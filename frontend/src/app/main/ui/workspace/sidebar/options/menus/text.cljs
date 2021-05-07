@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.workspace.sidebar.options.menus.text
   (:require
@@ -13,6 +10,7 @@
    [app.common.uuid :as uuid]
    [app.common.text :as txt]
    [app.main.data.workspace.common :as dwc]
+   [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.texts :as dwt]
    [app.main.fonts :as fonts]
@@ -67,8 +65,7 @@
 (def shape-attrs
   [:grow-type])
 
-(def root-attrs
-  (d/concat text-valign-attrs text-align-attrs))
+(def root-attrs text-valign-attrs)
 
 (def paragraph-attrs
   (d/concat text-align-attrs
@@ -163,7 +160,7 @@
         grow-type (->> values :grow-type)
         handle-change-grow
         (fn [event grow-type]
-          (st/emit! (dwc/update-shapes ids #(assoc % :grow-type grow-type))))]
+          (st/emit! (dch/update-shapes ids #(assoc % :grow-type grow-type))))]
 
     [:div.align-icons
      [:span.tooltip.tooltip-bottom
@@ -241,18 +238,19 @@
             (when-not (empty? attrs)
               (st/emit! (dwt/update-text-attrs {:id id :attrs attrs})))))
 
-        typography (cond
-                     (and (:typography-ref-id values)
-                          (not= (:typography-ref-id values) :multiple)
-                          (not= (:typography-ref-file values) file-id))
-                     (-> shared-libs
-                         (get-in [(:typography-ref-file values) :data :typographies (:typography-ref-id values)])
-                         (assoc :file-id (:typography-ref-file values)))
+        typography
+        (cond
+          (and (:typography-ref-id values)
+               (not= (:typography-ref-id values) :multiple)
+               (not= (:typography-ref-file values) file-id))
+          (-> shared-libs
+              (get-in [(:typography-ref-file values) :data :typographies (:typography-ref-id values)])
+              (assoc :file-id (:typography-ref-file values)))
 
-                     (and (:typography-ref-id values)
-                          (not= (:typography-ref-id values) :multiple)
-                          (= (:typography-ref-file values) file-id))
-                     (get typographies (:typography-ref-id values)))
+          (and (:typography-ref-id values)
+               (not= (:typography-ref-id values) :multiple)
+               (= (:typography-ref-file values) file-id))
+          (get typographies (:typography-ref-id values)))
 
         on-convert-to-typography
         (mf/use-callback

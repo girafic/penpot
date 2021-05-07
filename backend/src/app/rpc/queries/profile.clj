@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.rpc.queries.profile
   (:require
@@ -44,29 +41,27 @@
     {:id uuid/zero
      :fullname "Anonymous User"}))
 
-;; NOTE: this query make the assumption that union all preserves the
-;; order so the first id will always be the team id and the second the
-;; project_id; this is a postgresql behavior because UNION ALL works
-;; like APPEND operation.
-
-(def ^:private sql:default-team-and-project
-  "select t.id
+(def ^:private sql:default-profile-team
+  "select t.id, name
      from team as t
     inner join team_profile_rel as tp on (tp.team_id = t.id)
     where tp.profile_id = ?
       and tp.is_owner is true
-      and t.is_default is true
-    union all
-   select p.id
+      and t.is_default is true")
+
+(def ^:private sql:default-profile-project
+  "select p.id, name
      from project as p
     inner join project_profile_rel as tp on (tp.project_id = p.id)
     where tp.profile_id = ?
       and tp.is_owner is true
-      and p.is_default is true")
+      and p.is_default is true
+      and p.team_id = ?")
 
 (defn retrieve-additional-data
   [conn id]
-  (let [[team project] (db/exec! conn [sql:default-team-and-project id id])]
+  (let [team    (db/exec-one! conn [sql:default-profile-team id])
+        project (db/exec-one! conn [sql:default-profile-project id (:id team)])]
     {:default-team-id (:id team)
      :default-project-id (:id project)}))
 

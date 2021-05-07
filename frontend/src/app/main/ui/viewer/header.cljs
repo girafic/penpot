@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.viewer.header
   (:require
@@ -13,6 +10,7 @@
    [app.common.uuid :as uuid]
    [app.config :as cfg]
    [app.main.data.comments :as dcm]
+   [app.main.data.events :as ev]
    [app.main.data.messages :as dm]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.shortcuts :as sc]
@@ -26,6 +24,7 @@
    [app.util.router :as rt]
    [app.util.webapi :as wapi]
    [cuerdas.core :as str]
+   [potok.core :as ptk]
    [rumext.alpha :as mf]))
 
 (mf/defc zoom-widget
@@ -70,11 +69,11 @@
                            :viewer
                            (:path-params route)
                            {:token token :index "0"})
-        link   (str cfg/public-uri "/#" link)
+        link   (assoc cfg/public-uri :fragment link)
 
         copy-link
         (fn [event]
-          (wapi/write-to-clipboard link)
+          (wapi/write-to-clipboard (str link))
           (st/emit! (dm/show {:type :info
                               :content "Link copied successfuly!"
                               :timeout 3000})))]
@@ -92,7 +91,7 @@
        [:div.share-link-input
         (if (string? token)
           [:*
-            [:span.link link]
+            [:span.link (str link)]
             [:span.link-button {:on-click copy-link}
              (t locale "viewer.header.share.copy-link")]]
           [:span.link-placeholder (t locale "viewer.header.share.placeholder")])]
@@ -188,12 +187,12 @@
         total      (count frames)
         locale     (mf/deref i18n/locale)
         profile    (mf/deref refs/profile)
-        anonymous? (= uuid/zero (:id profile))
+        teams      (mf/deref refs/teams)
 
         team-id    (get-in data [:project :team-id])
 
-        has-permission? (and (not anonymous?)
-                             (contains? (:teams profile) team-id))
+        has-permission? (and (not= uuid/zero (:id profile))
+                             (contains? teams team-id))
 
         project-id (get-in data [:project :id])
         file-id    (get-in data [:file :id])

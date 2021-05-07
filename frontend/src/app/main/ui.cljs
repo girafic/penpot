@@ -2,9 +2,6 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
 ;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui
@@ -15,8 +12,9 @@
    [app.common.spec :as us]
    [app.common.uuid :as uuid]
    [app.config :as cfg]
-   [app.main.data.auth :refer [logout]]
+   [app.main.data.users :as du]
    [app.main.data.messages :as dm]
+   [app.main.data.events :as ev]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.auth :refer [auth]]
@@ -93,6 +91,8 @@
     ["/settings"             :dashboard-team-settings]
     ["/projects"             :dashboard-projects]
     ["/search"               :dashboard-search]
+    ["/fonts"                :dashboard-fonts]
+    ["/fonts/providers"      :dashboard-font-providers]
     ["/libraries"            :dashboard-libraries]
     ["/projects/:project-id" :dashboard-files]]
 
@@ -107,6 +107,7 @@
 (mf/defc main-page
   {::mf/wrap [#(mf/catch % {:fallback on-main-error})]}
   [{:keys [route] :as props}]
+
   [:& (mf/provider ctx/current-route) {:value route}
    (case (get-in route [:data :name])
      (:auth-login
@@ -138,11 +139,13 @@
       :dashboard-projects
       :dashboard-files
       :dashboard-libraries
+      :dashboard-fonts
+      :dashboard-font-providers
       :dashboard-team-members
       :dashboard-team-settings)
      [:*
       #_[:div.modal-wrapper
-         [:& app.main.ui.onboarding/release-notes-modal {:version "1.4"}]]
+         [:& app.main.ui.onboarding/release-notes-modal {:version "1.5"}]]
       [:& dashboard {:route route}]]
 
      :viewer
@@ -213,7 +216,7 @@
 ;; all profile data and redirect the user to the login page.
 (defmethod ptk/handle-error :authentication
   [error]
-  (ts/schedule (st/emitf (logout))))
+  (ts/schedule (st/emitf (du/logout))))
 
 ;; Error that happens on an active bussines model validation does not
 ;; passes an validation (example: profile can't leave a team). From
@@ -223,8 +226,9 @@
   [error]
   (ts/schedule
    (st/emitf
-    (dm/show {:content "Unexpected validation error (server side)."
-              :type :error})))
+    (dm/show {:content "Unexpected validation error."
+              :type :error
+              :timeout 3000})))
 
   ;; Print to the console some debug info.
   (js/console.group "Validation Error")
@@ -240,58 +244,82 @@
 ;; assertion (assertion that is preserved on production builds). From
 ;; the user perspective this should be treated as internal error.
 (defmethod ptk/handle-error :assertion
-  [{:keys [data stack message context] :as error}]
-  (ts/schedule
-   (st/emitf (dm/show {:content "Internal error: assertion."
-                       :type :error})))
+  [{:keys [data stack message hint context] :as error}]
+  (let [message (or message hint)
+        context (str/fmt "ns: '%s'\nname: '%s'\nfile: '%s:%s'"
+                              (:ns context)
+                              (:name context)
+                              (str cfg/public-uri "/js/cljs-runtime/" (:file context))
+                              (:line context))]
+    (ts/schedule
+     (st/emitf
+      (dm/show {:content "Internal error: assertion."
+                :type :error
+                :timeout 3000})
+      (ptk/event ::ev/event
+                 {::ev/type "exception"
+                  ::ev/name "assertion-error"
+                  :message message
+                  :context context
+                  :trace stack})))
 
-  ;; Print to the console some debugging info
-  (js/console.group message)
-  (js/console.info (str/format "ns: '%s'\nname: '%s'\nfile: '%s:%s'"
-                                (:ns context)
-                                (:name context)
-                                (str cfg/public-uri "/js/cljs-runtime/" (:file context))
-                                (:line context)))
-  (js/console.groupCollapsed "Stack Trace")
-  (js/console.info stack)
-  (js/console.groupEnd "Stack Trace")
-  (js/console.error (with-out-str (expound/printer data)))
-  (js/console.groupEnd message))
+    ;; Print to the console some debugging info
+    (js/console.group message)
+    (js/console.info context)
+    (js/console.groupCollapsed "Stack Trace")
+    (js/console.info stack)
+    (js/console.groupEnd "Stack Trace")
+    (js/console.error (with-out-str (expound/printer data)))
+    (js/console.groupEnd message)))
 
 ;; This happens when the backed server fails to process the
 ;; request. This can be caused by an internal assertion or any other
 ;; uncontrolled error.
 (defmethod ptk/handle-error :server-error
-  [{:keys [data] :as error}]
-  (ts/schedule
-   (st/emitf (dm/show
-              {:content "Something wrong has happened (on backend)."
-               :type :error})))
+  [{:keys [data hint] :as error}]
+  (let [hint (or hint (:hint data) (:message data))
+        info (with-out-str (pprint (dissoc data :explain)))
+        expl (:explain data)]
+    (ts/schedule
+     (st/emitf
+      (dm/show {:content "Something wrong has happened (on backend)."
+                :type :error
+                :timeout 3000})
+      (ptk/event ::ev/event
+                 {::ev/type "exception"
+                  ::ev/name "server-error"
+                  :hint hint
+                  :info info
+                  :explain expl})))
 
-  (js/console.group "Internal Server Error:")
-  (js/console.error "hint:" (or (:hint data) (:message data)))
-  (js/console.info
-   (with-out-str
-     (pprint (dissoc data :explain))))
-  (when-let [explain (:explain data)]
-    (js/console.error explain))
-  (js/console.groupEnd "Internal Server Error:"))
+    (js/console.group "Internal Server Error:")
+    (js/console.error "hint:" hint)
+    (js/console.info info)
+    (when expl (js/console.error expl))
+    (js/console.groupEnd "Internal Server Error:")))
 
 (defmethod ptk/handle-error :default
   [error]
   (if (instance? ExceptionInfo error)
     (ptk/handle-error (ex-data error))
-    (do
+    (let [stack (.-stack error)
+          hint  (or (ex-message error)
+                    (:hint error)
+                    (:message error))]
       (ts/schedule
-       (st/emitf (dm/assign-exception error)))
+       (st/emitf
+        (dm/assign-exception error)
+        (ptk/event ::ev/event
+                   {::ev/type "exception"
+                    ::ev/name "unexpected-error"
+                    :message hint
+                    :trace (.-stack error)})))
 
       (js/console.group "Internal error:")
-      (js/console.log "hint:" (or (ex-message error)
-                                  (:hint error)
-                                  (:message error)))
+      (js/console.log "hint:" hint)
       (ex/ignoring
        (js/console.error (clj->js error))
-       (js/console.error "stack:" (.-stack error)))
+       (js/console.error "stack:" stack))
       (js/console.groupEnd "Internal error:"))))
 
 (defonce uncaught-error-handler

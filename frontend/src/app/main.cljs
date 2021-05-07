@@ -2,19 +2,16 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main
   (:require
    [app.common.spec :as us]
    [app.common.uuid :as uuid]
    [app.config :as cfg]
-   [app.main.data.auth :as da]
+   [app.main.data.events :as ev]
    [app.main.data.messages :as dm]
-   [app.main.data.users :as udu]
+   [app.main.data.users :as du]
    [app.main.repo :as rp]
    [app.main.store :as st]
    [app.main.ui :as ui]
@@ -31,6 +28,7 @@
    [app.util.timers :as ts]
    [beicon.core :as rx]
    [cljs.spec.alpha :as s]
+   [potok.core :as ptk]
    [rumext.alpha :as mf]))
 
 (log/initialize!)
@@ -55,18 +53,16 @@
 (defn on-navigate
   [router path]
   (let [match   (match-path router path)
-        profile (:profile storage)
+        profile (:profile @storage)
         nopath? (or (= path "") (= path "/"))
         authed? (and (not (nil? profile))
                      (not= (:id profile) uuid/zero))]
 
     (cond
       (and nopath? authed? (nil? match))
-      (->> (rp/query! :profile)
-           (rx/subs (fn [profile]
-                      (if (not= uuid/zero profile)
-                        (st/emit! (rt/nav :dashboard-projects {:team-id (da/current-team-id profile)}))
-                        (st/emit! (rt/nav :auth-login))))))
+      (if (not= uuid/zero profile)
+        (st/emit! (rt/nav :dashboard-projects {:team-id (du/get-current-team-id profile)}))
+        (st/emit! (rt/nav :auth-login)))
 
       (and (not authed?) (nil? match))
       (st/emit! (rt/nav :auth-login))
@@ -75,24 +71,42 @@
       (st/emit! (dm/assign-exception {:type :not-found}))
 
       :else
-      (st/emit! #(assoc % :route match)))))
+      (st/emit! (rt/navigated match)))))
 
 (defn init-ui
   []
-  (st/emit! (rt/initialize-router ui/routes)
-            (rt/initialize-history on-navigate))
-
-  (st/emit! (udu/fetch-profile)
-            (udu/fetch-user-teams))
   (mf/mount (mf/element ui/app) (dom/get-element "app"))
-  (mf/mount (mf/element modal) (dom/get-element "modal")))
+  (mf/mount (mf/element modal)  (dom/get-element "modal")))
+
+
+(defn initialize
+  []
+  (letfn [(on-profile [profile]
+            (rx/of (rt/initialize-router ui/routes)
+                   (rt/initialize-history on-navigate)))]
+    (ptk/reify ::initialize
+      ptk/UpdateEvent
+      (update [_ state]
+        (assoc state :session-id (uuid/next)))
+
+      ptk/WatchEvent
+      (watch [_ state stream]
+        (rx/merge
+         (rx/of
+          (ptk/event ::ev/initialize)
+          (du/initialize-profile))
+         (->> stream
+              (rx/filter (ptk/type? ::du/profile-fetched))
+              (rx/take 1)
+              (rx/map deref)
+              (rx/mapcat on-profile)))))))
 
 (defn ^:export init
   []
   (i18n/init! cfg/translations)
   (theme/init! cfg/themes)
-  (st/init)
-  (init-ui))
+  (init-ui)
+  (st/emit! (initialize)))
 
 (defn reinit
   []
@@ -107,3 +121,4 @@
 (defn ^:dev/after-load after-load
   []
   (reinit))
+

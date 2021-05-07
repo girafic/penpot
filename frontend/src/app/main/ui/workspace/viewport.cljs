@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020-2021 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.workspace.viewport
   (:require
@@ -14,6 +11,7 @@
    [app.main.refs :as refs]
    [app.main.ui.context :as ctx]
    [app.main.ui.context :as muc]
+   [app.main.ui.measurements :as msr]
    [app.main.ui.workspace.shapes :as shapes]
    [app.main.ui.workspace.shapes.text.editor :as editor]
    [app.main.ui.workspace.viewport.actions :as actions]
@@ -37,7 +35,7 @@
 ;; --- Viewport
 
 (mf/defc viewport
-  [{:keys [local layout file] :as props}]
+  [{:keys [local selected layout file] :as props}]
   (let [;; When adding data from workspace-local revisit `app.main.ui.workspace` to check
         ;; that the new parameter is sent
         {:keys [edit-path
@@ -46,7 +44,6 @@
                 options-mode
                 panning
                 picking-color?
-                selected
                 selrect
                 show-distances?
                 tooltip
@@ -54,7 +51,6 @@
                 vbox
                 vport
                 zoom]} local
-
 
         ;; CONTEXT
         page-id           (mf/use-ctx ctx/current-page-id)
@@ -88,17 +84,29 @@
         drawing-tool      (:tool drawing)
         drawing-obj       (:object drawing)
 
+        selected-shapes   (into []
+                                (comp (map #(get objects %))
+                                      (filter some?))
+                                selected)
+        selected-frames   (into #{} (map :frame-id) selected-shapes)
+
+        ;; Only when we have all the selected shapes in one frame
+        selected-frame    (when (= (count selected-frames) 1) (get objects (first selected-frames)))
+
+
+        create-comment?   (= :comments drawing-tool)
         drawing-path?     (or (and edition (= :draw (get-in edit-path [edition :edit-mode])))
                               (and (some? drawing-obj) (= :path (:type drawing-obj))))
+        path-editing?     (and edition (= :path (get-in objects [edition :type])))
         text-editing?     (and edition (= :text (get-in objects [edition :type])))
 
         on-click          (actions/on-click hover selected edition drawing-path? drawing-tool)
         on-context-menu   (actions/on-context-menu hover)
-        on-double-click   (actions/on-double-click hover hover-ids drawing-path? objects)
+        on-double-click   (actions/on-double-click hover hover-ids drawing-path? objects edition)
         on-drag-enter     (actions/on-drag-enter)
         on-drag-over      (actions/on-drag-over)
         on-drop           (actions/on-drop file viewport-ref zoom)
-        on-mouse-down     (actions/on-mouse-down @hover drawing-tool text-editing? edition edit-path selected)
+        on-mouse-down     (actions/on-mouse-down @hover selected edition drawing-tool text-editing? path-editing? drawing-path? create-comment?)
         on-mouse-up       (actions/on-mouse-up disable-paste)
         on-pointer-down   (actions/on-pointer-down)
         on-pointer-enter  (actions/on-pointer-enter in-viewport?)
@@ -125,15 +133,17 @@
         show-snap-distance?      (and (contains? layout :dynamic-alignment) (= transform :move) (not (empty? selected)))
         show-snap-points?        (and (contains? layout :dynamic-alignment) (or drawing-obj transform))
         show-selrect?            (and selrect (empty? drawing))
+        show-measures?           (and (not transform) (not path-editing?) show-distances?)
         ]
 
     (hooks/setup-dom-events viewport-ref zoom disable-paste in-viewport?)
     (hooks/setup-viewport-size viewport-ref)
-    (hooks/setup-cursor cursor alt? panning drawing-tool drawing-path?)
+    (hooks/setup-cursor cursor alt? panning drawing-tool drawing-path? path-editing?)
     (hooks/setup-resize layout viewport-ref)
     (hooks/setup-keyboard alt? ctrl?)
     (hooks/setup-hover-shapes page-id move-stream selected objects transform selected ctrl? hover hover-ids)
     (hooks/setup-viewport-modifiers modifiers selected objects render-ref)
+    (hooks/setup-shortcuts path-editing? drawing-path?)
 
     [:div.viewport
      [:div.viewport-overlays
@@ -163,7 +173,8 @@
        :width (:width vport 0)
        :height (:height vport 0)
        :view-box (utils/format-viewbox vbox)
-       :style {:background-color (get options :background "#E8E9EA")}}
+       :style {:background-color (get options :background "#E8E9EA")
+               :pointer-events "none"}}
 
       [:& (mf/provider muc/embed-ctx) {:value true}
        ;; Render root shape
@@ -213,9 +224,16 @@
           {:selected selected
            :zoom zoom
            :edition edition
-           :show-distances (and (not transform) show-distances?)
            :disable-handlers (or drawing-tool edition)
            :on-move-selected on-move-selected}])
+
+       (when show-measures?
+         [:& msr/measurement
+          {:bounds vbox
+           :selected-shapes selected-shapes
+           :frame selected-frame
+           :hover-shape @hover
+           :zoom zoom}])
 
        (when text-editing?
          [:& editor/text-shape-edit {:shape (get objects edition)}])
@@ -273,13 +291,12 @@
           {:zoom zoom
            :tooltip tooltip}])
 
-
        (when show-presence?
          [:& presence/active-cursors
           {:page-id page-id}])
 
        [:& widgets/viewport-actions]
-       
+
        (when show-prototypes?
          [:& interactions/interactions
           {:selected selected}])

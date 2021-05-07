@@ -2,9 +2,6 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
 ;; Copyright (c) UXBOX Labs SL
 
 (ns app.rpc.mutations.teams
@@ -252,7 +249,9 @@
 
 (declare upload-photo)
 
-(s/def ::file ::media/upload)
+(s/def ::content-type ::media/image-content-type)
+(s/def ::file (s/and ::media/upload (s/keys :req-un [::content-type])))
+
 (s/def ::update-team-photo
   (s/keys :req-un [::profile-id ::team-id ::file]))
 
@@ -310,7 +309,7 @@
           team     (db/get-by-id conn :team team-id)
           itoken   (tokens :generate
                            {:iss :team-invitation
-                            :exp (dt/in-future "6h")
+                            :exp (dt/in-future "48h")
                             :profile-id (:id profile)
                             :role role
                             :team-id team-id

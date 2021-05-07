@@ -2,14 +2,10 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.settings.delete-account
   (:require
-   [app.main.data.auth :as da]
    [app.main.data.messages :as dm]
    [app.main.data.modal :as modal]
    [app.main.data.users :as du]
@@ -44,7 +40,7 @@
         on-accept
         (mf/use-callback
          (st/emitf (modal/hide)
-                   (da/request-account-deletion
+                   (du/request-account-deletion
                     (with-meta {} {:on-error on-error
                                    :on-success on-success}))))]
 

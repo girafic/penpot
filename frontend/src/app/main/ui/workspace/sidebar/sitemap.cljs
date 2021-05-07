@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.workspace.sidebar.sitemap
   (:require
@@ -105,6 +102,13 @@
                 :index index
                 :name (:name page)})]
 
+    (mf/use-effect
+      (mf/deps selected?)
+      (fn []
+        (when selected?
+          (let [node (mf/ref-val dref)]
+            (.scrollIntoViewIfNeeded ^js node)))))
+
     (mf/use-layout-effect
      (mf/deps (:edition @local))
      (fn []
@@ -194,10 +198,12 @@
 
 (mf/defc sitemap
   [{:keys [layout] :as props}]
-  (let [create      (mf/use-callback #(st/emit! dw/create-empty-page))
+  (let [file        (mf/deref refs/workspace-file)
+        create      (mf/use-callback
+                     (mf/deps file)
+                     (st/emitf (dw/create-page {:file-id (:id file)
+                                                :project-id (:project-id file)})))
         show-pages? (mf/use-state true)
-
-        file        (mf/deref refs/workspace-file)
 
         toggle-pages
         (mf/use-callback #(reset! show-pages? not))]

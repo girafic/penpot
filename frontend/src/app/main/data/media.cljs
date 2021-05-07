@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.data.media
   (:require
@@ -54,7 +51,7 @@
     (ex/raise :type :validation
               :code :media-too-large
               :hint (str/fmt "media size is large than 5mb (size: %s)" (.-size file))))
-  (when-not (contains? cm/valid-media-types (.-type file))
+  (when-not (contains? cm/valid-image-types (.-type file))
     (ex/raise :type :validation
               :code :media-type-not-allowed
               :hint (str/fmt "media type %s is not supported" (.-type file))))

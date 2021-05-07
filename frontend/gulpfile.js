@@ -16,6 +16,8 @@ const clean = require("postcss-clean");
 const mkdirp = require("mkdirp");
 const rimraf = require("rimraf");
 const sass = require("sass");
+const gettext = require("gettext-parser");
+const marked = require("marked");
 
 const mapStream = require("map-stream");
 const paths = {};
@@ -31,16 +33,48 @@ paths.dist = "./target/dist/";
 // Templates
 
 function readLocales() {
-  const path = __dirname + "/resources/locales.json";
-  const content = JSON.parse(fs.readFileSync(path, {encoding: "utf8"}));
+  const langs = ["ca", "de", "el", "en", "es", "fr", "tr", "ru", "zh_cn"];
+  const result = {};
 
-  let result = {};
-  for (let key of Object.keys(content)) {
-    const item = content[key];
-    if (l.isString(item)) {
-      result[key] = {"en": item};
-    } else if (l.isPlainObject(item) && l.isPlainObject(item.translations)) {
-      result[key] = item.translations;
+  for (let lang of langs) {
+    const content = fs.readFileSync(`./translations/${lang}.po`, {encoding:"utf-8"});
+
+    lang = lang.toLowerCase();
+
+    const data = gettext.po.parse(content, "utf-8");
+    const trdata = data.translations[""];
+
+    for (let key of Object.keys(trdata)) {
+      if (key === "") continue;
+      const comments = trdata[key].comments || {};
+
+      if (l.isNil(result[key])) {
+        result[key] = {};
+      }
+
+      const isMarkdown = l.includes(comments.flag, "markdown");
+
+      const msgs = trdata[key].msgstr;
+      if (msgs.length === 1) {
+        let message = msgs[0];
+        if (isMarkdown) {
+          message = marked.parseInline(message);
+        }
+
+        result[key][lang] = message;
+      } else {
+        result[key][lang] = msgs.map((item) => {
+          if (isMarkdown) {
+            return marked.parseInline(item);
+          } else {
+            return item;
+          }
+        });
+      }
+      // if (key === "modals.delete-font.title") {
+      //   console.dir(trdata[key], {depth:10});
+      //   console.dir(result[key], {depth:10});
+      // }
     }
   }
 
@@ -53,23 +87,23 @@ function readManifest() {
     const content = JSON.parse(fs.readFileSync(path, {encoding: "utf8"}));
 
     const index = {
-      "config": "/js/config.js?ts=" + Date.now(),
+      "config": "js/config.js?ts=" + Date.now(),
       "polyfills": "js/polyfills.js?ts=" + Date.now(),
     };
 
     for (let item of content) {
-      index[item.name] = "/js/" + item["output-name"];
+      index[item.name] = "js/" + item["output-name"];
     };
 
     return index;
   } catch (e) {
     console.error("Error on reading manifest, using default.");
     return {
-      "config": "/js/config.js",
+      "config": "js/config.js",
       "polyfills": "js/polyfills.js",
-      "main": "/js/main.js",
-      "shared": "/js/shared.js",
-      "worker": "/js/worker.js"
+      "main": "js/main.js",
+      "shared": "js/shared.js",
+      "worker": "js/worker.js"
     };
   }
 }
@@ -189,7 +223,7 @@ gulp.task("watch:main", function() {
   gulp.watch(paths.resources + "images/**/*", gulp.series("copy:assets:images"));
 
   gulp.watch([paths.resources + "templates/*.mustache",
-              paths.resources + "locales.json"],
+              "translations/*.po"],
              gulp.series("templates"));
 });
 

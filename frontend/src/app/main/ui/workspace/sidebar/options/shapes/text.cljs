@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.workspace.sidebar.options.shapes.text
   (:require
@@ -42,12 +39,11 @@
                       (:fill fill-values) (assoc :fill-color (:fill fill-values))
                       (:opacity fill-values) (assoc :fill-opacity (:fill fill-values)))
 
-        text-values (merge
-                     (select-keys shape [:grow-type :vertical-align :text-align])
-                     #_(dwt/current-root-values
-                        {:editor-state editor-state
-                         :shape shape
-                         :attrs root-attrs})
+        text-values (d/merge
+                     (select-keys shape [:grow-type])
+                     (dwt/current-root-values
+                      {:shape shape
+                       :attrs root-attrs})
                      (dwt/current-paragraph-values
                       {:editor-state editor-state
                        :shape shape

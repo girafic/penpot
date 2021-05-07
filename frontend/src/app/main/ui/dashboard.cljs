@@ -2,9 +2,6 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
 ;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.dashboard
@@ -21,6 +18,7 @@
    [app.main.ui.dashboard.files :refer [files-section]]
    [app.main.ui.dashboard.libraries :refer [libraries-page]]
    [app.main.ui.dashboard.projects :refer [projects-section]]
+   [app.main.ui.dashboard.fonts :refer [fonts-page font-providers-page]]
    [app.main.ui.dashboard.search :refer [search-page]]
    [app.main.ui.dashboard.sidebar :refer [sidebar]]
    [app.main.ui.dashboard.team :refer [team-settings-page team-members-page]]
@@ -67,6 +65,12 @@
    (case section
      :dashboard-projects
      [:& projects-section {:team team :projects projects}]
+
+     :dashboard-fonts
+     [:& fonts-page {:team team}]
+
+     :dashboard-font-providers
+     [:& font-providers-page {:team team}]
 
      :dashboard-files
      (when project
@@ -124,17 +128,19 @@
        [:& (mf/provider ctx/current-page-id) {:value nil}
 
         [:section.dashboard-layout
-         [:& sidebar {:team team
-                      :projects projects
-                      :project project
-                      :profile profile
-                      :section section
-                      :search-term search-term}]
+         [:& sidebar
+          {:team team
+           :projects projects
+           :project project
+           :profile profile
+           :section section
+           :search-term search-term}]
          (when (and team (seq projects))
-           [:& dashboard-content {:projects projects
-                                  :profile profile
-                                  :project project
-                                  :section section
-                                  :search-term search-term
-                                  :team team}])]]]]]))
+           [:& dashboard-content
+            {:projects projects
+             :profile profile
+             :project project
+             :section section
+             :search-term search-term
+             :team team}])]]]]]))
 

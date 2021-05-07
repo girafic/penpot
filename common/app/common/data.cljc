@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) 2016-2019 Andrey Antukh <niwi@niwi.nz>
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.common.data
   "Data manipulation and query helper functions."
@@ -261,6 +261,19 @@
       (recur (reduce-kv assoc! res (first maps))
              (next maps)))))
 
+(defn distinct-xf
+  [f]
+  (fn [rf]
+    (let [seen (volatile! #{})]
+      (fn
+        ([] (rf))
+        ([result] (rf result))
+        ([result input]
+         (let [input* (f input)]
+           (if (contains? @seen input*)
+             result
+             (do (vswap! seen conj input*)
+                 (rf result input)))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Data Parsing / Conversion
@@ -448,3 +461,9 @@
         kw     (if (keyword? kw) (name kw) kw)]
     (keyword (str prefix kw))))
 
+
+(defn tap
+  "Simpilar to the tap in rxjs but for plain collections"
+  [f coll]
+  (f coll)
+  coll)

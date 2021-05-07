@@ -2,17 +2,14 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.workspace.viewport.outline
   (:require
    [app.common.geom.shapes :as gsh]
    [app.common.pages :as cp]
    [app.main.refs :as refs]
-   [app.util.geom.path :as ugp]
+   [app.util.path.format :as upf]
    [app.util.object :as obj]
    [clojure.set :as set]
    [rumext.alpha :as mf]
@@ -30,7 +27,7 @@
         path-data
         (mf/use-memo
          (mf/deps shape)
-         #(when path? (ugp/content->path (:content shape))))
+         #(when path? (upf/format-path (:content shape))))
 
         {:keys [id x y width height]} shape
 
@@ -68,9 +65,9 @@
    ::mf/wrap [#(mf/memo' % (mf/check-props ["shapes" "zoom"]))]}
   [props]
   (let [shapes (obj/get props "shapes")
-        zoom (obj/get props "zoom")
-        color (if (or (> (count shapes) 1) (nil? (:shape-ref (first shapes))))
-                "#31EFB8" "#00E0FF")]
+        zoom   (obj/get props "zoom")
+        color  (if (or (> (count shapes) 1) (nil? (:shape-ref (first shapes))))
+                 "#31EFB8" "#00E0FF")]
     (for [shape shapes]
       [:& outline {:key (str "outline-" (:id shape))
                    :shape (gsh/transform-shape shape)
@@ -97,7 +94,8 @@
         shapes (->> outlines-ids
                     (filter #(not= edition %))
                     (map #(get objects %))
-                    (filterv show-outline?))]
+                    (filterv show-outline?)
+                    (filter some?))]
 
     [:g.outlines {:display (when (some? transform) "none")}
      [:& shape-outlines-render {:shapes shapes

@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.cli.migrate-media
   (:require
@@ -14,7 +11,7 @@
    [app.db :as db]
    [app.main :as main]
    [app.storage :as sto]
-   [clojure.tools.logging :as log]
+   [app.util.logging :as l]
    [cuerdas.core :as str]
    [datoteka.core :as fs]
    [integrant.core :as ig]))
@@ -49,7 +46,7 @@
           (run-in-system)
           (ig/halt!))
       (catch Exception e
-        (log/errorf e "Unhandled exception.")))))
+        (l/error :hint "unhandled exception" :cause e)))))
 
 
 ;; --- IMPL

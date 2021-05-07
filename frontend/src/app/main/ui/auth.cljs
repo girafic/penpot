@@ -2,15 +2,11 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.auth
   (:require
    [app.common.uuid :as uuid]
-   [app.main.data.auth :as da]
    [app.main.data.messages :as dm]
    [app.main.data.users :as du]
    [app.main.repo :as rp]
@@ -22,7 +18,6 @@
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
    [app.util.forms :as fm]
-   [app.util.storage :refer [cache]]
    [app.util.i18n :as i18n :refer [t]]
    [app.util.router :as rt]
    [app.util.timers :as ts]

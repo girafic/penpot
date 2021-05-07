@@ -3,17 +3,88 @@
 ## :rocket: Next
 
 ### :sparkles: New features
+### :bug: Bugs fixed
 
-- Add integration with gitpod.io (an online IDE) [#807](https://github.com/penpot/penpot/pull/807)
+- Remove interactions when the destination artboard is deleted [Taiga #1656](https://tree.taiga.io/project/penpot/issue/1656)
 
+### :arrow_up: Deps updates
+### :boom: Breaking changes
+### :heart: Community contributions by (Thank you!)
+
+## 1.5.2-alpha
 
 ### :bug: Bugs fixed
 
+- Fix problem with `close-path` command [#917](https://github.com/penpot/penpot/issues/917)
+- Fix wrong query for obtain the profile default project-id
+- Fix problems with empty paths and shortcuts [#923](https://github.com/penpot/penpot/issues/923)
+
+## 1.5.1-alpha
+
+### :bug: Bugs fixed
+
+- Fix issue with bitmap image clipboard.
+- Fix issue when removing all path points.
+- Increase default team invitation token expiration to 48h.
+- Fix wrong error message when an expired token is used.
+
+
+## 1.5.0-alpha
+
+### :sparkles: New features
+
+- Add integration with gitpod.io (an online IDE) [#807](https://github.com/penpot/penpot/pull/807)
+- Allow basic math operations in inputs [Taiga 1383](https://tree.taiga.io/project/penpot/us/1383)
+- Autocomplete color names in hex inputs [Taiga 1596](https://tree.taiga.io/project/penpot/us/1596)
+- Allow to group assets (components and graphics) [Taiga #1289](https://tree.taiga.io/project/penpot/us/1289)
+- Change icon of pinned projects [Taiga 1298](https://tree.taiga.io/project/penpot/us/1298)
+- Internal: refactor of http client, replace internal xhr usage with more modern Fetch API.
+- New features for paths: snap points on edition, add/remove nodes, merge/join/split nodes. [Taiga #907](https://tree.taiga.io/project/penpot/us/907)
+- Add OpenID-Connect support.
+- Reimplement social auth providers on top of the generic openid impl.
+
+### :bug: Bugs fixed
+
+- Fix problem with pan and space [#811](https://github.com/penpot/penpot/issues/811)
+- Fix issue when parsing exponential numbers in paths
+- Remove legacy system user and team [#843](https://github.com/penpot/penpot/issues/843)
+- Fix ordering of copy pasted objects [Taiga #1618](https://tree.taiga.io/project/penpot/issue/1617)
+- Fix problems with blending modes [#837](https://github.com/penpot/penpot/issues/837)
+- Fix problem with zoom an selection rect [#845](https://github.com/penpot/penpot/issues/845)
+- Fix problem displaying team statistics [#859](https://github.com/penpot/penpot/issues/859)
+- Fix problems with text editor selection [Taiga #1546](https://tree.taiga.io/project/penpot/issue/1546)
+- Fix problem when opening the context menu in dashboard at the bottom [#856](https://github.com/penpot/penpot/issues/856)
+- Fix problem when clicking an interactive group in view mode [#863](https://github.com/penpot/penpot/issues/863)
+- Fix visibility of pages in sitemap when changing page [Taiga #1618](https://tree.taiga.io/project/penpot/issue/1618)
+- Fix visual problem with group invite [Taiga #1290](https://tree.taiga.io/project/penpot/issue/1290)
+- Fix issues with promote owner panel [Taiga #763](https://tree.taiga.io/project/penpot/issue/763)
+- Allow use library colors when defining gradients [Taiga #1614](https://tree.taiga.io/project/penpot/issue/1614)
+- Fix group selrect not updating after alignment [#895](https://github.com/penpot/penpot/issues/895)
+
 ### :arrow_up: Deps updates
+
+### :boom: Breaking changes
+
+- Translations refactor: now penpot uses gettext instead of a custom
+  JSON, and each locale has its own separated file. All translations
+  should be contributed via the weblate.org service.
 
 ### :heart: Community contributions by (Thank you!)
 
 - madmath03 (by [Monogramm](https://github.com/Monogramm)) [#807](https://github.com/penpot/penpot/pull/807)
+- zzkt [#814](https://github.com/penpot/penpot/pull/814)
+
+
+## 1.4.1-alpha
+
+### :bug: Bugs fixed
+
+- Fix typography unlinking.
+- Fix incorrect measures on shapes outside artboard.
+- Fix issues on svg parsing related to numbers with exponents.
+- Fix some race conditions on removing shape from workspace.
+- Fix incorrect state management of user lang selection.
+- Fix email validation usability issue on team invitation lightbox.
 
 
 ## 1.4.0-alpha
@@ -74,6 +145,12 @@
 - Fix artboard title wasn't move when resizing [Taiga #1479](https://tree.taiga.io/project/penpot/issue/1479)
 - Fix titles in viewer thumbnails too long [Taiga #1474](https://tree.taiga.io/project/penpot/issue/1474)
 - Fix when right click on a selected text shows artboard contextual menu [Taiga #1226](https://tree.taiga.io/project/penpot/issue/1226)
+
+### :boom: Breaking changes
+
+- The LDAP configuration variables interpolation starts using `:`
+  (example `:username`) instead of `$`. The main reason is avoid
+  unnecesary conflict with bash interpolation.
 
 
 ### :arrow_up: Deps updates

@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.db.sql
   (:refer-clojure :exclude [update])
@@ -34,6 +31,11 @@
                 (:on-conflict-do-nothing opts)
                 (assoc :suffix "ON CONFLICT DO NOTHING"))]
      (sql/for-insert table key-map opts))))
+
+(defn insert-multi
+  [table cols rows opts]
+  (let [opts (merge default-opts opts)]
+    (sql/for-insert-multi table cols rows opts)))
 
 (defn select
   ([table where-params]

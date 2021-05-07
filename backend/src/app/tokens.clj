@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020-2021 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.tokens
   "Tokens generation service."
@@ -54,11 +51,11 @@
     claims))
 
 (s/def ::secret-key ::us/string)
-(s/def ::sprops
+(s/def ::props
   (s/keys :req-un [::secret-key]))
 
 (defmethod ig/pre-init-spec ::tokens [_]
-  (s/keys :req-un [::sprops]))
+  (s/keys :req-un [::props]))
 
 (defn- generate-predefined
   [cfg {:keys [iss profile-id] :as params}]
@@ -74,8 +71,8 @@
               :hint "no predefined token")))
 
 (defmethod ig/init-key ::tokens
-  [_ {:keys [sprops] :as cfg}]
-  (let [secret (derive-tokens-secret (:secret-key sprops))
+  [_ {:keys [props] :as cfg}]
+  (let [secret (derive-tokens-secret (:secret-key props))
         cfg    (assoc cfg ::secret secret)]
     (fn [action params]
       (case action

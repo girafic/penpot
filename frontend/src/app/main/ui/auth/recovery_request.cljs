@@ -2,16 +2,13 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.auth.recovery-request
   (:require
    [app.common.spec :as us]
-   [app.main.data.auth :as uda]
    [app.main.data.messages :as dm]
+   [app.main.data.users :as du]
    [app.main.store :as st]
    [app.main.ui.components.forms :as fm]
    [app.main.ui.icons :as i]
@@ -62,7 +59,7 @@
                  params (with-meta cdata
                           {:on-success #(on-success cdata %)
                            :on-error #(on-error cdata %)})]
-             (st/emit! (uda/request-profile-recovery params)))))]
+             (st/emit! (du/request-profile-recovery params)))))]
 
     [:& fm/form {:on-submit on-submit
                  :form form}

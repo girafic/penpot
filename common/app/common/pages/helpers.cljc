@@ -2,17 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.common.pages.helpers
   (:require
    [app.common.data :as d]
    [app.common.geom.shapes :as gsh]
    [app.common.spec :as us]
-   [app.common.uuid :as uuid]))
+   [app.common.uuid :as uuid]
+   [cuerdas.core :as str]))
 
 (defn walk-pages
   "Go through all pages of a file and apply a function to each one"
@@ -162,27 +160,6 @@
     (when parent-id
       (lazy-seq (cons parent-id (get-parents parent-id objects))))))
 
-(defn generate-child-parent-index
-  [objects]
-  (reduce-kv
-   (fn [index id obj]
-     (assoc index id (:parent-id obj)))
-   {} objects))
-
-(defn generate-child-all-parents-index
-  "Creates an index where the key is the shape id and the value is a set
-  with all the parents"
-  ([objects]
-   (generate-child-all-parents-index objects (vals objects)))
-
-  ([objects shapes]
-   (let [shape->parents
-         (fn [shape]
-           (->> (get-parents (:id shape) objects)
-                (into [])))]
-     (->> shapes
-          (map #(vector (:id %) (shape->parents %)))
-          (into {})))))
 
 (defn clean-loops
   "Clean a list of ids from circular references."
@@ -335,7 +312,6 @@
             (d/concat new-children new-child-objects)
             (d/concat updated-children updated-child-objects))))))))
 
-
 (defn indexed-shapes
   "Retrieves a list with the indexes for each element in the layer tree.
    This will be used for shift+selection."
@@ -350,40 +326,7 @@
               (reduce red-fn cur-idx (reverse (:shapes object)))))]
     (into {} (rec-index '() uuid/zero))))
 
-(defn calculate-z-index
-  "Given a collection of shapes calculates their z-index. Greater index
-  means is displayed over other shapes with less index."
-  [objects]
 
-  (let [is-frame? (fn [id] (= :frame (get-in objects [id :type])))
-        root-children (get-in objects [uuid/zero :shapes])
-        num-frames (->> root-children (filter is-frame?) count)]
-    (when (seq root-children)
-      (loop [current (peek root-children)
-             pending (pop root-children)
-             current-idx (+ (count objects) num-frames -1)
-             z-index {}]
-
-        (let [children (->> (get-in objects [current :shapes]))
-              children (cond
-                         (and (is-frame? current) (contains? z-index current))
-                         []
-
-                         (and (is-frame? current)
-                              (not (contains? z-index current)))
-                         (into [current] children)
-
-                         :else
-                         children)
-              pending (into (vec pending) children)]
-          (if (empty? pending)
-            (assoc z-index current current-idx)
-
-            (let []
-              (recur (peek pending)
-                     (pop pending)
-                     (dec current-idx)
-                     (assoc z-index current current-idx)))))))))
 
 (defn expand-region-selection
   "Given a selection selects all the shapes between the first and last in
@@ -462,3 +405,55 @@
         [parent-idx _] (d/seek (fn [[idx child-id]] (= child-id shape-id))
                                (d/enumerate (:shapes parent)))]
     parent-idx))
+
+(defn split-path
+  [path]
+  "Decompose a string in the form 'one / two / three' into
+  an array of strings, normalizing spaces."
+  (->> (str/split path "/")
+       (map str/trim)
+       (remove str/empty?)))
+
+(defn parse-path-name
+  "Parse a string in the form 'group / subgroup / name'.
+  Retrieve the path and the name in separated values, normalizing spaces."
+  [path-name]
+  (let [path-name-split (split-path path-name)
+        path (str/join " / " (butlast path-name-split))
+        name (last path-name-split)]
+    [path name]))
+
+(defn merge-path-item
+  "Put the item at the end of the path."
+  [path name]
+  (if-not (empty? path)
+    (str path " / " name)
+    name))
+
+(defn compact-path
+  "Separate last item of the path, and truncate the others if too long:
+    'one'                          ->  ['' 'one' false]
+    'one / two / three'            ->  ['one / two' 'three' false]
+    'one / two / three / four'     ->  ['one / two / ...' 'four' true]
+    'one-item-but-very-long / two' ->  ['...' 'two' true] "
+  [path max-length]
+  (let [path-split (split-path path)
+        last-item  (last path-split)]
+    (loop [other-items (seq (butlast path-split))
+           other-path  ""]
+      (if-let [item (first other-items)]
+        (let [full-path (-> other-path
+                            (merge-path-item item)
+                            (merge-path-item last-item))]
+          (if (> (count full-path) max-length)
+            [(merge-path-item other-path "...") last-item true]
+            (recur (next other-items)
+                   (merge-path-item other-path item))))
+        [other-path last-item false]))))
+
+(defn compact-name
+  "Append the first item of the path and the name."
+  [path name]
+  (let [path-split (split-path path)]
+    (merge-path-item (first path-split) name)))
+

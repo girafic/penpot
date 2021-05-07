@@ -2,25 +2,22 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.auth.recovery
   (:require
-   [cljs.spec.alpha :as s]
-   [cuerdas.core :as str]
-   [rumext.alpha :as mf]
-   [app.main.ui.icons :as i]
    [app.common.spec :as us]
-   [app.main.data.auth :as uda]
    [app.main.data.messages :as dm]
+   [app.main.data.users :as du]
    [app.main.store :as st]
    [app.main.ui.components.forms :as fm]
+   [app.main.ui.icons :as i]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [t tr]]
-   [app.util.router :as rt]))
+   [app.util.router :as rt]
+   [cljs.spec.alpha :as s]
+   [cuerdas.core :as str]
+   [rumext.alpha :as mf]))
 
 (s/def ::password-1 ::us/not-empty-string)
 (s/def ::password-2 ::us/not-empty-string)
@@ -57,7 +54,7 @@
                 :on-success on-success}
         params {:token (get-in @form [:clean-data :token])
                 :password (get-in @form [:clean-data :password-2])}]
-    (st/emit! (uda/recover-profile (with-meta params mdata)))))
+    (st/emit! (du/recover-profile (with-meta params mdata)))))
 
 (mf/defc recovery-form
   [{:keys [locale params] :as props}]

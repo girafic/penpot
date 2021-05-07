@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.common.pages.migrations
   (:require
@@ -166,3 +163,19 @@
     (-> data
         (update :components  #(d/mapm update-container %))
         (update :pages-index #(d/mapm update-container %)))))
+
+
+;; Remove interactions pointing to deleted frames
+(defmethod migrate 7
+  [data]
+  (letfn [(update-object [page _ object]
+            (d/update-when object :interactions
+              (fn [interactions]
+                (filterv #(get-in page [:objects (:destination %)])
+                         interactions))))
+
+          (update-page [_ page]
+            (update page :objects #(d/mapm (partial update-object page) %)))]
+
+    (update data :pages-index #(d/mapm update-page %))))
+

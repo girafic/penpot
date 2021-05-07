@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) Andrey Antukh <niwi@niwi.nz>
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.common.exceptions
   "A helpers for work with exceptions."
@@ -36,7 +36,7 @@
 
 (defn try*
   [f on-error]
-  (try (f) (catch #?(:clj Exception :cljs :default) e (on-error e))))
+  (try (f) (catch #?(:clj Throwable :cljs :default) e (on-error e))))
 
 ;; http://clj-me.cgrand.net/2013/09/11/macros-closures-and-unexpected-object-retention/
 ;; Explains the use of ^:once metadata

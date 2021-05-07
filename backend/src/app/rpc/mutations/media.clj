@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020-2021 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.rpc.mutations.media
   (:require
@@ -35,12 +32,15 @@
 (s/def ::file-id ::us/uuid)
 (s/def ::team-id ::us/uuid)
 
+
 ;; --- Create File Media object (upload)
 
 (declare create-file-media-object)
 (declare select-file)
 
-(s/def ::content ::media/upload)
+(s/def ::content-type ::media/image-content-type)
+(s/def ::content (s/and ::media/upload (s/keys :req-un [::content-type])))
+
 (s/def ::is-local ::us/boolean)
 
 (s/def ::upload-file-media-object

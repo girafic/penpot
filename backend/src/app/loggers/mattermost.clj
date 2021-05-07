@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020-2021 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.loggers.mattermost
   "A mattermost integration for error reporting."
@@ -18,12 +15,12 @@
    [app.util.async :as aa]
    [app.util.http :as http]
    [app.util.json :as json]
+   [app.util.logging :as l]
    [app.util.template :as tmpl]
    [app.worker :as wrk]
    [clojure.core.async :as a]
    [clojure.java.io :as io]
    [clojure.spec.alpha :as s]
-   [clojure.tools.logging :as log]
    [cuerdas.core :as str]
    [integrant.core :as ig]))
 
@@ -42,15 +39,15 @@
           :opt-un [::uri]))
 
 (defmethod ig/init-key ::reporter
-  [_ {:keys [receiver] :as cfg}]
-  (log/info "intializing mattermost error reporter")
+  [_ {:keys [receiver uri] :as cfg}]
+  (l/info :msg "intializing mattermost error reporter" :uri uri)
   (let [output (a/chan (a/sliding-buffer 128)
                        (filter #(= (:level %) "error")))]
     (receiver :sub output)
     (a/go-loop []
       (let [msg (a/<! output)]
         (if (nil? msg)
-          (log/info "stoping error reporting loop")
+          (l/info :msg "stoping error reporting loop")
           (do
             (a/<! (handle-event cfg msg))
             (recur)))))
@@ -66,19 +63,20 @@
     (let [uri  (:uri cfg)
           text (str "Unhandled exception (@channel):\n"
                     "- detail: " (cfg/get :public-uri) "/dbg/error-by-id/" id "\n"
+                    "- profile-id: `" (:profile-id cdata) "`\n"
                     "- host: `" host "`\n"
-                    "- version: `" version "`\n"
-                    (when error
-                      (str "```\n" (:trace error)  "\n```")))
+                    "- version: `" version "`\n")
           rsp    (http/send! {:uri uri
                               :method :post
                               :headers {"content-type" "application/json"}
                               :body (json/encode-str {:text text})})]
       (when (not= (:status rsp) 200)
-        (log/errorf "error on sending data to mattermost\n%s" (pr-str rsp))))
+        (l/error :hint "error on sending data to mattermost"
+                 :response (pr-str rsp))))
 
     (catch Exception e
-      (log/error e "unexpected exception on error reporter"))))
+      (l/error :hint "unexpected exception on error reporter"
+               :cause e))))
 
 (defn- persist-on-database!
   [{:keys [pool] :as cfg} {:keys [id] :as cdata}]
@@ -116,7 +114,8 @@
           (send-mattermost-notification! cfg cdata))
         (persist-on-database! cfg cdata))
       (catch Exception e
-        (log/error e "unexpected exception on error reporter")))))
+        (l/error :hint "unexpected exception on error reporter"
+                 :cause e)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Http Handler

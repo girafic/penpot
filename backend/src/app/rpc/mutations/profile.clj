@@ -2,13 +2,11 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020-2021 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.rpc.mutations.profile
   (:require
+   [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.spec :as us]
    [app.common.uuid :as uuid]
@@ -137,11 +135,11 @@
   "Returns true if email's domain is in the given whitelist or if given
   whitelist is an empty string."
   [whitelist email]
-  (if (str/blank? whitelist)
+  (if (str/empty-or-nil? whitelist)
     true
     (let [domains (str/split whitelist #",\s*")
-          email-domain (second (str/split email #"@"))]
-      (contains? (set domains) email-domain))))
+          domain  (second (str/split email #"@" 2))]
+      (contains? (set domains) domain))))
 
 (def ^:private sql:profile-existence
   "select exists (select * from profile
@@ -306,15 +304,34 @@
 
 (defn login-or-register
   [{:keys [conn] :as cfg} {:keys [email backend] :as params}]
-  (letfn [(create-profile [conn {:keys [fullname email]}]
+  (letfn [(info->props [info]
+            (dissoc info :name :fullname :email :backend))
+
+          (info->lang [{:keys [locale] :as info}]
+            (when (and (string? locale)
+                       (not (str/blank? locale)))
+              locale))
+
+          (create-profile [conn {:keys [email] :as info}]
             (db/insert! conn :profile
                         {:id (uuid/next)
-                         :fullname fullname
+                         :fullname (:fullname info)
                          :email (str/lower email)
+                         :lang (info->lang info)
                          :auth-backend backend
                          :is-active true
                          :password "!"
+                         :props (db/tjson (info->props info))
                          :is-demo false}))
+
+          (update-profile [conn info profile]
+            (let [props (d/merge (:props profile)
+                                 (info->props info))]
+              (db/update! conn :profile
+                          {:props (db/tjson props)
+                           :modified-at (dt/now)}
+                          {:id (:id profile)})
+              (assoc profile :props props)))
 
           (register-profile [conn params]
             (let [profile (->> (create-profile conn params)
@@ -324,7 +341,9 @@
 
     (let [profile (profile/retrieve-profile-data-by-email conn email)
           profile (if profile
-                    (profile/populate-additional-data conn profile)
+                    (->> profile
+                         (update-profile conn params)
+                         (profile/populate-additional-data conn))
                     (register-profile conn params))]
       (profile/strip-private-attrs profile))))
 
@@ -348,7 +367,6 @@
   (db/with-atomic [conn pool]
     (update-profile conn params)
     nil))
-
 
 ;; --- Mutation: Update Password
 
@@ -383,7 +401,9 @@
 
 (declare update-profile-photo)
 
-(s/def ::file ::media/upload)
+(s/def ::content-type ::media/image-content-type)
+(s/def ::file (s/and ::media/upload (s/keys :req-un [::content-type])))
+
 (s/def ::update-profile-photo
   (s/keys :req-un [::profile-id ::file]))
 

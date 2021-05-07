@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020-2021 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.core
   (:require
@@ -24,10 +21,9 @@
 (defn start
   [& args]
   (log/info :msg "initializing")
-  (p/let [browser (bwr/start!)
-          server  (http/start! {:browser browser})]
-    (reset! state {:http server
-                   :browser browser})))
+  (p/do!
+   (bwr/init)
+   (http/init)))
 
 (def main start)
 
@@ -38,8 +34,6 @@
 
   (log/info :msg "stoping")
   (p/do!
-   (when-let [instance (:browser @state)]
-     (bwr/stop! instance))
-   (when-let [instance (:http @state)]
-     (http/stop! instance))
+   (bwr/stop)
+   (http/stop)
    (done)))

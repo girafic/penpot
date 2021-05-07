@@ -2,9 +2,6 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
 ;; Copyright (c) UXBOX Labs SL
 
 (ns app.config
@@ -90,6 +87,7 @@
    :initial-project-skey "initial-project"
    })
 
+(s/def ::secret-key ::us/string)
 (s/def ::allow-demo-users ::us/boolean)
 (s/def ::asserts-enabled ::us/boolean)
 (s/def ::assets-path ::us/string)
@@ -108,9 +106,17 @@
 (s/def ::gitlab-client-secret ::us/string)
 (s/def ::google-client-id ::us/string)
 (s/def ::google-client-secret ::us/string)
+(s/def ::oidc-client-id ::us/string)
+(s/def ::oidc-client-secret ::us/string)
+(s/def ::oidc-base-uri ::us/string)
+(s/def ::oidc-token-uri ::us/string)
+(s/def ::oidc-auth-uri ::us/string)
+(s/def ::oidc-user-uri ::us/string)
+(s/def ::oidc-scopes ::us/set-of-str)
+(s/def ::oidc-roles ::us/set-of-str)
+(s/def ::oidc-roles-attr ::us/keyword)
 (s/def ::host ::us/string)
 (s/def ::http-server-port ::us/integer)
-(s/def ::http-session-cookie-name ::us/string)
 (s/def ::http-session-idle-max-age ::dt/duration)
 (s/def ::http-session-updater-batch-max-age ::dt/duration)
 (s/def ::http-session-updater-batch-max-size ::us/integer)
@@ -157,14 +163,13 @@
 (s/def ::storage-s3-bucket ::us/string)
 (s/def ::storage-s3-region ::us/keyword)
 (s/def ::telemetry-enabled ::us/boolean)
-(s/def ::telemetry-server-enabled ::us/boolean)
-(s/def ::telemetry-server-port ::us/integer)
 (s/def ::telemetry-uri ::us/string)
 (s/def ::telemetry-with-taiga ::us/boolean)
 (s/def ::tenant ::us/string)
 
 (s/def ::config
-  (s/keys :opt-un [::allow-demo-users
+  (s/keys :opt-un [::secret-key
+                   ::allow-demo-users
                    ::asserts-enabled
                    ::database-password
                    ::database-uri
@@ -181,6 +186,15 @@
                    ::gitlab-client-secret
                    ::google-client-id
                    ::google-client-secret
+                   ::oidc-client-id
+                   ::oidc-client-secret
+                   ::oidc-base-uri
+                   ::oidc-token-uri
+                   ::oidc-auth-uri
+                   ::oidc-user-uri
+                   ::oidc-scopes
+                   ::oidc-roles-attr
+                   ::oidc-roles
                    ::host
                    ::http-server-port
                    ::http-session-idle-max-age
@@ -228,8 +242,6 @@
                    ::storage-s3-bucket
                    ::storage-s3-region
                    ::telemetry-enabled
-                   ::telemetry-server-enabled
-                   ::telemetry-server-port
                    ::telemetry-uri
                    ::telemetry-referer
                    ::telemetry-with-taiga

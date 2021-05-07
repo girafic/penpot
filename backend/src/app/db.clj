@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.db
   (:require
@@ -16,12 +13,12 @@
    [app.db.sql :as sql]
    [app.metrics :as mtx]
    [app.util.json :as json]
+   [app.util.logging :as l]
    [app.util.migrations :as mg]
    [app.util.time :as dt]
    [app.util.transit :as t]
    [clojure.java.io :as io]
    [clojure.spec.alpha :as s]
-   [clojure.tools.logging :as log]
    [integrant.core :as ig]
    [next.jdbc :as jdbc]
    [next.jdbc.date-time :as jdbc-dt])
@@ -60,7 +57,9 @@
 
 (defmethod ig/init-key ::pool
   [_ {:keys [migrations metrics] :as cfg}]
-  (log/infof "initialize connection pool '%s' with uri '%s'" (name (:name cfg)) (:uri cfg))
+  (l/info :action "initialize connection pool"
+          :name (d/name (:name cfg))
+          :uri (:uri cfg))
   (instrument-jdbc! (:registry metrics))
   (let [pool (create-pool cfg)]
     (when (seq migrations)
@@ -201,6 +200,13 @@
               (sql/insert table params opts)
               (assoc opts :return-keys true))))
 
+(defn insert-multi!
+  ([ds table cols rows] (insert-multi! ds table cols rows nil))
+  ([ds table cols rows opts]
+   (exec! ds
+          (sql/insert-multi table cols rows opts)
+          (assoc opts :return-keys true))))
+
 (defn update!
   ([ds table params where] (update! ds table params where nil))
   ([ds table params where opts]
@@ -326,6 +332,12 @@
             (= typ "jsonb"))
       (t/decode-str val)
       val)))
+
+(defn inet
+  [ip-addr]
+  (doto (org.postgresql.util.PGobject.)
+    (.setType "inet")
+    (.setValue (str ip-addr))))
 
 (defn tjson
   "Encode as transit json."

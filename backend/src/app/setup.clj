@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020-2021 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.setup
   "Initial data setup of instance."
@@ -32,16 +29,26 @@
       (initialize-instance-id! cfg)
       (retrieve-all cfg))))
 
+(def sql:upsert-secret-key
+  "insert into server_prop (id, preload, content)
+   values ('secret-key', true, ?::jsonb)
+   on conflict (id) do update set content = ?::jsonb")
+
+(def sql:insert-secret-key
+  "insert into server_prop (id, preload, content)
+   values ('secret-key', true, ?::jsonb)
+   on conflict (id) do nothing")
+
 (defn- initialize-secret-key!
-  [{:keys [conn] :as cfg}]
-  (let [key (-> (bn/random-bytes 64)
-                (bc/bytes->b64u)
-                (bc/bytes->str))]
-    (db/insert! conn :server-prop
-                {:id "secret-key"
-                 :preload true
-                 :content (db/tjson key)}
-                {:on-conflict-do-nothing true})))
+  [{:keys [conn key] :as cfg}]
+  (if key
+    (let [key (db/tjson key)]
+      (db/exec-one! conn [sql:upsert-secret-key key key]))
+    (let [key (-> (bn/random-bytes 64)
+                  (bc/bytes->b64u)
+                  (bc/bytes->str))
+          key (db/tjson key)]
+      (db/exec-one! conn [sql:insert-secret-key key]))))
 
 (defn- initialize-instance-id!
   [{:keys [conn] :as cfg}]

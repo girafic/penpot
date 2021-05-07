@@ -2,10 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.dashboard.team
   (:require
@@ -88,7 +85,8 @@
                  ;; https://tree.taiga.io/project/uxboxproject/issue/1083
                  ;; {:value "viewer" :label (tr "labels.viewer")}]
 
-        initial (mf/use-memo (mf/deps team) (constantly {:team-id (:id team)}))
+        initial (mf/use-memo (mf/deps team) (constantly {:team-id (:id team)
+                                                         :role "editor"}))
         form    (fm/use-form :spec ::invite-member-form
                              :initial initial)
         on-success
@@ -306,7 +304,7 @@
                                 (if (:is-default team)
                                   (tr "dashboard.your-penpot")
                                   (:name team))))
-        (st/emitf (dd/fetch-team-members team)
+        (st/emit! (dd/fetch-team-members team)
                   (dd/fetch-team-stats team))))
 
     [:*

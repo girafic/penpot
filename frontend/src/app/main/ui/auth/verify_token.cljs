@@ -2,15 +2,11 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
-;; Copyright (c) 2020-2021 UXBOX Labs SL
+;; Copyright (c) UXBOX Labs SL
 
 (ns app.main.ui.auth.verify-token
   (:require
    [app.common.uuid :as uuid]
-   [app.main.data.auth :as da]
    [app.main.data.messages :as dm]
    [app.main.data.users :as du]
    [app.main.repo :as rp]
@@ -24,7 +20,6 @@
    [app.util.forms :as fm]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.router :as rt]
-   [app.util.storage :refer [cache]]
    [app.util.timers :as ts]
    [beicon.core :as rx]
    [cljs.spec.alpha :as s]
@@ -36,7 +31,7 @@
   [data]
   (let [msg (tr "dashboard.notifications.email-verified-successfully")]
     (ts/schedule 100 #(st/emit! (dm/success msg)))
-    (st/emit! (da/login-from-token data))))
+    (st/emit! (du/login-from-token data))))
 
 (defmethod handle-token :change-email
   [data]
@@ -47,7 +42,7 @@
 
 (defmethod handle-token :auth
   [tdata]
-  (st/emit! (da/login-from-token tdata)))
+  (st/emit! (du/login-from-token tdata)))
 
 (defmethod handle-token :team-invitation
   [tdata]
@@ -77,18 +72,26 @@
             (rx/subs
              (fn [tdata]
                (handle-token tdata))
-             (fn [error]
-               (case (:code error)
-                 :email-already-exists
+             (fn [{:keys [type code] :as error}]
+               (cond
+                 (and (= :validation type)
+                      (= :invalid-token code)
+                      (= :token-expired (:reason error)))
+                 (let [msg (tr "errors.token-expired")]
+                   (ts/schedule 100 #(st/emit! (dm/error msg)))
+                   (st/emit! (rt/nav :auth-login)))
+
+                 (= :email-already-exists code)
                  (let [msg (tr "errors.email-already-exists")]
                    (ts/schedule 100 #(st/emit! (dm/error msg)))
                    (st/emit! (rt/nav :auth-login)))
 
-                 :email-already-validated
+                 (= :email-already-validated code)
                  (let [msg (tr "errors.email-already-validated")]
                    (ts/schedule 100 #(st/emit! (dm/warn msg)))
                    (st/emit! (rt/nav :auth-login)))
 
+                 :else
                  (let [msg (tr "errors.generic")]
                    (ts/schedule 100 #(st/emit! (dm/error msg)))
                    (st/emit! (rt/nav :auth-login)))))))))

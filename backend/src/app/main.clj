@@ -2,17 +2,14 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; This Source Code Form is "Incompatible With Secondary Licenses", as
-;; defined by the Mozilla Public License, v. 2.0.
-;;
 ;; Copyright (c) UXBOX Labs SL
 
 (ns app.main
   (:require
    [app.common.data :as d]
    [app.config :as cf]
+   [app.util.logging :as l]
    [app.util.time :as dt]
-   [clojure.tools.logging :as log]
    [integrant.core :as ig]))
 
 (def system-config
@@ -48,7 +45,7 @@
     :redis-uri (cf/get :redis-uri)}
 
    :app.tokens/tokens
-   {:sprops (ig/ref :app.setup/props)}
+   {:props (ig/ref :app.setup/props)}
 
    :app.storage/gc-deleted-task
    {:pool     (ig/ref :app.db/pool)
@@ -63,8 +60,8 @@
     :storage  (ig/ref :app.storage/storage)}
 
    :app.http.session/session
-   {:pool        (ig/ref :app.db/pool)
-    :cookie-name (cf/get :http-session-cookie-name)}
+   {:pool   (ig/ref :app.db/pool)
+    :tokens (ig/ref :app.tokens/tokens)}
 
    :app.http.session/gc-task
    {:pool        (ig/ref :app.db/pool)
@@ -89,15 +86,13 @@
     :ws      {"/ws/notifications" (ig/ref :app.notifications/handler)}}
 
    :app.http/router
-   {
-    :rpc         (ig/ref :app.rpc/rpc)
+   {:rpc         (ig/ref :app.rpc/rpc)
     :session     (ig/ref :app.http.session/session)
     :tokens      (ig/ref :app.tokens/tokens)
     :public-uri  (cf/get :public-uri)
     :metrics     (ig/ref :app.metrics/metrics)
-    :oauth       (ig/ref :app.http.oauth/all)
+    :oauth       (ig/ref :app.http.oauth/handlers)
     :assets      (ig/ref :app.http.assets/handlers)
-    :svgparse    (ig/ref :app.svgparse/handler)
     :storage     (ig/ref :app.storage/storage)
     :sns-webhook (ig/ref :app.http.awsns/handler)
     :feedback    (ig/ref :app.http.feedback/handler)
@@ -113,43 +108,11 @@
    :app.http.feedback/handler
    {:pool (ig/ref :app.db/pool)}
 
-   :app.http.oauth/all
-   {:google (ig/ref :app.http.oauth/google)
-    :gitlab (ig/ref :app.http.oauth/gitlab)
-    :github (ig/ref :app.http.oauth/github)}
-
-   :app.http.oauth/google
+   :app.http.oauth/handlers
    {:rpc           (ig/ref :app.rpc/rpc)
     :session       (ig/ref :app.http.session/session)
     :tokens        (ig/ref :app.tokens/tokens)
-    :public-uri    (cf/get :public-uri)
-    :client-id     (cf/get :google-client-id)
-    :client-secret (cf/get :google-client-secret)}
-
-   :app.http.oauth/github
-   {:rpc           (ig/ref :app.rpc/rpc)
-    :session       (ig/ref :app.http.session/session)
-    :tokens        (ig/ref :app.tokens/tokens)
-    :public-uri    (cf/get :public-uri)
-    :client-id     (cf/get :github-client-id)
-    :client-secret (cf/get :github-client-secret)}
-
-   :app.http.oauth/gitlab
-   {:rpc           (ig/ref :app.rpc/rpc)
-    :session       (ig/ref :app.http.session/session)
-    :tokens        (ig/ref :app.tokens/tokens)
-    :public-uri    (cf/get :public-uri)
-    :base-uri      (cf/get :gitlab-base-uri)
-    :client-id     (cf/get :gitlab-client-id)
-    :client-secret (cf/get :gitlab-client-secret)}
-
-   :app.svgparse/svgc
-   {:metrics (ig/ref :app.metrics/metrics)}
-
-   ;; HTTP Handler for SVG parsing
-   :app.svgparse/handler
-   {:metrics (ig/ref :app.metrics/metrics)
-    :svgc    (ig/ref :app.svgparse/svgc)}
+    :public-uri    (cf/get :public-uri)}
 
    ;; RLimit definition for password hashing
    :app.rlimits/password
@@ -159,10 +122,15 @@
    :app.rlimits/image
    (cf/get :rlimits-image)
 
+   ;; RLimit definition for font processing
+   :app.rlimits/font
+   (cf/get :rlimits-font 2)
+
    ;; A collection of rlimits as hash-map.
    :app.rlimits/all
    {:password (ig/ref :app.rlimits/password)
-    :image    (ig/ref :app.rlimits/image)}
+    :image    (ig/ref :app.rlimits/image)
+    :font     (ig/ref :app.rlimits/font)}
 
    :app.rpc/rpc
    {:pool       (ig/ref :app.db/pool)
@@ -172,7 +140,6 @@
     :storage    (ig/ref :app.storage/storage)
     :msgbus     (ig/ref :app.msgbus/msgbus)
     :rlimits    (ig/ref :app.rlimits/all)
-    :svgc       (ig/ref :app.svgparse/svgc)
     :public-uri (cf/get :public-uri)}
 
    :app.notifications/handler
@@ -290,7 +257,8 @@
     :host (cf/get :srepl-host)}
 
    :app.setup/props
-   {:pool (ig/ref :app.db/pool)}
+   {:pool (ig/ref :app.db/pool)
+    :key  (cf/get :secret-key)}
 
    :app.loggers.zmq/receiver
    {:endpoint (cf/get :loggers-zmq-uri)}
@@ -348,8 +316,8 @@
                              (-> system-config
                                  (ig/prep)
                                  (ig/init))))
-  (log/infof "welcome to penpot (version: '%s')"
-             (:full cf/version)))
+  (l/info :msg "welcome to penpot"
+          :version (:full cf/version)))
 
 (defn stop
   []
