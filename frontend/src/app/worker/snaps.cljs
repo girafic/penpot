@@ -39,16 +39,15 @@
             (rt/insert tree (coord point) data))]
     (->> shapes
          (mapcat (process-shape frame-id coord))
-         (reduce into-tree data))))
+         (reduce into-tree (or data (rt/make-tree))))))
 
 (defn remove-coord-data
   [data frame-id shapes coord]
-
   (letfn [(remove-tree [tree [point _ :as data]]
             (rt/remove tree (coord point) data))]
     (->> shapes
          (mapcat (process-shape frame-id coord))
-         (reduce remove-tree data))))
+         (reduce remove-tree (or data (rt/make-tree))))))
 
 (defn aggregate-data
   ([objects]
@@ -69,8 +68,9 @@
   (let [shapes-data (aggregate-data objects)
 
         create-index
-        (fn [frame-id shapes] {:x (add-coord-data (rt/make-tree) frame-id shapes :x)
-                               :y (add-coord-data (rt/make-tree) frame-id shapes :y)})]
+        (fn [frame-id shapes]
+          {:x (-> (rt/make-tree) (add-coord-data frame-id shapes :x))
+           :y (-> (rt/make-tree) (add-coord-data frame-id shapes :y))})]
 
     (d/mapm create-index shapes-data)))
 
@@ -78,6 +78,14 @@
   [snap-data old-objects new-objects]
 
   (let [changed? #(not= (get old-objects %) (get new-objects %))
+        is-deleted-frame? #(and (not= uuid/zero %)
+                                (contains? old-objects %)
+                                (not (contains? new-objects %))
+                                (= :frame (get-in old-objects [% :type])))
+        is-new-frame? #(and (not= uuid/zero %)
+                            (contains? new-objects %)
+                            (not (contains? old-objects %))
+                            (= :frame (get-in new-objects [% :type])))
 
         changed-ids (into #{}
                           (filter changed?)
@@ -85,6 +93,9 @@
 
         to-delete (aggregate-data old-objects changed-ids)
         to-add    (aggregate-data new-objects changed-ids)
+
+        frames-to-delete (->> changed-ids (filter is-deleted-frame?))
+        frames-to-add (->> changed-ids (filter is-new-frame?))
 
         delete-data
         (fn [snap-data [frame-id shapes]]
@@ -98,13 +109,20 @@
               (update-in [frame-id :x] add-coord-data frame-id shapes :x)
               (update-in [frame-id :y] add-coord-data frame-id shapes :y)))
 
-        snap-data (->> to-delete
-                       (reduce delete-data snap-data))
+        delete-frames
+        (fn [snap-data frame-id]
+          (dissoc snap-data frame-id))
 
-        snap-data (->> to-add
-                       (reduce add-data snap-data))]
+        add-frames
+        (fn [snap-data frame-id]
+          (assoc snap-data frame-id {:x (rt/make-tree)
+                                     :y (rt/make-tree)}))]
 
-    snap-data))
+    (as-> snap-data $
+      (reduce add-frames $ frames-to-add)
+      (reduce add-data $ to-add)
+      (reduce delete-data $ to-delete)
+      (reduce delete-frames $ frames-to-delete))))
 
 (defn- log-state
   "Helper function to print a friendly version of the snap tree. Debugging purposes"
