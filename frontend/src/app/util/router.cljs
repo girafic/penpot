@@ -7,13 +7,11 @@
 (ns app.util.router
   (:refer-clojure :exclude [resolve])
   (:require
-   [app.common.data :as d]
-   [app.config :as cfg]
    [app.common.uri :as u]
+   [app.config :as cfg]
    [app.util.browser-history :as bhistory]
    [app.util.timers :as ts]
    [beicon.core :as rx]
-   [cuerdas.core :as str]
    [goog.events :as e]
    [potok.core :as ptk]
    [reitit.core :as r]))
@@ -83,13 +81,14 @@
       (dissoc state :exception))
 
     ptk/EffectEvent
-    (effect [_ state stream]
-      (let [router  (:router state)
-            history (:history state)
-            path    (resolve router id params qparams)]
-        (if ^boolean replace
-          (bhistory/replace-token! history path)
-          (bhistory/set-token! history path))))))
+    (effect [_ state _]
+      (ts/asap
+       #(let [router  (:router state)
+              history (:history state)
+              path    (resolve router id params qparams)]
+          (if ^boolean replace
+            (bhistory/replace-token! history path)
+            (bhistory/set-token! history path)))))))
 
 (defn nav
   ([id] (nav id nil nil))
@@ -105,7 +104,7 @@
 
 (deftype NavigateNewWindow [id params qparams]
   ptk/EffectEvent
-  (effect [_ state stream]
+  (effect [_ state _]
     (let [router (:router state)
           path   (resolve router id params qparams)
           uri    (-> (u/uri cfg/public-uri)

@@ -6,16 +6,11 @@
 
 (ns app.main.ui.workspace
   (:require
-   [app.common.geom.point :as gpt]
-   [app.main.constants :as c]
-   [app.main.data.history :as udh]
    [app.main.data.messages :as dm]
    [app.main.data.workspace :as dw]
    [app.main.refs :as refs]
    [app.main.store :as st]
-   [app.main.streams :as ms]
    [app.main.ui.context :as ctx]
-   [app.main.ui.hooks :as hooks]
    [app.main.ui.icons :as i]
    [app.main.ui.workspace.colorpalette :refer [colorpalette]]
    [app.main.ui.workspace.colorpicker]
@@ -29,10 +24,7 @@
    [app.main.ui.workspace.viewport :refer [viewport]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
-   [app.util.keyboard :as kbd]
    [app.util.object :as obj]
-   [beicon.core :as rx]
-   [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.alpha :as mf]))
 
@@ -67,10 +59,8 @@
         file   (obj/get props "file")
         layout (obj/get props "layout")]
     [:*
-     ;; TODO: left-sidebar option is obsolete because left-sidebar now
-     ;; is always visible.
      (when (:colorpalette layout)
-       [:& colorpalette {:left-sidebar? true}])
+       [:& colorpalette])
 
      [:section.workspace-content
       [:section.workspace-viewport
@@ -96,17 +86,21 @@
 
 (mf/defc workspace-page
   [{:keys [file layout page-id] :as props}]
-  (let [page (mf/deref trimmed-page-ref)]
-    (mf/use-layout-effect
-     (mf/deps page-id)
-     (fn []
-       (st/emit! (dw/initialize-page page-id))
-       (st/emitf (dw/finalize-page page-id))))
+  (mf/use-layout-effect
+   (mf/deps page-id)
+   (fn []
+     (if (nil? page-id)
+       (st/emit! (dw/go-to-page))
+       (st/emit! (dw/initialize-page page-id)))
 
-    (when page
-      [:& workspace-content {:key page-id
-                             :file file
-                             :layout layout}])))
+     (fn []
+       (when page-id
+         (st/emit! (dw/finalize-page page-id))))))
+
+  (when (mf/deref trimmed-page-ref)
+    [:& workspace-content {:key page-id
+                           :file file
+                           :layout layout}]))
 
 (mf/defc workspace-loader
   []
@@ -116,7 +110,6 @@
 (mf/defc workspace
   {::mf/wrap [mf/memo]}
   [{:keys [project-id file-id page-id layout-name] :as props}]
-
   (let [file    (mf/deref refs/workspace-file)
         project (mf/deref refs/workspace-project)
         layout  (mf/deref refs/workspace-layout)]
@@ -134,7 +127,7 @@
     (mf/use-effect
      (fn []
        ;; Close any non-modal dialog that may be still open
-       (st/emitf dm/hide)))
+       (st/emit! dm/hide)))
 
     (mf/use-effect
      (mf/deps file)
@@ -154,6 +147,9 @@
 
          (if (and (and file project)
                   (:initialized file))
-           [:& workspace-page {:page-id page-id :file file :layout layout}]
+           [:& workspace-page {:key (str "page-" page-id)
+                               :page-id page-id
+                               :file file
+                               :layout layout}]
            [:& workspace-loader])]]]]]))
 

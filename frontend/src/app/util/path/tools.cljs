@@ -80,13 +80,7 @@
   in the same vector that results from te previous->next points but with fixed length."
   [content point]
 
-  (let [make-curve-cmd (fn [cmd h1 h2]
-                         (-> cmd
-                             (update :params assoc
-                                     :c1x (:x h1) :c1y (:y h1)
-                                     :c2x (:x h2) :c2y (:y h2))))
-
-        indices (upc/point-indices content point)
+  (let [indices (upc/point-indices content point)
         vectors (->> indices (mapv (fn [index]
                                      (let [cmd (nth content index)
                                            prev-i (dec index)
@@ -151,10 +145,10 @@
       (let [add-curve
             (fn [content {:keys [index command prev-p next-c next-i]}]
               (cond-> content
-                (and (= :line-to (:command command)))
+                (= :line-to (:command command))
                 (update index #(line->curve prev-p %))
 
-                (and (= :line-to (:command next-c)))
+                (= :line-to (:command next-c))
                 (update next-i #(line->curve point %))))]
         (->> vectors (reduce add-curve content))))))
 
@@ -164,11 +158,12 @@
   [content points]
   (let [point-set (set points)]
 
-    (loop [segments []
-           prev-point nil
+    (loop [segments    []
+           prev-point  nil
            start-point nil
-           cur-cmd (first content)
-           content (rest content)]
+           index       0
+           cur-cmd     (first content)
+           content     (rest content)]
 
       (let [;; Close-path makes a segment from the last point to the initial path point
             cur-point (if (= :close-path (:command cur-cmd))
@@ -191,12 +186,16 @@
 
             segments (cond-> segments
                        is-segment?
-                       (conj [prev-point cur-point cur-cmd]))]
+                       (conj {:start prev-point
+                              :end cur-point
+                              :cmd cur-cmd
+                              :index index}))]
 
         (if (some? cur-cmd)
           (recur segments
                  cur-point
                  start-point
+                 (inc index)
                  (first content)
                  (rest content))
 
@@ -205,12 +204,13 @@
 (defn split-segments
   "Given a content creates splits commands between points with new segments"
   [content points value]
+
   (let [split-command
-        (fn [[start end cmd]]
+        (fn [{:keys [start end cmd index]}]
           (case (:command cmd)
-            :line-to [cmd (upg/split-line-to start cmd value)]
-            :curve-to [cmd (upg/split-curve-to start cmd value)]
-            :close-path [cmd [(upc/make-line-to (gpt/line-val start end value)) cmd]]
+            :line-to [index (upg/split-line-to start cmd value)]
+            :curve-to [index (upg/split-curve-to start cmd value)]
+            :close-path [index [(upc/make-line-to (gpt/line-val start end value)) cmd]]
             nil))
 
         cmd-changes
@@ -219,12 +219,12 @@
                             (filter (comp not nil?)))))
 
         process-segments
-        (fn [command]
-          (if (contains? cmd-changes command)
-            (get cmd-changes command)
+        (fn [[index command]]
+          (if (contains? cmd-changes index)
+            (get cmd-changes index)
             [command]))]
 
-    (into [] (mapcat process-segments) content)))
+    (into [] (mapcat process-segments) (d/enumerate content))))
 
 (defn remove-nodes
   "Removes from content the points given. Will try to reconstruct the paths
@@ -286,7 +286,7 @@
 
                           ;; If have a curve the first handler will be relative to the previous
                           ;; point. We change the handler to the new previous point
-                          (and curve? (not (empty? subpath)) (not= old-prev-point new-prev-point))
+                          (and curve? (seq subpath) (not= old-prev-point new-prev-point))
                           (update :params merge last-handler))
 
                 head-idx (dec (count result))
@@ -304,7 +304,7 @@
   [content points]
 
   (let [segments-set (into #{}
-                           (map (fn [[p1 p2 _]] [p1 p2]))
+                           (map (fn [{:keys [start end]}] [start end]))
                            (get-segments content points))
 
         create-line-command (fn [point other]
@@ -376,7 +376,7 @@
 
 (defn group-segments [segments]
   (loop [result []
-         [point-a point-b :as segment] (first segments)
+         {point-a :start point-b :end :as segment} (first segments)
          segments (rest segments)]
 
     (if (nil? segment)
@@ -388,7 +388,7 @@
             result (cond-> result
                      (and (nil? set-a) (nil? set-b))
                      (conj #{point-a point-b})
-                     
+
                      (and (some? set-a) (nil? set-b))
                      (add-to-set set-a point-b)
 

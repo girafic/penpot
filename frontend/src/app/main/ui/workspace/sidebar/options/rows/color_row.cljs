@@ -6,28 +6,39 @@
 
 (ns app.main.ui.workspace.sidebar.options.rows.color-row
   (:require
-   [rumext.alpha :as mf]
-   [cuerdas.core :as str]
+   [app.common.data :as d]
    [app.common.math :as math]
    [app.common.pages :as cp]
-   [app.common.data :as d]
-   [app.util.dom :as dom]
-   [app.util.data :refer [classnames]]
-   [app.util.i18n :as i18n :refer [tr]]
-   [app.util.color :as uc]
-   [app.main.refs :as refs]
    [app.main.data.modal :as modal]
-   [app.main.ui.hooks :as h]
-   [app.main.ui.icons :as i]
-   [app.main.ui.context :as ctx]
+   [app.main.refs :as refs]
    [app.main.ui.components.color-bullet :as cb]
    [app.main.ui.components.color-input :refer [color-input]]
-   [app.main.ui.components.numeric-input :refer [numeric-input]]))
+   [app.main.ui.components.numeric-input :refer [numeric-input]]
+   [app.main.ui.context :as ctx]
+   [app.main.ui.hooks :as h]
+   [app.main.ui.icons :as i]
+   [app.util.color :as uc]
+   [app.util.data :refer [classnames]]
+   [app.util.dom :as dom]
+   [app.util.i18n :as i18n :refer [tr]]
+   [rumext.alpha :as mf]))
 
 (defn color-picker-callback
   [color disable-gradient disable-opacity handle-change-color handle-open handle-close]
   (fn [event]
-    (let [x (.-clientX event)
+    (let [color
+          (cond
+            (uc/multiple? color)
+            {:color cp/default-color
+             :opacity 1}
+
+            (= :multiple (:opacity color))
+            (assoc color :opacity 1)
+
+            :else
+            color)
+
+          x (.-clientX event)
           y (.-clientY event)
           props {:x x
                  :y y
@@ -98,16 +109,12 @@
 
         handle-click-color (mf/use-callback
                             (mf/deps color)
-                            (let [;; If multiple, we change to default color
-                                  color (if (uc/multiple? color)
-                                          {:color cp/default-color :opacity 1}
-                                          color)]
-                              (color-picker-callback color
-                                                     disable-gradient
-                                                     disable-opacity
-                                                     handle-pick-color
-                                                     handle-open
-                                                     handle-close)))
+                            (color-picker-callback color
+                                                   disable-gradient
+                                                   disable-opacity
+                                                   handle-pick-color
+                                                   handle-open
+                                                   handle-close))
 
         prev-color (h/use-previous color)]
 

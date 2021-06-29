@@ -7,7 +7,6 @@
 (ns app.worker.snaps
   (:require
    [app.common.data :as d]
-   [app.common.pages :as cp]
    [app.common.uuid :as uuid]
    [app.util.geom.grid :as gg]
    [app.util.geom.snap-points :as snap]
@@ -71,13 +70,23 @@
         (fn [frame-id shapes]
           {:x (-> (rt/make-tree) (add-coord-data frame-id shapes :x))
            :y (-> (rt/make-tree) (add-coord-data frame-id shapes :y))})]
-
     (d/mapm create-index shapes-data)))
+
+;; Attributes that will change the values of their snap
+(def snap-attrs [:x :y :width :height :selrect :grids])
 
 (defn- update-snap-data
   [snap-data old-objects new-objects]
 
-  (let [changed? #(not= (get old-objects %) (get new-objects %))
+  (let [changed? (fn [id]
+                   (let [oldv (get old-objects id)
+                         newv (get new-objects id)]
+                     ;; Check first without select-keys because is faster if they are
+                     ;; the same reference
+                     (and (not= oldv newv)
+                          (not= (select-keys oldv snap-attrs)
+                                (select-keys newv snap-attrs)))))
+
         is-deleted-frame? #(and (not= uuid/zero %)
                                 (contains? old-objects %)
                                 (not (contains? new-objects %))
@@ -89,7 +98,8 @@
 
         changed-ids (into #{}
                           (filter changed?)
-                          (set/union (keys old-objects) (keys new-objects)))
+                          (set/union (set (keys old-objects))
+                                     (set (keys new-objects))))
 
         to-delete (aggregate-data old-objects changed-ids)
         to-add    (aggregate-data new-objects changed-ids)
@@ -119,35 +129,30 @@
                                      :y (rt/make-tree)}))]
 
     (as-> snap-data $
+      (reduce delete-data $ to-delete)
       (reduce add-frames $ frames-to-add)
       (reduce add-data $ to-add)
-      (reduce delete-data $ to-delete)
       (reduce delete-frames $ frames-to-delete))))
 
-(defn- log-state
-  "Helper function to print a friendly version of the snap tree. Debugging purposes"
-  []
-  (let [process-frame-data #(d/mapm rt/as-map %)
-        process-page-data  #(d/mapm process-frame-data %)]
-    (js/console.log "STATE" (clj->js (d/mapm process-page-data @state)))))
+;; (defn- log-state
+;;   "Helper function to print a friendly version of the snap tree. Debugging purposes"
+;;   []
+;;   (let [process-frame-data #(d/mapm rt/as-map %)
+;;         process-page-data  #(d/mapm process-frame-data %)]
+;;     (js/console.log "STATE" (clj->js (d/mapm process-page-data @state)))))
 
 (defn- index-page [state page-id objects]
   (let [snap-data (initialize-snap-data objects)]
     (assoc state page-id snap-data)))
 
 (defn- update-page [state page-id old-objects new-objects]
-  (let [changed? #(not= (get old-objects %) (get new-objects %))
-        changed-ids (into #{}
-                          (filter changed?)
-                          (set/union (keys old-objects) (keys new-objects)))
-
-        snap-data (get state page-id)
+  (let [snap-data (get state page-id)
         snap-data (update-snap-data snap-data old-objects new-objects)]
     (assoc state page-id snap-data)))
 
 ;; Public API
 (defmethod impl/handler :snaps/initialize-index
-  [{:keys [file-id data] :as message}]
+  [{:keys [data] :as message}]
   ;; Create the index
   (letfn [(process-page [state page]
             (let [id      (:id page)
@@ -160,8 +165,10 @@
 
 (defmethod impl/handler :snaps/update-index
   [{:keys [page-id old-objects new-objects] :as message}]
-  ;; TODO: Check the difference and update the index acordingly
   (swap! state update-page page-id old-objects new-objects)
+
+  ;; Uncomment this to regenerate the index everytime
+  #_(swap! state index-page page-id new-objects)
   ;; (log-state)
   nil)
 

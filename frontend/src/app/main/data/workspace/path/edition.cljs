@@ -8,11 +8,9 @@
   (:require
    [app.common.data :as d]
    [app.common.geom.point :as gpt]
-   [app.common.math :as mth]
-   [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.changes :as dch]
+   [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.path.changes :as changes]
-   [app.main.data.workspace.path.common :as common]
    [app.main.data.workspace.path.drawing :as drawing]
    [app.main.data.workspace.path.helpers :as helpers]
    [app.main.data.workspace.path.selection :as selection]
@@ -47,7 +45,7 @@
 (defn apply-content-modifiers []
   (ptk/reify ::apply-content-modifiers
     ptk/WatchEvent
-    (watch [_ state stream]
+    (watch [it state _]
       (let [objects (wsh/lookup-page-objects state)
 
             id (st/get-path-id state)
@@ -60,16 +58,20 @@
 
             old-points (->> content upg/content->points)
             new-points (->> new-content upg/content->points)
-            point-change (->> (map hash-map old-points new-points) (reduce merge))
+            point-change (->> (map hash-map old-points new-points) (reduce merge))]
 
-            [rch uch] (changes/generate-path-changes objects page-id shape (:content shape) new-content)]
-
-        (if (empty? new-content)
-          (rx/of (dch/commit-changes rch uch {:commit-local? true})
-                 dwc/clear-edition-mode)
-          (rx/of (dch/commit-changes rch uch {:commit-local? true})
-                 (selection/update-selection point-change)
-                 (fn [state] (update-in state [:workspace-local :edit-path id] dissoc :content-modifiers :moving-nodes :moving-handler))))))))
+        (when (and (some? new-content) (some? shape))
+          (let [[rch uch] (changes/generate-path-changes objects page-id shape (:content shape) new-content)]
+            (if (empty? new-content)
+              (rx/of (dch/commit-changes {:redo-changes rch
+                                          :undo-changes uch
+                                          :origin it})
+                     dwc/clear-edition-mode)
+              (rx/of (dch/commit-changes {:redo-changes rch
+                                          :undo-changes uch
+                                          :origin it})
+                     (selection/update-selection point-change)
+                     (fn [state] (update-in state [:workspace-local :edit-path id] dissoc :content-modifiers :moving-nodes :moving-handler))))))))))
 
 (defn modify-content-point
   [content {dx :x dy :y} modifiers point]
@@ -133,15 +135,15 @@
   [position shift?]
   (ptk/reify ::start-move-path-point
     ptk/WatchEvent
-    (watch [_ state stream]
+    (watch [_ state _]
       (let [id (get-in state [:workspace-local :edition])
             selected-points (get-in state [:workspace-local :edit-path id :selected-points] #{})
             selected? (contains? selected-points position)]
         (streams/drag-stream
          (rx/of
-          (when-not selected? (selection/select-node position shift? "drag"))
+          (when-not selected? (selection/select-node position shift?))
           (drag-selected-points @ms/mouse-position))
-         (rx/of (selection/select-node position shift? "click")))))))
+         (rx/of (selection/select-node position shift?)))))))
 
 (defn drag-selected-points
   [start-position]
@@ -259,7 +261,8 @@
         (streams/drag-stream
          (rx/concat
           (->> (streams/move-handler-stream snap-toggled start-point point handler opposite points)
-               (rx/take-until (->> stream (rx/filter ms/mouse-up?)))
+               (rx/take-until (->> stream (rx/filter #(or (ms/mouse-up? %)
+                                                          (streams/finish-edition? %)))))
                (rx/map
                 (fn [{:keys [x y alt? shift?]}]
                   (let [pos (cond-> (gpt/point x y)
@@ -322,5 +325,5 @@
             (update-in (st/get-path state :content) upt/split-segments #{from-p to-p} t))))
 
     ptk/WatchEvent
-    (watch [_ state stream]
+    (watch [_ _ _]
       (rx/of (changes/save-path-content {:preserve-move-to true})))))

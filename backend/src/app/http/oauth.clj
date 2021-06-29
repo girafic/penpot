@@ -6,10 +6,13 @@
 
 (ns app.http.oauth
   (:require
+   [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.spec :as us]
    [app.common.uri :as u]
    [app.config :as cf]
+   [app.db :as db]
+   [app.rpc.queries.profile :as profile]
    [app.util.http :as http]
    [app.util.logging :as l]
    [app.util.time :as dt]
@@ -25,11 +28,12 @@
    :headers {"location" (str uri)}
    :body ""})
 
-(defn generate-error-redirect-uri
-  [cfg]
-  (-> (u/uri (:public-uri cfg))
-      (assoc :path "/#/auth/login")
-      (assoc :query (u/map->query-string {:error "unable-to-auth"}))))
+(defn generate-error-redirect
+  [cfg error]
+  (let [uri (-> (u/uri (:public-uri cfg))
+                (assoc :path "/#/auth/login")
+                (assoc :query (u/map->query-string {:error "unable-to-auth" :hint (ex-message error)})))]
+    (redirect-response uri)))
 
 (defn register-profile
   [{:keys [rpc] :as cfg} info]
@@ -39,15 +43,33 @@
       (some? (:invitation-token info))
       (assoc :invitation-token (:invitation-token info)))))
 
-(defn generate-redirect-uri
-  [{:keys [tokens] :as cfg} profile]
-  (let [token (or (:invitation-token profile)
-                  (tokens :generate {:iss :auth
-                                     :exp (dt/in-future "15m")
-                                     :profile-id (:id profile)}))]
-    (-> (u/uri (:public-uri cfg))
-        (assoc :path "/#/auth/verify-token")
-        (assoc :query (u/map->query-string {:token token})))))
+(defn generate-redirect
+  [{:keys [tokens session] :as cfg} request info profile]
+  (if profile
+    (let [sxf    ((:create session) (:id profile))
+          token  (or (:invitation-token info)
+                     (tokens :generate {:iss :auth
+                                        :exp (dt/in-future "15m")
+                                        :profile-id (:id profile)}))
+          params {:token token}
+
+          uri    (-> (u/uri (:public-uri cfg))
+                     (assoc :path "/#/auth/verify-token")
+                     (assoc :query (u/map->query-string params)))]
+      (->> (redirect-response uri)
+           (sxf request)))
+    (let [info   (assoc info
+                        :iss :prepared-register
+                        :exp (dt/in-future {:hours 48}))
+          token  (tokens :generate info)
+          params (d/without-nils
+                  {:token token
+                   :fullname (:fullname info)})
+          uri    (-> (u/uri (:public-uri cfg))
+                     (assoc :path "/#/auth/register/validate")
+                     (assoc :query (u/map->query-string params)))]
+      (redirect-response uri))))
+
 
 (defn- build-redirect-uri
   [{:keys [provider] :as cfg}]
@@ -98,15 +120,27 @@
           res (http/send! req)]
 
       (when (= 200 (:status res))
-        (let [{:keys [name] :as data} (json/read-str (:body res) :key-fn keyword)]
-          (-> data
-              (assoc :backend (:name provider))
-              (assoc :fullname name)))))
+        (let [info (json/read-str (:body res) :key-fn keyword)]
+          {:backend (:name provider)
+           :email (:email info)
+           :fullname (:name info)
+           :props (dissoc info :name :email)})))
 
     (catch Exception e
       (l/error :hint "unexpected exception on retrieve-user-info"
                :cause e)
       nil)))
+
+(s/def ::backend ::us/not-empty-string)
+(s/def ::email ::us/not-empty-string)
+(s/def ::fullname ::us/not-empty-string)
+(s/def ::props (s/map-of ::us/keyword any?))
+
+(s/def ::info
+  (s/keys :req-un [::backend
+                   ::email
+                   ::fullname
+                   ::props]))
 
 (defn retrieve-info
   [{:keys [tokens provider] :as cfg} request]
@@ -115,9 +149,13 @@
         info   (some->> (get-in request [:params :code])
                         (retrieve-access-token cfg)
                         (retrieve-user-info cfg))]
-    (when-not info
+
+    (when-not (s/valid? ::info info)
+      (l/warn :hint "received incomplete profile info object (please set correct scopes)"
+              :info (pr-str info))
       (ex/raise :type :internal
-                :code :unable-to-auth))
+                :code :unable-to-auth
+                :hint "no user info"))
 
     ;; If the provider is OIDC, we can proceed to check
     ;; roles if they are defined.
@@ -130,6 +168,7 @@
                                (string? roles) (into #{} (str/words roles))
                                (vector? roles) (into #{} roles)
                                :else #{}))]
+
         ;; check if profile has a configured set of roles
         (when-not (set/subset? provider-roles profile-roles)
           (ex/raise :type :internal
@@ -138,33 +177,57 @@
 
     (cond-> info
       (some? (:invitation-token state))
-      (assoc :invitation-token (:invitation-token state)))))
+      (assoc :invitation-token (:invitation-token state))
+
+      ;; If state token comes with props, merge them. The state token
+      ;; props can contain pm_ and utm_ prefixed query params.
+      (map? (:props state))
+      (update :props merge (:props state)))))
 
 ;; --- HTTP HANDLERS
 
+(defn extract-props
+  [params]
+  (reduce-kv (fn [params k v]
+               (let [sk (name k)]
+                 (cond-> params
+                   (or (str/starts-with? sk "pm_")
+                       (str/starts-with? sk "pm-")
+                       (str/starts-with? sk "utm_"))
+                   (assoc (-> sk str/kebab keyword) v))))
+             {}
+             params))
+
 (defn- auth-handler
-  [{:keys [tokens] :as cfg} request]
-  (let [invitation (get-in request [:params :invitation-token])
+  [{:keys [tokens] :as cfg} {:keys [params] :as request}]
+  (let [invitation (:invitation-token params)
+        props      (extract-props params)
         state      (tokens :generate
                            {:iss :oauth
                             :invitation-token invitation
+                            :props props
                             :exp (dt/in-future "15m")})
         uri        (build-auth-uri cfg state)]
     {:status 200
      :body {:redirect-uri uri}}))
 
+(defn- retrieve-profile
+  [{:keys [pool] :as cfg} info]
+  (with-open [conn (db/open pool)]
+    (some->> (:email info)
+             (profile/retrieve-profile-data-by-email conn)
+             (profile/populate-additional-data conn))))
+
 (defn- callback-handler
-  [{:keys [session] :as cfg} request]
+  [cfg request]
   (try
-    (let [info    (retrieve-info cfg request)
-          profile (register-profile cfg info)
-          uri     (generate-redirect-uri cfg profile)
-          sxf     ((:create session) (:id profile))]
-      (->> (redirect-response uri)
-           (sxf request)))
-    (catch Exception _e
-      (-> (generate-error-redirect-uri cfg)
-          (redirect-response)))))
+    (let [info     (retrieve-info cfg request)
+          profile  (retrieve-profile cfg info)]
+      (generate-redirect cfg request info profile))
+    (catch Exception e
+      (l/warn :hint "error on oauth process"
+              :cause e)
+      (generate-error-redirect cfg e))))
 
 ;; --- INIT
 
@@ -176,7 +239,7 @@
 (s/def ::rpc map?)
 
 (defmethod ig/pre-init-spec :app.http.oauth/handlers [_]
-  (s/keys :req-un [::public-uri ::session ::tokens ::rpc]))
+  (s/keys :req-un [::public-uri ::session ::tokens ::rpc ::db/pool]))
 
 (defn wrap-handler
   [cfg handler]
@@ -207,6 +270,13 @@
                :auth-uri (get data "authorization_endpoint")
                :user-uri (get data "userinfo_endpoint"))))))
 
+(defn- obfuscate-string
+  [s]
+  (if (< (count s) 10)
+    (apply str (take (count s) (repeat "*")))
+    (str (subs s 0 5)
+         (apply str (take (- (count s) 5) (repeat "*"))))))
+
 (defn- initialize-oidc-provider
   [cfg]
   (let [opts {:base-uri      (cf/get :oidc-base-uri)
@@ -215,8 +285,7 @@
               :token-uri     (cf/get :oidc-token-uri)
               :auth-uri      (cf/get :oidc-auth-uri)
               :user-uri      (cf/get :oidc-user-uri)
-              :scopes        (into #{"openid" "profile" "email" "name"}
-                                   (cf/get :oidc-scopes #{}))
+              :scopes        (cf/get :oidc-scopes #{"openid" "profile" "email"})
               :roles-attr    (cf/get :oidc-roles-attr)
               :roles         (cf/get :oidc-roles)
               :name          "oidc"}]
@@ -227,10 +296,12 @@
                (string? (:user-uri opts))
                (string? (:auth-uri opts)))
         (do
-          (l/info :action "initialize" :provider "oid" :method "static")
+          (l/info :action "initialize" :provider "oidc" :method "static"
+                  :opts (pr-str (update opts :client-secret obfuscate-string)))
           (assoc-in cfg [:providers "oidc"] opts))
         (let [opts (discover-oidc-config opts)]
-          (l/info :action "initialize" :provider "oid" :method "discover")
+          (l/info :action "initialize" :provider "oidc" :method "discover"
+                  :opts (pr-str (update opts :client-secret obfuscate-string)))
           (assoc-in cfg [:providers "oidc"] opts)))
       cfg)))
 
@@ -238,9 +309,7 @@
   [cfg]
   (let [opts {:client-id     (cf/get :google-client-id)
               :client-secret (cf/get :google-client-secret)
-              :scopes        #{"email" "profile" "openid"
-                               "https://www.googleapis.com/auth/userinfo.email"
-                               "https://www.googleapis.com/auth/userinfo.profile"}
+              :scopes        #{"openid" "email" "profile"}
               :auth-uri      "https://accounts.google.com/o/oauth2/v2/auth"
               :token-uri     "https://oauth2.googleapis.com/token"
               :user-uri      "https://openidconnect.googleapis.com/v1/userinfo"
@@ -248,7 +317,8 @@
     (if (and (string? (:client-id opts))
              (string? (:client-secret opts)))
       (do
-        (l/info :action "initialize" :provider "google")
+        (l/info :action "initialize" :provider "google"
+                :opts (pr-str (update opts :client-secret obfuscate-string)))
         (assoc-in cfg [:providers "google"] opts))
       cfg)))
 
@@ -256,8 +326,7 @@
   [cfg]
   (let [opts {:client-id     (cf/get :github-client-id)
               :client-secret (cf/get :github-client-secret)
-              :scopes        #{"read:user"
-                               "user:email"}
+              :scopes        #{"read:user" "user:email"}
               :auth-uri      "https://github.com/login/oauth/authorize"
               :token-uri     "https://github.com/login/oauth/access_token"
               :user-uri      "https://api.github.com/user"
@@ -265,7 +334,8 @@
     (if (and (string? (:client-id opts))
              (string? (:client-secret opts)))
       (do
-        (l/info :action "initialize" :provider "github")
+        (l/info :action "initialize" :provider "github"
+                :opts (pr-str (update opts :client-secret obfuscate-string)))
         (assoc-in cfg [:providers "github"] opts))
       cfg)))
 
@@ -284,7 +354,8 @@
     (if (and (string? (:client-id opts))
              (string? (:client-secret opts)))
       (do
-        (l/info :action "initialize" :provider "gitlab")
+        (l/info :action "initialize" :provider "gitlab"
+                :opts (pr-str (update opts :client-secret obfuscate-string)))
         (assoc-in cfg [:providers "gitlab"] opts))
       cfg)))
 

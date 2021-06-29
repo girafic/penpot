@@ -6,15 +6,13 @@
 
 (ns app.main.data.workspace.drawing.common
   (:require
-   [beicon.core :as rx]
-   [potok.core :as ptk]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.main.data.workspace.common :as dwc]
-   [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.undo :as dwu]
-   [app.main.streams :as ms]
-   [app.main.worker :as uw]))
+   [app.main.worker :as uw]
+   [beicon.core :as rx]
+   [potok.core :as ptk]))
 
 (def clear-drawing
   (ptk/reify ::clear-drawing
@@ -25,10 +23,9 @@
 (def handle-finish-drawing
   (ptk/reify ::handle-finish-drawing
     ptk/WatchEvent
-    (watch [_ state stream]
+    (watch [_ state _]
       (let [shape (get-in state [:workspace-drawing :object])]
         (rx/concat
-         (rx/of clear-drawing)
          (when (:initialized? shape)
            (let [page-id (:current-page-id state)
                  shape-click-width (case (:type shape)
@@ -65,4 +62,8 @@
                                :page-id page-id
                                :rect (:selrect shape)})
                      (rx/map #(dwc/move-shapes-into-frame (:id shape) %)))
-                (rx/empty))))))))))
+                (rx/empty)))))
+
+         ;; Delay so the mouse event can read the drawing state
+         (->> (rx/of clear-drawing)
+              (rx/delay 0)))))))

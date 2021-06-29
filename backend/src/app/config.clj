@@ -8,6 +8,8 @@
   "A configuration management."
   (:refer-clojure :exclude [get])
   (:require
+   [app.common.data :as d]
+   [app.common.exceptions :as ex]
    [app.common.spec :as us]
    [app.common.version :as v]
    [app.util.time :as dt]
@@ -16,7 +18,8 @@
    [clojure.pprint :as pprint]
    [clojure.spec.alpha :as s]
    [cuerdas.core :as str]
-   [environ.core :refer [env]]))
+   [environ.core :refer [env]]
+   [integrant.core :as ig]))
 
 (prefer-method print-method
                clojure.lang.IRecord
@@ -26,6 +29,16 @@
                clojure.lang.IPersistentMap
                clojure.lang.IDeref)
 
+(defmethod ig/init-key :default
+  [_ data]
+  (d/without-nils data))
+
+(defmethod ig/prep-key :default
+  [_ data]
+  (if (map? data)
+    (d/without-nils data)
+    data))
+
 (def defaults
   {:http-server-port 6060
    :host "devenv"
@@ -34,8 +47,7 @@
    :database-username "penpot"
    :database-password "penpot"
 
-   :default-blob-version 1
-
+   :default-blob-version 3
    :loggers-zmq-uri "tcp://localhost:45556"
 
    :asserts-enabled false
@@ -46,11 +58,8 @@
    :srepl-host "127.0.0.1"
    :srepl-port 6062
 
-   :storage-backend :fs
-
-   :storage-fs-directory "assets"
-   :storage-s3-region :eu-central-1
-   :storage-s3-bucket "penpot-devenv-assets-pre"
+   :assets-storage-backend :fs
+   :storage-assets-fs-directory "assets"
 
    :feedback-destination "info@example.com"
    :feedback-enabled false
@@ -72,7 +81,6 @@
 
    :allow-demo-users true
    :registration-enabled true
-   :registration-domain-whitelist ""
 
    :telemetry-enabled false
    :telemetry-uri "https://telemetry.penpot.app/"
@@ -86,6 +94,12 @@
    ;; a server prop key where initial project is stored.
    :initial-project-skey "initial-project"
    })
+
+(s/def ::audit-enabled ::us/boolean)
+(s/def ::audit-archive-enabled ::us/boolean)
+(s/def ::audit-archive-uri ::us/string)
+(s/def ::audit-archive-gc-enabled ::us/boolean)
+(s/def ::audit-archive-gc-max-age ::dt/duration)
 
 (s/def ::secret-key ::us/string)
 (s/def ::allow-demo-users ::us/boolean)
@@ -143,7 +157,7 @@
 (s/def ::profile-complaint-threshold ::us/integer)
 (s/def ::public-uri ::us/string)
 (s/def ::redis-uri ::us/string)
-(s/def ::registration-domain-whitelist ::us/string)
+(s/def ::registration-domain-whitelist ::us/set-of-str)
 (s/def ::registration-enabled ::us/boolean)
 (s/def ::rlimits-image ::us/integer)
 (s/def ::rlimits-password ::us/integer)
@@ -158,10 +172,14 @@
 (s/def ::smtp-username (s/nilable ::us/string))
 (s/def ::srepl-host ::us/string)
 (s/def ::srepl-port ::us/integer)
-(s/def ::storage-backend ::us/keyword)
-(s/def ::storage-fs-directory ::us/string)
-(s/def ::storage-s3-bucket ::us/string)
-(s/def ::storage-s3-region ::us/keyword)
+(s/def ::assets-storage-backend ::us/keyword)
+(s/def ::fdata-storage-backend ::us/keyword)
+(s/def ::storage-assets-fs-directory ::us/string)
+(s/def ::storage-assets-s3-bucket ::us/string)
+(s/def ::storage-assets-s3-region ::us/keyword)
+(s/def ::storage-fdata-s3-bucket ::us/string)
+(s/def ::storage-fdata-s3-region ::us/keyword)
+(s/def ::storage-fdata-s3-prefix ::us/string)
 (s/def ::telemetry-enabled ::us/boolean)
 (s/def ::telemetry-uri ::us/string)
 (s/def ::telemetry-with-taiga ::us/boolean)
@@ -170,6 +188,11 @@
 (s/def ::config
   (s/keys :opt-un [::secret-key
                    ::allow-demo-users
+                   ::audit-enabled
+                   ::audit-archive-enabled
+                   ::audit-archive-uri
+                   ::audit-archive-gc-enabled
+                   ::audit-archive-gc-max-age
                    ::asserts-enabled
                    ::database-password
                    ::database-uri
@@ -235,12 +258,20 @@
                    ::smtp-ssl
                    ::smtp-tls
                    ::smtp-username
+
                    ::srepl-host
                    ::srepl-port
-                   ::storage-backend
-                   ::storage-fs-directory
-                   ::storage-s3-bucket
-                   ::storage-s3-region
+
+                   ::assets-storage-backend
+                   ::storage-assets-fs-directory
+                   ::storage-assets-s3-bucket
+                   ::storage-assets-s3-region
+
+                   ::fdata-storage-backend
+                   ::storage-fdata-s3-bucket
+                   ::storage-fdata-s3-region
+                   ::storage-fdata-s3-prefix
+
                    ::telemetry-enabled
                    ::telemetry-uri
                    ::telemetry-referer
@@ -261,9 +292,17 @@
 
 (defn- read-config
   []
-  (->> (read-env "penpot")
-       (merge defaults)
-       (us/conform ::config)))
+  (try
+    (->> (read-env "penpot")
+         (merge defaults)
+         (us/conform ::config))
+    (catch Throwable e
+      (when (ex/ex-info? e)
+        (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;")
+        (println "Error on validating configuration:")
+        (println (:explain (ex-data e))
+        (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;")))
+      (throw e))))
 
 (def version (v/parse (or (some-> (io/resource "version.txt")
                                   (slurp)

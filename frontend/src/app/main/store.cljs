@@ -23,6 +23,21 @@
 (defonce state  (ptk/store {:resolve ptk/resolve}))
 (defonce stream (ptk/input-stream state))
 
+(defonce last-events
+  (let [buffer (atom #queue [])
+        remove #{:potok.core/undefined
+                 :app.main.data.workspace.notifications/handle-pointer-update}]
+    (->> stream
+         (rx/filter ptk/event?)
+         (rx/map ptk/type)
+         (rx/filter (complement remove))
+         (rx/map str)
+         (rx/dedupe)
+         (rx/buffer 20 1)
+         (rx/subs #(reset! buffer %)))
+
+    buffer))
+
 (when *assert*
   (defonce debug-subscription
     (->> stream
@@ -47,6 +62,9 @@
 (defn ^:export dump-state []
   (logjs "state" @state))
 
+(defn ^:export dump-buffer []
+  (logjs "state" @last-events))
+
 (defn ^:export get-state [str-path]
   (let [path (->> (str/split str-path " ")
                   (map d/read-string))]
@@ -57,12 +75,12 @@
     (logjs "state" (get-in @state [:workspace-data :pages-index page-id :objects]))))
 
 (defn ^:export dump-object [name]
-  (let [page-id (get @state :current-page-id)]
-    (let [objects (get-in @state [:workspace-data :pages-index page-id :objects])
-          target (or (d/seek (fn [[id shape]] (= name (:name shape))) objects)
-                     (get objects (uuid name)))]
-      (->> target
-           (logjs "state")))))
+  (let [page-id (get @state :current-page-id)
+        objects (get-in @state [:workspace-data :pages-index page-id :objects])
+        target  (or (d/seek (fn [[_ shape]] (= name (:name shape))) objects)
+                    (get objects (uuid name)))]
+    (->> target
+         (logjs "state"))))
 
 (defn ^:export dump-tree
   ([] (dump-tree false false))
@@ -71,7 +89,7 @@
    (let [page-id    (get @state :current-page-id)
          objects    (get-in @state [:workspace-data :pages-index page-id :objects])
          components (get-in @state [:workspace-data :components])
-         libraries  (get-in @state [:workspace-libraries])
+         libraries  (get @state :workspace-libraries)
          root (d/seek #(nil? (:parent-id %)) (vals objects))]
 
      (letfn [(show-shape [shape-id level objects]

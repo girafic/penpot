@@ -9,13 +9,11 @@
    [app.common.data :as d]
    [app.common.spec :as us]
    [app.config :as cfg]
-   [app.main.data.comments :as dcm]
    [app.main.data.dashboard :as dd]
    [app.main.data.messages :as dm]
    [app.main.data.modal :as modal]
    [app.main.data.users :as du]
    [app.main.refs :as refs]
-   [app.main.repo :as rp]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.components.forms :as fm]
@@ -24,23 +22,17 @@
    [app.main.ui.dashboard.project-menu :refer [project-menu]]
    [app.main.ui.dashboard.team-form]
    [app.main.ui.icons :as i]
-   [app.util.avatars :as avatars]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
    [app.util.i18n :as i18n :refer [tr]]
-   [app.util.keyboard :as kbd]
    [app.util.object :as obj]
    [app.util.router :as rt]
-   [app.util.time :as dt]
-   [beicon.core :as rx]
    [cljs.spec.alpha :as s]
-   [cuerdas.core :as str]
    [goog.functions :as f]
-   [okulary.core :as l]
    [rumext.alpha :as mf]))
 
 (mf/defc sidebar-project
-  [{:keys [item team-id selected?] :as props}]
+  [{:keys [item selected?] :as props}]
   (let [dstate           (mf/deref refs/dashboard-local)
         selected-files   (:selected-files dstate)
         selected-project (:selected-project dstate)
@@ -56,8 +48,7 @@
         (mf/use-callback
          (mf/deps item)
          (fn []
-           (st/emit! (rt/nav :dashboard-files {:team-id (:team-id item)
-                                               :project-id (:id item)}))))
+           (st/emit! (dd/go-to-files (:id item)))))
 
         on-menu-click
         (mf/use-callback
@@ -103,21 +94,22 @@
             (when-not (dnd/from-child? e)
               (swap! local assoc :dragging? false))))
 
+        on-drop-success
+        (mf/use-callback
+         (mf/deps (:id item))
+         (st/emitf (dm/success (tr "dashboard.success-move-file"))
+                   (dd/go-to-files (:id item))))
+
         on-drop
         (mf/use-callback
-          (mf/deps item selected-files)
-          (fn [e]
-            (swap! local assoc :dragging? false)
-            (when (not= selected-project (:id item))
-              (let [data  {:ids selected-files
-                           :project-id (:id item)}
-
-                    mdata {:on-success
-                           (st/emitf (dm/success (tr "dashboard.success-move-file"))
-                                     (rt/nav :dashboard-files
-                                             {:team-id team-id
-                                              :project-id (:id item)}))}]
-                (st/emit! (dd/move-files (with-meta data mdata)))))))]
+         (mf/deps item selected-files)
+         (fn [_]
+           (swap! local assoc :dragging? false)
+           (when (not= selected-project (:id item))
+             (let [data  {:ids selected-files
+                          :project-id (:id item)}
+                   mdata {:on-success on-drop-success}]
+               (st/emit! (dd/move-files (with-meta data mdata)))))))]
 
     [:*
      [:li {:class (if selected? "current"
@@ -151,34 +143,30 @@
          (mf/deps team-id)
          (fn [event]
            (reset! focused? true)
-           (let [target (dom/get-target event)
-                 value (dom/get-value target)]
-             (dom/select-text! target)
-             (if (empty? value)
-               (emit! (rt/nav :dashboard-search {:team-id team-id} {}))
-               (emit! (rt/nav :dashboard-search {:team-id team-id} {:search-term value}))))))
+           (let [value (dom/get-target-val event)]
+             (dom/select-text! (dom/get-target event))
+             (emit! (dd/go-to-search value)))))
 
         on-search-blur
         (mf/use-callback
-         (fn [event]
+         (fn [_]
            (reset! focused? false)))
 
         on-search-change
         (mf/use-callback
          (mf/deps team-id)
          (fn [event]
-           (let [value (-> (dom/get-target event)
-                           (dom/get-value))]
-             (emit! (rt/nav :dashboard-search {:team-id team-id} {:search-term value})))))
+           (let [value (dom/get-target-val event)]
+             (emit! (dd/go-to-search value)))))
 
         on-clear-click
         (mf/use-callback
          (mf/deps team-id)
-         (fn [event]
+         (fn [_]
            (let [search-input (dom/get-element "search-input")]
              (dom/clean-value! search-input)
              (dom/focus! search-input)
-             (emit! (rt/nav :dashboard-search {:team-id team-id} {})))))]
+             (emit! (dd/go-to-search)))))]
 
     [:form.sidebar-search
      [:input.input-text
@@ -193,7 +181,7 @@
        :on-change on-search-change
        :ref #(when % (set! (.-value %) search-term))}]
 
-     (if (or @focused? (not (empty? search-term)))
+     (if (or @focused? (seq search-term))
        [:div.clear-search
         {:on-click on-clear-click}
         i/close]
@@ -203,9 +191,8 @@
         i/search])]))
 
 (mf/defc teams-selector-dropdown
-  [{:keys [team profile] :as props}]
-  (let [show-dropdown? (mf/use-state false)
-        teams          (mf/deref refs/teams)
+  [{:keys [profile] :as props}]
+  (let [teams (mf/deref refs/teams)
 
         on-create-clicked
         (mf/use-callback
@@ -213,9 +200,8 @@
 
         team-selected
         (mf/use-callback
-          (fn [team-id]
-            (du/set-current-team! team-id)
-            (st/emit! (rt/nav :dashboard-projects {:team-id team-id}))))]
+         (fn [team-id]
+           (st/emit! (dd/go-to-projects team-id))))]
 
     [:ul.dropdown.teams-dropdown
      [:li.title (tr "dashboard.switch-team")]
@@ -243,21 +229,17 @@
   {::mf/register modal/components
    ::mf/register-as ::leave-and-reassign}
   [{:keys [members profile team accept]}]
-  (let [form    (fm/use-form :spec ::leave-modal-form :initial {})
-        not-current-user? (fn [{:keys [id]}] (not= id (:id profile)))
-        members (->> members (filterv not-current-user?))
-        options (into [{:value "" :label (tr "modals.leave-and-reassign.select-memeber-to-promote")}]
-                      (map #(hash-map :label (:name %) :value (str (:id %))) members))
+  (let [form        (fm/use-form :spec ::leave-modal-form :initial {})
+        members     (some->> members (filterv #(not= (:id %) (:id profile))))
+        options     (into [{:value ""
+                            :label (tr "modals.leave-and-reassign.select-memeber-to-promote")}]
+                          (map #(hash-map :label (:name %) :value (str (:id %))) members))
 
-        on-cancel
-        (mf/use-callback (st/emitf (modal/hide)))
-
+        on-cancel   (st/emitf (modal/hide))
         on-accept
-        (mf/use-callback
-         (mf/deps form)
-         (fn [event]
-           (let [member-id (get-in @form [:clean-data :member-id])]
-             (accept member-id))))]
+        (fn [_]
+          (let [member-id (get-in @form [:clean-data :member-id])]
+            (accept member-id)))]
 
     [:div.modal-overlay
      [:div.modal-container.confirm-dialog
@@ -292,92 +274,57 @@
           :value (tr "modals.leave-and-reassign.promote-and-leave")
           :on-click on-accept}]]]]]))
 
-
 (mf/defc team-options-dropdown
   [{:keys [team profile] :as props}]
-  (let [members (mf/use-state [])
+  (let [go-members  (st/emitf (dd/go-to-team-members))
+        go-settings (st/emitf (dd/go-to-team-settings))
 
-        go-members
-        (mf/use-callback
-         (mf/deps team)
-         (st/emitf (rt/nav :dashboard-team-members {:team-id (:id team)})))
-
-        go-settings
-        (mf/use-callback
-         (mf/deps team)
-         (st/emitf (rt/nav :dashboard-team-settings {:team-id (:id team)})))
-
-        on-create-clicked
-        (mf/use-callback
-         (st/emitf (modal/show :team-form {})))
+        members-map (mf/deref refs/dashboard-team-members)
+        members     (vals members-map)
 
         on-rename-clicked
-        (mf/use-callback
-         (mf/deps team)
-         (st/emitf (modal/show :team-form {:team team})))
+        (st/emitf (modal/show :team-form {:team team}))
 
         on-leaved-success
-        (mf/use-callback
-         (mf/deps team profile)
-         (fn []
-           (let [team-id (:default-team-id profile)]
-             (du/set-current-team! team-id)
-             (st/emit! (modal/hide)
-                       (du/fetch-teams)
-                       (rt/nav :dashboard-projects {:team-id team-id})))))
+        (fn []
+          (st/emit! (modal/hide)
+                    (dd/go-to-projects (:default-team-id profile))))
 
         leave-fn
-        (mf/use-callback
-         (mf/deps team)
-         (st/emitf (dd/leave-team (with-meta team {:on-success on-leaved-success}))))
+        (st/emitf (dd/leave-team (with-meta {} {:on-success on-leaved-success})))
 
         leave-and-reassign-fn
-        (mf/use-callback
-         (mf/deps team)
-         (fn [member-id]
-           (let [team (assoc team :reassign-to member-id)]
-             (st/emit! (dd/leave-team (with-meta team {:on-success on-leaved-success}))))))
+        (fn [member-id]
+          (let [params {:reassign-to member-id}]
+            (st/emit! (dd/leave-team (with-meta params {:on-success on-leaved-success})))))
 
         on-leave-clicked
-        (mf/use-callback
-         (mf/deps team)
-         (st/emitf (modal/show
-                    {:type :confirm
-                     :title (tr "modals.leave-confirm.title")
-                     :message (tr "modals.leave-confirm.message")
-                     :accept-label (tr "modals.leave-confirm.accept")
-                     :on-accept leave-fn})))
+        (st/emitf (modal/show
+                   {:type :confirm
+                    :title (tr "modals.leave-confirm.title")
+                    :message (tr "modals.leave-confirm.message")
+                    :accept-label (tr "modals.leave-confirm.accept")
+                    :on-accept leave-fn}))
 
         on-leave-as-owner-clicked
-        (mf/use-callback
-         (mf/deps team @members)
-         (st/emitf (modal/show
-                    {:type ::leave-and-reassign
-                     :profile profile
-                     :team team
-                     :accept leave-and-reassign-fn
-                     :members @members})))
+        (st/emitf (modal/show
+                   {:type ::leave-and-reassign
+                    :profile profile
+                    :team team
+                    :members members
+                    :accept leave-and-reassign-fn}))
 
         delete-fn
-        (mf/use-callback
-         (mf/deps team)
-         (st/emitf (dd/delete-team (with-meta team {:on-success on-leaved-success}))))
+        (st/emitf (dd/delete-team (with-meta team {:on-success on-leaved-success})))
 
         on-delete-clicked
-        (mf/use-callback
-         (mf/deps team)
-         (st/emitf (modal/show
-                    {:type :confirm
-                     :title (tr "modals.delete-team-confirm.title")
-                     :message (tr "modals.delete-team-confirm.message")
-                     :accept-label (tr "modals.delete-team-confirm.accept")
-                     :on-accept delete-fn})))]
-
-    (mf/use-layout-effect
-     (mf/deps (:id team))
-     (fn []
-       (->> (rp/query! :team-members {:team-id (:id team)})
-            (rx/subs #(reset! members %)))))
+        (st/emitf
+         (modal/show
+          {:type :confirm
+           :title (tr "modals.delete-team-confirm.title")
+           :message (tr "modals.delete-team-confirm.message")
+           :accept-label (tr "modals.delete-team-confirm.accept")
+           :on-accept delete-fn}))]
 
     [:ul.dropdown.options-dropdown
      [:li {:on-click go-members} (tr "labels.members")]
@@ -389,7 +336,7 @@
        (:is-owner team)
        [:li {:on-click on-leave-as-owner-clicked} (tr "dashboard.leave-team")]
 
-       (> (count @members) 1)
+       (> (count members) 1)
        [:li {:on-click on-leave-clicked}  (tr "dashboard.leave-team")])
 
 
@@ -399,9 +346,7 @@
 
 (mf/defc sidebar-team-switch
   [{:keys [team profile] :as props}]
-  (let [show-dropdown? (mf/use-state false)
-
-        show-team-opts-ddwn? (mf/use-state false)
+  (let [show-team-opts-ddwn? (mf/use-state false)
         show-teams-ddwn?     (mf/use-state false)]
 
     [:div.sidebar-team-switch

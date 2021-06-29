@@ -3,14 +3,154 @@
 ## :rocket: Next
 
 ### :sparkles: New features
+
+- Allow nested asset groups [Taiga #1716](https://tree.taiga.io/project/penpot/us/1716).
+- Allow to ungroup assets [Taiga #1719](https://tree.taiga.io/project/penpot/us/1719).
+- Allow to rename assets groups [Taiga #1721](https://tree.taiga.io/project/penpot/us/1721).
+- Memorize collapse state of assets in panel [Taiga #1718](https://tree.taiga.io/project/penpot/us/1718).
+- Headers button sets and menus review [Taiga #1663](https://tree.taiga.io/project/penpot/us/1663).
+- Preserve components if possible, when pasted into a different file [Taiga #1063](https://tree.taiga.io/project/penpot/issue/1063).
+- Add the ability to offload file data to a cheaper storage when file becomes inactive.
+
 ### :bug: Bugs fixed
 
-- Remove interactions when the destination artboard is deleted [Taiga #1656](https://tree.taiga.io/project/penpot/issue/1656)
-- Fix snap index problem [Taiga #1661](https://tree.taiga.io/project/penpot/issue/1661)
+- Process numeric input changes only if the value actually changed.
+- Remove unnecesary redirect from history when user goes to workspace from dashboard [Taiga #1820](https://tree.taiga.io/project/penpot/issue/1820).
+- Fix tooltip position on view application [Taiga #1819](https://tree.taiga.io/project/penpot/issue/1819).
+- Fix dashboard navigation on moving file to other team [Taiga #1817](https://tree.taiga.io/project/penpot/issue/1817).
+- Fix workspace header presence styles and invalid link [Taiga #1813](https://tree.taiga.io/project/penpot/issue/1813).
+- Fix color-input wrong behavior (on workspace page color) [Taiga #1795](https://tree.taiga.io/project/penpot/issue/1795).
+- Fix file contextual menu in shared libraries at dashboard [Taiga #1865](https://tree.taiga.io/project/penpot/issue/1865).
 
 ### :arrow_up: Deps updates
 ### :boom: Breaking changes
 ### :heart: Community contributions by (Thank you!)
+
+## 1.6.5-alpha
+
+### :bug: Bugs fixed
+
+- Fix problem with paths editing after flip [#1040](https://github.com/penpot/penpot/issues/1040)
+
+## 1.6.4-alpha
+
+### :sparkles: Minor improvements
+
+-  Decrease default bulk buffers on storage tasks.
+-  Reduce file_change preserve interval to 24h.
+
+### :bug: Bugs fixed
+
+- Don't allow rename drafts project.
+- Fix custom font deletion task.
+- Fix custom font rendering on exporting shapes.
+- Fix font loading on viewer app.
+- Fix problem when moving files with drag & drop.
+- Fix unexpected exception on searching without term.
+- Properly handle nil values on `update-shapes` function.
+- Replace frame term usage by artboard on viewer app.
+
+
+## 1.6.3-alpha
+
+### :bug: Bugs fixed
+
+- Fix problem with merge and join nodes [#990](https://github.com/penpot/penpot/issues/990)
+- Fix problem with empty path editing.
+- Fix problem with create component.
+- Fix problem with move-objects.
+- Fix problem with merge and join nodes.
+
+## 1.6.2-alpha
+
+### :bug: Bugs fixed
+
+- Add better auth module logging.
+- Add missing `email` scope to OIDC backend.
+- Add missing cause prop on error loging.
+- Fix empty font-family handling on custom fonts page.
+- Fix incorrect unicode code points handling on draft-to-penpot conversion.
+- Fix some problems with paths.
+- Fix unexpected exception on duplicate project.
+- Fix unexpected exception when user leaves typography name empty.
+- Improve error report on uploading invalid image to library.
+- Minor fix on previous commit.
+- Minor improvements on svg uploading on libraries.
+
+
+## 1.6.1-alpha
+
+### :bug: Bugs fixed
+
+- Add safety check on reg-objects change impl.
+- Fix custom fonts embbedding issue.
+- Fix dashboard ordering issue.
+- Fix problem when creating a component with empty data.
+- Fix problem with moving shapes into frames.
+- Fix problems with mov-objects.
+- Fix unexpected excetion related to rounding integers.
+- Fix wrong type usage on libraries changes.
+- Improve editor lifecycle management.
+- Make the navigation async by default.
+
+
+## 1.6.0-alpha
+
+### :sparkles: New features
+
+- Add improved workspace font selector [Taiga US #292](https://tree.taiga.io/project/penpot/us/292).
+- Add option to interactively scale text [Taiga #1527](https://tree.taiga.io/project/penpot/us/1527)
+- Add performance improvements on dashboard data loading.
+- Add performance improvements to indexes handling on workspace.
+- Add the ability to upload/use custom fonts (and automatically generate all needed webfonts) [Taiga US #292](https://tree.taiga.io/project/penpot/us/292).
+- Transform shapes to path on double click
+- Translate automatic names of new files and projects.
+- Use shift instead of ctrl/cmd to keep aspect ratio [Taiga 1697](https://tree.taiga.io/project/penpot/issue/1697).
+- New translations: Portuguese (Brazil) and Romanias. 
+
+
+### :bug: Bugs fixed
+
+- Remove interactions when the destination artboard is deleted [Taiga #1656](https://tree.taiga.io/project/penpot/issue/1656).
+- Fix problem with fonts that ends with numbers [#940](https://github.com/penpot/penpot/issues/940).
+- Fix problem with imported SVG on editing paths [#971](https://github.com/penpot/penpot/issues/971)
+- Fix problem with color picker positioning
+- Fix order on color palette [#961](https://github.com/penpot/penpot/issues/961)
+- Fix issue when group creation leaves an empty group [#1724](https://tree.taiga.io/project/penpot/issue/1724)
+- Fix problem with :multiple for colors and typographies [#1668](https://tree.taiga.io/project/penpot/issue/1668)
+- Fix problem with locked shapes when change parents [#974](https://github.com/penpot/penpot/issues/974)
+- Fix problem with new nodes in paths [#978](https://github.com/penpot/penpot/issues/978)
+
+### :arrow_up: Deps updates
+
+- Update exporter dependencies (puppeteer), that fixes some unexpected exceptions.
+- Update string manipulation library.
+
+
+### :boom: Breaking changes
+
+- The OIDC setting `PENPOT_OIDC_SCOPES` has changed the default semantics. Before this
+  configuration added scopes to the default set. Now it replaces it, so use with care, because
+  penpot requires at least `name` and `email` props found on the user info object.
+
+### :heart: Community contributions by (Thank you!)
+
+- Translations: Portuguese (Brazil) and Romanias.
+
+
+## 1.5.4-alpha
+
+### :bug: Bugs fixed
+
+- Fix issues on group rendering.
+- Fix problem with text editing auto-height [Taiga #1683](https://tree.taiga.io/project/penpot/issue/1683)
+
+
+## 1.5.3-alpha
+
+### :bug: Bugs fixed
+
+- Fix problem undo/redo.
 
 ## 1.5.2-alpha
 

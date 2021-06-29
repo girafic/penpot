@@ -51,7 +51,8 @@
   "Draws the root shape of the viewport and recursively all the shapes"
   {::mf/wrap-props false}
   [props]
-  (let [objects     (obj/get props "objects")
+  (let [objects       (obj/get props "objects")
+        active-frames (obj/get props "active-frames")
         root-shapes (get-in objects [uuid/zero :shapes])
         shapes      (->> root-shapes (mapv #(get objects %)))]
 
@@ -59,7 +60,8 @@
       (if (= (:type item) :frame)
         [:& frame-wrapper {:shape item
                            :key (:id item)
-                           :objects objects}]
+                           :objects objects
+                           :thumbnail? (not (get active-frames (:id item) false))}]
 
         [:& shape-wrapper {:shape item
                            :key (:id item)}]))))
@@ -70,7 +72,7 @@
   [props]
   (let [shape  (obj/get props "shape")
         frame  (obj/get props "frame")
-        shape  (-> (geom/transform-shape shape)
+        shape  (-> (geom/transform-shape shape {:round-coords? false})
                    (geom/translate-to-frame frame))
         opts  #js {:shape shape
                    :frame frame}
@@ -81,20 +83,19 @@
     (when (and shape (not (:hidden shape)))
       [:*
        (if-not svg-element?
-         [:g.shape-wrapper
-          (case (:type shape)
-            :path [:> path/path-wrapper opts]
-            :text [:> text/text-wrapper opts]
-            :group [:> group-wrapper opts]
-            :rect [:> rect-wrapper opts]
-            :image [:> image-wrapper opts]
-            :circle [:> circle-wrapper opts]
-            :svg-raw [:> svg-raw-wrapper opts]
+         (case (:type shape)
+           :path [:> path/path-wrapper opts]
+           :text [:> text/text-wrapper opts]
+           :group [:> group-wrapper opts]
+           :rect [:> rect-wrapper opts]
+           :image [:> image-wrapper opts]
+           :circle [:> circle-wrapper opts]
+           :svg-raw [:> svg-raw-wrapper opts]
 
-            ;; Only used when drawing a new frame.
-            :frame [:> frame-wrapper {:shape shape}]
+           ;; Only used when drawing a new frame.
+           :frame [:> frame-wrapper {:shape shape}]
 
-            nil)]
+           nil)
 
          ;; Don't wrap svg elements inside a <g> otherwise some can break
          [:> svg-raw-wrapper opts])

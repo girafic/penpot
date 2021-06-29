@@ -11,7 +11,6 @@
    [app.main.data.modal :as modal]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.shortcuts :as sc]
-   [app.main.data.workspace.shortcuts :as sc]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
@@ -89,8 +88,6 @@
   (let [show-menu? (mf/use-state false)
         editing? (mf/use-state false)
 
-        locale     (mf/deref i18n/locale)
-
         edit-input-ref (mf/use-ref nil)
 
         add-shared-fn
@@ -125,7 +122,7 @@
                      :on-accept del-shared-fn})))
 
 
-        handle-blur (fn [event]
+        handle-blur (fn [_]
                       (let [value (-> edit-input-ref mf/ref-val dom/get-value)]
                         (st/emit! (dw/rename-file (:id file) value)))
                       (reset! editing? false))
@@ -218,6 +215,13 @@
            (tr "workspace.header.menu.enable-dynamic-alignment"))]
         [:span.shortcut (sc/get-tooltip :toggle-alignment)]]
 
+       [:li {:on-click #(st/emit! (dw/toggle-layout-flags :scale-text))}
+        [:span
+         (if (contains? layout :scale-text)
+           (tr "workspace.header.menu.disable-scale-text")
+           (tr "workspace.header.menu.enable-scale-text"))]
+        [:span.shortcut (sc/get-tooltip :toggle-scale-text)]]
+
        (if (:is-shared file)
          [:li {:on-click on-remove-shared}
           [:span (tr "dashboard.remove-shared")]]
@@ -236,9 +240,7 @@
   [{:keys [file layout project page-id] :as props}]
   (let [team-id  (:team-id project)
         zoom     (mf/deref refs/selected-zoom)
-        router   (mf/deref refs/router)
         params   {:page-id page-id :file-id (:id file)}
-        view-url (rt/resolve router :viewer params {:index 0})
 
         go-back
         (mf/use-callback
@@ -275,7 +277,6 @@
 
       [:a.btn-icon-dark.btn-small.tooltip.tooltip-bottom-left
        {:alt (tr "workspace.header.viewer" (sc/get-tooltip :open-viewer))
-        :href (str "#" view-url)
         :on-click go-viewer}
        i/play]]]))
 

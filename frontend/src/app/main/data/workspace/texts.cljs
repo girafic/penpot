@@ -16,16 +16,11 @@
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.state-helpers :as wsh]
-   [app.main.data.workspace.transforms :as dwt]
    [app.main.data.workspace.undo :as dwu]
-   [app.main.fonts :as fonts]
-   [app.util.object :as obj]
+   [app.util.router :as rt]
    [app.util.text-editor :as ted]
    [app.util.timers :as ts]
    [beicon.core :as rx]
-   [cljs.spec.alpha :as s]
-   [cuerdas.core :as str]
-   [goog.object :as gobj]
    [potok.core :as ptk]))
 
 (defn update-editor
@@ -41,7 +36,7 @@
   []
   (ptk/reify ::focus-editor
     ptk/EffectEvent
-    (effect [_ state stream]
+    (effect [_ state _]
       (when-let [editor (:workspace-editor state)]
         (ts/schedule #(.focus ^js editor))))))
 
@@ -54,24 +49,14 @@
         (update state :workspace-editor-state assoc id editor-state)
         (update state :workspace-editor-state dissoc id)))))
 
-(defn initialize-editor-state
-  [{:keys [id content] :as shape} decorator]
-  (ptk/reify ::initialize-editor-state
-    ptk/UpdateEvent
-    (update [_ state]
-      (update-in state [:workspace-editor-state id]
-                 (fn [_]
-                   (ted/create-editor-state
-                    (some->> content ted/import-content)
-                    decorator))))))
-
 (defn finalize-editor-state
   [{:keys [id] :as shape}]
   (ptk/reify ::finalize-editor-state
     ptk/WatchEvent
-    (watch [_ state stream]
+    (watch [_ state _]
       (let [content (-> (get-in state [:workspace-editor-state id])
                         (ted/get-editor-current-content))]
+
         (if (ted/content-has-text? content)
           (let [content (d/merge (ted/export-content content)
                                  (dissoc (:content shape) :children))]
@@ -84,6 +69,28 @@
                 (dwu/commit-undo-transaction)))))
           (rx/of (dws/deselect-shape id)
                  (dwc/delete-shapes [id])))))))
+
+(defn initialize-editor-state
+  [{:keys [id content] :as shape} decorator]
+  (ptk/reify ::initialize-editor-state
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:workspace-editor-state id]
+                 (fn [_]
+                   (ted/create-editor-state
+                    (some->> content ted/import-content)
+                    decorator))))
+
+    ptk/WatchEvent
+    (watch [_ _ stream]
+      ;; We need to finalize editor on two main events: (1) when user
+      ;; explicitly navigates to other section or page; (2) when user
+      ;; leaves the editor.
+      (->> (rx/merge
+            (rx/filter (ptk/type? ::rt/navigate) stream)
+            (rx/filter #(= ::finalize-editor-state %) stream))
+           (rx/take 1)
+           (rx/map #(finalize-editor-state shape))))))
 
 (defn select-all
   "Select all content of the current editor. When not editor found this
@@ -136,7 +143,7 @@
   [{:keys [id attrs]}]
   (ptk/reify ::update-root-attrs
     ptk/WatchEvent
-    (watch [_ state stream]
+    (watch [_ state _]
       (let [objects   (wsh/lookup-page-objects state)
             shape     (get objects id)
 
@@ -155,7 +162,7 @@
         (d/update-in-when state [:workspace-editor-state id] ted/update-editor-current-block-data attrs))
 
       ptk/WatchEvent
-      (watch [_ state stream]
+      (watch [_ state _]
         (when-not (some? (get-in state [:workspace-editor-state id]))
           (let [objects   (wsh/lookup-page-objects state)
                 shape     (get objects id)
@@ -182,7 +189,7 @@
       (d/update-in-when state [:workspace-editor-state id] ted/update-editor-current-inline-styles attrs))
 
     ptk/WatchEvent
-    (watch [_ state stream]
+    (watch [_ state _]
       (when-not (some? (get-in state [:workspace-editor-state id]))
         (let [objects   (wsh/lookup-page-objects state)
               shape     (get objects id)
@@ -219,7 +226,7 @@
 (defn resize-text-batch [changes]
   (ptk/reify ::resize-text-batch
     ptk/WatchEvent
-    (watch [_ state stream]
+    (watch [_ state _]
       (let [page-id  (:current-page-id state)
             objects (get-in state [:workspace-data :pages-index page-id :objects])]
         (if-not (every? #(contains? objects(first %)) changes)

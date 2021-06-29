@@ -6,9 +6,8 @@
 
 (ns app.config
   (:require
-   [app.common.data :as d]
-   [app.common.uri :as u]
    [app.common.spec :as us]
+   [app.common.uri :as u]
    [app.common.version :as v]
    [app.util.avatars :as avatars]
    [app.util.dom :as dom]
@@ -54,6 +53,11 @@
     :browser
     :webworker))
 
+(defn- parse-flags
+  [global]
+  (let [flags (obj/get global "penpotFlags" "")]
+    (into #{} (map keyword) (str/words flags))))
+
 (defn- parse-version
   [global]
   (-> (obj/get global "penpotVersion")
@@ -77,6 +81,8 @@
 (def translations         (obj/get global "penpotTranslations"))
 (def themes               (obj/get global "penpotThemes"))
 (def analytics            (obj/get global "penpotAnalyticsEnabled" false))
+
+(def flags                (delay (parse-flags global)))
 
 (def version              (delay (parse-version global)))
 (def target               (delay (parse-target global)))
@@ -121,9 +127,10 @@
 (defn resolve-file-media
   ([media]
    (resolve-file-media media false))
-  ([{:keys [id] :as media} thumnail?]
+
+  ([{:keys [id]} thumbnail?]
    (str (cond-> (u/join public-uri "assets/by-file-media-id/")
-          (true? thumnail?) (u/join (str id "/thumbnail"))
-          (false? thumnail?) (u/join (str id))))))
+          (true? thumbnail?) (u/join (str id "/thumbnail"))
+          (false? thumbnail?) (u/join (str id))))))
 
 

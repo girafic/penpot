@@ -4,6 +4,9 @@
 ;;
 ;; Copyright (c) UXBOX Labs SL
 
+;; TODO: DEPRECATED
+;; Should be removed in the 1.8.x
+
 (ns app.tasks.delete-object
   "Generic task for permanent deletion of objects."
   (:require
@@ -18,7 +21,7 @@
 (declare handle-deletion)
 
 (defmethod ig/pre-init-spec ::handler [_]
-  (s/keys :req-un [::db/pool]))
+  (s/keys :req-un [::db/pool ::sto/storage]))
 
 (defmethod ig/init-key ::handler
   [_ {:keys [pool] :as cfg}]

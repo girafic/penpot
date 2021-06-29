@@ -6,21 +6,18 @@
 
 (ns app.main.ui.workspace.sidebar.options.menus.exports
   (:require
-   [cuerdas.core :as str]
-   [beicon.core :as rx]
-   [rumext.alpha :as mf]
    [app.common.data :as d]
-   [app.main.repo :as rp]
-   [app.main.ui.icons :as i]
    [app.main.data.messages :as dm]
    [app.main.data.workspace :as udw]
+   [app.main.repo :as rp]
    [app.main.store :as st]
-   [app.util.object :as obj]
+   [app.main.ui.icons :as i]
    [app.util.dom :as dom]
-   [app.util.http :as http]
-   [app.util.i18n :as i18n :refer  [tr t]]))
+   [app.util.i18n :as i18n :refer  [tr]]
+   [beicon.core :as rx]
+   [rumext.alpha :as mf]))
 
-(defn- request-export
+(defn request-export
   [shape exports]
   (rp/query! :export
              {:page-id (:page-id shape)
@@ -29,25 +26,9 @@
               :name (:name shape)
               :exports exports}))
 
-(defn- trigger-download
-  [filename blob]
-  (let [link (dom/create-element "a")
-        uri  (dom/create-uri blob)
-        extension (dom/mtype->extension (.-type ^js blob))
-        filename (if extension
-                   (str filename "." extension)
-                   filename)]
-    (obj/set! link "href" uri)
-    (obj/set! link "download" filename)
-    (obj/set! (.-style ^js link) "display" "none")
-    (.appendChild (.-body ^js js/document) link)
-    (.click link)
-    (.remove link)))
-
 (mf/defc exports-menu
   [{:keys [shape page-id file-id] :as props}]
-  (let [locale   (mf/deref i18n/locale)
-        exports  (:exports shape [])
+  (let [exports  (:exports shape [])
         loading? (mf/use-state false)
 
         filename (cond-> (:name shape)
@@ -64,8 +45,8 @@
            (->> (request-export (assoc shape :page-id page-id :file-id file-id) exports)
                 (rx/subs
                  (fn [body]
-                   (trigger-download filename body))
-                 (fn [error]
+                   (dom/trigger-download filename body))
+                 (fn [_error]
                    (swap! loading? not)
                    (st/emit! (dm/error (tr "errors.unexpected-error"))))
                  (fn []
@@ -123,7 +104,7 @@
 
     [:div.element-set.exports-options
      [:div.element-set-title
-      [:span (t locale "workspace.options.export")]
+      [:span (tr "workspace.options.export")]
       [:div.add-page {:on-click add-export} i/close]]
      (when (seq exports)
        [:div.element-set-content
@@ -156,6 +137,6 @@
                   :btn-disabled @loading?)
           :disabled @loading?}
          (if @loading?
-           (t locale "workspace.options.exporting-object")
-           (t locale "workspace.options.export-object"))]])]))
+           (tr "workspace.options.exporting-object")
+           (tr "workspace.options.export-object"))]])]))
 

@@ -10,17 +10,14 @@
    [app.common.uri :as u]
    [app.config :as cfg]
    [app.util.http :as http]
-   [app.util.time :as dt]
-   [app.util.transit :as t]
-   [beicon.core :as rx]
-   [cuerdas.core :as str]))
+   [beicon.core :as rx]))
 
 (defn handle-response
   [{:keys [status body] :as response}]
   (cond
     (= 204 status)
     ;; We need to send "something" so the streams listening downstream can act
-    (rx/of :empty)
+    (rx/of nil)
 
     (= 502 status)
     (rx/throw {:type :bad-gateway})
@@ -87,7 +84,7 @@
   ([id params] (mutation id params)))
 
 (defmethod mutation :login-with-oauth
-  [id {:keys [provider] :as params}]
+  [_ {:keys [provider] :as params}]
   (let [uri    (u/join base-uri "api/auth/oauth/" (d/name provider))
         params (dissoc params :provider)]
     (->> (http/send! {:method :post :uri uri :query params})
@@ -95,7 +92,7 @@
          (rx/mapcat handle-response))))
 
 (defmethod mutation :send-feedback
-  [id params]
+  [_ params]
   (->> (http/send! {:method :post
                     :uri (u/join base-uri "api/feedback")
                     :body (http/transit-data params)})
@@ -103,19 +100,11 @@
        (rx/mapcat handle-response)))
 
 (defmethod query :export
-  [id params]
+  [_ params]
   (->> (http/send! {:method :post
                     :uri (u/join base-uri "export")
                     :body (http/transit-data params)
                     :response-type :blob})
-       (rx/mapcat handle-response)))
-
-(defmethod query :parsed-svg
-  [id params]
-  (->> (http/send! {:method :post
-                    :uri (u/join base-uri "api/rpc/query/" (name id))
-                    :body (http/transit-data params)})
-       (rx/map http/conditional-decode-transit)
        (rx/mapcat handle-response)))
 
 (derive :upload-file-media-object ::multipart-upload)

@@ -6,11 +6,9 @@
 
 (ns app.main.data.workspace.path.tools
   (:require
-   [app.common.geom.point :as gpt]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.path.changes :as changes]
-   [app.main.data.workspace.path.common :as common]
    [app.main.data.workspace.path.state :as st]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.util.path.subpaths :as ups]
@@ -25,7 +23,7 @@
   ([points tool-fn]
    (ptk/reify ::process-path-tool
      ptk/WatchEvent
-     (watch [_ state stream]
+     (watch [it state _]
        (let [objects (wsh/lookup-page-objects state)
              id (st/get-path-id state)
              page-id (:current-page-id state)
@@ -33,11 +31,13 @@
 
              selected-points (get-in state [:workspace-local :edit-path id :selected-points] #{})
              points (or points selected-points)]
-         (when-not (empty? points)
+         (when (and (seq points) (some? shape))
            (let [new-content (-> (tool-fn (:content shape) points)
                                  (ups/close-subpaths))
                  [rch uch] (changes/generate-path-changes objects page-id shape (:content shape) new-content)]
-             (rx/of (dch/commit-changes rch uch {:commit-local? true})
+             (rx/of (dch/commit-changes {:redo-changes rch
+                                         :undo-changes uch
+                                         :origin it})
                     (when (empty? new-content)
                       dwc/clear-edition-mode)))))))))
 
