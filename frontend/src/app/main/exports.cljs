@@ -25,6 +25,7 @@
    [app.main.ui.shapes.shape :refer [shape-container]]
    [app.main.ui.shapes.svg-raw :as svg-raw]
    [app.main.ui.shapes.text :as text]
+   [app.main.ui.shapes.text.fontfaces :as ff]
    [app.util.object :as obj]
    [app.util.timers :as ts]
    [cuerdas.core :as str]
@@ -43,7 +44,8 @@
 
 (defn- calculate-dimensions
   [{:keys [objects] :as data} vport]
-  (let [shapes (cp/select-toplevel-shapes objects {:include-frames? true})
+  (let [shapes (cp/select-toplevel-shapes objects {:include-frames? true
+                                                   :include-frame-children? false})
         to-finite (fn [val fallback] (if (not (mth/finite? val)) fallback val))
         rect (cond->> (gsh/selection-rect shapes)
                (some? vport)
@@ -86,9 +88,9 @@
     (mf/fnc svg-raw-wrapper
       [{:keys [shape frame] :as props}]
       (let [childs (mapv #(get objects %) (:shapes shape))]
-        (if (and (contains? shape :svg-attrs)
-                 (map? (:content shape))
-                 (not= :svg (get-in shape [:content :tag])))
+        (if (and (map? (:content shape))
+                 (or (= :svg (get-in shape [:content :tag]))
+                     (contains? shape :svg-attrs)))
           [:> shape-container {:shape shape}
            [:& svg-raw-shape {:frame frame
                               :shape shape
@@ -130,11 +132,18 @@
 
 (mf/defc page-svg
   {::mf/wrap [mf/memo]}
-  [{:keys [data width height thumbnails? embed?] :as props}]
+  [{:keys [data width height thumbnails? embed? include-metadata?] :as props
+    :or {embed? false include-metadata? false}}]
   (let [objects (:objects data)
         root    (get objects uuid/zero)
-        shapes  (->> (:shapes root)
-                     (map #(get objects %)))
+        shapes
+        (->> (:shapes root)
+             (map #(get objects %)))
+
+        root-children
+        (->> shapes
+             (filter #(not= :frame (:type %)))
+             (mapcat #(cp/get-object-with-children (:id %) objects)))
 
         vport   (when (and (some? width) (some? height))
                   {:width width :height height})
@@ -151,35 +160,36 @@
          (mf/deps objects)
          #(shape-wrapper-factory objects))]
     [:& (mf/provider embed/context) {:value embed?}
-     [:svg {:view-box vbox
-            :version "1.1"
-            :xmlnsXlink "http://www.w3.org/1999/xlink"
-            :xmlns "http://www.w3.org/2000/svg"
-            :xmlns:penpot "https://penpot.app/xmlns"
-            :style {:width "100%"
-                    :height "100%"
-                    :background background-color}}
+     [:& (mf/provider use/include-metadata-ctx) {:value include-metadata?}
+      [:svg {:view-box vbox
+             :version "1.1"
+             :xmlns "http://www.w3.org/2000/svg"
+             :xmlnsXlink "http://www.w3.org/1999/xlink"
+             :xmlns:penpot (when include-metadata? "https://penpot.app/xmlns")
+             :style {:width "100%"
+                     :height "100%"
+                     :background background-color}}
 
-      [:& use/export-page {:options (:options data)}]
-
-      (for [item shapes]
-        (let [frame? (= (:type item) :frame)]
-          (cond
-            (and frame? thumbnails? (some? (:thumbnail item)))
-            [:image {:xlinkHref (:thumbnail item)
-                     :x (:x item)
-                     :y (:y item)
-                     :width (:width item)
-                     :height (:height item)
-                     ;; DEBUG
-                     ;; :style {:filter "sepia(1)"}
-                     }]
-            frame?
-            [:& frame-wrapper {:shape item
-                               :key (:id item)}]
-            :else
-            [:& shape-wrapper {:shape item
-                               :key (:id item)}])))]]))
+        [:& use/export-page {:options (:options data)}]
+        [:& ff/fontfaces-style {:shapes root-children}]
+        (for [item shapes]
+          (let [frame? (= (:type item) :frame)]
+            (cond
+              (and frame? thumbnails? (some? (:thumbnail item)))
+              [:image {:xlinkHref (:thumbnail item)
+                       :x (:x item)
+                       :y (:y item)
+                       :width (:width item)
+                       :height (:height item)
+                       ;; DEBUG
+                       ;; :style {:filter "sepia(1)"}
+                       }]
+              frame?
+              [:& frame-wrapper {:shape item
+                                 :key (:id item)}]
+              :else
+              [:& shape-wrapper {:shape item
+                                 :key (:id item)}])))]]]))
 
 (mf/defc frame-svg
   {::mf/wrap [mf/memo]}
@@ -189,6 +199,8 @@
                      (gmt/translate-matrix))
 
         frame-id (:id frame)
+
+        include-metadata? (mf/use-ctx use/include-metadata-ctx)
 
         modifier-ids (concat [frame-id] (cp/get-children frame-id objects))
         update-fn #(assoc-in %1 [%2 :modifiers :displacement] modifier)
@@ -207,9 +219,9 @@
            :width width
            :height height
            :version "1.1"
-           :xmlnsXlink "http://www.w3.org/1999/xlink"
            :xmlns "http://www.w3.org/2000/svg"
-           :xmlns:penpot "https://penpot.app/xmlns"}
+           :xmlnsXlink "http://www.w3.org/1999/xlink"
+           :xmlns:penpot (when include-metadata? "https://penpot.app/xmlns")}
      [:& wrapper {:shape frame :view-box vbox}]]))
 
 (mf/defc component-svg
@@ -221,6 +233,8 @@
                      (gmt/translate-matrix))
 
         group-id (:id group)
+
+        include-metadata? (mf/use-ctx use/include-metadata-ctx)
 
         modifier-ids (concat [group-id] (cp/get-children group-id objects))
         update-fn #(assoc-in %1 [%2 :modifiers :displacement] modifier)
@@ -239,15 +253,16 @@
            :width width
            :height height
            :version "1.1"
-           :xmlnsXlink "http://www.w3.org/1999/xlink"
            :xmlns "http://www.w3.org/2000/svg"
-           :xmlns:penpot "https://penpot.app/xmlns"}
-     [:& wrapper {:shape group :view-box vbox}]]))
+           :xmlnsXlink "http://www.w3.org/1999/xlink"
+           :xmlns:penpot (when include-metadata? "https://penpot.app/xmlns")}
+     [:> shape-container {:shape group}
+      [:& wrapper {:shape group :view-box vbox}]]]))
 
 (mf/defc component-symbol
   [{:keys [id data] :as props}]
 
-  (let [{:keys [name objects]} data
+  (let [{:keys [name path objects]} data
         root (get objects id)
 
         {:keys [width height]} (:selrect root)
@@ -267,8 +282,9 @@
          (mf/deps objects)
          #(group-wrapper-factory objects))]
 
-    [:symbol {:id (str id)
-              :viewBox vbox}
+    [:> "symbol" #js {:id (str id)
+                      :viewBox vbox
+                      "penpot:path" path}
      [:title name]
      [:> shape-container {:shape root}
       [:& group-wrapper {:shape root :view-box vbox}]]]))
@@ -279,20 +295,21 @@
 
   (let [data (obj/get props "data")
         children (obj/get props "children")
-        embed? (obj/get props "embed?")]
+        embed? (obj/get props "embed?")
+        include-metadata? (obj/get props "include-metadata?")]
     [:& (mf/provider embed/context) {:value embed?}
-     [:svg {:version "1.1"
-            :xmlns "http://www.w3.org/2000/svg"
-            :xmlnsXlink "http://www.w3.org/1999/xlink"
-            :xmlns:penpot "https://penpot.app/xmlns"
-            :style {:width "100vw"
-                    :height "100vh"
-                    :display (when-not (some? children) "none")}}
+     [:& (mf/provider use/include-metadata-ctx) {:value include-metadata?}
+      [:svg {:version "1.1"
+             :xmlns "http://www.w3.org/2000/svg"
+             :xmlnsXlink "http://www.w3.org/1999/xlink"
+             :xmlns:penpot (when include-metadata? "https://penpot.app/xmlns")
+             :style {:width "100vw"
+                     :height "100vh"
+                     :display (when-not (some? children) "none")}}
+       [:defs
+        (for [[component-id component-data] (:components data)]
+          [:& component-symbol {:id component-id
+                                :key (str component-id)
+                                :data component-data}])]
 
-      [:defs
-       (for [[component-id component-data] (:components data)]
-         [:& component-symbol {:id component-id
-                               :key (str component-id)
-                               :data component-data}])]
-
-      children]]))
+       children]]]))

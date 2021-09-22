@@ -12,6 +12,7 @@
    [app.common.spec :as us]
    [app.common.text :as txt]
    [app.config :as cfg]
+   [app.main.data.events :as ev]
    [app.main.data.modal :as modal]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.colors :as dc]
@@ -39,6 +40,7 @@
    [cljs.spec.alpha :as s]
    [cuerdas.core :as str]
    [okulary.core :as l]
+   [potok.core :as ptk]
    [rumext.alpha :as mf]))
 
 ; TODO: refactor to remove duplicate code and less parameter passing.
@@ -65,17 +67,21 @@
                 'subgroup12': {'': [{asset12A}]}}
      'group2': {'subgroup21': {'': [{asset21A}}}}
   "
-  [assets]
-  (when-not (empty? assets)
-    (reduce (fn [groups asset]
-              (let [path-vector (cp/split-path (or (:path asset) ""))]
-                (update-in groups (conj path-vector "")
-                           (fn [group]
-                             (if-not group
-                               [asset]
-                               (conj group asset))))))
-            {}
-            assets)))
+  [assets reverse-sort?]
+  (letfn [(sort-key [key1 key2]
+            (if reverse-sort?
+              (compare (d/name key2) (d/name key1))
+              (compare (d/name key1) (d/name key2))))]
+    (when-not (empty? assets)
+      (reduce (fn [groups asset]
+                (let [path-vector (cp/split-path (or (:path asset) ""))]
+                  (update-in groups (conj path-vector "")
+                             (fn [group]
+                               (if-not group
+                                 [asset]
+                                 (conj group asset))))))
+              (sorted-map-by sort-key)
+              assets))))
 
 (defn add-group
   [asset group-name]
@@ -337,7 +343,7 @@
                                   :on-context-menu on-context-menu}]))])]))
 
 (mf/defc components-box
-  [{:keys [file-id local? components listing-thumbs? open? open-groups selected-assets
+  [{:keys [file-id local? components listing-thumbs? open? reverse-sort? open-groups selected-assets
            on-asset-click on-assets-delete on-clear-selection] :as props}]
   (let [state (mf/use-state {:renaming nil
                              :component-id nil})
@@ -350,7 +356,7 @@
                                 (seq (:colors selected-assets))
                                 (seq (:typographies selected-assets)))
 
-        groups              (group-assets components)
+        groups              (group-assets components reverse-sort?)
 
         on-duplicate
         (mf/use-callback
@@ -369,8 +375,10 @@
           (fn []
             (if (or multi-components? multi-assets?)
               (on-assets-delete)
-              (st/emit! (dwl/delete-component {:id (:component-id @state)})))
-            (st/emit! (dwl/sync-file file-id file-id))))
+              (st/emit! (dwu/start-undo-transaction)
+                        (dwl/delete-component {:id (:component-id @state)})
+                        (dwl/sync-file file-id file-id)
+                        (dwu/commit-undo-transaction)))))
 
         on-rename
         (mf/use-callback
@@ -587,7 +595,7 @@
                                 :on-context-menu on-context-menu}]))])]))
 
 (mf/defc graphics-box
-  [{:keys [file-id local? objects listing-thumbs? open? open-groups selected-assets
+  [{:keys [file-id local? objects listing-thumbs? open? open-groups selected-assets reverse-sort?
            on-asset-click on-assets-delete on-clear-selection] :as props}]
   (let [input-ref  (mf/use-ref nil)
         state      (mf/use-state {:renaming nil
@@ -601,7 +609,7 @@
                                 (seq (:colors selected-assets))
                                 (seq (:typographies selected-assets)))
 
-        groups (group-assets objects)
+        groups (group-assets objects reverse-sort?)
 
         add-graphic
         (mf/use-callback
@@ -615,7 +623,9 @@
          (fn [blobs]
            (let [params {:file-id file-id
                          :blobs (seq blobs)}]
-             (st/emit! (dw/upload-media-asset params)))))
+             (st/emit! (dw/upload-media-asset params)
+                       (ptk/event ::ev/event {::ev/name "add-asset-to-library"
+                                              :asset-type "graphics"})))))
 
         on-delete
         (mf/use-callback
@@ -796,16 +806,21 @@
 
         edit-color
         (fn [new-color]
-          (let [updated-color (merge new-color (select-keys color [:id :file-id :name]))]
+          (let [old-data (-> (select-keys color [:id :file-id])
+                             (assoc :name (cp/merge-path-item (:path color) (:name color))))
+                updated-color (merge new-color old-data)]
             (st/emit! (dwl/update-color updated-color file-id))))
 
         delete-color
         (mf/use-callback
-         (mf/deps @state multi-colors? multi-assets?)
+         (mf/deps @state multi-colors? multi-assets? file-id)
          (fn []
            (if (or multi-colors? multi-assets?)
              (on-assets-delete)
-             (st/emit! (dwl/delete-color color)))))
+             (st/emit! (dwu/start-undo-transaction)
+                       (dwl/delete-color color)
+                       (dwl/sync-file file-id file-id)
+                       (dwu/commit-undo-transaction)))))
 
         rename-color-clicked
         (fn [event]
@@ -930,6 +945,7 @@
           (when-not (empty? path-item)
             [:& colors-group {:file-id file-id
                               :prefix (cp/merge-path-item prefix path-item)
+                              :key (str "group-" path-item)
                               :groups content
                               :open-groups open-groups
                               :local? local?
@@ -945,7 +961,7 @@
                               :colors colors}]))])]))
 
 (mf/defc colors-box
-  [{:keys [file-id local? colors open? open-groups selected-assets
+  [{:keys [file-id local? colors open? open-groups selected-assets reverse-sort?
            on-asset-click on-assets-delete on-clear-selection] :as props}]
   (let [selected-colors     (:colors selected-assets)
         multi-colors?       (> (count selected-colors) 1)
@@ -953,7 +969,7 @@
                                 (seq (:graphics selected-assets))
                                 (seq (:typographies selected-assets)))
 
-        groups              (group-assets colors)
+        groups              (group-assets colors reverse-sort?)
 
         add-color
         (mf/use-callback
@@ -965,7 +981,9 @@
         (mf/use-callback
          (mf/deps file-id)
          (fn [event]
-           (st/emitf (dwl/set-assets-box-open file-id :colors true))
+           (st/emit! (dwl/set-assets-box-open file-id :colors true)
+                     (ptk/event ::ev/event {::ev/name "add-asset-to-library"
+                                            :asset-type "color"}))
            (modal/show! :colorpicker
                         {:x (.-clientX event)
                          :y (.-clientY event)
@@ -1117,7 +1135,7 @@
                                     :on-context-menu on-context-menu}]))])]))
 
 (mf/defc typographies-box
-  [{:keys [file file-id local? typographies open? open-groups selected-assets
+  [{:keys [file file-id local? typographies open? open-groups selected-assets reverse-sort?
            on-asset-click on-assets-delete on-clear-selection] :as props}]
   (let [state (mf/use-state {:detail-open? false
                              :id nil})
@@ -1126,7 +1144,7 @@
 
         local    (deref refs/workspace-local)
 
-        groups        (group-assets typographies)
+        groups        (group-assets typographies reverse-sort?)
 
         selected-typographies (:typographies selected-assets)
         multi-typographies?   (> (count selected-typographies) 1)
@@ -1138,7 +1156,9 @@
         (mf/use-callback
          (mf/deps file-id)
          (fn [_]
-           (st/emit! (dwl/add-typography txt/default-typography))))
+           (st/emit! (dwl/add-typography txt/default-typography)
+                     (ptk/event ::ev/event {::ev/name "add-asset-to-library"
+                                            :asset-type "typography"}))))
 
         handle-change
         (mf/use-callback
@@ -1247,7 +1267,10 @@
          (fn []
            (if (or multi-typographies? multi-assets?)
              (on-assets-delete)
-             (st/emit! (dwl/delete-typography (:id @state))))))
+             (st/emit! (dwu/start-undo-transaction)
+                       (dwl/delete-typography (:id @state))
+                       (dwl/sync-file file-id file-id)
+                       (dwu/commit-undo-transaction)))))
 
         editting-id (or (:rename-typography local) (:edit-typography local))]
 
@@ -1489,16 +1512,21 @@
         (mf/use-callback
           (mf/deps @selected-assets)
           (fn []
-            (st/emit! (dwu/start-undo-transaction))
-            (apply st/emit! (map #(dwl/delete-component {:id %})
-                                 (:components @selected-assets)))
-            (apply st/emit! (map #(dwl/delete-media {:id %})
-                                 (:graphics @selected-assets)))
-            (apply st/emit! (map #(dwl/delete-color {:id %})
-                                 (:colors @selected-assets)))
-            (apply st/emit! (map #(dwl/delete-typography %)
-                                 (:typographies @selected-assets)))
-            (st/emit! (dwu/commit-undo-transaction))))]
+            (let [selected-assets @selected-assets]
+              (st/emit! (dwu/start-undo-transaction))
+              (apply st/emit! (map #(dwl/delete-component {:id %})
+                                   (:components selected-assets)))
+              (apply st/emit! (map #(dwl/delete-media {:id %})
+                                   (:graphics selected-assets)))
+              (apply st/emit! (map #(dwl/delete-color {:id %})
+                                   (:colors selected-assets)))
+              (apply st/emit! (map #(dwl/delete-typography %)
+                                   (:typographies selected-assets)))
+              (when (or (d/not-empty? (:components selected-assets))
+                        (d/not-empty? (:colors selected-assets))
+                        (d/not-empty? (:typographies selected-assets)))
+                (st/emit! (dwl/sync-file (:id file) (:id file))))
+              (st/emit! (dwu/commit-undo-transaction)))))]
 
     [:div.tool-window {:on-context-menu #(dom/prevent-default %)
                        :on-click unselect-all}
@@ -1545,8 +1573,8 @@
               (tr "workspace.assets.selected-count" (i18n/c selected-count))])
            [:div.listing-option-btn.first {:on-click toggle-sort}
             (if @reverse-sort?
-              i/sort-descending
-              i/sort-ascending)]
+              i/sort-ascending
+              i/sort-descending)]
            [:div.listing-option-btn {:on-click toggle-listing}
             (if @listing-thumbs?
               i/listing-enum
@@ -1559,6 +1587,7 @@
                                 :listing-thumbs? listing-thumbs?
                                 :open? (open-box? :components)
                                 :open-groups (open-groups :components)
+                                :reverse-sort? @reverse-sort?
                                 :selected-assets @selected-assets
                                 :on-asset-click (partial on-asset-click :components)
                                 :on-assets-delete on-assets-delete
@@ -1571,6 +1600,7 @@
                               :listing-thumbs? listing-thumbs?
                               :open? (open-box? :graphics)
                               :open-groups (open-groups :graphics)
+                              :reverse-sort? @reverse-sort?
                               :selected-assets @selected-assets
                               :on-asset-click (partial on-asset-click :graphics)
                               :on-assets-delete on-assets-delete
@@ -1581,6 +1611,7 @@
                             :colors colors
                             :open? (open-box? :colors)
                             :open-groups (open-groups :colors)
+                            :reverse-sort? @reverse-sort?
                             :selected-assets @selected-assets
                             :on-asset-click (partial on-asset-click :colors)
                             :on-assets-delete on-assets-delete
@@ -1593,6 +1624,7 @@
                                   :typographies typographies
                                   :open? (open-box? :typographies)
                                   :open-groups (open-groups :typographies)
+                                  :reverse-sort? @reverse-sort?
                                   :selected-assets @selected-assets
                                   :on-asset-click (partial on-asset-click :typographies)
                                   :on-assets-delete on-assets-delete

@@ -12,6 +12,7 @@
    [app.main.data.events :as ev]
    [app.main.data.messages :as dm]
    [app.main.data.users :as du]
+   [app.main.sentry :as sentry]
    [app.main.store :as st]
    [app.main.ui :as ui]
    [app.main.ui.confirm]
@@ -42,10 +43,13 @@
     (if-let [conform (get-in match [:data :conform])]
       (let [spath  (get conform :path-params ::any)
             squery (get conform :query-params ::any)]
-        (-> (dissoc match :params)
-            (assoc :path-params (us/conform spath (get match :path-params))
-                   :query-params (us/conform squery (get match :query-params)))))
-      match)))
+        (try
+          (-> (dissoc match :params)
+              (assoc :path-params (us/conform spath (get match :path-params))
+                     :query-params (us/conform squery (get match :query-params))))
+          (catch :default _
+            nil)))
+        match)))
 
 (defn on-navigate
   [router path]
@@ -100,6 +104,7 @@
 
 (defn ^:export init
   []
+  (sentry/init!)
   (i18n/init! cfg/translations)
   (theme/init! cfg/themes)
   (init-ui)

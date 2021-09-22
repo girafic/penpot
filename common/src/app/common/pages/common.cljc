@@ -8,7 +8,7 @@
   (:require
    [app.common.uuid :as uuid]))
 
-(def file-version 8)
+(def file-version 11)
 (def default-color "#b1b2b5") ;; $color-gray-20
 (def root uuid/zero)
 
@@ -37,6 +37,8 @@
    :stroke-style          :stroke-group
    :stroke-width          :stroke-group
    :stroke-alignment      :stroke-group
+   :stroke-cap-start      :stroke-group
+   :stroke-cap-end        :stroke-group
    :rx                    :radius-group
    :ry                    :radius-group
    :r1                    :radius-group
@@ -56,5 +58,8 @@
    :transform-inverse     :geometry-group
    :shadow                :shadow-group
    :blur                  :blur-group
-   :masked-group?         :mask-group})
+   :masked-group?         :mask-group
+   :constraints-h         :constraints-group
+   :constraints-v         :constraints-group
+   :fixed-scroll          :constraints-group})
 

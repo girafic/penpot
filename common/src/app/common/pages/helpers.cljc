@@ -99,19 +99,20 @@
 
 ;; Implemented with transient for performance
 (defn get-children
-  "Retrieve all children ids recursively for a given object"
+  "Retrieve all children ids recursively for a given object. The
+  children's order will be breadth first."
   [id objects]
 
-  (loop [result (transient [])
+  (loop [result  (transient [])
          pending (transient [])
-         next id]
+         next    id]
     (let [children (get-in objects [next :shapes] [])
           [result pending]
           ;; Iterate through children and add them to the result
           ;; also add them in pending to check for their children
           (loop [result result
                  pending pending
-                 current (first children)
+                 current  (first children)
                  children (rest children)]
             (if current
               (recur (conj! result current)
@@ -160,6 +161,12 @@
     (when parent-id
       (lazy-seq (cons parent-id (get-parents parent-id objects))))))
 
+(defn get-frame
+  "Get the frame that contains the shape. If the shape is already a frame, get itself."
+  [shape objects]
+  (if (= (:type shape) :frame)
+    shape
+    (get objects (:frame-id shape))))
 
 (defn clean-loops
   "Clean a list of ids from circular references."
@@ -213,7 +220,7 @@
             (if (some #{id} acc)
               acc
               (conj acc id)))
-          prev-ids
+          (vec prev-ids)
           ids))
 
 (defn select-toplevel-shapes
@@ -465,12 +472,3 @@
   (let [path-split (split-path path)]
     (merge-path-item (first path-split) name)))
 
-(defn merge-modifiers
-  [objects modifiers]
-
-  (let [set-modifier
-        (fn [objects [id modifiers]]
-          (-> objects
-              (d/update-when id merge modifiers)))]
-    (->> modifiers
-         (reduce set-modifier objects))))

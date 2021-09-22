@@ -17,19 +17,19 @@
    [cljs.spec.alpha :as s]
    [clojure.set :as set]))
 
-;; Change this to :info :debug or :trace to debug this module
+;; Change this to :info :debug or :trace to debug this module, or :warn to reset to default
 (log/set-level! :warn)
 
 (defonce empty-changes [[] []])
 
 (defonce color-sync-attrs
-  [[:fill-color-ref-id   :color    :fill-color]
-   [:fill-color-ref-id   :gradient :fill-color-gradient]
-   [:fill-color-ref-id   :opacity  :fill-opacity]
+  [[:fill-color-ref-id   :fill-color-ref-file   :color    :fill-color]
+   [:fill-color-ref-id   :fill-color-ref-file   :gradient :fill-color-gradient]
+   [:fill-color-ref-id   :fill-color-ref-file   :opacity  :fill-opacity]
 
-   [:stroke-color-ref-id :color    :stroke-color]
-   [:stroke-color-ref-id :gradient :stroke-color-gradient]
-   [:stroke-color-ref-id :opacity  :stroke-opacity]])
+   [:stroke-color-ref-id :stroke-color-ref-file :color    :stroke-color]
+   [:stroke-color-ref-id :stroke-color-ref-file :gradient :stroke-color-gradient]
+   [:stroke-color-ref-id :stroke-color-ref-file :opacity  :stroke-opacity]])
 
 (declare generate-sync-container)
 (declare generate-sync-shape)
@@ -129,7 +129,7 @@
         (if (and (= (count shapes) 1)
                  (= (:type (first shapes)) :group))
           [(first shapes) [] []]
-          (dwg/prepare-create-group objects page-id shapes "Component-" true))
+          (dwg/prepare-create-group objects page-id shapes "Component-1" true))
 
         [new-shape new-shapes updated-shapes]
         (make-component-shape group objects file-id)
@@ -200,6 +200,64 @@
                      (get component :objects)
                      identity)))
 
+(defn generate-detach-instance
+  "Generate changes to remove the links between a shape and all its children
+  with a component."
+  [shape-id container]
+  (log/debug :msg "Detach instance" :shape-id shape-id :container (:id container))
+  (let [shapes (cp/get-object-with-children shape-id (:objects container))
+        rchanges (mapv (fn [obj]
+                         (make-change
+                           container
+                           {:type :mod-obj
+                            :id (:id obj)
+                            :operations [{:type :set
+                                          :attr :component-id
+                                          :val nil}
+                                         {:type :set
+                                          :attr :component-file
+                                          :val nil}
+                                         {:type :set
+                                          :attr :component-root?
+                                          :val nil}
+                                         {:type :set
+                                          :attr :remote-synced?
+                                          :val nil}
+                                         {:type :set
+                                          :attr :shape-ref
+                                          :val nil}
+                                         {:type :set
+                                          :attr :touched
+                                          :val nil}]}))
+                       shapes)
+
+        uchanges (mapv (fn [obj]
+                         (make-change
+                           container
+                           {:type :mod-obj
+                            :id (:id obj)
+                            :operations [{:type :set
+                                          :attr :component-id
+                                          :val (:component-id obj)}
+                                         {:type :set
+                                          :attr :component-file
+                                          :val (:component-file obj)}
+                                         {:type :set
+                                          :attr :component-root?
+                                          :val (:component-root? obj)}
+                                         {:type :set
+                                          :attr :remote-synced?
+                                          :val (:remote-synced? obj)}
+                                         {:type :set
+                                          :attr :shape-ref
+                                          :val (:shape-ref obj)}
+                                         {:type :set
+                                          :attr :touched
+                                          :val (:touched obj)}]}))
+                       shapes)]
+
+    [rchanges uchanges]))
+
 
 ;; ---- General library synchronization functions ----
 
@@ -216,26 +274,20 @@
             :file (pretty-file file-id state)
             :library (pretty-file library-id state))
 
-  (let [file          (get-file state file-id)
-        library       (get-file state library-id)
-        library-items (get library asset-type)]
-
-    (if (empty? library-items)
-      empty-changes
-
-      (loop [pages (vals (get file :pages-index))
-             rchanges []
-             uchanges []]
-        (if-let [page (first pages)]
-          (let [[page-rchanges page-uchanges]
-                (generate-sync-container asset-type
-                                         library-id
-                                         state
-                                         (cp/make-container page :page))]
-            (recur (next pages)
-                   (d/concat rchanges page-rchanges)
-                   (d/concat uchanges page-uchanges)))
-          [rchanges uchanges])))))
+  (let [file (get-file state file-id)]
+    (loop [pages (vals (get file :pages-index))
+           rchanges []
+           uchanges []]
+      (if-let [page (first pages)]
+        (let [[page-rchanges page-uchanges]
+              (generate-sync-container asset-type
+                                       library-id
+                                       state
+                                       (cp/make-container page :page))]
+          (recur (next pages)
+                 (d/concat rchanges page-rchanges)
+                 (d/concat uchanges page-uchanges)))
+        [rchanges uchanges]))))
 
 (defn generate-sync-library
   "Generate changes to synchronize all shapes in all components of the
@@ -248,27 +300,21 @@
             :file (pretty-file file-id state)
             :library (pretty-file library-id state))
 
-  (let [file          (get-file state file-id)
-        library       (get-file state library-id)
-        library-items (get library asset-type)]
-
-    (if (empty? library-items)
-      empty-changes
-
-      (loop [local-components (vals (get file :components))
-             rchanges []
-             uchanges []]
-        (if-let [local-component (first local-components)]
-          (let [[comp-rchanges comp-uchanges]
-                (generate-sync-container asset-type
-                                         library-id
-                                         state
-                                         (cp/make-container local-component
-                                                            :component))]
-            (recur (next local-components)
-                   (d/concat rchanges comp-rchanges)
-                   (d/concat uchanges comp-uchanges)))
-          [rchanges uchanges])))))
+  (let [file (get-file state file-id)]
+    (loop [local-components (vals (get file :components))
+           rchanges []
+           uchanges []]
+      (if-let [local-component (first local-components)]
+        (let [[comp-rchanges comp-uchanges]
+              (generate-sync-container asset-type
+                                       library-id
+                                       state
+                                       (cp/make-container local-component
+                                                          :component))]
+          (recur (next local-components)
+                 (d/concat rchanges comp-rchanges)
+                 (d/concat uchanges comp-uchanges)))
+        [rchanges uchanges]))))
 
 (defn- generate-sync-container
   "Generate changes to synchronize all shapes in a particular container (a page
@@ -323,7 +369,7 @@
                  attr-ref-file (keyword (str attr "-ref-file"))]
              (and (get shape attr-ref-id)
                   (= library-id (get shape attr-ref-file))))
-          (map #(nth % 2) color-sync-attrs))))
+          (map #(nth % 3) color-sync-attrs))))
 
     :typographies
     (fn [shape]
@@ -385,12 +431,14 @@
                                    :fill-color (:color color)
                                    :fill-opacity (:opacity color)
                                    :fill-color-gradient (:gradient color))
-                            node))]
+                            (assoc node
+                                   :fill-color-ref-id nil
+                                   :fill-color-ref-file nil)))]
         (generate-sync-text-shape shape container update-node))
       (loop [attrs (seq color-sync-attrs)
              roperations []
              uoperations []]
-        (let [[attr-ref-id color-attr attr] (first attrs)]
+        (let [[attr-ref-id attr-ref-file color-attr attr] (first attrs)]
           (if (nil? attr)
             (if (empty? roperations)
               empty-changes
@@ -410,17 +458,37 @@
                      roperations
                      uoperations)
               (let [color (get colors (get shape attr-ref-id))
-                    roperation {:type :set
-                                :attr attr
-                                :val (color-attr color)
-                                :ignore-touched true}
-                    uoperation {:type :set
-                                :attr attr
-                                :val (get shape attr)
-                                :ignore-touched true}]
+                    roperations' (if color
+                                   [{:type :set
+                                     :attr attr
+                                     :val (color-attr color)
+                                     :ignore-touched true}]
+                                   ;; If the referenced color does no longer exist in the library,
+                                   ;; we must unlink the color in the shape
+                                   [{:type :set
+                                     :attr attr-ref-id
+                                     :val nil
+                                     :ignore-touched true}
+                                    {:type :set
+                                     :attr attr-ref-file
+                                     :val nil
+                                     :ignore-touched true}])
+                    uoperations' (if color
+                                   [{:type :set
+                                     :attr attr
+                                     :val (get shape attr)
+                                     :ignore-touched true}]
+                                   [{:type :set
+                                     :attr attr-ref-id
+                                     :val (get shape attr-ref-id)
+                                     :ignore-touched true}
+                                    {:type :set
+                                     :attr attr-ref-file
+                                     :val (get shape attr-ref-file)
+                                     :ignore-touched true}])]
                 (recur (next attrs)
-                       (conj roperations roperation)
-                       (conj uoperations uoperation))))))))))
+                       (concat roperations roperations')
+                       (concat uoperations uoperations'))))))))))
 
 (defmethod generate-sync-shape :typographies
   [_ library-id state container shape]
@@ -432,7 +500,8 @@
         update-node (fn [node]
                       (if-let [typography (get typographies (:typography-ref-id node))]
                         (merge node (d/without-keys typography [:name :id]))
-                        node))]
+                        (dissoc node :typography-ref-id
+                                     :typography-ref-file)))]
     (generate-sync-text-shape shape container update-node)))
 
 (defn- get-assets
@@ -568,7 +637,9 @@
                                             root-main
                                             reset?
                                             initial-root?)
-      empty-changes)))
+      ; If the component is not found, because the master component has been
+      ; deleted or the library unlinked, detach the instance.
+      (generate-detach-instance shape-id container))))
 
 (defn- generate-sync-shape-direct-recursive
   [container shape-inst component shape-main root-inst root-main reset? initial-root?]
@@ -576,95 +647,92 @@
              :shape (str (:name shape-inst))
              :component (:name component))
 
-  (let [omit-touched?        (not reset?)
-        clear-remote-synced? (and initial-root? reset?)
-        set-remote-synced?   (and (not initial-root?) reset?)
+  (if (nil? shape-main)
+    ;; This should not occur, but protect against it in any case
+    (generate-detach-instance (:id shape-inst) container)
+    (let [omit-touched?        (not reset?)
+          clear-remote-synced? (and initial-root? reset?)
+          set-remote-synced?   (and (not initial-root?) reset?)
 
-        [rchanges uchanges]
-        (concat-changes
-          (update-attrs shape-inst
-                        shape-main
-                        root-inst
-                        root-main
-                        container
-                        omit-touched?)
+          [rchanges uchanges]
           (concat-changes
-            (if reset?
-              (change-touched shape-inst
-                              shape-main
-                              container
-                              {:reset-touched? true})
-              empty-changes)
+            (update-attrs shape-inst
+                          shape-main
+                          root-inst
+                          root-main
+                          container
+                          omit-touched?)
             (concat-changes
-              (if clear-remote-synced?
-                (change-remote-synced shape-inst container nil)
+              (if reset?
+                (change-touched shape-inst
+                                shape-main
+                                container
+                                {:reset-touched? true})
                 empty-changes)
-              (if set-remote-synced?
-                (change-remote-synced shape-inst container true)
-                empty-changes))))
+              (concat-changes
+                (if clear-remote-synced?
+                  (change-remote-synced shape-inst container nil)
+                  empty-changes)
+                (if set-remote-synced?
+                  (change-remote-synced shape-inst container true)
+                  empty-changes))))
 
-        children-inst   (mapv #(cp/get-shape container %)
-                              (:shapes shape-inst))
-        children-main   (mapv #(cp/get-shape component %)
-                              (:shapes shape-main))
+          children-inst   (mapv #(cp/get-shape container %)
+                                (:shapes shape-inst))
+          children-main   (mapv #(cp/get-shape component %)
+                                (:shapes shape-main))
 
-        only-inst (fn [child-inst]
-                    (when-not (and omit-touched?
-                                   (contains? (:touched shape-inst)
-                                              :shapes-group))
-                      (remove-shape child-inst
-                                    container
-                                    omit-touched?)))
+          only-inst (fn [child-inst]
+                      (when-not (and omit-touched?
+                                     (contains? (:touched shape-inst)
+                                                :shapes-group))
+                        (remove-shape child-inst
+                                      container
+                                      omit-touched?)))
 
-        only-main (fn [child-main]
-                    (when-not (and omit-touched?
-                                   (contains? (:touched shape-inst)
-                                              :shapes-group))
-                      (add-shape-to-instance child-main
-                                             (d/index-of children-main
-                                                         child-main)
-                                             component
-                                             container
-                                             root-inst
-                                             root-main
-                                             omit-touched?
-                                             set-remote-synced?)))
+          only-main (fn [child-main]
+                      (when-not (and omit-touched?
+                                     (contains? (:touched shape-inst)
+                                                :shapes-group))
+                        (add-shape-to-instance child-main
+                                               (d/index-of children-main
+                                                           child-main)
+                                               component
+                                               container
+                                               root-inst
+                                               root-main
+                                               omit-touched?
+                                               set-remote-synced?)))
 
-        both (fn [child-inst child-main]
-               (let [sub-root? (and (:component-id shape-inst)
-                                    (not (:component-root? shape-inst)))]
+          both (fn [child-inst child-main]
                  (generate-sync-shape-direct-recursive container
                                                        child-inst
                                                        component
                                                        child-main
-                                                       (if sub-root?
-                                                         shape-inst
-                                                         root-inst)
-                                                       (if sub-root?
-                                                         shape-main
-                                                         root-main)
+                                                       root-inst
+                                                       root-main
                                                        reset?
-                                                       initial-root?)))
+                                                       initial-root?))
 
-        moved (fn [child-inst child-main]
-                (move-shape
-                  child-inst
-                  (d/index-of children-inst child-inst)
-                  (d/index-of children-main child-main)
-                  container
-                  omit-touched?))
+          moved (fn [child-inst child-main]
+                  (move-shape
+                    child-inst
+                    (d/index-of children-inst child-inst)
+                    (d/index-of children-main child-main)
+                    container
+                    omit-touched?))
 
-        [child-rchanges child-uchanges]
-        (compare-children children-inst
-                          children-main
-                          only-inst
-                          only-main
-                          both
-                          moved
-                          false)]
+          [child-rchanges child-uchanges]
+          (compare-children children-inst
+                            children-main
+                            only-inst
+                            only-main
+                            both
+                            moved
+                            false)]
 
-    [(d/concat rchanges child-rchanges)
-     (d/concat uchanges child-uchanges)]))
+      [(d/concat rchanges child-rchanges)
+       (d/concat uchanges child-uchanges)])))
 
 (defn generate-sync-shape-inverse
   "Generate changes to update the component a shape is linked to, from
@@ -700,103 +768,99 @@
              :shape (str (:name shape-inst))
              :component (:name component))
 
-  (let [component-container  (cp/make-container component :component)
+  (if (nil? shape-main)
+    ;; This should not occur, but protect against it in any case
+    empty-changes
+    (let [component-container  (cp/make-container component :component)
 
-        omit-touched?        false
-        set-remote-synced?   (not initial-root?)
-        clear-remote-synced? initial-root?
+          omit-touched?        false
+          set-remote-synced?   (not initial-root?)
+          clear-remote-synced? initial-root?
 
-        [rchanges uchanges]
-        (concat-changes
-          (update-attrs shape-main
-                        shape-inst
-                        root-main
-                        root-inst
-                        component-container
-                        omit-touched?)
+          [rchanges uchanges]
           (concat-changes
-            (change-touched shape-inst
-                            shape-main
-                            container
-                            {:reset-touched? true})
+            (update-attrs shape-main
+                          shape-inst
+                          root-main
+                          root-inst
+                          component-container
+                          omit-touched?)
             (concat-changes
-              (change-touched shape-main
-                              shape-inst
-                              component-container
-                              {:copy-touched? true})
+              (change-touched shape-inst
+                              shape-main
+                              container
+                              {:reset-touched? true})
               (concat-changes
-                (if clear-remote-synced?
-                  (change-remote-synced shape-inst container nil)
-                  empty-changes)
-                (if set-remote-synced?
-                  (change-remote-synced shape-inst container true)
-                  empty-changes)))))
+                (change-touched shape-main
+                                shape-inst
+                                component-container
+                                {:copy-touched? true})
+                (concat-changes
+                  (if clear-remote-synced?
+                    (change-remote-synced shape-inst container nil)
+                    empty-changes)
+                  (if set-remote-synced?
+                    (change-remote-synced shape-inst container true)
+                    empty-changes)))))
 
-        children-inst   (mapv #(cp/get-shape container %)
-                              (:shapes shape-inst))
-        children-main   (mapv #(cp/get-shape component %)
-                              (:shapes shape-main))
+          children-inst   (mapv #(cp/get-shape container %)
+                                (:shapes shape-inst))
+          children-main   (mapv #(cp/get-shape component %)
+                                (:shapes shape-main))
 
-        only-inst (fn [child-inst]
-                    (add-shape-to-main child-inst
-                                       (d/index-of children-inst
-                                                   child-inst)
-                                       component
-                                       container
-                                       root-inst
-                                       root-main))
+          only-inst (fn [child-inst]
+                      (add-shape-to-main child-inst
+                                         (d/index-of children-inst
+                                                     child-inst)
+                                         component
+                                         container
+                                         root-inst
+                                         root-main))
 
-        only-main (fn [child-main]
-                    (remove-shape child-main
-                                  component-container
-                                  false))
+          only-main (fn [child-main]
+                      (remove-shape child-main
+                                    component-container
+                                    false))
 
-        both (fn [child-inst child-main]
-               (let [sub-root? (and (:component-id shape-inst)
-                                    (not (:component-root? shape-inst)))]
-
+          both (fn [child-inst child-main]
                  (generate-sync-shape-inverse-recursive container
                                                         child-inst
                                                         component
                                                         child-main
-                                                        (if sub-root?
-                                                          shape-inst
-                                                          root-inst)
-                                                        (if sub-root?
-                                                          shape-main
-                                                          root-main)
-                                                        initial-root?)))
+                                                        root-inst
+                                                        root-main
+                                                        initial-root?))
 
-        moved (fn [child-inst child-main]
-                (move-shape
-                  child-main
-                  (d/index-of children-main child-main)
-                  (d/index-of children-inst child-inst)
-                  component-container
-                  false))
+          moved (fn [child-inst child-main]
+                  (move-shape
+                    child-main
+                    (d/index-of children-main child-main)
+                    (d/index-of children-inst child-inst)
+                    component-container
+                    false))
 
-        [child-rchanges child-uchanges]
-        (compare-children children-inst
-                          children-main
-                          only-inst
-                          only-main
-                          both
-                          moved
-                          true)
+          [child-rchanges child-uchanges]
+          (compare-children children-inst
+                            children-main
+                            only-inst
+                            only-main
+                            both
+                            moved
+                            true)
 
-        ;; The inverse sync may be made on a component that is inside a
-        ;; remote library. We need to separate changes that are from
-        ;; local and remote files.
-        check-local (fn [change]
-                      (cond-> change
-                        (= (:id change) (:id shape-inst))
-                        (assoc :local-change? true)))
+          ;; The inverse sync may be made on a component that is inside a
+          ;; remote library. We need to separate changes that are from
+          ;; local and remote files.
+          check-local (fn [change]
+                        (cond-> change
+                          (= (:id change) (:id shape-inst))
+                          (assoc :local-change? true)))
 
-        rchanges (mapv check-local rchanges)
-        uchanges (mapv check-local uchanges)]
+          rchanges (mapv check-local rchanges)
+          uchanges (mapv check-local uchanges)]
 
-    [(d/concat rchanges child-rchanges)
-     (d/concat uchanges child-uchanges)]))
+      [(d/concat rchanges child-rchanges)
+       (d/concat uchanges child-uchanges)])))
 
 
 ; ---- Operation generation helpers ----
@@ -1160,6 +1224,8 @@
         ; sync only the position relative to the origin of the component.
         ; We solve this by moving the origin shape so it is aligned with
         ; the dest root before syncing.
+        ; In case of subinstances, the comparison is always done with the
+        ; near component, because this is that we are syncing with.
         origin-shape (reposition-shape origin-shape origin-root dest-root)
         touched      (get dest-shape :touched #{})]
 

@@ -28,10 +28,23 @@
      {:name "actions_profile_register_count"
       :help "A global counter of user registrations."
       :type :counter}
+
      :profile-activation
      {:name "actions_profile_activation_count"
       :help "A global counter of profile activations"
+      :type :counter}
+
+     :update-file-changes
+     {:name "rpc_update_file_changes_total"
+      :help "A total number of changes submitted to update-file."
+      :type :counter}
+
+     :update-file-bytes-processed
+     {:name "rpc_update_file_bytes_processed_total"
+      :help "A total number of bytes processed by update-file."
       :type :counter}}}
+
+
 
    :app.migrations/all
    {:main (ig/ref :app.migrations/migrations)}
@@ -44,7 +57,7 @@
     :redis-uri (cf/get :redis-uri)}
 
    :app.tokens/tokens
-   {:props (ig/ref :app.setup/props)}
+   {:keys (ig/ref :app.setup/keys)}
 
    :app.storage/gc-deleted-task
    {:pool     (ig/ref :app.db/pool)
@@ -90,12 +103,13 @@
     :tokens      (ig/ref :app.tokens/tokens)
     :public-uri  (cf/get :public-uri)
     :metrics     (ig/ref :app.metrics/metrics)
-    :oauth       (ig/ref :app.http.oauth/handlers)
+    :oauth       (ig/ref :app.http.oauth/handler)
     :assets      (ig/ref :app.http.assets/handlers)
     :storage     (ig/ref :app.storage/storage)
     :sns-webhook (ig/ref :app.http.awsns/handler)
     :feedback    (ig/ref :app.http.feedback/handler)
-    :error-report-handler (ig/ref :app.loggers.mattermost/handler)}
+    :audit-http-handler   (ig/ref :app.loggers.audit/http-handler)
+    :error-report-handler (ig/ref :app.loggers.database/handler)}
 
    :app.http.assets/handlers
    {:metrics           (ig/ref :app.metrics/metrics)
@@ -107,11 +121,12 @@
    :app.http.feedback/handler
    {:pool (ig/ref :app.db/pool)}
 
-   :app.http.oauth/handlers
+   :app.http.oauth/handler
    {:rpc           (ig/ref :app.rpc/rpc)
     :session       (ig/ref :app.http.session/session)
     :pool          (ig/ref :app.db/pool)
     :tokens        (ig/ref :app.tokens/tokens)
+    :audit         (ig/ref :app.loggers.audit/collector)
     :public-uri    (cf/get :public-uri)}
 
    ;; RLimit definition for password hashing
@@ -195,15 +210,16 @@
        {:cron #app/cron "0 0 * * * ?"  ;; hourly
         :task :file-offload})
 
-     (when (cf/get :audit-archive-enabled)
+     (when (contains? cf/flags :audit-log-archive)
        {:cron #app/cron "0 0 * * * ?" ;; every 1h
-        :task :audit-archive})
+        :task :audit-log-archive})
 
-     (when (cf/get :audit-archive-gc-enabled)
+     (when (contains? cf/flags :audit-log-gc)
        {:cron #app/cron "0 0 * * * ?" ;; every 1h
-        :task :audit-archive-gc})
+        :task :audit-log-gc})
 
-     (when (cf/get :telemetry-enabled)
+     (when (or (contains? cf/flags :telemetry)
+               (cf/get :telemetry-enabled))
        {:cron #app/cron "0 0 */6 * * ?" ;; every 6h
         :task :telemetry})]}
 
@@ -223,15 +239,14 @@
      :telemetry          (ig/ref :app.tasks.telemetry/handler)
      :session-gc         (ig/ref :app.http.session/gc-task)
      :file-offload       (ig/ref :app.tasks.file-offload/handler)
-     :audit-archive      (ig/ref :app.loggers.audit/archive-task)
-     :audit-archive-gc   (ig/ref :app.loggers.audit/archive-gc-task)}}
+     :audit-log-archive  (ig/ref :app.loggers.audit/archive-task)
+     :audit-log-gc       (ig/ref :app.loggers.audit/gc-task)}}
 
    :app.emails/sendmail-handler
    {:host             (cf/get :smtp-host)
     :port             (cf/get :smtp-port)
     :ssl              (cf/get :smtp-ssl)
     :tls              (cf/get :smtp-tls)
-    :enabled          (cf/get :smtp-enabled)
     :username         (cf/get :smtp-username)
     :password         (cf/get :smtp-password)
     :metrics          (ig/ref :app.metrics/metrics)
@@ -282,23 +297,27 @@
    {:pool (ig/ref :app.db/pool)
     :key  (cf/get :secret-key)}
 
+   :app.setup/keys
+   {:props (ig/ref :app.setup/props)}
+
    :app.loggers.zmq/receiver
    {:endpoint (cf/get :loggers-zmq-uri)}
 
+   :app.loggers.audit/http-handler
+   {:pool     (ig/ref :app.db/pool)
+    :executor (ig/ref :app.worker/executor)}
+
    :app.loggers.audit/collector
-   {:enabled  (cf/get :audit-enabled false)
-    :pool     (ig/ref :app.db/pool)
+   {:pool     (ig/ref :app.db/pool)
     :executor (ig/ref :app.worker/executor)}
 
    :app.loggers.audit/archive-task
-   {:uri      (cf/get :audit-archive-uri)
-    :enabled  (cf/get :audit-archive-enabled false)
+   {:uri      (cf/get :audit-log-archive-uri)
     :tokens   (ig/ref :app.tokens/tokens)
     :pool     (ig/ref :app.db/pool)}
 
-   :app.loggers.audit/archive-gc-task
-   {:enabled  (cf/get :audit-archive-gc-enabled false)
-    :max-age  (cf/get :audit-archive-gc-max-age cf/deletion-delay)
+   :app.loggers.audit/gc-task
+   {:max-age  (cf/get :audit-log-gc-max-age cf/deletion-delay)
     :pool     (ig/ref :app.db/pool)}
 
    :app.loggers.loki/reporter
@@ -312,21 +331,37 @@
     :pool     (ig/ref :app.db/pool)
     :executor (ig/ref :app.worker/executor)}
 
-   :app.loggers.mattermost/handler
+   :app.loggers.database/reporter
+   {:receiver (ig/ref :app.loggers.zmq/receiver)
+    :pool     (ig/ref :app.db/pool)
+    :executor (ig/ref :app.worker/executor)}
+
+   :app.loggers.database/handler
    {:pool (ig/ref :app.db/pool)}
+
+   :app.loggers.sentry/reporter
+   {:dsn                (cf/get :sentry-dsn)
+    :trace-sample-rate  (cf/get :sentry-trace-sample-rate 1.0)
+    :attach-stack-trace (cf/get :sentry-attach-stack-trace false)
+    :debug              (cf/get :sentry-debug false)
+    :receiver (ig/ref :app.loggers.zmq/receiver)
+    :pool     (ig/ref :app.db/pool)
+    :executor (ig/ref :app.worker/executor)}
 
    :app.storage/storage
    {:pool     (ig/ref :app.db/pool)
     :executor (ig/ref :app.worker/executor)
-    :backend  (cf/get :assets-storage-backend :assets-fs)
-    :backends {:assets-s3 (ig/ref [::assets :app.storage.s3/backend])
+
+    :backends {
+               :assets-s3 (ig/ref [::assets :app.storage.s3/backend])
                :assets-db (ig/ref [::assets :app.storage.db/backend])
                :assets-fs (ig/ref [::assets :app.storage.fs/backend])
-               :s3        (ig/ref [::assets :app.storage.s3/backend])
-               :db        (ig/ref [::assets :app.storage.db/backend])
-               :fs        (ig/ref [::assets :app.storage.fs/backend])
                :tmp       (ig/ref [::tmp  :app.storage.fs/backend])
-               :fdata-s3  (ig/ref [::fdata :app.storage.s3/backend])}}
+               :fdata-s3  (ig/ref [::fdata :app.storage.s3/backend])
+
+               ;; keep this for backward compatibility
+               :s3        (ig/ref [::assets :app.storage.s3/backend])
+               :fs        (ig/ref [::assets :app.storage.fs/backend])}}
 
    [::fdata :app.storage.s3/backend]
    {:region (cf/get :storage-fdata-s3-region)

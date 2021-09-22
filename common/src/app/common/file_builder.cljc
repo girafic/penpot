@@ -150,20 +150,22 @@
 
 (defn create-file
   ([name]
-   (let [id (uuid/next)]
-     {:id id
-      :name name
-      :data (-> init/empty-file-data
-                (assoc :id id))
+   (create-file (uuid/next) name))
 
-      ;; We keep the changes so we can send them to the backend
-      :changes []})))
+  ([id name]
+   {:id id
+    :name name
+    :data (-> init/empty-file-data
+              (assoc :id id))
+
+    ;; We keep the changes so we can send them to the backend
+    :changes []}))
 
 (defn add-page
   [file data]
 
   (assert (nil? (:current-component-id file)))
-  (let [page-id (uuid/next)
+  (let [page-id (or (:id data) (uuid/next))
         page (-> init/empty-page-data
                  (assoc :id page-id)
                  (d/deep-merge data))]
@@ -317,7 +319,9 @@
         create-child
         (fn [file child]
           (-> file
-              (create-svg-raw (assoc data :content child))
+              (create-svg-raw (assoc data
+                                     :id (uuid/next)
+                                     :content child))
               (close-svg-raw)))]
 
     ;; First :content is the the shape attribute, the other content is the
@@ -329,10 +333,10 @@
       (update :parent-stack pop)))
 
 (defn add-interaction
-  [file action-type event-type from-id destination-id]
+  [file from-id {:keys [action-type event-type destination]}]
 
   (assert (some? (lookup-shape file from-id)) (str "Cannot locate shape with id " from-id))
-  (assert (some? (lookup-shape file destination-id)) (str "Cannot locate shape with id " destination-id))
+  (assert (some? (lookup-shape file destination)) (str "Cannot locate shape with id " destination))
 
   (let [interactions (->> (lookup-shape file from-id)
                           :interactions
@@ -342,7 +346,7 @@
                          (conjv
                           {:action-type action-type
                            :event-type event-type
-                           :destination destination-id}))]
+                           :destination destination}))]
     (commit-change
      file
      {:type :mod-obj
@@ -391,6 +395,7 @@
 
   (let [selrect init/empty-selrect
         name (:name data)
+        path (:path data)
         obj (-> (init/make-minimal-group nil selrect name)
                 (merge data)
                 (check-name file :group)
@@ -400,6 +405,7 @@
          {:type :add-component
           :id (:id obj)
           :name name
+          :path path
           :shapes [obj]})
 
         (assoc :last-id (:id obj))

@@ -116,7 +116,7 @@
    [:h1 (tr "auth.register-title")]
    [:div.subtitle (tr "auth.register-subtitle")]
 
-   (when cf/demo-warning
+   (when (contains? @cf/flags :demo-warning)
      [:& demo-warning])
 
    [:& register-form {:params params}]
@@ -135,7 +135,7 @@
           :tab-index "4"}
       (tr "auth.login-here")]]
 
-    (when cf/allow-demo-users
+    (when (contains? @cf/flags :demo-users)
       [:div.link-entry
        [:span (tr "auth.create-demo-profile") " "]
        [:a {:on-click #(st/emit! (du/create-demo-profile))
@@ -169,16 +169,13 @@
     (let [token (:invitation-token data)]
       (st/emit! (rt/nav :auth-verify-token {} {:token token})))
 
-
     (not= "penpot" (:auth-backend data))
-    (st/emit!
-     (du/fetch-profile)
-     (rt/nav :dashboard-projects {:team-id (:default-team-id data)}))
+    (st/emit! (du/login-from-register))
 
     :else
     (st/emit! (rt/nav :auth-register-success {} {:email (:email data)}))))
 
-(s/def ::accept-terms-and-privacy ::us/boolean)
+(s/def ::accept-terms-and-privacy (s/and ::us/boolean true?))
 (s/def ::accept-newsletter-subscription ::us/boolean)
 
 (s/def ::register-validate-form
@@ -219,11 +216,11 @@
                     :label (tr "auth.terms-privacy-agreement")
                     :type "checkbox"}]]
 
-     (when (contains? @cf/flags :show-newsletter-check-on-register-validation)
+     (when (contains? @cf/flags :newsletter-registration-check)
        [:div.fields-row
         [:& fm/input {:name :accept-newsletter-subscription
                       :class "check-primary"
-                      :label (tr "auth.terms-privacy-agreement")
+                      :label (tr "auth.newsletter-subscription")
                       :type "checkbox"}]])
 
      [:& fm/submit-button
@@ -233,7 +230,6 @@
 
 (mf/defc register-validate-page
   [{:keys [params] :as props}]
-  (prn "register-validate-page" params)
   [:div.form-container
    [:h1 (tr "auth.register-title")]
    [:div.subtitle (tr "auth.register-subtitle")]

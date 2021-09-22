@@ -14,14 +14,13 @@
    [app.main.ui.components.context-menu :refer [context-menu]]
    [app.main.ui.context :as ctx]
    [app.main.ui.dashboard.import :as udi]
-   [app.util.debug :as d]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.router :as rt]
    [rumext.alpha :as mf]))
 
 (mf/defc project-menu
-  [{:keys [project show? on-edit on-menu-close top left] :as props}]
+  [{:keys [project show? on-edit on-menu-close top left on-import] :as props}]
   (assert (some? project) "missing `project` prop")
   (assert (boolean? show?) "missing `show?` prop")
   (assert (fn? on-edit) "missing `on-edit` prop")
@@ -85,8 +84,7 @@
         on-finish-import
         (mf/use-callback
          (fn []
-           (st/emit! (dd/fetch-recent-files)
-                     (dd/clear-selected-files))))]
+           (when (some? on-import) (on-import))))]
 
     [:*
      [:& udi/import-form {:ref file-input
@@ -101,14 +99,18 @@
        :left left
        :options [(when-not (:is-default project)
                    [(tr "labels.rename") on-edit])
-                 [(tr "dashboard.duplicate") on-duplicate]
-                 [(tr "dashboard.pin-unpin") toggle-pin]
-                 (when (seq teams)
+                 (when-not (:is-default project)
+                   [(tr "dashboard.duplicate") on-duplicate])
+                 (when-not (:is-default project)
+                   [(tr "dashboard.pin-unpin") toggle-pin])
+                 (when (and (seq teams) (not (:is-default project)))
                    [(tr "dashboard.move-to") nil
                     (for [team teams]
                       [(:name team) (on-move (:id team))])])
-                 (when (d/debug? :import)
+                 (when (some? on-import)
                    [(tr "dashboard.import") on-import-files])
-                 [:separator]
-                 [(tr "labels.delete") on-delete]]}]]))
+                 (when-not (:is-default project)
+                   [:separator])
+                 (when-not (:is-default project)
+                   [(tr "labels.delete") on-delete])]}]]))
 

@@ -32,7 +32,6 @@
 (s/def ::file-id ::us/uuid)
 (s/def ::team-id ::us/uuid)
 
-
 ;; --- Create File Media object (upload)
 
 (declare create-file-media-object)
@@ -92,12 +91,11 @@
 
 
 (defn create-file-media-object
-  [{:keys [conn storage] :as cfg} {:keys [file-id is-local name content] :as params}]
+  [{:keys [conn storage] :as cfg} {:keys [id file-id is-local name content] :as params}]
   (media/validate-media-type (:content-type content))
-  (let [storage      (assoc storage :conn conn)
+  (let [storage      (media/configure-assets-storage storage conn)
         source-path  (fs/path (:tempfile content))
         source-mtype (:content-type content)
-
         source-info  (media/run cfg {:cmd :info :input {:path source-path :mtype source-mtype}})
 
         thumb        (when (and (not (svg-image? source-info))
@@ -118,7 +116,7 @@
                        (sto/put-object storage {:content (sto/content (:data thumb) (:size thumb))
                                                 :content-type (:mtype thumb)}))]
     (db/insert! conn :file-media-object
-                {:id (uuid/next)
+                {:id (or id (uuid/next))
                  :file-id file-id
                  :is-local is-local
                  :name name

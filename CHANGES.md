@@ -1,30 +1,154 @@
-# CHANGELOG #
+# CHANGELOG
 
 ## :rocket: Next
+
+### :boom: Breaking changes
+### :sparkles: New features
+### :bug: Bugs fixed
+### :arrow_up: Deps updates
+### :boom: Breaking changes
+### :heart: Community contributions by (Thank you!)
+
+## 1.8.1-alpha
+
+### :bug: Bugs fixed
+
+- Fix project renaming issue (and some other related to the same underlying bug).
+- Fix internal exception on audit log persistence layer.
+- Set proper environment variable on docker images for chrome executable.
+- Fix internal metrics on websocket connections.
+
+
+## 1.8.0-alpha
+
+### :boom: Breaking changes
+
+- This release includes a new approach for handling share links, and
+  this feature is incompatible with the previous one. This means that
+  all the public share links generated previously will stop working.
+
+### :sparkles: New features
+
+- Add tooltips to color picker tabs [Taiga #1814](https://tree.taiga.io/project/penpot/us/1814).
+- Add styling to the end point of any open paths [Taiga #1107](https://tree.taiga.io/project/penpot/us/1107).
+- Allow to zoom with ctrl + middle button [Taiga #1428](https://tree.taiga.io/project/penpot/us/1428).
+- Auto placement of duplicated objects [Taiga #1386](https://tree.taiga.io/project/penpot/us/1386).
+- Enable penpot SVG metadata only when exporting complete files [Taiga #1914](https://tree.taiga.io/project/penpot/us/1914?milestone=295883).
+- Export to PDF all artboards of one page [Taiga #1895](https://tree.taiga.io/project/penpot/us/1895).
+- Go to a undo step clicking on a history element of the list [Taiga #1374](https://tree.taiga.io/project/penpot/us/1374).
+- Increment font size by 10 with shift+arrows [1047](https://github.com/penpot/penpot/issues/1047).
+- New shortcut to detach components Ctrl+Shift+K [Taiga #1799](https://tree.taiga.io/project/penpot/us/1799).
+- Set email inputs to type "email", to aid keyboard entry [Taiga #1921](https://tree.taiga.io/project/penpot/issue/1921).
+- Use shift+move to move element orthogonally [#823](https://github.com/penpot/penpot/issues/823).
+- Use space + mouse drag to pan, instead of only space [Taiga #1800](https://tree.taiga.io/project/penpot/us/1800).
+- Allow navigate through pages on the viewer [Taiga #1550](https://tree.taiga.io/project/penpot/us/1550).
+- Allow create share links with specific pages [Taiga #1844](https://tree.taiga.io/project/penpot/us/1844).
+
+### :bug: Bugs fixed
+
+- Prevent adding numeric suffix to layer names when not needed [Taiga #1929](https://tree.taiga.io/project/penpot/us/1929).
+- Prevent deleting or moving the drafts project [Taiga #1935](https://tree.taiga.io/project/penpot/issue/1935).
+- Fix problem with zoom and selection [Taiga #1919](https://tree.taiga.io/project/penpot/issue/1919)
+- Fix problem with borders on shape export [#1092](https://github.com/penpot/penpot/issues/1092)
+- Fix thumbnail cropping issue [Taiga #1964](https://tree.taiga.io/project/penpot/issue/1964)
+- Fix repeated fetch on file selection [Taiga #1933](https://tree.taiga.io/project/penpot/issue/1933)
+- Fix rename typography on text options [Taiga #1963](https://tree.taiga.io/project/penpot/issue/1963)
+- Fix problems with order in groups [Taiga #1960](https://tree.taiga.io/project/penpot/issue/1960)
+- Fix SVG components preview [#1134](https://github.com/penpot/penpot/issues/1134)
+- Fix group renaming problem [Taiga #1969](https://tree.taiga.io/project/penpot/issue/1969)
+- Fix problem with import broken images links [#1197](https://github.com/penpot/penpot/issues/1197)
+- Fix problem while moving imported SVG's [#1199](https://github.com/penpot/penpot/issues/1199)
+
+### :arrow_up: Deps updates
+### :boom: Breaking changes
+### :heart: Community contributions by (Thank you!)
+
+- eduayme [#1129](https://github.com/penpot/penpot/pull/1129).
+
+
+## 1.7.4-alpha
+
+### :bug: Bugs fixed
+
+- Fix demo user creation (self-hosted only)
+- Add better ldap response validation and reporting (self-hosted only)
+
+
+## 1.7.3-alpha
+
+### :bug: Bugs fixed
+
+- Fix font uploading issue on Windows.
+
+
+## 1.7.2-alpha
+
+### :sparkles: New features
+
+- Add many improvements to text tool.
+
+### :bug: Bugs fixed
+
+- Add scroll bar to Teams menu [Taiga #1894](https://tree.taiga.io/project/penpot/issue/1894).
+- Fix repeated names when duplicating artboards or groups [Taiga #1892](https://tree.taiga.io/project/penpot/issue/1892).
+- Fix properly messages lifecycle on navigate.
+- Fix handling repeated names on duplicate object trees.
+- Fix group naming on group creation.
+- Fix some issues in svg transformation.
+
+### :arrow_up: Deps updates
+
+- Update frontend build tooling.
+
+### :heart: Community contributions by (Thank you!)
+
+- soultipsy [#1100](https://github.com/penpot/penpot/pull/1100)
+
+
+## 1.7.1-alpha
+
+### :bug: Bugs fixed
+
+- Fix issue related to the GC and images in path shapes.
+- Fix issue on the shape order on some undo operations.
+- Fix issue on undo page deletion.
+- Fix some issues related to constraints.
+
+
+## 1.7.0-alpha
 
 ### :sparkles: New features
 
 - Allow nested asset groups [Taiga #1716](https://tree.taiga.io/project/penpot/us/1716).
 - Allow to ungroup assets [Taiga #1719](https://tree.taiga.io/project/penpot/us/1719).
 - Allow to rename assets groups [Taiga #1721](https://tree.taiga.io/project/penpot/us/1721).
+- Component constraints (left, right, left and right, center, scale...) [Taiga #1125](https://tree.taiga.io/project/penpot/us/1125).
+- Export elements to PDF [Taiga #519](https://tree.taiga.io/project/penpot/us/519).
 - Memorize collapse state of assets in panel [Taiga #1718](https://tree.taiga.io/project/penpot/us/1718).
 - Headers button sets and menus review [Taiga #1663](https://tree.taiga.io/project/penpot/us/1663).
 - Preserve components if possible, when pasted into a different file [Taiga #1063](https://tree.taiga.io/project/penpot/issue/1063).
 - Add the ability to offload file data to a cheaper storage when file becomes inactive.
+- Import/Export Penpot files from dashboard.
+- Double click won't make a shape a path until you change a node [Taiga #1796](https://tree.taiga.io/project/penpot/us/1796)
+- Incremental area selection [#779](https://github.com/penpot/penpot/discussions/779)
 
 ### :bug: Bugs fixed
 
 - Process numeric input changes only if the value actually changed.
 - Remove unnecesary redirect from history when user goes to workspace from dashboard [Taiga #1820](https://tree.taiga.io/project/penpot/issue/1820).
+- Detach shapes from deleted assets [Taiga #1850](https://tree.taiga.io/project/penpot/issue/1850).
 - Fix tooltip position on view application [Taiga #1819](https://tree.taiga.io/project/penpot/issue/1819).
 - Fix dashboard navigation on moving file to other team [Taiga #1817](https://tree.taiga.io/project/penpot/issue/1817).
 - Fix workspace header presence styles and invalid link [Taiga #1813](https://tree.taiga.io/project/penpot/issue/1813).
 - Fix color-input wrong behavior (on workspace page color) [Taiga #1795](https://tree.taiga.io/project/penpot/issue/1795).
 - Fix file contextual menu in shared libraries at dashboard [Taiga #1865](https://tree.taiga.io/project/penpot/issue/1865).
+- Fix problem with color picker and fonts [#1049](https://github.com/penpot/penpot/issues/1049)
+- Fix negative values in blur [Taiga #1815](https://tree.taiga.io/project/penpot/issue/1815)
+- Fix problem when editing color in group [Taiga #1816](https://tree.taiga.io/project/penpot/issue/1816)
+- Fix resize/rotate with mouse buttons different than left [#1060](https://github.com/penpot/penpot/issues/1060)
+- Fix header partialy visible on fullscreen viewer mode [Taiga #1875](https://tree.taiga.io/project/penpot/issue/1875)
+- Fix dynamic alignment enabled with hidden objects [#1063](https://github.com/penpot/penpot/issues/1063)
 
-### :arrow_up: Deps updates
-### :boom: Breaking changes
-### :heart: Community contributions by (Thank you!)
 
 ## 1.6.5-alpha
 

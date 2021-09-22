@@ -6,19 +6,20 @@
 
 (ns app.main.ui.dashboard.file-menu
   (:require
+   [app.common.data :as d]
    [app.main.data.dashboard :as dd]
+   [app.main.data.events :as ev]
    [app.main.data.messages :as dm]
    [app.main.data.modal :as modal]
    [app.main.repo :as rp]
    [app.main.store :as st]
    [app.main.ui.components.context-menu :refer [context-menu]]
    [app.main.ui.context :as ctx]
-   [app.main.worker :as uw]
-   [app.util.debug :as d]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.router :as rt]
    [beicon.core :as rx]
+   [potok.core :as ptk]
    [rumext.alpha :as mf]))
 
 (defn get-project-name
@@ -157,25 +158,37 @@
                       :on-accept del-shared})))
 
         on-export-files
-        (fn [_]
-          (->> (uw/ask-many!
-                {:cmd :export-file
-                 :team-id current-team-id
-                 :files (->> files (mapv :id))})
-               (rx/subs
-                (fn [msg]
-                  (case (:type msg)
-                    :progress
-                    (prn "[Progress]" (:data msg))
+        (mf/use-callback
+         (mf/deps files current-team-id)
+         (fn [_]
+           (st/emit! (ptk/event ::ev/event {::ev/name "export-files"
+                                            :num-files (count files)}))
+           (->> (rx/from files)
+                (rx/flat-map
+                 (fn [file]
+                   (->> (rp/query :file-libraries {:file-id (:id file)})
+                        (rx/map #(assoc file :has-libraries? (d/not-empty? %))))))
+                (rx/reduce conj [])
+                (rx/subs
+                 (fn [files]
+                   (st/emit!
+                    (modal/show
+                     {:type :export
+                      :team-id current-team-id
+                      :has-libraries? (->> files (some :has-libraries?))
+                      :files files})))))))
 
-                    :finish
-                    (dom/trigger-download-uri (:filename msg) (:mtype msg) (:uri msg)))))))]
+        ;; NOTE: this is used for detect if component is still mounted
+        mounted-ref (mf/use-ref true)]
 
     (mf/use-effect
+     (mf/deps show?)
      (fn []
-       (->> (rp/query! :all-projects)
-            (rx/map group-by-team)
-            (rx/subs #(reset! teams %)))))
+       (when show?
+         (->> (rp/query! :all-projects)
+              (rx/map group-by-team)
+              (rx/subs #(when (mf/ref-val mounted-ref)
+                          (reset! teams %)))))))
 
     (when current-team
       (let [sub-options (conj (vec (for [project current-projects]
@@ -195,8 +208,7 @@
                       [[(tr "dashboard.duplicate-multi" file-count) on-duplicate]
                        (when (or (seq current-projects) (seq other-teams))
                          [(tr "dashboard.move-to-multi" file-count) nil sub-options])
-                       (when (d/debug? :export)
-                         [(tr "dashboard.export-multi" file-count) on-export-files])
+                       [(tr "dashboard.export-multi" file-count) on-export-files]
                        [:separator]
                        [(tr "labels.delete-multi-files" file-count) on-delete]]
 
@@ -208,8 +220,7 @@
                        (if (:is-shared file)
                          [(tr "dashboard.remove-shared") on-del-shared]
                          [(tr "dashboard.add-shared") on-add-shared])
-                       (when (d/debug? :export)
-                         [(tr "dashboard.export-single") on-export-files])
+                       [(tr "dashboard.export-single") on-export-files]
                        [:separator]
                        [(tr "labels.delete") on-delete]])]
 

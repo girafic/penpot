@@ -7,6 +7,7 @@
 (ns app.worker.export
   (:require
    [app.common.data :as d]
+   [app.common.text :as ct]
    [app.config :as cfg]
    [app.main.render :as r]
    [app.main.repo :as rp]
@@ -20,7 +21,7 @@
 
 (defn create-manifest
   "Creates a manifest entry for the given files"
-  [team-id file-id files]
+  [team-id file-id export-type files]
   (letfn [(format-page [manifest page]
             (-> manifest
                 (assoc (str (:id page))
@@ -40,6 +41,8 @@
                           :shared          is-shared
                           :pages           pages
                           :pagesIndex      index
+                          :libraries       (->> (:libraries file) (into #{}) (mapv str))
+                          :exportType      (d/name export-type)
                           :hasComponents   (d/not-empty? (get-in file [:data :components]))
                           :hasMedia        (d/not-empty? (get-in file [:data :media]))
                           :hasColors       (d/not-empty? (get-in file [:data :colors]))
@@ -79,14 +82,14 @@
                      [(-> k str/camel) v]))))))
 
 (def ^:const color-keys
-  [:name :color :opacity :gradient])
+  [:name :color :opacity :gradient :path])
 
 (def ^:const typography-keys
   [:name :font-family :font-id :font-size :font-style :font-variant-id :font-weight
-   :letter-spacing :line-height :text-transform])
+   :letter-spacing :line-height :text-transform :path])
 
 (def ^:const media-keys
-  [:name :mtype :width :height])
+  [:name :mtype :width :height :path])
 
 (defn collect-color
   [result color]
@@ -142,20 +145,246 @@
   (->> (r/render-components (:data file))
        (rx/map #(vector (str (:id file) "/components.svg") %))))
 
-(defn export-file
-  [team-id file-id]
+(defn fetch-file-with-libraries [file-id]
+  (->> (rx/zip (rp/query :file {:id file-id})
+               (rp/query :file-libraries {:file-id file-id}))
+       (rx/map
+        (fn [[file file-libraries]]
+          (let [libraries-ids (->> file-libraries (map :id) (filterv #(not= (:id file) %)))]
+            (-> file
+                (assoc :libraries libraries-ids)))))))
 
-  (let [files-stream
-        (->> (rx/merge (rp/query :file {:id file-id})
-                       (->> (rp/query :file-libraries {:file-id file-id})
-                            (rx/flat-map identity)
-                            (rx/map #(assoc % :is-shared true))))
-             (rx/reduce #(assoc %1 (:id %2) %2) {})
-             (rx/share))
+(defn get-component-ref-file
+  [objects shape]
+
+  (cond
+    (contains? shape :component-file)
+    (get shape :component-file)
+
+    (contains? shape :shape-ref)
+    (recur objects (get objects (:parent-id shape)))
+
+    :else
+    nil))
+
+(defn detach-external-references
+  [file file-id]
+  (let [detach-text
+        (fn [content]
+          (->> content
+               (ct/transform-nodes
+                #(cond-> %
+                   (not= file-id (:fill-color-ref-file %))
+                   (dissoc :fill-color-ref-id :fill-color-ref-file)
+
+                   (not= file-id (:typography-ref-file %))
+                   (dissoc :typography-ref-id :typography-ref-file)))))
+
+        detach-shape
+        (fn [objects shape]
+          (cond-> shape
+            (not= file-id (:fill-color-ref-file shape))
+            (dissoc :fill-color-ref-id :fill-color-ref-file)
+
+            (not= file-id (:stroke-color-ref-file shape))
+            (dissoc :stroke-color-ref-id :stroke-color-ref-file)
+
+            (not= file-id (get-component-ref-file objects shape))
+            (dissoc :component-id :component-file :shape-ref :component-root?)
+
+            (= :text (:type shape))
+            (update :content detach-text)))
+
+        detach-objects
+        (fn [objects]
+          (->> objects
+               (d/mapm #(detach-shape objects %2))))
+
+        detach-pages
+        (fn [pages-index]
+          (->> pages-index
+               (d/mapm
+                (fn [_ data]
+                  (-> data
+                      (update :objects detach-objects))))))]
+
+    (-> file
+        (update-in [:data :pages-index] detach-pages))))
+
+(defn make-local-external-references
+  [file file-id]
+  (let [detach-text
+        (fn [content]
+          (->> content
+               (ct/transform-nodes
+                #(cond-> %
+                   (not= file-id (:fill-color-ref-file %))
+                   (assoc :fill-color-ref-file file-id)
+
+                   (not= file-id (:typography-ref-file %))
+                   (assoc :typography-ref-file file-id)))))
+
+        detach-shape
+        (fn [shape]
+          (cond-> shape
+            (not= file-id (:fill-color-ref-file shape))
+            (assoc :fill-color-ref-file file-id)
+
+            (not= file-id (:stroke-color-ref-file shape))
+            (assoc :stroke-color-ref-file file-id)
+
+            (not= file-id (:component-file shape))
+            (assoc :component-file file-id)
+
+            (= :text (:type shape))
+            (update :content detach-text)))
+
+        detach-objects
+        (fn [objects]
+          (->> objects
+               (d/mapm #(detach-shape %2))))
+
+        detach-pages
+        (fn [pages-index]
+          (->> pages-index
+               (d/mapm
+                (fn [_ data]
+                  (-> data
+                      (update :objects detach-objects))))))]
+    (-> file
+        (update-in [:data :pages-index] detach-pages))))
+
+(defn collect-external-references
+  [file]
+
+  (let [get-text-refs
+        (fn [content]
+          (->> content
+               (ct/node-seq #(or (contains? % :fill-color-ref-id)
+                                 (contains? % :typography-ref-id)))
+
+               (mapcat (fn [node]
+                         (cond-> []
+                           (contains? node :fill-color-ref-id)
+                           (conj {:id (:fill-color-ref-id node)
+                                  :file-id (:fill-color-ref-file node)})
+
+                           (contains? node :typography-ref-id)
+                           (conj {:id (:typography-ref-id node)
+                                  :file-id (:typography-ref-file node)})
+                           )))
+
+               (into [])))
+
+        get-shape-refs
+        (fn [[_ shape]]
+          (cond-> []
+            (contains? shape :fill-color-ref-id)
+            (conj {:id (:fill-color-ref-id shape)
+                   :file-id (:fill-color-ref-file shape)})
+
+            (contains? shape :stroke-color-ref-id)
+            (conj {:id (:stroke-color-ref-id shape)
+                   :file-id (:stroke-color-ref-file shape)})
+
+            (contains? shape :component-id)
+            (conj {:id (:component-id shape)
+                   :file-id (:component-file shape)})
+
+            (= :text (:type shape))
+            (d/concat (get-text-refs (:content shape)))))]
+
+    (->> (get-in file [:data :pages-index])
+         (vals)
+         (mapcat :objects)
+         (mapcat get-shape-refs)
+         (filter (comp some? :file-id))
+         (filter (comp some? :id))
+         (group-by :file-id)
+         (d/mapm #(mapv :id %2)))))
+
+(defn merge-assets [target-file assets-files]
+  (let [external-refs (collect-external-references target-file)
+
+        merge-file-assets
+        (fn [target file]
+          (let [colors       (-> (get-in file [:data :colors])
+                                 (select-keys (get external-refs (:id file))))
+                typographies (-> (get-in file [:data :typographies])
+                                 (select-keys (get external-refs (:id file))))
+                media        (-> (get-in file [:data :media])
+                                 (select-keys (get external-refs (:id file))))
+                components   (-> (get-in file [:data :components])
+                                 (select-keys (get external-refs (:id file))))]
+            (cond-> target
+              (d/not-empty? colors)
+              (update-in [:data :colors] merge colors)
+
+              (d/not-empty? typographies)
+              (update-in [:data :typographies] merge typographies)
+
+              (d/not-empty? media)
+              (update-in [:data :media] merge media)
+
+              (d/not-empty? components)
+              (update-in [:data :components] merge components))))]
+
+    (->> assets-files
+         (reduce merge-file-assets target-file))))
+
+(defn process-export
+  [file-id export-type files]
+
+  (case export-type
+    :all      files
+    :merge    (let [file-list (-> files (d/without-keys [file-id]) vals)]
+                (-> (select-keys files [file-id])
+                    (update file-id merge-assets file-list)
+                    (update file-id make-local-external-references file-id)
+                    (update file-id dissoc :libraries)))
+    :detach (-> (select-keys files [file-id])
+                (update file-id detach-external-references file-id)
+                (update file-id dissoc :libraries))))
+
+(defn collect-files
+  [file-id export-type]
+
+  (letfn [(fetch-dependencies [[files pending]]
+            (if (empty? pending)
+              ;; When not pending, we finish the generation
+              (rx/empty)
+
+              ;; Still pending files, fetch the next one
+              (let [next    (peek pending)
+                    pending (pop pending)]
+                (if (contains? files next)
+                  ;; The file is already in the result
+                  (rx/of [files pending])
+
+                  (->> (fetch-file-with-libraries next)
+                       (rx/map
+                        (fn [file]
+                          [(-> files
+                               (assoc (:id file) file))
+                           (as-> pending $
+                             (reduce conj $ (:libraries file)))])))))))]
+    (let [files {}
+          pending [file-id]]
+      (->> (rx/of [files pending])
+           (rx/expand fetch-dependencies)
+           (rx/last)
+           (rx/map first)
+           (rx/map #(process-export file-id export-type %))))))
+
+(defn export-file
+  [team-id file-id export-type]
+
+  (let [files-stream (->> (collect-files file-id export-type)
+                          (rx/share))
 
         manifest-stream
         (->> files-stream
-             (rx/map #(create-manifest team-id file-id %))
+             (rx/map #(create-manifest team-id file-id export-type %))
              (rx/map #(vector "manifest.json" %)))
 
         render-stream
@@ -218,17 +447,25 @@
                               (rx/map #(vector (get files file-id) %)))))))))
 
 (defmethod impl/handler :export-file
-  [{:keys [team-id files] :as message}]
+  [{:keys [team-id files export-type] :as message}]
 
   (->> (rx/from files)
-       (rx/mapcat #(export-file team-id %))
-       (rx/map
-        (fn [value]
-          (if (contains? value :type)
-            value
-            (let [[file export-blob] value]
-              {:type :finish
-               :filename (:name file)
-               :mtype "application/penpot"
-               :description "Penpot export (*.penpot)"
-               :uri (dom/create-uri export-blob)}))))))
+       (rx/mapcat
+        (fn [file]
+          (->> (export-file team-id file export-type)
+               (rx/map
+                (fn [value]
+                  (if (contains? value :type)
+                    value
+                    (let [[file export-blob] value]
+                      {:type :finish
+                       :file-id (:id file)
+                       :filename (:name file)
+                       :mtype "application/penpot"
+                       :description "Penpot export (*.penpot)"
+                       :uri (dom/create-uri export-blob)}))))
+               (rx/catch
+                   (fn [err]
+                     (rx/of {:type :error
+                             :error (str err)
+                             :file-id file}))))))))

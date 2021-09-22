@@ -47,7 +47,7 @@
         shape (-> selected first)]
     (when (and (= (count selected) 1)
                (= (:id shape) edition)
-               (= :path (:type shape)))
+               (not= :text (:type shape)))
       [:div.viewport-actions
        [:& path-actions {:shape shape}]])))
 
@@ -95,10 +95,12 @@
         on-mouse-down
         (mf/use-callback
          (mf/deps (:id frame) on-frame-select)
-         (fn [event]
-           (dom/prevent-default event)
-           (dom/stop-propagation event)
-           (on-frame-select event (:id frame))))
+         (fn [bevent]
+           (let [event  (.-nativeEvent bevent)]
+             (when (= 1 (.-which event))
+               (dom/prevent-default event)
+               (dom/stop-propagation event)
+               (on-frame-select event (:id frame))))))
 
         on-double-click
         (mf/use-callback

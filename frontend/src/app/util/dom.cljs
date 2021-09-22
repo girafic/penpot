@@ -6,13 +6,13 @@
 
 (ns app.util.dom
   (:require
-   [app.common.exceptions :as ex]
-   [app.common.geom.point :as gpt]
-   [app.util.globals :as globals]
-   [app.util.object :as obj]
-   [cuerdas.core :as str]
-   [goog.dom :as dom]
-   [promesa.core :as p]))
+    [app.common.exceptions :as ex]
+    [app.common.geom.point :as gpt]
+    [app.util.globals :as globals]
+    [app.util.object :as obj]
+    [cuerdas.core :as str]
+    [goog.dom :as dom]
+    [promesa.core :as p]))
 
 ;; --- Deprecated methods
 
@@ -45,6 +45,22 @@
   [title]
   (set! (.-title globals/document) title))
 
+(defn set-page-style
+  [style]
+  (let [head (first (.getElementsByTagName ^js globals/document "head"))
+        style-str (str/join "\n"
+                            (map (fn [[k v]]
+                                   (str (name k) ": " v ";"))
+                                 style))]
+    (.insertAdjacentHTML head "beforeend"
+                         (str "<style>"
+                              "  @page {" style-str "}"
+                              "  html, body {"            ; Fix issue having Chromium to add random 1px marging at the bottom
+                              "    overflow: hidden;"     ; https://github.com/puppeteer/puppeteer/issues/2278#issuecomment-410381934
+                              "    font-size: 0;"
+                              "  }"
+                              "</style>"))))
+
 (defn get-element-by-class
   ([classname]
    (dom/getElementByClass classname))
@@ -74,6 +90,12 @@
   [event]
   (.-target event))
 
+(defn get-current-target
+  "Extract the current target from event instance (different from target
+   when event triggered in a child of the suscribing element)."
+  [event]
+  (.-currentTarget event))
+
 (defn get-parent
   [dom]
   (.-parentElement ^js dom))
@@ -86,7 +108,7 @@
 (defn get-attribute
   "Extract the value of one attribute of a dom node."
   [node attr-name]
-  (.getAttribute node attr-name))
+  (.getAttribute ^js node attr-name))
 
 (def get-target-val (comp get-value get-target))
 
@@ -211,7 +233,13 @@
 
 (defn focus!
   [node]
-  (.focus node))
+  (when (some? node)
+    (.focus node)))
+
+(defn blur!
+  [node]
+  (when (some? node)
+    (.blur node)))
 
 (defn fullscreen?
   []
@@ -275,8 +303,11 @@
 (defn get-user-agent []
   (.-userAgent globals/navigator))
 
+(defn get-active []
+  (.-activeElement globals/document))
+
 (defn active? [node]
-  (= (.-activeElement globals/document) node))
+  (= (get-active) node))
 
 (defn get-data [^js node ^string attr]
   (.getAttribute node (str "data-" attr)))
@@ -359,3 +390,7 @@
                  (trigger-download-uri filename mtype uri)))))
 
     (trigger-download-uri filename mtype uri)))
+
+(defn left-mouse? [bevent]
+  (let [event  (.-nativeEvent ^js bevent)]
+    (= 1 (.-which event))))

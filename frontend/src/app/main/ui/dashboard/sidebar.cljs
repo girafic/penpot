@@ -8,8 +8,9 @@
   (:require
    [app.common.data :as d]
    [app.common.spec :as us]
-   [app.config :as cfg]
+   [app.config :as cf]
    [app.main.data.dashboard :as dd]
+   [app.main.data.events :as ev]
    [app.main.data.messages :as dm]
    [app.main.data.modal :as modal]
    [app.main.data.users :as du]
@@ -69,7 +70,8 @@
         (mf/use-callback
          (mf/deps item)
          (fn [name]
-           (st/emit! (dd/rename-project (assoc item :name name)))
+           (st/emit! (-> (dd/rename-project (assoc item :name name))
+                         (with-meta {::ev/origin "dashboard:sidebar"})))
            (swap! local assoc :edition? false)))
 
         on-drag-enter
@@ -214,7 +216,7 @@
        [:* {:key (:id team)}
         [:li.team-name {:on-click (partial team-selected (:id team))}
          [:span.team-icon
-          [:img {:src (cfg/resolve-team-photo-url team)}]]
+          [:img {:src (cf/resolve-team-photo-url team)}]]
          [:span.team-text {:title (:name team)} (:name team)]]])
 
      [:hr]
@@ -358,7 +360,7 @@
           [:span.team-text (tr "dashboard.default-team-name")]]
          [:div.team-name
           [:span.team-icon
-           [:img {:src (cfg/resolve-team-photo-url team)}]]
+           [:img {:src (cf/resolve-team-photo-url team)}]]
           [:span.team-text {:title (:name team)} (:name team)]])
 
        [:span.switch-icon
@@ -468,7 +470,7 @@
 (mf/defc profile-section
   [{:keys [profile team] :as props}]
   (let [show  (mf/use-state false)
-        photo (cfg/resolve-profile-photo-url profile)
+        photo (cf/resolve-profile-photo-url profile)
 
         on-click
         (mf/use-callback
@@ -496,7 +498,7 @@
         [:span.icon i/exit]
         [:span.text (tr "labels.logout")]]
 
-       (when cfg/feedback-enabled
+       (when (contains? @cf/flags :user-feedback)
          [:li.feedback {:on-click (partial on-click :settings-feedback)}
           [:span.icon i/msg-info]
           [:span.text (tr "labels.give-feedback")]

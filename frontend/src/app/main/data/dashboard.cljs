@@ -9,6 +9,7 @@
    [app.common.data :as d]
    [app.common.spec :as us]
    [app.common.uuid :as uuid]
+   [app.main.data.events :as ev]
    [app.main.data.fonts :as df]
    [app.main.data.media :as di]
    [app.main.data.users :as du]
@@ -66,6 +67,7 @@
   (ptk/reify ::initialize
     ptk/UpdateEvent
     (update [_ state]
+      (du/set-current-team! id)
       (let [prev-team-id (:current-team-id state)]
         (cond-> state
           (not= prev-team-id id)
@@ -386,6 +388,9 @@
   (us/assert ::us/email email)
   (us/assert ::us/keyword role)
   (ptk/reify ::invite-team-member
+    IDeref
+    (-deref [_] {:role role})
+
     ptk/WatchEvent
     (watch [_ state _]
       (let [{:keys [on-success on-error]
@@ -475,6 +480,10 @@
   (us/assert ::us/uuid id)
   (us/assert ::us/uuid team-id)
   (ptk/reify ::move-project
+    IDeref
+    (-deref [_]
+      {:id id :team-id team-id})
+
     ptk/WatchEvent
     (watch [_ _ _]
       (let [{:keys [on-success on-error]
@@ -566,6 +575,10 @@
   [{:keys [id name] :as params}]
   (us/assert ::file params)
   (ptk/reify ::rename-file
+    IDeref
+    (-deref [_]
+      {::ev/origin "dashboard" :id id :name name})
+
     ptk/UpdateEvent
     (update [_ state]
       (-> state
@@ -585,6 +598,10 @@
   [{:keys [id is-shared] :as params}]
   (us/assert ::file params)
   (ptk/reify ::set-file-shared
+    IDeref
+    (-deref [_]
+      {::ev/origin "dashboard" :id id :shared is-shared})
+
     ptk/UpdateEvent
     (update [_ state]
       (-> state
@@ -663,12 +680,16 @@
   (us/assert ::set-of-uuid ids)
   (us/assert ::us/uuid project-id)
   (ptk/reify ::move-files
+    IDeref
+    (-deref [_]
+      {:num-files (count ids)
+       :project-id project-id})
+
     ptk/WatchEvent
     (watch [_ _ _]
       (let [{:keys [on-success on-error]
              :or {on-success identity
                   on-error rx/throw}} (meta params)]
-
         (->> (rp/mutation! :move-files {:ids ids :project-id project-id})
              (rx/tap on-success)
              (rx/catch on-error))))))
@@ -690,14 +711,14 @@
 
 (defn go-to-files
   ([project-id]
-   (ptk/reify ::go-to-files
+   (ptk/reify ::go-to-files-1
      ptk/WatchEvent
      (watch [_ state _]
        (let [team-id (:current-team-id state)]
          (rx/of (rt/nav :dashboard-files {:team-id team-id
                                           :project-id project-id}))))))
   ([team-id project-id]
-   (ptk/reify ::go-to-files
+   (ptk/reify ::go-to-files-2
      ptk/WatchEvent
      (watch [_ _ _]
        (rx/of (rt/nav :dashboard-files {:team-id team-id
@@ -719,16 +740,15 @@
 
 (defn go-to-projects
   ([]
-   (ptk/reify ::go-to-projects
+   (ptk/reify ::go-to-projects-0
      ptk/WatchEvent
      (watch [_ state _]
        (let [team-id (:current-team-id state)]
          (rx/of (rt/nav :dashboard-projects {:team-id team-id}))))))
   ([team-id]
-   (ptk/reify ::go-to-projects
+   (ptk/reify ::go-to-projects-1
      ptk/WatchEvent
      (watch [_ _ _]
-       (du/set-current-team! team-id)
        (rx/of (rt/nav :dashboard-projects {:team-id team-id}))))))
 
 (defn go-to-team-members

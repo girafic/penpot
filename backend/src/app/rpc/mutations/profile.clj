@@ -9,12 +9,13 @@
    [app.common.exceptions :as ex]
    [app.common.spec :as us]
    [app.common.uuid :as uuid]
-   [app.config :as cfg]
+   [app.config :as cf]
    [app.db :as db]
    [app.emails :as eml]
    [app.http.oauth :refer [extract-props]]
    [app.loggers.audit :as audit]
    [app.media :as media]
+   [app.metrics :as mtx]
    [app.rpc.mutations.projects :as projects]
    [app.rpc.mutations.teams :as teams]
    [app.rpc.queries.profile :as profile]
@@ -85,6 +86,11 @@
       {:update false
        :valid false})))
 
+(defn decode-profile-row
+  [{:keys [props] :as profile}]
+  (cond-> profile
+    (db/pgobject? props "jsonb")
+    (assoc :props (db/decode-transit-pgobject props))))
 
 ;; --- MUTATION: Prepare Register
 
@@ -94,11 +100,10 @@
 
 (sv/defmethod ::prepare-register-profile {:auth false}
   [{:keys [pool tokens] :as cfg} params]
-  (when-not (cfg/get :registration-enabled)
+  (when-not (contains? cf/flags :registration)
     (ex/raise :type :restriction
               :code :registration-disabled))
-
-  (when-let [domains (cfg/get :registration-domain-whitelist)]
+  (when-let [domains (cf/get :registration-domain-whitelist)]
     (when-not (email-domain-in-whitelist? domains (:email params))
       (ex/raise :type :validation
                 :code :email-domain-is-not-allowed)))
@@ -145,7 +150,8 @@
   transaction is completed."
   [metrics]
   (fn []
-    ((get-in metrics [:definitions :profile-register]) :inc)))
+    (let [mobj (get-in metrics [:definitions :profile-register])]
+      ((::mtx/fn mobj) {:by 1}))))
 
 (defn register-profile
   [{:keys [conn tokens session metrics] :as cfg} {:keys [token] :as params}]
@@ -154,8 +160,8 @@
     (check-profile-existence! conn params)
     (let [profile (->> params
                        (create-profile conn)
-                       (create-profile-relations conn))]
-
+                       (create-profile-relations conn)
+                       (decode-profile-row))]
       (sid/load-initial-project! conn profile)
 
       (cond
@@ -174,7 +180,7 @@
           (with-meta resp
             {:transform-response ((:create session) (:id profile))
              :before-complete (annotate-profile-register metrics)
-             ::audit/props (:props profile)
+             ::audit/props (audit/profile->props profile)
              ::audit/profile-id (:id profile)}))
 
         ;; If auth backend is different from "penpot" means user is
@@ -184,7 +190,7 @@
         (with-meta (profile/strip-private-attrs profile)
           {:transform-response ((:create session) (:id profile))
            :before-complete (annotate-profile-register metrics)
-           ::audit/props (:props profile)
+           ::audit/props (audit/profile->props profile)
            ::audit/profile-id (:id profile)})
 
         ;; In all other cases, send a verification email.
@@ -208,7 +214,7 @@
 
           (with-meta profile
             {:before-complete (annotate-profile-register metrics)
-             ::audit/props (:props profile)
+             ::audit/props (audit/profile->props profile)
              ::audit/profile-id (:id profile)}))))))
 
 (defn create-profile
@@ -249,7 +255,7 @@
                    :is-demo is-demo}]
     (try
       (-> (db/insert! conn :profile params)
-          (update :props db/decode-transit-pgobject))
+          (decode-profile-row))
       (catch org.postgresql.util.PSQLException e
         (let [state (.getSQLState e)]
           (if (not= state "23505")
@@ -314,8 +320,8 @@
       (let [profile (->> (profile/retrieve-profile-data-by-email conn email)
                          (validate-profile)
                          (profile/strip-private-attrs)
-                         (profile/populate-additional-data conn))
-            profile (update profile :props db/decode-transit-pgobject)]
+                         (profile/populate-additional-data conn)
+                         (decode-profile-row))]
         (if-let [token (:invitation-token params)]
           ;; If the request comes with an invitation token, this means
           ;; that user wants to accept it with different user. A very
@@ -330,10 +336,12 @@
                 token  (tokens :generate claims)]
             (with-meta {:invitation-token token}
               {:transform-response ((:create session) (:id profile))
+               ::audit/props (audit/profile->props profile)
                ::audit/profile-id (:id profile)}))
 
           (with-meta profile
             {:transform-response ((:create session) (:id profile))
+             ::audit/props (audit/profile->props profile)
              ::audit/profile-id (:id profile)}))))))
 
 ;; --- MUTATION: Logout
@@ -395,6 +403,7 @@
               {:password (derive-password password)}
               {:id id}))
 
+
 ;; --- MUTATION: Update Photo
 
 (declare update-profile-photo)
@@ -409,11 +418,13 @@
   [{:keys [pool storage] :as cfg} {:keys [profile-id file] :as params}]
   (db/with-atomic [conn pool]
     (media/validate-media-type (:content-type file) #{"image/jpeg" "image/png" "image/webp"})
+    (media/run cfg {:cmd :info :input {:path (:tempfile file)
+                                       :mtype (:content-type file)}})
+
     (let [profile (db/get-by-id conn :profile profile-id)
-          _       (media/run cfg {:cmd :info :input {:path (:tempfile file)
-                                                     :mtype (:content-type file)}})
-          photo   (teams/upload-photo cfg params)
-          storage (assoc storage :conn conn)]
+          storage (media/configure-assets-storage storage conn)
+          cfg     (assoc cfg :storage storage)
+          photo   (teams/upload-photo cfg params)]
 
       ;; Schedule deletion of old photo
       (when-let [id (:photo-id profile)]
@@ -446,7 +457,8 @@
           params  (assoc params
                          :profile profile
                          :email (str/lower email))]
-      (if (cfg/get :smtp-enabled)
+      (if (or (cf/get :smtp-enabled)
+              (contains? cf/flags :smtp))
         (request-email-change cfg params)
         (change-email-inmediatelly cfg params)))))
 

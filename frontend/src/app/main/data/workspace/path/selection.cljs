@@ -48,7 +48,7 @@
     (update [_ state]
       (let [selrect (get-in state [:workspace-local :selrect])
             id (get-in state [:workspace-local :edition])
-            content (get-in state (st/get-path state :content))
+            content (st/get-path state :content)
             selected-point? #(gsh/has-point-rect? selrect %)
             selected-points (get-in state [:workspace-local :edit-path id :selected-points])
             positions (into (if shift? selected-points #{})
@@ -101,12 +101,12 @@
     (update [_ state]
       (update state :workspace-local dissoc :selrect))))
 
-(defn handle-selection
+(defn handle-area-selection
   [shift?]
   (letfn [(valid-rect? [{width :width height :height}]
             (or (> width 10) (> height 10)))]
 
-    (ptk/reify ::handle-selection
+    (ptk/reify ::handle-area-selection
       ptk/WatchEvent
       (watch [_ _ stream]
         (let [stop? (fn [event] (or (dwc/interrupt? event) (ms/mouse-up? event)))

@@ -9,6 +9,7 @@
   "A collection of derived refs."
   (:require
    [app.common.data :as d]
+   [app.common.geom.shapes :as gsh]
    [app.common.pages :as cp]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.store :as st]
@@ -36,6 +37,9 @@
 
 (def threads-ref
   (l/derived :comment-threads st/state))
+
+(def share-links
+  (l/derived :share-links st/state))
 
 ;; ---- Dashboard refs
 
@@ -109,6 +113,7 @@
                               :edit-path
                               :tooltip
                               :panning
+                              :zooming
                               :picking-color?
                               :transform
                               :hover
@@ -239,7 +244,7 @@
                       modifiers (:workspace-modifiers state)
                       objects (cond-> objects
                                 with-modifiers?
-                                (cp/merge-modifiers modifiers))
+                                (gsh/merge-modifiers modifiers))
                       xform (comp (map #(get objects %))
                                   (remove nil?))]
                   (into [] xform ids)))
@@ -285,8 +290,17 @@
 
 ;; ---- Viewer refs
 
+(def viewer-file
+  (l/derived :viewer-file st/state))
+
+(def viewer-project
+  (l/derived :viewer-file st/state))
+
 (def viewer-data
-  (l/derived :viewer-data st/state))
+  (l/derived :viewer st/state))
+
+(def viewer-state
+  (l/derived :viewer st/state))
 
 (def viewer-local
   (l/derived :viewer-local st/state))

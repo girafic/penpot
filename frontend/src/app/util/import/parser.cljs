@@ -73,8 +73,10 @@
 
 (defn get-id
   [node]
-  (when-let [id (re-find uuid-regex (get-in node [:attrs :id]))]
-    (uuid/uuid id)))
+  (let [attr-id (get-in node [:attrs :id])
+        id (when (string? attr-id) (re-find uuid-regex attr-id))]
+    (when (some? id)
+      (uuid/uuid id))))
 
 (defn str->bool
   [val]
@@ -158,6 +160,27 @@
 
     (d/deep-mapm (comp camelize fix-style) m)))
 
+(defn string->uuid
+  "Looks in a map for keys or values that have uuid shape and converts them
+  into uuid objects"
+  [m]
+  (letfn [(convert [value]
+            (cond
+              (and (string? value) (re-matches uuid-regex value))
+              (uuid/uuid value)
+
+              (and (keyword? value) (re-matches uuid-regex (d/name value)))
+              (uuid/uuid (d/name value))
+
+              (vector? value)
+              (mapv convert value)
+
+              :else
+              value))]
+    (->> m
+         (d/deep-mapm
+          (fn [pair] (->> pair (mapv convert)))))))
+
 (def search-data-node? #{:rect :image :path :text :circle})
 
 (defn get-svg-data
@@ -178,7 +201,13 @@
         (merge (add-attrs {} (:attrs svg-node)) node-attrs))
 
       (= type :svg-raw)
-      (->> node :content last)
+      (let [svg-content (get-data node :penpot:svg-content)
+            tag (-> svg-content :attrs :penpot:tag keyword)
+
+            svg-node (if (= :svg tag)
+                       (->> node :content last :content last)
+                       (->> node :content last))]
+        (merge (add-attrs {} (:attrs svg-node)) node-attrs))
 
       :else
       node-attrs)))
@@ -344,7 +373,9 @@
         stroke-alignment (get-meta node :stroke-alignment keyword)
         stroke (:stroke svg-data)
         gradient (when (str/starts-with? stroke "url")
-                   (parse-gradient node stroke))]
+                   (parse-gradient node stroke))
+        stroke-cap-start (get-meta node :stroke-cap-start keyword)
+        stroke-cap-end (get-meta node :stroke-cap-end keyword)]
 
     (cond-> props
       :always
@@ -360,7 +391,13 @@
              :stroke-opacity nil)
 
       (= stroke-alignment :inner)
-      (update :stroke-width / 2))))
+      (update :stroke-width / 2)
+
+      (some? stroke-cap-start)
+      (assoc :stroke-cap-start stroke-cap-start)
+
+      (some? stroke-cap-end)
+      (assoc :stroke-cap-end stroke-cap-end))))
 
 (defn add-rect-data
   [props node svg-data]
@@ -397,7 +434,7 @@
   [props node]
   (-> props
       (assoc :grow-type (get-meta node :grow-type keyword))
-      (assoc :content   (get-meta node :content json/decode))))
+      (assoc :content   (get-meta node :content (comp string->uuid json/decode)))))
 
 (defn add-group-data
   [props node]
@@ -605,6 +642,37 @@
         svg-data (or image-data pattern-data)]
     (:xlink:href svg-data)))
 
+(defn add-library-refs
+  [props node]
+
+  (let [fill-color-ref-id     (get-meta node :fill-color-ref-id uuid/uuid)
+        fill-color-ref-file   (get-meta node :fill-color-ref-file uuid/uuid)
+        stroke-color-ref-id   (get-meta node :stroke-color-ref-id uuid/uuid)
+        stroke-color-ref-file (get-meta node :stroke-color-ref-file uuid/uuid)
+        component-id          (get-meta node :component-id uuid/uuid)
+        component-file        (get-meta node :component-file uuid/uuid)
+        shape-ref             (get-meta node :shape-ref uuid/uuid)
+        component-root?       (get-meta node :component-root str->bool)]
+
+    (cond-> props
+      (some? fill-color-ref-id)
+      (assoc :fill-color-ref-id fill-color-ref-id
+             :fill-color-ref-file fill-color-ref-file)
+
+      (some? stroke-color-ref-id)
+      (assoc :stroke-color-ref-id stroke-color-ref-id
+             :stroke-color-ref-file stroke-color-ref-file)
+
+      (some? component-id)
+      (assoc :component-id component-id
+             :component-file component-file)
+
+      component-root?
+      (assoc :component-root? component-root?)
+
+      (some? shape-ref)
+      (assoc :shape-ref shape-ref))))
+
 (defn parse-data
   [type node]
 
@@ -620,6 +688,7 @@
           (add-blur node)
           (add-exports node)
           (add-svg-attrs node svg-data)
+          (add-library-refs node)
 
           (cond-> (= :svg-raw type)
             (add-svg-content node))
@@ -661,3 +730,4 @@
                  {:destination (get-meta node :destination uuid/uuid)
                   :action-type (get-meta node :action-type keyword)
                   :event-type  (get-meta node :event-type keyword)})))))
+

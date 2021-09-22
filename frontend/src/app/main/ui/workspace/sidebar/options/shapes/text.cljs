@@ -10,7 +10,8 @@
    [app.main.data.workspace.texts :as dwt]
    [app.main.refs :as refs]
    [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-menu]]
-   [app.main.ui.workspace.sidebar.options.menus.fill :refer [fill-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.constraints :refer [constraint-attrs constraints-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.fill :refer [fill-menu fill-attrs]]
    [app.main.ui.workspace.sidebar.options.menus.layer :refer [layer-attrs layer-menu]]
    [app.main.ui.workspace.sidebar.options.menus.measures :refer [measure-attrs measures-menu]]
    [app.main.ui.workspace.sidebar.options.menus.shadow :refer [shadow-menu]]
@@ -41,6 +42,7 @@
 
         text-values (d/merge
                      (select-keys shape [:grow-type])
+                     (select-keys shape fill-attrs)
                      (dwt/current-root-values
                       {:shape shape
                        :attrs root-attrs})
@@ -59,6 +61,10 @@
       {:ids ids
        :type type
        :values (select-keys shape measure-attrs)}]
+
+     [:& constraints-menu
+      {:ids ids
+       :values (select-keys shape constraint-attrs)}]
 
      [:& layer-menu {:ids ids
                      :type type

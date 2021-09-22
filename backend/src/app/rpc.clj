@@ -89,12 +89,6 @@
         (rlm/execute rlinst (f cfg params))))
     f))
 
-(defn- parse-client-ip
-  [{:keys [headers] :as request}]
-  (or (some-> (get headers "x-forwarded-for") (str/split ",") first)
-      (get headers "x-real-ip")
-      (get request :remote-addr)))
-
 (defn- wrap-impl
   [{:keys [audit] :as cfg} f mdata]
   (let [f      (wrap-with-rlimits cfg f mdata)
@@ -123,13 +117,14 @@
                 profile-id (or (:profile-id params')
                                (:profile-id result)
                                (::audit/profile-id resultm))
-                props      (d/merge params (::audit/props resultm))]
-            (audit :submit {:type (::type cfg)
-                            :name (or (::audit/name resultm)
-                                      (::sv/name mdata))
-                            :profile-id profile-id
-                            :ip-addr (parse-client-ip request)
-                            :props props})))
+                props      (d/merge params' (::audit/props resultm))]
+            (audit :cmd :submit
+                   :type (::type cfg)
+                   :name (or (::audit/name resultm)
+                             (::sv/name mdata))
+                   :profile-id profile-id
+                   :ip-addr (audit/parse-client-ip request)
+                   :props props)))
 
         result))))
 
@@ -180,6 +175,7 @@
                      'app.rpc.mutations.management
                      'app.rpc.mutations.ldap
                      'app.rpc.mutations.fonts
+                     'app.rpc.mutations.share-link
                      'app.rpc.mutations.verify-token)
          (map (partial process-method cfg))
          (into {}))))
