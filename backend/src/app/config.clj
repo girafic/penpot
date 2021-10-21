@@ -83,8 +83,7 @@
    :ldap-attrs-photo "jpegPhoto"
 
    ;; a server prop key where initial project is stored.
-   :initial-project-skey "initial-project"
-   })
+   :initial-project-skey "initial-project"})
 
 (s/def ::flags ::us/words)
 
@@ -270,8 +269,9 @@
                    ::tenant]))
 
 (defn- parse-flags
-  [{:keys [flags]}]
-  (flags/parse flags flags/default))
+  [config]
+  (-> (:flags config)
+      (flags/parse flags/default)))
 
 (defn read-env
   [prefix]

@@ -167,6 +167,12 @@ msgstr ""
 "Al crear una nueva cuenta, aceptas nuestros términos de servicio y política "
 "de privacidad."
 
+msgid "auth.terms-of-service"
+msgstr "Terminos de servicio"
+
+msgid "auth.privacy-policy"
+msgstr "Política de privacidad"
+
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.verification-email-sent"
 msgstr "Hemos enviado un email de verificación a"
@@ -324,6 +330,30 @@ msgstr "Hubo un problema importando el fichero. No se ha creado el fichero."
 
 msgid "dashboard.import.import-message"
 msgstr "%s ficheros han sido importados con éxito."
+
+msgid "dashboard.import.import-message"
+msgstr "%s files have been imported succesfully."
+
+msgid "dashboard.import.progress.upload-data"
+msgstr "Enviando datos al servidor (%s/%s)"
+
+msgid "dashboard.import.progress.upload-media"
+msgstr "Enviando fichero: %s"
+
+msgid "dashboard.import.progress.process-page"
+msgstr "Procesando página: %s"
+
+msgid "dashboard.import.progress.process-colors"
+msgstr "Procesando colores"
+
+msgid "dashboard.import.progress.process-typographies"
+msgstr "Procesando tipografías"
+
+msgid "dashboard.import.progress.process-media"
+msgstr "Procesando media"
+
+msgid "dashboard.import.progress.process-components"
+msgstr "Procesando componentes"
 
 #: src/app/main/ui/dashboard/team.cljs
 msgid "dashboard.invite-profile"
@@ -2285,8 +2315,24 @@ msgid "workspace.options.add-interaction"
 msgstr "Pulsa el botón + para añadir interacciones."
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.flows.add-flow-start"
+msgstr "Añadir inicio de flujo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.flows.flow-start"
+msgstr "Inicio de flujo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.flows.flow-starts"
+msgstr "Inicios de flujo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-action"
 msgstr "Acción"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-after-delay"
+msgstr "Tiempo"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-background"
@@ -2298,39 +2344,75 @@ msgstr "Cerrar al pulsar fuera"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-close-overlay"
-msgstr "Close overlay"
+msgstr "Cerrar superposición"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-close-overlay-dest"
-msgstr "Close overlay: %s"
+msgstr "Cerrar superposición: %s"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-destination"
 msgstr "Destino"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-delay"
+msgstr "Tiempo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-mouse-enter"
+msgstr "Pasar encima"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-mouse-leave"
+msgstr "Retirar encima"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-ms"
+msgstr "ms"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-navigate-to"
-msgstr "Navigate to"
+msgstr "Navegar a"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-navigate-to-dest"
-msgstr "Navigate to: %s"
+msgstr "Navegar a: %s"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-none"
-msgstr "none"
+msgstr "(sin definir)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-on-click"
-msgstr "On Click"
+msgstr "En click"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-open-overlay"
-msgstr "Open overlay"
+msgstr "Superposición"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-open-url"
+msgstr "Abrir url"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-prev-screen"
+msgstr "Pantalla anterior"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-toggle-overlay"
+msgstr "Alternar superpos."
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-open-overlay-dest"
-msgstr "Open overlay: %s"
+msgstr "Superposición: %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-toggle-overlay-dest"
+msgstr "Alternar superpos.: %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-url"
+msgstr "URL"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-pos-manual"
@@ -2370,15 +2452,19 @@ msgstr "Posición"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-self"
-msgstr "self"
+msgstr "mismo"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-trigger"
-msgstr "Trigger"
+msgstr "Disparador"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-while-hovering"
-msgstr "While Hovering"
+msgstr "Mientras pasa encima"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-while-pressing"
+msgstr "Mientras pulsa"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interactions"
@@ -2677,6 +2763,10 @@ msgstr "Cortar"
 msgid "workspace.shape.menu.delete"
 msgstr "Eliminar"
 
+#: src/app/main/ui/workspace/context_menu.cljs
+msgid "workspace.shape.menu.delete-flow-start"
+msgstr "Eliminar inicio de flujo"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/component.cljs, src/app/main/ui/workspace/sidebar/options/menus/component.cljs, src/app/main/ui/workspace/context_menu.cljs, src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.detach-instance"
 msgstr "Desacoplar instancia"
@@ -2696,6 +2786,10 @@ msgstr "Voltear horizontal"
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.flip-vertical"
 msgstr "Voltear vertical"
+
+#: src/app/main/ui/workspace/context_menu.cljs
+msgid "workspace.shape.menu.flow-start"
+msgstr "Inicio de flujo"
 
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.forward"
@@ -2956,3 +3050,27 @@ msgstr "¡Lo sentimos!"
 
 msgid "viewer.breaking-change.description"
 msgstr "Este link compartido ya no funciona. Crea uno nuevo o pídelo a la persona que lo creó."
+
+msgid "workspace.shape.menu.path"
+msgstr "Path"
+
+msgid "workspace.shape.menu.union"
+msgstr "Unión"
+
+msgid "workspace.shape.menu.difference"
+msgstr "Diferencia"
+
+msgid "workspace.shape.menu.intersection"
+msgstr "Intersección"
+
+msgid "workspace.shape.menu.exclude"
+msgstr "Exclusión"
+
+msgid "workspace.shape.menu.flatten"
+msgstr "Aplanar"
+
+msgid "workspace.shape.menu.transform-to-path"
+msgstr "Convertir en vector"
+
+msgid "workspace.options.search-font"
+msgstr "Buscar fuente"

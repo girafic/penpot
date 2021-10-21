@@ -6,16 +6,14 @@
 
 (ns app.main.ui
   (:require
-   [app.common.spec :as us]
-   [app.config :as cf]
    [app.main.refs :as refs]
+   [app.main.store :as st]
    [app.main.ui.auth :refer [auth]]
    [app.main.ui.auth.verify-token :refer [verify-token]]
    [app.main.ui.components.fullscreen :as fs]
    [app.main.ui.context :as ctx]
    [app.main.ui.cursors :as c]
    [app.main.ui.dashboard :refer [dashboard]]
-   [app.main.ui.errors]
    [app.main.ui.icons :as i]
    [app.main.ui.messages :as msgs]
    [app.main.ui.onboarding]
@@ -24,73 +22,12 @@
    [app.main.ui.static :as static]
    [app.main.ui.viewer :as viewer]
    [app.main.ui.workspace :as workspace]
-   [cljs.spec.alpha :as s]
-   [potok.core :as ptk]
+   [app.util.router :as rt]
    [rumext.alpha :as mf]))
-
-;; --- Routes
-
-(s/def ::page-id ::us/uuid)
-(s/def ::file-id ::us/uuid)
-(s/def ::section ::us/keyword)
-(s/def ::index ::us/integer)
-(s/def ::token (s/nilable ::us/not-empty-string))
-(s/def ::share-id ::us/uuid)
-
-(s/def ::viewer-path-params
-  (s/keys :req-un [::file-id]))
-
-(s/def ::viewer-query-params
-  (s/keys :req-un [::index]
-          :opt-un [::share-id ::section ::page-id]))
-
-(def routes
-  [["/auth"
-    ["/login"            :auth-login]
-    (when (contains? @cf/flags :registration)
-      ["/register"         :auth-register])
-    (when (contains? @cf/flags :registration)
-      ["/register/validate" :auth-register-validate])
-    (when (contains? @cf/flags :registration)
-      ["/register/success" :auth-register-success])
-    ["/recovery/request" :auth-recovery-request]
-    ["/recovery"         :auth-recovery]
-    ["/verify-token"     :auth-verify-token]]
-
-   ["/settings"
-    ["/profile"  :settings-profile]
-    ["/password" :settings-password]
-    ["/feedback" :settings-feedback]
-    ["/options"  :settings-options]]
-
-   ["/view/:file-id"
-    {:name :viewer
-     :conform
-     {:path-params ::viewer-path-params
-      :query-params ::viewer-query-params}}]
-
-   (when *assert*
-     ["/debug/icons-preview" :debug-icons-preview])
-
-   ;; Used for export
-   ["/render-object/:file-id/:page-id/:object-id" :render-object]
-   ["/render-sprite/:file-id" :render-sprite]
-
-   ["/dashboard/team/:team-id"
-    ["/members"              :dashboard-team-members]
-    ["/settings"             :dashboard-team-settings]
-    ["/projects"             :dashboard-projects]
-    ["/search"               :dashboard-search]
-    ["/fonts"                :dashboard-fonts]
-    ["/fonts/providers"      :dashboard-font-providers]
-    ["/libraries"            :dashboard-libraries]
-    ["/projects/:project-id" :dashboard-files]]
-
-   ["/workspace/:project-id/:file-id" :workspace]])
 
 (mf/defc on-main-error
   [{:keys [error] :as props}]
-  (mf/use-effect #(ptk/handle-error error))
+  (mf/use-effect (st/emitf (rt/assign-exception error)))
   [:span "Internal application errror"])
 
 (mf/defc main-page
@@ -153,12 +90,14 @@
 
        :render-object
        (do
-         (let [file-id   (uuid (get-in route [:path-params :file-id]))
-               page-id   (uuid (get-in route [:path-params :page-id]))
-               object-id (uuid (get-in route [:path-params :object-id]))]
+         (let [file-id      (uuid (get-in route [:path-params :file-id]))
+               page-id      (uuid (get-in route [:path-params :page-id]))
+               object-id    (uuid (get-in route [:path-params :object-id]))
+               render-texts (get-in route [:query-params :render-texts])]
            [:& render/render-object {:file-id file-id
                                      :page-id page-id
-                                     :object-id object-id}]))
+                                     :object-id object-id
+                                     :render-texts? (and (some? render-texts) (= render-texts "true"))}]))
 
        :render-sprite
        (do

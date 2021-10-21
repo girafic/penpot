@@ -6,6 +6,8 @@
 
 (ns app.main.ui.viewer
   (:require
+   [app.common.exceptions :as ex]
+   [app.common.geom.point :as gpt]
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.shortcuts :as sc]
@@ -37,13 +39,9 @@
   [{:keys [params data]}]
 
   (let [{:keys [page-id section index]} params
+        {:keys [file users project permissions]} data
 
         local   (mf/deref refs/viewer-local)
-
-        file    (:file data)
-        users   (:users data)
-        project (:project data)
-        perms   (:permissions data)
 
         page-id (or page-id (-> file :data :pages first))
 
@@ -60,6 +58,9 @@
                  (mf/deps frame zoom)
                  (fn [] (calculate-size frame zoom)))
 
+        interactions-mode
+        (:interactions-mode local)
+
         on-click
         (mf/use-callback
          (mf/deps section)
@@ -73,6 +74,9 @@
             (st/emit! (dv/close-overlay (:id frame)))))]
 
     (hooks/use-shortcuts ::viewer sc/shortcuts)
+
+    (when (nil? page)
+      (ex/raise :type :not-found))
 
     ;; Set the page title
     (mf/use-effect
@@ -97,8 +101,8 @@
                  :file file
                  :page page
                  :frame frame
-                 :permissions perms
-                 :zoom (:zoom local)
+                 :permissions permissions
+                 :zoom zoom
                  :section section}]
 
      [:div.viewer-content
@@ -139,11 +143,13 @@
 
             [:& interactions/viewport
              {:frame frame
+              :base-frame frame
+              :frame-offset (gpt/point 0 0)
               :size size
               :page page
               :file file
               :users users
-              :local local}]
+              :interactions-mode interactions-mode}]
 
             (for [overlay (:overlays local)]
               (let [size-over (calculate-size (:frame overlay) zoom)]
@@ -167,11 +173,13 @@
                            :top (* (:y (:position overlay)) zoom)}}
                   [:& interactions/viewport
                    {:frame (:frame overlay)
+                    :base-frame frame
+                    :frame-offset (:position overlay)
                     :size size-over
                     :page page
                     :file file
                     :users users
-                    :local local}]]]))]))]]]))
+                    :interactions-mode interactions-mode}]]]))]))]]]))
 
 ;; --- Component: Viewer Page
 

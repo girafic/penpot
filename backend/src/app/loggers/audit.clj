@@ -9,6 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.exceptions :as ex]
+   [app.common.logging :as l]
    [app.common.spec :as us]
    [app.common.transit :as t]
    [app.common.uuid :as uuid]
@@ -16,7 +17,6 @@
    [app.db :as db]
    [app.util.async :as aa]
    [app.util.http :as http]
-   [app.util.logging :as l]
    [app.util.time :as dt]
    [app.worker :as wrk]
    [clojure.core.async :as a]
@@ -36,6 +36,7 @@
   [profile]
   (-> profile
       (select-keys [:is-active :is-muted :auth-backend :email :default-team-id :default-project-id :fullname :lang])
+      (merge (:props profile))
       (d/without-nils)))
 
 (defn clean-props
@@ -116,9 +117,10 @@
                              (db/inet ip-addr)
                              (db/tjson (:props event))
                              (db/tjson (d/without-nils (:context event)))]))
-          events     (us/conform ::events events)
-          rows       (into [] prepare-xf events)]
-      (db/insert-multi! pool :audit-log columns rows))
+          events     (us/conform ::events events)]
+      (when (seq events)
+        (->> (into [] prepare-xf events)
+             (db/insert-multi! pool :audit-log columns))))
     (catch Throwable e
       (let [xdata (ex-data e)]
         (if (= :spec-validation (:code xdata))
@@ -229,7 +231,7 @@
   "select * from audit_log
     where archived_at is null
     order by created_at asc
-    limit 100
+    limit 1000
       for update skip locked;")
 
 (defn archive-events
@@ -270,11 +272,12 @@
                            :headers headers
                            :body body}
                   resp    (http/send! params)]
-              (when (not= (:status resp) 204)
-                (ex/raise :type :internal
-                          :code :unable-to-send-events
-                          :hint "unable to send events"
-                          :context resp))))
+              (if (= (:status resp) 204)
+                true
+                (do
+                  (l/warn :hint "unable to archive events"
+                          :resp-status (:status resp))
+                  false))))
 
           (mark-as-archived [conn rows]
             (db/exec-one! conn ["update audit_log set archived_at=now() where id = ANY(?)"
@@ -287,11 +290,9 @@
             xform  (comp (map decode-row)
                          (map row->event))
             events (into [] xform rows)]
-        (l/debug :action "archive-events" :uri uri :events (count events))
-        (if (empty? events)
-          :empty
-          (do
-            (send events)
+        (when-not (empty? events)
+          (l/debug :action "archive-events" :uri uri :events (count events))
+          (when (send events)
             (mark-as-archived conn rows)
             :continue))))))
 

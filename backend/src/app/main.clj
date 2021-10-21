@@ -6,8 +6,8 @@
 
 (ns app.main
   (:require
+   [app.common.logging :as l]
    [app.config :as cf]
-   [app.util.logging :as l]
    [app.util.time :as dt]
    [integrant.core :as ig]))
 
@@ -20,7 +20,7 @@
     :migrations (ig/ref :app.migrations/all)
     :name :main
     :min-pool-size 0
-    :max-pool-size 20}
+    :max-pool-size 30}
 
    :app.metrics/metrics
    {:definitions
@@ -43,8 +43,6 @@
      {:name "rpc_update_file_bytes_processed_total"
       :help "A total number of bytes processed by update-file."
       :type :counter}}}
-
-
 
    :app.migrations/all
    {:main (ig/ref :app.migrations/migrations)}
@@ -211,11 +209,11 @@
         :task :file-offload})
 
      (when (contains? cf/flags :audit-log-archive)
-       {:cron #app/cron "0 0 * * * ?" ;; every 1h
+       {:cron #app/cron "0 */3 * * * ?" ;; every 3m
         :task :audit-log-archive})
 
      (when (contains? cf/flags :audit-log-gc)
-       {:cron #app/cron "0 0 * * * ?" ;; every 1h
+       {:cron #app/cron "0 0 0 * * ?" ;; daily
         :task :audit-log-gc})
 
      (when (or (contains? cf/flags :telemetry)
@@ -228,8 +226,6 @@
     :tasks
     {:sendmail           (ig/ref :app.emails/sendmail-handler)
      :objects-gc         (ig/ref :app.tasks.objects-gc/handler)
-     :delete-object      (ig/ref :app.tasks.delete-object/handler)
-     :delete-profile     (ig/ref :app.tasks.delete-profile/handler)
      :file-media-gc      (ig/ref :app.tasks.file-media-gc/handler)
      :file-xlog-gc       (ig/ref :app.tasks.file-xlog-gc/handler)
      :storage-deleted-gc (ig/ref :app.storage/gc-deleted-task)
@@ -257,17 +253,10 @@
    {:pool    (ig/ref :app.db/pool)
     :max-age cf/deletion-delay}
 
-   :app.tasks.delete-object/handler
-   {:pool    (ig/ref :app.db/pool)
-    :storage (ig/ref :app.storage/storage)}
-
    :app.tasks.objects-gc/handler
    {:pool    (ig/ref :app.db/pool)
     :storage (ig/ref :app.storage/storage)
     :max-age cf/deletion-delay}
-
-   :app.tasks.delete-profile/handler
-   {:pool    (ig/ref :app.db/pool)}
 
    :app.tasks.file-media-gc/handler
    {:pool    (ig/ref :app.db/pool)

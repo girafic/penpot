@@ -111,6 +111,7 @@
                 (rx/of (df/fonts-fetched fonts)
                        (bundle-fetched (merge bundle params))))))))))
 
+(declare go-to-frame-auto)
 
 (defn bundle-fetched
   [{:keys [project file share-links libraries users permissions] :as bundle}]
@@ -130,7 +131,15 @@
                             :permissions permissions
                             :project project
                             :pages pages
-                            :file file}))))))
+                            :file file})))
+
+      ptk/WatchEvent
+      (watch [_ state _]
+        (let [route   (:route state)
+              qparams (:query-params route)
+              index   (:index qparams)]
+          (when (nil? index)
+            (rx/of (go-to-frame-auto))))))))
 
 (defn fetch-comment-threads
   [{:keys [file-id page-id] :as params}]
@@ -219,6 +228,12 @@
     (update [_ state]
       (update-in state [:viewer-local :show-thumbnails] not))))
 
+(def close-thumbnails-panel
+  (ptk/reify ::close-thumbnails-panel
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:viewer-local :show-thumbnails] false))))
+
 (def select-prev-frame
   (ptk/reify ::select-prev-frame
     ptk/WatchEvent
@@ -292,6 +307,10 @@
 (defn go-to-frame-by-index
   [index]
   (ptk/reify ::go-to-frame-by-index
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:viewer-local :overlays] []))
+
     ptk/WatchEvent
     (watch [_ state _]
       (let [route   (:route state)
@@ -304,6 +323,10 @@
   [frame-id]
   (us/verify ::us/uuid frame-id)
   (ptk/reify ::go-to-frame
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:viewer-local :overlays] []))
+
     ptk/WatchEvent
     (watch [_ state _]
       (let [route   (:route state)
@@ -315,9 +338,27 @@
         (when index
           (rx/of (go-to-frame-by-index index)))))))
 
+(defn go-to-frame-auto
+  []
+  (ptk/reify ::go-to-frame-auto
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [route   (:route state)
+            qparams (:query-params route)
+            page-id (:page-id qparams)
+            flows   (get-in state [:viewer :pages page-id :options :flows])]
+        (if (seq flows)
+          (let [frame-id (:starting-frame (first flows))]
+            (rx/of (go-to-frame frame-id)))
+          (rx/of (go-to-frame-by-index 0)))))))
+
 (defn go-to-section
   [section]
   (ptk/reify ::go-to-section
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:viewer-local :overlays] []))
+
     ptk/WatchEvent
     (watch [_ state _]
       (let [route   (:route state)
@@ -342,13 +383,38 @@
             frames   (get-in state [:viewer :pages page-id :frames])
             frame    (d/seek #(= (:id %) frame-id) frames)
             overlays (get-in state [:viewer-local :overlays])]
-        (if-not (some #(= % frame) overlays)
+        (if-not (some #(= (:frame %) frame) overlays)
           (update-in state [:viewer-local :overlays] conj 
                      {:frame frame
                       :position position
                       :close-click-outside close-click-outside
                       :background-overlay background-overlay})
           state)))))
+
+(defn toggle-overlay
+  [frame-id position close-click-outside background-overlay]
+  (us/verify ::us/uuid frame-id)
+  (us/verify ::us/point position)
+  (us/verify (s/nilable ::us/boolean) close-click-outside)
+  (us/verify (s/nilable ::us/boolean) background-overlay)
+  (ptk/reify ::toggle-overlay
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [route    (:route state)
+            qparams  (:query-params route)
+            page-id  (:page-id qparams)
+            frames   (get-in state [:viewer :pages page-id :frames])
+            frame    (d/seek #(= (:id %) frame-id) frames)
+            overlays (get-in state [:viewer-local :overlays])]
+        (if-not (some #(= (:frame %) frame) overlays)
+          (update-in state [:viewer-local :overlays] conj 
+                     {:frame frame
+                      :position position
+                      :close-click-outside close-click-outside
+                      :background-overlay background-overlay})
+          (update-in state [:viewer-local :overlays]
+                     (fn [overlays]
+                       (d/removev #(= (:id (:frame %)) frame-id) overlays))))))))
 
 (defn close-overlay
   [frame-id]
@@ -357,7 +423,7 @@
     (update [_ state]
       (update-in state [:viewer-local :overlays]
                  (fn [overlays]
-                   (remove #(= (:id (:frame %)) frame-id) overlays))))))
+                   (d/removev #(= (:id (:frame %)) frame-id) overlays))))))
 
 ;; --- Objects selection
 
@@ -448,6 +514,10 @@
 (defn go-to-page
   [page-id]
   (ptk/reify ::go-to-page
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:viewer-local :overlays] []))
+
     ptk/WatchEvent
      (watch [_ state _]
        (let [route   (:route state)

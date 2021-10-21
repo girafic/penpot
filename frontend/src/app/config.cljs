@@ -93,7 +93,8 @@
   (when (false? registration)
     (swap! flags disj :registration)))
 
-(def public-uri
+(defn get-public-uri
+  []
   (let [uri (u/uri (or (obj/get global "penpotPublicURI")
                        (.-origin ^js location)))]
     ;; Ensure that the path always ends with "/"; this ensures that
@@ -102,9 +103,7 @@
       (not (str/ends-with? (:path uri) "/"))
       (update :path #(str % "/")))))
 
-(when (= :browser @target)
-  (js/console.log
-   (str/format "Welcome to penpot! version='%s' base-uri='%s'." (:full @version) (str public-uri))))
+(def public-uri (get-public-uri))
 
 ;; --- Helper Functions
 
