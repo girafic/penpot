@@ -6,6 +6,7 @@
 
 (ns app.main.ui.workspace.sidebar.options.menus.shadow
   (:require
+   [app.common.colors :as clr]
    [app.common.data :as d]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.changes :as dch]
@@ -25,7 +26,7 @@
   (let [id (uuid/next)]
     {:id id
      :style :drop-shadow
-     :color {:color "#000000" :opacity 0.2}
+     :color {:color clr/black :opacity 0.2}
      :offset-x 4
      :offset-y 4
      :blur 4
@@ -77,7 +78,7 @@
         update-color
         (fn [index]
           (fn [color opacity]
-            (let [color (d/without-keys color [:id :file-id :gradient])]
+            (let [color (dissoc color :id :file-id :gradient)]
               (st/emit! (dch/update-shapes
                          ids
                          #(-> %
@@ -146,7 +147,7 @@
         [:option {:value ":inner-shadow"} (tr "workspace.options.shadow-options.inner-shadow")]]]
 
       [:div.row-grid-2
-       [:div.input-element
+       [:div.input-element {:title (tr "workspace.options.shadow-options.offsetx")}
         [:> numeric-input {:ref adv-offset-x-ref
                            :no-validate true
                            :placeholder "--"
@@ -155,7 +156,7 @@
                            :value (:offset-x value)}]
         [:span.after (tr "workspace.options.shadow-options.offsetx")]]
 
-       [:div.input-element
+       [:div.input-element {:title (tr "workspace.options.shadow-options.offsety")}
         [:> numeric-input {:ref adv-offset-y-ref
                            :no-validate true
                            :placeholder "--"
@@ -165,7 +166,7 @@
         [:span.after (tr "workspace.options.shadow-options.offsety")]]]
 
       [:div.row-grid-2
-       [:div.input-element
+       [:div.input-element {:title (tr "workspace.options.shadow-options.blur")}
         [:> numeric-input {:ref adv-blur-ref
                            :no-validate true
                            :placeholder "--"
@@ -175,7 +176,7 @@
                            :value (:blur value)}]
         [:span.after (tr "workspace.options.shadow-options.blur")]]
 
-       [:div.input-element
+       [:div.input-element {:title (tr "workspace.options.shadow-options.spread")}
         [:> numeric-input {:ref adv-spread-ref
                            :no-validate true
                            :placeholder "--"
@@ -190,6 +191,7 @@
                                ;; Support for old format colors
                                {:color (:color value) :opacity (:opacity value)}
                                (:color value))
+                      :title (tr "workspace.options.shadow-options.color")
                       :disable-gradient true
                       :on-change (update-color index)
                       :on-detach (detach-color index)

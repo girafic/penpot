@@ -42,7 +42,8 @@
       (let [head-p (gsp/command->point head)
             head (cond
                    (and (= :close-path (:command head))
-                        (< (gpt/distance last-p last-move) 0.01))
+                        (or (nil? last-p) ;; Ignore consecutive close-paths
+                            (< (gpt/distance last-p last-move) 0.01)))
                    nil
 
                    (= :close-path (:command head))
@@ -212,26 +213,25 @@
   ;; Pick all segments in content-a that are not inside content-b
   ;; Pick all segments in content-b that are not inside content-a
   (let [content
-        (d/concat
-         []
+        (concat
          (->> content-a-split (filter #(not (contains-segment? % content-b))))
          (->> content-b-split (filter #(not (contains-segment? % content-a)))))
 
         ;; Overlapping segments should be added when they are part of the border
         border-content
         (->> content-b-split
-             (filterv #(and (contains-segment? % content-a)
-                            (overlap-segment? % content-a-split)
-                            (not (inside-segment? % content)))))]
+             (filter #(and (contains-segment? % content-a)
+                           (overlap-segment? % content-a-split)
+                           (not (inside-segment? % content)))))]
 
-    (d/concat content border-content)))
+    ;; Ensure that the output is always a vector
+    (d/concat-vec content border-content)))
 
 (defn create-difference [content-a content-a-split content-b content-b-split]
   ;; Pick all segments in content-a that are not inside content-b
   ;; Pick all segments in content b that are inside content-a
   ;;  removing overlapping
-  (d/concat
-   []
+  (d/concat-vec
    (->> content-a-split (filter #(not (contains-segment? % content-b))))
 
    ;; Reverse second content so we can have holes inside other shapes
@@ -242,20 +242,19 @@
 (defn create-intersection [content-a content-a-split content-b content-b-split]
   ;; Pick all segments in content-a that are inside content-b
   ;; Pick all segments in content-b that are inside content-a
-  (d/concat
-   []
+  (d/concat-vec
    (->> content-a-split (filter #(contains-segment? % content-b)))
    (->> content-b-split (filter #(contains-segment? % content-a)))))
 
 
 (defn create-exclusion [content-a content-b]
   ;; Pick all segments
-  (d/concat [] content-a content-b))
+  (d/concat-vec content-a content-b))
 
 
 (defn fix-move-to
   [content]
-  ;; Remove the field `:prev` and makes the necesaries `move-to`
+  ;; Remove the field `:prev` and makes the necessaries `move-to`
   ;; then clean the subpaths
 
   (loop [current (first content)

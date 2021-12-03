@@ -152,14 +152,14 @@
                               (remove nil?))
                   used  (into #{} xfm presence)
                   avail (set/difference presence-palette used)]
-              (or (first avail) "#000000")))
+              (or (first avail) "var(--color-black)")))
 
           (update-color [color presence]
             (if (some? color)
               color
               (get-next-color presence)))
 
-          (update-sesion [session presence]
+          (update-session [session presence]
             (-> session
                 (assoc :id session-id)
                 (assoc :profile-id profile-id)
@@ -168,7 +168,7 @@
 
           (update-presence [presence]
             (-> presence
-                (update session-id update-sesion presence)
+                (update session-id update-session presence)
                 (d/without-nils)))
 
           ]

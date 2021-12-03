@@ -60,14 +60,14 @@
         param-list (extract-params cmd [[:x :number]
                                         [:y :number]])]
 
-    (d/concat [{:command :move-to
-                :relative relative
-                :params (first param-list)}]
+    (into [{:command :move-to
+            :relative relative
+            :params (first param-list)}]
 
-              (for [params (rest param-list)]
-                {:command :line-to
-                 :relative relative
-                 :params params}))))
+          (for [params (rest param-list)]
+            {:command :line-to
+             :relative relative
+             :params params}))))
 
 (defmethod parse-command "Z" [_]
   [{:command :close-path}])
@@ -197,8 +197,8 @@
   "Removes some commands and convert relative to absolute coordinates"
   [commands]
   (let [simplify-command
-        ;; prev-pos   : previous position for the current path. Necesary for relative commands
-        ;; prev-start : previous move-to necesary for Z commands
+        ;; prev-pos   : previous position for the current path. Necessary for relative commands
+        ;; prev-start : previous move-to necessary for Z commands
         ;; prev-cc    : previous command control point for cubic beziers
         ;; prev-qc    : previous command control point for quadratic curves
         (fn [[result prev-pos prev-start prev-cc prev-qc] [command _prev]]
@@ -259,7 +259,7 @@
                       (update :params merge (quadratic->curve prev-pos (gpt/point params) (upg/calculate-opposite-handler prev-pos prev-qc)))))
 
                 result (if (= :elliptical-arc (:command command))
-                         (d/concat result (arc->beziers prev-pos command))
+                         (into result (arc->beziers prev-pos command))
                          (conj result command))
 
                 next-cc (case (:command orig-command)

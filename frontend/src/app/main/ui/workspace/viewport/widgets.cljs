@@ -31,7 +31,7 @@
                :pattern-units "userSpaceOnUse"}
      [:path {:d "M 1 0 L 0 0 0 1"
              :style {:fill "none"
-                     :stroke "#59B9E2"
+                     :stroke "var(--color-info)"
                      :stroke-opacity "0.2"
                      :stroke-width (str (/ 1 zoom))}}]]]
    [:rect {:x (:x vbox)
@@ -90,6 +90,7 @@
      "translate(" (* zoom x) ", " (* zoom y) ")")))
 
 (mf/defc frame-title
+  {::mf/wrap [mf/memo]}
   [{:keys [frame modifiers selected? zoom on-frame-enter on-frame-leave on-frame-select]}]
   (let [{:keys [width x y]} (gsh/transform-shape frame)
         label-pos (gpt/point x (- y (/ 10 zoom)))
@@ -130,7 +131,7 @@
             :transform (str (when (and selected? modifiers)
                               (str (:displacement modifiers) " " ))
                             (text-transform label-pos zoom))
-            :style {:fill (when selected? "#28c295")}
+            :style {:fill (when selected? "var(--color-primary-dark)")}
             :on-mouse-down on-mouse-down
             :on-double-click on-double-click
             :on-pointer-enter on-pointer-enter

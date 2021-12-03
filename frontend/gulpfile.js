@@ -25,6 +25,17 @@ paths.resources = "./resources/";
 paths.output = "./resources/public/";
 paths.dist = "./target/dist/";
 
+/***********************************************
+ * Marked Extensions
+ ***********************************************/
+
+const renderer = {
+  link(href, title, text) {
+    return `<a href="${href}" target="_blank">${text}</a>`;
+  }
+};
+
+marked.use({renderer});
 
 /***********************************************
  * Helpers
@@ -33,7 +44,7 @@ paths.dist = "./target/dist/";
 // Templates
 
 function readLocales() {
-  const langs = ["ca", "de", "el", "en", "es", "fr", "tr", "ru", "zh_CN", "pt_BR", "ro"];
+  const langs = ["ar", "he", "ca", "de", "el", "en", "es", "fr", "tr", "ru", "zh_CN", "pt_BR", "ro"];
   const result = {};
 
   for (let lang of langs) {

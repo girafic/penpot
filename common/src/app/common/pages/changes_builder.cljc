@@ -12,7 +12,8 @@
 
 ;; Auxiliary functions to help create a set of changes (undo + redo)
 
-(defn empty-changes [origin page-id]
+(defn empty-changes
+  [origin page-id]
   (let [changes {:redo-changes []
                  :undo-changes []
                  :origin origin}]
@@ -97,7 +98,7 @@
            (let [old-obj (get objects id)
                  new-obj (update-fn old-obj)
 
-                 attrs (or attrs (d/concat #{} (keys old-obj) (keys new-obj)))
+                 attrs (or attrs (d/concat-set (keys old-obj) (keys new-obj)))
 
                  {rops :rops uops :uops}
                  (reduce #(generate-operation %1 %2 old-obj new-obj ignore-geometry?)
@@ -165,3 +166,11 @@
         (update :undo-changes #(as-> % $
                                  (reduce add-undo-change-parent $ ids)
                                  (reduce add-undo-change-shape $ ids))))))
+
+
+(defn move-page
+  [chdata index prev-index]
+  (let [page-id (::page-id (meta chdata))]
+    (-> chdata
+        (update :redo-changes conj {:type :mov-page :id page-id :index index})
+        (update :undo-changes conj {:type :mov-page :id page-id :index prev-index}))))

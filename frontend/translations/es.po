@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
-"PO-Revision-Date: 2021-09-04 15:33+0000\n"
-"Last-Translator: Rubén <rubnx@protonmail.com>\n"
+"PO-Revision-Date: 2021-09-24 13:39+0000\n"
+"Last-Translator: andy <andres.gonzalez79@gmail.com>\n"
 "Language-Team: Spanish "
 "<https://hosted.weblate.org/projects/penpot/frontend/es/>\n"
 "Language: es\n"
@@ -9,7 +9,7 @@ msgstr ""
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 4.8.1-dev\n"
+"X-Generator: Weblate 4.9-dev\n"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.already-have-account"
@@ -65,7 +65,7 @@ msgstr "Introduce tus datos aquí"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-title"
-msgstr "¡Encantados de verte de nuevo!"
+msgstr "¡Un placer verte de nuevo!"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-github-submit"
@@ -93,14 +93,14 @@ msgstr "Introduce la nueva contraseña"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.newsletter-subscription"
-msgstr "Estoy de acuerdo en suscribirme a la lista de correo de Penpot"
+msgstr "Estoy de acuerdo en suscribirme a la lista de correo de Penpot."
 
 #: src/app/main/ui/auth/recovery.cljs
 msgid "auth.notifications.invalid-token-error"
 msgstr "El código de recuperación no es válido."
 
 #: src/app/main/ui/auth/recovery.cljs
-msgid "auth.notifications.password-changed-succesfully"
+msgid "auth.notifications.password-changed-successfully"
 msgstr "La contraseña ha sido cambiada"
 
 #: src/app/main/ui/auth/recovery_request.cljs
@@ -124,6 +124,9 @@ msgstr "Contraseña"
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.password-length-hint"
 msgstr "8 caracteres como mínimo"
+
+msgid "auth.privacy-policy"
+msgstr "Política de privacidad"
 
 #: src/app/main/ui/auth/recovery_request.cljs
 msgid "auth.recovery-request-submit"
@@ -161,17 +164,14 @@ msgstr "Crear una cuenta"
 msgid "auth.sidebar-tagline"
 msgstr "La solución de código abierto para diseñar y prototipar"
 
+msgid "auth.terms-of-service"
+msgstr "Terminos de servicio"
+
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.terms-privacy-agreement"
 msgstr ""
 "Al crear una nueva cuenta, aceptas nuestros términos de servicio y política "
 "de privacidad."
-
-msgid "auth.terms-of-service"
-msgstr "Terminos de servicio"
-
-msgid "auth.privacy-policy"
-msgstr "Política de privacidad"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.verification-email-sent"
@@ -180,7 +180,7 @@ msgstr "Hemos enviado un email de verificación a"
 msgid "common.share-link.confirm-deletion-link-description"
 msgstr ""
 "¿Estas seguro que quieres eliminar el enlace? Si lo haces, el enlace dejara "
-"de funcionar para todos"
+"de funcionar para cualquiera"
 
 msgid "common.share-link.get-link"
 msgstr "Obtener enlace"
@@ -199,6 +199,9 @@ msgstr "Puede ver"
 
 msgid "common.share-link.permissions-hint"
 msgstr "Cualquiera con el enlace puede acceder"
+
+msgid "common.share-link.placeholder"
+msgstr "El enlace para compartir aparecerá aquí"
 
 msgid "common.share-link.remove-link"
 msgstr "Eliminar enlace"
@@ -254,6 +257,14 @@ msgstr "Duplicar %s archivos"
 msgid "dashboard.empty-files"
 msgstr "Todavía no hay ningún archivo aquí"
 
+#: src/app/main/ui/dashboard/grid.cljs
+#, markdown
+msgid "dashboard.empty-placeholder-drafts"
+msgstr ""
+"Aún no tienes archivos. Si quieres probar alguna plantilla visita nuestra "
+"seccion de [Bibliotecas y "
+"plantillas](https://penpot.app/libraries-templates.html)"
+
 msgid "dashboard.export-frames"
 msgstr "Exportar tableros a PDF..."
 
@@ -282,10 +293,10 @@ msgstr "Exportar librerias compartidas"
 msgid "dashboard.export.options.detach.message"
 msgstr ""
 "Las librerias compartidas no se incluirán en la exportación y ningún "
-"recurso será incluido en la librería."
+"recurso será incluido en la librería. "
 
 msgid "dashboard.export.options.detach.title"
-msgstr "Usar los recursos como objetos básicos."
+msgstr "Usar los recursos como objetos básicos"
 
 msgid "dashboard.export.options.merge.message"
 msgstr ""
@@ -293,7 +304,7 @@ msgstr ""
 "propio fichero."
 
 msgid "dashboard.export.options.merge.title"
-msgstr "Incluir librerias compartidas dentro de las librerias del fichero."
+msgstr "Incluir librerias compartidas dentro de las librerias del fichero"
 
 msgid "dashboard.export.title"
 msgstr "Exportar ficheros"
@@ -318,42 +329,43 @@ msgid "dashboard.fonts.hero-text2"
 msgstr ""
 "Sólo deberías cargar fuentes que te pertenecen o de las que tienes una "
 "licencia que te permita usarlas en Penpot. Encuentra más información en la "
-"sección de Derechos de Contenido: [Penpot's Terms of Service](1). También "
-"te puede interesar leer más sobre licencias tipográficas: [font "
-"licensing](2)."
+"sección de Derechos de Contenido: [Penpot's Terms of "
+"Service](https://penpot.app/terms.html). También te puede interesar leer "
+"más sobre licencias tipográficas: [font "
+"licensing](https://www.typography.com/faq)."
+
+msgid "dashboard.import"
+msgstr "Importar archivos"
 
 msgid "dashboard.import.analyze-error"
-msgstr "¡Vaya! No hemos podido importar el fichero."
+msgstr "¡Vaya! No hemos podido importar el fichero"
 
 msgid "dashboard.import.import-error"
-msgstr "Hubo un problema importando el fichero. No se ha creado el fichero."
-
-msgid "dashboard.import.import-message"
-msgstr "%s ficheros han sido importados con éxito."
+msgstr "Hubo un problema importando el fichero. No ha podido ser importado."
 
 msgid "dashboard.import.import-message"
 msgstr "%s files have been imported succesfully."
+
+msgid "dashboard.import.progress.process-colors"
+msgstr "Procesando colores"
+
+msgid "dashboard.import.progress.process-components"
+msgstr "Procesando componentes"
+
+msgid "dashboard.import.progress.process-media"
+msgstr "Procesando media"
+
+msgid "dashboard.import.progress.process-page"
+msgstr "Procesando página: %s"
+
+msgid "dashboard.import.progress.process-typographies"
+msgstr "Procesando tipografías"
 
 msgid "dashboard.import.progress.upload-data"
 msgstr "Enviando datos al servidor (%s/%s)"
 
 msgid "dashboard.import.progress.upload-media"
 msgstr "Enviando fichero: %s"
-
-msgid "dashboard.import.progress.process-page"
-msgstr "Procesando página: %s"
-
-msgid "dashboard.import.progress.process-colors"
-msgstr "Procesando colores"
-
-msgid "dashboard.import.progress.process-typographies"
-msgstr "Procesando tipografías"
-
-msgid "dashboard.import.progress.process-media"
-msgstr "Procesando media"
-
-msgid "dashboard.import.progress.process-components"
-msgstr "Procesando componentes"
 
 #: src/app/main/ui/dashboard/team.cljs
 msgid "dashboard.invite-profile"
@@ -429,6 +441,9 @@ msgstr "%s integrantes"
 #: src/app/main/ui/dashboard/file_menu.cljs
 msgid "dashboard.open-in-new-tab"
 msgstr "Abrir en una pestaña nueva"
+
+msgid "dashboard.options"
+msgstr "Opciones"
 
 #: src/app/main/ui/settings/password.cljs
 msgid "dashboard.password-change"
@@ -768,7 +783,7 @@ msgstr "Izquierda"
 
 #: src/app/main/ui/handoff/attributes/layout.cljs, src/app/main/ui/handoff/attributes/layout.cljs
 msgid "handoff.attributes.layout.radius"
-msgstr "Derecha"
+msgstr "Radio"
 
 #: src/app/main/ui/handoff/attributes/layout.cljs
 msgid "handoff.attributes.layout.rotation"
@@ -933,7 +948,7 @@ msgid "labels.accept"
 msgstr "Aceptar"
 
 msgid "labels.add-custom-font"
-msgstr "Añadir fuentes personalizada"
+msgstr "Añadir fuente personalizada"
 
 #: src/app/main/ui/dashboard/team.cljs, src/app/main/ui/dashboard/team.cljs, src/app/main/ui/dashboard/team.cljs
 msgid "labels.admin"
@@ -1250,6 +1265,12 @@ msgstr "Mostrar sólo tus comentarios"
 msgid "labels.sign-out"
 msgstr "Salir"
 
+msgid "labels.skip"
+msgstr "Omitir"
+
+msgid "labels.start"
+msgstr "Comenzar"
+
 #: src/app/main/ui/settings/profile.cljs
 msgid "labels.update"
 msgstr "Actualizar"
@@ -1458,7 +1479,7 @@ msgid "modals.leave-and-reassign.promote-and-leave"
 msgstr "Promocionar y abandonar"
 
 #: src/app/main/ui/dashboard/sidebar.cljs
-msgid "modals.leave-and-reassign.select-memeber-to-promote"
+msgid "modals.leave-and-reassign.select-member-to-promote"
 msgstr "Selecciona un miembro a promocionar"
 
 #: src/app/main/ui/dashboard/sidebar.cljs
@@ -1537,6 +1558,127 @@ msgstr "Perfil guardado correctamente!"
 msgid "notifications.validation-email-sent"
 msgstr "Verificación de email enviada a %s. Comprueba tu correo."
 
+msgid "onboarding.choice.title"
+msgstr "Te damos la bienvenida a Penpot"
+
+msgid "onboarding.contrib.alt"
+msgstr "Código Abierto"
+
+msgid "onboarding.contrib.desc1"
+msgstr ""
+"Penpot es Open Source, hecho por y para la comunidad. Si decides colaborar "
+"nos encantará :)"
+
+msgid "onboarding.contrib.desc2.1"
+msgstr "Puedes acceder al"
+
+msgid "onboarding.contrib.desc2.2"
+msgstr "y seguir las instrucciones de contribución :)"
+
+msgid "onboarding.contrib.link"
+msgstr "proyecto en github"
+
+msgid "onboarding.contrib.title"
+msgstr "Contribuyes en Open Source?"
+
+msgid "onboarding.slide.0.alt"
+msgstr "Crea diseños"
+
+msgid "onboarding.slide.0.desc1"
+msgstr "Crea bellos interfaces en colaboración con todas las personas del equipo."
+
+msgid "onboarding.slide.0.desc2"
+msgstr ""
+"Mantén consistencia a escala usando componentes, bibliotecas y sistemas de "
+"diseño."
+
+msgid "onboarding.slide.0.title"
+msgstr "Bibliotecas de diseño, estilos y componentes"
+
+msgid "onboarding.slide.1.alt"
+msgstr "Prototipos interactivos"
+
+msgid "onboarding.slide.1.desc1"
+msgstr "Crea interacciones completas para imitar el comportamiento del producto."
+
+msgid "onboarding.slide.1.desc2"
+msgstr ""
+"Comparte con stakeholders, presenta propuestas a tu equipo y realiza tests "
+"de usabilidad sobre tus diseños, todo en uno."
+
+msgid "onboarding.slide.1.title"
+msgstr "Lleva tus diseños a la vida con interacciones"
+
+msgid "onboarding.slide.2.alt"
+msgstr "Obtén feedback"
+
+msgid "onboarding.slide.2.desc1"
+msgstr ""
+"Todas las personas del equipo trabajando simultáneamente en archivos de "
+"diseño con edición conjunta en tiempo real y herramientas para comentar "
+"directamente sobre los diseños."
+
+msgid "onboarding.slide.2.title"
+msgstr "Obtén feedback, presenta y comparte tu trabajo"
+
+msgid "onboarding.slide.3.alt"
+msgstr "Especificaciones de código"
+
+msgid "onboarding.slide.3.desc1"
+msgstr ""
+"Sincroniza diseño y código de todos tus estilos y componentes con a "
+"snippets de código."
+
+msgid "onboarding.slide.3.desc2"
+msgstr ""
+"Obtén y entrega especificaciones de código para marcado (SVG, HTML) y "
+"estilos (CSS, Less, Stylus…)."
+
+msgid "onboarding.slide.3.title"
+msgstr "Una \"fuente de la verdad\" compartida"
+
+msgid "onboarding.team.create.button"
+msgstr "Crea un equipo"
+
+msgid "onboarding.team.create.desc1"
+msgstr ""
+"¿Trabajando con alguien más? Crea un equipo donde compartir proyectos y "
+"elementos de diseño."
+
+msgid "onboarding.team.create.input-placeholder"
+msgstr "Introduce el nombre del equipo"
+
+msgid "onboarding.team.create.title"
+msgstr "Crear equipo"
+
+msgid "onboarding.team.start.button"
+msgstr "Comenzar directamente"
+
+msgid "onboarding.team.start.desc1"
+msgstr ""
+"Entra directamente a Penpot y comienza a diseñar individualmente. Siempre "
+"tendrás la opción de crear equipos más adelante."
+
+msgid "onboarding.team.start.title"
+msgstr "Comienza a diseñar"
+
+msgid "onboarding.welcome.desc1"
+msgstr "¡Hurra! Ya tienes tu cuenta en Penpot :)"
+
+msgid "onboarding.welcome.desc2"
+msgstr ""
+"Penpot está en su primera versión beta gracias a una combinación de "
+"funcionalidades, madurez, estabilidad y la fantástica validación de su "
+"comunidad, a la que te damos la bienvenida."
+
+msgid "onboarding.welcome.desc3"
+msgstr ""
+"Mientras disfrutas de Penpot seguiremos haciendo mejoras, lanzando "
+"iteraciones de nuestros esperanzadores planes."
+
+msgid "onboarding.welcome.title"
+msgstr "Te damos la bienvenida a Penpot"
+
 #: src/app/main/ui/auth/recovery.cljs
 msgid "profile.recovery.go-to-login"
 msgstr "Ir al login"
@@ -1597,6 +1739,14 @@ msgstr "Configuración - %s - Penpot"
 msgid "title.viewer"
 msgstr "%s - Modo de visualización - Penpot"
 
+msgid "viewer.breaking-change.description"
+msgstr ""
+"Este link compartido ya no funciona. Crea uno nuevo o pídelo a la persona "
+"que lo creó."
+
+msgid "viewer.breaking-change.message"
+msgstr "¡Lo sentimos!"
+
 #: src/app/main/ui/handoff.cljs, src/app/main/ui/viewer.cljs
 msgid "viewer.empty-state"
 msgstr "No se ha encontrado ningún tablero."
@@ -1617,7 +1767,7 @@ msgid "viewer.header.fullscreen"
 msgstr "Pantalla completa"
 
 msgid "viewer.header.handsoff-section"
-msgstr "Handsoff"
+msgstr "Handoff"
 
 #: src/app/main/ui/viewer/header.cljs
 msgid "viewer.header.interactions"
@@ -2029,6 +2179,10 @@ msgstr "Mis bibliotecas"
 msgid "workspace.library.store"
 msgstr "Predefinidas"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.add-interaction"
+msgstr "Pulsa el botón + para añadir interacciones."
+
 msgid "workspace.options.blur-options.background-blur"
 msgstr "Fondo"
 
@@ -2119,6 +2273,18 @@ msgstr "Exportando"
 msgid "workspace.options.fill"
 msgstr "Relleno"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.flows.add-flow-start"
+msgstr "Añadir inicio de flujo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.flows.flow-start"
+msgstr "Inicio de flujo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.flows.flow-starts"
+msgstr "Inicios de flujo"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs
 msgid "workspace.options.grid.auto"
 msgstr "Automático"
@@ -2126,6 +2292,9 @@ msgstr "Automático"
 #: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs
 msgid "workspace.options.grid.column"
 msgstr "Columnas"
+
+msgid "workspace.options.grid.params.color"
+msgstr "Color"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs
 msgid "workspace.options.grid.params.columns"
@@ -2211,6 +2380,157 @@ msgstr "Relleno de grupo"
 msgid "workspace.options.group-stroke"
 msgstr "Borde de grupo"
 
+msgid "workspace.options.height"
+msgstr "Altura"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-action"
+msgstr "Acción"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-after-delay"
+msgstr "Tiempo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-background"
+msgstr "Añadir sombreado de fondo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-close-outside"
+msgstr "Cerrar al pulsar fuera"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-close-overlay"
+msgstr "Cerrar superposición"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-close-overlay-dest"
+msgstr "Cerrar superposición: %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-delay"
+msgstr "Tiempo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-destination"
+msgstr "Destino"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-mouse-enter"
+msgstr "Pasar encima"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-mouse-leave"
+msgstr "Retirar encima"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-ms"
+msgstr "ms"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-navigate-to"
+msgstr "Navegar a"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-navigate-to-dest"
+msgstr "Navegar a: %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-none"
+msgstr "(sin definir)"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-on-click"
+msgstr "En click"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-open-overlay"
+msgstr "Superposición"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-open-overlay-dest"
+msgstr "Superposición: %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-open-url"
+msgstr "Abrir url"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-pos-bottom-center"
+msgstr "Abajo centro"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-pos-bottom-left"
+msgstr "Abajo izquierda"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-pos-bottom-right"
+msgstr "Abajo derecha"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-pos-center"
+msgstr "Centro"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-pos-manual"
+msgstr "Manual"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-pos-top-center"
+msgstr "Arriba centro"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-pos-top-left"
+msgstr "Arriba izquierda"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-pos-top-right"
+msgstr "Arriba derecha"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-position"
+msgstr "Posición"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-preserve-scroll"
+msgstr "Conservar posición de desplazamiento"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-prev-screen"
+msgstr "Pantalla anterior"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-self"
+msgstr "mismo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-toggle-overlay"
+msgstr "Alternar superpos."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-toggle-overlay-dest"
+msgstr "Alternar superpos.: %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-trigger"
+msgstr "Disparador"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-url"
+msgstr "URL"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-while-hovering"
+msgstr "Mientras pasa encima"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-while-pressing"
+msgstr "Mientras pulsa"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interactions"
+msgstr "Interacciones"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/layer.cljs
 msgid "workspace.options.layer-options.blend-mode.color"
 msgstr "Color"
@@ -2287,6 +2607,9 @@ msgstr "Capas de grupo"
 msgid "workspace.options.layer-options.title.multiple"
 msgstr "Capas seleccionadas"
 
+msgid "workspace.options.opacity"
+msgstr "Opacidad"
+
 #: src/app/main/ui/workspace/sidebar/options/shapes/frame.cljs, src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.position"
 msgstr "Posición"
@@ -2310,165 +2633,8 @@ msgstr "Esquinas individuales"
 msgid "workspace.options.rotation"
 msgstr "Rotación"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.add-interaction"
-msgstr "Pulsa el botón + para añadir interacciones."
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.flows.add-flow-start"
-msgstr "Añadir inicio de flujo"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.flows.flow-start"
-msgstr "Inicio de flujo"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.flows.flow-starts"
-msgstr "Inicios de flujo"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-action"
-msgstr "Acción"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-after-delay"
-msgstr "Tiempo"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-background"
-msgstr "Añadir sombreado de fondo"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-close-outside"
-msgstr "Cerrar al pulsar fuera"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-close-overlay"
-msgstr "Cerrar superposición"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-close-overlay-dest"
-msgstr "Cerrar superposición: %s"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-destination"
-msgstr "Destino"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-delay"
-msgstr "Tiempo"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-mouse-enter"
-msgstr "Pasar encima"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-mouse-leave"
-msgstr "Retirar encima"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-ms"
-msgstr "ms"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-navigate-to"
-msgstr "Navegar a"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-navigate-to-dest"
-msgstr "Navegar a: %s"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-none"
-msgstr "(sin definir)"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-on-click"
-msgstr "En click"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-open-overlay"
-msgstr "Superposición"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-open-url"
-msgstr "Abrir url"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-prev-screen"
-msgstr "Pantalla anterior"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-toggle-overlay"
-msgstr "Alternar superpos."
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-open-overlay-dest"
-msgstr "Superposición: %s"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-toggle-overlay-dest"
-msgstr "Alternar superpos.: %s"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-url"
-msgstr "URL"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-pos-manual"
-msgstr "Manual"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-pos-center"
-msgstr "Centro"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-pos-top-left"
-msgstr "Arriba izquierda"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-pos-top-right"
-msgstr "Arriba derecha"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-pos-top-center"
-msgstr "Arriba centro"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-pos-bottom-left"
-msgstr "Abajo izquierda"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-pos-bottom-right"
-msgstr "Abajo derecha"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-pos-bottom-center"
-msgstr "Abajo centro"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-position"
-msgstr "Posición"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-self"
-msgstr "mismo"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-trigger"
-msgstr "Disparador"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-while-hovering"
-msgstr "Mientras pasa encima"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interaction-while-pressing"
-msgstr "Mientras pulsa"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
-msgid "workspace.options.interactions"
-msgstr "Interacciones"
+msgid "workspace.options.search-font"
+msgstr "Buscar fuente"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.select-a-shape"
@@ -2491,6 +2657,9 @@ msgstr "Borde de selección"
 #: src/app/main/ui/workspace/sidebar/options/menus/shadow.cljs
 msgid "workspace.options.shadow-options.blur"
 msgstr "Desenfoque"
+
+msgid "workspace.options.shadow-options.color"
+msgstr "Color de sombra"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/shadow.cljs
 msgid "workspace.options.shadow-options.drop-shadow"
@@ -2567,6 +2736,12 @@ msgstr "Marcador cuadrado"
 #: src/app/main/ui/workspace/sidebar/options/menus/stroke.cljs
 msgid "workspace.options.stroke-cap.triangle-arrow"
 msgstr "Flecha triángulo"
+
+msgid "workspace.options.stroke-color"
+msgstr "Color del trazo"
+
+msgid "workspace.options.stroke-width"
+msgstr "Ancho del trazo"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/stroke.cljs
 msgid "workspace.options.stroke.center"
@@ -2709,6 +2884,15 @@ msgstr "Alineación vertical"
 msgid "workspace.options.use-play-button"
 msgstr "Usa el botón de play de la cabecera para arrancar la vista de prototipo."
 
+msgid "workspace.options.width"
+msgstr "Ancho"
+
+msgid "workspace.options.x"
+msgstr "X"
+
+msgid "workspace.options.y"
+msgstr "Y"
+
 msgid "workspace.path.actions.add-node"
 msgstr "Añadir nodo (%s)"
 
@@ -2771,6 +2955,9 @@ msgstr "Eliminar inicio de flujo"
 msgid "workspace.shape.menu.detach-instance"
 msgstr "Desacoplar instancia"
 
+msgid "workspace.shape.menu.difference"
+msgstr "Diferencia"
+
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.duplicate"
 msgstr "Duplicar"
@@ -2778,6 +2965,12 @@ msgstr "Duplicar"
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.edit"
 msgstr "Editar"
+
+msgid "workspace.shape.menu.exclude"
+msgstr "Exclusión"
+
+msgid "workspace.shape.menu.flatten"
+msgstr "Aplanar"
 
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.flip-horizontal"
@@ -2805,11 +2998,14 @@ msgstr "Ir al archivo del componente principal"
 
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.group"
-msgstr "Grupo"
+msgstr "Agrupar"
 
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.hide"
 msgstr "Ocultar"
+
+msgid "workspace.shape.menu.intersection"
+msgstr "Intersección"
 
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.lock"
@@ -2817,11 +3013,14 @@ msgstr "Bloquear"
 
 #: src/app/main/ui/workspace/context_menu.cljs, src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.mask"
-msgstr "Máscara"
+msgstr "Crear máscara"
 
 #: src/app/main/ui/workspace/context_menu.cljs, src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.paste"
 msgstr "Pegar"
+
+msgid "workspace.shape.menu.path"
+msgstr "Path"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/component.cljs, src/app/main/ui/workspace/sidebar/options/menus/component.cljs, src/app/main/ui/workspace/context_menu.cljs, src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.reset-overrides"
@@ -2835,9 +3034,15 @@ msgstr "Mostrar"
 msgid "workspace.shape.menu.show-main"
 msgstr "Ver componente principal"
 
+msgid "workspace.shape.menu.transform-to-path"
+msgstr "Convertir en vector"
+
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.ungroup"
 msgstr "Desagrupar"
+
+msgid "workspace.shape.menu.union"
+msgstr "Unión"
 
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.unlock"
@@ -3044,33 +3249,3 @@ msgstr "Actualizar"
 
 msgid "workspace.viewport.click-to-close-path"
 msgstr "Pulsar para cerrar la ruta"
-
-msgid "viewer.breaking-change.message"
-msgstr "¡Lo sentimos!"
-
-msgid "viewer.breaking-change.description"
-msgstr "Este link compartido ya no funciona. Crea uno nuevo o pídelo a la persona que lo creó."
-
-msgid "workspace.shape.menu.path"
-msgstr "Path"
-
-msgid "workspace.shape.menu.union"
-msgstr "Unión"
-
-msgid "workspace.shape.menu.difference"
-msgstr "Diferencia"
-
-msgid "workspace.shape.menu.intersection"
-msgstr "Intersección"
-
-msgid "workspace.shape.menu.exclude"
-msgstr "Exclusión"
-
-msgid "workspace.shape.menu.flatten"
-msgstr "Aplanar"
-
-msgid "workspace.shape.menu.transform-to-path"
-msgstr "Convertir en vector"
-
-msgid "workspace.options.search-font"
-msgstr "Buscar fuente"

@@ -31,23 +31,22 @@
    :blur])
 
 (def style-properties
-  (d/concat
-   style-group-properties
-   [:fill-color
-    :fill-opacity
-    :fill-color-gradient
-    :fill-color-ref-file
-    :fill-color-ref-id
-    :fill-image
-    :stroke-color
-    :stroke-color-ref-file
-    :stroke-color-ref-id
-    :stroke-opacity
-    :stroke-style
-    :stroke-width
-    :stroke-alignment
-    :stroke-cap-start
-    :stroke-cap-end]))
+  (into style-group-properties
+        [:fill-color
+         :fill-opacity
+         :fill-color-gradient
+         :fill-color-ref-file
+         :fill-color-ref-id
+         :fill-image
+         :stroke-color
+         :stroke-color-ref-file
+         :stroke-color-ref-id
+         :stroke-opacity
+         :stroke-style
+         :stroke-width
+         :stroke-alignment
+         :stroke-cap-start
+         :stroke-cap-end]))
 
 (defn make-corner-arc
   "Creates a curvle corner for border radius"
@@ -177,18 +176,11 @@
                       (map #(get objects %))
                       (map #(convert-to-path % objects)))
         bool-type (:bool-type shape)
-        head (if (= bool-type :difference) (first children) (last children))
-        head (cond-> head
-               (and (contains? head :svg-attrs) (nil? (:fill-color head)))
-               (assoc :fill-color "#000000"))
-
-        head-data (select-keys head style-properties)
-        content (pb/content-bool (:bool-type shape) (mapv :content children))]
+        content (pb/content-bool bool-type (mapv :content children))]
 
     (-> shape
         (assoc :type :path)
         (assoc :content content)
-        (merge head-data)
         (d/without-keys dissoc-attrs))))
 
 (defn convert-to-path

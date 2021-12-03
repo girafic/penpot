@@ -11,6 +11,7 @@
    [app.common.spec :as us]
    [app.common.types.interactions :as cti]
    [app.common.types.page-options :as cto]
+   [app.common.types.radius :as ctr]
    [app.common.uuid :as uuid]
    [clojure.set :as set]
    [clojure.spec.alpha :as s]))
@@ -191,12 +192,6 @@
 (s/def :internal.shape/page-id uuid?)
 (s/def :internal.shape/proportion ::us/safe-number)
 (s/def :internal.shape/proportion-lock boolean?)
-(s/def :internal.shape/rx ::us/safe-number)
-(s/def :internal.shape/ry ::us/safe-number)
-(s/def :internal.shape/r1 ::us/safe-number)
-(s/def :internal.shape/r2 ::us/safe-number)
-(s/def :internal.shape/r3 ::us/safe-number)
-(s/def :internal.shape/r4 ::us/safe-number)
 (s/def :internal.shape/stroke-color string?)
 (s/def :internal.shape/stroke-color-gradient (s/nilable ::gradient))
 (s/def :internal.shape/stroke-color-ref-file (s/nilable uuid?))
@@ -261,6 +256,25 @@
 (s/def :internal.shape/transform ::matrix)
 (s/def :internal.shape/transform-inverse ::matrix)
 
+(s/def :internal.shape/opacity ::us/safe-number)
+(s/def :internal.shape/blend-mode
+  #{:normal
+    :darken
+    :multiply
+    :color-burn
+    :lighten
+    :screen
+    :color-dodge
+    :overlay
+    :soft-light
+    :hard-light
+    :difference
+    :exclusion
+    :hue
+    :saturation
+    :color
+    :luminosity})
+
 (s/def ::shape-attrs
   (s/keys :opt-un [:internal.shape/selrect
                    :internal.shape/points
@@ -285,12 +299,12 @@
                    :internal.shape/constraints-h
                    :internal.shape/constraints-v
                    :internal.shape/fixed-scroll
-                   :internal.shape/rx
-                   :internal.shape/ry
-                   :internal.shape/r1
-                   :internal.shape/r2
-                   :internal.shape/r3
-                   :internal.shape/r4
+                   ::ctr/rx
+                   ::ctr/ry
+                   ::ctr/r1
+                   ::ctr/r2
+                   ::ctr/r3
+                   ::ctr/r4
                    :internal.shape/x
                    :internal.shape/y
                    :internal.shape/exports
@@ -312,7 +326,9 @@
                    ::cti/interactions
                    :internal.shape/masked-group?
                    :internal.shape/shadow
-                   :internal.shape/blur]))
+                   :internal.shape/blur
+                   :internal.shape/opacity
+                   :internal.shape/blend-mode]))
 
 
 ;; shapes-group is handled differently
@@ -322,7 +338,8 @@
           :opt-un [::id]))
 
 (s/def ::shape
-  (s/and ::minimal-shape ::shape-attrs
+  (s/and ::minimal-shape
+         ::shape-attrs
          (s/keys :opt-un [::id
                           ::component-id
                           ::component-file

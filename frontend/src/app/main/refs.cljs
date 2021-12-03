@@ -61,12 +61,6 @@
 (def dashboard-search-result
   (l/derived :dashboard-search-result st/state))
 
-(def dashboard-team
-  (l/derived (fn [state]
-               (let [team-id (:current-team-id state)]
-                 (get-in state [:teams team-id])))
-             st/state))
-
 (def dashboard-team-stats
   (l/derived :dashboard-team-stats st/state))
 
@@ -247,10 +241,11 @@
          (fn [state]
            (let [objects (wsh/lookup-page-objects state)
                  modifiers (:workspace-modifiers state)
+                 ;; FIXME: Improve performance
                  objects (cond-> objects
                            with-modifiers?
                            (gsh/merge-modifiers modifiers))
-                 xform (comp (map #(get objects %))
+                 xform (comp (map (d/getf objects))
                              (remove nil?))]
              (into [] xform ids)))]
      (l/derived selector st/state =))))
@@ -305,19 +300,10 @@
 
 (def selected-shapes-with-children
   (letfn [(selector [{:keys [selected objects]}]
-            (let [children (->> selected
-                                (mapcat #(cp/get-children % objects))
-                                (filterv (comp not nil?)))]
-              (into selected children)))]
-    (l/derived selector selected-data =)))
-
-(def selected-objects-with-children
-  (letfn [(selector [{:keys [selected objects]}]
-            (let [children (->> selected
-                                (mapcat #(cp/get-children % objects))
-                                (filterv (comp not nil?)))
-                  shapes   (into selected children)]
-              (mapv #(get objects %) shapes)))]
+            (let [xform (comp (remove nil?)
+                              (mapcat #(cp/get-children % objects)))
+                  shapes (into selected xform selected)]
+              (mapv (d/getf objects) shapes)))]
     (l/derived selector selected-data =)))
 
 ;; ---- Viewer refs

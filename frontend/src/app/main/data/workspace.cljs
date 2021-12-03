@@ -14,6 +14,7 @@
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.pages :as cp]
+   [app.common.pages.changes-builder :as pcb]
    [app.common.pages.helpers :as cph]
    [app.common.pages.spec :as spec]
    [app.common.spec :as us]
@@ -350,16 +351,16 @@
 
 ;; TODO: properly handle positioning on undo.
 
+;; TODO: for some reason, the page-id here in some circumstances is `nil`
 (defn delete-page
   [id]
   (ptk/reify ::delete-page
     ptk/WatchEvent
     (watch [it state _]
       (let [page (get-in state [:workspace-data :pages-index id])
-            rchg {:type :del-page
-                  :id id}
-            uchg {:type :add-page
-                  :page page}]
+            rchg {:type :del-page :id id}
+            uchg {:type :add-page :page page}]
+
         (rx/of (dch/commit-changes {:redo-changes [rchg]
                                     :undo-changes [uchg]
                                     :origin it})
@@ -546,7 +547,7 @@
                             (disj flags flag)
                             (conj flags flag)))
                         stored
-                        (into #{} flags)))))))
+                        (d/concat-set flags)))))))
 
 ;; --- Set element options mode
 
@@ -784,8 +785,7 @@
              groups-to-delete)
 
         u-del-change
-        (d/concat
-         []
+        (concat
          ;; Create the groups
          (map (fn [group-id]
                 (let [group (get objects group-id)]
@@ -936,25 +936,25 @@
           :page-id page-id
           :shapes (vec parents)}]
 
-        rchanges (d/concat []
-                           r-mov-change
-                           r-del-change
-                           r-mask-change
-                           r-detach-change
-                           r-deroot-change
-                           r-reroot-change
-                           r-unconstraint-change
-                           r-reg-change)
+        rchanges (d/concat-vec
+                  r-mov-change
+                  r-del-change
+                  r-mask-change
+                  r-detach-change
+                  r-deroot-change
+                  r-reroot-change
+                  r-unconstraint-change
+                  r-reg-change)
 
-        uchanges (d/concat []
-                           u-del-change
-                           u-reroot-change
-                           u-deroot-change
-                           u-detach-change
-                           u-mask-change
-                           u-mov-change
-                           u-unconstraint-change
-                           u-reg-change)]
+        uchanges (d/concat-vec
+                  u-del-change
+                  u-reroot-change
+                  u-deroot-change
+                  u-detach-change
+                  u-mask-change
+                  u-mov-change
+                  u-unconstraint-change
+                  u-reg-change)]
     [rchanges uchanges]))
 
 (defn relocate-shapes
@@ -970,18 +970,15 @@
             objects  (wsh/lookup-page-objects state page-id)
 
             ;; Ignore any shape whose parent is also intented to be moved
-            ids (cp/clean-loops objects ids)
+            ids      (cp/clean-loops objects ids)
 
             ;; If we try to move a parent into a child we remove it
-            ids (filter #(not (cp/is-parent? objects parent-id %)) ids)
-
-            parents (reduce (fn [result id]
-                              (conj result (cp/get-parent id objects)))
-                            #{parent-id} ids)
+            ids      (filter #(not (cp/is-parent? objects parent-id %)) ids)
+            parents  (into #{parent-id} (map #(cp/get-parent % objects)) ids)
 
             groups-to-delete
-            (loop [current-id (first parents)
-                   to-check (rest parents)
+            (loop [current-id  (first parents)
+                   to-check    (rest parents)
                    removed-id? (set ids)
                    result #{}]
 
@@ -995,7 +992,7 @@
                            (empty? (remove removed-id? (:shapes group))))
 
                     ;; Adds group to the remove and check its parent
-                    (let [to-check (d/concat [] to-check [(cp/get-parent current-id objects)]) ]
+                    (let [to-check (concat to-check [(cp/get-parent current-id objects)])]
                       (recur (first to-check)
                              (rest to-check)
                              (conj removed-id? current-id)
@@ -1021,6 +1018,10 @@
                           group-ids)))
                     #{}
                     ids)
+
+            ;; TODO: Probably implementing this using loop/recur will
+            ;; be more efficient than using reduce and continuos data
+            ;; desturcturing.
 
             ;; Sets the correct components metadata for the moved shapes
             ;; `shapes-to-detach` Detach from a component instance a shape that was inside a component and is moved outside
@@ -1111,20 +1112,14 @@
 
 (defn relocate-page
   [id index]
-  (ptk/reify ::relocate-pages
+  (ptk/reify ::relocate-page
     ptk/WatchEvent
     (watch [it state _]
-      (let [cidx (-> (get-in state [:workspace-data :pages])
-                     (d/index-of id))
-            rchg {:type :mov-page
-                  :id id
-                  :index index}
-            uchg {:type :mov-page
-                  :id id
-                  :index cidx}]
-        (rx/of (dch/commit-changes {:redo-changes [rchg]
-                                    :undo-changes [uchg]
-                                    :origin it}))))))
+      (let [prev-index (-> (get-in state [:workspace-data :pages])
+                           (d/index-of id))
+            changes    (-> (pcb/empty-changes it id)
+                           (pcb/move-page index prev-index))]
+        (rx/of (dch/commit-changes changes))))))
 
 ;; --- Shape / Selection Alignment and Distribution
 
@@ -1209,7 +1204,7 @@
                 (boolean? hidden) (assoc :hidden hidden)))
 
             objects (wsh/lookup-page-objects state)
-            ids (d/concat [id] (cp/get-children id objects))]
+            ids     (into [id] (cp/get-children id objects))]
         (rx/of (dch/update-shapes ids update-fn))))))
 
 
@@ -1645,7 +1640,7 @@
                    (not= root-file-id (:current-file-id state))
                    (nil? (get-in state [:workspace-libraries root-file-id])))))
 
-          ;; Procceed with the standard shape paste procediment.
+          ;; Proceed with the standard shape paste process.
           (do-paste [it state mouse-pos media]
             (let [page-objects  (wsh/lookup-page-objects state)
                   media-idx     (d/index-by :prev-id media)
@@ -1673,7 +1668,7 @@
 
                   page-id   (:current-page-id state)
                   unames    (-> (wsh/lookup-page-objects state page-id)
-                                (dwc/retrieve-used-names)) ;; TODO: move this calculation inside prepare-duplcate-changes?
+                                (dwc/retrieve-used-names)) ;; TODO: move this calculation inside prepare-duplicate-changes?
 
                   rchanges  (->> (dws/prepare-duplicate-changes all-objects page-id unames selected delta)
                                  (mapv (partial process-rchange media-idx))
@@ -1799,7 +1794,7 @@
     (watch [it state _]
       (let [page-id (get state :current-page-id)
             options (wsh/lookup-page-options state page-id)
-            previus-color  (:background options)]
+            previous-color  (:background options)]
         (rx/of (dch/commit-changes
                 {:redo-changes [{:type :set-option
                                  :page-id page-id
@@ -1808,7 +1803,7 @@
                  :undo-changes [{:type :set-option
                                  :page-id page-id
                                  :option :background
-                                 :value previus-color}]
+                                 :value previous-color}]
                  :origin it}))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

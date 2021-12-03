@@ -143,7 +143,7 @@
 
         best-snap
         (fn [acc val]
-          ;; Using a number is faster than accesing the variable.
+          ;; Using a number is faster than accessing the variable.
           ;; Keep up to date with `snap-distance-accuracy`
           (if (and (<= val snap-distance-accuracy) (>= val (- snap-distance-accuracy)))
             (min acc val)
@@ -168,9 +168,8 @@
                           (map between-snap))
 
         ;; Search the minimum snap
-        snap-list (-> [] (d/concat lt-snap) (d/concat gt-snap) (d/concat between-snap))
-
-        min-snap (reduce best-snap ##Inf snap-list)]
+        snap-list (d/concat-vec lt-snap gt-snap between-snap)
+        min-snap  (reduce best-snap ##Inf snap-list)]
 
     (if (mth/finite? min-snap) [0 min-snap] nil)))
 
@@ -291,8 +290,7 @@
                                     (set (keys other)))]
              (into {}
                    (map (fn [key]
-                          [key
-                           (d/concat [] (get matches key []) (get other key []))]))
+                          [key (d/concat-vec (get matches key []) (get other key []))]))
                    keys)))]
 
      (-> matches

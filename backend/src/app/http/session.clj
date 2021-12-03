@@ -53,12 +53,15 @@
 
 (defn- add-cookies
   [response {:keys [id] :as session}]
-  (let [cors? (contains? cfg/flags :cors)]
+  (let [cors?   (contains? cfg/flags :cors)
+        secure? (contains? cfg/flags :secure-session-cookies)]
     (assoc response :cookies {cookie-name {:path "/"
                                            :http-only true
                                            :value id
-                                           :same-site (if cors? :none :strict)
-                                           :secure true}})))
+                                           :same-site (cond (not secure?) :lax
+                                                            cors?         :none
+                                                            :else         :strict)
+                                           :secure secure?}})))
 
 (defn- clear-cookies
   [response]
@@ -71,7 +74,10 @@
       (do
         (a/>!! (::events-ch cfg) id)
         (l/update-thread-context! {:profile-id profile-id})
-        (handler (assoc request :profile-id profile-id)))
+        (-> request
+            (assoc :profile-id profile-id)
+            (assoc :session-id id)
+            (handler)))
       (handler request))))
 
 ;; --- STATE INIT: SESSION

@@ -90,7 +90,7 @@
   [subpath other]
   (assert (pt= (:to subpath) (:from other)))
   (-> subpath
-      (update :data d/concat (rest (:data other)))
+      (update :data d/concat-vec (rest (:data other)))
       (assoc :to (:to other))))
 
 (defn- merge-paths
@@ -126,7 +126,7 @@
   (pt= (:from subpath) (:to subpath)))
 
 (defn close-subpaths
-  "Searches a path for posible supaths that can create closed loops and merge them"
+  "Searches a path for possible supaths that can create closed loops and merge them"
   [content]
   (let [subpaths (get-subpaths content)
         closed-subpaths

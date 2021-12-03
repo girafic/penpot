@@ -463,7 +463,7 @@
   #{:mask-type})
 
 ;; Defaults for some tags per spec https://www.w3.org/TR/SVG11/single-page.html
-;; they are basicaly the defaults that can be percents and we need to replace because
+;; they are basically the defaults that can be percents and we need to replace because
 ;; otherwise won't work as expected in the workspace
 (defonce svg-tag-defaults
   (let [filter-default {:units :filterUnits
@@ -630,8 +630,7 @@
 (defn find-node-references [node]
   (let [current (->> (find-attr-references (:attrs node)) (into #{}))
         children (->> (:content node) (map find-node-references) (flatten) (into #{}))]
-    (-> (d/concat current children)
-        (vec))))
+    (vec (into current children))))
 
 (defn find-def-references [defs references]
   (loop [result (into #{} references)
@@ -653,7 +652,7 @@
       (let [node (get defs to-check)
             new-refs (find-node-references node)
             pending (concat pending new-refs)]
-        (recur (d/concat result new-refs)
+        (recur (into result new-refs)
                (conj checked? to-check)
                (first pending)
                (rest pending))))))

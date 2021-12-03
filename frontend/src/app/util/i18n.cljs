@@ -27,6 +27,8 @@
    {:label "Rumanian (communit)" :value "ro"}
    {:label "Portuguese (Brazil, community)" :value "pt_br"}
    {:label "Ελληνική γλώσσα (community)" :value "el"}
+   {:label "עִבְרִית (community)" :value "he"}
+   {:label "عربي/عربى (community)" :value "ar"}
    {:label "简体中文 (community)" :value "zh_cn"}])
 
 (defn- parse-locale
@@ -56,7 +58,7 @@
 (defonce locale (l/atom (or (get @storage ::locale)
                             (autodetect))))
 
-;; The traslations `data` is a javascript object and should be treated
+;; The translations `data` is a javascript object and should be treated
 ;; with `goog.object` namespace functions instead of a standart
 ;; clojure functions. This is for performance reasons because this
 ;; code is executed in the critical part (application bootstrap) and
@@ -100,7 +102,7 @@
 ;; A main public api for translate strings.
 
 ;; A marker type that is used just for mark
-;; a parameter that reprsentes the counter.
+;; a parameter that represented the counter.
 
 (defn c
   [x]

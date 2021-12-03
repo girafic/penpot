@@ -9,6 +9,7 @@
    [app.common.data :as d]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.types.interactions :as cti]
    [app.common.uuid :as uuid]
    [app.util.color :as uc]
    [app.util.json :as json]
@@ -482,7 +483,7 @@
         color {:color (:color attrs)
                :opacity (-> attrs :opacity d/parse-double)}
 
-        params (-> (d/without-keys attrs [:color :opacity :display :type])
+        params (-> (dissoc attrs :color :opacity :display :type)
                    (d/update-when :size d/parse-double)
                    (d/update-when :item-length d/parse-double)
                    (d/update-when :gutter d/parse-double)
@@ -755,14 +756,24 @@
   (let [interactions-node (get-data node :penpot:interactions)]
     (->> (find-all-nodes interactions-node :penpot:interaction)
          (mapv (fn [node]
-                 {:event-type          (get-meta node :event-type keyword)
-                  :action-type         (get-meta node :action-type keyword)
-                  :delay               (get-meta node :delay d/parse-double)
-                  :destination         (get-meta node :destination uuid/uuid)
-                  :overlay-pos-type    (get-meta node :overlay-pos-type keyword)
-                  :overlay-position-x  (get-meta node :overlay-position-x d/parse-double)
-                  :overlay-position-y  (get-meta node :overlay-position-x d/parse-double)
-                  :url                 (get-meta node :url str)
-                  :close-click-outside (get-meta node :close-click-outside str->bool)
-                  :background-overlay  (get-meta node :background-overlay str->bool)})))))
+                 (let [interaction {:event-type  (get-meta node :event-type keyword)
+                                    :action-type (get-meta node :action-type keyword)}]
+                   (cond-> interaction
+                     (cti/has-delay interaction)
+                     (assoc :delay (get-meta node :delay d/parse-double))
+
+                     (cti/has-destination interaction)
+                     (assoc :destination     (get-meta node :destination uuid/uuid)
+                            :preserve-scroll (get-meta node :preserve-scroll str->bool))
+
+                     (cti/has-url interaction)
+                     (assoc :url (get-meta node :url str))
+
+                     (cti/has-overlay-opts interaction)
+                     (assoc :overlay-pos-type    (get-meta node :overlay-pos-type keyword)
+                            :overlay-position    (gpt/point
+                                                   (get-meta node :overlay-position-x d/parse-double)
+                                                   (get-meta node :overlay-position-y d/parse-double))
+                            :close-click-outside (get-meta node :close-click-outside str->bool)
+                            :background-overlay  (get-meta node :background-overlay str->bool)))))))))
 

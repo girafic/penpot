@@ -40,7 +40,9 @@
 (defmulti process-operation (fn [_ op] (:type op)))
 
 (defn process-changes
-  ([data items] (process-changes data items true))
+  ([data items]
+   (process-changes data items true))
+
   ([data items verify?]
    ;; When verify? false we spec the schema validation. Currently used to make just
    ;; 1 validation even if the changes are applied twice
@@ -152,6 +154,7 @@
 ;; reg-objects operation "regenerates" the geometry and selrect of the parent groups
 (defmethod process-change :reg-objects
   [data {:keys [page-id component-id shapes]}]
+  ;; FIXME: Improve performance
   (letfn [(reg-objects [objects]
             (reduce #(d/update-when %1 %2 update-group %1) objects
                     (sequence (comp
@@ -214,7 +217,7 @@
                     not-mask-shapes (without-obj shapes mask-id)
                     new-index       (if (nil? index) nil (max (dec index) 0))
                     new-shapes      (insert-items other-ids new-index not-mask-shapes)]
-                (d/concat [mask-id] new-shapes))))
+                (into [mask-id] new-shapes))))
 
           (add-to-parent [parent index shapes]
             (let [parent (-> parent
@@ -291,7 +294,7 @@
                   (reduce update-parent-id $ shapes)
 
                   ;; Analyze the old parents and clear the old links
-                  ;; only if the new parrent is different form old
+                  ;; only if the new parent is different form old
                   ;; parent.
                   (reduce (partial remove-from-old-parent cpindex) $ shapes)
 
@@ -469,4 +472,3 @@
   (ex/raise :type :not-implemented
             :code :operation-not-implemented
             :context {:type (:type op)}))
-

@@ -8,7 +8,6 @@
   (:require
    ["ua-parser-js" :as UAParser]
    [app.common.data :as d]
-   [app.common.logging :as log]
    [app.config :as cf]
    [app.main.repo :as rp]
    [app.util.globals :as g]
@@ -202,7 +201,6 @@
 
 (defn initialize
   []
-  (log/info :msg "initialize audit log")
   (ptk/reify ::initialize
     ptk/EffectEvent
     (effect [_ _ stream]

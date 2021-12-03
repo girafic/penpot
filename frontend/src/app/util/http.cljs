@@ -20,7 +20,7 @@
    [promesa.core :as p]))
 
 (defprotocol IBodyData
-  "A helper for define body data with the appropiate headers."
+  "A helper for define body data with the appropriate headers."
   (-update-headers [_ headers])
   (-get-body-data [_]))
 
@@ -88,6 +88,7 @@
                               :credentials credentials
                               :referrerPolicy "no-referrer"
                               :signal signal}]
+
        (-> (js/fetch (str uri) params)
            (p/then (fn [response]
                      (vreset! abortable? false)
@@ -136,8 +137,8 @@
 
 (defn conditional-decode-transit
   [{:keys [body headers] :as response}]
-  (let [contentype (get headers "content-type")]
-    (if (and (str/starts-with? contentype "application/transit+json")
+  (let [contenttype (get headers "content-type")]
+    (if (and (str/starts-with? contenttype "application/transit+json")
              (pos? (count body)))
       (assoc response :body (t/decode-str body))
       response)))

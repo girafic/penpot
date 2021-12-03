@@ -6,7 +6,6 @@
 
 (ns app.util.emails
   (:require
-   [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.spec :as us]
    [app.util.template :as tmpl]
@@ -199,7 +198,7 @@
       (ex/raise :type :internal
                 :code :missing-email-templates))
     {:subject subj
-     :body (d/concat
+     :body (into
             [{:type "text/plain"
               :content text}]
             (when html
@@ -207,7 +206,7 @@
                 :content html}]))}))
 
 (s/def ::priority #{:high :low})
-(s/def ::to (s/or :sigle ::us/email
+(s/def ::to (s/or :single ::us/email
                   :multi (s/coll-of ::us/email)))
 (s/def ::from ::us/email)
 (s/def ::reply-to ::us/email)

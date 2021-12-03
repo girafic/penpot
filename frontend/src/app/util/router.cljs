@@ -19,17 +19,16 @@
 
 ;; --- Router API
 
+(defn map->Match
+  [data]
+  (r/map->Match data))
+
 (defn resolve
   ([router id] (resolve router id {} {}))
   ([router id path-params] (resolve router id path-params {}))
   ([router id path-params query-params]
    (when-let [match (r/match-by-name router id path-params)]
-     (if (empty? query-params)
-       (r/match->path match)
-       (let [query (u/map->query-string query-params)]
-         (-> (u/uri (r/match->path match))
-             (assoc :query query)
-             (str)))))))
+     (r/match->path match query-params))))
 
 (defn create
   [routes]
@@ -117,9 +116,10 @@
     (effect [_ state _]
       (let [router (:router state)
             path   (resolve router rname path-params query-params)
+            name   (or name "_blank")
             uri    (-> (u/uri cfg/public-uri)
                        (assoc :fragment path))]
-        (dom/open-new-window (str uri) name)))))
+        (dom/open-new-window uri name nil)))))
 
 (defn nav-back
   []
@@ -161,7 +161,3 @@
                                (e/unlistenByKey key)))))
               (rx/take-until stoper)
               (rx/subs #(on-change router %)))))))
-
-
-
-

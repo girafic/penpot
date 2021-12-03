@@ -38,8 +38,8 @@
         (.stroke ctx)))
 
     (let [grd (.createRadialGradient ctx cx cy 0 cx cx radius)]
-      (.addColorStop grd 0 "white")
-      (.addColorStop grd 1 "rgba(255, 255, 255, 0")
+      (.addColorStop grd 0 "rgba(255, 255, 255, 1)")
+      (.addColorStop grd 1 "rgba(255, 255, 255, 0)")
       (obj/set! ctx "fillStyle" grd)
 
       (.beginPath ctx)
@@ -56,7 +56,7 @@
         y (+ (/ canvas-side 2) (* comp-y (/ canvas-side 2)))]
     (gpt/point x y)))
 
-(mf/defc harmony-selector [{:keys [color disable-opacity on-change]}]
+(mf/defc harmony-selector [{:keys [color disable-opacity on-change on-start-drag on-finish-drag]}]
   (let [canvas-ref (mf/use-ref nil)
         {hue :h saturation :s value :v alpha :alpha} color
 
@@ -83,6 +83,24 @@
                                       :r r :g g :b b
                                       :h new-hue
                                       :s new-saturation})))
+
+        handle-start-drag
+        (mf/use-callback
+         (mf/deps on-start-drag)
+         (fn [event]
+           (dom/capture-pointer event)
+           (reset! dragging? true)
+           (when on-start-drag
+             (on-start-drag))))
+
+        handle-stop-drag
+        (mf/use-callback
+         (mf/deps on-finish-drag)
+         (fn [event]
+           (dom/release-pointer event)
+           (reset! dragging? false)
+           (when on-finish-drag
+             (on-finish-drag))))
 
         on-change-value (fn [new-value]
                           (let [hex (uc/hsv->hex [hue saturation new-value])
@@ -112,11 +130,8 @@
        {:ref canvas-ref
         :width canvas-side
         :height canvas-side
-        :on-mouse-down #(reset! dragging? true)
-        :on-mouse-up #(reset! dragging? false)
-        :on-pointer-down (partial dom/capture-pointer)
-        :on-lost-pointer-capture #(do (dom/release-pointer %)
-                                      (reset! dragging? false))
+        :on-pointer-down handle-start-drag
+        :on-lost-pointer-capture handle-stop-drag
         :on-click calculate-pos
         :on-mouse-move #(when @dragging? (calculate-pos %))}]
       [:div.handler {:style {:pointer-events "none"
@@ -133,11 +148,15 @@
                            :value value
                            :max-value 255
                            :vertical true
-                           :on-change on-change-value}]
+                           :on-change on-change-value
+                           :on-start-drag on-start-drag
+                           :on-finish-drag on-finish-drag}]
       (when (not disable-opacity)
         [:& slider-selector {:class "opacity"
                              :vertical? true
                              :value alpha
                              :max-value 1
                              :vertical true
-                             :on-change on-change-opacity}])]]))
+                             :on-change on-change-opacity
+                             :on-start-drag on-start-drag
+                             :on-finish-drag on-finish-drag}])]]))

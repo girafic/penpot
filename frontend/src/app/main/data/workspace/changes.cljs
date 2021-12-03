@@ -50,7 +50,7 @@
   (let [old-obj (get objects id)
         new-obj (update-fn old-obj)
 
-        attrs (or attrs (d/concat #{} (keys old-obj) (keys new-obj)))
+        attrs (or attrs (d/concat-set (keys old-obj) (keys new-obj)))
 
         {rops :rops uops :uops}
         (reduce #(generate-operation %1 %2 old-obj new-obj ignore-geometry?)
@@ -114,20 +114,20 @@
                 :changes changes}))))
 
 (defn commit-changes
-  [{:keys [redo-changes undo-changes origin save-undo? file-id]
-    :or {save-undo? true}}]
-
+  [{:keys [redo-changes undo-changes origin save-undo? file-id] :or {save-undo? true}}]
   (log/debug :msg "commit-changes"
              :js/redo-changes redo-changes
              :js/undo-changes undo-changes)
+  (let [error  (volatile! nil)
+        strace (.-stack (ex-info "" {}))]
 
-  (let [error (volatile! nil)]
     (ptk/reify ::commit-changes
       cljs.core/IDeref
       (-deref [_]
         {:file-id file-id
          :hint-events @st/last-events
          :hint-origin (ptk/type origin)
+         :hint-strace strace
          :changes redo-changes})
 
       ptk/UpdateEvent
@@ -135,7 +135,6 @@
         (let [current-file-id (get state :current-file-id)
               file-id         (or file-id current-file-id)
               path            (if (= file-id current-file-id)
-
                                 [:workspace-data]
                                 [:workspace-libraries file-id :data])]
           (try

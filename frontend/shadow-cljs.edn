@@ -4,7 +4,6 @@
  :jvm-opts ["-Xmx700m" "-Xms100m" "-XX:+UseSerialGC" "-XX:-OmitStackTraceInFastThrow"]
  :dev-http {8888 "classpath:public"}
 
-
  :builds
  {:main
   {:target :browser
@@ -33,6 +32,7 @@
                       goog.debug.LOGGING_ENABLED true}
     :compiler-options
     {:fn-invoke-direct true
+     :optimizations #shadow/env ["PENPOT_BUILD_OPTIMIZATIONS" :as :keyword :default :advanced]
      :source-map true
      :elide-asserts true
      :anon-fn-naming-policy :off
@@ -65,7 +65,20 @@
    :ns-regexp "^app.*-test$"
    ;; :autorun true
 
-   :compiler-options
-   {:output-feature-set :es8
-    :output-wrapper false
-    :warnings {:fn-deprecated false}}}}}
+   :release
+   {:compiler-options
+    {:pseudo-names true
+     :pretty-print true
+     :source-map true
+     :source-map-include-sources-content true
+     :source-map-detail-level :all
+     :optimizations :whitespace
+     :fn-invoke-direct true}}
+
+   :dev
+   {:compiler-options
+    {:output-feature-set :es8
+     :output-wrapper false}}
+
+   }}}
+

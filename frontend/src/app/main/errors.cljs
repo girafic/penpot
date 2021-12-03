@@ -13,6 +13,7 @@
    [app.main.data.users :as du]
    [app.main.sentry :as sentry]
    [app.main.store :as st]
+   [app.util.i18n :refer [tr]]
    [app.util.router :as rt]
    [app.util.timers :as ts]
    [cljs.pprint :refer [pprint]]
@@ -48,7 +49,9 @@
 ;; here and not in app.main.errors because of circular dependency.
 (defmethod ptk/handle-error :authentication
   [_]
-  (ts/schedule (st/emitf (du/logout))))
+  (let [msg (tr "errors.auth.unable-to-login")]
+    (st/emit! (du/logout {:capture-redirect? true}))
+    (ts/schedule 500 (st/emitf (dm/warn msg)))))
 
 
 ;; That are special case server-errors that should be treated
@@ -62,7 +65,7 @@
   (ts/schedule
    (st/emitf (rt/assign-exception error))))
 
-;; Error that happens on an active bussines model validation does not
+;; Error that happens on an active business model validation does not
 ;; passes an validation (example: profile can't leave a team). From
 ;; the user perspective a error flash message should be visualized but
 ;; user can continue operate on the application.

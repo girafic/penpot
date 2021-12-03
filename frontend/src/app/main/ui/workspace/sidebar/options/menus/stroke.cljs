@@ -6,12 +6,12 @@
 
 (ns app.main.ui.workspace.sidebar.options.menus.stroke
   (:require
+   [app.common.colors :as clr]
    [app.common.data :as d]
    [app.common.math :as math]
    [app.common.pages.spec :as spec]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.colors :as dc]
-   [app.main.data.workspace.undo :as dwu]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.icons :as i]
@@ -102,7 +102,10 @@
         (mf/use-callback
           (mf/deps ids)
           (fn []
-            (st/emit! (dc/change-stroke ids (dissoc current-stroke-color :id :file-id)))))
+            (let [remove-multiple (fn [[_ value]] (not= value :multiple))
+                  current-stroke-color (-> (into {} (filter remove-multiple) current-stroke-color)
+                                           (assoc :id nil :file-id nil))]
+              (st/emit! (dc/change-stroke ids current-stroke-color)))))
 
         on-stroke-style-change
         (fn [event]
@@ -179,25 +182,13 @@
         (fn [_]
           (st/emit! (dch/update-shapes ids #(assoc %
                                                    :stroke-style :solid
-                                                   :stroke-color "#000000"
+                                                   :stroke-color clr/black
                                                    :stroke-opacity 1
                                                    :stroke-width 1))))
 
         on-del-stroke
         (fn [_]
-          (st/emit! (dch/update-shapes ids #(assoc % :stroke-style :none))))
-
-        on-open-picker
-        (mf/use-callback
-         (mf/deps ids)
-         (fn [_value _opacity _id _file-id]
-           (st/emit! (dwu/start-undo-transaction))))
-
-        on-close-picker
-        (mf/use-callback
-         (mf/deps ids)
-         (fn [_value _opacity _id _file-id]
-           (st/emit! (dwu/commit-undo-transaction))))]
+          (st/emit! (dch/update-shapes ids #(assoc % :stroke-style :none))))]
 
     (if show-options
       [:div.element-set
@@ -208,15 +199,15 @@
        [:div.element-set-content
         ;; Stroke Color
         [:& color-row {:color current-stroke-color
+                       :title (tr "workspace.options.stroke-color")
                        :on-change handle-change-stroke-color
-                       :on-detach handle-detach
-                       :on-open on-open-picker
-                       :on-close on-close-picker}]
+                       :on-detach handle-detach}]
 
         ;; Stroke Width, Alignment & Style
         [:div.row-flex
          [:div.input-element
-          {:class (dom/classnames :pixels (not= (:stroke-width values) :multiple))}
+          {:class (dom/classnames :pixels (not= (:stroke-width values) :multiple))
+           :title (tr "workspace.options.stroke-width")}
           [:input.input-text {:type "number"
                               :min "0"
                               :value (-> (:stroke-width values) width->string)

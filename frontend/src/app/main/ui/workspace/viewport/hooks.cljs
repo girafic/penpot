@@ -6,7 +6,6 @@
 
 (ns app.main.ui.workspace.viewport.hooks
   (:require
-   [app.common.data :as d]
    [app.common.geom.shapes :as gsh]
    [app.common.pages :as cp]
    [app.main.data.shortcuts :as dsc]
@@ -121,7 +120,7 @@
              (->> move-stream
                   ;; When transforming shapes we stop querying the worker
                   (rx/filter #(not (some? (mf/ref-val transform-ref))))
-                  (rx/switch-map query-point))
+                  (rx/merge-map query-point))
 
              (->> move-stream
                   ;; When transforming shapes we stop querying the worker
@@ -162,10 +161,9 @@
              remove-xfm (mapcat #(cp/get-parents % objects))
              remove-id? (cond-> (into #{} remove-xfm selected)
                           @ctrl?
-                          (d/concat (filterv is-group? ids)))
+                          (into (filter is-group?) ids))
 
-             ids (->> ids (filterv (comp not remove-id?)))
-
+             ids         (filterv (comp not remove-id?) ids)
              hover-shape (get objects (first ids))]
 
          (reset! hover hover-shape)

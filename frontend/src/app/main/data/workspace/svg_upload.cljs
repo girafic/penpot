@@ -409,12 +409,14 @@
                    :shapes [shape-id]}]
 
             ;; Careful! the undo changes are concatenated reversed (we undo in reverse order
-            changes [(d/concat rchs rch1 rch2) (d/concat uch1 uchs)]
-            unames (conj unames (:name shape))
+            changes [(d/concat-vec rchs rch1 rch2)
+                     (d/concat-vec uch1 uchs)]
+            unames  (conj unames (:name shape))
+
             reducer-fn (partial add-svg-child-changes page-id objects selected frame-id shape-id svg-data)]
         (reduce reducer-fn [unames changes] (d/enumerate children)))
 
-      ;; Cannot create the data from curren tags
+      ;; Cannot create the data from current tags
       [unames [rchs uchs]])))
 
 (declare create-svg-shapes)
@@ -425,7 +427,7 @@
     ptk/WatchEvent
     (watch [_ _ _]
       ;; Once the SVG is uploaded, we need to extract all the bitmap
-      ;; images and upload them separatelly, then proceed to create
+      ;; images and upload them separately, then proceed to create
       ;; all shapes.
       (->> (rx/from (usvg/collect-images svg-data))
            (rx/map (fn [uri]

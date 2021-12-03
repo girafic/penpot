@@ -7,7 +7,6 @@
 (ns app.main.ui.viewer.shapes
   "The main container for a frame in viewer mode"
   (:require
-   [app.common.data :as d]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as geom]
@@ -44,7 +43,12 @@
   (case (:action-type interaction)
     :navigate
     (when-let [frame-id (:destination interaction)]
-      (st/emit! (dv/go-to-frame frame-id)))
+      (let [viewer-section (dom/get-element "viewer-section")
+            scroll (if (:preserve-scroll interaction)
+                     (dom/get-scroll-pos viewer-section)
+                     0)]
+        (st/emit! (dv/set-nav-scroll scroll)
+                  (dv/go-to-frame frame-id))))
 
     :open-overlay
     (let [dest-frame-id       (:destination interaction)
@@ -191,8 +195,8 @@
               :y (- y 1)
               :width (+ width 2)
               :height (+ height 2)
-              :fill "#31EFB8"
-              :stroke "#31EFB8"
+              :fill "var(--color-primary)"
+              :stroke "var(--color-primary)"
               :stroke-width (if interactions-show? 1 0)
               :fill-opacity (if interactions-show? 0.2 0)
               :style {:pointer-events (when frame? "none")}
@@ -391,7 +395,7 @@
         update-fn    #(assoc-in %1 [%2 :modifiers :displacement] modifier)
 
         frame-id     (:id frame)
-        modifier-ids (d/concat [frame-id] (cp/get-children frame-id objects))
+        modifier-ids (into [frame-id] (cp/get-children frame-id objects))
         objects      (reduce update-fn objects modifier-ids)
         frame        (assoc-in frame [:modifiers :displacement] modifier)
 
