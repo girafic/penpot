@@ -116,6 +116,14 @@
                               :show-distances?])
              workspace-local =))
 
+(def interactions-data
+  (l/derived #(select-keys % [:editing-interaction-index
+                              :draw-interaction-to
+                              :draw-interaction-to-frame
+                              :move-overlay-to
+                              :move-overlay-index])
+             workspace-local =))
+
 (def local-displacement
   (l/derived #(select-keys % [:modifiers :selected])
              workspace-local =))
@@ -146,6 +154,9 @@
 
 (def editors
   (l/derived :editors workspace-local))
+
+(def selected-assets
+  (l/derived :selected-assets workspace-local))
 
 (def workspace-layout
   (l/derived :workspace-layout st/state))
@@ -219,7 +230,7 @@
   (l/derived :options workspace-page))
 
 (def workspace-frames
-  (l/derived cp/select-frames workspace-page-objects))
+  (l/derived cp/select-frames workspace-page-objects =))
 
 (def workspace-editor
   (l/derived :workspace-editor st/state))
@@ -232,23 +243,12 @@
   (l/derived #(get % id) workspace-page-objects))
 
 (defn objects-by-id
-  ([ids]
-   (objects-by-id ids nil))
-
-  ([ids {:keys [with-modifiers?]
-         :or { with-modifiers? false }}]
-   (let [selector
-         (fn [state]
-           (let [objects (wsh/lookup-page-objects state)
-                 modifiers (:workspace-modifiers state)
-                 ;; FIXME: Improve performance
-                 objects (cond-> objects
-                           with-modifiers?
-                           (gsh/merge-modifiers modifiers))
-                 xform (comp (map (d/getf objects))
-                             (remove nil?))]
-             (into [] xform ids)))]
-     (l/derived selector st/state =))))
+  [ids]
+  (let [selector
+        (fn [state]
+          (let [objects (wsh/lookup-page-objects state)]
+            (into [] (keep (d/getf objects)) ids)))]
+    (l/derived selector st/state =)))
 
 (defn- set-content-modifiers [state]
   (fn [id shape]
@@ -257,21 +257,11 @@
         (update shape :content upc/apply-content-modifiers content-modifiers)
         shape))))
 
-(defn select-children [id]
+(defn select-bool-children [id]
   (let [selector
         (fn [state]
           (let [objects (wsh/lookup-page-objects state)
-
-                modifiers (-> (:workspace-modifiers state))
-                {selected :selected disp-modifiers :modifiers}
-                (-> (:workspace-local state)
-                    (select-keys [:modifiers :selected]))
-
-                modifiers
-                (d/deep-merge
-                 modifiers
-                 (into {} (map #(vector % {:modifiers disp-modifiers})) selected))]
-
+                modifiers (:workspace-modifiers state)]
             (as-> (cp/select-children id objects) $
               (gsh/merge-modifiers $ modifiers)
               (d/mapm (set-content-modifiers state) $))))]

@@ -1756,7 +1756,7 @@ msgid "viewer.frame-not-found"
 msgstr "No se encuentra el tablero."
 
 msgid "viewer.header.comments-section"
-msgstr "Comentarios"
+msgstr "Comentarios (%s)"
 
 #: src/app/main/ui/viewer/header.cljs
 msgid "viewer.header.dont-show-interactions"
@@ -1767,14 +1767,14 @@ msgid "viewer.header.fullscreen"
 msgstr "Pantalla completa"
 
 msgid "viewer.header.handsoff-section"
-msgstr "Handoff"
+msgstr "Handoff (%s)"
 
 #: src/app/main/ui/viewer/header.cljs
 msgid "viewer.header.interactions"
 msgstr "Interacciones"
 
 msgid "viewer.header.interactions-section"
-msgstr "Interacciones"
+msgstr "Interacciones (%s)"
 
 #: src/app/main/ui/viewer/header.cljs
 msgid "viewer.header.share.copy-link"
@@ -1810,35 +1810,35 @@ msgstr "Mapa del sitio"
 
 #: src/app/main/ui/workspace/sidebar/align.cljs
 msgid "workspace.align.hcenter"
-msgstr "Alinear al centro"
+msgstr "Alinear al centro (%s)"
 
 #: src/app/main/ui/workspace/sidebar/align.cljs
 msgid "workspace.align.hdistribute"
-msgstr "Distribuir espacio horizontal"
+msgstr "Distribuir espacio horizontal (%s)"
 
 #: src/app/main/ui/workspace/sidebar/align.cljs
 msgid "workspace.align.hleft"
-msgstr "Alinear a la izquierda"
+msgstr "Alinear a la izquierda (%s)"
 
 #: src/app/main/ui/workspace/sidebar/align.cljs
 msgid "workspace.align.hright"
-msgstr "Alinear a la derecha"
+msgstr "Alinear a la derecha (%s)"
 
 #: src/app/main/ui/workspace/sidebar/align.cljs
 msgid "workspace.align.vbottom"
-msgstr "Alinear abajo"
+msgstr "Alinear abajo (%s)"
 
 #: src/app/main/ui/workspace/sidebar/align.cljs
 msgid "workspace.align.vcenter"
-msgstr "Alinear al centro"
+msgstr "Alinear al centro (%s)"
 
 #: src/app/main/ui/workspace/sidebar/align.cljs
 msgid "workspace.align.vdistribute"
-msgstr "Distribuir espacio vertical"
+msgstr "Distribuir espacio vertical (%s)"
 
 #: src/app/main/ui/workspace/sidebar/align.cljs
 msgid "workspace.align.vtop"
-msgstr "Alinear arriba"
+msgstr "Alinear arriba (%s)"
 
 #: src/app/main/ui/workspace/sidebar/assets.cljs
 msgid "workspace.assets.assets"
@@ -2392,6 +2392,22 @@ msgid "workspace.options.interaction-after-delay"
 msgstr "Tiempo"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-animation"
+msgstr "Animación"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-animation-dissolve"
+msgstr "Disolver"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-animation-slide"
+msgstr "Deslizar"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-animation-push"
+msgstr "Empujar"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-background"
 msgstr "Añadir sombreado de fondo"
 
@@ -2414,6 +2430,42 @@ msgstr "Tiempo"
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-destination"
 msgstr "Destino"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-duration"
+msgstr "Duración"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-easing"
+msgstr "Easing"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-easing-linear"
+msgstr "Linear"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-easing-ease"
+msgstr "Ease"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-easing-ease-in"
+msgstr "Ease in"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-easing-ease-out"
+msgstr "Ease out"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-easing-ease-in-out"
+msgstr "Ease in out"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-in"
+msgstr "Dentro"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-offset-effect"
+msgstr "Offset effect"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-mouse-enter"
@@ -2454,6 +2506,10 @@ msgstr "Superposición: %s"
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-open-url"
 msgstr "Abrir url"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-out"
+msgstr "Fuera"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.interaction-pos-bottom-center"

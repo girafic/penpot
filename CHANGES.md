@@ -5,7 +5,9 @@
 ### :boom: Breaking changes
 ### :sparkles: New features
 
+- Add actions to go to main component context menu option [Taiga #2053](https://tree.taiga.io/project/penpot/us/2053).
 - Add contrast between component select color and shape select color [Taiga #2121](https://tree.taiga.io/project/penpot/issue/2121).
+- Add animations in interactions [Taiga #2244](https://tree.taiga.io/project/penpot/us/2244).
 
 ### :bug: Bugs fixed
 
@@ -20,6 +22,19 @@
 - Spelling fixes (by @jsoref) [#1340](https://github.com/penpot/penpot/pull/1340).
 - Explain folders in components (by @candideu) [Penpot-docs #42](https://github.com/penpot/penpot-docs/pull/42).
 - Readability improvements of user guide (by @PaulSchulz) [Penpot-docs #50](https://github.com/penpot/penpot-docs/pull/50).
+
+
+# 1.10.2-beta
+
+### :bug: Bugs fixed
+
+- Fix corner case issues with media file uploads.
+- Fix issue with default page grids validation.
+- Fix issue related to some raceconditions on workspace navigation events.
+
+### :arrow_up: Deps updates
+
+- Update log4j2 dependency.
 
 
 # 1.10.1-beta

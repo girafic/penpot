@@ -10,6 +10,7 @@
    [app.main.data.users :as du]
    [app.main.store :as st]
    [app.main.ui.releases.common :as rc]
+   [app.main.ui.releases.v1-10]
    [app.main.ui.releases.v1-4]
    [app.main.ui.releases.v1-5]
    [app.main.ui.releases.v1-6]

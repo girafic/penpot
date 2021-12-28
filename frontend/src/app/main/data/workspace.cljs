@@ -6,6 +6,7 @@
 
 (ns app.main.data.workspace
   (:require
+   [app.common.attrs :as attrs]
    [app.common.data :as d]
    [app.common.geom.align :as gal]
    [app.common.geom.matrix :as gmt]
@@ -23,10 +24,11 @@
    [app.config :as cfg]
    [app.main.data.events :as ev]
    [app.main.data.messages :as dm]
-   [app.main.data.workspace.booleans :as dwb]
+   [app.main.data.workspace.bool :as dwb]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.drawing :as dwd]
+   [app.main.data.workspace.fix-bool-contents :as fbc]
    [app.main.data.workspace.groups :as dwg]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.data.workspace.libraries :as dwl]
@@ -42,10 +44,12 @@
    [app.main.repo :as rp]
    [app.main.streams :as ms]
    [app.main.worker :as uw]
+   [app.util.dom :as dom]
    [app.util.globals :as ug]
    [app.util.http :as http]
    [app.util.i18n :as i18n]
    [app.util.router :as rt]
+   [app.util.timers :as tm]
    [app.util.webapi :as wapi]
    [beicon.core :as rx]
    [cljs.spec.alpha :as s]
@@ -109,6 +113,10 @@
   {:zoom 1
    :flags #{}
    :selected (d/ordered-set)
+   :selected-assets {:components #{}
+                     :graphics #{}
+                     :colors #{}
+                     :typographies #{}}
    :expanded {}
    :tooltip nil
    :options-mode :design
@@ -212,8 +220,11 @@
                                       (or (not ignore-until)
                                           (> (:modified-at %) ignore-until)))
                                 libraries)]
-        (when needs-update?
-          (rx/of (dwl/notify-sync-file file-id)))))))
+        (rx/merge
+         (rx/of (fbc/fix-bool-contents))
+         (if needs-update?
+           (rx/of (dwl/notify-sync-file file-id))
+           (rx/empty)))))))
 
 (defn finalize-file
   [_project-id file-id]
@@ -306,7 +317,7 @@
   [page-id]
   (ptk/reify ::duplicate-page
     ptk/WatchEvent
-    (watch [this state _]
+    (watch [it state _]
       (let [id      (uuid/next)
             pages   (get-in state [:workspace-data :pages-index])
             unames  (dwc/retrieve-used-names pages)
@@ -321,7 +332,7 @@
                      :id id}]
         (rx/of (dch/commit-changes {:redo-changes [rchange]
                                     :undo-changes [uchange]
-                                    :origin this}))))))
+                                    :origin it}))))))
 
 (s/def ::rename-page
   (s/keys :req-un [::id ::name]))
@@ -1123,6 +1134,13 @@
 (declare align-object-to-frame)
 (declare align-objects-list)
 
+(defn can-align? [selected objects]
+  (cond
+    (empty? selected) false
+    (> (count selected) 1) true
+    :else
+    (not= uuid/zero (:frame-id (get objects (first selected))))))
+
 (defn align-objects
   [axis]
   (us/verify ::gal/align-axis axis)
@@ -1135,12 +1153,11 @@
             moved    (if (= 1 (count selected))
                        (align-object-to-frame objects (first selected) axis)
                        (align-objects-list objects selected axis))
-
             moved-objects (->> moved (group-by :id))
             ids (keys moved-objects)
             update-fn (fn [shape] (first (get moved-objects (:id shape))))]
-
-        (rx/of (dch/update-shapes ids update-fn {:reg-objects? true}))))))
+        (when (can-align? selected objects)
+          (rx/of (dch/update-shapes ids update-fn {:reg-objects? true})))))))
 
 (defn align-object-to-frame
   [objects object-id axis]
@@ -1153,6 +1170,12 @@
   (let [selected-objs (map #(get objects %) selected)
         rect (gsh/selection-rect selected-objs)]
     (mapcat #(gal/align-to-rect % rect axis objects) selected-objs)))
+
+(defn can-distribute? [selected]
+  (cond
+    (empty? selected) false
+    (< (count selected) 2) false
+    :else true))
 
 (defn distribute-objects
   [axis]
@@ -1169,7 +1192,8 @@
             moved-objects (->> moved (group-by :id))
             ids (keys moved-objects)
             update-fn (fn [shape] (first (get moved-objects (:id shape))))]
-        (rx/of (dch/update-shapes ids update-fn {:reg-objects? true}))))))
+        (when (can-distribute? selected)
+          (rx/of (dch/update-shapes ids update-fn {:reg-objects? true})))))))
 
 ;; --- Shape Proportions
 
@@ -1184,6 +1208,21 @@
                   (-> (assoc shape :proportion-lock true)
                       (gpr/assign-proportions))))]
         (rx/of (dch/update-shapes [id] assign-proportions))))))
+
+(defn toggle-proportion-lock
+  []
+  (ptk/reify ::toggle-propotion-lock
+    ptk/WatchEvent
+    (watch [_ state _]
+           (let [page-id       (:current-page-id state)
+                 objects       (wsh/lookup-page-objects state page-id)
+                 selected      (wsh/lookup-selected state)
+                 selected-obj  (-> (map #(get objects %) selected))
+                 multi         (attrs/get-attrs-multi selected-obj [:proportion-lock])
+                 multi?        (= :multiple (:proportion-lock multi))]
+             (if multi?
+               (rx/of (dch/update-shapes selected #(assoc % :proportion-lock true)))
+               (rx/of (dch/update-shapes selected #(update % :proportion-lock not))))))))
 
 ;; --- Update Shape Flags
 
@@ -1204,6 +1243,21 @@
             ids     (into [id] (cp/get-children id objects))]
         (rx/of (dch/update-shapes ids update-fn))))))
 
+(defn toggle-visibility-selected
+  []
+  (ptk/reify ::toggle-visibility-selected
+    ptk/WatchEvent
+    (watch [_ state _]
+           (let [selected (wsh/lookup-selected state)]
+             (rx/of (dch/update-shapes selected #(update % :hidden not)))))))
+
+(defn toggle-lock-selected
+  []
+  (ptk/reify ::toggle-lock-selected
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [selected (wsh/lookup-selected state)]
+        (rx/of (dch/update-shapes selected #(update % :blocked not)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Navigation
@@ -1257,6 +1311,66 @@
             qparams    {:page-id page-id :layout (name layout)}]
         (rx/of (rt/nav :workspace pparams qparams))))))
 
+(defn check-in-asset
+  [set element]
+  (if (contains? set element)
+    (disj set element)
+    (conj set element)))
+
+(defn toggle-selected-assets
+  [asset type]
+  (ptk/reify ::toggle-selected-assets
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:workspace-local :selected-assets type] #(check-in-asset % asset)))))
+
+(defn select-single-asset
+  [asset type]
+  (ptk/reify ::select-single-asset
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-local :selected-assets type] #{asset}))))
+
+(defn select-assets
+  [assets type]
+  (ptk/reify ::select-assets
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-local :selected-assets type] (into #{} assets)))))
+
+(defn unselect-all-assets
+  []
+  (ptk/reify ::unselect-all-assets
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-local :selected-assets] {:components #{}
+                                                           :graphics #{}
+                                                           :colors #{}
+                                                           :typographies #{}}))))
+
+(defn go-to-component
+  [objs]
+  (ptk/reify ::set-workspace-layout-component
+    IDeref
+    (-deref [_] {:layout :assets})
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [project-id    (get-in state [:workspace-project :id])
+            file-id       (get-in state [:workspace-file :id])
+            page-id       (get state :current-page-id)
+            component-id  (get (first objs) :component-id)
+            pparams       {:file-id file-id :project-id project-id}
+            qparams       {:page-id page-id :layout :assets}]
+        (rx/of (rt/nav :workspace pparams qparams)
+               (dwl/set-assets-box-open file-id :library true)
+               (dwl/set-assets-box-open file-id :components true)
+               (select-single-asset component-id :components))))
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (let [component-id  (get (first objs) :component-id)
+            wrapper-id    (str "component-shape-id-" component-id)]
+        (tm/schedule-on-idle #(dom/scroll-into-view-if-needed! (dom/get-element wrapper-id)))))))
+
 (def go-to-file
   (ptk/reify ::go-to-file
     ptk/WatchEvent
@@ -1269,13 +1383,13 @@
 
 (defn go-to-viewer
   ([] (go-to-viewer {}))
-  ([{:keys [file-id page-id]}]
+  ([{:keys [file-id page-id section]}]
    (ptk/reify ::go-to-viewer
      ptk/WatchEvent
      (watch [_ state _]
        (let [{:keys [current-file-id current-page-id]} state
              pparams {:file-id (or file-id current-file-id)}
-             qparams {:page-id (or page-id current-page-id)}]
+             qparams {:page-id (or page-id current-page-id) :section section}]
          (rx/of ::dwp/force-persist
                 (rt/nav-new-window* {:rname :viewer
                                      :path-params pparams

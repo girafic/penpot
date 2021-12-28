@@ -168,7 +168,7 @@
                                                  :accept-label (tr "modals.update-remote-component.accept")
                                                  :accept-style :primary
                                                  :on-accept confirm-update-remote-component}))
-        do-show-component (st/emitf (dw/go-to-layout :assets))
+        do-show-component (st/emitf (dw/go-to-component selected-objects))
         do-navigate-component-file (st/emitf (dwl/nav-to-component-file
                                               (:component-file shape)))
 
@@ -250,16 +250,16 @@
                 (or multiple? (and single? (or is-group? is-bool?))))
        [:& menu-entry {:title (tr "workspace.shape.menu.path")}
         [:& menu-entry {:title (tr "workspace.shape.menu.union")
-                        :shortcut (sc/get-tooltip :boolean-union)
+                        :shortcut (sc/get-tooltip :bool-union)
                         :on-click (set-bool :union)}]
         [:& menu-entry {:title (tr "workspace.shape.menu.difference")
-                        :shortcut (sc/get-tooltip :boolean-difference)
+                        :shortcut (sc/get-tooltip :bool-difference)
                         :on-click (set-bool :difference)}]
         [:& menu-entry {:title (tr "workspace.shape.menu.intersection")
-                        :shortcut (sc/get-tooltip :boolean-intersection)
+                        :shortcut (sc/get-tooltip :bool-intersection)
                         :on-click (set-bool :intersection)}]
         [:& menu-entry {:title (tr "workspace.shape.menu.exclude")
-                        :shortcut (sc/get-tooltip :boolean-exclude)
+                        :shortcut (sc/get-tooltip :bool-exclude)
                         :on-click (set-bool :exclude)}]
 
         (when (and single? is-bool? (not disable-flatten?))

@@ -354,6 +354,12 @@
   ([element scroll-top]
    (.scrollIntoView ^js element scroll-top)))
 
+(defn scroll-into-view-if-needed!
+  ([element]
+   (.scrollIntoViewIfNeeded ^js element false))
+  ([element scroll-top]
+   (.scrollIntoViewIfNeeded ^js element scroll-top)))
+
 (defn is-in-viewport?
   [element]
   (let [rect   (.getBoundingClientRect element)
@@ -424,4 +430,11 @@
 (defn browser-back
   []
   (.back (.-history js/window)))
+
+(defn animate!
+  ([item keyframes duration] (animate! item keyframes duration nil))
+  ([item keyframes duration onfinish]
+    (let [animation (.animate item keyframes duration)]
+      (when onfinish
+        (set! (.-onfinish animation) onfinish)))))
 
