@@ -5,6 +5,12 @@
 ### :boom: Breaking changes
 ### :sparkles: New features
 
+- Add shortcut for opacity [Taiga #2442](https://tree.taiga.io/project/penpot/us/2442).
+- Setting fill automatically for new texts [Taiga #2441](https://tree.taiga.io/project/penpot/us/2441).
+- Add shortcut to move action [Github #1213](https://github.com/penpot/penpot/issues/1213).
+- Add alt as mod key to add stroke color from library menu [Taiga #2207](https://tree.taiga.io/project/penpot/us/2207).
+- Add detach in bulk option to context menu [Taiga #2210](https://tree.taiga.io/project/penpot/us/2210).
+- Add penpot look and feel to multiuser cursors [Taiga #1387](https://tree.taiga.io/project/penpot/us/1387).
 - Add actions to go to main component context menu option [Taiga #2053](https://tree.taiga.io/project/penpot/us/2053).
 - Add contrast between component select color and shape select color [Taiga #2121](https://tree.taiga.io/project/penpot/issue/2121).
 - Add animations in interactions [Taiga #2244](https://tree.taiga.io/project/penpot/us/2244).
@@ -15,6 +21,10 @@
 - Fix problems when exporting all artboards [Taiga #2234](https://tree.taiga.io/project/penpot/issue/2234).
 - Fix problems with team management [#1353](https://github.com/penpot/penpot/issues/1353)
 - Fix problem when importing in shared libraries [#1362](https://github.com/penpot/penpot/issues/1362)
+- Fix problem with join nodes [#1422](https://github.com/penpot/penpot/issues/1422)
+- After team onboarding importing a file will import into the team drafts [Taiga #2408](https://tree.taiga.io/project/penpot/issue/2408)
+- Fix problem exporting shapes from handoff mode [Taiga #2386](https://tree.taiga.io/project/penpot/issue/2386)
+- Fix lock/hide elements in context menu when multiples shapes selected [Taiga #2340](https://tree.taiga.io/project/penpot/issue/2340)
 
 ### :arrow_up: Deps updates
 ### :heart: Community contributions by (Thank you!)
@@ -22,6 +32,43 @@
 - Spelling fixes (by @jsoref) [#1340](https://github.com/penpot/penpot/pull/1340).
 - Explain folders in components (by @candideu) [Penpot-docs #42](https://github.com/penpot/penpot-docs/pull/42).
 - Readability improvements of user guide (by @PaulSchulz) [Penpot-docs #50](https://github.com/penpot/penpot-docs/pull/50).
+
+
+# 1.10.4-beta
+
+### :sparkles: Enhacements
+
+- Allow parametrice file snapshoting interval.
+
+### :bug: Bugs fixed
+
+- Fix issue on :mov-object change impl.
+- Minor fix on how file changes log is persisted.
+- Fix many issues on error reporting.
+
+
+# 1.10.3-beta
+
+### :sparkles: Enhacements
+
+- Make all logging asynchronous, this avoid some overhead on jetty threads at cost of logging latency.
+- Increase default session time to 15 days.
+
+### :bug: Bugs fixed
+
+- Fix unexpected exception on saving pages with default grids [#2409](https://tree.taiga.io/project/penpot/issue/2409)
+- Fix react warnings on setting size 1 on row and column grids.
+- Fix minor issues on ZMQ logging listener (used in error reporting service).
+- Remove "ALPHA" from the code.
+- Fix value and nil handling on numeric-input component. This fixes many issues related to typography, components, etc. renaming.
+- Fix NPE on email complains processing.
+- Fix white page after leaving a team.
+- Fix missing leave team button outside members page.
+
+### :arrow_up: Deps updates
+
+- Update log4j2 dependency.
+>>>>>>> main
 
 
 # 1.10.2-beta

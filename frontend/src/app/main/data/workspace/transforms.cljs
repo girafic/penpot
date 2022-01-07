@@ -368,7 +368,7 @@
             (assoc-in [:workspace-local :transform] :resize)))
 
       ptk/WatchEvent
-      (watch [it state stream]
+      (watch [_ state stream]
         (let [initial-position @ms/mouse-position
               stoper  (rx/filter ms/mouse-up? stream)
               layout  (:workspace-layout state)
@@ -510,6 +510,11 @@
 (defn- start-move-duplicate
   [from-position]
   (ptk/reify ::start-move-duplicate
+    ptk/UpdateEvent
+    (update [_ state]
+      (-> state
+          (assoc-in [:workspace-local :transform] :move)))
+
     ptk/WatchEvent
     (watch [_ _ stream]
       (->> stream
@@ -730,7 +735,3 @@
                                :displacement (gmt/translate-matrix (gpt/point 0 (- (:height selrect))))}
                               true)
                (apply-modifiers selected))))))
-
-
-;; -- Transform to path ---------------------------------------------
-

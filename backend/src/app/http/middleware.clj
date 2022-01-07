@@ -9,7 +9,6 @@
    [app.common.logging :as l]
    [app.common.transit :as t]
    [app.config :as cf]
-   [app.metrics :as mtx]
    [app.util.json :as json]
    [buddy.core.codecs :as bc]
    [buddy.core.hash :as bh]
@@ -35,38 +34,32 @@
               (t/read! reader)))
 
           (parse-json [body]
-            (json/read body))
-
-          (parse [type body]
-            (try
-              (case type
-                :json (parse-json body)
-                :transit (parse-transit body))
-              (catch Exception e
-                (let [data {:type :parse
-                            :hint "unable to parse request body"
-                            :message (ex-message e)}]
-                  {:status 400
-                   :headers {"content-type" "application/transit+json"}
-                   :body (t/encode-str data {:type :json-verbose})}))))]
-
+            (json/read body))]
     (fn [{:keys [headers body] :as request}]
-      (let [ctype (get headers "content-type")]
-        (handler
-         (case ctype
-           "application/transit+json"
-           (let [params (parse :transit body)]
-             (-> request
-                 (assoc :body-params params)
-                 (update :params merge params)))
+      (try
+        (let [ctype (get headers "content-type")]
+          (handler (case ctype
+                     "application/transit+json"
+                     (let [params (parse-transit body)]
+                       (-> request
+                           (assoc :body-params params)
+                           (update :params merge params)))
 
-           "application/json"
-           (let [params (parse :json body)]
-             (-> request
-                 (assoc :body-params params)
-                 (update :params merge params)))
+                     "application/json"
+                     (let [params (parse-json body)]
+                       (-> request
+                           (assoc :body-params params)
+                           (update :params merge params)))
 
-           request))))))
+                     request)))
+        (catch Exception e
+          (let [data {:type :validation
+                      :code :unable-to-parse-request-body
+                      :hint "malformed params"}]
+            (l/error :hint (ex-message e) :cause e)
+            {:status 400
+             :headers {"content-type" "application/transit+json"}
+             :body (t/encode-str data {:type :json-verbose})}))))))
 
 (def parse-request-body
   {:name ::parse-request-body
@@ -78,6 +71,9 @@
         params (:query-params request)
         opts   {:type (if (contains? params "transit_verbose") :json-verbose :json)}]
     (cond
+      (:ws response)
+      response
+
       (coll? body)
       (-> response
           (update :headers assoc "content-type" "application/transit+json")
@@ -112,11 +108,6 @@
   {:name ::errors
    :compile (constantly wrap-errors)})
 
-(def metrics
-  {:name ::metrics
-   :wrap (fn [handler]
-           (mtx/wrap-counter handler {:id "http__requests_counter"
-                                      :help "Absolute http requests counter."}))})
 (def cookies
   {:name ::cookies
    :compile (constantly wrap-cookies)})

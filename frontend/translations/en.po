@@ -3012,6 +3012,10 @@ msgstr "Delete flow start"
 msgid "workspace.shape.menu.detach-instance"
 msgstr "Detach instance"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/component.cljs, src/app/main/ui/workspace/sidebar/options/menus/component.cljs, src/app/main/ui/workspace/context_menu.cljs, src/app/main/ui/workspace/context_menu.cljs
+msgid "workspace.shape.menu.detach-instances-in-bulk"
+msgstr "Detach instances"
+
 msgid "workspace.shape.menu.difference"
 msgstr "Difference"
 
@@ -3163,7 +3167,7 @@ msgstr "Image (%s)"
 
 #: src/app/main/ui/workspace/left_toolbar.cljs
 msgid "workspace.toolbar.move"
-msgstr "Move"
+msgstr "Move (%s)"
 
 #: src/app/main/ui/workspace/left_toolbar.cljs
 msgid "workspace.toolbar.path"

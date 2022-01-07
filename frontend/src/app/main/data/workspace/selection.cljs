@@ -184,11 +184,13 @@
             is-not-blocked (fn [shape-id] (not (get-in state [:workspace-data
                                                               :pages-index page-id
                                                               :objects shape-id
-                                                              :blocked] false)))]
-        (rx/of (->> new-selected
-                    (filter is-not-blocked)
-                    (into lks/empty-linked-set)
-                    (select-shapes)))))))
+                                                              :blocked] false)))
+
+            selected-ids (into lks/empty-linked-set
+                               (comp (filter some?)
+                                     (filter is-not-blocked))
+                               new-selected)]
+        (rx/of (select-shapes selected-ids))))))
 
 (defn deselect-all
   "Clear all possible state of drawing, edition
@@ -449,7 +451,7 @@
   (ptk/reify ::duplicate-selected
     ptk/WatchEvent
     (watch [it state _]
-      (when (nil? (get-in state [:workspace-local :transform]))
+      (when (or (not move-delta?) (nil? (get-in state [:workspace-local :transform])))
         (let [page-id  (:current-page-id state)
               objects  (wsh/lookup-page-objects state page-id)
               selected (wsh/lookup-selected state)
@@ -475,10 +477,10 @@
 
               id-duplicated (when (= (count selected) 1) (first selected))]
 
-          (rx/of (dch/commit-changes {:redo-changes rchanges
+          (rx/of (select-shapes selected)
+                 (dch/commit-changes {:redo-changes rchanges
                                       :undo-changes uchanges
                                       :origin it})
-                 (select-shapes selected)
                  (memorize-duplicated id-original id-duplicated)))))))
 
 (defn change-hover-state

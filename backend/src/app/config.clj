@@ -42,6 +42,7 @@
 
 (def defaults
   {:http-server-port 6060
+   :http-server-host "localhost"
    :host "devenv"
    :tenant "dev"
    :database-uri "postgresql://postgres/penpot"
@@ -50,6 +51,9 @@
 
    :default-blob-version 3
    :loggers-zmq-uri "tcp://localhost:45556"
+
+   :file-change-snapshot-every 5
+   :file-change-snapshot-timeout "3h"
 
    :public-uri "http://localhost:3449"
    :redis-uri "redis://redis/0"
@@ -98,6 +102,10 @@
 (s/def ::audit-log-archive-uri ::us/string)
 (s/def ::audit-log-gc-max-age ::dt/duration)
 
+(s/def ::admins ::us/set-of-str)
+(s/def ::file-change-snapshot-every ::us/integer)
+(s/def ::file-change-snapshot-timeout ::dt/duration)
+
 (s/def ::secret-key ::us/string)
 (s/def ::allow-demo-users ::us/boolean)
 (s/def ::assets-path ::us/string)
@@ -125,6 +133,7 @@
 (s/def ::oidc-roles-attr ::us/keyword)
 (s/def ::host ::us/string)
 (s/def ::http-server-port ::us/integer)
+(s/def ::http-server-host ::us/string)
 (s/def ::http-session-idle-max-age ::dt/duration)
 (s/def ::http-session-updater-batch-max-age ::dt/duration)
 (s/def ::http-session-updater-batch-max-size ::us/integer)
@@ -185,6 +194,7 @@
 (s/def ::config
   (s/keys :opt-un [::secret-key
                    ::flags
+                   ::admins
                    ::allow-demo-users
                    ::audit-log-archive-uri
                    ::audit-log-gc-max-age
@@ -193,6 +203,8 @@
                    ::database-username
                    ::default-blob-version
                    ::error-report-webhook
+                   ::file-change-snapshot-every
+                   ::file-change-snapshot-timeout
                    ::user-feedback-destination
                    ::github-client-id
                    ::github-client-secret
@@ -211,6 +223,7 @@
                    ::oidc-roles-attr
                    ::oidc-roles
                    ::host
+                   ::http-server-host
                    ::http-server-port
                    ::http-session-idle-max-age
                    ::http-session-updater-batch-max-age

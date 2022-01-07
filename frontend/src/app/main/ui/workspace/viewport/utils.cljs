@@ -52,17 +52,16 @@
 
         ;; When the shape is a frame we maybe need to move its thumbnail
         thumb-node (when frame? (dom/get-element (str "thumbnail-" id)))]
-    (cond
-      (some? thumb-node)
-      [(.-parentNode thumb-node)]
 
-      (and (some? shape-node) frame?)
-      [(dom/query shape-node ".frame-background")
+    (cond
+      frame?
+      [thumb-node
+       (dom/query shape-node ".frame-background")
        (dom/query shape-node ".frame-clip")]
 
       ;; For groups we don't want to transform the whole group but only
       ;; its filters/masks
-      (and (some? shape-node) mask?)
+      mask?
       [(dom/query shape-node ".mask-clip-path")
        (dom/query shape-node ".mask-shape")]
 
@@ -73,7 +72,7 @@
       [shape-node])))
 
 (defn update-transform [shapes transforms modifiers]
-  (doseq [{id :id :as shape} shapes]
+  (doseq [{:keys [id type] :as shape} shapes]
     (when-let [nodes (get-nodes shape)]
       (let [transform (get transforms id)
             modifiers (get-in modifiers [id :modifiers])
