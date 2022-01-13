@@ -20,6 +20,10 @@
   overflow: auto;
 
   & .viewer-wrapper {
+    position: relative;
+  }
+
+  & .viewer-clipper {
     display: grid;
     grid-template-rows: 1fr;
     grid-template-columns: 1fr;

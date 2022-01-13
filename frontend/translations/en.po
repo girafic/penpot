@@ -55,7 +55,7 @@ msgstr "Login here"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-submit"
-msgstr "Sign in"
+msgstr "Login"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-subtitle"
@@ -79,7 +79,7 @@ msgstr "Login with Google"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-ldap-submit"
-msgstr "Sign in with LDAP"
+msgstr "Login with LDAP"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-oidc-submit"
@@ -265,10 +265,10 @@ msgid "dashboard.export-frames"
 msgstr "Export artboards to PDF..."
 
 msgid "dashboard.export-multi"
-msgstr "Export %s files"
+msgstr "Export Penpot %s files"
 
 msgid "dashboard.export-single"
-msgstr "Export file"
+msgstr "Export Penpot file"
 
 msgid "dashboard.export.detail"
 msgstr "* Might include components, graphics, colors and/or typographies."
@@ -311,6 +311,20 @@ msgstr "Font deleted"
 msgid "dashboard.fonts.empty-placeholder"
 msgstr "You still have no custom fonts installed."
 
+#: src/app/main/ui/dashboard/fonts.cljs
+msgid "dashboard.fonts.fonts-added"
+msgid_plural "dashboard.fonts.fonts-added"
+msgstr[0] "1 font added"
+msgstr[1] "%s fonts added"
+
+#: src/app/main/ui/dashboard/fonts.cljs
+msgid "dashboard.fonts.upload-all"
+msgstr "Upload all"
+
+#: src/app/main/ui/dashboard/fonts.cljs
+msgid "dashboard.fonts.dismiss-all"
+msgstr "Dismiss all"
+
 #, markdown
 msgid "dashboard.fonts.hero-text1"
 msgstr ""
@@ -329,7 +343,7 @@ msgstr ""
 "[font licensing](https://www.typography.com/faq)."
 
 msgid "dashboard.import"
-msgstr "Import files"
+msgstr "Import Penpot files"
 
 msgid "dashboard.import.analyze-error"
 msgstr "Oops! We couldn't import this file"
@@ -1767,8 +1781,8 @@ msgstr "Don't show interactions"
 msgid "viewer.header.fullscreen"
 msgstr "Full Screen"
 
-msgid "viewer.header.handsoff-section"
-msgstr "Handsoff (%s)"
+msgid "viewer.header.handoff-section"
+msgstr "Handoff (%s)"
 
 #: src/app/main/ui/viewer/header.cljs
 msgid "viewer.header.interactions"
@@ -3042,6 +3056,10 @@ msgid "workspace.shape.menu.flip-vertical"
 msgstr "Flip vertical"
 
 #: src/app/main/ui/workspace/context_menu.cljs
+msgid "workspace.shape.menu.create-artboard-from-selection"
+msgstr "Selection to artboard"
+
+#: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.flow-start"
 msgstr "Flow start"
 
@@ -3322,3 +3340,6 @@ msgstr "Insufficient members to leave team, you probably want to delete it."
 
 msgid "errors.auth.unable-to-login"
 msgstr "Looks like you are not authenticated or session expired."
+
+msgid "dashboard.import.import-warning"
+msgstr "Some files containted invalid objects that have been removed."

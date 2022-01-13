@@ -269,10 +269,10 @@ msgid "dashboard.export-frames"
 msgstr "Exportar tableros a PDF..."
 
 msgid "dashboard.export-multi"
-msgstr "Exportar %s archivos"
+msgstr "Exportar %s archivos Penpot"
 
 msgid "dashboard.export-single"
-msgstr "Exportar archivo"
+msgstr "Exportar archivo Penpot"
 
 msgid "dashboard.export.detail"
 msgstr "* Pueden incluir components, gráficos, colores y/o tipografias."
@@ -315,6 +315,20 @@ msgstr "Fuente eliminada."
 msgid "dashboard.fonts.empty-placeholder"
 msgstr "Aun no tienes fuentes personalizadas."
 
+#: src/app/main/ui/dashboard/fonts.cljs
+msgid "dashboard.fonts.fonts-added"
+msgid_plural "dashboard.fonts.fonts-added"
+msgstr[0] "1 fuente añadida"
+msgstr[1] "%s fuentes añadidas"
+
+#: src/app/main/ui/dashboard/fonts.cljs
+msgid "dashboard.fonts.upload-all"
+msgstr "Cargar todas"
+
+#: src/app/main/ui/dashboard/fonts.cljs
+msgid "dashboard.fonts.dismiss-all"
+msgstr "Ignorar todas"
+
 #, markdown
 msgid "dashboard.fonts.hero-text1"
 msgstr ""
@@ -335,7 +349,7 @@ msgstr ""
 "licensing](https://www.typography.com/faq)."
 
 msgid "dashboard.import"
-msgstr "Importar archivos"
+msgstr "Importar archivos Penpot"
 
 msgid "dashboard.import.analyze-error"
 msgstr "¡Vaya! No hemos podido importar el fichero"
@@ -1766,7 +1780,7 @@ msgstr "No mostrar interacciones"
 msgid "viewer.header.fullscreen"
 msgstr "Pantalla completa"
 
-msgid "viewer.header.handsoff-section"
+msgid "viewer.header.handoff-section"
 msgstr "Handoff (%s)"
 
 #: src/app/main/ui/viewer/header.cljs
@@ -3041,6 +3055,10 @@ msgid "workspace.shape.menu.flip-vertical"
 msgstr "Voltear vertical"
 
 #: src/app/main/ui/workspace/context_menu.cljs
+msgid "workspace.shape.menu.create-artboard-from-selection"
+msgstr "Tablero de selección"
+
+#: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.flow-start"
 msgstr "Inicio de flujo"
 
@@ -3309,3 +3327,6 @@ msgstr "Actualizar"
 
 msgid "workspace.viewport.click-to-close-path"
 msgstr "Pulsar para cerrar la ruta"
+
+msgid "dashboard.import.import-warning"
+msgstr "Algunos ficheros contenían objetos erroneos que no han sido importados."

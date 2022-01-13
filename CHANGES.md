@@ -5,6 +5,8 @@
 ### :boom: Breaking changes
 ### :sparkles: New features
 
+- Show color hex or name on hover [Taiga #2413](https://tree.taiga.io/project/penpot/us/2413).
+- Add shortcut to create artboard from selected objects [Taiga #2412](https://tree.taiga.io/project/penpot/us/2412).
 - Add shortcut for opacity [Taiga #2442](https://tree.taiga.io/project/penpot/us/2442).
 - Setting fill automatically for new texts [Taiga #2441](https://tree.taiga.io/project/penpot/us/2441).
 - Add shortcut to move action [Github #1213](https://github.com/penpot/penpot/issues/1213).
@@ -17,6 +19,13 @@
 
 ### :bug: Bugs fixed
 
+- Fix remove gradient if any when applying color from library [Taiga #2299](https://tree.taiga.io/project/penpot/issue/2299).
+- Fix Enter as key action to exit edit path [Taiga #2444](https://tree.taiga.io/project/penpot/issue/2444).
+- Fix add fill color from palette to groups and components [Taiga #2313](https://tree.taiga.io/project/penpot/issue/2313).
+- Fix default project name in all languages [Taiga #2280](https://tree.taiga.io/project/penpot/issue/2280).
+- Fix line-height and letter-spacing inputs to allow negative values [Taiga #2381](https://tree.taiga.io/project/penpot/issue/2381).
+- Fix typo in Handoff tooltip [Taiga #2428](https://tree.taiga.io/project/penpot/issue/2428).
+- Fix crash when pressing Shift+1 on empty file [#1435](https://github.com/penpot/penpot/issues/1435).
 - Fix masked group resize strange behavior [Taiga #2317](https://tree.taiga.io/project/penpot/issue/2317).
 - Fix problems when exporting all artboards [Taiga #2234](https://tree.taiga.io/project/penpot/issue/2234).
 - Fix problems with team management [#1353](https://github.com/penpot/penpot/issues/1353)
@@ -25,8 +34,36 @@
 - After team onboarding importing a file will import into the team drafts [Taiga #2408](https://tree.taiga.io/project/penpot/issue/2408)
 - Fix problem exporting shapes from handoff mode [Taiga #2386](https://tree.taiga.io/project/penpot/issue/2386)
 - Fix lock/hide elements in context menu when multiples shapes selected [Taiga #2340](https://tree.taiga.io/project/penpot/issue/2340)
+- Fix problem with booleans [Taiga #2356](https://tree.taiga.io/project/penpot/issue/2356)
+- Fix line-height/letter-spacing inputs behaviour [Taiga #2331](https://tree.taiga.io/project/penpot/issue/2331)
+- Fix dotted style in strokes [Taiga #2312](https://tree.taiga.io/project/penpot/issue/2312)
+- Fix problem when resizing texts inside groups [Taiga #2310](https://tree.taiga.io/project/penpot/issue/2310)
+- Fix problem with multiple exports [Taiga #2468](https://tree.taiga.io/project/penpot/issue/2468)
+- Allow import to continue from recoverable failures [#1412](https://github.com/penpot/penpot/issues/1412)
+- Improved behaviour on text options when not text is selected [Taiga #2390](https://tree.taiga.io/project/penpot/issue/2390)
+- Fix decimal numbers in export viewbox [Taiga #2290](https://tree.taiga.io/project/penpot/issue/2290)
+- Right click over artboard name to open its menu [Taiga #1679](https://tree.taiga.io/project/penpot/issue/1679)
+- Make the default session cookue use SameSite=Lax instead of Strict (causes some issues in latest versions of Chrome).
+- Fix "open in new tab" on dashboard [Taiga #2235](https://tree.taiga.io/project/penpot/issue/2355)
+- Changing pages while comments activated will not close the panel [#1350](https://github.com/penpot/penpot/issues/1350)
+- Fix navigate comments in right sidebar [Taiga #2163](https://tree.taiga.io/project/penpot/issue/2163)
+- Fix keep name of component equal to the shape name [Taiga #2341](https://tree.taiga.io/project/penpot/issue/2341)
+- Fix lossing changes when changing selection and an input was already changed [Taiga #2329](https://tree.taiga.io/project/penpot/issue/2329), [Taiga #2330](https://tree.taiga.io/project/penpot/issue/2330)
+- Fix blur input field when click on viewport [Taiga #2164](https://tree.taiga.io/project/penpot/issue/2164)
+- Fix default page id in workspace [Taiga #2205](https://tree.taiga.io/project/penpot/issue/2205)
+- Fix problem when importing a file with grids [Taiga #2314](https://tree.taiga.io/project/penpot/issue/2314)
+- Fix problem with imported svgs with filters [Taiga #2478](https://tree.taiga.io/project/penpot/issue/2478)
+- Fix issues when updating selrect in paths [Taiga #2366](https://tree.taiga.io/project/penpot/issue/2366)
+- Fix scroll jumps in handoff mode [Taiga #2383](https://tree.taiga.io/project/penpot/issue/2383)
+- Fix handoff text with opacity [Taiga #2384](https://tree.taiga.io/project/penpot/issue/2384)
+- Restored rules color [Taiga #2460](https://tree.taiga.io/project/penpot/issue/2460)
+- Fix thumbnail not taking frame blending mode [Taiga #2301](https://tree.taiga.io/project/penpot/issue/2301)
+- Fix import/export with SVG edge cases [Taiga #2389](https://tree.taiga.io/project/penpot/issue/2389)
 
 ### :arrow_up: Deps updates
+
+- Update devenv docker image dependencies.
+
 ### :heart: Community contributions by (Thank you!)
 
 - Spelling fixes (by @jsoref) [#1340](https://github.com/penpot/penpot/pull/1340).
@@ -68,8 +105,6 @@
 ### :arrow_up: Deps updates
 
 - Update log4j2 dependency.
->>>>>>> main
-
 
 # 1.10.2-beta
 
@@ -127,6 +162,9 @@
 - Add placeholder to create shareable link
 - Fix project files count not refreshing correctly after import [Taiga #2216](https://tree.taiga.io/project/penpot/issue/2216)
 - Remove button after import process finish [Taiga #2215](https://tree.taiga.io/project/penpot/issue/2215)
+- Fix problem with styles in the viewer [Taiga #2467](https://tree.taiga.io/project/penpot/issue/2467)
+- Fix default state in viewer [Taiga #2465](https://tree.taiga.io/project/penpot/issue/2465)
+- Fix division by zero in bool operation [Taiga #2349](https://tree.taiga.io/project/penpot/issue/2349)
 
 ### :heart: Community contributions by (Thank you!)
 

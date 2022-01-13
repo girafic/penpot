@@ -31,7 +31,6 @@
     width: 50px;
     height: 50px;
   }
-
 }
 
 .color-cell.current {
@@ -56,7 +55,7 @@ ul.palette-menu .color-bullet {
   display: flex;
   justify-content: center;
   margin-bottom: 1rem;
-  padding: .6rem;
+  padding: 0.6rem;
 
   svg {
     fill: $color-gray-10;
@@ -93,9 +92,8 @@ ul.palette-menu .color-bullet {
 .color-bullet {
   display: flex;
   flex-direction: row;
-  overflow: hidden;
-
-  background: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAADFJREFUOE9jZGBgEAFifOANPknGUQMYhkkYEEgG+NMJKAwIAbwJbdQABnBCIgRoG4gAIF8IsXB/Rs4AAAAASUVORK5CYII=") left center;
+  background: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAADFJREFUOE9jZGBgEAFifOANPknGUQMYhkkYEEgG+NMJKAwIAbwJbdQABnBCIgRoG4gAIF8IsXB/Rs4AAAAASUVORK5CYII=")
+    left center;
   background-color: $color-white;
 
   & > * {
@@ -104,11 +102,19 @@ ul.palette-menu .color-bullet {
   }
 }
 
+.color-bullet-left {
+  border-radius: 10px 0 0 10px;
+}
+
+.color-bullet-right {
+  border-radius: 0 10px 10px 0;
+}
+
 .color-data .color-bullet.multiple {
   background: transparent;
 
   &::before {
-    content: "?"
+    content: "?";
   }
 }
 
@@ -151,9 +157,13 @@ ul.palette-menu .color-bullet {
       svg {
         fill: $color-primary;
       }
-
     }
   }
+}
+
+.color-data .color-bullet .color-bullet-left,
+.color-data .color-bullet .color-bullet-right {
+  border-radius: unset;
 }
 
 .colorpicker-content .libraries .selected-colors .color-bullet {
@@ -163,6 +173,7 @@ ul.palette-menu .color-bullet {
 
   &:hover {
     border-color: $color-primary;
+    z-index: 10;
   }
 
   &.button {
