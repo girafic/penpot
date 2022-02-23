@@ -6,8 +6,9 @@
 
 (ns app.main.ui.workspace.viewport.outline
   (:require
+   [app.common.exceptions :as ex]
    [app.common.geom.shapes :as gsh]
-   [app.common.pages :as cp]
+   [app.common.pages.helpers :as cph]
    [app.main.refs :as refs]
    [app.util.object :as obj]
    [app.util.path.format :as upf]
@@ -27,7 +28,9 @@
         path-data
         (mf/use-memo
          (mf/deps shape)
-         #(when path? (upf/format-path (:content shape))))
+         #(when path?
+            (or (ex/ignoring (upf/format-path (:content shape)))
+                "")))
 
         {:keys [x y width height selrect]} shape
 
@@ -86,7 +89,7 @@
         transform (mf/deref refs/current-transform)
 
         outlines-ids  (->> (set/union selected hover)
-                           (cp/clean-loops objects))
+                           (cph/clean-loops objects))
 
         show-outline? (fn [shape] (and (not (:hidden shape))
                                        (not (:blocked shape))))

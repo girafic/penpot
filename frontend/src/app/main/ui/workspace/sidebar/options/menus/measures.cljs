@@ -9,7 +9,7 @@
    [app.common.data :as d]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as math]
-   [app.common.types.radius :as ctr]
+   [app.common.spec.radius :as ctr]
    [app.main.data.workspace :as udw]
    [app.main.data.workspace.changes :as dch]
    [app.main.refs :as refs]
@@ -199,13 +199,15 @@
                               :placeholder "--"
                               :on-click select-all
                               :on-change on-pos-x-change
-                              :value (attr->string :x values)}]]
+                              :value (attr->string :x values)
+                              :precision 2}]]
           [:div.input-element.Yaxis {:title (tr "workspace.options.y")}
            [:> numeric-input {:no-validate true
                               :placeholder "--"
                               :on-click select-all
                               :on-change on-pos-y-change
-                              :value (attr->string :y values)}]]])
+                              :value (attr->string :y values)
+                              :precision 2}]]])
 
        ;; ROTATION
        (when (options :rotation)

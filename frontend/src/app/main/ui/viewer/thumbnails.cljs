@@ -8,7 +8,7 @@
   (:require
    [app.common.data :as d]
    [app.main.data.viewer :as dv]
-   [app.main.exports :as exports]
+   [app.main.render :as render]
    [app.main.store :as st]
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
@@ -77,7 +77,7 @@
   [:div.thumbnail-item {:on-click #(on-click % index)}
    [:div.thumbnail-preview
     {:class (dom/classnames :selected selected?)}
-    [:& exports/frame-svg {:frame frame :objects objects}]]
+    [:& render/frame-svg {:frame frame :objects objects}]]
    [:div.thumbnail-info
     [:span.name {:title (:name frame)} (:name frame)]]])
 
@@ -104,14 +104,13 @@
      {:class (dom/classnames :expanded @expanded?
                              :invisible (not show?))
 
-      :ref container
-      }
+      :ref container}
 
      [:& thumbnails-summary {:on-toggle-expand #(swap! expanded? not)
                              :on-close on-close
                              :total (count frames)}]
      [:& thumbnails-content {:expanded? @expanded?
-                              :total (count frames)}
+                             :total (count frames)}
       (for [[i frame] (d/enumerate frames)]
         [:& thumbnail-item {:index i
                             :frame frame

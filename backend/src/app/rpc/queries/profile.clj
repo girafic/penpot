@@ -35,9 +35,9 @@
 (s/def ::profile
   (s/keys :opt-un [::profile-id]))
 
-(sv/defmethod ::profile {:auth false}
+(sv/defmethod ::profile
+  {:auth false}
   [{:keys [pool] :as cfg} {:keys [profile-id] :as params}]
-
   ;; We need to return the anonymous profile object in two cases, when
   ;; no profile-id is in session, and when db call raises not found. In all other
   ;; cases we need to reraise the exception.

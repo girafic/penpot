@@ -124,13 +124,12 @@
   [context]
   (let [resolve (:resolve context)
         file-id (resolve (:file-id context))]
-    (rp/mutation
-     :create-temp-file
-     {:id file-id
-      :name (:name context)
-      :is-shared (:shared context)
-      :project-id (:project-id context)
-      :data (-> cp/empty-file-data (assoc :id file-id))})))
+    (rp/mutation :create-temp-file
+                 {:id file-id
+                  :name (:name context)
+                  :is-shared (:shared context)
+                  :project-id (:project-id context)
+                  :data (-> cp/empty-file-data (assoc :id file-id))})))
 
 (defn link-file-libraries
   "Create a new file on the back-end"
@@ -142,38 +141,30 @@
          (rx/map #(hash-map :file-id file-id :library-id %))
          (rx/flat-map (partial rp/mutation :link-file-to-library)))))
 
-(defn persist-file [file]
-  (rp/mutation :persist-temp-file {:id (:id file)}))
-
 (defn send-changes
   "Creates batches of changes to be sent to the backend"
   [context file]
-  (let [revn (atom (:revn file))
-        file-id (:id file)
+  (let [file-id    (:id file)
         session-id (uuid/next)
-        changes-batches
-        (->> (fb/generate-changes file)
-             (partition change-batch-size change-batch-size nil)
-             (mapv vec))
+        batches    (->> (fb/generate-changes file)
+                        (partition change-batch-size change-batch-size nil)
+                        (mapv vec))
 
-        current (atom 0)
-        total (count changes-batches)]
+        processed  (atom 0)
+        total      (count batches)]
 
     (rx/concat
-     (->> (rx/from changes-batches)
-          (rx/mapcat
-           (fn [change-batch]
-             (->> (rp/mutation :update-file
+     (->> (rx/from (d/enumerate batches))
+          (rx/merge-map
+           (fn [[i change-batch]]
+             (->> (rp/mutation :update-temp-file
                                {:id file-id
                                 :session-id session-id
-                                :revn @revn
+                                :revn i
                                 :changes change-batch})
-                  (rx/tap #(do (swap! current inc)
-                               (progress! context
-                                          :upload-data @current total))))))
-
+                  (rx/tap #(do (swap! processed inc)
+                               (progress! context :upload-data @processed total))))))
           (rx/map first)
-          (rx/tap #(reset! revn (:revn %)))
           (rx/ignore))
 
      (->> (rp/mutation :persist-temp-file {:id file-id})
@@ -250,7 +241,6 @@
 
 (defn process-import-node
   [context file node]
-
   (let [type         (cip/get-type node)
         close?       (cip/close? node)]
     (if close?
@@ -293,7 +283,6 @@
 
 (defn setup-interactions
   [file]
-
   (letfn [(add-interactions
             [file [id interactions]]
             (->> interactions
@@ -304,7 +293,6 @@
             (let [interactions (:interactions file)
                   file (dissoc file :interactions)]
               (->> interactions (reduce add-interactions file))))]
-
     (-> file process-interactions)))
 
 (defn resolve-media
@@ -328,6 +316,11 @@
     (->> (rx/of node)
          (rx/observe-on :async))))
 
+(defn media-node? [node]
+  (and (cip/shape? node)
+       (cip/has-image? node)
+       (not (cip/close? node))))
+
 (defn import-page
   [context file [page-id page-name content]]
   (let [nodes (->> content cip/node-seq)
@@ -339,12 +332,31 @@
         flows     (->> (get-in page-data [:options :flows])
                        (mapv #(update % :starting-frame resolve)))
         page-data (d/assoc-in-when page-data [:options :flows] flows)
-        file      (-> file (fb/add-page page-data))]
-    (->> (rx/from nodes)
-         (rx/filter cip/shape?)
-         (rx/mapcat (partial resolve-media context file-id))
-         (rx/reduce (partial process-import-node context) file)
-         (rx/map (comp fb/close-page setup-interactions)))))
+        file      (-> file (fb/add-page page-data))
+
+        ;; Preprocess nodes to parallel upload the images. Store the result in a table
+        ;; old-node => node with image
+        ;; that will be used in the second pass immediately
+        pre-process-images
+        (->> (rx/from nodes)
+             (rx/filter media-node?)
+             ;; TODO: this should be merge-map, but we disable the
+             ;; parallel upload until we resolve resource usage issues
+             ;; on backend.
+             (rx/mapcat
+              (fn [node]
+                (->> (resolve-media context file-id node)
+                     (rx/map (fn [result] [node result])))))
+             (rx/reduce conj {}))]
+
+    (->> pre-process-images
+         (rx/flat-map
+          (fn  [pre-proc]
+            (->> (rx/from nodes)
+                 (rx/filter cip/shape?)
+                 (rx/map (fn [node] (or (get pre-proc node) node)))
+                 (rx/reduce (partial process-import-node context) file)
+                 (rx/map (comp fb/close-page setup-interactions))))))))
 
 (defn import-component [context file node]
   (let [resolve      (:resolve context)
@@ -434,12 +446,11 @@
                                   :content content
                                   :is-local false})))
                      (rx/tap #(progress! context :upload-media (:name %)))
-                     (rx/flat-map #(rp/mutation! :upload-file-media-object %))
+                     (rx/merge-map #(rp/mutation! :upload-file-media-object %))
                      (rx/map (constantly media))
                      (rx/catch #(do (.error js/console (str "Error uploading media: " (:name media)) )
                                     (rx/empty)))))))
            (rx/reduce fb/add-library-media file)))
-
     (rx/of file)))
 
 (defn process-library-components
@@ -480,10 +491,9 @@
     (rx/concat
      (->> (rx/from files)
           (rx/map #(merge context %))
-          (rx/flat-map
-           (fn [context]
-             (->> (create-file context)
-                  (rx/map #(vector % (first (get data (:file-id context)))))))))
+          (rx/flat-map (fn [context]
+                         (->> (create-file context)
+                              (rx/map #(vector % (first (get data (:file-id context)))))))))
 
      (->> (rx/from files)
           (rx/map #(merge context %))
@@ -508,31 +518,33 @@
 
   (let [context {:project-id project-id
                  :resolve    (resolve-factory)}]
+
     (->> (create-files context files)
-         (rx/catch #(.error js/console "IMPORT ERROR" (clj->js %)))
          (rx/flat-map
           (fn [[file data]]
-            (->> (rx/concat
-                  (->> (uz/load-from-url (:uri data))
-                       (rx/map #(-> context (assoc :zip %) (merge data)))
-                       (rx/flat-map
-                        (fn [context]
-                          ;; process file retrieves a stream that will emit progress notifications
-                          ;; and other that will emit the files once imported
-                          (let [[progress-stream file-stream] (process-file context file)]
-                            (rx/merge
-                             progress-stream
-                             (->> file-stream
-                                  (rx/map
-                                   (fn [file]
-                                     {:status :import-finish
-                                      :errors (:errors file)
-                                      :file-id (:file-id data)})))))))))
+            (->> (uz/load-from-url (:uri data))
+                 (rx/map #(-> context (assoc :zip %) (merge data)))
+                 (rx/merge-map
+                  (fn [context]
+                    ;; process file retrieves a stream that will emit progress notifications
+                    ;; and other that will emit the files once imported
+                    (let [[progress-stream file-stream] (process-file context file)]
+                      (rx/merge progress-stream
+                                (->> file-stream
+                                     (rx/map
+                                      (fn [file]
+                                        {:status :import-finish
+                                         :errors (:errors file)
+                                         :file-id (:file-id data)})))))))
+                 (rx/catch (fn [cause]
+                             (log/error :hint (ex-message cause) :file-id (:file-id data) :cause cause)
+                             (rx/of {:status :import-error
+                                     :file-id (:file-id data)
+                                     :error (ex-message cause)
+                                     :error-data (ex-data cause)}))))))
 
-                 (rx/catch
-                     (fn [err]
-                       (.error js/console "ERROR" (str (:file-id data)) (clj->js err) (clj->js (.-data err)))
-                       (rx/of {:status :import-error
-                               :file-id (:file-id data)
-                               :error (.-message err)
-                               :error-data (clj->js (.-data err))})))))))))
+         (rx/catch (fn [cause]
+                     (log/error :hint "unexpected error on import process"
+                                :project-id project-id
+                                :cause cause))))))
+

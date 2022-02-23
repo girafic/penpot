@@ -233,10 +233,7 @@
 
     .attributes-shadow {
       display: flex;
-
-      .attributes-label {
-        margin-right: 2px;
-      }
+      margin-left: 4px;
     }
   }
 
@@ -322,19 +319,21 @@
   margin-top: 0.5rem;
   border-top: 1px solid $color-gray-60;
 
-  .code-row-lang {
-    position: relative;
-    display: flex;
-    flex-direction: row;
-    margin: 0.5rem;
-
-    &:hover {
+  &:hover {
+    .code-row-lang {
       .expand-button,
       .copy-button {
         visibility: visible;
         opacity: 1;
       }
     }
+  }
+
+  .code-row-lang {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    margin: 0.5rem;
 
     .code-selection {
       height: 100%;

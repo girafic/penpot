@@ -7,6 +7,7 @@
 (ns app.common.geom.align
   (:require
    [app.common.geom.shapes :as gsh]
+   [app.common.pages.helpers :refer [get-children]]
    [clojure.spec.alpha :as s]))
 
 ;; --- Alignment
@@ -15,23 +16,12 @@
 
 (declare calc-align-pos)
 
-;; TODO: revisit on how to reuse code and dont have this function
-;; duplicated because the implementation right now differs from the
-;; original function.
-
-;; Duplicated from pages/helpers to remove cyclic dependencies
-(defn- get-children [id objects]
-  (let [shapes (vec (get-in objects [id :shapes]))]
-    (if shapes
-      (into shapes (mapcat #(get-children % objects)) shapes)
-      [])))
-
 (defn- recursive-move
   "Move the shape and all its recursive children."
   [shape dpoint objects]
-  (let [children-ids (get-children (:id shape) objects)
-        children (map #(get objects %) children-ids)]
-    (map #(gsh/move % dpoint) (cons shape children))))
+  (->> (get-children objects (:id shape))
+       (cons shape)
+       (map #(gsh/move % dpoint))))
 
 (defn align-to-rect
   "Move the shape so that it is aligned with the given rectangle

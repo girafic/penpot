@@ -42,9 +42,9 @@
 (defn move
   "Move the shape relatively to its current
   position applying the provided delta."
-  [shape {dx :x dy :y}]
-  (let [dx (d/check-num dx)
-        dy (d/check-num dy)
+  [{:keys [type] :as shape} {dx :x dy :y}]
+  (let [dx       (d/check-num dx)
+        dy       (d/check-num dy)
         move-vec (gpt/point dx dy)]
 
     (-> shape
@@ -52,11 +52,8 @@
         (update :points move-points move-vec)
         (d/update-when :x + dx)
         (d/update-when :y + dy)
-        (cond-> (= :bool (:type shape))
-          (update :bool-content gpa/move-content move-vec))
-        (cond-> (= :path (:type shape))
-          (update :content gpa/move-content move-vec)))))
-
+        (cond-> (= :bool type) (update :bool-content gpa/move-content move-vec))
+        (cond-> (= :path type) (update :content gpa/move-content move-vec)))))
 
 ;; --- Absolute Movement
 
@@ -288,6 +285,8 @@
         (cond-> transform
           (-> (assoc :transform transform)
               (assoc :transform-inverse transform-inverse)))
+        (cond-> (not transform)
+          (dissoc :transform :transform-inverse))
         (assoc :selrect selrect)
         (assoc :points points)
         (assoc :rotation rotation))))
@@ -412,7 +411,7 @@
     {:rotation angle
      :displacement displacement}))
 
-(defn merge-modifiers*
+(defn merge-modifiers
   [objects modifiers]
 
   (let [set-modifier
@@ -421,8 +420,6 @@
               (d/update-when id merge modifiers)))]
     (->> modifiers
          (reduce set-modifier objects))))
-
-(def merge-modifiers (memoize merge-modifiers*))
 
 (defn modifiers->transform
   ([modifiers]
@@ -548,7 +545,6 @@
 
 (defn transform-selrect
   [selrect {:keys [displacement resize-transform-inverse resize-vector resize-origin resize-vector-2 resize-origin-2]}]
- 
   ;; FIXME: Improve Performance
   (let [resize-transform-inverse (or resize-transform-inverse (gmt/matrix))
 

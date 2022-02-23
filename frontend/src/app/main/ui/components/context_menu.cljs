@@ -6,6 +6,7 @@
 
 (ns app.main.ui.components.context-menu
   (:require
+   [app.common.data :as d]
    [app.main.refs :as refs]
    [app.main.ui.components.dropdown :refer [dropdown']]
    [app.main.ui.icons :as i]
@@ -100,22 +101,24 @@
                 [:span i/arrow-slide]
                 parent-option]]
               [:li.separator]])
-           (for [[option-name option-handler sub-options] (:options level)]
+           (for [[index [option-name option-handler sub-options data-test]] (d/enumerate (:options level))]
              (when option-name
                (if (= option-name :separator)
                  [:li.separator]
                  [:li.context-menu-item
                   {:class (dom/classnames :is-selected (and selected (= option-name selected)))
-                   :key option-name}
+                   :key index}
                   (if-not sub-options
                     [:a.context-menu-action {:on-click #(do (dom/stop-propagation %)
                                                             (on-close)
-                                                            (option-handler %))}
+                                                            (option-handler %))
+                                             :data-test data-test}
                      (if (and in-dashboard? (= option-name "Default"))
                        (tr "dashboard.default-team-name")
                        option-name)]
                     [:a.context-menu-action.submenu
                      {:data-no-close true
-                      :on-click (enter-submenu option-name sub-options)}
+                      :on-click (enter-submenu option-name sub-options)
+                      :data-test data-test}
                      option-name
                      [:span i/arrow-slide]])])))])]])))

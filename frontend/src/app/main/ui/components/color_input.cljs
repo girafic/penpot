@@ -29,6 +29,7 @@
   [props external-ref]
   (let [value     (obj/get props "value")
         on-change (obj/get props "onChange")
+        on-blur   (obj/get props "onBlur")
 
         ;; We need a ref pointing to the input dom element, but the user
         ;; of this component may provide one (that is forwarded here).
@@ -76,11 +77,13 @@
          (fn [event]
            (mf/set-ref-val! dirty-ref true)
            (let [enter? (kbd/enter? event)
-                 esc?   (kbd/esc? event)]
+                 esc?   (kbd/esc? event)
+                 input-node (mf/ref-val ref)]
              (when enter?
                (dom/prevent-default event)
                (let [new-value (parse-value)]
-                 (apply-value new-value)))
+                 (apply-value new-value)
+                 (dom/blur! input-node)))
              (when esc?
                (dom/prevent-default event)
                (update-input value)))))
@@ -90,6 +93,8 @@
          (mf/deps parse-value apply-value update-input)
          (fn [_]
            (let [new-value (parse-value)]
+             (when on-blur
+               (on-blur))
              (if new-value
                (apply-value new-value)
                (update-input value)))))

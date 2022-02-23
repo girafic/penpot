@@ -8,7 +8,7 @@
   (:require
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
-   [app.common.pages :as cp]
+   [app.common.pages.helpers :as cph]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.refs :as refs]
@@ -91,7 +91,7 @@
 
 (mf/defc frame-title
   {::mf/wrap [mf/memo]}
-  [{:keys [frame modifiers selected? zoom on-frame-enter on-frame-leave on-frame-select]}]
+  [{:keys [frame modifiers selected? zoom show-artboard-names? on-frame-enter on-frame-leave on-frame-select]}]
   (let [{:keys [width x y]} (gsh/transform-shape frame)
         label-pos (gpt/point x (- y (/ 10 zoom)))
 
@@ -142,6 +142,7 @@
                               (str (:displacement modifiers) " " ))
                             (text-transform label-pos zoom))
             :style {:fill (when selected? "var(--color-primary-dark)")}
+            :visibility (if show-artboard-names? "visible" "hidden")
             :on-mouse-down on-mouse-down
             :on-double-click on-double-click
             :on-context-menu on-context-menu
@@ -156,16 +157,18 @@
         zoom            (unchecked-get props "zoom")
         modifiers       (unchecked-get props "modifiers")
         selected        (or (unchecked-get props "selected") #{})
+        show-artboard-names? (unchecked-get props "show-artboard-names?")
         on-frame-enter  (unchecked-get props "on-frame-enter")
         on-frame-leave  (unchecked-get props "on-frame-leave")
         on-frame-select (unchecked-get props "on-frame-select")
-        frames    (cp/select-frames objects)]
+        frames          (cph/get-frames objects)]
 
     [:g.frame-titles
      (for [frame frames]
        [:& frame-title {:frame frame
                         :selected? (contains? selected (:id frame))
                         :zoom zoom
+                        :show-artboard-names? show-artboard-names?
                         :modifiers modifiers
                         :on-frame-enter on-frame-enter
                         :on-frame-leave on-frame-leave

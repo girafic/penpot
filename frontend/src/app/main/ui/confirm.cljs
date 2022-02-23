@@ -20,10 +20,12 @@
   {::mf/register modal/components
    ::mf/register-as :confirm}
   [{:keys [message
+           scd-message
            title
            on-accept
            on-cancel
            hint
+           items
            cancel-label
            accept-label
            accept-style] :as props}]
@@ -51,17 +53,15 @@
            (st/emit! (modal/hide))
            (on-cancel props)))]
 
-    (mf/use-effect
-     (fn []
-       (let [on-keydown
-             (fn [event]
-               (when (k/enter? event)
-                 (dom/prevent-default event)
-                 (dom/stop-propagation event)
-                 (st/emit! (modal/hide))
-                 (on-accept props)))
-             key (events/listen js/document EventType.KEYDOWN on-keydown)]
-         #(events/unlistenByKey key))))
+    (mf/with-effect
+      (letfn [(on-keydown [event]
+                (when (k/enter? event)
+                  (dom/prevent-default event)
+                  (dom/stop-propagation event)
+                  (st/emit! (modal/hide))
+                  (on-accept props)))]
+        (->> (events/listen js/document EventType.KEYDOWN on-keydown)
+             (partial events/unlistenByKey))))
 
     [:div.modal-overlay
      [:div.modal-container.confirm-dialog
@@ -72,9 +72,20 @@
         {:on-click cancel-fn} i/close]]
 
       [:div.modal-content
-       [:h3 message]
+       (when (and (string? message) (not= message ""))
+         [:h3 message])
+       (when (and (string? scd-message) (not= scd-message ""))
+         [:h3 scd-message])
        (when (string? hint)
-         [:p hint])]
+         [:p hint])
+       (when (> (count items) 0)
+         [:*
+          [:p (tr "ds.component-subtitle")]
+          [:ul
+           (for [item items]
+             [:li.modal-item-element
+              [:span.modal-component-icon i/component]
+              [:span (:name item)]])]])]
 
       [:div.modal-footer
        [:div.action-buttons

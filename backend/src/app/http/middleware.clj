@@ -10,22 +10,24 @@
    [app.common.transit :as t]
    [app.config :as cf]
    [app.util.json :as json]
-   [buddy.core.codecs :as bc]
-   [buddy.core.hash :as bh]
+   [ring.core.protocols :as rp]
    [ring.middleware.cookies :refer [wrap-cookies]]
    [ring.middleware.keyword-params :refer [wrap-keyword-params]]
    [ring.middleware.multipart-params :refer [wrap-multipart-params]]
-   [ring.middleware.params :refer [wrap-params]]))
+   [ring.middleware.params :refer [wrap-params]]
+   [yetti.adapter :as yt]))
 
 (defn wrap-server-timing
   [handler]
-  (let [seconds-from #(float (/ (- (System/nanoTime) %) 1000000000))]
-    (fn [request]
-      (let [start    (System/nanoTime)
-            response (handler request)]
-        (update response :headers
-                (fn [headers]
-                  (assoc headers "Server-Timing" (str "total;dur=" (seconds-from start)))))))))
+  (letfn [(get-age [start]
+            (float (/ (- (System/nanoTime) start) 1000000000)))
+
+          (update-headers [headers start]
+            (assoc headers "Server-Timing" (str "total;dur=" (get-age start))))]
+
+    (fn [request respond raise]
+      (let [start (System/nanoTime)]
+        (handler request #(respond (update % :headers update-headers start)) raise)))))
 
 (defn wrap-parse-request-body
   [handler]
@@ -34,63 +36,103 @@
               (t/read! reader)))
 
           (parse-json [body]
-            (json/read body))]
-    (fn [{:keys [headers body] :as request}]
+            (json/read body))
+
+          (handle-request [{:keys [headers body] :as request}]
+            (let [ctype (get headers "content-type")]
+              (case ctype
+                "application/transit+json"
+                (let [params (parse-transit body)]
+                  (-> request
+                      (assoc :body-params params)
+                      (update :params merge params)))
+
+                "application/json"
+                (let [params (parse-json body)]
+                  (-> request
+                      (assoc :body-params params)
+                      (update :params merge params)))
+
+                request)))
+
+          (handle-exception [cause]
+            (let [data {:type :validation
+                        :code :unable-to-parse-request-body
+                        :hint "malformed params"}]
+              (l/error :hint (ex-message cause) :cause cause)
+              {:status 400
+               :headers {"content-type" "application/transit+json"}
+               :body (t/encode-str data {:type :json-verbose})}))]
+
+    (fn [request respond raise]
       (try
-        (let [ctype (get headers "content-type")]
-          (handler (case ctype
-                     "application/transit+json"
-                     (let [params (parse-transit body)]
-                       (-> request
-                           (assoc :body-params params)
-                           (update :params merge params)))
-
-                     "application/json"
-                     (let [params (parse-json body)]
-                       (-> request
-                           (assoc :body-params params)
-                           (update :params merge params)))
-
-                     request)))
-        (catch Exception e
-          (let [data {:type :validation
-                      :code :unable-to-parse-request-body
-                      :hint "malformed params"}]
-            (l/error :hint (ex-message e) :cause e)
-            {:status 400
-             :headers {"content-type" "application/transit+json"}
-             :body (t/encode-str data {:type :json-verbose})}))))))
+        (let [request (handle-request request)]
+          (handler request respond raise))
+        (catch Exception cause
+          (respond (handle-exception cause)))))))
 
 (def parse-request-body
   {:name ::parse-request-body
    :compile (constantly wrap-parse-request-body)})
 
-(defn- impl-format-response-body
-  [response request]
-  (let [body   (:body response)
-        params (:query-params request)
-        opts   {:type (if (contains? params "transit_verbose") :json-verbose :json)}]
-    (cond
-      (:ws response)
-      response
+(defn buffered-output-stream
+  "Returns a buffered output stream that ignores flush calls. This is
+  needed because transit-java calls flush very aggresivelly on each
+  object write."
+  [^java.io.OutputStream os ^long chunk-size]
+  (proxy [java.io.BufferedOutputStream] [os (int chunk-size)]
+    ;; Explicitly do not forward flush
+    (flush [])
+    (close []
+      (proxy-super flush)
+      (proxy-super close))))
 
-      (coll? body)
-      (-> response
-          (update :headers assoc "content-type" "application/transit+json")
-          (assoc :body (t/encode body opts)))
+(def ^:const buffer-size (:http/output-buffer-size yt/base-defaults))
 
-      (nil? body)
-      (assoc response :status 204 :body "")
-
-      :else
-      response)))
-
-(defn- wrap-format-response-body
+(defn wrap-format-response-body
   [handler]
-  (fn [request]
-    (let [response (handler request)]
-      (cond-> response
-        (map? response) (impl-format-response-body request)))))
+  (letfn [(transit-streamable-body [data opts]
+            (reify rp/StreamableResponseBody
+              (write-body-to-stream [_ _ output-stream]
+                ;; Use the same buffer as jetty output buffer size
+                (try
+                  (with-open [bos (buffered-output-stream output-stream buffer-size)]
+                    (let [tw (t/writer bos opts)]
+                      (t/write! tw data)))
+                  (catch org.eclipse.jetty.io.EofException _cause
+                    ;; Do nothing, EOF means client closes connection abruptly
+                    nil)
+                  (catch Throwable cause
+                    (l/warn :hint "unexpected error on encoding response"
+                            :cause cause))))))
+
+          (impl-format-response-body [response {:keys [query-params] :as request}]
+            (let [body   (:body response)
+                  opts   {:type (if (contains? query-params "transit_verbose") :json-verbose :json)}]
+              (cond
+                (:ws response)
+                response
+
+                (coll? body)
+                (-> response
+                    (update :headers assoc "content-type" "application/transit+json")
+                    (assoc :body (transit-streamable-body body opts)))
+
+                (nil? body)
+                (assoc response :status 204 :body "")
+
+                :else
+                response)))
+
+          (handle-response [response request]
+            (cond-> response
+              (map? response) (impl-format-response-body request)))]
+
+    (fn [request respond raise]
+      (handler request
+               (fn [response]
+                 (respond (handle-response response request)))
+               raise))))
 
 (def format-response-body
   {:name ::format-response-body
@@ -98,11 +140,9 @@
 
 (defn wrap-errors
   [handler on-error]
-  (fn [request]
-    (try
-      (handler request)
-      (catch Throwable e
-        (on-error e request)))))
+  (fn [request respond _]
+    (handler request respond (fn [cause]
+                               (-> cause (on-error request) respond)))))
 
 (def errors
   {:name ::errors
@@ -128,47 +168,7 @@
   {:name ::server-timing
    :compile (constantly wrap-server-timing)})
 
-(defn wrap-etag
-  [handler]
-  (letfn [(generate-etag [{:keys [body] :as response}]
-            (str "W/\"" (-> body bh/blake2b-128 bc/bytes->hex) "\""))
-          (get-match [{:keys [headers] :as request}]
-            (get headers "if-none-match"))]
-    (fn [request]
-      (let [response (handler request)]
-        (if (= :get (:request-method request))
-          (let [etag     (generate-etag response)
-                match    (get-match request)
-                response (update response :headers #(assoc % "ETag" etag))]
-            (cond-> response
-              (and (string? match)
-                   (= :get (:request-method request))
-                   (= etag match))
-              (-> response
-                  (assoc :body "")
-                  (assoc :status 304))))
-          response)))))
-
-(def etag
-  {:name ::etag
-   :compile (constantly wrap-etag)})
-
-(defn activity-logger
-  [handler]
-  (let [logger "penpot.profile-activity"]
-    (fn [{:keys [headers] :as request}]
-      (let [ip-addr    (get headers "x-forwarded-for")
-            profile-id (:profile-id request)
-            qstring    (:query-string request)]
-        (l/info ::l/async true
-                ::l/logger logger
-                :ip-addr ip-addr
-                :profile-id profile-id
-                :uri (str (:uri request) (when qstring (str "?" qstring)))
-                :method (name (:request-method request)))
-        (handler request)))))
-
-(defn- wrap-cors
+(defn wrap-cors
   [handler]
   (if-not (contains? cf/flags :cors)
     handler
@@ -183,12 +183,15 @@
                          (assoc "access-control-allow-credentials" "true")
                          (assoc "access-control-expose-headers" "x-requested-with, content-type, cookie")
                          (assoc "access-control-allow-headers" "x-frontend-version, content-type, accept, x-requested-width"))))))]
-      (fn [request]
+      (fn [request respond raise]
         (if (= (:request-method request) :options)
           (-> {:status 200 :body ""}
-              (add-cors-headers request))
-          (let [response (handler request)]
-            (add-cors-headers response request)))))))
+              (add-cors-headers request)
+              (respond))
+          (handler request
+                   (fn [response]
+                     (respond (add-cors-headers response request)))
+                   raise))))))
 
 (def cors
   {:name ::cors

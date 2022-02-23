@@ -18,6 +18,7 @@
    [app.rpc.queries.files :as files]
    [app.rpc.queries.projects :as proj]
    [app.storage.impl :as simpl]
+   [app.util.async :as async]
    [app.util.blob :as blob]
    [app.util.services :as sv]
    [app.util.time :as dt]
@@ -27,6 +28,8 @@
 
 ;; --- Helpers & Specs
 
+(s/def ::frame-id ::us/uuid)
+(s/def ::file-id ::us/uuid)
 (s/def ::id ::us/uuid)
 (s/def ::name ::us/string)
 (s/def ::profile-id ::us/uuid)
@@ -270,6 +273,7 @@
          (contains? o :changes-with-metadata)))))
 
 (sv/defmethod ::update-file
+  {::async/dispatch :blocking}
   [{:keys [pool] :as cfg} {:keys [id profile-id] :as params}]
   (db/with-atomic [conn pool]
     (db/xact-lock! conn id)
@@ -305,24 +309,21 @@
               :context {:incoming-revn (:revn params)
                         :stored-revn (:revn file)}))
 
-  (let [mtx1    (get-in metrics [:definitions :update-file-changes])
-        mtx2    (get-in metrics [:definitions :update-file-bytes-processed])
-
-        changes (if changes-with-metadata
+  (let [changes (if changes-with-metadata
                   (mapcat :changes changes-with-metadata)
                   changes)
 
         changes (vec changes)
 
         ;; Trace the number of changes processed
-        _       ((::mtx/fn mtx1) {:by (count changes)})
+        _       (mtx/run! metrics {:id :update-file-changes :inc (count changes)})
 
         ts      (dt/now)
         file    (-> (files/retrieve-data cfg file)
                     (update :revn inc)
                     (update :data (fn [data]
                                     ;; Trace the length of bytes of processed data
-                                    ((::mtx/fn mtx2) {:by (alength data)})
+                                    (mtx/run! metrics {:id :update-file-bytes-processed :inc (alength data)})
                                     (-> data
                                         (blob/decode)
                                         (assoc :id (:id file))
@@ -414,7 +415,9 @@
   [conn project-id]
   (:team-id (db/get-by-id conn :project project-id {:columns [:team-id]})))
 
-;; TEMPORARY FILE CREATION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; TEMPORARY FILES (behaves differently)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (s/def ::create-temp-file ::create-file)
 
@@ -424,6 +427,23 @@
     (proj/check-edition-permissions! conn profile-id project-id)
     (create-file conn (assoc params :deleted-at (dt/in-future {:days 1})))))
 
+(s/def ::update-temp-file
+  (s/keys :req-un [::changes ::revn ::session-id ::id]))
+
+(sv/defmethod ::update-temp-file
+  [{:keys [pool] :as cfg} {:keys [profile-id session-id id revn changes] :as params}]
+  (db/with-atomic [conn pool]
+    (db/insert! conn :file-change
+                {:id (uuid/next)
+                 :session-id session-id
+                 :profile-id profile-id
+                 :created-at (dt/now)
+                 :file-id id
+                 :revn revn
+                 :data nil
+                 :changes (blob/encode changes)})
+    nil))
+
 (s/def ::persist-temp-file
   (s/keys :req-un [::id ::profile-id]))
 
@@ -431,6 +451,47 @@
   [{:keys [pool] :as cfg} {:keys [id profile-id] :as params}]
   (db/with-atomic [conn pool]
     (files/check-edition-permissions! conn profile-id id)
-    (db/update! conn :file
-                {:deleted-at nil}
-                {:id id})))
+    (let [file (db/get-by-id conn :file id)
+          revs (db/query conn :file-change
+                         {:file-id id}
+                         {:order-by [[:revn :asc]]})
+          revn (count revs)]
+
+      (when (nil? (:deleted-at file))
+        (ex/raise :type :validation
+                  :code :cant-persist-already-persisted-file))
+
+      (loop [revs (seq revs)
+             data (blob/decode (:data file))]
+        (if-let [rev (first revs)]
+          (recur (rest revs)
+                 (->> rev :changes blob/decode (cp/process-changes data)))
+          (db/update! conn :file
+                      {:deleted-at nil
+                       :revn revn
+                       :data (blob/encode data)}
+                      {:id id})))
+
+      nil)))
+
+
+;; --- Mutation: Upsert frame thumbnail
+
+(def sql:upsert-frame-thumbnail
+  "insert into file_frame_thumbnail(file_id, frame_id, data)
+   values (?, ?, ?)
+       on conflict(file_id, frame_id) do
+          update set data = ?;")
+
+(s/def ::data ::us/string)
+(s/def ::upsert-frame-thumbnail
+  (s/keys :req-un [::profile-id ::file-id ::frame-id ::data]))
+
+(sv/defmethod ::upsert-frame-thumbnail
+  [{:keys [pool] :as cfg} {:keys [profile-id file-id frame-id data]}]
+  (db/with-atomic [conn pool]
+    (files/check-edition-permissions! conn profile-id file-id)
+    (db/exec-one! conn [sql:upsert-frame-thumbnail file-id frame-id data data])
+    nil))
+
+

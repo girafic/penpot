@@ -7,7 +7,7 @@
 (ns app.main.ui.workspace.shapes.frame
   (:require
    [app.common.data :as d]
-   [app.common.pages :as cp]
+   [app.common.pages.helpers :as cph]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.shapes.frame :as frame]
    [app.main.ui.shapes.shape :refer [shape-container]]
@@ -96,18 +96,21 @@
        ::mf/wrap-props false}
       [props]
 
-      (let [shape           (unchecked-get props "shape")
-            objects         (unchecked-get props "objects")
-            thumbnail?      (unchecked-get props "thumbnail?")
+      (when-let [shape (unchecked-get props "shape")]
+        (let [objects    (unchecked-get props "objects")
+              thumbnail? (unchecked-get props "thumbnail?")
 
-            children        (-> (mapv (d/getf objects) (:shapes shape))
-                                (hooks/use-equal-memo))
-            all-children    (-> (cp/get-children-objects (:id shape) objects)
-                                (hooks/use-equal-memo))
+              children
+              (-> (mapv (d/getf objects) (:shapes shape))
+                  (hooks/use-equal-memo))
 
-            show-thumbnail? (and thumbnail? (some? (:thumbnail shape)))]
+              all-children
+              (-> (cph/get-children objects (:id shape))
+                  (hooks/use-equal-memo))
 
-        (when (some? shape)
+              show-thumbnail?
+              (and thumbnail? (some? (:thumbnail shape)))]
+
           [:g.frame-wrapper {:display (when (:hidden shape) "none")}
            [:> shape-container {:shape shape}
             [:& ff/fontfaces-style {:shapes all-children}]

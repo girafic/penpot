@@ -51,28 +51,28 @@
 
         ;; This `value` represents the previous value and is used as
         ;; initil value for the simple math expression evaluation.
-        value      (d/parse-integer value-str default-val)
+        value      (d/parse-double value-str default-val)
 
         min-val    (cond
                      (number? min-val-str)
                      min-val-str
 
                      (string? min-val-str)
-                     (d/parse-integer min-val-str))
+                     (d/parse-double min-val-str))
 
         max-val    (cond
                      (number? max-val-str)
                      max-val-str
 
                      (string? max-val-str)
-                     (d/parse-integer max-val-str))
+                     (d/parse-double max-val-str))
 
         step-val   (cond
                      (number? step-val-str)
                      step-val-str
 
                      (string? step-val-str)
-                     (d/parse-integer step-val-str)
+                     (d/parse-double step-val-str)
 
                      :else 1)
 
@@ -154,12 +154,12 @@
            (let [up?    (kbd/up-arrow? event)
                  down?  (kbd/down-arrow? event)
                  enter? (kbd/enter? event)
-                 esc?   (kbd/esc? event)]
+                 esc?   (kbd/esc? event)
+                 input-node (mf/ref-val ref)]
              (when (or up? down?)
                (set-delta event up? down?))
              (when enter?
-               (let [new-value (parse-value)]
-                 (apply-value new-value)))
+               (dom/blur! input-node))
              (when esc?
                (update-input value-str)))))
 
@@ -171,13 +171,13 @@
 
         handle-blur
         (mf/use-callback
-          (mf/deps parse-value apply-value update-input on-blur)
-          (fn [_]
-            (let [new-value (or (parse-value) default-val)]
-              (if new-value
-                (apply-value new-value)
-                (update-input new-value)))
-            (when on-blur (on-blur))))
+         (mf/deps parse-value apply-value update-input on-blur)
+         (fn [_]
+           (let [new-value (or (parse-value) default-val)]
+             (if new-value
+               (apply-value new-value)
+               (update-input new-value)))
+           (when on-blur (on-blur))))
 
         on-click
         (mf/use-callback
@@ -203,8 +203,7 @@
      (mf/deps value-str)
      (fn []
        (when-let [input-node (mf/ref-val ref)]
-         (when-not (dom/active? input-node)
-           (dom/set-value! input-node value-str)))))
+         (dom/set-value! input-node value-str))))
 
     (mf/use-effect
      (mf/deps handle-blur)

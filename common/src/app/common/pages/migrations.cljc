@@ -281,3 +281,52 @@
             (d/update-in-when page [:options :saved-grids] #(d/mapm update-grid %)))]
 
     (update data :pages-index #(d/mapm update-page %))))
+
+;; Add rx and ry to images
+(defmethod migrate 13
+  [data]
+  (letfn [(fix-radius [shape]
+            (if-not (or (contains? shape :rx) (contains? shape :r1))
+              (-> shape
+                  (assoc :rx 0)
+                  (assoc :ry 0))
+              shape))
+          (update-object [_ object]
+            (cond-> object
+              (= :image (:type object))
+              (fix-radius)))
+
+          (update-page [_ page]
+            (update page :objects #(d/mapm update-object %)))]
+
+    (update data :pages-index #(d/mapm update-page %))))
+
+(defn set-fills
+  [shape]
+  (let [attrs {:fill-color (:fill-color shape)
+               :fill-color-gradient (:fill-color-gradient shape)
+               :fill-color-ref-file (:fill-color-ref-file shape)
+               :fill-color-ref-id (:fill-color-ref-id shape)
+               :fill-opacity (:fill-opacity shape)}
+
+        clean-attrs (d/without-nils attrs)]
+    (-> shape
+        (assoc :fills [clean-attrs])
+        (dissoc :fill-color)
+        (dissoc :fill-color-gradient)
+        (dissoc :fill-color-ref-file)
+        (dissoc :fill-color-ref-id)
+        (dissoc :fill-opacity))))
+
+;; Add fills to shapes
+(defmethod migrate 14
+  [data]
+  (letfn [(update-object [_ object]
+            (cond-> object
+              (and (not (= :text (:type object))) (nil? (:fills object)))
+              (set-fills)))
+
+          (update-page [_ page]
+            (update page :objects #(d/mapm update-object %)))]
+
+    (update data :pages-index #(d/mapm update-page %))))

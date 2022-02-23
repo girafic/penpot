@@ -15,7 +15,9 @@
    [clojure.core.async :as a]
    [yetti.websocket :as yws])
   (:import
-   java.nio.ByteBuffer))
+   java.nio.ByteBuffer
+   org.eclipse.jetty.io.EofException))
+
 
 (declare decode-beat)
 (declare encode-beat)
@@ -24,11 +26,6 @@
 (declare process-output)
 (declare ws-ping!)
 (declare ws-send!)
-
-(defmacro call-mtx
-  [definitions name & args]
-  `(when-let [mtx-fn# (some-> ~definitions ~name ::mtx/fn)]
-     (mtx-fn# ~@args)))
 
 (def noop (constantly nil))
 
@@ -47,7 +44,7 @@
   ([handle-message {:keys [::input-buff-size
                            ::output-buff-size
                            ::idle-timeout
-                           ::metrics]
+                           metrics]
                     :or {input-buff-size 64
                          output-buff-size 64
                          idle-timeout 30000}
@@ -69,8 +66,8 @@
            on-terminate
            (fn [& _args]
              (when (compare-and-set! terminated false true)
-               (call-mtx metrics :connections {:cmd :dec :by 1})
-               (call-mtx metrics :sessions {:val (/ (inst-ms (dt/diff created-at (dt/now))) 1000.0)})
+               (mtx/run! metrics {:id :websocket-active-connections :dec 1})
+               (mtx/run! metrics {:id :websocket-session-timing :val (/ (inst-ms (dt/diff created-at (dt/now))) 1000.0)})
 
                (a/close! close-ch)
                (a/close! pong-ch)
@@ -86,7 +83,7 @@
 
            on-connect
            (fn [conn]
-             (call-mtx metrics :connections {:cmd :inc :by 1})
+             (mtx/run! metrics {:id :websocket-active-connections :inc 1})
 
              (let [wsp (atom (assoc options ::conn conn))]
                ;; Handle heartbeat
@@ -100,7 +97,7 @@
                ;; connection
                (a/go-loop []
                  (when-let [val (a/<! output-ch)]
-                   (call-mtx metrics :messages {:labels ["send"]})
+                   (mtx/run! metrics {:id :websocket-messages-total :labels ["send"] :inc 1})
                    (a/<! (ws-send! conn (t/encode-str val)))
                    (recur)))
 
@@ -109,7 +106,7 @@
 
            on-message
            (fn [_ message]
-             (call-mtx metrics :messages {:labels ["recv"]})
+             (mtx/run! metrics {:id :websocket-messages-total :labels ["send"] :inc 1})
              (try
                (let [message (t/decode-str message)]
                  (a/offer! input-ch message))
@@ -132,17 +129,25 @@
 (defn- ws-send!
   [conn s]
   (let [ch (a/chan 1)]
-    (yws/send! conn s (fn [e]
-                        (when e (a/offer! ch e))
-                        (a/close! ch)))
+    (try
+      (yws/send! conn s (fn [e]
+                          (when e (a/offer! ch e))
+                          (a/close! ch)))
+      (catch EofException cause
+        (a/offer! ch cause)
+        (a/close! ch)))
     ch))
 
 (defn- ws-ping!
   [conn s]
   (let [ch (a/chan 1)]
-    (yws/ping! conn s (fn [e]
-                        (when e (a/offer! ch e))
-                        (a/close! ch)))
+    (try
+      (yws/ping! conn s (fn [e]
+                          (when e (a/offer! ch e))
+                          (a/close! ch)))
+      (catch EofException cause
+        (a/offer! ch cause)
+        (a/close! ch)))
     ch))
 
 (defn- encode-beat

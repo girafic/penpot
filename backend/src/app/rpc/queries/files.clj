@@ -6,6 +6,8 @@
 
 (ns app.rpc.queries.files
   (:require
+   [app.common.data :as d]
+   [app.common.pages.helpers :as cph]
    [app.common.pages.migrations :as pmg]
    [app.common.spec :as us]
    [app.common.uuid :as uuid]
@@ -24,6 +26,7 @@
 
 ;; --- Helpers & Specs
 
+(s/def ::frame-id ::us/uuid)
 (s/def ::id ::us/uuid)
 (s/def ::name ::us/string)
 (s/def ::project-id ::us/uuid)
@@ -165,6 +168,7 @@
           f.created_at,
           f.modified_at,
           f.name,
+          f.revn,
           f.is_shared
      from file as f
     where f.project_id = ?
@@ -214,11 +218,63 @@
       (some-> (retrieve-file cfg id)
               (assoc :permissions perms)))))
 
-(s/def ::page
-  (s/keys :req-un [::profile-id ::file-id]))
+(declare trim-file-data)
 
-(defn remove-thumbnails-frames
-  "Removes from data the children for frames that have a thumbnail set up"
+(s/def ::page-id ::us/uuid)
+(s/def ::object-id ::us/uuid)
+
+(s/def ::trimmed-file
+  (s/keys :req-un [::profile-id ::id ::object-id ::page-id]))
+
+(sv/defmethod ::trimmed-file
+  "Retrieve a file by its ID and trims all unnecesary content from
+  it. It is mainly used for rendering a concrete object, so we don't
+  need force download all shapes when only a small subset is
+  necesseary."
+  [{:keys [pool] :as cfg} {:keys [profile-id id] :as params}]
+  (db/with-atomic [conn pool]
+    (let [cfg   (assoc cfg :conn conn)
+          perms (get-permissions conn profile-id id)]
+      (check-read-permissions! perms)
+      (some-> (retrieve-file cfg id)
+              (trim-file-data params)
+              (assoc :permissions perms)))))
+
+(defn- trim-file-data
+  [file {:keys [page-id object-id]}]
+  (let [page    (get-in file [:data :pages-index page-id])
+        objects (->> (cph/get-children-with-self (:objects page) object-id)
+                     (map #(dissoc % :thumbnail))
+                     (d/index-by :id))
+        page    (assoc page :objects objects)]
+    (-> file
+        (update :data assoc :pages-index {page-id page})
+        (update :data assoc :pages [page-id]))))
+
+(declare strip-frames-with-thumbnails)
+
+(s/def ::strip-frames-with-thumbnails ::us/boolean)
+
+(s/def ::page
+  (s/keys :req-un [::profile-id ::file-id]
+          :opt-un [::strip-frames-with-thumbnails]))
+
+(sv/defmethod ::page
+  "Retrieves the first page of the file. Used mainly for render
+  thumbnails on dashboard."
+  [{:keys [pool] :as cfg} {:keys [profile-id file-id] :as props}]
+  (db/with-atomic [conn pool]
+    (check-read-permissions! conn profile-id file-id)
+
+    (let [cfg     (assoc cfg :conn conn)
+          file    (retrieve-file cfg file-id)
+          page-id (get-in file [:data :pages 0])]
+      (cond-> (get-in file [:data :pages-index page-id])
+        (true? (:strip-frames-with-thumbnails props))
+        (strip-frames-with-thumbnails)))))
+
+(defn strip-frames-with-thumbnails
+  "Remove unnecesary shapes from frames that have thumbnail."
   [data]
   (let [filter-shape?
         (fn [objects [id shape]]
@@ -244,17 +300,6 @@
 
     (update data :objects update-objects)))
 
-(sv/defmethod ::page
-  [{:keys [pool] :as cfg} {:keys [profile-id file-id strip-thumbnails]}]
-  (db/with-atomic [conn pool]
-    (check-read-permissions! conn profile-id file-id)
-
-    (let [cfg     (assoc cfg :conn conn)
-          file    (retrieve-file cfg file-id)
-          page-id (get-in file [:data :pages 0])]
-      (cond-> (get-in file [:data :pages-index page-id])
-        strip-thumbnails
-        (remove-thumbnails-frames)))))
 
 ;; --- Query: Shared Library Files
 
@@ -348,6 +393,7 @@
    )
    select * from recent_files where row_num <= 10;")
 
+
 (s/def ::team-recent-files
   (s/keys :req-un [::profile-id ::team-id]))
 
@@ -356,6 +402,25 @@
   (with-open [conn (db/open pool)]
     (teams/check-read-permissions! conn profile-id team-id)
     (db/exec! conn [sql:team-recent-files team-id])))
+
+
+;; --- QUERY: get the thumbnail for an frame
+
+(def ^:private sql:file-frame-thumbnail
+  "select data
+     from file_frame_thumbnail
+    where file_id = ?
+      and frame_id = ?")
+
+(s/def ::file-frame-thumbnail
+  (s/keys :req-un [::profile-id ::file-id ::frame-id]))
+
+(sv/defmethod ::file-frame-thumbnail
+  [{:keys [pool]} {:keys [profile-id file-id frame-id]}]
+  (with-open [conn (db/open pool)]
+    (check-read-permissions! conn profile-id file-id)
+    (db/exec-one! conn [sql:file-frame-thumbnail file-id frame-id])))
+
 
 ;; --- Helpers
 

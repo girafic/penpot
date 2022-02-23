@@ -9,6 +9,7 @@
    [app.common.exceptions :as ex]
    [clojure.pprint :refer [pprint]]
    [cuerdas.core :as str]
+   [fipp.edn :as fpp]
    #?(:clj [io.aviso.exception :as ie])
    #?(:cljs [goog.log :as glog]))
   #?(:cljs (:require-macros [app.common.logging])
@@ -52,22 +53,16 @@
    (defn stringify-data
      [val]
      (cond
-       (instance? clojure.lang.Named val)
-       (name val)
-
-       (instance? Throwable val)
-       (binding [ie/*app-frame-names* [#"app.*"]
-                 ie/*fonts* nil
-                 ie/*traditional* true]
-         (ie/format-exception val nil))
-
        (string? val)
        val
 
+       (instance? clojure.lang.Named val)
+       (name val)
+
        (coll? val)
-       (binding [clojure.pprint/*print-right-margin* 200]
-         (-> (with-out-str (pprint val))
-             (simple-prune (* 1024 1024 3))))
+       (binding [*print-level* 8
+                 *print-length* 25]
+         (with-out-str (fpp/pprint val {:width 200})))
 
        :else
        (str val))))
@@ -163,26 +158,27 @@
      (.isEnabled ^Logger logger ^Level level)))
 
 (defmacro log
-  [& {:keys [level cause ::logger ::async ::raw] :or {async true} :as props}]
+  [& {:keys [level cause ::logger ::async ::raw ::context] :or {async true} :as props}]
   (if (:ns &env) ; CLJS
     `(write-log! ~(or logger (str *ns*))
                  ~level
                  ~cause
-                 ~(dissoc props :level :cause ::logger ::raw))
-    (let [props      (dissoc props :level :cause ::logger ::async ::raw)
+                 (or ~raw ~(dissoc props :level :cause ::logger ::raw ::context)))
+    (let [props      (dissoc props :level :cause ::logger ::async ::raw ::context)
           logger     (or logger (str *ns*))
           logger-sym (gensym "log")
           level-sym  (gensym "log")]
       `(let [~logger-sym (get-logger ~logger)
              ~level-sym  (get-level ~level)]
-         (if (enabled? ~logger-sym ~level-sym)
+         (when (enabled? ~logger-sym ~level-sym)
            ~(if async
-              `(let [cdata# (ThreadContext/getImmutableContext)]
-                 (send-off logging-agent
-                           (fn [_#]
-                             (with-context (into {:cause ~cause} cdata#)
-                               (->> (or ~raw (build-map-message ~props))
-                                    (write-log! ~logger-sym ~level-sym ~cause))))))
+              `(->> (ThreadContext/getImmutableContext)
+                    (send-off logging-agent
+                              (fn [_# cdata#]
+                                (with-context (-> {} (into cdata#) (into ~context))
+                                  (->> (or ~raw (build-map-message ~props))
+                                       (write-log! ~logger-sym ~level-sym ~cause))))))
+
               `(let [message# (or ~raw (build-map-message ~props))]
                  (write-log! ~logger-sym ~level-sym ~cause message#))))))))
 
@@ -297,7 +293,7 @@
 
 #?(:cljs
    (defn default-handler
-     [{:keys [message level logger-name]}]
+     [{:keys [message level logger-name exception] :as params}]
      (let [header-styles (str "font-weight: 600; color: " (level->color level))
            normal-styles (str "font-weight: 300; color: " (get colors :gray6))
            level-name    (level->short-name level)
@@ -318,7 +314,13 @@
                             (js/console.error v))))
                (js/console.groupEnd message))
              (let [message (str header "%c" (pr-str message))]
-               (js/console.log message header-styles normal-styles))))))))
+               (js/console.log message header-styles normal-styles)))))
+
+       (when exception
+         (when-let [data (ex-data exception)]
+           (js/console.error "cause data:" (pr-str data)))
+         (js/console.error (.-stack exception))))))
+
 
 #?(:cljs
    (defn record->map
