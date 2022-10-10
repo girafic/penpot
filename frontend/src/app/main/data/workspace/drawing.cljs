@@ -2,12 +2,12 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.workspace.drawing
   "Drawing interactions."
   (:require
-   [app.common.pages :as cp]
+   [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.drawing.box :as box]
@@ -37,29 +37,29 @@
 
      ptk/WatchEvent
      (watch [_ _ stream]
-       (let [stoper (rx/filter (ptk/type? ::clear-drawing) stream)]
-         (rx/merge
-          (when (= tool :path)
-            (rx/of (start-drawing :path)))
+       (rx/merge
+        (when (= tool :path)
+          (rx/of (start-drawing :path)))
 
-          (when (= tool :curve)
-            (let [stopper (->> stream (rx/filter dwc/interrupt?))]
-              (->> stream
-                   (rx/filter (ptk/type? ::common/handle-finish-drawing))
-                   (rx/take 1)
-                   (rx/observe-on :async)
-                   (rx/map #(select-for-drawing tool data))
-                   (rx/take-until stopper))))
+        (when (= tool :curve)
+          (let [stopper (->> stream (rx/filter dwc/interrupt?))]
+            (->> stream
+                 (rx/filter (ptk/type? ::common/handle-finish-drawing))
+                 (rx/take 1)
+                 (rx/observe-on :async)
+                 (rx/map #(select-for-drawing tool data))
+                 (rx/take-until stopper))))
 
-          ;; NOTE: comments are a special case and they manage they
-          ;; own interrupt cycle.q
-          (when (and (not= tool :comments)
-                     (not= tool :path))
+        ;; NOTE: comments are a special case and they manage they
+        ;; own interrupt cycle.q
+        (when (and (not= tool :comments)
+                   (not= tool :path))
+          (let [stopper (rx/filter (ptk/type? ::clear-drawing) stream)]
             (->> stream
                  (rx/filter dwc/interrupt?)
                  (rx/take 1)
-                 (rx/map (constantly common/clear-drawing))
-                 (rx/take-until stoper)))))))))
+                 (rx/map common/clear-drawing)
+                 (rx/take-until stopper)))))))))
 
 
 ;; NOTE/TODO: when an exception is raised in some point of drawing the
@@ -91,7 +91,7 @@
   (ptk/reify ::handle-drawing
     ptk/UpdateEvent
     (update [_ state]
-      (let [data (cp/make-minimal-shape type)]
+      (let [data (cts/make-minimal-shape type)]
         (update-in state [:workspace-drawing :object] merge data)))
 
     ptk/WatchEvent

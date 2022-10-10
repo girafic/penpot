@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
-"PO-Revision-Date: 2021-12-18 01:51+0000\n"
-"Last-Translator: Muhammad Insan Al-Amin <insan@mecha.id>\n"
+"PO-Revision-Date: 2022-09-23 20:54+0000\n"
+"Last-Translator: Dário <dariogomes@gmail.com>\n"
 "Language-Team: Indonesian "
 "<https://hosted.weblate.org/projects/penpot/frontend/id/>\n"
 "Language: id\n"
@@ -9,7 +9,7 @@ msgstr ""
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
-"X-Generator: Weblate 4.10\n"
+"X-Generator: Weblate 4.14.1\n"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.already-have-account"
@@ -18,8 +18,8 @@ msgstr "Sudah memiliki akun?"
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.check-your-email"
 msgstr ""
-"Cek surel anda dan klik pada tautan tersebut untuk verifikasi dan mulai "
-"gunakan Penpot."
+"Cek surel kamu dan klik pada tautan tersebut untuk memverifikasi dan mulai "
+"menggunakan Penpot."
 
 #: src/app/main/ui/auth/recovery.cljs
 msgid "auth.confirm-password"
@@ -31,13 +31,13 @@ msgstr "Buat akun demo"
 
 #: src/app/main/ui/auth/register.cljs, src/app/main/ui/auth/login.cljs
 msgid "auth.create-demo-profile"
-msgstr "Ingin mencobanya?"
+msgstr "Hanya ingin mencobanya?"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.demo-warning"
 msgstr ""
-"Ini layanan DEMO, JANGAN GUNAKAN untuk pekerjaan nyata, project ini akan di "
-"hapus secara berkala."
+"Ini layanan DEMO, JANGAN GUNAKAN untuk pekerjaan nyata, proyek-proyek ini "
+"akan di hapus secara berkala."
 
 #: src/app/main/ui/auth/register.cljs, src/app/main/ui/auth/recovery_request.cljs, src/app/main/ui/auth/login.cljs
 msgid "auth.email"
@@ -57,15 +57,11 @@ msgstr "Kembali!"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.login-here"
-msgstr "Masuk disini"
+msgstr "Masuk di sini"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-submit"
 msgstr "Masuk"
-
-#: src/app/main/ui/auth/login.cljs
-msgid "auth.login-subtitle"
-msgstr "Masukkan detail anda di bawah ini"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-title"
@@ -73,27 +69,27 @@ msgstr "Senang bertemu denganmu lagi!"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-github-submit"
-msgstr "Masuk dengan Github"
+msgstr "GitHub"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-gitlab-submit"
-msgstr "Masuk dengan Gitlab"
+msgstr "GitLab"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-google-submit"
-msgstr "Masuk dengan Google"
+msgstr "Google"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-ldap-submit"
-msgstr "Masuk dengan LDAP"
+msgstr "LDAP"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-oidc-submit"
-msgstr "Masuk dengan OpenID (SSO)"
+msgstr "OpenID Connect"
 
 #: src/app/main/ui/auth/recovery.cljs
 msgid "auth.new-password"
-msgstr "Ketikkan kata sandi baru"
+msgstr "Ketik kata sandi baru"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.newsletter-subscription"
@@ -101,7 +97,7 @@ msgstr "Saya setuju untuk berlangganan milis Penpot."
 
 #: src/app/main/ui/auth/recovery.cljs
 msgid "auth.notifications.invalid-token-error"
-msgstr "Token pemulihan tidak valid."
+msgstr "Token pemulihan tidak sah."
 
 #: src/app/main/ui/auth/recovery.cljs
 msgid "auth.notifications.password-changed-successfully"
@@ -109,15 +105,15 @@ msgstr "Kata sandi berhasil diubah"
 
 #: src/app/main/ui/auth/recovery_request.cljs
 msgid "auth.notifications.profile-not-verified"
-msgstr "Akun belum terverifikasi, harap verifikasi profile anda sebelum melanjutkan."
+msgstr "Profil belum terverifikasi, harap verifikasi profil sebelum melanjutkan."
 
 #: src/app/main/ui/auth/recovery_request.cljs
 msgid "auth.notifications.recovery-token-sent"
-msgstr "Link pemulihan kata sandi berhasil dikirim ke kotak masuk anda."
+msgstr "Tautan pemulihan kata sandi telah dikirim ke kotak masuk kamu."
 
 #: src/app/main/ui/auth/verify_token.cljs
 msgid "auth.notifications.team-invitation-accepted"
-msgstr "Berhasil bergabung dengan tim"
+msgstr "Berhasil bergabung ke tim"
 
 #: src/app/main/ui/auth/register.cljs, src/app/main/ui/auth/login.cljs
 msgid "auth.password"
@@ -125,18 +121,18 @@ msgstr "Kata sandi"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.password-length-hint"
-msgstr "Paling tidak 8 karakter"
+msgstr "Setidaknya 8 karakter"
 
 msgid "auth.privacy-policy"
 msgstr "Kebijakan privasi"
 
 #: src/app/main/ui/auth/recovery_request.cljs
 msgid "auth.recovery-request-submit"
-msgstr "Pemulihan kata sandi"
+msgstr "Pulihkan Kata Sandi"
 
 #: src/app/main/ui/auth/recovery_request.cljs
 msgid "auth.recovery-request-subtitle"
-msgstr "Kami akan mengirimi anda surel dengan intruksi"
+msgstr "Kami akan mengirimkan kamu surel dengan instruksi"
 
 #: src/app/main/ui/auth/recovery_request.cljs
 msgid "auth.recovery-request-title"
@@ -144,11 +140,11 @@ msgstr "Lupa kata sandi?"
 
 #: src/app/main/ui/auth/recovery.cljs
 msgid "auth.recovery-submit"
-msgstr "Ubah kata sandi anda"
+msgstr "Ubah kata sandi kamu"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.register"
-msgstr "Tidak ada akun?"
+msgstr "Belum punya akun?"
 
 #: src/app/main/ui/auth/register.cljs, src/app/main/ui/auth/login.cljs
 msgid "auth.register-submit"
@@ -156,7 +152,7 @@ msgstr "Buat akun baru"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.register-subtitle"
-msgstr "Ini gratis, Open Source"
+msgstr "Gratis dan Sumber Terbuka"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.register-title"
@@ -164,25 +160,28 @@ msgstr "Buat akun baru"
 
 #: src/app/main/ui/auth.cljs
 msgid "auth.sidebar-tagline"
-msgstr "Solusi open-source untuk desain dan pembuatan prototype."
+msgstr "Solusi sumber terbuka untuk pembuatan desain dan prototipe."
 
 msgid "auth.terms-of-service"
-msgstr "Ketentuan layanan"
+msgstr "Kebijakan layanan"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.terms-privacy-agreement"
 msgstr ""
-"Ketika membuat akun baru, anda menyetujui persyaratan layanan dan kebijakan "
+"Ketika membuat akun baru, kamu menyetujui kebijakan layanan dan kebijakan "
 "privasi kami."
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.verification-email-sent"
-msgstr "Kami telah mengirim verifikasi ke surel anda"
+msgstr "Kami telah mengirimkan surel verifikasi ke"
+
+msgid "common.share-link.all-users"
+msgstr "Semua pengguna Penpot"
 
 msgid "common.share-link.confirm-deletion-link-description"
 msgstr ""
-"Apakah anda yakin akan menghapus tautan ini? Jika ya, maka tautan tersebut "
-"tidak akan lagi tersedia untuk siapapun"
+"Apakah kamu yakin ingin menghapus tautan ini? Jika kamu menghapusnya, maka "
+"tautan tersebut tidak akan lagi tersedia untuk siapapun"
 
 msgid "common.share-link.get-link"
 msgstr "Dapatkan tautan"
@@ -193,28 +192,56 @@ msgstr "Tautan berhasil disalin"
 msgid "common.share-link.link-deleted-success"
 msgstr "Tautan berhasil dihapus"
 
-msgid "common.share-link.permissions-can-access"
-msgstr "Dapat mengakses"
+msgid "common.share-link.manage-ops"
+msgstr "Atur perizinan"
 
-msgid "common.share-link.permissions-can-view"
-msgstr "Dapat melihat"
+msgid "common.share-link.page-shared"
+msgid_plural "common.share-link.page-shared"
+msgstr[0] "%s halaman dibagikan"
+
+msgid "common.share-link.permissions-can-comment"
+msgstr "Dapat berkomentar"
+
+msgid "common.share-link.permissions-can-inspect"
+msgstr "Dapat menginspeksi kode"
 
 msgid "common.share-link.permissions-hint"
 msgstr "Siapapun yang memiliki tautan dapat mengakses"
 
-msgid "common.share-link.view-current-page"
-msgstr "Hanya halaman ini"
+msgid "common.share-link.permissions-pages"
+msgstr "Halaman yang dibagikan"
 
-msgid "common.share-link.view-selected-pages"
-msgstr "Halaman yang dipilih"
+msgid "common.share-link.placeholder"
+msgstr "Tautan yang dapat dibagikan akan muncul di sini"
+
+msgid "common.share-link.team-members"
+msgstr "Hanya anggota tim"
+
+msgid "common.share-link.title"
+msgstr "Bagikan prototipe"
+
+msgid "common.share-link.view-all"
+msgstr "Pilih Semua"
+
+#: src/app/main/ui/dashboard/projects.cljs
+msgid "dasboard.tutorial-hero.start"
+msgstr "Mulai tutorial"
+
+#: src/app/main/ui/dashboard/projects.cljs
+msgid "dasboard.walkthrough-hero.start"
+msgstr "Mulai tur"
+
+#: src/app/main/ui/dashboard/projects.cljs
+msgid "dasboard.walkthrough-hero.title"
+msgstr "Panduan Antarmuka"
 
 #: src/app/main/ui/workspace/header.cljs, src/app/main/ui/dashboard/file_menu.cljs
 msgid "dashboard.add-shared"
-msgstr "Tambahkan sebagai pustaka bersama"
+msgstr "Tambahkan sebagai Pustaka Bersama"
 
 #: src/app/main/ui/settings/profile.cljs
 msgid "dashboard.change-email"
-msgstr "Ubah email"
+msgstr "Ubah surel"
 
 #: src/app/main/data/dashboard.cljs, src/app/main/data/dashboard.cljs
 msgid "dashboard.copy-suffix"
@@ -222,52 +249,191 @@ msgstr "(salin)"
 
 #: src/app/main/ui/dashboard/sidebar.cljs
 msgid "dashboard.create-new-team"
-msgstr "+ Buat tim baru"
+msgstr "Buat tim baru"
 
 #: src/app/main/ui/dashboard/sidebar.cljs
 msgid "dashboard.default-team-name"
-msgstr "Penpot anda"
+msgstr "Penpot Kamu"
 
 #: src/app/main/ui/dashboard/sidebar.cljs
 msgid "dashboard.delete-team"
 msgstr "Hapus tim"
+
+msgid "dashboard.download-binary-file"
+msgstr "Unduh berkas Penpot (.penpot)"
+
+msgid "dashboard.download-standard-file"
+msgstr "Unduh berkas standar (.svg + .json)"
 
 msgid "dashboard.draft-title"
 msgstr "Draf"
 
 #: src/app/main/ui/dashboard/project_menu.cljs, src/app/main/ui/dashboard/file_menu.cljs
 msgid "dashboard.duplicate"
-msgstr "Duplikat"
+msgstr "Duplikasi"
 
 #: src/app/main/ui/dashboard/file_menu.cljs
 msgid "dashboard.duplicate-multi"
-msgstr "Duplikasi % file"
+msgstr "Duplikasi % berkas"
 
 #: src/app/main/ui/dashboard/grid.cljs
 msgid "dashboard.empty-files"
-msgstr "Anda belum memiliki file disini"
+msgstr "Kamu belum memiliki berkas di sini"
 
 #: src/app/main/ui/dashboard/grid.cljs
 #, markdown
 msgid "dashboard.empty-placeholder-drafts"
 msgstr ""
-"Belum ada file di sini. Jika anda mau mencoba menggunakan template, anda "
-"dapat membuka [Libraries & templates "
-"section](https://penpot.app/libraries-templates.html)"
+"Aduh! Kamu belum punya berkas! Jika kamu ingin mencoba beberapa template, "
+"buka [Pustaka & template](https://penpot.app/libraries-templates.html)"
+
+msgid "dashboard.export-binary-multi"
+msgstr "Unduh %s berkas Penpot (.penpot)"
 
 msgid "dashboard.export-frames"
-msgstr "Ekspor artboards ke PDF ..."
+msgstr "Ekspor papan-papan ke PDF"
+
+#: src/app/main/ui/export.cljs
+msgid "dashboard.export-frames.title"
+msgstr "Ekspor ke PDF"
 
 msgid "dashboard.export-multi"
-msgstr "Ekspor % file"
+msgstr "Ekspor %s berkas Penpot"
+
+#: src/app/main/ui/workspace/header.cljs
+msgid "dashboard.export-shapes"
+msgstr "Ekspor"
+
+#: src/app/main/ui/export.cljs
+msgid "dashboard.export-shapes.title"
+msgstr "Ekspor pilihan"
 
 msgid "dashboard.export-single"
-msgstr "Ekspor file"
+msgstr "Ekspor berkas Penpot"
+
+msgid "dashboard.export-standard-multi"
+msgstr "Unduh %s berkas standar (.svg + .json)"
 
 msgid "dashboard.export.detail"
 msgstr "* Dapat mencakup komponen, grafik, warna dan/atau tipografi."
 
 msgid "dashboard.export.explain"
 msgstr ""
-"Satu atau lebih file yang ingin anda ekspor, menggunakan pustaka bersama. "
-"Apa yang akan anda lakukan dengan asetnya*?"
+"Satu atau lebih berkas yang ingin kamu ekspor menggunakan pustaka bersama. "
+"Apa yang ingin kamu lakukan dengan asetnya*?"
+
+msgid "dashboard.export.options.all.message"
+msgstr "berkas dengan pustaka bersama akan dimasukkan dalam hasil ekspor."
+
+msgid "dashboard.export.options.all.title"
+msgstr "Ekspor pustaka bersama"
+
+msgid "dashboard.export.options.detach.message"
+msgstr ""
+"Pustaka bersama tidak akan dimasukkan dalam hasil ekspor dan tidak ada aset "
+"yang akan ditambahkan ke pustaka. "
+
+msgid "dashboard.fonts.deleted-placeholder"
+msgstr "Fon dihapus"
+
+msgid "dashboard.fonts.empty-placeholder"
+msgstr "Tak ada fon khusus yang terpasang."
+
+#: src/app/main/ui/dashboard/fonts.cljs
+msgid "dashboard.fonts.fonts-added"
+msgid_plural "dashboard.fonts.fonts-added"
+msgstr[0] "%s fon ditambahkan"
+
+#: src/app/main/ui/dashboard/fonts.cljs
+msgid "dashboard.fonts.upload-all"
+msgstr "Unggah semua"
+
+msgid "dashboard.import"
+msgstr "Impor berkas Penpot"
+
+msgid "dashboard.import.analyze-error"
+msgstr "Aduh! Kami tidak dapat mengimpor berkas ini"
+
+msgid "dashboard.import.import-error"
+msgstr "Terdapat masalah saat mengimpor berkas. Berkasnya tidak terimpor."
+
+msgid "dashboard.import.import-message"
+msgstr "%s berkas telah berhasil diimpor."
+
+msgid "dashboard.import.progress.process-colors"
+msgstr "Memproses warna"
+
+msgid "dashboard.import.progress.process-components"
+msgstr "Memproses komponen"
+
+msgid "dashboard.import.progress.process-media"
+msgstr "Memproses media"
+
+msgid "dashboard.import.progress.process-page"
+msgstr "Memproses halaman: %s"
+
+msgid "dashboard.import.progress.upload-data"
+msgstr "Mengunggah data ke server (%s/%s)"
+
+msgid "dashboard.import.progress.upload-media"
+msgstr "Mengunggah berkas: %s"
+
+#: src/app/main/ui/dashboard/team.cljs
+msgid "dashboard.invite-profile"
+msgstr "Undang ke tim"
+
+#: src/app/main/ui/dashboard/sidebar.cljs, src/app/main/ui/dashboard/sidebar.cljs
+msgid "dashboard.leave-team"
+msgstr "Tinggalkan tim"
+
+msgid "dashboard.libraries-and-templates"
+msgstr "Pustaka & Template"
+
+msgid "dashboard.libraries-and-templates.explore"
+msgstr "Jelajahi lebih banyak dan pelajari cara berkontribusi"
+
+msgid "dashboard.libraries-and-templates.import-error"
+msgstr "Terjadi masalah saat mengimpor template. Template tidak diimpor."
+
+#: src/app/main/ui/dashboard/libraries.cljs
+msgid "dashboard.libraries-title"
+msgstr "Pustaka"
+
+#: src/app/main/ui/dashboard/grid.cljs
+msgid "dashboard.loading-files"
+msgstr "memuat berkas-berkasmu …"
+
+msgid "dashboard.loading-fonts"
+msgstr "memuat fon-fon kamu …"
+
+#: src/app/main/ui/dashboard/project_menu.cljs, src/app/main/ui/dashboard/file_menu.cljs
+msgid "dashboard.move-to"
+msgstr "Pindahkan ke"
+
+#: src/app/main/ui/dashboard/file_menu.cljs
+msgid "dashboard.move-to-multi"
+msgstr "Pindahkan %s berkas ke"
+
+#: src/app/main/ui/dashboard/file_menu.cljs
+msgid "dashboard.move-to-other-team"
+msgstr "Pindahkan ke tim lain"
+
+#: src/app/main/ui/dashboard/projects.cljs, src/app/main/ui/dashboard/files.cljs
+msgid "dashboard.new-file"
+msgstr "+ Buat Berkas"
+
+#: src/app/main/data/dashboard.cljs
+msgid "dashboard.new-file-prefix"
+msgstr "Berkas Baru"
+
+#: src/app/main/ui/dashboard/projects.cljs
+msgid "dashboard.new-project"
+msgstr "+ Buat Proyek"
+
+#: src/app/main/data/dashboard.cljs
+msgid "dashboard.new-project-prefix"
+msgstr "Proyek Baru"
+
+#: src/app/main/ui/settings/profile.cljs
+msgid "dashboard.newsletter-msg"
+msgstr "Kirimkan saya berita, pembaruan produk dan rekomendasi tentang Penpot."

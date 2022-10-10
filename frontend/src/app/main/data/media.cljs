@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.media
   (:require
@@ -17,14 +17,13 @@
 
 ;; --- Predicates
 
-(defn ^boolean file?
+(defn file?
   [o]
   (instance? js/File o))
 
-(defn ^boolean blob?
+(defn blob?
   [o]
   (instance? js/Blob o))
-
 
 ;; --- Specs
 
@@ -37,12 +36,8 @@
 ;; --- Utility functions
 
 (defn validate-file
-  ;; Check that a file obtained with the file javascript API is valid.
+  "Check that a file obtained with the file javascript API is valid."
   [file]
-  (when (> (.-size file) cm/max-file-size)
-    (ex/raise :type :validation
-              :code :media-too-large
-              :hint (str/fmt "media size is large than 5mb (size: %s)" (.-size file))))
   (when-not (contains? cm/valid-image-types (.-type file))
     (ex/raise :type :validation
               :code :media-type-not-allowed
@@ -74,4 +69,3 @@
               :else
               (tr "errors.unexpected-error"))]
     (rx/of (dm/error msg))))
-

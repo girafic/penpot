@@ -2,36 +2,28 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.storage.impl
   "Storage backends abstraction layer."
   (:require
+   [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
-   [app.common.uuid :as uuid]
    [buddy.core.codecs :as bc]
-   [clojure.java.io :as io]
-   [cuerdas.core :as str])
+   [buddy.core.hash :as bh]
+   [clojure.java.io :as jio]
+   [datoteka.io :as io])
   (:import
    java.nio.ByteBuffer
-   java.util.UUID
-   java.io.ByteArrayInputStream
-   java.io.InputStream
-   java.nio.file.Files))
+   java.nio.file.Files
+   java.nio.file.Path
+   java.util.UUID))
 
 ;; --- API Definition
 
 (defmulti put-object (fn [cfg _ _] (:type cfg)))
 
 (defmethod put-object :default
-  [cfg _ _]
-  (ex/raise :type :internal
-            :code :invalid-storage-backend
-            :context cfg))
-
-(defmulti copy-object (fn [cfg _ _] (:type cfg)))
-
-(defmethod copy-object :default
   [cfg _ _]
   (ex/raise :type :internal
             :code :invalid-storage-backend
@@ -100,124 +92,122 @@
 (defn coerce-id
   [id]
   (cond
-    (string? id) (uuid/uuid id)
-    (uuid? id) id
-    :else (ex/raise :type :internal
-                    :code :invalid-id-type
-                    :hint "id should be string or uuid")))
+    (string? id) (parse-uuid id)
+    (uuid? id)   id
+    :else        (ex/raise :type :internal
+                           :code :invalid-id-type
+                           :hint "id should be string or uuid")))
 
+(defprotocol IContentObject
+  (get-size [_] "get object size"))
 
-(defprotocol IContentObject)
+(defprotocol IContentHash
+  (get-hash [_] "get precalculated hash"))
 
 (defn- path->content
-  [path]
-  (let [size (Files/size path)]
-    (reify
-      IContentObject
-      io/IOFactory
-      (make-reader [_ opts]
-	    (io/make-reader path opts))
-      (make-writer [_ _]
-        (throw (UnsupportedOperationException. "not implemented")))
-      (make-input-stream [_ opts]
-        (io/make-input-stream path opts))
-      (make-output-stream [_ _]
-        (throw (UnsupportedOperationException. "not implemented")))
-      clojure.lang.Counted
-      (count [_] size)
-
-    java.lang.AutoCloseable
-    (close [_]))))
-
-(defn string->content
-  [^String v]
-  (let [data (.getBytes v "UTF-8")
-        bais (ByteArrayInputStream. ^bytes data)]
-    (reify
-      IContentObject
-      io/IOFactory
-      (make-reader [_ opts]
-	    (io/make-reader bais opts))
-      (make-writer [_ _]
-        (throw (UnsupportedOperationException. "not implemented")))
-      (make-input-stream [_ opts]
-        (io/make-input-stream bais opts))
-      (make-output-stream [_ _]
-        (throw (UnsupportedOperationException. "not implemented")))
-
-      clojure.lang.Counted
-      (count [_]
-        (alength data))
-
-    java.lang.AutoCloseable
-    (close [_]))))
-
-(defn- input-stream->content
-  [^InputStream is size]
+  [^Path path ^long size]
   (reify
     IContentObject
-    io/IOFactory
-    (make-reader [_ opts]
-      (io/make-reader is opts))
+    (get-size [_] size)
+
+    jio/IOFactory
+    (make-reader [this opts]
+      (jio/make-reader this opts))
     (make-writer [_ _]
       (throw (UnsupportedOperationException. "not implemented")))
-    (make-input-stream [_ opts]
-      (io/make-input-stream is opts))
+    (make-input-stream [_ _]
+      (-> (io/input-stream path)
+          (io/bounded-input-stream size)))
     (make-output-stream [_ _]
+      (throw (UnsupportedOperationException. "not implemented")))))
+
+(defn- bytes->content
+  [^bytes data ^long size]
+  (reify
+    IContentObject
+    (get-size [_] size)
+
+    jio/IOFactory
+    (make-reader [this opts]
+      (jio/make-reader this opts))
+    (make-writer [_ _]
       (throw (UnsupportedOperationException. "not implemented")))
-
-    clojure.lang.Counted
-    (count [_] size)
-
-    java.lang.AutoCloseable
-    (close [_]
-      (.close is))))
+    (make-input-stream [_ _]
+      (-> (io/bytes-input-stream data)
+          (io/bounded-input-stream size)))
+    (make-output-stream [_ _]
+      (throw (UnsupportedOperationException. "not implemented")))))
 
 (defn content
   ([data] (content data nil))
   ([data size]
    (cond
      (instance? java.nio.file.Path data)
-     (path->content data)
+     (path->content data (or size (Files/size data)))
 
      (instance? java.io.File data)
-     (path->content (.toPath ^java.io.File data))
+     (content (.toPath ^java.io.File data) size)
 
      (instance? String data)
-     (string->content data)
+     (let [data (.getBytes data "UTF-8")]
+       (bytes->content data (alength data)))
 
      (bytes? data)
-     (input-stream->content (ByteArrayInputStream. ^bytes data) (alength ^bytes data))
+     (bytes->content data (or size (alength ^bytes data)))
 
-     (instance? InputStream data)
-     (do
-       (when-not size
-         (throw (UnsupportedOperationException. "size should be provided on InputStream")))
-       (input-stream->content data size))
+     ;; (instance? InputStream data)
+     ;; (do
+     ;;   (when-not size
+     ;;     (throw (UnsupportedOperationException. "size should be provided on InputStream")))
+     ;;   (make-content data size))
 
      :else
-     (throw (UnsupportedOperationException. "type not supported")))))
+     (throw (IllegalArgumentException. "invalid argument type")))))
+
+(defn wrap-with-hash
+  [content ^String hash]
+  (when-not (satisfies? IContentObject content)
+    (throw (UnsupportedOperationException. "`content` should be an instance of IContentObject")))
+
+  (when-not (satisfies? jio/IOFactory content)
+    (throw (UnsupportedOperationException. "`content` should be an instance of IOFactory")))
+
+  (reify
+    IContentObject
+    (get-size [_] (get-size content))
+
+    IContentHash
+    (get-hash [_] hash)
+
+    jio/IOFactory
+    (make-reader [_ opts]
+      (jio/make-reader content opts))
+    (make-writer [_ opts]
+      (jio/make-writer content opts))
+    (make-input-stream [_ opts]
+      (jio/make-input-stream content opts))
+    (make-output-stream [_ opts]
+      (jio/make-output-stream content opts))))
 
 (defn content?
   [v]
   (satisfies? IContentObject v))
 
-(defn slurp-bytes
-  [content]
-  (with-open [input  (io/input-stream content)
-              output (java.io.ByteArrayOutputStream. (count content))]
-    (io/copy input output)
-    (.toByteArray output)))
+(defn calculate-hash
+  [resource]
+  (let [result (with-open [input (io/input-stream resource)]
+                 (-> (bh/blake2b-256 input)
+                     (bc/bytes->hex)))]
+    (str "blake2b:" result)))
 
 (defn resolve-backend
-  [{:keys [conn pool] :as storage} backend-id]
-  (when backend-id
-    (let [backend (get-in storage [:backends backend-id])]
-      (when-not backend
-        (ex/raise :type :internal
-                  :code :backend-not-configured
-                  :hint (str/fmt "backend '%s' not configured" backend-id)))
-      (assoc backend
-             :conn (or conn pool)
-             :id backend-id))))
-
+  [{:keys [conn pool executor] :as storage} backend-id]
+  (let [backend (get-in storage [:backends backend-id])]
+    (when-not backend
+      (ex/raise :type :internal
+                :code :backend-not-configured
+                :hint (dm/fmt "backend '%' not configured" backend-id)))
+    (assoc backend
+           :executor executor
+           :conn (or conn pool)
+           :id backend-id)))

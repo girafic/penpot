@@ -2,17 +2,18 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.tasks.objects-gc
   "A maintenance task that performs a general purpose garbage collection
   of deleted objects."
   (:require
+   [app.common.data :as d]
    [app.common.logging :as l]
    [app.config :as cf]
    [app.db :as db]
+   [app.media :as media]
    [app.storage :as sto]
-   [app.storage.impl :as simpl]
    [app.util.time :as dt]
    [clojure.spec.alpha :as s]
    [cuerdas.core :as str]
@@ -42,61 +43,54 @@
 ;; --- IMPL: generic object deletion
 
 (defmethod delete-objects :default
-  [{:keys [conn max-age table] :as cfg}]
+  [{:keys [conn min-age table] :as cfg}]
   (let [sql     (str/fmt sql:delete-objects
                          {:table table :limit 50})
-        result  (db/exec! conn [sql max-age])]
+        result  (db/exec! conn [sql min-age])]
 
     (doseq [{:keys [id] :as item} result]
-      (l/trace :hint "delete object" :table table :id id))
+      (l/debug :hint "permanently delete object" :table table :id id))
 
     (count result)))
-
 
 ;; --- IMPL: file deletion
 
 (defmethod delete-objects "file"
-  [{:keys [conn max-age table storage] :as cfg}]
-  (let [sql     (str/fmt sql:delete-objects
-                         {:table table :limit 50})
-        result  (db/exec! conn [sql max-age])
-        backend (simpl/resolve-backend storage (cf/get :fdata-storage-backend))]
+  [{:keys [conn min-age table] :as cfg}]
+  (let [sql    (str/fmt sql:delete-objects {:table table :limit 50})
+        result (db/exec! conn [sql min-age])]
 
     (doseq [{:keys [id] :as item} result]
-      (l/trace :hint "delete object" :table table :id id)
-      (when backend
-        (simpl/del-object backend item)))
+      (l/debug :hint "permanently delete object" :table table :id id))
 
     (count result)))
 
 ;; --- IMPL: team-font-variant deletion
 
 (defmethod delete-objects "team_font_variant"
-  [{:keys [conn max-age storage table] :as cfg}]
-  (let [sql     (str/fmt sql:delete-objects
-                         {:table table :limit 50})
-        fonts   (db/exec! conn [sql max-age])
-        storage (assoc storage :conn conn)]
+  [{:keys [conn min-age storage table] :as cfg}]
+  (let [sql     (str/fmt sql:delete-objects {:table table :limit 50})
+        fonts   (db/exec! conn [sql min-age])
+        storage (media/configure-assets-storage storage conn)]
     (doseq [{:keys [id] :as font} fonts]
-      (l/trace :hint "delete object" :table table :id id)
-      (some->> (:woff1-file-id font) (sto/del-object storage))
-      (some->> (:woff2-file-id font) (sto/del-object storage))
-      (some->> (:otf-file-id font)   (sto/del-object storage))
-      (some->> (:ttf-file-id font)   (sto/del-object storage)))
+      (l/debug :hint "permanently delete object" :table table :id id)
+      (some->> (:woff1-file-id font) (sto/touch-object! storage) deref)
+      (some->> (:woff2-file-id font) (sto/touch-object! storage) deref)
+      (some->> (:otf-file-id font)   (sto/touch-object! storage) deref)
+      (some->> (:ttf-file-id font)   (sto/touch-object! storage) deref))
     (count fonts)))
 
 ;; --- IMPL: team deletion
 
 (defmethod delete-objects "team"
-  [{:keys [conn max-age storage table] :as cfg}]
-  (let [sql     (str/fmt sql:delete-objects
-                         {:table table :limit 50})
-        teams   (db/exec! conn [sql max-age])
-        storage (assoc storage :conn conn)]
+  [{:keys [conn min-age storage table] :as cfg}]
+  (let [sql     (str/fmt sql:delete-objects {:table table :limit 50})
+        teams   (db/exec! conn [sql min-age])
+        storage (media/configure-assets-storage storage conn)]
 
     (doseq [{:keys [id] :as team} teams]
-      (l/trace :hint "delete object" :table table :id id)
-      (some->> (:photo-id team) (sto/del-object storage)))
+      (l/debug :hint "permanently delete object" :table table :id id)
+      (some->> (:photo-id team) (sto/touch-object! storage) deref))
 
     (count teams)))
 
@@ -107,35 +101,20 @@
     where deleted_at is not null
       and deleted_at < now() - ?::interval
     order by deleted_at
-    limit %(limit)s
+    limit ?
     for update")
 
-(def sql:mark-owned-teams-deleted
-  "with owned as (
-    select tpr.team_id as id
-      from team_profile_rel as tpr
-     where tpr.is_owner is true
-       and tpr.profile_id = ?
-   )
-   update team set deleted_at = now() - ?::interval
-    where id in (select id from owned)")
-
 (defmethod delete-objects "profile"
-  [{:keys [conn max-age storage table] :as cfg}]
-  (let [sql      (str/fmt sql:retrieve-deleted-profiles {:limit 50})
-        profiles (db/exec! conn [sql max-age])
-        storage  (assoc storage :conn conn)]
+  [{:keys [conn min-age storage table] :as cfg}]
+  (let [profiles (db/exec! conn [sql:retrieve-deleted-profiles min-age 50])
+        storage  (media/configure-assets-storage storage conn)]
 
     (doseq [{:keys [id] :as profile} profiles]
-      (l/trace :hint "delete object" :table table :id id)
-
-      ;; Mark the owned teams as deleted; this enables them to be processed
-      ;; in the same transaction in the "team" table step.
-      (db/exec-one! conn [sql:mark-owned-teams-deleted id max-age])
+      (l/debug :hint "permanently delete object" :table table :id id)
 
       ;; Mark as deleted the storage object related with the photo-id
       ;; field.
-      (some->> (:photo-id profile) (sto/del-object storage))
+      (some->> (:photo-id profile) (sto/touch-object! storage) deref)
 
       ;; And finally, permanently delete the profile.
       (db/delete! conn :profile {:id id}))
@@ -150,22 +129,41 @@
     (let [res (delete-objects cfg)]
       (if (pos? res)
         (recur (+ n res))
-        (l/debug :hint "table gc summary" :table table :deleted n)))))
+        (do
+          (l/debug :hint "delete summary" :table table :total n)
+          n)))))
 
-(s/def ::max-age ::dt/duration)
+(s/def ::min-age ::dt/duration)
 
 (defmethod ig/pre-init-spec ::handler [_]
-  (s/keys :req-un [::db/pool ::sto/storage ::max-age]))
+  (s/keys :req-un [::db/pool ::sto/storage]
+          :opt-un [::min-age]))
+
+(defmethod ig/prep-key ::handler
+  [_ cfg]
+  (merge {:min-age cf/deletion-delay}
+         (d/without-nils cfg)))
 
 (defmethod ig/init-key ::handler
-  [_ {:keys [pool max-age] :as cfg}]
-  (fn [task]
-    ;; Checking first on task argument allows properly testing it.
-    (let [max-age (get task :max-age max-age)]
-      (db/with-atomic [conn pool]
-        (let [max-age (db/interval max-age)
-              cfg     (-> cfg
-                          (assoc :max-age max-age)
-                          (assoc :conn conn))]
-          (doseq [table target-tables]
-            (process-table (assoc cfg :table table))))))))
+  [_ {:keys [pool] :as cfg}]
+  (fn [params]
+    (db/with-atomic [conn pool]
+      (let [min-age (or (:min-age params) (:min-age cfg))
+            cfg     (-> cfg
+                        (assoc :min-age (db/interval min-age))
+                        (assoc :conn conn))]
+        (loop [tables (seq target-tables)
+               total  0]
+          (if-let [table (first tables)]
+            (recur (rest tables)
+                   (+ total (process-table (assoc cfg :table table))))
+            (do
+              (l/info :hint "objects gc finished successfully"
+                      :min-age (dt/format-duration min-age)
+                      :total total)
+
+              (when (:rollback? params)
+                (db/rollback! conn))
+
+              {:processed total})))))))
+

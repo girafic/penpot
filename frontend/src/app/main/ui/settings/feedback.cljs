@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.settings.feedback
   "Feedback form."
@@ -17,7 +17,7 @@
    [app.util.i18n :as i18n :refer [tr]]
    [beicon.core :as rx]
    [cljs.spec.alpha :as s]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (s/def ::content ::us/not-empty-string)
 (s/def ::subject ::us/not-empty-string)
@@ -55,7 +55,7 @@
          (fn [form _]
            (reset! loading true)
            (let [data (:clean-data @form)]
-             (->> (rp/mutation! :send-feedback data)
+             (->> (rp/command! :send-feedback data)
                   (rx/subs on-succes on-error)))))]
 
     [:& fm/form {:class "feedback-form"
@@ -81,21 +81,20 @@
 
      [:hr]
 
-     [:h2 (tr "feedback.discussions-title")]
-     [:p (tr "feedback.discussions-subtitle1")]
-     [:p (tr "feedback.discussions-subtitle2")]
+     [:h2 (tr "feedback.discourse-title")]
+     [:p (tr "feedback.discourse-subtitle1")]
 
      [:a.btn-secondary.btn-large
-      {:href "https://github.com/penpot/penpot/discussions" :target "_blank"}
-      (tr "feedback.discussions-go-to")]
-
+      {:href "https://community.penpot.app" :target "_blank"}
+      (tr "feedback.discourse-go-to")]
      [:hr]
 
-     [:h2 "Gitter"]
-     [:p (tr "feedback.chat-subtitle")]
+     [:h2 (tr "feedback.twitter-title")]
+     [:p (tr "feedback.twitter-subtitle1")]
+
      [:a.btn-secondary.btn-large
-      {:href "https://gitter.im/penpot/community" :target "_blank"}
-      (tr "feedback.chat-start")]
+      {:href "https://twitter.com/penpotapp" :target "_blank"}
+      (tr "feedback.twitter-go-to")]
 
      ]))
 

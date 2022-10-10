@@ -2,19 +2,26 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.store
-  (:require-macros [app.main.store])
   (:require
+   [app.common.logging :as log]
+   [app.util.object :as obj]
    [beicon.core :as rx]
    [okulary.core :as l]
    [potok.core :as ptk]))
+
+(log/set-level! :info)
 
 (enable-console-print!)
 
 (defonce loader (l/atom false))
 (defonce on-error (l/atom identity))
+
+(defmethod ptk/resolve :default
+  [type data]
+  (ptk/data-event type data))
 
 (defonce state
   (ptk/store {:resolve ptk/resolve
@@ -55,8 +62,10 @@
    (apply ptk/emit! state (cons event events))
    nil))
 
-(defn emitf
-  [& events]
-  #(apply ptk/emit! state events))
+(defonce ongoing-tasks (l/atom #{}))
 
-
+(add-watch ongoing-tasks ::ongoing-tasks
+           (fn [_ _ _ events]
+             (if (empty? events)
+               (obj/set! js/window "onbeforeunload" nil)
+               (obj/set! js/window "onbeforeunload" (constantly false)))))

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.config
   (:require
@@ -17,7 +17,7 @@
    [clojure.spec.alpha :as s]
    [cuerdas.core :as str]))
 
-;; --- Auxiliar Functions
+;; --- Auxiliary Functions
 
 (s/def ::platform #{:windows :linux :macos :other})
 (s/def ::browser #{:chrome :firefox :safari :edge :other})
@@ -54,87 +54,93 @@
     :browser
     :webworker))
 
+(def default-flags
+  [:enable-newsletter-subscription])
+
 (defn- parse-flags
   [global]
   (let [flags (obj/get global "penpotFlags" "")
         flags (sequence (map keyword) (str/words flags))]
-    (flags/parse flags/default flags)))
+    (flags/parse flags/default default-flags flags)))
+
+(defn- parse-features
+  [global]
+  (when-let [features-str (obj/get global "penpotFeatures")]
+    (map keyword (str/words features-str))))
 
 (defn- parse-version
   [global]
   (-> (obj/get global "penpotVersion")
       (v/parse)))
 
+(defn parse-build-date
+  [global]
+  (let [date (obj/get global "penpotBuildDate")]
+    (if (= date "%buildDate%")
+      "unknown"
+      date)))
+
 ;; --- Globar Config Vars
 
 (def default-theme  "default")
 (def default-language "en")
 
-(def google-client-id     (obj/get global "penpotGoogleClientID" nil))
-(def gitlab-client-id     (obj/get global "penpotGitlabClientID" nil))
-(def github-client-id     (obj/get global "penpotGithubClientID" nil))
-(def oidc-client-id       (obj/get global "penpotOIDCClientID" nil))
 (def worker-uri           (obj/get global "penpotWorkerURI" "/js/worker.js"))
 (def translations         (obj/get global "penpotTranslations"))
 (def themes               (obj/get global "penpotThemes"))
-(def sentry-dsn           (obj/get global "penpotSentryDsn"))
 (def onboarding-form-id   (obj/get global "penpotOnboardingQuestionsFormId"))
 
+(def build-date           (parse-build-date global))
 (def flags                (atom (parse-flags global)))
+(def features             (atom (parse-features global)))
 (def version              (atom (parse-version global)))
 (def target               (atom (parse-target global)))
 (def browser              (atom (parse-browser)))
 (def platform             (atom (parse-platform)))
 
-;; maintain for backward compatibility
-(let [login-with-ldap (obj/get global "penpotLoginWithLDAP" false)
-      registration    (obj/get global "penpotRegistrationEnabled" true)]
-  (when login-with-ldap
-    (swap! flags conj :login-with-ldap))
-  (when (false? registration)
-    (swap! flags disj :registration)))
+(def terms-of-service-uri (obj/get global "penpotTermsOfServiceURI" nil))
+(def privacy-policy-uri   (obj/get global "penpotPrivacyPolicyURI" nil))
 
-(defn get-public-uri
-  []
-  (let [uri (u/uri (or (obj/get global "penpotPublicURI")
-                       (.-origin ^js location)))]
+(defn- normalize-uri
+  [uri-str]
+  (let [uri (u/uri uri-str)]
     ;; Ensure that the path always ends with "/"; this ensures that
     ;; all path join operations works as expected.
     (cond-> uri
       (not (str/ends-with? (:path uri) "/"))
       (update :path #(str % "/")))))
 
-(def public-uri (get-public-uri))
+(def public-uri
+  (atom
+   (normalize-uri (or (obj/get global "penpotPublicURI")
+                      (.-origin ^js location)))))
 
 ;; --- Helper Functions
 
 (defn ^boolean check-browser? [candidate]
-  (us/verify ::browser candidate)
+  (us/verify! ::browser candidate)
   (= candidate @browser))
 
 (defn ^boolean check-platform? [candidate]
-  (us/verify ::platform candidate)
+  (us/verify! ::platform candidate)
   (= candidate @platform))
 
 (defn resolve-profile-photo-url
   [{:keys [photo-id fullname name] :as profile}]
   (if (nil? photo-id)
     (avatars/generate {:name (or fullname name)})
-    (str (u/join public-uri "assets/by-id/" photo-id))))
+    (str (u/join @public-uri "assets/by-id/" photo-id))))
 
 (defn resolve-team-photo-url
   [{:keys [photo-id name] :as team}]
   (if (nil? photo-id)
     (avatars/generate {:name name})
-    (str (u/join public-uri "assets/by-id/" photo-id))))
+    (str (u/join @public-uri "assets/by-id/" photo-id))))
 
 (defn resolve-file-media
   ([media]
    (resolve-file-media media false))
-
-  ([{:keys [id]} thumbnail?]
-   (str (cond-> (u/join public-uri "assets/by-file-media-id/")
+  ([{:keys [id] :as media} thumbnail?]
+   (str (cond-> (u/join @public-uri "assets/by-file-media-id/")
           (true? thumbnail?) (u/join (str id "/thumbnail"))
           (false? thumbnail?) (u/join (str id))))))
-
-

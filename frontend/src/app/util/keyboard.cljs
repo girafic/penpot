@@ -2,39 +2,49 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
-(ns app.util.keyboard)
+(ns app.util.keyboard
+  (:require
+   [app.config :as cfg]))
 
 (defn is-key?
-  [key]
-  (fn [e]
+  [^string key]
+  (fn [^js e]
     (= (.-key e) key)))
 
 (defn ^boolean alt?
-  [event]
+  [^js event]
   (.-altKey event))
 
 (defn ^boolean ctrl?
-  [event]
+  [^js event]
   (.-ctrlKey event))
 
 (defn ^boolean meta?
-  [event]
+  [^js event]
   (.-metaKey event))
 
 (defn ^boolean shift?
-  [event]
+  [^js event]
   (.-shiftKey event))
+
+(defn ^boolean mod?
+  [^js event]
+  (if (cfg/check-platform? :macos)
+    (meta? event)
+    (ctrl? event)))
 
 (def esc? (is-key? "Escape"))
 (def enter? (is-key? "Enter"))
 (def space? (is-key? " "))
 (def up-arrow? (is-key? "ArrowUp"))
 (def down-arrow? (is-key? "ArrowDown"))
-(def altKey? (is-key? "Alt"))
-(def ctrlKey? (or (is-key? "Control")
-                  (is-key? "Meta")))
+(def alt-key? (is-key? "Alt"))
+(def ctrl-key? (is-key? "Control"))
+(def meta-key? (is-key? "Meta"))
+(def comma? (is-key? ","))
+(def backspace? (is-key? "Backspace"))
 
 (defn editing? [e]
   (.-editing ^js e))

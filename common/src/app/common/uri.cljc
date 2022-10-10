@@ -7,15 +7,17 @@
 (ns app.common.uri
   (:refer-clojure :exclude [uri?])
   (:require
-   [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [lambdaisland.uri :as u]
-   [lambdaisland.uri.normalize :as un]))
+   [lambdaisland.uri.normalize :as un])
+  #?(:clj
+     (:import lambdaisland.uri.URI)))
 
-(d/export u/uri)
-(d/export u/join)
-(d/export u/query-encode)
-(d/export un/percent-encode)
-(d/export u/uri?)
+(dm/export u/uri)
+(dm/export u/join)
+(dm/export u/query-encode)
+(dm/export un/percent-encode)
+(dm/export u/uri?)
 
 (defn query-string->map
   [s]
@@ -24,6 +26,11 @@
 (defn default-encode-value
   [v]
   (if (keyword? v) (name v) v))
+
+(defn get-domain
+  [{:keys [host port] :as uri}]
+  (cond-> host
+    port (str ":" port)))
 
 (defn map->query-string
   ([params] (map->query-string params nil))
@@ -35,3 +42,16 @@
                   (remove #(nil? (second %)))
                   (map (fn [[k v]] [(key-fn k) (value-fn v)]))))
         (u/map->query-string))))
+
+#?(:clj
+   (defmethod print-method lambdaisland.uri.URI [^URI this ^java.io.Writer writer]
+     (.write writer "#")
+     (.write writer (str u/edn-tag))
+     (.write writer " ")
+     (.write writer (pr-str (.toString this))))
+
+   :cljs
+   (extend-type u/URI
+     IPrintWithWriter
+     (-pr-writer [this writer _opts]
+       (write-all writer "#" (str u/edn-tag) " " (pr-str (.toString this))))))

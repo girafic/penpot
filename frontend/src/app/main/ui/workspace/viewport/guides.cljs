@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.viewport.guides
   (:require
@@ -10,15 +10,18 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
+   [app.common.pages.helpers :as cph]
+   [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.main.data.workspace :as dw]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.streams :as ms]
    [app.main.ui.cursors :as cur]
+   [app.main.ui.formats :as fmt]
    [app.main.ui.workspace.viewport.rules :as rules]
    [app.util.dom :as dom]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (def guide-width 1)
 (def guide-opacity 0.7)
@@ -48,6 +51,8 @@
 
         frame-ref (mf/use-memo (mf/deps frame-id) #(refs/object-by-id frame-id))
         frame (mf/deref frame-ref)
+
+        snap-pixel? (mf/deref refs/snap-pixel?)
 
         on-pointer-enter
         (mf/use-callback
@@ -89,7 +94,7 @@
 
         on-mouse-move
         (mf/use-callback
-         (mf/deps position zoom)
+         (mf/deps position zoom snap-pixel?)
          (fn [event]
            
            (when-let [_ (mf/ref-val dragging-ref)]
@@ -101,8 +106,10 @@
                                   (+ position delta)
                                   (+ start-pos delta))
 
-                   ;; TODO: Change when pixel-grid flag exists
-                   new-position (mth/round new-position)
+                   new-position (if snap-pixel?
+                                  (mth/round new-position)
+                                  new-position)
+
                    new-frame-id (:id (get-hover-frame))]
                (swap! state assoc
                       :new-position new-position
@@ -196,13 +203,13 @@
 
     (if (= axis :x)
       {:rect-x      (- pos (/ guide-pill-width 2))
-       :rect-y      (+ (:y vbox) rules-pos (- (/ guide-pill-width 2)) (/ 2 zoom))
+       :rect-y      (+ (:y vbox) rules-pos (- (/ guide-pill-width 2)) (/ 3 zoom))
        :rect-width  guide-pill-width
        :rect-height guide-pill-height
        :text-x      pos
        :text-y      (+ (:y vbox) rules-pos (- (/ 3 zoom)))}
 
-      {:rect-x      (+ (:x vbox) rules-pos (- (/ guide-pill-height 2)) (- (/ 5 zoom)))
+      {:rect-x      (+ (:x vbox) rules-pos (- (/ guide-pill-height 2)) (- (/ 4 zoom)))
        :rect-y      (- pos (/ guide-pill-width 2))
        :rect-width  guide-pill-height
        :rect-height guide-pill-width
@@ -210,18 +217,19 @@
        :text-y      pos})))
 
 (defn guide-inside-vbox?
-  ([vbox]
-   (partial guide-inside-vbox? vbox))
+  ([zoom vbox]
+   (partial guide-inside-vbox? zoom vbox))
 
-  ([{:keys [x y width height]} {:keys [axis position]}]
-   (let [x1 x
+  ([zoom {:keys [x y width height]} {:keys [axis position]}]
+   (let [rule-area-size (/ rules/rule-area-size zoom)
+         x1 x
          x2 (+ x width)
          y1 y
          y2 (+ y height)]
      (if (= axis :x)
-       (and (>= position x1)
+       (and (>= position (+ x1 rule-area-size))
             (<= position x2))
-       (and (>= position y1)
+       (and (>= position (+ y1 rule-area-size))
             (<= position y2))))))
 
 (defn guide-creation-area
@@ -232,7 +240,7 @@
      :width (/ guide-creation-width zoom)
      :height (:height vbox)}
 
-    {:x (+ (:x vbox) (+ guide-creation-margin-top zoom))
+    {:x (+ (:x vbox) (/ guide-creation-margin-top zoom))
      :y (:y vbox)
      :width (:width vbox)
      :height (/ guide-creation-height zoom)}))
@@ -277,12 +285,16 @@
 
         pos (+ (or (:new-position @state) (:position guide)) (get move-vec axis))
         guide-width (/ guide-width zoom)
-        guide-pill-corner-radius (/ guide-pill-corner-radius zoom)]
+        guide-pill-corner-radius (/ guide-pill-corner-radius zoom)
+
+        frame-guide-outside?
+        (and (some? frame)
+             (not (is-guide-inside-frame? (assoc guide :position pos) frame)))]
 
     (when (or (nil? frame)
-              (is-guide-inside-frame? (assoc guide :position pos) frame)
-              (:hover @state true))
-      [:g.guide-area
+              (and (cph/root-frame? frame)
+                   (not (ctst/rotated-frame? frame))))
+      [:g.guide-area {:opacity (when frame-guide-outside? 0)}
        (when-not disabled-guides?
          (let [{:keys [x y width height]} (guide-area-axis pos vbox zoom frame axis)]
            [:rect {:x x
@@ -290,7 +302,7 @@
                    :width width
                    :height height
                    :style {:fill "none"
-                           :pointer-events "fill"
+                           :pointer-events (if frame-guide-outside? "none" "fill")
                            :cursor (if (= axis :x) (cur/resize-ew 0) (cur/resize-ns 0))}
                    :on-pointer-enter on-pointer-enter
                    :on-pointer-leave on-pointer-leave
@@ -363,10 +375,10 @@
                     :text-anchor "middle"
                     :dominant-baseline "middle"
                     :transform (when (= axis :y) (str "rotate(-90 " text-x "," text-y ")"))
-                    :style {:font-size (/ 13 zoom)
-                            :font-family "sourcesanspro"
+                    :style {:font-size (/ rules/font-size zoom)
+                            :font-family rules/font-family
                             :fill colors/black}}
-             (str (mth/round pos))]]))])))
+             (fmt/format-number pos)]]))])))
 
 (mf/defc new-guide-area
   [{:keys [vbox zoom axis get-hover-frame disabled-guides?]}]
@@ -378,7 +390,7 @@
            (let [guide (-> guide
                            (assoc :id (uuid/next)
                                   :axis axis))]
-             (when (guide-inside-vbox? vbox guide)
+             (when (guide-inside-vbox? zoom vbox guide)
                (st/emit! (dw/update-guides guide))))))
 
         {:keys [on-pointer-enter
@@ -426,7 +438,9 @@
                 (mf/deps page vbox)
                 #(->> (get-in page [:options :guides] {})
                       (vals)
-                      (filter (guide-inside-vbox? vbox))))
+                      (filter (guide-inside-vbox? zoom vbox))))
+
+        focus (mf/deref refs/workspace-focus-selected)
 
         hover-frame-ref (mf/use-ref nil)
 
@@ -441,7 +455,7 @@
         (mf/use-callback
          (mf/deps vbox)
          (fn [guide]
-           (if (guide-inside-vbox? vbox guide)
+           (if (guide-inside-vbox? zoom vbox guide)
              (st/emit! (dw/update-guides guide))
              (st/emit! (dw/remove-guide guide)))))]
 
@@ -464,12 +478,15 @@
                          :disabled-guides? disabled-guides?}]
      
      (for [current guides]
-       [:& guide  {:key (str "guide-" (:id current))
-                   :guide current
-                   :vbox vbox
-                   :zoom zoom
-                   :frame-modifier (get modifiers (:frame-id current))
-                   :get-hover-frame get-hover-frame
-                   :on-guide-change on-guide-change
-                   :disabled-guides? disabled-guides?}])]))
+       (when (or (nil? (:frame-id current))
+                 (empty? focus)
+                 (contains? focus (:frame-id current)))
+         [:& guide  {:key (str "guide-" (:id current))
+                     :guide current
+                     :vbox vbox
+                     :zoom zoom
+                     :frame-modifier (get modifiers (:frame-id current))
+                     :get-hover-frame get-hover-frame
+                     :on-guide-change on-guide-change
+                     :disabled-guides? disabled-guides?}]))]))
 

@@ -2,16 +2,18 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.webapi
   "HTML5 web api helpers."
   (:require
    [app.common.data :as d]
-   [app.common.exceptions :as ex]
+   [app.common.logging :as log]
    [app.util.object :as obj]
    [beicon.core :as rx]
    [cuerdas.core :as str]))
+
+(log/set-level! :warn)
 
 (defn- file-reader
   [f]
@@ -35,7 +37,7 @@
   [file]
   (file-reader #(.readAsDataURL ^js %1 file)))
 
-(defn ^boolean blob?
+(defn blob?
   [v]
   (instance? js/Blob v))
 
@@ -114,8 +116,9 @@
     (.webkitRequestFullscreen el)
 
     :else
-    (ex/raise :type :not-supported
-              :hint "seems like the current browser does not support fullscreen api.")))
+    (do
+      (log/error :msg "Seems like the current browser does not support fullscreen api.")
+      false)))
 
 (defn exit-fullscreen
   []
@@ -127,8 +130,9 @@
     (.webkitExitFullscreen js/document)
 
     :else
-    (ex/raise :type :not-supported
-              :hint "seems like the current browser does not support fullscreen api.")))
+    (do
+      (log/error :msg "Seems like the current browser does not support fullscreen api.")
+      false)))
 
 (defn observe-resize
   [node]

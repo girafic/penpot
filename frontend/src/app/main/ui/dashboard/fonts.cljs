@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.dashboard.fonts
   (:require
@@ -20,7 +20,7 @@
    [app.util.keyboard :as kbd]
    [beicon.core :as rx]
    [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn- use-set-page-title
   [team section]
@@ -41,12 +41,12 @@
   ;; (let [go-fonts
   ;;       (mf/use-callback
   ;;        (mf/deps team)
-  ;;        (st/emitf (rt/nav :dashboard-fonts {:team-id (:id team)})))
+  ;;        #(st/emit! (rt/nav :dashboard-fonts {:team-id (:id team)})))
 
   ;;       go-providers
   ;;       (mf/use-callback
   ;;        (mf/deps team)
-  ;;        (st/emitf (rt/nav :dashboard-font-providers {:team-id (:id team)})))]
+  ;;        #(st/emit! (rt/nav :dashboard-font-providers {:team-id (:id team)})))]
 
   (use-set-page-title team section)
 
@@ -292,7 +292,7 @@
         (mf/use-callback
          (fn [event]
            (let [val (dom/get-target-val event)]
-             (reset! sterm val))))]
+             (reset! sterm (str/lower val)))))]
 
     [:div.dashboard-installed-fonts
      [:h3 (tr "labels.installed-fonts")]

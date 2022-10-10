@@ -2,19 +2,18 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.viewport.outline
   (:require
+   [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.geom.shapes :as gsh]
-   [app.common.pages.helpers :as cph]
-   [app.main.refs :as refs]
    [app.util.object :as obj]
    [app.util.path.format :as upf]
    [clojure.set :as set]
-   [rumext.alpha :as mf]
-   [rumext.util :refer [map->obj]]))
+   [rumext.v2 :as mf]
+   [rumext.v2.util :refer [map->obj]]))
 
 (mf/defc outline
   {::mf/wrap-props false}
@@ -23,7 +22,7 @@
         zoom (obj/get props "zoom" 1)
 
         color (unchecked-get props "color")
-        transform (gsh/transform-matrix shape)
+        transform (gsh/transform-str shape)
         path? (= :path (:type shape))
         path-data
         (mf/use-memo
@@ -41,7 +40,7 @@
 
         common {:fill "none"
                 :stroke color
-                :strokeWidth (/ 1 zoom)
+                :strokeWidth (/ 2 zoom)
                 :pointerEvents "none"
                 :transform transform}
 
@@ -77,29 +76,33 @@
                    :zoom zoom
                    :color color}])))
 
+(defn- show-outline?
+  [shape]
+  (and (not (:hidden shape))
+       (not (:blocked shape))))
+
 (mf/defc shape-outlines
   {::mf/wrap-props false}
   [props]
-  (let [selected  (or (obj/get props "selected") #{})
-        hover     (or (obj/get props "hover") #{})
-        objects   (obj/get props "objects")
-        edition   (obj/get props "edition")
-        zoom      (obj/get props "zoom")
+  (let [selected    (or (obj/get props "selected") #{})
+        hover       (or (obj/get props "hover") #{})
+        highlighted (or (obj/get props "highlighted") #{})
 
-        transform (mf/deref refs/current-transform)
+        objects     (obj/get props "objects")
+        edition     (obj/get props "edition")
+        zoom        (obj/get props "zoom")
 
-        outlines-ids  (->> (set/union selected hover)
-                           (cph/clean-loops objects))
+        lookup      (d/getf objects)
+        edition?    (fn [o] (= edition o))
 
-        show-outline? (fn [shape] (and (not (:hidden shape))
-                                       (not (:blocked shape))))
+        shapes      (-> #{}
+                        (into (comp (remove edition?)
+                                    (keep lookup)
+                                    (filter show-outline?))
+                              (set/union selected hover))
+                        (into (comp (remove edition?)
+                                    (keep lookup))
+                              highlighted))]
 
-        shapes (->> outlines-ids
-                    (filter #(not= edition %))
-                    (map #(get objects %))
-                    (filterv show-outline?)
-                    (filter some?))]
-
-    [:g.outlines {:display (when (some? transform) "none")}
-     [:& shape-outlines-render {:shapes shapes
-                                :zoom zoom}]]))
+    [:g.outlines
+     [:& shape-outlines-render {:shapes shapes :zoom zoom}]]))

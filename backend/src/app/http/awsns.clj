@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.http.awsns
   "AWS SNS webhook handler for bounces."
@@ -11,30 +11,45 @@
    [app.common.logging :as l]
    [app.db :as db]
    [app.db.sql :as sql]
-   [app.util.http :as http]
+   [app.http.client :as http]
+   [app.tokens :as tokens]
    [clojure.spec.alpha :as s]
    [cuerdas.core :as str]
    [integrant.core :as ig]
-   [jsonista.core :as j]))
+   [jsonista.core :as j]
+   [promesa.exec :as px]
+   [yetti.request :as yrq]
+   [yetti.response :as yrs]))
 
 (declare parse-json)
+(declare handle-request)
 (declare parse-notification)
 (declare process-report)
 
+(s/def ::http-client ::http/client)
+(s/def ::sprops map?)
+
 (defmethod ig/pre-init-spec ::handler [_]
-  (s/keys :req-un [::db/pool]))
+  (s/keys :req-un [::db/pool ::http-client ::sprops]))
 
 (defmethod ig/init-key ::handler
-  [_ cfg]
-  (fn [request]
-    (let [body  (parse-json (slurp (:body request)))
+  [_ {:keys [executor] :as cfg}]
+  (fn [request respond _]
+    (let [data (-> request yrq/body slurp)]
+      (px/run! executor #(handle-request cfg data)))
+    (respond (yrs/response 200))))
+
+(defn handle-request
+  [{:keys [http-client] :as cfg} data]
+  (try
+    (let [body  (parse-json data)
           mtype (get body "Type")]
       (cond
         (= mtype "SubscriptionConfirmation")
         (let [surl   (get body "SubscribeURL")
               stopic (get body "TopicArn")]
           (l/info :action "subscription received" :topic stopic :url surl)
-          (http/send! {:uri surl :method :post :timeout 10000}))
+          (http/req! http-client {:uri surl :method :post :timeout 10000} {:sync? true}))
 
         (= mtype "Notification")
         (when-let [message (parse-json (get body "Message"))]
@@ -43,8 +58,11 @@
 
         :else
         (l/warn :hint "unexpected data received"
-                :report (pr-str body)))
-      {:status 200 :body ""})))
+                :report (pr-str body))))
+
+    (catch Throwable cause
+      (l/error :hint "unexpected exception on awsns"
+               :cause cause))))
 
 (defn- parse-bounce
   [data]
@@ -82,10 +100,10 @@
           (get mail "headers")))
 
 (defn- extract-identity
-  [{:keys [tokens] :as cfg} headers]
+  [{:keys [sprops]} headers]
   (let [tdata (get headers "x-penpot-data")]
     (when-not (str/empty? tdata)
-      (let [result (tokens :verify {:token tdata :iss :profile-identity})]
+      (let [result (tokens/verify sprops {:token tdata :iss :profile-identity})]
         (:profile-id result)))))
 
 (defn- parse-notification

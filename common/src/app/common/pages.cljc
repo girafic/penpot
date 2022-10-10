@@ -7,32 +7,34 @@
 (ns app.common.pages
   "A common (clj/cljs) functions and specs for pages."
   (:require
-   [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.pages.changes :as changes]
    [app.common.pages.common :as common]
+   [app.common.pages.focus :as focus]
    [app.common.pages.indices :as indices]
-   [app.common.pages.init :as init]))
+   [app.common.types.file :as ctf]))
 
 ;; Common
-(d/export common/root)
-(d/export common/file-version)
-(d/export common/default-color)
-(d/export common/component-sync-attrs)
+(dm/export common/root)
+(dm/export common/file-version)
+(dm/export common/default-color)
+(dm/export common/component-sync-attrs)
+
+;; Focus
+(dm/export focus/focus-objects)
+(dm/export focus/filter-not-focus)
+(dm/export focus/is-in-focus?)
 
 ;; Indices
-(d/export indices/calculate-z-index)
-(d/export indices/update-z-index)
-(d/export indices/generate-child-all-parents-index)
-(d/export indices/generate-child-parent-index)
-(d/export indices/create-clip-index)
+#_(dm/export indices/calculate-z-index)
+#_(dm/export indices/update-z-index)
+(dm/export indices/generate-child-all-parents-index)
+(dm/export indices/generate-child-parent-index)
+(dm/export indices/create-clip-index)
 
 ;; Process changes
-(d/export changes/process-changes)
+(dm/export changes/process-changes)
 
 ;; Initialization
-(d/export init/default-frame-attrs)
-(d/export init/default-shape-attrs)
-(d/export init/make-file-data)
-(d/export init/make-minimal-shape)
-(d/export init/make-minimal-group)
-(d/export init/empty-file-data)
+(dm/export ctf/make-file-data)
+(dm/export ctf/empty-file-data)

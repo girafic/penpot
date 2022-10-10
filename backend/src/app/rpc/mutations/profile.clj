@@ -2,357 +2,73 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.rpc.mutations.profile
   (:require
+   [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.spec :as us]
-   [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.db :as db]
    [app.emails :as eml]
-   [app.http.oauth :refer [extract-utm-props]]
    [app.loggers.audit :as audit]
    [app.media :as media]
+   [app.rpc.commands.auth :as cmd.auth]
+   [app.rpc.doc :as-alias doc]
    [app.rpc.mutations.teams :as teams]
    [app.rpc.queries.profile :as profile]
-   [app.rpc.rlimit :as rlimit]
+   [app.rpc.semaphore :as rsem]
    [app.storage :as sto]
-   [app.util.async :as async]
+   [app.tokens :as tokens]
    [app.util.services :as sv]
    [app.util.time :as dt]
-   [buddy.hashers :as hashers]
    [clojure.spec.alpha :as s]
-   [cuerdas.core :as str]))
+   [cuerdas.core :as str]
+   [promesa.core :as p]
+   [promesa.exec :as px]))
 
 ;; --- Helpers & Specs
 
 (s/def ::email ::us/email)
 (s/def ::fullname ::us/not-empty-string)
-(s/def ::lang (s/nilable ::us/not-empty-string))
+(s/def ::lang ::us/string)
 (s/def ::path ::us/string)
 (s/def ::profile-id ::us/uuid)
 (s/def ::password ::us/not-empty-string)
 (s/def ::old-password ::us/not-empty-string)
 (s/def ::theme ::us/string)
-(s/def ::invitation-token ::us/not-empty-string)
-
-(declare check-profile-existence!)
-(declare create-profile)
-(declare create-profile-relations)
-(declare register-profile)
-
-(defn email-domain-in-whitelist?
-  "Returns true if email's domain is in the given whitelist or if
-  given whitelist is an empty string."
-  [domains email]
-  (if (or (empty? domains)
-          (nil? domains))
-    true
-    (let [[_ candidate] (-> (str/lower email)
-                            (str/split #"@" 2))]
-      (contains? domains candidate))))
-
-(def ^:private sql:profile-existence
-  "select exists (select * from profile
-                   where email = ?
-                     and deleted_at is null) as val")
-
-(defn check-profile-existence!
-  [conn {:keys [email] :as params}]
-  (let [email  (str/lower email)
-        result (db/exec-one! conn [sql:profile-existence email])]
-    (when (:val result)
-      (ex/raise :type :validation
-                :code :email-already-exists))
-    params))
-
-(defn derive-password
-  [password]
-  (hashers/derive password
-                  {:alg :argon2id
-                   :memory 16384
-                   :iterations 20
-                   :parallelism 2}))
-
-(defn verify-password
-  [attempt password]
-  (try
-    (hashers/verify attempt password)
-    (catch Exception _e
-      {:update false
-       :valid false})))
-
-(defn decode-profile-row
-  [{:keys [props] :as profile}]
-  (cond-> profile
-    (db/pgobject? props "jsonb")
-    (assoc :props (db/decode-transit-pgobject props))))
-
-;; --- MUTATION: Prepare Register
-
-(s/def ::prepare-register-profile
-  (s/keys :req-un [::email ::password]
-          :opt-un [::invitation-token]))
-
-(sv/defmethod ::prepare-register-profile {:auth false}
-  [{:keys [pool tokens] :as cfg} params]
-  (when-not (contains? cf/flags :registration)
-    (ex/raise :type :restriction
-              :code :registration-disabled))
-
-  (when-let [domains (cf/get :registration-domain-whitelist)]
-    (when-not (email-domain-in-whitelist? domains (:email params))
-      (ex/raise :type :validation
-                :code :email-domain-is-not-allowed)))
-
-  ;; Don't allow proceed in preparing registration if the profile is
-  ;; already reported as spammer.
-  (when (eml/has-bounce-reports? pool (:email params))
-    (ex/raise :type :validation
-              :code :email-has-permanent-bounces
-              :hint "looks like the email has one or many bounces reported"))
-
-  (check-profile-existence! pool params)
-
-  (when (= (str/lower (:email params))
-           (str/lower (:password params)))
-    (ex/raise :type :validation
-              :code :email-as-password
-              :hint "you can't use your email as password"))
-
-  (let [params {:email (:email params)
-                :invitation-token (:invitation-token params)
-                :backend "penpot"
-                :iss :prepared-register
-                :exp (dt/in-future "48h")}
-        token  (tokens :generate params)]
-    {:token token}))
-
-;; --- MUTATION: Register Profile
-
-(s/def ::token ::us/not-empty-string)
-(s/def ::register-profile
-  (s/keys :req-un [::token ::fullname]))
-
-(sv/defmethod ::register-profile
-  {:auth false ::rlimit/permits (cf/get :rlimit-password)}
-  [{:keys [pool] :as cfg} params]
-  (db/with-atomic [conn pool]
-    (-> (assoc cfg :conn conn)
-        (register-profile params))))
-
-(defn register-profile
-  [{:keys [conn tokens session] :as cfg} {:keys [token] :as params}]
-  (let [claims    (tokens :verify {:token token :iss :prepared-register})
-        params    (merge params claims)]
-
-    (check-profile-existence! conn params)
-
-    (let [is-active  (or (:is-active params)
-                         (contains? cf/flags :insecure-register))
-          profile    (->> (assoc params :is-active is-active)
-                          (create-profile conn)
-                          (create-profile-relations conn)
-                          (decode-profile-row))
-
-          invitation (when-let [token (:invitation-token params)]
-                       (tokens :verify {:token token :iss :team-invitation}))]
-
-      (cond
-        ;; If invitation token comes in params, this is because the user comes from team-invitation process;
-        ;; in this case, regenerate token and send back to the user a new invitation token (and mark current
-        ;; session as logged). This happens only if the invitation email matches with the register email.
-        (and (some? invitation) (= (:email profile) (:member-email invitation)))
-        (let [claims (assoc invitation :member-id  (:id profile))
-              token  (tokens :generate claims)
-              resp   {:invitation-token token}]
-          (with-meta resp
-            {:transform-response ((:create session) (:id profile))
-             ::audit/props (audit/profile->props profile)
-             ::audit/profile-id (:id profile)}))
-
-        ;; If auth backend is different from "penpot" means user is
-        ;; registering using third party auth mechanism; in this case
-        ;; we need to mark this session as logged.
-        (not= "penpot" (:auth-backend profile))
-        (with-meta (profile/strip-private-attrs profile)
-          {:transform-response ((:create session) (:id profile))
-           ::audit/props (audit/profile->props profile)
-           ::audit/profile-id (:id profile)})
-
-        ;; If the `:enable-insecure-register` flag is set, we proceed
-        ;; to sign in the user directly, without email verification.
-        (true? is-active)
-        (with-meta (profile/strip-private-attrs profile)
-          {:transform-response ((:create session) (:id profile))
-           ::audit/props (audit/profile->props profile)
-           ::audit/profile-id (:id profile)})
-
-        ;; In all other cases, send a verification email.
-        :else
-        (let [vtoken (tokens :generate
-                             {:iss :verify-email
-                              :exp (dt/in-future "48h")
-                              :profile-id (:id profile)
-                              :email (:email profile)})
-              ptoken (tokens :generate-predefined
-                             {:iss :profile-identity
-                              :profile-id (:id profile)})]
-          (eml/send! {::eml/conn conn
-                      ::eml/factory eml/register
-                      :public-uri (:public-uri cfg)
-                      :to (:email profile)
-                      :name (:fullname profile)
-                      :token vtoken
-                      :extra-data ptoken})
-
-          (with-meta profile
-            {::audit/props (audit/profile->props profile)
-             ::audit/profile-id (:id profile)}))))))
-
-(defn create-profile
-  "Create the profile entry on the database with limited input filling
-  all the other fields with defaults."
-  [conn params]
-  (let [id        (or (:id params) (uuid/next))
-
-        props     (-> (extract-utm-props params)
-                      (merge (:props params))
-                      (db/tjson))
-
-        password  (if-let [password (:password params)]
-                    (derive-password password)
-                    "!")
-
-        locale    (:locale params)
-        locale    (when (and (string? locale) (not (str/blank? locale)))
-                    locale)
-
-        backend   (:backend params "penpot")
-        is-demo   (:is-demo params false)
-        is-muted  (:is-muted params false)
-        is-active (:is-active params false)
-        email     (str/lower (:email params))
-
-        params    {:id id
-                   :fullname (:fullname params)
-                   :email email
-                   :auth-backend backend
-                   :lang locale
-                   :password password
-                   :deleted-at (:deleted-at params)
-                   :props props
-                   :is-active is-active
-                   :is-muted is-muted
-                   :is-demo is-demo}]
-    (try
-      (-> (db/insert! conn :profile params)
-          (decode-profile-row))
-      (catch org.postgresql.util.PSQLException e
-        (let [state (.getSQLState e)]
-          (if (not= state "23505")
-            (throw e)
-            (ex/raise :type :validation
-                      :code :email-already-exists
-                      :cause e)))))))
-
-(defn create-profile-relations
-  [conn profile]
-  (let [team (teams/create-team conn {:profile-id (:id profile)
-                                      :name "Default"
-                                      :is-default true})]
-    (-> profile
-        (profile/strip-private-attrs)
-        (assoc :default-team-id (:id team))
-        (assoc :default-project-id (:default-project-id team)))))
-
-;; --- MUTATION: Login
-
-(s/def ::email ::us/email)
-(s/def ::scope ::us/string)
-
-(s/def ::login
-  (s/keys :req-un [::email ::password]
-          :opt-un [::scope ::invitation-token]))
-
-(sv/defmethod ::login
-  {:auth false ::rlimit/permits (cf/get :rlimit-password)}
-  [{:keys [pool session tokens] :as cfg} {:keys [email password] :as params}]
-  (letfn [(check-password [profile password]
-            (when (= (:password profile) "!")
-              (ex/raise :type :validation
-                        :code :account-without-password))
-            (:valid (verify-password password (:password profile))))
-
-          (validate-profile [profile]
-            (when-not (:is-active profile)
-              (ex/raise :type :validation
-                        :code :wrong-credentials))
-            (when-not profile
-              (ex/raise :type :validation
-                        :code :wrong-credentials))
-            (when-not (check-password profile password)
-              (ex/raise :type :validation
-                        :code :wrong-credentials))
-            profile)]
-
-    (db/with-atomic [conn pool]
-      (let [profile    (->> (profile/retrieve-profile-data-by-email conn email)
-                            (validate-profile)
-                            (profile/strip-private-attrs)
-                            (profile/populate-additional-data conn)
-                            (decode-profile-row))
-
-            invitation (when-let [token (:invitation-token params)]
-                         (tokens :verify {:token token :iss :team-invitation}))
-
-            ;; If invitation member-id does not matches the profile-id, we just proceed to ignore the
-            ;; invitation because invitations matches exactly; and user can't loging with other email and
-            ;; accept invitation with other email
-            response   (if (and (some? invitation) (= (:id profile) (:member-id invitation)))
-                         {:invitation-token (:invitation-token params)}
-                         profile)]
-
-        (with-meta response
-          {:transform-response ((:create session) (:id profile))
-           ::audit/props (audit/profile->props profile)
-           ::audit/profile-id (:id profile)})))))
-
-;; --- MUTATION: Logout
-
-(s/def ::logout
-  (s/keys :opt-un [::profile-id]))
-
-(sv/defmethod ::logout {:auth false}
-  [{:keys [session] :as cfg} _]
-  (with-meta {}
-    {:transform-response (:delete session)}))
 
 ;; --- MUTATION: Update Profile (own)
 
-(defn- update-profile
-  [conn {:keys [id fullname lang theme] :as params}]
-  (let [profile (db/update! conn :profile
-                            {:fullname fullname
-                             :lang lang
-                             :theme theme}
-                            {:id id})]
-    (-> profile
-        (profile/decode-profile-row)
-        (profile/strip-private-attrs))))
-
 (s/def ::update-profile
-  (s/keys :req-un [::id ::fullname]
+  (s/keys :req-un [::fullname ::profile-id]
           :opt-un [::lang ::theme]))
 
 (sv/defmethod ::update-profile
-  {::async/dispatch :default}
-  [{:keys [pool] :as cfg} params]
+  [{:keys [pool] :as cfg} {:keys [profile-id fullname lang theme] :as params}]
   (db/with-atomic [conn pool]
-    (let [profile (update-profile conn params)]
-      (with-meta profile
+    ;; NOTE: we need to retrieve the profile independently if we use
+    ;; it or not for explicit locking and avoid concurrent updates of
+    ;; the same row/object.
+    (let [profile (-> (db/get-by-id conn :profile profile-id {:for-update true})
+                      (profile/decode-profile-row))
+
+          ;; Update the profile map with direct params
+          profile (-> profile
+                      (assoc :fullname fullname)
+                      (assoc :lang lang)
+                      (assoc :theme theme))
+          ]
+
+      (db/update! conn :profile
+                  {:fullname fullname
+                   :lang lang
+                   :theme theme
+                   :props (db/tjson (:props profile))}
+                  {:id profile-id})
+
+      (with-meta (-> profile profile/strip-private-attrs d/without-nils)
         {::audit/props (audit/profile->props profile)}))))
 
 ;; --- MUTATION: Update Password
@@ -365,7 +81,7 @@
   (s/keys :req-un [::profile-id ::password ::old-password]))
 
 (sv/defmethod ::update-profile-password
-  {::rlimit/permits (cf/get :rlimit-password)}
+  {::rsem/queue :auth}
   [{:keys [pool] :as cfg} {:keys [password] :as params}]
   (db/with-atomic [conn pool]
     (let [profile    (validate-password! conn params)
@@ -388,7 +104,7 @@
 (defn- validate-password!
   [conn {:keys [profile-id old-password] :as params}]
   (let [profile (db/get-by-id conn :profile profile-id)]
-    (when-not (:valid (verify-password old-password (:password profile)))
+    (when-not (:valid (cmd.auth/verify-password old-password (:password profile)))
       (ex/raise :type :validation
                 :code :old-password-not-match))
     profile))
@@ -396,46 +112,39 @@
 (defn update-profile-password!
   [conn {:keys [id password] :as profile}]
   (db/update! conn :profile
-              {:password (derive-password password)}
+              {:password (cmd.auth/derive-password password)}
               {:id id}))
 
 ;; --- MUTATION: Update Photo
 
 (declare update-profile-photo)
 
-(s/def ::content-type ::media/image-content-type)
-(s/def ::file (s/and ::media/upload (s/keys :req-un [::content-type])))
-
+(s/def ::file ::media/upload)
 (s/def ::update-profile-photo
   (s/keys :req-un [::profile-id ::file]))
 
 (sv/defmethod ::update-profile-photo
-  {::rlimit/permits (cf/get :rlimit-image)}
-  [{:keys [pool storage] :as cfg} {:keys [profile-id file] :as params}]
-  (db/with-atomic [conn pool]
-    (media/validate-media-type (:content-type file) #{"image/jpeg" "image/png" "image/webp"})
-    (media/run {:cmd :info :input {:path (:tempfile file)
-                                   :mtype (:content-type file)}})
+  [cfg {:keys [file] :as params}]
+  ;; Validate incoming mime type
+  (media/validate-media-type! file #{"image/jpeg" "image/png" "image/webp"})
+  (let [cfg (update cfg :storage media/configure-assets-storage)]
+    (update-profile-photo cfg params)))
 
-    (let [profile (db/get-by-id conn :profile profile-id)
-          storage (media/configure-assets-storage storage conn)
-          cfg     (assoc cfg :storage storage)
+(defn update-profile-photo
+  [{:keys [pool storage executor] :as cfg} {:keys [profile-id] :as params}]
+  (p/let [profile (px/with-dispatch executor
+                    (db/get-by-id pool :profile profile-id))
           photo   (teams/upload-photo cfg params)]
 
-      ;; Schedule deletion of old photo
-      (when-let [id (:photo-id profile)]
-        (sto/del-object storage id))
+    ;; Schedule deletion of old photo
+    (when-let [id (:photo-id profile)]
+      (sto/touch-object! storage id))
 
-      ;; Save new photo
-      (update-profile-photo conn profile-id photo))))
-
-(defn- update-profile-photo
-  [conn profile-id sobj]
-  (db/update! conn :profile
-              {:photo-id (:id sobj)}
-              {:id profile-id})
-  nil)
-
+    ;; Save new photo
+    (db/update! pool :profile
+                {:photo-id (:id photo)}
+                {:id profile-id})
+    nil))
 
 ;; --- MUTATION: Request Email Change
 
@@ -453,33 +162,33 @@
           params  (assoc params
                          :profile profile
                          :email (str/lower email))]
-      (if (or (cf/get :smtp-enabled)
-              (contains? cf/flags :smtp))
+      (if (contains? cf/flags :smtp)
         (request-email-change cfg params)
         (change-email-immediately cfg params)))))
 
 (defn- change-email-immediately
   [{:keys [conn]} {:keys [profile email] :as params}]
   (when (not= email (:email profile))
-    (check-profile-existence! conn params))
+    (cmd.auth/check-profile-existence! conn params))
   (db/update! conn :profile
               {:email email}
               {:id (:id profile)})
   {:changed true})
 
 (defn- request-email-change
-  [{:keys [conn tokens] :as cfg} {:keys [profile email] :as params}]
-  (let [token   (tokens :generate
-                        {:iss :change-email
-                         :exp (dt/in-future "15m")
-                         :profile-id (:id profile)
-                         :email email})
-        ptoken  (tokens :generate-predefined
-                        {:iss :profile-identity
-                         :profile-id (:id profile)})]
+  [{:keys [conn sprops] :as cfg} {:keys [profile email] :as params}]
+  (let [token   (tokens/generate sprops
+                                 {:iss :change-email
+                                  :exp (dt/in-future "15m")
+                                  :profile-id (:id profile)
+                                  :email email})
+        ptoken  (tokens/generate sprops
+                                 {:iss :profile-identity
+                                  :profile-id (:id profile)
+                                  :exp (dt/in-future {:days 30})})]
 
     (when (not= email (:email profile))
-      (check-profile-existence! conn params))
+      (cmd.auth/check-profile-existence! conn params))
 
     (when-not (eml/allow-send-emails? conn profile)
       (ex/raise :type :validation
@@ -506,76 +215,6 @@
   [conn id]
   (db/get-by-id conn :profile id {:for-update true}))
 
-;; --- MUTATION: Request Profile Recovery
-
-(s/def ::request-profile-recovery
-  (s/keys :req-un [::email]))
-
-(sv/defmethod ::request-profile-recovery {:auth false}
-  [{:keys [pool tokens] :as cfg} {:keys [email] :as params}]
-  (letfn [(create-recovery-token [{:keys [id] :as profile}]
-            (let [token (tokens :generate
-                                {:iss :password-recovery
-                                 :exp (dt/in-future "15m")
-                                 :profile-id id})]
-              (assoc profile :token token)))
-
-          (send-email-notification [conn profile]
-            (let [ptoken (tokens :generate-predefined
-                                 {:iss :profile-identity
-                                  :profile-id (:id profile)})]
-              (eml/send! {::eml/conn conn
-                          ::eml/factory eml/password-recovery
-                          :public-uri (:public-uri cfg)
-                          :to (:email profile)
-                          :token (:token profile)
-                          :name (:fullname profile)
-                          :extra-data ptoken})
-              nil))]
-
-    (db/with-atomic [conn pool]
-      (when-let [profile (profile/retrieve-profile-data-by-email conn email)]
-        (when-not (eml/allow-send-emails? conn profile)
-          (ex/raise :type :validation
-                    :code :profile-is-muted
-                    :hint "looks like the profile has reported repeatedly as spam or has permanent bounces."))
-
-        (when-not (:is-active profile)
-          (ex/raise :type :validation
-                    :code :profile-not-verified
-                    :hint "the user need to validate profile before recover password"))
-
-        (when (eml/has-bounce-reports? conn (:email profile))
-          (ex/raise :type :validation
-                    :code :email-has-permanent-bounces
-                    :hint "looks like the email you invite has been repeatedly reported as spam or permanent bounce"))
-
-        (->> profile
-             (create-recovery-token)
-             (send-email-notification conn))))))
-
-
-;; --- MUTATION: Recover Profile
-
-(s/def ::token ::us/not-empty-string)
-(s/def ::recover-profile
-  (s/keys :req-un [::token ::password]))
-
-(sv/defmethod ::recover-profile
-  {:auth false ::rlimit/permits (cf/get :rlimit-password)}
-  [{:keys [pool tokens] :as cfg} {:keys [token password]}]
-  (letfn [(validate-token [token]
-            (let [tdata (tokens :verify {:token token :iss :password-recovery})]
-              (:profile-id tdata)))
-
-          (update-password [conn profile-id]
-            (let [pwd (derive-password password)]
-              (db/update! conn :profile {:password pwd} {:id profile-id})))]
-
-    (db/with-atomic [conn pool]
-      (->> (validate-token token)
-           (update-password conn))
-      nil)))
 
 ;; --- MUTATION: Update Profile Props
 
@@ -600,11 +239,13 @@
       (db/update! conn :profile
                   {:props (db/tjson props)}
                   {:id profile-id})
-      nil)))
+
+      (profile/filter-profile-props props))))
 
 
 ;; --- MUTATION: Delete Profile
 
+(declare get-owned-teams-with-participants)
 (declare check-can-delete-profile!)
 (declare mark-profile-as-deleted!)
 
@@ -614,14 +255,29 @@
 (sv/defmethod ::delete-profile
   [{:keys [pool session] :as cfg} {:keys [profile-id] :as params}]
   (db/with-atomic [conn pool]
-    (check-can-delete-profile! conn profile-id)
+    (let [teams      (get-owned-teams-with-participants conn profile-id)
+          deleted-at (dt/now)]
 
-    (db/update! conn :profile
-                {:deleted-at (dt/now)}
-                {:id profile-id})
+      ;; If we found owned teams with participants, we don't allow
+      ;; delete profile until the user properly transfer ownership or
+      ;; explicitly removes all participants from the team
+      (when (some pos? (map :participants teams))
+        (ex/raise :type :validation
+                  :code :owner-teams-with-people
+                  :hint "The user need to transfer ownership of owned teams."
+                  :context {:teams (mapv :id teams)}))
 
-    (with-meta {}
-      {:transform-response (:delete session)})))
+      (doseq [{:keys [id]} teams]
+        (db/update! conn :team
+                    {:deleted-at deleted-at}
+                    {:id id}))
+
+      (db/update! conn :profile
+                  {:deleted-at deleted-at}
+                  {:id profile-id})
+
+      (with-meta {}
+        {:transform-response (:delete session)}))))
 
 (def sql:owned-teams
   "with owner_teams as (
@@ -630,20 +286,87 @@
        where tpr.is_owner is true
          and tpr.profile_id = ?
    )
-   select tpr.team_id,
-          count(tpr.profile_id) as num_profiles
+   select tpr.team_id as id,
+          count(tpr.profile_id) - 1 as participants
      from team_profile_rel as tpr
     where tpr.team_id in (select id from owner_teams)
+      and tpr.profile_id != ?
     group by 1")
 
-(defn- check-can-delete-profile!
+(defn- get-owned-teams-with-participants
   [conn profile-id]
-  (let [rows (db/exec! conn [sql:owned-teams profile-id])]
-    ;; If we found owned teams with more than one profile we don't
-    ;; allow delete profile until the user properly transfer ownership
-    ;; or explicitly removes all participants from the team.
-    (when (some #(> (:num-profiles %) 1) rows)
-      (ex/raise :type :validation
-                :code :owner-teams-with-people
-                :hint "The user need to transfer ownership of owned teams."
-                :context {:teams (mapv :team-id rows)}))))
+  (db/exec! conn [sql:owned-teams profile-id profile-id]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; DEPRECATED METHODS (TO BE REMOVED ON 1.16.x)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; --- MUTATION: Login
+
+(s/def ::login ::cmd.auth/login-with-password)
+
+(sv/defmethod ::login
+  {:auth false
+   ::rsem/queue :auth
+   ::doc/added "1.0"
+   ::doc/deprecated "1.15"}
+  [cfg params]
+  (cmd.auth/login-with-password cfg params))
+
+;; --- MUTATION: Logout
+
+(s/def ::logout ::cmd.auth/logout)
+
+(sv/defmethod ::logout
+  {:auth false
+   ::doc/added "1.0"
+   ::doc/deprecated "1.15"}
+  [{:keys [session] :as cfg} _]
+  (with-meta {}
+    {:transform-response (:delete session)}))
+
+;; --- MUTATION: Recover Profile
+
+(s/def ::recover-profile ::cmd.auth/recover-profile)
+
+(sv/defmethod ::recover-profile
+  {::doc/added "1.0"
+   ::doc/deprecated "1.15"}
+  [cfg params]
+  (cmd.auth/recover-profile cfg params))
+
+;; --- MUTATION: Prepare Register
+
+(s/def ::prepare-register-profile ::cmd.auth/prepare-register-profile)
+
+(sv/defmethod ::prepare-register-profile
+  {:auth false
+   ::doc/added "1.0"
+   ::doc/deprecated "1.15"}
+  [cfg params]
+  (cmd.auth/prepare-register cfg params))
+
+;; --- MUTATION: Register Profile
+
+(s/def ::register-profile ::cmd.auth/register-profile)
+
+(sv/defmethod ::register-profile
+  {:auth false
+   ::rsem/queue :auth
+   ::doc/added "1.0"
+   ::doc/deprecated "1.15"}
+  [{:keys [pool] :as cfg} params]
+  (db/with-atomic [conn pool]
+    (-> (assoc cfg :conn conn)
+        (cmd.auth/register-profile params))))
+
+;; --- MUTATION: Request Profile Recovery
+
+(s/def ::request-profile-recovery ::cmd.auth/request-profile-recovery)
+
+(sv/defmethod ::request-profile-recovery
+  {:auth false
+   ::doc/added "1.0"
+   ::doc/deprecated "1.15"}
+  [cfg params]
+  (cmd.auth/request-profile-recovery cfg params))

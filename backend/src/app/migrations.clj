@@ -2,11 +2,11 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.migrations
   (:require
-   [app.migrations.migration-0023 :as mg0023]
+   [app.migrations.clj.migration-0023 :as mg0023]
    [app.util.migrations :as mg]
    [integrant.core :as ig]))
 
@@ -211,6 +211,42 @@
 
    {:name "0067-add-team-invitation-table"
     :fn (mg/resource "app/migrations/sql/0067-add-team-invitation-table.sql")}
+
+   {:name "0068-mod-storage-object-table"
+    :fn (mg/resource "app/migrations/sql/0068-mod-storage-object-table.sql")}
+
+   {:name "0069-add-file-thumbnail-table"
+    :fn (mg/resource "app/migrations/sql/0069-add-file-thumbnail-table.sql")}
+
+   {:name "0070-del-frame-thumbnail-table"
+    :fn (mg/resource "app/migrations/sql/0070-del-frame-thumbnail-table.sql")}
+
+   {:name "0071-add-file-object-thumbnail-table"
+    :fn (mg/resource "app/migrations/sql/0071-add-file-object-thumbnail-table.sql")}
+
+   {:name "0072-mod-file-object-thumbnail-table"
+    :fn (mg/resource "app/migrations/sql/0072-mod-file-object-thumbnail-table.sql")}
+
+   {:name "0073-mod-file-media-object-constraints"
+    :fn (mg/resource "app/migrations/sql/0073-mod-file-media-object-constraints.sql")}
+
+   {:name "0074-mod-file-library-rel-constraints"
+    :fn (mg/resource "app/migrations/sql/0074-mod-file-library-rel-constraints.sql")}
+
+   {:name "0075-mod-share-link-table"
+    :fn (mg/resource "app/migrations/sql/0075-mod-share-link-table.sql")}
+
+   {:name "0076-mod-storage-object-table"
+    :fn (mg/resource "app/migrations/sql/0076-mod-storage-object-table.sql")}
+
+   {:name "0077-mod-comment-thread-table"
+    :fn (mg/resource "app/migrations/sql/0077-mod-comment-thread-table.sql")}
+
+   {:name "0078-mod-file-media-object-table-drop-cascade"
+    :fn (mg/resource "app/migrations/sql/0078-mod-file-media-object-table-drop-cascade.sql")}
+
+   {:name "0079-mod-profile-table"
+    :fn (mg/resource "app/migrations/sql/0079-mod-profile-table.sql")}
    ])
 
 

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.tasks-telemetry-test
   (:require
@@ -21,13 +21,16 @@
   (with-mocks [mock {:target 'app.tasks.telemetry/send!
                      :return nil}]
     (let [task-fn (-> th/*system* :app.worker/registry :telemetry)
-          prof    (th/create-profile* 1 {:is-active true})]
+          prof    (th/create-profile* 1 {:is-active true
+                                         :props {:newsletter-news true}})]
 
       ;; run the task
-      (task-fn nil)
+      (task-fn {:send? true :enabled? true})
 
       (t/is (:called? @mock))
-      (let [[data] (-> @mock :call-args)]
+      (let [[_ data] (-> @mock :call-args)]
+        (t/is (contains? data :subscriptions))
+        (t/is (= [(:email prof)] (get-in data [:subscriptions :newsletter-news])))
         (t/is (contains? data :total-fonts))
         (t/is (contains? data :total-users))
         (t/is (contains? data :total-projects))

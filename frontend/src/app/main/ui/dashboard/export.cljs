@@ -2,19 +2,20 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.dashboard.export
   (:require
    [app.common.data :as d]
    [app.main.data.modal :as modal]
+   [app.main.features :as features]
    [app.main.store :as st]
    [app.main.ui.icons :as i]
    [app.main.worker :as uw]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [beicon.core :as rx]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (def ^:const options [:all :merge :detach])
 
@@ -51,19 +52,22 @@
 (mf/defc export-dialog
   {::mf/register modal/components
    ::mf/register-as :export}
-  [{:keys [team-id files has-libraries?]}]
+  [{:keys [team-id files has-libraries? binary?]}]
   (let [state (mf/use-state {:status :prepare
                              :files  (->> files (mapv #(assoc % :loading? true)))})
         selected-option (mf/use-state :all)
+
+        components-v2 (features/use-feature :components-v2)
 
         start-export
         (fn []
           (swap! state assoc :status :exporting)
           (->> (uw/ask-many!
-                {:cmd :export-file
+                {:cmd (if binary? :export-binary-file :export-standard-file)
                  :team-id team-id
                  :export-type @selected-option
-                 :files (->> files (mapv :id))})
+                 :files files
+                 :components-v2 components-v2})
                (rx/delay-emit 1000)
                (rx/subs
                 (fn [msg]
@@ -73,6 +77,7 @@
                   (when  (= :finish (:type msg))
                     (swap! state update :files mark-file-success (:file-id msg))
                     (dom/trigger-download-uri (:filename msg) (:mtype msg) (:uri msg)))))))
+
         cancel-fn
         (mf/use-callback
          (fn [event]

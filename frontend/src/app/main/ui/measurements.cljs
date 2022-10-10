@@ -2,17 +2,18 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.measurements
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.uuid :as uuid]
-   [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
+   [app.main.ui.formats :as fmt]
+   [rumext.v2 :as mf]))
 
 ;; ------------------------------------------------
 ;; CONSTANTS
@@ -97,7 +98,7 @@
 
 (mf/defc size-display [{:keys [selrect zoom]}]
   (let [{:keys [x y width height]} selrect
-        size-label (str/fmt "%s x %s" (mth/round width) (mth/round height))
+        size-label (dm/str (fmt/format-number width) " x " (fmt/format-number height))
 
         rect-height (/ size-display-height zoom)
         rect-width (/ (if (<= (count size-label) 9)
@@ -164,7 +165,7 @@
              :height distance-pill-height
              :style {:fill distance-text-color
                      :font-size font-size}}
-      distance]]))
+      (fmt/format-pixels distance)]]))
 
 (mf/defc selection-rect [{:keys [selrect zoom]}]
   (let [{:keys [x y width height]} selrect
@@ -201,7 +202,7 @@
             center-y (+ y1 (/ (- y2 y1) 2))
             distance (gpt/distance (gpt/point x1 y1) (gpt/point x2 y2))]
         (when-not (mth/almost-zero? distance)
-          [:g.distance-line {:key (str "line-%s-%s-%s-%s" x1 y1 x2 y2)}
+          [:g.distance-line {:key (dm/str "line-" x1 "-" y1 "-" x2 "-" y2)}
            [:line
             {:x1 x1
              :y1 y1
@@ -214,13 +215,14 @@
             {:x center-x
              :y center-y
              :zoom zoom
-             :distance (str (mth/round distance) "px")
+             :distance distance
              :bounds bounds}]])))))
 
 (mf/defc selection-guides [{:keys [bounds selrect zoom]}]
   [:g.selection-guides
-   (for [[x1 y1 x2 y2] (calculate-guides bounds selrect)]
-     [:line {:x1 x1
+   (for [[idx [x1 y1 x2 y2]] (d/enumerate (calculate-guides bounds selrect))]
+     [:line {:key (dm/str "guide-" idx)
+             :x1 x1
              :y1 y1
              :x2 x2
              :y2 y2
@@ -238,16 +240,20 @@
 
     (when (seq selected-shapes)
       [:g.measurement-feedback {:pointer-events "none"}
-       [:& selection-guides {:selrect selected-selrect :bounds bounds :zoom zoom}]
+       [:& selection-guides {:selrect selected-selrect
+                             :bounds bounds
+                             :zoom zoom}]
        [:& size-display {:selrect selected-selrect :zoom zoom}]
 
        (if (or (not hover-shape) (not hover-selected-shape?))
          (when (and frame (not= uuid/zero (:id frame)))
-           [:g.hover-shapes
-            [:& distance-display {:from (:selrect frame)
-                                  :to selected-selrect
-                                  :zoom zoom
-                                  :bounds bounds-selrect}]])
+           (let [frame-bb (-> (:points frame) (gsh/points->selrect))]
+             [:g.hover-shapes
+              [:& selection-rect {:type :hover :selrect frame-bb :zoom zoom}]
+              [:& distance-display {:from frame-bb
+                                    :to selected-selrect
+                                    :zoom zoom
+                                    :bounds bounds-selrect}]]))
 
          [:g.hover-shapes
           [:& selection-rect {:type :hover :selrect hover-selrect :zoom zoom}]

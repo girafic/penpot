@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.rpc.permissions
   "A permission checking helper factories."
@@ -52,6 +52,16 @@
   (fn check
     ([perms] (:can-read perms))
     ([conn & args] (check (apply qfn conn args)))))
+
+(defn make-comment-predicate-fn
+  "A simple factory for comment permission predicate functions."
+  [qfn]
+  (us/assert fn? qfn)
+  (fn check
+    ([perms]
+     (and (:is-logged perms) (= (:who-comment perms) "all")))
+    ([conn & args]
+     (check (apply qfn conn args)))))
 
 (defn make-check-fn
   "Helper that converts a predicate permission function to a check

@@ -8,6 +8,7 @@ rm -rf target;
 mkdir -p target/classes;
 mkdir -p target/dist;
 echo "$CURRENT_VERSION" > target/classes/version.txt;
+cp ../CHANGES.md target/classes/changelog.md;
 
 clojure -T:build jar;
 mv target/penpot.jar target/dist/penpot.jar
@@ -16,5 +17,6 @@ cp scripts/manage.template.sh target/dist/manage.sh;
 chmod +x target/dist/run.sh;
 chmod +x target/dist/manage.sh;
 
-
-
+# Prefetch
+bb ./scripts/prefetch-templates.clj resources/app/onboarding.edn builtin-templates/
+cp -r builtin-templates target/dist/

@@ -2,15 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.shapes.image
   (:require
    [app.common.geom.shapes :as gsh]
    [app.main.ui.shapes.attrs :as attrs]
-   [app.main.ui.shapes.custom-stroke :refer [shape-custom-stroke]]
+   [app.main.ui.shapes.custom-stroke :refer [shape-custom-strokes]]
    [app.util.object :as obj]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc image-shape
   {::mf/wrap-props false}
@@ -18,7 +18,7 @@
 
   (let [shape (unchecked-get props "shape")
         {:keys [x y width height]} shape
-        transform (gsh/transform-matrix shape)
+        transform (gsh/transform-str shape)
         props (-> (attrs/extract-style-attrs shape)
                   (obj/merge! (attrs/extract-border-radius-attrs shape))
                   (obj/merge!
@@ -29,8 +29,7 @@
                         :height height}))
         path? (some? (.-d props))]
 
-    [:g
-     [:& shape-custom-stroke {:shape shape}
-      (if path?
-        [:> :path props]
-        [:> :rect props])]]))
+    [:& shape-custom-strokes {:shape shape}
+     (if path?
+       [:> :path props]
+       [:> :rect props])]))

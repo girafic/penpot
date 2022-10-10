@@ -2,11 +2,12 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.components.context-menu
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.main.refs :as refs]
    [app.main.ui.components.dropdown :refer [dropdown']]
    [app.main.ui.icons :as i]
@@ -14,7 +15,7 @@
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.object :as obj]
    [goog.object :as gobj]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc context-menu
   {::mf/wrap-props false}
@@ -35,39 +36,45 @@
         route         (mf/deref refs/route)
         in-dashboard? (= :dashboard-projects (:name (:data route)))
 
-        local         (mf/use-state {:offset 0
+        local         (mf/use-state {:offset-y 0
+                                     :offset-x 0
                                      :levels nil})
 
         on-local-close
         (mf/use-callback
-          (fn []
-            (swap! local assoc :levels [{:parent-option nil
-                                         :options options}])
-            (on-close)))
+         (fn []
+           (swap! local assoc :levels [{:parent-option nil
+                                        :options options}])
+           (on-close)))
 
         check-menu-offscreen
         (mf/use-callback
-         (mf/deps top (:offset @local))
+         (mf/deps top (:offset-y @local) left (:offset-x @local))
          (fn [node]
            (when (some? node)
-             (let [{node-height :height}   (dom/get-bounding-rect node)
-                   {window-height :height} (dom/get-window-size)
-                   target-offset (if (> (+ top node-height) window-height)
+             (let [bounding_rect (dom/get-bounding-rect node)
+                   window_size (dom/get-window-size)
+                   {node-height :height node-width :width} bounding_rect
+                   {window-height :height window-width :width} window_size
+                   target-offset-y (if (> (+ top node-height) window-height)
                                    (- node-height)
-                                   0)]
+                                   0)
+                   target-offset-x (if (> (+ left node-width) window-width)
+                                     (- node-width)
+                                     0)]
 
-               (when (not= target-offset (:offset @local))
-                 (swap! local assoc :offset target-offset))))))
+               (when (or (not= target-offset-y (:offset-y @local)) (not= target-offset-x (:offset-x @local)))
+                 (swap! local assoc :offset-y target-offset-y :offset-x target-offset-x))))))
 
         enter-submenu
         (mf/use-callback
-          (mf/deps options)
-          (fn [option-name sub-options]
-            (fn [event]
-              (dom/stop-propagation event)
-              (swap! local update :levels
-                     conj {:parent-option option-name
-                           :options sub-options}))))
+         (mf/deps options)
+         (fn [option-name sub-options]
+           (fn [event]
+             (dom/stop-propagation event)
+             (swap! local update :levels
+                    conj {:parent-option option-name
+                          :options sub-options}))))
 
         exit-submenu
         (mf/use-callback
@@ -87,8 +94,8 @@
        [:div.context-menu {:class (dom/classnames :is-open open?
                                                   :fixed fixed?
                                                   :is-selectable is-selectable)
-                           :style {:top (+ top (:offset @local))
-                                   :left left}}
+                           :style {:top (+ top (:offset-y @local))
+                                   :left (+ left (:offset-x @local))}}
         (let [level (-> @local :levels peek)]
           [:ul.context-menu-items {:class (dom/classnames :min-width min-width?)
                                    :ref check-menu-offscreen}
@@ -104,10 +111,10 @@
            (for [[index [option-name option-handler sub-options data-test]] (d/enumerate (:options level))]
              (when option-name
                (if (= option-name :separator)
-                 [:li.separator]
+                 [:li.separator {:key (dm/str "context-item-" index)}]
                  [:li.context-menu-item
                   {:class (dom/classnames :is-selected (and selected (= option-name selected)))
-                   :key index}
+                   :key (dm/str "context-item-" index)}
                   (if-not sub-options
                     [:a.context-menu-action {:on-click #(do (dom/stop-propagation %)
                                                             (on-close)

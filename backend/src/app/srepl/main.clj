@@ -1,151 +1,103 @@
+;; This Source Code Form is subject to the terms of the Mozilla Public
+;; License, v. 2.0. If a copy of the MPL was not distributed with this
+;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
+;;
+;; Copyright (c) KALEIDOS INC
+
 (ns app.srepl.main
-  "A  main namespace for server repl."
+  "A collection of adhoc fixes scripts."
   #_:clj-kondo/ignore
   (:require
-   [app.common.data :as d]
-   [app.common.exceptions :as ex]
    [app.common.logging :as l]
-   [app.common.pages :as cp]
-   [app.common.pages.migrations :as pmg]
-   [app.common.spec.file :as spec.file]
-   [app.common.uuid :as uuid]
-   [app.config :as cfg]
+   [app.common.pprint :as p]
+   [app.common.spec :as us]
    [app.db :as db]
-   [app.db.sql :as sql]
-   [app.main :refer [system]]
-   [app.rpc.queries.profile :as prof]
-   [app.srepl.dev :as dev]
-   [app.util.blob :as blob]
+   [app.rpc.commands.auth :as cmd.auth]
+   [app.rpc.queries.profile :as profile]
+   [app.srepl.fixes :as f]
+   [app.srepl.helpers :as h]
    [app.util.time :as dt]
-   [fipp.edn :refer [pprint]]
-   [clojure.spec.alpha :as s]
-   [cuerdas.core :as str]
-   [expound.alpha :as expound]))
+   [clojure.pprint :refer [pprint]]
+   [cuerdas.core :as str]))
 
-(defn update-file
-  ([system id f] (update-file system id f false))
-  ([system id f save?]
-   (db/with-atomic [conn (:app.db/pool system)]
-     (let [file (db/get-by-id conn :file id {:for-update true})
-           file (-> file
-                    (update :data app.util.blob/decode)
-                    (update :data pmg/migrate-data)
-                    (update :data f)
-                    (update :data blob/encode)
-                    (update :revn inc))]
-       (when save?
-         (db/update! conn :file
-                     {:data (:data file)}
-                     {:id (:id file)}))
-       (update file :data blob/decode)))))
+(defn print-available-tasks
+  [system]
+  (let [tasks (:app.worker/registry system)]
+    (p/pprint (keys tasks) :level 200)))
 
-(defn reset-file-data
-  [system id data]
+(defn run-task!
+  ([system name]
+   (run-task! system name {}))
+  ([system name params]
+   (let [tasks (:app.worker/registry system)]
+     (if-let [task-fn (get tasks name)]
+       (task-fn params)
+       (println (format "no task '%s' found" name))))))
+
+(defn send-test-email!
+  [system destination]
+  (us/verify!
+   :expr (some? system)
+   :hint "system should be provided")
+
+  (us/verify!
+   :expr (string? destination)
+   :hint "destination should be provided")
+
+  (let [handler (:app.emails/sendmail system)]
+    (handler {:body "test email"
+              :subject "test email"
+              :to [destination]})))
+
+(defn resend-email-verification-email!
+  [system email]
+  (us/verify!
+   :expr (some? system)
+   :hint "system should be provided")
+
+  (let [sprops  (:app.setup/props system)
+        pool    (:app.db/pool system)
+        profile (profile/retrieve-profile-data-by-email pool email)]
+
+    (cmd.auth/send-email-verification! pool sprops profile)
+    :email-sent))
+
+(defn update-profile!
+  "Update a limited set of profile attrs."
+  [system & {:keys [email id active? deleted? blocked?]}]
+
+  (us/verify!
+   :expr (some? system)
+   :hint "system should be provided")
+
+  (us/verify!
+   :expr (or (string? email) (uuid? id))
+   :hint "email or id should be provided")
+
+  (let [params (cond-> {}
+                 (true? active?) (assoc :is-active true)
+                 (false? active?) (assoc :is-active false)
+                 (true? deleted?) (assoc :deleted-at (dt/now))
+                 (true? blocked?) (assoc :is-blocked true)
+                 (false? blocked?) (assoc :is-blocked false))
+        opts   (cond-> {}
+                 (some? email) (assoc :email (str/lower email))
+                 (some? id)    (assoc :id id))]
+
+    (db/with-atomic [conn (:app.db/pool system)]
+      (some-> (db/update! conn :profile params opts)
+              (profile/decode-profile-row)))))
+
+(defn mark-profile-as-blocked!
+  "Mark the profile blocked and removes all the http sessiones
+  associated with the profile-id."
+  [system email]
   (db/with-atomic [conn (:app.db/pool system)]
-    (db/update! conn :file
-                {:data data}
-                {:id id})))
-
-(defn get-file
-  [system id]
-  (-> (:app.db/pool system)
-      (db/get-by-id :file id)
-      (update :data app.util.blob/decode)
-      (update :data pmg/migrate-data)))
-
-(defn duplicate-file
-  "This is a raw version of duplication of file just only for forensic analysis"
-  [system file-id email]
-  (db/with-atomic [conn (:app.db/pool system)]
-    (when-let [profile (some->> (prof/retrieve-profile-data-by-email conn (str/lower email))
-                                (prof/populate-additional-data conn))]
-      (when-let [file (db/exec-one! conn (sql/select :file {:id file-id}))]
-        (let [params (assoc file
-                            :id (uuid/next)
-                            :project-id (:default-project-id profile))]
-          (db/insert! conn :file params)
-          (:id file))))))
-
-(defn verify-files
-  [system {:keys [age sleep chunk-size max-chunks stop-on-error? verbose?]
-           :or {sleep 1000
-                age "72h"
-                chunk-size 10
-                verbose? false
-                stop-on-error? true
-                max-chunks ##Inf}}]
-
-  (letfn [(retrieve-chunk [conn cursor]
-            (let [sql (str "select id, name, modified_at, data from file "
-                           " where modified_at > ? and deleted_at is null "
-                           " order by modified_at asc limit ?")
-                  age (if cursor
-                        cursor
-                        (-> (dt/now) (dt/minus age)))]
-              (seq (db/exec! conn [sql age chunk-size]))))
-
-          (validate-item [{:keys [id data modified-at] :as file}]
-            (let [data   (blob/decode data)
-                  valid? (s/valid? ::spec.file/data data)]
-
-              (l/debug :hint "validated file"
-                       :file-id id
-                       :age (-> (dt/diff modified-at (dt/now))
-                                (dt/truncate :minutes)
-                                (str)
-                                (subs 2)
-                                (str/lower))
-                       :valid valid?)
-
-              (when (and (not valid?) verbose?)
-                (let [edata (-> (s/explain-data ::spec.file/data data)
-                                (update ::s/problems #(take 5 %)))]
-                  (binding [s/*explain-out* expound/printer]
-                    (l/warn ::l/raw (with-out-str (s/explain-out edata))))))
-
-              (when (and (not valid?) stop-on-error?)
-                (throw (ex-info "penpot/abort" {})))
-
-              valid?))
-
-          (validate-chunk [chunk]
-            (loop [items   chunk
-                   success 0
-                   errored 0]
-
-              (if-let [item (first items)]
-                (if (validate-item item)
-                  (recur (rest items) (inc success) errored)
-                  (recur (rest items) success (inc errored)))
-                [(:modified-at (last chunk))
-                 success
-                 errored])))
-
-          (fmt-result [ns ne]
-            {:total (+ ns ne)
-             :errors ne
-             :success ns})
-
-          ]
-
-    (try
-      (db/with-atomic [conn (:app.db/pool system)]
-        (loop [cursor  nil
-               chunks  0
-               success 0
-               errors 0]
-          (if (< chunks max-chunks)
-            (if-let [chunk (retrieve-chunk conn cursor)]
-              (let [[cursor success' errors'] (validate-chunk chunk)]
-                (Thread/sleep (inst-ms (dt/duration sleep)))
-                (recur cursor
-                       (inc chunks)
-                       (+ success success')
-                       (+ errors errors')))
-              (fmt-result success errors))
-            (fmt-result success errors))))
-      (catch Throwable cause
-        (when (not= "penpot/abort" (ex-message cause))
-          (throw cause))
-        :error))))
-
+    (when-let [profile (db/get-by-params conn :profile
+                                         {:email (str/lower email)}
+                                         {:columns [:id :email]
+                                          :check-not-found false})]
+      (when-not (:is-blocked profile)
+        (db/update! conn :profile {:is-blocked true} {:id (:id profile)})
+        (db/delete! conn :http-session {:profile-id (:id profile)})
+        :blocked))))

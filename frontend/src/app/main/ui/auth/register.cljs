@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.auth.register
   (:require
@@ -20,7 +20,7 @@
    [app.util.router :as rt]
    [beicon.core :as rx]
    [cljs.spec.alpha :as s]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc demo-warning
   [_]
@@ -48,47 +48,57 @@
           :opt-un [::invitation-token]))
 
 (defn- handle-prepare-register-error
-  [form error]
-  (case (:code error)
-    :registration-disabled
+  [form {:keys [type code] :as cause}]
+  (condp = [type code]
+    [:restriction :registration-disabled]
     (st/emit! (dm/error (tr "errors.registration-disabled")))
 
-    :email-has-permanent-bounces
+    [:restriction :profile-blocked]
+    (st/emit! (dm/error (tr "errors.profile-blocked")))
+
+    [:validation :email-has-permanent-bounces]
     (let [email (get @form [:data :email])]
       (st/emit! (dm/error (tr "errors.email-has-permanent-bounces" email))))
 
-    :email-already-exists
+    [:validation :email-already-exists]
     (swap! form assoc-in [:errors :email]
            {:message "errors.email-already-exists"})
-    
-    :email-as-password
+
+    [:validation :email-as-password]
     (swap! form assoc-in [:errors :password]
            {:message "errors.email-as-password"})
 
     (st/emit! (dm/error (tr "errors.generic")))))
 
 (defn- handle-prepare-register-success
-  [_form {:keys [token] :as result}]
-  (st/emit! (rt/nav :auth-register-validate {} {:token token})))
+  [params]
+  (st/emit! (rt/nav :auth-register-validate {} params)))
+
 
 (mf/defc register-form
-  [{:keys [params] :as props}]
+  [{:keys [params on-success-callback] :as props}]
   (let [initial (mf/use-memo (mf/deps params) (constantly params))
         form    (fm/use-form :spec ::register-form
                              :validators [validate]
                              :initial initial)
         submitted? (mf/use-state false)
 
+        on-success (fn [p]
+                     (if (nil? on-success-callback)
+                       (handle-prepare-register-success p)
+                       (on-success-callback p)))
+
         on-submit
         (mf/use-callback
          (fn [form _event]
            (reset! submitted? true)
-           (let [params (:clean-data @form)]
-             (->> (rp/mutation :prepare-register-profile params)
+           (let [cdata (:clean-data @form)]
+             (->> (rp/command! :prepare-register-profile cdata)
+                  (rx/map #(merge % params))
                   (rx/finalize #(reset! submitted? false))
-                  (rx/subs (partial handle-prepare-register-success form)
-                           (partial handle-prepare-register-error form))))))
-        ]
+                  (rx/subs
+                   on-success
+                   (partial handle-prepare-register-error form))))))]
 
 
     [:& fm/form {:on-submit on-submit
@@ -112,23 +122,40 @@
        :disabled @submitted?
        :data-test "register-form-submit"}]]))
 
+
+(mf/defc register-methods
+  [{:keys [params on-success-callback] :as props}]
+  [:*
+   (when login/show-alt-login-buttons?
+     [:*
+      [:span.separator
+       [:span.line]
+       [:span.text (tr "labels.continue-with")]
+       [:span.line]]
+
+      [:div.buttons
+       [:& login/login-buttons {:params params}]]
+
+      (when (or (contains? @cf/flags :login)
+                (contains? @cf/flags :login-with-ldap))
+        [:span.separator
+         [:span.line]
+         [:span.text (tr "labels.or")]
+         [:span.line]])])
+
+   [:& register-form {:params params :on-success-callback on-success-callback}]])
+
 (mf/defc register-page
   [{:keys [params] :as props}]
   [:div.form-container
+
    [:h1 {:data-test "registration-title"} (tr "auth.register-title")]
    [:div.subtitle (tr "auth.register-subtitle")]
 
    (when (contains? @cf/flags :demo-warning)
      [:& demo-warning])
 
-   [:& register-form {:params params}]
-
-    (when login/show-alt-login-buttons?
-      [:*
-       [:span.separator (tr "labels.or")]
-
-       [:div.buttons
-        [:& login/login-buttons {:params params}]]])
+   [:& register-methods {:params params}]
 
    [:div.links
     [:div.link-entry
@@ -150,13 +177,6 @@
 (defn- handle-register-error
   [form error]
   (case (:code error)
-    :registration-disabled
-    (st/emit! (dm/error (tr "errors.registration-disabled")))
-
-    :email-has-permanent-bounces
-    (let [email (get @form [:data :email])]
-      (st/emit! (dm/error (tr "errors.email-has-permanent-bounces" email))))
-
     :email-already-exists
     (swap! form assoc-in [:errors :email]
            {:message "errors.email-already-exists"})
@@ -166,7 +186,7 @@
       (st/emit! (dm/error (tr "errors.generic"))))))
 
 (defn- handle-register-success
-  [_form data]
+  [data]
   (cond
     (some? (:invitation-token data))
     (let [token (:invitation-token data)]
@@ -193,21 +213,25 @@
                      ::accept-newsletter-subscription])))
 
 (mf/defc register-validate-form
-  [{:keys [params] :as props}]
+  [{:keys [params on-success-callback] :as props}]
   (let [form       (fm/use-form :spec ::register-validate-form
                                 :initial params)
         submitted? (mf/use-state false)
+
+        on-success (fn [p]
+                     (if (nil? on-success-callback)
+                       (handle-register-success p)
+                       (on-success-callback (:email p))))
 
         on-submit
         (mf/use-callback
          (fn [form _event]
            (reset! submitted? true)
            (let [params (:clean-data @form)]
-             (->> (rp/mutation :register-profile params)
+             (->> (rp/command! :register-profile params)
                   (rx/finalize #(reset! submitted? false))
-                  (rx/subs (partial handle-register-success form)
-                           (partial handle-register-error form))))))
-        ]
+                  (rx/subs on-success
+                           (partial handle-register-error form))))))]
 
     [:& fm/form {:on-submit on-submit
                  :form form}

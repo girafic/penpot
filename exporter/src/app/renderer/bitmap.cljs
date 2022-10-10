@@ -2,88 +2,58 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.renderer.bitmap
   "A bitmap renderer."
   (:require
    [app.browser :as bw]
-   [app.common.data :as d]
-   [app.common.exceptions :as ex :include-macros true]
    [app.common.logging :as l]
-   [app.common.pages :as cp]
-   [app.common.spec :as us]
+   [app.common.uri :as u]
    [app.config :as cf]
-   [cljs.spec.alpha :as s]
+   [app.util.mime :as mime]
+   [app.util.shell :as sh]
    [cuerdas.core :as str]
-   [lambdaisland.uri :as u]
    [promesa.core :as p]))
 
-(defn create-cookie
-  [uri token]
-  (let [domain (str (:host uri)
-                (when (:port uri)
-                  (str ":" (:port uri))))]
-    {:domain domain
-     :key "auth-token"
-     :value token}))
-
-(defn screenshot-object
-  [{:keys [file-id page-id object-id token scale type]}]
-  (letfn [(handle [page]
-            (let [path   (str "/render-object/" file-id "/" page-id "/" object-id)
-                  uri    (-> (u/uri (cf/get :public-uri))
-                             (assoc :path "/")
-                             (assoc :fragment path))
-                  cookie (create-cookie uri token)]
-              (screenshot page (str uri) cookie)))
-
-          (screenshot [page uri cookie]
-            (l/info :uri uri)
-            (let [viewport {:width 1920
-                            :height 1080
-                            :scale scale}
-                  options  {:viewport viewport
-                            :cookie cookie}]
-              (p/do!
-               (bw/configure-page! page options)
-               (bw/navigate! page uri)
-               (bw/eval! page (js* "() => document.body.style.background = 'transparent'"))
-               (bw/wait-for page "#screenshot")
-               (p/let [dom (bw/select page "#screenshot")]
-                 (case type
-                   :png  (bw/screenshot dom {:omit-background? true :type type})
-                   :jpeg (bw/screenshot dom {:omit-background? false :type type}))))))]
-
-    (bw/exec! handle)))
-
-(s/def ::name ::us/string)
-(s/def ::suffix ::us/string)
-(s/def ::type #{:jpeg :png})
-(s/def ::page-id ::us/uuid)
-(s/def ::file-id ::us/uuid)
-(s/def ::object-id ::us/uuid)
-(s/def ::scale ::us/number)
-(s/def ::token ::us/string)
-(s/def ::filename ::us/string)
-
-(s/def ::render-params
-  (s/keys :req-un [::name ::suffix ::type ::object-id ::page-id ::scale ::token ::file-id]
-          :opt-un [::filename]))
-
 (defn render
-  [params]
-  (us/assert ::render-params params)
-  (p/let [content (screenshot-object params)]
-    {:content content
-     :filename (or (:filename params)
-                   (str (:name params)
-                        (:suffix params "")
-                        (case (:type params)
-                          :png ".png"
-                          :jpeg ".jpg")))
-     :length (alength content)
-     :mime-type (case (:type params)
-                  :png "image/png"
-                  :jpeg "image/jpeg")}))
+  [{:keys [file-id page-id token scale type objects] :as params} on-object]
+  (letfn [(prepare-options [uri]
+            #js {:screen #js {:width bw/default-viewport-width
+                              :height bw/default-viewport-height}
+                 :viewport #js {:width bw/default-viewport-width
+                                :height bw/default-viewport-height}
+                 :locale "en-US"
+                 :storageState #js {:cookies (bw/create-cookies uri {:token token})}
+                 :deviceScaleFactor scale
+                 :userAgent bw/default-user-agent})
 
+          (render-object [page {:keys [id] :as object}]
+            (p/let [path (sh/tempfile :prefix "penpot.tmp.render.bitmap." :suffix (mime/get-extension type))
+                    node (bw/select page (str/concat "#screenshot-" id))]
+              (bw/wait-for node)
+              (case type
+                :png  (bw/screenshot node {:omit-background? true :type type :path path})
+                :jpeg (bw/screenshot node {:omit-background? false :type type :path path}))
+              (on-object (assoc object :path path))))
+
+          (render [uri page]
+            (l/info :uri uri)
+            (p/do
+              ;; navigate to the page and perform basic setup
+              (bw/nav! page (str uri))
+              (bw/sleep page 1000) ; the good old fix with sleep
+              (bw/eval! page (js* "() => document.body.style.background = 'transparent'"))
+
+              ;; take the screnshot of requested objects, one by one
+              (p/run! (partial render-object page) objects)
+              nil))]
+
+    (p/let [params {:file-id file-id
+                    :page-id page-id
+                    :object-id (mapv :id objects)
+                    :route "objects"}
+            uri    (-> (cf/get :public-uri)
+                       (assoc :path "/render.html")
+                       (assoc :query (u/map->query-string params)))]
+      (bw/exec! (prepare-options uri) (partial render uri)))))

@@ -2,9 +2,10 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.db
+  (:refer-clojure :exclude [get])
   (:require
    [app.common.data :as d]
    [app.common.exceptions :as ex]
@@ -27,6 +28,8 @@
    com.zaxxer.hikari.HikariConfig
    com.zaxxer.hikari.HikariDataSource
    com.zaxxer.hikari.metrics.prometheus.PrometheusMetricsTrackerFactory
+   io.whitfin.siphash.SipHasher
+   io.whitfin.siphash.SipHasherContainer
    java.io.InputStream
    java.io.OutputStream
    java.lang.AutoCloseable
@@ -55,54 +58,66 @@
 (s/def ::migrations map?)
 (s/def ::name keyword?)
 (s/def ::password ::us/string)
-(s/def ::read-only ::us/boolean)
 (s/def ::uri ::us/not-empty-string)
 (s/def ::username ::us/string)
 (s/def ::validation-timeout ::us/integer)
+(s/def ::read-only? ::us/boolean)
 
-(defmethod ig/pre-init-spec ::pool [_]
-  (s/keys :req-un [::uri ::name
+(s/def ::pool-options
+  (s/keys :opt-un [::uri ::name
                    ::min-size
                    ::max-size
                    ::connection-timeout
-                   ::validation-timeout]
-          :opt-un [::migrations
+                   ::validation-timeout
+                   ::migrations
                    ::username
                    ::password
                    ::mtx/metrics
-                   ::read-only]))
+                   ::read-only?]))
+
+(def defaults
+  {:name :main
+   :min-size 0
+   :max-size 60
+   :connection-timeout 10000
+   :validation-timeout 10000
+   :idle-timeout 120000 ; 2min
+   :max-lifetime 1800000 ; 30m
+   :read-only? false})
 
 (defmethod ig/prep-key ::pool
   [_ cfg]
-  (merge {:name :main
-          :min-size 0
-          :max-size 30
-          :connection-timeout 10000
-          :validation-timeout 10000
-          :idle-timeout 120000 ; 2min
-          :max-lifetime 1800000 ; 30m
-          :read-only false}
-         (d/without-nils cfg)))
+  (merge defaults (d/without-nils cfg)))
+
+;; Don't validate here, just validate that a map is received.
+(defmethod ig/pre-init-spec ::pool [_] ::pool-options)
 
 (defmethod ig/init-key ::pool
-  [_ {:keys [migrations name read-only] :as cfg}]
-  (l/info :hint "initialize connection pool"
-          :name (d/name name)
-          :uri (:uri cfg)
-          :read-only read-only
-          :with-credentials (and (contains? cfg :username)
-                                 (contains? cfg :password))
-          :min-size (:min-size cfg)
-          :max-size (:max-size cfg))
+  [_ {:keys [migrations read-only? uri] :as cfg}]
+  (if uri
+    (let [pool (create-pool cfg)]
+      (l/info :hint "initialize connection pool"
+              :name (d/name (:name cfg))
+              :uri uri
+              :read-only read-only?
+              :with-credentials (and (contains? cfg :username)
+                                     (contains? cfg :password))
+              :min-size (:min-size cfg)
+              :max-size (:max-size cfg))
+      (when-not read-only?
+        (some->> (seq migrations) (apply-migrations! pool)))
+      pool)
 
-  (let [pool (create-pool cfg)]
-    (when-not read-only
-      (some->> (seq migrations) (apply-migrations! pool)))
-    pool))
+    (do
+      (l/warn :hint "unable to initialize pool, missing url"
+              :name (d/name (:name cfg))
+              :read-only read-only?)
+      nil)))
 
 (defmethod ig/halt-key! ::pool
   [_ pool]
-  (.close ^HikariDataSource pool))
+  (when pool
+    (.close ^HikariDataSource pool)))
 
 (defn- apply-migrations!
   [pool migrations]
@@ -126,7 +141,7 @@
       (.setJdbcUrl           (str "jdbc:" uri))
       (.setPoolName          (d/name (:name cfg)))
       (.setAutoCommit true)
-      (.setReadOnly          (:read-only cfg))
+      (.setReadOnly          (:read-only? cfg))
       (.setConnectionTimeout (:connection-timeout cfg))
       (.setValidationTimeout (:validation-timeout cfg))
       (.setIdleTimeout       (:idle-timeout cfg))
@@ -138,7 +153,7 @@
 
     ;; When metrics namespace is provided
     (when metrics
-      (->> (:registry metrics)
+      (->> (::mtx/registry metrics)
            (PrometheusMetricsTrackerFactory.)
            (.setMetricsTrackerFactory config)))
 
@@ -213,7 +228,7 @@
   [& args]
   `(jdbc/with-transaction ~@args))
 
-(defn ^Connection open
+(defn open
   [pool]
   (jdbc/get-connection pool))
 
@@ -233,21 +248,21 @@
   ([ds table params opts]
    (exec-one! ds
               (sql/insert table params opts)
-              (assoc opts :return-keys true))))
+              (merge {:return-keys true} opts))))
 
 (defn insert-multi!
   ([ds table cols rows] (insert-multi! ds table cols rows nil))
   ([ds table cols rows opts]
    (exec! ds
           (sql/insert-multi table cols rows opts)
-          (assoc opts :return-keys true))))
+          (merge {:return-keys true} opts))))
 
 (defn update!
   ([ds table params where] (update! ds table params where nil))
   ([ds table params where opts]
    (exec-one! ds
               (sql/update table params where opts)
-              (assoc opts :return-keys true))))
+              (merge {:return-keys true} opts))))
 
 (defn delete!
   ([ds table params] (delete! ds table params nil))
@@ -256,28 +271,55 @@
               (sql/delete table params opts)
               (assoc opts :return-keys true))))
 
-(defn- is-deleted?
+(defn is-row-deleted?
   [{:keys [deleted-at]}]
   (and (dt/instant? deleted-at)
        (< (inst-ms deleted-at)
           (inst-ms (dt/now)))))
 
-(defn get-by-params
+(defn get*
+  "Internal function for retrieve a single row from database that
+  matches a simple filters."
   ([ds table params]
-   (get-by-params ds table params nil))
-  ([ds table params {:keys [check-not-found] :or {check-not-found true} :as opts}]
-   (let [res (exec-one! ds (sql/select table params opts))]
-     (when (and check-not-found (or (not res) (is-deleted? res)))
+   (get* ds table params nil))
+  ([ds table params {:keys [check-deleted?] :or {check-deleted? true} :as opts}]
+   (let [rows (exec! ds (sql/select table params opts))
+         rows (cond->> rows
+                check-deleted?
+                (remove is-row-deleted?))]
+     (first rows))))
+
+(defn get
+  ([ds table params]
+   (get ds table params nil))
+  ([ds table params {:keys [check-deleted?] :or {check-deleted? true} :as opts}]
+   (let [row (get* ds table params opts)]
+     (when (and (not row) check-deleted?)
        (ex/raise :type :not-found
                  :table table
                  :hint "database object not found"))
-     res)))
+     row)))
+
+(defn get-by-params
+  "DEPRECATED"
+  ([ds table params]
+   (get-by-params ds table params nil))
+  ([ds table params {:keys [check-not-found] :or {check-not-found true} :as opts}]
+   (let [row (get* ds table params (assoc opts :check-deleted? check-not-found))]
+     (when (and (not row) check-not-found)
+       (ex/raise :type :not-found
+                 :table table
+                 :hint "database object not found"))
+     row)))
 
 (defn get-by-id
   ([ds table id]
-   (get-by-params ds table {:id id} nil))
+   (get ds table {:id id} nil))
   ([ds table id opts]
-   (get-by-params ds table {:id id} opts)))
+   (let [opts (cond-> opts
+                (contains? opts :check-not-found)
+                (assoc :check-deleted? (:check-not-found opts)))]
+     (get ds table {:id id} opts))))
 
 (defn query
   ([ds table params]
@@ -311,9 +353,9 @@
   (and (pgarray? v) (= "uuid" (.getBaseTypeName ^PgArray v))))
 
 (defn decode-pgarray
-  ([v] (into [] (.getArray ^PgArray v)))
-  ([v in] (into in (.getArray ^PgArray v)))
-  ([v in xf] (into in xf (.getArray ^PgArray v))))
+  ([v] (some->> ^PgArray v .getArray vec))
+  ([v in] (some->> ^PgArray v .getArray (into in)))
+  ([v in xf]  (some->> ^PgArray v .getArray (into in xf))))
 
 (defn pgarray->set
   [v]
@@ -355,23 +397,23 @@
    (.rollback conn sp)))
 
 (defn interval
-  [data]
+  [o]
   (cond
-    (integer? data)
-    (->> (/ data 1000.0)
+    (or (integer? o)
+        (float? o))
+    (->> (/ o 1000.0)
          (format "%s seconds")
          (pginterval))
 
-    (string? data)
-    (pginterval data)
+    (string? o)
+    (pginterval o)
 
-    (dt/duration? data)
-    (->> (/ (.toMillis ^java.time.Duration data) 1000.0)
-         (format "%s seconds")
-         (pginterval))
+    (dt/duration? o)
+    (interval (inst-ms o))
 
     :else
-    (ex/raise :type :not-implemented)))
+    (ex/raise :type :not-implemented
+              :hint (format "no implementation found for value %s" (pr-str o)))))
 
 (defn decode-json-pgobject
   [^PGobject o]
@@ -419,10 +461,19 @@
 
 ;; --- Locks
 
+(def ^:private siphash-state
+  (SipHasher/container
+   (uuid/get-bytes uuid/zero)))
+
+(defn uuid->hash-code
+  [o]
+  (.hash ^SipHasherContainer siphash-state
+         ^bytes (uuid/get-bytes o)))
+
 (defn- xact-check-param
   [n]
   (cond
-    (uuid? n) (uuid/get-word-high n)
+    (uuid? n) (uuid->hash-code n)
     (int? n)  n
     :else (throw (IllegalArgumentException. "uuid or number allowed"))))
 

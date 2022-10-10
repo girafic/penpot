@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex,nofollow">
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <title>Builtin API Documentation - Penpot</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@200;300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+      {% include "app/templates/api-doc.css" %}
+    </style>
+    <script>
+      {% include "app/templates/api-doc.js" %}
+    </script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Penpot API Documentation (v{{version}})</h1>
+      </header>
+      <section class="rpc-doc-content">
+
+        <h2>RPC COMMAND METHODS:</h2>
+        <ul class="rpc-items">
+          {% for item in command-methods %}
+            {% include "app/templates/api-doc-entry.tmpl" with item=item %}
+          {% endfor %}
+        </ul>
+
+        <h2>RPC QUERY METHODS:</h2>
+        <ul class="rpc-items">
+          {% for item in query-methods %}
+            {% include "app/templates/api-doc-entry.tmpl" with item=item %}
+          {% endfor %}
+        </ul>
+
+        <h2>RPC MUTATION METHODS:</h2>
+        <ul class="rpc-items">
+          {% for item in mutation-methods %}
+            {% include "app/templates/api-doc-entry.tmpl" with item=item %}
+          {% endfor %}
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
+

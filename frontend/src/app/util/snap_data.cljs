@@ -2,16 +2,17 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.snap-data
-  "Data structure that holds and retrieves the data to make the snaps. Internaly
-   is implemented with a balanced binary tree that queries by range.
+  "Data structure that holds and retrieves the data to make the snaps.
+   Internally is implemented with a balanced binary tree that queries by range.
    https://en.wikipedia.org/wiki/Range_tree"
   (:require
    [app.common.data :as d]
    [app.common.pages.diff :as diff]
    [app.common.pages.helpers :as cph]
+   [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.util.geom.grid :as gg]
    [app.util.geom.snap-points :as snap]
@@ -53,6 +54,21 @@
         (assoc-in [frame-id :x] (rt/make-tree))
         (assoc-in [frame-id :y] (rt/make-tree)))))
 
+(defn get-grids-snap-points
+  [frame coord]
+  (if (ctst/rotated-frame? frame)
+    []
+    (let [grid->snap (fn [[grid-type position]]
+                       {:type :layout
+                        :id (:id frame)
+                        :grid grid-type
+                        :pt position})]
+      (->> (:grids frame)
+           (mapcat (fn [grid]
+                     (->> (gg/grid-snap-points frame grid coord)
+                          (mapv #(vector (:type grid) %)))))
+           (mapv grid->snap)))))
+
 (defn- add-frame
   [page-data frame]
   (let [frame-id (:id frame)
@@ -61,17 +77,8 @@
                         (mapv #(array-map :type :shape
                                           :id frame-id
                                           :pt %)))
-
-        grid-x-data (->> (gg/grid-snap-points frame :x)
-                         (mapv #(array-map :type :grid-x
-                                           :id frame-id
-                                           :pt %)))
-
-        grid-y-data (->> (gg/grid-snap-points frame :y)
-                         (mapv #(array-map :type :grid-y
-                                          :id frame-id
-                                          :pt %)))]
-
+        grid-x-data (get-grids-snap-points frame :x)
+        grid-y-data (get-grids-snap-points frame :y)]
     (-> page-data
         ;; Update root frame information
         (assoc-in [uuid/zero :objects-data frame-id] frame-data)
@@ -101,12 +108,15 @@
 
 
 (defn- add-guide
-  [page-data guide]
+  [objects page-data guide]
 
-  (let [guide-data (->> (snap/guide-snap-points guide)
+  (let [frame (get objects (:frame-id guide))
+        guide-data (->> (snap/guide-snap-points guide frame)
                         (mapv #(array-map
                                 :type :guide
                                 :id (:id guide)
+                                :axis (:axis guide)
+                                :frame-id (:frame-id guide)
                                 :pt %)))]
     (if-let [frame-id (:frame-id guide)]
       ;; Guide inside frame, we add the information only on that frame
@@ -172,10 +182,10 @@
       (add-shape new-shape)))
 
 (defn- update-guide
-  [page-data [old-guide new-guide]]
-  (-> page-data
-      (remove-guide old-guide)
-      (add-guide new-guide)))
+  [objects page-data [old-guide new-guide]]
+  (as-> page-data $
+    (remove-guide $ old-guide)
+    (add-guide objects $ new-guide)))
 
 ;; PUBLIC API
 
@@ -187,7 +197,7 @@
 (defn add-page
   "Adds page information"
   [snap-data {:keys [objects options] :as page}]
-  (let [frames     (cph/get-frames objects)
+  (let [frames     (ctst/get-frames objects)
         shapes     (->> (vals (:objects page))
                         (remove cph/frame-shape?))
         guides     (vals (:guides options))
@@ -197,7 +207,7 @@
           (add-root-frame $)
           (reduce add-frame $ frames)
           (reduce add-shape $ shapes)
-          (reduce add-guide $ guides))]
+          (reduce (partial add-guide objects) $ guides))]
     (assoc snap-data (:id page) page-data)))
 
 (defn update-page
@@ -208,7 +218,8 @@
     ;; Update page
     (update snap-data (:id page)
             (fn [page-data]
-              (let [{:keys [change-frame-shapes
+              (let [{:keys [objects]} page
+                    {:keys [change-frame-shapes
                             change-frame-guides
                             removed-frames
                             removed-shapes
@@ -229,10 +240,12 @@
                   (reduce update-shape   $ updated-shapes)
                   (reduce add-frame      $ new-frames)
                   (reduce add-shape      $ new-shapes)
-                  (reduce update-guide   $ change-frame-guides)
                   (reduce remove-guide   $ removed-guides)
-                  (reduce update-guide   $ updated-guides)
-                  (reduce add-guide      $ new-guides)))))
+
+                  ;; Guides functions. Need objects to get its frame data
+                  (reduce (partial update-guide objects)   $ change-frame-guides)
+                  (reduce (partial update-guide objects)   $ updated-guides)
+                  (reduce (partial add-guide objects)      $ new-guides)))))
 
     ;; Page doesn't exist, we create a new entry
     (add-page snap-data page)))

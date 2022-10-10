@@ -2,16 +2,14 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.shapes
   "The main container for a frame in viewer mode"
   (:require
-   [app.common.geom.matrix :as gmt]
-   [app.common.geom.point :as gpt]
-   [app.common.geom.shapes :as geom]
+   [app.common.geom.shapes :as gsh]
    [app.common.pages.helpers :as cph]
-   [app.common.spec.interactions :as cti]
+   [app.common.types.shape.interactions :as ctsi]
    [app.main.data.viewer :as dv]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -30,7 +28,7 @@
    [app.util.router :as rt]
    [app.util.timers :as tm]
    [okulary.core :as l]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (def base-frame-ctx (mf/create-context nil))
 (def frame-offset-ctx (mf/create-context nil))
@@ -56,10 +54,10 @@
           background-overlay  (:background-overlay interaction)
 
           dest-frame (get objects dest-frame-id)
-          position   (cti/calc-overlay-position interaction
-                                                base-frame
-                                                dest-frame
-                                                frame-offset)]
+          position   (ctsi/calc-overlay-position interaction
+                                                 base-frame
+                                                 dest-frame
+                                                 frame-offset)]
       (when dest-frame-id
         (st/emit! (dv/open-overlay dest-frame-id
                                    position
@@ -69,7 +67,11 @@
 
     :toggle-overlay
     (let [frame-id            (:destination interaction)
-          position            (:overlay-position interaction)
+          dest-frame          (get objects frame-id)
+          position            (ctsi/calc-overlay-position interaction
+                                                          base-frame
+                                                          dest-frame
+                                                          frame-offset) 
           close-click-outside (:close-click-outside interaction)
           background-overlay  (:background-overlay interaction)]
       (when frame-id
@@ -123,10 +125,10 @@
           background-overlay  (:background-overlay interaction)
 
           dest-frame (get objects dest-frame-id)
-          position   (cti/calc-overlay-position interaction
-                                                base-frame
-                                                dest-frame
-                                                frame-offset)]
+          position   (ctsi/calc-overlay-position interaction
+                                                 base-frame
+                                                 dest-frame
+                                                 frame-offset)]
       (when dest-frame-id
         (st/emit! (dv/open-overlay dest-frame-id
                                    position
@@ -204,7 +206,10 @@
               :stroke-width (if interactions-show? 1 0)
               :fill-opacity (if interactions-show? 0.2 0)
               :style {:pointer-events (when frame? "none")}
-              :transform (geom/transform-matrix shape)}])))
+              :transform (gsh/transform-str shape)}])))
+
+
+;; TODO: use-memo use-fn
 
 (defn generic-wrapper-factory
   "Wrap some svg shape and add interaction controls"
@@ -212,12 +217,11 @@
   (mf/fnc generic-wrapper
     {::mf/wrap-props false}
     [props]
-    (let [shape   (unchecked-get props "shape")
-          childs  (unchecked-get props "childs")
-          frame   (unchecked-get props "frame")
-          objects (unchecked-get props "objects")
-
-          base-frame    (mf/use-ctx base-frame-ctx)
+    (let [shape        (unchecked-get props "shape")
+          childs       (unchecked-get props "childs")
+          frame        (unchecked-get props "frame")
+          objects      (unchecked-get props "objects")
+          base-frame   (mf/use-ctx base-frame-ctx)
           frame-offset (mf/use-ctx frame-offset-ctx)
 
           interactions-show? (mf/deref viewer-interactions-show?)
@@ -225,25 +229,43 @@
           interactions (:interactions shape)
 
           svg-element? (and (= :svg-raw (:type shape))
-                            (not= :svg (get-in shape [:content :tag])))]
+                            (not= :svg (get-in shape [:content :tag])))
 
-      (mf/use-effect
-        (fn []
-          (let [sems (on-load shape base-frame frame-offset objects)]
-            #(run! tm/dispose! sems))))
+
+          on-mouse-down
+          (mf/use-fn (mf/deps shape base-frame frame-offset objects)
+                     #(on-mouse-down % shape base-frame frame-offset objects))
+
+          on-mouse-up
+          (mf/use-fn (mf/deps shape base-frame frame-offset objects)
+                     #(on-mouse-up % shape base-frame frame-offset objects))
+
+          on-mouse-enter
+          (mf/use-fn (mf/deps shape base-frame frame-offset objects)
+                     #(on-mouse-enter % shape base-frame frame-offset objects))
+
+          on-mouse-leave
+          (mf/use-fn (mf/deps shape base-frame frame-offset objects)
+                     #(on-mouse-leave % shape base-frame frame-offset objects))]
+
+
+      (mf/with-effect []
+        (let [sems (on-load shape base-frame frame-offset objects)]
+          (partial run! tm/dispose! sems)))
 
       (if-not svg-element?
         [:> shape-container {:shape shape
-                             :cursor (when (cti/actionable? interactions) "pointer")
-                             :on-mouse-down #(on-mouse-down % shape base-frame frame-offset objects)
-                             :on-mouse-up #(on-mouse-up % shape base-frame frame-offset objects)
-                             :on-mouse-enter #(on-mouse-enter % shape base-frame frame-offset objects)
-                             :on-mouse-leave #(on-mouse-leave % shape base-frame frame-offset objects)}
+                             :cursor (when (ctsi/actionable? interactions) "pointer")
+                             :on-mouse-down on-mouse-down
+                             :on-mouse-up on-mouse-up
+                             :on-mouse-enter on-mouse-enter
+                             :on-mouse-leave on-mouse-leave}
 
          [:& component {:shape shape
                         :frame frame
                         :childs childs
-                        :is-child-selected? true}]
+                        :is-child-selected? true
+                        :objects objects}]
 
          [:& interaction {:shape shape
                           :interactions interactions
@@ -252,7 +274,8 @@
         ;; Don't wrap svg elements inside a <g> otherwise some can break
         [:& component {:shape shape
                        :frame frame
-                       :childs childs}]))))
+                       :childs childs
+                       :objects objects}]))))
 
 (defn frame-wrapper
   [shape-container]
@@ -301,11 +324,12 @@
       [props]
       (let [shape     (obj/get props "shape")
             childs    (mapv #(get objects %) (:shapes shape))
-            shape     (geom/transform-shape shape)
+            shape     (gsh/transform-shape shape)
             props     (obj/merge! #js {} props
                                   #js {:shape shape
                                        :childs childs
                                        :objects objects})]
+
         [:> frame-wrapper props]))))
 
 (defn group-container-factory
@@ -315,12 +339,12 @@
     (mf/fnc group-container
       {::mf/wrap-props false}
       [props]
-      (let [shape  (unchecked-get props "shape")
-            childs (mapv #(get objects %) (:shapes shape))
-            props  (obj/merge! #js {} props
-                               #js {:childs childs
-                                    :objects objects})]
-        [:> group-wrapper props]))))
+      (let [childs   (mapv #(get objects %) (:shapes (unchecked-get props "shape")))
+            props    (obj/merge! #js {} props
+                                 #js {:childs childs
+                                      :objects objects})]
+        (when (not-empty childs)
+          [:> group-wrapper props])))))
 
 (defn bool-container-factory
   [objects]
@@ -329,8 +353,7 @@
     (mf/fnc bool-container
       {::mf/wrap-props false}
       [props]
-      (let [shape  (unchecked-get props "shape")
-            childs (->> (cph/get-children-ids objects (:id shape))
+      (let [childs (->> (cph/get-children-ids objects (:id (unchecked-get props "shape")))
                         (select-keys objects))
             props  (obj/merge! #js {} props
                                #js {:childs childs
@@ -344,8 +367,7 @@
     (mf/fnc svg-raw-container
       {::mf/wrap-props false}
       [props]
-      (let [shape  (unchecked-get props "shape")
-            childs (mapv #(get objects %) (:shapes shape))
+      (let [childs (mapv #(get objects %) (:shapes (unchecked-get props "shape")))
             props  (obj/merge! #js {} props
                                #js {:childs childs
                                     :objects objects})]
@@ -359,28 +381,37 @@
         image-wrapper  (image-wrapper)
         circle-wrapper (circle-wrapper)]
     (mf/fnc shape-container
-      {::mf/wrap-props false}
+      {::mf/wrap-props false
+       ::mf/wrap [mf/memo]}
       [props]
-      (let [group-container
-            (mf/use-memo (mf/deps objects)
-                         #(group-container-factory objects))
+      (let [shape   (unchecked-get props "shape")
+            frame   (unchecked-get props "frame")
+
+            group-container
+            (mf/with-memo [objects]
+              (group-container-factory objects))
+
+            frame-container
+            (mf/with-memo [objects]
+              (frame-container-factory objects))
 
             bool-container
-            (mf/use-memo (mf/deps objects)
-                         #(bool-container-factory objects))
+            (mf/with-memo [objects]
+              (bool-container-factory objects))
 
             svg-raw-container
-            (mf/use-memo (mf/deps objects)
-                         #(svg-raw-container-factory objects))
-            shape (unchecked-get props "shape")
-            frame (unchecked-get props "frame")]
+            (mf/with-memo [objects]
+              (svg-raw-container-factory objects))
+
+            ]
         (when (and shape (not (:hidden shape)))
-          (let [shape (-> (geom/transform-shape shape)
-                          (geom/translate-to-frame frame))
+          (let [shape (-> (gsh/transform-shape shape)
+                          (gsh/translate-to-frame frame))
+
                 opts #js {:shape shape
                           :objects objects}]
             (case (:type shape)
-              :frame   [:g.empty]
+              :frame   [:> frame-container opts]
               :text    [:> text-wrapper opts]
               :rect    [:> rect-wrapper opts]
               :path    [:> path-wrapper opts]
@@ -389,35 +420,3 @@
               :group   [:> group-container {:shape shape :frame frame :objects objects}]
               :bool    [:> bool-container {:shape shape :frame frame :objects objects}]
               :svg-raw [:> svg-raw-container {:shape shape :frame frame :objects objects}])))))))
-
-(mf/defc frame-svg
-  {::mf/wrap [mf/memo]}
-  [{:keys [objects frame zoom] :or {zoom 1} :as props}]
-  (let [modifier (-> (gpt/point (:x frame) (:y frame))
-                     (gpt/negate)
-                     (gmt/translate-matrix))
-
-        update-fn    #(assoc-in %1 [%2 :modifiers :displacement] modifier)
-
-        frame-id     (:id frame)
-        modifier-ids (into [frame-id] (cph/get-children-ids objects frame-id))
-        objects      (reduce update-fn objects modifier-ids)
-        frame        (assoc-in frame [:modifiers :displacement] modifier)
-
-        width        (* (:width frame) zoom)
-        height       (* (:height frame) zoom)
-        vbox         (str "0 0 " (:width frame 0)
-                          " "    (:height frame 0))
-        wrapper      (mf/use-memo
-                      (mf/deps objects)
-                      #(frame-container-factory objects))]
-
-    [:svg {:view-box vbox
-           :width width
-           :height height
-           :version "1.1"
-           :xmlnsXlink "http://www.w3.org/1999/xlink"
-           :xmlns "http://www.w3.org/2000/svg"}
-     [:& wrapper {:shape frame
-                  :view-box vbox}]]))
-

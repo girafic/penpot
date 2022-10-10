@@ -2,12 +2,13 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.worker.selection
   (:require
    [app.common.data :as d]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.shapes.text :as gte]
    [app.common.pages :as cp]
    [app.common.pages.helpers :as cph]
    [app.common.uuid :as uuid]
@@ -20,10 +21,18 @@
 
 (defonce state (l/atom {}))
 
-(defn index-shape
+(defn make-index-shape
   [objects parents-index clip-parents-index]
   (fn [index shape]
-    (let [{:keys [x y width height]} (gsh/points->selrect (:points shape))
+    (let [{:keys [x y width height]}
+          (cond
+            (and (= :text (:type shape))
+                 (some? (:position-data shape))
+                 (d/not-empty? (:position-data shape)))
+            (gte/position-data-bounding-box shape)
+
+            :else
+            (gsh/points->selrect (:points shape)))
           shape-bound #js {:x x :y y :width width :height height}
 
           parents      (get parents-index (:id shape))
@@ -68,18 +77,19 @@
   (let [shapes             (-> objects (dissoc uuid/zero) vals)
         parents-index      (cp/generate-child-all-parents-index objects)
         clip-parents-index (cp/create-clip-index objects parents-index)
-        bounds             (-> objects objects-bounds add-padding-bounds)
 
-        index (reduce (index-shape objects parents-index clip-parents-index)
-                      (qdt/create (clj->js bounds))
-                      shapes)
+        root-shapes        (cph/get-immediate-children objects uuid/zero)
+        bounds             (-> root-shapes gsh/selection-rect add-padding-bounds)
 
-        z-index (cp/calculate-z-index objects)]
+        index-shape        (make-index-shape objects parents-index clip-parents-index)
+        initial-quadtree   (qdt/create (clj->js bounds))
 
-    {:index index :z-index z-index :bounds bounds}))
+        index              (reduce index-shape initial-quadtree shapes)]
+
+    {:index index :bounds bounds}))
 
 (defn- update-index
-  [{index :index z-index :z-index :as data} old-objects new-objects]
+  [{index :index :as data} old-objects new-objects]
   (let [changes? (fn [id]
                    (not= (get old-objects id)
                          (get new-objects id)))
@@ -97,16 +107,13 @@
 
         new-index (qdt/remove-all index changed-ids)
 
-        index (reduce (index-shape new-objects parents-index clip-parents-index)
-                      new-index
-                      shapes)
+        index-shape (make-index-shape new-objects parents-index clip-parents-index)
+        index (reduce index-shape new-index shapes)]
 
-        z-index (cp/update-z-index z-index changed-ids old-objects new-objects)]
-
-    (assoc data :index index :z-index z-index)))
+    (assoc data :index index)))
 
 (defn- query-index
-  [{index :index z-index :z-index} rect frame-id full-frame? include-frames? ignore-groups? clip-children? reverse?]
+  [{index :index} rect frame-id full-frame? include-frames? ignore-groups? clip-children?]
   (let [result (-> (qdt/search index (clj->js rect))
                    (es6-iterator-seq))
 
@@ -114,7 +121,8 @@
         match-criteria?
         (fn [shape]
           (and (not (:hidden shape))
-               (not (:blocked shape))
+               (or (= :frame (:type shape)) ;; We return frames even if blocked
+                   (not (:blocked shape)))
                (or (not frame-id) (= frame-id (:frame-id shape)))
                (case (:type shape)
                  :frame   include-frames?
@@ -131,32 +139,18 @@
 
         overlaps-parent?
         (fn [clip-parents]
-          (->> clip-parents (some (comp not overlaps?)) not))
+          (->> clip-parents (some (comp not overlaps?)) not))]
 
-        add-z-index
-        (fn [{:keys [id frame-id] :as shape}]
-          (assoc shape :z (+ (get z-index id)
-                             (get z-index frame-id 0))))
-
-        ;; Shapes after filters of overlapping and criteria
-        matching-shapes
-        (into []
-              (comp (map #(unchecked-get % "data"))
-                    (filter match-criteria?)
-                    (filter overlaps?)
-                    (filter (comp overlaps? :frame))
-                    (filter (if clip-children?
-                              (comp overlaps-parent? :clip-parents)
-                              (constantly true)))
-                    (map add-z-index))
-              result)
-
-        keyfn (if reverse? (comp - :z) :z)]
-
+    ;; Shapes after filters of overlapping and criteria
     (into (d/ordered-set)
-          (->> matching-shapes
-               (sort-by keyfn)
-               (map :id)))))
+          (comp (map #(unchecked-get % "data"))
+                (filter match-criteria?)
+                (filter overlaps?)
+                (filter (if clip-children?
+                          (comp overlaps-parent? :clip-parents)
+                          (constantly true)))
+                (map :id))
+          result)))
 
 
 (defmethod impl/handler :selection/initialize-index
@@ -191,13 +185,8 @@
   nil)
 
 (defmethod impl/handler :selection/query
-  [{:keys [page-id rect frame-id reverse? full-frame? include-frames? ignore-groups? clip-children?]
-    :or {reverse? false full-frame? false include-frames? false clip-children? true} :as message}]
+  [{:keys [page-id rect frame-id full-frame? include-frames? ignore-groups? clip-children?]
+    :or {full-frame? false include-frames? false clip-children? true} :as message}]
   (when-let [index (get @state page-id)]
-    (query-index index rect frame-id full-frame? include-frames? ignore-groups? clip-children? reverse?)))
+    (query-index index rect frame-id full-frame? include-frames? ignore-groups? clip-children?)))
 
-(defmethod impl/handler :selection/query-z-index
-  [{:keys [page-id objects ids]}]
-  (when-let [{z-index :z-index} (get @state page-id)]
-    (->> ids (map #(+ (get z-index %)
-                      (get z-index (get-in objects [% :frame-id])))))))

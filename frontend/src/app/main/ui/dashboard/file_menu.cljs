@@ -2,11 +2,10 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.dashboard.file-menu
   (:require
-   [app.common.data :as d]
    [app.main.data.dashboard :as dd]
    [app.main.data.events :as ev]
    [app.main.data.messages :as dm]
@@ -20,7 +19,7 @@
    [app.util.router :as rt]
    [beicon.core :as rx]
    [potok.core :as ptk]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn get-project-name
   [project]
@@ -92,19 +91,30 @@
         on-delete
         (fn [event]
           (dom/stop-propagation event)
-          (if multi?
-            (st/emit! (modal/show
-                       {:type :confirm
-                        :title (tr "modals.delete-file-multi-confirm.title" file-count)
-                        :message (tr "modals.delete-file-multi-confirm.message" file-count)
-                        :accept-label (tr "modals.delete-file-multi-confirm.accept" file-count)
-                        :on-accept delete-fn}))
-            (st/emit! (modal/show
-                       {:type :confirm
-                        :title (tr "modals.delete-file-confirm.title")
-                        :message (tr "modals.delete-file-confirm.message")
-                        :accept-label (tr "modals.delete-file-confirm.accept")
-                        :on-accept delete-fn}))))
+
+          (let [has-shared? (filter #(:is-shared %) files)]
+
+            (if has-shared?
+              (do (st/emit! (dd/fetch-libraries-using-files files))
+                  (st/emit! (modal/show
+                             {:type :delete-shared
+                              :origin :delete
+                              :on-accept delete-fn
+                              :count-libraries (count has-shared?)})))
+
+              (if multi?
+                (st/emit! (modal/show
+                           {:type :confirm
+                            :title (tr "modals.delete-file-multi-confirm.title" file-count)
+                            :message (tr "modals.delete-file-multi-confirm.message" file-count)
+                            :accept-label (tr "modals.delete-file-multi-confirm.accept" file-count)
+                            :on-accept delete-fn}))
+                (st/emit! (modal/show
+                           {:type :confirm
+                            :title (tr "modals.delete-file-confirm.title")
+                            :message (tr "modals.delete-file-confirm.message")
+                            :accept-label (tr "modals.delete-file-confirm.accept")
+                            :on-accept delete-fn}))))))
 
         on-move-success
         (fn [team-id project-id]
@@ -126,10 +136,10 @@
                            {:on-success #(on-move-success team-id project-id)}))))))
 
         add-shared
-        (st/emitf (dd/set-file-shared (assoc file :is-shared true)))
+        #(st/emit! (dd/set-file-shared (assoc file :is-shared true)))
 
         del-shared
-        (st/emitf (dd/set-file-shared (assoc file :is-shared false)))
+        #(st/emit! (dd/set-file-shared (assoc file :is-shared false)))
 
         on-add-shared
         (fn [event]
@@ -148,36 +158,46 @@
         (fn [event]
           (dom/prevent-default event)
           (dom/stop-propagation event)
+          (st/emit! (dd/fetch-libraries-using-files [file]))
           (st/emit! (modal/show
-                     {:type :confirm
-                      :message ""
-                      :title (tr "modals.remove-shared-confirm.message" (:name file))
-                      :hint (tr "modals.remove-shared-confirm.hint")
-                      :cancel-label :omit
-                      :accept-label (tr "modals.remove-shared-confirm.accept")
-                      :on-accept del-shared})))
+                     {:type :delete-shared
+                      :origin :unpublish
+                      :on-accept del-shared
+                      :count-libraries 1})))
 
         on-export-files
+        (fn [event-name binary?]
+          (st/emit! (ptk/event ::ev/event {::ev/name event-name
+                                           ::ev/origin "dashboard"
+                                           :num-files (count files)}))
+
+          (->> (rx/from files)
+               (rx/flat-map
+                (fn [file]
+                  (->> (rp/command :has-file-libraries {:file-id (:id file)})
+                       (rx/map #(assoc file :has-libraries? %)))))
+               (rx/reduce conj [])
+               (rx/subs
+                (fn [files]
+                  (st/emit!
+                   (modal/show
+                    {:type :export
+                     :team-id current-team-id
+                     :has-libraries? (->> files (some :has-libraries?))
+                     :files files
+                     :binary? binary?}))))))
+
+        on-export-binary-files
         (mf/use-callback
          (mf/deps files current-team-id)
          (fn [_]
-           (st/emit! (ptk/event ::ev/event {::ev/name "export-files"
-                                            ::ev/origin "dashboard"
-                                            :num-files (count files)}))
-           (->> (rx/from files)
-                (rx/flat-map
-                 (fn [file]
-                   (->> (rp/query :file-libraries {:file-id (:id file)})
-                        (rx/map #(assoc file :has-libraries? (d/not-empty? %))))))
-                (rx/reduce conj [])
-                (rx/subs
-                 (fn [files]
-                   (st/emit!
-                    (modal/show
-                     {:type :export
-                      :team-id current-team-id
-                      :has-libraries? (->> files (some :has-libraries?))
-                      :files files})))))))
+           (on-export-files "export-binary-files" true)))
+
+        on-export-standard-files
+        (mf/use-callback
+         (mf/deps files current-team-id)
+         (fn [_]
+           (on-export-files "export-standard-files" false)))
 
         ;; NOTE: this is used for detect if component is still mounted
         mounted-ref (mf/use-ref true)]
@@ -210,7 +230,8 @@
                       [[(tr "dashboard.duplicate-multi" file-count) on-duplicate nil "duplicate-multi"]
                        (when (or (seq current-projects) (seq other-teams))
                          [(tr "dashboard.move-to-multi" file-count) nil sub-options "move-to-multi"])
-                       [(tr "dashboard.export-multi" file-count) on-export-files]
+                       [(tr "dashboard.export-binary-multi" file-count) on-export-binary-files]
+                       [(tr "dashboard.export-standard-multi" file-count) on-export-standard-files]
                        [:separator]
                        [(tr "labels.delete-multi-files" file-count) on-delete nil "delete-multi-files"]]
 
@@ -220,9 +241,11 @@
                        (when (or (seq current-projects) (seq other-teams))
                            [(tr "dashboard.move-to") nil sub-options "file-move-to"])
                        (if (:is-shared file)
-                         [(tr "dashboard.remove-shared") on-del-shared nil "file-del-shared"]
+                         [(tr "dashboard.unpublish-shared") on-del-shared nil "file-del-shared"]
                          [(tr "dashboard.add-shared") on-add-shared nil "file-add-shared"])
-                       [(tr "dashboard.export-single") on-export-files nil "file-export"]
+                       [:separator]
+                       [(tr "dashboard.download-binary-file") on-export-binary-files nil "download-binary-file"]
+                       [(tr "dashboard.download-standard-file") on-export-standard-files nil "download-standard-file"]
                        [:separator]
                        [(tr "labels.delete") on-delete nil "file-delete"]])]
 

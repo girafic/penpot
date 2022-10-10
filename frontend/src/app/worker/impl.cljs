@@ -2,14 +2,17 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.worker.impl
   (:require
+   [app.common.logging :as log]
    [app.common.pages.changes :as ch]
-   [app.util.globals :refer [global]]
-   [app.util.object :as obj]
+   [app.common.transit :as t]
+   [app.config :as cf]
    [okulary.core :as l]))
+
+(log/set-level! :info)
 
 (enable-console-print!)
 
@@ -21,21 +24,22 @@
 
 (defmethod handler :default
   [message]
-  (println "Unexpected message:" message))
+  (log/warn :hint "unexpected message" :message message))
 
 (defmethod handler :echo
   [message]
   message)
 
 (defmethod handler :initialize-indices
-  [{:keys [data] :as message}]
+  [{:keys [file-raw] :as message}]
 
-  (reset! state data)
-
-  (handler (-> message
-               (assoc :cmd :selection/initialize-index)))
-  (handler (-> message
-               (assoc :cmd :snaps/initialize-index))))
+  (let [data (-> (t/decode-str file-raw) :data)
+        message (assoc message :data data)]
+    (reset! state data)
+    (handler (-> message
+                 (assoc :cmd :selection/initialize-index)))
+    (handler (-> message
+                 (assoc :cmd :snaps/initialize-index)))))
 
 (defmethod handler :update-page-indices
   [{:keys [page-id changes] :as message}]
@@ -53,6 +57,8 @@
                    (assoc :cmd :snaps/update-index))))))
 
 (defmethod handler :configure
-  [{:keys [params]}]
-  (doseq [[param-key param-value] params]
-    (obj/set! global param-key param-value)))
+  [{:keys [key val]}]
+  (log/info :hint "configure worker" :key key :val val)
+  (case key
+    :public-uri
+    (reset! cf/public-uri val)))

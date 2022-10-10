@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.time
   (:require
@@ -11,15 +11,16 @@
    [cuerdas.core :as str]
    [fipp.ednize :as fez])
   (:import
+   java.nio.file.attribute.FileTime
    java.time.Duration
    java.time.Instant
    java.time.OffsetDateTime
    java.time.ZoneId
    java.time.ZonedDateTime
    java.time.format.DateTimeFormatter
+   java.time.temporal.ChronoUnit
    java.time.temporal.TemporalAmount
    java.time.temporal.TemporalUnit
-   java.time.temporal.ChronoUnit
    java.util.Date
    org.apache.logging.log4j.core.util.CronExpression))
 
@@ -27,16 +28,29 @@
 ;; Instant & Duration
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn temporal-unit
+  [o]
+  (if (instance? TemporalUnit o)
+    o
+    (case o
+      :nanos   ChronoUnit/NANOS
+      :millis  ChronoUnit/MILLIS
+      :micros  ChronoUnit/MICROS
+      :seconds ChronoUnit/SECONDS
+      :minutes ChronoUnit/MINUTES
+      :hours   ChronoUnit/HOURS
+      :days    ChronoUnit/DAYS
+      :weeks   ChronoUnit/WEEKS
+      :months   ChronoUnit/MONTHS)))
+
 ;; --- DURATION
 
 (defn- obj->duration
-  [{:keys [days minutes seconds hours nanos millis]}]
-  (cond-> (Duration/ofMillis (if (int? millis) ^long millis 0))
-    (int? days)    (.plusDays ^long days)
-    (int? hours)   (.plusHours ^long hours)
-    (int? minutes) (.plusMinutes ^long minutes)
-    (int? seconds) (.plusSeconds ^long seconds)
-    (int? nanos)   (.plusNanos ^long nanos)))
+  [params]
+  (reduce-kv (fn [o k v]
+               (.plus ^Duration o ^long v ^TemporalUnit (temporal-unit k)))
+             (Duration/ofMillis 0)
+             params))
 
 (defn duration?
   [v]
@@ -57,20 +71,17 @@
     :else
     (obj->duration ms-or-obj)))
 
+(defn ->seconds
+  [d]
+  (-> d inst-ms (/ 1000) int))
+
 (defn diff
   [t1 t2]
   (Duration/between t1 t2))
 
 (defn truncate
   [o unit]
-  (let [unit (if (instance? TemporalUnit unit)
-               unit
-               (case unit
-                 :nanos ChronoUnit/NANOS
-                 :millis ChronoUnit/MILLIS
-                 :micros ChronoUnit/MICROS
-                 :seconds ChronoUnit/SECONDS
-                 :minutes ChronoUnit/MINUTES))]
+  (let [unit (temporal-unit unit)]
     (cond
       (instance? Instant o)
       (.truncatedTo ^Instant o ^TemporalUnit unit)
@@ -103,7 +114,11 @@
   (inst-ms* [v] (.toMillis ^Duration v))
 
   OffsetDateTime
-  (inst-ms* [v] (.toEpochMilli (.toInstant ^OffsetDateTime v))))
+  (inst-ms* [v] (.toEpochMilli (.toInstant ^OffsetDateTime v)))
+
+  FileTime
+  (inst-ms* [v] (.toMillis ^FileTime v)))
+
 
 (defmethod print-method Duration
   [mv ^java.io.Writer writer]
@@ -116,6 +131,9 @@
   Duration
   (-edn [o] (pr-str o)))
 
+(defn format-duration
+  [o]
+  (str/lower (subs (str o) 2)))
 
 ;; --- INSTANT
 
@@ -156,11 +174,11 @@
 
 (defn in-future
   [v]
-  (plus (now) (duration v)))
+  (plus (now) v))
 
 (defn in-past
   [v]
-  (minus (now) (duration v)))
+  (minus (now) v))
 
 (defn instant->zoned-date-time
   [v]
@@ -312,3 +330,13 @@
   CronExpression
   (-edn [o] (pr-str o)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Measurement Helpers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn tpoint
+  "Create a measurement checkpoint for time measurement of potentially
+  asynchronous flow."
+  []
+  (let [p1 (System/nanoTime)]
+    #(duration {:nanos (- (System/nanoTime) p1)})))

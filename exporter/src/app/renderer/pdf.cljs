@@ -2,81 +2,60 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.renderer.pdf
   "A pdf renderer."
   (:require
    [app.browser :as bw]
-   [app.common.exceptions :as ex :include-macros true]
+   [app.common.data.macros :as dm]
    [app.common.logging :as l]
-   [app.common.spec :as us]
+   [app.common.uri :as u]
    [app.config :as cf]
-   [cljs.spec.alpha :as s]
-   [lambdaisland.uri :as u]
+   [app.util.mime :as mime]
+   [app.util.shell :as sh]
    [promesa.core :as p]))
 
-(defn create-cookie
-  [uri token]
-  (let [domain (str (:host uri)
-                (when (:port uri)
-                  (str ":" (:port uri))))]
-    {:domain domain
-     :key "auth-token"
-     :value token}))
-
-(defn pdf-from-object
-  [{:keys [file-id page-id object-id token scale type save-path]}]
-  (letfn [(handle [page]
-            (let [path   (str "/render-object/" file-id "/" page-id "/" object-id)
-                  uri    (-> (u/uri (cf/get :public-uri))
-                             (assoc :path "/")
-                             (assoc :query "essential=t")
-                             (assoc :fragment path))
-
-                  cookie (create-cookie uri token)]
-              (pdf-from page (str uri) cookie)))
-
-          (pdf-from [page uri cookie]
-            (l/info :uri uri)
-            (p/let [options {:cookie cookie}]
-              (bw/configure-page! page options)
-              (bw/navigate! page uri)
-              (bw/wait-for page "#screenshot")
-              ;; taking png screenshot before pdf, helps to make the
-              ;; pdf rendering works as expected.
-              (p/let [dom (bw/select page "#screenshot")]
-                (bw/screenshot dom {:full-page? true}))
-
-              (if save-path
-                (bw/pdf page {:save-path save-path})
-                (bw/pdf page))))]
-
-    (bw/exec! handle)))
-
-(s/def ::name ::us/string)
-(s/def ::suffix ::us/string)
-(s/def ::page-id ::us/uuid)
-(s/def ::file-id ::us/uuid)
-(s/def ::object-id ::us/uuid)
-(s/def ::scale ::us/number)
-(s/def ::token ::us/string)
-(s/def ::filename ::us/string)
-(s/def ::save-path ::us/string)
-
-(s/def ::render-params
-  (s/keys :req-un [::name ::suffix ::object-id ::page-id ::scale ::token ::file-id]
-          :opt-un [::filename ::save-path]))
-
 (defn render
-  [params]
-  (us/assert ::render-params params)
-  (p/let [content (pdf-from-object params)]
-    {:content content
-     :filename (or (:filename params)
-                   (str (:name params)
-                        (:suffix params "")
-                        ".pdf"))
-     :length (alength content)
-     :mime-type "application/pdf"}))
+  [{:keys [file-id page-id token scale type objects] :as params} on-object]
+  (letfn [(prepare-options [uri]
+            #js {:screen #js {:width bw/default-viewport-width
+                              :height bw/default-viewport-height}
+                 :viewport #js {:width bw/default-viewport-width
+                                :height bw/default-viewport-height}
+                 :locale "en-US"
+                 :storageState #js {:cookies (bw/create-cookies uri {:token token})}
+                 :deviceScaleFactor scale
+                 :userAgent bw/default-user-agent})
 
+          (prepare-uri [base-uri object-id]
+            (let [params {:file-id file-id
+                          :page-id page-id
+                          :object-id object-id
+                          :route "objects"}]
+              (-> base-uri
+                  (assoc :path "/render.html")
+                  (assoc :query (u/map->query-string params)))))
+
+          (render-object [page base-uri {:keys [id] :as object}]
+            (p/let [uri  (prepare-uri base-uri id)
+                    path (sh/tempfile :prefix "penpot.tmp.render.pdf." :suffix (mime/get-extension type))]
+              (l/info :uri uri)
+              (bw/nav! page uri)
+              (p/let [dom (bw/select page (dm/str "#screenshot-" id))]
+                (bw/wait-for dom)
+                (bw/screenshot dom {:full-page? true})
+                (bw/sleep page 2000) ; the good old fix with sleep
+                (bw/pdf page {:path path})
+                path)))
+
+          (render [base-uri page]
+            (p/loop [objects (seq objects)]
+              (when-let [object (first objects)]
+                (p/let [path (render-object page base-uri object)]
+                  (on-object (assoc object :path path))
+                  (p/recur (rest objects))))))]
+
+    (let [base-uri (cf/get :public-uri)]
+      (bw/exec! (prepare-options base-uri)
+                (partial render base-uri)))))

@@ -2,18 +2,19 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.worker.export
   (:require
    [app.common.data :as d]
+   [app.common.media :as cm]
    [app.common.text :as ct]
    [app.config :as cfg]
    [app.main.render :as r]
    [app.main.repo :as rp]
-   [app.util.dom :as dom]
    [app.util.http :as http]
    [app.util.json :as json]
+   [app.util.webapi :as wapi]
    [app.util.zip :as uz]
    [app.worker.impl :as impl]
    [beicon.core :as rx]
@@ -39,17 +40,18 @@
                                  (reduce format-page {}))]
               (-> manifest
                   (assoc (str (:id file))
-                         {:name            name
-                          :shared          is-shared
-                          :pages           pages
-                          :pagesIndex      index
-                          :version         current-version
-                          :libraries       (->> (:libraries file) (into #{}) (mapv str))
-                          :exportType      (d/name export-type)
-                          :hasComponents   (d/not-empty? (get-in file [:data :components]))
-                          :hasMedia        (d/not-empty? (get-in file [:data :media]))
-                          :hasColors       (d/not-empty? (get-in file [:data :colors]))
-                          :hasTypographies (d/not-empty? (get-in file [:data :typographies]))}))))]
+                         {:name                 name
+                          :shared               is-shared
+                          :pages                pages
+                          :pagesIndex           index
+                          :version              current-version
+                          :libraries            (->> (:libraries file) (into #{}) (mapv str))
+                          :exportType           (d/name export-type)
+                          :hasComponents        (d/not-empty? (get-in file [:data :components]))
+                          :hasDeletedComponents (d/not-empty? (get-in file [:data :deleted-components]))
+                          :hasMedia             (d/not-empty? (get-in file [:data :media]))
+                          :hasColors            (d/not-empty? (get-in file [:data :colors]))
+                          :hasTypographies      (d/not-empty? (get-in file [:data :typographies]))}))))]
     (let [manifest {:teamId (str team-id)
                     :fileId (str file-id)
                     :files (->> (vals files) (reduce format-file {}))}]
@@ -135,7 +137,7 @@
         (rx/map #(assoc % :file-id file-id))
         (rx/flat-map
          (fn [media]
-           (let [file-path (str file-id "/media/" (:id media) "." (dom/mtype->extension (:mtype media)))]
+           (let [file-path (str/concat file-id "/media/" (:id media) (cm/mtype->extension (:mtype media)))]
              (->> (http/send!
                    {:uri (cfg/resolve-file-media media)
                     :response-type :blob
@@ -145,11 +147,16 @@
 
 (defn parse-library-components
   [file]
-  (->> (r/render-components (:data file))
+  (->> (r/render-components (:data file) :components)
        (rx/map #(vector (str (:id file) "/components.svg") %))))
 
-(defn fetch-file-with-libraries [file-id]
-  (->> (rx/zip (rp/query :file {:id file-id})
+(defn parse-deleted-components
+  [file]
+  (->> (r/render-components (:data file) :deleted-components)
+       (rx/map #(vector (str (:id file) "/deleted-components.svg") %))))
+
+(defn fetch-file-with-libraries [file-id components-v2]
+  (->> (rx/zip (rp/query :file {:id file-id :components-v2 components-v2})
                (rp/query :file-libraries {:file-id file-id}))
        (rx/map
         (fn [[file file-libraries]]
@@ -350,7 +357,7 @@
                 (update file-id dissoc :libraries))))
 
 (defn collect-files
-  [file-id export-type]
+  [file-id export-type components-v2]
 
   (letfn [(fetch-dependencies [[files pending]]
             (if (empty? pending)
@@ -364,7 +371,7 @@
                   ;; The file is already in the result
                   (rx/of [files pending])
 
-                  (->> (fetch-file-with-libraries next)
+                  (->> (fetch-file-with-libraries next components-v2)
                        (rx/map
                         (fn [file]
                           [(-> files
@@ -380,9 +387,9 @@
            (rx/map #(process-export file-id export-type %))))))
 
 (defn export-file
-  [team-id file-id export-type]
+  [team-id file-id export-type components-v2]
 
-  (let [files-stream (->> (collect-files file-id export-type)
+  (let [files-stream (->> (collect-files file-id export-type components-v2)
                           (rx/share))
 
         manifest-stream
@@ -425,6 +432,12 @@
              (rx/filter #(d/not-empty? (get-in % [:data :components])))
              (rx/flat-map parse-library-components))
 
+        deleted-components-stream
+        (->> files-stream
+             (rx/flat-map vals)
+             (rx/filter #(d/not-empty? (get-in % [:data :deleted-components])))
+             (rx/flat-map parse-deleted-components))
+
         pages-stream
         (->> render-stream
              (rx/map collect-page))]
@@ -440,6 +453,7 @@
            manifest-stream
            pages-stream
            components-stream
+           deleted-components-stream
            media-stream
            colors-stream
            typographies-stream)
@@ -449,13 +463,33 @@
                          (->> (uz/compress-files data)
                               (rx/map #(vector (get files file-id) %)))))))))
 
-(defmethod impl/handler :export-file
-  [{:keys [team-id files export-type] :as message}]
+(defmethod impl/handler :export-binary-file
+  [{:keys [files export-type] :as message}]
+  (->> (rx/from files)
+       (rx/mapcat
+        (fn [file]
+          (->> (rp/command! :export-binfile {:file-id (:id file)
+                                             :include-libraries? (= export-type :all)
+                                             :embed-assets? (= export-type :merge)})
+               (rx/map #(hash-map :type :finish
+                                  :file-id (:id file)
+                                  :filename (:name file)
+                                  :mtype "application/penpot"
+                                  :description "Penpot export (*.penpot)"
+                                  :uri (wapi/create-uri (wapi/create-blob %))))
+               (rx/catch
+                (fn [err]
+                  (rx/of {:type :error
+                          :error (str err)
+                          :file-id (:id file)}))))))))
+
+(defmethod impl/handler :export-standard-file
+  [{:keys [team-id files export-type components-v2] :as message}]
 
   (->> (rx/from files)
        (rx/mapcat
         (fn [file]
-          (->> (export-file team-id file export-type)
+          (->> (export-file team-id (:id file) export-type components-v2)
                (rx/map
                 (fn [value]
                   (if (contains? value :type)
@@ -464,11 +498,11 @@
                       {:type :finish
                        :file-id (:id file)
                        :filename (:name file)
-                       :mtype "application/penpot"
-                       :description "Penpot export (*.penpot)"
-                       :uri (dom/create-uri export-blob)}))))
+                       :mtype "application/zip"
+                       :description "Penpot export (*.zip)"
+                       :uri (wapi/create-uri export-blob)}))))
                (rx/catch
                    (fn [err]
                      (rx/of {:type :error
                              :error (str err)
-                             :file-id file}))))))))
+                             :file-id (:id file)}))))))))

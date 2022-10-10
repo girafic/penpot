@@ -170,10 +170,6 @@ msgstr "Velg drakt"
 msgid "dashboard.show-all-files"
 msgstr "Vis alle filer"
 
-#: src/app/main/ui/dashboard/sidebar.cljs
-msgid "dashboard.switch-team"
-msgstr "Bytt lag"
-
 #: src/app/main/ui/dashboard/team.cljs
 msgid "dashboard.team-info"
 msgstr "Laginfo"
@@ -234,14 +230,6 @@ msgstr "Ta del i sludringen"
 #: src/app/main/ui/settings/feedback.cljs
 msgid "feedback.description"
 msgstr "Beskrivelse"
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-go-to"
-msgstr "Gå til diskusjoner"
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-title"
-msgstr "Lagdiskusjoner"
 
 #: src/app/main/ui/settings/feedback.cljs
 msgid "feedback.subject"
@@ -688,10 +676,6 @@ msgstr "Fest til rutenett"
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.show-grid"
 msgstr "Vis rutenett"
-
-#: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.show-layers"
-msgstr "Vis lag"
 
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.show-rules"

@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
-"PO-Revision-Date: 2021-05-17 21:32+0000\n"
-"Last-Translator: George Lemon <george@getvasco.com>\n"
+"PO-Revision-Date: 2022-08-18 16:16+0000\n"
+"Last-Translator: andy <andres.gonzalez79@gmail.com>\n"
 "Language-Team: Romanian "
 "<https://hosted.weblate.org/projects/penpot/frontend/ro/>\n"
 "Language: ro\n"
@@ -10,7 +10,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=n==1 ? 0 : (n==0 || (n%100 > 0 && n%100 < "
 "20)) ? 1 : 2;\n"
-"X-Generator: Weblate 4.7-dev\n"
+"X-Generator: Weblate 4.14-dev\n"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.already-have-account"
@@ -61,32 +61,28 @@ msgid "auth.login-submit"
 msgstr "Intră în cont"
 
 #: src/app/main/ui/auth/login.cljs
-msgid "auth.login-subtitle"
-msgstr "Introduceți detaliile dvs. mai jos"
-
-#: src/app/main/ui/auth/login.cljs
 msgid "auth.login-title"
 msgstr "Mă bucur să te văd din nou!"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-github-submit"
-msgstr "Conectează-te cu Github"
+msgstr "GitHub"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-gitlab-submit"
-msgstr "Conectează-te cu Gitlab"
+msgstr "GitLab"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-google-submit"
-msgstr "Conectează-te cu Google"
+msgstr "Google"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-ldap-submit"
-msgstr "Conectează-te cu LDAP"
+msgstr "LDAP"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-oidc-submit"
-msgstr "Conectează-te cu OpenID (SSO)"
+msgstr "OpenID"
 
 #: src/app/main/ui/auth/recovery.cljs
 msgid "auth.new-password"
@@ -182,7 +178,7 @@ msgstr "(copiază)"
 
 #: src/app/main/ui/dashboard/sidebar.cljs
 msgid "dashboard.create-new-team"
-msgstr "+ Creează o nouă echipă"
+msgstr "Creează o nouă echipă"
 
 #: src/app/main/ui/dashboard/sidebar.cljs
 msgid "dashboard.default-team-name"
@@ -368,10 +364,6 @@ msgstr "Fișerele au fost mutate cu succes"
 msgid "dashboard.success-move-project"
 msgstr "Proiectul a fost mutat cu succes"
 
-#: src/app/main/ui/dashboard/sidebar.cljs
-msgid "dashboard.switch-team"
-msgstr "Schimbă echipa"
-
 #: src/app/main/ui/dashboard/team.cljs
 msgid "dashboard.team-info"
 msgstr "Informațiile echipei"
@@ -473,7 +465,7 @@ msgstr "Formatul imaginii nu este acceptat (poate fi svg, jpg sau png)."
 
 #: src/app/main/data/workspace/persistence.cljs
 msgid "errors.media-too-large"
-msgstr "Imaginea este prea mare pentru a fi inserată (trebuie să fie sub 5mb)."
+msgstr "Imaginea este prea mare pentru a fi inserată."
 
 #: src/app/main/data/workspace/persistence.cljs, src/app/main/data/media.cljs
 msgid "errors.media-type-mismatch"
@@ -513,10 +505,6 @@ msgstr "Înregistrarea este dezactivată în prezent."
 msgid "errors.terms-privacy-agreement-invalid"
 msgstr "Trebuie să acceptați termenii serviciului și politica de confidențialitate."
 
-#: src/app/main/ui/auth/verify_token.cljs
-msgid "errors.token-expired"
-msgstr "Codul este expirat"
-
 #: src/app/main/data/media.cljs, src/app/main/ui/workspace/sidebar/options/menus/exports.cljs, src/app/main/ui/handoff/exports.cljs
 msgid "errors.unexpected-error"
 msgstr "A apărut o eroare neașteptată."
@@ -544,24 +532,6 @@ msgstr "Te simți sociabil? Hai să vorbim pe Gitter"
 #: src/app/main/ui/settings/feedback.cljs
 msgid "feedback.description"
 msgstr "Descriere"
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-go-to"
-msgstr "Du-te la discuții"
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-subtitle1"
-msgstr "Alătură-te forumului de comunicare al echipei Penpot."
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-subtitle2"
-msgstr ""
-"Poți pune întrebări, iei parte la discuții deschise și poți contribui la "
-"dezvoltarea proiectului."
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-title"
-msgstr "Discuțiile echipei"
 
 #: src/app/main/ui/settings/feedback.cljs
 msgid "feedback.subject"
@@ -1256,11 +1226,7 @@ msgstr "Elimină un membru al echipei"
 msgid "modals.invite-member-confirm.accept"
 msgstr "Trimite invitație"
 
-#: src/app/main/ui/dashboard/team.cljs
-msgid "modals.invite-member.title"
-msgstr "Invită o persoană în echipă"
-
-msgid "modals.leave-and-reassign.forbiden"
+msgid "modals.leave-and-reassign.forbidden"
 msgstr ""
 "Nu puteţi părăsi echipa dacă nu există un alt membru care să devină "
 "administrator. Aţi putea şterge echipa."
@@ -1664,16 +1630,8 @@ msgid "workspace.header.menu.enable-snap-grid"
 msgstr "Aliniază per grilă"
 
 #: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.hide-assets"
-msgstr "Ascunde obiectele"
-
-#: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.hide-grid"
 msgstr "Ascunde grila de ghidaj"
-
-#: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.hide-layers"
-msgstr "Ascunde layere"
 
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.hide-palette"
@@ -1688,16 +1646,8 @@ msgid "workspace.header.menu.select-all"
 msgstr "Selectează tot"
 
 #: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.show-assets"
-msgstr "Afişează asset-uri"
-
-#: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.show-grid"
 msgstr "Afişează sistemul grid"
-
-#: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.show-layers"
-msgstr "Afişează layere"
 
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.show-palette"
@@ -1960,10 +1910,6 @@ msgstr "Rânduri"
 #: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs
 msgid "workspace.options.grid.square"
 msgstr "Pătrat"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs
-msgid "workspace.options.grid.title"
-msgstr "Grilă & Layout"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/fill.cljs
 msgid "workspace.options.group-fill"

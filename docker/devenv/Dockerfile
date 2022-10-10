@@ -1,12 +1,12 @@
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 LABEL maintainer="Andrey Antukh <niwi@niwi.nz>"
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-ENV NODE_VERSION=v16.13.1 \
-    CLOJURE_VERSION=1.10.3.1058 \
-    CLJKONDO_VERSION=2021.12.19 \
-    BABASHKA_VERSION=0.7.3 \
+ENV NODE_VERSION=v16.17.0 \
+    CLOJURE_VERSION=1.11.1.1165 \
+    CLJKONDO_VERSION=2022.09.08 \
+    BABASHKA_VERSION=0.9.162 \
     LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8
 
@@ -30,6 +30,8 @@ RUN set -ex; \
         rsync \
         fakeroot \
         netcat \
+        file \
+        less \
     ; \
     echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen; \
     locale-gen; \
@@ -43,7 +45,6 @@ RUN set -ex; \
 RUN set -ex; \
     apt-get -qq update; \
     apt-get -qqy install --no-install-recommends \
-        python \
         build-essential \
         imagemagick \
         ghostscript \
@@ -57,6 +58,7 @@ RUN set -ex; \
         woff-tools \
         woff2 \
         fontforge \
+        openssh-client \
     ; \
     rm -rf /var/lib/apt/lists/*;
 
@@ -102,22 +104,30 @@ RUN set -ex; \
     ; \
     rm -rf /var/lib/apt/lists/*;
 
-RUN set -x; \
-    apt-get -qq update; \
-    curl -LfsSo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb; \
-    dpkg -i /tmp/chrome.deb; \
-    apt-get -fy install; \
-    rm -rf /var/lib/apt/lists/*; \
-    rm -rf /tmp/chrome.deb;
-
-RUN set -ex; \
-    curl -LfsSo /tmp/openjdk.tar.gz https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.1%2B12/OpenJDK17U-jdk_x64_linux_hotspot_17.0.1_12.tar.gz; \
-    mkdir -p /usr/lib/jvm/openjdk17; \
-    cd /usr/lib/jvm/openjdk17; \
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "${ARCH}" in \
+       aarch64|arm64) \
+         ESUM='c640fc5e5710dba3f92099a791be50fab54f91cf2c3838cb536ded27ecc562a6'; \
+         BINARY_URL='https://cdn.azul.com/zulu/bin/zulu19.28.81-ca-jdk19.0.0-linux_aarch64.tar.gz'; \
+         ;; \
+       amd64|x86_64) \
+         ESUM='6813da339124261092daab369a1c60dea5f27f4ba9608a16517191d30511a087'; \
+         BINARY_URL='https://cdn.azul.com/zulu/bin/zulu19.28.81-ca-jdk19.0.0-linux_x64.tar.gz'; \
+         ;; \
+       *) \
+         echo "Unsupported arch: ${ARCH}"; \
+         exit 1; \
+         ;; \
+    esac; \
+    curl -LfsSo /tmp/openjdk.tar.gz ${BINARY_URL}; \
+    echo "${ESUM} */tmp/openjdk.tar.gz" | sha256sum -c -; \
+    mkdir -p /usr/lib/jvm/openjdk; \
+    cd /usr/lib/jvm/openjdk; \
     tar -xf /tmp/openjdk.tar.gz --strip-components=1; \
     rm -rf /tmp/openjdk.tar.gz;
 
-ENV PATH="/usr/lib/jvm/openjdk17/bin:/usr/local/nodejs/bin:$PATH" JAVA_HOME=/usr/lib/jvm/openjdk17
+ENV PATH="/usr/lib/jvm/openjdk/bin:/usr/local/nodejs/bin:$PATH" JAVA_HOME=/usr/lib/jvm/openjdk
 
 RUN set -ex; \
     curl -LfsSo /tmp/clojure.sh https://download.clojure.org/install/linux-install-$CLOJURE_VERSION.sh; \
@@ -127,22 +137,34 @@ RUN set -ex; \
 
 RUN set -ex; \
     curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -; \
-    echo "deb http://apt.postgresql.org/pub/repos/apt focal-pgdg main" >> /etc/apt/sources.list.d/postgresql.list; \
+    echo "deb http://apt.postgresql.org/pub/repos/apt jammy-pgdg main" >> /etc/apt/sources.list.d/postgresql.list; \
     apt-get -qq update; \
-    apt-get -qqy install postgresql-client-13; \
+    apt-get -qqy install postgresql-client-14; \
     rm -rf /var/lib/apt/lists/*;
 
-RUN set -ex; \
-    curl -LfsSo /tmp/nodejs.tar.xz https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-linux-x64.tar.xz; \
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "${ARCH}" in \
+       aarch64|arm64) \
+         BINARY_URL="https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-arm64.tar.xz"; \
+         ;; \
+       amd64|x86_64) \
+         BINARY_URL="https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"; \
+         ;; \
+       *) \
+         echo "Unsupported arch: ${ARCH}"; \
+         exit 1; \
+         ;; \
+    esac; \
+    curl -LfsSo /tmp/nodejs.tar.xz ${BINARY_URL}; \
     mkdir -p /usr/local/nodejs; \
     cd /usr/local/nodejs; \
     tar -xf /tmp/nodejs.tar.xz --strip-components=1; \
     chown -R root /usr/local/nodejs; \
-    PATH="$PATH:/usr/local/nodejs/bin"; \
     /usr/local/nodejs/bin/npm install -g yarn; \
-    /usr/local/nodejs/bin/npm install -g svgo; \
     rm -rf /tmp/nodejs.tar.xz;
 
+# TODO: waiting for aarch64 build
 # Install clj-kondo
 RUN set -ex; \
     curl -LfsSo /tmp/clj-kondo.zip https://github.com/borkdude/clj-kondo/releases/download/v$CLJKONDO_VERSION/clj-kondo-$CLJKONDO_VERSION-linux-amd64.zip; \
@@ -150,13 +172,45 @@ RUN set -ex; \
     unzip /tmp/clj-kondo.zip; \
     rm /tmp/clj-kondo.zip;
 
-# Install babashka
 RUN set -ex; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "${ARCH}" in \
+       aarch64|arm64) \
+         BINARY_URL="https://github.com/babashka/babashka/releases/download/v$BABASHKA_VERSION/babashka-$BABASHKA_VERSION-linux-aarch64.tar.gz"; \
+         ;; \
+       amd64|x86_64) \
+         BINARY_URL="https://github.com/babashka/babashka/releases/download/v$BABASHKA_VERSION/babashka-$BABASHKA_VERSION-linux-amd64.tar.gz"; \
+         ;; \
+       *) \
+         echo "Unsupported arch: ${ARCH}"; \
+         exit 1; \
+         ;; \
+    esac; \
     cd /tmp; \
-    curl -LfsSo /tmp/babashka.tar.gz https://github.com/babashka/babashka/releases/download/v$BABASHKA_VERSION/babashka-$BABASHKA_VERSION-linux-amd64.tar.gz; \
+    curl -LfsSo /tmp/babashka.tar.gz ${BINARY_URL}; \
     cd /usr/local/bin; \
     tar -xf /tmp/babashka.tar.gz; \
     rm -rf /tmp/babashka.tar.gz;
+
+
+# Install minio client
+RUN set -ex; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "${ARCH}" in \
+       aarch64|arm64) \
+         BINARY_URL="https://dl.min.io/client/mc/release/linux-arm64/mc"; \
+         ;; \
+       amd64|x86_64) \
+         BINARY_URL="https://dl.min.io/client/mc/release/linux-amd64/mc"; \
+         ;; \
+       *) \
+         echo "Unsupported arch: ${ARCH}"; \
+         exit 1; \
+         ;; \
+    esac; \
+    wget -O /tmp/mc ${BINARY_URL}; \
+    mv /tmp/mc /usr/local/bin/; \
+    chmod +x /usr/local/bin/mc;
 
 WORKDIR /home
 

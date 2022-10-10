@@ -2,14 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.components.select
   (:require
+   [app.common.data.macros :as dm]
    [app.common.uuid :as uuid]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.icons :as i]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc select [{:keys [default-value options class on-change]}]
   (let [state (mf/use-state {:id (uuid/next)
@@ -39,10 +40,10 @@
       [:ul.custom-select-dropdown
        (for [[index item] (map-indexed vector options)]
          (cond
-           (= :separator item) [:hr {:key (str (:id @state) "-" index)}]
+           (= :separator item) [:hr {:key (dm/str (:id @state) "-" index)}]
            :else (let [[value label] (as-key-value item)]
                    [:li.checked-element
-                    {:key (str (:id @state) "-" index)
+                    {:key (dm/str (:id @state) "-" index)
                      :class (when (= value (-> @state :current-value)) "is-selected")
                      :on-click (select-item value)}
                     [:span.check-icon i/tick]

@@ -9,17 +9,28 @@
   (:require
    [app.common.data :as d]
    [app.common.geom.matrix :as gmt]
+   [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.pages.changes :as ch]
-   [app.common.pages.init :as init]
+   [app.common.pages.changes-spec :as pcs]
    [app.common.spec :as us]
-   [app.common.spec.change :as spec.change]
+   [app.common.types.components-list :as ctkl]
+   [app.common.types.container :as ctn]
+   [app.common.types.file :as ctf]
+   [app.common.types.page :as ctp]
+   [app.common.types.pages-list :as ctpl]
+   [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [cuerdas.core :as str]))
 
 (def root-frame uuid/zero)
 (def conjv (fnil conj []))
 (def conjs (fnil conj #{}))
+
+(defn- raise
+  [err-str]
+  #?(:clj (throw (Exception. err-str))
+     :cljs (throw (js/Error. err-str))))
 
 (defn- commit-change
   ([file change]
@@ -39,9 +50,9 @@
                          :frame-id (:current-frame-id file)))]
 
      (when fail-on-spec?
-       (us/verify ::spec.change/change change))
+       (us/verify ::pcs/change change))
 
-     (let [valid? (us/valid? ::spec.change/change change)]
+     (let [valid? (us/valid? ::pcs/change change)]
        #?(:cljs
           (when-not valid? (.warn js/console "Invalid shape" (clj->js change))))
 
@@ -75,10 +86,12 @@
 
     (commit-change file change {:add-container? true :fail-on-spec? fail-on-spec?})))
 
-(defn setup-rect-selrect [obj]
-  (let [rect      (select-keys obj [:x :y :width :height])
+(defn setup-rect-selrect [{:keys [x y width height transform] :as obj}]
+  (when-not (d/num? x y width height)
+    (raise "Coords not valid for object"))
+
+  (let [rect      (gsh/make-rect x y width height)
         center    (gsh/center-rect rect)
-        transform (:transform obj (gmt/matrix))
         selrect   (gsh/rect->selrect rect)
 
         points (-> (gsh/rect->points rect)
@@ -89,17 +102,13 @@
         (assoc :points points))))
 
 (defn- setup-path-selrect
-  [obj]
-  (let [content (:content obj)
-        center  (:center obj)
+  [{:keys [content center transform transform-inverse] :as obj}]
 
-        transform-inverse
-        (->> (:transform-inverse obj (gmt/matrix))
-             (gmt/transform-in center))
+  (when (or (empty? content) (nil? center))
+    (raise "Path not valid"))
 
-        transform
-        (->> (:transform obj (gmt/matrix))
-             (gmt/transform-in center))
+  (let [transform (gmt/transform-in center transform)
+        transform-inverse (gmt/transform-in center transform-inverse)
 
         content' (gsh/transform-content content transform-inverse)
         selrect  (gsh/content->selrect content')
@@ -164,7 +173,7 @@
   ([id name]
    {:id id
     :name name
-    :data (-> init/empty-file-data
+    :data (-> ctf/empty-file-data
               (assoc :id id))
 
     ;; We keep the changes so we can send them to the backend
@@ -175,8 +184,7 @@
 
   (assert (nil? (:current-component-id file)))
   (let [page-id (or (:id data) (uuid/next))
-        page (-> init/empty-page-data
-                 (assoc :id page-id)
+        page (-> (ctp/make-empty-page page-id "Page-1")
                  (d/deep-merge data))]
     (-> file
         (commit-change
@@ -205,7 +213,7 @@
 
 (defn add-artboard [file data]
   (assert (nil? (:current-component-id file)))
-  (let [obj (-> (init/make-minimal-shape :frame)
+  (let [obj (-> (cts/make-minimal-shape :frame)
                 (merge data)
                 (check-name file :frame)
                 (setup-selrect)
@@ -219,15 +227,19 @@
 
 (defn close-artboard [file]
   (assert (nil? (:current-component-id file)))
-  (-> file
-      (assoc :current-frame-id root-frame)
-      (update :parent-stack pop)))
+
+  (let [parent-id (-> file :parent-id peek)
+        parent (lookup-shape file parent-id)
+        current-frame-id (or (:frame-id parent) root-frame)]
+    (-> file
+        (assoc :current-frame-id current-frame-id)
+        (update :parent-stack pop))))
 
 (defn add-group [file data]
   (let [frame-id (:current-frame-id file)
-        selrect init/empty-selrect
+        selrect cts/empty-selrect
         name (:name data)
-        obj (-> (init/make-minimal-group frame-id selrect name)
+        obj (-> (cts/make-minimal-group frame-id selrect name)
                 (merge data)
                 (check-name file :group)
                 (d/without-nils))]
@@ -310,27 +322,36 @@
         children (->> bool :shapes (mapv #(lookup-shape file %)))
 
         file
-        (let [objects (lookup-objects file)
-              bool' (gsh/update-bool-selrect bool children objects)]
+        (cond
+          (empty? children)
           (commit-change
            file
-           {:type :mod-obj
-            :id bool-id
-            :operations
-            [{:type :set :attr :selrect :val (:selrect bool')}
-             {:type :set :attr :points  :val (:points bool')}
-             {:type :set :attr :x       :val (-> bool' :selrect :x)}
-             {:type :set :attr :y       :val (-> bool' :selrect :y)}
-             {:type :set :attr :width   :val (-> bool' :selrect :width)}
-             {:type :set :attr :height  :val (-> bool' :selrect :height)}]}
+           {:type :del-obj
+            :id bool-id}
+           {:add-container? true})
 
-           {:add-container? true}))]
+          :else
+          (let [objects (lookup-objects file)
+                bool' (gsh/update-bool-selrect bool children objects)]
+            (commit-change
+             file
+             {:type :mod-obj
+              :id bool-id
+              :operations
+              [{:type :set :attr :selrect :val (:selrect bool')}
+               {:type :set :attr :points  :val (:points bool')}
+               {:type :set :attr :x       :val (-> bool' :selrect :x)}
+               {:type :set :attr :y       :val (-> bool' :selrect :y)}
+               {:type :set :attr :width   :val (-> bool' :selrect :width)}
+               {:type :set :attr :height  :val (-> bool' :selrect :height)}]}
+
+             {:add-container? true})))]
 
     (-> file
         (update :parent-stack pop))))
 
 (defn create-shape [file type data]
-  (let [obj (-> (init/make-minimal-shape type)
+  (let [obj (-> (cts/make-minimal-shape type)
                 (merge data)
                 (check-name file :type)
                 (setup-selrect)
@@ -498,11 +519,18 @@
 (defn start-component
   [file data]
 
-  (let [selrect init/empty-selrect
-        name (:name data)
-        path (:path data)
-        obj (-> (init/make-minimal-group nil selrect name)
+  (let [selrect cts/empty-selrect
+        name               (:name data)
+        path               (:path data)
+        main-instance-id   (:main-instance-id data)
+        main-instance-page (:main-instance-page data)
+        obj (-> (cts/make-minimal-group nil selrect name)
                 (merge data)
+                (dissoc :path
+                        :main-instance-id
+                        :main-instance-page
+                        :main-instance-x
+                        :main-instance-y)
                 (check-name file :group)
                 (d/without-nils))]
     (-> file
@@ -511,6 +539,8 @@
           :id (:id obj)
           :name name
           :path path
+          :main-instance-id main-instance-id
+          :main-instance-page main-instance-page
           :shapes [obj]})
 
         (assoc :last-id (:id obj))
@@ -529,7 +559,8 @@
           (commit-change
            file
            {:type :del-component
-            :id component-id})
+            :id component-id
+            :skip-undelete? true})
 
           (:masked-group? component)
           (let [mask (first children)]
@@ -568,6 +599,42 @@
     (-> file
         (dissoc :current-component-id)
         (update :parent-stack pop))))
+
+(defn finish-deleted-component
+  [component-id page-id main-instance-x main-instance-y file]
+  (let [file             (assoc file :current-component-id component-id)
+        page             (ctpl/get-page (:data file) page-id)
+        component        (ctkl/get-component (:data file) component-id)
+        main-instance-id (:main-instance-id component)
+
+        ; To obtain a deleted component, we first create the component
+        ; and the main instance in the workspace, and then delete them.
+        [_ shapes]
+        (ctn/make-component-instance page
+                                     component
+                                     (:id file)
+                                     (gpt/point main-instance-x
+                                                main-instance-y)
+                                     {:main-instance? true
+                                      :force-id main-instance-id})]
+    (as-> file $
+      (reduce #(commit-change %1
+                              {:type :add-obj
+                               :id (:id %2)
+                               :page-id (:id page)
+                               :parent-id (:parent-id %2)
+                               :frame-id (:frame-id %2)
+                               :obj %2})
+              $
+              shapes)
+      (commit-change $ {:type :del-component
+                        :id component-id})
+      (reduce #(commit-change %1 {:type :del-obj
+                                  :page-id page-id
+                                  :id (:id %2)})
+              $
+              shapes)
+      (dissoc $ :current-component-id))))
 
 (defn delete-object
   [file id]

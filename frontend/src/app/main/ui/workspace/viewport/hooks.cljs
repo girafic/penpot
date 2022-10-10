@@ -2,14 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.viewport.hooks
   (:require
    [app.common.data :as d]
    [app.common.geom.shapes :as gsh]
-   [app.common.geom.shapes.rect :as gshr]
+   [app.common.pages :as cp]
    [app.common.pages.helpers :as cph]
+   [app.common.types.shape-tree :as ctt]
    [app.main.data.shortcuts :as dsc]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.path.shortcuts :as psc]
@@ -17,21 +18,24 @@
    [app.main.store :as st]
    [app.main.streams :as ms]
    [app.main.ui.hooks :as hooks]
+   [app.main.ui.workspace.shapes.frame.dynamic-modifiers :as sfd]
    [app.main.ui.workspace.viewport.actions :as actions]
    [app.main.ui.workspace.viewport.utils :as utils]
    [app.main.worker :as uw]
    [app.util.dom :as dom]
+   [app.util.globals :as globals]
    [app.util.timers :as timers]
    [beicon.core :as rx]
+   [debug :refer [debug?]]
    [goog.events :as events]
-   [rumext.alpha :as mf])
+   [rumext.v2 :as mf])
   (:import goog.events.EventType))
 
-(defn setup-dom-events [viewport-ref zoom disable-paste in-viewport?]
+(defn setup-dom-events [viewport-ref overlays-ref zoom disable-paste in-viewport?]
   (let [on-key-down       (actions/on-key-down)
         on-key-up         (actions/on-key-up)
         on-mouse-move     (actions/on-mouse-move viewport-ref zoom)
-        on-mouse-wheel    (actions/on-mouse-wheel viewport-ref zoom)
+        on-mouse-wheel    (actions/on-mouse-wheel viewport-ref overlays-ref zoom)
         on-paste          (actions/on-paste disable-paste in-viewport?)]
     (mf/use-layout-effect
      (mf/deps on-key-down on-key-up on-mouse-move on-mouse-wheel on-paste)
@@ -58,20 +62,22 @@
        ;; We schedule the event so it fires after `initialize-page` event
        (timers/schedule #(st/emit! (dw/initialize-viewport size)))))))
 
-(defn setup-cursor [cursor alt? ctrl? space? panning drawing-tool drawing-path? path-editing?]
+(defn setup-cursor [cursor alt? mod? space? panning drawing-tool drawing-path? path-editing?]
   (mf/use-effect
-   (mf/deps @cursor @alt? @ctrl? @space? panning drawing-tool drawing-path? path-editing?)
+   (mf/deps @cursor @alt? @mod? @space? panning drawing-tool drawing-path? path-editing?)
    (fn []
-     (let [new-cursor
+     (let [show-pen? (or (= drawing-tool :path)
+                         (and drawing-path?
+                              (not= drawing-tool :curve)))
+           new-cursor
            (cond
-             (and @ctrl? @space?)            (utils/get-cursor :zoom)
+             (and @mod? @space?)            (utils/get-cursor :zoom)
              (or panning @space?)            (utils/get-cursor :hand)
              (= drawing-tool :comments)      (utils/get-cursor :comments)
              (= drawing-tool :frame)         (utils/get-cursor :create-artboard)
              (= drawing-tool :rect)          (utils/get-cursor :create-rectangle)
              (= drawing-tool :circle)        (utils/get-cursor :create-ellipse)
-             (or (= drawing-tool :path)
-                 drawing-path?)              (utils/get-cursor :pen)
+             show-pen?                       (utils/get-cursor :pen)
              (= drawing-tool :curve)         (utils/get-cursor :pencil)
              drawing-tool                    (utils/get-cursor :create-shape)
              (and @alt? (not path-editing?)) (utils/get-cursor :duplicate)
@@ -80,9 +86,9 @@
        (when (not= @cursor new-cursor)
          (reset! cursor new-cursor))))))
 
-(defn setup-keyboard [alt? ctrl? space?]
+(defn setup-keyboard [alt? mod? space?]
   (hooks/use-stream ms/keyboard-alt #(reset! alt? %))
-  (hooks/use-stream ms/keyboard-ctrl #(reset! ctrl? %))
+  (hooks/use-stream ms/keyboard-mod #(reset! mod? %))
   (hooks/use-stream ms/keyboard-space #(reset! space? %)))
 
 (defn group-empty-space?
@@ -98,30 +104,24 @@
             (some #(cph/is-parent? objects % group-id))
             (not))))
 
-(defn check-text-collision?
-  "Checks if he current position `pos` overlaps any of the text-nodes for the given `text-id`"
-  [objects pos text-id]
-  (and (= :text (get-in objects [text-id :type]))
-       (let [collisions
-             (->> (dom/query-all (str "#shape-" text-id " .text-node"))
-                  (map dom/get-bounding-rect)
-                  (map dom/bounding-rect->rect))]
-         (not (some #(gshr/contains-point? % pos) collisions)))))
-
-(defn setup-hover-shapes [page-id move-stream raw-position-ref objects transform selected ctrl? hover hover-ids hover-disabled? zoom]
+(defn setup-hover-shapes [page-id move-stream objects transform selected mod? hover hover-ids hover-disabled? focus zoom]
   (let [;; We use ref so we don't recreate the stream on a change
         zoom-ref (mf/use-ref zoom)
-        ctrl-ref (mf/use-ref @ctrl?)
+        mod-ref (mf/use-ref @mod?)
         transform-ref (mf/use-ref nil)
         selected-ref (mf/use-ref selected)
         hover-disabled-ref (mf/use-ref hover-disabled?)
+        focus-ref (mf/use-ref focus)
+
+        last-point-ref (mf/use-var nil)
+        mod-str (mf/use-memo #(rx/subject))
 
         query-point
         (mf/use-callback
          (mf/deps page-id)
          (fn [point]
            (let [zoom (mf/ref-val zoom-ref)
-                 ctrl? (mf/ref-val ctrl-ref)
+                 mod? (mf/ref-val mod-ref)
                  rect (gsh/center->rect point (/ 5 zoom) (/ 5 zoom))]
              (if (mf/ref-val hover-disabled-ref)
                (rx/of nil)
@@ -130,22 +130,22 @@
                   :page-id page-id
                   :rect rect
                   :include-frames? true
-                  :clip-children? (not ctrl?)
-                  :reverse? true}))))) ;; we want the topmost shape to be selected first
+                  :clip-children? (not mod?)})))))
 
         over-shapes-stream
         (mf/use-memo
           (fn []
             (rx/merge
-             (->> move-stream
-                  ;; When transforming shapes we stop querying the worker
-                  (rx/filter #(not (some? (mf/ref-val transform-ref))))
-                  (rx/merge-map query-point))
+             ;; This stream works to "refresh" the outlines when the control is pressed
+             ;; but the mouse has not been moved from its position.
+             (->> mod-str
+                  (rx/observe-on :async)
+                  (rx/map #(deref last-point-ref)))
 
              (->> move-stream
                   ;; When transforming shapes we stop querying the worker
-                  (rx/filter #(some? (mf/ref-val transform-ref)))
-                  (rx/map (constantly nil))))))]
+                  (rx/merge-map query-point)
+                  (rx/tap #(reset! last-point-ref %))))))]
 
     ;; Refresh the refs on a value change
     (mf/use-effect
@@ -157,8 +157,10 @@
      #(mf/set-ref-val! zoom-ref zoom))
 
     (mf/use-effect
-     (mf/deps @ctrl?)
-     #(mf/set-ref-val! ctrl-ref @ctrl?))
+     (mf/deps @mod?)
+     (fn []
+       (rx/push! mod-str :update)
+       (mf/set-ref-val! mod-ref @mod?)))
 
     (mf/use-effect
      (mf/deps selected)
@@ -168,90 +170,128 @@
      (mf/deps hover-disabled?)
      #(mf/set-ref-val! hover-disabled-ref hover-disabled?))
 
+    (mf/use-effect
+     (mf/deps focus)
+     #(mf/set-ref-val! focus-ref focus))
+
     (hooks/use-stream
      over-shapes-stream
-     (mf/deps page-id objects @ctrl?)
+     (mf/deps page-id objects)
      (fn [ids]
-       (let [is-group?
-             (fn [id]
-               (contains? #{:group :bool} (get-in objects [id :type])))
+       (let [selected (mf/ref-val selected-ref)
+             focus (mf/ref-val focus-ref)
+             mod? (mf/ref-val mod-ref)
 
-             selected (mf/ref-val selected-ref)
+             ids (into
+                  (d/ordered-set)
+                  (ctt/sort-z-index objects ids {:bottom-frames? mod?}))
 
-             remove-xfm (mapcat #(cph/get-parent-ids objects %))
-             remove-id? (cond-> (into #{} remove-xfm selected)
-                          :always
-                          (into (filter #(check-text-collision? objects (mf/ref-val raw-position-ref) %)) ids)
+             grouped? (fn [id] (contains? #{:group :bool} (get-in objects [id :type])))
 
-                          (not @ctrl?)
-                          (into (filter #(group-empty-space? % objects ids)) ids)
+             selected-with-parents
+             (into #{} (mapcat #(cph/get-parent-ids objects %)) selected)
 
-                          @ctrl?
-                          (into (filter is-group?) ids))
+             root-frame-with-data?
+             #(as-> (get objects %) obj
+                (and (cph/root-frame? obj) (d/not-empty? (:shapes obj))))
 
-             hover-shape (->> ids
-                              (filter (comp not remove-id?))
-                              (first)
-                              (get objects))]
+             ;; Set with the elements to remove from the hover list
+             remove-id?
+             (cond-> selected-with-parents
+               (not mod?)
+               (into (filter #(or (root-frame-with-data? %)
+                                  (group-empty-space? % objects ids)))
+                     ids)
+
+               mod?
+               (into (filter grouped?) ids))
+
+             hover-shape
+             (->> ids
+                  (remove remove-id?)
+                  (filter #(or (empty? focus) (cp/is-in-focus? objects focus %)))
+                  (first)
+                  (get objects))]
          (reset! hover hover-shape)
          (reset! hover-ids ids))))))
 
 (defn setup-viewport-modifiers
   [modifiers objects]
-  (let [transforms
+  (let [root-frame-ids
         (mf/use-memo
-         (mf/deps modifiers)
-         (fn []
-           (d/mapm (fn [id {modifiers :modifiers}]
-                     (let [center (gsh/center-shape (get objects id))]
-                       (gsh/modifiers->transform center modifiers)))
-                   modifiers)))
-
-        shapes
-        (mf/use-memo
-         (mf/deps transforms)
-         (fn []
-           (->> (keys transforms)
-                (mapv (d/getf objects)))))]
-
-    ;; Layout effect is important so the code is executed before the modifiers
-    ;; are applied to the shape
-    (mf/use-layout-effect
-     (mf/deps transforms)
-     (fn []
-       (utils/update-transform shapes transforms modifiers)
-       #(utils/remove-transform shapes)))))
+         (mf/deps objects)
+         #(ctt/get-root-shapes-ids objects))
+        modifiers (select-keys modifiers root-frame-ids)]
+    (sfd/use-dynamic-modifiers objects globals/document modifiers)))
 
 (defn inside-vbox [vbox objects frame-id]
   (let [frame (get objects frame-id)]
-
-    (and (some? frame)
-         (gsh/overlaps? frame vbox))))
+    (and (some? frame) (gsh/overlaps? frame vbox))))
 
 (defn setup-active-frames
-  [objects vbox hover active-frames]
+  [objects hover-ids selected active-frames zoom transform vbox]
 
-  (mf/use-effect
-   (mf/deps vbox)
+  (let [all-frames             (mf/use-memo (mf/deps objects) #(ctt/get-root-frames-ids objects))
+        selected-frames        (mf/use-memo (mf/deps selected) #(->> all-frames (filter selected)))
 
-   (fn []
-     (swap! active-frames
-            (fn [active-frames]
-              (let [set-active-frames
-                    (fn [active-frames id active?]
-                      (cond-> active-frames
-                        (and active? (inside-vbox vbox objects id))
-                        (assoc id true)))]
-                (reduce-kv set-active-frames {} active-frames))))))
+        xf-selected-frame      (comp (remove cph/root-frame?)
+                                     (map #(cph/get-shape-id-root-frame objects %)))
 
-  (mf/use-effect
-   (mf/deps @hover @active-frames)
-   (fn []
-     (let [frame-id (if (= :frame (:type @hover))
-                      (:id @hover)
-                      (:frame-id @hover))]
-       (when (not (contains? @active-frames frame-id))
-         (swap! active-frames assoc frame-id true))))))
+        selected-shapes-frames (mf/use-memo (mf/deps selected) #(into #{} xf-selected-frame selected))
+
+        active-selection       (when (and (not= transform :move) (= (count selected-frames) 1)) (first selected-frames))
+        last-hover-ids       (mf/use-var nil)]
+
+    (mf/use-effect
+     (mf/deps @hover-ids)
+     (fn []
+       (when (d/not-empty? @hover-ids)
+         (reset! last-hover-ids (set @hover-ids)))))
+
+    (mf/use-effect
+     (mf/deps objects @hover-ids selected zoom transform vbox)
+     (fn []
+
+       ;; Rules for active frame:
+       ;; - If zoom < 25% displays thumbnail except when selecting a single frame or a child
+       ;; - We always active the current hovering frame for zoom > 25%
+       ;; - When zoom > 130% we activate the frames that are inside the vbox
+       ;; - If no hovering over any frames we keep the previous active one
+       ;; - Check always that the active frames are inside the vbox
+
+       (let [hover-ids? (set (->> @hover-ids (map #(cph/get-shape-id-root-frame objects %))))
+
+             is-active-frame?
+             (fn [id]
+               (or
+                ;; Zoom > 130% shows every frame
+                (> zoom 1.3)
+
+                ;; Zoom >= 25% will show frames hovering
+                (and
+                 (>= zoom 0.25)
+                 (or (contains? hover-ids? id) (contains? @last-hover-ids id)))
+
+                ;; Otherwise, if it's a selected frame
+                (= id active-selection)
+
+                ;; Or contains a selected shape
+                (contains? selected-shapes-frames id)))
+
+             new-active-frames
+             (into #{}
+                   (comp (filter is-active-frame?)
+
+                         ;; We only allow active frames that are contained in the vbox
+                         (filter (partial inside-vbox vbox objects)))
+                   all-frames)
+
+             ;; Debug only: Disable the thumbnails
+             new-active-frames
+             (if (debug? :disable-frame-thumbnails) (into #{} all-frames) new-active-frames)]
+
+         (when (not= @active-frames new-active-frames)
+           (reset! active-frames new-active-frames)))))))
 
 ;; NOTE: this is executed on each page change, maybe we need to move
 ;; this shortcuts outside the viewport?
@@ -264,4 +304,4 @@
    (fn []
      (when (or drawing-path? path-editing?)
        (st/emit! (dsc/push-shortcuts ::path psc/shortcuts))
-       (st/emitf (dsc/pop-shortcuts ::path))))))
+       #(st/emit! (dsc/pop-shortcuts ::path))))))

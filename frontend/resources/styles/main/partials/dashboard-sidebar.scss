@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) UXBOX Labs SL
+// Copyright (c) KALEIDOS INC
 
 .dashboard-sidebar {
   background-color: $color-white;
+  z-index: 1;
 
   .sidebar-inside {
     display: flex;
@@ -37,7 +38,7 @@
       top: 50px;
       z-index: 12;
       max-height: 30rem;
-      min-width: 230px;
+      min-width: 234px;
       overflow-y: auto;
     }
 
@@ -88,6 +89,32 @@
       height: 48px;
       align-items: center;
 
+      &.action {
+        .team-icon {
+          border-radius: 50%;
+          background-color: $color-gray-10;
+          height: 24px;
+          margin-right: 10px;
+          padding: 6px;
+          width: 24px;
+
+          svg {
+            height: 12px;
+            width: 12px;
+          }
+        }
+
+        &:hover {
+          .team-icon {
+            background-color: $color-primary;
+          }
+        }
+
+        .team-text {
+          width: 150px;
+        }
+      }
+
       .team-icon {
         display: flex;
         align-items: center;
@@ -111,6 +138,13 @@
         color: $color-gray-60;
         @include text-ellipsis;
         width: 130px;
+      }
+
+      .icon {
+        margin-left: auto;
+        svg {
+          fill: $color-gray-60;
+        }
       }
     }
 
@@ -177,7 +211,7 @@
       span.element-title {
         color: $color-gray-60;
         font-size: $fs14;
-        overflow-x: hidden;
+        overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         user-select: none;
@@ -376,7 +410,7 @@
     span {
       @include text-ellipsis;
       color: $color-black;
-      margin: 10px 5px;
+      margin: 10px;
       font-size: $fs14;
       max-width: 160px;
     }
@@ -403,9 +437,8 @@
     @include animation(0, 0.2s, fadeInUp);
 
     li {
-      height: 32px;
       font-size: $fs14;
-      padding: 5px 10px;
+      padding: $size-2 $size-4;
 
       svg {
         fill: $color-gray-20;

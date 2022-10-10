@@ -2,14 +2,16 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.viewport.selection
   "Selection handlers component."
   (:require
+   [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
-   [app.common.geom.shapes :as geom]
+   [app.common.geom.shapes :as gsh]
+   [app.common.types.shape :as cts]
    [app.main.data.workspace :as dw]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -17,10 +19,9 @@
    [app.main.ui.workspace.shapes.path.editor :refer [path-editor]]
    [app.util.dom :as dom]
    [app.util.object :as obj]
-   [cuerdas.core :as str]
    [debug :refer [debug?]]
-   [rumext.alpha :as mf]
-   [rumext.util :refer [map->obj]]))
+   [rumext.v2 :as mf]
+   [rumext.v2.util :refer [map->obj]]))
 
 (def rotation-handler-size 20)
 (def resize-point-radius 4)
@@ -33,7 +34,8 @@
 (def min-selrect-side 10)
 (def small-selrect-side 30)
 
-(mf/defc selection-rect [{:keys [transform rect zoom color on-move-selected on-context-menu]}]
+(mf/defc selection-rect
+  [{:keys [transform rect zoom color on-move-selected on-context-menu]}]
   (when rect
     (let [{:keys [x y width height]} rect]
       [:rect.main.viewport-selrect
@@ -41,7 +43,7 @@
         :y y
         :width width
         :height height
-        :transform transform
+        :transform (str transform)
         :on-mouse-down on-move-selected
         :on-context-menu on-context-menu
         :style {:stroke color
@@ -49,75 +51,106 @@
                 :fill "none"}}])))
 
 (defn- handlers-for-selection [{:keys [x y width height]} {:keys [type]} zoom]
-  (let [zoom-width (* width zoom)
-        zoom-height (* height zoom)
+  (let [threshold-small (/ 25 zoom)
+        threshold-tiny (/ 10 zoom)
 
-        align (when (or (<= zoom-width small-selrect-side)
-                        (<= zoom-height small-selrect-side))
-                :outside)
-        show-resize-point? (or (not= type :path)
-                               (and
-                                (> zoom-width min-selrect-side)
-                                (> zoom-height min-selrect-side)))
-        min-side-top? (or (not= type :path) (> zoom-height min-selrect-side))
-        min-side-side? (or (not= type :path) (> zoom-width min-selrect-side))]
+        small-width? (<= width threshold-small)
+        tiny-width?  (<= width threshold-tiny)
+
+        small-height? (<= height threshold-small)
+        tiny-height?  (<= height threshold-tiny)
+
+        vertical-line? (and (= type :path) tiny-width?)
+        horizontal-line? (and (= type :path) tiny-height?)
+
+        align (if (or small-width? small-height?)
+                :outside
+                :inside)]
     (->>
      [ ;; TOP-LEFT
       {:type :rotation
        :position :top-left
        :props {:cx x :cy y}}
 
-      (when show-resize-point?
-        {:type :resize-point
-         :position :top-left
-         :props {:cx x :cy y :align align}})
-
       {:type :rotation
        :position :top-right
        :props {:cx (+ x width) :cy y}}
-
-      (when show-resize-point?
-        {:type :resize-point
-         :position :top-right
-         :props {:cx (+ x width) :cy y :align align}})
 
       {:type :rotation
        :position :bottom-right
        :props {:cx (+ x width) :cy (+ y height)}}
 
-      (when show-resize-point?
-        {:type :resize-point
-         :position :bottom-right
-         :props {:cx (+ x width) :cy (+ y height) :align align}})
-
       {:type :rotation
        :position :bottom-left
        :props {:cx x :cy (+ y height)}}
 
-      (when show-resize-point?
+      (when-not horizontal-line?
+        (let [x (if small-width? (+ x (/ (- width threshold-small) 2)) x)
+              length (if small-width? threshold-small width)]
+          {:type :resize-side
+           :position :top
+           :props {:x x
+                   :y y
+                   :length length
+                   :angle 0
+                   :align align
+                   :show-handler? tiny-width?}}))
+
+      (when-not horizontal-line?
+        (let [x (if small-width? (+ x (/ (+ width threshold-small) 2)) (+ x width))
+              length (if small-width? threshold-small width)]
+          {:type :resize-side
+           :position :bottom
+           :props {:x x
+                   :y (+ y height)
+                   :length length
+                   :angle 180
+                   :align align
+                   :show-handler? tiny-width?}}))
+
+      (when-not vertical-line?
+        (let [y (if small-height? (+ y (/ (- height threshold-small) 2)) y)
+              length (if small-height? threshold-small height)]
+          {:type :resize-side
+           :position :right
+           :props {:x (+ x width)
+                   :y y
+                   :length length
+                   :angle 90
+                   :align align
+                   :show-handler? tiny-height?}}))
+
+      (when-not vertical-line?
+        (let [y (if small-height? (+ y (/ (+ height threshold-small) 2)) (+ y height))
+              length (if small-height? threshold-small height)]
+          {:type :resize-side
+           :position :left
+           :props {:x x
+                   :y y
+                   :length length
+                   :angle 270
+                   :align align
+                   :show-handler? tiny-height?}}))
+
+      (when (and (not tiny-width?) (not tiny-height?))
+        {:type :resize-point
+         :position :top-left
+         :props {:cx x :cy y :align align}})
+
+      (when (and (not tiny-width?) (not tiny-height?))
+        {:type :resize-point
+         :position :top-right
+         :props {:cx (+ x width) :cy y :align align}})
+
+      (when (and (not tiny-width?) (not tiny-height?))
+        {:type :resize-point
+         :position :bottom-right
+         :props {:cx (+ x width) :cy (+ y height) :align align}})
+
+      (when (and (not tiny-width?) (not tiny-height?))
         {:type :resize-point
          :position :bottom-left
-         :props {:cx x :cy (+ y height) :align align}})
-
-      (when min-side-top?
-        {:type :resize-side
-         :position :top
-         :props {:x x :y y :length width :angle 0 :align align}})
-
-      (when min-side-side?
-        {:type :resize-side
-         :position :right
-         :props {:x (+ x width) :y y :length height :angle 90 :align align}})
-
-      (when min-side-top?
-        {:type :resize-side
-         :position :bottom
-         :props {:x (+ x width) :y (+ y height) :length width :angle 180 :align align}})
-
-      (when min-side-side?
-        {:type :resize-side
-         :position :left
-         :props {:x x :y (+ y height) :length height :angle 270 :align align}})]
+         :props {:cx x :cy (+ y height) :align align}})]
 
      (filterv (comp not nil?)))))
 
@@ -135,12 +168,13 @@
             :y y
             :width size
             :height size
-            :fill (if (debug? :rotation-handler) "blue" "none")
-            :transform transform
+            :fill (if (debug? :handlers) "blue" "none")
+            :stroke-width 0
+            :transform (dm/str transform)
             :on-mouse-down on-rotate}]))
 
 (mf/defc resize-point-handler
-  [{:keys [cx cy zoom position on-resize transform rotation color overflow-text align]}]
+  [{:keys [cx cy zoom position on-resize transform rotation color align]}]
   (let [cursor (if (#{:top-left :bottom-right} position)
                  (cur/resize-nesw rotation) (cur/resize-nwse rotation))
         {cx' :x cy' :y} (gpt/transform (gpt/point cx cy) transform)]
@@ -151,7 +185,7 @@
                        :strokeWidth "1px"
                        :vectorEffect "non-scaling-stroke"}
                :fill "var(--color-white)"
-               :stroke (if (and (= position :bottom-right) overflow-text) "red" color)
+               :stroke color
                :cx cx'
                :cy cy'}]
 
@@ -166,8 +200,9 @@
                  :y cy'
                  :width resize-point-circle-radius
                  :height resize-point-circle-radius
-                 :transform (when rotation (str/fmt "rotate(%s, %s, %s)" rotation cx' cy'))
-                 :style {:fill (if (debug? :resize-handler) "red" "none")
+                 :transform (when rotation (dm/fmt "rotate(%, %, %)" rotation cx' cy'))
+                 :style {:fill (if (debug? :handlers) "red" "none")
+                         :stroke-width 0
                          :cursor cursor}
                  :on-mouse-down #(on-resize {:x cx' :y cy'} %)}])
 
@@ -175,37 +210,43 @@
                  :r (/ resize-point-circle-radius zoom)
                  :cx cx'
                  :cy cy'
-                 :style {:fill (if (debug? :resize-handler) "red" "none")
-                         :cursor cursor}}]
-       )]))
+                 :style {:fill (if (debug? :handlers) "red" "none")
+                         :stroke-width 0
+                         :cursor cursor}}])]))
 
 (mf/defc resize-side-handler
   "The side handler is always rendered horizontally and then rotated"
-  [{:keys [x y length align angle zoom position rotation transform on-resize]}]
+  [{:keys [x y length align angle zoom position rotation transform on-resize color show-handler?]}]
   (let [res-point (if (#{:top :bottom} position)
                     {:y y}
                     {:x x})
-        target-length (max 0 (- length (/ (* resize-point-rect-size 2) zoom)))
 
-        width (if (< target-length 6) length target-length)
         height (/ resize-side-height zoom)
-
-        offset-x (/ (- length width) 2)
         offset-y (if (= align :outside) (- height) (- (/ height 2)))
-
-        target-x (+ x offset-x)
-        target-y (+ y offset-y)]
-    [:rect {:x target-x
-            :y target-y
-            :width width
-            :height height
-            :transform (gmt/multiply transform
-                                     (gmt/rotate-matrix angle (gpt/point x y)))
-            :on-mouse-down #(on-resize res-point %)
-            :style {:fill (if (debug? :resize-handler) "yellow" "none")
-                    :cursor (if (#{:left :right} position)
-                              (cur/resize-ew rotation)
-                              (cur/resize-ns rotation)) }}]))
+        target-y (+ y offset-y)
+        transform-str (dm/str (gmt/multiply transform (gmt/rotate-matrix angle (gpt/point x y))))]
+    [:g.resize-handler
+     (when show-handler?
+       [:circle {:r (/ resize-point-radius zoom)
+                 :style {:fillOpacity 1
+                         :stroke color
+                         :strokeWidth "1px"
+                         :fill "var(--color-white)"
+                         :vectorEffect "non-scaling-stroke"}
+                 :cx (+ x (/ length 2))
+                 :cy y
+                 :transform transform-str}])
+     [:rect {:x x
+             :y target-y
+             :width length
+             :height height
+             :transform transform-str
+             :on-mouse-down #(on-resize res-point %)
+             :style {:fill (if (debug? :handlers) "yellow" "none")
+                     :stroke-width 0
+                     :cursor (if (#{:left :right} position)
+                               (cur/resize-ew rotation)
+                               (cur/resize-ns rotation)) }}]]))
 
 (defn minimum-selrect [{:keys [x y width height] :as selrect}]
   (let [final-width (max width min-selrect-side)
@@ -217,21 +258,44 @@
      :width final-width
      :height final-height}))
 
-(mf/defc controls
+(mf/defc controls-selection
   {::mf/wrap-props false}
   [props]
-  (let [{:keys [overflow-text] :as shape} (obj/get props "shape")
+  (let [shape             (obj/get props "shape")
         zoom              (obj/get props "zoom")
         color             (obj/get props "color")
         on-move-selected  (obj/get props "on-move-selected")
         on-context-menu   (obj/get props "on-context-menu")
+        disable-handlers  (obj/get props "disable-handlers")
+
+        current-transform (mf/deref refs/current-transform)
+
+        selrect (:selrect shape)
+        transform (gsh/transform-str shape {:no-flip true})]
+
+    (when (not (#{:move :rotate} current-transform))
+      [:g.controls {:pointer-events (if disable-handlers "none" "visible")}
+       ;; Selection rect
+       [:& selection-rect {:rect selrect
+                           :transform transform
+                           :zoom zoom
+                           :color color
+                           :on-move-selected on-move-selected
+                           :on-context-menu on-context-menu}]])))
+
+(mf/defc controls-handlers
+  {::mf/wrap-props false}
+  [props]
+  (let [shape             (obj/get props "shape")
+        zoom              (obj/get props "zoom")
+        color             (obj/get props "color")
         on-resize         (obj/get props "on-resize")
         on-rotate         (obj/get props "on-rotate")
         disable-handlers  (obj/get props "disable-handlers")
         current-transform (mf/deref refs/current-transform)
 
         selrect (:selrect shape)
-        transform (geom/transform-matrix shape {:no-flip true})
+        transform (gsh/transform-matrix shape {:no-flip true})
 
         rotation (-> (gpt/point 1 0)
                      (gpt/transform (:transform shape))
@@ -240,60 +304,46 @@
 
     (when (not (#{:move :rotate} current-transform))
       [:g.controls {:pointer-events (if disable-handlers "none" "visible")}
-
-       ;; Selection rect
-       [:& selection-rect {:rect selrect
-                           :transform transform
-                           :zoom zoom
-                           :color color
-                           :on-move-selected on-move-selected
-                           :on-context-menu on-context-menu}]
-
        ;; Handlers
        (for [{:keys [type position props]} (handlers-for-selection selrect shape zoom)]
-         (let [common-props {:key (str (name type) "-" (name position))
+         (let [common-props {:key (dm/str (name type) "-" (name position))
                              :zoom zoom
                              :position position
                              :on-rotate on-rotate
                              :on-resize (partial on-resize position)
                              :transform transform
                              :rotation rotation
-                             :color color
-                             :overflow-text overflow-text}
+                             :color color}
                props (map->obj (merge common-props props))]
            (case type
-             :rotation (when (not= :frame (:type shape)) [:> rotation-handler props])
+             :rotation [:> rotation-handler props]
              :resize-point [:> resize-point-handler props]
              :resize-side [:> resize-side-handler props])))])))
 
 ;; --- Selection Handlers (Component)
-;; TODO: add specs for clarity
 
-(mf/defc text-edition-selection-handlers
-  [{:keys [shape color] :as props}]
+(mf/defc text-edition-selection
+  [{:keys [shape color zoom] :as props}]
   (let [{:keys [x y width height]} shape]
     [:g.controls
      [:rect.main {:x x :y y
-                  :transform (geom/transform-matrix shape)
+                  :transform (gsh/transform-str shape)
                   :width width
                   :height height
                   :pointer-events "visible"
                   :style {:stroke color
-                          :stroke-width "0.5"
-                          :stroke-opacity "1"
+                          :stroke-width (/ 0.5 zoom)
+                          :stroke-opacity 1
                           :fill "none"}}]]))
 
-(mf/defc multiple-selection-handlers
-  [{:keys [shapes selected zoom color disable-handlers on-move-selected on-context-menu] :as props}]
+(mf/defc multiple-handlers
+  [{:keys [shapes selected zoom color disable-handlers] :as props}]
   (let [shape (mf/use-memo
                (mf/deps shapes)
                #(->> shapes
-                     (map geom/transform-shape)
-                     (geom/selection-rect)
-                     (geom/setup {:type :rect})))
-
-        shape-center (geom/center-shape shape)
-
+                     (map gsh/transform-shape)
+                     (gsh/selection-rect)
+                     (cts/setup-shape)))
         on-resize
         (fn [current-position _initial-position event]
           (when (dom/left-mouse? event)
@@ -306,33 +356,41 @@
             (dom/stop-propagation event)
             (st/emit! (dw/start-rotate shapes))))]
 
-    [:*
-     [:& controls {:shape shape
-                   :zoom zoom
-                   :color color
-                   :disable-handlers disable-handlers
-                   :on-move-selected on-move-selected
-                   :on-resize on-resize
-                   :on-rotate on-rotate
-                   :on-context-menu on-context-menu}]
+    [:& controls-handlers
+     {:shape shape
+      :zoom zoom
+      :color color
+      :disable-handlers disable-handlers
+      :on-resize on-resize
+      :on-rotate on-rotate}]))
 
-     (when (debug? :selection-center)
-       [:circle {:cx (:x shape-center) :cy (:y shape-center) :r 5 :fill "yellow"}])]))
+(mf/defc multiple-selection
+  [{:keys [shapes zoom color disable-handlers on-move-selected on-context-menu] :as props}]
+  (let [shape (mf/use-memo
+               (mf/deps shapes)
+               #(->> shapes
+                     (map gsh/transform-shape)
+                     (gsh/selection-rect)
+                     (cts/setup-shape)))]
 
-(mf/defc single-selection-handlers
-  [{:keys [shape zoom color disable-handlers on-move-selected on-context-menu] :as props}]
+    [:& controls-selection
+     {:shape shape
+      :zoom zoom
+      :color color
+      :disable-handlers disable-handlers
+      :on-move-selected on-move-selected
+      :on-context-menu on-context-menu}]))
+
+(mf/defc single-handlers
+  [{:keys [shape zoom color disable-handlers] :as props}]
   (let [shape-id (:id shape)
-        shape (geom/transform-shape shape {:round-coords? false})
-
-        shape' (if (debug? :simple-selection)
-                 (geom/setup {:type :rect} (geom/selection-rect [shape]))
-                 shape)
+        shape (gsh/transform-shape shape)
 
         on-resize
         (fn [current-position _initial-position event]
           (when (dom/left-mouse? event)
             (dom/stop-propagation event)
-            (st/emit! (dw/start-resize current-position #{shape-id} shape'))))
+            (st/emit! (dw/start-resize current-position #{shape-id} shape))))
 
         on-rotate
         (fn [event]
@@ -340,18 +398,28 @@
             (dom/stop-propagation event)
             (st/emit! (dw/start-rotate [shape]))))]
 
-    [:& controls {:shape shape'
-                  :zoom zoom
-                  :color color
-                  :on-rotate on-rotate
-                  :on-resize on-resize
-                  :disable-handlers disable-handlers
-                  :on-move-selected on-move-selected
-                  :on-context-menu on-context-menu}]))
+    [:& controls-handlers
+     {:shape shape
+      :zoom zoom
+      :color color
+      :disable-handlers disable-handlers
+      :on-rotate on-rotate
+      :on-resize on-resize}]))
 
-(mf/defc selection-handlers
+(mf/defc single-selection
+  [{:keys [shape zoom color disable-handlers on-move-selected on-context-menu] :as props}]
+  (let [shape (gsh/transform-shape shape)]
+    [:& controls-selection
+     {:shape shape
+      :zoom zoom
+      :color color
+      :disable-handlers disable-handlers
+      :on-move-selected on-move-selected
+      :on-context-menu on-context-menu}]))
+
+(mf/defc selection-area
   {::mf/wrap [mf/memo]}
-  [{:keys [shapes selected edition zoom disable-handlers on-move-selected on-context-menu] :as props}]
+  [{:keys [shapes edition zoom disable-handlers on-move-selected on-context-menu] :as props}]
   (let [num (count shapes)
         {:keys [type] :as shape} (first shapes)
 
@@ -363,28 +431,64 @@
       nil
 
       (> num 1)
-      [:& multiple-selection-handlers {:shapes shapes
-                                       :selected selected
-                                       :zoom zoom
-                                       :color color
-                                       :disable-handlers disable-handlers
-                                       :on-move-selected on-move-selected
-                                       :on-context-menu on-context-menu}]
+      [:& multiple-selection
+       {:shapes shapes
+        :zoom zoom
+        :color color
+        :disable-handlers disable-handlers
+        :on-move-selected on-move-selected
+        :on-context-menu on-context-menu}]
 
-      (and (= type :text)
-           (= edition (:id shape)))
-      [:& text-edition-selection-handlers {:shape shape
-                                           :zoom zoom
-                                           :color color}]
+      (and (= type :text) (= edition (:id shape)))
+      [:& text-edition-selection
+       {:shape shape
+        :zoom zoom
+        :color color}]
 
       (= edition (:id shape))
-      [:& path-editor {:zoom zoom
-                       :shape shape}]
+      nil
 
       :else
-      [:& single-selection-handlers {:shape shape
-                                     :zoom zoom
-                                     :color color
-                                     :disable-handlers disable-handlers
-                                     :on-move-selected on-move-selected
-                                     :on-context-menu on-context-menu}])))
+      [:& single-selection
+       {:shape shape
+        :zoom zoom
+        :color color
+        :disable-handlers disable-handlers
+        :on-move-selected on-move-selected
+        :on-context-menu on-context-menu}])))
+
+(mf/defc selection-handlers
+  {::mf/wrap [mf/memo]}
+  [{:keys [shapes selected edition zoom disable-handlers] :as props}]
+  (let [num (count shapes)
+        {:keys [type] :as shape} (first shapes)
+
+        color (if (or (> num 1) (nil? (:shape-ref shape)))
+                selection-rect-color-normal
+                selection-rect-color-component)]
+    (cond
+      (zero? num)
+      nil
+
+      (> num 1)
+      [:& multiple-handlers
+       {:shapes shapes
+        :selected selected
+        :zoom zoom
+        :color color
+        :disable-handlers disable-handlers}]
+
+      (and (= type :text) (= edition (:id shape)))
+      nil
+
+      (= edition (:id shape))
+      [:& path-editor
+       {:zoom zoom
+        :shape shape}]
+
+      :else
+      [:& single-handlers
+       {:shape shape
+        :zoom zoom
+        :color color
+        :disable-handlers disable-handlers}])))

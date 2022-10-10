@@ -2,12 +2,12 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.workspace.undo
   (:require
+   [app.common.pages.changes-spec :as pcs]
    [app.common.spec :as us]
-   [app.common.spec.change :as spec.change]
    [cljs.spec.alpha :as s]
    [potok.core :as ptk]))
 
@@ -15,8 +15,8 @@
 ;; Undo / Redo
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(s/def ::undo-changes ::spec.change/changes)
-(s/def ::redo-changes ::spec.change/changes)
+(s/def ::undo-changes ::pcs/changes)
+(s/def ::redo-changes ::pcs/changes)
 (s/def ::undo-entry
   (s/keys :req-un [::undo-changes ::redo-changes]))
 

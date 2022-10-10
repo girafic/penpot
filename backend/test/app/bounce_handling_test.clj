@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.bounce-handling-test
   (:require
@@ -10,6 +10,7 @@
    [app.emails :as emails]
    [app.http.awsns :as awsns]
    [app.test-helpers :as th]
+   [app.tokens :as tokens]
    [app.util.time :as dt]
    [clojure.pprint :refer [pprint]]
    [clojure.test :as t]
@@ -100,11 +101,11 @@
 
 (t/deftest test-parse-bounce-report
   (let [profile (th/create-profile* 1)
-        tokens  (:app.tokens/tokens th/*system*)
-        cfg     {:tokens tokens}
-        report  (bounce-report {:token (tokens :generate-predefined
-                                               {:iss :profile-identity
-                                                :profile-id (:id profile)})})
+        sprops  (:app.setup/props th/*system*)
+        cfg     {:sprops sprops}
+        report  (bounce-report {:token (tokens/generate sprops
+                                                        {:iss :profile-identity
+                                                         :profile-id (:id profile)})})
         result  (#'awsns/parse-notification cfg report)]
     ;; (pprint result)
 
@@ -117,11 +118,11 @@
 
 (t/deftest test-parse-complaint-report
   (let [profile (th/create-profile* 1)
-        tokens  (:app.tokens/tokens th/*system*)
-        cfg     {:tokens tokens}
-        report  (complaint-report {:token (tokens :generate-predefined
-                                                  {:iss :profile-identity
-                                                   :profile-id (:id profile)})})
+        sprops  (:app.setup/props th/*system*)
+        cfg     {:sprops sprops}
+        report  (complaint-report {:token (tokens/generate sprops
+                                                           {:iss :profile-identity
+                                                            :profile-id (:id profile)})})
         result  (#'awsns/parse-notification cfg report)]
     ;; (pprint result)
     (t/is (= "complaint" (:type result)))
@@ -132,8 +133,8 @@
     ))
 
 (t/deftest test-parse-complaint-report-without-token
-  (let [tokens  (:app.tokens/tokens th/*system*)
-        cfg     {:tokens tokens}
+  (let [sprops  (:app.setup/props th/*system*)
+        cfg     {:sprops sprops}
         report  (complaint-report {:token ""})
         result  (#'awsns/parse-notification cfg report)]
     (t/is (= "complaint" (:type result)))
@@ -145,12 +146,12 @@
 
 (t/deftest test-process-bounce-report
   (let [profile (th/create-profile* 1)
-        tokens  (:app.tokens/tokens th/*system*)
+        sprops  (:app.setup/props th/*system*)
         pool    (:app.db/pool th/*system*)
-        cfg     {:tokens tokens :pool pool}
-        report  (bounce-report {:token (tokens :generate-predefined
-                                               {:iss :profile-identity
-                                                :profile-id (:id profile)})})
+        cfg     {:sprops sprops :pool pool}
+        report  (bounce-report {:token (tokens/generate sprops
+                                                        {:iss :profile-identity
+                                                         :profile-id (:id profile)})})
         report  (#'awsns/parse-notification cfg report)]
 
     (#'awsns/process-report cfg report)
@@ -174,12 +175,12 @@
 
 (t/deftest test-process-complaint-report
   (let [profile (th/create-profile* 1)
-        tokens  (:app.tokens/tokens th/*system*)
+        sprops  (:app.setup/props th/*system*)
         pool    (:app.db/pool th/*system*)
-        cfg     {:tokens tokens :pool pool}
-        report  (complaint-report {:token (tokens :generate-predefined
-                                                  {:iss :profile-identity
-                                                   :profile-id (:id profile)})})
+        cfg     {:sprops sprops :pool pool}
+        report  (complaint-report {:token (tokens/generate sprops
+                                                           {:iss :profile-identity
+                                                            :profile-id (:id profile)})})
         report  (#'awsns/parse-notification cfg report)]
 
     (#'awsns/process-report cfg report)
@@ -205,13 +206,13 @@
 
 (t/deftest test-process-bounce-report-to-self
   (let [profile (th/create-profile* 1)
-        tokens  (:app.tokens/tokens th/*system*)
+        sprops  (:app.setup/props th/*system*)
         pool    (:app.db/pool th/*system*)
-        cfg     {:tokens tokens :pool pool}
+        cfg     {:sprops sprops :pool pool}
         report  (bounce-report {:email (:email profile)
-                                   :token (tokens :generate-predefined
-                                                  {:iss :profile-identity
-                                                   :profile-id (:id profile)})})
+                                :token (tokens/generate sprops
+                                                        {:iss :profile-identity
+                                                         :profile-id (:id profile)})})
         report  (#'awsns/parse-notification cfg report)]
 
     (#'awsns/process-report cfg report)
@@ -227,13 +228,13 @@
 
 (t/deftest test-process-complaint-report-to-self
   (let [profile (th/create-profile* 1)
-        tokens  (:app.tokens/tokens th/*system*)
+        sprops  (:app.setup/props th/*system*)
         pool    (:app.db/pool th/*system*)
-        cfg     {:tokens tokens :pool pool}
+        cfg     {:sprops sprops :pool pool}
         report  (complaint-report {:email (:email profile)
-                                   :token (tokens :generate-predefined
-                                                  {:iss :profile-identity
-                                                   :profile-id (:id profile)})})
+                                   :token (tokens/generate sprops
+                                                           {:iss :profile-identity
+                                                            :profile-id (:id profile)})})
         report  (#'awsns/parse-notification cfg report)]
 
     (#'awsns/process-report cfg report)
@@ -249,9 +250,10 @@
 
 (t/deftest test-allow-send-messages-predicate-with-bounces
   (with-mocks [mock {:target 'app.config/get
-                     :return (th/mock-config-get-with
+                     :return (th/config-get-mock
                               {:profile-bounce-threshold 3
                                :profile-complaint-threshold 2})}]
+
     (let [profile (th/create-profile* 1)
           pool    (:app.db/pool th/*system*)]
       (th/create-complaint-for pool {:type :bounce :id (:id profile) :created-at (dt/in-past {:days 8})})
@@ -259,7 +261,7 @@
       (th/create-complaint-for pool {:type :bounce :id (:id profile)})
 
       (t/is (true? (emails/allow-send-emails? pool profile)))
-      (t/is (= 4 (:call-count (deref mock))))
+      (t/is (= 4 (:call-count @mock)))
 
       (th/create-complaint-for pool {:type :bounce :id (:id profile)})
       (t/is (false? (emails/allow-send-emails? pool profile))))))
@@ -267,7 +269,7 @@
 
 (t/deftest test-allow-send-messages-predicate-with-complaints
   (with-mocks [mock {:target 'app.config/get
-                     :return (th/mock-config-get-with
+                     :return (th/config-get-mock
                               {:profile-bounce-threshold 3
                                :profile-complaint-threshold 2})}]
     (let [profile (th/create-profile* 1)
@@ -279,7 +281,7 @@
       (th/create-complaint-for pool {:type :complaint :id (:id profile)})
 
       (t/is (true? (emails/allow-send-emails? pool profile)))
-      (t/is (= 4 (:call-count (deref mock))))
+      (t/is (= 4 (:call-count @mock)))
 
       (th/create-complaint-for pool {:type :complaint :id (:id profile)})
       (t/is (false? (emails/allow-send-emails? pool profile))))))

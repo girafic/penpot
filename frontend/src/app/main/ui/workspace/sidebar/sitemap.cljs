@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.sidebar.sitemap
   (:require
@@ -21,7 +21,7 @@
    [app.util.keyboard :as kbd]
    [cuerdas.core :as str]
    [okulary.core :as l]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 ;; --- Page Item
 
@@ -33,7 +33,7 @@
         state       (mf/use-state {:menu-open false})
 
         delete-fn   (mf/use-callback (mf/deps id) #(st/emit! (dw/delete-page id)))
-        navigate-fn (mf/use-callback (mf/deps id) #(st/emit! (dw/go-to-page id)))
+        navigate-fn (mf/use-callback (mf/deps id) #(st/emit! :interrupt (dw/go-to-page id)))
 
         on-context-menu
         (mf/use-callback
@@ -50,11 +50,11 @@
         on-delete
         (mf/use-callback
          (mf/deps id)
-         (st/emitf (modal/show
-                    {:type :confirm
-                     :title (tr "modals.delete-page.title")
-                     :message (tr "modals.delete-page.body")
-                     :on-accept delete-fn})))
+         #(st/emit! (modal/show
+                      {:type :confirm
+                       :title (tr "modals.delete-page.title")
+                       :message (tr "modals.delete-page.body")
+                       :on-accept delete-fn})))
 
         on-double-click
         (mf/use-callback
@@ -209,6 +209,7 @@
         {:keys [on-pointer-down on-lost-pointer-capture on-mouse-move parent-ref size]}
         (use-resize-hook :sitemap 200 38 400 :y false nil)
 
+        size (if @show-pages? size 38)
         toggle-pages
         (mf/use-callback #(reset! show-pages? not))]
 
@@ -217,12 +218,13 @@
      [:div.tool-window-bar
       [:span (tr "workspace.sidebar.sitemap")]
       [:div.add-page {:on-click create} i/close]
-      [:div.collapse-pages {:on-click toggle-pages} i/arrow-slide]]
+      [:div.collapse-pages {:on-click toggle-pages
+                            :style {:transform (when (not @show-pages?) "rotate(-90deg)")}} i/arrow-slide]]
+
+     [:div.tool-window-content
+      [:& pages-list {:file file :key (:id file)}]]
 
      (when @show-pages?
-       [:div.tool-window-content
-        [:& pages-list {:file file :key (:id file)}]])
-
-     [:div.resize-area {:on-pointer-down on-pointer-down
-                        :on-lost-pointer-capture on-lost-pointer-capture
-                        :on-mouse-move on-mouse-move}]]))
+       [:div.resize-area {:on-pointer-down on-pointer-down
+                          :on-lost-pointer-capture on-lost-pointer-capture
+                          :on-mouse-move on-mouse-move}])]))

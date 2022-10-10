@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.handoff.attributes.text
   (:require
@@ -16,7 +16,7 @@
    [app.util.i18n :refer [tr]]
    [cuerdas.core :as str]
    [okulary.core :as l]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn has-text? [shape]
   (:content shape))
@@ -101,12 +101,13 @@
      [:div.attributes-content-row
       [:pre.attributes-content (str/trim text)]
       [:& copy-button {:data (str/trim text)}]]
+     (when (:fills style)
+       (for [fill (:fills style)]
 
-     (when (or (:fill-color style) (:fill-color-gradient style))
-       [:& color-row {:format @color-format
-                      :color (shape->color style)
-                      :copy-data (copy-style-data style :fill-color :fill-color-gradient)
-                      :on-change-format #(reset! color-format %)}])
+         [:& color-row {:format @color-format
+                        :color (shape->color fill)
+                        :copy-data (copy-style-data fill :fill-color :fill-color-gradient)
+                        :on-change-format #(reset! color-format %)}]))
 
      (when (:font-id style)
        [:div.attributes-unit-row
@@ -186,4 +187,5 @@
       [:div.attributes-block-title-text (tr "handoff.attributes.typography")]]
 
      (for [shape shapes]
-       [:& text-block {:shape shape}])]))
+       [:& text-block {:shape shape
+                       :key (str "text-block" (:id shape))}])]))

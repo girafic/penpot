@@ -2,28 +2,29 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.core
   (:require
+   ["process" :as proc]
    [app.browser :as bwr]
    [app.common.logging :as l]
-   [app.config]
+   [app.config :as cf]
    [app.http :as http]
-   [app.sentry :as sentry]
+   [app.redis :as redis]
    [promesa.core :as p]))
 
 (enable-console-print!)
 (l/initialize!)
-(sentry/init!)
-
-(defonce state (atom nil))
 
 (defn start
-  [& args]
-  (l/info :msg "initializing")
+  [& _]
+  (l/info :msg "initializing"
+          :public-uri (str (cf/get :public-uri))
+          :version (:full @cf/version))
   (p/do!
    (bwr/init)
+   (redis/init)
    (http/init)))
 
 (def main start)
@@ -33,8 +34,13 @@
   ;; an empty line for visual feedback of restart
   (js/console.log "")
 
-  (l/info :msg "stoping")
+  (l/info :msg "stopping")
   (p/do!
    (bwr/stop)
+   (redis/stop)
    (http/stop)
    (done)))
+
+(proc/on "uncaughtException"
+         (fn [cause]
+           (js/console.error cause)))

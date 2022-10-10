@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.releases
   (:require
@@ -12,6 +12,10 @@
    [app.main.ui.releases.common :as rc]
    [app.main.ui.releases.v1-10]
    [app.main.ui.releases.v1-11]
+   [app.main.ui.releases.v1-12]
+   [app.main.ui.releases.v1-13]
+   [app.main.ui.releases.v1-14]
+   [app.main.ui.releases.v1-15]
    [app.main.ui.releases.v1-4]
    [app.main.ui.releases.v1-5]
    [app.main.ui.releases.v1-6]
@@ -20,7 +24,7 @@
    [app.main.ui.releases.v1-9]
    [app.util.object :as obj]
    [app.util.timers :as tm]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 ;;; --- RELEASE NOTES MODAL
 
@@ -42,14 +46,13 @@
 
         finish
         (mf/use-callback
-         (st/emitf (modal/hide)
-                   (du/mark-onboarding-as-viewed {:version version})))
-        ]
+         #(st/emit! (modal/hide)
+                    (du/mark-onboarding-as-viewed {:version version})))]
 
     (mf/use-effect
      (mf/deps)
      (fn []
-       (st/emitf (du/mark-onboarding-as-viewed {:version version}))))
+       #(st/emit! (du/mark-onboarding-as-viewed {:version version}))))
 
     (mf/use-layout-effect
      (mf/deps @slide)
@@ -82,4 +85,4 @@
 
 (defmethod rc/render-release-notes "0.0"
   [params]
-  (rc/render-release-notes (assoc params :version "1.11")))
+  (rc/render-release-notes (assoc params :version "1.15")))

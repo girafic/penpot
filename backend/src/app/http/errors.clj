@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.http.errors
   "A errors handling for the http server."
@@ -10,36 +10,32 @@
    [app.common.exceptions :as ex]
    [app.common.logging :as l]
    [app.common.spec :as us]
+   [app.http :as-alias http]
    [clojure.spec.alpha :as s]
-   [cuerdas.core :as str]))
+   [cuerdas.core :as str]
+   [yetti.request :as yrq]
+   [yetti.response :as yrs]))
+
+(def ^:dynamic *context* {})
 
 (defn- parse-client-ip
-  [{:keys [headers] :as request}]
-  (or (some-> (get headers "x-forwarded-for") (str/split ",") first)
-      (get headers "x-real-ip")
-      (get request :remote-addr)))
+  [request]
+  (or (some-> (yrq/get-header request "x-forwarded-for") (str/split ",") first)
+      (yrq/get-header request "x-real-ip")
+      (yrq/remote-addr request)))
 
-(defn get-error-context
-  [request error]
-  (let [data (ex-data error)]
-    (merge
-     {:path          (:uri request)
-      :method        (:request-method request)
-      :hint          (ex-message error)
-      :params        (:params request)
-
-      :spec-problems (some->> data ::s/problems (take 10) seq vec)
-      :spec-value    (some->> data ::s/value)
-      :data          (some-> data (dissoc ::s/problems ::s/value ::s/spec))
-      :ip-addr       (parse-client-ip request)
-      :profile-id    (:profile-id request)}
-
-     (let [headers (:headers request)]
-       {:user-agent (get headers "user-agent")
-        :frontend-version (get headers "x-frontend-version" "unknown")})
-
-     (when (and data (::s/problems data))
-       {:spec-explain (us/pretty-explain data)}))))
+(defn get-context
+  [request]
+  (merge
+   *context*
+   {:path          (:path request)
+    :method        (:method request)
+    :params        (:params request)
+    :ip-addr       (parse-client-ip request)
+    :profile-id    (:profile-id request)}
+   (let [headers (:headers request)]
+     {:user-agent (get headers "user-agent")
+      :frontend-version (get headers "x-frontend-version" "unknown")})))
 
 (defmulti handle-exception
   (fn [err & _rest]
@@ -49,88 +45,120 @@
 
 (defmethod handle-exception :authentication
   [err _]
-  {:status 401 :body (ex-data err)})
+  (yrs/response 401 (ex-data err)))
 
 (defmethod handle-exception :restriction
   [err _]
-  {:status 400 :body (ex-data err)})
+  (yrs/response 400 (ex-data err)))
+
+(defmethod handle-exception :rate-limit
+  [err _]
+  (let [headers (-> err ex-data ::http/headers)]
+    (yrs/response :status 429 :body "" :headers headers)))
 
 (defmethod handle-exception :validation
   [err _]
-  (let [data    (ex-data err)
-        explain (us/pretty-explain data)]
-    {:status 400
-     :body (-> data
-               (dissoc ::s/problems)
-               (dissoc ::s/value)
-               (cond-> explain (assoc :explain explain)))}))
+  (let [{:keys [code] :as data} (ex-data err)]
+    (cond
+      (= code :spec-validation)
+      (let [explain (us/pretty-explain data)]
+        (yrs/response :status 400
+                      :body   (-> data
+                                  (dissoc ::s/problems ::s/value)
+                                  (cond-> explain (assoc :explain explain)))))
+
+      (= code :request-body-too-large)
+      (yrs/response :status 413 :body data)
+
+      :else
+      (yrs/response :status 400 :body data))))
 
 (defmethod handle-exception :assertion
   [error request]
-  (let [edata (ex-data error)]
-    (l/error ::l/raw (ex-message error)
-             ::l/context (get-error-context request error)
+  (let [edata (ex-data error)
+        explain (us/pretty-explain edata)]
+    (l/error ::l/raw (str (ex-message error) "\n" explain)
+             ::l/context (get-context request)
              :cause error)
-
-    {:status 500
-     :body {:type :server-error
-            :code :assertion
-            :data (dissoc edata ::s/problems ::s/value ::s/spec)}}))
+    (yrs/response :status 500
+                  :body   {:type :server-error
+                           :code :assertion
+                           :data (-> edata
+                                     (dissoc ::s/problems ::s/value ::s/spec)
+                                     (cond-> explain (assoc :explain explain)))})))
 
 (defmethod handle-exception :not-found
   [err _]
-  {:status 404 :body (ex-data err)})
-
-(defmethod handle-exception :default
-  [error request]
-  (let [edata (ex-data error)]
-    ;; NOTE: this is a special case for the idle-in-transaction error;
-    ;; when it happens, the connection is automatically closed and
-    ;; next-jdbc combines the two errors in a single ex-info. We only
-    ;; need the :handling error, because the :rollback error will be
-    ;; always "connection closed".
-    (if (and (ex/exception? (:rollback edata))
-             (ex/exception? (:handling edata)))
-      (handle-exception (:handling edata) request)
-      (do
-        (l/error ::l/raw (ex-message error)
-                 ::l/context (get-error-context request error)
-                 :cause error)
-        {:status 500
-         :body {:type :server-error
-                :code :unexpected
-                :hint (ex-message error)
-                :data edata}}))))
+  (yrs/response 404 (ex-data err)))
 
 (defmethod handle-exception org.postgresql.util.PSQLException
   [error request]
   (let [state (.getSQLState ^java.sql.SQLException error)]
     (l/error ::l/raw (ex-message error)
-             ::l/context (get-error-context request error)
+             ::l/context (get-context request)
              :cause error)
     (cond
       (= state "57014")
-      {:status 504
-       :body {:type :server-timeout
-              :code :statement-timeout
-              :hint (ex-message error)}}
+      (yrs/response 504 {:type :server-error
+                         :code :statement-timeout
+                         :hint (ex-message error)})
 
       (= state "25P03")
-      {:status 504
-       :body {:type :server-timeout
-              :code :idle-in-transaction-timeout
-              :hint (ex-message error)}}
+      (yrs/response 504 {:type :server-error
+                         :code :idle-in-transaction-timeout
+                         :hint (ex-message error)})
 
       :else
-      {:status 500
-       :body {:type :server-error
-              :code :psql-exception
-              :hint (ex-message error)
-              :state state}})))
+      (yrs/response 500 {:type :server-error
+                         :code :unexpected
+                         :hint (ex-message error)
+                         :state state}))))
+
+(defmethod handle-exception :default
+  [error request]
+  (let [edata (ex-data error)]
+    (cond
+      ;; This means that exception is not a controlled exception.
+      (nil? edata)
+      (do
+        (l/error ::l/raw (ex-message error)
+                 ::l/context (get-context request)
+                 :cause error)
+        (yrs/response 500 {:type :server-error
+                           :code :unexpected
+                           :hint (ex-message error)}))
+
+      ;; This is a special case for the idle-in-transaction error;
+      ;; when it happens, the connection is automatically closed and
+      ;; next-jdbc combines the two errors in a single ex-info. We
+      ;; only need the :handling error, because the :rollback error
+      ;; will be always "connection closed".
+      (and (ex/exception? (:rollback edata))
+           (ex/exception? (:handling edata)))
+      (handle-exception (:handling edata) request)
+
+      :else
+      (do
+        (l/error ::l/raw (ex-message error)
+                 ::l/context (get-context request)
+                 :cause error)
+        (yrs/response 500 {:type :server-error
+                           :code :unhandled
+                           :hint (ex-message error)
+                           :data edata})))))
 
 (defn handle
-  [error req]
-  (if (or (instance? java.util.concurrent.CompletionException error)
-          (instance? java.util.concurrent.ExecutionException error))
-    (handle-exception (.getCause ^Throwable error) req)
-    (handle-exception error req)))
+  [cause request]
+  (cond
+    (or (instance? java.util.concurrent.CompletionException cause)
+        (instance? java.util.concurrent.ExecutionException cause))
+    (handle-exception (.getCause ^Throwable cause) request)
+
+    (ex/wrapped? cause)
+    (let [context (meta cause)
+          cause   (deref cause)]
+      (binding [*context* context]
+        (handle-exception cause request)))
+
+    :else
+    (handle-exception cause request)))

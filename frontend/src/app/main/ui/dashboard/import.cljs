@@ -2,14 +2,18 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.dashboard.import
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.logging :as log]
+   [app.main.data.dashboard :as dd]
    [app.main.data.events :as ev]
+   [app.main.data.messages :as msg]
    [app.main.data.modal :as modal]
+   [app.main.features :as features]
    [app.main.store :as st]
    [app.main.ui.components.file-uploader :refer [file-uploader]]
    [app.main.ui.icons :as i]
@@ -17,9 +21,10 @@
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
+   [app.util.webapi :as wapi]
    [beicon.core :as rx]
    [potok.core :as ptk]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (log/set-level! :debug)
 
@@ -35,7 +40,7 @@
                         (mapv
                          (fn [file]
                            {:name (.-name file)
-                            :uri  (dom/create-uri file)})))]
+                            :uri  (wapi/create-uri file)})))]
          (st/emit! (modal/show
                     {:type :import
                      :project-id project-id
@@ -48,7 +53,7 @@
 
   (let [on-file-selected (use-import-file project-id on-finish-import)]
     [:form.import-file
-     [:& file-uploader {:accept ".penpot"
+     [:& file-uploader {:accept ".penpot,.zip"
                         :multi true
                         :ref external-ref
                         :on-selected on-file-selected}]]))
@@ -77,19 +82,20 @@
                  (= uri (:uri file))
                  (assoc :status :analyze-error))))))
 
-(defn set-analyze-result [files uri data]
+(defn set-analyze-result [files uri type data]
   (let [existing-files? (into #{} (->> files (map :file-id) (filter some?)))
         replace-file
         (fn [file]
-          (if (and (= uri (:uri file) )
+          (if (and (= uri (:uri file))
                    (= (:status file) :analyzing))
             (->> (:files data)
-                 (remove (comp existing-files? first) )
+                 (remove (comp existing-files? first))
                  (mapv (fn [[file-id file-data]]
                          (-> file-data
                              (assoc :file-id file-id
                                     :status :ready
-                                    :uri uri)))))
+                                    :uri uri
+                                    :type type)))))
             [file]))]
     (into [] (mapcat replace-file) files)))
 
@@ -138,7 +144,7 @@
     (str message)))
 
 (mf/defc import-entry
-  [{:keys [state file editing?]}]
+  [{:keys [state file editing? can-be-deleted?]}]
 
   (let [loading?       (or (= :analyzing (:status file))
                            (= :importing (:status file)))
@@ -205,9 +211,11 @@
 
         [:div.file-name-label (:name file) (when is-shared? i/library)])
 
-      [:div.edit-entry-buttons
-       [:button {:on-click handle-edit-entry}   i/pencil]
-       [:button {:on-click handle-remove-entry} i/trash]]]
+        [:div.edit-entry-buttons
+         (when (= "application/zip" (:type file))
+           [:button {:on-click handle-edit-entry}   i/pencil])
+         (when can-be-deleted?
+           [:button {:on-click handle-remove-entry} i/trash])]]
 
      (cond
        analyze-error?
@@ -232,35 +240,38 @@
 (mf/defc import-dialog
   {::mf/register modal/components
    ::mf/register-as :import}
-  [{:keys [project-id files on-finish-import]}]
+  [{:keys [project-id files template on-finish-import]}]
   (let [state (mf/use-state
                {:status :analyzing
                 :editing nil
+                :importing-templates 0
                 :files (->> files
                             (mapv #(assoc % :status :analyzing)))})
+
+        components-v2 (features/use-feature :components-v2)
 
         analyze-import
         (mf/use-callback
          (fn [files]
            (->> (uw/ask-many!
                  {:cmd :analyze-import
-                  :files (->> files (mapv :uri))})
+                  :files files})
                 (rx/delay-emit emit-delay)
                 (rx/subs
-                 (fn [{:keys [uri data error] :as msg}]
+                 (fn [{:keys [uri data error type] :as msg}]
                    (log/debug :uri uri :data data :error error)
                    (if (some? error)
                      (swap! state update :files set-analyze-error uri)
-                     (swap! state update :files set-analyze-result uri data)))))))
+                     (swap! state update :files set-analyze-result uri type data)))))))
 
         import-files
         (mf/use-callback
          (fn [project-id files]
            (st/emit! (ptk/event ::ev/event {::ev/name "import-files"
                                             :num-files (count files)}))
-
            (->> (uw/ask-many!
                  {:cmd :import-files
+                  :components-v2 components-v2
                   :project-id project-id
                   :files files})
                 (rx/subs
@@ -275,19 +286,50 @@
              (dom/prevent-default event)
              (st/emit! (modal/hide)))))
 
+        on-template-cloned-success
+        (fn []
+          (swap! state
+                 (fn [state]
+                   (-> state
+                       (assoc :status :importing :importing-templates 0))))
+          (st/emit! (dd/fetch-recent-files)))
+
+        on-template-cloned-error
+        (fn []
+          (st/emit!
+           (modal/hide)
+           (msg/error (tr "dashboard.libraries-and-templates.import-error"))))
+
+        continue-files
+        (fn []
+          (let [files (->> @state :files (filterv #(and (= :ready (:status %)) (not (:deleted? %)))))]
+            (import-files project-id files))
+
+          (swap! state
+                 (fn [state]
+                   (-> state
+                       (assoc :status :importing)
+                       (update :files mark-files-importing)))))
+
+        continue-template
+        (fn []
+          (let [mdata  {:on-success on-template-cloned-success :on-error on-template-cloned-error}
+                params {:project-id project-id :template-id (:id template)}]
+            (swap! state
+                   (fn [state]
+                     (-> state
+                         (assoc :status :importing :importing-templates 1))))
+            (st/emit! (dd/clone-template (with-meta params mdata)))))
+
+
         handle-continue
         (mf/use-callback
          (mf/deps project-id (:files @state))
          (fn [event]
            (dom/prevent-default event)
-           (let [files (->> @state :files (filterv #(= :ready (:status %))))]
-             (import-files project-id files))
-
-           (swap! state
-                  (fn [state]
-                    (-> state
-                        (assoc :status :importing)
-                        (update :files mark-files-importing))))))
+           (if (some? template)
+             (continue-template)
+             (continue-files))))
 
         handle-accept
         (mf/use-callback
@@ -296,10 +338,20 @@
            (st/emit! (modal/hide))
            (when on-finish-import (on-finish-import))))
 
+        num-importing (+
+                       (->> @state :files (filter #(= (:status %) :importing)) count)
+                       (:importing-templates @state))
+
+
         warning-files (->> @state :files (filter #(and (= (:status %) :import-finish) (d/not-empty? (:errors %)))) count)
         success-files (->> @state :files (filter #(and (= (:status %) :import-finish) (empty? (:errors %)))) count)
         pending-analysis? (> (->> @state :files (filter #(= (:status %) :analyzing)) count) 0)
-        pending-import? (> (->> @state :files (filter #(= (:status %) :importing)) count) 0)]
+        pending-import? (> num-importing 0)
+        files (->> (:files @state) (filterv (comp not :deleted?)))
+        ;; pending-import? (> (->> @state :files (filter #(= (:status %) :importing)) count) 0)
+        ;; files (->> (:files @state) (filterv (comp not :deleted?)))
+        valid-files? (or (some? template)
+                         (> (+ (->> files (filterv (fn [x] (not= (:status x) :analyze-error))) count)) 0))]
 
     (mf/use-effect
      (fn []
@@ -310,7 +362,7 @@
      (fn []
        ;; dispose uris when the component is umount
        #(doseq [file files]
-          (dom/revoke-uri (:uri file)))))
+          (wapi/revoke-uri (:uri file)))))
 
     [:div.modal-overlay
      [:div.modal-container.import-dialog
@@ -330,14 +382,22 @@
 
            [:div.feedback-banner
             [:div.icon i/checkbox-checked]
-            [:div.message (tr "dashboard.import.import-message" success-files)]]))
+            [:div.message (tr "dashboard.import.import-message" (if (some? template) 1 success-files))]]))
 
-       (for [file (->> (:files @state) (filterv (comp not :deleted?)))]
-         (let [editing?      (and (some? (:file-id file))
-                                  (= (:file-id file) (:editing @state)))]
+       (for [file files]
+         (let [editing? (and (some? (:file-id file))
+                             (= (:file-id file) (:editing @state)))]
            [:& import-entry {:state state
+                             :key (dm/str (:id file))
                              :file file
-                             :editing? editing?}]))]
+                             :editing? editing?
+                             :can-be-deleted? (> (count files) 1)}]))
+
+       (when (some? template)
+         [:& import-entry {:state state
+                           :file (assoc template :status (if (= 1 (:importing-templates @state)) :importing :ready))
+                           :editing? false
+                           :can-be-deleted? false}])]
 
       [:div.modal-footer
        [:div.action-buttons
@@ -352,7 +412,7 @@
            {:class "primary"
             :type "button"
             :value (tr "labels.continue")
-            :disabled pending-analysis?
+            :disabled (or pending-analysis? (not valid-files?))
             :on-click handle-continue}])
 
         (when (= :importing (:status @state))
@@ -360,5 +420,5 @@
            {:class "primary"
             :type "button"
             :value (tr "labels.accept")
-            :disabled pending-import?
+            :disabled (or pending-import? (not valid-files?))
             :on-click handle-accept}])]]]]))

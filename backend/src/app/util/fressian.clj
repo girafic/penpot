@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.fressian
   (:require
@@ -203,7 +203,7 @@
        (Instant/ofEpochMilli (.readInt rdr))))
 
 
-   "clj/ratio"
+   "ratio"
    (reify ReadHandler
      (read [_ rdr _ _]
        (Ratio. (biginteger (.readObject rdr))

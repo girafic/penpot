@@ -2,19 +2,18 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.sidebar.options.menus.layer
   (:require
    [app.common.data :as d]
-   [app.common.math :as mth]
    [app.main.data.workspace.changes :as dch]
    [app.main.store :as st]
    [app.main.ui.components.numeric-input :refer [numeric-input]]
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (def layer-attrs [:opacity :blend-mode :blocked :hidden])
 
@@ -23,8 +22,7 @@
     ""
     (str (-> opacity
              (d/coalesce 1)
-             (* 100)
-             (mth/round)))))
+             (* 100)))))
 
 (defn select-all [event]
   (dom/select-text! (dom/get-target event)))

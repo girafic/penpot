@@ -2,14 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.import.parser
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
-   [app.common.spec.interactions :as cti]
+   [app.common.types.shape.interactions :as ctsi]
    [app.common.uuid :as uuid]
    [app.util.color :as uc]
    [app.util.json :as json]
@@ -51,7 +52,12 @@
 (defn find-all-nodes
   [node tag]
   (when (some? node)
-    (->> node :content (filterv #(= (:tag %) tag)))))
+    (let [predicate?
+          (if (set? tag)
+            ;; We can pass a tag set or a single tag
+            #(contains? tag (:tag %))
+            #(= (:tag %) tag))]
+      (->> node :content (filterv predicate?)))))
 
 (defn get-data
   ([node]
@@ -185,7 +191,7 @@
          (d/deep-mapm
           (fn [pair] (->> pair (mapv convert)))))))
 
-(def search-data-node? #{:rect :image :path :text :circle})
+(def search-data-node? #{:rect :image :path :circle})
 
 (defn get-svg-data
   [type node]
@@ -200,9 +206,37 @@
              (map #(:attrs %))
              (reduce add-attrs node-attrs)))
 
+      (= type :text)
+      (->> node
+           (node-seq)
+           (filter #(contains? #{:g :foreignObject} (:tag %)))
+           (map #(:attrs %))
+           (reduce add-attrs node-attrs))
+
       (= type :frame)
-      (let [svg-node (->> node :content (d/seek #(= "frame-background" (get-in % [:attrs :class]))))]
-        (merge (add-attrs {} (:attrs svg-node)) node-attrs))
+      (let [;; Old .penpot files doesn't have "g" nodes. They have a clipPath reference as a node attribute
+            to-url #(dm/str "url(#" % ")")
+            frame-clip-rect-node  (->> (find-all-nodes node :defs)
+                                   (mapcat #(find-all-nodes % :clipPath))
+                                   (filter #(= (to-url (:id (:attrs %))) (:clip-path node-attrs)))
+                                   (mapcat #(find-all-nodes % #{:rect :path}))
+                                   (first))
+
+            ;; The nodes with the "frame-background" class can have some anidation depending on the strokes they have
+            g-nodes    (find-all-nodes node :g)
+            defs-nodes (flatten (map #(find-all-nodes % :defs) g-nodes))
+            gg-nodes   (flatten (map #(find-all-nodes % :g) g-nodes))
+
+
+            rect-nodes (flatten [[(find-all-nodes node :rect)]
+                                 (map #(find-all-nodes % #{:rect :path}) defs-nodes)
+                                 (map #(find-all-nodes % #{:rect :path}) g-nodes)
+                                 (map #(find-all-nodes % #{:rect :path}) gg-nodes)])
+            svg-node (d/seek #(= "frame-background" (get-in % [:attrs :class])) rect-nodes)]
+        (merge
+         (add-attrs {} (:attrs frame-clip-rect-node))
+         (add-attrs {} (:attrs svg-node))
+         node-attrs))
 
       (= type :svg-raw)
       (let [svg-content (get-data node :penpot:svg-content)
@@ -366,7 +400,8 @@
         component-id          (get-meta node :component-id uuid/uuid)
         component-file        (get-meta node :component-file uuid/uuid)
         shape-ref             (get-meta node :shape-ref uuid/uuid)
-        component-root?       (get-meta node :component-root str->bool)]
+        component-root?       (get-meta node :component-root str->bool)
+        main-instance?        (get-meta node :main-instance str->bool)]
 
     (cond-> props
       (some? stroke-color-ref-id)
@@ -380,6 +415,9 @@
       component-root?
       (assoc :component-root? component-root?)
 
+      main-instance?
+      (assoc :main-instance? main-instance?)
+
       (some? shape-ref)
       (assoc :shape-ref shape-ref))))
 
@@ -387,15 +425,28 @@
   [props node svg-data]
 
   (let [fill (:fill svg-data)
-        hide-fill-on-export (get-meta node :hide-fill-on-export str->bool)
-        fill-color-ref-id     (get-meta node :fill-color-ref-id uuid/uuid)
-        fill-color-ref-file   (get-meta node :fill-color-ref-file uuid/uuid)
-        gradient (when (str/starts-with? fill "url")
-                   (parse-gradient node fill))]
+        fill-color-ref-id        (get-meta node :fill-color-ref-id uuid/uuid)
+        fill-color-ref-file      (get-meta node :fill-color-ref-file uuid/uuid)
+        meta-fill-color          (get-meta node :fill-color)
+        meta-fill-opacity        (get-meta node :fill-opacity)
+        meta-fill-color-gradient (if (str/starts-with? meta-fill-color "url")
+                                   (parse-gradient node meta-fill-color)
+                                   (get-meta node :fill-color-gradient))
+        gradient                 (when (str/starts-with? fill "url")
+                                   (parse-gradient node fill))]
 
     (cond-> props
       :always
       (assoc :fill-color nil
+             :fill-opacity nil)
+
+      (some? meta-fill-color)
+      (assoc :fill-color meta-fill-color
+             :fill-opacity (d/parse-double meta-fill-opacity))
+
+      (some? meta-fill-color-gradient)
+      (assoc :fill-color-gradient meta-fill-color-gradient
+             :fill-color nil
              :fill-opacity nil)
 
       (some? gradient)
@@ -406,9 +457,6 @@
       (uc/hex? fill)
       (assoc :fill-color fill
              :fill-opacity (-> svg-data (:fill-opacity "1") d/parse-double))
-
-      (some? hide-fill-on-export)
-      (assoc :hide-fill-on-export hide-fill-on-export)
 
       (some? fill-color-ref-id)
       (assoc :fill-color-ref-id fill-color-ref-id
@@ -447,15 +495,15 @@
       (some? stroke-cap-end)
       (assoc :stroke-cap-end stroke-cap-end))))
 
-(defn add-rect-data
+(defn add-radius-data
   [props node svg-data]
   (let [r1 (get-meta node :r1 d/parse-double)
         r2 (get-meta node :r2 d/parse-double)
         r3 (get-meta node :r3 d/parse-double)
         r4 (get-meta node :r4 d/parse-double)
 
-        rx (-> (get svg-data :rx) d/parse-double)
-        ry (-> (get svg-data :ry) d/parse-double)]
+        rx (-> (get svg-data :rx 0) d/parse-double)
+        ry (-> (get svg-data :ry 0) d/parse-double)]
 
     (cond-> props
       (some? r1)
@@ -481,8 +529,9 @@
 (defn add-text-data
   [props node]
   (-> props
-      (assoc :grow-type (get-meta node :grow-type keyword))
-      (assoc :content   (get-meta node :content (comp string->uuid json/decode)))))
+      (assoc :grow-type     (get-meta node :grow-type keyword))
+      (assoc :content       (get-meta node :content (comp string->uuid json/decode)))
+      (assoc :position-data (get-meta node :position-data (comp string->uuid json/decode)))))
 
 (defn add-group-data
   [props node]
@@ -548,14 +597,13 @@
     (->> flows-node :content (mapv parse-flow-node))))
 
 (defn parse-guide-node [node]
-  (let [attrs (-> node :attrs remove-penpot-prefix)]
-    (println attrs)
-    (let [id (uuid/next)]
-      [id
-       {:id       id
-        :frame-id (when (:frame-id attrs) (-> attrs :frame-id uuid))
-        :axis     (-> attrs :axis keyword)
-        :position (-> attrs :position d/parse-double)}])))
+  (let [attrs (-> node :attrs remove-penpot-prefix)
+        id (uuid/next)]
+    [id
+     {:id       id
+      :frame-id (when (:frame-id attrs) (-> attrs :frame-id uuid))
+      :axis     (-> attrs :axis keyword)
+      :position (-> attrs :position d/parse-double)}]))
 
 (defn parse-guides [node]
   (let [guides-node (get-data node :penpot:guides)]
@@ -677,20 +725,48 @@
 
       props)))
 
-(defn add-fills
-  [props node svg-data]
-  (let [fills (-> node
-                  (find-node :defs)
-                  (find-node :pattern)
-                  (find-node :g)
-                  (find-all-nodes :rect)
-                  (reverse))
-        fills (if (= 0 (count fills))
-                [(add-fill {} node svg-data)]
-                (map #(add-fill {} node (get-svg-data :rect %)) fills))]
-      (-> props
-          (assoc :fills fills))))
+(defn parse-fills
+  [node svg-data]
+  (let [fills-node (get-data node :penpot:fills)
+        fills (->> (find-all-nodes fills-node :penpot:fill)
+                   (mapv (fn [fill-node]
+                           {:fill-color  (when (not (str/starts-with? (get-meta fill-node :fill-color) "url"))
+                                           (get-meta fill-node :fill-color))
+                            :fill-color-gradient (when (str/starts-with? (get-meta fill-node :fill-color) "url")
+                                                   (parse-gradient node (get-meta fill-node :fill-color)))
+                            :fill-color-ref-file (get-meta fill-node :fill-color-ref-file uuid/uuid)
+                            :fill-color-ref-id (get-meta fill-node :fill-color-ref-id uuid/uuid)
+                            :fill-opacity (get-meta fill-node :fill-opacity d/parse-double)}))
+                   (mapv d/without-nils))]
+    (if (seq fills)
+      fills
+      (->> [(-> (add-fill {} node svg-data)
+                (d/without-nils))]
+           (filterv not-empty)))))
 
+(defn parse-strokes
+  [node svg-data]
+  (let [strokes-node (get-data node :penpot:strokes)
+        strokes (->> (find-all-nodes strokes-node :penpot:stroke)
+                     (mapv (fn [stroke-node]
+                             {:stroke-color  (when (not (str/starts-with? (get-meta stroke-node :stroke-color) "url"))
+                                               (get-meta stroke-node :stroke-color))
+                              :stroke-color-gradient (when (str/starts-with? (get-meta stroke-node :stroke-color) "url")
+                                                       (parse-gradient node (get-meta stroke-node :stroke-color)))
+                              :stroke-color-ref-file (get-meta stroke-node :stroke-color-ref-file uuid/uuid)
+                              :stroke-color-ref-id (get-meta stroke-node :stroke-color-ref-id uuid/uuid)
+                              :stroke-opacity (get-meta stroke-node :stroke-opacity d/parse-double)
+                              :stroke-style (get-meta stroke-node :stroke-style keyword)
+                              :stroke-width (get-meta stroke-node :stroke-width d/parse-double)
+                              :stroke-alignment (get-meta stroke-node :stroke-alignment keyword)
+                              :stroke-cap-start (get-meta stroke-node :stroke-cap-start keyword)
+                              :stroke-cap-end (get-meta stroke-node :stroke-cap-end keyword)}))
+                     (mapv d/without-nils))]
+    (if (seq strokes)
+      strokes
+      (->> [(-> (add-stroke {} node svg-data)
+                (d/without-nils))]
+           (filterv #(and (not-empty %) (not= (:stroke-style %) :none)))))))
 
 (defn add-svg-content
   [props node]
@@ -717,10 +793,14 @@
           :content node-content}))))
 
 (defn add-frame-data [props node]
-  (let [grids (parse-grids node)]
-    (cond-> props
-      (d/not-empty? grids)
-      (assoc :grids grids))))
+  (let [grids (parse-grids node)
+        show-content (get-meta node :show-content str->bool)
+        hide-in-viewer (get-meta node :hide-in-viewer str->bool)]
+    (-> props
+        (assoc :show-content show-content)
+        (assoc :hide-in-viewer hide-in-viewer)
+        (cond-> (d/not-empty? grids)
+          (assoc :grids grids)))))
 
 (defn has-image?
   [node]
@@ -729,6 +809,7 @@
         (-> node
             (find-node :defs)
             (find-node :pattern)
+            (find-node :g)
             (find-node :image))]
     (or (= type :image)
         (some? pattern-image))))
@@ -743,11 +824,50 @@
         (-> node
             (find-node :defs)
             (find-node :pattern)
+            (find-node :g)
             (find-node :image)
             :attrs)
         image-data (get-svg-data :image node)
         svg-data (or image-data pattern-data)]
-    (:xlink:href svg-data)))
+    (or (:href svg-data) (:xlink:href svg-data))))
+
+(defn get-image-fill
+  [node]
+  (let [linear-gradient-node (-> node
+                                 (find-node :defs)
+                                 (find-node :linearGradient))
+        radial-gradient-node (-> node
+                                 (find-node :defs)
+                                 (find-node :radialGradient))
+        gradient-node (or linear-gradient-node radial-gradient-node)
+        stops (parse-stops gradient-node)
+        gradient (cond-> {:stops stops}
+                   (some? linear-gradient-node)
+                   (assoc :type :linear
+                          :start-x (-> linear-gradient-node :attrs :x1 d/parse-double)
+                          :start-y (-> linear-gradient-node :attrs :y1 d/parse-double)
+                          :end-x   (-> linear-gradient-node :attrs :x2 d/parse-double)
+                          :end-y   (-> linear-gradient-node :attrs :y2 d/parse-double)
+                          :width   1)
+
+                   (some? radial-gradient-node)
+                   (assoc :type :linear
+                          :start-x (get-meta radial-gradient-node :start-x d/parse-double)
+                          :start-y (get-meta radial-gradient-node :start-y d/parse-double)
+                          :end-x   (get-meta radial-gradient-node :end-x   d/parse-double)
+                          :end-y   (get-meta radial-gradient-node :end-y   d/parse-double)
+                          :width   (get-meta radial-gradient-node :width   d/parse-double)))]
+
+    (if (some? (or linear-gradient-node radial-gradient-node))
+      {:fill-color-gradient gradient}
+      (-> node
+          (find-node :defs)
+          (find-node :pattern)
+          (find-node :g)
+          (find-node :rect)
+          :attrs
+          :style
+          parse-style))))
 
 (defn parse-data
   [type node]
@@ -757,14 +877,18 @@
       (-> {}
           (add-common-data node)
           (add-position type node svg-data)
-          (add-stroke node svg-data)
+
           (add-layer-options svg-data)
           (add-shadows node)
           (add-blur node)
           (add-exports node)
           (add-svg-attrs node svg-data)
           (add-library-refs node)
-          (add-fills node svg-data)
+
+          (assoc :fills (parse-fills node svg-data))
+          (assoc :strokes (parse-strokes node svg-data))
+
+          (assoc :hide-fill-on-export      (get-meta node :hide-fill-on-export str->bool))
 
           (cond-> (= :svg-raw type)
             (add-svg-content node))
@@ -775,12 +899,12 @@
           (cond-> (= :group type)
             (add-group-data node))
 
-          (cond-> (= :rect type)
-            (add-rect-data node svg-data))
+          (cond-> (or (= :frame type) (= :rect type))
+            (add-radius-data node svg-data))
 
           (cond-> (some? (get-in node [:attrs :penpot:media-id]))
             (->
-             (add-rect-data node svg-data)
+             (add-radius-data node svg-data)
              (add-image-data type node)))
 
           (cond-> (= :text type)
@@ -819,17 +943,17 @@
                  (let [interaction {:event-type  (get-meta node :event-type keyword)
                                     :action-type (get-meta node :action-type keyword)}]
                    (cond-> interaction
-                     (cti/has-delay interaction)
+                     (ctsi/has-delay interaction)
                      (assoc :delay (get-meta node :delay d/parse-double))
 
-                     (cti/has-destination interaction)
+                     (ctsi/has-destination interaction)
                      (assoc :destination     (get-meta node :destination uuid/uuid)
                             :preserve-scroll (get-meta node :preserve-scroll str->bool))
 
-                     (cti/has-url interaction)
+                     (ctsi/has-url interaction)
                      (assoc :url (get-meta node :url str))
 
-                     (cti/has-overlay-opts interaction)
+                     (ctsi/has-overlay-opts interaction)
                      (assoc :overlay-pos-type    (get-meta node :overlay-pos-type keyword)
                             :overlay-position    (gpt/point
                                                    (get-meta node :overlay-position-x d/parse-double)

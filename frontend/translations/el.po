@@ -1,10 +1,15 @@
 msgid ""
 msgstr ""
-"Language: gr\n"
+"PO-Revision-Date: 2022-08-18 16:16+0000\n"
+"Last-Translator: andy <andres.gonzalez79@gmail.com>\n"
+"Language-Team: Greek "
+"<https://hosted.weblate.org/projects/penpot/frontend/el/>\n"
+"Language: el\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Plural-Forms: nplurals=2; plural=n != 1;\n"
+"X-Generator: Weblate 4.14-dev\n"
 
 #: src/app/main/ui/auth/register.cljs
 msgid "auth.already-have-account"
@@ -55,24 +60,24 @@ msgid "auth.login-submit"
 msgstr "Συνδεθείτε"
 
 #: src/app/main/ui/auth/login.cljs
-msgid "auth.login-subtitle"
-msgstr "Εισαγάγετε τα στοιχεία σας παρακάτω"
-
-#: src/app/main/ui/auth/login.cljs
 msgid "auth.login-title"
 msgstr "Χαίρομαι που σας ξαναδώ"
 
 #: src/app/main/ui/auth/register.cljs, src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-github-submit"
-msgstr "Συνδεθείτε με το Github"
+msgstr "GitHub"
 
 #: src/app/main/ui/auth/register.cljs, src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-gitlab-submit"
-msgstr "Συνδεθείτε με το Gitlab"
+msgstr "GitLab"
+
+#: src/app/main/ui/auth/login.cljs
+msgid "auth.login-with-google-submit"
+msgstr "Google"
 
 #: src/app/main/ui/auth/login.cljs
 msgid "auth.login-with-ldap-submit"
-msgstr "Συνδεθείτε με το LDAP"
+msgstr "LDAP"
 
 #: src/app/main/ui/auth/recovery.cljs
 msgid "auth.new-password"
@@ -168,7 +173,7 @@ msgstr "(Αντίγραφο)"
 
 #: src/app/main/ui/dashboard/sidebar.cljs
 msgid "dashboard.create-new-team"
-msgstr "+ Δημιουργία νέας ομάδας"
+msgstr "Δημιουργία νέας ομάδας"
 
 #: src/app/main/ui/dashboard/sidebar.cljs
 msgid "dashboard.default-team-name"
@@ -317,10 +322,6 @@ msgstr "Το έργο σας μετακινήθηκε με επιτυχία"
 msgid "dashboard.success-move-project"
 msgstr "Το έργο σας μετακινήθηκε με επιτυχία"
 
-#: src/app/main/ui/dashboard/sidebar.cljs
-msgid "dashboard.switch-team"
-msgstr "Αλλαγή εξοπλισμού"
-
 #: src/app/main/ui/dashboard/team.cljs
 msgid "dashboard.team-info"
 msgstr "Πληροφορίες ομάδας"
@@ -418,7 +419,7 @@ msgstr "Η μορφή εικόνας δεν αναγνωρίζεται (πρέπ
 
 #: src/app/main/data/workspace/persistence.cljs
 msgid "errors.media-too-large"
-msgstr "Η εικόνα είναι πολύ μεγάλη (πρέπει να είναι μικρότερη από 5mb)."
+msgstr "Η εικόνα είναι πολύ μεγάλη."
 
 #: src/app/main/data/workspace/persistence.cljs, src/app/main/data/media.cljs
 msgid "errors.media-type-mismatch"
@@ -483,24 +484,6 @@ msgstr "Νιώθετε σαν να μιλάτε; Συνομιλήστε μαζί
 #: src/app/main/ui/settings/feedback.cljs
 msgid "feedback.description"
 msgstr "Περιγραφή"
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-go-to"
-msgstr "Μετάβαση στις συζητήσεις"
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-subtitle1"
-msgstr "Μπείτε στο συνεργατικό φόρουμ του Penpot"
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-subtitle2"
-msgstr ""
-"Μπορείτε να κάνετε και να απαντήσετε σε ερωτήσεις, να έχετε συνομιλίες "
-"ανοιχτού τύπου και να συνεχίσετε να επηρεάζετε το έργο"
-
-#: src/app/main/ui/settings/feedback.cljs
-msgid "feedback.discussions-title"
-msgstr "Ομαδικές συζητήσεις "
 
 #: src/app/main/ui/settings/feedback.cljs
 msgid "feedback.subject"
@@ -1137,10 +1120,6 @@ msgstr "Διαγραφή μέλους της ομάδας"
 msgid "modals.invite-member-confirm.accept"
 msgstr "Αποστολή πρόσκλησης"
 
-#: src/app/main/ui/dashboard/team.cljs
-msgid "modals.invite-member.title"
-msgstr "Προσκαλέστε να συμμετάσχετε στην ομάδα"
-
 #: src/app/main/ui/dashboard/sidebar.cljs
 msgid "modals.leave-and-reassign.hint1"
 msgstr "Είστε ο ιδιοκτήτης του %s"
@@ -1447,16 +1426,8 @@ msgid "workspace.header.menu.enable-snap-grid"
 msgstr "Σύνδεση στο πλέγμα"
 
 #: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.hide-assets"
-msgstr "Απόκρυψη στοιχείων"
-
-#: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.hide-grid"
 msgstr "Απόκρυψη πλεγμάτων"
-
-#: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.hide-layers"
-msgstr "Απόκρυψη στρώματα"
 
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.hide-palette"
@@ -1471,16 +1442,8 @@ msgid "workspace.header.menu.select-all"
 msgstr "Επιλογή όλων"
 
 #: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.show-assets"
-msgstr "Εμφάνιση στοιχείων"
-
-#: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.show-grid"
 msgstr "Εμφάνιση πλέγματος"
-
-#: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.show-layers"
-msgstr "Εμφάνιση στρώματα"
 
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.show-palette"
@@ -1743,10 +1706,6 @@ msgstr "Σειρές"
 #: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs
 msgid "workspace.options.grid.square"
 msgstr "τετράγωνο"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs
-msgid "workspace.options.grid.title"
-msgstr "Πλέγμα & Διατάξεις"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/fill.cljs
 msgid "workspace.options.group-fill"

@@ -9,7 +9,7 @@
    [app.common.colors :as clr]
    [app.common.uuid :as uuid]))
 
-(def file-version 14)
+(def file-version 19)
 (def default-color clr/gray-20)
 (def root uuid/zero)
 
@@ -25,6 +25,7 @@
    :content               :content-group
    :hidden                :visibility-group
    :blocked               :modifiable-group
+   :grow-type             :text-font-group
    :font-family           :text-font-group
    :font-size             :text-font-group
    :font-style            :text-font-group
@@ -32,6 +33,7 @@
    :letter-spacing        :text-display-group
    :line-height           :text-display-group
    :text-align            :text-display-group
+   :strokes               :stroke-group
    :stroke-color          :stroke-group
    :stroke-color-gradient :stroke-group
    :stroke-color-ref-file :stroke-group
@@ -57,21 +59,32 @@
    :y                     :geometry-group
    :width                 :geometry-group
    :height                :geometry-group
+   :rotation              :geometry-group
    :transform             :geometry-group
    :transform-inverse     :geometry-group
+   :position-data         :geometry-group
+   :opacity               :layer-effects-group
+   :blend-mode            :layer-effects-group
    :shadow                :shadow-group
    :blur                  :blur-group
    :masked-group?         :mask-group
    :constraints-h         :constraints-group
    :constraints-v         :constraints-group
-   :fixed-scroll          :constraints-group})
+   :fixed-scroll          :constraints-group
+   :exports               :exports-group})
 
 ;; Attributes that may directly be edited by the user with forms
 (def editable-attrs
   {:frame #{:proportion-lock
             :width :height
             :x :y
+            :rx :ry
+            :r1 :r2 :r3 :r4
+            :rotation
             :selrect
+            :points
+            :show-content
+            :hide-in-viewer
 
             :opacity
             :blend-mode
@@ -84,12 +97,28 @@
             :fill-color-ref-id
             :fill-color-ref-file
             :fill-color-gradient
-            :hide-fill-on-export}
+            :hide-fill-on-export
+
+            :strokes
+            :stroke-style
+            :stroke-alignment
+            :stroke-width
+            :stroke-color
+            :stroke-color-ref-id
+            :stroke-color-ref-file
+            :stroke-opacity
+            :stroke-color-gradient
+            :stroke-cap-start
+            :stroke-cap-end
+
+            :exports}
 
   :group #{:proportion-lock
            :width :height
            :x :y
+           :rotation
            :selrect
+           :points
 
            :constraints-h
            :constraints-v
@@ -104,7 +133,9 @@
 
            :shadow
 
-           :blur}
+           :blur
+
+           :exports}
 
    :rect #{:proportion-lock
            :width :height
@@ -113,6 +144,7 @@
            :rx :ry
            :r1 :r2 :r3 :r4
            :selrect
+           :points
 
            :constraints-h
            :constraints-v
@@ -132,6 +164,7 @@
            :fill-color-ref-file
            :fill-color-gradient
 
+           :strokes
            :stroke-style
            :stroke-alignment
            :stroke-width
@@ -145,13 +178,16 @@
 
            :shadow
 
-           :blur}
+           :blur
+
+           :exports}
 
    :circle #{:proportion-lock
              :width :height
              :x :y
              :rotation
              :selrect
+             :points
 
              :constraints-h
              :constraints-v
@@ -171,6 +207,7 @@
              :fill-color-ref-file
              :fill-color-gradient
 
+             :strokes
              :stroke-style
              :stroke-alignment
              :stroke-width
@@ -184,13 +221,16 @@
 
              :shadow
 
-             :blur}
+             :blur
+
+             :exports}
 
   :path #{:proportion-lock
           :width :height
           :x :y
           :rotation
           :selrect
+          :points
 
           :constraints-h
           :constraints-v
@@ -210,6 +250,7 @@
           :fill-color-ref-file
           :fill-color-gradient
 
+          :strokes
           :stroke-style
           :stroke-alignment
           :stroke-width
@@ -223,15 +264,16 @@
 
           :shadow
 
-          :blur}
+          :blur
+
+          :exports}
 
   :text #{:proportion-lock
           :width :height
           :x :y
           :rotation
-          :rx :ry
-          :r1 :r2 :r3 :r4
           :selrect
+          :points
 
           :constraints-h
           :constraints-v
@@ -249,6 +291,17 @@
           :fill-color-ref-id
           :fill-color-ref-file
           :fill-color-gradient
+
+          :stroke-style
+          :stroke-alignment
+          :stroke-width
+          :stroke-color
+          :stroke-color-ref-id
+          :stroke-color-ref-file
+          :stroke-opacity
+          :stroke-color-gradient
+          :stroke-cap-start
+          :stroke-cap-end
 
           :shadow
 
@@ -277,7 +330,9 @@
 
           :text-transform
 
-          :grow-type}
+          :grow-type
+
+          :exports}
 
   :image #{:proportion-lock
            :width :height
@@ -286,6 +341,7 @@
            :rx :ry
            :r1 :r2 :r3 :r4
            :selrect
+           :points
 
            :constraints-h
            :constraints-v
@@ -300,7 +356,9 @@
 
            :shadow
 
-           :blur}
+           :blur
+
+           :exports}
 
   :svg-raw #{:proportion-lock
              :width :height
@@ -309,6 +367,7 @@
              :rx :ry
              :r1 :r2 :r3 :r4
              :selrect
+             :points
 
              :constraints-h
              :constraints-v
@@ -328,6 +387,7 @@
              :fill-color-ref-file
              :fill-color-gradient
 
+             :strokes
              :stroke-style
              :stroke-alignment
              :stroke-width
@@ -341,7 +401,9 @@
 
              :shadow
 
-             :blur}
+             :blur
+
+             :exports}
 
   :bool #{:proportion-lock
           :width :height
@@ -350,6 +412,7 @@
           :rx :ry
           :r1 :r2 :r3 :r4
           :selrect
+          :points
 
           :constraints-h
           :constraints-v
@@ -381,5 +444,7 @@
 
           :shadow
 
-          :blur}})
+          :blur
+
+          :exports}})
 

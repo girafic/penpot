@@ -2,50 +2,60 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.workspace
   (:require
    [app.common.attrs :as attrs]
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.align :as gal]
-   [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.proportions :as gpr]
    [app.common.geom.shapes :as gsh]
-   [app.common.math :as mth]
-   [app.common.pages :as cp]
    [app.common.pages.changes-builder :as pcb]
    [app.common.pages.helpers :as cph]
    [app.common.spec :as us]
-   [app.common.spec.shape :as spec.shape]
+   [app.common.text :as txt]
    [app.common.transit :as t]
+   [app.common.types.shape :as cts]
+   [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.config :as cfg]
+   [app.main.data.comments :as dcm]
    [app.main.data.events :as ev]
-   [app.main.data.messages :as dm]
+   [app.main.data.messages :as msg]
+   [app.main.data.users :as du]
    [app.main.data.workspace.bool :as dwb]
    [app.main.data.workspace.changes :as dch]
+   [app.main.data.workspace.collapse :as dwco]
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.drawing :as dwd]
+   [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.fix-bool-contents :as fbc]
    [app.main.data.workspace.groups :as dwg]
    [app.main.data.workspace.guides :as dwgu]
+   [app.main.data.workspace.highlight :as dwh]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.data.workspace.layers :as dwly]
+   [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.media :as dwm]
    [app.main.data.workspace.notifications :as dwn]
    [app.main.data.workspace.path :as dwdp]
    [app.main.data.workspace.path.shapes-to-path :as dwps]
    [app.main.data.workspace.persistence :as dwp]
    [app.main.data.workspace.selection :as dws]
+   [app.main.data.workspace.shape-layout :as dwsl]
+   [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.state-helpers :as wsh]
-   [app.main.data.workspace.svg-upload :as svg]
+   [app.main.data.workspace.thumbnails :as dwth]
    [app.main.data.workspace.transforms :as dwt]
    [app.main.data.workspace.undo :as dwu]
+   [app.main.data.workspace.viewport :as dwv]
+   [app.main.data.workspace.zoom :as dwz]
    [app.main.repo :as rp]
    [app.main.streams :as ms]
-   [app.main.worker :as uw]
    [app.util.dom :as dom]
    [app.util.globals :as ug]
    [app.util.http :as http]
@@ -55,11 +65,11 @@
    [app.util.webapi :as wapi]
    [beicon.core :as rx]
    [cljs.spec.alpha :as s]
-   [clojure.set :as set]
    [cuerdas.core :as str]
+   [linked.core :as lks]
    [potok.core :as ptk]))
 
-(s/def ::shape-attrs ::spec.shape/shape-attrs)
+(s/def ::shape-attrs ::cts/shape-attrs)
 (s/def ::set-of-string
   (s/every string? :kind set?))
 
@@ -71,99 +81,24 @@
 
 ;; --- Initialize Workspace
 
-(s/def ::layout-flag
-  #{:sitemap
-    :layers
-    :comments
-    :assets
-    :document-history
-    :colorpalette
-    :element-options
-    :rules
-    :display-grid
-    :snap-grid
-    :scale-text
-    :dynamic-alignment
-    :display-artboard-names
-    :snap-guides})
+(def default-workspace-local
+  {:zoom 1})
 
-(s/def ::layout-flags (s/coll-of ::layout-flag))
-
-(def default-layout
-  #{:sitemap
-    :layers
-    :element-options
-    :rules
-    :display-grid
-    :snap-grid
-    :dynamic-alignment
-    :display-artboard-names
-    :snap-guides})
-
-(def layout-presets
-  {:assets
-   {:del #{:sitemap :layers :document-history}
-    :add #{:assets}}
-
-   :document-history
-   {:del #{:assets :layers :sitemap}
-    :add #{:document-history}}
-
-   :layers
-   {:del #{:document-history :assets}
-    :add #{:sitemap :layers}}})
-
-(s/def ::options-mode #{:design :prototype})
-
-(def workspace-local-default
-  {:zoom 1
-   :flags #{}
-   :selected (d/ordered-set)
-   :selected-assets {:components #{}
-                     :graphics #{}
-                     :colors #{}
-                     :typographies #{}}
-   :expanded {}
-   :tooltip nil
-   :options-mode :design
-   :draw-interaction-to nil
-   :left-sidebar? true
-   :right-sidebar? true
-   :color-for-rename nil
-   :selected-palette-colorpicker :recent
-   :selected-palette :recent
-   :selected-palette-size :big
-   :assets-files-open {}
-   :picking-color? false
-   :picked-color nil
-   :picked-color-select false})
-
-(defn ensure-layout
-  [lname]
-  (ptk/reify ::ensure-layout
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-layout
-              (fn [stored]
-                (let [todel (get-in layout-presets [lname :del] #{})
-                      toadd (get-in layout-presets [lname :add] #{})]
-                  (-> stored
-                      (set/difference todel)
-                      (set/union toadd))))))))
-
-(defn setup-layout
+(defn initialize
   [lname]
   (us/verify (s/nilable ::us/keyword) lname)
-  (ptk/reify ::setup-layout
+  (ptk/reify ::initialize
     ptk/UpdateEvent
     (update [_ state]
-      (update state :workspace-layout #(or % default-layout)))
+      (-> state
+          (update :workspace-layout #(or % layout/default-layout))
+          (update :workspace-global #(or % layout/default-global))))
 
     ptk/WatchEvent
     (watch [_ _ _]
-      (if (and lname (contains? layout-presets lname))
-        (rx/of (ensure-layout lname))
-        (rx/of (ensure-layout :layers))))))
+      (if (and lname (contains? layout/presets lname))
+        (rx/of (layout/ensure-layout lname))
+        (rx/of (layout/ensure-layout :layers))))))
 
 (defn initialize-file
   [project-id file-id]
@@ -181,23 +116,31 @@
     ptk/WatchEvent
     (watch [_ _ stream]
       (rx/merge
-       (rx/of (dwp/fetch-bundle project-id file-id))
+       (rx/of (dwp/fetch-bundle project-id file-id)
+              (dcm/retrieve-comment-threads file-id))
 
        ;; Initialize notifications (websocket connection) and the file persistence
        (->> stream
             (rx/filter (ptk/type? ::dwp/bundle-fetched))
             (rx/take 1)
             (rx/map deref)
-            (rx/mapcat (fn [bundle]
-                         (rx/merge
-                          (rx/of (dwn/initialize file-id)
-                                 (dwp/initialize-file-persistence file-id)
-                                 (dwc/initialize-indices bundle))
+            (rx/mapcat
+             (fn [bundle]
+               (rx/merge
+                (rx/of (dwc/initialize-indices bundle))
 
-                          (->> stream
-                               (rx/filter #(= ::dwc/index-initialized %))
-                               (rx/take 1)
-                               (rx/map #(file-initialized bundle)))))))))
+                (->> (rx/of bundle)
+                     (rx/mapcat
+                      (fn [bundle]
+                        (let [bundle (assoc bundle :file (t/decode-str (:file-raw bundle)))
+                              team-id (dm/get-in bundle [:project :team-id])]
+                          (rx/merge
+                           (rx/of (dwn/initialize team-id file-id)
+                                  (dwp/initialize-file-persistence file-id))
+                           (->> stream
+                                (rx/filter #(= ::dwc/index-initialized %))
+                                (rx/take 1)
+                                (rx/map #(file-initialized bundle))))))))))))))
 
     ptk/EffectEvent
     (effect [_ _ _]
@@ -205,7 +148,7 @@
         (unchecked-set ug/global "name" name)))))
 
 (defn- file-initialized
-  [{:keys [file users project libraries] :as bundle}]
+  [{:keys [file users project libraries file-comments-users] :as bundle}]
   (ptk/reify ::file-initialized
     ptk/UpdateEvent
     (update [_ state]
@@ -215,8 +158,14 @@
              :workspace-undo {}
              :workspace-project project
              :workspace-file (assoc file :initialized true)
-             :workspace-data (:data file)
-             :workspace-libraries (d/index-by :id libraries)))
+             :workspace-data (-> (:data file)
+                                 (ctst/start-object-indices)
+                                 ;; DEBUG: Uncomment this to try out migrations in local without changing
+                                 ;; the version number
+                                 #_(assoc :version 17)
+                                 #_(app.common.pages.migrations/migrate-data 19))
+             :workspace-libraries (d/index-by :id libraries)
+             :current-file-comments-users (d/index-by :id file-comments-users)))
 
     ptk/WatchEvent
     (watch [_ _ _]
@@ -234,7 +183,7 @@
 
 (defn finalize-file
   [_project-id file-id]
-  (ptk/reify ::finalize
+  (ptk/reify ::finalize-file
     ptk/UpdateEvent
     (update [_ state]
       (dissoc state
@@ -259,31 +208,38 @@
             (rx/observe-on :async))))))
 
 (declare go-to-page)
+
 (defn initialize-page
   [page-id]
   (us/assert ::us/uuid page-id)
   (ptk/reify ::initialize-page
     ptk/WatchEvent
     (watch [_ state _]
-      (when-not (contains? (get-in state [:workspace-data :pages-index]) page-id)
+      (if (contains? (get-in state [:workspace-data :pages-index]) page-id)
+        (rx/of (dwp/preload-data-uris)
+               (dwth/watch-state-changes)
+               (dwl/watch-component-changes))
         (let [default-page-id (get-in state [:workspace-data :pages 0])]
           (rx/of (go-to-page default-page-id)))))
 
     ptk/UpdateEvent
     (update [_ state]
-      (let [;; we maintain a cache of page state for user convenience
-            ;; with the exception of the selection; when user abandon
-            ;; the current page, the selection is lost
-            page    (get-in state [:workspace-data :pages-index page-id])
-            page-id (:id page)
-            local   (-> state
-                        (get-in [:workspace-cache page-id] workspace-local-default)
+      (if-let [{:keys [id] :as page} (get-in state [:workspace-data :pages-index page-id])]
+        ;; we maintain a cache of page state for user convenience with
+        ;; the exception of the selection; when user abandon the
+        ;; current page, the selection is lost
+        (let [local (-> state
+                        (get-in [:workspace-cache id] default-workspace-local)
                         (assoc :selected (d/ordered-set)))]
-        (-> state
-            (assoc :current-page-id page-id)
-            (assoc :trimmed-page (select-keys page [:id :name]))
-            (assoc :workspace-local local)
-            (update-in [:route :params :query] assoc :page-id (str page-id)))))))
+          (-> state
+              (assoc :current-page-id id)
+              (assoc :trimmed-page (dm/select-keys page [:id :name]))
+              (assoc :workspace-local local)
+              (update :workspace-layout layout/load-layout-flags)
+              (update :workspace-global layout/load-layout-state)
+              (update :workspace-global assoc :background-color (-> page :options :background))
+              (update-in [:route :params :query] assoc :page-id (dm/str id))))
+        state))))
 
 (defn finalize-page
   [page-id]
@@ -298,7 +254,7 @@
             exit-workspace? (not= :workspace (get-in state [:route :data :name]))]
         (cond-> (assoc-in state [:workspace-cache page-id] local)
           :always
-          (dissoc :current-page-id :workspace-local :trimmed-page)
+          (dissoc :current-page-id :workspace-local :trimmed-page :workspace-focus-selected)
           exit-workspace?
           (dissoc :workspace-drawing))))))
 
@@ -317,17 +273,13 @@
       ptk/WatchEvent
       (watch [it state _]
         (let [pages   (get-in state [:workspace-data :pages-index])
-              unames  (dwc/retrieve-used-names pages)
-              name    (dwc/generate-unique-name unames "Page-1")
+              unames  (ctst/retrieve-used-names pages)
+              name    (ctst/generate-unique-name unames "Page-1")
 
-              rchange {:type :add-page
-                       :id id
-                       :name name}
-              uchange {:type :del-page
-                       :id id}]
-          (rx/of (dch/commit-changes {:redo-changes [rchange]
-                                      :undo-changes [uchange]
-                                      :origin it})))))))
+              changes (-> (pcb/empty-changes it)
+                          (pcb/add-empty-page id name))]
+
+          (rx/of (dch/commit-changes changes)))))))
 
 (defn duplicate-page
   [page-id]
@@ -336,19 +288,19 @@
     (watch [it state _]
       (let [id      (uuid/next)
             pages   (get-in state [:workspace-data :pages-index])
-            unames  (dwc/retrieve-used-names pages)
+            unames  (ctst/retrieve-used-names pages)
             page    (get-in state [:workspace-data :pages-index page-id])
-            name    (dwc/generate-unique-name unames (:name page))
+            name    (ctst/generate-unique-name unames (:name page))
 
-            page (-> page (assoc :name name :id id))
+            no_thumbnails_objects (->> (:objects page)
+                                      (d/mapm (fn [_ val] (dissoc val :use-for-thumbnail?))))
 
-            rchange {:type :add-page
-                     :page page}
-            uchange {:type :del-page
-                     :id id}]
-        (rx/of (dch/commit-changes {:redo-changes [rchange]
-                                    :undo-changes [uchange]
-                                    :origin it}))))))
+            page (-> page (assoc :name name :id id :objects no_thumbnails_objects))
+
+            changes (-> (pcb/empty-changes it)
+                        (pcb/add-page id page))]
+
+        (rx/of (dch/commit-changes changes))))))
 
 (s/def ::rename-page
   (s/keys :req-un [::id ::name]))
@@ -360,33 +312,29 @@
   (ptk/reify ::rename-page
     ptk/WatchEvent
     (watch [it state _]
-      (let [page (get-in state [:workspace-data :pages-index id])
-            rchg {:type :mod-page
-                  :id id
-                  :name name}
-            uchg {:type :mod-page
-                  :id id
-                  :name (:name page)}]
-        (rx/of (dch/commit-changes {:redo-changes [rchg]
-                                    :undo-changes [uchg]
-                                    :origin it}))))))
+      (let [page    (get-in state [:workspace-data :pages-index id])
+            changes (-> (pcb/empty-changes it)
+                        (pcb/mod-page page name))]
+
+        (rx/of (dch/commit-changes changes))))))
 
 (declare purge-page)
 (declare go-to-file)
 
-;; TODO: for some reason, the page-id here in some circumstances is `nil`
 (defn delete-page
   [id]
   (ptk/reify ::delete-page
     ptk/WatchEvent
     (watch [it state _]
-      (let [page (get-in state [:workspace-data :pages-index id])
-            rchg {:type :del-page :id id}
-            uchg {:type :add-page :page page}]
+      (let [pages (get-in state [:workspace-data :pages])
+            index (d/index-of pages id)
+            page (get-in state [:workspace-data :pages-index id])
+            page (assoc page :index index)
 
-        (rx/of (dch/commit-changes {:redo-changes [rchg]
-                                    :undo-changes [uchg]
-                                    :origin it})
+            changes (-> (pcb/empty-changes it)
+                        (pcb/del-page page))]
+
+        (rx/of (dch/commit-changes changes)
                (when (= id (:current-page-id state))
                  go-to-file))))))
 
@@ -416,40 +364,35 @@
 ;; Workspace State Manipulation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; --- Toggle layout flag
+;; --- Layout Flags
 
-(defn toggle-layout-flags
-  [& flags]
-  (ptk/reify ::toggle-layout-flags
+(dm/export layout/toggle-layout-flag)
+(dm/export layout/remove-layout-flag)
+
+;; --- Nudge
+
+(defn update-nudge
+  [{:keys [big small] :as params}]
+  (ptk/reify ::update-nudge
+    IDeref
+    (-deref [_] (d/without-nils params))
+
     ptk/UpdateEvent
     (update [_ state]
-      (update state :workspace-layout
-              (fn [stored]
-                (reduce (fn [flags flag]
-                          (if (contains? flags flag)
-                            (disj flags flag)
-                            (conj flags flag)))
-                        stored
-                        (d/concat-set flags)))))))
+      (update-in state [:profile :props :nudge]
+                 (fn [nudge]
+                   (cond-> nudge
+                     (number? big) (assoc :big big)
+                     (number? small) (assoc :small small)))))
 
-(defn remove-layout-flags
-  [& flags]
-  (ptk/reify ::remove-layout-flags
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-layout
-              (fn [stored]
-                (reduce disj stored (d/concat-set flags)))))))
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [nudge (get-in state [:profile :props :nudge])]
+        (rx/of (du/update-profile-props {:nudge nudge}))))))
 
 ;; --- Set element options mode
 
-(defn set-options-mode
-  [mode]
-  (us/assert ::options-mode mode)
-  (ptk/reify ::set-options-mode
-    ptk/UpdateEvent
-    (update [_ state]
-      (assoc-in state [:workspace-local :options-mode] mode))))
+(dm/export layout/set-options-mode)
 
 ;; --- Tooltip
 
@@ -459,253 +402,8 @@
     ptk/UpdateEvent
     (update [_ state]
       (if (string? content)
-        (assoc-in state [:workspace-local :tooltip] content)
-        (assoc-in state [:workspace-local :tooltip] nil)))))
-
-;; --- Viewport Sizing
-
-(declare increase-zoom)
-(declare decrease-zoom)
-(declare set-zoom)
-(declare zoom-to-fit-all)
-
-(defn initialize-viewport
-  [{:keys [width height] :as size}]
-  (letfn [(update* [{:keys [vport] :as local}]
-            (let [wprop (/ (:width vport) width)
-                  hprop (/ (:height vport) height)]
-              (-> local
-                  (assoc :vport size)
-                  (update :vbox (fn [vbox]
-                                  (-> vbox
-                                      (update :width #(/ % wprop))
-                                      (update :height #(/ % hprop))))))))
-
-          (initialize [state local]
-            (let [page-id (:current-page-id state)
-                  objects (wsh/lookup-page-objects state page-id)
-                  shapes  (cph/get-immediate-children objects)
-                  srect   (gsh/selection-rect shapes)
-                  local   (assoc local :vport size :zoom 1)]
-              (cond
-                (or (not (mth/finite? (:width srect)))
-                    (not (mth/finite? (:height srect))))
-                (assoc local :vbox (assoc size :x 0 :y 0))
-
-                (or (> (:width srect) width)
-                    (> (:height srect) height))
-                (let [srect (gal/adjust-to-viewport size srect {:padding 40})
-                      zoom  (/ (:width size) (:width srect))]
-                  (-> local
-                      (assoc :zoom zoom)
-                      (update :vbox merge srect)))
-
-                :else
-                (assoc local :vbox (assoc size
-                                          :x (+ (:x srect) (/ (- (:width srect) width) 2))
-                                          :y (+ (:y srect) (/ (- (:height srect) height) 2)))))))
-
-          (setup [state local]
-            (if (and (:vbox local) (:vport local))
-              (update* local)
-              (initialize state local)))]
-
-    (ptk/reify ::initialize-viewport
-      ptk/UpdateEvent
-      (update [_ state]
-        (update state :workspace-local
-                (fn [local]
-                  (setup state local)))))))
-
-(defn update-viewport-position
-  [{:keys [x y] :or {x identity y identity}}]
-  (us/assert fn? x)
-  (us/assert fn? y)
-  (ptk/reify ::update-viewport-position
-    ptk/UpdateEvent
-    (update [_ state]
-      (update-in state [:workspace-local :vbox]
-                 (fn [vbox]
-                   (-> vbox
-                       (update :x x)
-                       (update :y y)))))))
-
-(defn update-viewport-size
-  [resize-type {:keys [width height] :as size}]
-  (ptk/reify ::update-viewport-size
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-local
-              (fn [{:keys [vport] :as local}]
-                (if (or (nil? vport)
-                        (mth/almost-zero? width)
-                        (mth/almost-zero? height))
-                  ;; If we have a resize to zero just keep the old value
-                  local
-                  (let [wprop (/ (:width vport) width)
-                        hprop (/ (:height vport) height)
-
-                        vbox (:vbox local)
-                        vbox-x (:x vbox)
-                        vbox-y (:y vbox)
-                        vbox-width (:width vbox)
-                        vbox-height (:height vbox)
-
-                        vbox-width' (/ vbox-width wprop)
-                        vbox-height' (/ vbox-height hprop)
-
-                        vbox-x'
-                        (case resize-type
-                          :left  (+ vbox-x (- vbox-width vbox-width'))
-                          :right vbox-x
-                          (+ vbox-x (/ (- vbox-width vbox-width') 2)))
-
-                        vbox-y'
-                        (case resize-type
-                          :top  (+ vbox-y (- vbox-height vbox-height'))
-                          :bottom vbox-y
-                          (+ vbox-y (/ (- vbox-height vbox-height') 2)))]
-                    (-> local
-                        (assoc :vport size)
-                        (assoc-in [:vbox :x] vbox-x')
-                        (assoc-in [:vbox :y] vbox-y')
-                        (assoc-in [:vbox :width] vbox-width')
-                        (assoc-in [:vbox :height] vbox-height')))))))))
-
-(defn start-panning []
-  (ptk/reify ::start-panning
-    ptk/WatchEvent
-    (watch [_ state stream]
-      (let [stopper (->> stream (rx/filter (ptk/type? ::finish-panning)))
-            zoom (-> (get-in state [:workspace-local :zoom]) gpt/point)]
-        (when-not (get-in state [:workspace-local :panning])
-          (rx/concat
-           (rx/of #(-> % (assoc-in [:workspace-local :panning] true)))
-           (->> stream
-                (rx/filter ms/pointer-event?)
-                (rx/filter #(= :delta (:source %)))
-                (rx/map :pt)
-                (rx/take-until stopper)
-                (rx/map (fn [delta]
-                          (let [delta (gpt/divide delta zoom)]
-                            (update-viewport-position {:x #(- % (:x delta))
-                                                       :y #(- % (:y delta))})))))))))))
-
-(defn finish-panning []
-  (ptk/reify ::finish-panning
-    ptk/UpdateEvent
-    (update [_ state]
-      (-> state
-          (update :workspace-local dissoc :panning)))))
-
-(defn start-zooming [pt]
-  (ptk/reify ::start-zooming
-    ptk/WatchEvent
-    (watch [_ state stream]
-      (let [stopper (->> stream (rx/filter (ptk/type? ::finish-zooming)))]
-        (when-not (get-in state [:workspace-local :zooming])
-          (rx/concat
-           (rx/of #(-> % (assoc-in [:workspace-local :zooming] true)))
-           (->> stream
-                (rx/filter ms/pointer-event?)
-                (rx/filter #(= :delta (:source %)))
-                (rx/map :pt)
-                (rx/take-until stopper)
-                (rx/map (fn [delta]
-                          (let [scale (+ 1 (/ (:y delta) 100))] ;; this number may be adjusted after user testing
-                            (set-zoom pt scale)))))))))))
-
-(defn finish-zooming []
-  (ptk/reify ::finish-zooming
-    ptk/UpdateEvent
-    (update [_ state]
-      (-> state
-          (update :workspace-local dissoc :zooming)))))
-
-;; --- Zoom Management
-
-(defn- impl-update-zoom
-  [{:keys [vbox] :as local} center zoom]
-  (let [new-zoom (if (fn? zoom) (zoom (:zoom local)) zoom)
-        old-zoom (:zoom local)
-        center (if center center (gsh/center-rect vbox))
-        scale (/ old-zoom new-zoom)
-        mtx  (gmt/scale-matrix (gpt/point scale) center)
-        vbox' (gsh/transform-rect vbox mtx)]
-    (-> local
-        (assoc :zoom new-zoom)
-        (update :vbox merge (select-keys vbox' [:x :y :width :height])))))
-
-(defn increase-zoom
-  [center]
-  (ptk/reify ::increase-zoom
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-local
-              #(impl-update-zoom % center (fn [z] (min (* z 1.3) 200)))))))
-
-(defn decrease-zoom
-  [center]
-  (ptk/reify ::decrease-zoom
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-local
-              #(impl-update-zoom % center (fn [z] (max (/ z 1.3) 0.01)))))))
-
-(defn set-zoom
-  [center scale]
-  (ptk/reify ::set-zoom
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-local
-              #(impl-update-zoom % center (fn [z] (-> (* z scale)
-                                                      (max 0.01)
-                                                      (min 200))))))))
-
-(def reset-zoom
-  (ptk/reify ::reset-zoom
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-local
-              #(impl-update-zoom % nil 1)))))
-
-(def zoom-to-fit-all
-  (ptk/reify ::zoom-to-fit-all
-    ptk/UpdateEvent
-    (update [_ state]
-      (let [page-id (:current-page-id state)
-            objects (wsh/lookup-page-objects state page-id)
-            shapes  (cph/get-immediate-children objects)
-            srect   (gsh/selection-rect shapes)]
-        (if (empty? shapes)
-          state
-          (update state :workspace-local
-                  (fn [{:keys [vport] :as local}]
-                    (let [srect (gal/adjust-to-viewport vport srect {:padding 40})
-                          zoom  (/ (:width vport) (:width srect))]
-                      (-> local
-                          (assoc :zoom zoom)
-                          (update :vbox merge srect))))))))))
-
-(def zoom-to-selected-shape
-  (ptk/reify ::zoom-to-selected-shape
-    ptk/UpdateEvent
-    (update [_ state]
-      (let [selected (wsh/lookup-selected state)]
-        (if (empty? selected)
-          state
-          (let [page-id (:current-page-id state)
-                objects (wsh/lookup-page-objects state page-id)
-                srect   (->> selected
-                             (map #(get objects %))
-                             (gsh/selection-rect))]
-            (update state :workspace-local
-                    (fn [{:keys [vport] :as local}]
-                      (let [srect (gal/adjust-to-viewport vport srect {:padding 40})
-                            zoom  (/ (:width vport) (:width srect))]
-                        (-> local
-                            (assoc :zoom zoom)
-                            (update :vbox merge srect)))))))))))
+        (assoc-in state [:workspace-global :tooltip] content)
+        (assoc-in state [:workspace-global :tooltip] nil)))))
 
 ;; --- Update Shape Attrs
 
@@ -753,11 +451,11 @@
   (ptk/reify ::delete-selected
     ptk/WatchEvent
     (watch [_ state _]
-      (let [selected (wsh/lookup-selected state)
+      (let [selected     (wsh/lookup-selected state)
             hover-guides (get-in state [:workspace-guides :hover])]
         (cond
           (d/not-empty? selected)
-          (rx/of (dwc/delete-shapes selected)
+          (rx/of (dwsh/delete-shapes selected)
                  (dws/deselect-all))
 
           (d/not-empty? hover-guides)
@@ -773,249 +471,95 @@
   (ptk/reify ::vertical-order-selected
     ptk/WatchEvent
     (watch [it state _]
-      (let [page-id  (:current-page-id state)
-            objects  (wsh/lookup-page-objects state page-id)
-            selected (wsh/lookup-selected state)
-            rchanges (mapv (fn [id]
-                             (let [obj (get objects id)
-                                   parent (get objects (:parent-id obj))
-                                   shapes (:shapes parent)
-                                   cindex (d/index-of shapes id)
-                                   nindex (case loc
-                                            :top (count shapes)
-                                            :down (max 0 (- cindex 1))
-                                            :up (min (count shapes) (+ (inc cindex) 1))
-                                            :bottom 0)]
-                               {:type :mov-objects
-                                :parent-id (:parent-id obj)
-                                :frame-id (:frame-id obj)
-                                :page-id page-id
-                                :index nindex
-                                :shapes [id]}))
-                           selected)
+      (let [page-id         (:current-page-id state)
+            objects         (wsh/lookup-page-objects state page-id)
+            selected-ids    (wsh/lookup-selected state)
+            selected-shapes (map (d/getf objects) selected-ids)
 
-            uchanges (mapv (fn [id]
-                             (let [obj (get objects id)]
-                               {:type :mov-objects
-                                :parent-id (:parent-id obj)
-                                :frame-id (:frame-id obj)
-                                :page-id page-id
-                                :shapes [id]
-                                :index (cph/get-position-on-parent objects id)}))
-                           selected)]
-        ;; TODO: maybe missing the :reg-objects event?
-        (rx/of (dch/commit-changes {:redo-changes rchanges
-                                    :undo-changes uchanges
-                                    :origin it}))))))
+            move-shape
+            (fn [changes shape]
+              (let [parent        (get objects (:parent-id shape))
+                    sibling-ids   (:shapes parent)
+                    current-index (d/index-of sibling-ids (:id shape))
+                    index-in-selection (d/index-of selected-ids (:id shape))
+                    new-index     (case loc
+                                    :top (count sibling-ids)
+                                    :down (max 0 (- current-index 1))
+                                    :up (min (count sibling-ids) (+ (inc current-index) 1))
+                                    :bottom index-in-selection)]
+                (pcb/change-parent changes
+                                   (:id parent)
+                                   [shape]
+                                   new-index)))
+
+            changes (reduce move-shape
+                            (-> (pcb/empty-changes it page-id)
+                                (pcb/with-objects objects))
+                            selected-shapes)]
+
+        (rx/of (dch/commit-changes changes))))))
 
 
 ;; --- Change Shape Order (D&D Ordering)
 
-(defn relocate-shapes-changes [objects parents parent-id page-id to-index ids
+(defn relocate-shapes-changes [it objects parents parent-id page-id to-index ids
                                groups-to-delete groups-to-unmask shapes-to-detach
                                shapes-to-reroot shapes-to-deroot shapes-to-unconstraint]
-  (let [;; Changes to the shapes that are being move
-        r-mov-change
-        [{:type :mov-objects
-          :parent-id parent-id
-          :page-id page-id
-          :index to-index
-          :shapes (vec (reverse ids))}]
+  (let [shapes (map (d/getf objects) ids)]
 
-        u-mov-change
-        (map (fn [id]
-               (let [obj (get objects id)]
-                 {:type :mov-objects
-                  :parent-id (:parent-id obj)
-                  :page-id page-id
-                  :index (cph/get-position-on-parent objects id)
-                  :shapes [id]}))
-             (reverse ids))
+    (-> (pcb/empty-changes it page-id)
+        (pcb/with-objects objects)
 
-        ;; Changes deleting empty groups
-        r-del-change
-        (map (fn [group-id]
-               {:type :del-obj
-                :page-id page-id
-                :id group-id})
-             groups-to-delete)
+        ; Move the shapes
+        (pcb/change-parent parent-id
+                           (reverse shapes)
+                           to-index)
 
-        u-del-change
-        (concat
-         ;; Create the groups
-         (map (fn [group-id]
-                (let [group (get objects group-id)]
-                  {:type :add-obj
-                   :page-id page-id
-                   :parent-id parent-id
-                   :frame-id (:frame-id group)
-                   :id group-id
-                   :obj (-> group
-                            (assoc :shapes []))}))
-              groups-to-delete)
-         ;; Creates the hierarchy
-         (map (fn [group-id]
-                (let [group (get objects group-id)]
-                  {:type :mov-objects
-                   :page-id page-id
-                   :parent-id (:id group)
-                   :shapes (:shapes group)}))
-              groups-to-delete))
+        ; Remove empty groups
+        (pcb/remove-objects groups-to-delete)
 
-        ;; Changes removing the masks from the groups without mask shape
-        r-mask-change
-        (map (fn [group-id]
-               {:type :mod-obj
-                :page-id page-id
-                :id group-id
-                :operations [{:type :set
-                              :attr :masked-group?
-                              :val false}]})
-             groups-to-unmask)
+        ; Unmask groups whose mask have moved outside
+        (pcb/update-shapes groups-to-unmask
+                           (fn [shape]
+                             (assoc shape :masked-group? false)))
 
-        u-mask-change
-        (map (fn [group-id]
-               (let [group (get objects group-id)]
-                 {:type :mod-obj
-                  :page-id page-id
-                  :id group-id
-                  :operations [{:type :set
-                                :attr :masked-group?
-                                :val (:masked-group? group)}]}))
-             groups-to-unmask)
+        ; Detach shapes moved out of their component
+        (pcb/update-shapes shapes-to-detach
+                           (fn [shape]
+                             (assoc shape :component-id nil
+                                    :component-file nil
+                                    :component-root? nil
+                                    :remote-synced? nil
+                                    :shape-ref nil
+                                    :touched nil)))
 
-        ;; Changes to the components metadata
+        ; Make non root a component moved inside another one
+        (pcb/update-shapes shapes-to-deroot
+                           (fn [shape]
+                             (assoc shape :component-root? nil)))
 
-        detach-keys [:component-id :component-file :component-root? :remote-synced? :shape-ref :touched]
+        ; Make root a subcomponent moved outside its parent component
+        (pcb/update-shapes shapes-to-reroot
+                           (fn [shape]
+                             (assoc shape :component-root? true)))
 
-        r-detach-change
-        (map (fn [id]
-               {:type :mod-obj
-                :page-id page-id
-                :id id
-                :operations (mapv #(hash-map :type :set :attr % :val nil) detach-keys)})
-             shapes-to-detach)
+        ; Reset constraints depending on the new parent
+        (pcb/update-shapes shapes-to-unconstraint
+                           (fn [shape]
+                             (let [parent      (get objects parent-id)
+                                   frame-id    (if (= (:type parent) :frame)
+                                                 (:id parent)
+                                                 (:frame-id parent))
+                                   moved-shape (assoc shape
+                                                      :parent-id parent-id
+                                                      :frame-id frame-id)]
+                               (assoc shape
+                                      :constraints-h (gsh/default-constraints-h moved-shape)
+                                      :constraints-v (gsh/default-constraints-v moved-shape))))
+                           {:ignore-touched true})
 
-        u-detach-change
-        (map (fn [id]
-               (let [obj (get objects id)]
-                 {:type :mod-obj
-                  :page-id page-id
-                  :id id
-                  :operations (mapv #(hash-map :type :set :attr % :val (get obj %)) detach-keys)}))
-             shapes-to-detach)
-
-        r-deroot-change
-        (map (fn [id]
-               {:type :mod-obj
-                :page-id page-id
-                :id id
-                :operations [{:type :set
-                              :attr :component-root?
-                              :val nil}]})
-             shapes-to-deroot)
-
-        u-deroot-change
-        (map (fn [id]
-               {:type :mod-obj
-                :page-id page-id
-                :id id
-                :operations [{:type :set
-                              :attr :component-root?
-                              :val true}]})
-             shapes-to-deroot)
-
-        r-reroot-change
-        (map (fn [id]
-               {:type :mod-obj
-                :page-id page-id
-                :id id
-                :operations [{:type :set
-                              :attr :component-root?
-                              :val true}]})
-             shapes-to-reroot)
-
-        u-reroot-change
-        (map (fn [id]
-               {:type :mod-obj
-                :page-id page-id
-                :id id
-                :operations [{:type :set
-                              :attr :component-root?
-                              :val nil}]})
-             shapes-to-reroot)
-
-
-        ;; Changes resetting constraints
-
-        r-unconstraint-change
-        (map (fn [id]
-               (let [obj      (get objects id)
-                     parent   (get objects parent-id)
-                     frame-id (if (= (:type parent) :frame)
-                                (:id parent)
-                                (:frame-id parent))]
-                 {:type :mod-obj
-                  :page-id page-id
-                  :id id
-                  :operations [{:type :set
-                                :attr :constraints-h
-                                :val (gsh/default-constraints-h
-                                      (assoc obj :parent-id parent-id :frame-id frame-id))
-                                :ignore-touched true}
-                               {:type :set
-                                :attr :constraints-v
-                                :val (gsh/default-constraints-v
-                                      (assoc obj :parent-id parent-id :frame-id frame-id))
-                                :ignore-touched true}]}))
-             shapes-to-unconstraint)
-
-        u-unconstraint-change
-        (map (fn [id]
-               (let [obj (get objects id)]
-                 {:type :mod-obj
-                  :page-id page-id
-                  :id id
-                  :operations [{:type :set
-                                :attr :constraints-h
-                                :val (:constraints-h obj)
-                                :ignore-touched true}
-                               {:type :set
-                                :attr :constraints-v
-                                :val (:constraints-v obj)
-                                :ignore-touched true}]}))
-             shapes-to-unconstraint)
-
-        r-reg-change
-        [{:type :reg-objects
-          :page-id page-id
-          :shapes (vec parents)}]
-
-        u-reg-change
-        [{:type :reg-objects
-          :page-id page-id
-          :shapes (vec parents)}]
-
-        rchanges (d/concat-vec
-                  r-mov-change
-                  r-del-change
-                  r-mask-change
-                  r-detach-change
-                  r-deroot-change
-                  r-reroot-change
-                  r-unconstraint-change
-                  r-reg-change)
-
-        uchanges (d/concat-vec
-                  u-del-change
-                  u-reroot-change
-                  u-deroot-change
-                  u-detach-change
-                  u-mask-change
-                  u-mov-change
-                  u-unconstraint-change
-                  u-reg-change)]
-    [rchanges uchanges]))
+        ; Resize parent containers that need to
+        (pcb/resize-parents parents))))
 
 (defn relocate-shapes
   [ids parent-id to-index]
@@ -1029,7 +573,7 @@
       (let [page-id  (:current-page-id state)
             objects  (wsh/lookup-page-objects state page-id)
 
-            ;; Ignore any shape whose parent is also intented to be moved
+            ;; Ignore any shape whose parent is also intended to be moved
             ids      (cph/clean-loops objects ids)
 
             ;; If we try to move a parent into a child we remove it
@@ -1080,7 +624,7 @@
                     ids)
 
             ;; TODO: Probably implementing this using loop/recur will
-            ;; be more efficient than using reduce and continuos data
+            ;; be more efficient than using reduce and continuous data
             ;; desturcturing.
 
             ;; Sets the correct components metadata for the moved shapes
@@ -1114,24 +658,23 @@
                     [[] [] []]
                     ids)
 
-            [rchanges uchanges]
-            (relocate-shapes-changes objects
-                                     parents
-                                     parent-id
-                                     page-id
-                                     to-index
-                                     ids
-                                     groups-to-delete
-                                     groups-to-unmask
-                                     shapes-to-detach
-                                     shapes-to-reroot
-                                     shapes-to-deroot
-                                     ids)]
+            changes (relocate-shapes-changes it
+                                             objects
+                                             parents
+                                             parent-id
+                                             page-id
+                                             to-index
+                                             ids
+                                             groups-to-delete
+                                             groups-to-unmask
+                                             shapes-to-detach
+                                             shapes-to-reroot
+                                             shapes-to-deroot
+                                             ids)]
 
-        (rx/of (dch/commit-changes {:redo-changes rchanges
-                                    :undo-changes uchanges
-                                    :origin it})
-               (dwc/expand-collapse parent-id))))))
+        (rx/of (dch/commit-changes changes)
+               (dwco/expand-collapse parent-id)
+               (dwsl/update-layout-positions [parent-id]))))))
 
 (defn relocate-selected-shapes
   [parent-id to-index]
@@ -1156,15 +699,15 @@
 
             (case type
               :text
-              (rx/of (dwc/start-edition-mode id))
+              (rx/of (dwe/start-edition-mode id))
 
               (:group :bool)
-              (rx/of (dwc/select-shapes (into (d/ordered-set) [(last shapes)])))
+              (rx/of (dws/select-shapes (into (d/ordered-set) [(last shapes)])))
 
               :svg-raw
               nil
 
-              (rx/of (dwc/start-edition-mode id)
+              (rx/of (dwe/start-edition-mode id)
                      (dwdp/start-path-edit id)))))))))
 
 
@@ -1177,8 +720,8 @@
     (watch [it state _]
       (let [prev-index (-> (get-in state [:workspace-data :pages])
                            (d/index-of id))
-            changes    (-> (pcb/empty-changes it id)
-                           (pcb/move-page index prev-index))]
+            changes    (-> (pcb/empty-changes it)
+                           (pcb/move-page id index prev-index))]
         (rx/of (dch/commit-changes changes))))))
 
 ;; --- Shape / Selection Alignment and Distribution
@@ -1312,6 +855,29 @@
       (let [selected (wsh/lookup-selected state)]
         (rx/of (dch/update-shapes selected #(update % :blocked not)))))))
 
+(defn toggle-file-thumbnail-selected
+  []
+  (ptk/reify ::toggle-file-thumbnail-selected
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [selected   (wsh/lookup-selected state)
+            pages      (-> state :workspace-data :pages-index vals)
+            get-frames (fn [{:keys [objects id] :as page}]
+                         (->> (ctst/get-frames objects)
+                              (sequence
+                               (comp (filter :use-for-thumbnail?)
+                                     (map :id)
+                                     (remove selected)
+                                     (map (partial vector id))))))]
+
+        (rx/concat
+         (rx/from
+          (->> (mapcat get-frames pages)
+               (d/group-by first second)
+               (map (fn [[page-id frame-ids]]
+                      (dch/update-shapes frame-ids #(dissoc % :use-for-thumbnail?) {:page-id page-id})))))
+         (rx/of (dch/update-shapes selected #(update % :use-for-thumbnail? not))))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Navigation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1350,8 +916,8 @@
 
 (defn go-to-layout
   [layout]
-  (us/verify ::layout-flag layout)
-  (ptk/reify ::set-workspace-layout
+  (us/verify ::layout/flag layout)
+  (ptk/reify ::go-to-layout
     IDeref
     (-deref [_] {:layout layout})
 
@@ -1365,45 +931,45 @@
         (rx/of (rt/nav :workspace pparams qparams))))))
 
 (defn check-in-asset
-  [set element]
-  (if (contains? set element)
-    (disj set element)
-    (conj set element)))
+  [items element]
+  (let [items (or items #{})]
+    (if (contains? items element)
+      (disj items element)
+      (conj items element))))
 
 (defn toggle-selected-assets
   [asset type]
   (ptk/reify ::toggle-selected-assets
     ptk/UpdateEvent
     (update [_ state]
-      (update-in state [:workspace-local :selected-assets type] #(check-in-asset % asset)))))
+      (update-in state [:workspace-global :selected-assets type] #(check-in-asset % asset)))))
 
 (defn select-single-asset
   [asset type]
   (ptk/reify ::select-single-asset
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-local :selected-assets type] #{asset}))))
+      (assoc-in state [:workspace-global :selected-assets type] #{asset}))))
 
 (defn select-assets
   [assets type]
   (ptk/reify ::select-assets
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-local :selected-assets type] (into #{} assets)))))
+      (assoc-in state [:workspace-global :selected-assets type] (into #{} assets)))))
 
 (defn unselect-all-assets
   []
   (ptk/reify ::unselect-all-assets
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-local :selected-assets] {:components #{}
-                                                           :graphics #{}
-                                                           :colors #{}
-                                                           :typographies #{}}))))
-
+      (assoc-in state [:workspace-global :selected-assets] {:components #{}
+                                                            :graphics #{}
+                                                            :colors #{}
+                                                            :typographies #{}}))))
 (defn go-to-component
   [component-id]
-  (ptk/reify ::set-workspace-layout-component
+  (ptk/reify ::go-to-component
     IDeref
     (-deref [_] {:layout :assets})
 
@@ -1422,6 +988,31 @@
     (effect [_ _ _]
       (let [wrapper-id    (str "component-shape-id-" component-id)]
         (tm/schedule-on-idle #(dom/scroll-into-view-if-needed! (dom/get-element wrapper-id)))))))
+
+(defn go-to-main-instance
+  [page-id shape-id on-page-selected]
+  (us/verify ::us/uuid page-id)
+  (us/verify ::us/uuid shape-id)
+  (ptk/reify ::go-to-main-instance
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [current-page-id (:current-page-id state)]
+        (if (= page-id current-page-id)
+          (do
+            (on-page-selected)
+            (rx/of (dws/select-shapes (lks/set shape-id))))
+          (let [project-id      (:current-project-id state)
+                file-id         (:current-file-id state)
+                pparams         {:file-id file-id :project-id project-id}
+                qparams         {:page-id page-id :layout :assets}]
+            (rx/merge
+              (rx/of (rt/nav :workspace pparams qparams))
+              (->> stream
+                   (rx/filter (ptk/type? ::dwv/initialize-viewport))
+                   (rx/take 1)
+                   (rx/mapcat #(do
+                                 (on-page-selected)
+                                 (rx/of (dws/select-shapes (lks/set shape-id)))))))))))))
 
 (def go-to-file
   (ptk/reify ::go-to-file
@@ -1520,25 +1111,18 @@
 
 (defn copy-selected
   []
-  (letfn [;; Sort objects so they have the same relative ordering
-          ;; when pasted later.
-          (sort-selected [state data]
-            (let [selected (:selected data)
-                  page-id (:current-page-id state)
-                  objects (get-in state [:workspace-data
-                                         :pages-index
-                                         page-id
-                                         :objects])]
-              (->> (uw/ask! {:cmd :selection/query-z-index
-                             :page-id page-id
-                             :objects objects
-                             :ids selected})
-                   (rx/map (fn [z-indexes]
-                             (assoc data :selected
-                                    (->> (d/zip selected z-indexes)
-                                         (sort-by second)
-                                         (map first)
-                                         (into (d/ordered-set)))))))))
+  (letfn [(sort-selected [state data]
+            (let [selected (wsh/lookup-selected state)
+                  objects  (wsh/lookup-page-objects state)
+
+                  ;; Narrow the objects map so it contains only relevant data for
+                  ;; selected and its parents
+                  objects  (cph/selected-subtree objects selected)
+                  selected (->> (ctst/sort-z-index objects selected)
+                                (reverse)
+                                (into (d/ordered-set)))]
+
+              (assoc data :selected selected)))
 
           ;; Retrieve all ids of selected shapes with corresponding
           ;; children; this is needed because each shape should be
@@ -1553,8 +1137,8 @@
           ;; Prepare the shape object. Mainly needed for image shapes
           ;; for retrieve the image data and convert it to the
           ;; data-url.
-          (prepare-object [objects selected {:keys [type] :as obj}]
-            (let [obj (maybe-translate obj objects selected)]
+          (prepare-object [objects selected+children {:keys [type] :as obj}]
+            (let [obj (maybe-translate obj objects selected+children)]
               (if (= type :image)
                 (let [url (cfg/resolve-file-media (:metadata obj))]
                   (->> (http/send! {:method :get
@@ -1577,9 +1161,9 @@
                   (update res :images conj img-part))
                 res)))
 
-          (maybe-translate [shape objects selected]
+          (maybe-translate [shape objects selected+children]
             (if (and (not= (:type shape) :frame)
-                     (not (contains? selected (:frame-id shape))))
+                     (not (contains? selected+children (:frame-id shape))))
               ;; When the parent frame is not selected we change to relative
               ;; coordinates
               (let [frame (get objects (:frame-id shape))]
@@ -1596,16 +1180,20 @@
         (let [objects  (wsh/lookup-page-objects state)
               selected (->> (wsh/lookup-selected state)
                             (cph/clean-loops objects))
+
+              selected+children (cph/selected-with-children objects selected)
               pdata    (reduce (partial collect-object-ids objects) {} selected)
               initial  {:type :copied-shapes
                         :file-id (:current-file-id state)
                         :selected selected
                         :objects {}
                         :images #{}}]
+
+
           (->> (rx/from (seq (vals pdata)))
-               (rx/merge-map (partial prepare-object objects selected))
+               (rx/merge-map (partial prepare-object objects selected+children))
                (rx/reduce collect-data initial)
-               (rx/mapcat (partial sort-selected state))
+               (rx/map (partial sort-selected state))
                (rx/map t/encode-str)
                (rx/map wapi/write-to-clipboard)
                (rx/catch on-copy-error)
@@ -1651,7 +1239,7 @@
         (catch :default e
           (let [data (ex-data e)]
             (if (:not-implemented data)
-              (rx/of (dm/warn (i18n/tr "errors.clipboard-not-implemented")))
+              (rx/of (msg/warn (i18n/tr "errors.clipboard-not-implemented")))
               (js/console.error "ERROR" e))))))))
 
 (defn paste-from-event
@@ -1670,26 +1258,28 @@
               edit-id (get-in state [:workspace-local :edition])
               is-editing-text? (and edit-id (= :text (get-in objects [edit-id :type])))]
 
-          (cond
-            (and (string? text-data)
-                 (str/includes? text-data "<svg"))
-            (rx/of (paste-svg text-data))
+          ;; Some paste events can be fired while we're editing a text
+          ;; we forbid that scenario so the default behaviour is executed
+          (when-not is-editing-text?
+            (cond
+              (and (string? text-data)
+                   (str/includes? text-data "<svg"))
+              (rx/of (paste-svg text-data))
 
-            (seq image-data)
-            (rx/from (map paste-image image-data))
+              (seq image-data)
+              (rx/from (map paste-image image-data))
 
-            (coll? decoded-data)
-            (->> (rx/of decoded-data)
-                 (rx/filter #(= :copied-shapes (:type %)))
-                 (rx/map #(paste-shape % in-viewport?)))
+              (coll? decoded-data)
+              (->> (rx/of decoded-data)
+                   (rx/filter #(= :copied-shapes (:type %)))
+                   (rx/map #(paste-shape % in-viewport?)))
 
-            ;; Some paste events can be fired while we're editing a text
-            ;; we forbid that scenario so the default behaviour is executed
-            (and (string? text-data) (not is-editing-text?))
-            (rx/of (paste-text text-data))
+              (string? text-data)
+              (rx/of (paste-text text-data))
 
-            :else
-            (rx/empty)))
+              :else
+              (rx/empty))))
+
         (catch :default err
           (js/console.error "Clipboard error:" err))))))
 
@@ -1739,12 +1329,17 @@
           (calculate-paste-position [state mouse-pos in-viewport?]
             (let [page-objects  (wsh/lookup-page-objects state)
                   selected-objs (map #(get paste-objects %) selected)
-                  has-frame? (d/seek #(= (:type %) :frame) selected-objs)
+                  has-frame?    (d/seek #(= (:type %) :frame) selected-objs)
                   page-selected (wsh/lookup-selected state)
                   wrapper       (gsh/selection-rect selected-objs)
                   orig-pos      (gpt/point (:x1 wrapper) (:y1 wrapper))]
               (cond
-                (and (selected-frame? state) (not has-frame?))
+                has-frame?
+                (let [index     (cph/get-position-on-parent page-objects uuid/zero)
+                      delta     (gpt/subtract mouse-pos orig-pos)]
+                  [uuid/zero uuid/zero delta index])
+
+                (selected-frame? state)
                 (let [frame-id (first page-selected)
                       frame-object (get page-objects frame-id)
 
@@ -1779,7 +1374,7 @@
                   [frame-id frame-id delta])
 
                 (empty? page-selected)
-                (let [frame-id (cph/frame-id-by-position page-objects mouse-pos)
+                (let [frame-id (ctst/top-nested-frame page-objects mouse-pos)
                       delta    (gpt/subtract mouse-pos orig-pos)]
                   [frame-id frame-id delta])
 
@@ -1798,12 +1393,11 @@
             (let [set-index (fn [[result index] id]
                               [(assoc result id index) (inc index)])
 
-                  map-ids (when index
-                            (->> (vals paste-objects)
-                                 (filter #(not (selected (:parent-id %))))
-                                 (map :id)
-                                 (reduce set-index [{} (inc index)])
-                                 first))]
+                  map-ids
+                  (->> selected
+                       (map #(get-in paste-objects [% :id]))
+                       (reduce set-index [{} (inc index)])
+                       first)]
               (if (and (= :add-obj (:type change))
                        (contains? map-ids (:old-id change)))
                 (assoc change :index (get map-ids (:old-id change)))
@@ -1826,21 +1420,18 @@
                   ;; Calculate position for the pasted elements
                   [frame-id parent-id delta index] (calculate-paste-position state mouse-pos in-viewport?)
 
-                  paste-objects (->> paste-objects
-                                     (d/mapm (fn [_ shape]
-                                               (-> shape
-                                                   (assoc :frame-id frame-id)
-                                                   (assoc :parent-id parent-id)
+                  process-shape
+                  (fn [_ shape]
+                    (-> shape
+                        (assoc :frame-id frame-id)
+                        (assoc :parent-id parent-id)
 
-                                                   (cond->
-                                                     ;; if foreign instance, detach the shape
-                                                     (foreign-instance? shape paste-objects state)
-                                                     (dissoc :component-id
-                                                             :component-file
-                                                             :component-root?
-                                                             :remote-synced?
-                                                             :shape-ref
-                                                             :touched))))))
+                        ;; if foreign instance, detach the shape
+                        (cond-> (foreign-instance? shape paste-objects state)
+                          (dissoc :component-id :component-file :component-root?
+                                  :remote-synced? :shape-ref :touched))))
+
+                  paste-objects (->> paste-objects (d/mapm process-shape))
 
                   all-objects (merge (:objects page) paste-objects)
 
@@ -1848,10 +1439,9 @@
                                (pcb/amend-changes (partial process-rchange media-idx))
                                (pcb/amend-changes (partial change-add-obj-index paste-objects selected index)))
 
-                  ;; Adds a reg-objects operation so the groups are updated. We add all the new objects
+                  ;; Adds a resize-parents operation so the groups are updated. We add all the new objects
                   new-objects-ids (->> changes :redo-changes (filter #(= (:type %) :add-obj)) (mapv :id))
-
-                  changes (pcb/reg-objects changes new-objects-ids)
+                  changes (pcb/resize-parents changes new-objects-ids)
 
                   selected  (->> changes
                                  :redo-changes
@@ -1861,7 +1451,7 @@
                                  (into (d/ordered-set)))]
 
               (rx/of (dch/commit-changes changes)
-                     (dwc/select-shapes selected))))]
+                     (dws/select-shapes selected))))]
 
     (ptk/reify ::paste-shape
       ptk/WatchEvent
@@ -1880,7 +1470,7 @@
   (let [paragraphs (->> (str/lines text)
                         (map str/trim)
                         (mapv #(hash-map :type "paragraph"
-                                         :children [{:text %}])))]
+                                         :children [(merge txt/default-text-attrs {:text %})])))]
     {:type "root"
      :children [{:type "paragraph-set" :children paragraphs}]}))
 
@@ -1896,8 +1486,8 @@
             height 16
             page-id (:current-page-id state)
             frame-id (-> (wsh/lookup-page-objects state page-id)
-                         (cph/frame-id-by-position @ms/mouse-position))
-            shape (gsh/setup-selrect
+                         (ctst/top-nested-frame @ms/mouse-position))
+            shape (cts/setup-rect-selrect
                    {:id id
                     :type :text
                     :name "Text"
@@ -1910,9 +1500,10 @@
                     :content (as-content text)})]
         (rx/of (dwu/start-undo-transaction)
                (dws/deselect-all)
-               (dwc/add-shape shape)
+               (dwsh/add-shape shape)
                (dwu/commit-undo-transaction))))))
 
+;; TODO: why not implement it in terms of upload-media-workspace?
 (defn- paste-svg
   [text]
   (us/assert string? text)
@@ -1921,8 +1512,8 @@
     (watch [_ state _]
       (let [position (deref ms/mouse-position)
             file-id  (:current-file-id state)]
-        (->> (dwp/parse-svg ["svg" text])
-             (rx/map #(svg/svg-uploaded % file-id position)))))))
+        (->> (dwm/svg->clj ["svg" text])
+             (rx/map #(dwm/svg-uploaded % file-id position)))))))
 
 (defn- paste-image
   [image]
@@ -1933,25 +1524,25 @@
             params  {:file-id file-id
                      :blobs [image]
                      :position @ms/mouse-position}]
-        (rx/of (dwp/upload-media-workspace params))))))
+        (rx/of (dwm/upload-media-workspace params))))))
 
 (defn toggle-distances-display [value]
   (ptk/reify ::toggle-distances-display
 
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-local :show-distances?] value))))
+      (assoc-in state [:workspace-global :show-distances?] value))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Interactions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(d/export dwi/start-edit-interaction)
-(d/export dwi/move-edit-interaction)
-(d/export dwi/finish-edit-interaction)
-(d/export dwi/start-move-overlay-pos)
-(d/export dwi/move-overlay-pos)
-(d/export dwi/finish-move-overlay-pos)
+(dm/export dwi/start-edit-interaction)
+(dm/export dwi/move-edit-interaction)
+(dm/export dwi/finish-edit-interaction)
+(dm/export dwi/start-move-overlay-pos)
+(dm/export dwi/move-overlay-pos)
+(dm/export dwi/finish-move-overlay-pos)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CANVAS OPTIONS
@@ -1962,19 +1553,12 @@
   (ptk/reify ::change-canvas-color
     ptk/WatchEvent
     (watch [it state _]
-      (let [page-id (get state :current-page-id)
-            options (wsh/lookup-page-options state page-id)
-            previous-color  (:background options)]
-        (rx/of (dch/commit-changes
-                {:redo-changes [{:type :set-option
-                                 :page-id page-id
-                                 :option :background
-                                 :value (:color color)}]
-                 :undo-changes [{:type :set-option
-                                 :page-id page-id
-                                 :option :background
-                                 :value previous-color}]
-                 :origin it}))))))
+      (let [page    (wsh/lookup-page state)
+            changes (-> (pcb/empty-changes it)
+                        (pcb/with-page page)
+                        (pcb/set-page-option :background (:color color)))]
+
+        (rx/of (dch/commit-changes changes))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Artboard
@@ -1987,21 +1571,23 @@
     (watch [_ state _]
       (let [page-id       (:current-page-id state)
             objects       (wsh/lookup-page-objects state page-id)
-            shapes        (cph/get-immediate-children objects)
             selected      (wsh/lookup-selected state)
-            selected-objs (map #(get objects %) selected)
-            has-frame?    (some #(= (:type %) :frame) selected-objs)]
-        (when (not (or (empty? selected) has-frame?))
+            selected-objs (map #(get objects %) selected)]
+        (when (d/not-empty? selected)
           (let [srect    (gsh/selection-rect selected-objs)
-                frame-id (:frame-id (first shapes))
-                shape    (-> (cp/make-minimal-shape :frame)
+                frame-id (get-in objects [(first selected) :frame-id])
+                parent-id (get-in objects [(first selected) :parent-id])
+                shape    (-> (cts/make-minimal-shape :frame)
                              (merge {:x (:x srect) :y (:y srect) :width (:width srect) :height (:height srect)})
-                             (assoc :frame-id frame-id)
-                             (gsh/setup-selrect))]
+                             (assoc :frame-id frame-id :parent-id parent-id)
+                             (cond-> (not= frame-id uuid/zero)
+                               (assoc :fills [] :hide-in-viewer true))
+                             (cts/setup-rect-selrect))]
             (rx/of
              (dwu/start-undo-transaction)
-             (dwc/add-shape shape)
-             (dwc/move-shapes-into-frame (:id shape) selected)
+             (dwsh/add-shape shape)
+             (dwsh/move-shapes-into-frame (:id shape) selected)
+
              (dwu/commit-undo-transaction))))))))
 
 
@@ -2011,62 +1597,78 @@
 
 ;; Transform
 
-(d/export dwt/start-resize)
-(d/export dwt/update-dimensions)
-(d/export dwt/start-rotate)
-(d/export dwt/increase-rotation)
-(d/export dwt/start-move-selected)
-(d/export dwt/move-selected)
-(d/export dwt/update-position)
-(d/export dwt/flip-horizontal-selected)
-(d/export dwt/flip-vertical-selected)
-(d/export dwly/set-opacity)
+(dm/export dwt/start-resize)
+(dm/export dwt/update-dimensions)
+(dm/export dwt/change-orientation)
+(dm/export dwt/start-rotate)
+(dm/export dwt/increase-rotation)
+(dm/export dwt/start-move-selected)
+(dm/export dwt/move-selected)
+(dm/export dwt/update-position)
+(dm/export dwt/flip-horizontal-selected)
+(dm/export dwt/flip-vertical-selected)
+(dm/export dwly/set-opacity)
 
-;; Persistence
+;; Common
+(dm/export dwsh/add-shape)
+(dm/export dwe/clear-edition-mode)
+(dm/export dws/select-shapes)
+(dm/export dwe/start-edition-mode)
 
-(d/export dwp/set-file-shared)
-(d/export dwp/fetch-shared-files)
-(d/export dwp/link-file-to-library)
-(d/export dwp/unlink-file-from-library)
-(d/export dwp/upload-media-asset)
-(d/export dwp/upload-media-workspace)
-(d/export dwp/clone-media-object)
-(d/export dwc/image-uploaded)
+;; Drawing
+(dm/export dwd/select-for-drawing)
 
 ;; Selection
+(dm/export dws/toggle-focus-mode)
+(dm/export dws/deselect-all)
+(dm/export dws/deselect-shape)
+(dm/export dws/duplicate-selected)
+(dm/export dws/handle-area-selection)
+(dm/export dws/select-all)
+(dm/export dws/select-inside-group)
+(dm/export dws/select-shape)
+(dm/export dws/shift-select-shapes)
 
-(d/export dws/select-shape)
-(d/export dws/deselect-shape)
-(d/export dws/select-all)
-(d/export dws/deselect-all)
-(d/export dwc/select-shapes)
-(d/export dws/shift-select-shapes)
-(d/export dws/duplicate-selected)
-(d/export dws/handle-area-selection)
-(d/export dws/select-inside-group)
-(d/export dwd/select-for-drawing)
-(d/export dwc/clear-edition-mode)
-(d/export dwc/add-shape)
-(d/export dwc/start-edition-mode)
+;; Highlight
+(dm/export dwh/highlight-shape)
+(dm/export dwh/dehighlight-shape)
 
 ;; Groups
-
-(d/export dwg/mask-group)
-(d/export dwg/unmask-group)
-(d/export dwg/group-selected)
-(d/export dwg/ungroup-selected)
+(dm/export dwg/mask-group)
+(dm/export dwg/unmask-group)
+(dm/export dwg/group-selected)
+(dm/export dwg/ungroup-selected)
 
 ;; Boolean
-(d/export dwb/create-bool)
-(d/export dwb/group-to-bool)
-(d/export dwb/bool-to-group)
-(d/export dwb/change-bool-type)
+(dm/export dwb/create-bool)
+(dm/export dwb/group-to-bool)
+(dm/export dwb/bool-to-group)
+(dm/export dwb/change-bool-type)
 
 ;; Shapes to path
-(d/export dwps/convert-selected-to-path)
+(dm/export dwps/convert-selected-to-path)
 
 ;; Guides
-(d/export dwgu/update-guides)
-(d/export dwgu/remove-guide)
-(d/export dwgu/set-hover-guide)
+(dm/export dwgu/update-guides)
+(dm/export dwgu/remove-guide)
+(dm/export dwgu/set-hover-guide)
 
+;; Zoom
+(dm/export dwz/reset-zoom)
+(dm/export dwz/zoom-to-selected-shape)
+(dm/export dwz/start-zooming)
+(dm/export dwz/finish-zooming)
+(dm/export dwz/zoom-to-fit-all)
+(dm/export dwz/decrease-zoom)
+(dm/export dwz/increase-zoom)
+(dm/export dwz/set-zoom)
+
+;; Thumbnails
+(dm/export dwth/update-thumbnail)
+
+;; Viewport
+(dm/export dwv/initialize-viewport)
+(dm/export dwv/update-viewport-position)
+(dm/export dwv/update-viewport-size)
+(dm/export dwv/start-panning)
+(dm/export dwv/finish-panning)

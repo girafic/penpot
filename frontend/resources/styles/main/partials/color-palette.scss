@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) UXBOX Labs SL
+// Copyright (c) KALEIDOS INC
 
 .color-palette {
-  @include animation(0, 0.5s, fadeInUp);
+  @include animation(0, 0.3s, fadeInUp);
   align-items: center;
   background-color: $color-gray-50;
   border-top: 1px solid $color-gray-60;
@@ -42,7 +42,7 @@
   }
 
   &.fade-out-down {
-    @include animation(0, 0.5s, fadeOutDown);
+    @include animation(0, 0.3s, fadeOutDown);
   }
 
   & .context-menu-items {
@@ -82,6 +82,7 @@
 
 .color-palette-actions-button {
   cursor: pointer;
+  display: flex;
   & svg {
     width: 1rem;
     height: 1rem;

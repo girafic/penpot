@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.services-media-test
   (:require
@@ -41,13 +41,16 @@
       (t/is (uuid? media-id))
       (t/is (uuid? thumbnail-id))
       (let [storage (:app.storage/storage th/*system*)
-            mobj1   (sto/get-object storage media-id)
-            mobj2   (sto/get-object storage thumbnail-id)]
+            mobj1   @(sto/get-object storage media-id)
+            mobj2   @(sto/get-object storage thumbnail-id)]
         (t/is (sto/storage-object? mobj1))
         (t/is (sto/storage-object? mobj2))
         (t/is (= 122785 (:size mobj1)))
-        (t/is (= 3303   (:size mobj2)))))
-    ))
+        ;; This is because in ubuntu 21.04 generates different
+        ;; thumbnail that in ubuntu 22.04. This hack should be removed
+        ;; when we all use the ubuntu 22.04 devenv image.
+        (t/is (or (= 3302 (:size mobj2))
+                  (= 3303 (:size mobj2))))))))
 
 (t/deftest media-object-upload
   (let [prof   (th/create-profile* 1)
@@ -57,8 +60,8 @@
                                    :project-id (:default-project-id prof)
                                    :is-shared false})
         mfile  {:filename "sample.jpg"
-                :tempfile (th/tempfile "app/test_files/sample.jpg")
-                :content-type "image/jpeg"
+                :path (th/tempfile "app/test_files/sample.jpg")
+                :mtype "image/jpeg"
                 :size 312043}
 
         params {::th/type :upload-file-media-object
@@ -79,8 +82,8 @@
       (t/is (uuid? media-id))
       (t/is (uuid? thumbnail-id))
       (let [storage (:app.storage/storage th/*system*)
-            mobj1   (sto/get-object storage media-id)
-            mobj2   (sto/get-object storage thumbnail-id)]
+            mobj1   @(sto/get-object storage media-id)
+            mobj2   @(sto/get-object storage thumbnail-id)]
         (t/is (sto/storage-object? mobj1))
         (t/is (sto/storage-object? mobj2))
         (t/is (= 312043 (:size mobj1)))
@@ -96,8 +99,8 @@
                                    :project-id (:default-project-id prof)
                                    :is-shared false})
         mfile  {:filename "sample.jpg"
-                :tempfile (th/tempfile "app/test_files/sample.jpg")
-                :content-type "image/jpeg"
+                :path (th/tempfile "app/test_files/sample.jpg")
+                :mtype "image/jpeg"
                 :size 312043}
 
         params {::th/type :upload-file-media-object

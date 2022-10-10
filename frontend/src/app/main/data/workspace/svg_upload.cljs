@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.workspace.svg-upload
   (:require
@@ -11,30 +11,28 @@
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
-   [app.common.math :as mth]
-   [app.common.pages.helpers :as cph]
+   [app.common.pages.changes-builder :as pcb]
    [app.common.spec :refer [max-safe-int min-safe-int]]
+   [app.common.types.shape :as cts]
+   [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.changes :as dch]
-   [app.main.data.workspace.common :as dwc]
+   [app.main.data.workspace.selection :as dws]
+   [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.state-helpers :as wsh]
-   [app.main.repo :as rp]
    [app.util.color :as uc]
    [app.util.path.parser :as upp]
    [app.util.svg :as usvg]
-   [app.util.uri :as uu]
    [beicon.core :as rx]
    [cuerdas.core :as str]
    [potok.core :as ptk]))
 
 (defonce default-rect {:x 0 :y 0 :width 1 :height 1 :rx 0 :ry 0})
 (defonce default-circle {:r 0 :cx 0 :cy 0})
-(defonce default-image {:x 0 :y 0 :width 1 :height 1})
+(defonce default-image {:x 0 :y 0 :width 1 :height 1 :rx 0 :ry 0})
 
 (defn- assert-valid-num [attr num]
-  (when (or (nil? num)
-            (mth/nan? num)
-            (not (mth/finite? num))
+  (when (or (not (d/num? num))
             (>= num max-safe-int )
             (<= num  min-safe-int))
     (ex/raise (str (d/name attr) " attribute invalid: " num)))
@@ -75,6 +73,7 @@
     ;; Color present as attribute
     (uc/color? (str/trim (get-in shape [:svg-attrs :fill])))
     (-> (update :svg-attrs dissoc :fill)
+        (update-in [:svg-attrs :style] dissoc :fill)
         (assoc-in [:fills 0 :fill-color] (-> (get-in shape [:svg-attrs :fill])
                                              (str/trim)
                                              (uc/parse-color))))
@@ -82,55 +81,72 @@
     ;; Color present as style
     (uc/color? (str/trim (get-in shape [:svg-attrs :style :fill])))
     (-> (update-in [:svg-attrs :style] dissoc :fill)
+        (update :svg-attrs dissoc :fill)
         (assoc-in [:fills 0 :fill-color] (-> (get-in shape [:svg-attrs :style :fill])
                                              (str/trim)
                                              (uc/parse-color))))
 
     (get-in shape [:svg-attrs :fill-opacity])
     (-> (update :svg-attrs dissoc :fill-opacity)
+        (update-in [:svg-attrs :style] dissoc :fill-opacity)
         (assoc-in [:fills 0 :fill-opacity] (-> (get-in shape [:svg-attrs :fill-opacity])
-                                                (d/parse-double))))
+                                               (d/parse-double))))
 
     (get-in shape [:svg-attrs :style :fill-opacity])
     (-> (update-in [:svg-attrs :style] dissoc :fill-opacity)
+        (update :svg-attrs dissoc :fill-opacity)
         (assoc-in [:fills 0 :fill-opacity] (-> (get-in shape [:svg-attrs :style :fill-opacity])
-                                                (d/parse-double))))))
+                                               (d/parse-double))))))
 
 (defn setup-stroke [shape]
   (let [stroke-linecap (-> (or (get-in shape [:svg-attrs :stroke-linecap])
                                (get-in shape [:svg-attrs :style :stroke-linecap]))
                            ((d/nilf str/trim))
                            ((d/nilf keyword)))
+
         shape
         (cond-> shape
-          (uc/color? (get-in shape [:svg-attrs :stroke]))
+          (uc/color? (str/trim (get-in shape [:svg-attrs :stroke])))
           (-> (update :svg-attrs dissoc :stroke)
-              (assoc :stroke-color (get-in shape [:svg-attrs :stroke])))
+              (assoc-in [:strokes 0 :stroke-color] (-> (get-in shape [:svg-attrs :stroke])
+                                                       (str/trim)
+                                                       (uc/parse-color))))
 
-          (uc/color? (get-in shape [:svg-attrs :style :stroke]))
+          (uc/color? (str/trim (get-in shape [:svg-attrs :style :stroke])))
           (-> (update-in [:svg-attrs :style] dissoc :stroke)
-              (assoc :stroke-color (get-in shape [:svg-attrs :style :stroke])))
+              (assoc-in [:strokes 0 :stroke-color] (-> (get-in shape [:svg-attrs :style :stroke])
+                                                       (str/trim)
+                                                       (uc/parse-color))))
+
+          (get-in shape [:svg-attrs :stroke-opacity])
+          (-> (update :svg-attrs dissoc :stroke-opacity)
+              (assoc-in [:strokes 0 :stroke-opacity] (-> (get-in shape [:svg-attrs :stroke-opacity])
+                                                         (d/parse-double))))
+
+          (get-in shape [:svg-attrs :style :stroke-opacity])
+          (-> (update-in [:svg-attrs :style] dissoc :stroke-opacity)
+              (assoc-in [:strokes 0 :stroke-opacity] (-> (get-in shape [:svg-attrs :style :stroke-opacity])
+                                                       (d/parse-double))))
 
           (get-in shape [:svg-attrs :stroke-width])
           (-> (update :svg-attrs dissoc :stroke-width)
-              (assoc :stroke-width (-> (get-in shape [:svg-attrs :stroke-width])
-                                       (d/parse-double))))
+              (assoc-in [:strokes 0 :stroke-width] (-> (get-in shape [:svg-attrs :stroke-width])
+                                                       (d/parse-double))))
 
           (get-in shape [:svg-attrs :style :stroke-width])
           (-> (update-in [:svg-attrs :style] dissoc :stroke-width)
-              (assoc :stroke-width (-> (get-in shape [:svg-attrs :style :stroke-width])
-                                       (d/parse-double))))
+              (assoc-in [:strokes 0 :stroke-width] (-> (get-in shape [:svg-attrs :style :stroke-width])
+                                                       (d/parse-double))))
 
           (and stroke-linecap (= (:type shape) :path))
           (-> (update-in [:svg-attrs :style] dissoc :stroke-linecap)
-              (cond->
-                (#{:round :square} stroke-linecap)
+              (cond-> (#{:round :square} stroke-linecap)
                 (assoc :stroke-cap-start stroke-linecap
                        :stroke-cap-end   stroke-linecap))))]
 
-    (if (d/any-key? shape :stroke-color :stroke-opacity :stroke-width :stroke-cap-start :stroke-cap-end)
-      (merge {:stroke-style :svg} shape)
-      shape)))
+    (cond-> shape
+      (d/any-key? (get-in shape [:strokes 0]) :stroke-color :stroke-opacity :stroke-width :stroke-cap-start :stroke-cap-end)
+      (assoc-in [:strokes 0 :stroke-style] :svg))))
 
 (defn setup-opacity [shape]
   (cond-> shape
@@ -166,7 +182,7 @@
         (assoc :svg-attrs attrs)
         (assoc :svg-viewbox (-> (select-keys svg-data [:width :height])
                                 (assoc :x offset-x :y offset-y)))
-        (gsh/setup-selrect))))
+        (cts/setup-rect-selrect))))
 
 (defn create-svg-root [frame-id svg-data]
   (let [{:keys [name x y width height offset-x offset-y]} svg-data]
@@ -178,7 +194,7 @@
          :height height
          :x (+ x offset-x)
          :y (+ y offset-y)}
-        (gsh/setup-selrect)
+        (cts/setup-rect-selrect)
         (assoc :svg-attrs (-> (:attrs svg-data)
                               (dissoc :viewBox :xmlns)
                               (d/without-keys usvg/inheritable-props))))))
@@ -198,7 +214,7 @@
         (assoc :svg-attrs (d/without-keys attrs usvg/inheritable-props))
         (assoc :svg-viewbox (-> (select-keys svg-data [:width :height])
                                 (assoc :x offset-x :y offset-y)))
-        (gsh/setup-selrect))))
+        (cts/setup-rect-selrect))))
 
 (defn create-path-shape [name frame-id svg-data {:keys [attrs] :as data}]
   (when (and (contains? attrs :d) (seq (:d attrs)))
@@ -228,14 +244,9 @@
   (let [points (-> (gsh/rect->points rect-data)
                    (gsh/transform-points transform))
 
-        center (gsh/center-points points)
-
-        rect-shape (-> (gsh/make-centered-rect center (:width rect-data) (:height rect-data))
-                       (update :width max 1)
-                       (update :height max 1))
-
-        selrect (gsh/rect->selrect rect-shape)
-
+        center      (gsh/center-points points)
+        rect-shape  (gsh/center->rect center (:width rect-data) (:height rect-data))
+        selrect     (gsh/rect->selrect rect-shape)
         rect-points (gsh/rect->points rect-shape)
 
         [shape-transform shape-transform-inv rotation]
@@ -269,8 +280,8 @@
          :name name
          :frame-id frame-id}
         (cond->
-            (contains? attrs :rx) (assoc :rx (d/parse-double (:rx attrs)))
-            (contains? attrs :ry) (assoc :ry (d/parse-double (:ry attrs))))
+            (contains? attrs :rx) (assoc :rx (d/parse-double (:rx attrs 0)))
+            (contains? attrs :ry) (assoc :ry (d/parse-double (:ry attrs 0))))
 
         (merge metadata)
         (assoc :svg-viewbox (select-keys rect [:x :y :width :height]))
@@ -316,7 +327,7 @@
         transform (->> svg-transform
                        (gmt/transform-in (gpt/point svg-data)))
 
-        image-url (:xlink:href attrs)
+        image-url (or (:href attrs) (:xlink:href attrs))
         image-data (get-in svg-data [:image-data image-url])
 
         rect (->> (select-keys attrs [:x :y :width :height])
@@ -329,24 +340,26 @@
                       (update :y - (:y origin)))
 
         rect-metadata (calculate-rect-metadata rect-data transform)]
-    (-> {:id (uuid/next)
-         :type :image
-         :name name
-         :frame-id frame-id
-         :metadata {:width (:width image-data)
-                    :height (:height image-data)
-                    :mtype (:mtype image-data)
-                    :id (:id image-data)}}
 
-        (merge rect-metadata)
-        (assoc :svg-viewbox (select-keys rect [:x :y :width :height]))
-        (assoc :svg-attrs (dissoc attrs :x :y :width :height :xlink:href)))))
+    (when (some? image-data)
+      (-> {:id (uuid/next)
+           :type :image
+           :name name
+           :frame-id frame-id
+           :metadata {:width (:width image-data)
+                      :height (:height image-data)
+                      :mtype (:mtype image-data)
+                      :id (:id image-data)}}
+
+          (merge rect-metadata)
+          (assoc :svg-viewbox (select-keys rect [:x :y :width :height]))
+          (assoc :svg-attrs (dissoc attrs :x :y :width :height :href :xlink:href))))))
 
 (defn parse-svg-element [frame-id svg-data element-data unames]
-  (let [{:keys [tag attrs]} element-data
+  (let [{:keys [tag attrs hidden]} element-data
         attrs (usvg/format-styles attrs)
         element-data (cond-> element-data (map? element-data) (assoc :attrs attrs))
-        name (dwc/generate-unique-name unames (or (:id attrs) (tag->name tag)))
+        name (ctst/generate-unique-name unames (or (:id attrs) (tag->name tag)))
         att-refs (usvg/find-attr-references attrs)
         references (usvg/find-def-references (:defs svg-data) att-refs)
 
@@ -357,8 +370,9 @@
         use-tag? (and (= :use tag) (contains? defs href-id))]
 
     (if use-tag?
-      (let [use-data (get defs href-id)
-
+      (let [;; Merge the data of the use definition with the properties passed as attributes
+            use-data (-> (get defs href-id)
+                         (update :attrs #(d/deep-merge % (dissoc attrs :xlink:href :href))))
             displacement (gpt/point (d/parse-double (:x attrs "0")) (d/parse-double (:y attrs "0")))
             disp-matrix (str (gmt/translate-matrix displacement))
             element-data (-> element-data
@@ -380,76 +394,39 @@
                         :polygon     (create-path-shape name frame-id svg-data (-> element-data usvg/polygon->path))
                         :line        (create-path-shape name frame-id svg-data (-> element-data usvg/line->path))
                         :image       (create-image-shape name frame-id svg-data element-data)
-                        #_other      (create-raw-svg name frame-id svg-data element-data)))
+                        #_other      (create-raw-svg name frame-id svg-data element-data)))]
+        (when (some? shape)
+          (let [shape (-> shape
+                          (assoc :fills [])
+                          (assoc :strokes [])
+                          (assoc :svg-defs (select-keys (:defs svg-data) references))
+                          (setup-fill)
+                          (setup-stroke))
 
-            shape (assoc shape :fills [])
+                shape (cond-> shape
+                        hidden (assoc :hidden true))
 
-            shape (when (some? shape)
-                    (-> shape
-                        (assoc :svg-defs (select-keys (:defs svg-data) references))
-                        (setup-fill)
-                        (setup-stroke)))
+                children (cond->> (:content element-data)
+                           (or (= tag :g) (= tag :svg))
+                           (mapv #(usvg/inherit-attributes attrs %)))]
+            [shape children]))))))
 
-            children (cond->> (:content element-data)
-                       (or (= tag :g) (= tag :svg))
-                       (mapv #(usvg/inherit-attributes attrs %)))]
-        [shape children]))))
-
-(defn add-svg-child-changes [page-id objects selected frame-id parent-id svg-data [unames [rchs uchs]] [index data]]
+(defn add-svg-child-changes [page-id objects selected frame-id parent-id svg-data [unames changes] [index data]]
   (let [[shape children] (parse-svg-element frame-id svg-data data unames)]
     (if (some? shape)
       (let [shape-id (:id shape)
 
-            [rch1 uch1] (dwc/add-shape-changes page-id objects selected shape false)
+            new-shape (dwsh/make-new-shape shape objects selected)
+            changes   (-> changes
+                          (pcb/add-object new-shape)
+                          (pcb/change-parent parent-id [new-shape] index))
 
-            ;; Mov-objects won't have undo because we "delete" the object in the undo of the
-            ;; previous operation
-            rch2 [{:type :mov-objects
-                   :parent-id parent-id
-                   :frame-id frame-id
-                   :page-id page-id
-                   :index index
-                   :shapes [shape-id]}]
-
-            ;; Careful! the undo changes are concatenated reversed (we undo in reverse order
-            changes [(d/concat-vec rchs rch1 rch2)
-                     (d/concat-vec uch1 uchs)]
-            unames  (conj unames (:name shape))
+            unames  (conj unames (:name new-shape))
 
             reducer-fn (partial add-svg-child-changes page-id objects selected frame-id shape-id svg-data)]
         (reduce reducer-fn [unames changes] (d/enumerate children)))
 
-      ;; Cannot create the data from current tags
-      [unames [rchs uchs]])))
-
-(declare create-svg-shapes)
-
-(defn svg-uploaded
-  [svg-data file-id position]
-  (ptk/reify ::svg-uploaded
-    ptk/WatchEvent
-    (watch [_ _ _]
-      ;; Once the SVG is uploaded, we need to extract all the bitmap
-      ;; images and upload them separately, then proceed to create
-      ;; all shapes.
-      (->> (rx/from (usvg/collect-images svg-data))
-           (rx/map (fn [uri]
-                     (d/merge
-                      {:file-id file-id
-                       :is-local true
-                       :url uri}
-
-                      (if (str/starts-with? uri "data:")
-                        {:name "image"
-                         :content (uu/data-uri->blob uri)}
-                        {:name (uu/uri-name uri)}))))
-           (rx/mapcat (fn [uri-data]
-                        (->> (rp/mutation! (if (contains? uri-data :content)
-                                             :upload-file-media-object
-                                             :create-file-media-object-from-url) uri-data)
-                             (rx/map #(vector (:url uri-data) %)))))
-           (rx/reduce (fn [acc [url image]] (assoc acc url image)) {})
-           (rx/map #(create-svg-shapes (assoc svg-data :image-data %) position))))))
+      [unames changes])))
 
 (defn create-svg-shapes
   [svg-data {:keys [x y] :as position}]
@@ -459,17 +436,17 @@
       (try
         (let [page-id  (:current-page-id state)
               objects  (wsh/lookup-page-objects state page-id)
-              frame-id (cph/frame-id-by-position objects position)
+              frame-id (ctst/top-nested-frame objects position)
               selected (wsh/lookup-selected state)
 
               [vb-x vb-y vb-width vb-height] (svg-dimensions svg-data)
               x (- x vb-x (/ vb-width 2))
               y (- y vb-y (/ vb-height 2))
 
-              unames (dwc/retrieve-used-names objects)
+              unames (ctst/retrieve-used-names objects)
 
               svg-name (->> (str/replace (:name svg-data) ".svg" "")
-                            (dwc/generate-unique-name unames))
+                            (ctst/generate-unique-name unames))
 
               svg-data (-> svg-data
                            (assoc :x x
@@ -490,29 +467,47 @@
               root-shape (create-svg-root frame-id svg-data)
               root-id (:id root-shape)
 
+              ;; In penpot groups have the size of their children. To respect the imported svg size and empty space let's create a transparent shape as background to respect the imported size
+              base-background-shape {:tag :rect
+                                     :attrs {:x "0"
+                                             :y "0"
+                                             :width (str (:width root-shape))
+                                             :height (str (:height root-shape))
+                                             :fill "none"
+                                             :id "base-background"}
+                                     :hidden true
+                                     :content []}
+
+              svg-data (-> svg-data
+                           (assoc :defs def-nodes)
+                           (assoc :content (into [base-background-shape] (:content svg-data))))
+
               ;; Creates the root shape
-              changes (dwc/add-shape-changes page-id objects selected root-shape false)
+              new-shape (dwsh/make-new-shape root-shape objects selected)
+
+              changes   (-> (pcb/empty-changes it page-id)
+                            (pcb/with-objects objects)
+                            (pcb/add-object new-shape))
 
               root-attrs (-> (:attrs svg-data)
                              (usvg/format-styles))
 
-              ;; Reduces the children to create the changes to add the children shapes
-              [_ [rchanges uchanges]]
+              ;; Reduce the children to create the changes to add the children shapes
+              [_ changes]
               (reduce (partial add-svg-child-changes page-id objects selected frame-id root-id svg-data)
                       [unames changes]
                       (d/enumerate (->> (:content svg-data)
                                         (mapv #(usvg/inherit-attributes root-attrs %)))))
+              changes (pcb/resize-parents changes
+                                          (->> changes
+                                               :redo-changes
+                                               (filter #(= :add-obj (:type %)))
+                                               (map :id)
+                                               reverse
+                                               vec))]
 
-              reg-objects-action {:type :reg-objects
-                                  :page-id page-id
-                                  :shapes (->> rchanges (filter #(= :add-obj (:type %))) (map :id) reverse vec)}
-
-              rchanges (conj rchanges reg-objects-action)]
-
-          (rx/of (dch/commit-changes {:redo-changes rchanges
-                                      :undo-changes uchanges
-                                      :origin it})
-                 (dwc/select-shapes (d/ordered-set root-id))))
+          (rx/of (dch/commit-changes changes)
+                 (dws/select-shapes (d/ordered-set root-id))))
 
         (catch :default e
           (.error js/console "Error SVG" e)

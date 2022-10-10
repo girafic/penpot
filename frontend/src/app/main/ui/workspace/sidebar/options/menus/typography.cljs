@@ -2,14 +2,14 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.sidebar.options.menus.typography
   (:require
    ["react-virtualized" :as rvt]
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
-   [app.common.pages.helpers :as cph]
    [app.common.text :as txt]
    [app.main.data.fonts :as fts]
    [app.main.data.shortcuts :as dsc]
@@ -29,7 +29,7 @@
    [app.util.timers :as tm]
    [cuerdas.core :as str]
    [goog.events :as events]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn- attr->string [value]
   (if (= value :multiple)
@@ -193,8 +193,8 @@
          [:hr]
          [*
           [:p.title (tr "workspace.options.recent-fonts")]
-          (for [font recent-fonts]
-            [:& font-item {:key (:id font)
+          (for [[idx font] (d/enumerate recent-fonts)]
+            [:& font-item {:key (dm/str "font-" idx)
                            :font font
                            :style {}
                            :on-click on-select-and-close
@@ -339,7 +339,7 @@
 
 
      [:div.row-flex
-      (let [size-options [8 9 10 11 12 14 18 24 36 48 72]
+      (let [size-options [8 9 10 11 12 14 16 18 24 36 48 72]
             size-options (if (= font-size :multiple) (into [""] size-options) size-options)]
         [:& editable-select
          {:value (attr->string font-size)
@@ -386,7 +386,6 @@
        {:min -200
         :max 200
         :step 0.1
-        :precision 2
         :value (attr->string line-height)
         :placeholder (tr "settings.multiple")
         :on-change #(handle-change % :line-height)
@@ -400,7 +399,6 @@
        {:min -200
         :max 200
         :step 0.1
-        :precision 2
         :value (attr->string letter-spacing)
         :placeholder (tr "settings.multiple")
         :on-change #(handle-change % :letter-spacing)
@@ -463,57 +461,27 @@
         name-input-ref (mf/use-ref)
         on-change-ref  (mf/use-ref nil)
 
-        name-ref (mf/use-ref (:name typography))
-
         on-name-blur
         (mf/use-callback
          (mf/deps on-change)
          (fn [event]
-           (let [content (dom/get-target-val event)]
-             (when-not (str/blank? content)
-               (let [[path name] (cph/parse-path-name content)]
-                 (on-change {:name name :path path}))))))
+           (let [name (dom/get-target-val event)]
+             (when-not (str/blank? name)
+               (on-change {:name name})))))]
 
-        handle-go-to-edit
-        (fn []
-          (let [pparams {:project-id (:project-id file)
-                         :file-id (:id file)}]
-            (st/emit! (rt/nav :workspace pparams))))
+    (mf/with-effect [editing?]
+      (when editing?
+        (reset! open? editing?)))
 
-        on-name-change
-        (mf/use-callback
-         (fn [event]
-           (mf/set-ref-val! name-ref (dom/get-target-val event))))]
+    (mf/with-effect [focus-name?]
+      (when focus-name?
+        (tm/schedule
+         #(when-let [node (mf/ref-val name-input-ref)]
+            (dom/focus! node)
+            (dom/select-text! node)))))
 
-    (mf/use-effect
-     (mf/deps editing?)
-     (fn []
-       (when editing?
-         (reset! open? editing?))))
-
-    (mf/use-effect
-     (mf/deps focus-name?)
-     (fn []
-       (when focus-name?
-         (tm/schedule
-          #(when-let [node (mf/ref-val name-input-ref)]
-             (dom/focus! node)
-             (dom/select-text! node))))))
-
-    (mf/use-effect
-     (mf/deps on-change)
-     (fn []
-       (mf/set-ref-val! on-change-ref {:on-change on-change})))
-
-    (mf/use-effect
-     (fn []
-       (fn []
-         (let [content (mf/ref-val name-ref)]
-           ;; On destroy we check if it changed
-           (when (and (some? content) (not= content (:name typography)))
-             (let [{:keys [on-change]} (mf/ref-val on-change-ref)
-                 [path name] (cph/parse-path-name content)]
-             (on-change {:name name :path path})))))))
+    (mf/with-effect [on-change]
+      (mf/set-ref-val! on-change-ref {:on-change on-change}))
 
     [:*
      [:div.element-set-options-group.typography-entry
@@ -576,9 +544,13 @@
           [:span.label (tr "workspace.assets.typography.text-transform")]
           [:span (:text-transform typography)]]
 
-         [:div.go-to-lib-button
-          {:on-click handle-go-to-edit}
-          (tr "workspace.assets.typography.go-to-edit")]]
+         [:div.row-flex
+          [:a.go-to-lib-button
+           {:on-click #(st/emit! (rt/nav-new-window* {:rname :workspace
+                                                      :path-params {:project-id (:project-id file)
+                                                                    :file-id (:id file)}
+                                                      :query-params {:page-id (get-in file [:data :pages 0])}}))}
+           (tr "workspace.assets.typography.go-to-edit")]]]
 
         [:*
          [:div.element-set-content
@@ -586,9 +558,8 @@
            [:input.element-name.adv-typography-name
             {:type "text"
              :ref name-input-ref
-             :default-value (cph/merge-path-item (:path typography) (:name typography))
-             :on-blur on-name-blur
-             :on-change on-name-change}]
+             :default-value (:name typography)
+             :on-blur on-name-blur}]
 
              [:div.element-set-actions-button
               {:on-click #(reset! open? false)}

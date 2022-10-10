@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.workspace.drawing.box
   (:require
@@ -10,6 +10,8 @@
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.pages.helpers :as cph]
+   [app.common.types.shape :as cts]
+   [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.drawing.common :as common]
    [app.main.data.workspace.state-helpers :as wsh]
@@ -27,8 +29,8 @@
         shapev  (gpt/point width height)
         deltav  (gpt/to-vec initial point)
         scalev  (-> (gpt/divide (gpt/add shapev deltav) shapev)
-                    (update :x truncate-zero 1)
-                    (update :y truncate-zero 1))
+                    (update :x truncate-zero 0.01)
+                    (update :y truncate-zero 0.01))
         scalev  (if lock?
                   (let [v (max (:x scalev) (:y scalev))]
                     (gpt/point v v))
@@ -45,9 +47,7 @@
 (defn move-drawing
   [{:keys [x y]}]
   (fn [state]
-    (let [x (mth/precision x 0)
-          y (mth/precision y 0)]
-      (update-in state [:workspace-drawing :object] gsh/absolute-move (gpt/point x y)))))
+    (update-in state [:workspace-drawing :object] gsh/absolute-move (gpt/point x y))))
 
 (defn handle-drawing-box []
   (ptk/reify ::handle-drawing-box
@@ -55,44 +55,49 @@
     (watch [_ state stream]
       (let [stoper? #(or (ms/mouse-up? %) (= % :interrupt))
             stoper  (rx/filter stoper? stream)
-            initial @ms/mouse-position
+            layout  (get state :workspace-layout)
+            snap-pixel? (contains? layout :snap-pixel-grid)
+
+            initial (cond-> @ms/mouse-position
+                      snap-pixel? gpt/round)
 
             page-id (:current-page-id state)
             objects (wsh/lookup-page-objects state page-id)
-            layout  (get state :workspace-layout)
+            focus   (:workspace-focus-selected state)
             zoom    (get-in state [:workspace-local :zoom] 1)
+            fid     (ctst/top-nested-frame objects initial)
 
-            frames  (cph/get-frames objects)
-            fid     (or (->> frames
-                             (filter #(gsh/has-point? % initial))
-                             first
-                             :id)
-                        uuid/zero)
+            shape   (get-in state [:workspace-drawing :object])
+            shape   (-> shape
+                        (cts/setup-shape {:x (:x initial)
+                                         :y (:y initial)
+                                         :width 0.01
+                                         :height 0.01})
+                        (cond-> (and (cph/frame-shape? shape)
+                                     (not= fid uuid/zero))
+                          (assoc :fills [] :hide-in-viewer true))
 
-            shape (-> state
-                      (get-in [:workspace-drawing :object])
-                      (gsh/setup {:x (:x initial) :y (:y initial) :width 1 :height 1})
-                      (assoc :frame-id fid)
-                      (assoc :initialized? true)
-                      (assoc :click-draw? true))]
+                        (assoc :frame-id fid)
+                        (assoc :initialized? true)
+                        (assoc :click-draw? true))]
         (rx/concat
          ;; Add shape to drawing state
          (rx/of #(assoc-in state [:workspace-drawing :object] shape))
 
          ;; Initial SNAP
-         (->> (snap/closest-snap-point page-id [shape] layout zoom initial)
+         (->> (snap/closest-snap-point page-id [shape] objects layout zoom focus initial)
               (rx/map move-drawing))
 
          (->> ms/mouse-position
-              (rx/filter #(> (gpt/distance % initial) 2))
+              (rx/filter #(> (gpt/distance % initial) (/ 2 zoom)))
               (rx/with-latest vector ms/mouse-position-shift)
               (rx/switch-map
                (fn [[point :as current]]
-                 (->> (snap/closest-snap-point page-id [shape] layout zoom point)
+                 (->> (snap/closest-snap-point page-id [shape] objects layout zoom focus point)
                       (rx/map #(conj current %)))))
               (rx/map
                (fn [[_ shift? point]]
-                 #(update-drawing % point shift?)))
+                 #(update-drawing % (cond-> point snap-pixel? gpt/round) shift?)))
 
               (rx/take-until stoper))
-         (rx/of common/handle-finish-drawing))))))
+         (rx/of (common/handle-finish-drawing)))))))

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) UXBOX Labs SL
+// Copyright (c) KALEIDOS INC
 
 .workspace-header {
   position: relative;
@@ -122,7 +122,7 @@
     span {
       color: $color-white;
       font-size: $fs14;
-      overflow-x: hidden;
+      overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
 
@@ -152,7 +152,7 @@
     position: absolute;
     top: 40px;
     left: 40px;
-    width: 183px;
+    width: 195px;
     z-index: 12;
 
     background-color: $color-white;
@@ -192,7 +192,7 @@
         background-color: $color-primary-lighter;
       }
 
-      &.feedback {
+      &.info {
         border-top: 1px solid $color-gray-10;
       }
     }
@@ -200,7 +200,7 @@
 
   .sub-menu {
     position: absolute;
-    left: 230px;
+    left: 238px;
     width: 270px;
     z-index: 12;
     background-color: $color-white;
@@ -234,6 +234,10 @@
       top: 150px;
     }
 
+    &.help-info {
+      top: 186px;
+    }
+
     li {
       cursor: pointer;
       font-size: $fs14;
@@ -253,6 +257,10 @@
 
       &:hover {
         background-color: $color-primary-lighter;
+      }
+
+      &.separator {
+        border-top: 1px solid $color-gray-10;
       }
     }
   }
@@ -298,8 +306,14 @@
   }
 }
 
+.export-progress-widget {
+  cursor: pointer;
+  padding-top: 6px;
+}
+
 .persistence-status-widget {
   display: flex;
+  margin-left: 0px;
   margin-right: 10px;
   /* border: 1px solid red; */
   width: 150px;

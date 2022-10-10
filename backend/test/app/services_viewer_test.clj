@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.services-viewer-test
   (:require
@@ -30,7 +30,8 @@
       (let [data {::th/type :view-only-bundle
                   :profile-id (:id prof)
                   :file-id (:id file)
-                  :page-id (get-in file [:data :pages 0])}
+                  :page-id (get-in file [:data :pages 0])
+                  :components-v2 true}
 
             out  (th/query! data)]
 
@@ -49,7 +50,8 @@
                   :profile-id (:id prof)
                   :file-id (:id file)
                   :pages #{(get-in file [:data :pages 0])}
-                  :flags #{}}
+                  :who-comment "team"
+                  :who-inspect "all"}
             out  (th/mutation! data)]
 
         ;; (th/print-result! out)
@@ -62,7 +64,8 @@
       (let [data {::th/type :view-only-bundle
                   :profile-id (:id prof2)
                   :file-id (:id file)
-                  :page-id (get-in file [:data :pages 0])}
+                  :page-id (get-in file [:data :pages 0])
+                  :components-v2 true}
             out  (th/query! data)]
 
         ;; (th/print-result! out)
@@ -77,7 +80,8 @@
                   :profile-id (:id prof2)
                   :share-id @share-id
                   :file-id (:id file)
-                  :page-id (get-in file [:data :pages 0])}
+                  :page-id (get-in file [:data :pages 0])
+                  :components-v2 true}
             out  (th/query! data)]
 
         ;; (th/print-result! out)
@@ -92,7 +96,8 @@
       (let [data {::th/type :view-only-bundle
                   :share-id @share-id
                   :file-id (:id file)
-                  :page-id (get-in file [:data :pages 0])}
+                  :page-id (get-in file [:data :pages 0])
+                  :components-v2 true}
             out  (th/query! data)]
 
         ;; (th/print-result! out)

@@ -2,13 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main
   (:require
+   [app.auth.oidc]
    [app.common.logging :as l]
    [app.config :as cf]
    [app.util.time :as dt]
+   [cuerdas.core :as str]
    [integrant.core :as ig])
   (:gen-class))
 
@@ -20,33 +22,29 @@
     :read-only  (cf/get :database-readonly false)
     :metrics    (ig/ref :app.metrics/metrics)
     :migrations (ig/ref :app.migrations/all)
-    :name :main
-    :min-size (cf/get :database-min-pool-size 0)
-    :max-size (cf/get :database-max-pool-size 30)}
+    :name       :main
+    :min-size   (cf/get :database-min-pool-size 0)
+    :max-size   (cf/get :database-max-pool-size 60)}
 
    ;; Default thread pool for IO operations
    [::default :app.worker/executor]
-   {:parallelism (cf/get :default-executor-parallelism 120)
-    :prefix :default}
+   {:parallelism (cf/get :default-executor-parallelism 70)}
 
-   ;; Constrained thread pool. Should only be used from high demand
-   ;; RPC methods.
-   [::blocking :app.worker/executor]
-   {:parallelism (cf/get :blocking-executor-parallelism 20)
-    :prefix :blocking}
-
-   ;; Dedicated thread pool for backround tasks execution.
+   ;; Dedicated thread pool for background tasks execution.
    [::worker :app.worker/executor]
-   {:parallelism (cf/get :worker-executor-parallelism 10)
-    :prefix :worker}
+   {:parallelism (cf/get :worker-executor-parallelism 20)}
 
-   :app.worker/executors-monitor
-   {:executors
-    {:default  (ig/ref [::default :app.worker/executor])
-     :blocking (ig/ref [::blocking :app.worker/executor])
-     :worker   (ig/ref [::worker :app.worker/executor])}
+   :app.worker/scheduler
+   {:parallelism 1
+    :prefix :scheduler}
 
-    :metrics   (ig/ref :app.metrics/metrics)}
+   :app.worker/executors
+   {:default (ig/ref [::default :app.worker/executor])
+    :worker  (ig/ref [::worker :app.worker/executor])}
+
+   :app.worker/executor-monitor
+   {:metrics   (ig/ref :app.metrics/metrics)
+    :executors (ig/ref :app.worker/executors)}
 
    :app.migrations/migrations
    {}
@@ -57,69 +55,140 @@
    :app.migrations/all
    {:main (ig/ref :app.migrations/migrations)}
 
+   :app.redis/redis
+   {:uri     (cf/get :redis-uri)
+    :metrics (ig/ref :app.metrics/metrics)}
 
    :app.msgbus/msgbus
    {:backend   (cf/get :msgbus-backend :redis)
-    :redis-uri (cf/get :redis-uri)}
+    :executor  (ig/ref [::default :app.worker/executor])
+    :redis     (ig/ref :app.redis/redis)}
 
-   :app.tokens/tokens
-   {:keys (ig/ref :app.setup/keys)}
+   :app.storage.tmp/cleaner
+   {:executor (ig/ref [::worker :app.worker/executor])
+    :scheduler (ig/ref :app.worker/scheduler)}
 
    :app.storage/gc-deleted-task
    {:pool     (ig/ref :app.db/pool)
     :storage  (ig/ref :app.storage/storage)
-    :min-age  (dt/duration {:hours 2})}
+    :executor (ig/ref [::worker :app.worker/executor])}
 
    :app.storage/gc-touched-task
-   {:pool     (ig/ref :app.db/pool)}
+   {:pool (ig/ref :app.db/pool)}
 
-   :app.http.session/session
+   :app.http/client
+   {:executor (ig/ref [::default :app.worker/executor])}
+
+   :app.http/session
+   {:store (ig/ref :app.http.session/store)}
+
+   :app.http.session/store
    {:pool     (ig/ref :app.db/pool)
-    :tokens   (ig/ref :app.tokens/tokens)}
+    :sprops   (ig/ref :app.setup/props)
+    :executor (ig/ref [::default :app.worker/executor])}
 
    :app.http.session/gc-task
    {:pool        (ig/ref :app.db/pool)
-    :max-age     (cf/get :http-session-idle-max-age)}
-
-   :app.http.session/updater
-   {:pool           (ig/ref :app.db/pool)
-    :metrics        (ig/ref :app.metrics/metrics)
-    :executor       (ig/ref [::worker :app.worker/executor])
-    :session        (ig/ref :app.http.session/session)
-    :max-batch-age  (cf/get :http-session-updater-batch-max-age)
-    :max-batch-size (cf/get :http-session-updater-batch-max-size)}
+    :max-age     (cf/get :auth-token-cookie-max-age)}
 
    :app.http.awsns/handler
-   {:tokens  (ig/ref :app.tokens/tokens)
-    :pool    (ig/ref :app.db/pool)}
+   {:sprops      (ig/ref :app.setup/props)
+    :pool        (ig/ref :app.db/pool)
+    :http-client (ig/ref :app.http/client)
+    :executor    (ig/ref [::worker :app.worker/executor])}
 
    :app.http/server
    {:port        (cf/get :http-server-port)
     :host        (cf/get :http-server-host)
     :router      (ig/ref :app.http/router)
     :metrics     (ig/ref :app.metrics/metrics)
+    :executor    (ig/ref [::default :app.worker/executor])
+    :io-threads  (cf/get :http-server-io-threads)
+    :max-body-size           (cf/get :http-server-max-body-size)
+    :max-multipart-body-size (cf/get :http-server-max-multipart-body-size)}
 
-    :max-threads (cf/get :http-server-max-threads)
-    :min-threads (cf/get :http-server-min-threads)}
+   :app.auth.ldap/provider
+   {:host           (cf/get :ldap-host)
+    :port           (cf/get :ldap-port)
+    :ssl            (cf/get :ldap-ssl)
+    :tls            (cf/get :ldap-starttls)
+    :query          (cf/get :ldap-user-query)
+    :attrs-email    (cf/get :ldap-attrs-email)
+    :attrs-fullname (cf/get :ldap-attrs-fullname)
+    :attrs-username (cf/get :ldap-attrs-username)
+    :base-dn        (cf/get :ldap-base-dn)
+    :bind-dn        (cf/get :ldap-bind-dn)
+    :bind-password  (cf/get :ldap-bind-password)
+    :enabled?       (contains? cf/flags :login-with-ldap)}
 
+   :app.auth.oidc/google-provider
+   {:enabled?      (contains? cf/flags :login-with-google)
+    :client-id     (cf/get :google-client-id)
+    :client-secret (cf/get :google-client-secret)}
+
+   :app.auth.oidc/github-provider
+   {:enabled?      (contains? cf/flags :login-with-github)
+    :http-client   (ig/ref :app.http/client)
+    :client-id     (cf/get :github-client-id)
+    :client-secret (cf/get :github-client-secret)}
+
+   :app.auth.oidc/gitlab-provider
+   {:enabled?      (contains? cf/flags :login-with-gitlab)
+    :base-uri      (cf/get :gitlab-base-uri "https://gitlab.com")
+    :client-id     (cf/get :gitlab-client-id)
+    :client-secret (cf/get :gitlab-client-secret)}
+
+   :app.auth.oidc/generic-provider
+   {:enabled?      (contains? cf/flags :login-with-oidc)
+    :http-client   (ig/ref :app.http/client)
+
+    :client-id     (cf/get :oidc-client-id)
+    :client-secret (cf/get :oidc-client-secret)
+
+    :base-uri      (cf/get :oidc-base-uri)
+
+    :token-uri     (cf/get :oidc-token-uri)
+    :auth-uri      (cf/get :oidc-auth-uri)
+    :user-uri      (cf/get :oidc-user-uri)
+
+    :scopes        (cf/get :oidc-scopes)
+    :roles-attr    (cf/get :oidc-roles-attr)
+    :roles         (cf/get :oidc-roles)}
+
+   :app.auth.oidc/routes
+   {:providers   {:google (ig/ref :app.auth.oidc/google-provider)
+                  :github (ig/ref :app.auth.oidc/github-provider)
+                  :gitlab (ig/ref :app.auth.oidc/gitlab-provider)
+                  :oidc   (ig/ref :app.auth.oidc/generic-provider)}
+    :sprops      (ig/ref :app.setup/props)
+    :http-client (ig/ref :app.http/client)
+    :pool        (ig/ref :app.db/pool)
+    :session     (ig/ref :app.http/session)
+    :public-uri  (cf/get :public-uri)
+    :executor    (ig/ref [::default :app.worker/executor])}
+
+   ;; TODO: revisit the dependencies of this service, looks they are too much unused of them
    :app.http/router
-   {:assets               (ig/ref :app.http.assets/handlers)
-    :feedback             (ig/ref :app.http.feedback/handler)
-    :session              (ig/ref :app.http.session/session)
-    :sns-webhook          (ig/ref :app.http.awsns/handler)
-    :oauth                (ig/ref :app.http.oauth/handler)
-    :debug                (ig/ref :app.http.debug/handlers)
-    :ws                   (ig/ref :app.http.websocket/handler)
-    :metrics              (ig/ref :app.metrics/metrics)
-    :public-uri           (cf/get :public-uri)
-    :storage              (ig/ref :app.storage/storage)
-    :tokens               (ig/ref :app.tokens/tokens)
-    :audit-http-handler   (ig/ref :app.loggers.audit/http-handler)
-    :rpc                  (ig/ref :app.rpc/rpc)}
+   {:assets        (ig/ref :app.http.assets/handlers)
+    :feedback      (ig/ref :app.http.feedback/handler)
+    :session       (ig/ref :app.http/session)
+    :awsns-handler (ig/ref :app.http.awsns/handler)
+    :debug-routes  (ig/ref :app.http.debug/routes)
+    :oidc-routes   (ig/ref :app.auth.oidc/routes)
+    :ws            (ig/ref :app.http.websocket/handler)
+    :metrics       (ig/ref :app.metrics/metrics)
+    :public-uri    (cf/get :public-uri)
+    :storage       (ig/ref :app.storage/storage)
+    :audit-handler (ig/ref :app.loggers.audit/http-handler)
+    :rpc-routes    (ig/ref :app.rpc/routes)
+    :doc-routes    (ig/ref :app.rpc.doc/routes)
+    :executor      (ig/ref [::default :app.worker/executor])}
 
-   :app.http.debug/handlers
-   {:pool (ig/ref :app.db/pool)
-    :executor (ig/ref [::default :app.worker/executor])}
+   :app.http.debug/routes
+   {:pool     (ig/ref :app.db/pool)
+    :executor (ig/ref [::worker :app.worker/executor])
+    :storage  (ig/ref :app.storage/storage)
+    :session  (ig/ref :app.http/session)}
 
    :app.http.websocket/handler
    {:pool     (ig/ref :app.db/pool)
@@ -135,105 +204,71 @@
     :signature-max-age (dt/duration {:hours 24 :minutes 5})}
 
    :app.http.feedback/handler
-   {:pool (ig/ref :app.db/pool)}
+   {:pool     (ig/ref :app.db/pool)
+    :executor (ig/ref [::default :app.worker/executor])}
 
-   :app.http.oauth/handler
-   {:rpc        (ig/ref :app.rpc/rpc)
-    :session    (ig/ref :app.http.session/session)
-    :pool       (ig/ref :app.db/pool)
-    :tokens     (ig/ref :app.tokens/tokens)
-    :audit      (ig/ref :app.loggers.audit/collector)
-    :executor   (ig/ref [::default :app.worker/executor])
-    :public-uri (cf/get :public-uri)}
+   :app.rpc/semaphores
+   {:metrics (ig/ref :app.metrics/metrics)
+    :executor (ig/ref [::default :app.worker/executor])}
 
-   :app.rpc/rpc
-   {:pool       (ig/ref :app.db/pool)
-    :session    (ig/ref :app.http.session/session)
-    :tokens     (ig/ref :app.tokens/tokens)
-    :metrics    (ig/ref :app.metrics/metrics)
-    :storage    (ig/ref :app.storage/storage)
-    :msgbus     (ig/ref :app.msgbus/msgbus)
-    :public-uri (cf/get :public-uri)
-    :audit      (ig/ref :app.loggers.audit/collector)
-    :executors
-    {:default  (ig/ref [::default :app.worker/executor])
-     :blocking (ig/ref [::blocking :app.worker/executor])}}
+   :app.rpc/rlimit
+   {:executor  (ig/ref [::worker :app.worker/executor])
+    :scheduler (ig/ref :app.worker/scheduler)}
 
-   :app.worker/worker
-   {:executor (ig/ref [::worker :app.worker/executor])
-    :tasks    (ig/ref :app.worker/registry)
-    :metrics  (ig/ref :app.metrics/metrics)
-    :pool     (ig/ref :app.db/pool)}
+   :app.rpc/methods
+   {:pool        (ig/ref :app.db/pool)
+    :session     (ig/ref :app.http/session)
+    :sprops      (ig/ref :app.setup/props)
+    :metrics     (ig/ref :app.metrics/metrics)
+    :storage     (ig/ref :app.storage/storage)
+    :msgbus      (ig/ref :app.msgbus/msgbus)
+    :public-uri  (cf/get :public-uri)
+    :redis       (ig/ref :app.redis/redis)
+    :audit       (ig/ref :app.loggers.audit/collector)
+    :ldap        (ig/ref :app.auth.ldap/provider)
+    :http-client (ig/ref :app.http/client)
+    :rlimit      (ig/ref :app.rpc/rlimit)
+    :executors   (ig/ref :app.worker/executors)
+    :executor    (ig/ref [::default :app.worker/executor])
+    :templates   (ig/ref :app.setup/builtin-templates)
+    :semaphores  (ig/ref :app.rpc/semaphores)
+    }
 
-   :app.worker/scheduler
-   {:executor   (ig/ref [::worker :app.worker/executor])
-    :tasks      (ig/ref :app.worker/registry)
-    :pool       (ig/ref :app.db/pool)
-    :schedule
-    [{:cron #app/cron "0 0 0 * * ?" ;; daily
-      :task :file-media-gc}
+   :app.rpc.doc/routes
+   {:methods (ig/ref :app.rpc/methods)}
 
-     {:cron #app/cron "0 0 * * * ?"  ;; hourly
-      :task :file-xlog-gc}
-
-     {:cron #app/cron "0 0 0 * * ?"  ;; daily
-      :task :storage-deleted-gc}
-
-     {:cron #app/cron "0 0 0 * * ?"  ;; daily
-      :task :storage-touched-gc}
-
-     {:cron #app/cron "0 0 0 * * ?"  ;; daily
-      :task :session-gc}
-
-     {:cron #app/cron "0 0 0 * * ?"  ;; daily
-      :task :objects-gc}
-
-     {:cron #app/cron "0 0 0 * * ?"  ;; daily
-      :task :tasks-gc}
-
-     (when (cf/get :fdata-storage-backed)
-       {:cron #app/cron "0 0 * * * ?"  ;; hourly
-        :task :file-offload})
-
-     (when (contains? cf/flags :audit-log-archive)
-       {:cron #app/cron "0 */5 * * * ?" ;; every 5m
-        :task :audit-log-archive})
-
-     (when (contains? cf/flags :audit-log-gc)
-       {:cron #app/cron "0 0 0 * * ?" ;; daily
-        :task :audit-log-gc})
-
-     (when (or (contains? cf/flags :telemetry)
-               (cf/get :telemetry-enabled))
-       {:cron #app/cron "0 30 */3,23 * * ?"
-        :task :telemetry})]}
+   :app.rpc/routes
+   {:methods (ig/ref :app.rpc/methods)}
 
    :app.worker/registry
    {:metrics (ig/ref :app.metrics/metrics)
     :tasks
-    {:sendmail           (ig/ref :app.emails/sendmail-handler)
+    {:sendmail           (ig/ref :app.emails/handler)
      :objects-gc         (ig/ref :app.tasks.objects-gc/handler)
-     :file-media-gc      (ig/ref :app.tasks.file-media-gc/handler)
+     :file-gc            (ig/ref :app.tasks.file-gc/handler)
      :file-xlog-gc       (ig/ref :app.tasks.file-xlog-gc/handler)
-     :storage-deleted-gc (ig/ref :app.storage/gc-deleted-task)
-     :storage-touched-gc (ig/ref :app.storage/gc-touched-task)
+     :storage-gc-deleted (ig/ref :app.storage/gc-deleted-task)
+     :storage-gc-touched (ig/ref :app.storage/gc-touched-task)
      :tasks-gc           (ig/ref :app.tasks.tasks-gc/handler)
      :telemetry          (ig/ref :app.tasks.telemetry/handler)
      :session-gc         (ig/ref :app.http.session/gc-task)
-     :file-offload       (ig/ref :app.tasks.file-offload/handler)
      :audit-log-archive  (ig/ref :app.loggers.audit/archive-task)
      :audit-log-gc       (ig/ref :app.loggers.audit/gc-task)}}
 
-   :app.emails/sendmail-handler
+
+   :app.emails/sendmail
    {:host             (cf/get :smtp-host)
     :port             (cf/get :smtp-port)
     :ssl              (cf/get :smtp-ssl)
     :tls              (cf/get :smtp-tls)
     :username         (cf/get :smtp-username)
     :password         (cf/get :smtp-password)
-    :metrics          (ig/ref :app.metrics/metrics)
     :default-reply-to (cf/get :smtp-default-reply-to)
     :default-from     (cf/get :smtp-default-from)}
+
+   :app.emails/handler
+   {:sendmail (ig/ref :app.emails/sendmail)
+    :metrics  (ig/ref :app.metrics/metrics)}
 
    :app.tasks.tasks-gc/handler
    {:pool    (ig/ref :app.db/pool)
@@ -241,39 +276,31 @@
 
    :app.tasks.objects-gc/handler
    {:pool    (ig/ref :app.db/pool)
-    :storage (ig/ref :app.storage/storage)
-    :max-age cf/deletion-delay}
+    :storage (ig/ref :app.storage/storage)}
 
-   :app.tasks.file-media-gc/handler
-   {:pool    (ig/ref :app.db/pool)
-    :max-age cf/deletion-delay}
+   :app.tasks.file-gc/handler
+   {:pool (ig/ref :app.db/pool)}
 
    :app.tasks.file-xlog-gc/handler
-   {:pool    (ig/ref :app.db/pool)
-    :max-age (dt/duration {:hours 72})}
-
-   :app.tasks.file-offload/handler
-   {:pool    (ig/ref :app.db/pool)
-    :max-age (dt/duration {:seconds 5})
-    :storage (ig/ref :app.storage/storage)
-    :backend (cf/get :fdata-storage-backed :fdata-s3)}
+   {:pool (ig/ref :app.db/pool)}
 
    :app.tasks.telemetry/handler
    {:pool        (ig/ref :app.db/pool)
     :version     (:full cf/version)
     :uri         (cf/get :telemetry-uri)
-    :sprops      (ig/ref :app.setup/props)}
+    :sprops      (ig/ref :app.setup/props)
+    :http-client (ig/ref :app.http/client)}
 
    :app.srepl/server
    {:port (cf/get :srepl-port)
     :host (cf/get :srepl-host)}
 
+   :app.setup/builtin-templates
+   {:http-client (ig/ref :app.http/client)}
+
    :app.setup/props
    {:pool (ig/ref :app.db/pool)
     :key  (cf/get :secret-key)}
-
-   :app.setup/keys
-   {:props (ig/ref :app.setup/props)}
 
    :app.loggers.zmq/receiver
    {:endpoint (cf/get :loggers-zmq-uri)}
@@ -287,24 +314,23 @@
     :executor (ig/ref [::worker :app.worker/executor])}
 
    :app.loggers.audit/archive-task
-   {:uri      (cf/get :audit-log-archive-uri)
-    :tokens   (ig/ref :app.tokens/tokens)
-    :pool     (ig/ref :app.db/pool)}
+   {:uri         (cf/get :audit-log-archive-uri)
+    :sprops      (ig/ref :app.setup/props)
+    :pool        (ig/ref :app.db/pool)
+    :http-client (ig/ref :app.http/client)}
 
    :app.loggers.audit/gc-task
-   {:max-age  (cf/get :audit-log-gc-max-age cf/deletion-delay)
-    :pool     (ig/ref :app.db/pool)}
+   {:pool (ig/ref :app.db/pool)}
 
    :app.loggers.loki/reporter
-   {:uri      (cf/get :loggers-loki-uri)
-    :receiver (ig/ref :app.loggers.zmq/receiver)
-    :executor (ig/ref [::worker :app.worker/executor])}
+   {:uri         (cf/get :loggers-loki-uri)
+    :receiver    (ig/ref :app.loggers.zmq/receiver)
+    :http-client (ig/ref :app.http/client)}
 
    :app.loggers.mattermost/reporter
-   {:uri      (cf/get :error-report-webhook)
-    :receiver (ig/ref :app.loggers.zmq/receiver)
-    :pool     (ig/ref :app.db/pool)
-    :executor (ig/ref [::worker :app.worker/executor])}
+   {:uri         (cf/get :error-report-webhook)
+    :receiver    (ig/ref :app.loggers.zmq/receiver)
+    :http-client (ig/ref :app.http/client)}
 
    :app.loggers.database/reporter
    {:receiver (ig/ref :app.loggers.zmq/receiver)
@@ -313,49 +339,87 @@
 
    :app.storage/storage
    {:pool     (ig/ref :app.db/pool)
+    :executor (ig/ref [::default :app.worker/executor])
+
     :backends
     {:assets-s3 (ig/ref [::assets :app.storage.s3/backend])
-     :assets-db (ig/ref [::assets :app.storage.db/backend])
      :assets-fs (ig/ref [::assets :app.storage.fs/backend])
-
-     :tmp       (ig/ref [::tmp  :app.storage.fs/backend])
-     :fdata-s3  (ig/ref [::fdata :app.storage.s3/backend])
 
      ;; keep this for backward compatibility
      :s3        (ig/ref [::assets :app.storage.s3/backend])
      :fs        (ig/ref [::assets :app.storage.fs/backend])}}
 
-   [::fdata :app.storage.s3/backend]
-   {:region   (cf/get :storage-fdata-s3-region)
-    :bucket   (cf/get :storage-fdata-s3-bucket)
-    :endpoint (cf/get :storage-fdata-s3-endpoint)
-    :prefix   (cf/get :storage-fdata-s3-prefix)}
-
    [::assets :app.storage.s3/backend]
    {:region   (cf/get :storage-assets-s3-region)
     :endpoint (cf/get :storage-assets-s3-endpoint)
-    :bucket   (cf/get :storage-assets-s3-bucket)}
+    :bucket   (cf/get :storage-assets-s3-bucket)
+    :executor (ig/ref [::default :app.worker/executor])}
 
    [::assets :app.storage.fs/backend]
    {:directory (cf/get :storage-assets-fs-directory)}
+   })
 
-   [::tmp :app.storage.fs/backend]
-   {:directory "/tmp/penpot"}
 
-   [::assets :app.storage.db/backend]
-   {:pool (ig/ref :app.db/pool)}})
+(def worker-config
+  {:app.worker/cron
+   {:executor   (ig/ref [::worker :app.worker/executor])
+    :scheduler  (ig/ref :app.worker/scheduler)
+    :tasks      (ig/ref :app.worker/registry)
+    :pool       (ig/ref :app.db/pool)
+    :entries
+    [{:cron #app/cron "0 0 * * * ?" ;; hourly
+      :task :file-xlog-gc}
+
+     {:cron #app/cron "0 0 0 * * ?" ;; daily
+      :task :session-gc}
+
+     {:cron #app/cron "0 0 0 * * ?" ;; daily
+      :task :objects-gc}
+
+     {:cron #app/cron "0 0 0 * * ?" ;; daily
+      :task :storage-gc-deleted}
+
+     {:cron #app/cron "0 0 0 * * ?" ;; daily
+      :task :storage-gc-touched}
+
+     {:cron #app/cron "0 0 0 * * ?" ;; daily
+      :task :tasks-gc}
+
+     {:cron #app/cron "0 0 2 * * ?" ;; daily
+      :task :file-gc}
+
+     {:cron #app/cron "0 30 */3,23 * * ?"
+      :task :telemetry}
+
+     (when (contains? cf/flags :audit-log-archive)
+       {:cron #app/cron "0 */5 * * * ?" ;; every 5m
+        :task :audit-log-archive})
+
+     (when (contains? cf/flags :audit-log-gc)
+       {:cron #app/cron "30 */5 * * * ?" ;; every 5m
+        :task :audit-log-gc})]}
+
+   :app.worker/worker
+   {:executor (ig/ref [::worker :app.worker/executor])
+    :tasks    (ig/ref :app.worker/registry)
+    :metrics  (ig/ref :app.metrics/metrics)
+    :pool     (ig/ref :app.db/pool)}})
 
 (def system nil)
 
 (defn start
   []
-  (ig/load-namespaces system-config)
+  (ig/load-namespaces (merge system-config worker-config))
   (alter-var-root #'system (fn [sys]
                              (when sys (ig/halt! sys))
                              (-> system-config
+                                 (cond-> (contains? cf/flags :backend-worker)
+                                   (merge worker-config))
                                  (ig/prep)
                                  (ig/init))))
   (l/info :msg "welcome to penpot"
+          :flags (str/join "," (map name cf/flags))
+          :worker? (contains? cf/flags :backend-worker)
           :version (:full cf/version)))
 
 (defn stop

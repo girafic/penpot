@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.handoff.code
   (:require
@@ -17,7 +17,7 @@
    [app.util.dom :as dom]
    [cuerdas.core :as str]
    [potok.core :as ptk]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn generate-markup-code [_type shapes]
   (let [frame (dom/query js/document "#svg-frame")
@@ -72,12 +72,7 @@
 
     [:div.element-options
      [:div.code-block
-      [:div.code-row-lang
-       [:select.code-selection
-        [:option {:value "css"} "CSS"]
-        #_[:option {:value "sass"} "SASS"]
-        #_[:option {:value "less"} "Less"]
-        #_[:option {:value "stylus"} "Stylus"]]
+      [:div.code-row-lang "CSS"
 
        [:button.expand-button
         {:on-click on-expand }
@@ -91,10 +86,7 @@
                        :code style-code}]]]
 
      [:div.code-block
-      [:div.code-row-lang
-       [:select.code-selection
-        [:option "SVG"]
-        [:option "HTML"]]
+      [:div.code-row-lang "SVG"
 
        [:button.expand-button
         {:on-click on-expand}

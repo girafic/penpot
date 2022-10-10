@@ -2,17 +2,20 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.async
   (:require
+   [app.common.exceptions :as ex]
    [clojure.core.async :as a]
-   [clojure.spec.alpha :as s]
-   [promesa.exec :as px])
+   [clojure.core.async.impl.protocols :as ap]
+   [clojure.spec.alpha :as s])
   (:import
-   java.util.concurrent.Executor))
+   java.util.concurrent.Executor
+   java.util.concurrent.RejectedExecutionException))
 
 (s/def ::executor #(instance? Executor %))
+(s/def ::channel #(satisfies? ap/Channel %))
 
 (defonce processors
   (delay (.availableProcessors (Runtime/getRuntime))))
@@ -24,7 +27,7 @@
        ~@body
        (catch Exception e# e#))))
 
-(defmacro thread-try
+(defmacro thread
   [& body]
   `(a/thread
      (try
@@ -39,31 +42,34 @@
        (throw r#)
        r#)))
 
+(defmacro with-closing
+  [ch & body]
+  `(try
+     ~@body
+     (finally
+       (some-> ~ch a/close!))))
+
 (defn thread-call
   [^Executor executor f]
-  (let [c (a/chan 1)]
+  (let [ch (a/chan 1)
+        f' (fn []
+             (try
+               (let [ret (ex/try* f identity)]
+                 (when (some? ret) (a/>!! ch ret)))
+               (finally
+                 (a/close! ch))))]
     (try
-      (.execute executor
-                (fn []
-                  (try
-                    (let [ret (try (f) (catch Exception e e))]
-                      (when (some? ret) (a/>!! c ret)))
-                    (finally
-                      (a/close! c)))))
-      c
-      (catch java.util.concurrent.RejectedExecutionException _e
-        (a/close! c)
-        c))))
+      (.execute executor f')
+      (catch RejectedExecutionException _cause
+        (a/close! ch)))
+
+    ch))
 
 (defmacro with-thread
   [executor & body]
   (if (= executor ::default)
     `(a/thread-call (^:once fn* [] (try ~@body (catch Exception e# e#))))
     `(thread-call ~executor (^:once fn* [] ~@body))))
-
-(defmacro with-dispatch
-  [executor & body]
-  `(px/submit! ~executor (^:once fn* [] ~@body)))
 
 (defn batch
   [in {:keys [max-batch-size

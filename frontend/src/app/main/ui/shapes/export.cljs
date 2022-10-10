@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.shapes.export
   "Components that generates penpot specific svg nodes with
@@ -11,11 +11,12 @@
   (:require
    [app.common.data :as d]
    [app.common.geom.shapes :as gsh]
+   [app.main.ui.context :as muc]
    [app.util.json :as json]
    [app.util.object :as obj]
    [app.util.svg :as usvg]
    [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (def include-metadata-ctx (mf/create-context false))
 
@@ -53,7 +54,8 @@
     ([props attr trfn]
      (let [val (get shape attr)
            val (if (keyword? val) (d/name val) val)
-           ns-attr (str "penpot:" (-> attr d/name))]
+           ns-attr (-> (str "penpot:" (-> attr d/name))
+                       (str/strip-suffix "?"))]
        (cond-> props
          (some? val)
          (obj/set! ns-attr (trfn val)))))))
@@ -62,6 +64,7 @@
   "Adds as metadata properties that we cannot deduce from the exported SVG"
   [props shape]
   (let [add! (add-factory shape)
+        frame? (= :frame (:type shape))
         group? (= :group (:type shape))
         rect?  (= :rect (:type shape))
         image? (= :image (:type shape))
@@ -93,7 +96,11 @@
         (add! :constraints-v)
         (add! :fixed-scroll)
 
-        (cond-> (and (or rect? image?) (some? (:r1 shape)))
+        (cond-> frame?
+          (-> (add! :show-content)
+              (add! :hide-in-viewer)))
+
+        (cond-> (and (or rect? image? frame?) (some? (:r1 shape)))
           (-> (add! :r1)
               (add! :r2)
               (add! :r3)
@@ -109,7 +116,8 @@
 
         (cond-> text?
           (-> (add! :grow-type)
-              (add! :content (comp json/encode uuid->string))))
+              (add! :content (comp json/encode uuid->string))
+              (add! :position-data (comp json/encode uuid->string))))
 
         (cond-> mask?
           (obj/set! "penpot:masked-group" "true"))
@@ -129,7 +137,8 @@
         (add! :typography-ref-file)
         (add! :component-file)
         (add! :component-id)
-        (add! :component-root)
+        (add! :component-root?)
+        (add! :main-instance?)
         (add! :shape-ref))))
 
 (defn prefix-keys [m]
@@ -138,19 +147,20 @@
     (into {} (map prefix-entry) m)))
 
 (defn- export-grid-data [{:keys [grids]}]
-  (mf/html
-   [:> "penpot:grids" #js {}
-    (for [{:keys [type display params]} grids]
-      (let [props (->> (dissoc params :color)
-                       (prefix-keys)
-                       (clj->js))]
-        [:> "penpot:grid"
-         (-> props
-             (obj/set! "penpot:color" (get-in params [:color :color]))
-             (obj/set! "penpot:opacity" (get-in params [:color :opacity]))
-             (obj/set! "penpot:type" (d/name type))
-             (cond-> (some? display)
-               (obj/set! "penpot:display" (str display))))]))]))
+  (when (d/not-empty? grids)
+    (mf/html
+     [:> "penpot:grids" #js {}
+      (for [{:keys [type display params]} grids]
+        (let [props (->> (dissoc params :color)
+                         (prefix-keys)
+                         (clj->js))]
+          [:> "penpot:grid"
+           (-> props
+               (obj/set! "penpot:color" (get-in params [:color :color]))
+               (obj/set! "penpot:opacity" (get-in params [:color :opacity]))
+               (obj/set! "penpot:type" (d/name type))
+               (cond-> (some? display)
+                 (obj/set! "penpot:display" (str display))))]))])))
 
 (mf/defc export-flows
   [{:keys [flows]}]
@@ -169,11 +179,11 @@
                              :axis (d/name axis)}])])
 
 (mf/defc export-page
-  [{:keys [options]}]
+  [{:keys [id options]}]
   (let [saved-grids (get options :saved-grids)
         flows       (get options :flows)
         guides      (get options :guides)]
-    [:> "penpot:page" #js {}
+    [:> "penpot:page" #js {:id id}
      (when (d/not-empty? saved-grids)
        (let [parse-grid (fn [[type params]] {:type type :params params})
              grids (->> saved-grids (mapv parse-grid))]
@@ -258,7 +268,7 @@
     (when (= (:type shape) :svg-raw)
       (let [shape (-> shape (d/update-in-when [:content :attrs :style] str->style))
             props
-            (-> (obj/new)
+            (-> (obj/create)
                 (obj/set! "penpot:x" (:x shape))
                 (obj/set! "penpot:y" (:y shape))
                 (obj/set! "penpot:width" (:width shape))
@@ -269,6 +279,39 @@
         [:> "penpot:svg-content" props
          (for [leaf (->> shape :content :content (filter string?))]
            [:> "penpot:svg-child" {} leaf])]))]))
+
+
+(defn- export-fills-data [{:keys [fills]}]
+  (when-let [fills (seq fills)]
+    (mf/html
+     [:> "penpot:fills" #js {}
+      (for [[index fill] (d/enumerate fills)]
+        [:> "penpot:fill"
+         #js {:penpot:fill-color          (if (some? (:fill-color-gradient fill))
+                                              (str/format "url(#%s)" (str "fill-color-gradient_" (mf/use-ctx muc/render-id) "_" index))
+                                              (d/name (:fill-color fill)))
+              :penpot:fill-color-ref-file (d/name (:fill-color-ref-file fill))
+              :penpot:fill-color-ref-id   (d/name (:fill-color-ref-id fill))
+              :penpot:fill-opacity        (d/name (:fill-opacity fill))}])])))
+
+(defn- export-strokes-data [{:keys [strokes]}]
+  (when-let [strokes (seq strokes)]
+    (mf/html
+     [:> "penpot:strokes" #js {}
+      (for [[index stroke] (d/enumerate strokes)]
+        [:> "penpot:stroke"
+         #js {:penpot:stroke-color          (if (some? (:stroke-color-gradient stroke))
+                                              (str/format "url(#%s)" (str "stroke-color-gradient_" (mf/use-ctx muc/render-id) "_" index))
+                                              (d/name (:stroke-color stroke)))
+              :penpot:stroke-color-ref-file (d/name (:stroke-color-ref-file stroke))
+              :penpot:stroke-color-ref-id   (d/name (:stroke-color-ref-id stroke))
+              :penpot:stroke-opacity        (d/name (:stroke-opacity stroke))
+              :penpot:stroke-style          (d/name (:stroke-style stroke))
+              :penpot:stroke-width          (d/name (:stroke-width stroke))
+              :penpot:stroke-alignment      (d/name (:stroke-alignment stroke))
+              :penpot:stroke-cap-start      (d/name (:stroke-cap-start stroke))
+              :penpot:stroke-cap-end        (d/name (:stroke-cap-end stroke))}])])))
+
 
 (defn- export-interactions-data [{:keys [interactions]}]
   (when-let [interactions (seq interactions)]
@@ -291,12 +334,14 @@
 
 (mf/defc export-data
   [{:keys [shape]}]
-  (let [props (-> (obj/new) (add-data shape) (add-library-refs shape))]
+  (let [props (-> (obj/create) (add-data shape) (add-library-refs shape))]
     [:> "penpot:shape" props
      (export-shadow-data       shape)
      (export-blur-data         shape)
      (export-exports-data      shape)
      (export-svg-data          shape)
      (export-interactions-data shape)
+     (export-fills-data        shape)
+     (export-strokes-data      shape)
      (export-grid-data         shape)]))
 

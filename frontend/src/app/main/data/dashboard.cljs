@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.dashboard
   (:require
@@ -13,6 +13,7 @@
    [app.main.data.fonts :as df]
    [app.main.data.media :as di]
    [app.main.data.users :as du]
+   [app.main.features :as features]
    [app.main.repo :as rp]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.router :as rt]
@@ -53,15 +54,13 @@
           :opt-un [::created-at
                    ::modified-at]))
 
-(s/def ::set-of-uuid
-  (s/every ::us/uuid :kind set?))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Initialization
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (declare fetch-projects)
 (declare fetch-team-members)
+(declare fetch-builtin-templates)
 
 (defn initialize
   [{:keys [id] :as params}]
@@ -79,7 +78,8 @@
               (dissoc :dashboard-shared-files)
               (dissoc :dashboard-recent-files)
               (dissoc :dashboard-team-members)
-              (dissoc :dashboard-team-stats)))))
+              (dissoc :dashboard-team-stats)
+              (update :workspace-global dissoc :default-font)))))
 
     ptk/WatchEvent
     (watch [_ state stream]
@@ -88,7 +88,8 @@
        (ptk/watch (fetch-projects) state stream)
        (ptk/watch (fetch-team-members) state stream)
        (ptk/watch (du/fetch-teams) state stream)
-       (ptk/watch (du/fetch-users {:team-id id}) state stream)))))
+       (ptk/watch (du/fetch-users {:team-id id}) state stream)
+       (ptk/watch (fetch-builtin-templates) state stream)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Data Fetching (context aware: current team)
@@ -245,6 +246,33 @@
         (->> (rp/query :team-shared-files {:team-id team-id})
              (rx/map shared-files-fetched))))))
 
+;; --- EVENT: Get files that use this shared-file
+
+(defn clean-temp-shared
+  []
+  (ptk/reify ::clean-temp-shared
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:dashboard-local :files-with-shared] nil))))
+
+(defn library-using-files-fetched
+  [files]
+  (ptk/reify ::library-using-files-fetched
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [files (d/index-by :id files)]
+        (assoc-in state [:dashboard-local :files-with-shared] files)))))
+
+(defn fetch-libraries-using-files
+  [files]
+  (ptk/reify ::fetch-library-using-files
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (->> (rx/from files)
+           (rx/mapcat (fn [file]  (rp/query :library-using-files {:file-id (:id file)})))
+           (rx/reduce into [])
+           (rx/map library-using-files-fetched)))))
+
 ;; --- EVENT: recent-files
 
 (defn recent-files-fetched
@@ -266,6 +294,24 @@
        (let [team-id (or team-id (:current-team-id state))]
          (->> (rp/query :team-recent-files {:team-id team-id})
               (rx/map recent-files-fetched)))))))
+
+
+;; --- EVENT: fetch-template-files
+
+(defn builtin-templates-fetched
+  [libraries]
+  (ptk/reify ::libraries-fetched
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc state :builtin-templates libraries))))
+
+(defn fetch-builtin-templates
+  []
+  (ptk/reify ::fetch-builtin-templates
+    ptk/WatchEvent
+    (watch [_ _ _]
+        (->> (rp/command :retrieve-list-of-builtin-templates)
+             (rx/map builtin-templates-fetched)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Data Selection
@@ -326,11 +372,9 @@
 
 ;; --- EVENT: create-team-with-invitations
 
-;; NOTE: right now, it only handles a single email, in a near future
-;; this will be changed to the ability to specify multiple emails.
 
 (defn create-team-with-invitations
-  [{:keys [name email role] :as params}]
+  [{:keys [name emails role] :as params}]
   (us/assert string? name)
   (ptk/reify ::create-team-with-invitations
     ptk/WatchEvent
@@ -339,7 +383,7 @@
              :or {on-success identity
                   on-error rx/throw}} (meta params)
             params {:name name
-                    :emails #{email}
+                    :emails #{emails}
                     :role role}]
         (->> (rp/mutation! :create-team-and-invite-members params)
              (rx/tap on-success)
@@ -426,21 +470,21 @@
              (rx/tap #(tm/schedule on-success))
              (rx/catch on-error))))))
 
-(defn invite-team-member
-  [{:keys [email role] :as params}]
-  (us/assert ::us/email email)
-  (us/assert ::us/keyword role)
-  (ptk/reify ::invite-team-member
+(defn invite-team-members
+  [{:keys [emails role team-id resend?] :as params}]
+  (us/assert! ::us/set-of-valid-emails emails)
+  (us/assert! ::us/keyword role)
+  (us/assert! ::us/uuid team-id)
+  (ptk/reify ::invite-team-members
     IDeref
-    (-deref [_] {:role role})
+    (-deref [_] {:role role :team-id team-id :resend? resend?})
 
     ptk/WatchEvent
-    (watch [_ state _]
+    (watch [_ _ _]
       (let [{:keys [on-success on-error]
              :or {on-success identity
                   on-error rx/throw}} (meta params)
-            team-id (:current-team-id state)
-            params  (assoc params :team-id team-id)]
+            params (dissoc params :resend?)]
         (->> (rp/mutation! :invite-team-member params)
              (rx/tap on-success)
              (rx/catch on-error))))))
@@ -544,8 +588,7 @@
 
             new-name (str name " " (tr "dashboard.copy-suffix"))]
 
-        (->> (rp/mutation! :duplicate-project {:project-id id
-                                               :name new-name})
+        (->> (rp/command! :duplicate-project {:project-id id :name new-name})
              (rx/tap on-success)
              (rx/map project-duplicated)
              (rx/catch on-error))))))
@@ -565,8 +608,7 @@
              :or {on-success identity
                   on-error rx/throw}} (meta params)]
 
-        (->> (rp/mutation! :move-project {:project-id id
-                                          :team-id team-id})
+        (->> (rp/command! :move-project {:project-id id :team-id team-id})
              (rx/tap on-success)
              (rx/catch on-error))))))
 
@@ -714,18 +756,22 @@
   [{:keys [project-id] :as params}]
   (us/assert ::us/uuid project-id)
   (ptk/reify ::create-file
+
+    IDeref
+    (-deref [_] {:project-id project-id})
+
     ptk/WatchEvent
-    (watch [_ _ _]
+    (watch [it state _]
       (let [{:keys [on-success on-error]
              :or {on-success identity
                   on-error rx/throw}} (meta params)
-
             name   (name (gensym (str (tr "dashboard.new-file-prefix") " ")))
-            params (assoc params :name name)]
+            components-v2 (features/active-feature? state :components-v2)
+            params (assoc params :name name :components-v2 components-v2)]
 
         (->> (rp/mutation! :create-file params)
              (rx/tap on-success)
-             (rx/map file-created)
+             (rx/map #(with-meta (file-created %) (meta it)))
              (rx/catch on-error))))))
 
 ;; --- EVENT: duplicate-file
@@ -743,8 +789,7 @@
 
             new-name (str name " " (tr "dashboard.copy-suffix"))]
 
-        (->> (rp/mutation! :duplicate-file {:file-id id
-                                            :name new-name})
+        (->> (rp/command! :duplicate-file {:file-id id :name new-name})
              (rx/tap on-success)
              (rx/map file-created)
              (rx/catch on-error))))))
@@ -753,7 +798,7 @@
 
 (defn move-files
   [{:keys [ids project-id] :as params}]
-  (us/assert ::set-of-uuid ids)
+  (us/assert ::us/set-of-uuid ids)
   (us/assert ::us/uuid project-id)
   (ptk/reify ::move-files
     IDeref
@@ -766,10 +811,30 @@
       (let [{:keys [on-success on-error]
              :or {on-success identity
                   on-error rx/throw}} (meta params)]
-        (->> (rp/mutation! :move-files {:ids ids :project-id project-id})
+        (->> (rp/command! :move-files {:ids ids :project-id project-id})
              (rx/tap on-success)
              (rx/catch on-error))))))
 
+
+;; --- EVENT: clone-template
+(defn clone-template
+  [{:keys [template-id project-id] :as params}]
+  (us/assert ::us/uuid project-id)
+  (ptk/reify ::clone-template
+    IDeref
+    (-deref [_]
+      {:template-id template-id
+       :project-id project-id})
+
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (let [{:keys [on-success on-error]
+             :or {on-success identity
+                  on-error rx/throw}} (meta params)]
+
+        (->> (rp/command! :clone-template {:project-id project-id :template-id template-id})
+             (rx/tap on-success)
+             (rx/catch on-error))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Navigation
@@ -890,7 +955,7 @@
                              :team-id team-id})
             action-name   (if in-project? :create-file :create-project)
             action        (if in-project? file-created project-created)]
-        
+
         (->> (rp/mutation! action-name params)
              (rx/map action))))))
 

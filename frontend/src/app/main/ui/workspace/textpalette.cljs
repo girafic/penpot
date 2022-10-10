@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.textpalette
   (:require
@@ -18,7 +18,7 @@
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc typography-item
   [{:keys [file-id selected-ids typography name-only?]}]
@@ -51,7 +51,7 @@
      (when-not name-only?
        [:*
         [:div.typography-font (:name font-data)]
-        [:div.typography-data (str (:font-size typography) "pt | " (:name variant-data))]])]))
+        [:div.typography-data (str (:font-size typography) "px | " (:name variant-data))]])]))
 
 (mf/defc palette
   [{:keys [selected-ids current-file-id file-typographies shared-libs]}]
@@ -95,7 +95,7 @@
 
         {:keys [on-pointer-down on-lost-pointer-capture on-mouse-move parent-ref size]}
         (use-resize-hook :palette 72 54 80 :y true :bottom)]
-    
+
     [:div.color-palette {:ref parent-ref
                          :class (dom/classnames :no-text (< size 72))
                          :style #js {"--height" (str size "px")}}

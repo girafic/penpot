@@ -43,30 +43,6 @@ goog.scope(function() {
     }
   })();
 
-  /*
-   * The MIT License (MIT)
-   *
-   * Copyright (c) 2010-2016 Robert Kieffer and other contributors
-   *
-   * Permission is hereby granted, free of charge, to any person obtaining a copy
-   * of this software and associated documentation files (the "Software"), to deal
-   * in the Software without restriction, including without limitation the rights
-   * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   * copies of the Software, and to permit persons to whom the Software is
-   * furnished to do so, subject to the following conditions:
-   *
-   * The above copyright notice and this permission notice shall be included in all
-   * copies or substantial portions of the Software.
-   *
-   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-   * SOFTWARE.
-   */
-
   const hexMap = [];
   for (let i = 0; i < 256; i++) {
     hexMap[i] = (i + 0x100).toString(16).substr(1);
@@ -92,104 +68,130 @@ goog.scope(function() {
              hexMap[buf[i++]]);
   }
 
-  const buff = new Uint8Array(16);
+  self.v4 = (function () {
+    const buff8 = new Uint8Array(16);
 
-  function v4() {
-    fill(buff);
-    buff[6] = (buff[6] & 0x0f) | 0x40;
-    buff[8] = (buff[8] & 0x3f) | 0x80;
-    return core.uuid(toHexString(buff));
+    return function v4() {
+      fill(buff8);
+      buff8[6] = (buff8[6] & 0x0f) | 0x40;
+      buff8[8] = (buff8[8] & 0x3f) | 0x80;
+      return core.uuid(toHexString(buff8));
+    };
+  })();
+
+  function getBigUint64(view, byteOffset, le) {
+    const a = view.getUint32(byteOffset, le);
+    const b = view.getUint32(byteOffset + 4, le);
+    const leMask = Number(!!le);
+    const beMask = Number(!le);
+    return ((BigInt(a * beMask + b * leMask) << 32n) |
+            (BigInt(a * leMask + b * beMask)));
   }
 
-  let initialized = false;
-  let node;
-  let clockseq;
-  let lastms = 0;
-  let lastns = 0;
-
-  function v1() {
-    let cs = clockseq;
-
-    if (!initialized) {
-      const seed = new Uint8Array(8)
-      fill(seed);
-
-      // Per 4.5, create and 48-bit node id, (47 random bits + multicast bit = 1)
-      node = [
-        seed[0] | 0x01,
-        seed[1],
-        seed[2],
-        seed[3],
-        seed[4],
-        seed[5]
-      ];
-
-      // Per 4.2.2, randomize (14 bit) clockseq
-      cs = clockseq = (seed[6] << 8 | seed[7]) & 0x3fff;
-      initialized = true;
+  function setBigUint64(view, byteOffset, value, le) {
+    const hi = Number(value >> 32n);
+    const lo = Number(value & 0xffffffffn);
+    if (le) {
+      view.setUint32(byteOffset + 4, hi, le);
+      view.setUint32(byteOffset, lo, le);
     }
-
-    let ms = Date.now();
-    let ns = lastns + 1;
-    let dt = (ms - lastms) + (ns - lastns) / 10000;
-
-    // Per 4.2.1.2, Bump clockseq on clock regression
-    if (dt < 0) {
-      cs = cs + 1 & 0x3fff;
+    else {
+      view.setUint32(byteOffset, hi, le);
+      view.setUint32(byteOffset + 4, lo, le);
     }
-
-    // Reset nsecs if clock regresses (new clockseq) or we've moved onto a new
-    // time interval
-    if (dt < 0 || ms > lastms) {
-      ns = 0;
-    }
-
-    // Per 4.2.1.2 Throw error if too many uuids are requested
-    if (ns >= 10000) {
-      throw new Error("uuid v1 can't create more than 10M uuids/s")
-    }
-
-    lastms = ms;
-    lastns = ns;
-    clockseq = cs;
-
-    // Per 4.1.4 - Convert from unix epoch to Gregorian epoch
-    ms += 12219292800000;
-
-    let i = 0;
-
-    // `time_low`
-    var tl = ((ms & 0xfffffff) * 10000 + ns) % 0x100000000;
-    buff[i++] = tl >>> 24 & 0xff;
-    buff[i++] = tl >>> 16 & 0xff;
-    buff[i++] = tl >>> 8 & 0xff;
-    buff[i++] = tl & 0xff;
-
-    // `time_mid`
-    var tmh = (ms / 0x100000000 * 10000) & 0xfffffff;
-    buff[i++] = tmh >>> 8 & 0xff;
-    buff[i++] = tmh & 0xff;
-
-    // `time_high_and_version`
-    buff[i++] = tmh >>> 24 & 0xf | 0x10; // include version
-    buff[i++] = tmh >>> 16 & 0xff;
-
-    // `clock_seq_hi_and_reserved` (Per 4.2.2 - include variant)
-    buff[i++] = cs >>> 8 | 0x80;
-
-    // `clock_seq_low`
-    buff[i++] = cs & 0xff;
-
-    // `node`
-    for (var n = 0; n < 6; ++n) {
-      buff[i + n] = node[n];
-    }
-
-    return core.uuid(toHexString(buff));
   }
 
-  self.v1 = v1;
-  self.v4 = v4;
+  self.v8 = (function () {
+    const buff  = new ArrayBuffer(16);
+    const int8 = new Uint8Array(buff);
+    const view  = new DataView(buff);
+
+    const tmpBuff = new ArrayBuffer(8);
+    const tmpView = new DataView(tmpBuff);
+    const tmpInt8 = new Uint8Array(tmpBuff);
+
+    const timeRef = 1640995200000; // ms since 2022-01-01T00:00:00
+    const maxCs   = 0x0000_0000_0000_3fffn; // 14 bits space
+
+    let countCs = 0n;
+    let lastRd  = 0n;
+    let lastCs  = 0n;
+    let lastTs  = 0n;
+    let baseMsb = 0x0000_0000_0000_8000n;
+    let baseLsb = 0x8000_0000_0000_0000n;
+
+    const currentTimestamp = () => {
+      return BigInt.asUintN(64, "" + (Date.now() - timeRef));
+    };
+
+    const nextLong = () => {
+      fill(tmpInt8);
+      return getBigUint64(tmpView, 0, false);
+    };
+
+    lastRd = nextLong() & 0xffff_ffff_ffff_f0ffn;
+    lastCs = nextLong() & maxCs;
+
+    const create = function create(ts, lastRd, lastCs) {
+      const msb = (baseMsb
+                   | (lastRd & 0xffff_ffff_ffff_0fffn));
+
+      const lsb = (baseLsb
+                   | ((ts << 14n) & 0x3fff_ffff_ffff_c000n)
+                   | lastCs);
+
+      setBigUint64(view, 0, msb, false);
+      setBigUint64(view, 8, lsb, false);
+
+      return core.uuid(toHexString(int8));
+    };
+
+    const factory = function v8() {
+      while (true) {
+        let ts = currentTimestamp();
+
+        // Protect from clock regression
+        if ((ts - lastTs) < 0) {
+          lastRd = (lastRd
+                    & 0x0000_0000_0000_0f00n
+                    | (nextLong() & 0xffff_ffff_ffff_f0ffn));
+          countCs = 0n;
+          continue;
+        }
+
+        if (lastTs === ts) {
+          if (countCs < maxCs) {
+            lastCs = (lastCs + 1n) & maxCs;
+            countCs++;
+          } else {
+            continue;
+          }
+        } else {
+          lastTs = ts;
+          lastCs = nextLong() & maxCs;
+          countCs = 0;
+        }
+
+        return create(ts, lastRd, lastCs);
+      }
+    };
+
+    const setTag = (tag) => {
+      tag = BigInt.asUintN(64, "" + tag);
+      if (tag > 0x0000_0000_0000_000fn) {
+        throw new Error("illegal arguments: tag value should fit in 4bits");
+      }
+
+      lastRd = (lastRd
+                & 0xffff_ffff_ffff_f0ffn
+                | ((tag << 8) & 0x0000_0000_0000_0f00n));
+    };
+
+    factory.create = create;
+    factory.setTag = setTag;
+    return factory;
+  })();
+
 
   self.custom = function formatAsUUID(mostSigBits, leastSigBits) {
     const most = mostSigBits.toString("16").padStart(16, "0");

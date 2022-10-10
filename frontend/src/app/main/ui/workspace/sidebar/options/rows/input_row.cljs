@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.sidebar.options.rows.input-row
   (:require
@@ -10,9 +10,9 @@
    [app.main.ui.components.numeric-input :refer [numeric-input]]
    [app.main.ui.components.select :refer [select]]
    [app.util.object :as obj]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
-(mf/defc input-row [{:keys [label options value class min max on-change type placeholder]}]
+(mf/defc input-row [{:keys [label options value class min max on-change type placeholder default nillable]}]
   [:div.row-flex.input-row
    [:span.element-set-subtitle label]
    [:div.input-element {:class class}
@@ -43,6 +43,8 @@
        {:placeholder placeholder
         :min min
         :max max
+        :default default
+        :nillable nillable
         :on-change on-change
         :value (or value "")}])]])
 

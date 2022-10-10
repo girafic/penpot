@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.loggers.database
   "A specific logger impl that persists errors on the database."
@@ -46,11 +46,12 @@
 (defn parse-event
   [event]
   (-> (parse-event-data event)
+      (assoc :hint (or (:hint event) (:message event)))
       (assoc :tenant (cf/get :tenant))
       (assoc :host (cf/get :host))
       (assoc :public-uri (cf/get :public-uri))
       (assoc :version (:full cf/version))
-      (assoc :id (uuid/next))))
+      (update :id #(or % (uuid/next)))))
 
 (defn handle-event
   [{:keys [executor] :as cfg} event]
@@ -81,7 +82,7 @@
     (a/go-loop []
       (let [msg (a/<! output)]
         (if (nil? msg)
-          (l/info :msg "stoping error reporting loop")
+          (l/info :msg "stopping error reporting loop")
           (do
             (a/<! (handle-event cfg msg))
             (recur)))))

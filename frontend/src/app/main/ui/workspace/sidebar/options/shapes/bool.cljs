@@ -2,18 +2,20 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.sidebar.options.shapes.bool
   (:require
+   [app.main.refs :as refs]
    [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-menu]]
    [app.main.ui.workspace.sidebar.options.menus.constraints :refer [constraint-attrs constraints-menu]]
    [app.main.ui.workspace.sidebar.options.menus.fill :refer [fill-attrs fill-menu]]
    [app.main.ui.workspace.sidebar.options.menus.layer :refer [layer-attrs layer-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-attrs layout-item-menu]]
    [app.main.ui.workspace.sidebar.options.menus.measures :refer [measure-attrs measures-menu]]
    [app.main.ui.workspace.sidebar.options.menus.shadow :refer [shadow-menu]]
    [app.main.ui.workspace.sidebar.options.menus.stroke :refer [stroke-attrs stroke-menu]]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc options
   [{:keys [shape] :as props}]
@@ -22,11 +24,23 @@
         measure-values (select-keys shape measure-attrs)
         stroke-values (select-keys shape stroke-attrs)
         layer-values (select-keys shape layer-attrs)
-        constraint-values (select-keys shape constraint-attrs)]
+        constraint-values (select-keys shape constraint-attrs)
+        layout-item-values (select-keys shape layout-item-attrs)
+
+        is-layout-child-ref (mf/use-memo (mf/deps ids) #(refs/is-layout-child? ids))
+        is-layout-child? (mf/deref is-layout-child-ref)]
     [:*
      [:& measures-menu {:ids ids
                         :type type
-                        :values measure-values}]
+                        :values measure-values
+                        :shape shape}]
+     (when is-layout-child?
+       [:& layout-item-menu
+        {:ids ids
+         :type type
+         :values layout-item-values
+         :is-layout-child? true
+         :shape shape}])
      [:& constraints-menu {:ids ids
                            :values constraint-values}]
      [:& layer-menu {:ids ids

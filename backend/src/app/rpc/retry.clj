@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.rpc.retry
   "A fault tolerance helpers. Allow retry some operations that we know
@@ -29,17 +29,10 @@
   (if-let [max-retries (::max-retries mdata)]
     (fn [cfg params]
       (letfn [(run [retry]
-                (prn "wrap-retry" "run" retry)
-                (try
-                  (-> (f cfg params)
-                      (p/catch (partial handle-error retry)))
-                  (catch Throwable cause
-                    (prn cause)
-                    (throw cause))))
-
+                (-> (f cfg params)
+                    (p/catch (partial handle-error retry))))
 
               (handle-error [retry cause]
-                (prn "FOOFOFOF" retry (matches cause))
                 (if (matches cause)
                   (let [current-retry (inc retry)]
                     (l/trace :hint "running retry algorithm" :retry current-retry)

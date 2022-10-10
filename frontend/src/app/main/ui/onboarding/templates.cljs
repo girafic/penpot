@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.onboarding.templates
   (:require
@@ -12,16 +12,16 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.icons :as i]
-   [app.util.dom :as dom]
    [app.util.http :as http]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.webapi :as wapi]
    [beicon.core :as rx]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc template-item
   [{:keys [name path image project-id]}]
   (let [downloading? (mf/use-state false)
-        link         (str (assoc cf/public-uri :path path))
+        link         (str (assoc @cf/public-uri :path path))
 
         on-finish-import
         (fn []
@@ -39,7 +39,7 @@
           (reset! downloading? true)
           (->> (http/send! {:method :get :uri link :response-type :blob :mode :no-cors})
                (rx/subs (fn [{:keys [body] :as response}]
-                          (open-import-modal {:name name :uri (dom/create-uri body)}))
+                          (open-import-modal {:name name :uri (wapi/create-uri body)}))
                         (fn [error]
                           (js/console.log "error" error))
                         (fn []
@@ -59,7 +59,7 @@
   {::mf/wrap-props false
    ::mf/register modal/components
    ::mf/register-as :onboarding-templates}
-  ;; NOTE: the project usually comes empty, it only comes fullfilled
+  ;; NOTE: the project usually comes empty, it only comes fulfilled
   ;; when a user creates a new team just after signup.
   [props]
   (let [project-id (unchecked-get props "project-id")

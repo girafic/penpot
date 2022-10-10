@@ -9,7 +9,7 @@
    [clojure.spec.alpha :as s]
    [cuerdas.core :as str]))
 
-(def valid-font-types #{"font/ttf" "font/woff", "font/otf"})
+(def valid-font-types #{"font/ttf" "font/woff", "application/font-woff", "font/otf"})
 (def valid-image-types #{"image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"})
 (def str-image-types (str/join "," valid-image-types))
 (def str-font-types (str/join "," valid-font-types))
@@ -44,7 +44,20 @@
     "image/svg+xml" :svg
     nil))
 
-(def max-file-size (* 5 1024 1024))
+(defn mtype->extension [mtype]
+  ;; https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types
+  (case mtype
+    "image/apng"         ".apng"
+    "image/avif"         ".avif"
+    "image/gif"          ".gif"
+    "image/jpeg"         ".jpg"
+    "image/png"          ".png"
+    "image/svg+xml"      ".svg"
+    "image/webp"         ".webp"
+    "application/zip"    ".zip"
+    "application/penpot" ".penpot"
+    "application/pdf"    ".pdf"
+    nil))
 
 (s/def ::id uuid?)
 (s/def ::name string?)

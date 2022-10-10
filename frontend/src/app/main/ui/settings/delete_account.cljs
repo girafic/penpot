@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.settings.delete-account
   (:require
@@ -14,7 +14,7 @@
    [app.main.ui.messages :as msgs]
    [app.util.i18n :as i18n :refer [tr]]
    [beicon.core :as rx]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn on-error
   [{:keys [code] :as error}]
@@ -28,13 +28,13 @@
    ::mf/register-as :delete-account}
   []
   (let [on-close
-        (mf/use-callback (st/emitf (modal/hide)))
+        (mf/use-callback #(st/emit! (modal/hide)))
 
         on-accept
         (mf/use-callback
-         (st/emitf (modal/hide)
-                   (du/request-account-deletion
-                    (with-meta {} {:on-error on-error}))))]
+         #(st/emit! (modal/hide)
+                    (du/request-account-deletion
+                      (with-meta {} {:on-error on-error}))))]
 
     [:div.modal-overlay
      [:div.modal-container.change-email-modal

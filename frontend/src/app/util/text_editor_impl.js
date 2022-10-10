@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) UXBOX Labs SL
+ * Copyright (c) KALEIDOS INC
  */
 
 'use strict';
@@ -378,10 +378,7 @@ export function insertText(state, text, attrs, inlineStyles) {
   );
 
   blockArray = blockArray.map((b) => {
-    if (b.getText() === "") {
-      return mergeBlockData(b, attrs)
-    }
-    return b;
+      return mergeBlockData(b, attrs);
   });
 
   const fragment = BlockMapBuilder.createFromArray(blockArray);

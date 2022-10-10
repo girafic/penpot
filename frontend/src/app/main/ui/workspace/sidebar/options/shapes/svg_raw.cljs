@@ -2,22 +2,24 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.sidebar.options.shapes.svg-raw
   (:require
    [app.common.colors :as clr]
+   [app.common.data :as d]
+   [app.main.refs :as refs]
    [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-menu]]
    [app.main.ui.workspace.sidebar.options.menus.constraints :refer [constraint-attrs constraints-menu]]
    [app.main.ui.workspace.sidebar.options.menus.fill :refer [fill-attrs fill-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-attrs layout-item-menu]]
    [app.main.ui.workspace.sidebar.options.menus.measures :refer [measure-attrs measures-menu]]
    [app.main.ui.workspace.sidebar.options.menus.shadow :refer [shadow-menu]]
    [app.main.ui.workspace.sidebar.options.menus.stroke :refer [stroke-attrs stroke-menu]]
    [app.main.ui.workspace.sidebar.options.menus.svg-attrs :refer [svg-attrs-menu]]
    [app.util.color :as uc]
-   [app.util.data :as d]
    [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 ;; This is a list of svg tags that can be grouped in shape-container
 ;; this allows them to have gradients, shadows and masks
@@ -75,7 +77,7 @@
         stroke-width (-> (or (get-in shape [:content :attrs :stroke-width])
                              (get-in shape [:content :attrs :style :stroke-width])
                              "1")
-                         (d/parse-int))
+                         (d/parse-integer))
 
         stroke-values (if (empty? stroke-values)
                         {:stroke-color stroke-color
@@ -93,17 +95,30 @@
 
   (let [ids [(:id shape)]
         type (:type shape)
+
         {:keys [tag] :as content} (:content shape)
         measure-values (select-keys shape measure-attrs)
         constraint-values (select-keys shape constraint-attrs)
         fill-values    (get-fill-values shape)
-        stroke-values  (get-stroke-values shape)]
+        stroke-values  (get-stroke-values shape)
+        layout-item-values (select-keys shape layout-item-attrs)
+
+        is-layout-child-ref (mf/use-memo (mf/deps ids) #(refs/is-layout-child? ids))
+        is-layout-child? (mf/deref is-layout-child-ref)]
 
     (when (contains? svg-elements tag)
       [:*
        [:& measures-menu {:ids ids
                           :type type
-                          :values measure-values}]
+                          :values measure-values
+                          :shape shape}]
+       (when is-layout-child?
+         [:& layout-item-menu
+          {:ids ids
+           :type type
+           :values layout-item-values
+           :is-layout-child? true
+           :shape shape}])
 
        [:& constraints-menu {:ids ids
                              :values constraint-values}]

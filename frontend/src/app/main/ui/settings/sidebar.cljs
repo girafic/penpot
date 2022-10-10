@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.settings.sidebar
   (:require
@@ -14,9 +14,10 @@
    [app.main.ui.dashboard.sidebar :refer [profile-section]]
    [app.main.ui.icons :as i]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.keyboard :as kbd]
    [app.util.router :as rt]
    [potok.core :as ptk]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc sidebar-content
   [{:keys [profile section] :as props}]
@@ -28,35 +29,34 @@
         go-dashboard
         (mf/use-callback
          (mf/deps profile)
-         (st/emitf (rt/nav :dashboard-projects {:team-id (du/get-current-team-id profile)})))
+         #(st/emit! (rt/nav :dashboard-projects {:team-id (du/get-current-team-id profile)})))
 
         go-settings-profile
         (mf/use-callback
          (mf/deps profile)
-         (st/emitf (rt/nav :settings-profile)))
+         #(st/emit! (rt/nav :settings-profile)))
 
         go-settings-feedback
         (mf/use-callback
          (mf/deps profile)
-         (st/emitf (rt/nav :settings-feedback)))
+         #(st/emit! (rt/nav :settings-feedback)))
 
         go-settings-password
         (mf/use-callback
          (mf/deps profile)
-         (st/emitf (rt/nav :settings-password)))
+         #(st/emit! (rt/nav :settings-password)))
 
         go-settings-options
         (mf/use-callback
          (mf/deps profile)
-         (st/emitf (rt/nav :settings-options)))
+         #(st/emit! (rt/nav :settings-options)))
 
         show-release-notes
         (mf/use-callback
          (fn [event]
            (let [version (:main @cf/version)]
              (st/emit! (ptk/event ::ev/event {::ev/name "show-release-notes" :version version}))
-             (if (and (.-ctrlKey ^js event)
-                      (.-altKey ^js event))
+             (if (and (kbd/alt? event) (kbd/mod? event))
                (st/emit! (modal/show {:type :onboarding}))
                (st/emit! (modal/show {:type :release-notes :version version}))))))]
 

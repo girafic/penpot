@@ -7,17 +7,29 @@
 (ns app.main.ui.hooks
   "A collection of general purpose react hooks."
   (:require
+   [app.common.data.macros :as dm]
+   [app.common.pages :as cp]
+   [app.common.uuid :as uuid]
+   [app.main.broadcast :as mbc]
    [app.main.data.shortcuts :as dsc]
+   [app.main.refs :as refs]
    [app.main.store :as st]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
+   [app.util.storage :refer [storage]]
    [app.util.timers :as ts]
    [beicon.core :as rx]
-   [rumext.alpha :as mf]))
+   [goog.functions :as f]
+   [rumext.v2 :as mf]))
+
+(defn use-id
+  "Get a stable id value across rerenders."
+  []
+  (mf/use-memo #(dm/str (uuid/next))))
 
 (defn use-rxsub
   [ob]
-  (let [[state reset-state!] (mf/useState @ob)]
+  (let [[state reset-state!] (mf/useState #(if (satisfies? IDeref ob) @ob nil))]
     (mf/useEffect
      (fn []
        (let [sub (rx/subscribe ob #(reset-state! %))]
@@ -189,7 +201,6 @@
 
     [(deref state) ref]))
 
-
 (defn use-stream
   "Wraps the subscription to a stream into a `use-effect` call"
   ([stream on-subscribe]
@@ -203,6 +214,7 @@
 
 ;; https://reactjs.org/docs/hooks-faq.html#how-to-get-the-previous-props-or-state
 (defn use-previous
+  "Returns the value from previous render cycle."
   [value]
   (let [ref (mf/use-ref value)]
     (mf/use-effect
@@ -210,6 +222,29 @@
      (fn []
        (mf/set-ref-val! ref value)))
     (mf/ref-val ref)))
+
+(defn use-update-var
+  "Returns a var pointer what automatically updates with latest values."
+  [value]
+  (let [ptr (mf/use-var value)]
+    (mf/with-effect [value]
+      (reset! ptr value))
+    ptr))
+
+(defn use-ref-callback
+  "Returns a stable callback pointer what calls the interned
+  callback. The interned callback will be automatically updated on
+  each render if the reference changes and works as noop if the
+  pointer references to nil value."
+  [f]
+  (let [ptr (mf/use-ref nil)]
+    (mf/with-effect [f]
+      (mf/set-ref-val! ptr #js {:f f}))
+    (mf/use-fn
+     (fn [& args]
+       (let [obj  (mf/ref-val ptr)]
+         (when ^boolean obj
+           (apply (.-f obj) args)))))))
 
 (defn use-equal-memo
   [val]
@@ -235,3 +270,82 @@
     (let [ret (effect-fn)]
       (when (fn? ret) (ret)))
     (mf/use-effect deps effect-fn)))
+
+(defn with-focus-objects
+  ([objects]
+   (let [focus (mf/deref refs/workspace-focus-selected)]
+     (with-focus-objects objects focus)))
+
+  ([objects focus]
+   (let [objects (mf/use-memo
+                  (mf/deps focus objects)
+                  #(cp/focus-objects objects focus))]
+     objects)))
+
+(defn use-debounce
+  [ms value]
+  (let [[state update-state-fn] (mf/useState value)
+        update-fn (mf/use-memo (mf/deps ms) #(f/debounce update-state-fn ms))]
+    (mf/with-effect [value]
+      (update-fn value))
+    state))
+
+(defn use-shared-state
+  "A specialized hook that adds persistence and inter-context reactivity
+  to the default mf/use-state hook.
+
+  The state is automatically persisted under the provided key on
+  localStorage. And it will keep watching events with type equals to
+  `key` for new values."
+  [key default]
+  (let [id     (use-id)
+        state  (mf/use-state (get @storage key default))
+        stream (mf/with-memo [id]
+                 (->> mbc/stream
+                      (rx/filter #(not= (:id %) id))
+                      (rx/filter #(= (:type %) key))
+                      (rx/map deref)))]
+
+    (mf/with-effect [@state key id]
+      (mbc/emit! id key @state)
+      (swap! storage assoc key @state))
+
+    (use-stream stream (partial reset! state))
+
+    state))
+
+(defonce ^:private intersection-subject (rx/subject))
+(defonce ^:private intersection-observer
+  (delay (js/IntersectionObserver.
+          (fn [entries _]
+            (run! (partial rx/push! intersection-subject) (seq entries)))
+          #js {:rootMargin "0px"
+               :threshold 1.0})))
+
+(defn use-visible
+  [ref & {:keys [once?]}]
+  (let [[state update-state!] (mf/useState false)]
+    (mf/with-effect [once?]
+      (let [node   (mf/ref-val ref)
+            stream (->> intersection-subject
+                        (rx/filter (fn [entry]
+                                     (let [target (unchecked-get entry "target")]
+                                       (identical? target node))))
+                        (rx/map (fn [entry]
+                                  (let [ratio (unchecked-get entry "intersectionRatio")
+                                        intersecting? (unchecked-get entry "isIntersecting")]
+                                    (or intersecting? (> ratio 0.5)))))
+                        (rx/dedupe))
+            stream (if once?
+                     (->> stream
+                          (rx/filter identity)
+                          (rx/take 1))
+                     stream)
+            subs (rx/subscribe stream update-state!)]
+        (.observe ^js @intersection-observer node)
+        (fn []
+          (.unobserve ^js @intersection-observer node)
+          (rx/dispose! subs))))
+
+    state))
+

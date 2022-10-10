@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.handoff
   (:require
@@ -14,7 +14,7 @@
    [app.util.dom :as dom]
    [app.util.keyboard :as kbd]
    [goog.events :as events]
-   [rumext.alpha :as mf])
+   [rumext.v2 :as mf])
   (:import goog.events.EventType))
 
 (defn handle-select-frame
@@ -22,13 +22,23 @@
   (fn [event]
     (dom/prevent-default event)
     (dom/stop-propagation event)
-    (st/emit! (dv/select-shape (:id frame)))))
+    (st/emit! (dv/select-shape (:id frame)))
+
+    (let [origin (dom/get-target event)
+          over-section? (dom/class? origin "handoff-svg-container")
+          layout (dom/get-element "viewer-layout")
+          has-force? (dom/class? layout "force-visible")]
+
+      (when over-section?
+        (if has-force?
+          (dom/remove-class! layout "force-visible")
+          (dom/add-class! layout "force-visible"))))))
 
 (mf/defc viewport
-  [{:keys [local file page frame]}]
+  [{:keys [local file page frame index viewer-pagination size]}]
   (let [on-mouse-wheel
         (fn [event]
-          (when (or (kbd/ctrl? event) (kbd/meta? event))
+          (when (kbd/mod? event)
             (dom/prevent-default event)
             (let [event (.getBrowserEvent ^js event)
                   delta (+ (.-deltaY ^js event)
@@ -58,8 +68,9 @@
                        :local local
                        :page page}]
      [:div.handoff-svg-wrapper {:on-click (handle-select-frame frame)}
+      [:& viewer-pagination {:index index :num-frames (count (:frames page)) :left-bar true :right-bar true}]
       [:div.handoff-svg-container
-       [:& render-frame-svg {:frame frame :page page :local local}]]]
+       [:& render-frame-svg {:frame frame :page page :local local :size size}]]]
 
      [:& right-sidebar {:frame frame
                         :selected (:selected local)

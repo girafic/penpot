@@ -11,12 +11,13 @@
   display: grid;
   grid-template-rows: auto;
   grid-template-columns: 33% auto;
+  height: 100vh;
+  overflow-y: scroll;
 }
 
 .auth-sidebar {
   grid-column: 1 / span 1;
   height: 100vh;
-
   display: flex;
   padding-top: 7vh;
   flex-direction: column;
@@ -46,13 +47,31 @@
 }
 
 .auth-content {
-  align-items: center;
+  grid-column: 2 / span 1;
   background-color: $color-white;
   display: flex;
-  grid-column: 2 / span 1;
-  height: 100vh;
+  align-items: center;
   justify-content: center;
   position: relative;
+
+  .login-form {
+    margin-bottom: 30px;
+
+    .form-container {
+      width: 412px;
+      flex-direction: column;
+      .auth-buttons {
+        margin: $size-6 0 $size-4 0;
+        display: flex;
+        justify-content: center;
+        column-gap: 17px;
+      }
+
+      form {
+        margin: 2rem 0 0.5rem 0;
+      }
+    }
+  }
 
   input {
     margin-bottom: 0px;
@@ -68,24 +87,33 @@
     }
   }
 
-  .form-container {
-    width: 412px;
-
-    .auth-buttons {
-      margin-top: $size-6;
-    }
-
-    form {
-      margin: 2rem 0;
-    }
+  .btn-large {
+    flex-grow: 1;
+    font-size: 14px;
+    font-family: sourcesanspro;
+    font-style: normal;
+    font-weight: normal;
   }
 
   .btn-google-auth {
+    background-color: #4285f4;
+    color: $color-white;
     margin-bottom: $size-4;
     text-decoration: none;
+    .logo {
+      width: 20px;
+      height: 20px;
+      margin-right: 1rem;
+    }
+    &:hover {
+      background-color: #2065d7;
+      color: $color-white;
+    }
   }
 
   .btn-gitlab-auth {
+    background-color: #fc6d26;
+    color: $color-white;
     margin-bottom: $size-4;
     text-decoration: none;
 
@@ -93,10 +121,17 @@
       width: 20px;
       height: 20px;
       margin-right: 1rem;
+    }
+
+    &:hover {
+      background-color: #ee5f18;
+      color: $color-white;
     }
   }
 
   .btn-github-auth {
+    background-color: #4c4c4c;
+    color: $color-white;
     margin-bottom: $size-4;
     text-decoration: none;
 
@@ -105,6 +140,15 @@
       height: 20px;
       margin-right: 1rem;
     }
+
+    &:hover {
+      background-color: #2f2f2f;
+      color: $color-white;
+    }
+  }
+
+  .link-oidc {
+    text-align: center;
   }
 
   .separator {
@@ -112,6 +156,18 @@
     justify-content: center;
     width: 100%;
     text-transform: uppercase;
+    text-align: center;
+
+    .text {
+      margin: 0 10px;
+      color: $color-gray-40;
+    }
+
+    .line {
+      border: 1px solid $color-gray-10;
+      flex-grow: 10;
+      margin: auto;
+    }
   }
 
   .links {
@@ -137,14 +193,14 @@
       }
     }
   }
-}
 
-.terms-login {
-  bottom: $size-5;
-  font-size: $fs14;
-  position: absolute;
+  .terms-login {
+    bottom: $size-5;
+    font-size: $fs14;
+    position: absolute;
 
-  span {
-    margin: 0 $size-2;
+    span {
+      margin: 0 $size-2;
+    }
   }
 }

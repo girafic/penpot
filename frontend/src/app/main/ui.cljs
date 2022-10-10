@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui
   (:require
@@ -19,17 +19,17 @@
    [app.main.ui.onboarding]
    [app.main.ui.onboarding.questions]
    [app.main.ui.releases]
-   [app.main.ui.render :as render]
    [app.main.ui.settings :as settings]
    [app.main.ui.static :as static]
    [app.main.ui.viewer :as viewer]
    [app.main.ui.workspace :as workspace]
    [app.util.router :as rt]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc on-main-error
   [{:keys [error] :as props}]
   (mf/with-effect
+    (js/console.log error)
     (st/emit! (rt/assign-exception error)))
   [:span "Internal application error"])
 
@@ -109,25 +109,6 @@
                                    :section section
                                    :index index
                                    :share-id share-id}]))
-
-       :render-object
-       (do
-         (let [file-id      (uuid (get-in route [:path-params :file-id]))
-               page-id      (uuid (get-in route [:path-params :page-id]))
-               object-id    (uuid (get-in route [:path-params :object-id]))
-               render-texts (get-in route [:query-params :render-texts])]
-           [:& render/render-object {:file-id file-id
-                                     :page-id page-id
-                                     :object-id object-id
-                                     :render-texts? (and (some? render-texts) (= render-texts "true"))}]))
-
-       :render-sprite
-       (do
-         (let [file-id      (uuid (get-in route [:path-params :file-id]))
-               component-id (get-in route [:query-params :component-id])
-               component-id (when (some? component-id) (uuid component-id))]
-           [:& render/render-sprite {:file-id file-id
-                                     :component-id component-id}]))
 
        :workspace
        (let [project-id (some-> params :path :project-id uuid)

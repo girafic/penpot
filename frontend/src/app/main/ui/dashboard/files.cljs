@@ -2,10 +2,11 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.dashboard.files
   (:require
+   [app.common.math :as mth]
    [app.main.data.dashboard :as dd]
    [app.main.data.events :as ev]
    [app.main.refs :as refs]
@@ -16,11 +17,13 @@
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.webapi :as wapi]
+   [beicon.core :as rx]
    [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc header
-  [{:keys [project] :as props}]
+  [{:keys [project on-create-clicked] :as props}]
   (let [local      (mf/use-state {:menu-open false
                                   :edition false})
         on-menu-click
@@ -39,14 +42,7 @@
         toggle-pin
         (mf/use-callback
          (mf/deps project)
-         (st/emitf (dd/toggle-project-pin project)))
-
-        on-create-clicked
-        (mf/use-callback
-         (mf/deps project)
-         (fn [event]
-           (dom/prevent-default event)
-           (st/emit! (dd/create-file {:project-id (:id project)}))))
+         #(st/emit! (dd/toggle-project-pin project)))
 
         on-import
         (mf/use-callback
@@ -82,7 +78,7 @@
                        :on-import on-import}]
 
      [:div.dashboard-header-actions
-      [:a.btn-secondary.btn-small {:on-click on-create-clicked :data-test "new-file"}
+      [:a.btn-secondary.btn-small {:on-click (partial on-create-clicked project "dashboard:header") :data-test "new-file"}
        (tr "dashboard.new-file")]
 
       (when-not (:is-default project)
@@ -100,10 +96,45 @@
 (mf/defc files-section
   [{:keys [project team] :as props}]
   (let [files-map (mf/deref refs/dashboard-files)
+        width            (mf/use-state nil)
+        rowref           (mf/use-ref)
+        itemsize       (if (>= @width 1030)
+                         280
+                         230)
+
+        ratio          (if (some? @width) (/ @width itemsize) 0)
+        nitems         (mth/floor ratio)
+        limit          (min 10 nitems)
+        limit          (max 1 limit)
+
         files     (->> (vals files-map)
                        (filter #(= (:id project) (:project-id %)))
                        (sort-by :modified-at)
-                       (reverse))]
+                       (reverse))
+
+        on-create-clicked
+        (mf/use-callback
+         (fn [project origin event]
+           (dom/prevent-default event)
+           (st/emit! (with-meta (dd/create-file {:project-id (:id project)})
+                       {::ev/origin origin}))))]
+
+    (mf/use-effect
+     (fn []
+       (let [node (mf/ref-val rowref)
+             mnt? (volatile! true)
+             sub  (->> (wapi/observe-resize node)
+                       (rx/observe-on :af)
+                       (rx/subs (fn [entries]
+                                  (let [row (first entries)
+                                        row-rect (.-contentRect ^js row)
+                                        row-width (.-width ^js row-rect)]
+                                    (when @mnt?
+                                      (reset! width row-width))))))]
+         (fn []
+           (vreset! mnt? false)
+           (rx/dispose! sub)))))
+
 
     (mf/use-effect
      (mf/deps project)
@@ -121,8 +152,12 @@
                  (dd/clear-selected-files))))
 
     [:*
-     [:& header {:team team :project project}]
-     [:section.dashboard-container
+     [:& header {:team team :project project
+                 :on-create-clicked on-create-clicked}]
+     [:section.dashboard-container.no-bg {:ref rowref}
       [:& grid {:project project
-                :files files}]]]))
+                :files files
+                :on-create-clicked on-create-clicked
+                :origin :files
+                :limit limit}]]]))
 

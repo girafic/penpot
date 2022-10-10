@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.modal
   (:refer-clojure :exclude [update])
@@ -14,6 +14,8 @@
 
 (defonce components (atom {}))
 
+;; TODO: rename `:type` to `:name`
+
 (defn show
   ([props]
    (show (uuid/next) (:type props) props))
@@ -21,6 +23,10 @@
    (show (uuid/next) type props))
   ([id type props]
    (ptk/reify ::show-modal
+     IDeref
+     (-deref [_]
+       (merge (dissoc props :type) {:name type}))
+
      ptk/UpdateEvent
      (update [_ state]
        (assoc state ::modal {:id id

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.svg
   (:require
@@ -90,7 +90,6 @@
     :polyline
     :radialGradient
     :rect
-    :script
     :set
     :stop
     :style
@@ -458,6 +457,48 @@
     :feTile
     :feTurbulence})
 
+;; By spec: https://www.w3.org/TR/SVG11/single-page.html#struct-GElement
+(defonce svg-group-safe-tags
+  #{:animate
+    :animateColor
+    :animateMotion
+    :animateTransform
+    :set
+    :desc
+    :metadata
+    :title
+    :circle
+    :ellipse
+    :line
+    :path
+    :polygon
+    :polyline
+    :rect
+    :defs
+    :g
+    :svg
+    :symbol
+    :use
+    :linearGradient
+    :radialGradient
+    :a
+    :altGlyphDef
+    :clipPath
+    :color-profile
+    :cursor
+    :filter
+    :font
+    :font-face
+    :foreignObject
+    :image
+    :marker
+    :mask
+    :pattern
+    :style
+    :switch
+    :text
+    :view})
+
 ;; Props not supported by react we need to keep them lowercase
 (defonce non-react-props
   #{:mask-type})
@@ -672,7 +713,8 @@
        (gmt/matrix)
 
        ;; Paths doesn't have transform so we have to transform its gradients
-       (if (= :path (:type shape))
+       (if (or (= :path (:type shape))
+               (= :group (:type shape)))
          (gsh/transform-matrix shape)
          (gmt/matrix))
 
@@ -919,5 +961,5 @@
   (let [redfn (fn [acc {:keys [tag attrs]}]
                 (cond-> acc
                   (= :image tag)
-                  (conj (:xlink:href attrs))))]
+                  (conj (or (:href attrs) (:xlink:href attrs)))))]
     (reduce-nodes redfn [] svg-data )))

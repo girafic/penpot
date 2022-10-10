@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.fonts
   "Fonts management and loading logic."
@@ -23,10 +23,10 @@
    [okulary.core :as l]
    [promesa.core :as p]))
 
-(log/set-level! :warn)
+(log/set-level! :info)
 
 (def google-fonts
-  (preload-gfonts "fonts/gfonts.2020.04.23.json"))
+  (preload-gfonts "fonts/gfonts.2022.07.11.json"))
 
 (def local-fonts
   [{:id "sourcesanspro"
@@ -82,6 +82,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defonce loaded (l/atom #{}))
+(defonce loading (l/atom {}))
 
 (defn- create-link-element
   [uri]
@@ -125,8 +126,7 @@
 
 (defmethod load-font :builtin
   [{:keys [id ::on-loaded] :as font}]
-  (log/debug :action "load-font" :font-id id :backend "builtin")
-  ;; (js/console.log "[debug:fonts]: loading builtin font" id)
+  (log/debug :hint "load-font" :font-id id :backend "builtin")
   (when (fn? on-loaded)
     (on-loaded id)))
 
@@ -141,7 +141,7 @@
 (defmethod load-font :google
   [{:keys [id ::on-loaded] :as font}]
   (when (exists? js/window)
-    (log/debug :action "load-font" :font-id id :backend "google")
+    (log/info :hint "load-font" :font-id id :backend "google")
     (let [url (generate-gfonts-url font)]
       (load-font-css! url (partial on-loaded id))
       nil)))
@@ -154,15 +154,14 @@
     font-style: %(style)s;
     font-weight: %(weight)s;
     font-display: block;
-    src: url(%(woff2-uri)s) format('woff2'),
-         url(%(woff1-uri)s) format('woff'),
+    src: url(%(woff1-uri)s) format('woff'),
          url(%(ttf-uri)s) format('ttf'),
          url(%(otf-uri)s) format('otf');
   }")
 
 (defn- asset-id->uri
   [asset-id]
-  (str (u/join cf/public-uri "assets/by-id/" asset-id)))
+  (str (u/join @cf/public-uri "assets/by-id/" asset-id)))
 
 (defn generate-custom-font-variant-css
   [family variant]
@@ -184,7 +183,7 @@
 (defmethod load-font :custom
   [{:keys [id ::on-loaded] :as font}]
   (when (exists? js/window)
-    (js/console.log "[debug:fonts]: loading custom font" id)
+    (log/info :hint "load-font" :font-id id :backend "custom")
     (let [css (generate-custom-font-css font)]
       (add-font-css! css)
       (when (fn? on-loaded)
@@ -199,11 +198,43 @@
    (p/create (fn [resolve]
                (ensure-loaded! id resolve))))
   ([id on-loaded]
-   (if (contains? @loaded id)
-     (on-loaded id)
+   (log/debug :action "try-ensure-loaded!" :font-id id)
+   (if-not (exists? js/window)
+     ;; If we are in the worker environment, we just mark it as loaded
+     ;; without really loading it.
+     (do
+       (swap! loaded conj id)
+       (p/resolved id))
+
      (when-let [font (get @fontsdb id)]
-       (load-font (assoc font ::on-loaded on-loaded))
-       (swap! loaded conj id)))))
+       (cond
+         ;; Font already loaded, we just continue
+         (contains? @loaded id)
+         (p/do
+           (on-loaded id)
+           id)
+
+         ;; Font is currently downloading. We attach the caller to the promise
+         (contains? @loading id)
+         (-> (get @loading id)
+             (p/then #(do (on-loaded id) id)))
+
+         ;; First caller, we create the promise and then wait
+         :else
+         (let [on-load (fn [resolve]
+                         (swap! loaded conj id)
+                         (swap! loading dissoc id)
+                         (on-loaded id)
+                         (resolve id))
+
+               load-p (p/create
+                       (fn [resolve _]
+                         (-> font
+                             (assoc ::on-loaded (partial on-load resolve))
+                             (load-font))))]
+
+           (swap! loading assoc id load-p)
+           load-p))))))
 
 (defn ready
   [cb]
@@ -226,7 +257,7 @@
   font-style: %(style)s;
   font-weight: %(weight)s;
   font-display: block;
-  src: url(/fonts/%(family)s-%(suffix)s.woff) format('woff');
+  src: url(%(baseurl)sfonts/%(family)s-%(suffix)s.woff) format('woff');
 }
 ")
 
@@ -262,7 +293,8 @@
       :else
       (let [{:keys [weight style suffix] :as variant}
             (d/seek #(= (:id %) font-variant-id) variants)
-            font-data {:family family
+            font-data {:baseurl (str @cf/public-uri)
+                       :family family
                        :style style
                        :suffix (or suffix font-variant-id)
                        :weight weight}]

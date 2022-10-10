@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.services
   "A helpers and macros for define rpc like registry based services."
@@ -10,6 +10,20 @@
   (:require
    [app.common.data :as d]
    [cuerdas.core :as str]))
+
+(defrecord WrappedValue [obj]
+  clojure.lang.IDeref
+  (deref [_] obj))
+
+(defn wrap
+  ([]
+   (WrappedValue. nil))
+  ([o]
+   (WrappedValue. o)))
+
+(defn wrapped?
+  [o]
+  (instance? WrappedValue o))
 
 (defmacro defmethod
   [sname & body]
@@ -27,7 +41,7 @@
       (throw (IllegalArgumentException. "Missing arguments on `defmethod` macro.")))
 
     (let [mdata (assoc mdata
-                       ::docs (some-> docs str/<<-)
+                       ::docstring (some-> docs str/<<-)
                        ::spec sname
                        ::name (name sname))
 
@@ -40,9 +54,14 @@
   (comp
    (d/domap require)
    (map find-ns)
-   (mapcat ns-publics)
-   (map second)
-   (filter #(::spec (meta %)))))
+   (mapcat (fn [ns]
+             (->> (ns-publics ns)
+                  (map second)
+                  (filter #(::spec (meta %)))
+                  (map (fn [fvar]
+                         (with-meta (deref fvar)
+                           (-> (meta fvar)
+                               (assoc :ns (-> ns ns-name str)))))))))))
 
 (defn scan-ns
   [& nsyms]

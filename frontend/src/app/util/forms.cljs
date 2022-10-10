@@ -2,17 +2,16 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.forms
   (:refer-clojure :exclude [uuid])
   (:require
    [app.common.spec :as us]
-   [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [cljs.spec.alpha :as s]
    [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 ;; --- Handlers Helpers
 
@@ -114,19 +113,20 @@
         (render inc)))))
 
 (defn on-input-change
-  ([form field]
-   (on-input-change form field false))
-  ([form field trim?]
-  (fn [event]
-    (let [target (dom/get-target event)
-          value  (if (or (= (.-type target) "checkbox")
-                         (= (.-type target) "radio"))
-                   (.-checked target)
-                   (dom/get-value target))]
-      (swap! form (fn [state]
-                    (-> state
-                        (assoc-in [:data field] (if trim? (str/trim value) value))
-                        (update :errors dissoc field))))))))
+  ([form field value]
+   (on-input-change form field value false))
+  ([form field value trim?]
+   (swap! form (fn [state]
+                 (-> state
+                     (assoc-in [:data field] (if trim? (str/trim value) value))
+                     (update :errors dissoc field))))))
+
+(defn update-input-value!
+  [form field value]
+  (swap! form (fn [state]
+                (-> state
+                    (assoc-in [:data field] value)
+                    (update :errors dissoc field)))))
 
 (defn on-input-blur
   [form field]
@@ -162,4 +162,4 @@
 
 (s/def ::email ::us/email)
 (s/def ::not-empty-string ::us/not-empty-string)
-(s/def ::color ::us/color)
+(s/def ::color ::us/rgb-color-str)

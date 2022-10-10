@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) UXBOX Labs SL
+// Copyright (c) KALEIDOS INC
 
 .main-content {
   display: flex;
@@ -14,23 +14,26 @@
   background-color: $color-white;
   display: grid;
   grid-template-rows: 50px 1fr;
-  grid-template-columns: 40px 220px 1fr;
+  grid-template-columns: 40px 256px 1fr;
   height: 100vh;
 
   .dashboard-sidebar {
     grid-row: 1 / span 2;
     grid-column: 1 / span 2;
+    padding: 1rem;
     // overflow: hidden;
   }
 
   .dashboard-content {
     grid-row: 1 / span 2;
+    padding: 1rem 1rem 0 0;
   }
 }
 
 .dashboard-content {
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .verify-token {

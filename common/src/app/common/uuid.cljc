@@ -7,12 +7,13 @@
 (ns app.common.uuid
   (:refer-clojure :exclude [next uuid zero?])
   (:require
-   #?(:clj [app.common.data :as d])
-   #?(:clj [clj-uuid :as impl])
    #?(:clj [clojure.core :as c])
    #?(:cljs [app.common.uuid-impl :as impl])
    #?(:cljs [cljs.core :as c]))
-  #?(:clj (:import java.util.UUID)))
+  #?(:clj (:import
+           app.common.UUIDv8
+           java.util.UUID
+           java.nio.ByteBuffer)))
 
 (def zero #uuid "00000000-0000-0000-0000-000000000000")
 
@@ -22,29 +23,39 @@
 
 (defn next
   []
-  #?(:clj (impl/v1)
-     :cljs (impl/v1)))
+  #?(:clj (UUIDv8/create)
+     :cljs (impl/v8)))
 
 (defn random
   "Alias for clj-uuid/v4."
   []
-  #?(:clj (impl/v4)
+  #?(:clj (UUID/randomUUID)
      :cljs (impl/v4)))
-
-#?(:clj
-   (defn namespaced
-     [ns data]
-     (impl/v5 ns data)))
 
 (defn uuid
   "Parse string uuid representation into proper UUID instance."
   [s]
   #?(:clj (UUID/fromString s)
-     :cljs (c/uuid s)))
+     :cljs (c/parse-uuid s)))
 
 (defn custom
-  ([a] #?(:clj (UUID. 0 a) :cljs (c/uuid (impl/custom 0 a))))
-  ([b a] #?(:clj (UUID. b a) :cljs (c/uuid (impl/custom b a)))))
+  ([a] #?(:clj (UUID. 0 a) :cljs (c/parse-uuid (impl/custom 0 a))))
+  ([b a] #?(:clj (UUID. b a) :cljs (c/parse-uuid (impl/custom b a)))))
 
 #?(:clj
-   (d/export impl/get-word-high))
+   (defn get-word-high
+     [id]
+     (.getMostSignificantBits ^UUID id)))
+
+#?(:clj
+   (defn get-word-low
+     [id]
+     (.getLeastSignificantBits ^UUID id)))
+
+#?(:clj
+   (defn get-bytes
+     [^UUID o]
+     (let [buf (ByteBuffer/allocate 16)]
+       (.putLong buf (.getMostSignificantBits o))
+       (.putLong buf (.getLeastSignificantBits o))
+       (.array buf))))

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.auth.recovery-request
   (:require
@@ -16,21 +16,25 @@
    [app.util.router :as rt]
    [beicon.core :as rx]
    [cljs.spec.alpha :as s]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (s/def ::email ::us/email)
 (s/def ::recovery-request-form (s/keys :req-un [::email]))
 
 (mf/defc recovery-form
-  []
+  [{:keys [on-success-callback] :as props}]
   (let [form      (fm/use-form :spec ::recovery-request-form :initial {})
         submitted (mf/use-state false)
 
+        default-success-finish #(st/emit! (dm/info (tr "auth.notifications.recovery-token-sent")))
+
         on-success
         (mf/use-callback
-         (fn [_ _]
+         (fn [cdata _]
            (reset! submitted false)
-           (st/emit! (dm/info (tr "auth.notifications.recovery-token-sent")))))
+           (if (nil? on-success-callback)
+             (default-success-finish)
+             (on-success-callback (:email cdata)))))
 
         on-error
         (mf/use-callback
@@ -56,6 +60,7 @@
                  params (with-meta cdata
                           {:on-success #(on-success cdata %)
                            :on-error #(on-error cdata %)})]
+             (reset! form nil)
              (st/emit! (du/request-profile-recovery params)))))]
 
     [:& fm/form {:on-submit on-submit
@@ -74,15 +79,17 @@
 ;; --- Recovery Request Page
 
 (mf/defc recovery-request-page
-  []
-  [:section.generic-form
-   [:div.form-container
-    [:h1 (tr "auth.recovery-request-title")]
-    [:div.subtitle (tr "auth.recovery-request-subtitle")]
-    [:& recovery-form]
+  [{:keys [params on-success-callback go-back-callback] :as props}]
+  (let [default-go-back #(st/emit! (rt/nav :auth-login))
+        go-back (or go-back-callback default-go-back)]
+    [:section.generic-form
+     [:div.form-container
+      [:h1 (tr "auth.recovery-request-title")]
+      [:div.subtitle (tr "auth.recovery-request-subtitle")]
+      [:& recovery-form {:params params :on-success-callback on-success-callback}]
 
-    [:div.links
-     [:div.link-entry
-      [:a {:on-click #(st/emit! (rt/nav :auth-login))
-           :data-test "go-back-link"}
-       (tr "labels.go-back")]]]]])
+      [:div.links
+       [:div.link-entry
+        [:a {:on-click go-back
+             :data-test "go-back-link"}
+         (tr "labels.go-back")]]]]]))

@@ -2,17 +2,20 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns user
   (:require
    [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.geom.matrix :as gmt]
+   [app.common.logging :as l]
    [app.common.perf :as perf]
+   [app.common.pprint :as pp]
    [app.common.transit :as t]
    [app.config :as cfg]
    [app.main :as main]
+   [app.srepl.main :as srepl]
    [app.util.blob :as blob]
    [app.util.fressian :as fres]
    [app.util.json :as json]
@@ -25,7 +28,6 @@
    [clojure.spec.alpha :as s]
    [clojure.spec.gen.alpha :as sgen]
    [clojure.test :as test]
-   [clojure.test :as test]
    [clojure.tools.namespace.repl :as repl]
    [clojure.walk :refer [macroexpand-all]]
    [datoteka.core]
@@ -35,6 +37,24 @@
 (set! *warn-on-reflection* true)
 
 (defonce system nil)
+
+;; --- Benchmarking Tools
+
+(defmacro run-quick-bench
+  [& exprs]
+  `(with-progress-reporting (quick-bench (do ~@exprs) :verbose)))
+
+(defmacro run-quick-bench'
+  [& exprs]
+  `(quick-bench (do ~@exprs)))
+
+(defmacro run-bench
+  [& exprs]
+  `(with-progress-reporting (bench (do ~@exprs) :verbose)))
+
+(defmacro run-bench'
+  [& exprs]
+  `(bench (do ~@exprs)))
 
 ;; --- Development Stuff
 
@@ -56,7 +76,7 @@
   []
   (alter-var-root #'system (fn [sys]
                              (when sys (ig/halt! sys))
-                             (-> main/system-config
+                             (-> (merge main/system-config main/worker-config)
                                  (ig/prep)
                                  (ig/init))))
   :started)
@@ -66,7 +86,7 @@
   (alter-var-root #'system (fn [sys]
                              (when sys (ig/halt! sys))
                              nil))
-  :stoped)
+  :stopped)
 
 (defn restart
   []

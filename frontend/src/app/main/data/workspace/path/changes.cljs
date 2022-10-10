@@ -2,11 +2,11 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.workspace.path.changes
   (:require
-   [app.common.pages.helpers :as cph]
+   [app.common.pages.changes-builder :as pcb]
    [app.common.spec :as us]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.path.helpers :as helpers]
@@ -17,70 +17,50 @@
    [potok.core :as ptk]))
 
 (defn generate-path-changes
-  "Generates content changes and the undos for the content given"
-  [objects page-id shape old-content new-content]
+  "Generates changes to update the new content of the shape"
+  [it objects page-id shape old-content new-content]
   (us/verify ::spec/content old-content)
   (us/verify ::spec/content new-content)
-  (let [shape-id     (:id shape)
-        frame-id     (:frame-id shape)
-        parent-id    (:parent-id shape)
-        parent-index (cph/get-position-on-parent objects shape-id)
+  (let [shape-id (:id shape)
 
-        [old-points old-selrect] (helpers/content->points+selrect shape old-content)
-        [new-points new-selrect] (helpers/content->points+selrect shape new-content)
+        [old-points old-selrect]
+        (helpers/content->points+selrect shape old-content)
 
-        rch (cond
-              ;; https://tree.taiga.io/project/penpot/issue/2366
-              (nil? shape-id)
-              []
+        [new-points new-selrect]
+        (helpers/content->points+selrect shape new-content)
 
-              (empty? new-content)
-              [{:type :del-obj
-                :id shape-id
-                :page-id page-id}
-               {:type :reg-objects
-                :page-id page-id
-                :shapes [shape-id]}]
+        ;; We set the old values so the update-shapes works
+        objects
+        (-> objects
+            (update
+             shape-id
+             assoc
+             :content old-content
+             :selrect old-selrect
+             :points old-points))
 
-              :else
-              [{:type :mod-obj
-                :id shape-id
-                :page-id page-id
-                :operations [{:type :set :attr :content :val new-content}
-                             {:type :set :attr :selrect :val new-selrect}
-                             {:type :set :attr :points  :val new-points}]}
-               {:type :reg-objects
-                :page-id page-id
-                :shapes [shape-id]}])
+        changes (-> (pcb/empty-changes it page-id)
+                    (pcb/with-objects objects))]
 
-        uch (cond
-              ;; https://tree.taiga.io/project/penpot/issue/2366
-              (nil? shape-id)
-              []
+    (cond
+      ;; https://tree.taiga.io/project/penpot/issue/2366
+      (nil? shape-id)
+      changes
 
-              (empty? new-content)
-              [{:type :add-obj
-                :id shape-id
-                :obj shape
-                :page-id page-id
-                :frame-id frame-id
-                :parent-id parent-id
-                :index parent-index}
-               {:type :reg-objects
-                :page-id page-id
-                :shapes [shape-id]}]
+      (empty? new-content)
+      (-> changes
+          (pcb/remove-objects [shape-id])
+          (pcb/resize-parents [shape-id]))
 
-              :else
-              [{:type :mod-obj
-                :id shape-id
-                :page-id page-id
-                :operations [{:type :set :attr :content :val old-content}
-                             {:type :set :attr :selrect :val old-selrect}
-                             {:type :set :attr :points  :val old-points}]}
-               {:type :reg-objects
-                :page-id page-id
-                :shapes [shape-id]}])]
-    [rch uch]))
+      :else
+      (-> changes
+          (pcb/update-shapes [shape-id]
+                             (fn [shape]
+                               (assoc shape
+                                      :content new-content
+                                      :selrect new-selrect
+                                      :points new-points)))
+          (pcb/resize-parents [shape-id])))))
 
 (defn save-path-content
   ([]
@@ -105,10 +85,8 @@
              old-content (get-in state [:workspace-local :edit-path id :old-content])
              shape       (st/get-path state)]
          (if (and (some? old-content) (some? (:id shape)))
-           (let [[rch uch] (generate-path-changes objects page-id shape old-content (:content shape))]
-             (rx/of (dch/commit-changes {:redo-changes rch
-                                         :undo-changes uch
-                                         :origin it})))
+           (let [changes (generate-path-changes it objects page-id shape old-content (:content shape))]
+             (rx/of (dch/commit-changes changes)))
            (rx/empty)))))))
 
 

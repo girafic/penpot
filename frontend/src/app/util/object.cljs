@@ -2,16 +2,16 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.object
   "A collection of helpers for work with javascript objects."
-  (:refer-clojure :exclude [set! get get-in merge clone contains?])
+  (:refer-clojure :exclude [set! new get get-in merge clone contains?])
   (:require
    ["lodash/omit" :as omit]
    [cuerdas.core :as str]))
 
-(defn new [] #js {})
+(defn create [] #js {})
 
 (defn get
   ([obj k]
@@ -43,6 +43,7 @@
               (rest keys)
               (unchecked-get res key))))))
 
+#_:clj-kondo/ignore
 (defn without
   [obj keys]
   (let [keys (cond

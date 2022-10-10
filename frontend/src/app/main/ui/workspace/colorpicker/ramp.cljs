@@ -2,16 +2,16 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.colorpicker.ramp
   (:require
-   [app.common.math :as math]
+   [app.common.math :as mth]
    [app.main.ui.components.color-bullet :refer [color-bullet]]
    [app.main.ui.workspace.colorpicker.slider-selector :refer [slider-selector]]
    [app.util.color :as uc]
    [app.util.dom :as dom]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc value-saturation-selector [{:keys [saturation value on-change on-start-drag on-finish-drag]}]
   (let [dragging? (mf/use-state false)
@@ -19,8 +19,8 @@
         (fn [ev]
           (let [{:keys [left right top bottom]} (-> ev dom/get-target dom/get-bounding-rect)
                 {:keys [x y]} (-> ev dom/get-client-position)
-                px (math/clamp (/ (- x left) (- right left)) 0 1)
-                py (* 255 (- 1 (math/clamp (/ (- y top) (- bottom top)) 0 1)))]
+                px (mth/clamp (/ (- x left) (- right left)) 0 1)
+                py (* 255 (- 1 (mth/clamp (/ (- y top) (- bottom top)) 0 1)))]
             (on-change px py)))
 
         handle-start-drag
@@ -41,6 +41,7 @@
         ]
     [:div.value-saturation-selector
      {:on-pointer-down handle-start-drag
+      :on-pointer-up handle-stop-drag
       :on-lost-pointer-capture handle-stop-drag
       :on-click calculate-pos
       :on-mouse-move #(when @dragging? (calculate-pos %))}

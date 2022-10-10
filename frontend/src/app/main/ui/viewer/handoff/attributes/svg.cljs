@@ -2,19 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.handoff.attributes.svg
   (:require
-   #_[app.common.math :as mth]
-   #_[app.main.ui.icons :as i]
-   #_[app.util.code-gen :as cg]
    [app.common.data :as d]
    [app.main.ui.components.copy-button :refer [copy-button]]
    [app.util.i18n :refer [tr]]
    [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
-
+   [rumext.v2 :as mf]))
 
 (defn map->css [attr]
   (->> attr

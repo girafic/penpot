@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.tasks.telemetry
   "A task that is responsible to collect anonymous statistical
@@ -12,10 +12,9 @@
    [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.spec :as us]
-   [app.config :as cfg]
+   [app.config :as cf]
    [app.db :as db]
    [app.util.async :refer [thread-sleep]]
-   [app.util.http :as http]
    [app.util.json :as json]
    [clojure.spec.alpha :as s]
    [integrant.core :as ig]))
@@ -26,7 +25,10 @@
 
 (declare get-stats)
 (declare send!)
+(declare get-subscriptions-newsletter-updates)
+(declare get-subscriptions-newsletter-news)
 
+(s/def ::http-client fn?)
 (s/def ::version ::us/string)
 (s/def ::uri ::us/string)
 (s/def ::instance-id ::us/uuid)
@@ -34,34 +36,73 @@
   (s/keys :req-un [::instance-id]))
 
 (defmethod ig/pre-init-spec ::handler [_]
-  (s/keys :req-un [::db/pool ::version ::uri ::sprops]))
+  (s/keys :req-un [::db/pool ::http-client ::version ::uri ::sprops]))
 
 (defmethod ig/init-key ::handler
   [_ {:keys [pool sprops version] :as cfg}]
-  (fn [_]
-    ;; Sleep randomly between 0 to 10s
-    (thread-sleep (rand-int 10000))
+  (fn [{:keys [send? enabled?] :or {send? true enabled? false}}]
+    (let [subs     {:newsletter-updates (get-subscriptions-newsletter-updates pool)
+                    :newsletter-news (get-subscriptions-newsletter-news pool)}
+          enabled? (or enabled?
+                       (contains? cf/flags :telemetry)
+                       (cf/get :telemetry-enabled))
 
-    (let [instance-id (:instance-id sprops)]
-      (-> (get-stats pool version)
-          (assoc :instance-id instance-id)
-          (send! cfg)))))
+          data     {:subscriptions subs
+                    :version version
+                    :instance-id (:instance-id sprops)}]
+      (cond
+        ;; If we have telemetry enabled, then proceed the normal
+        ;; operation.
+        enabled?
+        (let [data (merge data (get-stats pool))]
+          (when send?
+            (thread-sleep (rand-int 10000))
+            (send! cfg data))
+          data)
+
+        ;; If we have telemetry disabled, but there are users that are
+        ;; explicitly checked the newsletter subscription on the
+        ;; onboarding dialog or the profile section, then proceed to
+        ;; send a limited telemetry data, that consists in the list of
+        ;; subscribed emails and the running penpot version.
+        (seq subs)
+        (do
+          (when send?
+            (thread-sleep (rand-int 10000))
+            (send! cfg data))
+          data)
+
+        :else
+        data))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; IMPL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- send!
-  [data cfg]
-  (let [response (http/send! {:method :post
-                              :uri (:uri cfg)
-                              :headers {"content-type" "application/json"}
-                              :body (json/write-str data)})]
+  [{:keys [http-client uri] :as cfg} data]
+  (let [response (http-client {:method :post
+                               :uri uri
+                               :headers {"content-type" "application/json"}
+                               :body (json/write-str data)}
+                               {:sync? true})]
     (when (> (:status response) 206)
       (ex/raise :type :internal
                 :code :invalid-response
                 :response-status (:status response)
                 :response-body (:body response)))))
+
+(defn- get-subscriptions-newsletter-updates
+  [conn]
+  (let [sql "select email from profile where props->>'~:newsletter-updates' = 'true'"]
+    (->> (db/exec! conn [sql])
+         (mapv :email))))
+
+(defn- get-subscriptions-newsletter-news
+  [conn]
+  (let [sql "select email from profile where props->>'~:newsletter-news' = 'true'"]
+    (->> (db/exec! conn [sql])
+         (mapv :email))))
 
 (defn- retrieve-num-teams
   [conn]
@@ -137,20 +178,36 @@
   (->> [sql:team-averages]
        (db/exec-one! conn)))
 
+(defn- retrieve-enabled-auth-providers
+  [conn]
+  (let [sql  (str "select auth_backend as backend, count(*) as total "
+                 "  from profile group by 1")
+        rows (db/exec! conn [sql])]
+    (->> rows
+         (map (fn [{:keys [backend total]}]
+                (let [backend (or backend "penpot")]
+                  [(keyword (str "auth-backend-" backend))
+                   total])))
+         (into {}))))
+
 (defn- retrieve-jvm-stats
   []
   (let [^Runtime runtime (Runtime/getRuntime)]
     {:jvm-heap-current (.totalMemory runtime)
      :jvm-heap-max     (.maxMemory runtime)
-     :jvm-cpus         (.availableProcessors runtime)}))
+     :jvm-cpus         (.availableProcessors runtime)
+     :os-arch          (System/getProperty "os.arch")
+     :os-name          (System/getProperty "os.name")
+     :os-version       (System/getProperty "os.version")
+     :user-tz          (System/getProperty "user.timezone")}))
 
 (defn get-stats
-  [conn version]
-  (let [referer (if (cfg/get :telemetry-with-taiga)
+  [conn]
+  (let [referer (if (cf/get :telemetry-with-taiga)
                   "taiga"
-                  (cfg/get :telemetry-referer))]
-    (-> {:version        version
-         :referer        referer
+                  (cf/get :telemetry-referer))]
+    (-> {:referer        referer
+         :public-uri     (cf/get :public-uri)
          :total-teams    (retrieve-num-teams conn)
          :total-projects (retrieve-num-projects conn)
          :total-files    (retrieve-num-files conn)
@@ -161,6 +218,7 @@
          :total-touched-files (retrieve-num-touched-files conn)}
         (d/merge
          (retrieve-team-averages conn)
-         (retrieve-jvm-stats))
+         (retrieve-jvm-stats)
+         (retrieve-enabled-auth-providers conn))
         (d/without-nils))))
 

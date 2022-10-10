@@ -2,16 +2,17 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.dashboard.sidebar
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.spec :as us]
    [app.config :as cf]
    [app.main.data.dashboard :as dd]
    [app.main.data.events :as ev]
-   [app.main.data.messages :as dm]
+   [app.main.data.messages :as msg]
    [app.main.data.modal :as modal]
    [app.main.data.users :as du]
    [app.main.refs :as refs]
@@ -25,12 +26,14 @@
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.keyboard :as kbd]
    [app.util.object :as obj]
    [app.util.router :as rt]
    [beicon.core :as rx]
    [cljs.spec.alpha :as s]
    [goog.functions :as f]
-   [rumext.alpha :as mf]))
+   [potok.core :as ptk]
+   [rumext.v2 :as mf]))
 
 (mf/defc sidebar-project
   [{:keys [item selected?] :as props}]
@@ -99,8 +102,8 @@
         on-drop-success
         (mf/use-callback
          (mf/deps (:id item))
-         (st/emitf (dm/success (tr "dashboard.success-move-file"))
-                   (dd/go-to-files (:id item))))
+         #(st/emit! (msg/success (tr "dashboard.success-move-file"))
+                    (dd/go-to-files (:id item))))
 
         on-drop
         (mf/use-callback
@@ -168,11 +171,18 @@
            (let [search-input (dom/get-element "search-input")]
              (dom/clean-value! search-input)
              (dom/focus! search-input)
-             (emit! (dd/go-to-search)))))]
+             (emit! (dd/go-to-search)))))
+
+        on-key-press
+        (mf/use-callback
+         (fn [e]
+           (when (kbd/enter? e)
+             (dom/prevent-default e)
+             (dom/stop-propagation e))))]
 
     [:form.sidebar-search
      [:input.input-text
-      {:key :images-search-box
+      {:key "images-search-box"
        :id "search-input"
        :type "text"
        :placeholder (tr "dashboard.search-placeholder")
@@ -181,6 +191,7 @@
        :on-focus on-search-focus
        :on-blur on-search-blur
        :on-change on-search-change
+       :on-key-press on-key-press
        :ref #(when % (set! (.-value %) search-term))}]
 
      (if (or @focused? (seq search-term))
@@ -193,12 +204,12 @@
         i/search])]))
 
 (mf/defc teams-selector-dropdown
-  [{:keys [profile] :as props}]
+  [{:keys [team profile] :as props}]
   (let [teams (mf/deref refs/teams)
 
         on-create-clicked
         (mf/use-callback
-         (st/emitf (modal/show :team-form {})))
+         #(st/emit! (modal/show :team-form {})))
 
         team-selected
         (mf/use-callback
@@ -206,22 +217,25 @@
            (st/emit! (dd/go-to-projects team-id))))]
 
     [:ul.dropdown.teams-dropdown
-     [:li.title (tr "dashboard.switch-team")]
-     [:hr]
      [:li.team-name {:on-click (partial team-selected (:default-team-id profile))}
       [:span.team-icon i/logo-icon]
-      [:span.team-text (tr "dashboard.your-penpot")]]
+      [:span.team-text (tr "dashboard.your-penpot")]
+      (when (= (:default-team-id profile) (:id team))
+        [:span.icon i/tick])]
 
-     (for [team (remove :is-default (vals teams))]
-       [:* {:key (:id team)}
-        [:li.team-name {:on-click (partial team-selected (:id team))}
-         [:span.team-icon
-          [:img {:src (cf/resolve-team-photo-url team)}]]
-         [:span.team-text {:title (:name team)} (:name team)]]])
-
+     (for [team-item (remove :is-default (vals teams))]
+       [:li.team-name {:on-click (partial team-selected (:id team-item))
+                       :key (dm/str (:id team-item))}
+        [:span.team-icon
+         [:img {:src (cf/resolve-team-photo-url team-item)
+                :alt (:name team-item)}]]
+        [:span.team-text {:title (:name team-item)} (:name team-item)]
+        (when (= (:id team-item) (:id team))
+          [:span.icon i/tick])])
      [:hr]
-     [:li.action {:on-click on-create-clicked :data-test "create-new-team"}
-      (tr "dashboard.create-new-team")]]))
+     [:li.team-name.action {:on-click on-create-clicked :data-test "create-new-team"}
+      [:span.team-icon.new-team i/close]
+      [:span.team-text (tr "dashboard.create-new-team")]]]))
 
 (s/def ::member-id ::us/uuid)
 (s/def ::leave-modal-form
@@ -229,9 +243,9 @@
 
 (mf/defc team-options-dropdown
   [{:keys [team profile] :as props}]
-  (let [go-members     (st/emitf (dd/go-to-team-members))
-        go-invitations (st/emitf (dd/go-to-team-invitations))
-        go-settings    (st/emitf (dd/go-to-team-settings))
+  (let [go-members     #(st/emit! (dd/go-to-team-members))
+        go-invitations #(st/emit! (dd/go-to-team-invitations))
+        go-settings    #(st/emit! (dd/go-to-team-settings))
 
         members-map    (mf/deref refs/dashboard-team-members)
         members        (vals members-map)
@@ -247,13 +261,13 @@
         (fn [{:keys [code] :as error}]
           (condp = code
             :no-enough-members-for-leave
-            (rx/of (dm/error (tr "errors.team-leave.insufficient-members")))
+            (rx/of (msg/error (tr "errors.team-leave.insufficient-members")))
 
             :member-does-not-exist
-            (rx/of (dm/error (tr "errors.team-leave.member-does-not-exists")))
+            (rx/of (msg/error (tr "errors.team-leave.member-does-not-exists")))
 
             :owner-cant-leave-team
-            (rx/of (dm/error (tr "errors.team-leave.owner-cant-leave")))
+            (rx/of (msg/error (tr "errors.team-leave.owner-cant-leave")))
 
             (rx/throw error)))
 
@@ -272,12 +286,12 @@
           (st/emit! (modal/show :team-form {:team team})))
 
         on-leave-clicked
-        (st/emitf (modal/show
-                   {:type :confirm
-                    :title (tr "modals.leave-confirm.title")
-                    :message (tr "modals.leave-confirm.message")
-                    :accept-label (tr "modals.leave-confirm.accept")
-                    :on-accept leave-fn}))
+        #(st/emit! (modal/show
+                     {:type :confirm
+                      :title (tr "modals.leave-confirm.title")
+                      :message (tr "modals.leave-confirm.message")
+                      :accept-label (tr "modals.leave-confirm.accept")
+                      :on-accept leave-fn}))
 
         on-leave-as-owner-clicked
         (fn []
@@ -289,22 +303,22 @@
                       :accept leave-fn})))
 
         leave-and-close
-        (st/emitf (modal/show
-                   {:type :confirm
-                    :title (tr "modals.leave-confirm.title")
-                    :message  (tr "modals.leave-and-close-confirm.message" (:name team))
-                    :scd-message (tr "modals.leave-and-close-confirm.hint")
-                    :accept-label (tr "modals.leave-confirm.accept")
-                    :on-accept delete-fn}))
+        #(st/emit! (modal/show
+                     {:type :confirm
+                      :title (tr "modals.leave-confirm.title")
+                      :message  (tr "modals.leave-and-close-confirm.message" (:name team))
+                      :scd-message (tr "modals.leave-and-close-confirm.hint")
+                      :accept-label (tr "modals.leave-confirm.accept")
+                      :on-accept delete-fn}))
 
         on-delete-clicked
-        (st/emitf
-         (modal/show
-          {:type :confirm
-           :title (tr "modals.delete-team-confirm.title")
-           :message (tr "modals.delete-team-confirm.message")
-           :accept-label (tr "modals.delete-team-confirm.accept")
-           :on-accept delete-fn}))]
+        #(st/emit!
+           (modal/show
+             {:type :confirm
+              :title (tr "modals.delete-team-confirm.title")
+              :message (tr "modals.delete-team-confirm.message")
+              :accept-label (tr "modals.delete-team-confirm.accept")
+              :on-accept delete-fn}))]
 
     [:ul.dropdown.options-dropdown
      [:li {:on-click go-members :data-test "team-members"} (tr "labels.members")]
@@ -343,7 +357,8 @@
           [:span.team-text (tr "dashboard.default-team-name")]]
          [:div.team-name
           [:span.team-icon
-           [:img {:src (cf/resolve-team-photo-url team)}]]
+           [:img {:src (cf/resolve-team-photo-url team)
+                  :alt (:name team)}]]
           [:span.team-text {:title (:name team)} (:name team)]])
 
        [:span.switch-icon
@@ -380,12 +395,12 @@
         go-projects
         (mf/use-callback
          (mf/deps team)
-         (st/emitf (rt/nav :dashboard-projects {:team-id (:id team)})))
+         #(st/emit! (rt/nav :dashboard-projects {:team-id (:id team)})))
 
         go-fonts
         (mf/use-callback
          (mf/deps team)
-         (st/emitf (rt/nav :dashboard-fonts {:team-id (:id team)})))
+         #(st/emit! (rt/nav :dashboard-fonts {:team-id (:id team)})))
 
         go-drafts
         (mf/use-callback
@@ -397,7 +412,7 @@
         go-libs
         (mf/use-callback
          (mf/deps team)
-         (st/emitf (rt/nav :dashboard-libraries {:team-id (:id team)})))
+         #(st/emit! (rt/nav :dashboard-libraries {:team-id (:id team)})))
 
         pinned-projects
         (->> (vals projects)
@@ -442,7 +457,7 @@
          (for [item pinned-projects]
            [:& sidebar-project
             {:item item
-             :key (:id item)
+             :key (dm/str (:id item))
              :id (:id item)
              :team-id (:id team)
              :selected? (= (:id item) (:id project))}])]
@@ -462,12 +477,22 @@
            (dom/stop-propagation event)
            (if (keyword? section)
              (st/emit! (rt/nav section))
-             (st/emit! section))))]
+             (st/emit! section))))
+
+        show-release-notes
+        (mf/use-callback
+         (fn [event]
+           (let [version (:main @cf/version)]
+             (st/emit! (ptk/event ::ev/event {::ev/name "show-release-notes" :version version}))
+             (if (and (kbd/alt? event) (kbd/mod? event))
+               (st/emit! (modal/show {:type :onboarding}))
+               (st/emit! (modal/show {:type :release-notes :version version}))))))]
 
     [:div.profile-section
      [:div.profile {:on-click #(reset! show true)
                     :data-test "profile-btn"}
-      [:img {:src photo}]
+      [:img {:src photo
+             :alt (:fullname profile)}]
       [:span (:fullname profile)]]
 
      [:& dropdown {:on-close #(reset! show false)
@@ -475,26 +500,28 @@
       [:ul.dropdown
        [:li {:on-click (partial on-click :settings-profile)
              :data-test "profile-profile-opt"}
-        [:span.icon i/user]
         [:span.text (tr "labels.your-account")]]
        [:li.separator {:on-click #(dom/open-new-window "https://help.penpot.app")
                        :data-test "help-center-profile-opt"}
-        [:span.icon i/help]
         [:span.text (tr "labels.help-center")]]
-       [:li {:on-click #(dom/open-new-window "https://penpot.app/libraries-templates.html")
-             :data-test "libraries-templates-profile-opt"}
-        [:span.icon i/download]
+       [:li {:on-click #(dom/open-new-window "https://community.penpot.app")}
+        [:span.text (tr "labels.community")]]
+       [:li {:on-click #(dom/open-new-window "https://www.youtube.com/c/Penpot")}
+        [:span.text (tr "labels.tutorials")]]
+       [:li {:on-click show-release-notes}
+        [:span (tr "labels.release-notes")]]
+
+       [:li.separator {:on-click #(dom/open-new-window "https://penpot.app/libraries-templates.html")
+                       :data-test "libraries-templates-profile-opt"}
         [:span.text (tr "labels.libraries-and-templates")]]
-       ;;[:li {:on-click #(dom/open-new-window "https://penpot.app?no-redirect=1")
-       [:li {:on-click #(dom/open-new-window "https://landing-next.penpot.app?no-redirect=1")
-             :data-test "about-penpot-profile-opt"} ;; Parameter ?no-redirect is to force stay in landing page
-        [:span.icon i/logo-icon]                    ;; instead of redirecting to app
-        [:span.text (tr "labels.about-penpot")]]
+       [:li {:on-click #(dom/open-new-window "https://github.com/penpot/penpot")}
+        [:span (tr "labels.github-repo")]]
+       [:li  {:on-click #(dom/open-new-window "https://penpot.app/terms.html")}
+        [:span (tr "auth.terms-of-service")]]
 
        (when (contains? @cf/flags :user-feedback)
          [:li.separator {:on-click (partial on-click :settings-feedback)
                          :data-test "feedback-profile-opt"}
-          [:span.icon i/msg-info]
           [:span.text (tr "labels.give-feedback")]])
 
        [:li.separator {:on-click #(on-click (du/logout) %)

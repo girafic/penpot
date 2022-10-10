@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.dashboard.shortcuts
   (:require
@@ -13,19 +13,23 @@
 (def shortcuts
   {:go-to-search       {:tooltip (ds/meta "F")
                         :command (ds/c-mod "f")
-                        :fn (st/emitf (dd/go-to-search))}
+                        :subsections [:navigation-dashboard]
+                        :fn #(st/emit! (dd/go-to-search))}
 
    :go-to-drafts       {:tooltip "G D"
                         :command "g d"
-                        :fn (st/emitf (dd/go-to-drafts))}
+                        :subsections [:navigation-dashboard]
+                        :fn #(st/emit! (dd/go-to-drafts))}
 
    :go-to-libs         {:tooltip "G L"
                         :command "g l"
-                        :fn (st/emitf (dd/go-to-libs))}
+                        :subsections [:navigation-dashboard]
+                        :fn #(st/emit! (dd/go-to-libs))}
    
    :create-new-project {:tooltip "+"
                         :command "+"
-                        :fn (st/emitf (dd/create-element))}})
+                        :subsections [:general-dashboard]
+                        :fn #(st/emit! (dd/create-element))}})
 
 (defn get-tooltip [shortcut]
   (assert (contains? shortcuts shortcut) (str shortcut))

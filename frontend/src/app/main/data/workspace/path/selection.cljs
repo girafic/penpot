@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.workspace.path.selection
   (:require
@@ -50,7 +50,7 @@
             id (get-in state [:workspace-local :edition])
             content (st/get-path state :content)
             selected-point? #(gsh/has-point-rect? selrect %)
-            selected-points (get-in state [:workspace-local :edit-path id :selected-points])
+            selected-points (or (get-in state [:workspace-local :edit-path id :selected-points]) #{})
             positions (into (if shift? selected-points #{})
                             (comp (filter #(not (= (:command %) :close-path)))
                                   (map (comp gpt/point :params))
@@ -103,20 +103,21 @@
 
 (defn handle-area-selection
   [shift?]
-  (letfn [(valid-rect? [{width :width height :height}]
-            (or (> width 10) (> height 10)))]
+  (letfn [(valid-rect? [zoom {width :width height :height}]
+            (or (> width (/ 10 zoom)) (> height (/ 10 zoom))))]
 
     (ptk/reify ::handle-area-selection
       ptk/WatchEvent
-      (watch [_ _ stream]
-        (let [stop? (fn [event] (or (dwc/interrupt? event) (ms/mouse-up? event)))
+      (watch [_ state stream]
+        (let [zoom (get-in state [:workspace-local :zoom] 1)
+              stop? (fn [event] (or (dwc/interrupt? event) (ms/mouse-up? event)))
               stoper (->> stream (rx/filter stop?))
               from-p @ms/mouse-position]
           (rx/concat
            (->> ms/mouse-position
                 (rx/take-until stoper)
                 (rx/map #(gsh/points->rect [from-p %]))
-                (rx/filter valid-rect?)
+                (rx/filter (partial valid-rect? zoom))
                 (rx/map update-area-selection))
 
            (rx/of (select-node-area shift?)

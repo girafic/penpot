@@ -14,6 +14,8 @@
    [app.common.spec :as us]
    [clojure.spec.alpha :as s]))
 
+(def precision 6)
+
 ;; --- Matrix Impl
 
 (defrecord Matrix [^double a
@@ -24,9 +26,15 @@
                    ^double f]
   Object
   (toString [_]
-    (str "matrix(" a "," b "," c "," d "," e "," f ")")))
+    (str "matrix("
+         (mth/precision a precision) ","
+         (mth/precision b precision) ","
+         (mth/precision c precision) ","
+         (mth/precision d precision) ","
+         (mth/precision e precision) ","
+         (mth/precision f precision) ")")))
 
-(defn ^boolean matrix?
+(defn matrix?
   "Return true if `v` is Matrix instance."
   [v]
   (instance? Matrix v))
@@ -56,6 +64,24 @@
                     (filter #(-> % first seq))
                     (map (comp d/parse-double first)))]
     (apply matrix params)))
+
+(defn close?
+  [m1 m2]
+  (and (mth/close? (.-a m1) (.-a m2))
+       (mth/close? (.-b m1) (.-b m2))
+       (mth/close? (.-c m1) (.-c m2))
+       (mth/close? (.-d m1) (.-d m2))
+       (mth/close? (.-e m1) (.-e m2))
+       (mth/close? (.-f m1) (.-f m2))))
+
+(defn unit? [m1]
+  (and (some? m1)
+       (mth/close? (.-a m1) 1)
+       (mth/close? (.-b m1) 0)
+       (mth/close? (.-c m1) 0)
+       (mth/close? (.-d m1) 1)
+       (mth/close? (.-e m1) 0)
+       (mth/close? (.-f m1) 0)))
 
 (defn multiply
   ([^Matrix m1 ^Matrix m2]
@@ -108,9 +134,12 @@
   (= v base))
 
 (defn translate-matrix
-  [{x :x y :y :as pt}]
-  (assert (gpt/point? pt))
-  (Matrix. 1 0 0 1 x y))
+  ([{x :x y :y :as pt}]
+   (assert (gpt/point? pt))
+   (Matrix. 1 0 0 1 x y))
+
+  ([x y]
+   (translate-matrix (gpt/point x y))))
 
 (defn scale-matrix
   ([pt center]
@@ -184,9 +213,36 @@
 (defmethod pp/simple-dispatch Matrix [obj] (pr obj))
 
 (defn transform-in [pt mtx]
-  (if (some? pt)
+  (if (and (some? pt) (some? mtx))
     (-> (matrix)
         (translate pt)
         (multiply mtx)
         (translate (gpt/negate pt)))
     mtx))
+
+(defn determinant
+  "Determinant for the affinity transform"
+  [{:keys [a b c d _ _]}]
+  (- (* a d) (* c b)))
+
+(defn inverse
+  "Gets the inverse of the affinity transform `mtx`"
+  [{:keys [a b c d e f] :as mtx}]
+  (let [det (determinant mtx)
+        a' (/  d det)
+        b' (/ (- b) det)
+        c' (/ (- c) det)
+        d' (/  a det)
+        e' (/ (- (* c f) (* d e)) det)
+        f' (/ (- (* b e) (* a f)) det)]
+    (Matrix. a' b' c' d' e' f')))
+
+(defn round
+  [mtx]
+  (-> mtx
+      (update :a mth/precision 4)
+      (update :b mth/precision 4)
+      (update :c mth/precision 4)
+      (update :d mth/precision 4)
+      (update :e mth/precision 4)
+      (update :f mth/precision 4)))

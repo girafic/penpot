@@ -2,23 +2,34 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.header
   (:require
-   [app.common.math :as mth]
+   [app.common.data.macros :as dm]
    [app.main.data.modal :as modal]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.shortcuts :as sc]
-   [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
+   [app.main.ui.export :refer [export-progress-widget]]
+   [app.main.ui.formats :as fmt]
    [app.main.ui.icons :as i]
    [app.main.ui.viewer.comments :refer [comments-menu]]
    [app.main.ui.viewer.interactions :refer [flows-menu interactions-menu]]
    [app.util.dom :as dom]
-   [app.util.i18n :as i18n :refer [tr]]
-   [rumext.alpha :as mf]))
+   [app.util.i18n :refer [tr]]
+   [okulary.core :as l]
+   [rumext.v2 :as mf]))
+
+(def fullscreen-ref
+  (l/derived (fn [state]
+               (dm/get-in state [:viewer-local :fullscreen?]))
+             st/state))
+
+(defn open-login-dialog
+  []
+  (modal/show! :login-register {}))
 
 (mf/defc zoom-widget
   {::mf/wrap [mf/memo]}
@@ -32,7 +43,7 @@
     :as props}]
   (let [show-dropdown? (mf/use-state false)]
     [:div.zoom-widget {:on-click #(reset! show-dropdown? true)}
-     [:span.label {} (str (mth/round (* 100 zoom)) "%")]
+     [:span.label (fmt/format-percent zoom)]
      [:span.icon i/arrow-down]
      [:& dropdown {:show @show-dropdown?
                    :on-close #(reset! show-dropdown? false)}
@@ -43,7 +54,7 @@
                                (dom/stop-propagation event)
                                (dom/prevent-default event)
                                (on-decrease))} "-"]
-         [:p.zoom-size {} (str (mth/round (* 100 zoom)) "%")]
+         [:p.zoom-size (fmt/format-percent zoom)]
          [:button {:on-click (fn [event]
                                (dom/stop-propagation event)
                                (dom/prevent-default event)
@@ -60,7 +71,7 @@
 
 (mf/defc header-options
   [{:keys [section zoom page file index permissions]}]
-  (let [fullscreen? (mf/deref refs/fullscreen?)
+  (let [fullscreen? (mf/deref fullscreen-ref)
 
         toggle-fullscreen
         (mf/use-callback
@@ -76,7 +87,8 @@
         (mf/use-callback
          (mf/deps page)
          (fn []
-           (modal/show! :share-link {:page page :file file})))]
+           (modal/show! :share-link {:page page :file file})
+           (modal/allow-click-outside!)))]
 
     [:div.options-zone
      (case section
@@ -88,13 +100,14 @@
 
        [:div.view-options])
 
+     [:& export-progress-widget]
      [:& zoom-widget
       {:zoom zoom
-       :on-increase (st/emitf dv/increase-zoom)
-       :on-decrease (st/emitf dv/decrease-zoom)
-       :on-zoom-reset (st/emitf dv/reset-zoom)
-       :on-zoom-fill (st/emitf dv/zoom-to-fill)
-       :on-zoom-fit (st/emitf dv/zoom-to-fit)
+       :on-increase #(st/emit! dv/increase-zoom)
+       :on-decrease #(st/emit! dv/decrease-zoom)
+       :on-zoom-reset #(st/emit! dv/reset-zoom)
+       :on-zoom-fill #(st/emit! dv/zoom-to-fill)
+       :on-zoom-fit #(st/emit! dv/zoom-to-fit)
        :on-fullscreen toggle-fullscreen}]
 
      [:span.btn-icon-dark.btn-small.tooltip.tooltip-bottom-left
@@ -105,18 +118,20 @@
         i/full-screen)]
 
      (when (:is-admin permissions)
-       [:span.btn-primary {:on-click open-share-dialog} (tr "labels.share-prototype")])
+       [:span.btn-primary {:on-click open-share-dialog} i/export [:span (tr "labels.share-prototype")]])
 
      (when (:can-edit permissions)
-       [:span.btn-text-dark {:on-click go-to-workspace} (tr "labels.edit-file")])]))
+       [:span.btn-text-dark {:on-click go-to-workspace} (tr "labels.edit-file")])
+
+     (when-not (:is-logged permissions)
+       [:span.btn-text-dark {:on-click open-login-dialog} (tr "labels.log-or-sign")])]))
 
 (mf/defc header-sitemap
-  [{:keys [project file page frame index] :as props}]
+  [{:keys [project file page frame] :as props}]
   (let [project-name   (:name project)
         file-name      (:name file)
         page-name      (:name page)
         frame-name     (:name frame)
-        total          (count (:frames page))
         show-dropdown? (mf/use-state false)
 
         toggle-thumbnails
@@ -149,43 +164,48 @@
       [:span "/"]
 
       [:span.page-name page-name]
-      [:span.icon i/arrow-down]
+
 
       [:& dropdown {:show @show-dropdown?
                     :on-close close-dropdown}
        [:ul.dropdown
         (for [id (get-in file [:data :pages])]
           [:li {:id (str id)
+                :key (str id)
                 :on-click (partial navigate-to id)}
            (get-in file [:data :pages-index id :name])])]]]
 
+     [:span.icon {:on-click open-dropdown} i/arrow-down]
      [:div.current-frame
       {:on-click toggle-thumbnails}
       [:span.label "/"]
-      [:span.label frame-name]
-      [:span.icon i/arrow-down]
-      [:span.counters (str (inc index) " / " total)]]]))
+      [:span.label frame-name]]
+     [:span.icon {:on-click toggle-thumbnails} i/arrow-down]]))
 
 
 (mf/defc header
   [{:keys [project file page frame zoom section permissions index]}]
   (let [go-to-dashboard
-        (st/emitf (dv/go-to-dashboard))
+        #(st/emit! (dv/go-to-dashboard))
 
         go-to-handoff
-        (fn []
-          (st/emit! dv/close-thumbnails-panel (dv/go-to-section :handoff)))
+        (fn[]
+          (if (:is-logged permissions)
+           (st/emit! dv/close-thumbnails-panel (dv/go-to-section :handoff))
+           (open-login-dialog)))
 
         navigate
         (fn [section]
-          (st/emit! (dv/go-to-section section)))]
+          (if (or (= section :interactions) (:is-logged permissions))
+            (st/emit! (dv/go-to-section section))
+            (open-login-dialog)))]
 
     [:header.viewer-header
      [:div.nav-zone
       [:div.main-icon
        [:a {:on-click go-to-dashboard
             ;; If the user doesn't have permission we disable the link
-            :style {:pointer-events (when-not permissions "none")}} i/logo-icon]]
+            :style {:pointer-events (when-not (:can-edit permissions) "none")}} i/logo-icon]]
 
       [:& header-sitemap {:project project :file file :page page :frame frame :index index}]]
 
@@ -196,7 +216,8 @@
         :alt (tr "viewer.header.interactions-section" (sc/get-tooltip :open-interactions))}
        i/play]
 
-      (when (:can-edit permissions)
+      (when (or (:can-edit permissions)
+                (= (:who-comment permissions) "all"))
         [:button.mode-zone-button.tooltip.tooltip-bottom
          {:on-click #(navigate :comments)
           :class (dom/classnames :active (= section :comments))
@@ -205,7 +226,7 @@
 
       (when (or (= (:type permissions) :membership)
                 (and (= (:type permissions) :share-link)
-                     (contains? (:flags permissions) :section-handoff)))
+                     (= (:who-inspect permissions) "all")))
         [:button.mode-zone-button.tooltip.tooltip-bottom
          {:on-click go-to-handoff
           :class (dom/classnames :active (= section :handoff))

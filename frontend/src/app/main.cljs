@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main
   (:require
@@ -11,30 +11,34 @@
    [app.config :as cf]
    [app.main.data.events :as ev]
    [app.main.data.users :as du]
+   [app.main.data.websocket :as ws]
    [app.main.errors]
-   [app.main.sentry :as sentry]
    [app.main.store :as st]
    [app.main.ui :as ui]
+   [app.main.ui.alert]
    [app.main.ui.confirm]
+   [app.main.ui.delete-shared]
    [app.main.ui.modal :refer [modal]]
    [app.main.ui.routes :as rt]
    [app.main.worker :as worker]
    [app.util.dom :as dom]
-   [app.util.globals :as glob]
    [app.util.i18n :as i18n]
    [app.util.theme :as theme]
    [beicon.core :as rx]
-   [cuerdas.core :as str]
    [debug]
+   [features]
    [potok.core :as ptk]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (log/initialize!)
 (log/set-level! :root :warn)
 (log/set-level! :app :info)
 
 (when (= :browser @cf/target)
-  (log/info :message "Welcome to penpot" :version (:full @cf/version) :public-uri (str cf/public-uri)))
+  (log/info :message "Welcome to penpot"
+            :version (:full @cf/version)
+            :build-date cf/build-date
+            :public-uri (str @cf/public-uri)))
 
 (declare reinit)
 
@@ -53,25 +57,25 @@
     ptk/WatchEvent
     (watch [_ _ stream]
       (rx/merge
-       (rx/of (ptk/event ::ev/initialize)
+       (rx/of (ev/initialize)
               (du/initialize-profile))
        (->> stream
             (rx/filter du/profile-fetched?)
             (rx/take 1)
-            (rx/map #(rt/init-routes)))))))
+            (rx/map #(rt/init-routes)))
 
-(def essential-only?
-  (let [href (.-href ^js glob/location)]
-    (str/includes? href "essential=t")))
+       (->> stream
+            (rx/filter du/profile-fetched?)
+            (rx/map deref)
+            (rx/filter du/is-authenticated?)
+            (rx/take 1)
+            (rx/map #(ws/initialize)))))))
 
 (defn ^:export init
   []
-  (when-not essential-only?
-    (worker/init!)
-    (sentry/init!)
-    (i18n/init! cf/translations)
-    (theme/init! cf/themes))
-
+  (worker/init!)
+  (i18n/init! cf/translations)
+  (theme/init! cf/themes)
   (init-ui)
   (st/emit! (initialize)))
 
@@ -79,6 +83,7 @@
   []
   (mf/unmount (dom/get-element "app"))
   (mf/unmount (dom/get-element "modal"))
+  (st/emit! (ev/initialize))
   (init-ui))
 
 (defn ^:dev/after-load after-load
@@ -91,4 +96,3 @@
  (fn [_ _ old-value current-value]
    (when (not= old-value current-value)
      (reinit))))
-

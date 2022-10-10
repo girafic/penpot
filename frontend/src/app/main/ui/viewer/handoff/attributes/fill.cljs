@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.handoff.attributes.fill
   (:require
@@ -11,7 +11,7 @@
    [app.util.code-gen :as cg]
    [app.util.color :as uc]
    [app.util.i18n :refer [tr]]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (def fill-attributes [:fill-color :fill-color-gradient])
 
@@ -58,7 +58,7 @@
        (for [shape shapes]
          (if (seq (:fills shape))
            (for [value (:fills shape [])]
-             [:& fill-block {:key (str "fill-block-" (:id shape))
+             [:& fill-block {:key (str "fill-block-" (:id shape) value)
                              :shape value}])
-           [:& fill-block {:key (str "fill-block-" (:id shape))
+           [:& fill-block {:key (str "fill-block-only" (:id shape))
                            :shape shape}]))])))

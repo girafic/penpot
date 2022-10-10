@@ -2,12 +2,12 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.icons
   (:refer-clojure :exclude [import mask])
   (:require-macros [app.main.ui.icons :refer [icon-xref]])
-  (:require [rumext.alpha :as mf]))
+  (:require [rumext.v2 :as mf]))
 
 ;; Keep the list of icons sorted
 
@@ -24,10 +24,20 @@
 (def arrow-down (icon-xref :arrow-down))
 (def arrow-end (icon-xref :arrow-end))
 (def arrow-slide (icon-xref :arrow-slide))
+(def arrow-up (icon-xref :arrow-up))
 (def artboard (icon-xref :artboard))
 (def at (icon-xref :at))
+(def auto-direction (icon-xref :auto-direction))
+(def auto-fill (icon-xref :auto-fill))
 (def auto-fix (icon-xref :auto-fix))
+(def auto-fix-layout (icon-xref :auto-fix-layout))
+(def auto-gap (icon-xref :auto-gap))
 (def auto-height (icon-xref :auto-height))
+(def auto-hug (icon-xref :auto-hug))
+(def auto-margin-side (icon-xref :auto-margin-side))
+(def auto-margin (icon-xref :auto-margin))
+(def auto-padding (icon-xref :auto-padding))
+(def auto-padding-side (icon-xref :auto-padding-side))
 (def auto-width (icon-xref :auto-width))
 (def bool-difference (icon-xref :boolean-difference))
 (def bool-exclude (icon-xref :boolean-exclude))
@@ -39,18 +49,22 @@
 (def chat (icon-xref :chat))
 (def checkbox-checked (icon-xref :checkbox-checked))
 (def checkbox-unchecked (icon-xref :checkbox-unchecked))
+(def checkbox-intermediate (icon-xref :checkbox-intermediate))
 (def circle (icon-xref :circle))
 (def close (icon-xref :close))
 (def code (icon-xref :code))
 (def component (icon-xref :component))
+(def component-copy (icon-xref :component-copy))
 (def copy (icon-xref :copy))
 (def curve (icon-xref :curve))
+(def cross (icon-xref :cross))
 (def download (icon-xref :download))
 (def easing-linear (icon-xref :easing-linear))
 (def easing-ease (icon-xref :easing-ease))
 (def easing-ease-in (icon-xref :easing-ease-in))
 (def easing-ease-out (icon-xref :easing-ease-out))
 (def easing-ease-in-out (icon-xref :easing-ease-in-out))
+(def exclude (icon-xref :exclude))
 (def exit (icon-xref :exit))
 (def export (icon-xref :export))
 (def eye (icon-xref :eye))
@@ -64,8 +78,11 @@
 (def full-screen-off (icon-xref :full-screen-off))
 (def grid (icon-xref :grid))
 (def grid-snap (icon-xref :grid-snap))
+(def go-next (icon-xref :go-next))
+(def go-prev (icon-xref :go-prev))
 (def help (icon-xref :help))
 (def icon-empty (icon-xref :icon-empty))
+(def icon-filter (icon-xref :filter))
 (def icon-list (icon-xref :icon-list))
 (def icon-lock (icon-xref :icon-lock))
 (def icon-set (icon-xref :icon-set))
@@ -130,10 +147,12 @@
 (def radius-4 (icon-xref :radius-4))
 (def recent (icon-xref :recent))
 (def redo (icon-xref :redo))
+(def reset (icon-xref :reset))
 (def rotate (icon-xref :rotate))
 (def ruler (icon-xref :ruler))
 (def ruler-tool (icon-xref :ruler-tool))
 (def search (icon-xref :search))
+(def set-thumbnail (icon-xref :set-thumbnail))
 (def shape-halign-center (icon-xref :shape-halign-center))
 (def shape-halign-left (icon-xref :shape-halign-left))
 (def shape-halign-right (icon-xref :shape-halign-right))
@@ -142,10 +161,13 @@
 (def shape-valign-center (icon-xref :shape-valign-center))
 (def shape-valign-top (icon-xref :shape-valign-top))
 (def shape-vdistribute (icon-xref :shape-vdistribute))
+(def shortcut (icon-xref :shortcut))
 (def size-horiz (icon-xref :size-horiz))
 (def size-vert (icon-xref :size-vert))
 (def sort-ascending (icon-xref :sort-ascending))
 (def sort-descending (icon-xref :sort-descending))
+(def space-around (icon-xref :space-around))
+(def space-between (icon-xref :space-between))
 (def strikethrough (icon-xref :strikethrough))
 (def stroke (icon-xref :stroke))
 (def switch (icon-xref :switch))
@@ -169,6 +191,10 @@
 (def uppercase (icon-xref :uppercase))
 (def user (icon-xref :user))
 
+(def brand-openid (icon-xref :brand-openid))
+(def brand-github (icon-xref :brand-github))
+(def brand-gitlab (icon-xref :brand-gitlab))
+(def brand-google (icon-xref :brand-google))
 
 (def loader-pencil
   (mf/html

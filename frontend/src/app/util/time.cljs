@@ -2,24 +2,25 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.time
   (:require
-   ["date-fns/formatDistanceToNowStrict" :as dateFnsFormatDistanceToNowStrict]
-   ["date-fns/locale/ar-SA" :as dateFnsLocalesAr]
-   ["date-fns/locale/ca" :as dateFnsLocalesCa]
-   ["date-fns/locale/de" :as dateFnsLocalesDe]
-   ["date-fns/locale/el" :as dateFnsLocalesEl]
-   ["date-fns/locale/en-US" :as dateFnsLocalesEnUs]
-   ["date-fns/locale/es" :as dateFnsLocalesEs]
-   ["date-fns/locale/fr" :as dateFnsLocalesFr]
-   ["date-fns/locale/he" :as dateFnsLocalesHe]
-   ["date-fns/locale/pt-BR" :as dateFnsLocalesPtBr]
-   ["date-fns/locale/ro" :as dateFnsLocalesRo]
-   ["date-fns/locale/ru" :as dateFnsLocalesRu]
-   ["date-fns/locale/tr" :as dateFnsLocalesTr]
-   ["date-fns/locale/zh-CN" :as dateFnsLocalesZhCn]
+   ["date-fns/formatDistanceToNowStrict" :default dateFnsFormatDistanceToNowStrict]
+   ["date-fns/locale/ar-SA" :default dateFnsLocalesAr]
+   ["date-fns/locale/ca" :default dateFnsLocalesCa]
+   ["date-fns/locale/de" :default dateFnsLocalesDe]
+   ["date-fns/locale/el" :default dateFnsLocalesEl]
+   ["date-fns/locale/en-US" :default dateFnsLocalesEnUs]
+   ["date-fns/locale/es" :default dateFnsLocalesEs]
+   ["date-fns/locale/fa-IR" :default dateFnsLocalesFa]
+   ["date-fns/locale/fr" :default dateFnsLocalesFr]
+   ["date-fns/locale/he" :default dateFnsLocalesHe]
+   ["date-fns/locale/pt-BR" :default dateFnsLocalesPtBr]
+   ["date-fns/locale/ro" :default dateFnsLocalesRo]
+   ["date-fns/locale/ru" :default dateFnsLocalesRu]
+   ["date-fns/locale/tr" :default dateFnsLocalesTr]
+   ["date-fns/locale/zh-CN" :default dateFnsLocalesZhCn]
    ["luxon" :as lxn]
    [app.util.object :as obj]
    [cuerdas.core :as str]))
@@ -218,6 +219,7 @@
        :ru dateFnsLocalesRu
        :ro dateFnsLocalesRo
        :de dateFnsLocalesDe
+       :fa dateFnsLocalesFa
        :pt_br dateFnsLocalesPtBr
        :zh_cn dateFnsLocalesZhCn})
 

@@ -19,7 +19,7 @@ $height-palette-max: 80px;
   width: 100vw;
   height: 100vh;
   user-select: none;
-
+  background-color: $color-canvas;
   display: grid;
   grid-template-areas:
     "header header header header"
@@ -63,7 +63,6 @@ $height-palette-max: 80px;
 
   .color-palette {
     grid-area: color-palette;
-    min-height: $height-palette-min;
     max-height: $height-palette-max;
     height: var(--height, $height-palette);
   }
@@ -242,12 +241,13 @@ $height-palette-max: 80px;
     position: relative;
 
     .viewport-overlays {
+      cursor: initial;
+      height: 100%;
+      overflow: hidden;
+      pointer-events: none;
       position: absolute;
       width: 100%;
-      height: 100%;
       z-index: 10;
-      pointer-events: none;
-      cursor: initial;
 
       .pixel-overlay {
         height: 100%;
@@ -316,6 +316,10 @@ $height-palette-max: 80px;
   }
 }
 
+.workspace-frame-icon {
+  fill: $color-gray-40;
+}
+
 .workspace-frame-label {
   fill: $color-gray-40;
   font-size: $fs12;
@@ -348,9 +352,10 @@ $height-palette-max: 80px;
   position: absolute;
   width: 100%;
   z-index: 12;
-  pointer-events: initial;
+  pointer-events: none;
 
   .path-actions {
+    pointer-events: initial;
     display: flex;
     flex-direction: row;
     background: white;

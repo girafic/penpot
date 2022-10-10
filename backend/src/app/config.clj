@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.config
   "A configuration management."
@@ -19,6 +19,7 @@
    [clojure.pprint :as pprint]
    [clojure.spec.alpha :as s]
    [cuerdas.core :as str]
+   [datoteka.fs :as fs]
    [environ.core :refer [env]]
    [integrant.core :as ig]))
 
@@ -41,21 +42,22 @@
     data))
 
 (def defaults
-  {:host "devenv"
-   :tenant "dev"
-   :database-uri "postgresql://postgres/penpot"
+  {:database-uri "postgresql://postgres/penpot"
    :database-username "penpot"
    :database-password "penpot"
 
-   :default-blob-version 3
+   :default-blob-version 4
    :loggers-zmq-uri "tcp://localhost:45556"
+   :rpc-rlimit-config (fs/path "resources/rlimit.edn")
 
    :file-change-snapshot-every 5
    :file-change-snapshot-timeout "3h"
 
    :public-uri "http://localhost:3449"
-   :redis-uri "redis://redis/0"
+   :host "localhost"
+   :tenant "main"
 
+   :redis-uri "redis://redis/0"
    :srepl-host "127.0.0.1"
    :srepl-port 6062
 
@@ -63,11 +65,6 @@
    :storage-assets-fs-directory "assets"
 
    :assets-path "/internal/assets/"
-
-   :rlimit-password 10
-   :rlimit-image 2
-   :rlimit-font 5
-
    :smtp-default-reply-to "Penpot <no-reply@example.com>"
    :smtp-default-from "Penpot <no-reply@example.com>"
 
@@ -83,35 +80,35 @@
    :ldap-attrs-username "uid"
    :ldap-attrs-email "mail"
    :ldap-attrs-fullname "cn"
-   :ldap-attrs-photo "jpegPhoto"
 
    ;; a server prop key where initial project is stored.
    :initial-project-skey "initial-project"})
 
-(s/def ::flags ::us/set-of-keywords)
+(s/def ::default-rpc-rlimit ::us/vector-of-strings)
+(s/def ::rpc-rlimit-config ::fs/path)
 
-;; DEPRECATED PROPERTIES: should be removed in 1.10
-(s/def ::registration-enabled ::us/boolean)
-(s/def ::smtp-enabled ::us/boolean)
+(s/def ::media-max-file-size ::us/integer)
+
+(s/def ::flags ::us/vector-of-keywords)
 (s/def ::telemetry-enabled ::us/boolean)
-(s/def ::asserts-enabled ::us/boolean)
-;; END DEPRECATED
 
 (s/def ::audit-log-archive-uri ::us/string)
-(s/def ::audit-log-gc-max-age ::dt/duration)
 
-(s/def ::admins ::us/set-of-str)
+(s/def ::admins ::us/set-of-strings)
 (s/def ::file-change-snapshot-every ::us/integer)
 (s/def ::file-change-snapshot-timeout ::dt/duration)
 
 (s/def ::default-executor-parallelism ::us/integer)
-(s/def ::blocking-executor-parallelism ::us/integer)
 (s/def ::worker-executor-parallelism ::us/integer)
+
+(s/def ::authenticated-cookie-domain ::us/string)
+(s/def ::authenticated-cookie-name ::us/string)
+(s/def ::auth-token-cookie-name ::us/string)
+(s/def ::auth-token-cookie-max-age ::dt/duration)
 
 (s/def ::secret-key ::us/string)
 (s/def ::allow-demo-users ::us/boolean)
 (s/def ::assets-path ::us/string)
-(s/def ::authenticated-cookie-domain ::us/string)
 (s/def ::database-password (s/nilable ::us/string))
 (s/def ::database-uri ::us/string)
 (s/def ::database-username (s/nilable ::us/string))
@@ -135,21 +132,21 @@
 (s/def ::oidc-token-uri ::us/string)
 (s/def ::oidc-auth-uri ::us/string)
 (s/def ::oidc-user-uri ::us/string)
-(s/def ::oidc-scopes ::us/set-of-str)
-(s/def ::oidc-roles ::us/set-of-str)
+(s/def ::oidc-scopes ::us/set-of-strings)
+(s/def ::oidc-roles ::us/set-of-strings)
 (s/def ::oidc-roles-attr ::us/keyword)
+(s/def ::oidc-email-attr ::us/keyword)
+(s/def ::oidc-name-attr ::us/keyword)
 (s/def ::host ::us/string)
 (s/def ::http-server-port ::us/integer)
 (s/def ::http-server-host ::us/string)
-(s/def ::http-server-min-threads ::us/integer)
-(s/def ::http-server-max-threads ::us/integer)
-(s/def ::http-session-idle-max-age ::dt/duration)
-(s/def ::http-session-updater-batch-max-age ::dt/duration)
-(s/def ::http-session-updater-batch-max-size ::us/integer)
+(s/def ::http-server-max-body-size ::us/integer)
+(s/def ::http-server-max-multipart-body-size ::us/integer)
+(s/def ::http-server-io-threads ::us/integer)
+(s/def ::http-server-worker-threads ::us/integer)
 (s/def ::initial-project-skey ::us/string)
 (s/def ::ldap-attrs-email ::us/string)
 (s/def ::ldap-attrs-fullname ::us/string)
-(s/def ::ldap-attrs-photo ::us/string)
 (s/def ::ldap-attrs-username ::us/string)
 (s/def ::ldap-base-dn ::us/string)
 (s/def ::ldap-bind-dn ::us/string)
@@ -169,10 +166,13 @@
 (s/def ::profile-complaint-threshold ::us/integer)
 (s/def ::public-uri ::us/string)
 (s/def ::redis-uri ::us/string)
-(s/def ::registration-domain-whitelist ::us/set-of-str)
-(s/def ::rlimit-font ::us/integer)
-(s/def ::rlimit-image ::us/integer)
-(s/def ::rlimit-password ::us/integer)
+(s/def ::registration-domain-whitelist ::us/set-of-strings)
+
+(s/def ::semaphore-process-font ::us/integer)
+(s/def ::semaphore-process-image ::us/integer)
+(s/def ::semaphore-update-file ::us/integer)
+(s/def ::semaphore-auth ::us/integer)
+
 (s/def ::smtp-default-from ::us/string)
 (s/def ::smtp-default-reply-to ::us/string)
 (s/def ::smtp-host ::us/string)
@@ -197,18 +197,15 @@
 (s/def ::telemetry-with-taiga ::us/boolean)
 (s/def ::tenant ::us/string)
 
-(s/def ::sentry-trace-sample-rate ::us/number)
-(s/def ::sentry-attach-stack-trace ::us/boolean)
-(s/def ::sentry-debug ::us/boolean)
-(s/def ::sentry-dsn ::us/string)
-
 (s/def ::config
   (s/keys :opt-un [::secret-key
                    ::flags
                    ::admins
                    ::allow-demo-users
                    ::audit-log-archive-uri
-                   ::audit-log-gc-max-age
+                   ::auth-token-cookie-name
+                   ::auth-token-cookie-max-age
+                   ::authenticated-cookie-name
                    ::authenticated-cookie-domain
                    ::database-password
                    ::database-uri
@@ -217,9 +214,9 @@
                    ::database-min-pool-size
                    ::database-max-pool-size
                    ::default-blob-version
+                   ::default-rpc-rlimit
                    ::error-report-webhook
                    ::default-executor-parallelism
-                   ::blocking-executor-parallelism
                    ::worker-executor-parallelism
                    ::file-change-snapshot-every
                    ::file-change-snapshot-timeout
@@ -239,19 +236,19 @@
                    ::oidc-user-uri
                    ::oidc-scopes
                    ::oidc-roles-attr
+                   ::oidc-email-attr
+                   ::oidc-name-attr
                    ::oidc-roles
                    ::host
                    ::http-server-host
                    ::http-server-port
-                   ::http-server-max-threads
-                   ::http-server-min-threads
-                   ::http-session-idle-max-age
-                   ::http-session-updater-batch-max-age
-                   ::http-session-updater-batch-max-size
+                   ::http-server-max-body-size
+                   ::http-server-max-multipart-body-size
+                   ::http-server-io-threads
+                   ::http-server-worker-threads
                    ::initial-project-skey
                    ::ldap-attrs-email
                    ::ldap-attrs-fullname
-                   ::ldap-attrs-photo
                    ::ldap-attrs-username
                    ::ldap-base-dn
                    ::ldap-bind-dn
@@ -264,6 +261,7 @@
                    ::local-assets-uri
                    ::loggers-loki-uri
                    ::loggers-zmq-uri
+                   ::media-max-file-size
                    ::profile-bounce-max-age
                    ::profile-bounce-threshold
                    ::profile-complaint-max-age
@@ -271,25 +269,25 @@
                    ::public-uri
                    ::redis-uri
                    ::registration-domain-whitelist
-                   ::registration-enabled
-                   ::rlimit-font
-                   ::rlimit-image
-                   ::rlimit-password
-                   ::sentry-dsn
-                   ::sentry-debug
-                   ::sentry-attach-stack-trace
-                   ::sentry-trace-sample-rate
+                   ::rpc-rlimit-config
+
+                   ::semaphore-process-font
+                   ::semaphore-process-image
+                   ::semaphore-update-file
+                   ::semaphore-auth
+
                    ::smtp-default-from
                    ::smtp-default-reply-to
-                   ::smtp-enabled
                    ::smtp-host
                    ::smtp-password
                    ::smtp-port
                    ::smtp-ssl
                    ::smtp-tls
                    ::smtp-username
+
                    ::srepl-host
                    ::srepl-port
+
                    ::assets-storage-backend
                    ::storage-assets-fs-directory
                    ::storage-assets-s3-bucket
@@ -307,9 +305,10 @@
                    ::tenant]))
 
 (def default-flags
-  [:enable-backend-asserts
-   :enable-backend-api-doc
-   :enable-secure-session-cookies])
+  [:enable-backend-api-doc
+   :enable-backend-worker
+   :enable-secure-session-cookies
+   :enable-email-verification])
 
 (defn- parse-flags
   [config]
@@ -339,8 +338,8 @@
       (when (ex/ex-info? e)
         (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;")
         (println "Error on validating configuration:")
-        (println (:explain (ex-data e))
-        (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;")))
+        (println (us/pretty-explain (ex-data e)))
+        (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;"))
       (throw e))))
 
 (def version
@@ -349,8 +348,8 @@
                        (str/trim))
                "%version%")))
 
-(def ^:dynamic config (read-config))
-(def ^:dynamic flags  (parse-flags config))
+(defonce ^:dynamic config (read-config))
+(defonce ^:dynamic flags (parse-flags config))
 
 (def deletion-delay
   (dt/duration {:days 7}))

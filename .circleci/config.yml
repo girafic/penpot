@@ -2,22 +2,16 @@ version: 2
 jobs:
   build:
     docker:
-      # specify the version you desire here
       - image: penpotapp/devenv:latest
-
-      # Specify service dependencies here if necessary
-      # CircleCI maintains a library of pre-built images
-      # documented at https://circleci.com/docs/2.0/circleci-images/
-      # - image: circleci/postgres:9.4
-      - image: circleci/postgres:13.3-ram
+      - image: cimg/postgres:13.5
         environment:
           POSTGRES_USER: penpot_test
           POSTGRES_PASSWORD: penpot_test
           POSTGRES_DB: penpot_test
-
-      - image: circleci/redis:6.0.8
+      - image: cimg/redis:6.2.6
 
     working_directory: ~/repo
+    resource_class: large
 
     environment:
       # Customize the JVM maximum heap limit
@@ -32,6 +26,8 @@ jobs:
            - v1-dependencies-{{ checksum "backend/deps.edn" }}-{{ checksum "frontend/deps.edn"}}-{{ checksum "common/deps.edn"}}
            # fallback to using the latest cache if no exact match is found
            - v1-dependencies-
+
+      - run: cd .clj-kondo && cat config.edn
 
       - run:
           name: common lint
@@ -83,16 +79,16 @@ jobs:
           environment:
             PATH: /usr/local/nodejs/bin/:/usr/local/bin:/bin:/usr/bin
 
-      # - run:
-      #     working_directory: "./common"
-      #     name: common tests (cljs)
-      #     command: |
-      #       yarn install
-      #       yarn run compile-test
-      #       node target/test.js
-      # 
-      #     environment:
-      #       PATH: /usr/local/nodejs/bin/:/usr/local/bin:/bin:/usr/bin
+      - run:
+          working_directory: "./common"
+          name: common tests (cljs)
+          command: |
+            yarn install
+            yarn run compile-test
+            node target/test.js
+
+          environment:
+            PATH: /usr/local/nodejs/bin/:/usr/local/bin:/bin:/usr/bin
 
       - run:
           working_directory: "./common"

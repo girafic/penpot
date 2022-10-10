@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.snap
   (:require
@@ -10,6 +10,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
+   [app.common.pages :as cp]
    [app.common.pages.helpers :as cph]
    [app.common.uuid :refer [zero]]
    [app.main.refs :as refs]
@@ -21,7 +22,7 @@
 
 (def ^:const snap-accuracy 10)
 (def ^:const snap-path-accuracy 10)
-(def ^:const snap-distance-accuracy 10)
+(def ^:const snap-distance-accuracy 20)
 
 (defn- remove-from-snap-points
   [remove-snap?]
@@ -32,25 +33,27 @@
 
 (defn make-remove-snap
   "Creates a filter for the snap data. Used to disable certain layouts"
-  [layout filter-shapes]
+  [layout filter-shapes objects focus]
 
-  (fn [{:keys [type id]}]
+  (fn [{:keys [type id frame-id]}]
     (cond
       (= type :layout)
       (or (not (contains? layout :display-grid))
-          (not (contains? layout :snap-grid)))
+          (not (contains? layout :snap-grid))
+          (and (d/not-empty? focus)
+               (not (contains? focus id))))
 
       (= type :guide)
       (or (not (contains? layout :rules))
-          (not (contains? layout :snap-guides)))
+          (not (contains? layout :snap-guides))
+          (and (d/not-empty? focus)
+               (not (contains? focus frame-id))))
 
       :else
       (or (contains? filter-shapes id)
-          (not (contains? layout :dynamic-alignment))))))
-
-(defn- flatten-to-points
-  [query-result]
-  (mapcat (fn [[_ data]] (map :pt data)) query-result))
+          (not (contains? layout :dynamic-alignment))
+          (and (d/not-empty? focus)
+               (not (cp/is-in-focus? objects focus id)))))))
 
 (defn- calculate-distance [query-result point coord]
   (->> query-result
@@ -75,16 +78,15 @@
       ;; Otherwise the root frame is the common
       :else zero)))
 
-(defn get-snap-points [page-id frame-id remove-snap? point coord]
+(defn get-snap-points [page-id frame-id remove-snap? zoom point coord]
   (let [value (get point coord)]
     (->> (uw/ask! {:cmd :snaps/range-query
                    :page-id page-id
                    :frame-id frame-id
                    :axis coord
-                   :ranges [[(- value 0.5) (+ value 0.5)]]})
+                   :ranges [[(- value (/ 0.5 zoom)) (+ value (/ 0.5 zoom))]]})
          (rx/take 1)
-         (rx/map (remove-from-snap-points remove-snap?))
-         (rx/map flatten-to-points))))
+         (rx/map (remove-from-snap-points remove-snap?)))))
 
 (defn- search-snap
   [page-id frame-id points coord remove-snap? zoom]
@@ -188,7 +190,7 @@
         snap-list (d/concat-vec lt-snap gt-snap between-snap)
         min-snap  (reduce best-snap ##Inf snap-list)]
 
-    (if (mth/finite? min-snap) [0 min-snap] nil)))
+    (if (d/num? min-snap) [0 min-snap] nil)))
 
 (defn search-snap-distance [selrect coord shapes-lt shapes-gt zoom]
   (->> (rx/combine-latest shapes-lt shapes-gt)
@@ -223,33 +225,43 @@
          (rx/map snap->vector))))
 
 (defn closest-snap-point
-  [page-id shapes layout zoom point]
+  [page-id shapes objects layout zoom focus point]
   (let [frame-id (snap-frame-id shapes)
         filter-shapes (into #{} (map :id shapes))
-        remove-snap? (make-remove-snap layout filter-shapes)]
+        remove-snap? (make-remove-snap layout filter-shapes objects focus)]
     (->> (closest-snap page-id frame-id [point] remove-snap? zoom)
          (rx/map #(or % (gpt/point 0 0)))
          (rx/map #(gpt/add point %)))))
 
+(defn combine-snaps-points
+  ([] nil)
+  ([p1] p1)
+  ([p1 p2]
+   (cond
+     (nil? p2) p1
+     (nil? p1) p2
+
+     :else
+     (gpt/point (mth/max-abs (:x p1) (:x p2))
+                (mth/max-abs (:y p1) (:y p2))))))
+
 (defn closest-snap-move
-  [page-id shapes objects layout zoom movev]
+  [page-id shapes objects layout zoom focus movev]
   (let [frame-id (snap-frame-id shapes)
         filter-shapes (into #{} (map :id shapes))
-        remove-snap? (make-remove-snap layout filter-shapes)
+        remove-snap? (make-remove-snap layout filter-shapes objects focus)
 
-        shape (if (> (count shapes) 1)
-                (->> shapes (map gsh/transform-shape) gsh/selection-rect (gsh/setup {:type :rect}))
-                (->> shapes (first)))
+        snap-points
+        (->> shapes
+             (gsh/selection-rect)
+             (sp/selrect-snap-points)
+             ;; Move the points in the translation vector
+             (map #(gpt/add % movev)))]
 
-        shapes-points (->> shape
-                           (sp/shape-snap-points)
-                           ;; Move the points in the translation vector
-                           (map #(gpt/add % movev)))]
-
-    (->> (rx/merge (closest-snap page-id frame-id shapes-points remove-snap? zoom)
+    (->> (rx/merge (closest-snap page-id frame-id snap-points remove-snap? zoom)
                    (when (contains? layout :dynamic-alignment)
                      (closest-distance-snap page-id shapes objects zoom movev)))
-         (rx/reduce gpt/min)
+         (rx/reduce combine-snaps-points)
          (rx/map #(or % (gpt/point 0 0))))))
 
 
@@ -352,9 +364,14 @@
                0)
           dy (if (not= 0 (:y snap-delta))
                (- (+ (:y snap-pos) (:y snap-delta)) (:y position))
-               0)]
+               0)
 
-      (cond-> position
-        (<= (mth/abs dx) snap-accuracy) (update :x + dx)
-        (<= (mth/abs dy) snap-accuracy) (update :y + dy)))
+          ;; If the deltas (dx,dy) are bigger than the snap-accuracy means the stored snap
+          ;; is not valid, so we change to 0
+          dx (if (> (mth/abs dx) snap-accuracy) 0 dx)
+          dy (if (> (mth/abs dy) snap-accuracy) 0 dy)]
+      (-> position
+          (update :x + dx)
+          (update :y + dy)))
+
     position))

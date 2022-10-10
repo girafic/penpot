@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.shapes
   "A workspace specific shapes wrappers.
@@ -13,12 +13,12 @@
   common."
   (:require
    [app.common.pages.helpers :as cph]
+   [app.main.ui.context :as ctx]
    [app.main.ui.shapes.circle :as circle]
    [app.main.ui.shapes.image :as image]
    [app.main.ui.shapes.rect :as rect]
    [app.main.ui.shapes.text.fontfaces :as ff]
    [app.main.ui.workspace.shapes.bool :as bool]
-   [app.main.ui.workspace.shapes.bounding-box :refer [bounding-box]]
    [app.main.ui.workspace.shapes.common :as common]
    [app.main.ui.workspace.shapes.frame :as frame]
    [app.main.ui.workspace.shapes.group :as group]
@@ -26,14 +26,14 @@
    [app.main.ui.workspace.shapes.svg-raw :as svg-raw]
    [app.main.ui.workspace.shapes.text :as text]
    [app.util.object :as obj]
-   [debug :refer [debug?]]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (declare shape-wrapper)
 (declare group-wrapper)
 (declare svg-raw-wrapper)
 (declare bool-wrapper)
-(declare frame-wrapper)
+(declare root-frame-wrapper)
+(declare nested-frame-wrapper)
 
 (def circle-wrapper (common/generic-wrapper-factory circle/circle-shape))
 (def image-wrapper (common/generic-wrapper-factory image/image-shape))
@@ -41,12 +41,21 @@
 
 (mf/defc root-shape
   "Draws the root shape of the viewport and recursively all the shapes"
-  {::mf/wrap-props false}
+  {::mf/wrap [mf/memo]
+   ::mf/wrap-props false}
   [props]
   (let [objects       (obj/get props "objects")
         active-frames (obj/get props "active-frames")
-        shapes        (cph/get-immediate-children objects)]
-    [:*
+        shapes        (cph/get-immediate-children objects)
+
+        ;; We group the objects together per frame-id so if an object of a different
+        ;; frame changes won't affect the rendering frame
+        frame-objects
+        (mf/use-memo
+         (mf/deps objects)
+         #(cph/objects-by-frame objects))]
+
+    [:& (mf/provider ctx/active-frames) {:value active-frames}
      ;; Render font faces only for shapes that are part of the root
      ;; frame but don't belongs to any other frame.
      (let [xform (comp
@@ -54,52 +63,59 @@
                   (mapcat #(cph/get-children-with-self objects (:id %))))]
        [:& ff/fontfaces-style {:shapes (into [] xform shapes)}])
 
-     (for [item shapes]
-       (if (cph/frame-shape? item)
-         [:& frame-wrapper {:shape item
-                            :key (:id item)
-                            :objects objects
-                            :thumbnail? (not (get active-frames (:id item) false))}]
+     (for [shape shapes]
+       (cond
+         (not (cph/frame-shape? shape))
+         [:& shape-wrapper
+          {:shape shape
+           :key (:id shape)}]
 
-         [:& shape-wrapper {:shape item
-                            :key (:id item)}]))]))
+         (cph/root-frame? shape)
+         [:& root-frame-wrapper
+          {:shape shape
+           :key (:id shape)
+           :objects (get frame-objects (:id shape))
+           :thumbnail? (not (contains? active-frames (:id shape)))}]
+
+         :else
+         [:& nested-frame-wrapper
+          {:shape shape
+           :key (:id shape)
+           :objects (get frame-objects (:id shape))}]))]))
 
 (mf/defc shape-wrapper
   {::mf/wrap [#(mf/memo' % (mf/check-props ["shape"]))]
    ::mf/wrap-props false}
   [props]
-  (let [shape  (obj/get props "shape")
-        opts  #js {:shape shape}
+  (let [shape (obj/get props "shape")
 
-        svg-element? (and (= (:type shape) :svg-raw)
-                          (not= :svg (get-in shape [:content :tag])))]
+        active-frames
+        (when (cph/root-frame? shape) (mf/use-ctx ctx/active-frames))
 
+        thumbnail?
+        (and (some? active-frames)
+             (not (contains? active-frames (:id shape))))
+
+        opts  #js {:shape shape :thumbnail? thumbnail?}]
     (when (and (some? shape) (not (:hidden shape)))
-      [:*
-       (if-not svg-element?
-         (case (:type shape)
-           :path    [:> path/path-wrapper opts]
-           :text    [:> text/text-wrapper opts]
-           :group   [:> group-wrapper opts]
-           :rect    [:> rect-wrapper opts]
-           :image   [:> image-wrapper opts]
-           :circle  [:> circle-wrapper opts]
-           :svg-raw [:> svg-raw-wrapper opts]
-           :bool    [:> bool-wrapper opts]
+      (case (:type shape)
+        :path    [:> path/path-wrapper opts]
+        :text    [:> text/text-wrapper opts]
+        :group   [:> group-wrapper opts]
+        :rect    [:> rect-wrapper opts]
+        :image   [:> image-wrapper opts]
+        :circle  [:> circle-wrapper opts]
+        :svg-raw [:> svg-raw-wrapper opts]
+        :bool    [:> bool-wrapper opts]
 
-           ;; Only used when drawing a new frame.
-           :frame [:> frame-wrapper opts]
+        ;; Only used when drawing a new frame.
+        :frame [:> nested-frame-wrapper opts]
 
-           nil)
-
-         ;; Don't wrap svg elements inside a <g> otherwise some can break
-         [:> svg-raw-wrapper opts])
-
-       (when (debug? :bounding-boxes)
-         [:> bounding-box opts])])))
+        nil))))
 
 (def group-wrapper (group/group-wrapper-factory shape-wrapper))
 (def svg-raw-wrapper (svg-raw/svg-raw-wrapper-factory shape-wrapper))
 (def bool-wrapper (bool/bool-wrapper-factory shape-wrapper))
-(def frame-wrapper (frame/frame-wrapper-factory shape-wrapper))
+(def root-frame-wrapper (frame/root-frame-wrapper-factory shape-wrapper))
+(def nested-frame-wrapper (frame/nested-frame-wrapper-factory shape-wrapper))
 

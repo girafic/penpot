@@ -2,19 +2,19 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.workspace.bool
   (:require
-   [app.common.colors :as clr]
    [app.common.data :as d]
    [app.common.geom.shapes :as gsh]
-   [app.common.pages.changes-builder :as cb]
+   [app.common.pages.changes-builder :as pcb]
    [app.common.pages.helpers :as cph]
    [app.common.path.shapes-to-path :as stp]
+   [app.common.types.shape-tree :as ctt]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.changes :as dch]
-   [app.main.data.workspace.common :as dwc]
+   [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.state-helpers :as wsh]
    [beicon.core :as rx]
    [cuerdas.core :as str]
@@ -35,8 +35,8 @@
   (let [shapes (mapv #(stp/convert-to-path % objects) shapes)
         head (if (= bool-type :difference) (first shapes) (last shapes))
         head (cond-> head
-               (and (contains? head :svg-attrs) (nil? (:fill-color head)))
-               (assoc :fill-color clr/black))
+               (and (contains? head :svg-attrs) (empty? (:fills head)))
+               (assoc :fills stp/default-bool-fills))
 
         head-data (select-keys head stp/style-properties)
 
@@ -61,8 +61,8 @@
                     (mapv #(stp/convert-to-path % objects)))
         head (if (= bool-type :difference) (first shapes) (last shapes))
         head (cond-> head
-               (and (contains? head :svg-attrs) (nil? (:fill-color head)))
-               (assoc :fill-color clr/black))
+               (and (contains? head :svg-attrs) (empty? (:fills head)))
+               (assoc :fills stp/default-bool-fills))
         head-data (select-keys head stp/style-properties)]
 
     (-> group
@@ -90,19 +90,19 @@
       (let [page-id (:current-page-id state)
             objects (wsh/lookup-page-objects state)
             base-name (-> bool-type d/name str/capital (str "-1"))
-            name (-> (dwc/retrieve-used-names objects)
-                     (dwc/generate-unique-name base-name))
+            name (-> (ctt/retrieve-used-names objects)
+                     (ctt/generate-unique-name base-name))
             shapes  (selected-shapes state)]
 
         (when-not (empty? shapes)
           (let [[boolean-data index] (create-bool-data bool-type name shapes objects)
                 shape-id (:id boolean-data)
-                changes (-> (cb/empty-changes it page-id)
-                            (cb/with-objects objects)
-                            (cb/add-obj boolean-data {:index index})
-                            (cb/change-parent shape-id shapes))]
+                changes (-> (pcb/empty-changes it page-id)
+                            (pcb/with-objects objects)
+                            (pcb/add-object boolean-data {:index index})
+                            (pcb/change-parent shape-id shapes))]
             (rx/of (dch/commit-changes changes)
-                   (dwc/select-shapes (d/ordered-set shape-id)))))))))
+                   (dws/select-shapes (d/ordered-set shape-id)))))))))
 
 (defn group-to-bool
   [shape-id bool-type]

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.handoff.left-sidebar
   (:require
@@ -15,7 +15,7 @@
    [app.util.dom :as dom]
    [app.util.keyboard :as kbd]
    [okulary.core :as l]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn- make-collapsed-iref
   [id]
@@ -45,7 +45,7 @@
           (dom/prevent-default event)
           (let [id (:id item)]
             (cond
-              (or (kbd/ctrl? event) (kbd/meta? event))
+              (kbd/mod? event)
               (st/emit! (dv/toggle-selection id))
 
               (kbd/shift? event)
@@ -72,7 +72,7 @@
                                                      :icon-layer (= (:type item) :icon))
                               :on-click select-shape}
       [:& si/element-icon {:shape item}]
-      [:& layer-name {:shape item}]
+      [:& layer-name {:shape item :disabled-double-click true}]
 
       (when (and (not disable-collapse?) (:shapes item))
         [:span.toggle-content

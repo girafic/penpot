@@ -2,14 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.shapes.group
   (:require
+   [app.common.data.macros :as dm]
    [app.main.ui.context :as muc]
    [app.main.ui.shapes.mask :refer [mask-url clip-url mask-factory]]
    [app.util.object :as obj]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn group-shape
   [shape-wrapper]
@@ -19,7 +20,8 @@
       [props]
       (let [shape          (unchecked-get props "shape")
             childs         (unchecked-get props "childs")
-            render-id      (mf/use-ctx muc/render-ctx)
+            objects        (unchecked-get props "objects")
+            render-id      (mf/use-ctx muc/render-id)
             masked-group?  (:masked-group? shape)
 
             [mask childs]  (if masked-group?
@@ -32,24 +34,25 @@
             ;  Firefox bug: https://bugzilla.mozilla.org/show_bug.cgi?id=1734805
             [clip-wrapper clip-props]
             (if masked-group?
-              ["g" (-> (obj/new)
+              ["g" (-> (obj/create)
                        (obj/set! "clipPath" (clip-url render-id mask)))]
               [mf/Fragment nil])
 
             [mask-wrapper mask-props]
             (if masked-group?
-              ["g" (-> (obj/new)
-                       (obj/set! "mask"     (mask-url render-id mask)))]
+              ["g" (-> (obj/create)
+                       (obj/set! "mask" (mask-url render-id mask)))]
               [mf/Fragment nil])]
 
         [:> clip-wrapper clip-props
          [:> mask-wrapper mask-props
           (when masked-group?
-            [:> render-mask #js {:mask mask}])
+            [:> render-mask #js {:mask mask
+                                 :objects objects}])
 
           (for [item childs]
             [:& shape-wrapper {:shape item
-                               :key (:id item)}])]]))))
+                               :key (dm/str (:id item))}])]]))))
 
 
 

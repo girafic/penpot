@@ -11,12 +11,20 @@
    [app.common.exceptions :as ex]
    [app.common.geom.shapes :as gsh]
    [app.common.geom.shapes.bool :as gshb]
+   [app.common.math :as mth]
    [app.common.pages.common :refer [component-sync-attrs]]
    [app.common.pages.helpers :as cph]
-   [app.common.pages.init :as init]
    [app.common.spec :as us]
-   [app.common.spec.change :as spec.change]
-   [app.common.spec.shape :as spec.shape]))
+   [app.common.pages.changes-spec :as pcs]
+   [app.common.types.components-list :as ctkl]
+   [app.common.types.container :as ctn]
+   [app.common.types.colors-list :as ctcl]
+   [app.common.types.file :as ctf]
+   [app.common.types.page :as ctp]
+   [app.common.types.pages-list :as ctpl]
+   [app.common.types.shape :as cts]
+   [app.common.types.shape-tree :as ctst]
+   [app.common.types.typographies-list :as ctyl]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Specific helpers
@@ -27,15 +35,11 @@
   [coll o]
   (into [] (filter #(not= % o)) coll))
 
-(defn vec-without-nils
-  [coll]
-  (into [] (remove nil?) coll))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Page Transformation Changes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; --- Changes Processing Impl
+;; === Changes Processing Impl
 
 (defmulti process-change (fn [_ change] (:type change)))
 (defmulti process-operation (fn [_ op] (:type op)))
@@ -48,7 +52,7 @@
    ;; When verify? false we spec the schema validation. Currently used to make just
    ;; 1 validation even if the changes are applied twice
    (when verify?
-     (us/assert ::spec.change/changes items))
+     (us/assert ::pcs/changes items))
 
    (let [result (reduce #(or (process-change %1 %2) %1) data items)]
      ;; Validate result shapes (only on the backend)
@@ -58,7 +62,7 @@
             (doseq [[id shape] (:objects page)]
               (when-not (= shape (get-in data [:pages-index page-id :objects id]))
                 ;; If object has change verify is correct
-                (us/verify ::spec.shape/shape shape))))))
+                (us/verify ::cts/shape shape))))))
 
      result)))
 
@@ -73,45 +77,9 @@
 
 (defmethod process-change :add-obj
   [data {:keys [id obj page-id component-id frame-id parent-id index ignore-touched]}]
-  (letfn [(update-parent-shapes [shapes]
-            ;; Ensure that shapes is always a vector.
-            (let [shapes (into [] shapes)]
-              (cond
-                (some #{id} shapes)
-                shapes
-
-                (nil? index)
-                (if (= :frame (:type obj))
-                  (into [id] shapes)
-                  (conj shapes id))
-
-                :else
-                (cph/insert-at-index shapes index [id]))))
-
-          (update-parent [parent]
-            (-> parent
-                (update :shapes update-parent-shapes)
-                (update :shapes vec-without-nils)
-                (cond-> (and (:shape-ref parent)
-                             (not= (:id parent) frame-id)
-                             (not ignore-touched))
-                  (-> (update :touched cph/set-touched-group :shapes-group)
-                      (dissoc :remote-synced?)))))
-
-          (update-objects [objects parent-id]
-            (if (and (or (nil? parent-id) (contains? objects parent-id))
-                     (or (nil? frame-id) (contains? objects frame-id)))
-              (-> objects
-                  (assoc id (-> obj
-                                (assoc :frame-id frame-id)
-                                (assoc :parent-id parent-id)
-                                (assoc :id id)))
-                  (update parent-id update-parent))
-              objects))
-
-          (update-container [data]
-            (let [parent-id (or parent-id frame-id)]
-              (update data :objects update-objects parent-id)))]
+  (let [update-container
+        (fn [container]
+          (ctst/add-shape id obj container frame-id parent-id index ignore-touched))]
 
     (if page-id
       (d/update-in-when data [:pages-index page-id] update-container)
@@ -211,7 +179,7 @@
             (let [invalid-targets (calculate-invalid-targets objects shape-id)]
               (and (contains? objects shape-id)
                    (not (invalid-targets parent-id))
-                   (cph/valid-frame-target? objects parent-id shape-id))))
+                   #_(cph/valid-frame-target? objects parent-id shape-id))))
 
           (insert-items [prev-shapes index shapes]
             (let [prev-shapes (or prev-shapes [])]
@@ -237,7 +205,7 @@
                              ;; We need to ensure that no `nil` in the
                              ;; shapes list after adding all the
                              ;; incoming shapes to the parent.
-                             (update :shapes vec-without-nils))]
+                             (update :shapes d/vec-without-nils))]
               (cond-> parent
                 (and (:shape-ref parent) (= (:type parent) :group) (not ignore-touched))
                 (-> (update :touched cph/set-touched-group :shapes-group)
@@ -258,7 +226,7 @@
 
                   (-> objects
                       (d/update-in-when [pid :shapes] without-obj sid)
-                      (d/update-in-when [pid :shapes] vec-without-nils)
+                      (d/update-in-when [pid :shapes] d/vec-without-nils)
                       (cond-> component? (d/update-when pid #(-> %
                                                                  (update :touched cph/set-touched-group :shapes-group)
                                                                  (dissoc :remote-synced?)))))))))
@@ -323,22 +291,11 @@
   [data {:keys [id name page]}]
   (when (and id name page)
     (ex/raise :type :conflict
-              :hint "name or page should be provided, never both"))
-  (letfn [(conj-if-not-exists [pages id]
-            (cond-> pages
-              (not (d/seek #(= % id) pages))
-              (conj id)))]
-    (if (and (string? name) (uuid? id))
-      (let [page (assoc init/empty-page-data
-                        :id id
-                        :name name)]
-        (-> data
-            (update :pages conj-if-not-exists id)
-            (update :pages-index assoc id page)))
-
-      (-> data
-          (update :pages conj-if-not-exists (:id page))
-          (update :pages-index assoc (:id page) page)))))
+              :hint "id+name or page should be provided, never both"))
+  (let [page (if (and (string? name) (uuid? id))
+               (ctp/make-empty-page id name)
+               page)]
+    (ctpl/add-page data page)))
 
 (defmethod process-change :mod-page
   [data {:keys [id name]}]
@@ -346,9 +303,7 @@
 
 (defmethod process-change :del-page
   [data {:keys [id]}]
-  (-> data
-      (update :pages (fn [pages] (filterv #(not= % id) pages)))
-      (update :pages-index dissoc id)))
+  (ctpl/delete-page data id))
 
 (defmethod process-change :mov-page
   [data {:keys [id index]}]
@@ -356,7 +311,7 @@
 
 (defmethod process-change :add-color
   [data {:keys [color]}]
-  (update data :colors assoc (:id color) color))
+  (ctcl/add-color data color))
 
 (defmethod process-change :mod-color
   [data {:keys [color]}]
@@ -364,7 +319,7 @@
 
 (defmethod process-change :del-color
   [data {:keys [id]}]
-  (update data :colors dissoc id))
+  (ctcl/delete-color data id))
 
 (defmethod process-change :add-recent-color
   [data {:keys [color]}]
@@ -392,12 +347,14 @@
 ;; -- Components
 
 (defmethod process-change :add-component
-  [data {:keys [id name path shapes]}]
-  (assoc-in data [:components id]
-            {:id id
-             :name name
-             :path path
-             :objects (d/index-by :id shapes)}))
+  [data {:keys [id name path main-instance-id main-instance-page shapes]}]
+  (ctkl/add-component data
+                      id
+                      name
+                      path
+                      main-instance-id
+                      main-instance-page
+                      shapes))
 
 (defmethod process-change :mod-component
   [data {:keys [id name path objects]}]
@@ -413,14 +370,22 @@
                   (assoc :objects objects))))
 
 (defmethod process-change :del-component
+  [data {:keys [id skip-undelete?]}]
+  (ctf/delete-component data id skip-undelete?))
+
+(defmethod process-change :restore-component
   [data {:keys [id]}]
-  (d/dissoc-in data [:components id]))
+  (ctf/restore-component data id))
+
+(defmethod process-change :purge-component
+  [data {:keys [id]}]
+  (ctf/purge-component data id))
 
 ;; -- Typography
 
 (defmethod process-change :add-typography
   [data {:keys [typography]}]
-  (update data :typographies assoc (:id typography) typography))
+  (ctyl/add-typography data typography))
 
 (defmethod process-change :mod-typography
   [data {:keys [typography]}]
@@ -428,31 +393,41 @@
 
 (defmethod process-change :del-typography
   [data {:keys [id]}]
-  (update data :typographies dissoc id))
+  (ctyl/delete-typography data id))
 
-;; -- Operations
+;; === Operations
 
 (defmethod process-operation :set
   [shape op]
-  (let [attr       (:attr op)
-        val        (:val op)
-        ignore     (:ignore-touched op)
+  (let [attr            (:attr op)
+        group           (get component-sync-attrs attr)
+        val             (:val op)
+        shape-val       (get shape attr)
+        ignore          (:ignore-touched op)
         ignore-geometry (:ignore-geometry op)
-        shape-ref  (:shape-ref shape)
-        group      (get component-sync-attrs attr)
-        root-name? (and (= group :name-group)
-                        (:component-root? shape))]
+        is-geometry?    (and (or (= group :geometry-group)
+                                 (and (= group :content-group) (= (:type shape) :path)))
+                             (not (#{:width :height} attr))) ;; :content in paths are also considered geometric
+        shape-ref       (:shape-ref shape)
+        root-name?      (and (= group :name-group)
+                             (:component-root? shape))
+
+        ;; For geometric attributes, there are cases in that the value changes
+        ;; slightly (e.g. when rounding to pixel, or when recalculating text
+        ;; positions in different zoom levels). To take this into account, we
+        ;; ignore geometric changes smaller than 1 pixel.
+        equal? (if is-geometry?
+                 (gsh/close-attrs? attr val shape-val 1)
+                 (gsh/close-attrs? attr val shape-val))]
 
     (cond-> shape
       ;; Depending on the origin of the attribute change, we need or not to
       ;; set the "touched" flag for the group the attribute belongs to.
       ;; In some cases we need to ignore touched only if the attribute is
       ;; geometric (position, width or transformation).
-      (and shape-ref group (not ignore) (not= val (get shape attr))
+      (and shape-ref group (not ignore) (not equal?)
            (not root-name?)
-           (not (and ignore-geometry
-                     (and (= group :geometry-group)
-                          (not (#{:width :height} attr))))))
+           (not (and ignore-geometry is-geometry?)))
       (->
         (update :touched cph/set-touched-group group)
         (dissoc :remote-synced?))
@@ -484,3 +459,36 @@
   (ex/raise :type :not-implemented
             :code :operation-not-implemented
             :context {:type (:type op)}))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Component changes detection
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Analyze one change and checks if if modifies the main instance of
+;; any component, so that it needs to be synced immediately to the
+;; main component. Return the ids of the components that need sync.
+
+(defmulti components-changed (fn [_ change] (:type change)))
+
+(defmethod components-changed :mod-obj
+  [file-data {:keys [id page-id _component-id operations]}]
+  (when page-id
+    (let [page (ctpl/get-page file-data page-id)
+          shape-and-parents (map #(ctn/get-shape page %)
+                                 (into [id] (cph/get-parent-ids (:objects page) id)))
+          need-sync? (fn [operation]
+                       ; We need to trigger a sync if the shape has changed any
+                       ; attribute that participates in components synchronization.
+                       (and (= (:type operation) :set)
+                            (component-sync-attrs (:attr operation))))
+          any-sync? (some need-sync? operations)]
+      (when any-sync?
+        (let [xform (comp (filter :main-instance?) ; Select shapes that are main component instances
+                          (map :id))]
+          (into #{} xform shape-and-parents))))))
+
+(defmethod components-changed :default
+  [_ _]
+  nil)
+

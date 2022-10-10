@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.sidebar.options.menus.shadow
   (:require
@@ -18,7 +18,7 @@
    [app.main.ui.workspace.sidebar.options.rows.color-row :refer [color-row]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (def shadow-attrs [:shadow])
 
@@ -57,7 +57,7 @@
         on-remove-shadow
         (fn [index]
           (fn []
-            (st/emit! (dch/update-shapes ids #(update % :shadow remove-shadow-by-index index) ))))
+            (st/emit! (dch/update-shapes ids #(update % :shadow remove-shadow-by-index index)))))
 
         select-text
         (fn [ref] (fn [_] (dom/select-text! (mf/ref-val ref))))
@@ -78,10 +78,9 @@
         update-color
         (fn [index]
           (fn [color]
-            (let [color (dissoc color :id :file-id :gradient)]
-              (st/emit! (dch/update-shapes
-                         ids
-                         #(assoc-in % [:shadow index :color] color))))))
+            (st/emit! (dch/update-shapes
+                       ids
+                       #(assoc-in % [:shadow index :color] color)))))
 
         detach-color
         (fn [index]
@@ -117,12 +116,12 @@
       ;;                    :value (:blur value)}]
 
       [:select.input-select
-        {:default-value (str (:style value))
-         :on-change (fn [event]
-                      (let [value (-> event dom/get-target dom/get-value d/read-string)]
-                        (st/emit! (dch/update-shapes ids #(assoc-in % [:shadow index :style] value)))))}
-        [:option {:value ":drop-shadow"} (tr "workspace.options.shadow-options.drop-shadow")]
-        [:option {:value ":inner-shadow"} (tr "workspace.options.shadow-options.inner-shadow")]]
+       {:default-value (str (:style value))
+        :on-change (fn [event]
+                     (let [value (-> event dom/get-target dom/get-value d/read-string)]
+                       (st/emit! (dch/update-shapes ids #(assoc-in % [:shadow index :style] value)))))}
+       [:option {:value ":drop-shadow"} (tr "workspace.options.shadow-options.drop-shadow")]
+       [:option {:value ":inner-shadow"} (tr "workspace.options.shadow-options.inner-shadow")]]
 
       [:div.element-set-actions
        [:div.element-set-actions-button {:on-click (toggle-visibility index)}

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.messages
   (:require
@@ -12,7 +12,7 @@
    [app.main.store :as st]
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc banner
   [{:keys [type position status controls content actions on-close data-test] :as props}]
@@ -49,7 +49,7 @@
 (mf/defc notifications
   []
   (let [message  (mf/deref refs/message)
-        on-close (st/emitf dm/hide)]
+        on-close #(st/emit! dm/hide)]
     (when message
       [:& banner (assoc message
                         :position (or (:position message) :fixed)

@@ -2,23 +2,22 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.libraries
   (:require
    [app.common.data :as d]
    [app.main.data.modal :as modal]
-   [app.main.data.workspace :as dw]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.icons :as i]
-   [app.util.data :refer [matches-search]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.strings :refer [matches-search]]
    [cuerdas.core :as str]
    [okulary.core :as l]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (def workspace-file
   (l/derived :workspace-file st/state))
@@ -72,21 +71,40 @@
            (reset! search-term "")))
 
         link-library
-        (mf/use-callback (mf/deps file) #(st/emit! (dw/link-file-to-library (:id file) %)))
+        (mf/use-callback (mf/deps file) #(st/emit! (dwl/link-file-to-library (:id file) %)))
 
         unlink-library
         (mf/use-callback
-          (mf/deps file)
-          (fn [library-id]
-            (st/emit! (dw/unlink-file-from-library (:id file) library-id)
-                      (dwl/sync-file (:id file) library-id))))]
+         (mf/deps file)
+         (fn [library-id]
+           (st/emit! (dwl/unlink-file-from-library (:id file) library-id)
+                     (dwl/sync-file (:id file) library-id))))
+        add-shared
+        (mf/use-callback
+         (mf/deps file)
+         #(st/emit! (dwl/set-file-shared (:id file) true)))
+
+        del-shared
+        (mf/use-callback
+         (mf/deps file)
+         #(st/emit! (dwl/set-file-shared (:id file) false)))]
     [:*
      [:div.section
       [:div.section-title (tr "workspace.libraries.in-this-file")]
       [:div.section-list
        [:div.section-list-item
+        [:div
         [:div.item-name (tr "workspace.libraries.file-library")]
         [:div.item-contents (contents-str file)]]
+       [:div
+        (if (:is-shared file)
+          [:input.item-button {:type "button"
+                               :value (tr "common.unpublish")
+                               :on-click del-shared}]
+          [:input.item-button {:type "button"
+                               :value (tr "common.publish")
+                               :on-click add-shared}])]]
+
        (for [library sorted-libraries]
          [:div.section-list-item {:key (:id library)}
           [:div.item-name (:name library)]
@@ -164,7 +182,7 @@
      (mf/deps project)
      (fn []
        (when (:team-id project)
-         (st/emit! (dw/fetch-shared-files {:team-id (:team-id project)})))))
+         (st/emit! (dwl/fetch-shared-files {:team-id (:team-id project)})))))
 
     [:div.modal-overlay
      [:div.modal.libraries-dialog

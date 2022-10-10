@@ -6,6 +6,7 @@
 
 (ns app.common.math
   "A collection of math utils."
+  (:refer-clojure :exclude [abs])
   #?(:cljs
      (:require [goog.math :as math])))
 
@@ -105,6 +106,11 @@
   #?(:cljs (js/Math.round v)
      :clj (Math/round (float v))))
 
+(defn half-round
+  "Returns a value rounded to the next point or half point"
+  [v]
+  (/ (round (* v 2)) 2))
+
 (defn ceil
   "Returns the smallest integer greater than
   or equal to a given number."
@@ -114,7 +120,7 @@
 
 (defn precision
   [v n]
-  (when (and (number? v) (number? n))
+  (when (and (number? v) (integer? n))
     (let [d (pow 10 n)]
       (/ (round (* v d)) d))))
 
@@ -164,3 +170,7 @@
   [v0 v1 t]
   (+ (* (- 1 t) v0)
      (* t       v1)))
+
+(defn max-abs
+  [a b]
+  (max (abs a) (abs b)))

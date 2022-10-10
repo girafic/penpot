@@ -2,10 +2,10 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.tokens
-  "Tokens generation service."
+  "Tokens generation API."
   (:require
    [app.common.data :as d]
    [app.common.exceptions :as ex]
@@ -13,18 +13,27 @@
    [app.common.transit :as t]
    [app.util.time :as dt]
    [buddy.sign.jwe :as jwe]
-   [clojure.spec.alpha :as s]
-   [integrant.core :as ig]))
+   [clojure.spec.alpha :as s]))
 
-(defn- generate
-  [cfg claims]
-  (let [payload (-> claims d/without-nils t/encode)]
-    (jwe/encrypt payload (::secret cfg) {:alg :a256kw :enc :a256gcm})))
+(s/def ::tokens-key bytes?)
 
-(defn- verify
-  [cfg {:keys [token] :as params}]
-  (let [payload (jwe/decrypt token (::secret cfg) {:alg :a256kw :enc :a256gcm})
-        claims  (t/decode payload)]
+(defn generate
+  [{:keys [tokens-key]} claims]
+  (us/assert! ::tokens-key tokens-key)
+  (let [payload (-> claims
+                    (assoc :iat (dt/now))
+                    (d/without-nils)
+                    (t/encode))]
+    (jwe/encrypt payload tokens-key {:alg :a256kw :enc :a256gcm})))
+
+(defn decode
+  [{:keys [tokens-key]} token]
+  (let [payload (jwe/decrypt token tokens-key {:alg :a256kw :enc :a256gcm})]
+    (t/decode payload)))
+
+(defn verify
+  [sprops {:keys [token] :as params}]
+  (let [claims (decode sprops token)]
     (when (and (dt/instant? (:exp claims))
                (dt/is-before? (:exp claims) (dt/now)))
       (ex/raise :type :validation
@@ -42,30 +51,7 @@
                 :params params))
     claims))
 
-(defn- generate-predefined
-  [cfg {:keys [iss profile-id] :as params}]
-  (case iss
-    :profile-identity
-    (do
-      (us/verify uuid? profile-id)
-      (generate cfg (assoc params
-                           :exp (dt/in-future {:days 30}))))
 
-    (ex/raise :type :internal
-              :code :not-implemented
-              :hint "no predefined token")))
 
-(s/def ::keys fn?)
 
-(defmethod ig/pre-init-spec ::tokens [_]
-  (s/keys :req-un [::keys]))
 
-(defmethod ig/init-key ::tokens
-  [_ {:keys [keys] :as cfg}]
-  (let [secret (keys :salt "tokens" :size 32)
-        cfg    (assoc cfg ::secret secret)]
-    (fn [action params]
-      (case action
-        :generate-predefined (generate-predefined cfg params)
-        :verify (verify cfg params)
-        :generate (generate cfg params)))))

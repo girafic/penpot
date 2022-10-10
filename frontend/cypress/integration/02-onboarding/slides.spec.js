@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) UXBOX Labs SL
+ * Copyright (c) KALEIDOS INC
  */
 
 "use strict";
@@ -17,7 +17,7 @@ describe("onboarding slides", () => {
     cy.demoLogin();
   });
 
-  it("go trough all the onboarding slides", () => {
+  it("go through all the onboarding slides", () => {
     cy.getBySel("onboarding-welcome").should("exist");
     cy.getBySel("onboarding-next-btn").should("exist");
     cy.getBySel("onboarding-next-btn").click();

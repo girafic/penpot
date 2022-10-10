@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.dashboard.project-menu
   (:require
@@ -19,7 +19,7 @@
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.router :as rt]
    [cljs.spec.alpha :as s]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (s/def ::project some?)
 (s/def ::show? boolean?)
@@ -56,7 +56,7 @@
                      (with-meta project {:on-success on-duplicate-success}))))
 
         toggle-pin
-        (st/emitf (dd/toggle-project-pin project))
+        #(st/emit! (dd/toggle-project-pin project))
 
         on-move-success
         (fn [team-id]
@@ -66,7 +66,7 @@
         (fn [team-id]
           (let [data  {:id (:id project) :team-id team-id}
                 mdata {:on-success #(on-move-success team-id)}]
-            (st/emitf (dm/success (tr "dashboard.success-move-project"))
+            #(st/emit! (dm/success (tr "dashboard.success-move-project"))
                       (dd/move-project (with-meta data mdata)))))
 
         delete-fn
@@ -76,7 +76,7 @@
                     (dd/go-to-projects (:team-id project))))
 
         on-delete
-        (st/emitf
+        #(st/emit!
          (modal/show
           {:type :confirm
            :title (tr "modals.delete-project-confirm.title")

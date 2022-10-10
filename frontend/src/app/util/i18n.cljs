@@ -2,19 +2,23 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.i18n
   "A i18n foundation."
   (:require
+   [app.common.logging :as log]
    [app.config :as cfg]
+   [app.util.dom :as dom]
    [app.util.globals :as globals]
    [app.util.object :as obj]
    [app.util.storage :refer [storage]]
    [cuerdas.core :as str]
    [goog.object :as gobj]
    [okulary.core :as l]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
+
+(log/set-level! :info)
 
 (def supported-locales
   [{:label "English" :value "en"}
@@ -22,14 +26,20 @@
    {:label "Català" :value "ca"}
    {:label "Français (community)" :value "fr"}
    {:label "Deutsch (community)" :value "de"}
+   {:label "Italiano (community)" :value "it"}
+   {:label "Euskera (community)" :value "eu"}
+   {:label "Norsk - Bokmål (community)" :value "nb_no"}
+   {:label "Portuguese - Brazil (community)" :value "pt_br"}
+   {:label "Polski (community)" :value "pl"}
    {:label "Русский (community)" :value "ru"}
+   {:label "Rumanian (community)" :value "ro"}
    {:label "Türkçe (community)" :value "tr"}
-   {:label "Rumanian (communit)" :value "ro"}
-   {:label "Portuguese (Brazil, community)" :value "pt_br"}
    {:label "Ελληνική γλώσσα (community)" :value "el"}
    {:label "עִבְרִית (community)" :value "he"}
    {:label "عربي/عربى (community)" :value "ar"}
-   {:label "简体中文 (community)" :value "zh_cn"}])
+   {:label "فارسی (community)" :value "fa"}
+   {:label "简体中文 (community)" :value "zh_cn"}
+   {:label "繁體中文 (community)" :value "zh_hant"}])
 
 (defn- parse-locale
   [locale]
@@ -59,7 +69,7 @@
                             (autodetect))))
 
 ;; The translations `data` is a javascript object and should be treated
-;; with `goog.object` namespace functions instead of a standart
+;; with `goog.object` namespace functions instead of a standard
 ;; clojure functions. This is for performance reasons because this
 ;; code is executed in the critical part (application bootstrap) and
 ;; used in many parts of the application.
@@ -78,11 +88,12 @@
                           locale
                           (recur (rest locales)))
                         cfg/default-language))]
+
       (swap! storage assoc ::locale lname)
       (reset! locale lname))
-    (do
+    (let [lname (autodetect)]
       (swap! storage dissoc ::locale)
-      (reset! locale (autodetect)))))
+      (reset! locale lname))))
 
 (defn reset-locale
   "Set the current locale to the browser detected one if it is
@@ -90,6 +101,16 @@
   []
   (swap! storage dissoc ::locale)
   (reset! locale (autodetect)))
+
+(add-watch locale ::browser-font
+           (fn [_ _ _ locale]
+             (log/info :hint "locale changed" :locale locale)
+             (dom/set-html-lang! locale)
+             (let [node  (dom/get-body)]
+               (if (or (= locale "fa")
+                       (= locale "ar"))
+                 (dom/set-css-property! node "--font-family" "'vazirmatn', 'worksans', sans-serif")
+                 (dom/unset-css-property! node "--font-family")))))
 
 (deftype C [val]
   IDeref

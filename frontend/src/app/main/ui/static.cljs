@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.static
   (:require
@@ -12,7 +12,7 @@
    [app.util.i18n :refer [tr]]
    [app.util.object :as obj]
    [app.util.router :as rt]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc static-header
   {::mf/wrap-props false}
@@ -41,7 +41,7 @@
    [:div.desc-message (tr "labels.bad-gateway.desc-message")]
    [:div.sign-info
     [:a.btn-primary.btn-small
-     {:on-click (st/emitf #(dissoc % :exception))}
+     {:on-click (fn [] (st/emit! #(dissoc % :exception)))}
      (tr "labels.retry")]]])
 
 (mf/defc service-unavailable
@@ -52,7 +52,7 @@
    [:div.desc-message (tr "labels.service-unavailable.desc-message")]
    [:div.sign-info
     [:a.btn-primary.btn-small
-     {:on-click (st/emitf #(dissoc % :exception))}
+     {:on-click (fn [] (st/emit! #(dissoc % :exception)))}
      (tr "labels.retry")]]])
 
 (mf/defc internal-error
@@ -63,7 +63,7 @@
    [:div.desc-message (tr "labels.internal-error.desc-message")]
    [:div.sign-info
     [:a.btn-primary.btn-small
-     {:on-click (st/emitf (rt/assign-exception nil))}
+     {:on-click (fn [] (st/emit! (rt/assign-exception nil)))}
      (tr "labels.retry")]]])
 
 (mf/defc exception-page

@@ -2,80 +2,41 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.data.workspace.colors
   (:require
-   [app.common.colors :as clr]
+   [app.common.colors :as colors]
    [app.common.data :as d]
+   [app.common.pages.helpers :as cph]
+   [app.main.broadcast :as mbc]
    [app.main.data.modal :as md]
    [app.main.data.workspace.changes :as dch]
+   [app.main.data.workspace.layout :as layout]
+   [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.texts :as dwt]
-   [app.main.repo :as rp]
+   [app.util.color :as uc]
    [beicon.core :as rx]
-   [cljs.spec.alpha :as s]
    [potok.core :as ptk]))
 
-(def clear-color-for-rename
-  (ptk/reify ::clear-color-for-rename
-    ptk/UpdateEvent
-    (update [_ state]
-      (assoc-in state [:workspace-local :color-for-rename] nil))))
-
-(declare rename-color-result)
-
-(defn rename-color
-  [file-id color-id name]
-  (ptk/reify ::rename-color
-    ptk/WatchEvent
-    (watch [_ _ _]
-      (->> (rp/mutation! :rename-color {:id color-id :name name})
-           (rx/map (partial rename-color-result file-id))))))
-
-(defn rename-color-result
-  [_file-id color]
-  (ptk/reify ::rename-color-result
-    ptk/UpdateEvent
-    (update [_ state]
-      (update-in state [:workspace-file :colors] #(d/replace-by-id % color)))))
-
-(defn change-palette-size
-  [size]
-  (s/assert #{:big :small} size)
-  (ptk/reify ::change-palette-size
-    ptk/UpdateEvent
-    (update [_ state]
-      (-> state
-          (assoc-in [:workspace-local :selected-palette-size] size)))))
-
-(defn change-palette-selected
-  "Change the library used by the general palette tool"
-  [selected]
-  (ptk/reify ::change-palette-selected
-    ptk/UpdateEvent
-    (update [_ state]
-      (-> state
-          (assoc-in [:workspace-local :selected-palette] selected)))))
-
-(defn change-palette-selected-colorpicker
-  "Change the library used by the color picker"
-  [selected]
-  (ptk/reify ::change-palette-selected-colorpicker
-    ptk/UpdateEvent
-    (update [_ state]
-      (-> state
-          (assoc-in [:workspace-local :selected-palette-colorpicker] selected)))))
+;; A set of keys that are used for shared state identifiers
+(def ^:const colorpicker-selected-broadcast-key ::colorpicker-selected)
+(def ^:const colorpalette-selected-broadcast-key ::colorpalette-selected)
 
 (defn show-palette
   "Show the palette tool and change the library it uses"
   [selected]
   (ptk/reify ::show-palette
-    ptk/UpdateEvent
-    (update [_ state]
-      (-> state
-          (update :workspace-layout conj :colorpalette)
-          (assoc-in [:workspace-local :selected-palette] selected)))))
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (layout/toggle-layout-flag :colorpalette :force? true)
+             (mbc/event colorpalette-selected-broadcast-key selected)))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (let [wglobal (:workspace-global state)]
+        (layout/persist-layout-state! wglobal)))))
 
 (defn start-picker
   []
@@ -83,7 +44,7 @@
     ptk/UpdateEvent
     (update [_ state]
       (-> state
-          (assoc-in [:workspace-local :picking-color?] true)))))
+          (assoc-in [:workspace-global :picking-color?] true)))))
 
 (defn stop-picker
   []
@@ -91,8 +52,8 @@
     ptk/UpdateEvent
     (update [_ state]
       (-> state
-          (update :workspace-local dissoc :picked-color-select :picked-shift?)
-          (assoc-in [:workspace-local :picking-color?] false)))))
+          (update :workspace-global dissoc :picked-color-select :picked-shift?)
+          (assoc-in [:workspace-global :picking-color?] false)))))
 
 (defn pick-color
   [rgba]
@@ -100,7 +61,7 @@
     ptk/UpdateEvent
     (update [_ state]
       (-> state
-          (assoc-in [:workspace-local :picked-color] rgba)))))
+          (assoc-in [:workspace-global :picked-color] rgba)))))
 
 (defn pick-color-select
   [value shift?]
@@ -108,86 +69,94 @@
     ptk/UpdateEvent
     (update [_ state]
       (-> state
-          (assoc-in [:workspace-local :picked-color-select] value)
-          (assoc-in [:workspace-local :picked-shift?] shift?)))))
+          (assoc-in [:workspace-global :picked-color-select] value)
+          (assoc-in [:workspace-global :picked-shift?] shift?)))))
 
 (defn transform-fill
   [state ids color transform]
-  (let [page-id   (:current-page-id state)
-        objects   (wsh/lookup-page-objects state page-id)
+  (let [objects   (wsh/lookup-page-objects state)
 
         is-text?  #(= :text (:type (get objects %)))
         text-ids  (filter is-text? ids)
-        shape-ids (filter (comp not is-text?) ids)
+        shape-ids (remove is-text? ids)
 
-        attrs (cond-> {:fill-color nil
-                       :fill-color-gradient nil
-                       :fill-color-ref-file nil
-                       :fill-color-ref-id nil
-                       :fill-opacity nil}
+        attrs
+        (cond-> {}
+          (contains? color :color)
+          (assoc :fill-color (:color color))
 
-                (contains? color :color)
-                (assoc :fill-color (:color color))
+          (contains? color :id)
+          (assoc :fill-color-ref-id (:id color))
 
-                (contains? color :id)
-                (assoc :fill-color-ref-id (:id color))
+          (contains? color :file-id)
+          (assoc :fill-color-ref-file (:file-id color))
 
-                (contains? color :file-id)
-                (assoc :fill-color-ref-file (:file-id color))
+          (contains? color :gradient)
+          (assoc :fill-color-gradient (:gradient color))
 
-                (contains? color :gradient)
-                (assoc :fill-color-gradient (:gradient color))
+          (contains? color :opacity)
+          (assoc :fill-opacity (:opacity color))
 
-                (contains? color :opacity)
-                (assoc :fill-opacity (:opacity color)))
-        ;; Not nil attrs
-        clean-attrs (d/without-nils attrs)]
+          :always
+          (d/without-nils))
+
+        transform-attrs #(transform % attrs)]
 
     (rx/concat
-     (rx/from (map #(dwt/update-text-attrs {:id % :attrs attrs}) text-ids))
-     (rx/of (dch/update-shapes
-             shape-ids
-             #(transform % clean-attrs))))))
+     (rx/from (map #(dwt/update-text-with-function % transform-attrs) text-ids))
+     (rx/of (dch/update-shapes shape-ids transform-attrs)))))
 
-(defn swap-fills [shape index new-index]
-  (let [first (get-in shape [:fills index])
-        second (get-in shape [:fills new-index])]
+(defn swap-attrs [shape attr index new-index]
+  (let [first (get-in shape [attr index])
+        second (get-in shape [attr new-index])]
     (-> shape
-        (assoc-in [:fills index] second)
-        (assoc-in [:fills new-index] first))
-    ))
+        (assoc-in [attr index] second)
+        (assoc-in [attr new-index] first))))
 
 (defn reorder-fills
   [ids index new-index]
   (ptk/reify ::reorder-fills
     ptk/WatchEvent
-    (watch [_ _ _]
-           (rx/of (dch/update-shapes
-                   ids
-                   #(swap-fills % index new-index))))))
+    (watch [_ state _]
+      (let [objects   (wsh/lookup-page-objects state)
+
+            is-text?  #(= :text (:type (get objects %)))
+            text-ids  (filter is-text? ids)
+            shape-ids (remove is-text? ids)
+            transform-attrs #(swap-attrs % :fills index new-index)]
+
+        (rx/concat
+         (rx/from (map #(dwt/update-text-with-function % transform-attrs) text-ids))
+         (rx/of (dch/update-shapes shape-ids transform-attrs)))))))
 
 (defn change-fill
   [ids color position]
   (ptk/reify ::change-fill
     ptk/WatchEvent
     (watch [_ state _]
-           (let [change (fn [shape attrs] (assoc-in shape [:fills position] (into {} attrs)))]
-             (transform-fill state ids color change)))))
+      (let [change-fn (fn [shape attrs]
+                        (-> shape
+                            (cond-> (not (contains? shape :fills))
+                              (assoc :fills []))
+                            (assoc-in [:fills position] (into {} attrs))))]
+        (transform-fill state ids color change-fn)))))
 
 (defn change-fill-and-clear
   [ids color]
   (ptk/reify ::change-fill-and-clear
     ptk/WatchEvent
     (watch [_ state _]
-           (let [set (fn [shape attrs] (assoc shape :fills [attrs]))]
-             (transform-fill state ids color set)))))
+      (let [set (fn [shape attrs] (assoc shape :fills [attrs]))]
+        (transform-fill state ids color set)))))
 
 (defn add-fill
   [ids color]
   (ptk/reify ::add-fill
     ptk/WatchEvent
     (watch [_ state _]
-      (let [add (fn [shape attrs] (assoc shape :fills (into [attrs] (:fills shape))))]
+      (let [add (fn [shape attrs]
+                  (-> shape
+                      (update :fills #(into [attrs] %))))]
         (transform-fill state ids color add)))))
 
 (defn remove-fill
@@ -227,37 +196,101 @@
                                                 shape))))))))
 
 (defn change-stroke
-  [ids color]
+  [ids attrs index]
   (ptk/reify ::change-stroke
     ptk/WatchEvent
     (watch [_ _ _]
-      (let [attrs (cond-> {:stroke-color nil
-                           :stroke-color-ref-id nil
-                           :stroke-color-ref-file nil
-                           :stroke-color-gradient nil
-                           :stroke-opacity nil}
-                    (contains? color :color)
-                    (assoc :stroke-color (:color color))
+      (let [color-attrs (cond-> {}
+                          (contains? attrs :color)
+                          (assoc :stroke-color (:color attrs))
 
-                    (contains? color :id)
-                    (assoc :stroke-color-ref-id (:id color))
+                          (contains? attrs :id)
+                          (assoc :stroke-color-ref-id (:id attrs))
 
-                    (contains? color :file-id)
-                    (assoc :stroke-color-ref-file (:file-id color))
+                          (contains? attrs :file-id)
+                          (assoc :stroke-color-ref-file (:file-id attrs))
 
-                    (contains? color :gradient)
-                    (assoc :stroke-color-gradient (:gradient color))
+                          (contains? attrs :gradient)
+                          (assoc :stroke-color-gradient (:gradient attrs))
 
-                    (contains? color :opacity)
-                    (assoc :stroke-opacity (:opacity color)))]
+                          (contains? attrs :opacity)
+                          (assoc :stroke-opacity (:opacity attrs)))
+
+            attrs (merge attrs color-attrs)]
 
         (rx/of (dch/update-shapes ids (fn [shape]
-                                        (cond-> (d/merge shape attrs)
-                                          (= (:stroke-style shape) :none)
-                                          (assoc :stroke-style :solid
-                                                 :stroke-width 1
-                                                 :stroke-opacity 1)))))))))
+                                        (let [new-attrs (merge (get-in shape [:strokes index]) attrs)
+                                              new-attrs (cond-> new-attrs
+                                                          (not (contains? new-attrs :stroke-width))
+                                                          (assoc :stroke-width 1)
 
+                                                          (not (contains? new-attrs :stroke-style))
+                                                          (assoc :stroke-style :solid)
+
+                                                          (not (contains? new-attrs :stroke-alignment))
+                                                          (assoc :stroke-alignment :center)
+
+                                                          :always
+                                                          (d/without-nils))]
+                                          (-> shape
+                                              (cond-> (not (contains? shape :strokes))
+                                                (assoc :strokes []))
+                                              (assoc-in [:strokes index] new-attrs))))))))))
+
+(defn change-shadow
+  [ids attrs index]
+  (ptk/reify ::change-shadow
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (dch/update-shapes ids (fn [shape]
+                                      (let [;; If we try to set a gradient to a shadow (for example using the color selection from multiple shapes) let's use the first stop color
+                                            attrs (cond-> attrs
+                                                    (:gradient attrs) (get-in [:gradient :stops 0]))
+                                            new-attrs (merge (get-in shape [:shadow index :color]) attrs)]
+                                        (assoc-in shape [:shadow index :color] new-attrs))))))))
+
+(defn add-stroke
+  [ids stroke]
+  (ptk/reify ::add-stroke
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (let [add (fn [shape attrs] (assoc shape :strokes (into [attrs] (:strokes shape))))]
+        (rx/of (dch/update-shapes
+                ids
+                #(add % stroke)))))))
+
+(defn remove-stroke
+  [ids position]
+  (ptk/reify ::remove-stroke
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (let [remove-fill-by-index (fn [values index] (->> (d/enumerate values)
+                                                         (filterv (fn [[idx _]] (not= idx index)))
+                                                         (mapv second)))
+
+            remove (fn [shape] (update shape :strokes remove-fill-by-index position))]
+        (rx/of (dch/update-shapes
+                ids
+                #(remove %)))))))
+
+(defn remove-all-strokes
+  [ids]
+  (ptk/reify ::remove-all-strokes
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (let [remove-all (fn [shape] (assoc shape :strokes []))]
+        (rx/of (dch/update-shapes
+                ids
+                #(remove-all %)))))))
+
+(defn reorder-strokes
+  [ids index new-index]
+  (ptk/reify ::reorder-strokes
+    ptk/WatchEvent
+    (watch [_ _ _]
+           (rx/of (dch/update-shapes
+                   ids
+                   #(swap-attrs % :strokes index new-index))))))
 
 (defn picker-for-selected-shape
   []
@@ -287,43 +320,243 @@
       (update [_ state]
         (let [handle-change-color (fn [color] (rx/push! sub color))]
           (-> state
-              (assoc-in [:workspace-local :picking-color?] true)
+              (assoc-in [:workspace-global :picking-color?] true)
               (assoc ::md/modal {:id (random-uuid)
-                                 :data {:color clr/black :opacity 1}
+                                 :data {:color colors/black :opacity 1}
                                  :type :colorpicker
                                  :props {:on-change handle-change-color}
                                  :allow-click-outside true})))))))
 
-(defn start-gradient
-  [gradient]
-  (ptk/reify ::start-gradient
-    ptk/UpdateEvent
-    (update [_ state]
-      (let [id (-> state wsh/lookup-selected first)]
-        (-> state
-            (assoc-in [:workspace-local :current-gradient] gradient)
-            (assoc-in [:workspace-local :current-gradient :shape-id] id))))))
+(defn color-att->text
+  [color]
+  {:fill-color (:color color)
+   :fill-opacity (:opacity color)
+   :fill-color-ref-id (:id color)
+   :fill-color-ref-file (:file-id color)
+   :fill-color-gradient (:gradient color)})
 
-(defn stop-gradient
+(defn change-text-color
+  [old-color new-color index node]
+  (let [fills (:fills node)
+        parsed-color (d/without-nils (color-att->text old-color))
+        parsed-new-color (d/without-nils (color-att->text new-color))
+        has-color? (d/index-of fills parsed-color)]
+    (cond-> node
+      (some? has-color?)
+      (assoc-in [:fills index] parsed-new-color))))
+
+(defn change-color-in-selected
+  [new-color shapes-by-color old-color]
+  (ptk/reify ::change-color-in-selected
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (->> (rx/from shapes-by-color)
+           (rx/map (fn [shape] (case (:prop shape)
+                                 :fill (change-fill [(:shape-id shape)] new-color (:index shape))
+                                 :stroke (change-stroke [(:shape-id shape)] new-color (:index shape))
+                                 :shadow (change-shadow [(:shape-id shape)] new-color (:index shape))
+                                 :content (dwt/update-text-with-function
+                                           (:shape-id shape)
+                                           (partial change-text-color old-color new-color (:index shape))))))))))
+
+(defn apply-color-from-palette
+  [color is-alt?]
+  (ptk/reify ::apply-color-from-palette
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [objects  (wsh/lookup-page-objects state)
+            selected (->> (wsh/lookup-selected state)
+                          (cph/clean-loops objects))
+            selected-obj (keep (d/getf objects) selected)
+            select-shapes-for-color (fn [shape objects]
+                                      (let [shapes (case (:type shape)
+                                                     :group (cph/get-children objects (:id shape))
+                                                     [shape])]
+                                        (->> shapes
+                                             (remove cph/group-shape?)
+                                             (map :id))))
+            ids (mapcat #(select-shapes-for-color % objects) selected-obj)]
+        (if is-alt?
+          (rx/of (change-stroke ids (merge uc/empty-color color) 0))
+          (rx/of (change-fill ids (merge uc/empty-color color) 0)))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; COLORPICKER STATE MANAGEMENT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn split-color-components
+  [{:keys [color opacity] :as data}]
+  (let [value (if (uc/hex? color) color colors/black)
+        [r g b] (uc/hex->rgb value)
+        [h s v] (uc/hex->hsv value)]
+    (merge data
+           {:hex (or value "000000")
+            :alpha (or opacity 1)
+            :r r :g g :b b
+            :h h :s s :v v})))
+
+(defn materialize-color-components
+  [{:keys [hex alpha] :as data}]
+  (-> data
+      (assoc :color hex)
+      (assoc :opacity alpha)))
+
+(defn clear-color-components
+  [data]
+  (dissoc data :hex :alpha :r :g :b :h :s :v))
+
+(defn- create-gradient
+  [type]
+  {:start-x 0.5
+   :start-y (if (= type :linear-gradient) 0.0 0.5)
+   :end-x   0.5
+   :end-y   1
+   :width  1.0})
+
+(defn get-color-from-colorpicker-state
+  [{:keys [type current-color stops gradient] :as state}]
+  (if (= type :color)
+    (clear-color-components current-color)
+    {:gradient (-> gradient
+                   (assoc :type (case type
+                                  :linear-gradient :linear
+                                  :radial-gradient :radial))
+                   (assoc :stops (mapv clear-color-components stops))
+                   (dissoc :shape-id))}))
+
+(defn- colorpicker-onchange-runner
+  "Effect event that runs the on-change callback with the latest
+  colorpicker state converted to color object."
+  [on-change]
+  (ptk/reify ::colorpicker-onchange-runner
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when-let [color (some-> state :colorpicker get-color-from-colorpicker-state)]
+        (on-change color)))))
+
+(defn initialize-colorpicker
+  [on-change]
+  (ptk/reify ::initialize-colorpicker
+    ptk/WatchEvent
+    (watch [_ _ stream]
+      (let [stoper (rx/merge
+                    (rx/filter (ptk/type? ::finalize-colorpicker) stream)
+                    (rx/filter (ptk/type? ::initialize-colorpicker) stream))]
+
+        (->> (rx/merge
+              (->> stream
+                   (rx/filter (ptk/type? ::update-colorpicker-gradient))
+                   (rx/debounce 200))
+              (rx/filter (ptk/type? ::update-colorpicker-color) stream)
+              (rx/filter (ptk/type? ::activate-colorpicker-gradient) stream))
+             (rx/map (constantly (colorpicker-onchange-runner on-change)))
+             (rx/take-until stoper))))))
+
+(defn finalize-colorpicker
   []
-  (ptk/reify ::stop-gradient
+  (ptk/reify ::finalize-colorpicker
     ptk/UpdateEvent
     (update [_ state]
-      (-> state
-          (update :workspace-local dissoc :current-gradient)))))
+      (dissoc state :colorpicker))))
 
-(defn update-gradient
+(defn update-colorpicker
+  [{:keys [gradient] :as data}]
+  (ptk/reify ::update-colorpicker
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [shape-id (-> state wsh/lookup-selected first)]
+        (update state :colorpicker
+                (fn [state]
+                  (if (some? gradient)
+                    (let [stop  (or (:editing-stop state) 0)
+                          stops (mapv split-color-components (:stops gradient))
+                          type  (case (:type gradient)
+                                  :linear :linear-gradient
+                                  :radial :radial-gradient)]
+                      (-> state
+                          (assoc :type type)
+                          (assoc :current-color (nth stops stop))
+                          (assoc :stops stops)
+                          (assoc :gradient (-> gradient
+                                               (dissoc :stops)
+                                               (assoc :shape-id shape-id)))
+                          (assoc :editing-stop stop)))
+
+                    (-> state
+                        (assoc :type :color)
+                        (assoc :current-color (split-color-components (dissoc data :gradient)))
+                        (dissoc :editing-stop)
+                        (dissoc :gradient)
+                        (dissoc :stops)))))))))
+
+(defn update-colorpicker-color
+  [changes add-recent?]
+  (ptk/reify ::update-colorpicker-color
+    ptk/UpdateEvent
+    (update [_ state]
+      (update state :colorpicker
+              (fn [state]
+                (let [state (-> state
+                                (update :current-color merge changes)
+                                (update :current-color materialize-color-components)
+                                ;; current color can be a library one I'm changing via colorpicker
+                                (d/dissoc-in [:current-color :id])
+                                (d/dissoc-in [:current-color :file-id]))]
+                  (if-let [stop (:editing-stop state)]
+                    (update-in state [:stops stop] (fn [data] (->> changes
+                                                                   (merge data)
+                                                                   (materialize-color-components))))
+                    (-> state
+                        (assoc :type :color)
+                        (dissoc :gradient :stops :editing-stop)))))))
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when add-recent?
+        (let [formated-color  (get-color-from-colorpicker-state (:colorpicker state))]
+          (rx/of (dwl/add-recent-color formated-color)))))))
+
+(defn update-colorpicker-gradient
   [changes]
-  (ptk/reify ::update-gradient
+  (ptk/reify ::update-colorpicker-gradient
     ptk/UpdateEvent
     (update [_ state]
-      (-> state
-          (update-in [:workspace-local :current-gradient] merge changes)))))
+      (update-in state [:colorpicker :gradient] merge changes))))
 
-(defn select-gradient-stop
-  [spot]
-  (ptk/reify ::select-gradient-stop
+(defn select-colorpicker-gradient-stop
+  [stop]
+  (ptk/reify ::select-colorpicket-gradient-stop
     ptk/UpdateEvent
     (update [_ state]
-      (-> state
-          (assoc-in [:workspace-local :editing-stop] spot)))))
+      (update state :colorpicker
+              (fn [state]
+                (if-let [color (get-in state [:stops stop])]
+                  (assoc state
+                         :current-color color
+                         :editing-stop stop)
+                  state))))))
+
+(defn activate-colorpicker-gradient
+  [type]
+  (ptk/reify ::activate-colorpicker-gradient
+    ptk/UpdateEvent
+    (update [_ state]
+      (update state :colorpicker
+              (fn [state]
+                (if (= type (:type state))
+                  (do
+                    (-> state
+                        (assoc :type :color)
+                        (dissoc :editing-stop :stops :gradient)))
+                  (let [gradient (create-gradient type)
+                        color    (:current-color state)]
+                    (-> state
+                        (assoc :type type)
+                        (assoc :gradient gradient)
+                        (cond-> (not (:stops state))
+                          (assoc :editing-stop 0
+                                 :stops  [(assoc color :offset 0)
+                                          (-> color
+                                              (assoc :alpha 0)
+                                              (assoc :offset 1)
+                                              (materialize-color-components))]))))))))))

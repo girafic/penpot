@@ -2,12 +2,11 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.strings
   (:require
    [cuerdas.core :as str]))
-
 
 (def ^:const trail-zeros-regex-1 #"\.0+$")
 (def ^:const trail-zeros-regex-2 #"(\.\d*[^0])0+$")
@@ -36,3 +35,10 @@
     (catch :default _
       (str num))))
 
+(defn matches-search
+  [name search-term]
+  (if (str/empty? search-term)
+    true
+    (let [st (str/trim (str/lower search-term))
+          nm (str/trim (str/lower name))]
+      (str/includes? nm st))))

@@ -2,11 +2,12 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.shapes.text.fontfaces
   (:require
    [app.common.data :as d]
+   [app.common.pages.helpers :as cph]
    [app.main.fonts :as fonts]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.shapes.embed :as embed]
@@ -14,7 +15,7 @@
    [beicon.core :as rx]
    [clojure.set :as set]
    [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn replace-embeds
   "Replace into the font-faces of a CSS the URL's that are present in `embed-data` by its
@@ -63,29 +64,44 @@
                     (mf/deps fonts-css)
                     #(fonts/extract-fontface-urls fonts-css))
 
+
         ;; Calculate the data-uris for these fonts
         fonts-embed (embed/use-data-uris fonts-urls)
+
+        loading? (some? (d/seek #(not (contains? fonts-embed %)) fonts-urls))
 
         ;; Creates a style tag by replacing the urls with the data uri
         style (replace-embeds fonts-css fonts-urls fonts-embed)]
 
-    (when (d/not-empty? style)
-      [:style style])))
+    (cond
+      (d/not-empty? style)
+      [:style {:data-loading loading?} style]
+
+      (d/not-empty? fonts)
+      [:style {:data-loading true}])))
+
+(defn shape->fonts
+  [shape objects]
+  (let [initial (cond-> #{}
+                  (cph/text-shape? shape)
+                  (into (fonts/get-content-fonts (:content shape))))]
+    (->> (cph/get-children objects (:id shape))
+         (filter cph/text-shape?)
+         (map (comp fonts/get-content-fonts :content))
+         (reduce set/union initial))))
+
+(defn shapes->fonts
+  [shapes]
+  (->> shapes
+       (filter cph/text-shape?)
+       (map (comp fonts/get-content-fonts :content))
+       (reduce set/union #{})))
 
 (mf/defc fontfaces-style
   {::mf/wrap-props false
-   ::mf/wrap [#(mf/memo' % (mf/check-props ["shapes"]))]}
+   ::mf/wrap [#(mf/memo' % (mf/check-props ["fonts"]))]}
   [props]
-  (let [shapes  (->> (obj/get props "shapes")
-                     (filterv #(= :text (:type %))))
-
-        content (->> shapes (mapv :content))
-
-        ;; Retrieve the fonts ids used by the text shapes
-        fonts (->> content
-                   (mapv fonts/get-content-fonts)
-                   (reduce set/union #{})
-                   (hooks/use-equal-memo))]
-
+  (let [;; Retrieve the fonts ids used by the text shapes
+        fonts (obj/get props "fonts")]
     (when (d/not-empty? fonts)
       [:> fontfaces-style-render {:fonts fonts}])))

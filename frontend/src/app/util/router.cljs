@@ -2,13 +2,13 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.router
   (:refer-clojure :exclude [resolve])
   (:require
    [app.common.uri :as u]
-   [app.config :as cfg]
+   [app.config :as cf]
    [app.util.browser-history :as bhistory]
    [app.util.dom :as dom]
    [app.util.timers :as ts]
@@ -117,8 +117,7 @@
       (let [router (:router state)
             path   (resolve router rname path-params query-params)
             name   (or name "_blank")
-            uri    (-> (u/uri cfg/public-uri)
-                       (assoc :fragment path))]
+            uri    (assoc @cf/public-uri :fragment path)]
         (dom/open-new-window uri name nil)))))
 
 (defn nav-back

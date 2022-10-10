@@ -2,13 +2,14 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.handoff.selection-feedback
   (:require
+   [app.common.data :as d]
    [app.common.geom.shapes :as gsh]
-   [app.main.ui.measurements :refer [selection-guides size-display measurement]]
-   [rumext.alpha :as mf]))
+   [app.main.ui.measurements :refer [size-display measurement]]
+   [rumext.v2 :as mf]))
 
 ;; ------------------------------------------------
 ;; CONSTANTS
@@ -21,10 +22,8 @@
 
 (defn resolve-shapes
   [objects ids]
-  (let [resolve-shape #(get objects %)]
-    (into [] (comp (map resolve-shape)
-                   (filter some?))
-          ids)))
+  (let [resolve-shape (d/getf objects)]
+    (into [] (keep resolve-shape) ids)))
 
 ;; ------------------------------------------------
 ;; HELPERS
@@ -53,24 +52,23 @@
                      :stroke-width selection-rect-width}}]]))
 
 (mf/defc selection-feedback
-  [{:keys [frame local objects]}]
+  [{:keys [frame local objects size]}]
   (let [{:keys [hover selected zoom]} local
-        hover-shape     (-> (or (first (resolve-shapes objects [hover])) frame)
-                            (gsh/translate-to-frame frame))
-        selected-shapes (->> (resolve-shapes objects selected))
 
-        selrect         (gsh/selection-rect selected-shapes)
-        bounds          (frame->bounds frame)]
+        shapes          (resolve-shapes objects [hover])
+        hover-shape     (or (first shapes) frame)
+        hover-shape     (gsh/translate-to-frame hover-shape size)
 
+        selected-shapes (resolve-shapes objects selected)
+        selrect         (gsh/selection-rect selected-shapes)]
 
-    (when (seq selected-shapes)
+    (when (d/not-empty? selected-shapes)
       [:g.selection-feedback {:pointer-events "none"}
        [:g.selected-shapes
-        [:& selection-guides {:bounds bounds :selrect selrect :zoom zoom}]
         [:& selection-rect {:selrect selrect :zoom zoom}]
         [:& size-display {:selrect selrect :zoom zoom}]]
 
-       [:& measurement {:bounds bounds
+       [:& measurement {:bounds (assoc size :x 0 :y 0)
                         :selected-shapes selected-shapes
                         :hover-shape hover-shape
                         :zoom zoom}]])))

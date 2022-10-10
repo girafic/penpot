@@ -2,14 +2,16 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.sidebar.options.menus.interactions
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.pages.helpers :as cph]
-   [app.common.spec.interactions :as csi]
-   [app.common.spec.page :as csp]
+   [app.common.types.page :as ctp]
+   [app.common.types.shape-tree :as ctt]
+   [app.common.types.shape.interactions :as ctsi]
    [app.common.uuid :as uuid]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.interactions :as dwi]
@@ -22,7 +24,7 @@
    [app.util.keyboard :as kbd]
    [cuerdas.core :as str]
    [okulary.core :as l]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn- event-type-names
   []
@@ -79,7 +81,7 @@
     {:dissolve (tr "workspace.options.interaction-animation-dissolve")
      :slide (tr "workspace.options.interaction-animation-slide")}
 
-    (csi/allow-push? (:action-type interaction))
+    (ctsi/allow-push? (:action-type interaction))
     (assoc :push (tr "workspace.options.interaction-animation-push"))))
 
 (defn- easing-names
@@ -137,7 +139,7 @@
          nil))
 
     [:div.flow-element
-     [:div.flow-button {:on-click (st/emitf (dw/select-shape (:starting-frame flow)))}
+     [:div.flow-button {:on-click #(st/emit! (dw/select-shape (:starting-frame flow)))}
       i/play]
      (if @editing?
        [:input.element-name
@@ -148,9 +150,9 @@
          :auto-focus true
          :default-value (:name flow "")}]
        [:span.element-label.flow-name
-        {:on-double-click (st/emitf (dwi/start-rename-flow (:id flow)))}
+        {:on-double-click #(st/emit! (dwi/start-rename-flow (:id flow)))}
         (:name flow)])
-     [:div.add-page {:on-click (st/emitf (dwi/remove-flow (:id flow)))}
+     [:div.add-page {:on-click #(st/emit! (dwi/remove-flow (:id flow)))}
       i/minus]]))
 
 (mf/defc page-flows
@@ -165,23 +167,23 @@
 (mf/defc shape-flows
   [{:keys [flows shape]}]
   (when (= (:type shape) :frame)
-    (let [flow (csp/get-frame-flow flows (:id shape))]
+    (let [flow (ctp/get-frame-flow flows (:id shape))]
       [:div.element-set.interactions-options
        [:div.element-set-title
         [:span (tr "workspace.options.flows.flow-start")]]
        (if (nil? flow)
          [:div.flow-element
           [:span.element-label (tr "workspace.options.flows.add-flow-start")]
-          [:div.add-page {:on-click (st/emitf (dwi/add-flow-selected-frame))}
+          [:div.add-page {:on-click #(st/emit! (dwi/add-flow-selected-frame))}
            i/plus]]
          [:& flow-item {:flow flow :key (str (:id flow))}])])))
 
 (mf/defc interaction-entry
   [{:keys [index shape interaction update-interaction remove-interaction]}]
-  (let [objects             (deref refs/workspace-page-objects)
-        destination         (get objects (:destination interaction))
-        frames              (mf/with-memo [objects]
-                              (cph/get-frames objects))
+  (let [objects              (deref refs/workspace-page-objects)
+        destination          (get objects (:destination interaction))
+
+        frames               (mf/with-memo [objects] (ctt/get-viewer-frames objects {:all-frames? true}))
 
         overlay-pos-type     (:overlay-pos-type interaction)
         close-click-outside? (:close-click-outside interaction false)
@@ -201,27 +203,27 @@
         change-event-type
         (fn [event]
           (let [value (-> event dom/get-target dom/get-value d/read-string)]
-            (update-interaction index #(csi/set-event-type % value shape))))
+            (update-interaction index #(ctsi/set-event-type % value shape))))
 
         change-action-type
         (fn [event]
           (let [value (-> event dom/get-target dom/get-value d/read-string)]
-            (update-interaction index #(csi/set-action-type % value))))
+            (update-interaction index #(ctsi/set-action-type % value))))
 
         change-delay
         (fn [value]
-          (update-interaction index #(csi/set-delay % value)))
+          (update-interaction index #(ctsi/set-delay % value)))
 
         change-destination
         (fn [event]
           (let [value (-> event dom/get-target dom/get-value)
                 value (when (not= value "") (uuid/uuid value))]
-            (update-interaction index #(csi/set-destination % value))))
+            (update-interaction index #(ctsi/set-destination % value))))
 
         change-preserve-scroll
         (fn [event]
           (let [value (-> event dom/get-target dom/checked?)]
-            (update-interaction index #(csi/set-preserve-scroll % value))))
+            (update-interaction index #(ctsi/set-preserve-scroll % value))))
 
         change-url
         (fn [event]
@@ -237,55 +239,55 @@
             (if (dom/valid? target)
               (do
                 (dom/remove-class! target "error")
-                (update-interaction index #(csi/set-url % value)))
+                (update-interaction index #(ctsi/set-url % value)))
               (dom/add-class! target "error"))))
 
         change-overlay-pos-type
         (fn [event]
           (let [value (-> event dom/get-target dom/get-value d/read-string)]
-            (update-interaction index #(csi/set-overlay-pos-type % value shape objects))))
+            (update-interaction index #(ctsi/set-overlay-pos-type % value shape objects))))
 
         toggle-overlay-pos-type
         (fn [pos-type]
-          (update-interaction index #(csi/toggle-overlay-pos-type % pos-type shape objects)))
+          (update-interaction index #(ctsi/toggle-overlay-pos-type % pos-type shape objects)))
 
         change-close-click-outside
         (fn [event]
           (let [value (-> event dom/get-target dom/checked?)]
-            (update-interaction index #(csi/set-close-click-outside % value))))
+            (update-interaction index #(ctsi/set-close-click-outside % value))))
 
         change-background-overlay
         (fn [event]
           (let [value (-> event dom/get-target dom/checked?)]
-            (update-interaction index #(csi/set-background-overlay % value))))
+            (update-interaction index #(ctsi/set-background-overlay % value))))
 
         change-animation-type
         (fn [event]
           (let [value (-> event dom/get-target dom/get-value d/read-string)]
-            (update-interaction index #(csi/set-animation-type % value))))
+            (update-interaction index #(ctsi/set-animation-type % value))))
 
         change-duration
         (fn [value]
-          (update-interaction index #(csi/set-duration % value)))
+          (update-interaction index #(ctsi/set-duration % value)))
 
         change-easing
         (fn [event]
           (let [value (-> event dom/get-target dom/get-value d/read-string)]
-            (update-interaction index #(csi/set-easing % value))))
+            (update-interaction index #(ctsi/set-easing % value))))
 
         change-way
         (fn [event]
           (let [value (-> event dom/get-target dom/get-value d/read-string)]
-            (update-interaction index #(csi/set-way % value))))
+            (update-interaction index #(ctsi/set-way % value))))
 
         change-direction
         (fn [value]
-          (update-interaction index #(csi/set-direction % value)))
+          (update-interaction index #(ctsi/set-direction % value)))
 
         change-offset-effect
         (fn [event]
           (let [value (-> event dom/get-target dom/checked?)]
-            (update-interaction index #(csi/set-offset-effect % value))))
+            (update-interaction index #(ctsi/set-offset-effect % value))))
         ]
 
     [:*
@@ -313,10 +315,11 @@
            (for [[value name] (event-type-names)]
              (when-not (and (= value :after-delay)
                             (not= (:type shape) :frame))
-               [:option {:value (str value)} name]))]]
+               [:option {:key (dm/str value)
+                         :value (dm/str value)} name]))]]
 
          ; Delay
-         (when (csi/has-delay interaction)
+         (when (ctsi/has-delay interaction)
            [:div.interactions-element
             [:span.element-set-subtitle.wide (tr "workspace.options.interaction-delay")]
             [:div.input-element {:title (tr "workspace.options.interaction-ms")}
@@ -334,10 +337,11 @@
            {:value (str (:action-type interaction))
             :on-change change-action-type}
            (for [[value name] (action-type-names)]
-             [:option {:value (str value)} name])]]
+             [:option {:key (dm/str "action-" value)
+                       :value (str value)} name])]]
 
          ; Destination
-         (when (csi/has-destination interaction)
+         (when (ctsi/has-destination interaction)
            [:div.interactions-element
             [:span.element-set-subtitle.wide (tr "workspace.options.interaction-destination")]
             [:select.input-select
@@ -349,10 +353,11 @@
              (for [frame frames]
                (when (and (not= (:id frame) (:id shape)) ; A frame cannot navigate to itself
                           (not= (:id frame) (:frame-id shape))) ; nor a shape to its container frame
-                 [:option {:value (str (:id frame))} (:name frame)]))]])
+                 [:option {:key (dm/str "destination-" (:id frame))
+                           :value (str (:id frame))} (:name frame)]))]])
 
          ; Preserve scroll
-         (when (csi/has-preserve-scroll interaction)
+         (when (ctsi/has-preserve-scroll interaction)
            [:div.interactions-element
             [:div.input-checkbox
              [:input {:type "checkbox"
@@ -363,7 +368,7 @@
               (tr "workspace.options.interaction-preserve-scroll")]]])
 
          ; URL
-         (when (csi/has-url interaction)
+         (when (ctsi/has-url interaction)
            [:div.interactions-element
             [:span.element-set-subtitle.wide (tr "workspace.options.interaction-url")]
             [:input.input-text {:type "url"
@@ -371,7 +376,7 @@
                                 :default-value (str (:url interaction))
                                 :on-blur change-url}]])
 
-         (when (csi/has-overlay-opts interaction)
+         (when (ctsi/has-overlay-opts interaction)
            [:*
             ; Overlay position (select)
             [:div.interactions-element
@@ -433,7 +438,7 @@
               [:label {:for (str "background-" index)}
                (tr "workspace.options.interaction-background")]]]])
 
-         (when (csi/has-animation? interaction)
+         (when (ctsi/has-animation? interaction)
            [:*
              ; Animation select
              [:div.interactions-element.separator
@@ -446,7 +451,7 @@
                  [:option {:value (str value)} name])]]
 
              ; Direction
-             (when (csi/has-way? interaction)
+             (when (ctsi/has-way? interaction)
                [:div.interactions-element.interactions-way-buttons
                 [:div.input-radio
                  [:input {:type "radio"
@@ -466,7 +471,7 @@
                  [:label {:for "way-out"} (tr "workspace.options.interaction-out")]]])
 
              ; Direction
-             (when (csi/has-direction? interaction)
+             (when (ctsi/has-direction? interaction)
                [:div.interactions-element.interactions-direction-buttons
                 [:div.element-set-actions-button
                  {:class (dom/classnames :active (= direction :right))
@@ -486,7 +491,7 @@
                   i/animate-up]])
 
              ; Duration
-             (when (csi/has-duration? interaction)
+             (when (ctsi/has-duration? interaction)
                [:div.interactions-element
                 [:span.element-set-subtitle.wide (tr "workspace.options.interaction-duration")]
                 [:div.input-element {:title (tr "workspace.options.interaction-ms")}
@@ -498,7 +503,7 @@
                  [:span.after (tr "workspace.options.interaction-ms")]]])
 
              ; Easing
-             (when (csi/has-easing? interaction)
+             (when (ctsi/has-easing? interaction)
                [:div.interactions-element
                 [:span.element-set-subtitle.wide (tr "workspace.options.interaction-easing")]
                 [:select.input-select
@@ -515,7 +520,7 @@
                    :ease-in-out i/easing-ease-in-out)]])
 
              ; Offset effect
-             (when (csi/has-offset-effect? interaction)
+             (when (ctsi/has-offset-effect? interaction)
                [:div.interactions-element
                 [:div.input-checkbox
                  [:input {:type "checkbox"
@@ -568,7 +573,8 @@
           [:div.interactions-help (tr "workspace.options.use-play-button")]])]
       [:div.groups
        (for [[index interaction] (d/enumerate interactions)]
-         [:& interaction-entry {:index index
+         [:& interaction-entry {:key (dm/str (:id shape) "-" index)
+                                :index index
                                 :shape shape
                                 :interaction interaction
                                 :update-interaction update-interaction

@@ -2,17 +2,19 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.viewport.rules
   (:require
    [app.common.colors :as colors]
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
+   [app.main.ui.formats :as fmt]
    [app.main.ui.hooks :as hooks]
    [app.util.object :as obj]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (def rules-pos 15)
 (def rules-size 4)
@@ -25,8 +27,8 @@
 (def over-number-size 50)
 (def over-number-opacity 0.7)
 
-(def font-size 13)
-(def font-family "sourcesanspro")
+(def font-size 12)
+(def font-family "worksans")
 
 ;; ----------------
 ;;   RULES
@@ -116,32 +118,28 @@
         step (calculate-step-size zoom)
         clip-id (str "clip-rule-" (d/name axis))]
 
-    
     [:*
      (let [{:keys [x y width height]} (get-background-area vbox zoom axis)]
        [:rect {:x x :y y :width width :height height :style {:fill rules-background}}])
 
-     [:g.rules {:clipPath (str "url(#" clip-id ")")} 
+     [:g.rules {:clipPath (str "url(#" clip-id ")")}
 
       [:defs
        [:clipPath {:id clip-id}
         (let [{:keys [x y width height]} (get-clip-area vbox zoom axis)]
           [:rect {:x x :y y :width width :height height}])]]
 
-      
-
       (let [{:keys [start end]} (get-rule-params vbox axis)
-            minv (max (mth/round start) -100000)
+            minv (max start -100000)
             minv (* (mth/ceil (/ minv step)) step)
-            maxv (min (mth/round end) 100000)
+            maxv (min end 100000)
             maxv (* (mth/floor (/ maxv step)) step)]
 
         (for [step-val (range minv (inc maxv) step)]
           (let [{:keys [text-x text-y line-x1 line-y1 line-x2 line-y2]}
                 (get-rule-axis step-val vbox zoom axis)]
-            [:* 
-             [:text {:key (str "text-" (d/name axis) "-" step-val)
-                     :x text-x
+            [:* {:key (dm/str "text-" (d/name axis) "-" step-val)}
+             [:text {:x text-x
                      :y text-y
                      :text-anchor "middle"
                      :dominant-baseline "middle"
@@ -149,7 +147,7 @@
                      :style {:font-size (/ font-size zoom)
                              :font-family font-family
                              :fill colors/gray-30}}
-              (str (mth/round step-val))]
+              (fmt/format-number step-val)]
 
              [:line {:key (str "line-" (d/name axis) "-"  step-val)
                      :x1 line-x1
@@ -176,7 +174,7 @@
             :height (/ rule-area-size zoom)
             :style {:fill rules-background
                     :fill-opacity over-number-opacity}}]
-    
+
     [:text {:x (- (:x1 selection-rect) (/ 4 zoom))
             :y (+ (:y vbox) (/ 12 zoom))
             :text-anchor "end"
@@ -184,7 +182,7 @@
             :style {:font-size (/ font-size zoom)
                     :font-family font-family
                     :fill selection-area-color}}
-     (str (mth/round (:x1 selection-rect)))]
+     (fmt/format-number (:x1 selection-rect))]
 
     [:rect {:x (:x2 selection-rect)
             :y (:y vbox)
@@ -200,11 +198,11 @@
             :style {:font-size (/ font-size zoom)
                     :font-family font-family
                     :fill selection-area-color}}
-     (str (mth/round (:x2 selection-rect)))]]
+     (fmt/format-number (:x2 selection-rect))]]
 
    (let [center-x (+ (:x vbox) (/ rule-area-half-size zoom))
          center-y (- (+ (:y selection-rect) (/ (:height selection-rect) 2)) (/ rule-area-half-size zoom))]
-     
+
      [:g {:transform (str "rotate(-90 " center-x "," center-y ")")}
       [:rect {:x (- center-x (/ (:height selection-rect) 2) (/ rule-area-half-size zoom))
               :y (- center-y (/ rule-area-half-size zoom))
@@ -226,7 +224,7 @@
               :height (/ rule-area-size zoom)
               :style {:fill rules-background
                       :fill-opacity over-number-opacity}}]
-      
+
       [:text {:x (- center-x (/ (:height selection-rect) 2) (/ 15 zoom))
               :y center-y
               :text-anchor "end"
@@ -234,7 +232,7 @@
               :style {:font-size (/ font-size zoom)
                       :font-family font-family
                       :fill selection-area-color}}
-       (str (mth/round (:y2 selection-rect)))]
+       (fmt/format-number (:y2 selection-rect))]
 
       [:text {:x (+ center-x (/ (:height selection-rect) 2) )
               :y center-y
@@ -243,7 +241,7 @@
               :style {:font-size (/ font-size zoom)
                       :font-family font-family
                       :fill selection-area-color}}
-       (str (mth/round (:y1 selection-rect)))]])])
+       (fmt/format-number (:y1 selection-rect))]])])
 
 (mf/defc rules
   {::mf/wrap-props false

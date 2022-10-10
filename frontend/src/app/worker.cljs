@@ -2,16 +2,16 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.worker
   (:require
    [app.common.logging :as log]
    [app.common.spec :as us]
-   [app.common.transit :as t]
    [app.worker.export]
    [app.worker.impl :as impl]
    [app.worker.import]
+   [app.worker.messages :as wm]
    [app.worker.selection]
    [app.worker.snaps]
    [app.worker.thumbnails]
@@ -46,16 +46,21 @@
   [{:keys [sender-id payload] :as message}]
   (us/assert ::message message)
   (letfn [(post [msg]
-            (let [msg (-> msg (assoc :reply-to sender-id) (t/encode-str))]
+            (let [msg (-> msg (assoc :reply-to sender-id) (wm/encode))]
               (.postMessage js/self msg)))
 
           (reply [result]
             (post {:payload result}))
 
-          (reply-error [err]
-            (.error js/console "error" (pr-str err))
-            (post {:error {:data (ex-data err)
-                           :message (ex-message err)}}))
+          (reply-error [cause]
+            (if (map? cause)
+              (post {:error {:type :worker-error
+                             :code (or (:type cause) :wrapped)
+                             :data cause}})
+              (post {:error {:type :worker-error
+                             :code :unhandled-error
+                             :hint (ex-message cause)
+                             :data (ex-data cause)}})))
 
           (reply-completed
             ([] (reply-completed nil))
@@ -86,8 +91,8 @@
   "Sends to the client a notification that its messages have been dropped"
   [{:keys [sender-id] :as message}]
   (us/assert ::message message)
-  (.postMessage js/self (t/encode-str {:reply-to sender-id
-                                       :dropped true})))
+  (.postMessage js/self (wm/encode {:reply-to sender-id
+                                    :dropped true})))
 
 (defn subscribe-buffer-messages
   "Creates a subscription to process the buffer messages"
@@ -145,7 +150,7 @@
   [event]
   (when (nil? (.-source event))
     (let [message (.-data event)
-          message (t/decode-str message)]
+          message (wm/decode message)]
       (if (:buffer? message)
         (rx/push! buffer message)
         (handle-message message)))))

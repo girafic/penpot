@@ -2,44 +2,44 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) UXBOX Labs SL
+// Copyright (c) KALEIDOS INC
 
 .dashboard-grid {
   font-size: $fs14;
   height: 100%;
+  overflow: hidden;
+  overflow-y: auto;
 
   .grid-row {
-    display: flex;
-    flex-wrap: wrap;
-    width: 100%;
-    align-content: flex-start;
-
-    &.no-wrap {
-      flex-wrap: nowrap;
-    }
+    display: grid;
+    width: 99%;
+    margin-left: 13px;
   }
 
   .grid-item {
     align-items: center;
-    border: 2px solid lighten($color-gray-20, 13%);
-    border-radius: $br-small;
     cursor: pointer;
     display: flex;
     flex-direction: column;
-    flex-shrink: 0;
-    height: 200px;
-    margin: $size-4;
-    max-width: 260px;
-    min-width: 260px;
+    flex: 1 0 260px;
+    height: 230px;
+    margin: $size-3 $size-4 $size-4 $size-2;
     position: relative;
     text-align: center;
-    width: 18%;
+    @media #{$bp-max-1366} {
+      height: 200px;
+      flex: 1 0 230px;
+    }
 
     &:hover {
-      box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
+      .grid-item-th {
+        border: 2px solid $color-primary;
+      }
     }
 
     .grid-item-th {
+      border-radius: $br-small;
+      border: 2px solid lighten($color-gray-20, 15%);
       text-align: initial;
     }
 
@@ -94,17 +94,17 @@
     }
 
     .item-info {
-      display: flex;
-      flex-direction: column;
+      display: grid;
       padding: $size-2;
       text-align: left;
       width: 100%;
+      font-size: $fs12;
 
       h3 {
         border: 1px solid transparent;
         color: $color-gray-60;
         font-size: $fs14;
-        font-weight: 400;
+        font-weight: 500;
         overflow: hidden;
         padding: 0;
         height: 27px;
@@ -113,14 +113,23 @@
         width: 100%;
         white-space: nowrap;
         line-height: 27px;
+        max-width: 260px;
+        @media #{$bp-max-1366} {
+          max-width: 230px;
+        }
       }
 
       span.date {
-        color: $color-gray-20;
-        font-size: $fs12;
+        color: $color-gray-30;
+        font-size: $fs13;
         overflow: hidden;
         text-overflow: ellipsis;
         width: 100%;
+        white-space: nowrap;
+        max-width: 260px;
+        @media #{$bp-max-1366} {
+          max-width: 230px;
+        }
       }
 
       .edit-wrapper {
@@ -137,10 +146,10 @@
     .item-badge {
       background-color: $color-white;
       border: 1px solid $color-gray-20;
-      border-radius: 4px;
+      border-radius: 2px;
       position: absolute;
-      top: $size-1;
-      right: $size-1;
+      top: $size-2;
+      right: $size-2;
       height: 32px;
       width: 32px;
       display: flex;
@@ -181,18 +190,20 @@
       }
 
       &.selected {
-        border: 2px solid $color-primary;
+        .grid-item-th {
+          border: 2px solid $color-primary;
+        }
       }
 
       .project-th-actions {
         align-items: center;
-        bottom: 2px;
+        bottom: 14px;
         opacity: 0;
         display: flex;
         right: 5px;
         justify-content: center;
         position: absolute;
-        width: 15px;
+        width: 30px;
         height: 30px;
 
         span {
@@ -207,9 +218,11 @@
           &.menu {
             margin-right: 0;
             display: flex;
-            justify-content: flex-end;
+            justify-content: center;
             align-items: flex-end;
             flex-direction: column;
+            width: 100%;
+            height: 100%;
 
             > svg {
               fill: $color-gray-60;
@@ -283,11 +296,6 @@
     }
   }
 
-  // STYLES FOR LIBRARIES
-  &.library {
-    padding: $size-4;
-  }
-
   .grid-item-th {
     background-position: center;
     background-size: auto 80%;
@@ -295,6 +303,7 @@
     border-top-left-radius: $br-small;
     border-top-right-radius: $br-small;
     height: 70%;
+    max-height: 160px;
     overflow: hidden;
     position: relative;
     width: 100%;
@@ -318,23 +327,112 @@
       fill: $color-gray-20;
     }
   }
+
+  // LIBRARY VIEW
+  .grid-item {
+    &.project-th.library {
+      height: 610px;
+      width: 300px;
+    }
+
+    .grid-item-th.library {
+      background-color: $color-gray-50;
+      flex-direction: column;
+      height: 90%;
+      justify-content: start;
+      max-height: 550px;
+      padding: $size-6;
+
+      .asset-section {
+        font-size: $fs12;
+        color: $color-gray-20;
+
+        &:not(:first-child) {
+          margin-top: $size-4;
+        }
+      }
+
+      .asset-title {
+        display: flex;
+        font-size: $fs12;
+        text-transform: uppercase;
+
+        & .num-assets {
+          color: $color-gray-30;
+        }
+      }
+
+      .asset-list-item {
+        display: flex;
+        align-items: center;
+        border: 1px solid transparent;
+        border-radius: $br-small;
+        margin-top: $size-1;
+        padding: 2px;
+        font-size: $fs12;
+        color: $color-white;
+        position: relative;
+
+        & .name-block {
+          color: $color-gray-20;
+          width: calc(100% - 24px - #{$size-2});
+        }
+
+        & .item-name {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          display: block;
+        }
+
+        & svg {
+          background-color: $color-canvas;
+          border-radius: 4px;
+          border: 2px solid transparent;
+          height: 24px;
+          width: 24px;
+          margin-right: $size-2;
+        }
+
+        & .color-name {
+          color: $color-white;
+        }
+
+        & .color-value {
+          margin-left: $size-1;
+          color: $color-gray-30;
+          text-transform: uppercase;
+        }
+
+        & .typography-sample {
+          height: 20px;
+          margin-right: $size-1;
+          width: 20px;
+        }
+      }
+    }
+  }
 }
 
 .grid-empty-placeholder {
-  align-items: center;
-  border: 1px dashed $color-gray-20;
-  border-radius: $br-small;
-  display: flex;
-  flex-direction: column;
-  height: 200px;
-  margin: $size-4;
-  padding: 3rem;
-  justify-content: center;
-
-  &.drafts {
-    background-image: url("/images/ph-left.svg"), url("/images/ph-right.svg");
+  border-radius: $br-huge;
+  display: grid;
+  background-color: rgba(227, 227, 227, 0.3);
+  padding: 13px;
+  margin-right: 13px;
+  &.libs {
+    background-image: url(/images/ph-left.svg), url(/images/ph-right.svg);
     background-position: 15% bottom, 85% top;
     background-repeat: no-repeat;
+    align-items: center;
+    border: 1px dashed #b1b2b5;
+    border-radius: 3px;
+    display: flex;
+    flex-direction: column;
+    height: 200px;
+    margin: 1rem;
+    padding: 3rem;
+    justify-content: center;
     .text {
       p {
         max-width: 360px;
@@ -342,6 +440,30 @@
         font-size: $fs16;
       }
     }
+  }
+  .create-new {
+    background-color: white;
+    border: 2px solid $color-gray-10;
+    border-radius: 3px;
+    color: $color-black;
+    cursor: pointer;
+    height: 158px;
+    font-family: "worksans", sans-serif;
+    margin: 0.5rem;
+    &:hover {
+      border: 2px solid $color-primary;
+    }
+  }
+
+  &.search {
+    align-items: center;
+    display: flex;
+    justify-content: center;
+    flex-direction: column;
+    height: 200px;
+    background: $color-white;
+    border: 1px dashed #e3e3e3;
+    border-radius: 0;
   }
 
   svg {
@@ -354,10 +476,5 @@
     margin-top: 10px;
     color: $color-gray-30;
     font-size: $fs16;
-  }
-
-  img.ph-files {
-    height: 150px;
-    margin-right: calc(100% - 148px);
   }
 }

@@ -2,21 +2,25 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.colorpicker.color-inputs
   (:require
-   [app.common.math :as math]
+   [app.common.math :as mth]
    [app.util.color :as uc]
    [app.util.dom :as dom]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
+
+(defn parse-hex
+  [val]
+  (if (= (first val) \#)
+    val
+    (str \# val)))
 
 (mf/defc color-inputs [{:keys [type color disable-opacity on-change]}]
   (let [{red :r green :g blue :b
          hue :h saturation :s value :v
          hex :hex alpha :alpha} color
-
-        parse-hex (fn [val] (if (= (first val) \#) val (str \# val)))
 
         refs {:hex   (mf/use-ref nil)
               :r     (mf/use-ref nil)
@@ -52,7 +56,7 @@
         on-change-property
         (fn [property max-value]
           (fn [e]
-            (let [val (-> e dom/get-target-val (math/clamp 0 max-value))
+            (let [val (-> e dom/get-target-val (mth/clamp 0 max-value))
                   val (if (#{:s} property) (/ val 100) val)]
               (when (not (nil? val))
                 (if (#{:r :g :b} property)
@@ -72,7 +76,7 @@
 
         on-change-opacity
         (fn [e]
-          (when-let [new-alpha (-> e dom/get-target-val (math/clamp 0 100) (/ 100))]
+          (when-let [new-alpha (-> e dom/get-target-val (mth/clamp 0 100) (/ 100))]
             (on-change {:alpha new-alpha})))]
 
 
@@ -86,9 +90,9 @@
            (when (and property-val property-ref)
              (when-let [node (mf/ref-val property-ref)]
                (case ref-key
-                 (:s :alpha) (dom/set-value! node (math/round (* property-val 100)))
+                 (:s :alpha) (dom/set-value! node (* property-val 100))
                  :hex (dom/set-value! node property-val)
-                 (dom/set-value! node (math/round property-val)))))))))
+                 (dom/set-value! node property-val))))))))
 
     [:div.color-values
      {:class (when disable-opacity "disable-opacity")}
@@ -156,7 +160,7 @@
                             :min 0
                             :step 1
                             :max 100
-                            :default-value (if (= alpha :multiple) "" (math/precision alpha 2))
+                            :default-value (if (= alpha :multiple) "" alpha)
                             :on-change on-change-opacity}])
 
      [:label.hex-label {:for "hex-value"} "HEX"]

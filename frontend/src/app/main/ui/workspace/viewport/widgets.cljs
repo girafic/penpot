@@ -2,13 +2,16 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.viewport.widgets
   (:require
+   [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
-   [app.common.pages.helpers :as cph]
+   [app.common.types.shape-tree :as ctt]
+   [app.common.uuid :as uuid]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.refs :as refs]
@@ -17,8 +20,9 @@
    [app.main.ui.hooks :as hooks]
    [app.main.ui.icons :as i]
    [app.main.ui.workspace.viewport.path-actions :refer [path-actions]]
+   [app.main.ui.workspace.viewport.utils :as vwu]
    [app.util.dom :as dom]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (mf/defc pixel-grid
   [{:keys [vbox zoom]}]
@@ -79,23 +83,11 @@
               :stroke "rgb(49, 239, 184)"
               :stroke-width (/ 1 zoom)}}]))
 
-;; Ensure that the label has always the same font
-;; size, regardless of zoom
-;; https://css-tricks.com/transforms-on-svg-elements/
-(defn text-transform
-  [{:keys [x y]} zoom]
-  (let [inv-zoom (/ 1 zoom)]
-    (str
-     "scale(" inv-zoom ", " inv-zoom ") "
-     "translate(" (* zoom x) ", " (* zoom y) ")")))
 
 (mf/defc frame-title
   {::mf/wrap [mf/memo]}
-  [{:keys [frame modifiers selected? zoom show-artboard-names? on-frame-enter on-frame-leave on-frame-select]}]
-  (let [{:keys [width x y]} (gsh/transform-shape frame)
-        label-pos (gpt/point x (- y (/ 10 zoom)))
-
-        on-mouse-down
+  [{:keys [frame selected? zoom show-artboard-names? on-frame-enter on-frame-leave on-frame-select]}]
+  (let [on-mouse-down
         (mf/use-callback
          (mf/deps (:id frame) on-frame-select)
          (fn [bevent]
@@ -107,19 +99,19 @@
 
         on-double-click
         (mf/use-callback
-          (mf/deps (:id frame))
-          (st/emitf (dw/go-to-layout :layers)
+         (mf/deps (:id frame))
+         #(st/emit! (dw/go-to-layout :layers)
                     (dw/start-rename-shape (:id frame))))
 
         on-context-menu
         (mf/use-callback
-          (mf/deps frame)
-          (fn [bevent]
-            (let [event    (.-nativeEvent bevent)
-                  position (dom/get-client-position event)]
-              (dom/prevent-default event)
-              (dom/stop-propagation event)
-              (st/emit! (dw/show-shape-context-menu {:position position :shape frame})))))
+         (mf/deps frame)
+         (fn [bevent]
+           (let [event    (.-nativeEvent bevent)
+                 position (dom/get-client-position event)]
+             (dom/prevent-default event)
+             (dom/stop-propagation event)
+             (st/emit! (dw/show-shape-context-menu {:position position :shape frame})))))
 
         on-pointer-enter
         (mf/use-callback
@@ -131,48 +123,59 @@
         (mf/use-callback
          (mf/deps (:id frame) on-frame-leave)
          (fn [_]
-           (on-frame-leave (:id frame))))]
+           (on-frame-leave (:id frame))))
+        text-pos-x (if (:use-for-thumbnail? frame) 15 0)]
 
-    [:text {:x 0
-            :y 0
-            :width width
-            :height 20
-            :class "workspace-frame-label"
-            :transform (str (when (and selected? modifiers)
-                              (str (:displacement modifiers) " " ))
-                            (text-transform label-pos zoom))
-            :style {:fill (when selected? "var(--color-primary-dark)")}
-            :visibility (if show-artboard-names? "visible" "hidden")
-            :on-mouse-down on-mouse-down
-            :on-double-click on-double-click
-            :on-context-menu on-context-menu
-            :on-pointer-enter on-pointer-enter
-            :on-pointer-leave on-pointer-leave}
-     (:name frame)]))
+    (when (not (:hidden frame))
+      [:g.frame-title {:id (dm/str "frame-title-" (:id frame)) :transform (vwu/title-transform frame zoom)}
+       (when (:use-for-thumbnail? frame)
+         [:svg {:x 0
+                :y -9
+                :width 12
+                :height 12
+                :class "workspace-frame-icon"
+                :style {:fill (when selected? "var(--color-primary-dark)")}
+                :visibility (if show-artboard-names? "visible" "hidden")}
+          [:use {:href "#icon-set-thumbnail"}]])
+       [:text {:x text-pos-x
+               :y 0
+               :width (:width frame)
+               :height 20
+               :class "workspace-frame-label"
+               ;:transform (dm/str frame-transform " " (text-transform label-pos zoom))
+               :style {:fill (when selected? "var(--color-primary-dark)")}
+               :visibility (if show-artboard-names? "visible" "hidden")
+               :on-mouse-down on-mouse-down
+               :on-double-click on-double-click
+               :on-context-menu on-context-menu
+               :on-pointer-enter on-pointer-enter
+               :on-pointer-leave on-pointer-leave}
+        (:name frame)]])))
 
 (mf/defc frame-titles
-  {::mf/wrap-props false}
+  {::mf/wrap-props false
+   ::mf/wrap [mf/memo]}
   [props]
   (let [objects         (unchecked-get props "objects")
         zoom            (unchecked-get props "zoom")
-        modifiers       (unchecked-get props "modifiers")
         selected        (or (unchecked-get props "selected") #{})
         show-artboard-names? (unchecked-get props "show-artboard-names?")
         on-frame-enter  (unchecked-get props "on-frame-enter")
         on-frame-leave  (unchecked-get props "on-frame-leave")
         on-frame-select (unchecked-get props "on-frame-select")
-        frames          (cph/get-frames objects)]
+        frames          (ctt/get-frames objects)]
 
     [:g.frame-titles
      (for [frame frames]
-       [:& frame-title {:frame frame
-                        :selected? (contains? selected (:id frame))
-                        :zoom zoom
-                        :show-artboard-names? show-artboard-names?
-                        :modifiers modifiers
-                        :on-frame-enter on-frame-enter
-                        :on-frame-leave on-frame-leave
-                        :on-frame-select on-frame-select}])]))
+       (when (= (:frame-id frame) uuid/zero)
+         [:& frame-title {:key (dm/str "frame-title-" (:id frame))
+                          :frame frame
+                          :selected? (contains? selected (:id frame))
+                          :zoom zoom
+                          :show-artboard-names? show-artboard-names?
+                          :on-frame-enter on-frame-enter
+                          :on-frame-leave on-frame-leave
+                          :on-frame-select on-frame-select}]))]))
 
 (mf/defc frame-flow
   [{:keys [flow frame modifiers selected? zoom on-frame-enter on-frame-leave on-frame-select]}]
@@ -192,7 +195,7 @@
         on-double-click
         (mf/use-callback
           (mf/deps (:id frame))
-          (st/emitf (dwi/start-rename-flow (:id flow))))
+          #(st/emit! (dwi/start-rename-flow (:id flow))))
 
         on-pointer-enter
         (mf/use-callback
@@ -212,7 +215,7 @@
                      :height 24
                      :transform (str (when (and selected? modifiers)
                                        (str (:displacement modifiers) " " ))
-                                     (text-transform flow-pos zoom))}
+                                     (vwu/text-transform flow-pos zoom))}
      [:div.flow-badge {:class (dom/classnames :selected selected?)}
       [:div.content {:on-mouse-down on-mouse-down
                      :on-double-click on-double-click
@@ -234,9 +237,10 @@
         on-frame-leave  (unchecked-get props "on-frame-leave")
         on-frame-select (unchecked-get props "on-frame-select")]
     [:g.frame-flows
-     (for [flow flows]
+     (for [[index flow] (d/enumerate flows)]
        (let [frame (get objects (:starting-frame flow))]
-         [:& frame-flow {:flow flow
+         [:& frame-flow {:key (dm/str (:id frame) "-" index)
+                         :flow flow
                          :frame frame
                          :selected? (contains? selected (:id frame))
                          :zoom zoom

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.util.path.parser
   (:require
@@ -302,16 +302,17 @@
          (reduce simplify-command [[start] start-pos start-pos start-pos start-pos])
          (first))))
 
-
 (defn parse-path [path-str]
-  (let [clean-path-str
-        (-> path-str
-            (str/trim)
-            ;; Change "commas" for spaces
-            (str/replace #"," " ")
-            ;; Remove all consecutive spaces
-            (str/replace #"\s+" " "))
-        commands (re-seq commands-regex clean-path-str)]
-    (-> (mapcat parse-command commands)
-        (simplify-commands))))
+  (if (empty? path-str)
+    path-str
+    (let [clean-path-str
+          (-> path-str
+              (str/trim)
+              ;; Change "commas" for spaces
+              (str/replace #"," " ")
+              ;; Remove all consecutive spaces
+              (str/replace #"\s+" " "))
+          commands (re-seq commands-regex clean-path-str)]
+      (-> (mapcat parse-command commands)
+          (simplify-commands)))))
 

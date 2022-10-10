@@ -2,26 +2,24 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.http
   (:require
    [app.common.data :as d]
-   [app.common.exceptions :as ex]
    [app.common.logging :as l]
-   [app.common.spec :as us]
-   [app.config :as cf]
-   [app.http.doc :as doc]
+   [app.common.transit :as t]
    [app.http.errors :as errors]
-   [app.http.middleware :as middleware]
+   [app.http.middleware :as mw]
    [app.metrics :as mtx]
+   [app.worker :as wrk]
    [clojure.spec.alpha :as s]
    [integrant.core :as ig]
-   [reitit.ring :as rr]
-   [yetti.adapter :as yt])
-  (:import
-   org.eclipse.jetty.server.Server
-   org.eclipse.jetty.server.handler.StatisticsHandler))
+   [reitit.core :as r]
+   [reitit.middleware :as rr]
+   [yetti.adapter :as yt]
+   [yetti.request :as yrq]
+   [yetti.response :as yrs]))
 
 (declare wrap-router)
 
@@ -31,154 +29,152 @@
 
 (s/def ::handler fn?)
 (s/def ::router some?)
-(s/def ::port ::us/integer)
-(s/def ::host ::us/string)
-(s/def ::name ::us/string)
-(s/def ::max-threads ::cf/http-server-max-threads)
-(s/def ::min-threads ::cf/http-server-min-threads)
+(s/def ::port integer?)
+(s/def ::host string?)
+(s/def ::name string?)
+
+(s/def ::max-body-size integer?)
+(s/def ::max-multipart-body-size integer?)
+(s/def ::io-threads integer?)
+(s/def ::worker-threads integer?)
 
 (defmethod ig/prep-key ::server
   [_ cfg]
   (merge {:name "http"
-          :min-threads 4
-          :max-threads 60
           :port 6060
-          :host "0.0.0.0"}
+          :host "0.0.0.0"
+          :max-body-size (* 1024 1024 30)             ; 30 MiB
+          :max-multipart-body-size (* 1024 1024 120)} ; 120 MiB
          (d/without-nils cfg)))
 
 (defmethod ig/pre-init-spec ::server [_]
-  (s/keys :req-un [::port ::host ::name ::min-threads ::max-threads]
-          :opt-un [::mtx/metrics ::router ::handler]))
-
-(defn- instrument-metrics
-  [^Server server metrics]
-  (let [stats (doto (StatisticsHandler.)
-                (.setHandler (.getHandler server)))]
-    (.setHandler server stats)
-    (mtx/instrument-jetty! (:registry metrics) stats)
-    server))
+  (s/and
+   (s/keys :req-un [::port ::host ::name ::max-body-size ::max-multipart-body-size]
+           :opt-un [::router ::handler ::io-threads ::worker-threads ::wrk/executor])
+   (fn [cfg]
+     (or (contains? cfg :router)
+         (contains? cfg :handler)))))
 
 (defmethod ig/init-key ::server
-  [_ {:keys [handler router port name metrics host] :as opts}]
-  (l/info :hint "starting http server"
-          :port port :host host :name name
-          :min-threads (:min-threads opts)
-          :max-threads (:max-threads opts))
+  [_ {:keys [handler router port name host] :as cfg}]
+  (l/info :hint "starting http server" :port port :host host :name name)
   (let [options {:http/port port
                  :http/host host
-                 :thread-pool/max-threads (:max-threads opts)
-                 :thread-pool/min-threads (:min-threads opts)
+                 :http/max-body-size (:max-body-size cfg)
+                 :http/max-multipart-body-size (:max-multipart-body-size cfg)
+                 :xnio/io-threads (:io-threads cfg)
+                 :xnio/worker-threads (:worker-threads cfg)
+                 :xnio/dispatch (:executor cfg)
                  :ring/async true}
-        handler (cond
-                  (fn? handler)  handler
-                  (some? router) (wrap-router router)
-                  :else (ex/raise :type :internal
-                                  :code :invalid-argument
-                                  :hint "Missing `handler` or `router` option."))
-        server  (-> (yt/server handler (d/without-nils options))
-                    (cond-> metrics (instrument-metrics metrics)))]
-    (assoc opts :server (yt/start! server))))
+
+        handler (if (some? router)
+                  (wrap-router router)
+
+                  handler)
+        server  (yt/server handler (d/without-nils options))]
+    (assoc cfg :server (yt/start! server))))
 
 (defmethod ig/halt-key! ::server
-  [_ {:keys [server name port] :as opts}]
-  (l/info :msg "stoping http server" :name name :port port)
+  [_ {:keys [server name port] :as cfg}]
+  (l/info :msg "stopping http server" :name name :port port)
   (yt/stop! server))
+
+(defn- not-found-handler
+  [_ respond _]
+  (respond (yrs/response 404)))
 
 (defn- wrap-router
   [router]
-  (let [default (rr/routes
-                 (rr/create-resource-handler {:path "/"})
-                 (rr/create-default-handler))
-        options {:middleware [middleware/wrap-server-timing]
-                 :inject-match? false
-                 :inject-router? false}
-        handler (rr/ring-handler router default options)]
+  (letfn [(handler [request respond raise]
+            (if-let [match (r/match-by-path router (yrq/path request))]
+              (let [params  (:path-params match)
+                    result  (:result match)
+                    handler (or (:handler result) not-found-handler)
+                    request (-> request
+                                (assoc :path-params params)
+                                (update :params merge params))]
+                (handler request respond raise))
+              (not-found-handler request respond raise)))
+
+          (on-error [cause request respond]
+            (let [{:keys [body] :as response} (errors/handle cause request)]
+              (respond
+               (cond-> response
+                 (map? body)
+                 (-> (update :headers assoc "content-type" "application/transit+json")
+                     (assoc :body (t/encode-str body {:type :json-verbose})))))))]
+
     (fn [request respond _]
-      (handler request respond (fn [cause]
-                                 (l/error :hint "unexpected error processing request"
-                                          ::l/context (errors/get-error-context request cause)
-                                          :query-string (:query-string request)
-                                          :cause cause)
-                                 (respond {:status 500 :body "internal server error"}))))))
+      (try
+        (handler request respond #(on-error % request respond))
+        (catch Throwable cause
+          (on-error cause request respond))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; HTTP ROUTER
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(s/def ::rpc map?)
-(s/def ::session map?)
-(s/def ::oauth map?)
-(s/def ::storage map?)
 (s/def ::assets map?)
+(s/def ::audit-handler fn?)
+(s/def ::awsns-handler fn?)
+(s/def ::debug-routes (s/nilable vector?))
+(s/def ::doc-routes (s/nilable vector?))
 (s/def ::feedback fn?)
+(s/def ::oauth map?)
+(s/def ::oidc-routes (s/nilable vector?))
+(s/def ::rpc-routes (s/nilable vector?))
+(s/def ::session map?)
+(s/def ::storage map?)
 (s/def ::ws fn?)
-(s/def ::audit-http-handler fn?)
-(s/def ::debug map?)
 
 (defmethod ig/pre-init-spec ::router [_]
-  (s/keys :req-un [::rpc ::session ::mtx/metrics ::ws
-                   ::oauth ::storage ::assets ::feedback
-                   ::debug ::audit-http-handler]))
+  (s/keys :req-un [::mtx/metrics
+                   ::ws
+                   ::storage
+                   ::assets
+                   ::session
+                   ::feedback
+                   ::awsns-handler
+                   ::debug-routes
+                   ::oidc-routes
+                   ::audit-handler
+                   ::rpc-routes
+                   ::doc-routes]))
 
 (defmethod ig/init-key ::router
-  [_ {:keys [ws session rpc oauth metrics assets feedback debug] :as cfg}]
+  [_ {:keys [ws session metrics assets feedback] :as cfg}]
   (rr/router
-   [["/metrics" {:get (:handler metrics)}]
-    ["/assets" {:middleware [[middleware/format-response-body]
-                             [middleware/errors errors/handle]
-                             [middleware/cookies]
-                             (:middleware session)]}
-     ["/by-id/:id" {:get (:objects-handler assets)}]
-     ["/by-file-media-id/:id" {:get (:file-objects-handler assets)}]
-     ["/by-file-media-id/:id/thumbnail" {:get (:file-thumbnails-handler assets)}]]
+   [["" {:middleware [[mw/server-timing]
+                      [mw/format-response]
+                      [mw/params]
+                      [mw/parse-request]
+                      [mw/errors errors/handle]
+                      [mw/restrict-methods]]}
 
-    ["/dbg" {:middleware [[middleware/multipart-params]
-                          [middleware/params]
-                          [middleware/keyword-params]
-                          [middleware/format-response-body]
-                          [middleware/errors errors/handle]
-                          [middleware/cookies]
-                          [(:middleware session)]]}
-     ["" {:get (:index debug)}]
-     ["/error-by-id/:id" {:get (:retrieve-error debug)}]
-     ["/error/:id" {:get (:retrieve-error debug)}]
-     ["/error" {:get (:retrieve-error-list debug)}]
-     ["/file/data" {:get (:retrieve-file-data debug)
-                    :post (:upload-file-data debug)}]
-     ["/file/changes" {:get (:retrieve-file-changes debug)}]]
+     ["/metrics" {:handler (::mtx/handler metrics)
+                  :allowed-methods #{:get}}]
 
-    ["/webhooks"
-     ["/sns" {:post (:sns-webhook cfg)}]]
+     ["/assets" {:middleware [(:middleware session)]}
+      ["/by-id/:id" {:handler (:objects-handler assets)}]
+      ["/by-file-media-id/:id" {:handler (:file-objects-handler assets)}]
+      ["/by-file-media-id/:id/thumbnail" {:handler (:file-thumbnails-handler assets)}]]
 
-    ["/ws/notifications"
-     {:middleware [[middleware/params]
-                   [middleware/keyword-params]
-                   [middleware/format-response-body]
-                   [middleware/errors errors/handle]
-                   [middleware/cookies]
-                   [(:middleware session)]]
-      :get ws}]
+     (:debug-routes cfg)
 
-    ["/api" {:middleware [[middleware/cors]
-                          [middleware/params]
-                          [middleware/multipart-params]
-                          [middleware/keyword-params]
-                          [middleware/format-response-body]
-                          [middleware/parse-request-body]
-                          [middleware/errors errors/handle]
-                          [middleware/cookies]]}
+     ["/webhooks"
+      ["/sns" {:handler (:awsns-handler cfg)
+               :allowed-methods #{:post}}]]
 
-     ["/health" {:get (:health-check debug)}]
-     ["/_doc" {:get (doc/handler rpc)}]
-     ["/feedback" {:middleware [(:middleware session)]
-                   :post feedback}]
-     ["/auth/oauth/:provider" {:post (:handler oauth)}]
-     ["/auth/oauth/:provider/callback" {:get (:callback-handler oauth)}]
+     ["/ws/notifications" {:middleware [(:middleware session)]
+                           :handler ws
+                           :allowed-methods #{:get}}]
 
-     ["/audit/events" {:middleware [(:middleware session)]
-                       :post (:audit-http-handler cfg)}]
-
-     ["/rpc" {:middleware [(:middleware session)]}
-      ["/query/:type" {:get (:query-handler rpc)
-                       :post (:query-handler rpc)}]
-      ["/mutation/:type" {:post (:mutation-handler rpc)}]]]]))
+     ["/api" {:middleware [[mw/cors]
+                           [(:middleware session)]]}
+      ["/audit/events" {:handler (:audit-handler cfg)
+                        :allowed-methods #{:post}}]
+      ["/feedback" {:handler feedback
+                    :allowed-methods #{:post}}]
+      (:doc-routes cfg)
+      (:oidc-routes cfg)
+      (:rpc-routes cfg)]]]))

@@ -2,15 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.handoff.attributes.blur
   (:require
    [app.main.ui.components.copy-button :refer [copy-button]]
    [app.util.code-gen :as cg]
-   [app.util.i18n :refer [t]]
+   [app.util.i18n :refer [tr]]
    [cuerdas.core :as str]
-   [rumext.alpha :as mf]))
+   [rumext.v2 :as mf]))
 
 (defn has-blur? [shape]
   (:blur shape))
@@ -22,17 +22,17 @@
    {:to-prop "filter"
     :format #(str/fmt "blur(%spx)" (:value %))}))
 
-(mf/defc blur-panel [{:keys [shapes locale]}]
+(mf/defc blur-panel [{:keys [shapes]}]
   (let [shapes (->> shapes (filter has-blur?))]
     (when (seq shapes)
       [:div.attributes-block
        [:div.attributes-block-title
-        [:div.attributes-block-title-text (t locale "handoff.attributes.blur")]
+        [:div.attributes-block-title-text (tr "handoff.attributes.blur")]
         (when (= (count shapes) 1)
           [:& copy-button {:data (copy-data (first shapes))}])]
 
        (for [shape shapes]
          [:div.attributes-unit-row
-          [:div.attributes-label (t locale "handoff.attributes.blur.value")]
+          [:div.attributes-label (tr "handoff.attributes.blur.value")]
           [:div.attributes-value (-> shape :blur :value) "px"]
           [:& copy-button {:data (copy-data shape)}]])])))

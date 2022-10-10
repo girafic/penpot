@@ -2,14 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.left-toolbar
   (:require
    [app.common.geom.point :as gpt]
-   [app.common.math :as mth]
    [app.common.media :as cm]
+   [app.main.data.events :as ev]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.media :as dwm]
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -19,7 +20,9 @@
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.object :as obj]
-   [rumext.alpha :as mf]))
+   [app.util.timers :as ts]
+   [rumext.v2 :as mf]))
+
 
 (mf/defc image-upload
   {::mf/wrap [mf/memo]}
@@ -35,26 +38,27 @@
          (mf/deps file)
          (fn [blobs]
            ;; We don't want to add a ref because that redraws the component
-           ;; for everychange. Better direct access on the callback
-           ;; vbox (get-in @st/state [:workspace-local :vbox])
-           (let [vbox   (:vbox @refs/workspace-local)
-                 x      (mth/round (+ (:x vbox) (/ (:width vbox) 2)))
-                 y      (mth/round (+ (:y vbox) (/ (:height vbox) 2)))
+           ;; for everychange. Better direct access on the callback.
+           (let [vbox   (deref refs/vbox)
+                 x      (+ (:x vbox) (/ (:width vbox) 2))
+                 y      (+ (:y vbox) (/ (:height vbox) 2))
                  params {:file-id (:id file)
                          :blobs (seq blobs)
                          :position (gpt/point x y)}]
-             (st/emit! (dw/upload-media-workspace params)))))]
+             (st/emit! (dwm/upload-media-workspace params)))))]
 
-       [:li.tooltip.tooltip-right
-        {:alt (tr "workspace.toolbar.image" (sc/get-tooltip :insert-image))
-         :on-click on-click}
-        [:*
-         i/image
-         [:& file-uploader {:input-id "image-upload"
-                            :accept cm/str-image-types
-                            :multi true
-                            :ref ref
-                            :on-selected on-files-selected}]]]))
+    [:li
+     [:button.tooltip.tooltip-right
+      {:alt (tr "workspace.toolbar.image" (sc/get-tooltip :insert-image))
+       :aria-label (tr "workspace.toolbar.image" (sc/get-tooltip :insert-image))
+       :on-click on-click}
+      [:*
+       i/image
+       [:& file-uploader {:input-id "image-upload"
+                          :accept cm/str-image-types
+                          :multi true
+                          :ref ref
+                          :on-selected on-files-selected}]]]]))
 
 (mf/defc left-toolbar
   {::mf/wrap [mf/memo]
@@ -65,74 +69,108 @@
         select-drawtool   #(st/emit! :interrupt (dw/select-for-drawing %))
         edition           (mf/deref refs/selected-edition)]
     [:aside.left-toolbar
-     [:div.left-toolbar-inside
-      [:ul.left-toolbar-options
-       [:li.tooltip.tooltip-right
+     [:ul.left-toolbar-options
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.move"  (sc/get-tooltip :move))
+         :aria-label (tr "workspace.toolbar.move"  (sc/get-tooltip :move))
          :class (when (and (nil? selected-drawtool)
                            (not edition)) "selected")
-         :on-click (st/emitf :interrupt)}
-        i/pointer-inner]
-       [:li.tooltip.tooltip-right
+         :on-click #(st/emit! :interrupt)}
+        i/pointer-inner]]
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.frame" (sc/get-tooltip :draw-frame))
+         :aria-label (tr "workspace.toolbar.frame" (sc/get-tooltip :draw-frame))
          :class (when (= selected-drawtool :frame) "selected")
          :on-click (partial select-drawtool :frame)
          :data-test "artboard-btn"}
-        i/artboard]
-       [:li.tooltip.tooltip-right
+        i/artboard]]
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.rect" (sc/get-tooltip :draw-rect))
+         :aria-label (tr "workspace.toolbar.rect" (sc/get-tooltip :draw-rect))
          :class (when (= selected-drawtool :rect) "selected")
          :on-click (partial select-drawtool :rect)
          :data-test "rect-btn"}
-        i/box]
-       [:li.tooltip.tooltip-right
+        i/box]]
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.ellipse" (sc/get-tooltip :draw-ellipse))
+         :aria-label (tr "workspace.toolbar.ellipse" (sc/get-tooltip :draw-ellipse))
          :class (when (= selected-drawtool :circle) "selected")
          :on-click (partial select-drawtool :circle)
          :data-test "ellipse-btn"}
-        i/circle]
-       [:li.tooltip.tooltip-right
+        i/circle]]
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.text" (sc/get-tooltip :draw-text))
+         :aria-label (tr "workspace.toolbar.text" (sc/get-tooltip :draw-text))
          :class (when (= selected-drawtool :text) "selected")
          :on-click (partial select-drawtool :text)}
-        i/text]
+        i/text]]
 
-       [:& image-upload]
+      [:& image-upload]
 
-       [:li.tooltip.tooltip-right
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.curve" (sc/get-tooltip :draw-curve))
+         :aria-label (tr "workspace.toolbar.curve" (sc/get-tooltip :draw-curve))
          :class (when (= selected-drawtool :curve) "selected")
          :on-click (partial select-drawtool :curve)
          :data-test "curve-btn"}
-        i/pencil]
-       [:li.tooltip.tooltip-right
+        i/pencil]]
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.path" (sc/get-tooltip :draw-path))
+         :aria-label (tr "workspace.toolbar.path" (sc/get-tooltip :draw-path))
          :class (when (= selected-drawtool :path) "selected")
          :on-click (partial select-drawtool :path)
          :data-test "path-btn"}
-        i/pen]
+        i/pen]]
 
-       [:li.tooltip.tooltip-right
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.comments" (sc/get-tooltip :add-comment))
+         :aria-label (tr "workspace.toolbar.comments" (sc/get-tooltip :add-comment))
          :class (when (= selected-drawtool :comments) "selected")
          :on-click (partial select-drawtool :comments)}
-        i/chat]]
+        i/chat]]]
 
-      [:ul.left-toolbar-options.panels
-       [:li.tooltip.tooltip-right
+     [:ul.left-toolbar-options.panels
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.text-palette" (sc/get-tooltip :toggle-textpalette))
+         :aria-label (tr "workspace.toolbar.text-palette" (sc/get-tooltip :toggle-textpalette))
          :class (when (contains? layout :textpalette) "selected")
          :on-click (fn []
                      (r/set-resize-type! :bottom)
-                     (st/emit! (dw/remove-layout-flags :colorpalette)
-                               (dw/toggle-layout-flags :textpalette)))}
-        "Ag"]
-       
-       [:li.tooltip.tooltip-right
+                     (dom/add-class!  (dom/get-element-by-class "color-palette") "fade-out-down")
+                     (ts/schedule 300 #(st/emit! (dw/remove-layout-flag :colorpalette)
+                                                 (-> (dw/toggle-layout-flag :textpalette)
+                                                     (vary-meta assoc ::ev/origin "workspace-left-toolbar")))))}
+        "Ag"]]
+
+      [:li
+       [:button.tooltip.tooltip-right
         {:alt (tr "workspace.toolbar.color-palette" (sc/get-tooltip :toggle-colorpalette))
+         :aria-label (tr "workspace.toolbar.color-palette" (sc/get-tooltip :toggle-colorpalette))
          :class (when (contains? layout :colorpalette) "selected")
          :on-click (fn []
                      (r/set-resize-type! :bottom)
-                     (st/emit! (dw/remove-layout-flags :textpalette)
-                               (dw/toggle-layout-flags :colorpalette)))}
-        i/palette]]]]))
+                     (dom/add-class!  (dom/get-element-by-class "color-palette") "fade-out-down")
+                     (ts/schedule 300 #(st/emit! (dw/remove-layout-flag :textpalette)
+                                                 (-> (dw/toggle-layout-flag :colorpalette)
+                                                     (vary-meta assoc ::ev/origin "workspace-left-toolbar")))))}
+        i/palette]]
+      [:li
+       [:button.tooltip.tooltip-right.separator
+        {:alt (tr "workspace.toolbar.shortcuts" (sc/get-tooltip :show-shortcuts))
+         :aria-label (tr "workspace.toolbar.shortcuts" (sc/get-tooltip :show-shortcuts))
+         :class (when (contains? layout :shortcuts) "selected")
+         :on-click (fn []
+                     (let [is-sidebar-closed? (contains? layout :collapse-left-sidebar)]
+                       (ts/schedule 300 #(st/emit! (when is-sidebar-closed? (dw/toggle-layout-flag :collapse-left-sidebar))
+                                                   (-> (dw/toggle-layout-flag :shortcuts)
+                                                       (vary-meta assoc ::ev/origin "workspace-left-toolbar"))))))}
+        i/shortcut]]]]))
