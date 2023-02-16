@@ -15,7 +15,7 @@
    [promesa.core :as p]))
 
 (enable-console-print!)
-(l/initialize!)
+(l/setup! {:app :info})
 
 (defn start
   [& _]
@@ -44,3 +44,6 @@
 (proc/on "uncaughtException"
          (fn [cause]
            (js/console.error cause)))
+
+(proc/on "SIGTERM" (fn [] (proc/exit 0)))
+(proc/on "SIGINT" (fn [] (proc/exit 0)))

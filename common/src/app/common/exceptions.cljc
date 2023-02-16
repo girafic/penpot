@@ -2,38 +2,34 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.common.exceptions
   "A helpers for work with exceptions."
-  #?(:cljs
-     (:require-macros [app.common.exceptions]))
-  (:require [clojure.spec.alpha :as s]))
+  #?(:cljs (:require-macros [app.common.exceptions]))
+  (:require
+   #?(:clj [clojure.stacktrace :as strace])
+   [app.common.pprint :as pp]
+   [clojure.spec.alpha :as s]
+   [cuerdas.core :as str]
+   [expound.alpha :as expound])
+  #?(:clj
+     (:import
+      clojure.lang.IPersistentMap)))
 
-(s/def ::type keyword?)
-(s/def ::code keyword?)
-(s/def ::hint string?)
-(s/def ::cause #?(:clj #(instance? Throwable %)
-                  :cljs #(instance? js/Error %)))
+#?(:clj (set! *warn-on-reflection* true))
 
-(s/def ::error-params
-  (s/keys :req-un [::type]
-          :opt-un [::code
-                   ::hint
-                   ::cause]))
-
-(defn error
-  [& {:keys [hint cause ::data type] :as params}]
-  (s/assert ::error-params params)
-  (let [payload (-> params
-                    (dissoc :cause ::data)
-                    (merge data))
-        hint    (or hint (pr-str type))]
-    (ex-info hint payload cause)))
+(defmacro error
+  [& {:keys [type hint] :as params}]
+  `(ex-info ~(or hint (name type))
+            (merge
+             ~(dissoc params :cause ::data)
+             ~(::data params))
+            ~(:cause params)))
 
 (defmacro raise
-  [& args]
-  `(throw (error ~@args)))
+  [& params]
+  `(throw (error ~@params)))
 
 (defn try*
   [f on-error]
@@ -46,48 +42,146 @@
   [& exprs]
   `(try* (^:once fn* [] ~@exprs) (constantly nil)))
 
-(defmacro try
+(defmacro try!
   [& exprs]
   `(try* (^:once fn* [] ~@exprs) identity))
 
-(defn with-always
-  "A helper that evaluates an exptession independently if the body
-  raises exception or not."
-  [always-expr & body]
-  `(try ~@body (finally ~always-expr)))
-
 (defn ex-info?
   [v]
-  (instance? #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core.ExceptionInfo) v))
+  (instance? #?(:clj clojure.lang.IExceptionInfo :cljs cljs.core.ExceptionInfo) v))
+
+(defn error?
+  [v]
+  (instance? #?(:clj clojure.lang.IExceptionInfo :cljs cljs.core.ExceptionInfo) v))
 
 (defn exception?
   [v]
   (instance? #?(:clj java.lang.Throwable :cljs js/Error) v))
 
+#?(:clj
+   (defn runtime-exception?
+     [v]
+     (instance? RuntimeException v)))
 
-#?(:cljs
-   (deftype WrappedException [cause meta]
-     cljs.core/IMeta
-     (-meta [_] meta)
+(defn explain
+  ([data] (explain data nil))
+  ([data {:keys [max-problems] :or {max-problems 10} :as opts}]
+   (cond
+     ;; ;; NOTE: a special case for spec validation errors on integrant
+     (and (= (:reason data) :integrant.core/build-failed-spec)
+          (contains? data :explain))
+     (explain (:explain data) opts)
 
-     cljs.core/IDeref
-     (-deref [_] cause))
-   :clj
-   (deftype WrappedException [cause meta]
-     clojure.lang.IMeta
-     (meta [_] meta)
+     (and (contains? data ::s/problems)
+          (contains? data ::s/value)
+          (contains? data ::s/spec))
+     (binding [s/*explain-out* expound/printer]
+       (with-out-str
+         (s/explain-out (update data ::s/problems #(take max-problems %))))))))
 
-     clojure.lang.IDeref
-     (deref [_] cause)))
+#?(:clj
+(defn format-throwable
+  [^Throwable cause & {:keys [summary? detail? header? data? explain? chain? data-level data-length trace-length]
+                       :or {summary? true
+                            detail? true
+                            header? true
+                            data? true
+                            explain? true
+                            chain? true
+                            data-length 10
+                            data-level 3}}]
 
+  (letfn [(print-trace-element [^StackTraceElement e]
+            (let [class (.getClassName e)
+                  method (.getMethodName e)]
+              (let [match (re-matches #"^([A-Za-z0-9_.-]+)\$(\w+)__\d+$" (str class))]
+                (if (and match (= "invoke" method))
+                  (apply printf "%s/%s" (rest match))
+                  (printf "%s.%s" class method))))
+            (printf "(%s:%d)" (or (.getFileName e) "") (.getLineNumber e)))
 
-#?(:clj (ns-unmap 'app.common.exceptions '->WrappedException))
-#?(:clj (ns-unmap 'app.common.exceptions 'map->WrappedException))
+          (print-explain [explain]
+            (print "    xp: ")
+            (let [[line & lines] (str/lines explain)]
+              (print line)
+              (newline)
+              (doseq [line lines]
+                (println "       " line))))
 
-(defn wrapped?
-  [o]
-  (instance? WrappedException o))
+          (print-data [data]
+            (when (seq data)
+              (print "    dt: ")
+              (let [[line & lines] (str/lines (pp/pprint-str data :level data-level :length data-length ))]
+                (print line)
+                (newline)
+                (doseq [line lines]
+                  (println "       " line)))))
 
-(defn wrap-with-context
-  [cause context]
-  (WrappedException. cause context))
+          (print-trace-title [^Throwable cause]
+            (print   " →  ")
+            (printf "%s: %s" (.getName (class cause)) (first (str/lines (ex-message cause))))
+
+            (when-let [^StackTraceElement e (first (.getStackTrace ^Throwable cause))]
+              (printf " (%s:%d)" (or (.getFileName e) "") (.getLineNumber e)))
+
+            (newline))
+
+          (print-summary [^Throwable cause]
+            (let [causes (loop [cause (ex-cause cause)
+                                result []]
+                           (if cause
+                             (recur (ex-cause cause)
+                                    (conj result cause))
+                             result))]
+              (when header?
+                (println "SUMMARY:"))
+              (print-trace-title cause)
+              (doseq [cause causes]
+                (print-trace-title cause))))
+
+          (print-trace [^Throwable cause]
+            (print-trace-title cause)
+            (let [st (.getStackTrace cause)]
+              (print "    at: ")
+              (if-let [e (first st)]
+                (print-trace-element e)
+                (print "[empty stack trace]"))
+              (newline)
+
+              (doseq [e (if (nil? trace-length) (rest st) (take (dec trace-length) (rest st)))]
+                (print "        ")
+                (print-trace-element e)
+                (newline))))
+
+          (print-detail [^Throwable cause]
+            (print-trace cause)
+            (when-let [data (ex-data cause)]
+              (when data?
+                (print-data (dissoc data ::s/problems ::s/spec ::s/value)))
+              (when explain?
+                (if-let [explain (explain data)]
+                  (print-explain explain)))))
+
+          (print-all [^Throwable cause]
+            (when summary?
+              (print-summary cause))
+
+            (when detail?
+              (when header?
+                (println "DETAIL:"))
+
+              (print-detail cause)
+              (when chain?
+                (loop [cause cause]
+                  (when-let [cause (ex-cause cause)]
+                    (newline)
+                    (print-detail cause)
+                    (recur cause))))))
+          ]
+    (with-out-str
+      (print-all cause)))))
+
+#?(:clj
+(defn print-throwable
+  [cause & {:as opts}]
+  (println (format-throwable cause opts))))

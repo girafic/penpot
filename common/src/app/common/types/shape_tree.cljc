@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.common.types.shape-tree
   (:require
@@ -132,45 +132,34 @@
 (defn get-base
   [objects id-a id-b]
 
-  (let [parents-a (reverse (cons id-a (cph/get-parent-ids objects id-a)))
-        parents-b (reverse (cons id-b (cph/get-parent-ids objects id-b)))
+  (let [[parents-a parents-a-index] (cph/get-parent-ids-with-index objects id-a)
+        [parents-b parents-b-index] (cph/get-parent-ids-with-index objects id-b)
 
-        [base base-child-a base-child-b]
-        (loop [parents-a (rest parents-a)
-               parents-b (rest parents-b)
-               base uuid/zero]
-          (cond
-            (not= (first parents-a) (first parents-b))
-            [base (first parents-a) (first parents-b)]
+        parents-a (cons id-a parents-a)
+        parents-b (into #{id-b} parents-b)
 
-            (or (empty? parents-a) (empty? parents-b))
-            [uuid/zero (first parents-a) (first parents-b)]
+        ;; Search for the common frame in order
+        base (or (d/seek parents-b parents-a) uuid/zero)
 
-            :else
-            (recur (rest parents-a) (rest parents-b) (first parents-a))))
+        idx-a (get parents-a-index base)
+        idx-b (get parents-b-index base)]
 
-        index-base-a (when base-child-a (cph/get-position-on-parent objects base-child-a))
-        index-base-b (when base-child-b (cph/get-position-on-parent objects base-child-b))]
-
-    [base index-base-a index-base-b]))
+    [base idx-a idx-b]))
 
 (defn is-shape-over-shape?
-  [objects base-shape-id over-shape-id {:keys [top-frames?]}]
+  [objects base-shape-id over-shape-id]
 
   (let [[base index-a index-b] (get-base objects base-shape-id over-shape-id)]
     (cond
+      ;; The base the base shape, so the other item is bellow
       (= base base-shape-id)
-      (and (not top-frames?)
-           (let [object (get objects base-shape-id)]
-             (or (cph/frame-shape? object)
-                 (cph/root-frame? object))))
+      false
 
+      ;; The base is the testing over, so it's over
       (= base over-shape-id)
-      (or top-frames?
-          (let [object (get objects over-shape-id)]
-            (or (not (cph/frame-shape? object))
-                (not (cph/root-frame? object)))))
+      true
 
+      ;; Check which index is lower
       :else
       (< index-a index-b))))
 
@@ -183,20 +172,20 @@
              (let [type-a (dm/get-in objects [id-a :type])
                    type-b (dm/get-in objects [id-b :type])]
                (cond
-                 (and bottom-frames? (= :frame type-a) (not= :frame type-b))
-                 1
+                 (and (not= :frame type-a) (= :frame type-b))
+                 (if bottom-frames? -1 1)
 
-                 (and bottom-frames? (not= :frame type-a) (= :frame type-b))
-                 -1
+                 (and (= :frame type-a) (not= :frame type-b))
+                 (if bottom-frames? 1 -1)
 
                  (= id-a id-b)
                  0
 
-                 (is-shape-over-shape? objects id-a id-b options)
-                 1
+                 (is-shape-over-shape? objects id-b id-a)
+                 -1
 
                  :else
-                 -1)))]
+                 1)))]
      (sort comp ids))))
 
 (defn frame-id-by-position
@@ -224,8 +213,31 @@
   "Search for the top nested frame for positioning shapes when moving or creating.
   Looks for all the frames in a position and then goes in depth between the top-most and its
   children to find the target."
-  [objects position]
-  (let [frame-ids (all-frames-by-position objects position)
+  ([objects position]
+   (top-nested-frame objects position nil))
+
+  ([objects position excluded]
+   (assert (or (nil? excluded) (set? excluded)))
+
+   (let [frame-ids (cond->> (all-frames-by-position objects position)
+                     (some? excluded)
+                     (remove excluded))
+
+         frame-set (set frame-ids)]
+
+     (loop [current-id (first frame-ids)]
+       (let [current-shape (get objects current-id)
+             child-frame-id (d/seek #(contains? frame-set %)
+                                    (-> (:shapes current-shape) reverse))]
+         (if (nil? child-frame-id)
+           (or current-id uuid/zero)
+           (recur child-frame-id)))))))
+
+(defn top-nested-frame-ids
+  "Search the top nested frame in a list of ids"
+  [objects ids]
+
+  (let [frame-ids (->> ids (filter #(cph/frame-shape? objects %)))
         frame-set (set frame-ids)]
     (loop [current-id (first frame-ids)]
       (let [current-shape (get objects current-id)
@@ -245,7 +257,7 @@
                (if all-frames?
                  identity
                  (remove :hide-in-viewer)))
-         (sort-z-index objects (get-frames-ids objects) {:top-frames? true}))))
+         (sort-z-index objects (get-frames-ids objects)))))
 
 (defn start-page-index
   [objects]
@@ -255,12 +267,6 @@
   [objects]
   (with-meta objects {::index-frames (get-frames (with-meta objects nil))}))
 
-(defn start-object-indices
-  [file]
-  (letfn [(process-index [page-index page-id]
-            (update-in page-index [page-id :objects] start-page-index))]
-    (update file :pages-index #(reduce process-index % (keys %)))))
-
 (defn update-object-indices
   [file page-id]
   (update-in file [:pages-index page-id :objects] update-page-index))
@@ -268,30 +274,6 @@
 (defn rotated-frame?
   [frame]
   (not (mth/almost-zero? (:rotation frame 0))))
-
-(defn retrieve-used-names
-  [objects]
-  (into #{} (comp (map :name) (remove nil?)) (vals objects)))
-
-(defn- extract-numeric-suffix
-  [basename]
-  (if-let [[_ p1 p2] (re-find #"(.*)-([0-9]+)$" basename)]
-    [p1 (+ 1 (d/parse-integer p2))]
-    [basename 1]))
-
-(defn generate-unique-name
-  "A unique name generator"
-  [used basename]
-  (s/assert ::us/set-of-string used)
-  (s/assert ::us/string basename)
-  (if-not (contains? used basename)
-    basename
-    (let [[prefix initial] (extract-numeric-suffix basename)]
-      (loop [counter initial]
-        (let [candidate (str prefix "-" counter)]
-          (if (contains? used candidate)
-            (recur (inc counter))
-            candidate))))))
 
 (defn clone-object
   "Gets a copy of the object and all its children, with new ids
@@ -338,8 +320,8 @@
            [new-object new-objects updated-objects])
 
          (let [child-id (first child-ids)
-               child (get objects child-id)
-               _ (us/assert some? child)
+               child    (get objects child-id)
+               _        (us/assert! ::us/some child)
 
                [new-child new-child-objects updated-child-objects]
                (clone-object child new-id objects update-new-object update-original-object)]

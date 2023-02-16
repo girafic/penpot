@@ -12,10 +12,11 @@ cp ../CHANGES.md target/classes/changelog.md;
 
 clojure -T:build jar;
 mv target/penpot.jar target/dist/penpot.jar
+cp resources/log4j2.xml target/dist/log4j2.xml
 cp scripts/run.template.sh target/dist/run.sh;
-cp scripts/manage.template.sh target/dist/manage.sh;
+cp scripts/manage.py target/dist/manage.py
 chmod +x target/dist/run.sh;
-chmod +x target/dist/manage.sh;
+chmod +x target/dist/manage.py
 
 # Prefetch
 bb ./scripts/prefetch-templates.clj resources/app/onboarding.edn builtin-templates/

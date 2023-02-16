@@ -6,8 +6,12 @@
 
 (ns app.migrations
   (:require
+   [app.common.data.macros :as dm]
+   [app.common.logging :as l]
+   [app.db :as db]
    [app.migrations.clj.migration-0023 :as mg0023]
    [app.util.migrations :as mg]
+   [clojure.spec.alpha :as s]
    [integrant.core :as ig]))
 
 (def migrations
@@ -247,7 +251,84 @@
 
    {:name "0079-mod-profile-table"
     :fn (mg/resource "app/migrations/sql/0079-mod-profile-table.sql")}
-   ])
 
+   {:name "0080-mod-index-names"
+    :fn (mg/resource "app/migrations/sql/0080-mod-index-names.sql")}
 
-(defmethod ig/init-key ::migrations [_ _] migrations)
+   {:name "0081-add-deleted-at-index-to-file-table"
+    :fn (mg/resource "app/migrations/sql/0081-add-deleted-at-index-to-file-table.sql")}
+
+   {:name "0082-add-features-column-to-file-table"
+    :fn (mg/resource "app/migrations/sql/0082-add-features-column-to-file-table.sql")}
+
+   {:name "0083-add-file-data-fragment-table"
+    :fn (mg/resource "app/migrations/sql/0083-add-file-data-fragment-table.sql")}
+
+   {:name "0084-add-features-column-to-file-change-table"
+    :fn (mg/resource "app/migrations/sql/0084-add-features-column-to-file-change-table.sql")}
+
+   {:name "0085-add-webhook-table"
+    :fn (mg/resource "app/migrations/sql/0085-add-webhook-table.sql")}
+
+   {:name "0086-add-webhook-delivery-table"
+    :fn (mg/resource "app/migrations/sql/0086-add-webhook-delivery-table.sql")}
+
+   {:name "0087-mod-task-table"
+    :fn (mg/resource "app/migrations/sql/0087-mod-task-table.sql")}
+
+   {:name "0088-mod-team-profile-rel-table"
+    :fn (mg/resource "app/migrations/sql/0088-mod-team-profile-rel-table.sql")}
+
+   {:name "0089-mod-project-profile-rel-table"
+    :fn (mg/resource "app/migrations/sql/0089-mod-project-profile-rel-table.sql")}
+
+   {:name "0090-mod-http-session-table"
+    :fn (mg/resource "app/migrations/sql/0090-mod-http-session-table.sql")}
+
+   {:name "0091-mod-team-project-profile-rel-table"
+    :fn (mg/resource "app/migrations/sql/0091-mod-team-project-profile-rel-table.sql")}
+
+   {:name "0092-mod-team-invitation-table"
+    :fn (mg/resource "app/migrations/sql/0092-mod-team-invitation-table.sql")}
+
+   {:name "0093-del-file-share-tokens-table"
+    :fn (mg/resource "app/migrations/sql/0093-del-file-share-tokens-table.sql")}
+
+   {:name "0094-del-profile-attr-table"
+    :fn (mg/resource "app/migrations/sql/0094-del-profile-attr-table.sql")}
+
+   {:name "0095-del-storage-data-table"
+    :fn (mg/resource "app/migrations/sql/0095-del-storage-data-table.sql")}
+
+   {:name "0096-del-storage-pending-table"
+    :fn (mg/resource "app/migrations/sql/0096-del-storage-pending-table.sql")}
+
+   {:name "0098-add-quotes-table"
+    :fn (mg/resource "app/migrations/sql/0098-add-quotes-table.sql")}
+
+   {:name "0099-add-access-token-table"
+    :fn (mg/resource "app/migrations/sql/0099-add-access-token-table.sql")}
+
+   {:name "0100-mod-profile-indexes"
+    :fn (mg/resource "app/migrations/sql/0100-mod-profile-indexes.sql")}
+
+   {:name "0101-mod-server-error-report-table"
+    :fn (mg/resource "app/migrations/sql/0101-mod-server-error-report-table.sql")}
+
+  ])
+
+(defn apply-migrations!
+  [pool name migrations]
+  (dm/with-open [conn (db/open pool)]
+    (mg/setup! conn)
+    (mg/migrate! conn {:name name :steps migrations})))
+
+(defmethod ig/pre-init-spec ::migrations
+  [_]
+  (s/keys :req [::db/pool]))
+
+(defmethod ig/init-key ::migrations
+  [module {:keys [::db/pool]}]
+  (when-not (db/read-only? pool)
+    (l/info :hint "running migrations" :module module)
+    (some->> (seq migrations) (apply-migrations! pool "main"))))

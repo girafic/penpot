@@ -7,16 +7,17 @@
 (ns app.loggers.database
   "A specific logger impl that persists errors on the database."
   (:require
+   [app.common.data :as d]
+   [app.common.exceptions :as ex]
    [app.common.logging :as l]
-   [app.common.uuid :as uuid]
+   [app.common.pprint :as pp]
+   [app.common.spec :as us]
    [app.config :as cf]
    [app.db :as db]
-   [app.util.async :as aa]
-   [app.worker :as wrk]
-   [clojure.core.async :as a]
    [clojure.spec.alpha :as s]
-   [cuerdas.core :as str]
-   [integrant.core :as ig]))
+   [integrant.core :as ig]
+   [promesa.exec :as px]
+   [promesa.exec.csp :as sp]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Error Listener
@@ -27,67 +28,81 @@
 (defonce enabled (atom true))
 
 (defn- persist-on-database!
-  [{:keys [pool] :as cfg} {:keys [id] :as event}]
+  [pool id report]
   (when-not (db/read-only? pool)
-    (db/insert! pool :server-error-report {:id id :content (db/tjson event)})))
+    (db/insert! pool :server-error-report
+                {:id id
+                 :version 2
+                 :content (db/tjson report)})))
 
-(defn- parse-event-data
-  [event]
-  (reduce-kv
-   (fn [acc k v]
-     (cond
-       (= k :id)         (assoc acc k (uuid/uuid v))
-       (= k :profile-id) (assoc acc k (uuid/uuid v))
-       (str/blank? v)    acc
-       :else             (assoc acc k v)))
-   {}
-   event))
+(defn record->report
+  [{:keys [::l/context ::l/message ::l/props ::l/logger ::l/level ::l/cause] :as record}]
+  (us/assert! ::l/record record)
 
-(defn parse-event
-  [event]
-  (-> (parse-event-data event)
-      (assoc :hint (or (:hint event) (:message event)))
-      (assoc :tenant (cf/get :tenant))
-      (assoc :host (cf/get :host))
-      (assoc :public-uri (cf/get :public-uri))
-      (assoc :version (:full cf/version))
-      (update :id #(or % (uuid/next)))))
+  (merge
+   {:context (-> context
+                 (assoc :tenant (cf/get :tenant))
+                 (assoc :host (cf/get :host))
+                 (assoc :public-uri (cf/get :public-uri))
+                 (assoc :version (:full cf/version))
+                 (assoc :logger-name logger)
+                 (assoc :logger-level level)
+                 (dissoc :params)
+                 (pp/pprint-str :width 200))
+    :params  (some-> (:params context)
+                     (pp/pprint-str :width 200))
+    :props   (pp/pprint-str props :width 200)
+    :hint    (or (ex-message cause) @message)
+    :trace   (ex/format-throwable cause :data? false :explain? false :header? false :summary? false)}
 
-(defn handle-event
-  [{:keys [executor] :as cfg} event]
-  (aa/with-thread executor
-    (try
-      (let [event (parse-event event)
-            uri   (cf/get :public-uri)]
+   (when-let [data (ex-data cause)]
+     {:spec-value    (some-> (::s/value data) (pp/pprint-str :width 200))
+      :spec-explain  (ex/explain data)
+      :data          (-> data
+                         (dissoc ::s/problems ::s/value ::s/spec :hint)
+                         (pp/pprint-str :width 200))})))
 
-        (l/debug :hint "registering error on database" :id (:id event)
-                 :uri (str uri "/dbg/error/" (:id event)))
+(defn- handle-event
+  [{:keys [::db/pool]} {:keys [::l/id] :as record}]
+  (try
+    (let [uri    (cf/get :public-uri)
+          report (-> record record->report d/without-nils)]
+      (l/debug :hint "registering error on database" :id id
+               :uri (str uri "/dbg/error/" id))
 
-        (persist-on-database! cfg event))
-      (catch Exception cause
-        (l/warn :hint "unexpected exception on database error logger" :cause cause)))))
+      (persist-on-database! pool id report))
+    (catch Throwable cause
+      (l/warn :hint "unexpected exception on database error logger" :cause cause))))
+
+(defn error-record?
+  [{:keys [::l/level ::l/cause]}]
+  (and (= :error level)
+       (ex/exception? cause)))
 
 (defmethod ig/pre-init-spec ::reporter [_]
-  (s/keys :req-un [::wrk/executor ::db/pool ::receiver]))
-
-(defn error-event?
-  [event]
-  (= "error" (:logger/level event)))
+  (s/keys :req [::db/pool]))
 
 (defmethod ig/init-key ::reporter
-  [_ {:keys [receiver] :as cfg}]
-  (l/info :msg "initializing database error persistence")
-  (let [output (a/chan (a/sliding-buffer 5) (filter error-event?))]
-    (receiver :sub output)
-    (a/go-loop []
-      (let [msg (a/<! output)]
-        (if (nil? msg)
-          (l/info :msg "stopping error reporting loop")
-          (do
-            (a/<! (handle-event cfg msg))
-            (recur)))))
-    output))
+  [_ cfg]
+  (let [input (sp/chan (sp/sliding-buffer 32) (filter error-record?))]
+    (add-watch l/log-record ::reporter #(sp/put! input %4))
+    (px/thread
+      {:name "penpot/database-reporter" :virtual true}
+      (l/info :hint "initializing database error persistence")
+      (try
+        (loop []
+          (when-let [record (sp/take! input)]
+            (handle-event cfg record)
+            (recur)))
+        (catch InterruptedException _
+          (l/debug :hint "reporter interrupted"))
+        (catch Throwable cause
+          (l/error :hint "unexpected error" :cause cause))
+        (finally
+          (sp/close! input)
+          (remove-watch l/log-record ::reporter)
+          (l/info :hint "reporter terminated"))))))
 
 (defmethod ig/halt-key! ::reporter
-  [_ output]
-  (a/close! output))
+  [_ thread]
+  (some-> thread px/interrupt!))

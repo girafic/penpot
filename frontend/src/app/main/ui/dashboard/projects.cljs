@@ -21,6 +21,7 @@
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.keyboard :as kbd]
    [app.util.router :as rt]
    [app.util.time :as dt]
    [app.util.webapi :as wapi]
@@ -33,26 +34,34 @@
 (mf/defc header
   {::mf/wrap [mf/memo]}
   []
-  (let [create #(st/emit! (dd/create-project))]
+  (let [on-click (mf/use-fn #(st/emit! (dd/create-project)))]
     [:header.dashboard-header
-     [:div.dashboard-title
+     [:div.dashboard-title#dashboard-projects-title
       [:h1 (tr "dashboard.projects-title")]]
-
-     [:a.btn-secondary.btn-small {:on-click create :data-test "new-project-button"}
+     [:button.btn-secondary.btn-small
+      {:on-click on-click
+       :data-test "new-project-button"}
       (tr "dashboard.new-project")]]))
 
 (mf/defc team-hero
   {::mf/wrap [mf/memo]}
-  [{:keys [team close-banner] :as props}]
-  (let [go-members (mf/use-fn #(st/emit! (dd/go-to-team-members)))
+  [{:keys [team close-fn] :as props}]
+  (let [on-nav-members-click (mf/use-fn #(st/emit! (dd/go-to-team-members)))
 
-        invite-member
+        on-invite-click
         (mf/use-fn
          (mf/deps team)
          (fn []
            (st/emit! (modal/show {:type :invite-members
                                   :team team
-                                  :origin :hero}))))]
+                                  :origin :hero}))))
+        on-close-click
+        (mf/use-fn
+         (mf/deps close-fn)
+         (fn [event]
+           (dom/prevent-default event)
+           (close-fn)))]
+
     [:div.team-hero
      [:img {:src "images/deco-team-banner.png" :border "0"
             :role "presentation"}]
@@ -60,13 +69,13 @@
       [:div.title (tr "dasboard.team-hero.title")]
       [:div.info
        [:span (tr "dasboard.team-hero.text")]
-       [:a {:on-click  go-members} (tr "dasboard.team-hero.management")]]]
+       [:a {:on-click on-nav-members-click} (tr "dasboard.team-hero.management")]]]
      [:button.btn-primary.invite
-      {:on-click invite-member}
+      {:on-click on-invite-click}
       (tr "onboarding.choice.team-up.invite-members")]
      [:button.close
-      {:on-click close-banner
-      :aria-label (tr "labels.close")}
+      {:on-click on-close-click
+       :aria-label (tr "labels.close")}
       [:span i/close]]]))
 
 (def builtin-templates
@@ -104,11 +113,11 @@
              (swap! state #(assoc % :status :importing))
              (st/emit! (with-meta (dd/clone-template (with-meta params mdata))
                          {::ev/origin "get-started-hero-block"})))))]
-    [:div.tutorial
-     [:div.img]
+    [:article.tutorial
+     [:div.thumbnail]
      [:div.text
-      [:div.title (tr "dasboard.tutorial-hero.title")]
-      [:div.info (tr "dasboard.tutorial-hero.info")]
+      [:h2.title (tr "dasboard.tutorial-hero.title")]
+      [:p.info (tr "dasboard.tutorial-hero.info")]
       [:button.btn-primary.action {:on-click download-tutorial}
        (case (:status @state)
          :waiting (tr "dasboard.tutorial-hero.start")
@@ -128,12 +137,15 @@
           (st/emit! (ptk/event ::ev/event {::ev/name "show-walkthrough"
                                            ::ev/origin "get-started-hero-block"
                                            :section "dashboard"})))]
-    [:div.walkthrough
-     [:div.img]
+    [:article.walkthrough
+     [:div.thumbnail]
      [:div.text
-      [:div.title (tr "dasboard.walkthrough-hero.title")]
-      [:div.info (tr "dasboard.walkthrough-hero.info")]
-      [:a.btn-primary.action {:href " https://design.penpot.app/walkthrough" :target "_blank" :on-click handle-walkthrough-link}
+      [:h2.title (tr "dasboard.walkthrough-hero.title")]
+      [:p.info (tr "dasboard.walkthrough-hero.info")]
+      [:a.btn-primary.action 
+       {:href " https://design.penpot.app/walkthrough"
+        :target "_blank"
+        :on-click handle-walkthrough-link}
        (tr "dasboard.walkthrough-hero.start")]]
      [:button.close
       {:on-click close-walkthrough
@@ -145,6 +157,7 @@
   (let [locale     (mf/deref i18n/locale)
         file-count (or (:count project) 0)
         project-id (:id project)
+        team-id    (:id team)
 
         dstate     (mf/deref refs/dashboard-local)
         edit-id    (:project-for-edit dstate)
@@ -156,8 +169,8 @@
         width      (mf/use-state nil)
         rowref     (mf/use-ref)
         itemsize   (if (>= @width 1030)
-                    280
-                    230)
+                     280
+                     230)
 
         ratio      (if (some? @width) (/ @width itemsize) 0)
         nitems     (mth/floor ratio)
@@ -166,30 +179,33 @@
 
         on-nav
         (mf/use-fn
-         (mf/deps project)
+         (mf/deps project-id team-id)
          (fn []
-           (st/emit! (rt/nav :dashboard-files {:team-id (:team-id project)
-                                               :project-id project-id}))))
+           (st/emit! (rt/nav :dashboard-files
+                             {:team-id team-id
+                              :project-id project-id}))))
         toggle-pin
-        (mf/use-callback
+        (mf/use-fn
          (mf/deps project)
          #(st/emit! (dd/toggle-project-pin project)))
 
         on-menu-click
-        (mf/use-callback (fn [event]
-                           (let [position (dom/get-client-position event)]
-                             (dom/prevent-default event)
-                             (swap! local assoc :menu-open true
-                                                :menu-pos position))))
+        (mf/use-fn
+         (fn [event]
+           (let [position (dom/get-client-position event)]
+             (dom/prevent-default event)
+             (swap! local assoc
+                    :menu-open true
+                    :menu-pos position))))
 
         on-menu-close
-        (mf/use-callback #(swap! local assoc :menu-open false))
+        (mf/use-fn #(swap! local assoc :menu-open false))
 
         on-edit-open
-        (mf/use-callback #(swap! local assoc :edition? true))
+        (mf/use-fn #(swap! local assoc :edition? true))
 
         on-edit
-        (mf/use-callback
+        (mf/use-fn
          (mf/deps project)
          (fn [name]
            (let [name (str/trim name)]
@@ -199,29 +215,33 @@
              (swap! local assoc :edition? false))))
 
         on-file-created
-        (mf/use-callback
-         (mf/deps project)
+        (mf/use-fn
          (fn [data]
            (let [pparams {:project-id (:project-id data)
                           :file-id (:id data)}
                  qparams {:page-id (get-in data [:data :pages 0])}]
              (st/emit! (rt/nav :workspace pparams qparams)))))
 
-
         create-file
-        (mf/use-callback
-         (mf/deps project)
+        (mf/use-fn
+         (mf/deps project-id on-file-created)
          (fn [origin]
            (let [mdata  {:on-success on-file-created}
-                 params {:project-id (:id project)}]
-             (st/emit! (with-meta (dd/create-file (with-meta params mdata))
-                         {::ev/origin origin})))))
+                 params {:project-id project-id}]
+             (st/emit! (-> (dd/create-file (with-meta params mdata))
+                           (with-meta {::ev/origin origin}))))))
+
+        on-create-click
+        (mf/use-fn
+         (mf/deps create-file)
+         (fn [_]
+           (create-file "dashboard:grid-header-plus-button")))
 
         on-import
-        (mf/use-callback
-         (mf/deps (:id project) (:id team))
+        (mf/use-fn
+         (mf/deps project-id (:id team))
          (fn []
-           (st/emit! (dd/fetch-files {:project-id (:id project)})
+           (st/emit! (dd/fetch-files {:project-id project-id})
                      (dd/fetch-recent-files (:id team))
                      (dd/clear-selected-files))))]
 
@@ -240,10 +260,9 @@
           (vreset! mnt? false)
           (rx/dispose! sub))))
 
-
-    [:div.dashboard-project-row
+    [:article.dashboard-project-row
      {:class (when first? "first")}
-     [:div.project {:ref rowref}
+     [:header.project {:ref rowref}
       [:div.project-name-wrapper
        (if (:edition? @local)
          [:& inline-edition {:content (:name project)
@@ -254,13 +273,14 @@
             (tr "labels.drafts")
             (:name project))])
 
-       [:& project-menu {:project project
-                         :show? (:menu-open @local)
-                         :left (:x (:menu-pos @local))
-                         :top (:y (:menu-pos @local))
-                         :on-edit on-edit-open
-                         :on-menu-close on-menu-close
-                         :on-import on-import}]
+       [:& project-menu
+        {:project project
+         :show? (:menu-open @local)
+         :left (:x (:menu-pos @local))
+         :top (:y (:menu-pos @local))
+         :on-edit on-edit-open
+         :on-menu-close on-menu-close
+         :on-import on-import}]
 
        [:span.info (str (tr "labels.num-of-files" (i18n/c file-count)))]
        (when (> file-count 0)
@@ -269,19 +289,39 @@
            [:span.recent-files-row-title-info (str ", " time)]))
        [:div.project-actions
         (when-not (:is-default project)
-          [:span.pin-icon.tooltip.tooltip-bottom
+          [:button.pin-icon.tooltip.tooltip-bottom
            {:class (when (:is-pinned project) "active")
-            :on-click toggle-pin :alt (tr "dashboard.pin-unpin")}
+            :on-click toggle-pin 
+            :alt (tr "dashboard.pin-unpin")
+            :aria-label (tr "dashboard.pin-unpin")
+            :on-key-down (fn [event]
+                           (when (kbd/enter? event)
+                             (toggle-pin event)))
+            :tab-index "0"}
            (if (:is-pinned project)
              i/pin-fill
              i/pin)])
 
-        [:a.btn-secondary.btn-small.tooltip.tooltip-bottom
-         {:on-click create-file :alt (tr "dashboard.new-file") :data-test "project-new-file"}
+        [:button.btn-secondary.btn-small.tooltip.tooltip-bottom
+         {:on-click on-create-click
+          :alt (tr "dashboard.new-file")
+          :aria-label (tr "dashboard.new-file")
+          :data-test "project-new-file"
+          :tab-index "0"
+          :on-key-down (fn [event]
+                         (when (kbd/enter? event)
+                           (on-create-click event)))}
          i/close]
 
-        [:a.btn-secondary.btn-small.tooltip.tooltip-bottom
-         {:on-click on-menu-click :alt (tr "dashboard.options") :data-test "project-options"}
+        [:button.btn-secondary.btn-small.tooltip.tooltip-bottom
+         {:on-click on-menu-click
+          :alt (tr "dashboard.options")
+          :aria-label  (tr "dashboard.options")
+          :data-test "project-options"
+          :tab-index "0"
+          :on-key-down (fn [event]
+                         (when (kbd/enter? event)
+                           (on-menu-click event)))}
          i/actions]]]
 
       (when (and (> limit 0)
@@ -295,7 +335,7 @@
       {:project project
        :team team
        :files files
-       :on-create-clicked (partial create-file "dashboard:empty-folder-placeholder")
+       :create-fn create-file
        :limit limit}]]))
 
 
@@ -354,7 +394,7 @@
        [:& header]
 
        (when team-hero?
-         [:& team-hero {:team team :close-banner close-banner}])
+         [:& team-hero {:team team :close-fn close-banner}])
 
        (when (or (not tutorial-viewed?) (not walkthrough-viewed?))
          [:div.hero-projects
@@ -367,7 +407,7 @@
             [:& interface-walkthrough
              {:close-walkthrough close-walkthrough}])])
 
-       [:section.dashboard-container.no-bg
+       [:div.dashboard-container.no-bg.dashboard-projects
         (for [{:keys [id] :as project} projects]
           (let [files (when recent-map
                         (->> (vals recent-map)

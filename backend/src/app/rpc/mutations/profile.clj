@@ -11,22 +11,18 @@
    [app.common.spec :as us]
    [app.config :as cf]
    [app.db :as db]
-   [app.emails :as eml]
+   [app.http.session :as session]
    [app.loggers.audit :as audit]
    [app.media :as media]
-   [app.rpc.commands.auth :as cmd.auth]
+   [app.rpc.climit :as-alias climit]
+   [app.rpc.commands.profile :as profile]
    [app.rpc.doc :as-alias doc]
-   [app.rpc.mutations.teams :as teams]
-   [app.rpc.queries.profile :as profile]
-   [app.rpc.semaphore :as rsem]
+   [app.rpc.helpers :as rph]
    [app.storage :as sto]
-   [app.tokens :as tokens]
    [app.util.services :as sv]
    [app.util.time :as dt]
    [clojure.spec.alpha :as s]
-   [cuerdas.core :as str]
-   [promesa.core :as p]
-   [promesa.exec :as px]))
+   [cuerdas.core :as str]))
 
 ;; --- Helpers & Specs
 
@@ -46,13 +42,15 @@
           :opt-un [::lang ::theme]))
 
 (sv/defmethod ::update-profile
-  [{:keys [pool] :as cfg} {:keys [profile-id fullname lang theme] :as params}]
+  {::doc/added "1.0"
+   ::doc/deprecated "1.18"}
+  [{:keys [::db/pool] :as cfg} {:keys [profile-id fullname lang theme] :as params}]
   (db/with-atomic [conn pool]
     ;; NOTE: we need to retrieve the profile independently if we use
     ;; it or not for explicit locking and avoid concurrent updates of
     ;; the same row/object.
-    (let [profile (-> (db/get-by-id conn :profile profile-id {:for-update true})
-                      (profile/decode-profile-row))
+    (let [profile (-> (db/get-by-id conn :profile profile-id ::db/for-update? true)
+                      (profile/decode-row))
 
           ;; Update the profile map with direct params
           profile (-> profile
@@ -68,153 +66,69 @@
                    :props (db/tjson (:props profile))}
                   {:id profile-id})
 
-      (with-meta (-> profile profile/strip-private-attrs d/without-nils)
-        {::audit/props (audit/profile->props profile)}))))
+      (-> profile
+          (profile/strip-private-attrs)
+          (d/without-nils)
+          (rph/with-meta {::audit/props (audit/profile->props profile)})))))
+
 
 ;; --- MUTATION: Update Password
-
-(declare validate-password!)
-(declare update-profile-password!)
-(declare invalidate-profile-session!)
 
 (s/def ::update-profile-password
   (s/keys :req-un [::profile-id ::password ::old-password]))
 
 (sv/defmethod ::update-profile-password
-  {::rsem/queue :auth}
-  [{:keys [pool] :as cfg} {:keys [password] :as params}]
+  {::climit/queue :auth
+   ::doc/added "1.0"
+   ::doc/deprecated "1.18"}
+  [{:keys [::db/pool] :as cfg} {:keys [password] :as params}]
   (db/with-atomic [conn pool]
-    (let [profile    (validate-password! conn params)
-          session-id (:app.rpc/session-id params)]
+    (let [profile    (#'profile/validate-password! conn params)
+          session-id (::session/id params)]
       (when (= (str/lower (:email profile))
                (str/lower (:password params)))
         (ex/raise :type :validation
                   :code :email-as-password
                   :hint "you can't use your email as password"))
-      (update-profile-password! conn (assoc profile :password password))
-      (invalidate-profile-session! conn (:id profile) session-id)
+      (profile/update-profile-password! conn (assoc profile :password password))
+      (#'profile/invalidate-profile-session! conn (:id profile) session-id)
       nil)))
 
-(defn- invalidate-profile-session!
-  "Removes all sessions except the current one."
-  [conn profile-id session-id]
-  (let [sql "delete from http_session where profile_id = ? and id != ?"]
-    (:next.jdbc/update-count (db/exec-one! conn [sql profile-id session-id]))))
-
-(defn- validate-password!
-  [conn {:keys [profile-id old-password] :as params}]
-  (let [profile (db/get-by-id conn :profile profile-id)]
-    (when-not (:valid (cmd.auth/verify-password old-password (:password profile)))
-      (ex/raise :type :validation
-                :code :old-password-not-match))
-    profile))
-
-(defn update-profile-password!
-  [conn {:keys [id password] :as profile}]
-  (db/update! conn :profile
-              {:password (cmd.auth/derive-password password)}
-              {:id id}))
 
 ;; --- MUTATION: Update Photo
-
-(declare update-profile-photo)
 
 (s/def ::file ::media/upload)
 (s/def ::update-profile-photo
   (s/keys :req-un [::profile-id ::file]))
 
 (sv/defmethod ::update-profile-photo
+  {::doc/added "1.0"
+   ::doc/deprecated "1.18"}
   [cfg {:keys [file] :as params}]
   ;; Validate incoming mime type
   (media/validate-media-type! file #{"image/jpeg" "image/png" "image/webp"})
-  (let [cfg (update cfg :storage media/configure-assets-storage)]
-    (update-profile-photo cfg params)))
-
-(defn update-profile-photo
-  [{:keys [pool storage executor] :as cfg} {:keys [profile-id] :as params}]
-  (p/let [profile (px/with-dispatch executor
-                    (db/get-by-id pool :profile profile-id))
-          photo   (teams/upload-photo cfg params)]
-
-    ;; Schedule deletion of old photo
-    (when-let [id (:photo-id profile)]
-      (sto/touch-object! storage id))
-
-    ;; Save new photo
-    (db/update! pool :profile
-                {:photo-id (:id photo)}
-                {:id profile-id})
-    nil))
+  (let [cfg (update cfg ::sto/storage media/configure-assets-storage)]
+    (profile/update-profile-photo cfg params)))
 
 ;; --- MUTATION: Request Email Change
-
-(declare request-email-change)
-(declare change-email-immediately)
 
 (s/def ::request-email-change
   (s/keys :req-un [::email]))
 
 (sv/defmethod ::request-email-change
-  [{:keys [pool] :as cfg} {:keys [profile-id email] :as params}]
+  {::doc/added "1.0"
+   ::doc/deprecated "1.18"}
+  [{:keys [::db/pool] :as cfg} {:keys [profile-id email] :as params}]
   (db/with-atomic [conn pool]
     (let [profile (db/get-by-id conn :profile profile-id)
-          cfg     (assoc cfg :conn conn)
+          cfg     (assoc cfg ::profile/conn conn)
           params  (assoc params
                          :profile profile
                          :email (str/lower email))]
+
       (if (contains? cf/flags :smtp)
-        (request-email-change cfg params)
-        (change-email-immediately cfg params)))))
-
-(defn- change-email-immediately
-  [{:keys [conn]} {:keys [profile email] :as params}]
-  (when (not= email (:email profile))
-    (cmd.auth/check-profile-existence! conn params))
-  (db/update! conn :profile
-              {:email email}
-              {:id (:id profile)})
-  {:changed true})
-
-(defn- request-email-change
-  [{:keys [conn sprops] :as cfg} {:keys [profile email] :as params}]
-  (let [token   (tokens/generate sprops
-                                 {:iss :change-email
-                                  :exp (dt/in-future "15m")
-                                  :profile-id (:id profile)
-                                  :email email})
-        ptoken  (tokens/generate sprops
-                                 {:iss :profile-identity
-                                  :profile-id (:id profile)
-                                  :exp (dt/in-future {:days 30})})]
-
-    (when (not= email (:email profile))
-      (cmd.auth/check-profile-existence! conn params))
-
-    (when-not (eml/allow-send-emails? conn profile)
-      (ex/raise :type :validation
-                :code :profile-is-muted
-                :hint "looks like the profile has reported repeatedly as spam or has permanent bounces."))
-
-    (when (eml/has-bounce-reports? conn email)
-      (ex/raise :type :validation
-                :code :email-has-permanent-bounces
-                :hint "looks like the email you invite has been repeatedly reported as spam or permanent bounce"))
-
-    (eml/send! {::eml/conn conn
-                ::eml/factory eml/change-email
-                :public-uri (:public-uri cfg)
-                :to (:email profile)
-                :name (:fullname profile)
-                :pending-email email
-                :token token
-                :extra-data ptoken})
-    nil))
-
-
-(defn select-profile-for-update
-  [conn id]
-  (db/get-by-id conn :profile id {:for-update true}))
-
+        (#'profile/request-email-change! cfg params)
+        (#'profile/change-email-immediately! cfg params)))))
 
 ;; --- MUTATION: Update Profile Props
 
@@ -223,9 +137,11 @@
   (s/keys :req-un [::profile-id ::props]))
 
 (sv/defmethod ::update-profile-props
-  [{:keys [pool] :as cfg} {:keys [profile-id props]}]
+  {::doc/added "1.0"
+   ::doc/deprecated "1.18"}
+  [{:keys [::db/pool] :as cfg} {:keys [profile-id props]}]
   (db/with-atomic [conn pool]
-    (let [profile (profile/retrieve-profile-data conn profile-id)
+    (let [profile (profile/get-profile conn profile-id ::db/for-update? true)
           props   (reduce-kv (fn [props k v]
                                ;; We don't accept namespaced keys
                                (if (simple-ident? k)
@@ -240,22 +156,20 @@
                   {:props (db/tjson props)}
                   {:id profile-id})
 
-      (profile/filter-profile-props props))))
+      (profile/filter-props props))))
 
 
 ;; --- MUTATION: Delete Profile
-
-(declare get-owned-teams-with-participants)
-(declare check-can-delete-profile!)
-(declare mark-profile-as-deleted!)
 
 (s/def ::delete-profile
   (s/keys :req-un [::profile-id]))
 
 (sv/defmethod ::delete-profile
-  [{:keys [pool session] :as cfg} {:keys [profile-id] :as params}]
+  {::doc/added "1.0"
+   ::doc/deprecated "1.18"}
+  [{:keys [::db/pool] :as cfg} {:keys [profile-id] :as params}]
   (db/with-atomic [conn pool]
-    (let [teams      (get-owned-teams-with-participants conn profile-id)
+    (let [teams      (#'profile/get-owned-teams-with-participants conn profile-id)
           deleted-at (dt/now)]
 
       ;; If we found owned teams with participants, we don't allow
@@ -276,97 +190,4 @@
                   {:deleted-at deleted-at}
                   {:id profile-id})
 
-      (with-meta {}
-        {:transform-response (:delete session)}))))
-
-(def sql:owned-teams
-  "with owner_teams as (
-      select tpr.team_id as id
-        from team_profile_rel as tpr
-       where tpr.is_owner is true
-         and tpr.profile_id = ?
-   )
-   select tpr.team_id as id,
-          count(tpr.profile_id) - 1 as participants
-     from team_profile_rel as tpr
-    where tpr.team_id in (select id from owner_teams)
-      and tpr.profile_id != ?
-    group by 1")
-
-(defn- get-owned-teams-with-participants
-  [conn profile-id]
-  (db/exec! conn [sql:owned-teams profile-id profile-id]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; DEPRECATED METHODS (TO BE REMOVED ON 1.16.x)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; --- MUTATION: Login
-
-(s/def ::login ::cmd.auth/login-with-password)
-
-(sv/defmethod ::login
-  {:auth false
-   ::rsem/queue :auth
-   ::doc/added "1.0"
-   ::doc/deprecated "1.15"}
-  [cfg params]
-  (cmd.auth/login-with-password cfg params))
-
-;; --- MUTATION: Logout
-
-(s/def ::logout ::cmd.auth/logout)
-
-(sv/defmethod ::logout
-  {:auth false
-   ::doc/added "1.0"
-   ::doc/deprecated "1.15"}
-  [{:keys [session] :as cfg} _]
-  (with-meta {}
-    {:transform-response (:delete session)}))
-
-;; --- MUTATION: Recover Profile
-
-(s/def ::recover-profile ::cmd.auth/recover-profile)
-
-(sv/defmethod ::recover-profile
-  {::doc/added "1.0"
-   ::doc/deprecated "1.15"}
-  [cfg params]
-  (cmd.auth/recover-profile cfg params))
-
-;; --- MUTATION: Prepare Register
-
-(s/def ::prepare-register-profile ::cmd.auth/prepare-register-profile)
-
-(sv/defmethod ::prepare-register-profile
-  {:auth false
-   ::doc/added "1.0"
-   ::doc/deprecated "1.15"}
-  [cfg params]
-  (cmd.auth/prepare-register cfg params))
-
-;; --- MUTATION: Register Profile
-
-(s/def ::register-profile ::cmd.auth/register-profile)
-
-(sv/defmethod ::register-profile
-  {:auth false
-   ::rsem/queue :auth
-   ::doc/added "1.0"
-   ::doc/deprecated "1.15"}
-  [{:keys [pool] :as cfg} params]
-  (db/with-atomic [conn pool]
-    (-> (assoc cfg :conn conn)
-        (cmd.auth/register-profile params))))
-
-;; --- MUTATION: Request Profile Recovery
-
-(s/def ::request-profile-recovery ::cmd.auth/request-profile-recovery)
-
-(sv/defmethod ::request-profile-recovery
-  {:auth false
-   ::doc/added "1.0"
-   ::doc/deprecated "1.15"}
-  [cfg params]
-  (cmd.auth/request-profile-recovery cfg params))
+      (rph/with-transform {} (session/delete-fn cfg)))))

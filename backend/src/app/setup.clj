@@ -8,8 +8,10 @@
   "Initial data setup of instance."
   (:require
    [app.common.logging :as l]
+   [app.common.spec :as us]
    [app.common.uuid :as uuid]
    [app.db :as db]
+   [app.main :as-alias main]
    [app.setup.builtin-templates]
    [app.setup.keys :as keys]
    [buddy.core.codecs :as bc]
@@ -48,11 +50,16 @@
                       :cause cause))))
         instance-id)))
 
+(s/def ::main/key ::us/string)
+(s/def ::main/props
+  (s/map-of ::us/keyword some?))
+
 (defmethod ig/pre-init-spec ::props [_]
-  (s/keys :req-un [::db/pool]))
+  (s/keys :req [::db/pool]
+          :opt [::main/key]))
 
 (defmethod ig/init-key ::props
-  [_ {:keys [pool key] :as cfg}]
+  [_ {:keys [::db/pool ::main/key] :as cfg}]
   (db/with-atomic [conn pool]
     (db/xact-lock! conn 0)
     (when-not key
@@ -63,5 +70,5 @@
     (let [secret (or key (generate-random-key))]
       (-> (retrieve-all conn)
           (assoc :secret-key secret)
-          (assoc :tokens-key (keys/derive secret :salt "tokens" :size 32))
+          (assoc :tokens-key (keys/derive secret :salt "tokens"))
           (update :instance-id handle-instance-id conn (db/read-only? pool))))))

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.common.pages
   "A common (clj/cljs) functions and specs for pages."
@@ -19,6 +19,8 @@
 (dm/export common/file-version)
 (dm/export common/default-color)
 (dm/export common/component-sync-attrs)
+(dm/export common/retrieve-used-names)
+(dm/export common/generate-unique-name)
 
 ;; Focus
 (dm/export focus/focus-objects)

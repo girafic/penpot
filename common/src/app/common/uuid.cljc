@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.common.uuid
   (:refer-clojure :exclude [next uuid zero?])
@@ -59,3 +59,10 @@
        (.putLong buf (.getMostSignificantBits o))
        (.putLong buf (.getLeastSignificantBits o))
        (.array buf))))
+
+#?(:clj
+   (defn from-bytes
+     [^bytes o]
+     (let [buf (ByteBuffer/wrap o)]
+       (UUID. ^long (.getLong buf)
+              ^long (.getLong buf)))))

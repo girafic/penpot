@@ -12,8 +12,11 @@
    [app.common.media :as cm]
    [app.common.spec :as us]
    [app.common.uuid :as uuid]
+   [app.main.data.messages :as dm]
    [app.main.fonts :as fonts]
    [app.main.repo :as rp]
+   [app.main.store :as st]
+   [app.util.i18n :refer [tr]]
    [app.util.storage :refer [storage]]
    [app.util.webapi :as wa]
    [beicon.core :as rx]
@@ -73,7 +76,7 @@
   (ptk/reify ::load-team-fonts
     ptk/WatchEvent
     (watch [_ _ _]
-      (->> (rp/query :font-variants {:team-id team-id})
+      (->> (rp/cmd! :get-font-variants {:team-id team-id})
            (rx/map fonts-fetched)))))
 
 (defn process-upload
@@ -81,16 +84,44 @@
   map with temporal ID's associated to each font entry."
   [blobs team-id]
   (letfn [(prepare [{:keys [font type name data] :as params}]
-            (let [family  (or (.getEnglishName ^js font "preferredFamily")
-                              (.getEnglishName ^js font "fontFamily"))
-                  variant (or (.getEnglishName ^js font "preferredSubfamily")
-                              (.getEnglishName ^js font "fontSubfamily"))]
+            (let [family          (or (.getEnglishName ^js font "preferredFamily")
+                                      (.getEnglishName ^js font "fontFamily"))
+                  variant         (or (.getEnglishName ^js font "preferredSubfamily")
+                                      (.getEnglishName ^js font "fontSubfamily"))
+
+                 ;; Vertical metrics determine the baseline in a text and the space between lines of text.
+                 ;; For historical reasons, there are three pairs of ascender/descender values, known as hhea, OS/2 and uSWin metrics.
+                 ;; Depending on the font, operating system and application a different set will be used to render text on the screen.
+                 ;; On Mac, Safari and Chrome use the hhea values to render text. Firefox will respect the useTypoMetrics setting and will use the OS/2 if it is set.
+                 ;; If the useTypoMetrics is not set, Firefox will also use metrics from the hhea table.
+                 ;; On Windows, all browsers use the usWin metrics, but respect the useTypoMetrics setting and if set will use the OS/2 values.
+
+                  hhea-ascender   (abs (-> font .-tables .-hhea .-ascender))
+                  hhea-descender  (abs (-> font .-tables .-hhea .-descender))
+
+                  win-ascent      (abs (-> font .-tables .-os2 .-usWinAscent))
+                  win-descent     (abs (-> font .-tables .-os2 .-usWinDescent))
+
+                  os2-ascent      (abs (-> font .-tables .-os2 .-sTypoAscender))
+                  os2-descent     (abs (-> font .-tables .-os2 .-sTypoDescender))
+
+                  ;; useTypoMetrics can be read from the 7th bit
+                  f-selection     (-> (-> font .-tables .-os2 .-fsSelection)
+                                      (bit-test 7))
+
+                  height-warning? (or (not= hhea-ascender win-ascent)
+                                      (not= hhea-descender win-descent)
+                                      (and f-selection (or
+                                                        (not= hhea-ascender os2-ascent)
+                                                        (not= hhea-descender os2-descent))))]
+
               {:content {:data (js/Uint8Array. data)
                          :name name
                          :type type}
                :font-family (or family "")
                :font-weight (cm/parse-font-weight variant)
-               :font-style  (cm/parse-font-style variant)}))
+               :font-style  (cm/parse-font-style variant)
+               :height-warning? height-warning?}))
 
           (join [res {:keys [content] :as font}]
             (let [key-fn   (juxt :font-family :font-weight :font-style)
@@ -133,17 +164,35 @@
                            {:data data
                             :name (.-name blob)
                             :type (parse-mtype data)}))
-                 (rx/mapcat (fn [{:keys [type] :as font}]
-                              (if type
+                 (rx/catch (fn []
+                             (rx/of {:error (.-name blob)})))
+                 (rx/mapcat (fn [{:keys [type, error] :as font}]
+                              (if (or type error)
                                 (rx/of font)
                                 (rx/empty))))))]
 
-    (->> (rx/from blobs)
-         (rx/mapcat read-blob)
-         (rx/map parse-font)
-         (rx/filter some?)
-         (rx/map prepare)
-         (rx/reduce join {}))))
+    (let [fonts (->> (rx/from blobs)
+                     (rx/mapcat read-blob))
+          errors (->> fonts
+                      (rx/filter #(some? (:error %)))
+                      (rx/reduce (fn [acc font]
+                                   (conj acc (str "'" (:error font) "'")))
+                                 []))]
+
+      (rx/subscribe errors
+                    #(when
+                      (not-empty %)
+                       (st/emit!
+                        (dm/error
+                         (if (> (count %) 1)
+                           (tr "errors.bad-font-plural" (str/join ", " %))
+                           (tr "errors.bad-font" (first %)))))))
+      (->> fonts
+           (rx/filter #(nil? (:error %)))
+           (rx/map parse-font)
+           (rx/filter some?)
+           (rx/map prepare)
+           (rx/reduce join {})))))
 
 (defn- calculate-family-to-id-mapping
   [existing]
@@ -215,7 +264,7 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [team-id (:current-team-id state)]
-        (->> (rp/mutation! :update-font {:id id :name name :team-id team-id})
+        (->> (rp/cmd! :update-font {:id id :name name :team-id team-id})
              (rx/ignore))))))
 
 (defn delete-font
@@ -232,7 +281,7 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [team-id (:current-team-id state)]
-        (->> (rp/mutation! :delete-font {:id font-id :team-id team-id})
+        (->> (rp/cmd! :delete-font {:id font-id :team-id team-id})
              (rx/ignore))))))
 
 (defn delete-font-variant
@@ -249,7 +298,7 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [team-id (:current-team-id state)]
-        (->> (rp/mutation! :delete-font-variant {:id id :team-id team-id})
+        (->> (rp/cmd! :delete-font-variant {:id id :team-id team-id})
              (rx/ignore))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

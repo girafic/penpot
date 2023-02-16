@@ -72,10 +72,12 @@
         :dashboard-font-providers
         :dashboard-team-members
         :dashboard-team-invitations
+        :dashboard-team-webhooks
         :dashboard-team-settings)
 
        [:*
         #_[:div.modal-wrapper
+           #_[:& app.main.ui.releases/release-notes-modal {:version "1.16"}]
            #_[:& app.main.ui.onboarding/onboarding-templates-modal]
            #_[:& app.main.ui.onboarding/onboarding-modal]
            #_[:& app.main.ui.onboarding/onboarding-team-modal]]

@@ -18,6 +18,7 @@
    [app.common.types.color :as ctc]
    [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
+   [app.common.types.file :as ctf]
    [app.common.types.shape-tree :as ctst]
    [app.common.types.typography :as cty]
    [app.main.data.workspace.groups :as dwg]
@@ -59,19 +60,20 @@
 ;; ---- Components and instances creation ----
 
 (defn generate-add-component
-  "If there is exactly one id, and it's a group, and not already a component, use
-  it as root. Otherwise, create a group that contains all ids. Then, make a
+  "If there is exactly one id, and it's a group or a frame, and not already a component,
+  use it as root. Otherwise, create a group that contains all ids. Then, make a
   component with it, and link all shapes to their corresponding one in the component."
   [it shapes objects page-id file-id components-v2]
   (let [[group changes]
         (if (and (= (count shapes) 1)
-                 (= (:type (first shapes)) :group)
+                 (or (= (:type (first shapes)) :group)
+                     (= (:type (first shapes)) :frame))
                  (not (ctk/instance-root? (first shapes))))
           [(first shapes) (-> (pcb/empty-changes it page-id)
                               (pcb/with-objects objects))]
           (let [group-name (if (= 1 (count shapes))
                              (:name (first shapes))
-                             "Component-1")]
+                             "Component 1")]
             (dwg/prepare-create-group it
                                       objects
                                       page-id
@@ -453,6 +455,11 @@
         component     (cph/get-component libraries
                                          (:component-file shape-inst)
                                          (:component-id shape-inst))
+        component     (or component
+                          (and reset?
+                               (ctf/get-deleted-component
+                                 (get-in libraries [(:component-file shape-inst) :data])
+                                 (:component-id shape-inst))))
         shape-main    (when component
                         (ctn/get-shape component (:shape-ref shape-inst)))
 
@@ -908,37 +915,41 @@
         parents    (cph/get-parent-ids objects (:id shape))
         parent     (first parents)
         children   (cph/get-children-ids objects (:id shape))
+        ids        (into [(:id shape)] children)
+
+        add-redo-change (fn [changes id]
+                          (update changes :redo-changes conj
+                                  (make-change
+                                   container
+                                   {:type :del-obj
+                                    :id id
+                                    :ignore-touched true})))
 
         add-undo-change (fn [changes id]
                           (let [shape' (get objects id)]
                             (update changes :undo-changes d/preconj
                                     (make-change
-                                      container
-                                      (as-> {:type :add-obj
-                                             :id id
-                                             :index (cph/get-position-on-parent objects id)
-                                             :parent-id (:parent-id shape')
-                                             :ignore-touched true
-                                             :obj shape'} $
-                                        (cond-> $
-                                          (:frame-id shape')
-                                          (assoc :frame-id (:frame-id shape'))))))))
+                                     container
+                                     (as-> {:type :add-obj
+                                            :id id
+                                            :index (cph/get-position-on-parent objects id)
+                                            :parent-id (:parent-id shape')
+                                            :ignore-touched true
+                                            :obj shape'} $
+                                       (cond-> $
+                                         (:frame-id shape')
+                                         (assoc :frame-id (:frame-id shape'))))))))
 
-        changes' (-> changes
+        changes' (-> (reduce add-redo-change changes ids)
                      (update :redo-changes conj (make-change
-                                                  container
-                                                  {:type :del-obj
-                                                   :id (:id shape)
-                                                   :ignore-touched true}))
-                     (update :redo-changes conj (make-change
-                                                  container
-                                                  {:type :reg-objects
-                                                   :shapes (vec parents)}))
+                                                 container
+                                                 {:type :reg-objects
+                                                  :shapes (vec parents)}))
                      (add-undo-change (:id shape)))
 
         changes' (reduce add-undo-change
                          changes'
-                         (map :id children))]
+                         children)]
 
     (if (and (cph/touched-group? parent :shapes-group) omit-touched?)
       changes

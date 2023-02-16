@@ -30,13 +30,12 @@
    [potok.core :as ptk]
    [rumext.v2 :as mf]))
 
-(log/initialize!)
-(log/set-level! :root :warn)
-(log/set-level! :app :info)
+(log/setup! {:app :info})
 
 (when (= :browser @cf/target)
   (log/info :message "Welcome to penpot"
             :version (:full @cf/version)
+            :asserts *assert*
             :build-date cf/build-date
             :public-uri (str @cf/public-uri)))
 
@@ -59,6 +58,7 @@
       (rx/merge
        (rx/of (ev/initialize)
               (du/initialize-profile))
+
        (->> stream
             (rx/filter du/profile-fetched?)
             (rx/take 1)
@@ -79,7 +79,7 @@
   (init-ui)
   (st/emit! (initialize)))
 
-(defn reinit
+(defn ^:export reinit
   []
   (mf/unmount (dom/get-element "app"))
   (mf/unmount (dom/get-element "modal"))

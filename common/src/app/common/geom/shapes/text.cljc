@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.common.geom.shapes.text
   (:require
@@ -22,7 +22,9 @@
   (let [points    (->> shape
                        :position-data
                        (mapcat (comp gpr/rect->points position-data->rect)))]
-    (-> points (gpr/points->selrect))))
+    (if (empty? points)
+      (:selrect shape)
+      (-> points (gpr/points->selrect)))))
 
 (defn position-data-bounding-box
   [shape]

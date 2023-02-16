@@ -25,6 +25,12 @@
   }
 }
 
+.viewer-loader {
+  svg#loader-pencil {
+    fill: $color-gray-50;
+  }
+}
+
 .viewer-section {
   height: calc(100vh - 48px);
   grid-row: 1 / span 2;
@@ -79,7 +85,7 @@
   }
 
   & .viewer-go-next.right-bar {
-    right: 256px;
+    right: 0;
   }
 
   & .viewer-go-prev {
@@ -91,7 +97,7 @@
   }
 
   & .viewer-go-prev.left-bar {
-    left: 256px;
+    left: 0;
   }
 
   & .viewer-bottom {
@@ -105,7 +111,7 @@
     z-index: 2;
 
     &.left-bar {
-      width: calc(100% - 512px);
+      width: 100%;
     }
 
     .reset {

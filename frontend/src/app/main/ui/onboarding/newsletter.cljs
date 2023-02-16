@@ -30,9 +30,10 @@
         (mf/use-callback
          (mf/deps @newsletter-updates @newsletter-news)
          (fn []
-           (st/emit! (dm/success message)
-                       (modal/show {:type :onboarding-team})
-                       (du/update-profile-props {:newsletter-updates @newsletter-updates :newsletter-news @newsletter-news}))))]
+           (st/emit! (when (or @newsletter-updates @newsletter-news)
+                       (dm/success message))
+                     (modal/show {:type :onboarding-team})
+                     (du/update-profile-props {:newsletter-updates @newsletter-updates :newsletter-news @newsletter-news}))))]
 
     [:div.modal-overlay
      [:div.modal-container.onboarding.newsletter.animated.fadeInDown
@@ -51,7 +52,7 @@
                   :id "newsletter-news"
                   :on-change #(toggle newsletter-news)}]
          [:label {:for "newsletter-news"} (tr "onboarding-v2.newsletter.news")]]]
-       [:p (tr "onboarding-v2.newsletter.privacy1")  [:a {:target "_blank" :href "https://penpot.app/privacy.html"} (tr "onboarding.newsletter.policy")]]
+       [:p (tr "onboarding-v2.newsletter.privacy1")  [:a {:target "_blank" :href "https://penpot.app/privacy"} (tr "onboarding.newsletter.policy")]]
        [:p (tr "onboarding-v2.newsletter.privacy2")]]
       [:div.modal-footer
        [:button.btn-primary {:on-click accept} (tr "labels.continue")]]

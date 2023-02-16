@@ -2,21 +2,18 @@
 <Configuration status="info" monitorInterval="30">
   <Appenders>
     <Console name="console" target="SYSTEM_OUT">
-      <PatternLayout pattern="[%d{YYYY-MM-dd HH:mm:ss.SSS}] %level{length=1} %logger{36} - %msg%n"/>
+      <PatternLayout pattern="[%d{YYYY-MM-dd HH:mm:ss.SSS}] %level{length=1} %logger{36} - %msg%n"
+                     alwaysWriteExceptions="false" />
     </Console>
 
     <RollingFile name="main" fileName="logs/main.log" filePattern="logs/main-%i.log">
-      <PatternLayout pattern="[%d{YYYY-MM-dd HH:mm:ss.SSS}] %level{length=1} %logger{36} - %msg%n"/>
+      <PatternLayout pattern="[%d{YYYY-MM-dd HH:mm:ss.SSS}] %level{length=1} %logger{36} - %msg%n"
+                     alwaysWriteExceptions="false" />
       <Policies>
         <SizeBasedTriggeringPolicy size="50M"/>
       </Policies>
       <DefaultRolloverStrategy max="9"/>
     </RollingFile>
-
-    <JeroMQ name="zmq">
-      <Property name="endpoint">tcp://localhost:45556</Property>
-      <JsonLayout complete="false" compact="true" includeTimeMillis="true" stacktraceAsString="true" properties="true" />
-    </JeroMQ>
   </Appenders>
 
   <Loggers>
@@ -32,10 +29,8 @@
     <Logger name="app.util.websocket" level="info" />
     <Logger name="app.redis" level="info" />
     <Logger name="app.rpc.rlimit" level="info" />
-
-    <Logger name="app.cli" level="debug" additivity="false">
-      <AppenderRef ref="console"/>
-    </Logger>
+    <Logger name="app.rpc.climit" level="info" />
+    <Logger name="app.rpc.mutations.files" level="info" />
 
     <Logger name="app.loggers" level="debug" additivity="false">
       <AppenderRef ref="main" level="debug" />
@@ -43,7 +38,6 @@
 
     <Logger name="app" level="all" additivity="false">
       <AppenderRef ref="main" level="trace" />
-      <AppenderRef ref="zmq" level="debug" />
     </Logger>
 
     <Logger name="user" level="trace" additivity="false">

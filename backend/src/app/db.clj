@@ -17,7 +17,6 @@
    [app.db.sql :as sql]
    [app.metrics :as mtx]
    [app.util.json :as json]
-   [app.util.migrations :as mg]
    [app.util.time :as dt]
    [clojure.java.io :as io]
    [clojure.spec.alpha :as s]
@@ -32,7 +31,6 @@
    io.whitfin.siphash.SipHasherContainer
    java.io.InputStream
    java.io.OutputStream
-   java.lang.AutoCloseable
    java.sql.Connection
    java.sql.Savepoint
    org.postgresql.PGConnection
@@ -50,12 +48,9 @@
 ;; Initialization
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(declare apply-migrations!)
-
 (s/def ::connection-timeout ::us/integer)
 (s/def ::max-size ::us/integer)
 (s/def ::min-size ::us/integer)
-(s/def ::migrations map?)
 (s/def ::name keyword?)
 (s/def ::password ::us/string)
 (s/def ::uri ::us/not-empty-string)
@@ -64,26 +59,26 @@
 (s/def ::read-only? ::us/boolean)
 
 (s/def ::pool-options
-  (s/keys :opt-un [::uri ::name
-                   ::min-size
-                   ::max-size
-                   ::connection-timeout
-                   ::validation-timeout
-                   ::migrations
-                   ::username
-                   ::password
-                   ::mtx/metrics
-                   ::read-only?]))
+  (s/keys :opt [::uri
+                ::name
+                ::min-size
+                ::max-size
+                ::connection-timeout
+                ::validation-timeout
+                ::username
+                ::password
+                ::mtx/metrics
+                ::read-only?]))
 
 (def defaults
-  {:name :main
-   :min-size 0
-   :max-size 60
-   :connection-timeout 10000
-   :validation-timeout 10000
-   :idle-timeout 120000 ; 2min
-   :max-lifetime 1800000 ; 30m
-   :read-only? false})
+  {::name :main
+   ::min-size 0
+   ::max-size 60
+   ::connection-timeout 10000
+   ::validation-timeout 10000
+   ::idle-timeout 120000 ; 2min
+   ::max-lifetime 1800000 ; 30m
+   ::read-only? false})
 
 (defmethod ig/prep-key ::pool
   [_ cfg]
@@ -93,38 +88,22 @@
 (defmethod ig/pre-init-spec ::pool [_] ::pool-options)
 
 (defmethod ig/init-key ::pool
-  [_ {:keys [migrations read-only? uri] :as cfg}]
-  (if uri
-    (let [pool (create-pool cfg)]
-      (l/info :hint "initialize connection pool"
-              :name (d/name (:name cfg))
-              :uri uri
-              :read-only read-only?
-              :with-credentials (and (contains? cfg :username)
-                                     (contains? cfg :password))
-              :min-size (:min-size cfg)
-              :max-size (:max-size cfg))
-      (when-not read-only?
-        (some->> (seq migrations) (apply-migrations! pool)))
-      pool)
-
-    (do
-      (l/warn :hint "unable to initialize pool, missing url"
-              :name (d/name (:name cfg))
-              :read-only read-only?)
-      nil)))
+  [_ {:keys [::uri ::read-only?] :as cfg}]
+  (when uri
+    (l/info :hint "initialize connection pool"
+            :name (d/name (::name cfg))
+            :uri uri
+            :read-only read-only?
+            :with-credentials (and (contains? cfg ::username)
+                                   (contains? cfg ::password))
+            :min-size (::min-size cfg)
+          :max-size (::max-size cfg))
+    (create-pool cfg)))
 
 (defmethod ig/halt-key! ::pool
   [_ pool]
   (when pool
     (.close ^HikariDataSource pool)))
-
-(defn- apply-migrations!
-  [pool migrations]
-  (with-open [conn ^AutoCloseable (open pool)]
-    (mg/setup! conn)
-    (doseq [[name steps] migrations]
-      (mg/migrate! conn {:name (d/name name) :steps steps}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; API & Impl
@@ -135,19 +114,19 @@
        "SET idle_in_transaction_session_timeout = 300000;"))
 
 (defn- create-datasource-config
-  [{:keys [metrics uri] :as cfg}]
+  [{:keys [::mtx/metrics ::uri] :as cfg}]
   (let [config (HikariConfig.)]
     (doto config
       (.setJdbcUrl           (str "jdbc:" uri))
-      (.setPoolName          (d/name (:name cfg)))
+      (.setPoolName          (d/name (::name cfg)))
       (.setAutoCommit true)
-      (.setReadOnly          (:read-only? cfg))
-      (.setConnectionTimeout (:connection-timeout cfg))
-      (.setValidationTimeout (:validation-timeout cfg))
-      (.setIdleTimeout       (:idle-timeout cfg))
-      (.setMaxLifetime       (:max-lifetime cfg))
-      (.setMinimumIdle       (:min-size cfg))
-      (.setMaximumPoolSize   (:max-size cfg))
+      (.setReadOnly          (::read-only? cfg))
+      (.setConnectionTimeout (::connection-timeout cfg))
+      (.setValidationTimeout (::validation-timeout cfg))
+      (.setIdleTimeout       (::idle-timeout cfg))
+      (.setMaxLifetime       (::max-lifetime cfg))
+      (.setMinimumIdle       (::min-size cfg))
+      (.setMaximumPoolSize   (::max-size cfg))
       (.setConnectionInitSql initsql)
       (.setInitializationFailTimeout -1))
 
@@ -157,8 +136,8 @@
            (PrometheusMetricsTrackerFactory.)
            (.setMetricsTrackerFactory config)))
 
-    (some->> ^String (:username cfg) (.setUsername config))
-    (some->> ^String (:password cfg) (.setPassword config))
+    (some->> ^String (::username cfg) (.setUsername config))
+    (some->> ^String (::password cfg) (.setPassword config))
 
     config))
 
@@ -166,7 +145,10 @@
   [v]
   (instance? javax.sql.DataSource v))
 
+(s/def ::conn some?)
+(s/def ::nilable-pool (s/nilable ::pool))
 (s/def ::pool pool?)
+(s/def ::pool-or-conn some?)
 
 (defn closed?
   [pool]
@@ -232,44 +214,46 @@
   [pool]
   (jdbc/get-connection pool))
 
+(def ^:private default-opts
+  {:builder-fn sql/as-kebab-maps})
+
 (defn exec!
   ([ds sv]
-   (exec! ds sv {}))
+   (jdbc/execute! ds sv default-opts))
   ([ds sv opts]
-   (jdbc/execute! ds sv (assoc opts :builder-fn sql/as-kebab-maps))))
+   (jdbc/execute! ds sv (merge default-opts opts))))
 
 (defn exec-one!
-  ([ds sv] (exec-one! ds sv {}))
+  ([ds sv]
+   (jdbc/execute-one! ds sv default-opts))
   ([ds sv opts]
-   (jdbc/execute-one! ds sv (assoc opts :builder-fn sql/as-kebab-maps))))
+   (jdbc/execute-one! ds sv
+                      (-> (merge default-opts opts)
+                          (assoc :return-keys (::return-keys? opts false))))))
 
 (defn insert!
-  ([ds table params] (insert! ds table params nil))
-  ([ds table params opts]
-   (exec-one! ds
-              (sql/insert table params opts)
-              (merge {:return-keys true} opts))))
+  [ds table params & {:as opts}]
+  (exec-one! ds
+             (sql/insert table params opts)
+             (merge {::return-keys? true} opts)))
 
 (defn insert-multi!
-  ([ds table cols rows] (insert-multi! ds table cols rows nil))
-  ([ds table cols rows opts]
-   (exec! ds
-          (sql/insert-multi table cols rows opts)
-          (merge {:return-keys true} opts))))
+  [ds table cols rows & {:as opts}]
+  (exec! ds
+         (sql/insert-multi table cols rows opts)
+         (merge {::return-keys? true} opts)))
 
 (defn update!
-  ([ds table params where] (update! ds table params where nil))
-  ([ds table params where opts]
-   (exec-one! ds
-              (sql/update table params where opts)
-              (merge {:return-keys true} opts))))
+  [ds table params where & {:as opts}]
+  (exec-one! ds
+             (sql/update table params where opts)
+             (merge {::return-keys? true} opts)))
 
 (defn delete!
-  ([ds table params] (delete! ds table params nil))
-  ([ds table params opts]
-   (exec-one! ds
-              (sql/delete table params opts)
-              (assoc opts :return-keys true))))
+  [ds table params & {:as opts}]
+  (exec-one! ds
+             (sql/delete table params opts)
+             (merge {::return-keys? true} opts)))
 
 (defn is-row-deleted?
   [{:keys [deleted-at]}]
@@ -278,54 +262,34 @@
           (inst-ms (dt/now)))))
 
 (defn get*
-  "Internal function for retrieve a single row from database that
-  matches a simple filters."
-  ([ds table params]
-   (get* ds table params nil))
-  ([ds table params {:keys [check-deleted?] :or {check-deleted? true} :as opts}]
-   (let [rows (exec! ds (sql/select table params opts))
-         rows (cond->> rows
-                check-deleted?
-                (remove is-row-deleted?))]
-     (first rows))))
+  "Retrieve a single row from database that matches a simple filters. Do
+  not raises exceptions."
+  [ds table params & {:as opts}]
+  (let [rows (exec! ds (sql/select table params opts))
+        rows (cond->> rows
+               (::remove-deleted? opts true)
+               (remove is-row-deleted?))]
+    (first rows)))
 
 (defn get
-  ([ds table params]
-   (get ds table params nil))
-  ([ds table params {:keys [check-deleted?] :or {check-deleted? true} :as opts}]
-   (let [row (get* ds table params opts)]
-     (when (and (not row) check-deleted?)
-       (ex/raise :type :not-found
-                 :table table
-                 :hint "database object not found"))
-     row)))
-
-(defn get-by-params
-  "DEPRECATED"
-  ([ds table params]
-   (get-by-params ds table params nil))
-  ([ds table params {:keys [check-not-found] :or {check-not-found true} :as opts}]
-   (let [row (get* ds table params (assoc opts :check-deleted? check-not-found))]
-     (when (and (not row) check-not-found)
-       (ex/raise :type :not-found
-                 :table table
-                 :hint "database object not found"))
-     row)))
+  "Retrieve a single row from database that matches a simple
+  filters. Raises :not-found exception if no object is found."
+  [ds table params & {:as opts}]
+  (let [row (get* ds table params opts)]
+    (when (and (not row) (::check-deleted? opts true))
+      (ex/raise :type :not-found
+                :code :object-not-found
+                :table table
+                :hint "database object not found"))
+    row))
 
 (defn get-by-id
-  ([ds table id]
-   (get ds table {:id id} nil))
-  ([ds table id opts]
-   (let [opts (cond-> opts
-                (contains? opts :check-not-found)
-                (assoc :check-deleted? (:check-not-found opts)))]
-     (get ds table {:id id} opts))))
+  [ds table id & {:as opts}]
+  (get ds table {:id id} opts))
 
 (defn query
-  ([ds table params]
-   (query ds table params nil))
-  ([ds table params opts]
-   (exec! ds (sql/select table params opts))))
+  [ds table params & {:as opts}]
+  (exec! ds (sql/select table params opts)))
 
 (defn pgobject?
   ([v]
@@ -352,10 +316,13 @@
   [v]
   (and (pgarray? v) (= "uuid" (.getBaseTypeName ^PgArray v))))
 
+;; TODO rename to decode-pgarray-into
 (defn decode-pgarray
-  ([v] (some->> ^PgArray v .getArray vec))
-  ([v in] (some->> ^PgArray v .getArray (into in)))
-  ([v in xf]  (some->> ^PgArray v .getArray (into in xf))))
+  ([v] (decode-pgarray v []))
+  ([v in]
+   (into in (some-> ^PgArray v .getArray)))
+  ([v in xf]
+   (into in xf (some-> ^PgArray v .getArray))))
 
 (defn pgarray->set
   [v]
@@ -417,47 +384,58 @@
 
 (defn decode-json-pgobject
   [^PGobject o]
-  (let [typ (.getType o)
-        val (.getValue o)]
-    (if (or (= typ "json")
-            (= typ "jsonb"))
-      (json/read val)
-      val)))
+  (when o
+    (let [typ (.getType o)
+          val (.getValue o)]
+      (if (or (= typ "json")
+              (= typ "jsonb"))
+        (json/decode val)
+        val))))
 
 (defn decode-transit-pgobject
   [^PGobject o]
-  (let [typ (.getType o)
-        val (.getValue o)]
-    (if (or (= typ "json")
-            (= typ "jsonb"))
-      (t/decode-str val)
-      val)))
+  (when o
+    (let [typ (.getType o)
+          val (.getValue o)]
+      (if (or (= typ "json")
+              (= typ "jsonb"))
+        (t/decode-str val)
+        val))))
 
 (defn inet
   [ip-addr]
-  (doto (org.postgresql.util.PGobject.)
-    (.setType "inet")
-    (.setValue (str ip-addr))))
+  (when ip-addr
+    (doto (org.postgresql.util.PGobject.)
+      (.setType "inet")
+      (.setValue (str ip-addr)))))
 
 (defn decode-inet
   [^PGobject o]
-  (if (= "inet" (.getType o))
-    (.getValue o)
-    nil))
+  (when o
+    (if (= "inet" (.getType o))
+      (.getValue o)
+      nil)))
 
 (defn tjson
   "Encode as transit json."
   [data]
-  (doto (org.postgresql.util.PGobject.)
-    (.setType "jsonb")
-    (.setValue (t/encode-str data {:type :json-verbose}))))
+  (when data
+    (doto (org.postgresql.util.PGobject.)
+      (.setType "jsonb")
+      (.setValue (t/encode-str data {:type :json-verbose})))))
 
 (defn json
   "Encode as plain json."
   [data]
-  (doto (org.postgresql.util.PGobject.)
-    (.setType "jsonb")
-    (.setValue (json/write-str data))))
+  (when data
+    (doto (org.postgresql.util.PGobject.)
+      (.setType "jsonb")
+      (.setValue (json/encode-str data)))))
+
+(defn get-update-count
+  [result]
+  (:next.jdbc/update-count result))
+
 
 ;; --- Locks
 
@@ -488,3 +466,18 @@
   (let [n   (xact-check-param n)
         row (exec-one! conn ["select pg_try_advisory_xact_lock(?::bigint) as lock" n])]
     (:lock row)))
+
+(defn sql-exception?
+  [cause]
+  (instance? java.sql.SQLException cause))
+
+(defn connection-error?
+  [cause]
+  (and (sql-exception? cause)
+       (contains? #{"08003" "08006" "08001" "08004"}
+                  (.getSQLState ^java.sql.SQLException cause))))
+
+(defn serialization-error?
+  [cause]
+  (and (sql-exception? cause)
+       (= "40001" (.getSQLState ^java.sql.SQLException cause))))

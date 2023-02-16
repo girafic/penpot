@@ -2,27 +2,33 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) UXBOX Labs SL
+;; Copyright (c) KALEIDOS INC
 
 (ns app.common.data
-  "Data manipulation and query helper functions."
+  "A collection if helpers for working with data structures and other
+  data resources."
   (:refer-clojure :exclude [read-string hash-map merge name update-vals
-                            parse-double group-by iteration concat mapcat])
+                            parse-double group-by iteration concat mapcat
+                            parse-uuid])
   #?(:cljs
      (:require-macros [app.common.data]))
 
   (:require
-   [app.common.math :as mth]
-   [clojure.set :as set]
-   [cuerdas.core :as str]
    #?(:cljs [cljs.reader :as r]
       :clj [clojure.edn :as r])
    #?(:cljs [cljs.core :as c]
       :clj [clojure.core :as c])
+   [app.common.exceptions :as ex]
+   [app.common.math :as mth]
+   [clojure.set :as set]
+   [cuerdas.core :as str]
+   [linked.map :as lkm]
    [linked.set :as lks])
-
   #?(:clj
-     (:import linked.set.LinkedSet)))
+     (:import
+      linked.set.LinkedSet
+      linked.map.LinkedMap
+      java.lang.AutoCloseable)))
 
 (def boolean-or-nil?
   (some-fn nil? boolean?))
@@ -36,10 +42,20 @@
   ([a] (conj lks/empty-linked-set a))
   ([a & xs] (apply conj lks/empty-linked-set a xs)))
 
+(defn ordered-map
+  ([] lkm/empty-linked-map)
+  ([a] (conj lkm/empty-linked-map a))
+  ([a & xs] (apply conj lkm/empty-linked-map a xs)))
+
 (defn ordered-set?
   [o]
   #?(:cljs (instance? lks/LinkedSet o)
      :clj (instance? LinkedSet o)))
+
+(defn ordered-map?
+  [o]
+  #?(:cljs (instance? lkm/LinkedMap o)
+     :clj (instance? LinkedMap o)))
 
 #?(:clj
    (defmethod print-method clojure.lang.PersistentQueue [q, w]
@@ -54,8 +70,12 @@
   ([a & more] (into (queue) (cons a more))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Data Structures Manipulation
+;; Data Structures Access & Manipulation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn not-empty?
+  [coll]
+  (boolean (seq coll)))
 
 (defn editable-collection?
   [m]
@@ -142,6 +162,16 @@
               (rest items)
               (conj! res [idx (first items)]))))))
 
+(defn group-by
+  ([kf coll] (group-by kf identity [] coll))
+  ([kf vf coll] (group-by kf vf [] coll))
+  ([kf vf iv coll]
+   (let [conj (fnil conj iv)]
+     (reduce (fn [result item]
+               (update result (kf item) conj (vf item)))
+             {}
+             coll))))
+
 (defn seek
   ([pred coll]
    (seek pred coll nil))
@@ -186,19 +216,22 @@
   ([coll value]
    (sequence (replace-by-id value) coll)))
 
-(defn without-nils
-  "Given a map, return a map removing key-value
-  pairs when value is `nil`."
-  [data]
-  (into {} (remove (comp nil? second)) data))
-
 (defn vec-without-nils
   [coll]
   (into [] (remove nil?) coll))
 
+(defn without-nils
+  "Given a map, return a map removing key-value
+  pairs when value is `nil`."
+  ([] (remove (comp nil? val)))
+  ([data]
+   (into {} (without-nils) data)))
+
 (defn without-qualified
-  [data]
-  (into {} (remove (comp qualified-keyword? first)) data))
+  ([]
+   (remove (comp qualified-keyword? key)))
+  ([data]
+   (into {} (without-qualified) data)))
 
 (defn without-keys
   "Return a map without the keys provided
@@ -232,13 +265,6 @@
   ([mfn coll]
    (into {} (mapm mfn) coll)))
 
-(defn update-vals
-  "m f => {k (f v) ...}
-  Given a map m and a function f of 1-argument, returns a new map where the keys of m
-  are mapped to result of applying f to the corresponding values of m."
-  [m f]
-  (c/update-vals m f))
-
 (defn removev
   "Returns a vector of the items in coll for which (fn item) returns logical false"
   [fn coll]
@@ -247,12 +273,12 @@
 (defn filterm
   "Filter values of a map that satisfy a predicate"
   [pred coll]
-  (into {} (filter pred coll)))
+  (into {} (filter pred) coll))
 
 (defn removem
   "Remove values of a map that satisfy a predicate"
   [pred coll]
-  (into {} (remove pred coll)))
+  (into {} (remove pred) coll))
 
 (defn map-perm
   "Maps a function to each pair of values that can be combined inside the
@@ -377,6 +403,81 @@
              (do (vswap! seen conj input*)
                  (rf result input)))))))))
 
+(defn with-next
+  "Given a collection will return a new collection where each element
+  is paired with the next item in the collection
+  (with-next (range 5)) => [[0 1] [1 2] [2 3] [3 4] [4 nil]]"
+  [coll]
+  (map vector
+       coll
+       (c/concat (rest coll) [nil])))
+
+(defn with-prev
+  "Given a collection will return a new collection where each element
+  is paired with the previous item in the collection
+  (with-prev (range 5)) => [[0 nil] [1 0] [2 1] [3 2] [4 3]]"
+  [coll]
+  (map vector
+       coll
+       (c/cons nil coll)))
+
+(defn with-prev-next
+  "Given a collection will return a new collection where every item is paired
+  with the previous and the next item of a collection
+  (with-prev-next (range 5)) => [[0 nil 1] [1 0 2] [2 1 3] [3 2 4] [4 3 nil]]"
+  [coll]
+  (map vector
+       coll
+       (c/cons nil coll)
+       (c/concat (rest coll) [nil])))
+
+(defn deep-mapm
+  "Applies a map function to an associative map and recurses over its children
+  when it's a vector or a map"
+  [mfn m]
+  (let [do-map
+        (fn [entry]
+          (let [[k v] (mfn entry)]
+            (cond
+              (or (vector? v) (map? v))
+              [k (deep-mapm mfn v)]
+
+              :else
+              (mfn [k v]))))]
+    (cond
+      (map? m)
+      (into {} (map do-map) m)
+
+      (vector? m)
+      (into [] (map (partial deep-mapm mfn)) m)
+
+      :else
+      m)))
+
+(defn iteration
+  "Creates a totally lazy seqable via repeated calls to step, a
+  function of some (continuation token) 'k'. The first call to step
+  will be passed initk, returning 'ret'. If (somef ret) is true, (vf
+  ret) will be included in the iteration, else iteration will
+  terminate and vf/kf will not be called. If (kf ret) is non-nil it
+  will be passed to the next step call, else iteration will terminate.
+
+  This can be used e.g. to consume APIs that return paginated or batched data.
+
+   step - (possibly impure) fn of 'k' -> 'ret'
+   :somef - fn of 'ret' -> logical true/false, default 'some?'
+   :vf - fn of 'ret' -> 'v', a value produced by the iteration, default 'identity'
+   :kf - fn of 'ret' -> 'next-k' or nil (signaling 'do not continue'), default 'identity'
+   :initk - the first value passed to step, default 'nil'
+
+  It is presumed that step with non-initk is
+  unreproducible/non-idempotent. If step with initk is unreproducible
+  it is on the consumer to not consume twice."
+  [& args]
+  (->> (apply c/iteration args)
+       (concat-all)))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Data Parsing / Conversion
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -420,6 +521,10 @@
        default
        v))))
 
+(defn parse-uuid
+  [v]
+  (ex/ignoring (c/parse-uuid v)))
+
 (defn num-string? [v]
   ;; https://stackoverflow.com/questions/175739/built-in-way-in-javascript-to-check-if-a-string-is-a-valid-number
   #?(:cljs (and (string? v)
@@ -443,8 +548,9 @@
   (or val default))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Data Parsing / Conversion
+;; Utilities
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn nilf
   "Returns a new function that if you pass nil as any argument will
   return nil"
@@ -461,22 +567,32 @@
 
 (defn num?
   "Checks if a value `val` is a number but not an Infinite or NaN"
-  ([val]
-   (and (number? val)
-        (mth/finite? val)
-        (not (mth/nan? val))))
-
-  ([val & vals]
-   (and (num? val)
-        (->> vals (every? num?)))))
+  ([a]
+   (mth/finite? a))
+  ([a b]
+   (and (mth/finite? a)
+        (mth/finite? b)))
+  ([a b c]
+   (and (mth/finite? a)
+        (mth/finite? b)
+        (mth/finite? c)))
+  ([a b c d]
+   (and (mth/finite? a)
+        (mth/finite? b)
+        (mth/finite? c)
+        (mth/finite? d)))
+  ([a b c d & others]
+   (and (mth/finite? a)
+        (mth/finite? b)
+        (mth/finite? c)
+        (mth/finite? d)
+        (every? mth/finite? others))))
 
 (defn check-num
   "Function that checks if a number is nil or nan. Will return 0 when not
   valid and the number otherwise."
-  ([v]
-   (check-num v 0))
-  ([v default]
-   (if (num? v) v default)))
+  ([v] (mth/finite v 0))
+  ([v default] (mth/finite v default)))
 
 (defn any-key? [element & rest]
   (some #(contains? element %) rest))
@@ -497,34 +613,6 @@
      :else
      (or default-value
          (str maybe-keyword)))))
-
-(defn with-next
-  "Given a collection will return a new collection where each element
-  is paired with the next item in the collection
-  (with-next (range 5)) => [[0 1] [1 2] [2 3] [3 4] [4 nil]]"
-  [coll]
-  (map vector
-       coll
-       (c/concat (rest coll) [nil])))
-
-(defn with-prev
-  "Given a collection will return a new collection where each element
-  is paired with the previous item in the collection
-  (with-prev (range 5)) => [[0 nil] [1 0] [2 1] [3 2] [4 3]]"
-  [coll]
-  (map vector
-       coll
-       (c/concat [nil] coll)))
-
-(defn with-prev-next
-  "Given a collection will return a new collection where every item is paired
-  with the previous and the next item of a collection
-  (with-prev-next (range 5)) => [[0 nil 1] [1 0 2] [2 1 3] [3 2 4] [4 3 nil]]"
-  [coll]
-  (map vector
-       coll
-       (c/concat [nil] coll)
-       (c/concat (rest coll) [nil])))
 
 (defn prefix-keyword
   "Given a keyword and a prefix will return a new keyword with the prefix attached
@@ -616,33 +704,6 @@
                (recur (inc counter))
                candidate))))))))
 
-(defn deep-mapm
-  "Applies a map function to an associative map and recurses over its children
-  when it's a vector or a map"
-  [mfn m]
-  (let [do-map
-        (fn [entry]
-          (let [[k v] (mfn entry)]
-            (cond
-              (or (vector? v) (map? v))
-              [k (deep-mapm mfn v)]
-
-              :else
-              (mfn [k v]))))]
-    (cond
-      (map? m)
-      (into {} (map do-map) m)
-
-      (vector? m)
-      (into [] (map (partial deep-mapm mfn)) m)
-
-      :else
-      m)))
-
-(defn not-empty?
-  [coll]
-  (boolean (seq coll)))
-
 (defn kebab-keys [m]
   (->> m
        (deep-mapm
@@ -650,40 +711,6 @@
           (if (or (keyword? k) (string? k))
             [(keyword (str/kebab (name k))) v]
             [k v])))))
-
-
-(defn group-by
-  ([kf coll] (group-by kf identity [] coll))
-  ([kf vf coll] (group-by kf vf [] coll))
-  ([kf vf iv coll]
-   (let [conj (fnil conj iv)]
-     (reduce (fn [result item]
-               (update result (kf item) conj (vf item)))
-             {}
-             coll))))
-
-(defn iteration
-  "Creates a totally lazy seqable via repeated calls to step, a
-  function of some (continuation token) 'k'. The first call to step
-  will be passed initk, returning 'ret'. If (somef ret) is true, (vf
-  ret) will be included in the iteration, else iteration will
-  terminate and vf/kf will not be called. If (kf ret) is non-nil it
-  will be passed to the next step call, else iteration will terminate.
-
-  This can be used e.g. to consume APIs that return paginated or batched data.
-
-   step - (possibly impure) fn of 'k' -> 'ret'
-   :somef - fn of 'ret' -> logical true/false, default 'some?'
-   :vf - fn of 'ret' -> 'v', a value produced by the iteration, default 'identity'
-   :kf - fn of 'ret' -> 'next-k' or nil (signaling 'do not continue'), default 'identity'
-   :initk - the first value passed to step, default 'nil'
-
-  It is presumed that step with non-initk is
-  unreproducible/non-idempotent. If step with initk is unreproducible
-  it is on the consumer to not consume twice."
-  [& args]
-  (->> (apply c/iteration args)
-       (concat-all)))
 
 (defn toggle-selection
   ([set value]
@@ -695,3 +722,25 @@
      (if (contains? set value)
        (disj set value)
        (conj set value)))))
+
+(defn lazy-map
+  "Creates a map with lazy values given the generator function that receives as argument
+  the key for the value to be generated"
+  [keys generator-fn]
+  (into {}
+        (map (fn [key]
+               [key (delay (generator-fn key))]))
+        keys))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Util protocols
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defprotocol ICloseable
+  :extend-via-metadata true
+  (close! [_] "Close the resource."))
+
+#?(:clj
+   (extend-protocol ICloseable
+     AutoCloseable
+     (close! [this] (.close this))))
