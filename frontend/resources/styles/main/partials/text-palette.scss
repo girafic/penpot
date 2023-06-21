@@ -9,11 +9,15 @@
 
   & .typography-name {
     color: $color-white;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   & .typography-font,
   & .typography-data {
-    font-size: 16px;
+    font-size: $fs16;
     color: $color-gray-30;
   }
 

@@ -10,18 +10,37 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.pages.common :as common]
-   [app.common.spec :as us]
+   [app.common.schema :as sm]
+   [app.common.types.component :as ctk]
+   [app.common.types.components-list :as ctkl]
+   [app.common.types.pages-list :as ctpl]
    [app.common.types.shape-tree :as ctst]
-   [clojure.spec.alpha :as s]))
+   [app.common.uuid :as uuid]))
 
-(s/def ::type #{:page :component})
-(s/def ::id uuid?)
-(s/def ::name ::us/string)
-(s/def ::path (s/nilable ::us/string))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; SCHEMA
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(s/def ::container
-  (s/keys :req-un [::id ::name]
-          :opt-un [::type ::path ::ctst/objects]))
+(def valid-container-types
+  #{:page :component})
+
+(sm/def! ::container
+  [:map
+   [:id ::sm/uuid]
+   [:type {:optional true}
+    [::sm/one-of valid-container-types]]
+   [:name :string]
+   [:path {:optional true} [:maybe :string]]
+   [:modified-at {:optional true} ::sm/inst]
+   [:objects {:optional true}
+    [:map-of {:gen/max 10} ::sm/uuid :map]]])
+
+(def container?
+  (sm/pred-fn ::container))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; HELPERS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn make-container
   [page-or-component type]
@@ -37,19 +56,26 @@
 
 (defn get-container
   [file type id]
-  (us/assert map? file)
-  (us/assert ::type type)
-  (us/assert uuid? id)
+  (dm/assert! (map? file))
+  (dm/assert! (contains? valid-container-types type))
+  (dm/assert! (uuid? id))
 
   (-> (if (= type :page)
-        (dm/get-in file [:pages-index id])
-        (dm/get-in file [:components id]))
+        (ctpl/get-page file id)
+        (ctkl/get-component file id))
       (assoc :type type)))
 
 (defn get-shape
   [container shape-id]
-  (us/assert ::container container)
-  (us/assert ::us/uuid shape-id)
+
+  (dm/assert!
+   "expected valid container"
+   (container? container))
+
+  (dm/assert!
+   "expected valid uuid for `shape-id`"
+   (uuid? shape-id))
+
   (-> container
       (get :objects)
       (get shape-id)))
@@ -61,6 +87,44 @@
 (defn update-shape
   [container shape-id f]
   (update-in container [:objects shape-id] f))
+
+(defn get-direct-children
+  [container shape]
+  (map #(get-shape container %) (:shapes shape)))
+
+(defn get-component-shape
+  "Get the parent shape linked to a component for this shape, if any"
+  ([objects shape] (get-component-shape objects shape nil))
+  ([objects shape {:keys [allow-main?] :or {allow-main? false} :as options}]
+  (cond
+    (nil? shape)
+    nil
+
+    (and (not (ctk/in-component-copy? shape)) (not allow-main?))
+    nil
+
+    (ctk/instance-root? shape)
+    shape
+
+    :else
+    (get-component-shape objects (get objects (:parent-id shape)) options))))
+
+(defn in-component-main?
+  "Check if the shape is inside a component non-main instance.
+   
+   Note that we must iterate on the parents because non-root shapes in
+   a main component have not any discriminating attribute."
+  [objects shape]
+  (let [component-shape (get-component-shape objects shape {:allow-main? true})]
+    (:main-instance? component-shape)))
+
+(defn in-any-component?
+  "Check if the shape is part of any component (main or copy), wether it's
+   head or not."
+  [objects shape]
+  (or (ctk/in-component-copy? shape)
+      (ctk/main-instance? shape)
+      (in-component-main? objects shape)))
 
 (defn make-component-shape
   "Clone the shape and all children. Generate new ids and detach
@@ -117,15 +181,24 @@
     [new-root-shape (map remap-frame-id new-shapes) updated-shapes]))
 
 (defn make-component-instance
-  "Clone the shapes of the component, generating new names and ids, and linking
+  "Generate a new instance of the component inside the given container.
+
+  Clone the shapes of the component, generating new names and ids, and linking
   each new shape to the corresponding one of the component. Place the new instance
   coordinates in the given position."
-  ([container component component-file-id position]
-   (make-component-instance container component component-file-id position {}))
+  ([container component library-data position components-v2]
+   (make-component-instance container component library-data position components-v2 {}))
 
-  ([container component component-file-id position
-    {:keys [main-instance? force-id] :or {main-instance? false force-id nil}}]
-   (let [component-shape (get-shape component (:id component))
+  ([container component library-data position components-v2
+    {:keys [main-instance? force-id force-frame-id keep-ids?]
+     :or {main-instance? false force-id nil force-frame-id nil keep-ids? false}}]
+   (let [component-page  (when components-v2
+                           (ctpl/get-page library-data (:main-instance-page component)))
+         component-shape (if components-v2
+                           (-> (get-shape component-page (:main-instance-id component))
+                               (assoc :parent-id nil)
+                               (assoc :frame-id uuid/zero))
+                           (get-shape component (:id component)))
 
          orig-pos        (gpt/point (:x component-shape) (:y component-shape))
          delta           (gpt/subtract position orig-pos)
@@ -133,7 +206,10 @@
          objects         (:objects container)
          unames          (volatile! (common/retrieve-used-names objects))
 
-         frame-id        (ctst/frame-id-by-position objects (gpt/add orig-pos delta))
+         frame-id        (or force-frame-id
+                             (ctst/frame-id-by-position objects
+                                                        (gpt/add orig-pos delta)
+                                                        {:skip-components? true}))
          frame-ids-map   (volatile! {})
 
          update-new-shape
@@ -147,20 +223,26 @@
                (vswap! frame-ids-map assoc (:id original-shape) (:id new-shape)))
 
              (cond-> new-shape
-               true
+               :always
                (-> (gsh/move delta)
                    (dissoc :touched))
 
-               (nil? (:shape-ref original-shape))
+               main-instance?
+               (assoc :main-instance? true)
+
+               (not main-instance?)
+               (dissoc :main-instance?)
+
+               (and (not main-instance?) (nil? (:shape-ref original-shape)))
                (assoc :shape-ref (:id original-shape))
 
                (nil? (:parent-id original-shape))
-               (assoc :component-id (:id original-shape)
-                      :component-file component-file-id
+               (assoc :component-id (:id component)
+                      :component-file (:id library-data)
                       :component-root? true
                       :name new-name)
 
-               (and (nil? (:parent-id original-shape)) main-instance?)
+               (and (nil? (:parent-id original-shape)) main-instance? components-v2)
                (assoc :main-instance? true)
 
                (some? (:parent-id original-shape))
@@ -169,18 +251,20 @@
          [new-shape new-shapes _]
          (ctst/clone-object component-shape
                             nil
-                            (get component :objects)
+                            (if components-v2 (:objects component-page) (:objects component))
                             update-new-shape
                             (fn [object _] object)
-                            force-id)
+                            force-id
+                            keep-ids?)
 
         ;; If frame-id points to a shape inside the component, remap it to the
         ;; corresponding new frame shape. If not, set it to the destination frame.
         ;; Also fix empty parent-id.
-        remap-frame-id (fn [shape]
-                         (as-> shape $
-                           (update $ :frame-id #(get @frame-ids-map % frame-id))
-                           (update $ :parent-id #(or % (:frame-id $)))))]
+         remap-frame-id (fn [shape]
+                          (as-> shape $
+                            (update $ :frame-id #(get @frame-ids-map % frame-id))
+                            (update $ :parent-id #(or % (:frame-id $)))))]
 
-     [new-shape (map remap-frame-id new-shapes)])))
+     [(remap-frame-id new-shape)
+      (map remap-frame-id new-shapes)])))
 

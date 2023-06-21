@@ -17,7 +17,7 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.streams :as ms]
-   [app.main.ui.cursors :as cur]
+   [app.main.ui.css-cursors :as cur]
    [app.main.ui.formats :as fmt]
    [app.main.ui.workspace.viewport.rules :as rules]
    [app.util.dom :as dom]
@@ -93,7 +93,7 @@
            (mf/set-ref-val! start-pos-ref nil)
            (swap! state assoc :new-position nil)))
 
-        on-mouse-move
+        on-pointer-move
         (mf/use-callback
          (mf/deps position zoom snap-pixel?)
          (fn [event]
@@ -120,7 +120,7 @@
      :on-pointer-down on-pointer-down
      :on-pointer-up on-pointer-up
      :on-lost-pointer-capture on-lost-pointer-capture
-     :on-mouse-move on-mouse-move
+     :on-pointer-move on-pointer-move
      :state state
      :frame frame}))
 
@@ -274,7 +274,7 @@
                 on-pointer-down
                 on-pointer-up
                 on-lost-pointer-capture
-                on-mouse-move
+                on-pointer-move
                 state
                 frame]} (use-guide handle-change-position get-hover-frame zoom guide)
 
@@ -302,15 +302,15 @@
                    :y y
                    :width width
                    :height height
+                   :class (if (= axis :x) (cur/get-dynamic "resize-ew" 0) (cur/get-dynamic "resize-ns" 0))
                    :style {:fill "none"
-                           :pointer-events (if frame-guide-outside? "none" "fill")
-                           :cursor (if (= axis :x) (cur/resize-ew 0) (cur/resize-ns 0))}
+                           :pointer-events (if frame-guide-outside? "none" "fill")}
                    :on-pointer-enter on-pointer-enter
                    :on-pointer-leave on-pointer-leave
                    :on-pointer-down on-pointer-down
                    :on-pointer-up on-pointer-up
                    :on-lost-pointer-capture on-lost-pointer-capture
-                   :on-mouse-move on-mouse-move}]))
+                   :on-pointer-move on-pointer-move}]))
 
        (if (some? frame)
          (let [{:keys [l1-x1 l1-y1 l1-x2 l1-y2
@@ -379,7 +379,8 @@
                     :style {:font-size (/ rules/font-size zoom)
                             :font-family rules/font-family
                             :fill colors/black}}
-             (fmt/format-number pos)]]))])))
+             ;; If the guide is associated to a frame we show the position relative to the frame
+             (fmt/format-number (- pos (if (= axis :x) (:x frame) (:y frame))))]]))])))
 
 (mf/defc new-guide-area
   [{:keys [vbox zoom axis get-hover-frame disabled-guides?]}]
@@ -399,7 +400,7 @@
                 on-pointer-down
                 on-pointer-up
                 on-lost-pointer-capture
-                on-mouse-move
+                on-pointer-move
                 state
                 frame]} (use-guide on-guide-change get-hover-frame zoom {:axis axis})]
 
@@ -415,10 +416,10 @@
                  :on-pointer-down on-pointer-down
                  :on-pointer-up on-pointer-up
                  :on-lost-pointer-capture on-lost-pointer-capture
-                 :on-mouse-move on-mouse-move
+                 :on-pointer-move on-pointer-move
+                 :class (if (= axis :x) (cur/get-dynamic "resize-ew" 0) (cur/get-dynamic "resize-ns" 0))
                  :style {:fill "none"
-                         :pointer-events "fill"
-                         :cursor (if (= axis :x) (cur/resize-ew 0) (cur/resize-ns 0))}}]))
+                         :pointer-events "fill"}}]))
 
      (when (:new-position @state)
        [:& guide {:guide {:axis axis

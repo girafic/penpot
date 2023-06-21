@@ -8,8 +8,11 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
-   [app.common.spec :as us]
+   [app.common.types.components-list :as ctkl]
+   [app.common.types.pages-list :as ctpl]
+   [app.common.types.shape.layout :as ctl]
    [app.common.uuid :as uuid]
+   [clojure.set :as set]
    [cuerdas.core :as str]))
 
 (declare reduce-objects)
@@ -23,9 +26,11 @@
   (and (= type :frame) (= id uuid/zero)))
 
 (defn root-frame?
-  [{:keys [frame-id type]}]
-  (and (= type :frame)
-       (= frame-id uuid/zero)))
+  ([objects id]
+   (root-frame? (get objects id)))
+  ([{:keys [frame-id type]}]
+   (and (= type :frame)
+        (= frame-id uuid/zero))))
 
 (defn frame-shape?
   ([objects id]
@@ -34,8 +39,10 @@
    (= type :frame)))
 
 (defn group-shape?
-  [{:keys [type]}]
-  (= type :group))
+  ([objects id]
+   (group-shape? (get objects id)))
+  ([{:keys [type]}]
+   (= type :group)))
 
 (defn mask-shape?
   [{:keys [type masked-group?]}]
@@ -53,6 +60,10 @@
   [{:keys [type]}]
   (= type :text))
 
+(defn rect-shape?
+  [{:keys [type]}]
+  (= type :rect))
+
 (defn image-shape?
   [{:keys [type]}]
   (= type :image))
@@ -62,14 +73,22 @@
   (= type :svg-raw))
 
 (defn path-shape?
-  [{:keys [type]}]
-  (= type :path))
+  ([objects id]
+   (path-shape? (get objects id)))
+  ([{:keys [type]}]
+   (= type :path)))
 
 (defn unframed-shape?
   "Checks if it's a non-frame shape in the top level."
   [shape]
   (and (not (frame-shape? shape))
        (= (:frame-id shape) uuid/zero)))
+
+(defn has-children?
+  ([objects id]
+   (has-children? (get objects id)))
+  ([shape]
+   (d/not-empty? (:shapes shape))))
 
 (defn get-children-ids
   [objects id]
@@ -80,14 +99,17 @@
                 (into shapes (mapcat #(get-children-ids-rec % (conj processed id))) shapes))))]
     (get-children-ids-rec id #{})))
 
+(defn get-children-ids-with-self
+  [objects id]
+  (into [id] (get-children-ids objects id)))
+
 (defn get-children
   [objects id]
   (mapv (d/getf objects) (get-children-ids objects id)))
 
 (defn get-children-with-self
   [objects id]
-  (let [lookup (d/getf objects)]
-    (into [(lookup id)] (map lookup) (get-children-ids objects id))))
+  (mapv (d/getf objects) (get-children-ids-with-self objects id)))
 
 (defn get-parent
   "Retrieve the id of the parent for the shape-id (if exists)"
@@ -108,6 +130,21 @@
       (if (and (some? parent-id) (not= parent-id id))
         (recur (conj result parent-id) parent-id)
         result))))
+
+(defn get-parents-with-self
+  [objects id]
+  (let [lookup (d/getf objects)]
+    (into [(lookup id)] (map lookup) (get-parent-ids objects id))))
+
+(defn hidden-parent?
+  "Checks the parent for the hidden property"
+  [objects shape-id]
+  (let [parent-id (dm/get-in objects [shape-id :parent-id])]
+    (cond
+      (or (nil? parent-id) (nil? shape-id) (= shape-id uuid/zero) (= parent-id uuid/zero)) false
+      (dm/get-in objects [parent-id :hidden]) true
+      :else
+      (recur objects parent-id))))
 
 (defn get-parent-ids-with-index
   "Returns a tuple with the list of parents and a map with the position within each parent"
@@ -148,6 +185,25 @@
               (get objects)
               (get-frame objects)))))
 
+(defn get-root-frame
+  [objects shape-id]
+
+  (let [frame-id
+        (if (frame-shape? objects shape-id)
+          shape-id
+          (dm/get-in objects [shape-id :frame-id]))
+
+        frame (get objects frame-id)]
+    (cond
+      (or (root? frame) (nil? frame))
+      nil
+
+      (root-frame? frame)
+      frame
+
+      :else
+      (get-root-frame objects (:frame-id frame)))))
+
 (defn valid-frame-target?
   [objects parent-id shape-id]
   (let [shape (get objects shape-id)]
@@ -169,7 +225,6 @@
         shapes (:shapes prt)
         pos (d/index-of shapes id)]
     (if (= 0 pos) nil (nth shapes (dec pos)))))
-
 
 (defn get-immediate-children
   "Retrieve resolved shape objects that are immediate children
@@ -226,36 +281,6 @@
   [shape group]
   ((or (:touched shape) #{}) group))
 
-(defn get-component
-  "Retrieve a component from libraries, if no library-id is provided, we
-  iterate over all libraries and find the component on it."
-  ([libraries component-id]
-   (some #(-> % :data :components (get component-id)) (vals libraries)))
-  ([libraries library-id component-id]
-   (get-in libraries [library-id :data :components component-id])))
-
-(defn get-component-shape
-  "Get the parent shape linked to a component for this shape, if any"
-  [objects shape]
-  (if-not (:shape-ref shape)
-    nil
-    (if (:component-id shape)
-      shape
-      (if-let [parent-id (:parent-id shape)]
-        (get-component-shape objects (get objects parent-id))
-        nil))))
-
-(defn get-root-shape
-  "Get the root shape linked to a component for this shape, if any."
-  [objects shape]
-
-  (cond
-    (some? (:component-root? shape))
-    shape
-
-    (some? (:shape-ref shape))
-    (recur objects (get objects (:parent-id shape)))))
-
 (defn make-container
   [page-or-component type]
   (assoc page-or-component :type type))
@@ -270,14 +295,33 @@
 
 (defn get-container
   [file type id]
-  (us/assert map? file)
-  (us/assert keyword? type)
-  (us/assert uuid? id)
+  (dm/assert! (map? file))
+  (dm/assert! (keyword? type))
+  (dm/assert! (uuid? id))
 
   (-> (if (= type :page)
-        (get-in file [:pages-index id])
-        (get-in file [:components id]))
+        (ctpl/get-page file id)
+        (ctkl/get-component file id))
       (assoc :type type)))
+
+(defn component-touched?
+  "Check if any shape in the component is touched"
+  [objects root-id]
+  (->> (get-children-with-self objects root-id)
+       (filter (comp seq :touched))
+       seq))
+
+(defn components-nesting-loop?
+  "Check if a nesting loop would be created if the given shape is moved below the given parent"
+  [objects shape-id parent-id]
+  (let [xf-get-component-id (keep :component-id)
+
+        children            (get-children-with-self objects shape-id)
+        child-components    (into #{} xf-get-component-id children)
+
+        parents             (get-parents-with-self objects parent-id)
+        parent-components   (into #{} xf-get-component-id parents)]
+    (seq (set/intersection child-components parent-components))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ALGORITHMS & TRANSFORMATIONS FOR SHAPES
@@ -295,15 +339,6 @@
   [page objects-list]
   (update page :objects
           #(into % (d/index-by :id objects-list))))
-
-(defn insert-at-index
-  [objects index ids]
-  (let [[before after] (split-at index objects)
-        p? (set ids)]
-    (d/concat-vec []
-                  (remove p? before)
-                  ids
-                  (remove p? after))))
 
 (defn append-at-the-end
   [prev-ids ids]
@@ -368,7 +403,7 @@
        (map second)))
 
 (defn get-index-replacement
-  "Given a collection of shapes, calculate their positions 
+  "Given a collection of shapes, calculate their positions
    in the parent, find first index and return next one"
   [shapes objects]
   (->> shapes
@@ -482,8 +517,17 @@
 
 (defn is-child?
   [objects parent-id candidate-child-id]
-  (let [parents (get-parent-ids objects candidate-child-id)]
-    (some? (d/seek #(= % parent-id) parents))))
+  (loop [cur-id candidate-child-id]
+    (let [cur-parent-id (dm/get-in objects [cur-id :parent-id])]
+      (cond
+        (= parent-id cur-parent-id)
+        true
+
+        (or (= cur-parent-id uuid/zero) (nil? cur-parent-id))
+        false
+
+        :else
+        (recur cur-parent-id)))))
 
 (defn reduce-objects
   ([objects reducer-fn init-val]
@@ -499,19 +543,22 @@
 
        (loop [current-val init-val
               current-id  (first root-children)
-              pending-ids (rest root-children)]
+              pending-ids (rest root-children)
+              processed   #{}]
 
+         (if (contains? processed current-id)
+           (recur current-val (first pending-ids) (rest pending-ids) processed)
+           (let [current-shape (get objects current-id)
+                 processed (conj processed current-id)
+                 next-val (reducer-fn current-val current-shape)
+                 next-pending-ids
+                 (if (or (nil? check-children?) (check-children? current-shape))
+                   (concat (or (:shapes current-shape) []) pending-ids)
+                   pending-ids)]
 
-         (let [current-shape (get objects current-id)
-               next-val (reducer-fn current-val current-shape)
-               next-pending-ids
-               (if (or (nil? check-children?) (check-children? current-shape))
-                 (concat (or (:shapes current-shape) []) pending-ids)
-                 pending-ids)]
-
-           (if (empty? next-pending-ids)
-             next-val
-             (recur next-val (first next-pending-ids) (rest next-pending-ids)))))))))
+             (if (empty? next-pending-ids)
+               next-val
+               (recur next-val (first next-pending-ids) (rest next-pending-ids) processed)))))))))
 
 (defn selected-with-children
   [objects selected]
@@ -527,3 +574,40 @@
        (d/seek root-frame?)
        :id))
 
+(defn comparator-layout-z-index
+  [[idx-a child-a] [idx-b child-b]]
+  (cond
+    (> (ctl/layout-z-index child-a) (ctl/layout-z-index child-b)) 1
+    (< (ctl/layout-z-index child-a) (ctl/layout-z-index child-b)) -1
+    (> idx-a idx-b) 1
+    (< idx-a idx-b) -1
+    :else 0))
+
+(defn sort-layout-children-z-index
+  [children]
+  (->> children
+       (d/enumerate)
+       (sort comparator-layout-z-index)
+       (mapv second)))
+
+(defn common-parent-frame
+  "Search for the common frame for the selected shapes. Otherwise returns the root frame"
+  [objects selected]
+
+  (loop [frame-id (get-in objects [(first selected) :frame-id])
+         frame-parents (get-parent-ids objects frame-id)
+         selected (rest selected)]
+    (if (empty? selected)
+      frame-id
+
+      (let [current (first selected)
+            parent? (into #{} (get-parent-ids objects current))
+
+            [frame-id frame-parents]
+            (if (parent? frame-id)
+              [frame-id frame-parents]
+
+              (let [frame-id (d/seek parent? frame-parents)]
+                [frame-id (get-parent-ids objects frame-id)]))]
+
+        (recur frame-id frame-parents (rest selected))))))

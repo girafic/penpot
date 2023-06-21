@@ -26,20 +26,34 @@
    [app.util.keyboard :as kbd]
    [app.util.object :as obj]
    [app.util.timers :as timers]
+   [app.util.webapi :as wapi]
    [beicon.core :as rx]
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
 
 (def scale-per-pixel -0.0057)
 
-(defn on-mouse-down
+(defn on-pointer-down
   [{:keys [id blocked hidden type]} selected edition drawing-tool text-editing?
-   node-editing? drawing-path? create-comment? space? panning z? workspace-read-only?]
+   node-editing? grid-editing? drawing-path? create-comment? space? panning z? workspace-read-only?]
   (mf/use-callback
    (mf/deps id blocked hidden type selected edition drawing-tool text-editing?
-            node-editing? drawing-path? create-comment? @z? @space?
+            node-editing? grid-editing? drawing-path? create-comment? @z? @space?
             panning workspace-read-only?)
+
    (fn [bevent]
+     ;; We need to handle editor related stuff here because
+     ;; handling on editor dom node does not works properly.
+     (let [target  (dom/get-target bevent)
+           editor (.closest ^js target ".public-DraftEditor-content")]
+       ;; Capture mouse pointer to detect the movements even if cursor
+       ;; leaves the viewport or the browser itself
+       ;; https://developer.mozilla.org/en-US/docs/Web/API/Element/setPointerCapture
+       (if editor
+         (.setPointerCapture editor (.-pointerId bevent))
+         (.setPointerCapture target (.-pointerId bevent))))
+
+
      (when (or (dom/class? (dom/get-target bevent) "viewport-controls")
                (dom/class? (dom/get-target bevent) "viewport-selrect"))
        (dom/stop-propagation bevent)
@@ -70,7 +84,7 @@
              (do
                (st/emit! (ms/->MouseEvent :down ctrl? shift? alt? meta?))
 
-               (when (and (not= edition id) text-editing?)
+               (when (and (not= edition id) (or text-editing? grid-editing?))
                  (st/emit! dw/clear-edition-mode))
 
                (when (and (not text-editing?)
@@ -80,7 +94,7 @@
                           (not drawing-path?))
                  (cond
                    node-editing?
-                 ;; Handle path node area selection
+                   ;; Handle path node area selection
                    (when-not workspace-read-only?
                      (st/emit! (dwdp/handle-area-selection shift?)))
 
@@ -210,14 +224,13 @@
 
 (defn on-context-menu
   [hover hover-ids workspace-read-only?]
-  (mf/use-callback
+  (mf/use-fn
    (mf/deps @hover @hover-ids workspace-read-only?)
    (fn [event]
      (if workspace-read-only?
        (dom/prevent-default event)
        (when (or (dom/class? (dom/get-target event) "viewport-controls")
-                 (dom/class? (dom/get-target event) "viewport-selrect")
-                 (workspace-read-only?))
+                 (dom/class? (dom/get-target event) "viewport-selrect"))
          (dom/prevent-default event)
 
          (let [position (dom/get-client-position event)]
@@ -241,11 +254,15 @@
        (let [position (dom/get-client-position event)]
          (st/emit! (dw/show-shape-context-menu {:position position :hover-ids @hover-ids})))))))
 
-(defn on-mouse-up
+(defn on-pointer-up
   [disable-paste]
   (mf/use-callback
    (fn [event]
      (dom/stop-propagation event)
+
+     (let [target (dom/get-target event)]
+       ;; Release pointer on mouse up
+       (.releasePointerCapture target (.-pointerId event)))
 
      (let [event (.-nativeEvent event)
            ctrl? (kbd/ctrl? event)
@@ -278,27 +295,6 @@
   (mf/use-callback
    (fn []
      (reset! in-viewport? false))))
-
-(defn on-pointer-down []
-  (mf/use-callback
-   (fn [event]
-    ;; We need to handle editor related stuff here because
-    ;; handling on editor dom node does not works properly.
-     (let [target  (dom/get-target event)
-           editor (.closest ^js target ".public-DraftEditor-content")]
-      ;; Capture mouse pointer to detect the movements even if cursor
-      ;; leaves the viewport or the browser itself
-      ;; https://developer.mozilla.org/en-US/docs/Web/API/Element/setPointerCapture
-       (if editor
-         (.setPointerCapture editor (.-pointerId event))
-         (.setPointerCapture target (.-pointerId event)))))))
-
-(defn on-pointer-up []
-  (mf/use-callback
-   (fn [event]
-     (let [target (dom/get-target event)]
-      ; Release pointer on mouse up
-       (.releasePointerCapture target (.-pointerId event))))))
 
 (defn on-key-down []
   (mf/use-callback
@@ -333,7 +329,7 @@
                         (= "TEXTAREA" (obj/get target "tagName")))]
        (st/emit! (ms/->KeyboardEvent :up key shift? ctrl? alt? meta? editing?))))))
 
-(defn on-mouse-move []
+(defn on-pointer-move [move-stream]
   (let [last-position (mf/use-var nil)]
     (mf/use-callback
      (fn [event]
@@ -345,7 +341,7 @@
              delta (if @last-position
                      (gpt/subtract raw-pt @last-position)
                      (gpt/point 0 0))]
-
+         (rx/push! move-stream pt)
          (reset! last-position raw-pt)
          (st/emit! (ms/->PointerEvent :delta delta
                                       (kbd/ctrl? event)
@@ -358,23 +354,16 @@
                                       (kbd/alt? event)
                                       (kbd/meta? event))))))))
 
-(defn on-pointer-move [move-stream]
-  (mf/use-callback
-   (mf/deps move-stream)
-   (fn [event]
-     (let [raw-pt (dom/get-client-position event)
-           pt     (uwvv/point->viewport raw-pt)]
-       (rx/push! move-stream pt)))))
-
 (defn on-mouse-wheel [zoom]
   (mf/use-callback
    (mf/deps zoom)
    (fn [event]
      (let [event  (.getBrowserEvent ^js event)
            target (dom/get-target event)
-           mod? (kbd/mod? event)]
+           mod? (kbd/mod? event)
+           picking-color? (= "pixel-overlay" (.-id target))]
 
-       (when (uwvv/inside-viewport? target)
+       (when (or (uwvv/inside-viewport? target) picking-color?)
          (dom/prevent-default event)
          (dom/stop-propagation event)
          (let [raw-pt (dom/get-client-position event)
@@ -446,16 +435,29 @@
                                                 (:id component)
                                                 (gpt/point final-x final-y))))
 
-         ;; Will trigger when the user drags an image from a browser to the viewport
-         (dnd/has-type? event "text/uri-list")
-         (let [data  (dnd/get-data event "text/uri-list")
-               lines (str/lines data)
-               uris  (filter #(and (not (str/blank? %))
-                                   (not (str/starts-with? % "#")))
-                             lines)
+         ;; Will trigger when the user drags an image from a browser
+         ;; to the viewport (firefox and chrome do it a bit different
+         ;; depending on the origin)
+         (dnd/has-type? event "Files")
+         (let [files  (dnd/get-files event)
                params {:file-id (:id file)
                        :position viewport-coord
-                       :uris uris}]
+                       :blobs (seq files)}]
+           (st/emit! (dwm/upload-media-workspace params)))
+
+         ;; Will trigger when the user drags an image (usually rendered as datauri) from a
+         ;; browser to the viewport (mainly on firefox, all depending on the origin of the
+         ;; drag event).
+         (dnd/has-type? event "text/uri-list")
+         (let [data   (dnd/get-data event "text/uri-list")
+               lines  (str/lines data)
+               uris   (->> lines (filter #(str/starts-with? % "http")))
+               data   (->> lines (filter #(str/starts-with? % "data:image/")))
+               params {:file-id (:id file)
+                       :position viewport-coord}
+               params (if (seq uris)
+                        (assoc params :uris uris)
+                        (assoc params :blobs (map wapi/data-uri->blob data)))]
            (st/emit! (dwm/upload-media-workspace params)))
 
          ;; Will trigger when the user drags an SVG asset from the assets panel

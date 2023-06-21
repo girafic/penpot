@@ -16,21 +16,22 @@
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.db :as db]
-   [app.http.client :as http]
+   [app.http :as-alias http]
+   [app.http.access-token :as-alias actoken]
+   [app.http.client :as http.client]
    [app.loggers.audit.tasks :as-alias tasks]
    [app.loggers.webhooks :as-alias webhooks]
    [app.main :as-alias main]
-   [app.metrics :as mtx]
    [app.rpc :as-alias rpc]
+   [app.rpc.retry :as rtry]
    [app.tokens :as tokens]
-   [app.util.retry :as rtry]
+   [app.util.services :as-alias sv]
    [app.util.time :as dt]
    [app.worker :as wrk]
    [clojure.spec.alpha :as s]
    [cuerdas.core :as str]
    [integrant.core :as ig]
    [lambdaisland.uri :as u]
-   [promesa.core :as p]
    [promesa.exec :as px]
    [yetti.request :as yrq]))
 
@@ -94,6 +95,15 @@
 
 ;; --- SPECS
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; COLLECTOR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Defines a service that collects the audit/activity log using
+;; internal database. Later this audit log can be transferred to
+;; an external storage and data cleared.
+
 (s/def ::profile-id ::us/uuid)
 (s/def ::name ::us/string)
 (s/def ::type ::us/string)
@@ -106,25 +116,18 @@
   (s/or :fn fn? :str string? :kw keyword?))
 
 (s/def ::event
-  (s/keys :req-un [::type ::name ::profile-id]
-          :opt-un [::ip-addr ::props]
-          :opt [::webhooks/event?
+  (s/keys :req [::type ::name ::profile-id]
+          :opt [::ip-addr
+                ::props
+                ::webhooks/event?
                 ::webhooks/batch-timeout
                 ::webhooks/batch-key]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; COLLECTOR
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; Defines a service that collects the audit/activity log using
-;; internal database. Later this audit log can be transferred to
-;; an external storage and data cleared.
 
 (s/def ::collector
   (s/keys :req [::wrk/executor ::db/pool]))
 
 (defmethod ig/pre-init-spec ::collector [_]
-  (s/keys :req [::db/pool ::wrk/executor ::mtx/metrics]))
+  (s/keys :req [::db/pool ::wrk/executor]))
 
 (defmethod ig/init-key ::collector
   [_ {:keys [::db/pool] :as cfg}]
@@ -135,15 +138,64 @@
     :else
     cfg))
 
-(defn- persist-event!
-  [pool event]
+(defn prepare-event
+  [cfg mdata params result]
+  (let [resultm    (meta result)
+        request    (-> params meta ::http/request)
+        profile-id (or (::profile-id resultm)
+                       (:profile-id result)
+                       (::rpc/profile-id params)
+                       uuid/zero)
+
+        props      (-> (or (::replace-props resultm)
+                           (-> params
+                               (merge (::props resultm))
+                               (dissoc :profile-id)
+                               (dissoc :type)))
+
+                       (clean-props))
+
+        token-id  (::actoken/id request)
+        context   (d/without-nils
+                   {:access-token-id (some-> token-id str)})]
+
+    {::type (or (::type resultm)
+                (::rpc/type cfg))
+     ::name (or (::name resultm)
+                (::sv/name mdata))
+     ::profile-id profile-id
+     ::ip-addr (some-> request parse-client-ip)
+     ::props props
+     ::context context
+
+     ;; NOTE: for batch-key lookup we need the params as-is
+     ;; because the rpc api does not need to know the
+     ;; audit/webhook specific object layout.
+     ::rpc/params params
+
+     ::webhooks/batch-key
+     (or (::webhooks/batch-key mdata)
+         (::webhooks/batch-key resultm))
+
+     ::webhooks/batch-timeout
+     (or (::webhooks/batch-timeout mdata)
+         (::webhooks/batch-timeout resultm))
+
+     ::webhooks/event?
+     (or (::webhooks/event? mdata)
+         (::webhooks/event? resultm)
+         false)}))
+
+(defn- handle-event!
+  [conn-or-pool event]
   (us/verify! ::event event)
   (let [params {:id (uuid/next)
-                :name (:name event)
-                :type (:type event)
-                :profile-id (:profile-id event)
-                :ip-addr (:ip-addr event)
-                :props (:props event)}]
+                :name (::name event)
+                :type (::type event)
+                :profile-id (::profile-id event)
+                :ip-addr (::ip-addr event)
+                :context (::context event)
+                :props (::props event)}]
 
     (when (contains? cf/flags :audit-log)
       ;; NOTE: this operation may cause primary key conflicts on inserts
@@ -151,11 +203,13 @@
       ;; this case we just retry the operation.
       (rtry/with-retry {::rtry/when rtry/conflict-exception?
                         ::rtry/max-retries 6
-                        ::rtry/label "persist-audit-log"}
+                        ::rtry/label "persist-audit-log"
+                        ::db/conn (dm/check db/connection? conn-or-pool)}
         (let [now (dt/now)]
-          (db/insert! pool :audit-log
+          (db/insert! conn-or-pool :audit-log
                       (-> params
                           (update :props db/tjson)
+                          (update :context db/tjson)
                           (update :ip-addr db/inet)
                           (assoc :created-at now)
                           (assoc :tracked-at now)
@@ -172,7 +226,7 @@
                             :else               label)
             dedupe?       (boolean (and batch-key batch-timeout))]
 
-        (wrk/submit! ::wrk/conn pool
+        (wrk/submit! ::wrk/conn conn-or-pool
                      ::wrk/task :process-webhook-event
                      ::wrk/queue :webhooks
                      ::wrk/max-retries 0
@@ -183,16 +237,18 @@
                      ::webhooks/event
                      (-> params
                          (dissoc :ip-addr)
-                         (dissoc :type)))))))
+                         (dissoc :type)))))
+    params))
 
 (defn submit!
   "Submit audit event to the collector."
-  [{:keys [::wrk/executor ::db/pool] :as collector} params]
-  (us/assert! ::collector collector)
-  (->> (px/submit! executor (partial persist-event! pool (d/without-nils params)))
-       (p/merr (fn [cause]
-                 (l/error :hint "audit: unexpected error processing event" :cause cause)
-                 (p/resolved nil)))))
+  [cfg params]
+  (let [conn (or (::db/conn cfg) (::db/pool cfg))]
+    (us/assert! ::db/pool-or-conn conn)
+    (try
+      (handle-event! conn (d/without-nils params))
+      (catch Throwable cause
+        (l/error :hint "audit: unexpected error processing event" :cause cause)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TASK: ARCHIVE
@@ -206,7 +262,7 @@
 (s/def ::tasks/uri ::us/string)
 
 (defmethod ig/pre-init-spec ::tasks/archive-task [_]
-  (s/keys :req [::db/pool ::main/props ::http/client]))
+  (s/keys :req [::db/pool ::main/props ::http.client/client]))
 
 (defmethod ig/init-key ::tasks/archive
   [_ cfg]
@@ -230,7 +286,7 @@
             (if n
               (do
                 (px/sleep 100)
-                (recur (+ total n)))
+                (recur (+ total ^long n)))
               (when (pos? total)
                 (l/debug :hint "events archived" :total total)))))))))
 
@@ -280,7 +336,7 @@
                            :method :post
                            :headers headers
                            :body body}
-                  resp    (http/req! cfg params {:sync? true})]
+                  resp    (http.client/req! cfg params {:sync? true})]
               (if (= (:status resp) 204)
                 true
                 (do

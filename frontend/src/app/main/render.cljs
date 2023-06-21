@@ -20,6 +20,7 @@
    [app.common.geom.shapes.bounds :as gsb]
    [app.common.math :as mth]
    [app.common.pages.helpers :as cph]
+   [app.common.types.file :as ctf]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape-tree :as ctst]
    [app.config :as cfg]
@@ -287,12 +288,12 @@
             :fill "none"}
       [:& shape-wrapper {:shape frame}]]]))
 
-
 ;; Component for rendering a thumbnail of a single componenent. Mainly
 ;; used to render thumbnails on assets panel.
 (mf/defc component-svg
   {::mf/wrap [mf/memo #(mf/deferred % ts/idle-then-raf)]}
   [{:keys [objects root-shape zoom] :or {zoom 1} :as props}]
+  (when root-shape
   (let [root-shape-id (:id root-shape)
         include-metadata? (mf/use-ctx export/include-metadata-ctx)
 
@@ -311,16 +312,16 @@
                  update-fn    #(update %1 %2 gsh/transform-shape (ctm/move-modifiers vector))]
              (reduce update-fn objects children-ids))))
 
-        root-shape (get objects root-shape-id)
-        width      (* (:width root-shape) zoom)
-        height     (* (:height root-shape) zoom)
-        vbox       (format-viewbox {:width (:width root-shape 0)
-                                    :height (:height root-shape 0)})
+        root-shape' (get objects root-shape-id)
+        width       (* (:width root-shape') zoom)
+        height      (* (:height root-shape') zoom)
+        vbox        (format-viewbox {:width (:width root-shape' 0)
+                                     :height (:height root-shape' 0)})
         root-shape-wrapper
         (mf/use-memo
-         (mf/deps objects root-shape)
+         (mf/deps objects root-shape')
          (fn []
-           (case (:type root-shape)
+           (case (:type root-shape')
              :group (group-wrapper-factory objects)
              :frame (frame-wrapper-factory objects))))]
 
@@ -333,8 +334,9 @@
            :xmlns:penpot (when include-metadata? "https://penpot.app/xmlns")
            :fill "none"}
 
-     [:> shape-container {:shape root-shape}
-      [:& root-shape-wrapper {:shape root-shape :view-box vbox}]]]))
+     [:> shape-container {:shape root-shape'}
+      [:& (mf/provider muc/is-component?) {:value true}
+       [:& root-shape-wrapper {:shape root-shape' :view-box vbox}]]]])))
 
 (mf/defc object-svg
   {::mf/wrap [mf/memo]}
@@ -377,18 +379,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (mf/defc component-symbol
-  [{:keys [id data] :as props}]
-  (let [name       (:name data)
-        path       (:path data)
-        objects    (-> (:objects data)
-                       (adapt-objects-for-shape id))
-        root-shape (get objects id)
+  [{:keys [component] :as props}]
+  (let [name       (:name component)
+        path       (:path component)
+        root-id    (or (:main-instance-id component)
+                       (:id component))
+        objects    (adapt-objects-for-shape (:objects component)
+                                            root-id)
+        root-shape (get objects root-id)
         selrect    (:selrect root-shape)
 
-        main-instance-id   (:main-instance-id data)
-        main-instance-page (:main-instance-page data)
-        main-instance-x    (:main-instance-x data)
-        main-instance-y    (:main-instance-y data)
+        main-instance-id   (:main-instance-id component)
+        main-instance-page (:main-instance-page component)
+        main-instance-x    (:main-instance-x component)
+        main-instance-y    (:main-instance-y component)
 
         vbox
         (format-viewbox
@@ -405,7 +409,7 @@
          (mf/deps objects)
          (fn [] (frame-wrapper-factory objects)))]
 
-    [:> "symbol" #js {:id (str id)
+    [:> "symbol" #js {:id (str root-id)
                       :viewBox vbox
                       "penpot:path" path
                       "penpot:main-instance-id" main-instance-id
@@ -435,9 +439,10 @@
              :style {:display (when-not (some? children) "none")}
              :fill "none"}
        [:defs
-        (for [[id data] (source data)]
-          [:& component-symbol {:id id :key (dm/str id) :data data}])]
-
+        (for [[id component] (source data)]
+          (let [component (ctf/load-component-objects data component)]
+            [:& component-symbol {:key (dm/str id) :component component}]))]
+       
        children]]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -468,7 +473,7 @@
   (let [texts (->> objects
                    (vals)
                    (filterv #(= (:type %) :text))
-                   (mapv :content)) ]
+                   (mapv :content))]
 
     (->> (rx/from texts)
          (rx/map fonts/get-content-fonts)
@@ -497,6 +502,7 @@
   (let [;; Join all components objects into a single map
         objects (->> (source data)
                      (vals)
+                     (map (partial ctf/load-component-objects data))
                      (map :objects)
                      (reduce conj))]
     (rx/concat

@@ -12,8 +12,9 @@
    [app.common.geom.shapes :as gsh]
    [app.common.pages.changes-builder :as pcb]
    [app.common.pages.helpers :as cph]
-   [app.common.spec :as us]
+   [app.common.schema :as sm]
    [app.common.types.component :as ctk]
+   [app.common.types.container :as ctn]
    [app.common.types.page :as ctp]
    [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
@@ -29,10 +30,7 @@
    [app.main.features :as features]
    [app.main.streams :as ms]
    [beicon.core :as rx]
-   [cljs.spec.alpha :as s]
    [potok.core :as ptk]))
-
-(s/def ::shape-attrs ::cts/shape-attrs)
 
 (defn get-shape-layer-position
   [objects selected attrs]
@@ -73,12 +71,36 @@
                :parent-id parent-id
                :index index))))
 
+(defn prepare-add-shape
+  [changes attrs objects selected]
+  (let [id       (or (:id attrs) (uuid/next))
+        name     (:name attrs)
+
+        shape (make-new-shape
+               (assoc attrs :id id :name name)
+               objects
+               selected)
+
+        index (:index (meta attrs))
+
+        changes (-> changes
+                    (pcb/with-objects objects)
+                    (cond-> (some? index)
+                      (pcb/add-object shape {:index index}))
+                    (cond-> (nil? index)
+                      (pcb/add-object shape))
+                    (cond-> (some? (:parent-id attrs))
+                      (pcb/change-parent (:parent-id attrs) [shape] index))
+                    (cond-> (ctl/grid-layout? objects (:parent-id shape))
+                      (pcb/update-shapes [(:parent-id shape)] ctl/assign-cells)))]
+
+    [shape changes]))
+
 (defn add-shape
   ([attrs]
    (add-shape attrs {}))
-
-  ([attrs {:keys [no-select?]}]
-   (us/verify ::shape-attrs attrs)
+  ([attrs {:keys [no-select? no-update-layout?]}]
+   (dm/assert! (cts/shape-attrs? attrs))
    (ptk/reify ::add-shape
      ptk/WatchEvent
      (watch [it state _]
@@ -86,52 +108,52 @@
              objects  (wsh/lookup-page-objects state page-id)
              selected (wsh/lookup-selected state)
 
-             id       (or (:id attrs) (uuid/next))
-             name     (:name attrs)
+             changes  (pcb/empty-changes it page-id)
 
-             shape (make-new-shape
-                    (assoc attrs :id id :name name)
-                    objects
-                    selected)
+             [shape changes]
+             (prepare-add-shape changes attrs objects selected)
 
-             index (:index (meta attrs))
-             changes  (-> (pcb/empty-changes it page-id)
-                          (pcb/with-objects objects)
-                          (cond-> (some? index)
-                            (pcb/add-object shape {:index index}))
-                          (cond-> (nil? index)
-                            (pcb/add-object shape))
-                          (cond-> (some? (:parent-id attrs))
-                            (pcb/change-parent (:parent-id attrs) [shape])))
              undo-id (js/Symbol)]
 
          (rx/concat
           (rx/of (dwu/start-undo-transaction undo-id)
                  (dch/commit-changes changes)
-                 (ptk/data-event :layout/update [(:parent-id shape)])
+                 (when-not no-update-layout?
+                   (ptk/data-event :layout/update [(:parent-id shape)]))
                  (when-not no-select?
-                   (dws/select-shapes (d/ordered-set id)))
+                   (dws/select-shapes (d/ordered-set (:id shape))))
                  (dwu/commit-undo-transaction undo-id))
           (when (= :text (:type attrs))
-            (->> (rx/of (dwe/start-edition-mode id))
+            (->> (rx/of (dwe/start-edition-mode (:id shape)))
                  (rx/observe-on :async)))))))))
+
+(defn prepare-move-shapes-into-frame
+  [changes frame-id shapes objects]
+  (let [ordered-indexes (cph/order-by-indexed-shapes objects shapes)
+        parent-id (get-in objects [frame-id :parent-id])
+        ordered-indexes (->> ordered-indexes (remove #(= % parent-id)))
+        to-move-shapes (map (d/getf objects) ordered-indexes)]
+    (when (d/not-empty? to-move-shapes)
+      (-> changes
+          (cond-> (not (ctl/any-layout? objects frame-id))
+            (pcb/update-shapes ordered-indexes ctl/remove-layout-item-data))
+          (pcb/update-shapes ordered-indexes #(cond-> % (cph/frame-shape? %) (assoc :hide-in-viewer true)))
+          (pcb/change-parent frame-id to-move-shapes 0)
+          (cond-> (ctl/grid-layout? objects frame-id)
+            (pcb/update-shapes [frame-id] ctl/assign-cells))))))
 
 (defn move-shapes-into-frame [frame-id shapes]
   (ptk/reify ::move-shapes-into-frame
     ptk/WatchEvent
     (watch [it state _]
-      (let [page-id  (:current-page-id state)
+      (let [page-id (:current-page-id state)
             objects (wsh/lookup-page-objects state page-id)
-
-            ordered-indexes (cph/order-by-indexed-shapes objects shapes)
-            to-move-shapes (map (d/getf objects) ordered-indexes)
-
-            changes
-            (when (d/not-empty? to-move-shapes)
-              (-> (pcb/empty-changes it page-id)
-                  (pcb/with-objects objects)
-                  (pcb/change-parent frame-id to-move-shapes 0)))]
-
+            changes (-> (pcb/empty-changes it page-id)
+                        (pcb/with-objects objects))
+            changes (prepare-move-shapes-into-frame changes
+                                                    frame-id
+                                                    shapes
+                                                    objects)]
         (if (some? changes)
           (rx/of (dch/commit-changes changes))
           (rx/empty))))))
@@ -142,7 +164,7 @@
 (defn delete-shapes
   ([ids] (delete-shapes nil ids))
   ([page-id ids]
-   (us/assert ::us/set-of-uuid ids)
+   (dm/assert! (sm/set-of-uuid? ids))
    (ptk/reify ::delete-shapes
      ptk/WatchEvent
      (watch [it state _]
@@ -162,8 +184,8 @@
                ;; not the root. In this case, they must not be deleted,
                ;; but hidden (to be able to recover them more easily).
                (let [shape           (get objects shape-id)
-                     component-shape (cph/get-component-shape objects shape)]
-                 (and (ctk/in-component-instance? shape)
+                     component-shape (ctn/get-component-shape objects shape)]
+                 (and (ctk/in-component-copy? shape)
                       (not= shape component-shape)
                       (not (ctk/main-instance? component-shape)))))
 
@@ -182,141 +204,154 @@
                        (recur (rest ids-seq)
                               (conj ids-to-delete id)
                               ids-to-hide)))))
-               [ids []])]
+               [ids []])
 
-         (rx/concat (rx/of (update-shape-flags ids-to-hide {:hidden true}))
-                    (real-delete-shapes file page objects ids-to-delete it components-v2)))))))
+             undo-id (js/Symbol)]
 
-(defn- real-delete-shapes
-  [file page objects ids it components-v2]
-  (let [lookup  (d/getf objects)
+         (rx/concat
+          (rx/of (dwu/start-undo-transaction undo-id)
+                 (update-shape-flags ids-to-hide {:hidden true}))
+          (real-delete-shapes file page objects ids-to-delete it components-v2)
+          (rx/of (dwu/commit-undo-transaction undo-id))))))))
 
-        layout-ids (->> ids
-                        (mapcat (partial cph/get-parent-ids objects))
-                        (filter (partial ctl/layout? objects)))
-
-        groups-to-unmask
-        (reduce (fn [group-ids id]
+(defn- real-delete-shapes-changes
+  ([file page objects ids it components-v2]
+   (let [changes (-> (pcb/empty-changes it (:id page))
+                     (pcb/with-page page)
+                     (pcb/with-objects objects)
+                     (pcb/with-library-data file))]
+     (real-delete-shapes-changes changes file page objects ids it components-v2)))
+  ([changes file page objects ids _it components-v2]
+   (let [lookup  (d/getf objects)
+         groups-to-unmask
+         (reduce (fn [group-ids id]
                   ;; When the shape to delete is the mask of a masked group,
                   ;; the mask condition must be removed, and it must be
                   ;; converted to a normal group.
-                  (let [obj    (lookup id)
-                        parent (lookup (:parent-id obj))]
-                    (if (and (:masked-group? parent)
-                             (= id (first (:shapes parent))))
-                      (conj group-ids (:id parent))
-                      group-ids)))
-                #{}
-                ids)
+                   (let [obj    (lookup id)
+                         parent (lookup (:parent-id obj))]
+                     (if (and (:masked-group? parent)
+                              (= id (first (:shapes parent))))
+                       (conj group-ids (:id parent))
+                       group-ids)))
+                 #{}
+                 ids)
 
-        interacting-shapes
-        (filter (fn [shape]
+         interacting-shapes
+         (filter (fn [shape]
                   ;; If any of the deleted shapes is the destination of
                   ;; some interaction, this must be deleted, too.
-                  (let [interactions (:interactions shape)]
-                    (some #(and (ctsi/has-destination %)
-                                (contains? ids (:destination %)))
-                          interactions)))
-                (vals objects))
+                   (let [interactions (:interactions shape)]
+                     (some #(and (ctsi/has-destination %)
+                                 (contains? ids (:destination %)))
+                           interactions)))
+                 (vals objects))
 
         ;; If any of the deleted shapes is a frame with guides
-        guides (into {}
-                     (comp (map second)
-                           (remove #(contains? ids (:frame-id %)))
-                           (map (juxt :id identity)))
-                     (dm/get-in page [:options :guides]))
+         guides (into {}
+                      (comp (map second)
+                            (remove #(contains? ids (:frame-id %)))
+                            (map (juxt :id identity)))
+                      (dm/get-in page [:options :guides]))
 
-        starting-flows
-        (filter (fn [flow]
+         starting-flows
+         (filter (fn [flow]
                   ;; If any of the deleted is a frame that starts a flow,
                   ;; this must be deleted, too.
-                  (contains? ids (:starting-frame flow)))
-                (-> page :options :flows))
+                   (contains? ids (:starting-frame flow)))
+                 (-> page :options :flows))
 
-        all-parents
-        (reduce (fn [res id]
+         all-parents
+         (reduce (fn [res id]
                   ;; All parents of any deleted shape must be resized.
-                  (into res (cph/get-parent-ids objects id)))
-                (d/ordered-set)
-                ids)
+                   (into res (cph/get-parent-ids objects id)))
+                 (d/ordered-set)
+                 ids)
 
-        all-children
-        (->> ids ;; Children of deleted shapes must be also deleted.
-             (reduce (fn [res id]
-                       (into res (cph/get-children-ids objects id)))
-                     [])
-             (reverse)
-             (into (d/ordered-set)))
+         all-children
+         (->> ids ;; Children of deleted shapes must be also deleted.
+              (reduce (fn [res id]
+                        (into res (cph/get-children-ids objects id)))
+                      [])
+              (reverse)
+              (into (d/ordered-set)))
 
-        find-all-empty-parents
-        (fn recursive-find-empty-parents [empty-parents]
-          (let [all-ids   (into empty-parents ids)
-                contains? (partial contains? all-ids)
-                xform     (comp (map lookup)
-                                (filter cph/group-shape?)
-                                (remove #(->> (:shapes %) (remove contains?) seq))
-                                (map :id))
-                parents   (into #{} xform all-parents)]
-            (if (= empty-parents parents)
-              empty-parents
-              (recursive-find-empty-parents parents))))
+         find-all-empty-parents
+         (fn recursive-find-empty-parents [empty-parents]
+           (let [all-ids   (into empty-parents ids)
+                 contains? (partial contains? all-ids)
+                 xform     (comp (map lookup)
+                                 (filter cph/group-shape?)
+                                 (remove #(->> (:shapes %) (remove contains?) seq))
+                                 (map :id))
+                 parents   (into #{} xform all-parents)]
+             (if (= empty-parents parents)
+               empty-parents
+               (recursive-find-empty-parents parents))))
 
-        empty-parents
+         empty-parents
         ;; Any parent whose children are all deleted, must be deleted too.
-        (into (d/ordered-set) (find-all-empty-parents #{}))
+         (into (d/ordered-set) (find-all-empty-parents #{}))
 
-        components-to-delete
-        (if components-v2
-          (reduce (fn [components id]
-                    (let [shape (get objects id)]
-                      (if (and (= (:component-file shape) (:id file)) ;; Main instances should exist only in local file
-                               (:main-instance? shape))               ;; but check anyway
-                        (conj components (:component-id shape))
-                        components)))
-                  []
-                  (into ids all-children))
-          [])
+         components-to-delete
+         (if components-v2
+           (reduce (fn [components id]
+                     (let [shape (get objects id)]
+                       (if (and (= (:component-file shape) (:id file)) ;; Main instances should exist only in local file
+                                (:main-instance? shape))               ;; but check anyway
+                         (conj components (:component-id shape))
+                         components)))
+                   []
+                   (into ids all-children))
+           [])
 
-        changes (-> (pcb/empty-changes it (:id page))
-                    (pcb/with-page page)
-                    (pcb/with-objects objects)
-                    (pcb/with-library-data file)
-                    (pcb/set-page-option :guides guides))
+         changes (-> changes
+                     (pcb/set-page-option :guides guides))
 
-        changes (reduce (fn [changes component-id]
+         changes (reduce (fn [changes component-id]
                           ;; It's important to delete the component before the main instance, because we
                           ;; need to store the instance position if we want to restore it later.
-                          (pcb/delete-component changes component-id components-v2))
-                        changes
-                        components-to-delete)
+                           (pcb/delete-component changes component-id))
+                         changes
+                         components-to-delete)
 
-        changes (-> changes
-                    (pcb/remove-objects all-children)
-                    (pcb/remove-objects ids)
-                    (pcb/remove-objects empty-parents)
-                    (pcb/resize-parents all-parents)
-                    (pcb/update-shapes groups-to-unmask
-                                       (fn [shape]
-                                         (assoc shape :masked-group? false)))
-                    (pcb/update-shapes (map :id interacting-shapes)
-                                       (fn [shape]
-                                         (d/update-when shape :interactions
-                                                        (fn [interactions]
-                                                          (into []
-                                                                (remove #(and (ctsi/has-destination %)
-                                                                              (contains? ids (:destination %))))
-                                                                interactions)))))
-                    (cond-> (seq starting-flows)
-                      (pcb/update-page-option :flows (fn [flows]
-                                                       (->> (map :id starting-flows)
-                                                            (reduce ctp/remove-flow flows))))))
+         changes (-> changes
+                     (pcb/remove-objects all-children {:ignore-touched true})
+                     (pcb/remove-objects ids)
+                     (pcb/remove-objects empty-parents)
+                     (pcb/resize-parents all-parents)
+                     (pcb/update-shapes groups-to-unmask
+                                        (fn [shape]
+                                          (assoc shape :masked-group? false)))
+                     (pcb/update-shapes (map :id interacting-shapes)
+                                        (fn [shape]
+                                          (d/update-when shape :interactions
+                                                         (fn [interactions]
+                                                           (into []
+                                                                 (remove #(and (ctsi/has-destination %)
+                                                                               (contains? ids (:destination %))))
+                                                                 interactions)))))
+                     (cond-> (seq starting-flows)
+                       (pcb/update-page-option :flows (fn [flows]
+                                                        (->> (map :id starting-flows)
+                                                             (reduce ctp/remove-flow flows))))))]
+     [changes all-parents])))
+
+
+(defn delete-shapes-changes
+  [changes file page objects ids it components-v2]
+  (let [[changes _all-parents] (real-delete-shapes-changes changes file page objects ids it components-v2)]
+    changes))
+
+
+(defn- real-delete-shapes
+  [file page objects ids it components-v2]
+  (let [[changes all-parents] (real-delete-shapes-changes file page objects ids it components-v2)
         undo-id (js/Symbol)]
-
     (rx/of (dwu/start-undo-transaction undo-id)
            (dc/detach-comment-thread ids)
-           (ptk/data-event :layout/update all-parents)
            (dch/commit-changes changes)
-           (ptk/data-event :layout/update layout-ids)
+           (ptk/data-event :layout/update all-parents)
            (dwu/commit-undo-transaction undo-id))))
 
 (defn create-and-add-shape
@@ -353,6 +388,35 @@
 ;; Artboard
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn prepare-create-artboard-from-selection
+  [changes id parent-id objects selected index frame-name without-fill?]
+  (let [selected-objs (map #(get objects %) selected)
+        new-index (or index
+                      (cph/get-index-replacement selected objects))]
+    (when (d/not-empty? selected)
+      (let [srect     (gsh/selection-rect selected-objs)
+            frame-id  (get-in objects [(first selected) :frame-id])
+            parent-id (or parent-id (get-in objects [(first selected) :parent-id]))
+            shape     (-> (cts/make-minimal-shape :frame)
+                          (merge {:x (:x srect) :y (:y srect) :width (:width srect) :height (:height srect)})
+                          (cond-> id
+                            (assoc :id id))
+                          (cond-> frame-name
+                            (assoc :name frame-name))
+                          (assoc :frame-id frame-id :parent-id parent-id)
+                          (with-meta {:index new-index})
+                          (cond-> (or (not= frame-id uuid/zero) without-fill?)
+                            (assoc :fills [] :hide-in-viewer true))
+                          (cts/setup-rect-selrect))
+
+            [shape changes]
+            (prepare-add-shape changes shape objects selected)
+
+            changes
+            (prepare-move-shapes-into-frame changes (:id shape) selected objects)]
+
+        [shape changes]))))
+
 (defn create-artboard-from-selection
   ([]
    (create-artboard-from-selection nil))
@@ -363,33 +427,33 @@
   ([id parent-id index]
    (ptk/reify ::create-artboard-from-selection
      ptk/WatchEvent
-     (watch [_ state _]
-       (let [page-id       (:current-page-id state)
-             objects       (wsh/lookup-page-objects state page-id)
-             selected      (wsh/lookup-selected state)
-             selected      (cph/clean-loops objects selected)
-             selected-objs (map #(get objects %) selected)
-             new-index     (or index
-                               (cph/get-index-replacement selected objects))]
-         (when (d/not-empty? selected)
-           (let [srect     (gsh/selection-rect selected-objs)
-                 frame-id  (get-in objects [(first selected) :frame-id])
-                 parent-id (or parent-id (get-in objects [(first selected) :parent-id]))
-                 shape     (-> (cts/make-minimal-shape :frame)
-                               (merge {:x (:x srect) :y (:y srect) :width (:width srect) :height (:height srect)})
-                               (cond-> id
-                                 (assoc :id id))
-                               (assoc :frame-id frame-id :parent-id parent-id)
-                               (with-meta {:index new-index})
-                               (cond-> (not= frame-id uuid/zero)
-                                 (assoc :fills [] :hide-in-viewer true))
-                               (cts/setup-rect-selrect))
-                 undo-id (js/Symbol)]
-             (rx/of
-              (dwu/start-undo-transaction undo-id)
-              (add-shape shape)
-              (move-shapes-into-frame (:id shape) selected)
-              (dwu/commit-undo-transaction undo-id)))))))))
+     (watch [it state _]
+       (let [page-id  (:current-page-id state)
+             objects  (wsh/lookup-page-objects state page-id)
+             selected (wsh/lookup-selected state)
+             selected (cph/clean-loops objects selected)
+
+             changes  (pcb/empty-changes it page-id)
+
+             [frame-shape changes]
+             (prepare-create-artboard-from-selection changes
+                                                     id
+                                                     parent-id
+                                                     objects
+                                                     selected
+                                                     index
+                                                     nil
+                                                     false)
+
+             undo-id  (js/Symbol)]
+
+         (when changes
+           (rx/of
+            (dwu/start-undo-transaction undo-id)
+            (dch/commit-changes changes)
+            (dws/select-shapes (d/ordered-set (:id frame-shape)))
+            (ptk/data-event :layout/update [(:id frame-shape)])
+            (dwu/commit-undo-transaction undo-id))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Shape Flags
@@ -397,8 +461,14 @@
 
 (defn update-shape-flags
   [ids {:keys [blocked hidden] :as flags}]
-  (us/verify (s/coll-of ::us/uuid) ids)
-  (us/assert ::shape-attrs flags)
+  (dm/assert!
+   "expected valid coll of uuids"
+   (every? uuid? ids))
+
+  (dm/assert!
+   "expected valid shape-attrs value for `flags`"
+   (cts/shape-attrs? flags))
+
   (ptk/reify ::update-shape-flags
     ptk/WatchEvent
     (watch [_ state _]
@@ -411,7 +481,7 @@
             ;; We have change only the hidden behaviour, to hide only the
             ;; selected shape, block behaviour remains the same.
             ids     (if (boolean? blocked)
-                     (into ids (->> ids (mapcat #(cph/get-children-ids objects %))))
+                      (into ids (->> ids (mapcat #(cph/get-children-ids objects %))))
                       ids)]
         (rx/of (dch/update-shapes ids update-fn))))))
 
@@ -431,26 +501,33 @@
       (let [selected (wsh/lookup-selected state)]
         (rx/of (dch/update-shapes selected #(update % :blocked not)))))))
 
+
+;; FIXME: this need to be refactored
+
 (defn toggle-file-thumbnail-selected
   []
   (ptk/reify ::toggle-file-thumbnail-selected
     ptk/WatchEvent
     (watch [_ state _]
       (let [selected   (wsh/lookup-selected state)
-            pages      (-> state :workspace-data :pages-index vals)
-            get-frames (fn [{:keys [objects id] :as page}]
-                         (->> (ctst/get-frames objects)
-                              (sequence
-                               (comp (filter :use-for-thumbnail?)
-                                     (map :id)
-                                     (remove selected)
-                                     (map (partial vector id))))))]
+            pages      (-> state :workspace-data :pages-index vals)]
 
         (rx/concat
+         ;; First: clear the `:use-for-thumbnail?` flag from all not
+         ;; selected frames.
          (rx/from
-          (->> (mapcat get-frames pages)
+          (->> pages
+               (mapcat
+                (fn [{:keys [objects id] :as page}]
+                  (->> (ctst/get-frames objects)
+                       (sequence
+                        (comp (filter :use-for-thumbnail?)
+                              (map :id)
+                              (remove selected)
+                              (map (partial vector id)))))))
                (d/group-by first second)
                (map (fn [[page-id frame-ids]]
                       (dch/update-shapes frame-ids #(dissoc % :use-for-thumbnail?) {:page-id page-id})))))
-         (rx/of (dch/update-shapes selected #(update % :use-for-thumbnail? not))))))))
 
+         ;; And finally: toggle the flag value on all the selected shapes
+         (rx/of (dch/update-shapes selected #(update % :use-for-thumbnail? not))))))))

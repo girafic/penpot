@@ -58,10 +58,10 @@
   (.setAttribute (.querySelector js/document "html") "lang" lang))
 
 (defn set-html-theme-color
-  [^string color scheme]
-  (let [meta-node (.querySelector js/document "meta[name='theme-color']")]
-    (.setAttribute meta-node "content" color)
-    (.setAttribute meta-node "media" (str/format "(prefers-color-scheme: %s)" scheme))))
+  [^string color]
+  (let [node (.querySelector js/document "body")]
+    (.removeAttribute node "class")
+    (.add ^js (.-classList ^js node) color)))
 
 (defn set-page-style!
   [styles]
@@ -147,7 +147,7 @@
   [^js node selector]
 
   (loop [current node]
-    (if (or (nil? current) (.matches current selector) )
+    (if (or (nil? current) (.matches current selector))
       current
       (recur (.-parentElement current)))))
 
@@ -175,10 +175,10 @@
 (defn get-scroll-position
   [^js event]
   (when (some? event)
-      {:scroll-height (.-scrollHeight event)
-       :scroll-left   (.-scrollLeft event)
-       :scroll-top    (.-scrollTop event)
-       :scroll-width  (.-scrollWidth event)}))
+    {:scroll-height (.-scrollHeight event)
+     :scroll-left   (.-scrollLeft event)
+     :scroll-top    (.-scrollTop event)
+     :scroll-width  (.-scrollWidth event)}))
 
 (def get-target-val (comp get-value get-target))
 
@@ -234,7 +234,7 @@
 
 (defn select-text!
   [^js node]
-  (when (some? node)
+  (when (and (some? node) (or (= "INPUT" (.-tagName node)) (= "TEXTAREA" (.-tagName node))))
     (.select ^js node)))
 
 (defn ^boolean equals?
@@ -309,6 +309,13 @@
    (when (some? el)
      (.querySelectorAll el selector))))
 
+(defn get-element-offset-position
+  [^js node]
+  (when (some? node)
+    (let [x (.-offsetTop node)
+          y (.-offsetLeft node)]
+      (gpt/point x y))))
+
 (defn get-client-position
   [^js event]
   (let [x (.-clientX event)
@@ -361,11 +368,21 @@
   (when (some? node)
     (.blur node)))
 
+;; List of dom events for different browsers to detect the exit of fullscreen mode
+(def fullscreen-events
+  ["fullscreenchange" "mozfullscreenchange" "MSFullscreenChange" "webkitfullscreenchange"])
+
 (defn fullscreen?
   []
   (cond
     (obj/in? globals/document "webkitFullscreenElement")
     (boolean (.-webkitFullscreenElement globals/document))
+
+    (obj/in? globals/document "mozFullScreen")
+    (boolean (.-mozFullScreen globals/document))
+
+    (obj/in? globals/document "msFullscreenElement")
+    (boolean (.-msFullscreenElement globals/document))
 
     (obj/in? globals/document "fullscreenElement")
     (boolean (.-fullscreenElement globals/document))
@@ -393,14 +410,19 @@
     (->  (js/XMLSerializer.)
          (.serializeToString node))))
 
-(defn svg->data-uri
-  [svg]
-  (assert (string? svg))
-  (let [b64 (-> svg
-                js/encodeURIComponent
-                js/unescape
+(defn str->data-uri
+  [str type]
+  (assert (string? str))
+  (let [b64 (-> str
                 js/btoa)]
-    (dm/str "data:image/svg+xml;base64," b64)))
+    (dm/str "data:" type ";base64," b64)))
+
+(defn svg-node->data-uri
+  [svg-node]
+  (let [xml  (-> (js/XMLSerializer.)
+                 (.serializeToString svg-node))
+        data-uri (str->data-uri xml "image/svg+xml")]
+    data-uri))
 
 (defn set-property! [^js node property value]
   (when (some? node)
@@ -441,7 +463,7 @@
   (assert (even? (count params)))
   (str/join " " (reduce (fn [acc [k v]]
                           (if (true? (boolean v))
-                            (conj acc (name k))
+                            (conj acc (d/name k))
                             acc))
                         []
                         (partition 2 params))))
@@ -567,7 +589,7 @@
     (let [extension (cm/mtype->extension mtype)
           opts {:suggestedName (str filename "." extension)
                 :types [{:description description
-                         :accept { mtype [(str "." extension)]}}]}]
+                         :accept {mtype [(str "." extension)]}}]}]
 
       (-> (p/let [file-system (.showSaveFilePicker globals/window (clj->js opts))
                   writable    (.createWritable file-system)
@@ -576,9 +598,9 @@
                   _           (.write writable blob)]
             (.close writable))
           (p/catch
-              #(when-not (and (= (type %) js/DOMException)
-                              (= (.-name %) "AbortError"))
-                 (trigger-download-uri filename mtype uri)))))
+           #(when-not (and (= (type %) js/DOMException)
+                           (= (.-name %) "AbortError"))
+              (trigger-download-uri filename mtype uri)))))
 
     (trigger-download-uri filename mtype uri)))
 
@@ -609,9 +631,9 @@
 (defn animate!
   ([item keyframes duration] (animate! item keyframes duration nil))
   ([item keyframes duration onfinish]
-    (let [animation (.animate item keyframes duration)]
-      (when onfinish
-        (set! (.-onfinish animation) onfinish)))))
+   (let [animation (.animate item keyframes duration)]
+     (when onfinish
+       (set! (.-onfinish animation) onfinish)))))
 
 (defn is-child?
   [^js node ^js candidate]
@@ -655,3 +677,12 @@
 (defn has-children?
   [^js node]
   (> (-> node .-children .-length) 0))
+
+;; WARNING: Use only for debugging. It's to costly to use for real
+(defn measure-text
+  "Given a canvas' context 2d and the text info returns tis ascent/descent info"
+  [context-2d font-size font-family text]
+  (let [_ (set! (.-font context-2d) (str font-size " " font-family))
+        measures (.measureText context-2d text)]
+    {:descent (.-actualBoundingBoxDescent measures)
+     :ascent (.-actualBoundingBoxAscent measures)}))

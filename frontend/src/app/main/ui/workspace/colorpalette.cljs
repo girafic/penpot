@@ -49,7 +49,7 @@
 
         container      (mf/use-ref nil)
 
-        {:keys [on-pointer-down on-lost-pointer-capture on-mouse-move parent-ref size]}
+        {:keys [on-pointer-down on-lost-pointer-capture on-pointer-move parent-ref size]}
         (use-resize-hook :palette 72 54 80 :y true :bottom)
 
         on-left-arrow-click
@@ -113,12 +113,12 @@
                                      "--bullet-size" (dm/str (if (< size 72) (- size 15) (- size 30)) "px")}}
      [:div.resize-area {:on-pointer-down on-pointer-down
                         :on-lost-pointer-capture on-lost-pointer-capture
-                        :on-mouse-move on-mouse-move}]
+                        :on-pointer-move on-pointer-move}]
      [:& dropdown {:show (:show-menu @state)
                    :on-close #(swap! state assoc :show-menu false)}
       [:ul.workspace-context-menu.palette-menu
        (for [{:keys [data id] :as library} (vals shared-libs)]
-         (let [colors (-> data :colors vals)]
+         (let [colors (->> data :colors vals (sort-by :name))]
            [:li.palette-library
             {:key (dm/str "library-" id)
              :on-click on-select-palette
@@ -130,7 +130,6 @@
                [:& cb/color-bullet {:key (dm/str "color-" i)
                                     :color color}])]]))
 
-
        [:li.palette-library
         {:on-click on-select-palette
          :data-palette "file"}
@@ -139,7 +138,7 @@
                             (tr "workspace.libraries.colors.file-library")
                             (str/ffmt " (%)" (count file-colors)))]
         [:div.color-sample
-         (for [[i color] (map-indexed vector (take 7 (vals file-colors)))]
+         (for [[i color] (map-indexed vector (take 7 (->> (vals file-colors) (sort-by :name))))]
            [:& cb/color-bullet {:key (dm/str "color-" i)
                                 :color color}])]]
 
@@ -160,10 +159,16 @@
 
      [:span.left-arrow {:on-click on-left-arrow-click} i/arrow-slide]
      [:div.color-palette-content {:ref container :on-wheel on-scroll}
-      [:div.color-palette-inside {:style {:position "relative"
+     (if (empty? current-colors)
+        [:div.color-palette-empty {:style {:position "absolute"
+                                           :left "50%"
+                                           :top "50%"
+                                           :transform "translate(-50%, -50%)"}} 
+              (tr "workspace.libraries.colors.empty-palette")]
+        [:div.color-palette-inside {:style {:position "relative"
                                           :right (str (* 66 offset) "px")}}
-       (for [[idx item] (map-indexed vector current-colors)]
-         [:& palette-item {:color item :key idx}])]]
+          (for [[idx item] (map-indexed vector current-colors)]
+            [:& palette-item {:color item :key idx}])])]
 
      [:span.right-arrow {:on-click on-right-arrow-click} i/arrow-slide]]))
 

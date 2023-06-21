@@ -12,11 +12,13 @@
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
-   [app.common.geom.shapes.flex-layout :as gsl]
+   [app.common.geom.shapes.flex-layout :as gslf]
+   [app.common.geom.shapes.grid-layout :as gslg]
    [app.common.math :as mth]
    [app.common.pages.changes-builder :as pcb]
    [app.common.pages.helpers :as cph]
-   [app.common.spec :as us]
+   [app.common.types.component :as ctk]
+   [app.common.types.container :as ctn]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape-tree :as ctst]
    [app.common.types.shape.layout :as ctl]
@@ -30,7 +32,6 @@
    [app.main.streams :as ms]
    [app.util.dom :as dom]
    [beicon.core :as rx]
-   [cljs.spec.alpha :as s]
    [potok.core :as ptk]))
 
 ;; -- Helpers --------------------------------------------------------
@@ -95,7 +96,7 @@
   (ptk/reify ::finish-transform
     ptk/UpdateEvent
     (update [_ state]
-      (update state :workspace-local dissoc :transform))))
+      (update state :workspace-local dissoc :transform :duplicate-move-started? false))))
 
 
 ;; -- Resize --------------------------------------------------------
@@ -103,7 +104,8 @@
 (defn start-resize
   "Enter mouse resize mode, until mouse button is released."
   [handler ids shape]
-  (letfn [(resize [shape initial layout [point lock? center? point-snap]]
+  (letfn [(resize
+           [shape initial layout [point lock? center? point-snap]]
             (let [{:keys [width height]} (:selrect shape)
                   {:keys [rotation]} shape
 
@@ -177,21 +179,23 @@
 
                   modifiers
                   (-> (ctm/empty)
+
                       (cond-> displacement
                         (ctm/move displacement))
+
                       (ctm/resize scalev resize-origin shape-transform shape-transform-inverse)
 
                       (cond-> set-fix-width?
-                        (ctm/change-parent-property :layout-item-h-sizing :fix))
+                        (ctm/change-property :layout-item-h-sizing :fix))
 
                       (cond-> set-fix-height?
-                        (ctm/change-parent-property :layout-item-v-sizing :fix))
+                        (ctm/change-property :layout-item-v-sizing :fix))
 
                       (cond-> scale-text
                         (ctm/scale-content (:x scalev))))
 
                   modif-tree (dwm/create-modif-tree ids modifiers)]
-              (rx/of (dwm/set-modifiers modif-tree))))
+              (rx/of (dwm/set-modifiers modif-tree scale-text))))
 
           ;; Unifies the instantaneous proportion lock modifier
           ;; activated by Shift key and the shapes own proportion
@@ -208,7 +212,7 @@
       ptk/WatchEvent
       (watch [_ state stream]
         (let [initial-position @ms/mouse-position
-              stoper  (rx/filter ms/mouse-up? stream)
+              stopper (rx/filter ms/mouse-up? stream)
               layout  (:workspace-layout state)
               page-id (:current-page-id state)
               focus   (:workspace-focus-selected state)
@@ -225,7 +229,7 @@
                                  (->> (snap/closest-snap-point page-id resizing-shapes objects layout zoom focus point)
                                       (rx/map #(conj current %)))))
                 (rx/mapcat (partial resize shape initial-position layout))
-                (rx/take-until stoper))
+                (rx/take-until stopper))
            (rx/of (dwm/apply-modifiers)
                   (finish-transform))))))))
 
@@ -233,9 +237,13 @@
   "Change size of shapes, from the sideber options form.
   Will ignore pixel snap used in the options side panel"
   [ids attr value]
-  (us/verify (s/coll-of ::us/uuid) ids)
-  (us/verify #{:width :height} attr)
-  (us/verify ::us/number value)
+  (dm/assert! (number? value))
+  (dm/assert!
+   "expected valid coll of uuids"
+   (every? uuid? ids))
+  (dm/assert!
+   "expected valid attr"
+   (contains? #{:width :height} attr))
   (ptk/reify ::update-dimensions
     ptk/UpdateEvent
     (update [_ state]
@@ -257,8 +265,13 @@
   "Change orientation of shapes, from the sidebar options form.
   Will ignore pixel snap used in the options side panel"
   [ids orientation]
-  (us/verify (s/coll-of ::us/uuid) ids)
-  (us/verify #{:horiz :vert} orientation)
+  (dm/assert!
+   "expected valid coll of uuids"
+   (every? uuid? ids))
+  (dm/assert!
+   "expected valid orientation"
+   (contains? #{:horiz :vert} orientation))
+
   (ptk/reify ::change-orientation
     ptk/UpdateEvent
     (update [_ state]
@@ -365,6 +378,7 @@
                (some? id)
                (d/toggle-selection id shift?))]
 
+         ;; Take the first mouse position and start a move or a duplicate
          (when (or (d/not-empty? selected) (some? id))
            (->> ms/mouse-position
                 (rx/map #(gpt/to-vec initial %))
@@ -382,7 +396,7 @@
                     (if alt?
                       ;; When alt is down we start a duplicate+move
                       (rx/of (start-move-duplicate initial)
-                             (dws/duplicate-selected false))
+                             (dws/duplicate-selected false true))
 
                       ;; Otherwise just plain old move
                       (rx/of (start-move initial selected))))))
@@ -394,7 +408,8 @@
     ptk/UpdateEvent
     (update [_ state]
       (-> state
-          (assoc-in [:workspace-local :transform] :move)))
+          (assoc-in [:workspace-local :transform] :move)
+          (assoc-in [:workspace-local :duplicate-move-started?] true)))
 
     ptk/WatchEvent
     (watch [_ _ stream]
@@ -427,6 +442,7 @@
              selected (wsh/lookup-selected state {:omit-blocked? true})
              ids     (if (nil? ids) selected ids)
              shapes  (mapv #(get objects %) ids)
+             duplicate-move-started? (get-in state [:workspace-local :duplicate-move-started?] false)
              stopper (rx/filter ms/mouse-up? stream)
              layout  (get state :workspace-layout)
              zoom    (get-in state [:workspace-local :zoom] 1)
@@ -440,7 +456,7 @@
              exclude-frames-siblings
              (into exclude-frames
                    (comp (mapcat (partial cph/get-siblings-ids objects))
-                         (filter (partial ctl/layout-immediate-child-id? objects)))
+                         (filter (partial ctl/any-layout-immediate-child-id? objects)))
                    selected)
 
              position (->> ms/mouse-position
@@ -469,11 +485,14 @@
 
                       (rx/map
                        (fn [[move-vector mod?]]
-                         (let [position     (gpt/add from-position move-vector)
+                         (let [position       (gpt/add from-position move-vector)
                                exclude-frames (if mod? exclude-frames exclude-frames-siblings)
-                               target-frame (ctst/top-nested-frame objects position exclude-frames)
-                               layout?      (ctl/layout? objects target-frame)
-                               drop-index   (when layout? (gsl/get-drop-index target-frame objects position))]
+                               target-frame   (ctst/top-nested-frame objects position exclude-frames)
+                               flex-layout?   (ctl/flex-layout? objects target-frame)
+                               grid-layout?   (ctl/grid-layout? objects target-frame)
+                               drop-index     (cond
+                                                flex-layout? (gslf/get-drop-index target-frame objects position)
+                                                grid-layout? (gslg/get-drop-index target-frame objects position))]
                            [move-vector target-frame drop-index])))
 
                       (rx/take-until stopper))]
@@ -501,6 +520,17 @@
                             (dwm/set-modifiers false false {:snap-ignore-axis snap-ignore-axis}))))))
 
               (->> move-stream
+                      (rx/with-latest-from ms/mouse-position-alt)
+                      (rx/filter (fn [[_ alt?]] alt?))
+                      (rx/take 1)
+                      (rx/mapcat
+                        (fn [[_ alt?]]
+                          (if (and (not duplicate-move-started?) alt?)
+                            (rx/of (start-move-duplicate from-position)
+                                   (dws/duplicate-selected false true))
+                          (rx/empty)))))
+
+              (->> move-stream
                    (rx/map (comp set-ghost-displacement first)))
 
               ;; Last event will write the modifiers creating the changes
@@ -515,7 +545,8 @@
                                (finish-transform)
                                (dwu/commit-undo-transaction undo-id))))))))))))))
 
-(s/def ::direction #{:up :down :right :left})
+(def valid-directions
+  #{:up :down :right :left})
 
 (defn reorder-selected-layout-child
   [direction]
@@ -529,7 +560,8 @@
             get-new-position
             (fn [parent-id position]
               (let [parent (get objects parent-id)]
-                (when (ctl/layout? parent)
+                (cond
+                  (ctl/flex-layout? parent)
                   (if (or
                        (and (ctl/reverse? parent)
                             (or (= direction :left)
@@ -538,7 +570,12 @@
                             (or (= direction :right)
                                 (= direction :down))))
                     (dec position)
-                    (+ position 2)))))
+                    (+ position 2))
+
+                  ;; TODO: GRID
+                  (ctl/grid-layout? parent)
+                  nil
+                  )))
 
             add-children-position
             (fn [[parent-id children]]
@@ -634,8 +671,8 @@
 (defn move-selected
   "Move shapes a fixed increment in one direction, from a keyboard action."
   [direction shift?]
-  (us/verify ::direction direction)
-  (us/verify boolean? shift?)
+  (dm/assert! (contains? valid-directions direction))
+  (dm/assert! (boolean? shift?))
 
   (ptk/reify ::move-selected
     ptk/WatchEvent
@@ -643,20 +680,18 @@
       (let [objects (wsh/lookup-page-objects state)
             selected (wsh/lookup-selected state {:omit-blocked? true})
             selected-shapes (->> selected (map (d/getf objects)))]
-        (if (every? (partial ctl/layout-immediate-child? objects) selected-shapes)
+        (if (every? #(and (ctl/any-layout-immediate-child? objects %)
+                          (not (ctl/layout-absolute? %)))
+                    selected-shapes)
           (rx/of (reorder-selected-layout-child direction))
           (rx/of (nudge-selected-shapes direction shift?)))))))
 
-(s/def ::x number?)
-(s/def ::y number?)
-(s/def ::position
-  (s/keys :opt-un [::x ::y]))
-
 (defn update-position
-  "Move shapes to a new position, from the sidebar options form."
+  "Move shapes to a new position"
   [id position]
-  (us/verify ::us/uuid id)
-  (us/verify ::position position)
+  (js/console.log "DEBUG" (pr-str position))
+  (dm/assert! (uuid? id))
+
   (ptk/reify ::update-position
     ptk/WatchEvent
     (watch [_ state _]
@@ -684,8 +719,9 @@
     (watch [it state _]
       (let [page-id  (:current-page-id state)
             objects  (wsh/lookup-page-objects state page-id)
-            layout?  (get-in objects [frame-id :layout])
             lookup   (d/getf objects)
+            frame    (get objects frame-id)
+            layout?  (:layout frame)
 
             shapes (->> ids (cph/clean-loops objects) (keep lookup))
 
@@ -726,9 +762,38 @@
               #{}
               (into (d/ordered-set) (find-all-empty-parents #{})))
 
+            ;; Not move absolute shapes that won't change parent
+            moving-shapes
+            (->> moving-shapes
+                 (remove (fn [shape]
+                           (and (ctl/layout-absolute? shape)
+                                (= frame-id (:parent-id shape))))))
+
+            frame-component
+            (ctn/get-component-shape objects frame)
+
+            shape-ids-to-detach
+            (reduce (fn [result shape]
+                      (if (and (some? shape) (ctk/in-component-copy-not-root? shape))
+                        (let [shape-component (ctn/get-component-shape objects shape)]
+                          (if (= (:id frame-component) (:id shape-component))
+                            result
+                            (into result (cph/get-children-ids-with-self objects (:id shape)))))
+                        result))
+                    #{}
+                    moving-shapes)
+
+            moving-shapes-ids
+            (map :id moving-shapes)
+
             changes
             (-> (pcb/empty-changes it page-id)
                 (pcb/with-objects objects)
+                ;; Remove layout-item properties when moving a shape outside a layout
+                (cond-> (not (ctl/any-layout? objects frame-id))
+                  (pcb/update-shapes moving-shapes-ids ctl/remove-layout-item-data))
+                (pcb/update-shapes moving-shapes-ids #(cond-> % (cph/frame-shape? %) (assoc :hide-in-viewer true)))
+                (pcb/update-shapes shape-ids-to-detach ctk/detach-shape)
                 (pcb/change-parent frame-id moving-shapes drop-index)
                 (pcb/remove-objects empty-parents))]
 

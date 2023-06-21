@@ -389,7 +389,8 @@
     :mask-type})
 
 (defonce inheritable-props
-  [:clip-rule
+  [:style
+   :clip-rule
    :color
    :color-interpolation
    :color-interpolation-filters
@@ -457,6 +458,12 @@
     :feSpecularLighting
     :feTile
     :feTurbulence})
+
+(def parent-tags
+  #{:g
+    :svg
+    :text
+    :tspan})
 
 ;; By spec: https://www.w3.org/TR/SVG11/single-page.html#struct-GElement
 (defonce svg-group-safe-tags
@@ -820,6 +827,10 @@
 (defn line->path [{:keys [attrs] :as node}]
   (let [tag :path
         {:keys [x1 y1 x2 y2]} attrs
+        x1 (or x1 0)
+        y1 (or y1 0)
+        x2 (or x2 0)
+        y2 (or y2 0)
         attrs (-> attrs
                   (dissoc :x1 :x2 :y1 :y2)
                   (assoc :d (str "M" x1 "," y1 " L" x2 "," y2)))]

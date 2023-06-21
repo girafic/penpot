@@ -27,6 +27,7 @@
 
 (defn interrupt? [e] (= e :interrupt))
 
+(declare undo-to-index)
 
 (defn- assure-valid-current-page
   []
@@ -60,13 +61,25 @@
                 items (:items undo)
                 index (or (:index undo) (dec (count items)))]
             (when-not (or (empty? items) (= index -1))
-              (let [changes (get-in items [index :undo-changes])]
-                (rx/of (dwu/materialize-undo changes (dec index))
-                       (dch/commit-changes {:redo-changes changes
-                                            :undo-changes []
-                                            :save-undo? false
-                                            :origin it})
-                       (assure-valid-current-page))))))))))
+              (let [item (get items index)
+                    changes (:undo-changes item)
+                    undo-group (:undo-group item)
+                    find-first-group-idx (fn ffgidx[index]
+                                           (let [item (get items index)]
+                                             (if (= (:undo-group item) undo-group)
+                                               (ffgidx (dec index))
+                                               (inc index))))
+
+                    undo-group-index (when undo-group
+                                       (find-first-group-idx index))]
+                (if undo-group
+                  (rx/of (undo-to-index (dec undo-group-index)))
+                  (rx/of (dwu/materialize-undo changes (dec index))
+                         (dch/commit-changes {:redo-changes changes
+                                              :undo-changes []
+                                              :save-undo? false
+                                              :origin it})
+                         (assure-valid-current-page)))))))))))
 
 (def redo
   (ptk/reify ::redo
@@ -74,17 +87,29 @@
     (watch [it state _]
       (let [edition (get-in state [:workspace-local :edition])
             drawing (get state :workspace-drawing)]
-        (when-not (or (some? edition) (not-empty drawing))
+        (when (and (nil? edition) (or (empty? drawing) (= :curve (:tool drawing))))
           (let [undo  (:workspace-undo state)
                 items (:items undo)
                 index (or (:index undo) (dec (count items)))]
             (when-not (or (empty? items) (= index (dec (count items))))
-              (let [changes (get-in items [(inc index) :redo-changes])]
-                (rx/of (dwu/materialize-undo changes (inc index))
-                       (dch/commit-changes {:redo-changes changes
-                                            :undo-changes []
-                                            :origin it
-                                            :save-undo? false}))))))))))
+              (let [item (get items (inc index))
+                    changes (:redo-changes item)
+                    undo-group (:undo-group item)
+                    find-last-group-idx (fn flgidx [index]
+                                          (let [item (get items index)]
+                                            (if (= (:undo-group item) undo-group)
+                                              (flgidx (inc index))
+                                              (dec index))))
+
+                    redo-group-index (when undo-group
+                                       (find-last-group-idx (inc index)))]
+                (if undo-group
+                  (rx/of (undo-to-index redo-group-index))
+                  (rx/of (dwu/materialize-undo changes (inc index))
+                         (dch/commit-changes {:redo-changes changes
+                                              :undo-changes []
+                                              :origin it
+                                              :save-undo? false})))))))))))
 
 (defn undo-to-index
   "Repeat undoing or redoing until dest-index is reached."
@@ -99,7 +124,7 @@
                 items (:items undo)
                 index (or (:index undo) (dec (count items)))]
             (when (and (some? items)
-                       (<= 0 dest-index (dec (count items))))
+                       (<= -1 dest-index (dec (count items))))
               (let [changes (vec (apply concat
                                         (cond
                                           (< dest-index index)

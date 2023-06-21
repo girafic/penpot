@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2015-2020 Andrey Antukh <niwi@niwi.nz>
-// Copyright (c) 2015-2020 Juan de la Cruz <delacruzgarciajuan@gmail.com>
+// Copyright (c) KALEIDOS INC
 
 .settings-bar {
   background-color: $color-gray-50;
@@ -25,7 +24,8 @@
     grid-template-rows: 100%;
     height: calc(100% - 2px);
 
-    .tool-window {
+    .tool-window,
+    .sitemap {
       position: relative;
       border-bottom: 1px solid $color-gray-60;
       display: flex;
@@ -47,7 +47,10 @@
           width: 12px;
         }
 
-        span {
+        button,
+        div {
+          border: none;
+          background-color: transparent;
           color: $color-gray-10;
           font-size: $fs14;
           max-width: 100%;
@@ -58,7 +61,7 @@
 
         span.tool-badge {
           border: 1px solid $color-primary;
-          border-radius: 2px;
+          border-radius: $br2;
           font-size: $fs10;
           color: $color-primary;
           padding: 2px 4px;
@@ -123,8 +126,8 @@
         & .view-only-mode {
           color: $color-primary;
           border: 1px solid $color-primary;
-          border-radius: 3px;
-          font-size: 10px;
+          border-radius: $br3;
+          font-size: $fs10;
           text-transform: uppercase;
           display: flex;
           align-items: center;
@@ -171,8 +174,8 @@
         & .focus-mode {
           color: $color-primary;
           border: 1px solid $color-primary;
-          border-radius: 3px;
-          font-size: 10px;
+          border-radius: $br3;
+          font-size: $fs10;
           text-transform: uppercase;
           padding: 0px 4px;
           display: flex;
@@ -189,8 +192,8 @@
 
   .empty {
     color: $color-gray-20;
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: $fs12;
+    line-height: $lh-150;
     text-align: center;
     padding: 0 15px;
     display: flex;
@@ -246,7 +249,7 @@
   height: 100%;
   width: 100%;
   overflow-y: auto;
-
+  overflow-x: hidden;
   &.inspect {
     .tab-container-tabs {
       padding-bottom: 0.5rem;
@@ -256,7 +259,7 @@
     }
 
     .tab-container-tab-title {
-      border-radius: 4px;
+      border-radius: $br4;
 
       &.current {
         background-color: $color-primary;
@@ -339,7 +342,7 @@ button.collapse-sidebar {
     width: 28px;
     height: 48px;
     padding: 0;
-    border-radius: 0px 4px 4px 0px;
+    border-radius: 0 $br4 $br4 0;
     border-left: 1px solid $color-gray-50;
 
     & svg {
@@ -415,7 +418,7 @@ button.collapse-sidebar {
       justify-content: space-between;
       align-items: center;
       border: 1px solid $color-gray-30;
-      border-radius: 2px;
+      border-radius: $br2;
       width: 100%;
       &:focus-within {
         border: 1px solid $color-primary;
@@ -516,7 +519,7 @@ button.collapse-sidebar {
 
     .shortcut-name {
       border: 1px solid $color-gray-60;
-      border-radius: 4px;
+      border-radius: $br4;
       padding: 7px;
       display: flex;
       justify-content: space-between;
@@ -537,10 +540,10 @@ button.collapse-sidebar {
         min-width: 15px;
         background-color: $color-white;
         color: $color-black;
-        border-radius: 3px;
+        border-radius: $br3;
         padding: 2px 5px;
         font-size: $fs11;
-        font-weight: 600;
+        font-weight: $fw600;
         margin: 0 2px;
         text-transform: capitalize;
         display: inline-block;

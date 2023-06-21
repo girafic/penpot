@@ -7,16 +7,18 @@
 (ns app.main.data.workspace.notifications
   (:require
    [app.common.data :as d]
-   [app.common.pages.changes-spec :as pcs]
-   [app.common.spec :as us]
+   [app.common.data.macros :as dm]
+   [app.common.pages.changes :as cpc]
+   [app.common.schema :as sm]
    [app.main.data.websocket :as dws]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.persistence :as dwp]
    [app.main.streams :as ms]
+   [app.util.globals :refer [global]]
+   [app.util.object :as obj]
    [app.util.time :as dt]
    [beicon.core :as rx]
-   [cljs.spec.alpha :as s]
    [clojure.set :as set]
    [potok.core :as ptk]))
 
@@ -37,7 +39,8 @@
             profile-id (:profile-id state)
 
             initmsg    [{:type :subscribe-file
-                         :file-id file-id}
+                         :file-id file-id
+                         :version (obj/get global "penpotVersion")}
                         {:type :subscribe-team
                          :team-id team-id}]
 
@@ -130,7 +133,7 @@
     })
 
 (defn handle-presence
-  [{:keys [type session-id profile-id] :as message}]
+  [{:keys [type session-id profile-id version] :as message}]
   (letfn [(get-next-color [presence]
             (let [xfm   (comp (map second)
                               (map :color)
@@ -149,6 +152,7 @@
                 (assoc :id session-id)
                 (assoc :profile-id profile-id)
                 (assoc :updated-at (dt/now))
+                (assoc :version version)
                 (update :color update-color presence)
                 (assoc :text-color (if (contains? ["#00fa9a" "#ffd700" "#dda0dd" "#ffafda"]
                                                   (update-color (:color presence) presence))
@@ -179,47 +183,55 @@
                           :updated-at (dt/now)
                           :page-id page-id))))))
 
-(s/def ::type keyword?)
-(s/def ::profile-id uuid?)
-(s/def ::file-id uuid?)
-(s/def ::session-id uuid?)
-(s/def ::revn integer?)
-(s/def ::changes ::pcs/changes)
-
-(s/def ::file-change-event
-  (s/keys :req-un [::type ::profile-id ::file-id ::session-id ::revn ::changes]))
+(def schema:handle-file-change
+  [:map
+   [:type :keyword]
+   [:profile-id ::sm/uuid]
+   [:file-id ::sm/uuid]
+   [:session-id ::sm/uuid]
+   [:revn :int]
+   [:changes ::cpc/changes]])
 
 (defn handle-file-change
   [{:keys [file-id changes] :as msg}]
-  (us/assert ::file-change-event msg)
+  (dm/assert! (sm/valid? schema:handle-file-change msg))
   (ptk/reify ::handle-file-change
     IDeref
     (-deref [_] {:changes changes})
 
     ptk/WatchEvent
-    (watch [_ _ _]
-      (let [position-data-operation?
+    (watch [_ state _]
+      (let [page-id (:current-page-id state)
+            position-data-operation?
             (fn [{:keys [type attr]}]
               (and (= :set type) (= attr :position-data)))
 
-            add-origin-session-id
-            (fn [{:keys [] :as op}]
-              (cond-> op
-                (position-data-operation? op)
-                (update :val with-meta {:session-id (:session-id msg)})))
+            ;;add-origin-session-id
+            ;;(fn [{:keys [] :as op}]
+            ;;  (cond-> op
+            ;;    (position-data-operation? op)
+            ;;    (update :val with-meta {:session-id (:session-id msg)})))
 
             update-position-data
             (fn [change]
+              ;; Remove the position data from remote operations. Will be changed localy, otherwise
+              ;; creates a strange "out-of-sync" behaviour.
               (cond-> change
-                (= :mod-obj (:type change))
-                (update :operations #(mapv add-origin-session-id %))))
+                (and (= page-id (:page-id change))
+                     (= :mod-obj (:type change)))
+                (update :operations #(d/removev position-data-operation? %))))
 
             process-page-changes
             (fn [[page-id changes]]
               (dch/update-indices page-id changes))
 
             ;; We update `position-data` from the incoming message
-            changes (->> changes (mapv update-position-data))
+            changes (->> changes
+                         (mapv update-position-data)
+                         (d/removev (fn [change]
+                                      (and (= page-id (:page-id change))
+                                           (:ignore-remote? change)))))
+
             changes-by-pages (group-by :page-id changes)]
 
         (rx/merge
@@ -228,18 +240,19 @@
          (when-not (empty? changes-by-pages)
            (rx/from (map process-page-changes changes-by-pages))))))))
 
-(s/def ::library-change-event
-  (s/keys :req-un [::type
-                   ::profile-id
-                   ::file-id
-                   ::session-id
-                   ::revn
-                   ::modified-at
-                   ::changes]))
+(def schema:handle-library-change
+  [:map
+   [:type :keyword]
+   [:profile-id ::sm/uuid]
+   [:file-id ::sm/uuid]
+   [:session-id ::sm/uuid]
+   [:revn :int]
+   [:modified-at ::sm/inst]
+   [:changes ::cpc/changes]])
 
 (defn handle-library-change
   [{:keys [file-id modified-at changes revn] :as msg}]
-  (us/assert ::library-change-event msg)
+  (dm/assert! (sm/valid? schema:handle-library-change msg))
   (ptk/reify ::handle-library-change
     ptk/WatchEvent
     (watch [_ state _]

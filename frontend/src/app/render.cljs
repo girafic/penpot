@@ -11,9 +11,10 @@
    [app.common.logging :as l]
    [app.common.math :as mth]
    [app.common.spec :as us]
+   [app.common.types.components-list :as ctkl]
    [app.common.uri :as u]
    [app.main.data.fonts :as df]
-   [app.main.features :as features]
+   [app.main.features :as feat]
    [app.main.render :as render]
    [app.main.repo :as repo]
    [app.main.store :as st]
@@ -51,6 +52,7 @@
 
 (defn ^:export init
   []
+  (st/emit! (feat/initialize))
   (init-ui))
 
 (defn reinit
@@ -94,13 +96,13 @@
 
 (mf/defc object-svg
   [{:keys [page-id file-id object-id render-embed?]}]
-  (let [components-v2 (features/use-feature :components-v2)
+  (let [components-v2 (feat/use-feature :components-v2)
         fetch-state   (mf/use-fn
                         (mf/deps file-id page-id object-id components-v2)
                         (fn []
                           (let [features (cond-> #{} components-v2 (conj "components/v2"))]
                             (->> (rx/zip
-                                  (repo/query! :font-variants {:file-id file-id})
+                                  (repo/cmd! :get-font-variants {:file-id file-id})
                                   (repo/cmd! :get-page {:file-id file-id
                                                         :page-id page-id
                                                         :object-id object-id
@@ -134,13 +136,13 @@
 
 (mf/defc objects-svg
   [{:keys [page-id file-id object-ids render-embed?]}]
-  (let [components-v2 (features/use-feature :components-v2)
+  (let [components-v2 (feat/use-feature :components-v2)
         fetch-state   (mf/use-fn
                        (mf/deps file-id page-id components-v2)
                        (fn []
                          (let [features (cond-> #{} components-v2 (conj "components/v2"))]
                            (->> (rx/zip
-                                 (repo/query! :font-variants {:file-id file-id})
+                                 (repo/cmd! :get-font-variants {:file-id file-id})
                                  (repo/cmd! :get-page {:file-id file-id
                                                        :page-id page-id
                                                        :features features}))
@@ -247,7 +249,7 @@
                      :border "0px solid black"}]]])]
 
        [:ul.nav
-        (for [[id data] (get-in file [:data :components])]
+        (for [[id data] (ctkl/components (:data file))]
           (let [on-click (fn [event]
                            (dom/prevent-default event)
                            (swap! state assoc :component-id id))]

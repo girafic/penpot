@@ -5,20 +5,20 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.rpc.retry
-  "A fault tolerance RPC middleware. Allow retry some operations that we
-  know we can retry."
   (:require
    [app.common.logging :as l]
-   [app.util.retry :refer [conflict-exception?]]
-   [app.util.services :as sv]
-   [promesa.core :as p]))
+   [app.db :as db]
+   [app.util.services :as sv])
+  (:import
+   org.postgresql.util.PSQLException))
 
-(defn conflict-db-insert?
+(defn conflict-exception?
   "Check if exception matches a insertion conflict on postgresql."
   [e]
-  (conflict-exception? e))
+  (and (instance? PSQLException e)
+       (= "23505" (.getSQLState ^PSQLException e))))
 
-(def always-false (constantly false))
+(def ^:private always-false (constantly false))
 
 (defn wrap-retry
   [_ f {:keys [::matches ::sv/name] :or {matches always-false} :as mdata}]
@@ -28,18 +28,36 @@
 
   (if-let [max-retries (::max-retries mdata)]
     (fn [cfg params]
-      (letfn [(run [retry]
-                (->> (f cfg params)
-                     (p/merr (partial handle-error retry))))
-
-              (handle-error [retry cause]
-                (if (matches cause)
-                  (let [current-retry (inc retry)]
-                    (l/trace :hint "running retry algorithm" :retry current-retry)
-                    (if (<= current-retry max-retries)
-                      (run current-retry)
-                      (throw cause)))
-                  (throw cause)))]
-        (run 1)))
+      ((fn run [retry]
+         (try
+           (f cfg params)
+           (catch Throwable cause
+             (if (matches cause)
+               (let [current-retry (inc retry)]
+                 (l/trace :hint "running retry algorithm" :retry current-retry)
+                 (if (<= current-retry max-retries)
+                   (run current-retry)
+                   (throw cause)))
+               (throw cause))))) 1))
     f))
 
+(defmacro with-retry
+  [{:keys [::when ::max-retries ::label ::db/conn] :or {max-retries 3}} & body]
+  `(let [conn# ~conn]
+     (assert (or (nil? conn#) (db/connection? conn#)) "invalid database connection")
+     (loop [tnum# 1]
+       (let [result# (let [sp# (some-> conn# db/savepoint)]
+                       (try
+                         (let [result# (do ~@body)]
+                           (some->> sp# (db/release! conn#))
+                           result#)
+                         (catch Throwable cause#
+                           (some->> sp# (db/rollback! conn#))
+                           (if (and (~when cause#) (<= tnum# ~max-retries))
+                             ::retry
+                             (throw cause#)))))]
+         (if (= ::retry result#)
+           (do
+             (l/warn :hint "retrying operation" :label ~label :retry tnum#)
+             (recur (inc tnum#)))
+           result#)))))

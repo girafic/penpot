@@ -8,6 +8,7 @@
   (:require
    [app.common.data.macros :as dm]
    [app.common.files.features :as ffeat]
+   [app.common.geom.point :as gpt]
    [app.common.logging :as log]
    [app.main.data.dashboard :as dd]
    [app.main.data.messages :as msg]
@@ -24,6 +25,7 @@
    [app.main.ui.hooks :as h]
    [app.main.ui.icons :as i]
    [app.main.worker :as wrk]
+   [app.util.color :as uc]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
    [app.util.i18n :as i18n :refer [tr]]
@@ -45,7 +47,8 @@
   (let [features (cond-> ffeat/enabled
                    (features/active-feature? :components-v2)
                    (conj "components/v2"))]
-    (wrk/ask! {:cmd :thumbnails/generate
+
+    (wrk/ask! {:cmd :thumbnails/generate-for-file
                :revn (:revn file)
                :file-id (:id file)
                :file-name (:name file)
@@ -104,12 +107,13 @@
             [:span.num-assets (str "\u00A0(") (:count components) ")"]] ;; Unicode 00A0 is non-breaking space
            [:div.asset-list
             (for [component (:sample components)]
-              [:div.asset-list-item {:key (str "assets-component-" (:id component))}
-               [:& component-svg {:group (get-in component [:objects (:id component)])
-                                  :objects (:objects component)}]
-               [:div.name-block
-                [:span.item-name {:title (:name component)}
-                 (:name component)]]])
+              (let [root-id (or (:main-instance-id component) (:id component))] ;; Check for components-v2 in library
+                [:div.asset-list-item {:key (str "assets-component-" (:id component))}
+                 [:& component-svg {:root-shape (get-in component [:objects root-id])
+                                    :objects (:objects component)}] ;; Components in the summary come loaded with objects, even in v2
+                 [:div.name-block
+                  [:span.item-name {:title (:name component)}
+                   (:name component)]]]))
             (when (> (:count components) (count (:sample components)))
               [:div.asset-list-item
                [:div.name-block
@@ -123,7 +127,7 @@
            [:div.asset-list
             (for [color (:sample colors)]
               (let [default-name (cond
-                                   (:gradient color) (bc/gradient-type->string (get-in color [:gradient :type]))
+                                   (:gradient color) (uc/gradient-type->string (get-in color [:gradient :type]))
                                    (:color color) (:color color)
                                    :else (:value color))]
                 [:div.asset-list-item {:key (str "assets-color-" (:id color))}
@@ -251,7 +255,14 @@
                (st/emit! (dd/clear-selected-files)))
              (st/emit! (dd/toggle-file-select file)))
 
-           (let [position (dom/get-client-position event)]
+           (let [client-position (dom/get-client-position event)
+                 position (if (and (nil? (:y client-position)) (nil? (:x client-position)))
+                            (let [target-element (dom/get-target event)
+                                  points         (dom/get-bounding-rect target-element)
+                                  y              (:top points)
+                                  x              (:left points)]
+                              (gpt/point x y))
+                            client-position)]
              (swap! local assoc
                     :menu-open true
                     :menu-pos position))))
@@ -260,7 +271,9 @@
         (mf/use-fn
          (mf/deps file)
          (fn [name]
-           (st/emit! (dd/rename-file (assoc file :name name)))
+           (let [name (str/trim name)]
+             (when (not= name "")
+               (st/emit! (dd/rename-file (assoc file :name name)))))
            (swap! local assoc :edition false)))
 
         on-edit
@@ -276,8 +289,8 @@
       (when (and (not selected?) (:menu-open @local))
         (swap! local assoc :menu-open false)))
 
-    [:li.grid-item.project-th
-     [:a
+    [:li.grid-item.project-th {:class (dom/classnames :library library-view?)}
+     [:button
       {:tab-index "0"
        :class (dom/classnames :selected selected?
                               :library library-view?)
@@ -314,9 +327,11 @@
         [:div.project-th-icon.menu
          {:tab-index "0"
           :ref menu-ref
+          :id (str file-id "-action-menu")
           :on-click on-menu-click
           :on-key-down (fn [event]
                          (when (kbd/enter? event)
+                           (dom/stop-propagation event)
                            (on-menu-click event)))}
          i/actions
          (when selected?
@@ -328,8 +343,8 @@
                           :on-edit on-edit
                           :on-menu-close on-menu-close
                           :origin origin
-                          :dashboard-local dashboard-local}])]]]]]))
-
+                          :dashboard-local dashboard-local
+                          :parent-id (str file-id "-action-menu")}])]]]]]))
 
 (mf/defc grid
   [{:keys [files project origin limit library-view? create-fn] :as props}]

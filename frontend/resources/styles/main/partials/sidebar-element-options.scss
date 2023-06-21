@@ -13,14 +13,14 @@
   .element-icons {
     background-color: $color-gray-60;
     border: 1px solid $color-gray-60;
-    border-radius: $br-small;
+    border-radius: $br3;
     display: flex;
     margin: $size-1;
 
     li {
       align-items: center;
       border-right: 1px solid $color-gray-60;
-      border-radius: $br-small;
+      border-radius: $br3;
       cursor: pointer;
       display: flex;
       flex: 1;
@@ -145,7 +145,7 @@
 
         span {
           color: $color-primary;
-          font-weight: bold;
+          font-weight: $fw700;
         }
       }
     }
@@ -195,6 +195,10 @@
   }
 
   .input-select {
+    /* This padding is so the text won't overlap the arrow*/
+    padding-right: 1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: $color-gray-10;
 
     &:focus {
@@ -234,7 +238,7 @@
     }
 
     input:checked + label::after {
-      font-size: 0.8rem;
+      font-size: $fs13;
     }
   }
 
@@ -288,7 +292,7 @@
 
   .custom-select {
     border: 1px solid $color-gray-40;
-    border-radius: $br-small;
+    border-radius: $br3;
     cursor: pointer;
     padding: $size-1 $size-5 $size-1 $size-1;
     position: relative;
@@ -324,7 +328,7 @@
 
   .custom-select-dropdown {
     background-color: $color-white;
-    border-radius: $br-small;
+    border-radius: $br3;
     box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.25);
     left: 0;
     max-height: 30rem;
@@ -349,13 +353,13 @@
       font-size: $fs14;
       display: flex;
       gap: 0 10px;
-      justify-content: start;
+      justify-content: flex-start;
       padding: $size-2;
 
       span {
         color: $color-gray-20;
         display: flex;
-        justify-content: start;
+        justify-content: flex-start;
         align-items: center;
       }
 
@@ -662,7 +666,7 @@
 .margin-options {
   align-items: center;
   border: 1px solid $color-gray-60;
-  border-radius: 4px;
+  border-radius: $br4;
   display: flex;
   justify-content: space-between;
   padding: 8px;
@@ -782,7 +786,8 @@
   }
 }
 
-.grid-option {
+.grid-option,
+.shadow-option {
   margin-bottom: 0.5rem;
   .advanced-options {
     .row-flex {
@@ -792,6 +797,15 @@
       left: 0;
       position: absolute;
       top: 12px;
+    }
+    .element-set-actions-button {
+      min-width: auto;
+      min-height: auto;
+      padding-right: 10px;
+      svg {
+        width: 12px;
+        height: 12px;
+      }
     }
   }
 }
@@ -803,12 +817,13 @@
   margin-left: 0.25rem;
 }
 
-.element-set-content .grid-option-main {
+.element-set-content .grid-option-main,
+.element-set-content .shadow-option-main {
   align-items: center;
   display: flex;
   padding: 0.3rem 0;
   border: 1px solid $color-black;
-  border-radius: 4px;
+  border-radius: $br4;
   height: 48px;
 
   &:hover {
@@ -853,11 +868,13 @@
   }
 }
 
-.grid-option-main-actions {
+.grid-option-main-actions,
+.shadow-option-main-actions {
   display: flex;
   visibility: hidden;
 
-  .grid-option:hover & {
+  .grid-option:hover &,
+  .shadow-option:hover & {
     visibility: visible;
   }
 }
@@ -881,7 +898,7 @@
 .advanced-options {
   border: 1px solid $color-gray-60;
   background-color: $color-gray-50;
-  border-radius: 4px;
+  border-radius: $br4;
   padding: 8px;
   position: relative;
   top: 2px;
@@ -892,10 +909,10 @@
   cursor: pointer;
   border: 1px solid $color-black;
   background: $color-gray-60;
-  border-radius: 2px;
+  border-radius: $br2;
   color: $color-gray-20;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: $fs11;
+  line-height: $lh-145; // Original value was 16px; 16px/11px = 145.454545455% => $lh-145
   flex-grow: 1;
   padding: 0.25rem 0;
 
@@ -919,7 +936,7 @@
   justify-content: space-between;
   padding: 3px;
   border: 1px solid $color-black;
-  border-radius: 4px;
+  border-radius: $br4;
 
   &:hover {
     background: #1f1f1f;
@@ -1078,20 +1095,23 @@
   }
 
   .typography-sample {
-    font-size: 17px;
+    font-size: $fs17;
     color: $color-white;
     margin: 0 0.5rem;
 
     font-family: sourcesanspro;
     font-style: normal;
-    font-weight: normal;
+    font-weight: $fw400;
   }
 
   .typography-name {
     flex-grow: 1;
-    font-size: 11px;
+    font-size: $fs11;
     margin-top: 4px;
+    max-width: calc(var(--width, 256px) - 100px);
+    overflow: hidden;
     white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .element-set-actions-button svg {
@@ -1120,7 +1140,7 @@
 }
 
 .row-flex input.adv-typography-name {
-  font-size: 14px;
+  font-size: $fs14;
   color: $color-gray-10;
   width: 100%;
   max-width: none;
@@ -1140,11 +1160,11 @@
 }
 
 .typography-read-only-data {
-  font-size: 12px;
+  font-size: $fs12;
   color: $color-white;
 
   .typography-name {
-    font-size: 14px;
+    font-size: $fs14;
   }
 
   .row-flex {
@@ -1166,9 +1186,9 @@
     text-align: center;
     background: $color-gray-50;
     padding: 0.5rem;
-    border-radius: 2px;
+    border-radius: $br2;
     cursor: pointer;
-    font-size: 14px;
+    font-size: $fs14;
     margin-top: 1rem;
 
     &:hover {
@@ -1182,7 +1202,7 @@
   margin: 0.5rem;
   padding: 0.5rem;
   border: 1px dashed $color-gray-30;
-  border-radius: 4px;
+  border-radius: $br4;
   display: flex;
   justify-content: space-between;
 
@@ -1252,7 +1272,7 @@
         width: $size-4;
         height: $size-4;
         border: 1px solid $color-gray-30;
-        border-radius: $br-small;
+        border-radius: $br3;
 
         svg {
           width: 8px;
@@ -1282,7 +1302,7 @@
       padding: 4px;
       font-size: $fs12;
       background: $color-gray-50;
-      border-radius: $br-small;
+      border-radius: $br3;
       color: $color-gray-20;
       border: 1px solid $color-gray-30;
       width: 88%;
@@ -1364,7 +1384,7 @@
     }
 
     .label {
-      font-size: 12px;
+      font-size: $fs12;
     }
 
     svg {
@@ -1588,7 +1608,7 @@
 
   .text {
     color: $color-gray-30;
-    font-size: 0.75rem;
+    font-size: $fs12;
     padding-left: 10px;
   }
 
@@ -1624,7 +1644,8 @@
 }
 
 .layout-menu,
-.layout-item-menu {
+.layout-item-menu,
+.layout-grid-item-menu {
   font-family: "worksans", sans-serif;
   svg {
     height: 16px;
@@ -1638,27 +1659,36 @@
     .row-title {
       font-size: $fs12;
       display: flex;
-      justify-content: start;
+      justify-content: flex-start;
       align-items: center;
       margin-right: 5px;
       font-family: "worksans", sans-serif;
 
       &.justify-content,
+      &.align-content,
       &.sizing {
-        align-items: start;
+        align-items: flex-start;
         margin-top: 4px;
+      }
+
+      &.align-items-grid,
+      &.jusfiy-content-grid {
+        align-items: flex-start;
+        margin-top: 11px;
       }
     }
     .btn-wrapper {
       display: flex;
       width: 100%;
       max-width: 185px;
+
       &.wrap {
         flex-direction: column;
         gap: 5px;
       }
 
-      &.justify-content {
+      &.justify-content,
+      &.align-content {
         display: flex;
         flex-direction: column;
         gap: 5px;
@@ -1670,9 +1700,10 @@
       .align-self-style,
       .justify-content-style,
       .align-content-style,
-      .layout-behavior {
+      .layout-behavior,
+      .absolute {
         display: flex;
-        border-radius: 4px;
+        border-radius: $br4;
         border: 1px solid $color-gray-60;
         height: 26px;
         margin-right: 5px;
@@ -1691,8 +1722,13 @@
           border: none;
           cursor: pointer;
           border-right: 1px solid $color-gray-60;
+          color: $color-gray-20;
           &.active,
           &:hover {
+            color: $color-primary;
+            &.dir {
+              color: $color-primary;
+            }
             svg {
               fill: $color-primary;
             }
@@ -1732,6 +1768,69 @@
         }
         :last-child {
           border-right: none;
+        }
+      }
+      .z-index {
+        display: flex;
+        align-items: center;
+        margin-left: 2px;
+        margin-top: -4px;
+        svg {
+          width: 30px;
+        }
+      }
+
+      .edit-mode {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-left: 5px;
+
+        button {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          background: transparent;
+          border: none;
+          cursor: pointer;
+          &.active,
+          &:hover {
+            svg {
+              fill: $color-primary;
+            }
+          }
+        }
+      }
+
+      &.align-grid {
+        flex-direction: column;
+        gap: 7px;
+        margin: 7px 0;
+      }
+    }
+    .position-wrapper {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      width: 100%;
+      max-width: 185px;
+      height: 26px;
+      border-radius: 4px;
+      border: 1px solid $color-gray-60;
+      .position-btn {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        color: $color-gray-20;
+        border-right: 1px solid $color-gray-60;
+        &:last-child {
+          border-right: none;
+        }
+        &.active,
+        &:hover {
+          color: $color-primary;
         }
       }
     }
@@ -1783,7 +1882,7 @@
         }
       }
       input {
-        font-size: 0.75rem;
+        font-size: $fs12;
         min-width: 0;
         padding: 0.25rem;
         height: 20px;
@@ -1797,11 +1896,11 @@
       background: none;
       border: none;
       cursor: pointer;
-      border-radius: $br-small;
+      border-radius: $br3;
 
       &.lock {
         border: 1px solid $color-gray-60;
-        border-radius: $br-small;
+        border-radius: $br3;
         width: 30px;
         height: 30px;
       }
@@ -1854,7 +1953,7 @@
           }
         }
         input {
-          font-size: 0.75rem;
+          font-size: $fs12;
           min-width: 0;
           padding: 0.25rem;
           width: 70px;
@@ -1869,11 +1968,11 @@
         background: none;
         border: none;
         cursor: pointer;
-        border-radius: $br-small;
+        border-radius: $br3;
 
         &.lock {
           border: 1px solid $color-gray-60;
-          border-radius: $br-small;
+          border-radius: $br3;
           width: 30px;
           height: 30px;
         }
@@ -1894,9 +1993,9 @@
     .margin-item-icons {
       padding: 0;
       border: 1px solid $color-gray-60;
-      border-radius: 3px;
+      border-radius: $br3;
       margin-bottom: 8px;
-      margin-top: 3px;
+      margin-top: $br3;
       margin-right: 1px;
       height: 30px;
       width: 30px;
@@ -1943,7 +2042,7 @@
 
   .layout-container {
     border: 1px solid $color-gray-60;
-    border-radius: 3px;
+    border-radius: $br3;
     margin: 5px 0;
     .layout-entry {
       display: flex;
@@ -2062,6 +2161,147 @@
       }
     }
   }
+
+  .grid-columns {
+    border: 1px solid $color-gray-60;
+    padding: 5px;
+    min-height: 38px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    &:not(:first-child) {
+      margin-top: 5px;
+    }
+    .grid-columns-header {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      height: 100%;
+      flex-grow: 1;
+      min-height: 36px;
+      .columns-info {
+        flex-grow: 1;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .expand-icon,
+      .add-column {
+        cursor: pointer;
+        background-color: transparent;
+        border: none;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+
+        &.active,
+        &:hover {
+          svg {
+            fill: $color-primary;
+          }
+        }
+      }
+
+      .add-column svg {
+        height: 12px;
+        width: 12px;
+        fill: $color-gray-20;
+      }
+    }
+    .columns-info-wrapper {
+      .column-info {
+        display: grid;
+        grid-template-columns: 35px 1fr 1fr auto;
+        background-color: $color-gray-60;
+        padding: 3px;
+        &:not(:first-child) {
+          margin-top: 3px;
+        }
+        .direction-grid-icon {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          padding: 5px;
+        }
+        input {
+          background-color: $color-gray-60;
+        }
+        .grid-column-value,
+        .grid-column-unit {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 30px;
+          &.active,
+          &:focus,
+          &:focus-within {
+            border-bottom: 1px solid $color-primary;
+          }
+        }
+        .grid-column-unit-selector {
+          border: none;
+          border-bottom: 1px solid $color-gray-30;
+          margin: 0.25rem 0;
+          height: 23px;
+          width: 100%;
+          &:hover {
+            border-bottom: 1px solid $color-gray-20;
+          }
+        }
+
+        .remove-grid-column {
+          cursor: pointer;
+          background-color: transparent;
+          border: none;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          margin-left: 40px;
+          svg {
+            height: 12px;
+            width: 12px;
+            fill: $color-gray-20;
+          }
+          &.active,
+          &:hover {
+            svg {
+              fill: $color-primary;
+            }
+          }
+        }
+      }
+    }
+  }
+  .manage-grid-columns {
+    margin-left: 60px;
+    margin-bottom: 10px;
+    .grid-auto,
+    .grid-manual {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      .grid-columns-auto,
+      .grid-rows-auto {
+        display: grid;
+        grid-template-columns: 20px 1fr;
+        .icon {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        }
+        input {
+          width: 80%;
+        }
+      }
+    }
+    .grid-manual {
+      .input-wrapper {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  }
 }
 
 .advanced-ops {
@@ -2076,7 +2316,7 @@
   padding: 0;
   .icon {
     display: flex;
-    justify-content: start;
+    justify-content: flex-start;
     align-items: center;
     margin-right: 10px;
     svg {
@@ -2100,6 +2340,133 @@
         content: attr(alt);
         width: 100px;
       }
+    }
+  }
+}
+
+.component-annotation {
+  background-color: $color-gray-60;
+  border: 1px solid $color-gray-60;
+  border-radius: 2px;
+
+  .title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid $color-gray-50;
+    font-size: $fs12;
+    color: $color-gray-20;
+    padding: 0 10px;
+
+    &.expandeable {
+      cursor: pointer;
+    }
+
+    div {
+      display: flex;
+      align-items: center;
+      line-height: 2.5;
+    }
+
+    .expand {
+      svg {
+        fill: $color-gray-20;
+        width: $size-2;
+        height: $size-2;
+        margin-right: 10px;
+      }
+    }
+
+    .icon {
+      display: none;
+      cursor: pointer;
+      svg {
+        fill: $color-gray-20;
+        width: $size-4;
+        height: $size-4;
+        margin-left: 15px;
+        &.icon-cross {
+          width: $size-3;
+          height: $size-3;
+        }
+      }
+
+      .icon-tick:hover,
+      .icon-pencil:hover {
+        fill: $color-primary;
+      }
+
+      .icon-cross:hover,
+      .icon-trash:hover {
+        fill: $color-danger;
+      }
+    }
+
+    &:hover {
+      .icon {
+        display: flex;
+      }
+    }
+  }
+
+  &.editing {
+    border: 1px solid $color-primary;
+    .title .icon {
+      display: flex;
+    }
+  }
+
+  .hidden {
+    display: none;
+  }
+
+  .counter {
+    text-align: right;
+    font-size: $fs11;
+    color: $color-gray-30;
+    margin: 0 10px 10px 0;
+  }
+
+  // Auto growing text
+  .grow-wrap {
+    // easy way to plop the elements on top of each other and have them both sized based on the tallest one's height
+    display: grid;
+
+    &:after {
+      // The space is needed to preventy jumpy behavior
+      content: attr(data-replicated-value) " ";
+      white-space: pre-wrap;
+      visibility: hidden;
+    }
+
+    textarea {
+      background-color: $color-gray-60;
+      color: $color-white;
+      min-height: 250px;
+      padding: 10px;
+
+      border: none;
+      overflow: hidden;
+      outline: none;
+
+      -webkit-box-shadow: none;
+      -moz-box-shadow: none;
+      box-shadow: none;
+
+      resize: none; /*remove the resize handle on the bottom right*/
+    }
+
+    textarea,
+    &:after {
+      /* Identical styling required!! */
+      font: inherit;
+      font-size: $fs14;
+      overflow-wrap: anywhere;
+
+      padding: 10px;
+
+      /* Place on top of each other */
+      grid-area: 1 / 1 / 2 / 2;
     }
   }
 }

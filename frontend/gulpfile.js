@@ -12,6 +12,8 @@ const gulpSass = require("gulp-sass")(require("sass"));
 const svgSprite = require("gulp-svg-sprite");
 
 const autoprefixer = require("autoprefixer")
+const modules = require("postcss-modules");
+
 const clean = require("postcss-clean");
 const mkdirp = require("mkdirp");
 const rimraf = require("rimraf");
@@ -45,11 +47,14 @@ marked.use({renderer});
 
 function readLocales() {
   const langs = ["ar", "ca", "de", "el", "en", "eu", "it", "es",
-                 "fa", "fr", "he", "nb_NO", "pl", "pt_BR", "ro",
+                 "fa", "fr", "he", "nb_NO", "pl", "pt_BR", "ro", "id",
                  "ru", "tr", "zh_CN", "zh_Hant", "hr", "gl", "pt_PT",
+                 "cs", "fo", "ko", "lv",
                  // this happens when file does not matches correct
                  // iso code for the language.
-                 ["ja_jp", "jpn_JP"]
+                 ["ja_jp", "jpn_JP"],
+                 // ["fi", "fin_FI"],
+                 ["uk", "ukr_UA"]
                 ];
   const result = {};
 
@@ -159,7 +164,7 @@ function templatePipeline(options) {
 
     const tmpl = gulpMustache({
       ts: ts,
-      th: th,
+      // th: th,
       manifest: manifest,
       translations: JSON.stringify(locales),
       themes: JSON.stringify(themes),
@@ -179,15 +184,37 @@ function templatePipeline(options) {
 
 gulpSass.compiler = sass;
 
-gulp.task("scss", function() {
-  return gulp.src(paths.resources + "styles/main-default.scss")
-    .pipe(gulpSass.sync().on('error', gulpSass.logError))
+gulp.task("scss:modules", function() {
+  return gulp.src(["src/**/**.scss"])
+    .pipe(gulpSass.sync({includePaths: ["./resources/styles/common/",
+    "./resources/styles/"]}).on('error', gulpSass.logError))
     .pipe(gulpPostcss([
-      autoprefixer,
-      // clean({format: "keep-breaks", level: 1})
+      modules({
+        generateScopedName: "[folder]_[name]_[local]_[hash:base64:5]",
+      }),
+      autoprefixer(),
     ]))
     .pipe(gulp.dest(paths.output + "css/"));
 });
+
+gulp.task("scss:main", function() {
+  return gulp.src(paths.resources + "styles/main-default.scss")
+    .pipe(gulpSass.sync(
+    ).on('error', gulpSass.logError))
+    .pipe(gulpPostcss([
+      autoprefixer,
+    ]))
+    .pipe(gulp.dest(paths.output + "css/"));
+});
+
+gulp.task("scss:concat", function() {
+  return gulp.src([paths.output + "css/main-default.css",
+                  paths.output + "css/app/**/*.css"])
+    .pipe(gulpConcat("main.css"), {rebaseUrls: false})
+    .pipe(gulp.dest(paths.output + "css/"));
+});
+
+gulp.task("scss", gulp.series("scss:main", "scss:modules", "scss:concat"));
 
 gulp.task("svg:sprite:icons", function() {
   return gulp.src(paths.resources + "images/icons/*.svg")
@@ -250,6 +277,7 @@ gulp.task("dev:dirs", async function(next) {
 });
 
 gulp.task("watch:main", function() {
+  gulp.watch("src/**/**.scss", gulp.series("scss"));
   gulp.watch(paths.resources + "styles/**/**.scss", gulp.series("scss"));
   gulp.watch(paths.resources + "images/**/*", gulp.series("copy:assets:images"));
 

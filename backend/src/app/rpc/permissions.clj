@@ -8,8 +8,19 @@
   "A permission checking helper factories."
   (:require
    [app.common.exceptions :as ex]
+   [app.common.schema :as sm]
    [app.common.spec :as us]
    [clojure.spec.alpha :as s]))
+
+(sm/def! ::permissions
+  [:map {:title "Permissions"}
+   [:type {:gen/elements [:membership :share-link]} :keyword]
+   [:is-owner :boolean]
+   [:is-admin :boolean]
+   [:can-edit :boolean]
+   [:can-read :boolean]
+   [:is-logged :boolean]])
+
 
 (s/def ::role #{:admin :owner :editor :viewer})
 
@@ -36,6 +47,14 @@
     (assoc :is-owner false
            :is-admin false
            :can-edit false)))
+
+(defn make-admin-predicate-fn
+  "A simple factory for admin permission predicate functions."
+  [qfn]
+  (us/assert fn? qfn)
+  (fn check
+    ([perms] (:is-admin perms))
+    ([conn & args] (check (apply qfn conn args)))))
 
 (defn make-edition-predicate-fn
   "A simple factory for edition permission predicate functions."

@@ -153,9 +153,9 @@
 (s/def ::oidc-user-uri ::us/string)
 (s/def ::oidc-scopes ::us/set-of-strings)
 (s/def ::oidc-roles ::us/set-of-strings)
-(s/def ::oidc-roles-attr ::us/keyword)
-(s/def ::oidc-email-attr ::us/keyword)
-(s/def ::oidc-name-attr ::us/keyword)
+(s/def ::oidc-roles-attr ::us/string)
+(s/def ::oidc-email-attr ::us/string)
+(s/def ::oidc-name-attr ::us/string)
 (s/def ::host ::us/string)
 (s/def ::http-server-port ::us/integer)
 (s/def ::http-server-host ::us/string)
@@ -323,6 +323,7 @@
 
 (def default-flags
   [:enable-backend-api-doc
+   :enable-backend-openapi-doc
    :enable-backend-worker
    :enable-secure-session-cookies
    :enable-email-verification])

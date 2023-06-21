@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2015-2016 Andrey Antukh <niwi@niwi.nz>
-// Copyright (c) 2015-2016 Juan de la Cruz <delacruzgarciajuan@gmail.com>
+// Copyright (c) KALEIDOS INC
 
 :root {
   --font-family: "worksans", sans-serif;
@@ -24,6 +23,7 @@ body {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  position: relative;
 }
 
 * {
@@ -56,7 +56,7 @@ svg {
 
 a {
   cursor: pointer;
-  font-weight: 500;
+  font-weight: $fw500;
   color: $color-gray-50;
 
   &:hover {
@@ -64,22 +64,26 @@ a {
   }
 }
 
+button {
+  font-family: "worksans", sans-serif;
+}
+
 p {
   font-size: $fs12;
   margin-bottom: 1rem;
-  line-height: $base-lh-sm;
+  line-height: $lh-133;
 
   @include bp(baby-bear) {
     font-size: $fs16;
-    line-height: $base-lh;
+    line-height: $lh-143;
   }
 }
 
 li {
-  line-height: $base-lh-sm;
+  line-height: $lh-133;
 
   @include bp(baby-bear) {
-    line-height: $base-lh;
+    line-height: $lh-143;
   }
 }
 
@@ -88,7 +92,7 @@ ul {
 }
 
 strong {
-  font-weight: bold;
+  font-weight: $fw700;
 }
 
 .relative {
@@ -97,45 +101,45 @@ strong {
 
 h1 {
   font-size: $fs34;
-  font-weight: 500;
-  line-height: $title-lh-sm;
+  font-weight: $fw500;
+  line-height: $lh-115;
 
   @include bp(baby-bear) {
     font-size: $fs38;
-    line-height: $title-lh;
+    line-height: $lh-125;
   }
 
   &.supertitle {
     font-size: $fs44;
-    font-weight: 300;
-    line-height: $title-lh-sm;
+    font-weight: $fw300;
+    line-height: $lh-115;
 
     @include bp(baby-bear) {
       font-size: $fs44;
-      line-height: $title-lh;
+      line-height: $lh-125;
     }
   }
 }
 h2 {
   font-size: $fs24;
-  font-weight: 300;
-  line-height: $title-lh-sm;
+  font-weight: $fw300;
+  line-height: $lh-115;
 
   @include bp(baby-bear) {
     font-size: $fs32;
-    line-height: $title-lh;
+    line-height: $lh-125;
   }
 }
 
 h3 {
   font-size: $fs24;
-  font-weight: 300;
+  font-weight: $fw300;
   padding: 0.5rem 0;
 }
 
 h4 {
   font-size: $fs18;
-  font-weight: 300;
+  font-weight: $fw300;
 }
 
 @-webkit-keyframes rotation {
@@ -225,7 +229,7 @@ h4 {
 }
 
 .bold {
-  font-weight: bold !important;
+  font-weight: $fw700 !important;
 }
 
 .nopd {

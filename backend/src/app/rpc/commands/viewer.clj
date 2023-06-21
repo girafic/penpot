@@ -6,6 +6,7 @@
 
 (ns app.rpc.commands.viewer
   (:require
+   [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
    [app.db :as db]
    [app.rpc :as-alias rpc]
@@ -26,12 +27,18 @@
   [conn file-id profile-id features]
   (let [file    (files/get-file conn file-id features)
         project (get-project conn (:project-id file))
-        libs    (files/get-file-libraries conn file-id features)
+        libs    (files/get-file-libraries conn file-id)
         users   (comments/get-file-comments-users conn file-id profile-id)
-
         links   (->> (db/query conn :share-link {:file-id file-id})
                      (mapv (fn [row]
-                             (update row :pages db/decode-pgarray #{}))))
+                             (-> row
+                                 (update :pages db/decode-pgarray #{})
+                                 ;; NOTE: the flags are deprecated but are still present
+                                 ;; on the table on old rows. The flags are pgarray and
+                                 ;; for avoid decoding it (because they are no longer used
+                                 ;; on frontend) we just dissoc the column attribute from
+                                 ;; row.
+                                 (dissoc :flags)))))
 
         fonts   (db/query conn :team-font-variant
                           {:team-id (:team-id project)
@@ -70,7 +77,7 @@
                 (update :data remove-not-allowed-pages (:pages perms))
 
                 :always
-                (update :data select-keys [:id :options :pages :pages-index]))))))
+                (update :data select-keys [:id :options :pages :pages-index :components]))))))
 
 (s/def ::get-view-only-bundle
   (s/keys :req-un [::files/file-id]
@@ -85,5 +92,5 @@
    ::cond/reuse-key? true
    ::doc/added "1.17"}
   [{:keys [::db/pool]} {:keys [::rpc/profile-id] :as params}]
-  (with-open [conn (db/open pool)]
+  (dm/with-open [conn (db/open pool)]
     (get-view-only-bundle conn (assoc params :profile-id profile-id))))

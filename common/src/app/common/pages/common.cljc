@@ -8,9 +8,9 @@
   (:require
    [app.common.colors :as clr]
    [app.common.data :as d]
-   [app.common.spec :as us]
-   [app.common.uuid :as uuid]
-   [clojure.spec.alpha :as s]))
+   [app.common.data.macros :as dm]
+   [app.common.schema :as sm]
+   [app.common.uuid :as uuid]))
 
 (def file-version 20)
 (def default-color clr/gray-20)
@@ -123,6 +123,10 @@
             :blocked
             :hidden
 
+            :shadow
+
+            :blur
+
             :fills
             :fill-color
             :fill-opacity
@@ -198,7 +202,9 @@
             :layout-item-min-h
             :layout-item-max-w
             :layout-item-min-w
-            :layout-item-align-self}
+            :layout-item-align-self
+            :layout-item-absolute
+            :layout-item-z-index}
 
    :rect #{:proportion-lock
            :width :height
@@ -595,14 +601,16 @@
     [p1 (+ 1 (d/parse-integer p2))]
     [basename 1]))
 
-(s/def ::set-of-strings
-  (s/every ::us/string :kind set?))
-
 (defn generate-unique-name
   "A unique name generator"
   [used basename]
-  (us/assert! ::set-of-strings used)
-  (us/assert! ::us/string basename)
+  (dm/assert!
+   "expected a set of strings"
+   (sm/set-of-strings? used))
+
+  (dm/assert!
+   "expected a string for `basename`."
+   (string? basename))
   (if-not (contains? used basename)
     basename
     (let [[prefix initial] (extract-numeric-suffix basename)]

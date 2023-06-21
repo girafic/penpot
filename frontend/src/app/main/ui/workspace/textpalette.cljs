@@ -42,7 +42,8 @@
                        :attrs attrs}))
                    selected-ids))))]
 
-    [:div.typography-item {:on-click handle-click}
+    [:div.typography-item {:title (:name typography)
+                           :on-click handle-click}
      [:div.typography-name
       {:style {:font-family (:font-family typography)
                :font-weight (:font-weight typography)
@@ -68,8 +69,8 @@
         current-typographies
         (case @selected
           :recent []
-          :file (vals file-typographies)
-          (vals (get-in shared-libs [@selected :data :typographies])))
+          :file (sort-by #(str/lower (:name %)) (vals file-typographies))
+          (sort-by #(str/lower (:name %)) (vals (get-in shared-libs [@selected :data :typographies]))))
 
         container (mf/use-ref nil)
 
@@ -93,7 +94,7 @@
                (on-right-arrow-click)
                (on-left-arrow-click)))))
 
-        {:keys [on-pointer-down on-lost-pointer-capture on-mouse-move parent-ref size]}
+        {:keys [on-pointer-down on-lost-pointer-capture on-pointer-move parent-ref size]}
         (use-resize-hook :palette 72 54 80 :y true :bottom)]
 
     [:div.color-palette {:ref parent-ref
@@ -101,7 +102,7 @@
                          :style #js {"--height" (str size "px")}}
      [:div.resize-area {:on-pointer-down on-pointer-down
                         :on-lost-pointer-capture on-lost-pointer-capture
-                        :on-mouse-move on-mouse-move}]
+                        :on-pointer-move on-pointer-move}]
      [:& dropdown {:show (:show-menu @state)
                    :on-close #(swap! state assoc :show-menu false)}
 
@@ -129,13 +130,19 @@
      [:span.left-arrow {:on-click on-left-arrow-click} i/arrow-slide]
 
      [:div.color-palette-content {:ref container :on-wheel on-wheel}
-      [:div.color-palette-inside
-       (for [[idx item] (map-indexed vector current-typographies)]
-         [:& typography-item
-          {:key idx
-           :file-id file-id
-           :selected-ids selected-ids
-           :typography item}])]]
+     (if (empty? current-typographies)
+        [:div.color-palette-empty {:style {:position "absolute"
+                                           :left "50%"
+                                           :top "50%"
+                                           :transform "translate(-50%, -50%)"}} 
+              (tr "workspace.libraries.colors.empty-typography-palette")]
+        [:div.color-palette-inside
+        (for [[idx item] (map-indexed vector current-typographies)]
+          [:& typography-item
+            {:key idx
+            :file-id file-id
+            :selected-ids selected-ids
+            :typography item}])])]
 
      [:span.right-arrow {:on-click on-right-arrow-click} i/arrow-slide]]))
 

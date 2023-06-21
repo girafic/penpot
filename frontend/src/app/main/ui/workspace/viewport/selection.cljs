@@ -11,12 +11,13 @@
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
+   [app.common.types.container :as ctn]
    [app.common.types.shape :as cts]
    [app.main.data.workspace :as dw]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
-   [app.main.ui.cursors :as cur]
+   [app.main.ui.css-cursors :as cur]
    [app.main.ui.workspace.shapes.path.editor :refer [path-editor]]
    [app.util.dom :as dom]
    [app.util.object :as obj]
@@ -45,7 +46,7 @@
         :width width
         :height height
         :transform (str transform)
-        :on-mouse-down on-move-selected
+        :on-pointer-down on-move-selected
         :on-context-menu on-context-menu
         :style {:stroke color
                 :stroke-width (/ selection-rect-width zoom)
@@ -164,20 +165,23 @@
                 :top-right 90
                 :bottom-right 180
                 :bottom-left 270)]
-    [:rect {:style {:cursor (cur/rotate (+ rotation angle))}
-            :x x
+    [:rect {:x x
             :y y
+            :class (cur/get-dynamic "rotate" (+ rotation angle))
             :width size
             :height size
             :fill (if (debug? :handlers) "blue" "none")
             :stroke-width 0
             :transform (dm/str transform)
-            :on-mouse-down on-rotate}]))
+            :on-pointer-down on-rotate}]))
 
 (mf/defc resize-point-handler
   [{:keys [cx cy zoom position on-resize transform rotation color align]}]
-  (let [cursor (if (#{:top-left :bottom-right} position)
-                 (cur/resize-nesw rotation) (cur/resize-nwse rotation))
+  (let [layout (mf/deref refs/workspace-layout)
+        scale-text (:scale-text layout)
+        cursor (if (#{:top-left :bottom-right} position)
+                 (if scale-text (cur/get-dynamic "scale-nesw" rotation) (cur/get-dynamic "resize-nesw" rotation)) 
+                 (if scale-text (cur/get-dynamic "scale-nwse" rotation) (cur/get-dynamic "resize-nwse" rotation)))
         {cx' :x cy' :y} (gpt/transform (gpt/point cx cy) transform)]
 
     [:g.resize-handler
@@ -199,21 +203,21 @@
              {cx' :x cy' :y} (gpt/transform (gpt/point cx cy) transform)]
          [:rect {:x cx'
                  :y cy'
+                 :class cursor
                  :width resize-point-circle-radius
                  :height resize-point-circle-radius
                  :transform (when rotation (dm/fmt "rotate(%, %, %)" rotation cx' cy'))
                  :style {:fill (if (debug? :handlers) "red" "none")
-                         :stroke-width 0
-                         :cursor cursor}
-                 :on-mouse-down #(on-resize {:x cx' :y cy'} %)}])
+                         :stroke-width 0}
+                 :on-pointer-down #(on-resize {:x cx' :y cy'} %)}])
 
-       [:circle {:on-mouse-down #(on-resize {:x cx' :y cy'} %)
+       [:circle {:on-pointer-down #(on-resize {:x cx' :y cy'} %)
                  :r (/ resize-point-circle-radius zoom)
                  :cx cx'
                  :cy cy'
+                 :class cursor
                  :style {:fill (if (debug? :handlers) "red" "none")
-                         :stroke-width 0
-                         :cursor cursor}}])]))
+                         :stroke-width 0}}])]))
 
 (mf/defc resize-side-handler
   "The side handler is always rendered horizontally and then rotated"
@@ -221,7 +225,8 @@
   (let [res-point (if (#{:top :bottom} position)
                     {:y y}
                     {:x x})
-
+        layout (mf/deref refs/workspace-layout)
+        scale-text (:scale-text layout)
         height (/ resize-side-height zoom)
         offset-y (if (= align :outside) (- height) (- (/ height 2)))
         target-y (+ y offset-y)
@@ -241,13 +246,13 @@
              :y target-y
              :width length
              :height height
+             :class (if (#{:left :right} position)
+                      (if scale-text (cur/get-dynamic "scale-ew" rotation) (cur/get-dynamic "resize-ew" rotation))
+                      (if scale-text (cur/get-dynamic "scale-ns" rotation) (cur/get-dynamic "resize-ns" rotation)))
              :transform transform-str
-             :on-mouse-down #(on-resize res-point %)
+             :on-pointer-down #(on-resize res-point %)
              :style {:fill (if (debug? :handlers) "yellow" "none")
-                     :stroke-width 0
-                     :cursor (if (#{:left :right} position)
-                               (cur/resize-ew rotation)
-                               (cur/resize-ns rotation)) }}]]))
+                     :stroke-width 0}}]]))
 
 (defn minimum-selrect [{:keys [x y width height] :as selrect}]
   (let [final-width (max width min-selrect-side)
@@ -437,9 +442,13 @@
   (let [num (count shapes)
         {:keys [type] :as shape} (first shapes)
 
-        color (if (or (> num 1) (nil? (:shape-ref shape)))
-                selection-rect-color-normal
-                selection-rect-color-component)]
+        ;; Note that we don't use mf/deref to avoid a repaint dependency here
+        objects (deref refs/workspace-page-objects)
+
+        color (if (and (= num 1)
+                       (ctn/in-any-component? objects shape))
+                selection-rect-color-component
+                selection-rect-color-normal)]
     (cond
       (zero? num)
       nil
@@ -477,9 +486,13 @@
   (let [num (count shapes)
         {:keys [type] :as shape} (first shapes)
 
-        color (if (or (> num 1) (nil? (:shape-ref shape)))
-                selection-rect-color-normal
-                selection-rect-color-component)]
+        ;; Note that we don't use mf/deref to avoid a repaint dependency here
+        objects (deref refs/workspace-page-objects)
+
+        color (if (and (= num 1)
+                       (ctn/in-any-component? objects shape))
+                selection-rect-color-component
+                selection-rect-color-normal)]
     (cond
       (zero? num)
       nil

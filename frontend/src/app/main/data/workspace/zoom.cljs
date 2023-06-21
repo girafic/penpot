@@ -25,23 +25,30 @@
         vbox' (gsh/transform-rect vbox mtx)]
     (-> local
         (assoc :zoom new-zoom)
+        (assoc :zoom-inverse (/ 1 new-zoom))
         (update :vbox merge (select-keys vbox' [:x :y :width :height])))))
 
 (defn increase-zoom
-  [center]
-  (ptk/reify ::increase-zoom
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-local
-              #(impl-update-zoom % center (fn [z] (min (* z 1.3) 200)))))))
+  ([]
+   (increase-zoom ::auto))
+  ([center]
+   (ptk/reify ::increase-zoom
+     ptk/UpdateEvent
+     (update [_ state]
+       (let [center (if (= center ::auto) @ms/mouse-position center)]
+         (update state :workspace-local
+                 #(impl-update-zoom % center (fn [z] (min (* z 1.3) 200)))))))))
 
 (defn decrease-zoom
-  [center]
-  (ptk/reify ::decrease-zoom
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-local
-              #(impl-update-zoom % center (fn [z] (max (/ z 1.3) 0.01)))))))
+  ([]
+   (decrease-zoom ::auto))
+  ([center]
+   (ptk/reify ::decrease-zoom
+     ptk/UpdateEvent
+     (update [_ state]
+       (let [center (if (= center ::auto) @ms/mouse-position center)]
+         (update state :workspace-local
+                 #(impl-update-zoom % center (fn [z] (max (/ z 1.3) 0.01)))))))))
 
 (defn set-zoom
   [center scale]
@@ -76,6 +83,7 @@
                           zoom  (/ (:width vport) (:width srect))]
                       (-> local
                           (assoc :zoom zoom)
+                          (assoc :zoom-inverse (/ 1 zoom))
                           (update :vbox merge srect))))))))))
 
 (def zoom-to-selected-shape
@@ -96,6 +104,7 @@
                             zoom  (/ (:width vport) (:width srect))]
                         (-> local
                             (assoc :zoom zoom)
+                            (assoc :zoom-inverse (/ 1 zoom))
                             (update :vbox merge srect)))))))))))
 
 (defn start-zooming [pt]

@@ -13,10 +13,12 @@
    [app.main.data.users :as du]
    [app.main.data.websocket :as ws]
    [app.main.errors]
+   [app.main.features :as feat]
    [app.main.store :as st]
    [app.main.ui :as ui]
    [app.main.ui.alert]
    [app.main.ui.confirm]
+   [app.main.ui.css-cursors :as cur]
    [app.main.ui.delete-shared]
    [app.main.ui.modal :refer [modal]]
    [app.main.ui.routes :as rt]
@@ -57,6 +59,7 @@
     (watch [_ _ stream]
       (rx/merge
        (rx/of (ev/initialize)
+              (feat/initialize)
               (du/initialize-profile))
 
        (->> stream
@@ -76,6 +79,7 @@
   (worker/init!)
   (i18n/init! cf/translations)
   (theme/init! cf/themes)
+  (cur/init-styles)
   (init-ui)
   (st/emit! (initialize)))
 
@@ -96,3 +100,6 @@
  (fn [_ _ old-value current-value]
    (when (not= old-value current-value)
      (reinit))))
+
+(set! (.-stackTraceLimit js/Error) 50)
+

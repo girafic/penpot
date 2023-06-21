@@ -36,10 +36,10 @@
   "
 
   (:require
+   [app.common.fressian :as fres]
    [app.common.logging :as l]
    [app.common.transit :as t]
    [app.common.uuid :as uuid]
-   [app.util.fressian :as fres]
    [app.util.time :as dt]
    [clojure.core :as c])
   (:import
@@ -74,13 +74,15 @@
   IPointerMap
   (load! [_]
     (l/trace :hint "pointer-map:load" :id id)
-    (set! loaded? true)
 
     (when-not *load-fn*
       (throw (UnsupportedOperationException. "load is not supported when *load-fn* is not bind")))
 
     (when-let [data (*load-fn* id)]
       (set! odata data))
+
+    (set! loaded? true)
+
     (or odata {}))
 
   (modified? [_] modified?)

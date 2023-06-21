@@ -76,6 +76,10 @@
   [node]
   (= "root" (:type node)))
 
+(defn generate-shape-name
+  [text]
+  (subs text 0 (min 280 (count text))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DraftJS <-> Penpot Conversion
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -157,7 +161,7 @@
 (defn- code-points->text
   [cpoints start end]
   #?(:cljs (apply str (subvec cpoints start end))
-     :clj  (let [sb (StringBuilder. (- end start))]
+     :clj  (let [sb (StringBuilder. (- ^long end ^long start))]
              (run! #(.appendCodePoint sb (int %)) (subvec cpoints start end))
              (.toString sb))))
 

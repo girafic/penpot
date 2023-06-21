@@ -14,7 +14,7 @@
    [app.common.math :as mth]
    [app.common.pages.common :as cpc]
    [app.common.pages.helpers :as cph]
-   [app.common.spec :as us]
+   [app.common.types.container :as ctn]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape.layout :as ctl]
    [app.main.constants :refer [zoom-half-pixel-precision]]
@@ -24,7 +24,6 @@
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.undo :as dwu]
    [beicon.core :as rx]
-   [cljs.spec.alpha :as s]
    [potok.core :as ptk]))
 
 ;; -- temporary modifiers -------------------------------------------
@@ -54,7 +53,7 @@
           shape
 
           (nil? root)
-          (cph/get-root-shape objects shape)
+          (ctn/get-component-shape objects shape {:allow-main? true})
 
           :else root)
 
@@ -64,7 +63,7 @@
           transformed-shape
 
           (nil? transformed-root)
-          (as-> (cph/get-root-shape objects transformed-shape) $
+          (as-> (ctn/get-component-shape objects transformed-shape {:allow-main? true}) $
             (gsh/transform-shape (merge $ (get modif-tree (:id $)))))
 
           :else transformed-root)
@@ -95,7 +94,6 @@
         ignore-geometry? (and (and (< (:x distance) 1) (< (:y distance) 1))
                               (mth/close? (:width selrect) (:width transformed-selrect))
                               (mth/close? (:height selrect) (:height transformed-selrect)))]
-
     [root transformed-root ignore-geometry?]))
 
 (defn- get-ignore-tree
@@ -156,12 +154,16 @@
 
 (defn create-modif-tree
   [ids modifiers]
-  (us/verify (s/coll-of uuid?) ids)
+  (dm/assert!
+   "expected valid coll of uuids"
+   (every? uuid? ids))
   (into {} (map #(vector % {:modifiers modifiers})) ids))
 
 (defn build-modif-tree
   [ids objects get-modifier]
-  (us/verify (s/coll-of uuid?) ids)
+  (dm/assert!
+   "expected valid coll of uuids"
+   (every? uuid? ids))
   (into {} (map #(vector % {:modifiers (get-modifier (get objects %))})) ids))
 
 (defn modifier-remove-from-parent
@@ -179,8 +181,8 @@
   (let [origin-frame-ids (->> selected (group-by #(get-in objects [% :frame-id])))
         child-set (set (get-in objects [target-frame-id :shapes]))
 
-        target-frame (get objects target-frame-id)
-        target-layout? (ctl/layout? target-frame)
+        target-frame        (get objects target-frame-id)
+        target-flex-layout? (ctl/flex-layout? target-frame)
 
         children-ids (concat (:shapes target-frame) selected)
 
@@ -201,7 +203,7 @@
         (fn [modif-tree [original-frame shapes]]
           (let [shapes (->> shapes (d/removev #(= target-frame-id %)))
                 shapes (cond->> shapes
-                         (and target-layout? (= original-frame target-frame-id))
+                         (and target-flex-layout? (= original-frame target-frame-id))
                          ;; When movining inside a layout frame remove the shapes that are not immediate children
                          (filterv #(contains? child-set %)))
                 children-ids (->> (dm/get-in objects [original-frame :shapes])
@@ -219,7 +221,7 @@
                   (cond-> v-sizing?
                     (update-in [original-frame :modifiers] ctm/change-property :layout-item-v-sizing :fix)))
 
-              (and target-layout? (= original-frame target-frame-id))
+              (and target-flex-layout? (= original-frame target-frame-id))
               (update-in [target-frame-id :modifiers] ctm/add-children shapes drop-index))))]
 
     (as-> modif-tree $
@@ -374,7 +376,7 @@
   ([]
    (apply-modifiers nil))
 
-  ([{:keys [undo-transation? modifiers] :or {undo-transation? true}}]
+  ([{:keys [modifiers undo-transation? stack-undo?] :or {undo-transation? true stack-undo? false}}]
    (ptk/reify ::apply-modifiers
      ptk/WatchEvent
      (watch [_ state _]
@@ -412,6 +414,7 @@
                           (cond-> text-shape?
                             (update-grow-type shape)))))
                   {:reg-objects? true
+                   :stack-undo? stack-undo?
                    :ignore-tree ignore-tree
                    ;; Attributes that can change in the transform. This way we don't have to check
                    ;; all the attributes
@@ -419,6 +422,15 @@
                            :points
                            :x
                            :y
+                           :rx
+                           :ry
+                           :r1
+                           :r2
+                           :r3
+                           :r4
+                           :shadow
+                           :blur
+                           :strokes
                            :width
                            :height
                            :content
@@ -428,9 +440,20 @@
                            :flip-x
                            :flip-y
                            :grow-type
-                           :layout-item-h-sizing
-                           :layout-item-v-sizing
                            :position-data
+                           :layout-gap
+                           :layout-padding
+                           :layout-item-h-sizing
+                           :layout-item-margin
+                           :layout-item-max-h
+                           :layout-item-max-w
+                           :layout-item-min-h
+                           :layout-item-min-w
+                           :layout-item-v-sizing
+                           :layout-padding-type
+                           :layout-gap
+                           :layout-item-margin
+                           :layout-item-margin-type
                            ]})
                  ;; We've applied the text-modifier so we can dissoc the temporary data
                  (fn [state]

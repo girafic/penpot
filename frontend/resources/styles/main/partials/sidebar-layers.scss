@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2015-2020 Andrey Antukh <niwi@niwi.nz>
-// Copyright (c) 2015-2020 Juan de la Cruz <delacruzgarciajuan@gmail.com>
+// Copyright (c) KALEIDOS INC
 
 .element-list-body {
   align-items: center;
@@ -12,13 +11,52 @@
   padding: $size-1 $size-2;
   transition: none;
   width: 100%;
+  .toggle-content {
+    svg {
+      display: flex;
+      height: 13px;
+      width: 13px;
+    }
+  }
 
-  svg {
-    fill: $color-gray-20;
-    height: 13px;
-    flex-shrink: 0;
-    margin-right: 8px;
-    width: 13px;
+  .icon {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 4px;
+    margin-bottom: 3px;
+    width: 18px;
+    height: 18px;
+
+    svg {
+      fill: $color-gray-20;
+      height: 12px;
+      width: 12px;
+    }
+
+    & .absolute {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 18px;
+      height: 18px;
+
+      svg {
+        width: 18px;
+        height: 18px;
+        fill: $color-gray-20;
+        fill-opacity: 0.5;
+      }
+    }
+  }
+
+  &.selected .icon .absolute svg {
+    fill: $color-primary;
+  }
+
+  &:hover .icon .absolute svg {
+    fill: $color-gray-60;
   }
 
   &.group {
@@ -255,6 +293,8 @@ span.element-name {
 
   .toggle-element,
   .block-element {
+    border: none;
+    background-color: transparent;
     left: 0;
     position: absolute;
     top: 0;
@@ -303,7 +343,7 @@ span.element-name {
 .icon-layer {
   > svg {
     background-color: rgba(255, 255, 255, 0.6);
-    border-radius: $br-small;
+    border-radius: $br3;
     flex-shrink: 0;
     fill: $color-black !important;
     padding: 1px;
@@ -311,7 +351,8 @@ span.element-name {
 }
 
 #layers {
-  .tool-window-bar {
+  .tool-window-bar,
+  .pages-tool-bar {
     display: flex;
     justify-content: space-between;
     height: 32px;
@@ -320,7 +361,7 @@ span.element-name {
     &.search {
       .search-box {
         border: 1px solid $color-gray-20;
-        border-radius: 4px;
+        border-radius: $br4;
         height: 32px;
         width: 100%;
         display: flex;
@@ -334,13 +375,13 @@ span.element-name {
           width: 100%;
           background-color: $color-gray-50;
           color: $color-white;
-          font-size: 12px;
+          font-size: $fs12;
           height: 16px;
           &:focus {
             outline: none;
           }
         }
-        span {
+        div {
           height: 16px;
           overflow: hidden;
         }
@@ -366,15 +407,16 @@ span.element-name {
 }
 .active-filters {
   margin-top: 5px;
-  line-height: 26px;
-  font-size: 11px;
+  line-height: 26px; // Original value was 26px; 26px/11px = 236.363636364% => $lh-236 (rounded)
+  font-size: $fs11;
   margin: 0 0.5rem;
   span {
     background-color: $color-primary;
     color: $color-black;
     padding: 3px 5px;
     margin: 0 2px;
-    border-radius: 4px;
+    border: none;
+    border-radius: $br4;
     cursor: pointer;
     svg {
       width: 7px;
@@ -393,10 +435,11 @@ span.element-name {
   left: 8px;
   background-color: $color-white;
   color: $color-gray-50;
-  border-radius: 4px;
+  border-radius: $br4;
+  z-index: 1;
   span {
     padding: 10px 20px 10px 10px;
-    border-radius: 4px;
+    border-radius: $br4;
     svg {
       width: 16px;
       height: 16px;

@@ -15,17 +15,22 @@
    [app.common.pages.helpers :as cph]
    [app.common.text :as txt]
    [app.common.types.modifiers :as ctm]
+   [app.common.uuid :as uuid]
+   [app.main.data.events :as ev]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.common :as dwc]
+   [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.undo :as dwu]
+   [app.main.fonts :as fonts]
    [app.util.router :as rt]
    [app.util.text-editor :as ted]
    [app.util.timers :as ts]
    [beicon.core :as rx]
+   [cuerdas.core :as str]
    [potok.core :as ptk]))
 
 ;; -- Attrs
@@ -122,10 +127,14 @@
     ptk/WatchEvent
     (watch [_ state _]
       (when (dwc/initialized? state)
-        (let [objects (wsh/lookup-page-objects state)
-              shape   (get objects id)
-              content (-> (get-in state [:workspace-editor-state id])
-                          (ted/get-editor-current-content))]
+        (let [objects      (wsh/lookup-page-objects state)
+              shape        (get objects id)
+              editor-state (get-in state [:workspace-editor-state id])
+              content      (-> editor-state
+                               (ted/get-editor-current-content))
+              text         (-> (ted/get-editor-current-plain-text editor-state)
+                               (txt/generate-shape-name))
+              new-shape?   (nil? (:content shape))]
           (if (ted/content-has-text? content)
             (let [content (d/merge (ted/export-content content)
                                    (dissoc (:content shape) :children))
@@ -141,6 +150,8 @@
                      (let [{:keys [width height]} modifiers]
                        (-> shape
                            (assoc :content content)
+                           (cond-> new-shape?
+                             (assoc :name text))
                            (cond-> (or (some? width) (some? height))
                              (gsh/transform-shape (ctm/change-size shape width height)))))))
                   (dwu/commit-undo-transaction (:id shape))))))
@@ -315,6 +326,7 @@
                           (cph/group-shape? shape) (cph/get-children-ids objects id))]
           (rx/of (dch/update-shapes shape-ids #(update-text-content % update-node? d/txt-merge attrs))))))))
 
+
 (defn migrate-node
   [node]
   (let [color-attrs (select-keys node [:fill-color :fill-opacity :fill-color-ref-id :fill-color-ref-file :fill-color-gradient])]
@@ -377,7 +389,7 @@
           (assoc-in [:workspace-local :edition] (-> selected first :id)))))))
 
 (defn not-changed? [old-dim new-dim]
-  (> (mth/abs (- old-dim new-dim)) 1))
+  (> (mth/abs (- old-dim new-dim)) 0.1))
 
 (defn commit-resize-text
   []
@@ -414,7 +426,10 @@
 
           (let [ids (->> (keys props) (filter changed-text?))]
             (rx/of (dwu/start-undo-transaction undo-id)
-                   (dch/update-shapes ids update-fn {:reg-objects? true :save-undo? true})
+                   (dch/update-shapes ids update-fn {:reg-objects? true
+                                                     :stack-undo? true
+                                                     :ignore-remote? true
+                                                     :ignore-touched true})
                    (ptk/data-event :layout/update ids)
                    (dwu/commit-undo-transaction undo-id))))))))
 
@@ -539,7 +554,7 @@
 
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (dwm/apply-modifiers)))))
+      (rx/of (dwm/apply-modifiers {:stack-undo? true})))))
 
 (defn commit-position-data
   []
@@ -558,7 +573,7 @@
                  (fn [shape]
                    (-> shape
                        (assoc :position-data (get position-data (:id shape)))))
-                 {:save-undo? false :reg-objects? false}))
+                 {:stack-undo? true :reg-objects? false :ignore-remote? true}))
          (rx/of (fn [state]
                   (dissoc state ::update-position-data-debounce ::update-position-data))))))))
 
@@ -589,22 +604,97 @@
           (rx/empty))))))
 
 (defn update-attrs
-[id attrs]
+  [id attrs]
   (ptk/reify ::update-attrs
-      ptk/WatchEvent
-      (watch [_ _ _]
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/concat
+       (let [attrs (select-keys attrs root-attrs)]
+         (if-not (empty? attrs)
+           (rx/of (update-root-attrs {:id id :attrs attrs}))
+           (rx/empty)))
+
+       (let [attrs (select-keys attrs paragraph-attrs)]
+         (if-not (empty? attrs)
+           (rx/of (update-paragraph-attrs {:id id :attrs attrs}))
+           (rx/empty)))
+
+       (let [attrs (select-keys attrs text-attrs)]
+         (if-not (empty? attrs)
+           (rx/of (update-text-attrs {:id id :attrs attrs}))
+           (rx/empty)))))))
+
+
+(defn apply-typography
+  "A higher level event that has the resposability of to apply the
+  specified typography to the selected shapes."
+  [typography file-id]
+  (ptk/reify ::apply-typography
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [editor-state (:workspace-editor-state state)
+            selected     (wsh/lookup-selected state)
+            attrs        (-> typography
+                             (assoc :typography-ref-file file-id)
+                             (assoc :typography-ref-id (:id typography))
+                             (dissoc :id :name))]
+
+        (->> (rx/from (seq selected))
+             (rx/map (fn [id]
+                       (let [editor (get editor-state id)]
+                         (update-text-attrs {:id id :editor editor :attrs attrs})))))))))
+
+(defn generate-typography-name
+  [{:keys [font-id font-variant-id] :as typography}]
+  (let [{:keys [name]} (fonts/get-font-data font-id)]
+    (assoc typography :name (str name " " (str/title font-variant-id)))))
+
+(defn add-typography
+  "A higher level version of dwl/add-typography, and has mainly two
+  responsabilities: add the typography to the library and apply it to
+  the currently selected text shapes (being aware of the open text
+  editors."
+  [file-id]
+  (ptk/reify ::add-typography
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [selected   (wsh/lookup-selected state)
+            objects    (wsh/lookup-page-objects state)
+
+            xform      (comp (keep (d/getf objects))
+                             (filter cph/text-shape?))
+            shapes     (into [] xform selected)
+            shape      (first shapes)
+
+            values     (current-text-values
+                        {:editor-state (dm/get-in state [:workspace-editor-state (:id shape)])
+                         :shape shape
+                         :attrs text-attrs})
+
+            multiple? (or (> 1 (count shapes))
+                          (d/seek (partial = :multiple)
+                                  (vals values)))
+
+            values    (-> (d/without-nils values)
+                          (select-keys
+                           (d/concat-vec text-font-attrs
+                                         text-spacing-attrs
+                                         text-transform-attrs)))
+
+            typ-id    (uuid/next)
+            typ       (-> (if multiple?
+                            txt/default-typography
+                            (merge txt/default-typography values))
+                          (generate-typography-name)
+                          (assoc :id typ-id))]
+
         (rx/concat
-             (let [attrs (select-keys attrs root-attrs)]
-               (if-not (empty? attrs)
-                 (rx/of (update-root-attrs {:id id :attrs attrs}))
-                 (rx/empty)))
+         (rx/of (dwl/add-typography typ)
+                (ptk/event ::ev/event {::ev/name "add-asset-to-library"
+                                       :asset-type "typography"}))
 
-             (let [attrs (select-keys attrs paragraph-attrs)]
-               (if-not (empty? attrs)
-                 (rx/of (update-paragraph-attrs {:id id :attrs attrs}))
-                 (rx/empty)))
+         (when (not multiple?)
+           (rx/of (update-attrs (:id shape)
+                                {:typography-ref-id typ-id
+                                 :typography-ref-file file-id}))))))))
 
-             (let [attrs (select-keys attrs text-attrs)]
-               (if-not (empty? attrs)
-                 (rx/of (update-text-attrs {:id id :attrs attrs}))
-                 (rx/empty)))))))

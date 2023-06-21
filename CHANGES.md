@@ -5,23 +5,177 @@
 ### :boom: Breaking changes & Deprecations
 
 ### :sparkles: New features
-- Adds paddings and gaps prediction on layout creation [Taiga #4838](https://tree.taiga.io/project/penpot/task/4838)
+- Default naming of text layers [Taiga #2836](https://tree.taiga.io/project/penpot/us/2836)
+- Create typography style from a selected text layer[Taiga #3041](https://tree.taiga.io/project/penpot/us/3041)
+- Board as ruler origin [Taiga #4833](https://tree.taiga.io/project/penpot/us/4833)
+- Access tokens support [Taiga #4460](https://tree.taiga.io/project/penpot/us/4460)
 
 ### :bug: Bugs fixed
+- Fix files can be opened from multiple urls [Taiga #5310](https://tree.taiga.io/project/penpot/issue/5310)
+- Fix asset color item was created from the selected layer [Taiga #5180](https://tree.taiga.io/project/penpot/issue/5180)
 
 ### :arrow_up: Deps updates
 
 ### :heart: Community contributions by (Thank you!)
+- Update Typography palette order (by @akshay-gupta7) [Github #3156](https://github.com/penpot/penpot/pull/3156)
+- Palettes (color, typographies) empty state (by @akshay-gupta7) [Github #3160](https://github.com/penpot/penpot/pull/3160)
+- Duplicate objects via drag + alt (by @akshay-gupta7) [Github #3147](https://github.com/penpot/penpot/pull/3147)
+- Set line-height to auto as 1.2 (by @akshay-gupta7) [Github #3185](https://github.com/penpot/penpot/pull/3185)
+- Click to select full values at the design sidebar (by @akshay-gupta7) [Github #3179](https://github.com/penpot/penpot/pull/3179)
+- Fix rect filter bounds math (by @ryanbreen) [Github #3180](https://github.com/penpot/penpot/pull/3180)
+- Removed sizing variables from radius (by @ondrejkonec) [Github #3184](https://github.com/penpot/penpot/pull/3184)
+- Dashboard search, set focus after shortcut (by @akshay-gupta7) [Github #3196](https://github.com/penpot/penpot/pull/3196)
+- Library name dropdown arrow is overlapped by library name (by @ondrejkonec) [Taiga #5200](https://tree.taiga.io/project/penpot/issue/5200)
+- Reorder shadows (by @akshay-gupta7) [Github #3236](https://github.com/penpot/penpot/pull/3236)
+- Open project in new tab from workspace (by @akshay-gupta7) [Github #3246](https://github.com/penpot/penpot/pull/3246)
+- Distribute fix enabled when two elements were selected (by @dfelinto) [Github #3266](https://github.com/penpot/penpot/pull/3266)
+- Distribute vertical spacing failing for overlapped text (by @dfelinto) [Github #3267](https://github.com/penpot/penpot/pull/3267)
 
+## 1.18.5
+
+## 1.18.4
+
+### :bug: Bugs fixed
+
+- Fix zooming while color picker breaks UI [GH #3214](https://github.com/penpot/penpot/issues/3214)
+- Fix problem with layout not reflowing on shape deletion [Taiga #5289](https://tree.taiga.io/project/penpot/issue/5289)
+- Fix extra long typography names on assets and palette [Taiga #5199](https://tree.taiga.io/project/penpot/issue/5199)
+- Fix background-color property on inspect code [Taiga #5300](https://tree.taiga.io/project/penpot/issue/5300)
+- Preview layer blend modes (by @akshay-gupta7) [Github #3235](https://github.com/penpot/penpot/pull/3235)
+
+## 1.18.3
+
+### :bug: Bugs fixed
+
+- Fix problem with rulers not placing correctly [Taiga #5093](https://tree.taiga.io/project/penpot/issue/5093)
+- Fix page context menu [Taiga #5145](https://tree.taiga.io/project/penpot/issue/5145)
+- Fix project file count [Taiga #5148](https://tree.taiga.io/project/penpot/issue/5148)
+- Fix OIDC roles checking mechanism [GH #3152](https://github.com/penpot/penpot/issues/3152)
+- Import updated translation strings from weblate
+
+### :arrow_up: Deps updates
+
+## 1.18.2
+
+### :bug: Bugs fixed
+
+- Fix problem with frame title rotation
+- Fix first level board "Show in view mode" is automatically unchecked [Taiga #5136](https://tree.taiga.io/project/penpot/issue/5136)
+
+## 1.18.1
+
+### :bug: Bugs fixed
+
+- Fix problems with imported SVG shadows [Taiga #4922](https://tree.taiga.io/project/penpot/issue/4922)
+- Fix problems with imported SVG embedded images and transforms [Taiga #4639](https://tree.taiga.io/project/penpot/issue/4639)
+
+## 1.18.0
+
+### :sparkles: New features
+- Adds more accessibility improvements in dashboard [Taiga #4577](https://tree.taiga.io/project/penpot/us/4577)
+- Adds paddings and gaps prediction on layout creation [Taiga #4838](https://tree.taiga.io/project/penpot/task/4838)
+- Add visual feedback when proportionally scaling text elements with **K** [Taiga #3415](https://tree.taiga.io/project/penpot/us/3415)
+- Add visualization and mouse control to paddings, margins and gaps in frames with layout [Taiga #4839](https://tree.taiga.io/project/penpot/task/4839)
+- Allow for absolute positioned elements inside layout [Taiga #4834](https://tree.taiga.io/project/penpot/us/4834)
+- Add z-index option for flex layout items [Taiga #2980](https://tree.taiga.io/project/penpot/us/2980)
+- Scale content proportionally affects strokes, shadows, blurs and corners [Taiga #1951](https://tree.taiga.io/project/penpot/us/1951)
+- Use tabulators to navigate layers [Taiga #5010](https://tree.taiga.io/project/penpot/issue/5010)
+
+### :bug: Bugs fixed
+
+- Fix problem with rules position on changing pages [Taiga #4847](https://tree.taiga.io/project/penpot/issue/4847)
+- Fix error streen when uploading wrong SVG [#2995](https://github.com/penpot/penpot/issues/2995)
+- Fix selecting children from hidden parent layers [Taiga #4934](https://tree.taiga.io/project/penpot/issue/4934)
+- Fix problem when undoing multiple selected colors [Taiga #4920](https://tree.taiga.io/project/penpot/issue/4920)
+- Allow selection of empty board by partial rect [Taiga #4806](https://tree.taiga.io/project/penpot/issue/4806)
+- Improve behavior for undo on text edition [Taiga #4693](https://tree.taiga.io/project/penpot/issue/4693)
+- Improve deeps selection of nested arboards [Taiga #4913](https://tree.taiga.io/project/penpot/issue/4913)
+- Fix problem on selection numeric inputs on Firefox [#2991](https://github.com/penpot/penpot/issues/2991)
+- Changed the text dominant-baseline to use ideographic [Taiga #4791](https://tree.taiga.io/project/penpot/issue/4791)
+- Viewer wrong translations [Github #3035](https://github.com/penpot/penpot/issues/3035)
+- Fix problem with text editor in Safari
+- Fix unlink library color when blur color picker input [#3026](https://github.com/penpot/penpot/issues/3026)
+- Fix snap pixel when moving path points on high zoom [#2930](https://github.com/penpot/penpot/issues/2930)
+- Fix shortcuts for zoom now take into account the mouse position [#2924](https://github.com/penpot/penpot/issues/2924)
+- Fix close colorpicker on Firefox when mouse-up is outside the picker [#2911](https://github.com/penpot/penpot/issues/2911)
+- Fix problems with touch devices and Wacom tablets [#2216](https://github.com/penpot/penpot/issues/2216)
+- Fix problem with board titles misplaced [Taiga #4738](https://tree.taiga.io/project/penpot/issue/4738)
+- Fix problem with alt getting stuck when alt+tab [Taiga #5013](https://tree.taiga.io/project/penpot/issue/5013)
+- Fix problem with z positioning of elements [Taiga #5014](https://tree.taiga.io/project/penpot/issue/5014)
+- Fix problem in Firefox with scroll jumping when changin pages [#3052](https://github.com/penpot/penpot/issues/3052)
+- Fix nested frame interaction created flow in wrong frame [Taiga #5043](https://tree.taiga.io/project/penpot/issue/5043)
+- Font-Kerning does not work on Artboard Export to PNG/JPG/PDF [#3029](https://github.com/penpot/penpot/issues/3029)
+- Fix manipulate duplicated project (delete, duplicate, rename, pin/unpin...) [Taiga #5027](https://tree.taiga.io/project/penpot/issue/5027)
+- Fix deleted files appear in search results [Taiga #5002](https://tree.taiga.io/project/penpot/issue/5002)
+- Fix problem with selected colors and texts [Taiga #5051](https://tree.taiga.io/project/penpot/issue/5051)
+- Fix problem when assigning color from palette or assets [Taiga #5050](https://tree.taiga.io/project/penpot/issue/5050)
+- Fix shortcuts for alignment [Taiga #5030](https://tree.taiga.io/project/penpot/issue/5030)
+- Fix path options not showing when editing rects or ellipses [Taiga #5053](https://tree.taiga.io/project/penpot/issue/5053)
+- Fix tooltips for some alignment options are truncated on design tab [Taiga #5040](https://tree.taiga.io/project/penpot/issue/5040)
+- Fix horizontal margins drag don't always start from place [Taiga #5020](https://tree.taiga.io/project/penpot/issue/5020)
+- Fix multiplayer username sometimes is not displayed correctly [Taiga #4400](https://tree.taiga.io/project/penpot/issue/4400)
+- Show warning when trying to invite a user that is already in members [Taiga #4147](https://tree.taiga.io/project/penpot/issue/4147)
+- Fix problem with text out of borders when changing from auto-width to fixed [Taiga #4308](https://tree.taiga.io/project/penpot/issue/4308)
+- Fix header not showing when exiting fullscreen mode in viewer [Taiga #4244](https://tree.taiga.io/project/penpot/issue/4244)
+- Fix visual problem in select options [Taiga #5028](https://tree.taiga.io/project/penpot/issue/5028)
+- Forbid empty names for assets [Taiga #5056](https://tree.taiga.io/project/penpot/issue/5056)
+- Select children after ungroup action [Taiga #4917](https://tree.taiga.io/project/penpot/issue/4917)
+- Fix problem with guides not showing when moving over nested frames [Taiga #4905](https://tree.taiga.io/project/penpot/issue/4905)
+- Fix change email and password for users signed in via social login [Taiga #4273](https://tree.taiga.io/project/penpot/issue/4273)
+- Fix drag and drop files from browser or file explorer under circumstances [Taiga #5054](https://tree.taiga.io/project/penpot/issue/5054)
+- Fix problem when copy/pasting shapes [Taiga #4931](https://tree.taiga.io/project/penpot/issue/4931)
+- Fix problem with color picker not able to change hue [Taiga #5065](https://tree.taiga.io/project/penpot/issue/5065)
+- Fix problem with outer stroke in texts [Taiga #5078](https://tree.taiga.io/project/penpot/issue/5078)
+- Fix problem with text carring over next line when changing to fixed [Taiga #5067](https://tree.taiga.io/project/penpot/issue/5067)
+- Fix don't show invite user hero to users with editor role [Taiga #5086](https://tree.taiga.io/project/penpot/issue/5086)
+- Fix enter emails on onboarding new user creating team [Taiga #5089](https://tree.taiga.io/project/penpot/issue/5089)
+- Fix invalid files amount after moving on dashboard [Taiga #5080](https://tree.taiga.io/project/penpot/issue/5080)
+- Fix dashboard left sidebar, the [x] overlaps the field [Taiga #5064](https://tree.taiga.io/project/penpot/issue/5064)
+- Fix expanded typography on assets sidebar is moving [Taiga #5063](https://tree.taiga.io/project/penpot/issue/5063)
+- Fix spelling mistake in confirmation after importing only 1 file [Taiga #5095](https://tree.taiga.io/project/penpot/issue/5095)
+- Fix problem with selection colors and texts [Taiga #5079](https://tree.taiga.io/project/penpot/issue/5079)
+- Remove "show in view mode" flag when moving frame to frame [Taiga #5091](https://tree.taiga.io/project/penpot/issue/5091)
+- Fix problem creating files in project page [Taiga #5060](https://tree.taiga.io/project/penpot/issue/5060)
+- Disable empty names on rename files [Taiga #5088](https://tree.taiga.io/project/penpot/issue/5088)
+- Fix problem with SVG and flex layout [Taiga #](https://tree.taiga.io/project/penpot/issue/5099)
+- Fix unpublish and delete shared library warning messages [Taiga #5090](https://tree.taiga.io/project/penpot/issue/5090)
+- Fix last update project timer update after creating new file [Taiga #5096](https://tree.taiga.io/project/penpot/issue/5096)
+- Fix dashboard scrolling using 'Page Up' and 'Page Down' [Taiga #5081](https://tree.taiga.io/project/penpot/issue/5081)
+- Fix view mode header buttons overlapping in small resolutions [Taiga #5058](https://tree.taiga.io/project/penpot/issue/5058)
+- Fix precision for wrap in flex [Taiga #5072](https://tree.taiga.io/project/penpot/issue/5072)
+- Fix relative position overlay positioning [Taiga #5092](https://tree.taiga.io/project/penpot/issue/5092)
+- Fix hide grid keyboard shortcut [Github #3071](https://github.com/penpot/penpot/pull/3071)
+- Fix problem with opacity in imported SVG's [Taiga #4923](https://tree.taiga.io/project/penpot/issue/4923)
+
+### :heart: Community contributions by (Thank you!)
+- To @ondrejkonec: for contributing to the code with:
+- Refactor CSS variables [Github #2948](https://github.com/penpot/penpot/pull/2948)
+
+## 1.17.3
+
+### :bug: Bugs fixed
+- Fix copy and paste very nested inside itself [Taiga #4848](https://tree.taiga.io/project/penpot/issue/4848)
+- Fix custom fonts not rendered correctly [Taiga #4874](https://tree.taiga.io/project/penpot/issue/4874)
+- Fix problem with shadows and blur on multiple selection
+- Fix problem with redo shortcut
+- Fix Component texts not displayed in assets panel [Taiga #4907](https://tree.taiga.io/project/penpot/issue/4907)
+- Fix search field has implemented shared styles for "close icon" and "search icon" [Taiga #4927](https://tree.taiga.io/project/penpot/issue/4927)
+- Fix Handling correctly slashes "/" in emails [Taiga #4906](https://tree.taiga.io/project/penpot/issue/4906)
+- Fix Change text color from selected colors [Taiga #4933](https://tree.taiga.io/project/penpot/issue/4933)
+
+### :sparkles: Enhancements
+
+- Adds environment variables for specifying the export and backend URI for the frontend docker image, thanks to @Supernova3339 for the initial PR and suggestion [Github #2984](https://github.com/penpot/penpot/issues/2984)
 
 ## 1.17.2
 
 ### :bug: Bugs fixed
+
 - Fix invite members button text [Taiga #4794](https://tree.taiga.io/project/penpot/issue/4794)
-
-## 1.17.2
-
-### :bug: Bugs fixed
+- Fix problem with opacity in frames [Taiga #4795](https://tree.taiga.io/project/penpot/issue/4795)
+- Fix correct behaviour for space-around and added space-evenly option
+- Fix duplicate with alt and undo only undo one step [Taiga #4746](https://tree.taiga.io/project/penpot/issue/4746)
+- Fix problem creating frames inside layout [Taiga #4844](https://tree.taiga.io/project/penpot/issue/4844)
 - Fix paste board inside itself [Taiga #4775](https://tree.taiga.io/project/penpot/issue/4775)
 - Fix middle button panning can drag guides [Taiga #4266](https://tree.taiga.io/project/penpot/issue/4266)
 

@@ -36,6 +36,7 @@ services:
 
   penpot-frontend:
     image: "penpotapp/frontend:latest"
+    restart: always
     ports:
       - 9001:80
 
@@ -96,8 +97,10 @@ services:
 
   penpot-backend:
     image: "penpotapp/backend:latest"
+    restart: always
+
     volumes:
-      - penpot_assets:/opt/penpot/assets
+      - penpot_assets:/opt/data/assets
 
     depends_on:
       - penpot-postgres
@@ -137,10 +140,10 @@ services:
       - PENPOT_FLAGS=enable-registration enable-login-with-password disable-email-verification enable-smtp enable-prepl-server
 
       ## Penpot SECRET KEY. It serves as a master key from which other keys for subsystems
-      ## (eg http sessions) are derived.
+      ## (eg http sessions, or invitations) are derived.
       ##
-      ## Leave it comment if it is ok for you to have to login again after each backend
-      ## restart.
+      ## If you leve it commented, all created sessions and invitations will
+      ## become invalid on container restart.
       ##
       ## If you going to uncomment this, we recommend use here a trully randomly generated
       ## 512 bits base64 encoded string.  You can generate one with:
@@ -214,6 +217,7 @@ services:
 
   penpot-exporter:
     image: "penpotapp/exporter:latest"
+    restart: always
     networks:
       - penpot
 
@@ -268,6 +272,7 @@ services:
   # minio:
   #   image: "minio/minio:latest"
   #   command: minio server /mnt/data --console-address ":9001"
+  #   restart: always
   #
   #   volumes:
   #     - "penpot_minio:/mnt/data"

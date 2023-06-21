@@ -46,7 +46,10 @@
 (defonce state
   (ptk/store {:resolve ptk/resolve
               :on-event on-event
-              :on-error (fn [e] (@on-error e))}))
+              :on-error (fn [cause]
+                          (when cause
+                            #_(log/error :hint "unexpected exception on store" :cause cause)
+                            (@on-error cause)))}))
 
 (defonce stream
   (ptk/input-stream state))

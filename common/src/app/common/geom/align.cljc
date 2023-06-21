@@ -7,12 +7,12 @@
 (ns app.common.geom.align
   (:require
    [app.common.geom.shapes :as gsh]
-   [app.common.pages.helpers :refer [get-children]]
-   [clojure.spec.alpha :as s]))
+   [app.common.pages.helpers :refer [get-children]]))
 
 ;; --- Alignment
 
-(s/def ::align-axis #{:hleft :hcenter :hright :vtop :vcenter :vbottom})
+(def valid-align-axis
+  #{:hleft :hcenter :hright :vtop :vcenter :vbottom})
 
 (declare calc-align-pos)
 
@@ -65,14 +65,14 @@
 
 ;; --- Distribute
 
-(s/def ::dist-axis #{:horizontal :vertical})
+(def valid-dist-axis
+  #{:horizontal :vertical})
 
 (defn distribute-space
-  "Distribute equally the space between shapes in the given axis. If
-  there is no space enough, it does nothing. It takes into account
-  the form of the shape and the rotation, what is distributed is
-  the wrapping rectangles of the shapes. If any shape is a group,
-  move also all of its recursive children."
+  "Distribute equally the space between shapes in the given axis.
+  It takes into account the form of the shape and the rotation,
+  what is distributed is the wrapping rectangles of the shapes.
+  If any shape is a group, move also all of its recursive children."
   [shapes axis objects]
   (let [coord (if (= axis :horizontal) :x :y)
         other-coord (if (= axis :horizontal) :y :x)
@@ -84,30 +84,27 @@
         ; Each shape wrapped in its own rectangle
         wrapped-shapes (map #(gsh/selection-rect [%]) sorted-shapes)
         ; The total space between shapes
-        space (reduce - (size wrapper-rect) (map size wrapped-shapes))]
+        space (reduce - (size wrapper-rect) (map size wrapped-shapes))
+        unit-space (/ space (- (count wrapped-shapes) 1))
+        ; Calculate the distance we need to move each shape.
+        ; The new position of each one is the position of the
+        ; previous one plus its size plus the unit space.
+        deltas (loop [shapes' wrapped-shapes
+                      start-pos (coord wrapper-rect)
+                      deltas []]
 
-    (if (<= space 0)
-      shapes
-      (let [unit-space (/ space (- (count wrapped-shapes) 1))
-            ; Calculate the distance we need to move each shape.
-            ; The new position of each one is the position of the
-            ; previous one plus its size plus the unit space.
-            deltas (loop [shapes' wrapped-shapes
-                          start-pos (coord wrapper-rect)
-                          deltas []]
+                 (let [first-shape (first shapes')
+                       delta (- start-pos (coord first-shape))
+                       new-pos (+ start-pos (size first-shape) unit-space)]
 
-                     (let [first-shape (first shapes')
-                           delta (- start-pos (coord first-shape))
-                           new-pos (+ start-pos (size first-shape) unit-space)]
-
-                       (if (= (count shapes') 1)
-                         (conj deltas delta)
-                         (recur (rest shapes')
-                                new-pos
-                                (conj deltas delta)))))]
+                   (if (= (count shapes') 1)
+                     (conj deltas delta)
+                     (recur (rest shapes')
+                       new-pos
+                       (conj deltas delta)))))]
 
         (mapcat #(recursive-move %1 {coord %2 other-coord 0} objects)
-                sorted-shapes deltas)))))
+                sorted-shapes deltas)))
 
 ;; Adjust to viewport
 

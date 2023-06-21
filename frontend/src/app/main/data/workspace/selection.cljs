@@ -7,19 +7,22 @@
 (ns app.main.data.workspace.selection
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.pages :as cp]
    [app.common.pages.changes-builder :as pcb]
    [app.common.pages.helpers :as cph]
-   [app.common.spec :as us]
+   [app.common.types.component :as ctk]
+   [app.common.types.file :as ctf]
    [app.common.types.page :as ctp]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.uuid :as uuid]
    [app.main.data.modal :as md]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.collapse :as dwc]
+   [app.main.data.workspace.libraries-helpers :as dwlh]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.data.workspace.zoom :as dwz]
@@ -27,13 +30,9 @@
    [app.main.streams :as ms]
    [app.main.worker :as uw]
    [beicon.core :as rx]
-   [cljs.spec.alpha :as s]
    [clojure.set :as set]
    [linked.set :as lks]
    [potok.core :as ptk]))
-
-(s/def ::ordered-set-of-uuid
-  (s/every uuid? :kind d/ordered-set?))
 
 (defn interrupt? [e] (= e :interrupt))
 
@@ -119,7 +118,7 @@
    (select-shape id false))
 
   ([id toggle?]
-   (us/verify ::us/uuid id)
+   (dm/assert! (uuid? id))
    (ptk/reify ::select-shape
      ptk/UpdateEvent
      (update [_ state]
@@ -131,31 +130,72 @@
              objects (wsh/lookup-page-objects state page-id)]
          (rx/of (dwc/expand-all-parents [id] objects)))))))
 
+(defn select-prev-shape
+  ([]
+   (ptk/reify ::select-prev-shape
+     ptk/WatchEvent
+     (watch [_ state _]
+       (let [selected       (wsh/lookup-selected state)
+             count-selected (count selected)
+             first-selected (first selected)
+             page-id        (:current-page-id state)
+             objects        (wsh/lookup-page-objects state page-id)
+             current        (get objects first-selected)
+             parent         (get objects (:parent-id current))
+             sibling-ids    (:shapes parent)
+             current-index  (d/index-of sibling-ids first-selected)
+             sibling        (if (= (dec (count sibling-ids)) current-index)
+                              (first sibling-ids)
+                              (nth sibling-ids (inc current-index)))]
+
+         (cond
+           (= 1 count-selected)
+           (rx/of (select-shape sibling))
+
+           (> count-selected 1)
+           (rx/of (select-shape first-selected))))))))
+
+(defn select-next-shape
+  ([]
+   (ptk/reify ::select-next-shape
+     ptk/WatchEvent
+     (watch [_ state _]
+       (let [selected       (wsh/lookup-selected state)
+             count-selected (count selected)
+             first-selected (first selected)
+             page-id        (:current-page-id state)
+             objects        (wsh/lookup-page-objects state page-id)
+             current        (get objects first-selected)
+             parent         (get objects (:parent-id current))
+             sibling-ids    (:shapes parent)
+             current-index  (d/index-of sibling-ids first-selected)
+             sibling        (if (= 0 current-index)
+                              (last sibling-ids)
+                              (nth sibling-ids (dec current-index)))]
+         (cond
+           (= 1 count-selected)
+           (rx/of (select-shape sibling))
+
+           (> count-selected 1)
+           (rx/of (select-shape first-selected))))))))
+
 (defn deselect-shape
   [id]
-  (us/verify ::us/uuid id)
+  (dm/assert! (uuid? id))
   (ptk/reify ::deselect-shape
     ptk/UpdateEvent
     (update [_ state]
       (update-in state [:workspace-local :selected] disj id))))
 
 (defn shift-select-shapes
-  ([id objects]
-   (ptk/reify ::shift-select-shapes
-     ptk/UpdateEvent
-     (update [_ state]
-       (let [selection (-> state
-                           wsh/lookup-selected
-                           (conj id))]
-         (-> state
-             (assoc-in [:workspace-local :selected]
-                       (cph/expand-region-selection objects selection)))))))
   ([id]
-   (ptk/reify ::shift-select-shapes
+   (shift-select-shapes id nil))
+
+  ([id objects]
+   (ptk/reify ::shift-select-shapes-2
      ptk/UpdateEvent
      (update [_ state]
-       (let [page-id (:current-page-id state)
-             objects (wsh/lookup-page-objects state page-id)
+       (let [objects (or objects (wsh/lookup-page-objects state))
              selection (-> state
                            wsh/lookup-selected
                            (conj id))]
@@ -165,7 +205,11 @@
 
 (defn select-shapes
   [ids]
-  (us/verify ::ordered-set-of-uuid ids)
+  (dm/assert!
+   "expected valid coll of uuids"
+   (and (every? uuid? ids)
+        (d/ordered-set? ids)))
+
   (ptk/reify ::select-shapes
     ptk/UpdateEvent
     (update [_ state]
@@ -255,7 +299,9 @@
                  :ignore-groups? ignore-groups?
                  :full-frame? true})
                (rx/map #(cph/clean-loops objects %))
-               (rx/map #(into initial-set (filter (comp not blocked?)) %))
+               (rx/map #(into initial-set (comp
+                                           (filter (complement blocked?))
+                                           (remove (partial cph/hidden-parent? objects))) %))
                (rx/map select-shapes)))))))
 
 (defn select-inside-group
@@ -287,44 +333,93 @@
 (defn prepare-duplicate-changes
   "Prepare objects to duplicate: generate new id, give them unique names,
   move to the desired position, and recalculate parents and frames as needed."
-  [all-objects page ids delta it]
-  (let [shapes         (map (d/getf all-objects) ids)
-        unames         (volatile! (cp/retrieve-used-names (:objects page)))
-        update-unames! (fn [new-name] (vswap! unames conj new-name))
-        all-ids        (reduce #(into %1 (cons %2 (cph/get-children-ids all-objects %2))) (d/ordered-set) ids)
-        ids-map        (into {} (map #(vector % (uuid/next))) all-ids)
+  ([all-objects page ids delta it libraries library-data file-id]
+   (let [init-changes
+         (-> (pcb/empty-changes it)
+             (pcb/with-page page)
+             (pcb/with-objects all-objects))]
+  (prepare-duplicate-changes all-objects page ids delta it libraries library-data file-id init-changes)))
 
-        init-changes
-        (-> (pcb/empty-changes it)
-            (pcb/with-page page)
-            (pcb/with-objects all-objects))
+  ([all-objects page ids delta it libraries library-data file-id init-changes]
+   (let [shapes         (map (d/getf all-objects) ids)
+         unames         (volatile! (cp/retrieve-used-names (:objects page)))
+         update-unames! (fn [new-name] (vswap! unames conj new-name))
+         all-ids        (reduce #(into %1 (cons %2 (cph/get-children-ids all-objects %2))) (d/ordered-set) ids)
+         ids-map        (into {} (map #(vector % (uuid/next))) all-ids)
 
-        changes
-        (->> shapes
-             (reduce #(prepare-duplicate-shape-change %1
-                                                      all-objects
-                                                      page
-                                                      unames
-                                                      update-unames!
-                                                      ids-map
-                                                      %2
-                                                      delta)
-                     init-changes))]
+         changes
+         (->> shapes
+              (reduce #(prepare-duplicate-shape-change %1
+                                                       all-objects
+                                                       page
+                                                       unames
+                                                       update-unames!
+                                                       ids-map
+                                                       %2
+                                                       delta
+                                                       libraries
+                                                       library-data
+                                                       it
+                                                       file-id)
+                      init-changes))]
 
-    (-> changes
-        (prepare-duplicate-flows shapes page ids-map)
-        (prepare-duplicate-guides shapes page ids-map delta))))
+     (-> changes
+         (prepare-duplicate-flows shapes page ids-map)
+         (prepare-duplicate-guides shapes page ids-map delta)))))
+
+(defn- prepare-duplicate-component-change
+  [changes page component-root parent-id delta libraries library-data it]
+  (let [component-id (:component-id component-root)
+        file-id (:component-file component-root)
+        main-component    (ctf/get-component libraries file-id component-id)
+        moved-component   (gsh/move component-root delta)
+        pos               (gpt/point (:x moved-component) (:y moved-component))
+
+        instantiate-component
+        #(dwlh/generate-instantiate-component changes
+                                              file-id
+                                              (:component-id component-root)
+                                              pos
+                                              page
+                                              libraries
+                                              (:id component-root)
+                                              parent-id)
+
+        restore-component
+        #(let [restore (dwlh/prepare-restore-component changes library-data (:component-id component-root) it page delta (:id component-root) parent-id)]
+           [(:shape restore) (:changes restore)])
+
+        [_shape changes]
+        (if (nil? main-component)
+          (restore-component)
+          (instantiate-component))]
+    changes))
 
 (defn- prepare-duplicate-shape-change
-  ([changes objects page unames update-unames! ids-map obj delta]
-   (prepare-duplicate-shape-change changes objects page unames update-unames! ids-map obj delta (:frame-id obj) (:parent-id obj)))
+  ([changes objects page unames update-unames! ids-map obj delta libraries library-data it file-id]
+   (prepare-duplicate-shape-change changes objects page unames update-unames! ids-map obj delta libraries library-data it file-id (:frame-id obj) (:parent-id obj)))
 
-  ([changes objects page unames update-unames! ids-map obj delta frame-id parent-id]
-   (if (some? obj)
+  ([changes objects page unames update-unames! ids-map obj delta libraries library-data it file-id frame-id parent-id]
+   (cond
+     (nil? obj)
+     changes
+
+     (ctf/is-known-component? obj libraries)
+     (prepare-duplicate-component-change changes page obj parent-id delta libraries library-data it)
+
+     :else
      (let [frame?      (cph/frame-shape? obj)
            new-id      (ids-map (:id obj))
            parent-id   (or parent-id frame-id)
            name        (:name obj)
+
+           is-component-root? (:saved-component-root? obj)
+           is-component-main? (:main-instance? obj)
+           regenerate-component
+           (fn [changes shape]
+             (let [components-v2 (dm/get-in library-data [:options :components-v2])
+                   [_ changes] (dwlh/generate-add-component-changes changes shape objects file-id (:id page) components-v2)]
+               changes))
 
            new-obj     (-> obj
                            (assoc :id new-id
@@ -333,12 +428,17 @@
                                   :frame-id frame-id)
                            (dissoc :shapes
                                    :main-instance?
+                                   :shape-ref
                                    :use-for-thumbnail?)
                            (gsh/move delta)
                            (d/update-when :interactions #(ctsi/remap-interactions % ids-map objects)))
 
            changes (-> (pcb/add-object changes new-obj {:ignore-touched true})
-                       (pcb/amend-last-change #(assoc % :old-id (:id obj))))]
+                       (pcb/amend-last-change #(assoc % :old-id (:id obj))))
+
+           changes (cond-> changes
+                     (and is-component-root? is-component-main?)
+                     (regenerate-component new-obj))]
 
        (reduce (fn [changes child]
                  (prepare-duplicate-shape-change changes
@@ -349,11 +449,14 @@
                                                  ids-map
                                                  child
                                                  delta
+                                                 libraries
+                                                 library-data
+                                                 it
+                                                 file-id
                                                  (if frame? new-id frame-id)
                                                  new-id))
                changes
-               (map (d/getf objects) (:shapes obj))))
-     changes)))
+               (map (d/getf objects) (:shapes obj)))))))
 
 (defn- prepare-duplicate-flows
   [changes shapes page ids-map]
@@ -464,7 +567,9 @@
 (defn calc-duplicate-delta
   [obj state objects]
   (let [{:keys [id-original id-duplicated]}
-        (get-in state [:workspace-local :duplicated])]
+        (get-in state [:workspace-local :duplicated])
+        move? (and (cph/frame-shape? obj)
+                   (not (ctk/instance-head? obj)))]
     (if (or (and (not= id-original (:id obj))
                  (not= id-duplicated (:id obj)))
             ;; As we can remove duplicated elements may be we can still caching a deleted id
@@ -473,7 +578,7 @@
 
       ;; The default is leave normal shapes in place, but put
       ;; new frames to the right of the original.
-      (if (cph/frame-shape? obj)
+      (if move?
         (gpt/point (+ (:width obj) 50) 0)
         (gpt/point 0 0))
 
@@ -485,7 +590,10 @@
 
         (gpt/subtract new-pos pt-obj)))))
 
-(defn duplicate-selected [move-delta?]
+(defn duplicate-selected
+  ([move-delta?]
+   (duplicate-selected move-delta? false))
+  ([move-delta? alt-duplication?]
   (ptk/reify ::duplicate-selected
     ptk/WatchEvent
     (watch [it state _]
@@ -499,8 +607,16 @@
                                     (calc-duplicate-delta obj state objects)
                                     (gpt/point 0 0))
 
-                  changes         (->> (prepare-duplicate-changes objects page selected delta it)
+                  file-id         (:current-file-id state)
+                  libraries       (wsh/get-libraries state)
+                  library-data    (wsh/get-file state file-id)
+
+                  changes         (->> (prepare-duplicate-changes objects page selected delta it libraries library-data file-id)
                                        (duplicate-changes-update-indices objects selected))
+
+                  tags            (or (:tags changes) #{})
+
+                  changes         (cond-> changes alt-duplication? (assoc :tags (conj tags :alt-duplication)))
 
                   id-original     (first selected)
 
@@ -525,7 +641,7 @@
                 (select-shapes new-selected)
                 (ptk/data-event :layout/update frames)
                 (memorize-duplicated id-original id-duplicated)
-                (dwu/commit-undo-transaction undo-id)))))))))
+                (dwu/commit-undo-transaction undo-id))))))))))
 
 (defn change-hover-state
   [id value]

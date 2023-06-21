@@ -10,6 +10,7 @@
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes.path :as upg]
+   [app.common.pages.helpers :as cph]
    [app.common.path.commands :as upc]
    [app.common.path.shapes-to-path :as upsp]
    [app.common.path.subpaths :as ups]
@@ -153,6 +154,8 @@
 
             selected-points (dm/get-in state [:workspace-local :edit-path id :selected-points] #{})
 
+            start-position (apply min #(gpt/distance start-position %) selected-points)
+
             content (st/get-path state :content)
             points (upg/content->points content)]
 
@@ -241,7 +244,7 @@
       (let [id (dm/get-in state [:workspace-local :edition])
             cx (d/prefix-keyword prefix :x)
             cy (d/prefix-keyword prefix :y)
-            start-point @ms/mouse-position
+
             modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers])
             start-delta-x (dm/get-in modifiers [index cx] 0)
             start-delta-y (dm/get-in modifiers [index cy] 0)
@@ -258,7 +261,7 @@
         (streams/drag-stream
          (rx/concat
           (rx/of (dch/update-shapes [id] upsp/convert-to-path))
-          (->> (streams/move-handler-stream start-point point handler opposite points)
+          (->> (streams/move-handler-stream handler point handler opposite points)
                (rx/take-until (->> stream (rx/filter #(or (ms/mouse-up? %)
                                                           (streams/finish-edition? %)))))
                (rx/map
@@ -269,8 +272,8 @@
                      id
                      index
                      prefix
-                     (+ start-delta-x (- (:x pos) (:x start-point)))
-                     (+ start-delta-y (- (:y pos) (:y start-point)))
+                     (+ start-delta-x (- (:x pos) (:x handler)))
+                     (+ start-delta-y (- (:y pos) (:y handler)))
                      (not alt?))))))
           (rx/concat (rx/of (apply-content-modifiers)))))))))
 
@@ -281,9 +284,12 @@
   (ptk/reify ::start-path-edit
     ptk/UpdateEvent
     (update [_ state]
-      (let [edit-path (dm/get-in state [:workspace-local :edit-path id])
+      (let [objects (wsh/lookup-page-objects state)
+            edit-path (dm/get-in state [:workspace-local :edit-path id])
             content (st/get-path state :content)
-            state (st/set-content state (ups/close-subpaths content))]
+            state (cond-> state
+                    (cph/path-shape? objects id)
+                    (st/set-content (ups/close-subpaths content)))]
         (cond-> state
           (or (not edit-path) (= :draw (:edit-mode edit-path)))
           (assoc-in [:workspace-local :edit-path id] {:edit-mode :move

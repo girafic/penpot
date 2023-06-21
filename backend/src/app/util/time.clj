@@ -6,8 +6,13 @@
 
 (ns app.util.time
   (:require
+   [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
+   [app.common.schema :as sm]
+   [app.common.schema.openapi :as-alias oapi]
+   [app.common.time :as common-time]
    [clojure.spec.alpha :as s]
+   [clojure.test.check.generators :as tgen]
    [cuerdas.core :as str]
    [fipp.ednize :as fez])
   (:import
@@ -19,6 +24,7 @@
    java.time.ZonedDateTime
    java.time.format.DateTimeFormatter
    java.time.temporal.ChronoUnit
+   java.time.temporal.Temporal
    java.time.temporal.TemporalAmount
    java.time.temporal.TemporalUnit
    java.util.Date
@@ -127,7 +133,8 @@
 
 (extend-protocol fez/IEdn
   Duration
-  (-edn [o] (pr-str o)))
+  (-edn [o]
+    (tagged-literal 'app/duration (str o))))
 
 (defn format-duration
   [o]
@@ -160,15 +167,31 @@
 
 (defn plus
   [d ta]
-  (.plus d ^TemporalAmount (duration ta)))
+  (let [^TemporalAmount ta (duration ta)]
+    (cond
+      (instance? Duration d)
+      (.plus ^Duration d ta)
+
+      (instance? Temporal d)
+      (.plus ^Temporal d ta)
+
+      :else
+      (throw (UnsupportedOperationException. "unsupported type")))))
 
 (defn minus
   [d ta]
-  (.minus d ^TemporalAmount (duration ta)))
+  (let [^TemporalAmount ta (duration ta)]
+    (cond
+      (instance? Duration d)
+      (.minus ^Duration d ta)
 
-(defn now
-  []
-  (Instant/now))
+      (instance? Temporal d)
+      (.minus ^Temporal d ta)
+
+      :else
+      (throw (UnsupportedOperationException. "unsupported type")))))
+
+(dm/export common-time/now)
 
 (defn in-future
   [v]
@@ -199,7 +222,7 @@
 
 (extend-protocol fez/IEdn
   Instant
-  (-edn [o] (pr-str o)))
+  (-edn [o] (tagged-literal 'app/instant (format-instant o))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Cron Expression
@@ -338,3 +361,27 @@
   []
   (let [p1 (System/nanoTime)]
     #(duration {:nanos (- (System/nanoTime) p1)})))
+
+(sm/def! ::instant
+  {:type ::instant
+   :pred instant?
+   :type-properties
+   {:error/message "should be an instant"
+    :title "instant"
+    ::sm/decode instant
+    :gen/gen (tgen/fmap (fn [i] (in-past i))  tgen/pos-int)
+    ::oapi/type "string"
+    ::oapi/format "iso"
+    }})
+
+(sm/def! ::duration
+  {:type :durations
+   :pred duration?
+   :type-properties
+   {:error/message "should be a duration"
+    :gen/gen (tgen/fmap duration tgen/pos-int)
+    :title "duration"
+    ::sm/decode duration
+    ::oapi/type "string"
+    ::oapi/format "duration"
+    }})

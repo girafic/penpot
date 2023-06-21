@@ -5,8 +5,8 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer
+  (:import goog.events.EventType)
   (:require
-   [app.common.colors :as clr]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
@@ -34,6 +34,7 @@
    [app.main.ui.viewer.thumbnails :refer [thumbnails-panel]]
    [app.util.dom :as dom]
    [app.util.dom.normalize-wheel :as nw]
+   [app.util.globals :as globals]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
    [app.util.webapi :as wapi]
@@ -157,7 +158,8 @@
      :index index
      :page page
      :users users
-     :frame frame}]
+     :frame frame
+     :interactions-mode interactions-mode}]
 
    [:div.viewer-wrapper
     {:style {:width (:width wrapper-size)
@@ -177,7 +179,7 @@
           :size orig-size
           :page page
           :users users
-          :interactions-mode :hide}]])
+          :interactions-mode interactions-mode}]])
 
      [:div.viewport-container
       {:ref current-viewport-ref
@@ -213,7 +215,7 @@
 (mf/defc viewer
   [{:keys [params data]}]
 
-  (let [{:keys [page-id section index]} params
+  (let [{:keys [page-id section index interactions-mode]} params
         {:keys [file users project permissions]} data
 
         allowed (or
@@ -280,9 +282,6 @@
         (mf/with-memo [size orig-size zoom]
           (calculate-wrapper size orig-size zoom))
 
-        interactions-mode
-        (:interactions-mode local)
-
         click-on-screen
         (mf/use-callback
          (fn [event]
@@ -329,7 +328,13 @@
                  (dom/stop-propagation event)
                  (if shift?
                    (dom/set-h-scroll-pos! viewer-section new-scroll-pos)
-                   (dom/set-scroll-pos! viewer-section new-scroll-pos)))))))]
+                   (dom/set-scroll-pos! viewer-section new-scroll-pos)))))))
+
+        on-exit-fullscreen
+        (mf/use-callback
+         (fn []
+           (when (not (dom/fullscreen?))
+             (st/emit! (dv/exit-fullscreen)))))]
 
     (hooks/use-shortcuts ::viewer sc/shortcuts)
     (when (nil? page)
@@ -347,12 +352,19 @@
          (dom/set-html-title (str "\u25b6 " (tr "title.viewer" name))))))
 
     (mf/with-effect []
-      (dom/set-html-theme-color clr/gray-50 "dark")
-      (let [key1 (events/listen js/window "click" on-click)
-            key2 (events/listen (mf/ref-val viewer-section-ref) "wheel" on-wheel #js {"passive" false})]
+      (let [events
+            [(events/listen globals/window EventType.CLICK on-click)
+             (events/listen (mf/ref-val viewer-section-ref) EventType.WHEEL on-wheel #js {"passive" false})]]
+
+        (doseq [event dom/fullscreen-events]
+          (.addEventListener globals/document event on-exit-fullscreen false))
+
         (fn []
-          (events/unlistenByKey key1)
-          (events/unlistenByKey key2))))
+          (doseq [key events]
+            (events/unlistenByKey key))
+
+          (doseq [event dom/fullscreen-events]
+            (.removeEventListener globals/document event on-exit-fullscreen)))))
 
     (mf/use-effect
      (fn []
@@ -470,7 +482,8 @@
                          :frame frame
                          :permissions permissions
                          :zoom zoom
-                         :section section}]
+                         :section section
+                         :interactions-mode interactions-mode}]
       [:div.thumbnail-close {:on-click #(st/emit! dv/close-thumbnails-panel)
                              :class (dom/classnames :invisible (not (:show-thumbnails local false)))}]
       [:& thumbnails-panel {:frames frames
@@ -502,7 +515,8 @@
              :local local
              :size size
              :index index
-             :viewer-pagination viewer-pagination}]
+             :viewer-pagination viewer-pagination
+             :interactions-mode interactions-mode}]
 
 
            [:& (mf/provider ctx/current-zoom) {:value zoom}

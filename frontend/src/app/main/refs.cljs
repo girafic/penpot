@@ -104,9 +104,6 @@
 (def workspace-drawing
   (l/derived :workspace-drawing st/state))
 
-(def workspace-ready?
-  (l/derived :workspace-ready? st/state))
-
 ;; TODO: rename to workspace-selected (?)
 ;; Don't use directly from components, this is a proxy to improve performance of selected-shapes
 (def ^:private selected-shapes-data
@@ -183,17 +180,12 @@
 (def context-menu
   (l/derived :context-menu workspace-local))
 
-(def file-library-listing-thumbs?
-  (l/derived :file-library-listing-thumbs workspace-global))
-
-(def file-library-reverse-sort?
-  (l/derived :file-library-reverse-sort workspace-global))
+;; page item that it is being edited
+(def editing-page-item
+  (l/derived :page-item workspace-local))
 
 (def current-hover-ids
   (l/derived :hover-ids context-menu))
-
-(def selected-assets
-  (l/derived :selected-assets workspace-global))
 
 (def workspace-layout
   (l/derived :workspace-layout st/state))
@@ -208,6 +200,8 @@
                      data (:workspace-data state)]
                  (-> file
                      (dissoc :data)
+                     ;; FIXME: still used in sitemaps but sitemaps
+                     ;; should declare its own lense for it
                      (assoc :pages (:pages data)))))
              st/state =))
 
@@ -278,6 +272,15 @@
 
 (def workspace-read-only?
   (l/derived :read-only? workspace-global))
+
+(def workspace-paddings-selected
+  (l/derived :paddings-selected workspace-global))
+
+(def workspace-gap-selected
+  (l/derived :gap-selected workspace-global))
+
+(def workspace-margins-selected
+  (l/derived :margins-selected workspace-global))
 
 (defn object-by-id
   [id]
@@ -379,9 +382,7 @@
 
 (def selected-objects
   (letfn [(selector [{:keys [selected objects]}]
-            (->> selected
-                 (map #(get objects %))
-                 (filterv (comp not nil?))))]
+            (into [] (keep (d/getf objects)) selected))]
     (l/derived selector selected-data =)))
 
 (def selected-shapes-with-children
@@ -402,7 +403,7 @@
      (let [objects  (wsh/lookup-page-objects state)]
        (into []
              (comp (map (d/getf objects))
-                   (filter (partial ctl/layout-immediate-child? objects)))
+                   (filter (partial ctl/flex-layout-immediate-child? objects)))
              ids)))
    st/state =))
 
@@ -475,22 +476,22 @@
 (defn workspace-text-modifier-by-id [id]
   (l/derived #(get % id) workspace-text-modifier =))
 
-(defn is-layout-child?
+(defn is-flex-layout-child?
   [ids]
   (l/derived
    (fn [objects]
      (->> ids
           (map (d/getf objects))
-          (some (partial ctl/layout-immediate-child? objects))))
+          (some (partial ctl/flex-layout-immediate-child? objects))))
    workspace-page-objects))
 
-(defn all-layout-child?
+(defn all-flex-layout-child?
   [ids]
   (l/derived
    (fn [objects]
      (->> ids
           (map (d/getf objects))
-          (every? (partial ctl/layout-immediate-child? objects))))
+          (every? (partial ctl/flex-layout-immediate-child? objects))))
    workspace-page-objects))
 
 (defn get-flex-child-viewer
@@ -500,7 +501,7 @@
      (let [objects (wsh/lookup-viewer-objects state page-id)]
        (into []
              (comp (map (d/getf objects))
-                   (filter (partial ctl/layout-immediate-child? objects)))
+                   (filter (partial ctl/flex-layout-immediate-child? objects)))
              ids)))
    st/state =))
 
@@ -519,3 +520,23 @@
 
 (def colorpicker
   (l/derived :colorpicker st/state))
+
+
+(def workspace-grid-edition
+  (l/derived :workspace-grid-edition st/state))
+
+(defn workspace-grid-edition-id
+  [id]
+  (l/derived #(get % id) workspace-grid-edition))
+
+(def workspace-annotations
+  (l/derived #(get % :workspace-annotations {}) st/state))
+
+(def current-file-id
+  (l/derived :current-file-id st/state))
+
+(def workspace-preview-blend
+  (l/derived :workspace-preview-blend st/state))
+
+(defn workspace-preview-blend-by-id [id]
+  (l/derived (l/key id) workspace-preview-blend =))

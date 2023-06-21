@@ -64,7 +64,7 @@
 
     [:header.dashboard-header
      (if (:is-default project)
-       [:div.dashboard-title#dashboard-drafts-title 
+       [:div.dashboard-title#dashboard-drafts-title
         [:h1 (tr "labels.drafts")]]
 
        (if (:edition @local)
@@ -90,7 +90,7 @@
                        :on-import on-import}]
 
      [:div.dashboard-header-actions
-      [:a.btn-secondary.btn-small 
+      [:a.btn-secondary.btn-small
        {:tab-index "0"
         :on-click on-create-click
         :data-test "new-file"
@@ -114,7 +114,7 @@
 
       [:div.icon.tooltip.tooltip-bottom-left
        {:tab-index "0"
-        :on-click on-menu-click 
+        :on-click on-menu-click
         :alt (tr "dashboard.options")
         :on-key-down (fn [event]
                        (when (kbd/enter? event)
@@ -144,6 +144,7 @@
 
         create-file
         (mf/use-fn
+         (mf/deps project)
          (fn [origin]
            (st/emit! (with-meta (dd/create-file {:project-id (:id project)})
                        {::ev/origin origin}))))]

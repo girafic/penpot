@@ -155,8 +155,18 @@
   (.isClosed ^HikariDataSource pool))
 
 (defn read-only?
-  [pool]
-  (.isReadOnly ^HikariDataSource pool))
+  [pool-or-conn]
+  (cond
+    (instance? HikariDataSource pool-or-conn)
+    (.isReadOnly ^HikariDataSource pool-or-conn)
+
+    (instance? Connection pool-or-conn)
+    (.isReadOnly ^Connection pool-or-conn)
+
+    :else
+    (ex/raise :type :internal
+              :code :invalid-connection
+              :hint "invalid connection provided")))
 
 (defn create-pool
   [cfg]
@@ -351,11 +361,19 @@
   [data]
   (org.postgresql.util.PGInterval. ^String data))
 
+(defn connection?
+  [conn]
+  (instance? Connection conn))
+
 (defn savepoint
   ([^Connection conn]
    (.setSavepoint conn))
   ([^Connection conn label]
    (.setSavepoint conn (name label))))
+
+(defn release!
+  [^Connection conn ^Savepoint sp ]
+  (.releaseSavepoint conn sp))
 
 (defn rollback!
   ([^Connection conn]

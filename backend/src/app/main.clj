@@ -14,7 +14,6 @@
    [app.db :as-alias db]
    [app.email :as-alias email]
    [app.http :as-alias http]
-   [app.http.access-token :as-alias actoken]
    [app.http.assets :as-alias http.assets]
    [app.http.awsns :as http.awsns]
    [app.http.client :as-alias http.client]
@@ -22,7 +21,6 @@
    [app.http.session :as-alias session]
    [app.http.session.tasks :as-alias session.tasks]
    [app.http.websocket :as http.ws]
-   [app.loggers.audit :as-alias audit]
    [app.loggers.audit.tasks :as-alias audit.tasks]
    [app.loggers.webhooks :as-alias webhooks]
    [app.metrics :as-alias mtx]
@@ -38,7 +36,8 @@
    [app.util.time :as dt]
    [app.worker :as-alias wrk]
    [cuerdas.core :as str]
-   [integrant.core :as ig])
+   [integrant.core :as ig]
+   [promesa.exec :as px])
   (:gen-class))
 
 (def default-metrics
@@ -103,15 +102,15 @@
     ::mdef/labels ["name"]
     ::mdef/type :summary}
 
-   :rpc-climit-queue-size
-   {::mdef/name "penpot_rpc_climit_queue_size"
-    ::mdef/help "Current number of queued submissions on the CLIMIT."
+   :rpc-climit-queue
+   {::mdef/name "penpot_rpc_climit_queue"
+    ::mdef/help "Current number of queued submissions."
     ::mdef/labels ["name"]
     ::mdef/type :gauge}
 
-   :rpc-climit-concurrency
-   {::mdef/name "penpot_rpc_climit_concurrency"
-    ::mdef/help "Current number of used concurrency capacity on the CLIMIT"
+   :rpc-climit-permits
+   {::mdef/name "penpot_rpc_climit_permits"
+    ::mdef/help "Current number of available permits"
     ::mdef/labels ["name"]
     ::mdef/type :gauge}
 
@@ -175,10 +174,8 @@
 
    ;; Default thread pool for IO operations
    ::wrk/executor
-   {::wrk/parallelism (cf/get :default-executor-parallelism 100)}
-
-   ::wrk/scheduled-executor
-   {::wrk/parallelism (cf/get :scheduled-executor-parallelism 20)}
+   {::wrk/parallelism (cf/get :default-executor-parallelism
+                              (+ 3 (* (px/get-available-processors) 3)))}
 
    ::wrk/monitor
    {::mtx/metrics  (ig/ref ::mtx/metrics)
@@ -195,17 +192,16 @@
    {::mtx/metrics (ig/ref ::mtx/metrics)}
 
    ::rds/redis
-   {::rds/uri     (cf/get :redis-uri)
-    ::mtx/metrics (ig/ref ::mtx/metrics)}
+   {::rds/uri      (cf/get :redis-uri)
+    ::mtx/metrics  (ig/ref ::mtx/metrics)
+    ::wrk/executor (ig/ref ::wrk/executor)}
 
    ::mbus/msgbus
-   {:backend   (cf/get :msgbus-backend :redis)
-    :executor  (ig/ref ::wrk/executor)
-    :redis     (ig/ref ::rds/redis)}
+   {::wrk/executor  (ig/ref ::wrk/executor)
+    ::rds/redis     (ig/ref ::rds/redis)}
 
    :app.storage.tmp/cleaner
-   {::wrk/executor (ig/ref ::wrk/executor)
-    ::wrk/scheduled-executor (ig/ref ::wrk/scheduled-executor)}
+   {::wrk/executor (ig/ref ::wrk/executor)}
 
    ::sto/gc-deleted-task
    {::db/pool      (ig/ref ::db/pool)
@@ -218,14 +214,7 @@
    {::wrk/executor (ig/ref ::wrk/executor)}
 
    ::session/manager
-   {::db/pool      (ig/ref ::db/pool)
-    ::wrk/executor (ig/ref ::wrk/executor)
-    ::props        (ig/ref :app.setup/props)}
-
-   ::actoken/manager
-   {::db/pool      (ig/ref ::db/pool)
-    ::wrk/executor (ig/ref ::wrk/executor)
-    ::props        (ig/ref :app.setup/props)}
+   {::db/pool (ig/ref ::db/pool)}
 
    ::session.tasks/gc
    {::db/pool (ig/ref ::db/pool)}
@@ -240,8 +229,7 @@
    {::http/port                    (cf/get :http-server-port)
     ::http/host                    (cf/get :http-server-host)
     ::http/router                  (ig/ref ::http/router)
-    ::http/metrics                 (ig/ref ::mtx/metrics)
-    ::http/executor                (ig/ref ::wrk/executor)
+    ::wrk/executor                 (ig/ref ::wrk/executor)
     ::http/io-threads              (cf/get :http-server-io-threads)
     ::http/max-body-size           (cf/get :http-server-max-body-size)
     ::http/max-multipart-body-size (cf/get :http-server-max-multipart-body-size)}
@@ -276,18 +264,14 @@
    {::http.client/client (ig/ref ::http.client/client)
     ::db/pool            (ig/ref ::db/pool)
     ::props              (ig/ref :app.setup/props)
-    ::wrk/executor       (ig/ref ::wrk/executor)
     ::oidc/providers     {:google (ig/ref ::oidc.providers/google)
                           :github (ig/ref ::oidc.providers/github)
                           :gitlab (ig/ref ::oidc.providers/gitlab)
                           :oidc   (ig/ref ::oidc.providers/generic)}
-    ::audit/collector    (ig/ref ::audit/collector)
     ::session/manager    (ig/ref ::session/manager)}
 
    :app.http/router
    {::session/manager    (ig/ref ::session/manager)
-    ::actoken/manager    (ig/ref ::actoken/manager)
-    ::wrk/executor       (ig/ref ::wrk/executor)
     ::db/pool            (ig/ref ::db/pool)
     ::rpc/routes         (ig/ref ::rpc/routes)
     ::rpc.doc/routes     (ig/ref ::rpc.doc/routes)
@@ -302,12 +286,13 @@
    :app.http.debug/routes
    {::db/pool         (ig/ref ::db/pool)
     ::wrk/executor    (ig/ref ::wrk/executor)
-    ::session/manager (ig/ref ::session/manager)}
+    ::session/manager (ig/ref ::session/manager)
+    ::sto/storage     (ig/ref ::sto/storage)}
 
-   :app.http.websocket/routes
+   ::http.ws/routes
    {::db/pool         (ig/ref ::db/pool)
     ::mtx/metrics     (ig/ref ::mtx/metrics)
-    ::mbus/msgbus     (ig/ref :app.msgbus/msgbus)
+    ::mbus/msgbus     (ig/ref ::mbus/msgbus)
     ::session/manager (ig/ref ::session/manager)}
 
    :app.http.assets/routes
@@ -322,12 +307,10 @@
     ::wrk/executor (ig/ref ::wrk/executor)}
 
    :app.rpc/rlimit
-   {::wrk/executor           (ig/ref ::wrk/executor)
-    ::wrk/scheduled-executor (ig/ref ::wrk/scheduled-executor)}
+   {::wrk/executor (ig/ref ::wrk/executor)}
 
    :app.rpc/methods
-   {::audit/collector    (ig/ref ::audit/collector)
-    ::http.client/client (ig/ref ::http.client/client)
+   {::http.client/client (ig/ref ::http.client/client)
     ::db/pool            (ig/ref ::db/pool)
     ::wrk/executor       (ig/ref ::wrk/executor)
     ::session/manager    (ig/ref ::session/manager)
@@ -354,7 +337,6 @@
     ::db/pool         (ig/ref ::db/pool)
     ::wrk/executor    (ig/ref ::wrk/executor)
     ::session/manager (ig/ref ::session/manager)
-    ::actoken/manager (ig/ref ::actoken/manager)
     ::props           (ig/ref :app.setup/props)}
 
    ::wrk/registry
@@ -399,7 +381,8 @@
     ::sto/storage (ig/ref ::sto/storage)}
 
    :app.tasks.file-gc/handler
-   {::db/pool (ig/ref ::db/pool)}
+   {::db/pool     (ig/ref ::db/pool)
+    ::sto/storage (ig/ref ::sto/storage)}
 
    :app.tasks.file-xlog-gc/handler
    {::db/pool (ig/ref ::db/pool)}
@@ -427,11 +410,6 @@
     ;; NOTE: this dependency is only necessary for proper initialization ordering, props
     ;; module requires the migrations to run before initialize.
     ::migrations (ig/ref :app.migrations/migrations)}
-
-   ::audit/collector
-   {::db/pool           (ig/ref ::db/pool)
-    ::wrk/executor      (ig/ref ::wrk/executor)
-    ::mtx/metrics       (ig/ref ::mtx/metrics)}
 
    ::audit.tasks/archive
    {::props              (ig/ref :app.setup/props)
@@ -475,8 +453,7 @@
 
 (def worker-config
   {::wrk/cron
-   {::wrk/scheduled-executor  (ig/ref ::wrk/scheduled-executor)
-    ::wrk/registry            (ig/ref ::wrk/registry)
+   {::wrk/registry            (ig/ref ::wrk/registry)
     ::db/pool                 (ig/ref ::db/pool)
     ::wrk/entries
     [{:cron #app/cron "0 0 * * * ?" ;; hourly

@@ -6,12 +6,13 @@
 
 (ns backend-tests.storage-test
   (:require
-   [backend-tests.helpers :as th]
    [app.common.exceptions :as ex]
    [app.common.uuid :as uuid]
    [app.db :as db]
+   [app.rpc :as-alias rpc]
    [app.storage :as sto]
    [app.util.time :as dt]
+   [backend-tests.helpers :as th]
    [clojure.test :as t]
    [cuerdas.core :as str]
    [datoteka.core :as fs]
@@ -37,61 +38,61 @@
   (let [storage (-> (:app.storage/storage th/*system*)
                     (configure-storage-backend))
         content (sto/content "content")
-        object  @(sto/put-object! storage {::sto/content content
-                                           :content-type "text/plain"
-                                           :other "data"})]
+        object  (sto/put-object! storage {::sto/content content
+                                          :content-type "text/plain"
+                                          :other "data"})]
 
     (t/is (sto/object? object))
-    (t/is (fs/path? @(sto/get-object-path storage object)))
+    (t/is (fs/path? (sto/get-object-path storage object)))
 
     (t/is (nil? (:expired-at object)))
     (t/is (= :assets-fs (:backend object)))
     (t/is (= "data" (:other (meta object))))
     (t/is (= "text/plain" (:content-type (meta object))))
-    (t/is (= "content" (slurp @(sto/get-object-data storage object))))
-    (t/is (= "content" (slurp @(sto/get-object-path storage object))))
+    (t/is (= "content" (slurp (sto/get-object-data storage object))))
+    (t/is (= "content" (slurp (sto/get-object-path storage object))))
     ))
 
 (t/deftest put-and-retrieve-expired-object
   (let [storage (-> (:app.storage/storage th/*system*)
                     (configure-storage-backend))
         content (sto/content "content")
-        object  @(sto/put-object! storage {::sto/content content
-                                           ::sto/expired-at (dt/in-future {:seconds 1})
-                                           :content-type "text/plain"
-                                           })]
+        object  (sto/put-object! storage {::sto/content content
+                                          ::sto/expired-at (dt/in-future {:seconds 1})
+                                          :content-type "text/plain"
+                                          })]
 
     (t/is (sto/object? object))
     (t/is (dt/instant? (:expired-at object)))
     (t/is (dt/is-after? (:expired-at object) (dt/now)))
-    (t/is (= object @(sto/get-object storage (:id object))))
+    (t/is (= object (sto/get-object storage (:id object))))
 
     (th/sleep 1000)
-    (t/is (nil? @(sto/get-object storage (:id object))))
-    (t/is (nil? @(sto/get-object-data storage object)))
-    (t/is (nil? @(sto/get-object-url storage object)))
-    (t/is (nil? @(sto/get-object-path storage object)))
+    (t/is (nil? (sto/get-object storage (:id object))))
+    (t/is (nil? (sto/get-object-data storage object)))
+    (t/is (nil? (sto/get-object-url storage object)))
+    (t/is (nil? (sto/get-object-path storage object)))
     ))
 
 (t/deftest put-and-delete-object
   (let [storage (-> (:app.storage/storage th/*system*)
                     (configure-storage-backend))
         content (sto/content "content")
-        object  @(sto/put-object! storage {::sto/content content
-                                           :content-type "text/plain"
-                                           :expired-at (dt/in-future {:seconds 1})})]
+        object  (sto/put-object! storage {::sto/content content
+                                          :content-type "text/plain"
+                                          :expired-at (dt/in-future {:seconds 1})})]
     (t/is (sto/object? object))
-    (t/is (true? @(sto/del-object! storage object)))
+    (t/is (true? (sto/del-object! storage object)))
 
     ;; retrieving the same object should be not nil because the
     ;; deletion is not immediate
-    (t/is (some? @(sto/get-object-data storage object)))
-    (t/is (some? @(sto/get-object-url storage object)))
-    (t/is (some? @(sto/get-object-path storage object)))
+    (t/is (some? (sto/get-object-data storage object)))
+    (t/is (some? (sto/get-object-url storage object)))
+    (t/is (some? (sto/get-object-path storage object)))
 
     ;; But you can't retrieve the object again because in database is
     ;; marked as deleted/expired.
-    (t/is (nil? @(sto/get-object storage (:id object))))
+    (t/is (nil? (sto/get-object storage (:id object))))
     ))
 
 (t/deftest test-deleted-gc-task
@@ -99,14 +100,14 @@
                     (configure-storage-backend))
         content1 (sto/content "content1")
         content2 (sto/content "content2")
-        object1  @(sto/put-object! storage {::sto/content content1
-                                            ::sto/expired-at (dt/now)
-                                            :content-type "text/plain"
-                                            })
-        object2  @(sto/put-object! storage {::sto/content content2
-                                            ::sto/expired-at (dt/in-past {:hours 2})
-                                            :content-type "text/plain"
-                                            })]
+        object1  (sto/put-object! storage {::sto/content content1
+                                           ::sto/expired-at (dt/now)
+                                           :content-type "text/plain"
+                                           })
+        object2  (sto/put-object! storage {::sto/content content2
+                                           ::sto/expired-at (dt/in-past {:hours 2})
+                                           :content-type "text/plain"
+                                           })]
 
     (th/sleep 200)
 
@@ -134,14 +135,14 @@
                  :size 312043}
 
         params  {::th/type :upload-file-media-object
-                 :profile-id (:id prof)
+                 ::rpc/profile-id (:id prof)
                  :file-id (:id file)
                  :is-local true
                  :name "testfile"
                  :content mfile}
 
-        out1    (th/mutation! params)
-        out2    (th/mutation! params)]
+        out1    (th/command! params)
+        out2    (th/command! params)]
 
     (t/is (nil? (:error out1)))
     (t/is (nil? (:error out2)))
@@ -209,14 +210,14 @@
                  :size 312043}
 
         params1 {::th/type :upload-file-media-object
-                 :profile-id (:id prof)
+                 ::rpc/profile-id (:id prof)
                  :file-id (:id file)
                  :is-local true
                  :name "testfile"
                  :content mfile}
 
         params2 {::th/type :create-font-variant
-                 :profile-id (:id prof)
+                 ::rpc/profile-id (:id prof)
                  :team-id team-id
                  :font-id font-id
                  :font-family "somefont"
@@ -224,8 +225,8 @@
                  :font-style "normal"
                  :data {"font/ttf" ttfdata}}
 
-        out1     (th/mutation! params1)
-        out2     (th/mutation! params2)]
+        out1     (th/command! params1)
+        out2     (th/command! params2)]
 
     ;; (th/print-result! out)
 
@@ -275,14 +276,14 @@
                  :size 312043}
 
         params  {::th/type :upload-file-media-object
-                 :profile-id (:id prof)
+                 ::rpc/profile-id (:id prof)
                  :file-id (:id file)
                  :is-local true
                  :name "testfile"
                  :content mfile}
 
-        out1    (th/mutation! params)
-        out2    (th/mutation! params)]
+        out1    (th/command! params)
+        out2    (th/command! params)]
 
     (t/is (nil? (:error out1)))
     (t/is (nil? (:error out2)))

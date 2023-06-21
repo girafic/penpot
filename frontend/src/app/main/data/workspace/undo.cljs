@@ -6,19 +6,27 @@
 
 (ns app.main.data.workspace.undo
   (:require
-   [app.common.pages.changes-spec :as pcs]
-   [app.common.spec :as us]
-   [cljs.spec.alpha :as s]
+   [app.common.data :as d]
+   [app.common.data.macros :as dm]
+   [app.common.logging :as log]
+   [app.common.pages.changes :as cpc]
+   [app.common.schema :as sm]
    [potok.core :as ptk]))
+
+;; Change this to :info :debug or :trace to debug this module
+(log/set-level! :warn)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Undo / Redo
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(s/def ::undo-changes ::pcs/changes)
-(s/def ::redo-changes ::pcs/changes)
-(s/def ::undo-entry
-  (s/keys :req-un [::undo-changes ::redo-changes]))
+(def schema:undo-entry
+  [:map
+   [:undo-changes [:vector ::cpc/change]]
+   [:redo-changes [:vector ::cpc/change]]])
+
+(def undo-entry?
+  (sm/pred-fn schema:undo-entry))
 
 (def MAX-UNDO-SIZE 50)
 
@@ -54,32 +62,61 @@
                                                     (dec MAX-UNDO-SIZE)))))
     state))
 
+(defn- stack-undo-entry
+  [state {:keys [undo-changes redo-changes] :as entry}]
+    (let [index (get-in state [:workspace-undo :index] -1)]
+    (if (>= index 0)
+      (update-in state [:workspace-undo :items index]
+                 (fn [item]
+                   (-> item
+                       (update :undo-changes #(into undo-changes %))
+                       (update :redo-changes #(into % redo-changes)))))
+      (add-undo-entry state entry))))
+
 (defn- accumulate-undo-entry
-  [state {:keys [undo-changes redo-changes]}]
+  [state {:keys [undo-changes redo-changes undo-group tags]}]
   (-> state
       (update-in [:workspace-undo :transaction :undo-changes] #(into undo-changes %))
-      (update-in [:workspace-undo :transaction :redo-changes] #(into % redo-changes))))
+      (update-in [:workspace-undo :transaction :redo-changes] #(into % redo-changes))
+      (cond->
+       (nil? (get-in state [:workspace-undo :transaction :undo-group]))
+       (assoc-in [:workspace-undo :transaction :undo-group] undo-group))
+      (assoc-in [:workspace-undo :transaction :tags] tags)))
 
 (defn append-undo
-  [entry]
-  (us/assert ::undo-entry entry)
+  [entry stack?]
+  (dm/assert! (boolean? stack?))
+  (dm/assert! (undo-entry? entry))
+
   (ptk/reify ::append-undo
     ptk/UpdateEvent
     (update [_ state]
-      (if (get-in state [:workspace-undo :transaction])
-        (accumulate-undo-entry state entry)
-        (add-undo-entry state entry)))))
+     (cond
+       (and (get-in state [:workspace-undo :transaction])
+            (or (not stack?)
+                (d/not-empty? (get-in state [:workspace-undo :transaction :undo-changes]))
+                (d/not-empty? (get-in state [:workspace-undo :transaction :redo-changes]))))
+       (accumulate-undo-entry state entry)
+
+       stack?
+       (stack-undo-entry state entry)
+
+       :else
+       (add-undo-entry state entry)))))
 
 (def empty-tx
   {:undo-changes [] :redo-changes []})
 
-(defn start-undo-transaction [id]
+(defn start-undo-transaction
+  "Start a transaction, so that every changes inside are added together in a single undo entry."
+  [id]
   (ptk/reify ::start-undo-transaction
     ptk/UpdateEvent
     (update [_ state]
+      (log/info :msg "start-undo-transaction")
       ;; We commit the old transaction before starting the new one
-      (let [current-tx (get-in state [:workspace-undo :transaction])
-            pending-tx (get-in state [:workspace-undo :transactions-pending])]
+      (let [current-tx    (get-in state [:workspace-undo :transaction])
+            pending-tx    (get-in state [:workspace-undo :transactions-pending])]
         (cond-> state
           (nil? current-tx)  (assoc-in [:workspace-undo :transaction] empty-tx)
           (nil? pending-tx)  (assoc-in [:workspace-undo :transactions-pending] #{id})
@@ -89,28 +126,20 @@
   (ptk/reify ::discard-undo-transaction
     ptk/UpdateEvent
     (update [_ state]
+      (log/info :msg "discard-undo-transaction")
       (update state :workspace-undo dissoc :transaction :transactions-pending))))
 
 (defn commit-undo-transaction [id]
   (ptk/reify ::commit-undo-transaction
     ptk/UpdateEvent
     (update [_ state]
+      (log/info :msg "commit-undo-transaction")
       (let [state (update-in state [:workspace-undo :transactions-pending] disj id)]
         (if (empty? (get-in state [:workspace-undo :transactions-pending]))
           (-> state
               (add-undo-entry (get-in state [:workspace-undo :transaction]))
               (update :workspace-undo dissoc :transaction))
           state)))))
-
-(def pop-undo-into-transaction
-  (ptk/reify ::last-undo-into-transaction
-    ptk/UpdateEvent
-    (update [_ state]
-      (let [index (get-in state [:workspace-undo :index] -1)]
-
-        (cond-> state
-          (>= index 0) (accumulate-undo-entry (get-in state [:workspace-undo :items index]))
-          (>= index 0) (update-in [:workspace-undo :index] dec))))))
 
 (def reinitialize-undo
   (ptk/reify ::reset-undo

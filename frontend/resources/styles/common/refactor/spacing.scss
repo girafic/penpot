@@ -1,0 +1,41 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "sass:math";
+
+$s-0: 0px;
+$s-2: math.div(0.25rem, 2);
+$s-4: var(--s-4);
+$s-6: calc($s-2 + $s-4);
+$s-8: calc(var(--s-4) * 2);
+$s-12: calc(var(--s-4) * 3);
+$s-16: calc(var(--s-4) * 4);
+$s-20: calc(var(--s-4) * 5);
+$s-24: calc(var(--s-4) * 6);
+$s-28: calc(var(--s-4) * 7);
+$s-32: calc(var(--s-4) * 8);
+$s-36: calc(var(--s-4) * 9);
+$s-40: calc(var(--s-4) * 10);
+$s-44: calc(var(--s-4) * 11);
+$s-48: calc(var(--s-4) * 12);
+$s-52: calc(var(--s-4) * 13);
+$s-56: calc(var(--s-4) * 14);
+$s-60: calc(var(--s-4) * 15);
+$s-64: calc(var(--s-4) * 16);
+$s-68: calc(var(--s-4) * 17);
+$s-72: calc(var(--s-4) * 18);
+$s-76: calc(var(--s-4) * 19);
+$s-80: calc(var(--s-4) * 20);
+$s-96: calc(var(--s-4) * 24);
+$s-104: calc(var(--s-4) * 25);
+$s-120: calc(var(--s-4) * 30);
+$s-136: calc(var(--s-4) * 34);
+$s-152: calc(var(--s-4) * 38);
+$s-192: calc(var(--s-4) * 48);
+$s-240: calc(var(--s-4) * 60);
+$s-248: calc(var(--s-4) * 61);
+$s-480: calc(var(--s-4) * 120);
+$s-736: calc(var(--s-4) * 184);

@@ -10,7 +10,10 @@
    [app.common.files.features :as ffeat]
    [app.common.logging :as l]
    [app.common.pages :as cp]
+   [app.common.pages.changes :as cpc]
    [app.common.pages.migrations :as pmg]
+   [app.common.schema :as sm]
+   [app.common.schema.generators :as smg]
    [app.common.spec :as us]
    [app.common.types.file :as ctf]
    [app.common.uuid :as uuid]
@@ -21,7 +24,7 @@
    [app.metrics :as mtx]
    [app.msgbus :as mbus]
    [app.rpc :as-alias rpc]
-   [app.rpc.climit :as-alias climit]
+   [app.rpc.climit :as climit]
    [app.rpc.commands.files :as files]
    [app.rpc.doc :as-alias doc]
    [app.rpc.helpers :as rph]
@@ -60,6 +63,40 @@
      (or (contains? o :changes)
          (contains? o :changes-with-metadata)))))
 
+
+;; --- SCHEMA
+
+(sm/def! ::changes
+  [:vector ::cpc/change])
+
+(sm/def! ::change-with-metadata
+  [:map {:title "ChangeWithMetadata"}
+   [:changes ::changes]
+   [:hint-origin {:optional true} :keyword]
+   [:hint-events {:optional true} [:vector :string]]])
+
+(sm/def! ::update-file-params
+  [:map {:title "UpdateFileParams"}
+   [:id ::sm/uuid]
+   [:session-id ::sm/uuid]
+   [:revn {:min 0} :int]
+   [:features {:optional true
+               :gen/max 3
+               :gen/gen (smg/subseq files/supported-features)}
+    ::sm/set-of-strings]
+   [:changes {:optional true} ::changes]
+   [:changes-with-metadata {:optional true}
+    [:vector ::change-with-metadata]]])
+
+(sm/def! ::update-file-result
+  [:vector {:title "UpdateFileResults"}
+   [:map {:title "UpdateFileResult"}
+    [:changes ::changes]
+    [:file-id ::sm/uuid]
+    [:id ::sm/uuid]
+    [:revn {:min 0} :int]
+    [:session-id ::sm/uuid]]])
+
 ;; --- HELPERS
 
 ;; File changes that affect to the library, and must be notified
@@ -78,8 +115,7 @@
 (defn- library-change?
   [{:keys [type] :as change}]
   (or (contains? library-change-types type)
-      (and (contains? file-change-types type)
-           (some? (:component-id change)))))
+      (contains? file-change-types type)))
 
 (def ^:private sql:get-file
   "SELECT f.*, p.team_id
@@ -101,7 +137,7 @@
 
 (defn- wrap-with-pointer-map-context
   [f]
-  (fn [{:keys [conn] :as cfg} {:keys [id] :as file}]
+  (fn [{:keys [::db/conn] :as cfg} {:keys [id] :as file}]
     (binding [pmap/*tracked* (atom {})
               pmap/*load-fn* (partial files/load-pointer conn id)
               ffeat/*wrap-with-pointer-map-fn* pmap/wrap]
@@ -126,18 +162,22 @@
 ;; database.
 
 (sv/defmethod ::update-file
-  {::climit/queue :update-file
+  {::climit/id :update-file-by-id
    ::climit/key-fn :id
    ::webhooks/event? true
    ::webhooks/batch-timeout (dt/duration "2m")
    ::webhooks/batch-key (webhooks/key-fn ::rpc/profile-id :id)
+
+   ::sm/params ::update-file-params
+   ::sm/result ::update-file-result
+
+   ::doc/module :files
    ::doc/added "1.17"}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id id] :as params}]
   (db/with-atomic [conn pool]
     (files/check-edition-permissions! conn profile-id id)
     (db/xact-lock! conn id)
-
-    (let [cfg    (assoc cfg :conn conn)
+    (let [cfg    (assoc cfg ::db/conn conn)
           params (assoc params :profile-id profile-id)
           tpoint (dt/tpoint)]
       (-> (update-file cfg params)
@@ -145,17 +185,18 @@
                              (l/trace :hint "update-file" :time (dt/format-duration elapsed))))))))
 
 (defn update-file
-  [{:keys [conn ::mtx/metrics] :as cfg} {:keys [profile-id id changes changes-with-metadata] :as params}]
+  [{:keys [::db/conn ::mtx/metrics] :as cfg} {:keys [profile-id id changes changes-with-metadata] :as params}]
   (let [file     (get-file conn id)
         features (->> (concat (:features file)
                               (:features params))
-                      (into files/default-features)
+                      (into (files/get-default-features))
                       (files/check-features-compatibility!))]
 
     (files/check-edition-permissions! conn profile-id (:id file))
 
     (binding [ffeat/*current*  features
               ffeat/*previous* (:features file)]
+
       (let [update-fn (cond-> update-file*
                         (contains? features "storage/pointer-map")
                         (wrap-with-pointer-map-context)
@@ -197,24 +238,34 @@
                         :project-id (:project-id file)
                         :team-id    (:team-id file)}))))))
 
+(defn- update-file-data
+  [file changes]
+  (-> file
+      (update :revn inc)
+      (update :data (fn [data]
+                      (cond-> data
+                        :always
+                        (-> (blob/decode)
+                            (assoc :id (:id file))
+                            (pmg/migrate-data))
+
+                        (and (contains? ffeat/*current* "components/v2")
+                             (not (contains? ffeat/*previous* "components/v2")))
+                        (ctf/migrate-to-components-v2)
+
+                        :always
+                        (-> (cp/process-changes changes)
+                            (blob/encode)))))))
+
+
 (defn- update-file*
-  [{:keys [conn] :as cfg} {:keys [profile-id file changes session-id ::created-at] :as params}]
-  (let [file (-> file
-                 (update :revn inc)
-                 (update :data (fn [data]
-                                 (cond-> data
-                                   :always
-                                   (-> (blob/decode)
-                                       (assoc :id (:id file))
-                                       (pmg/migrate-data))
+  [{:keys [::db/conn] :as cfg} {:keys [profile-id file changes session-id ::created-at] :as params}]
+  (let [;; Process the file data in the CLIMIT context; scheduling it
+        ;; to be executed on a separated executor for avoid to do the
+        ;; CPU intensive operation on vthread.
+        file (-> (climit/configure cfg :update-file)
+                 (climit/submit! (partial update-file-data file changes)))]
 
-                                   (and (contains? ffeat/*current* "components/v2")
-                                        (not (contains? ffeat/*previous* "components/v2")))
-                                   (ctf/migrate-to-components-v2)
-
-                                   :always
-                                   (-> (cp/process-changes changes)
-                                       (blob/encode))))))]
     (db/insert! conn :file-change
                 {:id (uuid/next)
                  :session-id session-id
@@ -273,11 +324,10 @@
        (vec)))
 
 (defn- send-notifications!
-  [{:keys [conn] :as cfg} {:keys [file changes session-id] :as params}]
+  [{:keys [::db/conn] :as cfg} {:keys [file changes session-id] :as params}]
   (let [lchanges (filter library-change? changes)
         msgbus   (::mbus/msgbus cfg)]
 
-    ;; Asynchronously publish message to the msgbus
     (mbus/pub! msgbus
                :topic (:id file)
                :message {:type :file-change
@@ -290,7 +340,6 @@
     (when (and (:is-shared file) (seq lchanges))
       (let [team-id (or (:team-id file)
                         (files/get-team-id conn (:project-id file)))]
-        ;; Asynchronously publish message to the msgbus
         (mbus/pub! msgbus
                    :topic team-id
                    :message {:type :library-change

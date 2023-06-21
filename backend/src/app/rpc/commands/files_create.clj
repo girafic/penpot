@@ -23,6 +23,7 @@
    [app.util.objects-map :as omap]
    [app.util.pointer-map :as pmap]
    [app.util.services :as sv]
+   [app.util.time :as dt]
    [clojure.spec.alpha :as s]))
 
 (defn create-file-role!
@@ -33,22 +34,25 @@
          (db/insert! conn :file-profile-rel))))
 
 (defn create-file
-  [conn {:keys [id name project-id is-shared data revn
+  [conn {:keys [id name project-id is-shared revn
                 modified-at deleted-at create-page
                 ignore-sync-until features]
          :or {is-shared false revn 0 create-page true}
          :as params}]
-  (let [id       (or id (:id data) (uuid/next))
-        features (-> (into files/default-features features)
-                     (files/check-features-compatibility!))
 
-        data     (or data
-                     (binding [ffeat/*current* features
-                               ffeat/*wrap-with-objects-map-fn* (if (features "storate/objects-map") omap/wrap identity)
-                               ffeat/*wrap-with-pointer-map-fn* (if (features "storage/pointer-map") pmap/wrap identity)]
-                       (if create-page
-                         (ctf/make-file-data id)
-                         (ctf/make-file-data id nil))))
+  (let [id       (or id (uuid/next))
+        features (->> features
+                      (into (files/get-default-features))
+                      (files/check-features-compatibility!))
+
+        pointers (atom {})
+        data     (binding [pmap/*tracked* pointers
+                           ffeat/*current* features
+                           ffeat/*wrap-with-objects-map-fn* (if (features "storate/objects-map") omap/wrap identity)
+                           ffeat/*wrap-with-pointer-map-fn* (if (features "storage/pointer-map") pmap/wrap identity)]
+                   (if create-page
+                     (ctf/make-file-data id)
+                     (ctf/make-file-data id nil)))
 
         features (db/create-array conn "text" features)
         file     (db/insert! conn :file
@@ -64,8 +68,15 @@
                                :modified-at modified-at
                                :deleted-at deleted-at}))]
 
+    (binding [pmap/*tracked* pointers]
+      (files/persist-pointers! conn id))
+
     (->> (assoc params :file-id id :role :owner)
          (create-file-role! conn))
+
+    (db/update! conn :project
+      {:modified-at (dt/now)}
+      {:id project-id})
 
     (files/decode-row file)))
 
@@ -79,6 +90,7 @@
 
 (sv/defmethod ::create-file
   {::doc/added "1.17"
+   ::doc/module :files
    ::webhooks/event? true}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id project-id] :as params}]
   (db/with-atomic [conn pool]

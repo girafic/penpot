@@ -26,6 +26,8 @@
 
 ![feature-readme](https://user-images.githubusercontent.com/1045247/189871786-0b44f7cf-3a0a-4445-a87b-9919ec398bf7.gif)
 
+**:tada: [Important Notice!] :tada:** Our very first **Penpot Fest** is happening on June 28-30, Barcelona (Spain). **Secure yourself a ticket** to know everything about the present and future of Penpot and be part of the conversation! See details on the amazing venue and speakers lineup at [penpotfest.org](https://penpotfest.org)! :zap:
+
 Penpot is the first **Open Source** design and prototyping platform meant for cross-domain teams. Non dependent on operating systems, Penpot is web based and works with open standards (SVG). Penpot invites designers all over the world to fall in love with open source while getting developers excited about the design process in return.
 
 ## Table of contents ##
@@ -124,7 +126,7 @@ You can ask and answer questions, have open-ended conversations, and follow alon
 
 ✏️ [Tutorials](https://www.youtube.com/playlist?list=PLgcCPfOv5v54WpXhHmNO7T-YC7AE-SRsr)
 
-🏘️ [Architecture](https://help.penpot.app/technical-guide/architecture/)
+🏘️ [Architecture](https://help.penpot.app/technical-guide/developer/architecture/)
 
 📚 [Dev Diaries](https://penpot.app/dev-diaries.html)
 

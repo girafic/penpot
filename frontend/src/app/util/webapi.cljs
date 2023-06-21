@@ -8,6 +8,7 @@
   "HTML5 web api helpers."
   (:require
    [app.common.data :as d]
+   [app.common.exceptions :as ex]
    [app.common.logging :as log]
    [app.util.object :as obj]
    [beicon.core :as rx]
@@ -21,10 +22,15 @@
   (rx/create
    (fn [subs]
      (let [reader (js/FileReader.)]
-       (obj/set! reader "onload" #(do (rx/push! subs (.-result reader))
+       (obj/set! reader "onload" #(do (rx/push! subs (.-result ^js reader))
                                       (rx/end! subs)))
+       (obj/set! reader "onerror" #(rx/error! subs %))
+       (obj/set! reader "onabort" #(rx/error! subs (ex/error :type :internal
+                                                             :code :abort
+                                                             :hint "operation aborted")))
        (f reader)
-       (constantly nil)))))
+       (fn []
+         (.abort ^js reader))))))
 
 (defn read-file-as-text
   [file]
@@ -51,14 +57,31 @@
 
 (defn revoke-uri
   [url]
-  (assert (string? url) "invalid arguments")
-  (js/URL.revokeObjectURL url))
+  (when ^boolean (str/starts-with? url "blob:")
+    (js/URL.revokeObjectURL url)))
 
 (defn create-uri
   "Create a url from blob."
   [b]
   (assert (blob? b) "invalid arguments")
   (js/URL.createObjectURL b))
+
+(defn data-uri?
+  [s]
+  (str/starts-with? s "data:"))
+
+(defn data-uri->blob
+  [data-uri]
+  (let [[mtype b64-data] (str/split data-uri ";base64,")
+        mtype   (subs mtype (inc (str/index-of mtype ":")))
+        decoded (.atob js/window b64-data)
+        size    (.-length ^js decoded)
+        content (js/Uint8Array. size)]
+
+    (doseq [i (range 0 size)]
+      (aset content i (.charCodeAt ^js decoded i)))
+
+    (create-blob content mtype)))
 
 (defn write-to-clipboard
   [data]

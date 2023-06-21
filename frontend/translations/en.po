@@ -271,6 +271,114 @@ msgstr "Add as Shared Library"
 msgid "dashboard.change-email"
 msgstr "Change email"
 
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.personal"
+msgstr "Personal access tokens"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.personal.description"
+msgstr "Personal access tokens function like an alternative to our login/password authentication system and can be used to allow an application to access the internal Penpot API"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.create"
+msgstr "Generate new token"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.empty.no-access-tokens"
+msgstr "You have no tokens so far."
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.empty.add-one"
+msgstr "Press the button \"Generate new token\" to generate one."
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "modals.create-access-token.title"
+msgstr "Generate access token"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "modals.create-access-token.name.label"
+msgstr "Name"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "modals.create-access-token.name.placeholder"
+msgstr "The name can help to know what's the token for"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "modals.create-access-token.expiration-date.label"
+msgstr "Expiration date"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "modals.create-access-token.submit-label"
+msgstr "Create token"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "modals.delete-acces-token.title"
+msgstr "Delete token"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "modals.delete-acces-token.message"
+msgstr "Are you sure you want to delete this token?"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "modals.delete-acces-token.accept"
+msgstr "Delete token"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.create.success"
+msgstr "Access token created successfully."
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.expires-on"
+msgstr "Expires on %s"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.expired-on"
+msgstr "Expired on %s"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.no-expiration"
+msgstr "No expiration date"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "modals.create-access-token.copy-token"
+msgstr "Copy token"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.copied-success"
+msgstr "Copied token"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.expiration-never"
+msgstr "Never"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.expiration-30-days"
+msgstr "30 days"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.expiration-60-days"
+msgstr "60 days"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.expiration-90-days"
+msgstr "90 days"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.expiration-180-days"
+msgstr "180 days"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.errors-required-name"
+msgstr "The name is required"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.token-will-expire"
+msgstr "The token will expire on %s"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "dashboard.access-tokens.token-will-not-expire"
+msgstr "The token has no expiration date"
+
 #: src/app/main/data/dashboard.cljs, src/app/main/data/dashboard.cljs
 msgid "dashboard.copy-suffix"
 msgstr "(copy)"
@@ -387,7 +495,7 @@ msgid "dashboard.export.title"
 msgstr "Export files"
 
 msgid "dashboard.fonts.deleted-placeholder"
-msgstr "Font deleted"
+msgstr "Missing font"
 
 #: src/app/main/ui/dashboard/fonts.cljs
 msgid "dashboard.fonts.dismiss-all"
@@ -419,19 +527,19 @@ msgstr ""
 "Service](https://penpot.app/terms.html). You also might want to read about "
 "[font licensing](https://www.typography.com/faq)."
 
-#, markdown
-msgid "dashboard.fonts.warning-text"
-msgstr ""
-"We have detected a possible problem in your fonts "
-"related to vertical metrics for different operative systems. "
-"In order to check it you can use font vertical metrics services "
-"like [this one](https://vertical-metrics.netlify.app/). "
-"In addition, we recommend using [Transfonter](https://transfonter.org/) "
-"to generate webfonts and fix errors. "
-
 #: src/app/main/ui/dashboard/fonts.cljs
 msgid "dashboard.fonts.upload-all"
 msgstr "Upload all"
+
+#, markdown
+msgid "dashboard.fonts.warning-text"
+msgstr ""
+"We have detected a possible problem in your fonts related to vertical "
+"metrics for different operative systems. In order to check it you can use "
+"font vertical metrics services like [this "
+"one](https://vertical-metrics.netlify.app/). In addition, we recommend "
+"using [Transfonter](https://transfonter.org/) to generate webfonts and fix "
+"errors. "
 
 msgid "dashboard.import"
 msgstr "Import Penpot files"
@@ -443,7 +551,9 @@ msgid "dashboard.import.import-error"
 msgstr "There was a problem importing the file. The file wasn't imported."
 
 msgid "dashboard.import.import-message"
-msgstr "%s files have been imported successfully."
+msgid_plural "dashboard.import.import-message"
+msgstr[0] "1 file has been imported successfully."
+msgstr[1] "%s files have been imported successfully."
 
 msgid "dashboard.import.import-warning"
 msgstr "Some files containted invalid objects that have been removed."
@@ -780,7 +890,7 @@ msgstr "The email «%s» has been reported as spam or permanently bounce."
 #: src/app/main/errors.cljs
 msgid "errors.feature-mismatch"
 msgstr ""
-"Looks like you are opening a file that has the feature '%s' enabled bug "
+"Looks like you are opening a file that has the feature '%s' enabled but "
 "your penpot frontend does not supports it or has it disabled."
 
 #: src/app/main/errors.cljs
@@ -1056,12 +1166,12 @@ msgid "inspect.attributes.typography.font-size"
 msgstr "Font Size"
 
 #: src/app/main/ui/inspect/attributes/text.cljs
-msgid "inspect.attributes.typography.font-size"
-msgstr "Font Weight"
-
-#: src/app/main/ui/inspect/attributes/text.cljs
 msgid "inspect.attributes.typography.font-style"
 msgstr "Font Style"
+
+#: src/app/main/ui/inspect/attributes/text.cljs
+msgid "inspect.attributes.typography.font-weight"
+msgstr "Font Weight"
 
 #: src/app/main/ui/inspect/attributes/text.cljs
 msgid "inspect.attributes.typography.letter-spacing"
@@ -1227,6 +1337,9 @@ msgstr "Copy link"
 msgid "labels.create"
 msgstr "Create"
 
+msgid "labels.discard"
+msgstr "Discard"
+
 #: src/app/main/ui/dashboard/team_form.cljs, src/app/main/ui/dashboard/team_form.cljs
 msgid "labels.create-team"
 msgstr "Create new team"
@@ -1379,6 +1492,7 @@ msgid "labels.no-invitations"
 msgstr "No pending invitations."
 
 #: src/app/main/ui/dashboard/team.cljs
+#, markdown
 msgid "labels.no-invitations-hint"
 msgstr "Click the **Invite people** button to invite people to this team."
 
@@ -1425,6 +1539,10 @@ msgstr "Owner"
 #: src/app/main/ui/settings/sidebar.cljs, src/app/main/ui/dashboard/sidebar.cljs
 msgid "labels.password"
 msgstr "Password"
+
+#: src/app/main/ui/settings/sidebar.cljs
+msgid "labels.access-tokens"
+msgstr "Access tokens"
 
 #: src/app/main/ui/dashboard/team.cljs
 msgid "labels.pending-invitation"
@@ -1548,7 +1666,7 @@ msgid "labels.uploading"
 msgstr "Uploading…"
 
 msgid "labels.view-only"
-msgstr "VIEW ONLY"
+msgstr "View only"
 
 #: src/app/main/ui/dashboard/team.cljs
 msgid "labels.viewer"
@@ -1723,21 +1841,25 @@ msgstr[1] "Delete files"
 msgid "modals.delete-shared-confirm.hint"
 msgid_plural "modals.delete-shared-confirm.hint"
 msgstr[0] ""
-"If you delete it, those assets will move to the local library of this file. "
-"Any unused assets will be lost."
+"If you delete it, those assets will no longer be available from other "
+"files. Assets that have already been used will remain in this file (no "
+"design will be broken!)."
 msgstr[1] ""
-"If you delete them, those assets will move to the local library of this "
-"file. Any unused assets will be lost."
+"If you delete them, those assets will no longer be available from other "
+"files. Assets that have already been used will remain in this file (no "
+"design will be broken!)."
 
 #: src/app/main/ui/workspace/header.cljs, src/app/main/ui/dashboard/file_menu.cljs
 msgid "modals.delete-shared-confirm.hint-many"
 msgid_plural "modals.delete-shared-confirm.hint-many"
 msgstr[0] ""
-"If you delete it, those assets will move to the local libraries of these "
-"files. Any unused assets will be lost."
+"If you delete it, those assets will no longer be available from other "
+"files. Assets that have already been used will remain in these files (no "
+"design will be broken!)."
 msgstr[1] ""
-"If you delete them, those assets will move to the local libraries of these "
-"files. Any unused assets will be lost."
+"If you delete them, those assets will no longer be available from other "
+"files. Assets that have already been used will remain in these file (no "
+"design will be broken!)."
 
 #: src/app/main/ui/workspace/header.cljs, src/app/main/ui/dashboard/file_menu.cljs
 msgid "modals.delete-shared-confirm.message"
@@ -1820,6 +1942,11 @@ msgstr "Send invitation"
 
 msgid "modals.invite-member.emails"
 msgstr "Emails, comma separated"
+
+msgid "modals.invite-member.repeated-invitation"
+msgstr ""
+"Some emails are from current team members. Their invitations will not be "
+"sent."
 
 #: src/app/main/ui/dashboard/team.cljs
 msgid "modals.invite-team-member.title"
@@ -1922,21 +2049,25 @@ msgstr[1] "Unpublish"
 msgid "modals.unpublish-shared-confirm.hint"
 msgid_plural "modals.unpublish-shared-confirm.hint"
 msgstr[0] ""
-"If you unpublish it, those assets will move to the local library of this "
-"file."
+"If you unpublish it, those assets will no longer be available from other "
+"files. Assets that have already been used will remain in this file (no "
+"design will be broken!)."
 msgstr[1] ""
-"If you unpublish them, those assets will move to the local library of this "
-"file."
+"If you unpublish them, those assets will no longer be available from other "
+"files. Assets that have already been used will remain in this file (no "
+"design will be broken!)."
 
 #: src/app/main/ui/workspace/header.cljs, src/app/main/ui/dashboard/file_menu.cljs
 msgid "modals.unpublish-shared-confirm.hint-many"
 msgid_plural "modals.unpublish-shared-confirm.hint-many"
 msgstr[0] ""
-"If you unpublish it, those assets will move to the local libraries of these "
-"files."
+"If you unpublish it, those assets will no longer be available from other "
+"files. Assets that have already been used will remain in these files (no "
+"design will be broken!)."
 msgstr[1] ""
-"If you unpublish them, those assets will move to the local libraries of "
-"these files."
+"If you unpublish them, those assets will no longer be available from other "
+"files. Assets that have already been used will remain in these file (no "
+"design will be broken!)."
 
 #: src/app/main/ui/workspace/header.cljs, src/app/main/ui/dashboard/file_menu.cljs
 msgid "modals.unpublish-shared-confirm.message"
@@ -1995,6 +2126,12 @@ msgstr ""
 #: src/app/main/ui/workspace/sidebar/options/menus/component.cljs, src/app/main/ui/workspace/context_menu.cljs
 msgid "modals.update-remote-component.message"
 msgstr "Update a component in a shared library"
+
+msgid "modals.delete-component-annotation.message"
+msgstr "Are you sure you want to delete this annotation?"
+
+msgid "modals.delete-component-annotation.title"
+msgstr "Delete annotation"
 
 #: src/app/main/ui/dashboard/team.cljs
 msgid "notifications.invitation-email-sent"
@@ -2236,8 +2373,14 @@ msgstr "Add node"
 msgid "shortcuts.align-bottom"
 msgstr "Align bottom"
 
+msgid "shortcuts.align-center"
+msgstr "Align center"
+
 msgid "shortcuts.align-hcenter"
 msgstr "Align center horizontally"
+
+msgid "shortcuts.align-justify"
+msgstr "Align justify"
 
 msgid "shortcuts.align-left"
 msgstr "Align left"
@@ -2253,6 +2396,9 @@ msgstr "Align center vertically"
 
 msgid "shortcuts.artboard-selection"
 msgstr "Create board from selection"
+
+msgid "shortcuts.bold"
+msgstr "Toggle bold"
 
 msgid "shortcuts.bool-difference"
 msgstr "Boolean difference"
@@ -2344,6 +2490,12 @@ msgstr "Flip horizontally"
 msgid "shortcuts.flip-vertical"
 msgstr "Flip vertically"
 
+msgid "shortcuts.font-size-dec"
+msgstr "Decrement font size"
+
+msgid "shortcuts.font-size-inc"
+msgstr "Increment font size"
+
 msgid "shortcuts.go-to-drafts"
 msgstr "Go to drafts"
 
@@ -2368,8 +2520,26 @@ msgstr "Zoom in"
 msgid "shortcuts.insert-image"
 msgstr "Insert image"
 
+msgid "shortcuts.italic"
+msgstr "Toggle italic"
+
 msgid "shortcuts.join-nodes"
 msgstr "Join nodes"
+
+msgid "shortcuts.letter-spacing-dec"
+msgstr "Decrement letter spacing"
+
+msgid "shortcuts.letter-spacing-inc"
+msgstr "Increment letter spacing"
+
+msgid "shortcuts.line-height-dec"
+msgstr "Decrement line height"
+
+msgid "shortcuts.line-height-inc"
+msgstr "Increment line height"
+
+msgid "shortcuts.line-through"
+msgstr "Toggle line through"
 
 msgid "shortcuts.make-corner"
 msgstr "Make corner"
@@ -2491,6 +2661,12 @@ msgstr "Search shortcuts"
 msgid "shortcuts.select-all"
 msgstr "Select all"
 
+msgid "shortcuts.select-next"
+msgstr "Select next layer"
+
+msgid "shortcuts.select-prev"
+msgstr "Select previous layer"
+
 msgid "shortcuts.separate-nodes"
 msgstr "Separate nodes"
 
@@ -2514,6 +2690,18 @@ msgstr "Start measurement"
 
 msgid "shortcuts.stop-measure"
 msgstr "Stop measurement"
+
+msgid "shortcuts.text-align-center"
+msgstr "Align center"
+
+msgid "shortcuts.text-align-left"
+msgstr "Align left"
+
+msgid "shortcuts.text-align-justify"
+msgstr "Align justify"
+
+msgid "shortcuts.text-align-right"
+msgstr "Align right"
 
 msgid "shortcuts.thumbnail-set"
 msgstr "Set thumbnails"
@@ -2576,6 +2764,9 @@ msgstr "Toggle visibility"
 msgid "shortcuts.toggle-zoom-style"
 msgstr "Toggle zoom style"
 
+msgid "shortcuts.underline"
+msgstr "Toggle underline"
+
 msgid "shortcuts.undo"
 msgstr "Undo"
 
@@ -2588,50 +2779,17 @@ msgstr "Unmask"
 msgid "shortcuts.v-distribute"
 msgstr "Distribute vertically"
 
-msgid "shortcuts.zoom-selected"
-msgstr "Zoom to selected"
-
-msgid "shortcuts.align-center"
-msgstr "Align center"
-
-msgid "shortcuts.align-justify"
-msgstr "Align justify"
-
-msgid "shortcuts.bold"
-msgstr "Toggle bold"
-
-msgid "shortcuts.italic"
-msgstr "Toggle italic"
-
-msgid "shortcuts.font-size-dec"
-msgstr "Decrement font size"
-
-msgid "shortcuts.font-size-inc"
-msgstr "Increment font size"
-
-msgid "shortcuts.letter-spacing-dec"
-msgstr "Decrement letter spacing"
-
-msgid "shortcuts.letter-spacing-inc"
-msgstr "Increment letter spacing"
-
-msgid "shortcuts.line-height-dec"
-msgstr "Decrement line height"
-
-msgid "shortcuts.line-height-inc"
-msgstr "Increment line height"
-
-msgid "shortcuts.line-through"
-msgstr "Toggle line through"
-
-msgid "shortcuts.underline"
-msgstr "Toggle underline"
+msgid "shortcuts.zoom-lense-decrease"
+msgstr "Zoom lense decrease"
 
 msgid "shortcuts.zoom-lense-increase"
 msgstr "Zoom lense increase"
 
-msgid "shortcuts.zoom-lense-decrease"
-msgstr "Zoom lense decrease"
+msgid "shortcuts.zoom-selected"
+msgstr "Zoom to selected"
+
+
+
 
 #: src/app/main/ui/dashboard/files.cljs
 msgid "title.dashboard.files"
@@ -2676,6 +2834,10 @@ msgstr "Password - Penpot"
 #: src/app/main/ui/settings/profile.cljs
 msgid "title.settings.profile"
 msgstr "Profile - Penpot"
+
+#: src/app/main/ui/settings/access-tokens.cljs
+msgid "title.settings.access-tokens"
+msgstr "Profile - Access tokens"
 
 #: src/app/main/ui/dashboard/team.cljs
 msgid "title.team-invitations"
@@ -2820,6 +2982,9 @@ msgstr "Delete"
 msgid "workspace.assets.duplicate"
 msgstr "Duplicate"
 
+msgid "workspace.assets.duplicate-main"
+msgstr "Duplicate main"
+
 #: src/app/main/ui/workspace/sidebar/assets.cljs, src/app/main/ui/workspace/sidebar/assets.cljs
 msgid "workspace.assets.edit"
 msgstr "Edit"
@@ -2936,6 +3101,9 @@ msgstr "Radial gradient"
 msgid "workspace.header.menu.disable-dynamic-alignment"
 msgstr "Disable dynamic alignment"
 
+msgid "workspace.header.menu.disable-scale-content"
+msgstr "Disable proportional scale"
+
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.disable-scale-text"
 msgstr "Disable scale text"
@@ -2954,6 +3122,9 @@ msgstr "Disable snap to pixel"
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.enable-dynamic-alignment"
 msgstr "Enable dynamic alignment"
+
+msgid "workspace.header.menu.enable-scale-content"
+msgstr "Enable proportional scale"
 
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.enable-scale-text"
@@ -3013,6 +3184,9 @@ msgstr "Preferences"
 msgid "workspace.header.menu.option.view"
 msgstr "View"
 
+msgid "workspace.header.menu.redo"
+msgstr "Redo"
+
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.select-all"
 msgstr "Select all"
@@ -3039,6 +3213,9 @@ msgstr "Show rulers"
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.show-textpalette"
 msgstr "Show fonts palette"
+
+msgid "workspace.header.menu.undo"
+msgstr "Undo"
 
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.reset-zoom"
@@ -3103,6 +3280,14 @@ msgstr "HSV"
 #: src/app/main/ui/workspace/colorpicker/libraries.cljs, src/app/main/ui/workspace/colorpalette.cljs
 msgid "workspace.libraries.colors.recent-colors"
 msgstr "Recent colors"
+
+#: src/app/main/ui/workspace/colorpalette.cljs
+msgid "workspace.libraries.colors.empty-palette"
+msgstr "There are no color styles in your library yet"
+
+#: src/app/main/ui/workspace/textpalette.cljs
+msgid "workspace.libraries.colors.empty-typography-palette"
+msgstr "There are no typography styles in your library yet"
 
 #: src/app/main/ui/workspace/colorpicker.cljs
 msgid "workspace.libraries.colors.rgb-complementary"
@@ -3206,6 +3391,15 @@ msgstr "Clip content"
 #: src/app/main/ui/workspace/sidebar/options/menus/component.cljs
 msgid "workspace.options.component"
 msgstr "Component"
+
+msgid "workspace.options.component.annotation"
+msgstr "Annotation"
+
+msgid "workspace.options.component.create-annotation"
+msgstr "Create an annotation"
+
+msgid "workspace.options.component.edit-annotation"
+msgstr "Edit an annotation"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.constraints"
@@ -3742,12 +3936,12 @@ msgid "workspace.options.layout.direction.column-reverse"
 msgstr "Reverse column"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/layout.cljs
-msgid "workspace.options.layout.direction.row-reverse"
-msgstr "Reverse row"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/layout.cljs
 msgid "workspace.options.layout.direction.row"
 msgstr "Row"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/layout.cljs
+msgid "workspace.options.layout.direction.row-reverse"
+msgstr "Reverse row"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/layout.cljs
 msgid "workspace.options.layout.gap"
@@ -3829,7 +4023,7 @@ msgstr "All corners"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.radius.single-corners"
-msgstr "Individual corners"
+msgstr "Independent corners"
 
 msgid "workspace.options.recent-fonts"
 msgstr "Recent"
@@ -3990,24 +4184,24 @@ msgid "workspace.options.text-options.align-bottom"
 msgstr "Align bottom"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
-msgid "workspace.options.text-options.align-center"
-msgstr "Align center"
+msgid "workspace.options.text-options.text-align-center"
+msgstr "Align center (%s)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
-msgid "workspace.options.text-options.align-justify"
-msgstr "Justify"
+msgid "workspace.options.text-options.text-align-justify"
+msgstr "Justify (%s)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
-msgid "workspace.options.text-options.align-left"
-msgstr "Align left"
+msgid "workspace.options.text-options.text-align-left"
+msgstr "Align left (%s)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
 msgid "workspace.options.text-options.align-middle"
 msgstr "Align middle"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
-msgid "workspace.options.text-options.align-right"
-msgstr "Align right"
+msgid "workspace.options.text-options.text-align-right"
+msgstr "Align right (%s)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
 msgid "workspace.options.text-options.align-top"
@@ -4051,7 +4245,7 @@ msgstr "None"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
 msgid "workspace.options.text-options.strikethrough"
-msgstr "Strikethrough"
+msgstr "Strikethrough (%s)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
 msgid "workspace.options.text-options.title"
@@ -4071,7 +4265,7 @@ msgstr "Title case"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
 msgid "workspace.options.text-options.underline"
-msgstr "Underline"
+msgstr "Underline (%s)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/typography.cljs
 msgid "workspace.options.text-options.uppercase"
@@ -4172,6 +4366,9 @@ msgstr "Selection to board"
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.create-component"
 msgstr "Create component"
+
+msgid "workspace.shape.menu.create-multiple-components"
+msgstr "Create multiple components"
 
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.cut"
@@ -4289,6 +4486,9 @@ msgstr "Show in assets panel"
 #: src/app/main/ui/workspace/sidebar/options/menus/component.cljs, src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.show-main"
 msgstr "Show main component"
+
+msgid "workspace.shape.menu.create-annotation"
+msgstr "Create annotation"
 
 msgid "workspace.shape.menu.thumbnail-remove"
 msgstr "Remove thumbnail"
@@ -4553,3 +4753,175 @@ msgstr "Update"
 
 msgid "workspace.viewport.click-to-close-path"
 msgstr "Click to close the path"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.lets-get-started"
+msgstr "Let's get started!"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.your-feedback-will-help-us"
+msgstr "Your feedback will help us understand what your habits and preferences are so that we can keep making Penpot such a useful and enjoyable tool."
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.questions-how-are-you-planning-to-use-penpot"
+msgstr "How are you planning to use Penpot?"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.discover-more-about-penpot"
+msgstr "Discover more about Penpot"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.test-penpot-to-see-if-its-a-fit-for-team"
+msgstr "Test Penpot to see if it's a fit for team "
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.start-to-work-on-my-project"
+msgstr "Start to work on my project"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.get-the-code-from-my-team-project"
+msgstr "Get the code from my team project "
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.leave-feedback-for-my-team-project"
+msgstr "Leave feedback for my team project"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.work-in-concept-ideas"
+msgstr "Work in concept ideas"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.try-out-before-using-penpot-on-premise"
+msgstr "Try out before using Penpot on-premise"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.select-option"
+msgstr "Select option"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.previous"
+msgstr "Previous"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.next"
+msgstr "Next"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.start"
+msgstr "Start"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.describe-your-experience-working-on"
+msgstr "How would you best describe your experience working on..."
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "branding-illustrations-marketing-pieces"
+msgstr "...branding, illustrations, marketing pieces, etc."
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.none"
+msgstr "None"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.some"
+msgstr "Some"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.a-lot"
+msgstr "A lot"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.interface-design-visual-assets-design-systems"
+msgstr "... interface design, visual assets, design systems, etc."
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.wireframes-user-journeys-flows-navigation-trees"
+msgstr "... wireframes, user journeys & flows, navigation trees, etc."
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "question.design-tool-more-experienced-with"
+msgstr "Which is the design tool you have more experience with?"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.figma"
+msgstr "Figma"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.sketch"
+msgstr "Sketch"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.adobe-xd"
+msgstr "Adobe XD"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.canva"
+msgstr "Canva"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.invision"
+msgstr "InVision"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.never-used-a-tool"
+msgstr "I've never used a design tool before"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.other"
+msgstr "Other (specify)"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.team-size"
+msgstr "What's the size of your team?"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.more-than-50"
+msgstr "More than 50"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.31-50"
+msgstr "31-50"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.11-30"
+msgstr "11-30"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.2-10"
+msgstr "2-10"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.freelancer"
+msgstr "I'm a freelancer"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.personal-project"
+msgstr "I’m working in a personal project"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.role"
+msgstr "What's your role?"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.designer"
+msgstr "Designer"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.developer"
+msgstr "Developer"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.manager"
+msgstr "Product or Project manager"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.founder"
+msgstr "Founder/VP"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.marketing"
+msgstr "Marketing"
+
+#: src/app/main/ui/onboarding/questions.cljs
+msgid "questions.student-teacher"
+msgstr "Student or teacher"

@@ -12,9 +12,11 @@
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
    [app.common.math :as mth]
+   [app.common.schema :as sm]
+   [app.common.schema.generators :as sg]
+   [app.common.schema.openapi :as-alias oapi]
    [app.common.spec :as us]
-   [clojure.spec.alpha :as s]
-   [clojure.test.check.generators :as tgen]))
+   [clojure.spec.alpha :as s]))
 
 (def precision 6)
 
@@ -47,6 +49,58 @@
   ([a b c d e f]
    (Matrix. a b c d e f)))
 
+(def number-regex #"[+-]?\d*(\.\d+)?(e[+-]?\d+)?")
+
+(defn str->matrix
+  [matrix-str]
+  (let [params (->> (re-seq number-regex matrix-str)
+                    (filter #(-> % first seq))
+                    (map (comp d/parse-double first)))]
+    (apply matrix params)))
+
+(sm/def! ::matrix-map
+  [:map {:title "MatrixMap"}
+   [:a ::sm/safe-double]
+   [:b ::sm/safe-double]
+   [:c ::sm/safe-double]
+   [:d ::sm/safe-double]
+   [:e ::sm/safe-double]
+   [:f ::sm/safe-double]])
+
+(sm/def! ::matrix
+  (letfn [(decode [o]
+            (if (map? o)
+              (map->Matrix o)
+              (if (string? o)
+                (str->matrix o)
+                o)))
+          (encode [o]
+            (dm/str (dm/get-prop o :a) ","
+                    (dm/get-prop o :b) ","
+                    (dm/get-prop o :c) ","
+                    (dm/get-prop o :d) ","
+                    (dm/get-prop o :e) ","
+                    (dm/get-prop o :f) ","))]
+
+    {:type ::matrix
+     :pred matrix?
+     :type-properties
+     {:title "matrix"
+      :description "Matrix instance"
+      :error/message "expected a valid point"
+      :gen/gen (->> (sg/tuple (sg/small-double)
+                              (sg/small-double)
+                              (sg/small-double)
+                              (sg/small-double)
+                              (sg/small-double)
+                              (sg/small-double) )
+                    (sg/fmap #(apply ->Matrix %)))
+      ::oapi/type "string"
+      ::oapi/format "matrix"
+      ::oapi/decode decode
+      ::oapi/encode encode}}))
+
+;; FIXME: deprecated
 (s/def ::a ::us/safe-float)
 (s/def ::b ::us/safe-float)
 (s/def ::c ::us/safe-float)
@@ -58,21 +112,11 @@
   (s/keys :req-un [::a ::b ::c ::d ::e ::f]))
 
 (s/def ::matrix
-  (s/with-gen
-    (s/and ::matrix-attrs matrix?)
-    #(tgen/fmap map->Matrix (s/gen ::matrix-attrs))))
+  (s/and ::matrix-attrs matrix?))
 
-(def number-regex #"[+-]?\d*(\.\d+)?(e[+-]?\d+)?")
-
-(defn str->matrix
-  [matrix-str]
-  (let [params (->> (re-seq number-regex matrix-str)
-                    (filter #(-> % first seq))
-                    (map (comp d/parse-double first)))]
-    (apply matrix params)))
 
 (defn close?
-  [m1 m2]
+  [^Matrix m1 ^Matrix m2]
   (and (mth/close? (.-a m1) (.-a m2))
        (mth/close? (.-b m1) (.-b m2))
        (mth/close? (.-c m1) (.-c m2))
@@ -80,7 +124,7 @@
        (mth/close? (.-e m1) (.-e m2))
        (mth/close? (.-f m1) (.-f m2))))
 
-(defn unit? [m1]
+(defn unit? [^Matrix m1]
   (and (some? m1)
        (mth/close? (.-a m1) 1)
        (mth/close? (.-b m1) 0)
@@ -187,20 +231,28 @@
 
 (defn scale-matrix
   ([pt center]
-   (-> (matrix)
-       (multiply! (translate-matrix center))
-       (multiply! (scale-matrix pt))
-       (multiply! (translate-matrix (gpt/negate center)))))
+   (let [sx (dm/get-prop pt :x)
+         sy (dm/get-prop pt :y)
+         cx (dm/get-prop center :x)
+         cy (dm/get-prop center :y)]
+     (Matrix. sx 0 0 sy (- cx (* cx sx)) (- cy (* cy sy)))))
   ([pt]
    (assert (gpt/point? pt))
    (Matrix. (dm/get-prop pt :x) 0 0 (dm/get-prop pt :y) 0 0)))
 
 (defn rotate-matrix
   ([angle point]
-   (-> (matrix)
-       (multiply! (translate-matrix point))
-       (multiply! (rotate-matrix angle))
-       (multiply! (translate-matrix (gpt/negate point)))))
+   (let [cx (dm/get-prop point :x)
+         cy (dm/get-prop point :y)
+         nx (- cx)
+         ny (- cy)
+         a (mth/radians angle)
+         c (mth/cos a)
+         s (mth/sin a)
+         ns (- s)
+         tx (+ (* c nx) (* ns ny) cx)
+         ty (+ (* s nx) (*  c ny) cy)]
+     (Matrix. c s ns c tx ty)))
   ([angle]
    (let [a (mth/radians angle)]
      (Matrix. (mth/cos a)

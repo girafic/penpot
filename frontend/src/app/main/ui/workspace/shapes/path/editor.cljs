@@ -16,7 +16,7 @@
    [app.main.snap :as snap]
    [app.main.store :as st]
    [app.main.streams :as ms]
-   [app.main.ui.cursors :as cur]
+   [app.main.ui.css-cursors :as cur]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.workspace.shapes.path.common :as pc]
    [app.util.dom :as dom]
@@ -51,7 +51,7 @@
          (fn [_]
            (st/emit! (drp/path-pointer-leave position))))
 
-        on-mouse-down
+        on-pointer-down
         (fn [event]
           (dom/stop-propagation event)
           (dom/prevent-default event)
@@ -95,14 +95,13 @@
      [:circle {:cx x
                :cy y
                :r (/ point-radius-active-area zoom)
-               :on-mouse-down on-mouse-down
-               :on-mouse-enter on-enter
-               :on-mouse-leave on-leave
+               :on-pointer-down on-pointer-down
+               :on-pointer-enter on-enter
+               :on-pointer-leave on-leave
                :pointer-events (when-not preview? "visible")
-               :style {:cursor (cond
-                                 (= edit-mode :draw) cur/pen-node
-                                 (= edit-mode :move) cur/pointer-node)
-                       :stroke-width 0
+               :class (cond (= edit-mode :draw) (cur/get-static "pen-node")
+                            (= edit-mode :move) (cur/get-static "pointer-node"))
+               :style {:stroke-width 0
                        :fill "none"}}]]))
 
 (mf/defc path-handler [{:keys [index prefix point handler zoom selected? hover? edit-mode snap-angle?]}]
@@ -116,7 +115,7 @@
           (fn [_]
             (st/emit! (drp/path-handler-leave index prefix)))
 
-          on-mouse-down
+          on-pointer-down
           (fn [event]
             (dom/stop-propagation event)
             (dom/prevent-default event)
@@ -157,11 +156,11 @@
        [:circle {:cx x
                  :cy y
                  :r (/ point-radius-active-area zoom)
-                 :on-mouse-down on-mouse-down
-                 :on-mouse-enter on-enter
-                 :on-mouse-leave on-leave
-                 :style {:cursor (when (= edit-mode :move) cur/pointer-move)
-                         :fill "none"
+                 :on-pointer-down on-pointer-down
+                 :on-pointer-enter on-enter
+                 :on-pointer-leave on-leave
+                 :class (when (= edit-mode :move) (cur/get-static "pointer-move"))
+                 :style {:fill "none"
                          :stroke-width 0}}]])))
 
 (mf/defc path-preview [{:keys [zoom command from]}]

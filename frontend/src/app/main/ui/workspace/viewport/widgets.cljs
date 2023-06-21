@@ -9,6 +9,8 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
+   [app.common.pages.helpers :as cph]
+   [app.common.types.container :as ctn]
    [app.common.types.shape-tree :as ctt]
    [app.common.uuid :as uuid]
    [app.main.data.workspace :as dw]
@@ -55,8 +57,13 @@
         drawing     (mf/deref refs/workspace-drawing)
         drawing-obj (:object drawing)
         shape       (or drawing-obj (-> selected first))]
-    (when (or (and (= (count selected) 1) (= (:id shape) edition) (not= :text (:type shape)))
-              (and (some? drawing-obj) (= :path (:type drawing-obj))))
+    (when (or (and (= (count selected) 1)
+                   (= (:id shape) edition)
+                   (and (not (cph/text-shape? shape))
+                        (not (cph/frame-shape? shape))))
+              (and (some? drawing-obj)
+                   (cph/path-shape? drawing-obj)
+                   (not= :curve (:tool drawing))))
       [:div.viewport-actions
        [:& path-actions {:shape shape}]])))
 
@@ -92,7 +99,16 @@
               #(mf/deferred % ts/raf)]}
   [{:keys [frame selected? zoom show-artboard-names? show-id? on-frame-enter on-frame-leave on-frame-select]}]
   (let [workspace-read-only? (mf/use-ctx ctx/workspace-read-only?)
-        on-mouse-down
+
+        ;; Note that we don't use mf/deref to avoid a repaint dependency here
+        objects (deref refs/workspace-page-objects)
+
+        color (when selected?
+                (if (ctn/in-any-component? objects frame)
+                  "var(--color-component-highlight)"
+                  "var(--color-primary-dark)"))
+
+        on-pointer-down
         (mf/use-callback
          (mf/deps (:id frame) on-frame-select workspace-read-only?)
          (fn [bevent]
@@ -100,7 +116,7 @@
              (when (= 1 (.-which event))
                (dom/prevent-default event)
                (dom/stop-propagation event)
-                 (on-frame-select event (:id frame))))))
+               (on-frame-select event (:id frame))))))
 
         on-double-click
         (mf/use-callback
@@ -140,7 +156,7 @@
                 :width 12
                 :height 12
                 :class "workspace-frame-icon"
-                :style {:fill (when selected? "var(--color-primary-dark)")}
+                :style {:fill color}
                 :visibility (if show-artboard-names? "visible" "hidden")}
           [:use {:href "#icon-set-thumbnail"}]])
        [:text {:x text-pos-x
@@ -148,9 +164,9 @@
                :width (:width frame)
                :height 20
                :class "workspace-frame-label"
-               :style {:fill (when selected? "var(--color-primary-dark)")}
+               :style {:fill color}
                :visibility (if show-artboard-names? "visible" "hidden")
-               :on-mouse-down on-mouse-down
+               :on-pointer-down on-pointer-down
                :on-double-click on-double-click
                :on-context-menu on-context-menu
                :on-pointer-enter on-pointer-enter
@@ -170,7 +186,8 @@
         on-frame-enter       (unchecked-get props "on-frame-enter")
         on-frame-leave       (unchecked-get props "on-frame-leave")
         on-frame-select      (unchecked-get props "on-frame-select")
-        shapes               (ctt/get-frames objects)
+        components-v2        (mf/use-ctx ctx/components-v2)
+        shapes               (ctt/get-frames objects {:skip-copies? components-v2})
         shapes               (if (debug? :shape-titles)
                                (into (set shapes)
                                      (map (d/getf objects))
@@ -199,7 +216,7 @@
   (let [{:keys [x y]} frame
         flow-pos (gpt/point x (- y (/ 35 zoom)))
 
-        on-mouse-down
+        on-pointer-down
         (mf/use-callback
          (mf/deps (:id frame) on-frame-select)
          (fn [bevent]
@@ -232,7 +249,7 @@
                      :height 24
                      :transform (vwu/text-transform flow-pos zoom)}
      [:div.flow-badge {:class (dom/classnames :selected selected?)}
-      [:div.content {:on-mouse-down on-mouse-down
+      [:div.content {:on-pointer-down on-pointer-down
                      :on-double-click on-double-click
                      :on-pointer-enter on-pointer-enter
                      :on-pointer-leave on-pointer-leave}

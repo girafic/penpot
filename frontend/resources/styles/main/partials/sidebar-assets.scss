@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) 2015-2016 Andrey Antukh <niwi@niwi.nz>
-// Copyright (c) 2015-2016 Juan de la Cruz <delacruzgarciajuan@gmail.com>
+// Copyright (c) KALEIDOS INC
 
 .assets-bar {
   display: flex;
@@ -113,6 +112,7 @@
 
   .collapse-library {
     margin-right: $size-2;
+    flex-shrink: inherit; // Inheriting shrink behaviour
 
     &.open svg {
       transform: rotate(90deg);
@@ -265,7 +265,7 @@
 
     .grid-cell {
       background-color: $color-canvas;
-      border-radius: 4px;
+      border-radius: $br4;
       border: 2px solid transparent;
       overflow: hidden;
       display: flex;
@@ -303,7 +303,7 @@
 
       .editable-label-input {
         border: 1px solid $color-gray-20;
-        border-radius: 3px;
+        border-radius: $br3;
         font-size: $fs12;
         padding: 2px;
         margin: 0;
@@ -330,7 +330,7 @@
 
     .grid-placeholder {
       border: 2px solid $color-gray-20;
-      border-radius: 4px;
+      border-radius: $br4;
     }
 
     .drop-space {
@@ -339,6 +339,10 @@
 
     .typography-container {
       position: relative;
+
+      &:last-child {
+        padding-bottom: 0.5em;
+      }
     }
 
     .drag-counter {
@@ -371,7 +375,7 @@
         & > svg,
         & > img {
           background-color: $color-canvas;
-          border-radius: 4px;
+          border-radius: $br4;
           border: 2px solid transparent;
           height: 24px;
           width: 24px;
@@ -422,13 +426,21 @@
       display: flex;
       align-items: center;
       border: 1px solid transparent;
-      border-radius: $br-small;
+      border-radius: $br3;
       margin-top: $size-1;
       padding: 2px;
       font-size: $fs12;
       color: $color-white;
       cursor: pointer;
       position: relative;
+
+      .name-block {
+        color: $color-gray-20;
+        width: calc(100% - 24px - #{$size-2});
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
 
       & span {
         margin-left: $size-1;
@@ -481,7 +493,7 @@
   .chrome-picker {
     box-shadow: none !important;
     border: 1px solid $color-gray-10 !important;
-    border-radius: 0 !important;
+    border-radius: $br0 !important;
 
     & input {
       background-color: $color-white;
@@ -514,8 +526,8 @@
 
 .modal-create-color-title {
   color: $color-black;
-  font-size: 24px;
-  font-weight: normal;
+  font-size: $fs24;
+  font-weight: $fw400;
 }
 
 .libraries-wrapper {

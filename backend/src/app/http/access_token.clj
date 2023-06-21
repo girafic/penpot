@@ -7,25 +7,11 @@
 (ns app.http.access-token
   (:require
    [app.common.logging :as l]
-   [app.common.spec :as us]
    [app.config :as cf]
    [app.db :as db]
    [app.main :as-alias main]
    [app.tokens :as tokens]
-   [app.worker :as-alias wrk]
-   [clojure.spec.alpha :as s]
-   [integrant.core :as ig]
-   [promesa.core :as p]
-   [promesa.exec :as px]
    [yetti.request :as yrq]))
-
-
-(s/def ::manager
-  (s/keys :req [::db/pool ::wrk/executor ::main/props]))
-
-(defmethod ig/pre-init-spec ::manager [_] ::manager)
-(defmethod ig/init-key ::manager [_ cfg] cfg)
-(defmethod ig/halt-key! ::manager [_ _])
 
 (def header-re #"^Token\s+(.*)")
 
@@ -40,48 +26,50 @@
   (when token
     (tokens/verify props {:token token :iss "access-token"})))
 
-(defn- get-token-perms
+(def sql:get-token-data
+  "SELECT perms, profile_id, expires_at
+     FROM access_token
+    WHERE id = ?
+      AND (expires_at IS NULL 
+           OR (expires_at > now()));")
+
+(defn- get-token-data
   [pool token-id]
   (when-not (db/read-only? pool)
-    (when-let [token (db/get* pool :access-token {:id token-id} {:columns [:perms]})]
-      (some-> (:perms token)
-              (db/decode-pgarray #{})))))
+    (some-> (db/exec-one! pool [sql:get-token-data token-id])
+            (update :perms db/decode-pgarray #{}))))
 
 (defn- wrap-soft-auth
-  [handler {:keys [::manager]}]
-  (us/assert! ::manager manager)
+  "Soft Authentication, will be executed synchronously on the undertow
+  worker thread."
+  [handler {:keys [::main/props]}]
+  (letfn [(handle-request [request]
+            (try
+              (let [token  (get-token request)
+                    claims (decode-token props token)]
+                (cond-> request
+                  (map? claims)
+                  (assoc ::id (:tid claims))))
+              (catch Throwable cause
+                (l/trace :hint "exception on decoding malformed token" :cause cause)
+                request)))]
 
-  (let [{:keys [::wrk/executor ::main/props]} manager]
     (fn [request respond raise]
-      (let [token (get-token request)]
-        (->> (px/submit! executor (partial decode-token props token))
-             (p/fnly (fn [claims cause]
-                       (when cause
-                         (l/trace :hint "exception on decoding malformed token" :cause cause))
-                       (let [request (cond-> request
-                                       (map? claims)
-                                       (assoc ::id (:tid claims)))]
-                         (handler request respond raise)))))))))
+      (let [request (handle-request request)]
+        (handler request respond raise)))))
 
 (defn- wrap-authz
-  [handler {:keys [::manager]}]
-  (us/assert! ::manager manager)
-  (let [{:keys [::wrk/executor ::db/pool]} manager]
-    (fn [request respond raise]
-      (if-let [token-id (::id request)]
-        (->> (px/submit! executor (partial get-token-perms pool token-id))
-             (p/fnly (fn [perms cause]
-                       (cond
-                         (some? cause)
-                         (raise cause)
-
-                         (nil? perms)
-                         (handler request respond raise)
-
-                         :else
-                         (let [request (assoc request ::perms perms)]
-                           (handler request respond raise))))))
-        (handler request respond raise)))))
+  "Authorization middleware, will be executed synchronously on vthread."
+  [handler {:keys [::db/pool]}]
+  (fn [request]
+    (let [{:keys [perms profile-id expires-at]} (some->> (::id request) (get-token-data pool))]
+      (handler (cond-> request
+                 (some? perms)
+                 (assoc ::perms perms)
+                 (some? profile-id)
+                 (assoc ::profile-id profile-id)
+                 (some? expires-at)
+                 (assoc ::expires-at expires-at))))))
 
 (def soft-auth
   {:name ::soft-auth

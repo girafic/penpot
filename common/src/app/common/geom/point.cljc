@@ -15,9 +15,12 @@
    [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
    [app.common.math :as mth]
+   [app.common.schema :as sm]
+   [app.common.schema.generators :as sg]
+   [app.common.schema.openapi :as-alias oapi]
    [app.common.spec :as us]
    [clojure.spec.alpha :as s]
-   [clojure.test.check.generators :as tgen]))
+   [cuerdas.core :as str]))
 
 ;; --- Point Impl
 
@@ -32,6 +35,13 @@
   [v]
   (instance? Point v))
 
+(sm/def! ::point-map
+  [:map {:title "PointMap"}
+   [:x ::sm/safe-number]
+   [:y ::sm/safe-number]])
+
+
+;; FIXME: deprecated
 (s/def ::x ::us/safe-number)
 (s/def ::y ::us/safe-number)
 
@@ -39,8 +49,33 @@
   (s/keys :req-un [::x ::y]))
 
 (s/def ::point
-  (s/with-gen (s/and ::point-attrs point?)
-    #(tgen/fmap map->Point (s/gen ::point-attrs))))
+  (s/and ::point-attrs point?))
+
+(sm/def! ::point
+  (letfn [(decode [p]
+            (if (map? p)
+              (map->Point p)
+              (if (string? p)
+                (let [[x y] (->> (str/split p #",") (mapv parse-double))]
+                  (Point. x y))
+                p)))
+
+          (encode [p]
+            (dm/str (dm/get-prop p :x) ","
+                    (dm/get-prop p :y)))]
+
+    {:type ::point
+     :pred point?
+     :type-properties
+     {:title "point"
+      :description "Point"
+      :error/message "expected a valid point"
+      :gen/gen (->> (sg/tuple (sg/small-int) (sg/small-int))
+                    (sg/fmap #(apply ->Point %)))
+      ::oapi/type "string"
+      ::oapi/format "point"
+      ::oapi/decode decode
+      ::oapi/encode encode}}))
 
 (defn point-like?
   [{:keys [x y] :as v}]
@@ -318,8 +353,10 @@
 (defn unit
   [p1]
   (let [p-length (length p1)]
-    (Point. (/ (dm/get-prop p1 :x) p-length)
-            (/ (dm/get-prop p1 :y) p-length))))
+    (if (mth/almost-zero? p-length)
+      (Point. 0 0)
+      (Point. (/ (dm/get-prop p1 :x) p-length)
+              (/ (dm/get-prop p1 :y) p-length)))))
 
 (defn perpendicular
   [pt]
@@ -380,7 +417,6 @@
 (defn rotate
   "Rotates the point around center with an angle"
   [p c angle]
-  (prn "ROTATE" p c angle)
   (assert (point? p) "point instance expected")
   (assert (point? c) "point instance expected")
   (let [angle (mth/radians angle)

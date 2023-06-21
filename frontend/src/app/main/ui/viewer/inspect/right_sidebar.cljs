@@ -7,9 +7,10 @@
 (ns app.main.ui.viewer.inspect.right-sidebar
   (:require
    [app.main.data.workspace :as dw]
+   [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.shape-icon :as si]
-   [app.main.ui.components.tab-container :refer [tab-container tab-element]]
+   [app.main.ui.components.tabs-container :refer [tabs-container tabs-element]]
    [app.main.ui.icons :as i]
    [app.main.ui.viewer.inspect.attributes :refer [attributes]]
    [app.main.ui.viewer.inspect.code :refer [code]]
@@ -17,6 +18,24 @@
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [rumext.v2 :as mf]))
+
+(defn- get-libraries
+  "Retrieve all libraries, including the local file, on workspace or viewer"
+  [from]
+  (if (= from :workspace)
+    (let [workspace-data (deref refs/workspace-data)
+          {:keys [id] :as local} workspace-data
+          libraries (deref refs/workspace-libraries)]
+      (-> libraries
+          (assoc id {:id id
+                     :data local})))
+    (let [viewer-data     (deref refs/viewer-data)
+          local           (get-in viewer-data [:file :data])
+          id              (deref refs/current-file-id)
+          libraries (:libraries viewer-data)]
+      (-> libraries
+          (assoc id {:id id
+                     :data local})))))
 
 (mf/defc right-sidebar
   [{:keys [frame page file selected shapes page-id file-id from]
@@ -28,7 +47,9 @@
 
         first-shape   (first shapes)
         page-id       (or page-id (:id page))
-        file-id       (or file-id (:id file))]
+        file-id       (or file-id (:id file))
+
+        libraries      (get-libraries from)]
 
     [:aside.settings-bar.settings-bar-right {:class (when @expanded "expanded")}
      [:div.settings-bar-inside
@@ -56,20 +77,21 @@
              ;;   inspect.tabs.code.selected.text
              [:span.tool-window-bar-title (:name first-shape)]])]
          [:div.tool-window-content.inspect
-          [:& tab-container {:on-change-tab #(do
+          [:& tabs-container {:on-change-tab #(do
                                                (reset! expanded false)
                                                (reset! section %)
                                                (when (= from :workspace)
                                                  (st/emit! (dw/set-inspect-expanded false))))
                              :selected @section}
-           [:& tab-element {:id :info :title (tr "inspect.tabs.info")}
+           [:& tabs-element {:id :info :title (tr "inspect.tabs.info")}
             [:& attributes {:page-id page-id
                             :file-id file-id
                             :frame frame
                             :shapes shapes
-                            :from from}]]
+                            :from from
+                            :libraries libraries}]]
 
-           [:& tab-element {:id :code :title (tr "inspect.tabs.code")}
+           [:& tabs-element {:id :code :title (tr "inspect.tabs.code")}
             [:& code {:frame frame
                       :shapes shapes
                       :on-expand (fn []

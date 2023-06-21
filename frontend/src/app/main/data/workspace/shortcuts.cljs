@@ -68,7 +68,7 @@
                           :command (ds/c-mod "x")
                           :subsections [:edit]
                           :fn #(emit-when-no-readonly (dw/copy-selected)
-                                                      (dw/delete-selected))}
+                                 (dw/delete-selected))}
 
    :paste                {:tooltip (ds/meta "V")
                           :disabled true
@@ -247,7 +247,7 @@
                           :command "t"
                           :subsections [:tools]
                           :fn #(emit-when-no-readonly dwtxt/start-edit-if-selected
-                                                      (dwd/select-for-drawing :text))}
+                                 (dwd/select-for-drawing :text))}
 
    :draw-path            {:tooltip "P"
                           :command "p"
@@ -354,12 +354,16 @@
                           :fn #(st/emit! (dw/select-all))}
 
    :toggle-grid          {:tooltip (ds/meta "'")
-                          :command (ds/c-mod "'")
+                          ;;https://github.com/ccampbell/mousetrap/issues/85
+                          :command [(ds/c-mod "'") (ds/c-mod "219")]
+                          :show-command (ds/c-mod "'")
                           :subsections [:main-menu]
                           :fn #(st/emit! (toggle-layout-flag :display-grid))}
 
    :toggle-snap-grid     {:tooltip (ds/meta-shift "'")
-                          :command (ds/c-mod "shift+'")
+                          ;;https://github.com/ccampbell/mousetrap/issues/85
+                          :command [(ds/c-mod "shift+'") (ds/c-mod "shift+219")]
+                          :show-command (ds/c-mod "shift+'")
                           :subsections [:main-menu]
                           :fn #(st/emit! (toggle-layout-flag :snap-grid))}
 
@@ -387,7 +391,7 @@
                           :command (ds/c-mod "shift+e")
                           :subsections [:basics :main-menu]
                           :fn #(st/emit!
-                                (de/show-workspace-export-dialog))}
+                                 (de/show-workspace-export-dialog))}
 
    :toggle-snap-guide    {:tooltip (ds/meta-shift "G")
                           :command (ds/c-mod "shift+g")
@@ -420,15 +424,15 @@
                          :command (ds/a-mod "p")
                          :subsections [:panels]
                          :fn #(do (r/set-resize-type! :bottom)
-                                  (emit-when-no-readonly (dw/remove-layout-flag :textpalette)
-                                                         (toggle-layout-flag :colorpalette)))}
+                                (emit-when-no-readonly (dw/remove-layout-flag :textpalette)
+                                  (toggle-layout-flag :colorpalette)))}
 
    :toggle-textpalette  {:tooltip (ds/alt "T")
                          :command (ds/a-mod "t")
                          :subsections [:panels]
                          :fn #(do (r/set-resize-type! :bottom)
-                                  (emit-when-no-readonly (dw/remove-layout-flag :colorpalette)
-                                                         (toggle-layout-flag :textpalette)))}
+                                (emit-when-no-readonly (dw/remove-layout-flag :colorpalette)
+                                  (toggle-layout-flag :textpalette)))}
 
    :hide-ui              {:tooltip "\\"
                           :command "\\"
@@ -440,12 +444,12 @@
    :increase-zoom        {:tooltip "+"
                           :command ["+" "="]
                           :subsections [:zoom-workspace]
-                          :fn #(st/emit! (dw/increase-zoom nil))}
+                          :fn #(st/emit! (dw/increase-zoom))}
 
    :decrease-zoom        {:tooltip "-"
                           :command ["-" "_"]
                           :subsections [:zoom-workspace]
-                          :fn #(st/emit! (dw/decrease-zoom nil))}
+                          :fn #(st/emit! (dw/decrease-zoom))}
 
    :reset-zoom           {:tooltip (ds/shift "0")
                           :command "shift+0"
@@ -495,7 +499,18 @@
                           :subsections [:navigation-workspace]
                           :fn #(st/emit! (dw/go-to-dashboard))}
 
+   :select-prev          {:tooltip (ds/shift "tab")
+                          :command "shift+tab"
+                          :subsections [:navigation-workspace]
+                          :fn #(st/emit! (dw/select-prev-shape))}
+
+   :select-next          {:tooltip ds/tab
+                          :command "tab"
+                          :subsections [:navigation-workspace]
+                          :fn #(st/emit! (dw/select-next-shape))}
+
    ;; SHAPE
+
 
    :bool-union           {:tooltip (ds/meta (ds/alt "U"))
                           :command (ds/c-mod "alt+u")

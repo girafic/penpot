@@ -11,9 +11,9 @@
    [app.common.uuid :as uuid]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.shortcuts :as sc]
    [app.main.data.workspace.texts :as dwt]
    [app.main.data.workspace.undo :as dwu]
-   [app.main.fonts :as fonts]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
@@ -22,10 +22,7 @@
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.timers :as ts]
-   [cuerdas.core :as str]
    [rumext.v2 :as mf]))
-
-
 
 (mf/defc text-align-options
   [{:keys [values on-change on-blur] :as props}]
@@ -38,22 +35,22 @@
     ;; --- Align
     [:div.align-icons
      [:span.tooltip.tooltip-bottom
-      {:alt (tr "workspace.options.text-options.align-left")
+      {:alt (tr "workspace.options.text-options.text-align-left" (sc/get-tooltip :text-align-left))
        :class (dom/classnames :current (= "left" text-align))
        :on-click #(handle-change % "left")}
       i/text-align-left]
      [:span.tooltip.tooltip-bottom
-      {:alt (tr "workspace.options.text-options.align-center")
+      {:alt (tr "workspace.options.text-options.text-align-center" (sc/get-tooltip :text-align-center))
        :class (dom/classnames :current (= "center" text-align))
        :on-click #(handle-change % "center")}
       i/text-align-center]
      [:span.tooltip.tooltip-bottom
-      {:alt (tr "workspace.options.text-options.align-right")
+      {:alt (tr "workspace.options.text-options.text-align-right" (sc/get-tooltip :text-align-right))
        :class (dom/classnames :current (= "right" text-align))
        :on-click #(handle-change % "right")}
       i/text-align-right]
      [:span.tooltip.tooltip-bottom
-      {:alt (tr  "workspace.options.text-options.align-justify")
+      {:alt (tr "workspace.options.text-options.text-align-justify" (sc/get-tooltip :text-align-justify))
        :class (dom/classnames :current (= "justify" text-align))
        :on-click #(handle-change % "justify")}
       i/text-align-justify]]))
@@ -149,21 +146,16 @@
       i/minus]
 
      [:span.tooltip.tooltip-bottom
-      {:alt (tr "workspace.options.text-options.underline")
+      {:alt (tr "workspace.options.text-options.underline" (sc/get-tooltip :underline))
        :class (dom/classnames :current (= "underline" text-decoration))
        :on-click #(handle-change % "underline")}
       i/underline]
 
      [:span.tooltip.tooltip-bottom
-      {:alt (tr "workspace.options.text-options.strikethrough")
+      {:alt (tr "workspace.options.text-options.strikethrough" (sc/get-tooltip :line-through))
        :class (dom/classnames :current (= "line-through" text-decoration))
        :on-click #(handle-change % "line-through")}
       i/strikethrough]]))
-
-(defn generate-typography-name
-  [{:keys [font-id font-variant-id] :as typography}]
-  (let [{:keys [name]} (fonts/get-font-data font-id)]
-    (assoc typography :name (str name " " (str/title font-variant-id)))))
 
 (mf/defc text-menu
   {::mf/wrap [mf/memo]}
@@ -216,7 +208,7 @@
                                               dwt/text-spacing-attrs
                                               dwt/text-transform-attrs)))
                 typography (merge txt/default-typography set-values)
-                typography (generate-typography-name typography)
+                typography (dwt/generate-typography-name typography)
                 id         (uuid/next)]
             (st/emit! (dwl/add-typography (assoc typography :id id) false))
             (run! #(emit-update! % {:typography-ref-id id

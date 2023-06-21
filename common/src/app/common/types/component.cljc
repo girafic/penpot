@@ -7,8 +7,20 @@
 (ns app.common.types.component)
 
 (defn instance-root?
+  "Check if this shape is the head of a top instance."
+  [shape]
+  (some? (:component-root? shape)))
+
+(defn instance-head?
+  "Check if this shape is the head of a top instance or a subinstance."
   [shape]
   (some? (:component-id shape)))
+
+(defn subinstance-head?
+  "Check if this shape is the head of a subinstance."
+  [shape]
+  (and (some? (:component-id shape))
+       (nil? (:component-root shape))))
 
 (defn instance-of?
   [shape file-id component-id]
@@ -28,7 +40,19 @@
   [shape]
   (some? (:main-instance? shape)))
 
-(defn is-main-instance?
+(defn in-component-copy?
+  "Check if the shape is inside a component non-main instance."
+  [shape]
+  (some? (:shape-ref shape)))
+
+(defn in-component-copy-not-root?
+  "Check if the shape is inside a component non-main instance and
+  is not the root shape."
+  [shape]
+  (and (some? (:shape-ref shape))
+       (nil? (:component-id shape))))
+
+(defn main-instance-of?
   "Check if this shape is the root of the main instance of the given component."
   [shape-id page-id component]
   (and (= shape-id (:main-instance-id component))
@@ -36,25 +60,15 @@
 
 (defn get-component-root
   [component]
-  (get-in component [:objects (:id component)]))
-
+  (if (some? (:main-instance-id component))
+    (get-in component [:objects (:main-instance-id component)])
+    (get-in component [:objects (:id component)])))
+ 
 (defn uses-library-components?
   "Check if the shape uses any component in the given library."
   [shape library-id]
   (and (some? (:component-id shape))
        (= (:component-file shape) library-id)))
-
-(defn in-component-instance?
-  "Check if the shape is inside a component instance."
-  [shape]
-  (some? (:shape-ref shape)))
-
-(defn in-component-instance-not-root?
-  "Check if the shape is inside a component instance and
-  is not the root shape."
-  [shape]
-  (and (some? (:shape-ref shape))
-       (nil? (:component-id shape))))
 
 (defn detach-shape
   "Remove the links and leave it as a plain shape, detached from any component."
@@ -66,5 +80,3 @@
           :remote-synced?
           :shape-ref
           :touched))
-
-

@@ -112,7 +112,7 @@
 
 ;; --- SPEC: email
 
-(def email-re #"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
+(def email-re #"[a-zA-Z0-9_.+-\\\\]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
 
 (defn parse-email
   [s]
@@ -235,7 +235,7 @@
 
 ;; --- SPECS WITHOUT CONFORMER
 
-(s/def ::inst inst?)
+(s/def ::inst inst?)  ;; A clojure instant (date and time)
 
 (s/def ::string
   (s/with-gen string?
@@ -251,6 +251,9 @@
 
 #?(:clj
    (s/def ::agent #(instance? clojure.lang.Agent %)))
+
+#?(:clj
+   (s/def ::atom #(instance? clojure.lang.Atom %)))
 
 (defn bytes?
   "Test if a first parameter is a byte

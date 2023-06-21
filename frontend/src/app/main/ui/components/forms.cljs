@@ -191,31 +191,73 @@
         [:span.hint hint])]]))
 
 (mf/defc select
-  [{:keys [options label form default data-test] :as props
+  [{:keys [options disabled label form default data-test] :as props
     :or {default ""}}]
   (let [input-name (get props :name)
-        form      (or form (mf/use-ctx form-ctx))
-        value     (or (get-in @form [:data input-name]) default)
-        cvalue    (d/seek #(= value (:value %)) options)
-        on-change (fn [event]
-                    (let [target (dom/get-target event)
-                          value  (dom/get-value target)]
-                      (fm/on-input-change form input-name value)))]
+        form       (or form (mf/use-ctx form-ctx))
+        value      (or (get-in @form [:data input-name]) default)
+        cvalue     (d/seek #(= value (:value %)) options)
+        focus?     (mf/use-state false)
+        on-change
+        (fn [event]
+          (let [target (dom/get-target event)
+                value  (dom/get-value target)]
+            (fm/on-input-change form input-name value)))
+
+        on-focus
+        (fn [_]
+          (reset! focus? true))
+
+        on-blur
+        (fn [_]
+          (reset! focus? false))]
 
     [:div.custom-select
      [:select {:value value
                :on-change on-change
+               :on-focus on-focus
+               :on-blur on-blur
+               :disabled disabled
                :data-test data-test}
       (for [item options]
-        [:option {:key (:value item) :value (:value item)} (:label item)])]
+        [:> :option (clj->js (cond-> {:key (:value item) :value (:value item)}
+                               (:disabled item) (assoc :disabled "disabled")
+                               (:hidden item) (assoc :style {:display "none"}))) 
+         (:label item)])]
 
-     [:div.input-container
+     [:div.input-container {:class (dom/classnames :disabled disabled :focus @focus?)}
       [:div.main-content
        [:label label]
        [:span.value (:label cvalue "")]]
 
       [:div.icon
        i/arrow-slide]]]))
+
+(mf/defc radio-buttons
+  [{:keys [name options form trim on-change-value] :as props}]
+  (let [form            (or form (mf/use-ctx form-ctx))
+        value           (get-in @form [:data name] "")
+        on-change-value (or on-change-value (constantly nil))        
+        on-change (fn [event]
+                    (let [value (-> event dom/get-target dom/get-value)]
+                      (swap! form assoc-in [:touched name] true)
+                      (fm/on-input-change form name value trim)
+                      (on-change-value name value)))]
+    [:div.custom-radio
+     (for [item options]
+       (let [id (str/ffmt "%-%" name (:value item))
+             image (:image item)]
+         [:div.input-radio {:key id :class (when image "with-image")}
+          [:input {:on-change on-change
+                   :type "radio"
+                   :id id
+                   :name name
+                   :value (:value item)
+                   :checked (= value (:value item))}]
+          [:label {:for id
+                   :style {:background-image (when image (str/ffmt "url(%)" image))}
+                   :class (when image "with-image")}
+           (:label item)]]))]))
 
 (mf/defc submit-button
   [{:keys [label form on-click disabled data-test] :as props}]
@@ -251,7 +293,7 @@
   (into [] (distinct) (conj coll item)))
 
 (mf/defc multi-input
-  [{:keys [form label class name trim valid-item-fn on-submit] :as props}]
+  [{:keys [form label class name trim valid-item-fn caution-item-fn on-submit] :as props}]
   (let [form       (or form (mf/use-ctx form-ctx))
         input-name (get props :name)
         touched?   (get-in @form [:touched input-name])
@@ -309,7 +351,9 @@
                    (on-submit form))
                  (when (not (str/empty? @value))
                    (reset! value "")
-                   (swap! items conj-dedup {:text val :valid (valid-item-fn val)}))))
+                   (swap! items conj-dedup {:text val
+                                            :valid (valid-item-fn val)
+                                            :caution (caution-item-fn val)}))))
 
              (and (kbd/backspace? event)
                   (str/empty? @value))
@@ -361,6 +405,7 @@
           [:div.selected-item {:key (:text item)
                                :tab-index "0"
                                :on-key-down (partial manage-key-down item)}
-           [:span.around {:class (when-not (:valid item) "invalid")}
+           [:span.around {:class (dom/classnames "invalid" (not (:valid item))
+                                                 "caution" (:caution item))}
             [:span.text (:text item)]
             [:span.icon {:on-click #(remove-item! item)} i/cross]]])])]))

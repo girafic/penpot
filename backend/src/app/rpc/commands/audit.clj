@@ -21,10 +21,7 @@
    [app.rpc.helpers :as rph]
    [app.util.services :as sv]
    [app.util.time :as dt]
-   [app.worker :as wrk]
-   [clojure.spec.alpha :as s]
-   [promesa.core :as p]
-   [promesa.exec :as px]))
+   [clojure.spec.alpha :as s]))
 
 (defn- event->row [event]
   [(uuid/next)
@@ -42,8 +39,9 @@
    :profile-id :ip-addr :props :context])
 
 (defn- handle-events
-  [{:keys [::db/pool]} {:keys [::rpc/profile-id events ::http/request]}]
-  (let [ip-addr (audit/parse-client-ip request)
+  [{:keys [::db/pool]} {:keys [::rpc/profile-id events] :as params}]
+  (let [request (-> params meta ::http/request)
+        ip-addr (audit/parse-client-ip request)
         xform   (comp
                  (map #(assoc % :profile-id profile-id))
                  (map #(assoc % :ip-addr ip-addr))
@@ -71,17 +69,22 @@
           :req-un [::events]))
 
 (sv/defmethod ::push-audit-events
-  {::climit/queue :push-audit-events
+  {::climit/id :submit-audit-events-by-profile
    ::climit/key-fn ::rpc/profile-id
    ::audit/skip true
    ::doc/added "1.17"}
-  [{:keys [::db/pool ::wrk/executor] :as cfg} params]
+  [{:keys [::db/pool] :as cfg} params]
   (if (or (db/read-only? pool)
           (not (contains? cf/flags :audit-log)))
     (do
       (l/warn :hint "audit: http handler disabled or db is read-only")
       (rph/wrap nil))
 
-    (->> (px/submit! executor #(handle-events cfg params))
-         (p/fmap (constantly nil)))))
+    (do
+      (try
+        (handle-events cfg params)
+        (catch Throwable cause
+          (l/error :hint "unexpected error on persisting audit events from frontend"
+                   :cause cause)))
 
+      (rph/wrap nil))))

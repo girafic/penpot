@@ -8,14 +8,20 @@
   (:require
    [app.common.colors :as colors]
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.pages.helpers :as cph]
+   [app.common.schema :as sm]
+   [app.common.types.component :as ctk]
    [app.main.broadcast :as mbc]
+   [app.main.data.events :as ev]
    [app.main.data.modal :as md]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.texts :as dwt]
+   [app.main.data.workspace.undo :as dwu]
+   [app.main.store :as st]
    [app.util.color :as uc]
    [beicon.core :as rx]
    [potok.core :as ptk]))
@@ -80,6 +86,8 @@
         text-ids  (filter is-text? ids)
         shape-ids (remove is-text? ids)
 
+        undo-id (js/Symbol)
+
         attrs
         (cond-> {}
           (contains? color :color)
@@ -103,8 +111,10 @@
         transform-attrs #(transform % attrs)]
 
     (rx/concat
+     (rx/of (dwu/start-undo-transaction undo-id))
      (rx/from (map #(dwt/update-text-with-function % transform-attrs) text-ids))
-     (rx/of (dch/update-shapes shape-ids transform-attrs)))))
+     (rx/of (dch/update-shapes shape-ids transform-attrs))
+     (rx/of (dwu/commit-undo-transaction undo-id)))))
 
 (defn swap-attrs [shape attr index new-index]
   (let [first (get-in shape [attr index])
@@ -194,7 +204,6 @@
                                               (if (= (:type shape) :frame)
                                                 (d/merge shape attrs)
                                                 shape))))))))
-
 (defn change-stroke
   [ids attrs index]
   (ptk/reify ::change-stroke
@@ -218,70 +227,93 @@
 
             attrs (merge attrs color-attrs)]
 
-        (rx/of (dch/update-shapes ids (fn [shape]
-                                        (let [new-attrs (merge (get-in shape [:strokes index]) attrs)
-                                              new-attrs (cond-> new-attrs
-                                                          (not (contains? new-attrs :stroke-width))
-                                                          (assoc :stroke-width 1)
+        (rx/of (dch/update-shapes
+                ids
+                (fn [shape]
+                  (let [new-attrs (merge (get-in shape [:strokes index]) attrs)
+                        new-attrs (cond-> new-attrs
+                                    (not (contains? new-attrs :stroke-width))
+                                    (assoc :stroke-width 1)
 
-                                                          (not (contains? new-attrs :stroke-style))
-                                                          (assoc :stroke-style :solid)
+                                    (not (contains? new-attrs :stroke-style))
+                                    (assoc :stroke-style :solid)
 
-                                                          (not (contains? new-attrs :stroke-alignment))
-                                                          (assoc :stroke-alignment :center)
+                                    (not (contains? new-attrs :stroke-alignment))
+                                    (assoc :stroke-alignment :center)
 
-                                                          :always
-                                                          (d/without-nils))]
-                                          (-> shape
-                                              (cond-> (not (contains? shape :strokes))
-                                                (assoc :strokes []))
-                                              (assoc-in [:strokes index] new-attrs))))))))))
+                                    :always
+                                    (d/without-nils))]
+                    (cond-> shape
+                      (not (contains? shape :strokes))
+                      (assoc :strokes [])
+
+                      :always
+                      (assoc-in [:strokes index] new-attrs))))))))))
 
 (defn change-shadow
   [ids attrs index]
   (ptk/reify ::change-shadow
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (dch/update-shapes ids (fn [shape]
-                                      (let [;; If we try to set a gradient to a shadow (for example using the color selection from multiple shapes) let's use the first stop color
-                                            attrs (cond-> attrs
-                                                    (:gradient attrs) (get-in [:gradient :stops 0]))
-                                            new-attrs (merge (get-in shape [:shadow index :color]) attrs)]
-                                        (assoc-in shape [:shadow index :color] new-attrs))))))))
+      (rx/of (dch/update-shapes
+              ids
+              (fn [shape]
+                (let [;; If we try to set a gradient to a shadow (for
+                      ;; example using the color selection from
+                      ;; multiple shapes) let's use the first stop
+                      ;; color
+                      attrs     (cond-> attrs
+                                  (:gradient attrs) (get-in [:gradient :stops 0]))
+                      new-attrs (merge (get-in shape [:shadow index :color]) attrs)]
+                  (assoc-in shape [:shadow index :color] new-attrs))))))))
+
+(defn add-shadow
+  [ids shadow]
+  (dm/assert! (sm/coll-of-uuid? ids))
+  (ptk/reify ::add-shadow
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (let [add-shadow (fn [shape]
+                         (update shape :shadow #(into [shadow] %)))]
+        (rx/of (dch/update-shapes ids add-shadow))))))
 
 (defn add-stroke
   [ids stroke]
   (ptk/reify ::add-stroke
     ptk/WatchEvent
     (watch [_ _ _]
-      (let [add (fn [shape attrs] (assoc shape :strokes (into [attrs] (:strokes shape))))]
-        (rx/of (dch/update-shapes
-                ids
-                #(add % stroke)))))))
+      (let [add-stroke (fn [shape] (update shape :strokes #(into [stroke] %)))]
+        (rx/of (dch/update-shapes ids add-stroke))))))
 
 (defn remove-stroke
   [ids position]
   (ptk/reify ::remove-stroke
     ptk/WatchEvent
     (watch [_ _ _]
-      (let [remove-fill-by-index (fn [values index] (->> (d/enumerate values)
-                                                         (filterv (fn [[idx _]] (not= idx index)))
-                                                         (mapv second)))
-
-            remove (fn [shape] (update shape :strokes remove-fill-by-index position))]
-        (rx/of (dch/update-shapes
-                ids
-                #(remove %)))))))
+      (letfn [(remove-fill-by-index [values index]
+                (->> (d/enumerate values)
+                     (filterv (fn [[idx _]] (not= idx index)))
+                     (mapv second)))
+              (remove-stroke [shape]
+                (update shape :strokes remove-fill-by-index position))]
+        (rx/of (dch/update-shapes ids remove-stroke))))))
 
 (defn remove-all-strokes
   [ids]
   (ptk/reify ::remove-all-strokes
     ptk/WatchEvent
     (watch [_ _ _]
-      (let [remove-all (fn [shape] (assoc shape :strokes []))]
-        (rx/of (dch/update-shapes
-                ids
-                #(remove-all %)))))))
+      (let [remove-all #(assoc % :strokes [])]
+        (rx/of (dch/update-shapes ids remove-all))))))
+
+(defn reorder-shadows
+  [ids index new-index]
+  (ptk/reify ::reorder-shadow
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (dch/update-shapes
+              ids
+              #(swap-attrs % :shadow index new-index))))))
 
 (defn reorder-strokes
   [ids index new-index]
@@ -337,8 +369,9 @@
 
 (defn change-text-color
   [old-color new-color index node]
-  (let [fills (:fills node)
-        parsed-color (d/without-nils (color-att->text old-color))
+  (let [fills (map #(dissoc % :fill-color-ref-id :fill-color-ref-file) (:fills node))
+        parsed-color (-> (d/without-nils (color-att->text old-color))
+                         (dissoc :fill-color-ref-id :fill-color-ref-file))
         parsed-new-color (d/without-nils (color-att->text new-color))
         has-color? (d/index-of fills parsed-color)]
     (cond-> node
@@ -350,33 +383,48 @@
   (ptk/reify ::change-color-in-selected
     ptk/WatchEvent
     (watch [_ _ _]
-      (->> (rx/from shapes-by-color)
-           (rx/map (fn [shape] (case (:prop shape)
-                                 :fill (change-fill [(:shape-id shape)] new-color (:index shape))
-                                 :stroke (change-stroke [(:shape-id shape)] new-color (:index shape))
-                                 :shadow (change-shadow [(:shape-id shape)] new-color (:index shape))
-                                 :content (dwt/update-text-with-function
-                                           (:shape-id shape)
-                                           (partial change-text-color old-color new-color (:index shape))))))))))
+      (let [undo-id (js/Symbol)]
+        (rx/concat
+         (rx/of (dwu/start-undo-transaction undo-id))
+         (->> (rx/from shapes-by-color)
+              (rx/map (fn [shape] (case (:prop shape)
+                                    :fill (change-fill [(:shape-id shape)] new-color (:index shape))
+                                    :stroke (change-stroke [(:shape-id shape)] new-color (:index shape))
+                                    :shadow (change-shadow [(:shape-id shape)] new-color (:index shape))
+                                    :content (dwt/update-text-with-function
+                                              (:shape-id shape)
+                                              (partial change-text-color old-color new-color (:index shape)))))))
+         (rx/of (dwu/commit-undo-transaction undo-id)))))))
 
 (defn apply-color-from-palette
-  [color is-alt?]
+  [color stroke?]
   (ptk/reify ::apply-color-from-palette
     ptk/WatchEvent
     (watch [_ state _]
       (let [objects  (wsh/lookup-page-objects state)
             selected (->> (wsh/lookup-selected state)
                           (cph/clean-loops objects))
-            selected-obj (keep (d/getf objects) selected)
-            select-shapes-for-color (fn [shape objects]
-                                      (let [shapes (case (:type shape)
-                                                     :group (cph/get-children objects (:id shape))
-                                                     [shape])]
-                                        (->> shapes
-                                             (remove cph/group-shape?)
-                                             (map :id))))
-            ids (mapcat #(select-shapes-for-color % objects) selected-obj)]
-        (if is-alt?
+
+            ids
+            (loop [pending (seq selected)
+                   result []]
+              (if (empty? pending)
+                result
+                (let [cur (first pending)
+                      ;; We treat frames that aren't components and with no fill the same as groups
+                      group? (or (cph/group-shape? objects cur)
+                                 (and (cph/frame-shape? objects cur)
+                                      (empty? (dm/get-in objects [cur :fills]))
+                                      (not (ctk/instance-head? (get objects cur)))))
+
+                      pending
+                      (if group?
+                        (concat pending (dm/get-in objects [cur :shapes]))
+                        pending)
+
+                      result (cond-> result (not group?) (conj cur))]
+                  (recur (rest pending) result))))]
+        (if stroke?
           (rx/of (change-stroke ids (merge uc/empty-color color) 0))
           (rx/of (change-fill ids (merge uc/empty-color color) 0)))))))
 
@@ -560,3 +608,35 @@
                                               (assoc :alpha 0)
                                               (assoc :offset 1)
                                               (materialize-color-components))]))))))))))
+
+(defn select-color
+  [position]
+  (ptk/reify ::select-color
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [selected   (wsh/lookup-selected state)
+            shapes     (wsh/lookup-shapes state selected)
+            shape      (first shapes)
+            fills      (if (cph/text-shape? shape)
+                         (:fills (dwt/current-text-values
+                                   {:editor-state (dm/get-in state [:workspace-editor-state (:id shape)])
+                                    :shape shape
+                                    :attrs (conj dwt/text-fill-attrs :fills)}))
+                         (:fills shape))
+            fill       (first fills)
+            single?    (and (= 1 (count selected))
+                         (= 1 (count fills)))
+            data       (if single?
+                         (d/without-nils {:color (:fill-color fill)
+                                          :opacity (:fill-opacity fill)
+                                          :gradient (:fill-color-gradient fill)})
+                         {:color "#406280"
+                          :opacity 1})]
+        (rx/of (md/show :colorpicker
+                 {:x (:x position)
+                  :y (:y position)
+                  :on-accept #(st/emit! (dwl/add-color data))
+                  :data data
+                  :position :right})
+          (ptk/event ::ev/event {::ev/name "add-asset-to-library"
+                                 :asset-type "color"}))))))

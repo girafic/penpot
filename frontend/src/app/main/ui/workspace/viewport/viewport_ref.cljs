@@ -39,7 +39,6 @@
 
 (defn create-viewport-ref
   []
-  
   (let [ref (mf/use-ref nil)]
     [ref
      (mf/use-memo
@@ -50,12 +49,14 @@
 
 (defn point->viewport
   [pt]
-  (let [zoom (dm/get-in @st/state [:workspace-local :zoom])]
-    (when (some? @viewport-ref)
+  (let [zoom (dm/get-in @st/state [:workspace-local :zoom] 1)]
+    (when (and (some? @viewport-ref)
+               (some? @viewport-brect))
       (let [vbox     (.. ^js @viewport-ref -viewBox -baseVal)
             brect    @viewport-brect
             box      (gpt/point (.-x vbox) (.-y vbox))
             zoom     (gpt/point zoom)]
+
         (-> (gpt/subtract pt brect)
             (gpt/divide zoom)
             (gpt/add box))))))

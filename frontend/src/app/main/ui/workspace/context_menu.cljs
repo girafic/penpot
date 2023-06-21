@@ -6,6 +6,7 @@
 
 (ns app.main.ui.workspace.context-menu
   "A workspace specific context menu (mouse right click)."
+  (:require-macros [app.main.style :refer [css]])
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
@@ -16,6 +17,7 @@
    [app.common.types.page :as ctp]
    [app.main.data.events :as ev]
    [app.main.data.modal :as modal]
+   [app.main.data.shortcuts :as scd]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.data.workspace.libraries :as dwl]
@@ -27,7 +29,7 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
-   [app.main.ui.components.shape-icon :as si]
+   [app.main.ui.components.shape-icon-refactor :as sic]
    [app.main.ui.context :as ctx]
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
@@ -48,7 +50,7 @@
   [{:keys [title shortcut on-click on-pointer-enter on-pointer-leave on-unmount children selected? icon] :as props}]
   (let [submenu-ref (mf/use-ref nil)
         hovering? (mf/use-ref false)
-
+        new-css-system (mf/use-ctx ctx/new-css-system)
         on-pointer-enter
         (mf/use-callback
          (fn []
@@ -77,49 +79,82 @@
              (when (and (some? dom) (some? submenu-node))
                (dom/set-css-property! submenu-node "top" (str (.-offsetTop dom) "px"))))))]
 
-
     (mf/use-effect
      (mf/deps on-unmount)
      (constantly on-unmount))
 
     (if icon
-      [:li.icon-menu-item {:ref set-dom-node
-                           :on-click on-click
-                           :on-pointer-enter on-pointer-enter
-                           :on-pointer-leave on-pointer-leave}
-       [:span.icon-wrapper
-        (if selected? [:span.selected-icon i/tick]
-            [:span.selected-icon])
-        [:span.shape-icon icon]]
-       [:span.title title]]
-      [:li {:ref set-dom-node
+      [:li {:class (if new-css-system
+                     (dom/classnames (css :icon-menu-item) true)
+                     (dom/classnames :icon-menu-item true))
+            :ref set-dom-node
             :on-click on-click
             :on-pointer-enter on-pointer-enter
             :on-pointer-leave on-pointer-leave}
-       [:span.title title]
-       [:span.shortcut (or shortcut "")]
+       [:span
+        {:class (if new-css-system
+                  (dom/classnames (css :icon-wrapper) true)
+                  (dom/classnames :icon-wrapper true))}
+        (if selected? [:span {:class (if new-css-system
+                                       (dom/classnames (css :selected-icon) true)
+                                       (dom/classnames :selected-icon true))}
+                       (if new-css-system
+                         i/tick-refactor
+                         i/tick)]
+            [:span {:class (if new-css-system
+                             (dom/classnames (css :selected-icon) true)
+                             (dom/classnames :selected-icon true))}])
+        [:span {:class (if new-css-system
+                         (dom/classnames (css :shape-icon) true)
+                         (dom/classnames :shape-icon true))} icon]]
+       [:span {:class (if new-css-system
+                        (dom/classnames (css :title) true)
+                        (dom/classnames :title true))} title]]
+      [:li {:class (dom/classnames (css :context-menu-item) new-css-system)
+            :ref set-dom-node
+            :on-click on-click
+            :on-pointer-enter on-pointer-enter
+            :on-pointer-leave on-pointer-leave}
+       [:span {:class (if new-css-system
+                        (dom/classnames (css :title) true)
+                        (dom/classnames :title true))} title]
+       (when shortcut
+         [:span   {:class (if new-css-system
+                            (dom/classnames (css :shortcut) true)
+                            (dom/classnames :shortcut true))}
+          (if new-css-system
+            (for [sc (scd/split-sc shortcut)]
+              [:span {:class (dom/classnames (css :shortcut-key) true)} sc])
+            (or shortcut ""))])
 
        (when (> (count children) 1)
-         [:span.submenu-icon i/arrow-slide])
+         (if new-css-system
+           [:span {:class (dom/classnames (css :submenu-icon) true)} i/arrow-refactor]
+           [:span.submenu-icon i/arrow-slide]))
 
        (when (> (count children) 1)
-         [:ul.workspace-context-menu
-          {:ref submenu-ref
+         [:ul
+          {:class (if new-css-system
+                    (dom/classnames (css :workspace-context-submenu) true)
+                    (dom/classnames :workspace-context-menu true))
+           :ref submenu-ref
            :style {:display "none" :left 250}
            :on-context-menu prevent-default}
           children])])))
-
 (mf/defc menu-separator
   []
-  [:li.separator])
+  (let [new-css-system (mf/use-ctx ctx/new-css-system)]
+    [:li {:class (if new-css-system
+                 (dom/classnames (css :separator) true)
+                 (dom/classnames :separator true))}]))
 
 (mf/defc context-menu-edit
-  []
-  (let [do-copy      #(st/emit! (dw/copy-selected))
-        do-cut       #(st/emit! (dw/copy-selected)
-                                (dw/delete-selected))
-        do-paste     #(st/emit! dw/paste)
-        do-duplicate #(st/emit! (dw/duplicate-selected false))]
+  [_]
+  (let [do-copy           #(st/emit! (dw/copy-selected))
+        do-cut            #(st/emit! (dw/copy-selected)
+                                     (dw/delete-selected))
+        do-paste          #(st/emit! dw/paste)
+        do-duplicate      #(st/emit! (dw/duplicate-selected true))]
     [:*
      [:& menu-entry {:title (tr "workspace.shape.menu.copy")
                      :shortcut (sc/get-tooltip :copy)
@@ -165,7 +200,7 @@
                           :on-pointer-enter (on-pointer-enter (:id object))
                           :on-pointer-leave (on-pointer-leave (:id object))
                           :on-unmount (on-unmount (:id object))
-                          :icon (si/element-icon {:shape object})}])])
+                          :icon (sic/element-icon-refactor {:shape object})}])])
      [:& menu-entry {:title (tr "workspace.shape.menu.forward")
                      :shortcut (sc/get-tooltip :bring-forward)
                      :on-click do-bring-forward}]
@@ -336,20 +371,24 @@
     [:*
      (if (every? :hidden shapes)
        [:& menu-entry {:title (tr "workspace.shape.menu.show")
+                       :shortcut (sc/get-tooltip :toggle-visibility)
                        :on-click do-show-shape}]
        [:& menu-entry {:title (tr "workspace.shape.menu.hide")
+                       :shortcut (sc/get-tooltip :toggle-visibility)
                        :on-click do-hide-shape}])
 
      (if (every? :blocked shapes)
        [:& menu-entry {:title (tr "workspace.shape.menu.unlock")
+                       :shortcut (sc/get-tooltip :toggle-lock)
                        :on-click do-unlock-shape}]
        [:& menu-entry {:title (tr "workspace.shape.menu.lock")
+                       :shortcut (sc/get-tooltip :toggle-lock)
                        :on-click do-lock-shape}])]))
 
 (mf/defc context-menu-prototype
   [{:keys [shapes]}]
   (let [options         (mf/deref refs/workspace-page-options)
-        options-mode    (mf/deref refs/options-mode)
+        options-mode    (mf/deref refs/options-mode-global)
         do-add-flow     #(st/emit! (dwi/add-flow-selected-frame))
         do-remove-flow  #(st/emit! (dwi/remove-flow (:id %)))
         flows           (:flows options)
@@ -396,18 +435,21 @@
 (mf/defc context-menu-component
   [{:keys [shapes]}]
   (let [single?             (= (count shapes) 1)
+        components-v2       (features/use-feature :components-v2)
 
         has-component?      (some true? (map #(contains? % :component-id) shapes))
         is-component?       (and single? (-> shapes first :component-id some?))
-        is-non-root?        (and single? (ctk/in-component-instance-not-root? (first shapes)))
+        in-copy-not-root?   (some true? (map #(ctk/in-component-copy-not-root? %) shapes))
 
-        shape-id            (-> shapes first :id)
-        component-id        (-> shapes first :component-id)
-        component-file      (-> shapes first :component-file)
-        main-component?     (-> shapes first :main-instance?)
+        objects             (deref refs/workspace-page-objects)
+        touched?            (and single? (cph/component-touched? objects (:id (first shapes))))
+        can-update-main?    (or (not components-v2) touched?)
+
+        first-shape         (first shapes)
+        {:keys [id component-id component-file main-instance?]} first-shape
+        lacks-annotation?   (nil? (:annotation first-shape))
         component-shapes    (filter #(contains? % :component-id) shapes)
 
-        components-v2       (features/use-feature :components-v2)
 
         current-file-id     (mf/use-ctx ctx/current-file-id)
         local-component?    (= component-file current-file-id)
@@ -421,17 +463,22 @@
                                     (ctf/get-component workspace-libraries component-file component-id)))
 
         do-add-component #(st/emit! (dwl/add-component))
-        do-detach-component #(st/emit! (dwl/detach-component shape-id))
+        do-add-multiple-components #(st/emit! (dwl/add-multiple-components))
+        do-detach-component #(st/emit! (dwl/detach-component id))
         do-detach-component-in-bulk #(st/emit! dwl/detach-selected-components)
-        do-reset-component #(st/emit! (dwl/reset-component shape-id))
+        do-reset-component #(st/emit! (dwl/reset-component id))
         do-show-component #(st/emit! (dw/go-to-component component-id))
         do-show-in-assets #(st/emit! (if components-v2
                                        (dw/show-component-in-assets component-id)
                                        (dw/go-to-component component-id)))
+        create-annotation #(when components-v2
+                             (st/emit! (dw/set-annotations-id-for-create (:id first-shape))))
+
         do-navigate-component-file #(st/emit! (dwl/nav-to-component-file component-file))
-        do-update-component #(st/emit! (dwl/update-component-sync shape-id component-file))
+        do-update-component #(st/emit! (dwl/update-component-sync id component-file))
         do-update-component-in-bulk #(st/emit! (dwl/update-component-in-bulk component-shapes component-file))
-        do-restore-component #(st/emit! (dwl/restore-component component-file component-id))
+        do-restore-component #(st/emit! (dwl/restore-component component-file component-id)
+                                        (dw/go-to-main-instance nil component-id))
 
         do-update-remote-component
         #(st/emit! (modal/show
@@ -459,12 +506,15 @@
                                            :on-accept do-update-component-in-bulk}))))]
     [:*
      [:*
-      (when (or (not is-non-root?) (and has-component? (not single?)))
+      (when (or (not in-copy-not-root?) (and has-component? (not single?)))
         [:& menu-separator])
-      (when-not is-non-root?
+      (when-not in-copy-not-root?
         [:& menu-entry {:title (tr "workspace.shape.menu.create-component")
                         :shortcut (sc/get-tooltip :create-component)
                         :on-click do-add-component}])
+      (when-not (or single? in-copy-not-root?)
+        [:& menu-entry {:title (tr "workspace.shape.menu.create-multiple-components")
+                        :on-click do-add-multiple-components}])
       (when (and has-component? (not single?))
         [:*
          [:& menu-entry {:title (tr "workspace.shape.menu.detach-instances-in-bulk")
@@ -479,17 +529,22 @@
        ;;          app/main/ui/workspace/sidebar/options/menus/component.cljs
        [:*
         [:& menu-separator]
-        (if main-component?
-          [:& menu-entry {:title (tr "workspace.shape.menu.show-in-assets")
-                          :on-click do-show-in-assets}]
+        (if main-instance?
+          [:*
+           [:& menu-entry {:title (tr "workspace.shape.menu.show-in-assets")
+                           :on-click do-show-in-assets}]
+           (when (and components-v2 lacks-annotation?)
+             [:& menu-entry {:title (tr "workspace.shape.menu.create-annotation")
+                             :on-click create-annotation}])]
           (if local-component?
             (if is-dangling?
               [:*
                [:& menu-entry {:title (tr "workspace.shape.menu.detach-instance")
                                :shortcut (sc/get-tooltip :detach-component)
                                :on-click do-detach-component}]
-               [:& menu-entry {:title (tr "workspace.shape.menu.reset-overrides")
-                               :on-click do-reset-component}]
+               (when can-update-main?
+                 [:& menu-entry {:title (tr "workspace.shape.menu.reset-overrides")
+                                 :on-click do-reset-component}])
                (when components-v2
                  [:& menu-entry {:title (tr "workspace.shape.menu.restore-main")
                                  :on-click do-restore-component}])]
@@ -497,10 +552,12 @@
                [:& menu-entry {:title (tr "workspace.shape.menu.detach-instance")
                                :shortcut (sc/get-tooltip :detach-component)
                                :on-click do-detach-component}]
-               [:& menu-entry {:title (tr "workspace.shape.menu.reset-overrides")
-                               :on-click do-reset-component}]
-               [:& menu-entry {:title (tr "workspace.shape.menu.update-main")
-                               :on-click do-update-component}]
+               (when can-update-main?
+                 [:*
+                  [:& menu-entry {:title (tr "workspace.shape.menu.reset-overrides")
+                                  :on-click do-reset-component}]
+                  [:& menu-entry {:title (tr "workspace.shape.menu.update-main")
+                                  :on-click do-update-component}]])
                [:& menu-entry {:title (tr "workspace.shape.menu.show-main")
                                :on-click do-show-component}]])
             (if is-dangling?
@@ -508,8 +565,9 @@
                [:& menu-entry {:title (tr "workspace.shape.menu.detach-instance")
                                :shortcut (sc/get-tooltip :detach-component)
                                :on-click do-detach-component}]
-               [:& menu-entry {:title (tr "workspace.shape.menu.reset-overrides")
-                               :on-click do-reset-component}]
+               (when can-update-main?
+                 [:& menu-entry {:title (tr "workspace.shape.menu.reset-overrides")
+                               :on-click do-reset-component}])
                (when components-v2
                  [:& menu-entry {:title (tr "workspace.shape.menu.restore-main")
                                  :on-click do-restore-component}])]
@@ -517,10 +575,12 @@
                [:& menu-entry {:title (tr "workspace.shape.menu.detach-instance")
                                :shortcut (sc/get-tooltip :detach-component)
                                :on-click do-detach-component}]
-               [:& menu-entry {:title (tr "workspace.shape.menu.reset-overrides")
-                               :on-click do-reset-component}]
-               [:& menu-entry {:title (tr "workspace.shape.menu.update-main")
-                               :on-click do-update-remote-component}]
+               (when can-update-main?
+                 [:*
+                  [:& menu-entry {:title (tr "workspace.shape.menu.reset-overrides")
+                                  :on-click do-reset-component}]
+                  [:& menu-entry {:title (tr "workspace.shape.menu.update-main")
+                                  :on-click do-update-remote-component}]])
                [:& menu-entry {:title (tr "workspace.shape.menu.go-main")
                                :on-click do-navigate-component-file}]])))])
      [:& menu-separator]]))
@@ -555,6 +615,30 @@
        [:> context-menu-component props]
        [:> context-menu-delete props]])))
 
+(mf/defc page-item-context-menu
+  [{:keys [mdata] :as props}]
+  (let [page (:page mdata)
+        deletable? (:deletable? mdata)
+        id (:id page)
+        delete-fn #(st/emit! (dw/delete-page id))
+        do-delete #(st/emit! (modal/show
+                              {:type :confirm
+                               :title (tr "modals.delete-page.title")
+                               :message (tr "modals.delete-page.body")
+                               :on-accept delete-fn}))
+        do-duplicate #(st/emit! (dw/duplicate-page id))
+        do-rename #(st/emit! (dw/start-rename-page-item id))]
+
+    [:*
+     (when deletable?
+       [:& menu-entry {:title (tr "workspace.assets.delete")
+                       :on-click do-delete}])
+
+     [:& menu-entry {:title (tr "workspace.assets.rename")
+                     :on-click do-rename}]
+     [:& menu-entry {:title (tr "workspace.assets.duplicate")
+                     :on-click do-duplicate}]]))
+
 (mf/defc viewport-context-menu
   []
   (let [focus      (mf/deref refs/workspace-focus-selected)
@@ -577,10 +661,11 @@
 
 (mf/defc context-menu
   []
-  (let [mdata (mf/deref menu-ref)
-        top (- (get-in mdata [:position :y]) 20)
-        left (get-in mdata [:position :x])
-        dropdown-ref (mf/use-ref)]
+  (let [mdata          (mf/deref menu-ref)
+        top            (- (get-in mdata [:position :y]) 20)
+        left           (get-in mdata [:position :x])
+        dropdown-ref   (mf/use-ref)
+        new-css-system (mf/use-ctx ctx/new-css-system)]
 
     (mf/use-effect
      (mf/deps mdata)
@@ -597,14 +682,17 @@
 
     [:& dropdown {:show (boolean mdata)
                   :on-close #(st/emit! dw/hide-context-menu)}
-     [:ul.workspace-context-menu
-      {:ref dropdown-ref
+     [:ul
+      {:class (if new-css-system
+                (dom/classnames (css :workspace-context-menu) true)
+                (dom/classnames :workspace-context-menu true))
+       :ref dropdown-ref
        :style {:top top :left left}
        :on-context-menu prevent-default}
 
-      (if (contains? mdata :selected)
-        [:& shape-context-menu {:mdata mdata}]
+      (case (:kind mdata)
+        :shape [:& shape-context-menu {:mdata mdata}]
+        :page [:& page-item-context-menu {:mdata mdata}]
         [:& viewport-context-menu {:mdata mdata}])]]))
-
 
 
