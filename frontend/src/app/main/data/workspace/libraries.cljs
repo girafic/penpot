@@ -423,7 +423,8 @@
                                            new-component-shapes
                                            []
                                            (:id new-main-instance-shape)
-                                           (:id main-instance-page)))]
+                                           (:id main-instance-page)
+                                           (:annotation component)))]
 
         (rx/of (dch/commit-changes changes))))))
 
@@ -453,9 +454,9 @@
   (ptk/reify ::restore-component
     ptk/WatchEvent
     (watch [it state _]
-      (let [page-id         (:current-page-id state)
-            current-page    (dm/get-in state [:workspace-data :pages-index page-id])
-            objects         (wsh/lookup-page-objects state page-id)
+      (let [page-id      (:current-page-id state)
+            current-page (dm/get-in state [:workspace-data :pages-index page-id])
+            objects      (wsh/lookup-page-objects state page-id)
             library-data (wsh/get-file state library-id)
             {:keys [changes shape]} (dwlh/prepare-restore-component library-data component-id current-page it)
             parent-id (:parent-id shape)
@@ -464,14 +465,13 @@
                       (update-in [parent-id :shapes]
                                  #(conj % (:id shape))))
 
-
             ;; Adds a resize-parents operation so the groups are updated. We add all the new objects
             new-objects-ids (->> changes :redo-changes (filter #(= (:type %) :add-obj)) (mapv :id))
             changes (-> changes
                         (pcb/with-objects objects)
                         (pcb/resize-parents new-objects-ids))]
-        (rx/of (dch/commit-changes changes))))))
 
+        (rx/of (dch/commit-changes (assoc changes :file-id library-id)))))))
 
 (defn instantiate-component
   "Create a new shape in the current page, from the component with the given id
@@ -480,14 +480,14 @@
   (dm/assert! (uuid? file-id))
   (dm/assert! (uuid? component-id))
   (dm/assert! (gpt/point? position))
-
   (ptk/reify ::instantiate-component
     ptk/WatchEvent
     (watch [it state _]
       (let [page      (wsh/lookup-page state)
             libraries (wsh/get-libraries state)
 
-            changes   (pcb/empty-changes it (:id page))
+            changes   (-> (pcb/empty-changes it (:id page))
+                          (pcb/with-objects (:objects page)))
 
             [new-shape changes]
             (dwlh/generate-instantiate-component changes
