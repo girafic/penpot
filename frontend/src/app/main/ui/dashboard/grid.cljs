@@ -62,7 +62,9 @@
          (rx/mapcat (fn [{:keys [fonts] :as result}]
                       (->> (fonts/render-font-styles fonts)
                            (rx/map (fn [styles]
-                                     (assoc result :styles styles))))))
+                                     (assoc result
+                                            :styles styles
+                                            :width 250))))))
          (rx/mapcat thr/render)
          (rx/mapcat (partial persist-thumbnail file-id revn)))))
 
@@ -76,7 +78,12 @@
       (when (and visible? (not thumbnail-uri))
         (->> (ask-for-thumbnail file-id revn)
              (rx/subs (fn [url]
-                        (st/emit! (dd/set-file-thumbnail file-id url)))))))
+                        (st/emit! (dd/set-file-thumbnail file-id url)))
+                      (fn [cause]
+                        (log/error :hint "unable to render thumbnail"
+                                   :file-if file-id
+                                   :revn revn
+                                   :message (ex-message cause)))))))
 
     [:div.grid-item-th
      {:style {:background-color background-color}
@@ -105,6 +112,22 @@
            colors (:colors summary)
            typographies (:typographies summary)]
        [:*
+
+        (when (and (zero? (:count components)) (zero? (:count colors)) (zero? (:count typographies)))
+          [:*
+           [:div.asset-section
+            [:div.asset-title
+             [:span (tr "workspace.assets.components")]
+             [:span.num-assets (str "\u00A0(") 0 ")"]]] ;; Unicode 00A0 is non-breaking space
+          [:div.asset-section
+           [:div.asset-title
+            [:span (tr "workspace.assets.colors")]
+            [:span.num-assets (str "\u00A0(") 0 ")"]]] ;; Unicode 00A0 is non-breaking space
+          [:div.asset-section
+           [:div.asset-title
+            [:span (tr "workspace.assets.typography")]
+            [:span.num-assets (str "\u00A0(") 0 ")"]]]]) ;; Unicode 00A0 is non-breaking space
+
 
         (when (pos? (:count components))
           [:div.asset-section

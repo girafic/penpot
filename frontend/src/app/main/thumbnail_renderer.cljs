@@ -62,9 +62,9 @@
 
 (defn render
   "Renders a thumbnail."
-  [{:keys [data styles] :as params}]
+  [{:keys [data styles width] :as params}]
   (let [id      (dm/str (uuid/next))
-        payload #js {:data data :styles styles}
+        payload #js {:data data :styles styles :width width}
         message #js {:id id
                      :scope "penpot/thumbnail-renderer"
                      :payload payload}]
@@ -78,7 +78,7 @@
          (rx/mapcat (fn [msg]
                       (case (unchecked-get msg "type")
                         "success" (rx/of (unchecked-get msg "payload"))
-                        "failure" (rx/throw (unchecked-get msg "payload")))))
+                        "failure" (rx/throw (js/Error. (unchecked-get msg "payload"))))))
          (rx/take 1))))
 
 (defn init!
@@ -88,6 +88,6 @@
     (dom/set-attribute! iframe "src" origin)
     (dom/set-attribute! iframe "hidden" true)
     (dom/append-child! js/document.body iframe)
-
+    (.addEventListener js/window "message" on-message)
     (set! instance iframe)
-    (.addEventListener js/window "message" on-message)))
+    ))

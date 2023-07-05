@@ -273,16 +273,13 @@
                (binding [pmap/*tracked* (atom {})]
                  (let [data        (ctf/migrate-to-components-v2 data)
                        features    (conj features "components/v2")
-                       modified-at (dt/now)
                        features'   (db/create-array conn "text" features)]
                    (db/update! conn :file
                                {:data (blob/encode data)
-                                :modified-at modified-at
                                 :features features'}
                                {:id id})
                    (persist-pointers! conn id)
                    (-> file
-                       (assoc :modified-at modified-at)
                        (assoc :features features)
                        (assoc :data data))))
                file)]
@@ -358,8 +355,8 @@
   (db/get pool :file {:id id} {:columns [:id :modified-at :revn]}))
 
 (defn get-file-etag
-  [{:keys [modified-at revn]}]
-  (str (dt/format-instant modified-at :iso) "-" revn))
+  [{:keys [::rpc/profile-id]} {:keys [modified-at revn]}]
+  (str profile-id (dt/format-instant modified-at :iso) revn))
 
 (sv/defmethod ::get-file
   "Retrieve a file by its ID. Only authenticated users."
@@ -374,7 +371,7 @@
       (check-read-permissions! perms)
       (let [file (-> (get-file conn id features project-id)
                      (assoc :permissions perms))]
-        (vary-meta file assoc ::cond/key (get-file-etag file))))))
+        (vary-meta file assoc ::cond/key (get-file-etag params file))))))
 
 
 ;; --- COMMAND QUERY: get-file-fragment (by id)
@@ -549,9 +546,11 @@
           f.created_at,
           f.modified_at,
           f.name,
-          f.is_shared
+          f.is_shared,
+          ft.media_id
      from file as f
     inner join project as p on (p.id = f.project_id)
+     left join file_thumbnail as ft on (ft.file_id = f.id and ft.revn = f.revn)
     where f.is_shared = true
       and f.deleted_at is null
       and p.deleted_at is null
@@ -582,6 +581,12 @@
     (->> (db/exec! conn [sql:team-shared-files team-id])
          (into #{} (comp
                     (map decode-row)
+                    (map (fn [row]
+                           (if-let [media-id (:media-id row)]
+                             (-> row
+                                 (dissoc :media-id)
+                                 (assoc :thumbnail-uri (resolve-public-uri media-id)))
+                             (dissoc row :media-id))))
                     (map #(assoc % :library-summary (library-summary %)))
                     (map #(dissoc % :data)))))))
 

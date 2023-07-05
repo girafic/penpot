@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## :rocket: 1.20.0
+## 1.20.0
 
 ### :boom: Breaking changes & Deprecations
 
@@ -10,26 +10,37 @@
 
 ### :arrow_up: Deps updates
 
-### :heart: Community contributions by (Thank you!)
+-### :heart: Community contributions by (Thank you!)
 
 ## 1.19.0
 
 ### :boom: Breaking changes & Deprecations
 
 ### :sparkles: New features
+
 - Default naming of text layers [Taiga #2836](https://tree.taiga.io/project/penpot/us/2836)
-- Create typography style from a selected text layer[Taiga #3041](https://tree.taiga.io/project/penpot/us/3041)
+- Create typography style from a selected text layer [Taiga #3041](https://tree.taiga.io/project/penpot/us/3041)
 - Board as ruler origin [Taiga #4833](https://tree.taiga.io/project/penpot/us/4833)
 - Access tokens support [Taiga #4460](https://tree.taiga.io/project/penpot/us/4460)
 - Show interactions setting at the view mode [Taiga #1330](https://tree.taiga.io/project/penpot/issue/1330)
+- Improve dashboard performance related to thumbnails; now the thumbnails are
+  rendered as bitmap images.
+- Add the ability to disable google fonts provider with the `disable-google-fonts-provider` flag
+- Add the ability to disable dashboard templates section with the `disable-dashboard-templates-section` flag
+- Add the ability to use the registration whitelist with OICD [Github #3348](https://github.com/penpot/penpot/issues/3348)
+- Add support for local caching of google fonts (this avoids exposing
+  the final user IP to goolge and reduces the amount of request sent
+  to google)
 
 ### :bug: Bugs fixed
+
 - Fix files can be opened from multiple urls [Taiga #5310](https://tree.taiga.io/project/penpot/issue/5310)
 - Fix asset color item was created from the selected layer [Taiga #5180](https://tree.taiga.io/project/penpot/issue/5180)
 
 ### :arrow_up: Deps updates
 
 ### :heart: Community contributions by (Thank you!)
+
 - Update Typography palette order (by @akshay-gupta7) [Github #3156](https://github.com/penpot/penpot/pull/3156)
 - Palettes (color, typographies) empty state (by @akshay-gupta7) [Github #3160](https://github.com/penpot/penpot/pull/3160)
 - Duplicate objects via drag + alt (by @akshay-gupta7) [Github #3147](https://github.com/penpot/penpot/pull/3147)
@@ -43,6 +54,7 @@
 - Open project in new tab from workspace (by @akshay-gupta7) [Github #3246](https://github.com/penpot/penpot/pull/3246)
 - Distribute fix enabled when two elements were selected (by @dfelinto) [Github #3266](https://github.com/penpot/penpot/pull/3266)
 - Distribute vertical spacing failing for overlapped text (by @dfelinto) [Github #3267](https://github.com/penpot/penpot/pull/3267)
+- bug Change independent corner radius input tooltips #3332 (by @astudentinearth) [Github #3332](https://github.com/penpot/penpot/pull/3332)
 
 ## 1.18.6
 
