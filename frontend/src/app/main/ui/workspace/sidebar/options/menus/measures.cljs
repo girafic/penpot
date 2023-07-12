@@ -19,6 +19,7 @@
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.components.numeric-input :refer [numeric-input]]
+   [app.main.ui.hooks :as hooks]
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
@@ -68,7 +69,9 @@
 
 ;; -- User/drawing coords
 (mf/defc measures-menu
-  [{:keys [ids ids-with-children values type all-types shape] :as props}]
+  {::mf/wrap-props false
+   ::mf/wrap [mf/memo]}
+  [{:keys [ids ids-with-children values type all-types shape]}]
   (let [options (if (= type :multiple)
                   (reduce #(union %1 %2) (map #(get type->options %) all-types))
                   (get type->options type))
@@ -80,19 +83,21 @@
                      [shape])
         frames (map #(deref (refs/object-by-id (:frame-id %))) old-shapes)
 
+        ids (hooks/use-equal-memo ids)
+
         selection-parents-ref (mf/use-memo (mf/deps ids) #(refs/parents-by-ids ids))
         selection-parents     (mf/deref selection-parents-ref)
 
-        flex-child? (->> selection-parents (some ctl/flex-layout?))
-        absolute? (ctl/layout-absolute? shape)
-        flex-container? (ctl/flex-layout? shape)
-        flex-auto-width? (ctl/auto-width? shape)
-        flex-fill-width? (ctl/fill-width? shape)
+        flex-child?       (->> selection-parents (some ctl/flex-layout?))
+        absolute?         (ctl/layout-absolute? shape)
+        flex-container?   (ctl/flex-layout? shape)
+        flex-auto-width?  (ctl/auto-width? shape)
+        flex-fill-width?  (ctl/fill-width? shape)
         flex-auto-height? (ctl/auto-height? shape)
         flex-fill-height? (ctl/fill-height? shape)
 
-        disabled-position-x? (and flex-child? (not absolute?))
-        disabled-position-y? (and flex-child? (not absolute?))
+        disabled-position-x?   (and flex-child? (not absolute?))
+        disabled-position-y?   (and flex-child? (not absolute?))
         disabled-width-sizing? (and (or flex-child? flex-container?)
                                     (or flex-auto-width? flex-fill-width?)
                                     (not absolute?))
@@ -109,7 +114,7 @@
         ;; For rotated or stretched shapes, the origin point we show in the menu
         ;; is not the (:x :y) shape attribute, but the top left coordinate of the
         ;; wrapping rectangle.
-        values (let [{:keys [x y]} (gsh/selection-rect [(first shapes)])]
+        values (let [{:keys [x y]} (gsh/shapes->rect [(first shapes)])]
                  (cond-> values
                    (not= (:x values) :multiple) (assoc :x x)
                    (not= (:y values) :multiple) (assoc :y y)

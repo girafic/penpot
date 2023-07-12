@@ -80,6 +80,7 @@
                             (pcb/set-stack-undo? stack-undo?)
                             (pcb/with-objects objects))
                         ids)
+             changes (pcb/reorder-grid-children changes ids)
              changes (add-undo-group changes state)]
          (rx/concat
           (if (seq (:redo-changes changes))
@@ -206,8 +207,8 @@
           (try
             (dm/assert!
              "expect valid vector of changes"
-             (and (cpc/changes? redo-changes)
-                  (cpc/changes? undo-changes)))
+             (and (cpc/valid-changes? redo-changes)
+                  (cpc/valid-changes? undo-changes)))
 
             (update-in state path (fn [file]
                                     (-> file

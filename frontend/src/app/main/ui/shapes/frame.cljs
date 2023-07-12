@@ -7,6 +7,7 @@
 (ns app.main.ui.shapes.frame
   (:require
    [app.common.data.macros :as dm]
+   [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.pages.helpers :as cph]
    [app.common.types.shape.layout :as ctl]
@@ -14,6 +15,7 @@
    [app.main.ui.context :as muc]
    [app.main.ui.shapes.attrs :as attrs]
    [app.main.ui.shapes.custom-stroke :refer [shape-fills shape-strokes]]
+   [app.main.ui.shapes.grid-layout-viewer :refer [grid-layout-viewer]]
    [app.util.object :as obj]
    [debug :refer [debug?]]
    [rumext.v2 :as mf]))
@@ -93,7 +95,7 @@
   [props]
   (let [shape    (unchecked-get props "shape")
         bounds   (or (unchecked-get props "bounds")
-                     (gsh/points->selrect (:points shape)))
+                     (grc/points->rect (:points shape)))
 
         shape-id (:id shape)
         thumb    (:thumbnail shape)
@@ -106,6 +108,8 @@
       {:id (dm/str "thumbnail-" shape-id)
        :href thumb
        :decoding "async"
+       ;; FIXME: ensure bounds is always a rect instance and
+       ;; dm/get-prop for static attr access
        :x (:x bounds)
        :y (:y bounds)
        :width (:width bounds)
@@ -138,9 +142,12 @@
           childs (unchecked-get props "childs")
           childs (cond-> childs
                    (ctl/any-layout? shape)
-                   (cph/sort-layout-children-z-index))]
+                   (cph/sort-layout-children-z-index))
+          is-component? (mf/use-ctx muc/is-component?)]
       [:> frame-container props
        [:g.frame-children {:opacity (:opacity shape)}
         (for [item childs]
-          [:& shape-wrapper {:key (dm/str (:id item)) :shape item}])]])))
+          [:& shape-wrapper {:key (dm/str (:id item)) :shape item}])]
+       (when (and is-component? (empty? childs))
+         [:& grid-layout-viewer {:shape shape :childs childs}])])))
 

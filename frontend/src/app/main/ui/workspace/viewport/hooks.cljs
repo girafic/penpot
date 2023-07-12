@@ -8,8 +8,9 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
-   [app.common.pages :as cp]
+   [app.common.pages.focus :as cpf]
    [app.common.pages.helpers :as cph]
    [app.common.types.component :as ctk]
    [app.common.types.shape-tree :as ctt]
@@ -137,7 +138,8 @@
          (mf/deps page-id)
          (fn [point]
            (let [zoom (mf/ref-val zoom-ref)
-                 rect (gsh/center->rect point (/ 5 zoom) (/ 5 zoom))]
+                 rect (grc/center->rect point (/ 5 zoom) (/ 5 zoom))]
+
              (if (mf/ref-val hover-disabled-ref)
                (rx/of nil)
                (->> (uw/ask-buffered!
@@ -151,20 +153,20 @@
                     (rx/filter some?))))))
 
         over-shapes-stream
-        (mf/use-memo
-          (fn []
-            (rx/merge
-             ;; This stream works to "refresh" the outlines when the control is pressed
-             ;; but the mouse has not been moved from its position.
-             (->> mod-str
-                  (rx/observe-on :async)
-                  (rx/map #(deref last-point-ref))
-                  (rx/merge-map query-point))
+        (mf/with-memo [move-stream mod-str]
+          (rx/merge
+           ;; This stream works to "refresh" the outlines when the control is pressed
+           ;; but the mouse has not been moved from its position.
+           (->> mod-str
+                (rx/observe-on :async)
+                (rx/map #(deref last-point-ref))
+                (rx/filter some?)
+                (rx/merge-map query-point))
 
-             (->> move-stream
-                  (rx/tap #(reset! last-point-ref %))
-                  ;; When transforming shapes we stop querying the worker
-                  (rx/merge-map query-point)))))]
+           (->> move-stream
+                (rx/tap #(reset! last-point-ref %))
+                ;; When transforming shapes we stop querying the worker
+                (rx/merge-map query-point))))]
 
     ;; Refresh the refs on a value change
     (mf/use-effect
@@ -206,7 +208,9 @@
                   (remove #(dm/get-in objects [% :blocked]))
                   (ctt/sort-z-index objects ids {:bottom-frames? mod?}))
 
-             grouped? (fn [id] (contains? #{:group :bool} (get-in objects [id :type])))
+             grouped? (fn [id]
+                        (and (cph/group-shape? objects id)
+                             (not (cph/mask-shape? objects id))))
 
              selected-with-parents
              (into #{} (mapcat #(cph/get-parent-ids objects %)) selected)
@@ -245,7 +249,7 @@
                   (remove remove-id?)
                   (remove (partial cph/hidden-parent? objects))
                   (remove #(and mod? (no-fill-nested-frames? %)))
-                  (filter #(or (empty? focus) (cp/is-in-focus? objects focus %)))
+                  (filter #(or (empty? focus) (cpf/is-in-focus? objects focus %)))
                   (first)
                   (get objects))]
 
@@ -354,5 +358,5 @@
        (do (st/emit! (dsc/push-shortcuts ::path psc/shortcuts))
            #(st/emit! (dsc/pop-shortcuts ::path)))
        text-editing?
-        (do (st/emit! (dsc/push-shortcuts ::text tsc/shortcuts))
-            #(st/emit! (dsc/pop-shortcuts ::text)))))))
+       (do (st/emit! (dsc/push-shortcuts ::text tsc/shortcuts))
+           #(st/emit! (dsc/pop-shortcuts ::text)))))))

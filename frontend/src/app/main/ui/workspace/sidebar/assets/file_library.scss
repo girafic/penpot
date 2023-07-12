@@ -19,6 +19,8 @@
   }
 
   .special-title {
+    @include textEllipsis;
+    width: calc(var(--width, 256px) - $s-80);
     color: var(--title-foreground-color-hover);
   }
   .special-subtitle {
@@ -32,7 +34,7 @@
     width: $s-28;
     border-radius: $br-8;
     svg {
-      @extend .button-icon-small;
+      @extend .button-icon;
       fill: var(--title-foreground-color-hover);
     }
   }

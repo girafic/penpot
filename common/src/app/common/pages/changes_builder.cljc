@@ -11,12 +11,14 @@
    [app.common.files.features :as ffeat]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.pages :as cp]
    [app.common.pages.helpers :as cph]
    [app.common.types.component :as ctk]
    [app.common.types.file :as ctf]
+   [app.common.types.shape.layout :as ctl]
    [app.common.uuid :as uuid]))
 
 ;; Auxiliary functions to help create a set of changes (undo + redo)
@@ -216,6 +218,9 @@
    (add-object changes obj nil))
 
   ([changes obj {:keys [index ignore-touched] :or {index ::undefined ignore-touched false}}]
+
+   ;; FIXME: add shape validation
+
    (assert-page-id changes)
    (assert-objects changes)
    (let [obj (cond-> obj
@@ -233,7 +238,7 @@
           :frame-id       (:frame-id obj)
           :index          (::index obj)
           :ignore-touched ignore-touched
-          :obj            (dissoc obj ::index :parent-id)}
+          :obj            (dissoc obj ::index)}
 
          del-change
          {:type :del-obj
@@ -468,7 +473,7 @@
                           (every? #(apply gpt/close? %) (d/zip old-val new-val))
 
                           (= attr :selrect)
-                          (gsh/close-selrect? old-val new-val)
+                          (grc/close-rect? old-val new-val)
 
                           :else
                           (= old-val new-val))]
@@ -490,7 +495,7 @@
                                  (gsh/update-bool-selrect parent children objects)
 
                                  (= (:type parent) :group)
-                                 (if (:masked-group? parent)
+                                 (if (:masked-group parent)
                                    (gsh/update-mask-selrect parent children)
                                    (gsh/update-group-selrect parent children)))]
             (if resized-parent
@@ -623,11 +628,11 @@
                                    :attr :component-file
                                    :val (:component-file shape)}
                                   {:type :set
-                                   :attr :component-root?
-                                   :val (:component-root? shape)}
+                                   :attr :component-root
+                                   :val (:component-root shape)}
                                   {:type :set
-                                   :attr :main-instance?
-                                   :val (:main-instance? shape)}
+                                   :attr :main-instance
+                                   :val (:main-instance shape)}
                                   {:type :set
                                    :attr :shape-ref
                                    :val (:shape-ref shape)}
@@ -712,3 +717,42 @@
     (-> changes
         (update :redo-changes add-ignore-remote)
         (update :undo-changes add-ignore-remote))))
+
+(defn reorder-grid-children
+  [changes ids]
+  (assert-page-id changes)
+  (assert-objects changes)
+
+  (let [page-id (::page-id (meta changes))
+        objects (lookup-objects changes)
+
+        reorder-grid
+        (fn [changes grid]
+          (let [old-shapes (:shapes grid)
+                grid       (ctl/reorder-grid-children grid)
+                new-shapes (->> (:shapes grid)
+                                (filterv #(contains? objects %)))
+
+                redo-change
+                {:type :reorder-children
+                 :parent-id (:id grid)
+                 :page-id page-id
+                 :shapes new-shapes}
+
+                undo-change
+                {:type :reorder-children
+                 :parent-id (:id grid)
+                 :page-id page-id
+                 :shapes old-shapes}]
+            (-> changes
+                (update :redo-changes conj redo-change)
+                (update :undo-changes d/preconj undo-change)
+                (apply-changes-local))))
+
+        changes
+        (->> ids
+             (map (d/getf objects))
+             (filter ctl/grid-layout?)
+             (reduce reorder-grid changes))]
+
+    changes))

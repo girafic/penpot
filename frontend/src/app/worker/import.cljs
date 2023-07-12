@@ -9,7 +9,7 @@
   (:require
    ["jszip" :as zip]
    [app.common.data :as d]
-   [app.common.file-builder :as fb]
+   [app.common.files.builder :as fb]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes.path :as gpa]
    [app.common.logging :as log]
@@ -229,7 +229,16 @@
         (d/update-when :shape-ref resolve)
 
         (cond-> (= type :text)
-          (d/update-when :content resolve-text-content context)))))
+          (d/update-when :content resolve-text-content context))
+
+        (cond-> (and (= type :frame) (= :grid (:layout data)))
+          (update
+           :layout-grid-cells
+           (fn [cells]
+             (->> (vals cells)
+                  (reduce (fn [cells {:keys [id shapes]}]
+                            (assoc-in cells [id :shapes] (mapv resolve shapes)))
+                          cells))))))))
 
 (defn- translate-frame
   [data type file]

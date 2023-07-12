@@ -26,7 +26,8 @@
                (and (ctl/flex-layout? shape) (ctl/row? shape))
                i/layout-rows
 
-               ;; TODO: GRID ICON
+               (ctl/grid-layout? shape)
+               i/grid-layout-mode
 
                :else
                i/artboard)
@@ -36,7 +37,7 @@
       :path i/curve
       :rect i/box
       :text i/text
-      :group (if (:masked-group? shape)
+      :group (if (:masked-group shape)
                i/mask
                i/folder)
       :bool (case (:bool-type shape)
