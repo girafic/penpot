@@ -77,6 +77,10 @@
                  (pcb/with-objects objects)
                  (prepare-add-shape shape objects selected))
 
+             changes (cond-> changes
+                       (cph/text-shape? shape)
+                       (pcb/set-undo-group (:id shape)))
+
              undo-id (js/Symbol)]
 
          (rx/concat
@@ -248,7 +252,7 @@
            (let [all-ids   (into empty-parents ids)
                  contains? (partial contains? all-ids)
                  xform     (comp (map lookup)
-                                 (filter cph/group-shape?)
+                                 (filter #(or (cph/group-shape? %) (cph/bool-shape? %)))
                                  (remove #(->> (:shapes %) (remove contains?) seq))
                                  (map :id))
                  parents   (into #{} xform all-parents)]

@@ -71,7 +71,8 @@
   [{:keys [locale] :as props}]
   (let [initial (mf/use-memo (constantly {:password-old nil}))
         form (fm/use-form :spec ::password-form
-                          :validators [(fm/validate-not-empty :password-1 (tr "auth.password-not-empty"))
+                          :validators [(fm/validate-not-all-spaces :password-old (tr "auth.password-not-empty"))
+                                       (fm/validate-not-empty :password-1 (tr "auth.password-not-empty"))
                                        (fm/validate-not-empty :password-2 (tr "auth.password-not-empty"))
                                        password-equality]
                           :initial initial)]
@@ -98,7 +99,7 @@
         :name :password-2
         :label (t locale "labels.confirm-password")}]]
 
-     [:& fm/submit-button
+     [:> fm/submit-button*
       {:label (t locale "dashboard.update-settings")
        :data-test "submit-password"}]]))
 

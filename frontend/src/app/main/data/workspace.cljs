@@ -46,6 +46,7 @@
    [app.main.data.workspace.drawing.common :as dwdc]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.fix-bool-contents :as fbc]
+   [app.main.data.workspace.fix-broken-shape-links :as fbs]
    [app.main.data.workspace.fix-deleted-fonts :as fdf]
    [app.main.data.workspace.groups :as dwg]
    [app.main.data.workspace.guides :as dwgu]
@@ -132,8 +133,10 @@
             has-graphics?  (-> file :media seq)
             components-v2  (features/active-feature? state :components-v2)]
         (rx/merge
-         (rx/of (fbc/fix-bool-contents))
-         (rx/of (fdf/fix-deleted-fonts))
+         (rx/of (fbc/fix-bool-contents)
+                (fdf/fix-deleted-fonts)
+                (fbs/fix-broken-shapes))
+
          (if (and has-graphics? components-v2)
            (rx/of (remove-graphics (:id file) (:name file)))
            (rx/empty)))))))
@@ -1832,9 +1835,14 @@
                           detach? (or (foreign-instance? shape paste-objects state)
                                       (and (ctk/in-component-copy-not-root? shape)
                                            (not= (:id component-shape)
-                                                 (:id component-shape-parent))))]
+                                                 (:id component-shape-parent))))
+                          assign-shapes? (and (or (cph/group-shape? shape)
+                                                  (cph/bool-shape? shape))
+                                              (nil? (:shapes shape)))]
                       (-> shape
                           (assoc :frame-id frame-id :parent-id parent-id)
+                          (cond-> assign-shapes?
+                            (assoc :shapes []))
                           (cond-> detach?
                             ;; this is used later, if the paste needs to create a new component from the detached shape
                             (-> (assoc :saved-component-root (:component-root shape))
@@ -2285,6 +2293,44 @@
     ptk/UpdateEvent
     (update [_ state]
       (reduce #(update %1 :workspace-preview-blend dissoc %2) state ids))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Components
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn find-components-norefs
+  []
+  (ptk/reify ::find-components-norefs
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [objects (wsh/lookup-page-objects state)
+            copies  (->> objects
+                         vals
+                         (filter #(and (ctk/instance-head? %) (not (ctk/main-instance? %)))))
+
+            copies-no-ref (filter #(not (:shape-ref %)) copies)
+            find-childs-no-ref (fn [acc-map item]
+                                 (let [id (:id item)
+                                       childs (->> (cph/get-children objects id)
+                                                   (filter #(not (:shape-ref %))))]
+                                   (if (seq childs)
+                                     (assoc acc-map id childs)
+                                     acc-map)))
+            childs-no-ref (reduce
+                           find-childs-no-ref
+                           {}
+                           copies)]
+        (js/console.log "Copies no ref" (count copies-no-ref) (clj->js copies-no-ref))
+        (js/console.log "Childs no ref" (count childs-no-ref) (clj->js childs-no-ref))))))
+
+(defn set-shape-ref
+  [id shape-ref]
+  (ptk/reify ::set-shape-ref
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (update-shape (uuid/uuid id) {:shape-ref (uuid/uuid shape-ref)})))))
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

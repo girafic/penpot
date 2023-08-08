@@ -19,7 +19,7 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.editable-select :refer [editable-select]]
-   [app.main.ui.components.numeric-input :refer [numeric-input]]
+   [app.main.ui.components.numeric-input :refer [numeric-input*]]
    [app.main.ui.components.radio-buttons :refer [nilable-option radio-buttons]]
    [app.main.ui.components.search-bar :refer [search-bar]]
    [app.main.ui.components.select :refer [select]]
@@ -425,6 +425,7 @@
 
         [:select.input-select.variant-option
          {:disabled (= font-id :multiple)
+          :data-mousetrap-dont-stop true
           :value (attr->string font-variant-id)
           :on-change on-font-variant-change
           :on-blur on-blur}
@@ -456,7 +457,7 @@
                 :alt (tr "workspace.options.text-options.line-height")}
          i/text-lineheight-refactor]
 
-        [:> numeric-input
+        [:> numeric-input*
          {:min -200
           :max 200
           :step 0.1
@@ -473,7 +474,7 @@
          {:class (css :icon)
           :alt (tr "workspace.options.text-options.letter-spacing")}
          i/text-letterspacing-refactor]
-        [:> numeric-input
+        [:> numeric-input*
          {:min -200
           :max 200
           :step 0.1
@@ -488,7 +489,7 @@
         [:span.icon-before.tooltip.tooltip-bottom
          {:alt (tr "workspace.options.text-options.line-height")}
          i/line-height]
-        [:> numeric-input
+        [:> numeric-input*
          {:min -200
           :max 200
           :step 0.1
@@ -503,7 +504,7 @@
         [:span.icon-before.tooltip.tooltip-bottom
          {:alt (tr "workspace.options.text-options.letter-spacing")}
          i/letter-spacing]
-        [:> numeric-input
+        [:> numeric-input*
          {:min -200
           :max 200
           :step 0.1

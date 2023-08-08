@@ -7,7 +7,7 @@
 (ns app.main.ui.workspace.sidebar.options.rows.input-row
   (:require
    [app.main.ui.components.editable-select :refer [editable-select]]
-   [app.main.ui.components.numeric-input :refer [numeric-input]]
+   [app.main.ui.components.numeric-input :refer [numeric-input*]]
    [app.main.ui.components.select :refer [select]]
    [app.util.object :as obj]
    [rumext.v2 :as mf]))
@@ -20,7 +20,8 @@
 
     (case type
       :select
-      [:& select {:default-value value
+      [:& select {:data-mousetrap-dont-stop true ;; makes mousetrap to not stop at this element
+                  :default-value value
                   :class "input-option"
                   :options options
                   :on-change on-change}]
@@ -40,7 +41,7 @@
                :class "input-text"
                :on-change on-change} ]
 
-      [:> numeric-input
+      [:> numeric-input*
        {:placeholder placeholder
         :min min
         :max max

@@ -8,6 +8,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.exceptions :as ex]
    [app.common.logging :as log]
    [app.common.pages :as cp]
    [app.common.pages.changes :as cpc]
@@ -51,7 +52,7 @@
 
 (defn update-shapes
   ([ids update-fn] (update-shapes ids update-fn nil))
-  ([ids update-fn {:keys [reg-objects? save-undo? stack-undo? attrs ignore-tree page-id ignore-remote? ignore-touched]
+  ([ids update-fn {:keys [reg-objects? save-undo? stack-undo? attrs ignore-tree page-id ignore-remote? ignore-touched undo-group]
                    :or {reg-objects? false save-undo? true stack-undo? false ignore-remote? false ignore-touched false}}]
    (dm/assert! (sm/coll-of-uuid? ids))
    (dm/assert! (fn? update-fn))
@@ -78,7 +79,9 @@
                         (-> (pcb/empty-changes it page-id)
                             (pcb/set-save-undo? save-undo?)
                             (pcb/set-stack-undo? stack-undo?)
-                            (pcb/with-objects objects))
+                            (pcb/with-objects objects)
+                            (cond-> undo-group
+                              (pcb/set-undo-group undo-group)))
                         ids)
              changes (pcb/reorder-grid-children changes ids)
              changes (add-undo-group changes state)]
@@ -204,6 +207,7 @@
               path            (if (= file-id current-file-id)
                                 [:workspace-data]
                                 [:workspace-libraries file-id :data])]
+
           (try
             (dm/assert!
              "expect valid vector of changes"
@@ -216,7 +220,11 @@
                                         (ctst/update-object-indices page-id))))
 
             (catch :default err
-              (log/error :js/error err)
+              (when-let [data (ex-data err)]
+                (js/console.log (ex/explain data)))
+
+              (when (ex/error? err)
+                (js/console.log (.-stack ^js err)))
               (vreset! error err)
               state))))
 

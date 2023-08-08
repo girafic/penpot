@@ -26,18 +26,20 @@
 (mf/defc exports-menu
   {::mf/wrap [#(mf/memo' % (mf/check-props ["ids" "values" "type" "page-id" "file-id"]))]}
   [{:keys [ids type values page-id file-id] :as props}]
-  (let [exports      (:exports values [])
+  (let [exports            (:exports values [])
 
-        state        (mf/deref refs/export)
-        in-progress? (:in-progress state)
+        state              (mf/deref refs/export)
+        in-progress?       (:in-progress state)
 
-        sname        (when (seqable? exports)
-                       (let [shapes (wsh/lookup-shapes @st/state ids)
-                             sname  (-> shapes first :name)
-                             suffix (-> exports first :suffix)]
-                         (cond-> sname
-                           (and (= 1 (count exports)) (some? suffix))
-                           (str suffix))))
+        shapes-with-exports (->> (wsh/lookup-shapes @st/state ids)
+                                 (filter #(pos? (count (:exports %)))))
+
+        sname               (when (seqable? exports)
+                              (let [sname  (-> shapes-with-exports first :name)
+                                    suffix (-> exports first :suffix)]
+                                (cond-> sname
+                                  (and (= 1 (count exports)) (some? suffix))
+                                  (str suffix))))
 
         scale-enabled?
         (mf/use-callback
@@ -50,7 +52,22 @@
          (fn [event]
            (dom/prevent-default event)
            (if (= :multiple type)
-             (st/emit! (de/show-workspace-export-dialog {:selected (reverse ids)}))
+             ;; I can select multiple shapes all of them with no export settings and one of them with only one
+             ;; In that situation we must export it directly
+             (if (and (= 1 (count shapes-with-exports)) (= 1 (-> shapes-with-exports first :exports count)))
+               (let [shape    (-> shapes-with-exports first)
+                     export   (-> shape :exports first)
+                     sname    (:name shape)
+                     suffix   (:suffix export)
+                     defaults {:page-id page-id
+                               :file-id file-id
+                               :name sname
+                               :object-id (:id (first shapes-with-exports))}]
+                 (cond-> sname
+                   (some? suffix)
+                   (str suffix))
+                 (st/emit! (de/request-simple-export {:export (merge export defaults)})))
+               (st/emit! (de/show-workspace-export-dialog {:selected (reverse ids)})))
 
              ;; In other all cases we only allowed to have a single
              ;; shape-id because multiple shape-ids are handled
@@ -152,7 +169,8 @@
           [:div.element-set-options-group
            {:key index}
            (when (scale-enabled? export)
-             [:select.input-select {:on-change (partial on-scale-change index)
+             [:select.input-select {:data-mousetrap-dont-stop true ;; makes mousetrap to not stop at this element
+                                    :on-change (partial on-scale-change index)
                                     :value (:scale export)}
               [:option {:value "0.5"}  "0.5x"]
               [:option {:value "0.75"} "0.75x"]
@@ -165,7 +183,8 @@
                                :placeholder (tr "workspace.options.export.suffix")
                                :on-change (partial on-suffix-change index)
                                :on-key-down manage-key-down}]
-           [:select.input-select {:value (d/name (:type export))
+           [:select.input-select {:data-mousetrap-dont-stop true ;; makes mousetrap to not stop at this element
+                                  :value (d/name (:type export))
                                   :on-change (partial on-type-change index)}
             [:option {:value "png"} "PNG"]
             [:option {:value "jpeg"} "JPEG"]
@@ -182,4 +201,4 @@
          :disabled in-progress?}
         (if in-progress?
           (tr "workspace.options.exporting-object")
-          (tr "workspace.options.export-object" (c (count ids))))])]))
+          (tr "workspace.options.export-object" (c (count shapes-with-exports))))])]))
