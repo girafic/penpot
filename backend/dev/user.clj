@@ -7,7 +7,9 @@
 (ns user
   (:require
    [app.common.data :as d]
+   [app.common.debug :as debug]
    [app.common.exceptions :as ex]
+   [app.common.files.helpers :as cfh]
    [app.common.fressian :as fres]
    [app.common.geom.matrix :as gmt]
    [app.common.logging :as l]
@@ -21,7 +23,8 @@
    [app.common.transit :as t]
    [app.common.types.file :as ctf]
    [app.common.uuid :as uuid]
-   [app.config :as cfg]
+   [app.config :as cf]
+   [app.db :as db]
    [app.main :as main]
    [app.srepl.helpers :as srepl.helpers]
    [app.srepl.main :as srepl]
@@ -41,7 +44,7 @@
    [clojure.walk :refer [macroexpand-all]]
    [criterium.core  :as crit]
    [cuerdas.core :as str]
-   [datoteka.core]
+   [datoteka.fs :as fs]
    [integrant.core :as ig]
    [malli.core :as m]
    [malli.dev.pretty :as mdp]
@@ -53,9 +56,11 @@
    [promesa.exec :as px]))
 
 (repl/disable-reload! (find-ns 'integrant.core))
+(repl/disable-reload! (find-ns 'app.common.debug))
+
 (set! *warn-on-reflection* true)
 
-(defonce system nil)
+(add-tap #'debug/tap-handler)
 
 ;; --- Benchmarking Tools
 
@@ -94,20 +99,14 @@
 (defn- start
   []
   (try
-    (alter-var-root #'system (fn [sys]
-                               (when sys (ig/halt! sys))
-                               (-> (merge main/system-config main/worker-config)
-                                   (ig/prep)
-                                   (ig/init))))
+    (main/start)
     :started
     (catch Throwable cause
       (ex/print-throwable cause))))
 
 (defn- stop
   []
-  (alter-var-root #'system (fn [sys]
-                             (when sys (ig/halt! sys))
-                             nil))
+  (main/stop)
   :stopped)
 
 (defn restart
@@ -120,61 +119,29 @@
   (stop)
   (repl/refresh-all :after 'user/start))
 
-(defn compression-bench
-  [data]
-  (let [humanize (fn [v] (hum/filesize v :binary true :format " %.4f "))
-        v1 (time (humanize (alength (blob/encode data {:version 1}))))
-        v3 (time (humanize (alength (blob/encode data {:version 3}))))
-        v4 (time (humanize (alength (blob/encode data {:version 4}))))
-        v5 (time (humanize (alength (blob/encode data {:version 5}))))
-        v6 (time (humanize (alength (blob/encode data {:version 6}))))
-        ]
-    (print-table
-     [{
-       :v1 v1
-       :v3 v3
-       :v4 v4
-       :v5 v5
-       :v6 v6
-       }])))
-
-(defonce debug-tap
-  (do
-    (add-tap #(locking debug-tap
-                (prn "tap debug:" %)))
-    1))
+;; (defn compression-bench
+;;   [data]
+;;   (let [humanize (fn [v] (hum/filesize v :binary true :format " %.4f "))
+;;         v1 (time (humanize (alength (blob/encode data {:version 1}))))
+;;         v3 (time (humanize (alength (blob/encode data {:version 3}))))
+;;         v4 (time (humanize (alength (blob/encode data {:version 4}))))
+;;         v5 (time (humanize (alength (blob/encode data {:version 5}))))
+;;         v6 (time (humanize (alength (blob/encode data {:version 6}))))
+;;         ]
+;;     (print-table
+;;      [{
+;;        :v1 v1
+;;        :v3 v3
+;;        :v4 v4
+;;        :v5 v5
+;;        :v6 v6
+;;        }])))
 
 
-(sm/def! ::test
-  [:map {:title "Foo"}
-   [:x :int]
-   [:y {:min 0} :double]
-   [:bar
-    [:map {:title "Bar"}
-     [:z :string]
-     [:v ::sm/uuid]]]
-   [:items
-    [:vector ::dt/instant]]])
-
-(sm/def! ::test2
-  [:multi {:title "Foo" :dispatch :type}
-   [:x
-    [:map {:title "FooX"}
-     [:type [:= :x]]
-     [:x :int]]]
-   [:y
-    [:map
-     [:type [:= :x]]
-     [:y [::sm/one-of #{:a :b :c}]]]]
-   [:z
-    [:map {:title "FooZ"}
-     [:z
-      [:multi {:title "Bar" :dispatch :type}
-       [:a
-        [:map
-         [:type [:= :a]]
-         [:a :int]]]
-       [:b
-        [:map
-         [:type [:= :b]]
-         [:b :int]]]]]]]])
+(defn calculate-frames
+  [{:keys [data]}]
+  (->> (vals (:pages-index data))
+       (mapcat (comp vals :objects))
+       (filter cfh/is-direct-child-of-root?)
+       (filter cfh/frame-shape?)
+       (count)))

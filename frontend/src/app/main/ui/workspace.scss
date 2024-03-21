@@ -12,30 +12,53 @@
 @include font-face("worksans", "WorkSans-Bold", bold);
 
 // Space mono
-@include font-face("spacemono", "SpaceMono-Regular", normal);
+@include font-face("robotomono", "RobotoMono-Regular", normal);
 
 :global(:root) {
   --s-4: 0.25rem;
-  --layer-indentation-size: calc(var(--s-4) * 5);
+  --layer-indentation-size: calc(var(--s-4) * 6);
 }
 
 .workspace {
   @extend .new-scrollbar;
   width: 100vw;
-  height: 100%;
+  height: 100vh;
+  max-height: 100vh;
   user-select: none;
   display: grid;
   grid-template-areas: "left-sidebar viewport right-sidebar";
   grid-template-rows: 1fr;
   grid-template-columns: auto 1fr auto;
+  overflow: hidden;
 
   .workspace-loader {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    @include flexCenter;
     grid-area: viewport;
-    svg {
+    background-color: var(--loader-background);
+    :global(svg#loader-pencil) {
       fill: var(--icon-foreground);
     }
   }
+}
+
+.workspace-content {
+  grid-area: viewport;
+}
+
+.history-debug-overlay {
+  bottom: 0;
+  max-height: $s-500;
+  width: $s-500;
+  overflow-y: auto;
+  position: absolute;
+  z-index: $z-index-modal;
+}
+
+.workspace-viewport {
+  overflow: hidden;
+  transition: none;
+  display: grid;
+  grid-template-rows: $s-20 1fr;
+  grid-template-columns: $s-20 1fr;
+  flex: 1;
 }

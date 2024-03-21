@@ -43,23 +43,32 @@
         is-grid-parent-ref (mf/use-memo (mf/deps ids) #(refs/grid-layout-child? ids))
         is-grid-parent? (mf/deref is-grid-parent-ref)
 
-        is-layout-child-absolute? (ctl/layout-absolute? shape)
+        is-layout-child-absolute? (ctl/item-absolute? shape)
 
         ids (hooks/use-equal-memo ids)
         parents-by-ids-ref (mf/use-memo (mf/deps ids) #(refs/parents-by-ids ids))
         parents (mf/deref parents-by-ids-ref)]
     [:*
+     [:& layer-menu {:ids ids
+                     :type type
+                     :values layer-values}]
+
      [:& measures-menu {:ids ids
                         :type type
                         :values measure-values
                         :shape shape}]
-     [:& layout-container-menu {:type type :ids [(:id shape)] :values layout-container-values :multiple false}]
+
+     [:& layout-container-menu
+      {:type type
+       :ids [(:id shape)]
+       :values layout-container-values
+       :multiple false}]
 
      (when (and (= (count ids) 1) is-layout-child? is-grid-parent?)
        [:& grid-cell/options
         {:shape (first parents)
          :cell (ctl/get-cell-by-shape-id (first parents) (first ids))}])
-     
+
      (when is-layout-child?
        [:& layout-item-menu
         {:ids ids
@@ -70,13 +79,9 @@
          :is-grid-parent? is-grid-parent?
          :shape shape}])
 
-     (when (or (not is-layout-child?) is-layout-child-absolute?)
+     (when (or (not ^boolean is-layout-child?) ^boolean is-layout-child-absolute?)
        [:& constraints-menu {:ids ids
                              :values constraint-values}])
-
-     [:& layer-menu {:ids ids
-                     :type type
-                     :values layer-values}]
 
      [:& fill-menu {:ids ids
                     :type type

@@ -8,23 +8,23 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.rect :as grc]
-   [app.common.math :as mth]
-   [app.common.pages.helpers :as cph]))
+   [app.common.math :as mth]))
 
 (defn shape-stroke-margin
   [shape stroke-width]
-  (if (cph/path-shape? shape)
-    ;; TODO: Calculate with the stroke offset (not implemented yet
-    (mth/sqrt (* 2 stroke-width stroke-width))
-    (- (mth/sqrt (* 2 stroke-width stroke-width)) stroke-width)))
+  (if (cfh/path-shape? shape)
+    ;; TODO: Calculate with the stroke offset (not implemented yet)
+    (+ stroke-width (mth/sqrt (* 2 stroke-width stroke-width)))
+    (mth/sqrt (* 2 stroke-width stroke-width))))
 
 (defn- apply-filters
-  [type filters]
+  [attr type filters]
   (sequence
    (comp
     (remove :hidden)
-    (filter #(= (:style %) type))
+    (filter #(= (attr %) type))
     (map (fn [item]
            {:id (dm/str "filter_" (:id item))
             :type type
@@ -40,10 +40,10 @@
    ;; We can revisit this in the future
    #_(->> shape :blur (into []) (blur-filters :background-blur))
 
-   (->> shape :shadow (apply-filters :drop-shadow))
+   (->> shape :shadow (apply-filters :style :drop-shadow))
    [{:id "shape" :type :blend-filters}]
-   (->> shape :shadow (apply-filters :inner-shadow))
-   (->> shape :blur   (into []) (apply-filters :layer-blur))))
+   (->> shape :shadow (apply-filters :style :inner-shadow))
+   (->> shape :blur list (apply-filters :type :layer-blur))))
 
 (defn- calculate-filter-bounds
   [selrect filter-entry]
@@ -81,7 +81,7 @@
 
 (defn get-shape-filter-bounds
   [shape]
-  (if (and (cph/svg-raw-shape? shape)
+  (if (and (cfh/svg-raw-shape? shape)
            (not= :svg (dm/get-in shape [:content :tag])))
     (dm/get-prop shape :selrect)
     (let [filters    (shape->filters shape)
@@ -104,15 +104,14 @@
                       0))
               (reduce d/max 0))
 
-         margin
+         stroke-margin
          (if ignore-margin?
            0
-           (->> strokes
-                (map #(shape-stroke-margin % stroke-width))
-                (reduce d/max 0)))
+           (shape-stroke-margin shape stroke-width))
 
          shadow-width
          (->> (:shadow shape)
+              (remove :hidden)
               (map #(case (:style % :drop-shadow)
                       :drop-shadow (+ (mth/abs (:offset-x %)) (* (:spread %) 2) (* (:blur %) 2) 10)
                       0))
@@ -120,13 +119,13 @@
 
          shadow-height
          (->> (:shadow shape)
+              (remove :hidden)
               (map #(case (:style % :drop-shadow)
                       :drop-shadow (+ (mth/abs (:offset-y %)) (* (:spread %) 2) (* (:blur %) 2) 10)
                       0))
               (reduce d/max 0))]
-
-     {:horizontal (+ stroke-width margin shadow-width)
-      :vertical (+ stroke-width margin shadow-height)})))
+     {:horizontal (mth/ceil (+ stroke-margin shadow-width))
+      :vertical (mth/ceil (+ stroke-margin shadow-height))})))
 
 (defn- add-padding
   [bounds padding]
@@ -142,47 +141,52 @@
         (update :width + (* 2 h-padding))
         (update :height + (* 2 v-padding)))))
 
+(defn calculate-base-bounds
+  ([shape]
+   (calculate-base-bounds shape true))
+  ([shape ignore-margin?]
+   (-> (get-shape-filter-bounds shape)
+       (add-padding (calculate-padding shape ignore-margin?)))))
+
 (defn get-object-bounds
-  [objects shape]
-  (let [calculate-base-bounds
-        (fn [shape]
-          (-> (get-shape-filter-bounds shape)
-              (add-padding (calculate-padding shape true))))
+  ([objects shape]
+   (get-object-bounds objects shape nil))
+  ([objects shape {:keys [ignore-margin?] :or {ignore-margin? true}}]
+   (let [base-bounds (calculate-base-bounds shape ignore-margin?)
+         bounds
+         (cond
+           (or (empty? (:shapes shape))
+               (or (:masked-group shape) (= :bool (:type shape)))
+               (and (cfh/frame-shape? shape) (not (:show-content shape))))
+           [base-bounds]
 
-        bounds
-        (cond
-          (empty? (:shapes shape))
-          [(calculate-base-bounds shape)]
+           :else
+           (cfh/reduce-objects
+            objects
 
-          (:masked-group shape)
-          [(calculate-base-bounds shape)]
+            (fn [shape]
+              (and (not (:hidden shape))
+                   (d/not-empty? (:shapes shape))
+                   (or (not (cfh/frame-shape? shape))
+                       (:show-content shape))
 
-          (and (cph/frame-shape? shape) (not (:show-content shape)))
-          [(calculate-base-bounds shape)]
+                   (or (not (cfh/group-shape? shape))
+                       (not (:masked-group shape)))))
+            (:id shape)
 
-          :else
-          (cph/reduce-objects
-           objects
+            (fn [result child]
+              (cond-> result
+                (not (:hidden child))
+                (conj (calculate-base-bounds child))))
 
-           (fn [shape]
-             (and (d/not-empty? (:shapes shape))
-                  (or (not (cph/frame-shape? shape))
-                      (:show-content shape))
+            [base-bounds]))
 
-                  (or (not (cph/group-shape? shape))
-                      (not (:masked-group shape)))))
-           (:id shape)
-           (fn [result child]
-             (conj result (calculate-base-bounds child)))
+         children-bounds
+         (cond->> (grc/join-rects bounds)
+           (not (cfh/frame-shape? shape)) (or (:children-bounds shape)))
 
-           [(calculate-base-bounds shape)]))
+         filters (shape->filters shape)
+         blur-value (or (-> shape :blur :value) 0)]
 
-        children-bounds
-        (cond->> (grc/join-rects bounds)
-          (not (cph/frame-shape? shape)) (or (:children-bounds shape)))
-
-        filters (shape->filters shape)
-        blur-value (or (-> shape :blur :value) 0)]
-
-    (get-rect-filter-bounds children-bounds filters blur-value)))
+     (get-rect-filter-bounds children-bounds filters blur-value))))
 

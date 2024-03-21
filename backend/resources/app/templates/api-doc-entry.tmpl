@@ -22,11 +22,13 @@
       {% endif %}
       {% if item.params-schema-js %}
         <span class="tag">
-          <span>SC</span>
+          <span>SCHEMA</span>
         </span>
-      {% else %}
+      {% endif %}
+
+      {% if item.sse %}
         <span class="tag">
-          <span>SP</span>
+          <span>SSE</span>
         </span>
       {% endif %}
     </div>

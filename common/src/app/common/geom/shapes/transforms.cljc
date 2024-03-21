@@ -8,6 +8,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
@@ -15,7 +16,6 @@
    [app.common.geom.shapes.common :as gco]
    [app.common.geom.shapes.path :as gpa]
    [app.common.math :as mth]
-   [app.common.pages.helpers :as cph]
    [app.common.record :as cr]
    [app.common.types.modifiers :as ctm]))
 
@@ -61,8 +61,8 @@
           dy (dm/get-prop delta :y)]
       (if (d/num? dx dy)
         (mapv #(-> %
-                  (update :x + dx)
-                  (update :y + dy))
+                   (update :x + dx)
+                   (update :y + dy))
               position-data)
         position-data))))
 
@@ -104,14 +104,15 @@
 (defn absolute-move
   "Move the shape to the exactly specified position."
   [shape pos]
-  (let [x  (dm/get-prop pos :x)
-        y  (dm/get-prop pos :y)
-        sr (dm/get-prop shape :selrect)
-        px (dm/get-prop sr :x)
-        py (dm/get-prop sr :y)
-        dx (- (d/check-num x) px)
-        dy (- (d/check-num y) py)]
-    (move shape (gpt/point dx dy))))
+  (when shape
+    (let [x  (dm/get-prop pos :x)
+          y  (dm/get-prop pos :y)
+          sr (dm/get-prop shape :selrect)
+          px (dm/get-prop sr :x)
+          py (dm/get-prop sr :y)
+          dx (- (d/check-num x) px)
+          dy (- (d/check-num y) py)]
+      (move shape (gpt/point dx dy)))))
 
 ;; --- Transformation matrix operations
 
@@ -139,6 +140,28 @@
 
        (gmt/translate (gpt/negate shape-center)))))
 
+(defn inverse-transform-matrix
+  ([shape]
+   (inverse-transform-matrix shape nil))
+
+  ([shape params]
+   (inverse-transform-matrix shape params (or (gco/shape->center shape) (gpt/point 0 0))))
+
+  ([{:keys [flip-x flip-y transform-inverse] :as shape} {:keys [no-flip]} shape-center]
+   (-> (gmt/matrix)
+       (gmt/translate shape-center)
+
+       (cond-> (and flip-x no-flip)
+         (gmt/scale (gpt/point -1 1)))
+
+       (cond-> (and flip-y no-flip)
+         (gmt/scale (gpt/point 1 -1)))
+
+       (cond-> (some? transform-inverse)
+         (gmt/multiply transform-inverse))
+
+       (gmt/translate (gpt/negate shape-center)))))
+
 (defn transform-str
   ([shape]
    (transform-str shape nil))
@@ -150,21 +173,6 @@
                 (and no-flip flip-y)))
      (dm/str (transform-matrix shape params))
      "")))
-
-;; FIXME: performance
-(defn inverse-transform-matrix
-  ([shape]
-   (let [shape-center (or (gco/shape->center shape)
-                          (gpt/point 0 0))]
-     (inverse-transform-matrix shape shape-center)))
-  ([{:keys [flip-x flip-y] :as shape} center]
-   (-> (gmt/matrix)
-       (gmt/translate center)
-       (cond->
-           flip-x (gmt/scale (gpt/point -1 1))
-           flip-y (gmt/scale (gpt/point 1 -1)))
-       (gmt/multiply (:transform-inverse shape (gmt/matrix)))
-       (gmt/translate (gpt/negate center)))))
 
 ;; FIXME: move to geom rect?
 (defn transform-rect
@@ -206,24 +214,24 @@
             mb7 (/ (- x2 x1) det)
             mb8 (/ (- (* x1 y1) (* x2 y1)) det)]
 
-      (gmt/matrix (+ (* ma0 mb0)
-                     (* ma1 mb3)
-                     (* ma2 mb6))
-                  (+ (* ma3 mb0)
-                     (* ma4 mb3)
-                     (* ma5 mb6))
-                  (+ (* ma0 mb1)
-                     (* ma1 mb4)
-                     (* ma2 mb7))
-                  (+ (* ma3 mb1)
-                     (* ma4 mb4)
-                     (* ma5 mb7))
-                  (+ (* ma0 mb2)
-                     (* ma1 mb5)
-                     (* ma2 mb8))
-                  (+ (* ma3 mb2)
-                     (* ma4 mb5)
-                     (* ma5 mb8)))))))
+        (gmt/matrix (+ (* ma0 mb0)
+                       (* ma1 mb3)
+                       (* ma2 mb6))
+                    (+ (* ma3 mb0)
+                       (* ma4 mb3)
+                       (* ma5 mb6))
+                    (+ (* ma0 mb1)
+                       (* ma1 mb4)
+                       (* ma2 mb7))
+                    (+ (* ma3 mb1)
+                       (* ma4 mb4)
+                       (* ma5 mb7))
+                    (+ (* ma0 mb2)
+                       (* ma1 mb5)
+                       (* ma2 mb8))
+                    (+ (* ma3 mb2)
+                       (* ma4 mb5)
+                       (* ma5 mb8)))))))
 
 (defn calculate-selrect
   [points center]
@@ -313,7 +321,7 @@
                   (update shape :bool-content gpa/transform-content transform-mtx)
                   shape)
         shape   (if (= type :text)
-                  (update shape :position-data move-position-data transform-mtx)
+                  (update shape :position-data transform-position-data transform-mtx)
                   shape)
         shape   (if (= type :path)
                   (update shape :content gpa/transform-content transform-mtx)
@@ -337,7 +345,7 @@
         ;; NOTE: ensure we have a fresh shallow copy of shape
         shape     (cr/clone shape)
         shape     (adjust-shape-flips! shape points)
-        
+
         center    (gco/points->center points)
         selrect   (calculate-selrect points center)
         transform (calculate-transform points center selrect)
@@ -413,7 +421,11 @@
                        (gco/transform-points shape-center (:transform group (gmt/matrix))))
 
         ;; Calculate the new selrect
-        new-selrect (grc/points->rect base-points)]
+        sr-transform (gmt/transform-in (gco/points->center new-points) (:transform-inverse group (gmt/matrix)))
+        new-selrect
+        (-> new-points
+            (gco/transform-points sr-transform)
+            (grc/points->rect))]
 
     ;; Updates the shape and the applytransform-rect will update the other properties
     (-> group
@@ -454,6 +466,29 @@
           (assoc :points points))
       (update-group-selrect shape children))))
 
+(defn update-shapes-geometry
+  [objects ids]
+  (->> ids
+       (reduce
+        (fn [objects id]
+          (let [shape (get objects id)
+                children (cfh/get-immediate-children objects id)
+                shape
+                (cond
+                  (cfh/mask-shape? shape)
+                  (update-mask-selrect shape children)
+
+                  (cfh/bool-shape? shape)
+                  (update-bool-selrect shape children objects)
+
+                  (cfh/group-shape? shape)
+                  (update-group-selrect shape children)
+
+                  :else
+                  shape)]
+            (assoc objects id shape)))
+        objects)))
+
 (defn transform-shape
   ([shape]
    (let [modifiers (:modifiers shape)]
@@ -462,11 +497,11 @@
          (transform-shape modifiers))))
 
   ([shape modifiers]
-   (if (and (some? modifiers) (not (ctm/empty? modifiers)))
+   (if (and (some? shape) (some? modifiers) (not (ctm/empty? modifiers)))
      (let [transform (ctm/modifiers->transform modifiers)]
        (cond-> shape
          (and (some? transform)
-              (not (cph/root? shape)))
+              (not (cfh/root? shape)))
          (apply-transform transform)
 
          (ctm/has-structure? modifiers)
@@ -482,7 +517,6 @@
           ids (seq ids)]
      (if (empty? ids)
        objects
-
        (let [id (first ids)
              modifier (dm/get-in modifiers [id :modifiers])]
          (recur (d/update-when objects id transform-shape modifier)
@@ -521,7 +555,7 @@
               (let [modifiers (cond-> (get-in modif-tree [(:id child) :modifiers])
                                 propagate? (ctm/add-modifiers parent-modifiers))
                     child     (transform-shape child modifiers)
-                    parent?   (cph/group-like-shape? child)
+                    parent?   (cfh/group-like-shape? child)
 
                     modif-tree
                     (cond-> modif-tree
@@ -544,13 +578,13 @@
            (map (d/getf objects) $)
            (apply-children-modifiers objects modif-tree modifiers $ propagate?))]
      (cond
-       (cph/mask-shape? group)
+       (cfh/mask-shape? group)
        (update-mask-selrect group children)
 
-       (cph/bool-shape? group)
+       (cfh/bool-shape? group)
        (transform-shape group modifiers)
 
-       (cph/group-shape? group)
+       (cfh/group-shape? group)
        (update-group-selrect group children)
 
        :else

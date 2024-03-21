@@ -5,17 +5,27 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.components.code-block
+  (:require-macros [app.main.style :as stl])
   (:require
-   ["highlight.js" :as hljs]
-   [rumext.v2 :as mf]))
+   [app.common.data.macros :as dm]
+   [cuerdas.core :as str]
+   [promesa.core :as p]
+   [rumext.v2 :as mf]
+   [shadow.lazy :as lazy]))
+
+(def highlight-fn
+  (lazy/loadable app.util.code-highlight/highlight!))
 
 (mf/defc code-block
   {::mf/wrap-props false}
   [{:keys [code type]}]
-  (let [block-ref (mf/use-ref)]
+  (let [block-ref (mf/use-ref)
+        code (str/trim code)]
+
     (mf/with-effect [code type]
       (when-let [node (mf/ref-val block-ref)]
-        (hljs/highlightElement node)))
+        (p/let [highlight-fn (lazy/load highlight-fn)]
+          (highlight-fn node))))
 
-    [:pre.code-display {:class type :ref block-ref} code]))
+    [:pre {:class (dm/str type " " (stl/css :code-display)) :ref block-ref} code]))
 

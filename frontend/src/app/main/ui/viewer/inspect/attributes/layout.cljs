@@ -5,10 +5,14 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.inspect.attributes.layout
+  (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.types.shape.layout :as ctl]
    [app.main.ui.components.copy-button :refer [copy-button]]
+   [app.main.ui.components.title-bar :refer [inspect-title-bar]]
+   [app.main.ui.viewer.inspect.attributes.common :as cmm]
    [app.util.code-gen.style-css :as css]
    [rumext.v2 :as mf]))
 
@@ -22,28 +26,39 @@
    :align-content
    :justify-items
    :justify-content
+   :row-gap
+   :column-gap
    :gap
    :padding])
 
 (mf/defc layout-block
   [{:keys [objects shape]}]
-  [:*
-   (for [property properties]
-     (when-let [value (css/get-css-value objects shape property)]
-       [:div.attributes-unit-row
-        [:div.attributes-label (d/name property)]
-        [:div.attributes-value value]
-        [:& copy-button {:data (css/get-css-property objects shape property)}]]))])
+  (for [property properties]
+    (when-let [value (css/get-css-value objects shape property)]
+      (let [property-name (cmm/get-css-rule-humanized property)]
+        [:div {:class (stl/css :layout-row)}
+         [:div {:title property-name
+                :key   (dm/str "layout-" (:id shape) "-" (d/name property))
+                :class (stl/css :global/attr-label)}
+          property-name]
+         [:div {:class (stl/css :global/attr-value)}
+
+          [:& copy-button {:data (css/get-css-property objects shape property)}
+           [:div {:class (stl/css :button-children)} value]]]]))))
 
 (mf/defc layout-panel
   [{:keys [objects shapes]}]
-  (let [shapes (->> shapes (filter ctl/any-layout?))] 
+  (let [shapes (->> shapes (filter ctl/any-layout?))]
+
     (when (seq shapes)
-      [:div.attributes-block
-       [:div.attributes-block-title
-        [:div.attributes-block-title-text "Layout"]
+      [:div {:class (stl/css :attributes-block)}
+       [:& inspect-title-bar
+        {:title "Layout"
+         :class (stl/css :title-spacing-layout)}
+
         (when (= (count shapes) 1)
-          [:& copy-button {:data (css/get-shape-properties-css objects (first shapes) properties)}])]
+          [:& copy-button {:data (css/get-shape-properties-css objects (first shapes) properties)
+                           :class (stl/css :copy-btn-title)}])]
 
        (for [shape shapes]
          [:& layout-block {:shape shape

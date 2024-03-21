@@ -7,9 +7,9 @@
 (ns app.main.ui.workspace.viewport.scroll-bars
   (:require
    [app.common.colors :as clr]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
-   [app.common.pages.helpers :as cph]
    [app.main.data.workspace :as dw]
    [app.main.store :as st]
    [app.main.ui.workspace.viewport.viewport-ref :refer [point->viewport]]
@@ -28,7 +28,7 @@
 
 (mf/defc viewport-scrollbars
   {::mf/wrap [mf/memo]}
-  [{:keys [objects zoom vbox]}]
+  [{:keys [objects zoom vbox bottom-padding]}]
 
   (let [v-scrolling?              (mf/use-state false)
         h-scrolling?              (mf/use-state false)
@@ -53,8 +53,13 @@
 
         base-objects-rect         (mf/with-memo [objects]
                                     (-> objects
-                                        (cph/get-immediate-children)
+                                        (cfh/get-immediate-children)
                                         (gsh/shapes->rect)))
+
+        ;; Padding for bottom palette
+        vbox                     (cond-> vbox
+                                   (some? bottom-padding)
+                                   (update :height - (/ bottom-padding zoom)))
 
         inv-zoom                 (/ 1 zoom)
         vbox-height              (- (:height vbox) (* inv-zoom scroll-height))
@@ -65,6 +70,7 @@
                                      (max 0)
                                      (* vbox-height)
                                      (/ (:height base-objects-rect)))
+
         ;; left space hidden because of the scroll
         left-offset              (-> (- vbox-x (:x base-objects-rect))
                                      (max 0)

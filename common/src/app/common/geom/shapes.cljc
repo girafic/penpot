@@ -15,7 +15,6 @@
    [app.common.geom.shapes.constraints :as gct]
    [app.common.geom.shapes.corners :as gsc]
    [app.common.geom.shapes.intersect :as gsi]
-   [app.common.geom.shapes.modifiers :as gsm]
    [app.common.geom.shapes.path :as gsp]
    [app.common.geom.shapes.transforms :as gtr]
    [app.common.math :as mth]))
@@ -173,6 +172,8 @@
 (dm/export gtr/transform-bounds)
 (dm/export gtr/move-position-data)
 (dm/export gtr/apply-objects-modifiers)
+(dm/export gtr/apply-children-modifiers)
+(dm/export gtr/update-shapes-geometry)
 
 ;; Constratins
 (dm/export gct/calc-child-modifiers)
@@ -185,6 +186,7 @@
 
 ;; Intersection
 (dm/export gsi/overlaps?)
+(dm/export gsi/overlaps-path?)
 (dm/export gsi/has-point?)
 (dm/export gsi/has-point-rect?)
 (dm/export gsi/rect-contains-shape?)
@@ -200,5 +202,5 @@
 (dm/export gsc/shape-corners-1)
 (dm/export gsc/shape-corners-4)
 
-;; Modifiers
-(dm/export gsm/set-objects-modifiers)
+;; Rect
+(dm/export grc/rect->points)

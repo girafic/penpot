@@ -13,11 +13,15 @@
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.undo :as dwu]
    [app.util.router :as rt]
-   [beicon.core :as rx]
-   [potok.core :as ptk]))
+   [beicon.v2.core :as rx]
+   [potok.v2.core :as ptk]))
 
 ;; Change this to :info :debug or :trace to debug this module
 (log/set-level! :warn)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; HELPERS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn initialized?
   "Check if the state is properly initialized in a workspace. This means
@@ -26,11 +30,9 @@
   (and (uuid? (:current-file-id state))
        (uuid? (:current-page-id state))))
 
-;; --- Helpers
-
-(defn interrupt? [e] (= e :interrupt))
-
-(declare undo-to-index)
+(defn interrupt?
+  [e]
+  (= e :interrupt))
 
 (defn- assure-valid-current-page
   []
@@ -49,9 +51,16 @@
           (rx/empty)
           (rx/of (rt/nav :workspace pparams qparams)))))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; UNDO
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; These functions should've been in `src/app/main/data/workspace/undo.cljs` but doing that causes
-;; a circular dependency with `src/app/main/data/workspace/changes.cljs`
+(declare undo-to-index)
+
+;; These functions should've been in
+;; `src/app/main/data/workspace/undo.cljs` but doing that causes a
+;; circular dependency with `src/app/main/data/workspace/changes.cljs`
+
 (def undo
   (ptk/reify ::undo
     ptk/WatchEvent
@@ -94,9 +103,11 @@
   (ptk/reify ::redo
     ptk/WatchEvent
     (watch [it state _]
-      (let [edition (get-in state [:workspace-local :edition])
+      (let [objects (wsh/lookup-page-objects state)
+            edition (get-in state [:workspace-local :edition])
             drawing (get state :workspace-drawing)]
-        (when (and (nil? edition) (or (empty? drawing) (= :curve (:tool drawing))))
+        (when (and (or (nil? edition) (ctl/grid-layout? objects edition))
+                   (or (empty? drawing) (= :curve (:tool drawing))))
           (let [undo  (:workspace-undo state)
                 items (:items undo)
                 index (or (:index undo) (dec (count items)))]
@@ -152,3 +163,28 @@
                                               :undo-changes []
                                               :origin it
                                               :save-undo? false})))))))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Toolbar
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn toggle-toolbar-visibility
+  []
+  (ptk/reify ::toggle-toolbar-visibility
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:workspace-local :hide-toolbar] not))))
+
+(defn hide-toolbar
+  []
+  (ptk/reify ::hide-toolbar
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-local :hide-toolbar] true))))
+
+(defn show-toolbar
+  []
+  (ptk/reify ::show-toolbar
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-local :hide-toolbar] false))))

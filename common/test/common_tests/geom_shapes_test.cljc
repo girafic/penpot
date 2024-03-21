@@ -10,6 +10,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.shapes.intersect :as gsin]
    [app.common.geom.shapes.transforms :as gsht]
    [app.common.math :as mth :refer [close?]]
    [app.common.types.modifiers :as ctm]
@@ -40,9 +41,9 @@
 (t/deftest transform-shapes
   (t/testing "Shape without modifiers should stay the same"
     (t/are [type]
-        (let [shape-before (create-test-shape type)
-              shape-after  (gsh/transform-shape shape-before)]
-          (= shape-before shape-after))
+           (let [shape-before (create-test-shape type)
+                 shape-after  (gsh/transform-shape shape-before)]
+             (= shape-before shape-after))
 
       :rect :path))
 
@@ -64,49 +65,48 @@
                       (get-in shape-after  [:selrect :width])))
 
         (t/is (close? (get-in shape-before [:selrect :height])
-                      (get-in shape-after  [:selrect :height])))
-        )))
+                      (get-in shape-after  [:selrect :height]))))))
 
   (t/testing "Transform with empty translation"
     (t/are [type]
-        (let [modifiers {:displacement (gmt/matrix)}
-              shape-before (create-test-shape type {:modifiers modifiers})
-              shape-after  (gsh/transform-shape shape-before)]
-          (t/are [prop]
-              (t/is (close? (get-in shape-before [:selrect prop])
-                            (get-in shape-after [:selrect prop])))
-            :x :y :width :height :x1 :y1 :x2 :y2))
+           (let [modifiers {:displacement (gmt/matrix)}
+                 shape-before (create-test-shape type {:modifiers modifiers})
+                 shape-after  (gsh/transform-shape shape-before)]
+             (t/are [prop]
+                    (t/is (close? (get-in shape-before [:selrect prop])
+                                  (get-in shape-after [:selrect prop])))
+               :x :y :width :height :x1 :y1 :x2 :y2))
       :rect :path))
 
   (t/testing "Transform shape with resize modifiers"
     (t/are [type]
-        (let [modifiers (ctm/resize-modifiers (gpt/point 2 2) (gpt/point 0 0))
-              shape-before (create-test-shape type {:modifiers modifiers})
-              shape-after  (gsh/transform-shape shape-before)]
-          (t/is (not= shape-before shape-after))
+           (let [modifiers (ctm/resize-modifiers (gpt/point 2 2) (gpt/point 0 0))
+                 shape-before (create-test-shape type {:modifiers modifiers})
+                 shape-after  (gsh/transform-shape shape-before)]
+             (t/is (not= shape-before shape-after))
 
-          (t/is (close? (get-in shape-before [:selrect :x])
-                        (get-in shape-after  [:selrect :x])))
+             (t/is (close? (get-in shape-before [:selrect :x])
+                           (get-in shape-after  [:selrect :x])))
 
-          (t/is (close? (get-in shape-before [:selrect :y])
-                        (get-in shape-after  [:selrect :y])))
+             (t/is (close? (get-in shape-before [:selrect :y])
+                           (get-in shape-after  [:selrect :y])))
 
-          (t/is (close? (* 2 (get-in shape-before [:selrect :width]))
-                        (get-in shape-after  [:selrect :width])))
+             (t/is (close? (* 2 (get-in shape-before [:selrect :width]))
+                           (get-in shape-after  [:selrect :width])))
 
-          (t/is (close? (* 2 (get-in shape-before [:selrect :height]))
-                        (get-in shape-after  [:selrect :height]))))
+             (t/is (close? (* 2 (get-in shape-before [:selrect :height]))
+                           (get-in shape-after  [:selrect :height]))))
       :rect :path))
 
   (t/testing "Transform with empty resize"
     (t/are [type]
-        (let [modifiers (ctm/resize-modifiers (gpt/point 1 1) (gpt/point 0 0))
-              shape-before (create-test-shape type {:modifiers modifiers})
-              shape-after  (gsh/transform-shape shape-before)]
-          (t/are [prop]
-              (t/is (close? (get-in shape-before [:selrect prop])
-                            (get-in shape-after [:selrect prop])))
-            :x :y :width :height :x1 :y1 :x2 :y2))
+           (let [modifiers (ctm/resize-modifiers (gpt/point 1 1) (gpt/point 0 0))
+                 shape-before (create-test-shape type {:modifiers modifiers})
+                 shape-after  (gsh/transform-shape shape-before)]
+             (t/are [prop]
+                    (t/is (close? (get-in shape-before [:selrect prop])
+                                  (get-in shape-after [:selrect prop])))
+               :x :y :width :height :x1 :y1 :x2 :y2))
       :rect :path))
 
   (t/testing "Transform with resize=0"
@@ -117,54 +117,52 @@
       (t/is (close? (get-in shape-before [:selrect :width])
                     (get-in shape-after  [:selrect :width])))
       (t/is (close? (get-in shape-before [:selrect :height])
-                      (get-in shape-after  [:selrect :height])))))
+                    (get-in shape-after  [:selrect :height])))))
 
   (t/testing "Transform shape with rotation modifiers"
     (t/are [type]
-        (let [shape-before (create-test-shape type)
-              modifiers (ctm/rotation-modifiers shape-before (gsh/shape->center shape-before) 30)
-              shape-before (assoc shape-before :modifiers modifiers)
-              shape-after  (gsh/transform-shape shape-before)]
+           (let [shape-before (create-test-shape type)
+                 modifiers (ctm/rotation-modifiers shape-before (gsh/shape->center shape-before) 30)
+                 shape-before (assoc shape-before :modifiers modifiers)
+                 shape-after  (gsh/transform-shape shape-before)]
 
-          (t/is (close? (get-in shape-before [:selrect :x])
-                        (get-in shape-after  [:selrect :x])))
+             (t/is (close? (get-in shape-before [:selrect :x])
+                           (get-in shape-after  [:selrect :x])))
 
-          (t/is (close? (get-in shape-before [:selrect :y])
-                        (get-in shape-after  [:selrect :y])))
+             (t/is (close? (get-in shape-before [:selrect :y])
+                           (get-in shape-after  [:selrect :y])))
 
-          (t/is (= (count (:points shape-before)) (count (:points shape-after))))
+             (t/is (= (count (:points shape-before)) (count (:points shape-after))))
 
-          (for [idx (range 0 (count (:point shape-before)))]
-            (do (t/is (not (close? (get-in shape-before [:points idx :x])
-                                   (get-in shape-after [:points idx :x]))))
-                (t/is (not (close? (get-in shape-before [:points idx :y])
-                                   (get-in shape-after [:points idx :y])))))))
+             (for [idx (range 0 (count (:point shape-before)))]
+               (do (t/is (not (close? (get-in shape-before [:points idx :x])
+                                      (get-in shape-after [:points idx :x]))))
+                   (t/is (not (close? (get-in shape-before [:points idx :y])
+                                      (get-in shape-after [:points idx :y])))))))
       :rect :path))
 
   (t/testing "Transform shape with rotation = 0 should leave equal selrect"
     (t/are [type]
-        (let [shape-before (create-test-shape type)
-              modifiers (ctm/rotation-modifiers shape-before (gsh/shape->center shape-before) 0)
-              shape-after  (gsh/transform-shape (assoc shape-before :modifiers modifiers))]
-          (t/are [prop]
-              (t/is (close? (get-in shape-before [:selrect prop])
-                            (get-in shape-after [:selrect prop])))
-            :x :y :width :height :x1 :y1 :x2 :y2))
+           (let [shape-before (create-test-shape type)
+                 modifiers (ctm/rotation-modifiers shape-before (gsh/shape->center shape-before) 0)
+                 shape-after  (gsh/transform-shape (assoc shape-before :modifiers modifiers))]
+             (t/are [prop]
+                    (t/is (close? (get-in shape-before [:selrect prop])
+                                  (get-in shape-after [:selrect prop])))
+               :x :y :width :height :x1 :y1 :x2 :y2))
       :rect :path))
 
   (t/testing "Transform shape with invalid selrect fails gracefully"
     (t/are [type selrect]
-        (let [modifiers    (ctm/move-modifiers 0 0)
-              shape-before (create-test-shape type {:selrect selrect})
-              shape-after  (gsh/transform-shape shape-before modifiers)]
+           (let [modifiers    (ctm/move-modifiers 0 0)
+                 shape-before (create-test-shape type {:selrect selrect})
+                 shape-after  (gsh/transform-shape shape-before modifiers)]
 
-          (t/is (grc/close-rect? (:selrect shape-before)
-                                 (:selrect shape-after))))
+             (t/is (grc/close-rect? (:selrect shape-before)
+                                    (:selrect shape-after))))
 
       :rect (grc/make-rect 0 0 ##Inf ##Inf)
-      :path (grc/make-rect 0 0 ##Inf ##Inf)
-      ))
-  )
+      :path (grc/make-rect 0 0 ##Inf ##Inf))))
 
 (t/deftest points-to-selrect
   (let [points [(gpt/point 0.5 0.5)
@@ -184,8 +182,8 @@
 (t/deftest points-transform-matrix
   (t/testing "Transform matrix"
     (t/are [selrect points expected]
-        (let [result (gsht/transform-points-matrix selrect points)]
-          (t/is (gmt/close? expected result)))
+           (let [result (gsht/transform-points-matrix selrect points)]
+             (t/is (gmt/close? expected result)))
 
       ;; No transformation
       (grc/make-rect 0 0 10 10)
@@ -196,7 +194,7 @@
       ;; Displacement
       (grc/make-rect 0 0 10 10)
       (-> (grc/make-rect 20 20 10 10)
-          (grc/rect->points ))
+          (grc/rect->points))
       (gmt/matrix 1 0 0 1 20 20)
 
       ;; Resize
@@ -224,3 +222,13 @@
           (grc/rect->points)
           (gsh/transform-points (gmt/rotate-matrix 45)))
       (gmt/matrix (* (mth/cos g45) 2) (* (mth/sin g45) 2) (* (- (mth/sin g45)) 4) (* (mth/cos g45) 4) 0 0))))
+
+
+(t/deftest shape-has-point-pred
+  (let [{:keys [points] :as shape} (create-test-shape :rect {})
+        point1 (first points)
+        point2 (update point1 :x - 100)]
+    (t/is (true? (gsin/fast-has-point? shape point1)))
+    (t/is (true? (gsin/slow-has-point? shape point1)))
+    (t/is (false? (gsin/fast-has-point? shape point2)))
+    (t/is (false? (gsin/fast-has-point? shape point2)))))

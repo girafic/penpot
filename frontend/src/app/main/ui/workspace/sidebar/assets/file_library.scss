@@ -6,47 +6,46 @@
 
 @import "refactor/common-refactor.scss";
 .tool-window {
-  margin-bottom: $s-24;
+  padding: 0 0 $s-24 $s-12;
+  display: grid;
+  grid-auto-rows: max-content;
+  gap: $s-4;
+  height: 100%;
 }
-.library-title {
-  .file-name {
-    @include titleTipography;
-    display: flex;
-    justify-content: flex-start;
-    align-items: center;
-    flex-grow: 100;
-    height: 100%;
-  }
 
-  .special-title {
-    @include textEllipsis;
-    width: calc(var(--width, 256px) - $s-80);
-    color: var(--title-foreground-color-hover);
-  }
-  .special-subtitle {
-    padding-left: $s-4;
-    color: var(--title-foreground-color);
-    text-transform: initial;
-  }
-  .file-link {
-    @extend .button-tertiary;
-    height: $s-32;
-    width: $s-28;
-    border-radius: $br-8;
-    svg {
-      @extend .button-icon;
-      fill: var(--title-foreground-color-hover);
-    }
+.file-name {
+  @include bodySmallTypography;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  flex-grow: 100;
+  height: 100%;
+}
+
+.special-title {
+  @include textEllipsis;
+  color: var(--title-foreground-color-hover);
+  margin-left: $s-2;
+  text-align: left;
+}
+
+.file-link {
+  @extend .button-tertiary;
+  height: $s-32;
+  width: $s-28;
+  border-radius: $br-8;
+  svg {
+    @extend .button-icon;
+    stroke: var(--icon-foreground);
+    fill: var(--title-foreground-color-hover);
   }
 }
+
 .library-content {
-  display: flex;
-  flex-direction: column;
-  height: calc(100% - $s-36);
   width: 100%;
-  overflow-y: hidden;
-  overflow-x: hidden;
-  margin-top: $s-4;
+  display: grid;
+  grid-auto-rows: max-content;
+  gap: $s-4;
 }
 
 .asset-title {
@@ -55,22 +54,23 @@
   flex-direction: column;
   align-items: center;
   gap: $s-8;
-  .no-found-icon {
-    @include flexCenter;
-    background-color: var(--not-found-background-color);
-    border-radius: $br-circle;
-    height: $s-48;
-    width: $s-48;
-    svg {
-      @extend .button-icon;
-      height: $s-24;
-      width: $s-24;
-      stroke: var(--not-found-foreground-color);
-    }
-  }
+}
 
-  .no-found-text {
-    @include titleTipography;
-    color: var(--not-found-foreground-color);
+.no-found-icon {
+  @include flexCenter;
+  background-color: var(--not-found-background-color);
+  border-radius: $br-circle;
+  height: $s-48;
+  width: $s-48;
+  svg {
+    @extend .button-icon;
+    height: $s-24;
+    width: $s-24;
+    stroke: var(--not-found-foreground-color);
   }
+}
+
+.no-found-text {
+  @include bodySmallTypography;
+  color: var(--not-found-foreground-color);
 }

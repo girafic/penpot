@@ -48,7 +48,7 @@
                  (map event->row))
         events  (sequence xform events)]
     (when (seq events)
-      (db/insert-multi! pool :audit-log event-columns events))))
+      (db/insert-many! pool :audit-log event-columns events))))
 
 (def schema:event
   [:map {:title "Event"}
@@ -64,7 +64,7 @@
    [:events [:vector schema:event]]])
 
 (sv/defmethod ::push-audit-events
-  {::climit/id :submit-audit-events-by-profile
+  {::climit/id :submit-audit-events/by-profile
    ::climit/key-fn ::rpc/profile-id
    ::sm/params schema:push-audit-events
    ::audit/skip true

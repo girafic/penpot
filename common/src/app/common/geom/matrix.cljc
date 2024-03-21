@@ -6,9 +6,9 @@
 
 (ns app.common.geom.matrix
   (:require
+   #?(:clj [app.common.fressian :as fres])
    #?(:cljs [cljs.pprint :as pp]
       :clj  [clojure.pprint :as pp])
-   #?(:clj [app.common.fressian :as fres])
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
@@ -44,6 +44,17 @@
             (mth/to-fixed (.-e this) precision)
             (mth/to-fixed (.-f this) precision))))
 
+(defn format-precision
+  [mtx precision]
+  (when mtx
+    (dm/fmt "matrix(%, %, %, %, %, %)"
+            (mth/to-fixed (.-a mtx) precision)
+            (mth/to-fixed (.-b mtx) precision)
+            (mth/to-fixed (.-c mtx) precision)
+            (mth/to-fixed (.-d mtx) precision)
+            (mth/to-fixed (.-e mtx) precision)
+            (mth/to-fixed (.-f mtx) precision))))
+
 (defn matrix?
   "Return true if `v` is Matrix instance."
   [v]
@@ -56,7 +67,8 @@
   ([a b c d e f]
    (pos->Matrix a b c d e f)))
 
-(def number-regex #"[+-]?\d*(\.\d+)?(e[+-]?\d+)?")
+(def number-regex
+  #"[+-]?\d*(\.\d+)?([eE][+-]?\d+)?")
 
 (defn str->matrix
   [matrix-str]
@@ -65,14 +77,18 @@
                     (map (comp d/parse-double first)))]
     (apply matrix params)))
 
-(sm/def! ::matrix-map
-  [:map {:title "MatrixMap"}
+(def ^:private schema:matrix-attrs
+  [:map {:title "MatrixAttrs"}
    [:a ::sm/safe-double]
    [:b ::sm/safe-double]
    [:c ::sm/safe-double]
    [:d ::sm/safe-double]
    [:e ::sm/safe-double]
    [:f ::sm/safe-double]])
+
+(def valid-matrix?
+  (sm/lazy-validator
+   [:and [:fn matrix?] schema:matrix-attrs]))
 
 (sm/def! ::matrix
   (letfn [(decode [o]
@@ -90,7 +106,7 @@
                     (dm/get-prop o :f) ","))]
 
     {:type ::matrix
-     :pred matrix?
+     :pred valid-matrix?
      :type-properties
      {:title "matrix"
       :description "Matrix instance"
@@ -100,7 +116,7 @@
                               (sg/small-double)
                               (sg/small-double)
                               (sg/small-double)
-                              (sg/small-double) )
+                              (sg/small-double))
                     (sg/fmap #(apply pos->Matrix %)))
       ::oapi/type "string"
       ::oapi/format "matrix"
@@ -248,8 +264,8 @@
   ([pt]
    (dm/assert! (gpt/point? pt))
    (pos->Matrix 1 0 0 1
-            (- (dm/get-prop pt :x))
-            (- (dm/get-prop pt :y))))
+                (- (dm/get-prop pt :x))
+                (- (dm/get-prop pt :y))))
 
   ([x y]
    (pos->Matrix 1 0 0 1 (- x) (- y))))

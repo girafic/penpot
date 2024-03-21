@@ -8,18 +8,18 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.focus :as cpf]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.geom.snap :as sp]
    [app.common.math :as mth]
-   [app.common.pages.focus :as cpf]
-   [app.common.pages.helpers :as cph]
    [app.common.uuid :refer [zero]]
    [app.main.refs :as refs]
    [app.main.worker :as uw]
    [app.util.range-tree :as rt]
-   [beicon.core :as rx]
+   [beicon.v2.core :as rx]
    [clojure.set :as set]))
 
 (def ^:const snap-accuracy 10)
@@ -40,14 +40,14 @@
   (fn [{:keys [type id frame-id]}]
     (cond
       (= type :layout)
-      (or (not (contains? layout :display-grid))
-          (not (contains? layout :snap-grid))
+      (or (not (contains? layout :display-guides))
+          (not (contains? layout :snap-guides))
           (and (d/not-empty? focus)
                (not (contains? focus id))))
 
       (= type :guide)
-      (or (not (contains? layout :rules))
-          (not (contains? layout :snap-guides))
+      (or (not (contains? layout :rulers))
+          (not (contains? layout :snap-ruler-guides))
           (and (d/not-empty? focus)
                (not (contains? focus frame-id))))
 
@@ -82,13 +82,14 @@
 
 (defn get-snap-points [page-id frame-id remove-snap? zoom point coord]
   (let [value (get point coord)
-        vbox @refs/vbox]
+        vbox @refs/vbox
+        ranges [[(- value (/ 0.5 zoom)) (+ value (/ 0.5 zoom))]]]
     (->> (uw/ask! {:cmd :snaps/range-query
                    :page-id page-id
                    :frame-id frame-id
                    :axis coord
                    :bounds vbox
-                   :ranges [[(- value (/ 0.5 zoom)) (+ value (/ 0.5 zoom))]]})
+                   :ranges ranges})
          (rx/take 1)
          (rx/map (remove-from-snap-points remove-snap?)))))
 
@@ -181,7 +182,7 @@
                           range-tree
                           (- cd snap-distance-accuracy)
                           (+ cd snap-distance-accuracy))
-                         (map #(- (first %) cd ))))))))
+                         (map #(- (first %) cd))))))))
 
         get-middle-snaps
         (fn [lt-dist gt-dist]
@@ -210,8 +211,9 @@
 
 (defn search-snap-distance [selrect coord shapes-lt shapes-gt zoom]
   (->> (rx/combine-latest shapes-lt shapes-gt)
-       (rx/map (fn [[shapes-lt shapes-gt]]
-                 (calculate-snap coord selrect shapes-lt shapes-gt zoom)))))
+       (rx/map
+        (fn [[shapes-lt shapes-gt]]
+          (calculate-snap coord selrect shapes-lt shapes-gt zoom)))))
 
 (defn select-shapes-area
   [page-id frame-id selected objects area]
@@ -220,7 +222,7 @@
                  :frame-id frame-id
                  :include-frames? true
                  :rect area})
-       (rx/map #(cph/clean-loops objects %))
+       (rx/map #(cfh/clean-loops objects %))
        (rx/map #(set/difference % selected))
        (rx/map #(map (d/getf objects) %))))
 
@@ -233,12 +235,12 @@
          (rx/merge-map
           (fn [[frame selrect]]
             (let [vbox     (deref refs/vbox)
+
                   frame-id (->> shapes first :frame-id)
+                  frame-sr (when-not (cfh/root? frame) (dm/get-prop frame :selrect))
+                  bounds (d/nilv (grc/clip-rect frame-sr vbox) vbox)
                   selected (into #{} (map :id shapes))
-                  areas (->> (gsh/get-areas
-                              (or (grc/clip-rect (dm/get-prop frame :selrect) vbox)
-                                  vbox)
-                              selrect)
+                  areas (->> (gsh/get-areas bounds selrect)
                              (d/mapm #(select-shapes-area page-id frame-id selected objects %2)))
                   snap-x (search-snap-distance selrect :x (:left areas) (:right areas) zoom)
                   snap-y (search-snap-distance selrect :y (:top areas) (:bottom areas) zoom)]

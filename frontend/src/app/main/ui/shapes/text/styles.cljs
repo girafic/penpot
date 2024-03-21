@@ -6,6 +6,7 @@
 
 (ns app.main.ui.shapes.text.styles
   (:require
+   [app.common.colors :as cc]
    [app.common.data :as d]
    [app.common.text :as txt]
    [app.common.transit :as transit]
@@ -20,7 +21,6 @@
   (let [valign (:vertical-align node "top")
         base   #js {:height (fmt/format-pixels height)
                     :width  (fmt/format-pixels width)
-                    :fontFamily "sourcesanspro"
                     :display "flex"
                     :whiteSpace "break-spaces"}]
     (cond-> base
@@ -76,7 +76,7 @@
          fill-opacity    (or (-> data :fills first :fill-opacity) (:fill-opacity data))
          fill-gradient   (or (-> data :fills first :fill-color-gradient) (:fill-color-gradient data))
 
-         [r g b a]       (uc/hex->rgba fill-color fill-opacity)
+         [r g b a]       (cc/hex->rgba fill-color fill-opacity)
          text-color      (when (and (some? fill-color) (some? fill-opacity))
                            (str/format "rgba(%s, %s, %s, %s)" r g b a))
 
@@ -92,7 +92,7 @@
                               :textTransform text-transform
                               :color (if (and show-text? (not gradient?)) text-color "transparent")
                               :background (when (and show-text? gradient?) text-color)
-                              :caretColor (or text-color "black")
+                              :caretColor (if (and (not gradient?) text-color) text-color "black")
                               :overflowWrap "initial"
                               :lineBreak "auto"
                               :whiteSpace "break-spaces"

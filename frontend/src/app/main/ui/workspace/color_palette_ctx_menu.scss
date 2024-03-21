@@ -9,11 +9,11 @@
 .palette-menu {
   position: absolute;
   left: auto;
+  bottom: var(--height);
   max-width: $s-480;
-  bottom: $s-0;
   padding: $s-4;
   margin: 0 0 $s-4 0;
-  z-index: $z-index-3;
+  z-index: $z-index-4;
   border-radius: $br-10;
   background-color: var(--context-menu-background-color);
 
@@ -33,7 +33,7 @@
     .option-wrapper {
       width: 100%;
       .library-name {
-        @include titleTipography;
+        @include bodySmallTypography;
         color: var(--context-menu-foreground-color);
         display: grid;
         grid-template-columns: 1fr $s-24;
@@ -52,8 +52,9 @@
           margin-left: $s-4;
           @include flexCenter;
           svg {
-            @include flexCenter;
             @extend .button-icon-small;
+            @include flexCenter;
+            stroke: var(--icon-foreground);
           }
         }
       }

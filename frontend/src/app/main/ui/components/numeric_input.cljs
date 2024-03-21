@@ -41,7 +41,7 @@
         min-value   (d/parse-double min-value)
         max-value   (d/parse-double max-value)
         step-value  (d/parse-double step-value 1)
-        default     (d/parse-double default 0)
+        default     (d/parse-double default (when-not nillable? 0))
 
         select-on-focus? (d/nilv (unchecked-get props "selectOnFocus") true)
 
@@ -53,10 +53,13 @@
 
         ;; This `value` represents the previous value and is used as
         ;; initil value for the simple math expression evaluation.
-        value       (d/parse-double value-str default)
+        value       (when (not= :multiple value-str) (d/parse-double value-str default))
 
         ;; We need to store the handle-blur ref so we can call it on unmount
         dirty-ref   (mf/use-ref false)
+
+        ;; Last value input by the user we need to store to save on unmount
+        last-value*  (mf/use-var value)
 
         parse-value
         (mf/use-fn
@@ -102,7 +105,20 @@
         (mf/use-fn
          (mf/deps wrap-value? min-value max-value parse-value apply-value)
          (fn [event up? down?]
-           (let [current-value (parse-value)]
+           (let [current-value (parse-value)
+                 current-value
+                 (cond
+                   (and (not current-value) down? max-value)
+                   max-value
+
+                   (and (not current-value) up? min-value)
+                   min-value
+
+                   (not current-value)
+                   (d/nilv default 0)
+
+                   :else
+                   current-value)]
              (when current-value
                (let [increment (cond
                                  (kbd/shift? event)
@@ -136,7 +152,7 @@
 
         handle-key-down
         (mf/use-fn
-         (mf/deps set-delta apply-value update-input)
+         (mf/deps set-delta apply-value update-input parse-value)
          (fn [event]
            (mf/set-ref-val! dirty-ref true)
            (let [up?    (kbd/up-arrow? event)
@@ -146,11 +162,19 @@
                  node   (mf/ref-val ref)]
              (when (or up? down?)
                (set-delta event up? down?))
+             (reset! last-value* (parse-value))
              (when enter?
                (dom/blur! node))
              (when esc?
                (update-input value-str)
                (dom/blur! node)))))
+
+        handle-change
+        (mf/use-fn
+         (mf/deps parse-value)
+         (fn []
+           ;; Store the last value inputed
+           (reset! last-value* (parse-value))))
 
         handle-mouse-wheel
         (mf/use-fn
@@ -167,15 +191,15 @@
         (mf/use-fn
          (mf/deps parse-value apply-value update-input on-blur)
          (fn [event]
-           (let [new-value (or (parse-value) default)]
-             (if (or nillable? new-value)
-               (apply-value event new-value)
-               (update-input new-value)))
-           (when (fn? on-blur)
-             (on-blur event))))
+           (when (mf/ref-val dirty-ref)
+             (let [new-value (or @last-value* default)]
+               (if (or nillable? new-value)
+                 (apply-value event new-value)
+                 (update-input new-value)))
+             (when (fn? on-blur)
+               (on-blur event)))))
 
-        handle-unmount
-        (h/use-ref-callback handle-blur)
+        handle-unmount (h/use-ref-callback handle-blur)
 
         on-click
         (mf/use-fn
@@ -201,7 +225,7 @@
                   (obj/unset! "selectOnFocus")
                   (obj/unset! "nillable")
                   (obj/set! "value" mf/undefined)
-                  (obj/set! "onChange" mf/undefined)
+                  (obj/set! "onChange" handle-change)
                   (obj/set! "className" class)
                   (obj/set! "type" "text")
                   (obj/set! "ref" ref)
@@ -215,10 +239,7 @@
       (when-let [input-node (mf/ref-val ref)]
         (dom/set-value! input-node (fmt/format-number value))))
 
-    (mf/with-effect []
-      (fn []
-        (when (mf/ref-val dirty-ref)
-          (handle-unmount))))
+    (mf/with-effect [handle-unmount] handle-unmount)
 
     (mf/with-layout-effect []
       (let [keys [(events/listen globals/window "pointerdown" on-click)

@@ -9,6 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes.common :as gco]
@@ -16,7 +17,6 @@
    [app.common.geom.shapes.effects :as gse]
    [app.common.geom.shapes.strokes :as gss]
    [app.common.math :as mth]
-   [app.common.pages.helpers :as cph]
    [app.common.text :as txt]
    [app.common.types.shape.layout :as ctl]
    [clojure.core :as c]))
@@ -42,27 +42,27 @@
 ;;     * change-properties
 
 (defrecord Modifiers
-    [last-order ;; Last `order` attribute in the geometry list
-     geometry-parent
-     geometry-child
-     structure-parent
-     structure-child])
+           [last-order ;; Last `order` attribute in the geometry list
+            geometry-parent
+            geometry-child
+            structure-parent
+            structure-child])
 
 (defrecord GeometricOperation
-    [order ;; Need the order to keep consistent between geometry-parent and geometry-child
-     type
-     vector
-     origin
-     transform
-     transform-inverse
-     rotation
-     center])
+           [order ;; Need the order to keep consistent between geometry-parent and geometry-child
+            type
+            vector
+            origin
+            transform
+            transform-inverse
+            rotation
+            center])
 
 (defrecord StructureOperation
-    [type
-     property
-     value
-     index])
+           [type
+            property
+            value
+            index])
 
 ;; Record constructors
 
@@ -599,8 +599,8 @@
   "Transforms a matrix by the translation modifier"
   [matrix modifier]
   (-> (dm/get-prop modifier :vector)
-          (gmt/translate-matrix)
-          (gmt/multiply! matrix)))
+      (gmt/translate-matrix)
+      (gmt/multiply! matrix)))
 
 
 (defn transform-resize!
@@ -656,8 +656,7 @@
   [modifiers]
   (let [modifiers (concat (dm/get-prop modifiers :geometry-parent)
                           (dm/get-prop modifiers :geometry-child))
-        modifiers (sort-by #(dm/get-prop % :order) modifiers)
-        ]
+        modifiers (sort-by #(dm/get-prop % :order) modifiers)]
     (modifiers->transform1 modifiers)))
 
 (defn modifiers->transform-old
@@ -739,7 +738,7 @@
           (apply-scale-content
             [shape value]
             (cond-> shape
-              (cph/text-shape? shape)
+              (cfh/text-shape? shape)
               (update-text-content scale-text-content value)
 
               :always
@@ -756,6 +755,9 @@
 
               (ctl/flex-layout? shape)
               (ctl/update-flex-scale value)
+
+              (ctl/grid-layout? shape)
+              (ctl/update-grid-scale value)
 
               :always
               (ctl/update-flex-child value)))]
@@ -775,14 +777,19 @@
 
                 :add-children
                 (let [value (dm/get-prop operation :value)
-                      index (dm/get-prop operation :index)]
-                  (if (some? index)
-                    (update shape :shapes
-                            (fn [shapes]
-                              (if (vector? shapes)
-                                (d/insert-at-index shapes index value)
-                                (d/concat-vec shapes value))))
-                    (update shape :shapes d/concat-vec value)))
+                      index (dm/get-prop operation :index)
+
+                      shape
+                      (if (some? index)
+                        (update shape :shapes
+                                (fn [shapes]
+                                  (if (vector? shapes)
+                                    (d/insert-at-index shapes index value)
+                                    (d/concat-vec shapes value))))
+                        (update shape :shapes d/concat-vec value))]
+
+                  ;; Remove duplication
+                  (update shape :shapes #(into [] (apply d/ordered-set %))))
 
                 :remove-children
                 (let [value (dm/get-prop operation :value)]

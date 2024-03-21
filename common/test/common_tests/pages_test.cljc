@@ -6,8 +6,8 @@
 
 (ns common-tests.pages-test
   (:require
-   [app.common.files.features :as ffeat]
-   [app.common.pages :as cp]
+   [app.common.features :as ffeat]
+   [app.common.files.changes :as ch]
    [app.common.types.file :as ctf]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
@@ -28,7 +28,7 @@
                  :page-id page-id
                  :option :test
                  :value "test"}
-            res (cp/process-changes data [chg])]
+            res (ch/process-changes data [chg])]
         (t/is (= "test" (get-in res [:pages-index page-id :options :test])))))
 
     (t/testing "Sets option nested"
@@ -40,7 +40,7 @@
                    :page-id page-id
                    :option [:values :test :b]
                    :value "b"}]
-            res (cp/process-changes data chgs)]
+            res (ch/process-changes data chgs)]
         (t/is (= {:a "a" :b "b"}
                  (get-in res [:pages-index page-id :options :values :test])))))
 
@@ -49,7 +49,7 @@
                  :page-id page-id
                  :option :test
                  :value nil}
-            res (cp/process-changes data [chg])]
+            res (ch/process-changes data [chg])]
         (t/is (empty? (keys (get-in res [:pages-index page-id :options]))))))
 
     (t/testing "Remove option nested 1"
@@ -65,7 +65,7 @@
                    :page-id page-id
                    :option [:values :test]
                    :value nil}]
-            res (cp/process-changes data chgs)]
+            res (ch/process-changes data chgs)]
         (t/is (empty? (keys (get-in res [:pages-index page-id :options]))))))
 
     (t/testing "Remove option nested 2"
@@ -81,9 +81,8 @@
                    :page-id page-id
                    :option [:values :test2]
                    :value nil}]
-            res (cp/process-changes data chgs)]
-        (t/is (= [:test1] (keys (get-in res [:pages-index page-id :options :values]))))))
-    ))
+            res (ch/process-changes data chgs)]
+        (t/is (= [:test1] (keys (get-in res [:pages-index page-id :options :values]))))))))
 
 (t/deftest process-change-add-obj
   (let [file-id (uuid/custom 2 2)
@@ -105,7 +104,7 @@
                          :id id-a
                          :type :rect
                          :name "rect"})}
-            res (cp/process-changes data [chg])]
+            res (ch/process-changes data [chg])]
 
         (let [objects (get-in res [:pages-index page-id :objects])]
           (t/is (= 2 (count objects)))
@@ -126,7 +125,7 @@
                            :frame-id uuid/zero
                            :type :rect
                            :name (str id)})})
-            res (cp/process-changes data [(chg id-a 0)
+            res (ch/process-changes data [(chg id-a 0)
                                           (chg id-b 0)
                                           (chg id-c 1)])]
 
@@ -137,8 +136,7 @@
           (t/is (not (nil? (get objects id-a))))
           (t/is (not (nil? (get objects id-b))))
           (t/is (not (nil? (get objects id-c))))
-          (t/is (= [id-b id-c id-a] (get-in objects [uuid/zero :shapes]))))))
-    ))
+          (t/is (= [id-b id-c id-a] (get-in objects [uuid/zero :shapes]))))))))
 
 (t/deftest process-change-mod-obj
   (let [file-id (uuid/custom 2 2)
@@ -152,7 +150,7 @@
                   :operations [{:type :set
                                 :attr :name
                                 :val "foobar"}]}
-            res (cp/process-changes data [chg])]
+            res (ch/process-changes data [chg])]
         (let [objects (get-in res [:pages-index page-id :objects])]
           (t/is (= "foobar" (get-in objects [uuid/zero :name]))))))
 
@@ -163,10 +161,8 @@
                   :operations [{:type :set
                                 :attr :name
                                 :val "foobar"}]}
-            res (cp/process-changes data [chg])]
-        (t/is (= res data))))
-
-    ))
+            res (ch/process-changes data [chg])]
+        (t/is (= res data))))))
 
 
 ;; (t/deftest process-change-del-obj
@@ -185,7 +181,7 @@
 ;;       (let [chg  {:type :del-obj
 ;;                   :page-id page-id
 ;;                   :id id}
-;;             res  (cp/process-changes data [chg])]
+;;             res  (ch/process-changes data [chg])]
 
 ;;         (let [objects (get-in res [:pages-index page-id :objects])]
 ;;           (t/is (= 1 (count objects)))
@@ -195,8 +191,8 @@
 ;;       (let [chg  {:type :del-obj
 ;;                   :page-id page-id
 ;;                   :id id}
-;;             res1 (cp/process-changes data [chg])
-;;             res2 (cp/process-changes res1 [chg])]
+;;             res1 (ch/process-changes data [chg])
+;;             res2 (ch/process-changes res1 [chg])]
 
 ;;         (t/is (= res1 res2))
 ;;         (let [objects (get-in res1 [:pages-index page-id :objects])]
@@ -304,7 +300,7 @@
 ;;                       :page-id page-id
 ;;                       :parent-id new-group-id
 ;;                       :shapes [rect-b-id rect-c-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; (clojure.pprint/pprint data)
 ;;         ;; (println "===============")
@@ -324,7 +320,7 @@
 ;;                       :parent-id group-b-id
 ;;                       :index 0
 ;;                       :shapes [rect-a-id rect-c-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         (let [objects (get-in res [:pages-index page-id :objects])]
 ;;           (t/is (= [group-a-id group-b-id rect-e-id]
@@ -340,7 +336,7 @@
 ;;                       :parent-id group-b-id
 ;;                       :index 0
 ;;                       :shapes [rect-a-id rect-e-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         (let [objects (get-in res [:pages-index page-id :objects])]
 ;;           (t/is (= [group-a-id group-b-id]
@@ -356,7 +352,7 @@
 ;;                       :parent-id group-b-id
 ;;                       :index 0
 ;;                       :shapes [rect-a-id rect-e-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         (let [objects (get-in res [:pages-index page-id :objects])]
 ;;           (t/is (= [group-a-id group-b-id]
@@ -371,7 +367,7 @@
 ;;                       :page-id page-id
 ;;                       :parent-id group-a-id
 ;;                       :shapes [rect-d-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         (let [objects (get-in res [:pages-index page-id :objects])]
 ;;           (t/is (= [group-a-id group-b-id rect-e-id]
@@ -383,7 +379,7 @@
 ;;                       :page-id page-id
 ;;                       :parent-id frame-b-id
 ;;                       :shapes [group-a-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; (pprint (get-in data [:pages-index page-id :objects]))
 ;;         ;; (println "==========")
@@ -403,7 +399,7 @@
 ;;                       :parent-id uuid/zero
 ;;                       :shapes [group-a-id]
 ;;                       :index 0}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         (let [objects (get-in res [:pages-index page-id :objects])]
 ;;           ;; (pprint (get-in data [:objects uuid/zero]))
@@ -418,7 +414,7 @@
 ;;                       :page-id page-id
 ;;                       :parent-id group-a-id
 ;;                       :shapes [group-a-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 ;;         (t/is (= data res))))
 ;;     ))
 
@@ -462,7 +458,7 @@
 ;;                         :name "Shape 3"}}
 ;;                  ]
 ;;         data (make-file-data file-id page-id)
-;;         data (cp/process-changes data changes)]
+;;         data (ch/process-changes data changes)]
 
 ;;     (t/testing "preserve order on multiple shape mov 1"
 ;;       (let [changes [{:type :mov-objects
@@ -470,7 +466,7 @@
 ;;                       :shapes [shape-2-id shape-3-id]
 ;;                       :parent-id uuid/zero
 ;;                       :index 0}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; (println "==> BEFORE")
 ;;         ;; (pprint (get-in data [:objects]))
@@ -488,7 +484,7 @@
 ;;                       :shapes [shape-3-id shape-2-id]
 ;;                       :parent-id uuid/zero
 ;;                       :index 0}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; (println "==> BEFORE")
 ;;         ;; (pprint (get-in data [:objects]))
@@ -509,7 +505,7 @@
 ;;                       :page-id page-id
 ;;                       :shapes [shape-2-id]
 ;;                       :parent-id uuid/zero}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         (t/is (= (get-in res [:pages-index page-id :objects shape-1-id :frame-id])
 ;;                  (get-in data [:pages-index page-id :objects shape-1-id :frame-id])))
@@ -569,7 +565,7 @@
 ;;                   :shapes [shape-1-id shape-2-id]}]
 
 ;;         data (make-file-data file-id page-id)
-;;         data (cp/process-changes data changes)]
+;;         data (ch/process-changes data changes)]
 
 ;;     (t/testing "case 1"
 ;;       (let [changes [{:type :mov-objects
@@ -577,7 +573,7 @@
 ;;                       :parent-id uuid/zero
 ;;                       :index 2
 ;;                       :shapes [shape-3-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; Before
 
@@ -599,7 +595,7 @@
 ;;                       :parent-id group-1-id
 ;;                       :index 2
 ;;                       :shapes [shape-3-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; Before
 
@@ -627,7 +623,7 @@
 ;;                       :parent-id group-1-id
 ;;                       :index 1
 ;;                       :shapes [shape-3-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; Before
 
@@ -655,7 +651,7 @@
 ;;                       :parent-id group-1-id
 ;;                       :index 0
 ;;                       :shapes [shape-3-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; Before
 
@@ -683,7 +679,7 @@
 ;;                       :parent-id uuid/zero
 ;;                       :index 0
 ;;                       :shapes [shape-2-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; (pprint (get-in data [:pages-index page-id :objects uuid/zero]))
 ;;         ;; (pprint (get-in res [:pages-index page-id :objects uuid/zero]))
@@ -715,7 +711,7 @@
 ;;                       :parent-id uuid/zero
 ;;                       :index 0
 ;;                       :shapes [shape-2-id shape-1-id]}]
-;;             res (cp/process-changes data changes)]
+;;             res (ch/process-changes data changes)]
 
 ;;         ;; (pprint (get-in data [:pages-index page-id :objects uuid/zero]))
 ;;         ;; (pprint (get-in res [:pages-index page-id :objects uuid/zero]))

@@ -10,7 +10,7 @@
   position: relative;
   visibility: hidden;
   opacity: $op-0;
-  z-index: $z-index-3;
+  z-index: $z-index-4;
 
   &.is-open {
     position: relative;
@@ -32,6 +32,7 @@
     margin: $s-0;
     padding: $s-4;
     border-radius: $br-8;
+    border: $s-2 solid var(--panel-border-color);
     background-color: var(--menu-background-color);
     overflow: auto;
     & .separator {
@@ -45,7 +46,7 @@
     .context-menu-item {
       display: flex;
       .context-menu-action {
-        @include titleTipography;
+        @include bodySmallTypography;
         display: flex;
         align-items: center;
         justify-content: flex-start;
@@ -72,6 +73,9 @@
           display: flex;
           align-items: center;
           font-weight: $fw700;
+          background: none;
+          border: none;
+          cursor: pointer;
           .submenu-icon-back svg {
             @extend .button-icon-small;
             stroke: var(--menu-foreground-color);
@@ -82,12 +86,12 @@
       &:hover .context-menu-action {
         background-color: var(--menu-background-color-hover);
         text-decoration: none;
-        color: var(--menu-foreground-color-hover);
+        color: var(--menu-foreground-color);
         &.submenu .submenu-icon svg {
-          stroke: var(--menu-foreground-color-hover);
+          stroke: var(--menu-foreground-color);
         }
         &.submenu-back .submenu-icon-back svg {
-          stroke: var(--menu-foreground-color-hover);
+          stroke: var(--menu-foreground-color);
         }
       }
       &:focus {

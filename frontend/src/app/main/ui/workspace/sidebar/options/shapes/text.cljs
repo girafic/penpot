@@ -7,8 +7,9 @@
 (ns app.main.ui.workspace.sidebar.options.shapes.text
   (:require
    [app.common.data :as d]
+   [app.common.text :as txt]
    [app.common.types.shape.layout :as ctl]
-   [app.main.data.workspace.texts :as dwt :refer [text-fill-attrs root-attrs paragraph-attrs text-attrs]]
+   [app.main.data.workspace.texts :as dwt]
    [app.main.refs :as refs]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-menu]]
@@ -40,7 +41,7 @@
         is-grid-parent? (mf/deref is-grid-parent-ref)
 
         layout-container-values (select-keys shape layout-container-flex-attrs)
-        is-layout-child-absolute? (ctl/layout-absolute? shape)
+        is-layout-child-absolute? (ctl/item-absolute? shape)
 
         ids (hooks/use-equal-memo ids)
         parents-by-ids-ref (mf/use-memo (mf/deps ids) #(refs/parents-by-ids ids))
@@ -56,7 +57,7 @@
         fill-values  (-> (dwt/current-text-values
                           {:editor-state editor-state
                            :shape shape
-                           :attrs (conj text-fill-attrs :fills)})
+                           :attrs (conj txt/text-fill-attrs :fills)})
                          (d/update-in-when [:fill-color-gradient :type] keyword))
 
         fill-values (if (not (contains? fill-values :fills))
@@ -71,24 +72,32 @@
                      (select-keys shape fill-attrs)
                      (dwt/current-root-values
                       {:shape shape
-                       :attrs root-attrs})
+                       :attrs txt/root-attrs})
                      (dwt/current-paragraph-values
                       {:editor-state editor-state
                        :shape shape
-                       :attrs paragraph-attrs})
+                       :attrs txt/paragraph-attrs})
                      (dwt/current-text-values
                       {:editor-state editor-state
                        :shape shape
-                       :attrs text-attrs}))
+                       :attrs txt/text-node-attrs}))
         layout-item-values (select-keys shape layout-item-attrs)]
 
     [:*
+     [:& layer-menu {:ids ids
+                     :type type
+                     :values layer-values}]
      [:& measures-menu
       {:ids ids
        :type type
        :values (select-keys shape measure-attrs)
        :shape shape}]
-     [:& layout-container-menu {:type type :ids [(:id shape)] :values layout-container-values :multiple false}]
+
+     [:& layout-container-menu
+      {:type type
+       :ids [(:id shape)]
+       :values layout-container-values
+       :multiple false}]
 
      (when (and (= (count ids) 1) is-layout-child? is-grid-parent?)
        [:& grid-cell/options
@@ -105,14 +114,10 @@
          :is-grid-parent? is-grid-parent?
          :shape shape}])
 
-     (when (or (not is-layout-child?) is-layout-child-absolute?)
+     (when (or (not ^boolean is-layout-child?) ^boolean is-layout-child-absolute?)
        [:& constraints-menu
         {:ids ids
          :values (select-keys shape constraint-attrs)}])
-
-     [:& layer-menu {:ids ids
-                     :type type
-                     :values layer-values}]
 
      [:& text-menu
       {:ids ids

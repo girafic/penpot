@@ -7,125 +7,140 @@
 @import "refactor/common-refactor.scss";
 
 .assets-bar {
-  position: relative;
+  display: grid;
   height: 100%;
-  overflow: hidden;
+  grid-auto-rows: max-content;
+  // TODO: ugly hack :( Fix this! we shouldn't be hardcoding this height
+  max-height: calc(100vh - $s-80);
+  scrollbar-gutter: stable;
+  overflow-y: auto;
+  padding-top: $s-8;
+}
 
-  .libraries-button {
-    @include tabTitleTipography;
-    @extend .button-secondary;
-    gap: $s-2;
-    height: $s-32;
-    width: 100%;
-    border-radius: $s-8;
-    margin-bottom: $s-4;
-    .libraries-icon {
-      @include flexCenter;
-      width: $s-24;
-      height: 100%;
-      svg {
-        @include flexCenter;
-        @extend .button-icon;
-      }
-    }
-    &:hover {
-      background-color: var(--button-secondary-background-color-hover);
-      color: var(--button-secondary-foreground-color-hover);
-      border: $s-1 solid var(--button-secondary-border-color-hover);
-      svg {
-        stroke: var(--button-secondary-foreground-color-hover);
-      }
-    }
-    &:focus {
-      background-color: var(--button-secondary-background-color-focus);
-      color: var(--button-secondary-foreground-color-focus);
-      border: $s-1 solid var(--button-secondary-border-color-focus);
-      svg {
-        stroke: var(--button-secondary-foreground-color-focus);
-      }
-    }
-  }
-  .section-button {
+.libraries-button {
+  @extend .button-secondary;
+  @include uppercaseTitleTipography;
+  gap: $s-2;
+  height: $s-32;
+  width: 100%;
+  margin-bottom: $s-4;
+  border-radius: $s-8;
+  .libraries-icon {
     @include flexCenter;
-    @include buttonStyle;
-    height: $s-32;
-    width: $s-32;
-    margin: 0;
-    border: 1px solid var(--color-background-tertiary);
-    border-radius: $br-8 $br-2 $br-2 $br-8;
-    background-color: var(--color-background-tertiary);
+    width: $s-24;
+    height: 100%;
     svg {
-      height: $s-16;
-      width: $s-16;
+      @include flexCenter;
+      @extend .button-icon;
       stroke: var(--icon-foreground);
     }
-    &:focus {
-      border: 1px solid var(--input-border-color-focus);
-      outline: 0;
-      background-color: var(--input-background-color-active);
-      color: var(--input-foreground-color-active);
-      svg {
-        background-color: var(--input-background-color-active);
-      }
+  }
+  &:hover {
+    background-color: var(--button-secondary-background-color-hover);
+    color: var(--button-secondary-foreground-color-hover);
+    border: $s-1 solid var(--button-secondary-border-color-hover);
+    svg {
+      stroke: var(--button-secondary-foreground-color-hover);
     }
-    &:hover {
-      border: 1px solid var(--input-background-color-hover);
+  }
+  &:focus {
+    background-color: var(--button-secondary-background-color-focus);
+    color: var(--button-secondary-foreground-color-focus);
+    border: $s-1 solid var(--button-secondary-border-color-focus);
+    svg {
+      stroke: var(--button-secondary-foreground-color-focus);
+    }
+  }
+}
+
+.section-button {
+  @include flexCenter;
+  @include buttonStyle;
+  height: $s-32;
+  width: $s-32;
+  margin: 0;
+  border: $s-1 solid var(--input-border-color-rest);
+  border-radius: $br-8 $br-2 $br-2 $br-8;
+  background-color: var(--input-background-color-rest);
+  svg {
+    height: $s-16;
+    width: $s-16;
+    stroke: var(--icon-foreground);
+  }
+  &:focus {
+    border: $s-1 solid var(--input-border-color-focus);
+    outline: 0;
+    background-color: var(--input-background-color-focus);
+    color: var(--input-foreground-color-focus);
+    svg {
+      background-color: var(--input-background-color-focus);
+    }
+  }
+  &:hover {
+    border: $s-1 solid var(--input-border-color-hover);
+    background-color: var(--input-background-color-hover);
+    svg {
       background-color: var(--input-background-color-hover);
+      stroke: var(--button-foreground-hover);
+    }
+    &:focus {
+      border: $s-1 solid var(--input-border-color-focus);
+      outline: 0;
+      background-color: var(--input-background-color-focus);
+      color: var(--input-foreground-color-focus);
       svg {
-        background-color: var(--input-background-color-hover);
-        stroke: var(--button-foreground-hover);
+        background-color: var(--input-background-color-focus);
       }
     }
   }
-  .sections-container {
-    @include menuShadow;
-    position: absolute;
-    top: $s-84;
-    left: $s-12;
-    display: flex;
-    flex-direction: column;
-    gap: $s-4;
-    width: $s-192;
-    padding: $s-4;
-    border-radius: $br-8;
-    background-color: var(--menu-background-color);
-    z-index: $z-index-2;
-    .section-item {
-      @include titleTipography;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      width: 100%;
-      padding: $s-6;
-      border-radius: $br-8;
-      .section-btn {
-        @include buttonStyle;
-      }
-    }
+
+  &.opened {
+    @extend .button-icon-selected;
   }
-  .libraries-wrapper {
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    height: calc(100% - $s-80);
-    overflow-y: auto;
-    overflow-x: hidden;
-    scrollbar-gutter: stable;
-    overflow-y: overlay;
-  }
-  .assets-header {
-    padding: $s-8 $s-12 $s-12 $s-12;
-    .search-wrapper {
-      display: flex;
-      gap: $s-4;
-      .sort-button {
-        @extend .button-secondary;
-        width: $s-32;
-        border-radius: $br-8;
-        svg {
-          @extend .button-icon-small;
-        }
-      }
-    }
+}
+
+.sections-container {
+  @include menuShadow;
+  @include flexColumn;
+  position: absolute;
+  top: $s-84;
+  left: $s-12;
+  width: $s-192;
+  padding: $s-4;
+  border-radius: $br-8;
+  background-color: var(--menu-background-color);
+  z-index: $z-index-2;
+}
+
+.section-item {
+  @include bodySmallTypography;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: $s-6;
+  border-radius: $br-8;
+}
+
+.section-btn {
+  @include buttonStyle;
+}
+
+.assets-header {
+  padding: 0 0 $s-24 $s-12;
+}
+
+.search-wrapper {
+  display: flex;
+  gap: $s-4;
+}
+
+.sort-button {
+  @extend .button-tertiary;
+  width: $s-32;
+  border-radius: $br-8;
+  svg {
+    @extend .button-icon-small;
+    stroke: var(--icon-foreground);
   }
 }

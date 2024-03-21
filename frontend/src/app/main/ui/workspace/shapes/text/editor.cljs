@@ -7,6 +7,7 @@
 (ns app.main.ui.workspace.shapes.text.editor
   (:require
    ["draft-js" :as draft]
+   [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
@@ -48,7 +49,7 @@
   (let [children (obj/get props "children")]
     [:span {:style {:background "#ccc" :display "inline-block"}} children]))
 
-(defn render-block
+(defn- render-block
   [block shape]
   (let [type (ted/get-editor-block-type block)]
     (case type
@@ -59,7 +60,7 @@
                        :shape shape}}
       nil)))
 
-(defn styles-fn [shape styles content]
+(defn- styles-fn [shape styles content]
   (let [data (if (= (.getText content) "")
                (-> (.getData content)
                    (.toJS)
@@ -73,18 +74,26 @@
 (def empty-editor-state
   (ted/create-editor-state nil default-decorator))
 
-(defn get-blocks-to-setup [block-changes]
+(defn- get-blocks-to-setup [block-changes]
   (->> block-changes
        (filter (fn [[_ v]]
                  (nil? (:old v))))
        (mapv first)))
 
-(defn get-blocks-to-add-styles
+(defn- get-blocks-to-add-styles
   [block-changes]
   (->> block-changes
        (filter (fn [[_ v]]
                  (and (not= (:old v) (:new v)) (= (:old v) ""))))
        (mapv first)))
+
+(defn- shape->justify
+  [{:keys [content]}]
+  (case (d/nilv (:vertical-align content) "top")
+    "center" "center"
+    "top"    "flex-start"
+    "bottom" "flex-end"
+    nil))
 
 (mf/defc text-shape-edit-html
   {::mf/wrap [mf/memo]
@@ -113,8 +122,7 @@
         (fn [event]
           (dom/stop-propagation event)
           (when (kbd/esc? event)
-            (st/emit! :interrupt)
-            (st/emit! dw/clear-edition-mode)))
+            (st/emit! :interrupt (dw/clear-edition-mode))))
 
         on-mount
         (fn []
@@ -247,7 +255,8 @@
        :custom-style-fn (partial styles-fn shape)
        :block-renderer-fn #(render-block % shape)
        :ref on-editor
-       :editor-state state}]]))
+       :editor-state state
+       :style #js {:border "1px solid red"}}]]))
 
 (defn translate-point-from-viewport
   "Translate a point in the viewport into client coordinates"
@@ -281,7 +290,7 @@
         ;; NOTE: this teoretically breaks hooks rules, but in practice
         ;; it is imposible to really break it
         maybe-zoom
-        (when (cf/check-browser? :safari)
+        (when (cf/check-browser? :safari-16)
           (mf/deref refs/selected-zoom))
 
         shape (cond-> shape
@@ -300,26 +309,39 @@
         width  (mth/max (dm/get-prop bounds :width)
                         (dm/get-prop shape :width))
         height (mth/max (dm/get-prop bounds :height)
-                        (dm/get-prop shape :height))]
+                        (dm/get-prop shape :height))
+
+        style
+        (cond-> #js {:pointerEvents "all"}
+
+          (not (cf/check-browser? :safari))
+          (obj/merge!
+           #js {:transform (dm/fmt "translate(%px, %px)" (- (dm/get-prop shape :x) x) (- (dm/get-prop shape :y) y))})
+
+          (cf/check-browser? :safari-17)
+          (obj/merge!
+           #js {:height "100%"
+                :display "flex"
+                :flexDirection "column"
+                :justifyContent (shape->justify shape)})
+
+          (cf/check-browser? :safari-16)
+          (obj/merge!
+           #js {:position "fixed"
+                :left 0
+                :top  (- (dm/get-prop shape :y) y)
+                :transform-origin "top left"
+                :transform (when (some? maybe-zoom)
+                             (dm/fmt "scale(%)" maybe-zoom))}))]
 
     [:g.text-editor {:clip-path (dm/fmt "url(#%)" clip-id)
                      :transform (dm/str (gsh/transform-matrix shape))}
      [:defs
       [:clipPath {:id clip-id}
-       [:rect {:x x
-               :y y
-               :width width
-               :height height
-               :fill "red"}]]]
+       [:rect {:x x :y y :width width :height height}]]]
 
      [:foreignObject {:x x :y y :width width :height height}
-      [:div {:style {:position "fixed"
-                     :left 0
-                     :top  (- (dm/get-prop shape :y) y)
-                     :pointer-events "all"
-                     :transform-origin "top left"
-                     :transform (when (some? maybe-zoom)
-                                  (dm/fmt "scale(%)" maybe-zoom))}}
+      [:div {:style style}
        [:& text-shape-edit-html
         {:shape shape
          :key (dm/str shape-id)}]]]]))

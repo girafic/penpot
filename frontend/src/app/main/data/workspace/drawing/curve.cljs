@@ -13,6 +13,7 @@
    [app.common.geom.shapes.flex-layout :as gslf]
    [app.common.geom.shapes.grid-layout :as gslg]
    [app.common.geom.shapes.path :as gsp]
+   [app.common.types.container :as ctn]
    [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
    [app.common.types.shape.layout :as ctl]
@@ -20,15 +21,12 @@
    [app.main.data.workspace.drawing.common :as common]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.streams :as ms]
+   [app.util.mouse :as mse]
    [app.util.path.simplify-curve :as ups]
-   [beicon.core :as rx]
-   [potok.core :as ptk]))
+   [beicon.v2.core :as rx]
+   [potok.v2.core :as ptk]))
 
 (def simplify-tolerance 0.3)
-
-(defn stoper-event?
-  [{:keys [type] :as event}]
-  (ms/mouse-event? event) (= type :up))
 
 (defn- insert-point
   [point]
@@ -57,7 +55,9 @@
             content      (dm/get-in state [:workspace-drawing :object :content] [])
             start        (dm/get-in content [0 :params] nil)
             position     (when start (gpt/point start))
-            frame-id     (ctst/top-nested-frame objects position)
+            frame-id     (->> (ctst/top-nested-frame objects position)
+                              (ctn/get-first-not-copy-parent objects) ;; We don't want to change the structure of component copies
+                              :id)
             flex-layout? (ctl/flex-layout? objects frame-id)
 
             grid-layout? (ctl/grid-layout? objects frame-id)
@@ -99,18 +99,18 @@
   (ptk/reify ::handle-drawing
     ptk/WatchEvent
     (watch [_ _ stream]
-      (let [stoper (rx/filter stoper-event? stream)
-            mouse  (rx/sample 10 ms/mouse-position)
-            shape  (cts/setup-shape {:type :path
-                                     :initialized? true
-                                     :frame-id uuid/zero
-                                     :parent-id uuid/zero
-                                     :segments []})]
+      (let [stopper (mse/drag-stopper stream)
+            mouse   (rx/sample 10 ms/mouse-position)
+            shape   (cts/setup-shape {:type :path
+                                      :initialized? true
+                                      :frame-id uuid/zero
+                                      :parent-id uuid/zero
+                                      :segments []})]
         (rx/concat
          (rx/of #(update % :workspace-drawing assoc :object shape))
          (->> mouse
               (rx/map insert-point)
-              (rx/take-until stoper))
+              (rx/take-until stopper))
          (rx/of
           (setup-frame)
           (finish-drawing)

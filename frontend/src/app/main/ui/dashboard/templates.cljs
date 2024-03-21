@@ -5,6 +5,7 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.dashboard.templates
+  (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
    [app.common.math :as mth]
@@ -21,8 +22,14 @@
    [app.util.keyboard :as kbd]
    [app.util.router :as rt]
    [okulary.core :as l]
-   [potok.core :as ptk]
+   [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
+
+(def ^:private arrow-icon
+  (i/icon-xref :arrow (stl/css :arrow-icon)))
+
+(def ^:private download-icon
+  (i/icon-xref :download (stl/css :download-icon)))
 
 (def builtin-templates
   (l/derived :builtin-templates st/state))
@@ -73,12 +80,18 @@
              (dom/prevent-default event)
              (on-click event))))]
 
-    [:div.title
+    [:div {:class (stl/css :title)}
      [:button {:tab-index "0"
+               :class (stl/css :title-btn)
                :on-click on-click
                :on-key-down on-key-down}
-      [:span (tr "dashboard.libraries-and-templates")]
-      [:span.icon (if ^boolean collapsed i/arrow-up i/arrow-down)]]]))
+      [:span {:class (stl/css :title-text)}
+       (tr "dashboard.libraries-and-templates")]
+      (if ^boolean collapsed
+        [:span {:class (stl/css :title-icon :title-icon-collapsed)}
+         arrow-icon]
+        [:span {:class (stl/css :title-icon)}
+         arrow-icon])]]))
 
 (mf/defc card-item
   {::mf/wrap-props false}
@@ -100,18 +113,19 @@
              (dom/stop-propagation event)
              (on-import item event))))]
 
-    [:a.card-container
-     {:tab-index (if (or (not is-visible) collapsed) "-1" "0")
-      :id id
-      :data-index index
-      :on-click on-click
-      :on-key-down on-key-down}
-     [:div.template-card
-      [:div.img-container
+    [:a {:class (stl/css :card-container)
+         :tab-index (if (or (not is-visible) collapsed) "-1" "0")
+         :id id
+         :data-index index
+         :on-click on-click
+         :on-key-down on-key-down}
+     [:div {:class (stl/css :template-card)}
+      [:div {:class (stl/css :img-container)}
        [:img {:src (dm/str thb)
               :alt (:name item)}]]
-      [:div.card-name [:span (:name item)]
-        [:span.icon i/download]]]]))
+      [:div {:class (stl/css :card-name)}
+       [:span {:class (stl/css :card-text)} (:name item)]
+       download-icon]]]))
 
 (mf/defc card-item-link
   {::mf/wrap-props false}
@@ -134,18 +148,18 @@
              (dom/stop-propagation event)
              (on-click event))))]
 
-    [:div.card-container
-     [:div.template-card
-      [:div.img-container
+    [:div {:class (stl/css :card-container)}
+     [:div {:class (stl/css :template-card)}
+      [:div {:class (stl/css :img-container)}
        [:a {:id id
             :tab-index (if (or (not is-visible) collapsed) "-1" "0")
             :href "https://penpot.app/libraries-templates.html"
             :target "_blank"
             :on-click on-click
             :on-key-down on-key-down}
-        [:div.template-link
-         [:div.template-link-title (tr "dashboard.libraries-and-templates")]
-         [:div.template-link-text (tr "dashboard.libraries-and-templates.explore")]]]]]]))
+        [:div {:class (stl/css :template-link)}
+         [:div {:class (stl/css :template-link-title)} (tr "dashboard.libraries-and-templates")]
+         [:div {:class (stl/css :template-link-text)} (tr "dashboard.libraries-and-templates.explore")]]]]]]))
 
 (mf/defc templates-section
   {::mf/wrap-props false}
@@ -226,21 +240,20 @@
         (mf/use-fn
          (mf/deps default-project-id project-id section templates team-id)
          (fn [template _event]
-           (import-template! template team-id project-id default-project-id section)))
+           (import-template! template team-id project-id default-project-id section)))]
 
-        ]
-
-    (mf/with-effect [collapsed]
-      (when-not collapsed
+    (mf/with-effect [profile collapsed]
+      (when (and profile (not collapsed))
         (st/emit! (dd/fetch-builtin-templates))))
 
-    [:div.dashboard-templates-section
-     {:class (when ^boolean collapsed "collapsed")}
+    [:div {:class (stl/css-case :dashboard-templates-section true
+                                :collapsed collapsed)}
      [:& title {:collapsed collapsed}]
 
-     [:div.content {:ref content-ref
-                    :style {:left card-offset
-                            :width (dm/str container-size "px")}}
+     [:div {:class (stl/css :content)
+            :ref content-ref
+            :style {:left card-offset
+                    :width (dm/str container-size "px")}}
 
       (for [index (range (count templates))]
         [:& card-item
@@ -259,17 +272,16 @@
         :total total}]]
 
      (when (< card-offset 0)
-       [:button.button.left
-        {:tab-index (if ^boolean collapsed "-1" "0")
-         :on-click on-move-left
-         :on-key-down on-move-left-key-down}
-        i/go-prev])
+       [:button {:class (stl/css :move-button :move-left)
+                 :tab-index (if ^boolean collapsed "-1" "0")
+                 :on-click on-move-left
+                 :on-key-down on-move-left-key-down}
+        arrow-icon])
 
      (when more-cards
-       [:button.button.right
-        {:tab-index (if collapsed "-1" "0")
-         :on-click on-move-right
-         :aria-label (tr "labels.next")
-         :on-key-down  on-move-right-key-down}
-        i/go-next])]))
-
+       [:button {:class (stl/css :move-button :move-right)
+                 :tab-index (if collapsed "-1" "0")
+                 :on-click on-move-right
+                 :aria-label (tr "labels.next")
+                 :on-key-down  on-move-right-key-down}
+        arrow-icon])]))

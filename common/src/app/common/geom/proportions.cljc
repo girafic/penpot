@@ -4,7 +4,9 @@
 ;;
 ;; Copyright (c) KALEIDOS INC
 
-(ns app.common.geom.proportions)
+(ns app.common.geom.proportions
+  (:require
+   [app.common.data :as d]))
 
 ;; --- Proportions
 
@@ -22,8 +24,8 @@
            :proportion (/ width height)
            :proportion-lock true)))
 
-(defn setup-proportions-svg
-  [{:keys [width height] :as shape}]
+(defn setup-proportions-size
+  [{{:keys [width height]} :selrect :as shape}]
   (assoc shape
          :proportion (/ width height)
          :proportion-lock true))
@@ -35,9 +37,12 @@
          :proportion-lock false))
 
 (defn setup-proportions
-  [shape]
-  (case (:type shape)
-    :svg-raw (setup-proportions-svg shape)
-    :image (setup-proportions-image shape)
-    :text shape
-    (setup-proportions-const shape)))
+  [{:keys [type] :as shape}]
+  (let [image-fill? (and (d/not-empty? (:fills shape))
+                         (every? #(some? (:fill-image %)) (:fills shape)))]
+    (cond
+      (= type :svg-raw) (setup-proportions-size shape)
+      (= type :image)   (setup-proportions-image shape)
+      (= type :text)    shape
+      image-fill?       (setup-proportions-size shape)
+      :else             (setup-proportions-const shape))))

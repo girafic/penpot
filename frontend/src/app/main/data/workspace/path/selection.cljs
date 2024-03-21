@@ -10,11 +10,11 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
-   [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.path.state :as st]
    [app.main.streams :as ms]
-   [beicon.core :as rx]
-   [potok.core :as ptk]))
+   [app.util.mouse :as mse]
+   [beicon.v2.core :as rx]
+   [potok.v2.core :as ptk]))
 
 (defn path-pointer-enter [position]
   (ptk/reify ::path-pointer-enter
@@ -118,16 +118,15 @@
     (ptk/reify ::handle-area-selection
       ptk/WatchEvent
       (watch [_ state stream]
-        (let [zoom (get-in state [:workspace-local :zoom] 1)
-              stop? (fn [event] (or (dwc/interrupt? event) (ms/mouse-up? event)))
-              stoper (->> stream (rx/filter stop?))
-              from-p @ms/mouse-position]
+        (let [zoom    (get-in state [:workspace-local :zoom] 1)
+              stopper (mse/drag-stopper stream)
+              from-p  @ms/mouse-position]
           (rx/concat
            (->> ms/mouse-position
-                (rx/take-until stoper)
                 (rx/map #(grc/points->rect [from-p %]))
                 (rx/filter (partial valid-rect? zoom))
-                (rx/map update-area-selection))
+                (rx/map update-area-selection)
+                (rx/take-until stopper))
 
            (rx/of (select-node-area shift?)
                   (clear-area-selection))))))))

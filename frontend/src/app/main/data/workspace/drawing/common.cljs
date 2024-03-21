@@ -7,17 +7,17 @@
 (ns app.main.data.workspace.drawing.common
   (:require
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
-   [app.common.pages.helpers :as cph]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape :as cts]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.worker :as uw]
-   [beicon.core :as rx]
-   [potok.core :as ptk]))
+   [beicon.v2.core :as rx]
+   [potok.v2.core :as ptk]))
 
 (defn clear-drawing
   []
@@ -39,7 +39,7 @@
         (rx/concat
          (when (:initialized? shape)
            (let [click-draw? (:click-draw? shape)
-                 text?       (cph/text-shape? shape)
+                 text?       (cfh/text-shape? shape)
                  vbox        (dm/get-in state [:workspace-local :vbox])
 
                  min-side    (mth/min 100
@@ -52,7 +52,12 @@
                    (assoc :grow-type :fixed)
 
                    (and ^boolean click-draw? (not ^boolean text?))
-                   (-> (assoc :width min-side :height min-side)
+                   (-> (assoc :width min-side)
+                       (assoc :height min-side)
+                       ;; NOTE: we need to recalculate the selrect and
+                       ;; points, so we assign `nil` to it
+                       (assoc :selrect nil)
+                       (assoc :points nil)
                        (cts/setup-shape)
                        (gsh/transform-shape (ctm/move-modifiers (- (/ min-side 2)) (- (/ min-side 2)))))
 
@@ -65,19 +70,20 @@
 
              ;; Add & select the created shape to the workspace
              (rx/concat
-              (if (cph/frame-shape? shape)
+              (if (cfh/frame-shape? shape)
                 (rx/of (dwu/start-undo-transaction (:id shape)))
                 (rx/empty))
 
               (rx/of (dwsh/add-shape shape {:no-select? (= tool :curve)}))
-              (if (cph/frame-shape? shape)
+              (if (cfh/frame-shape? shape)
                 (rx/concat
                  (->> (uw/ask! {:cmd :selection/query
                                 :page-id page-id
                                 :rect (:selrect shape)
                                 :include-frames? true
-                                :full-frame? true})
-                      (rx/map #(cph/clean-loops objects %))
+                                :full-frame? true
+                                :using-selrect? true})
+                      (rx/map #(cfh/clean-loops objects %))
                       (rx/map #(dwsh/move-shapes-into-frame (:id shape) %)))
                  (rx/of (dwu/commit-undo-transaction (:id shape))))
                 (rx/empty)))))

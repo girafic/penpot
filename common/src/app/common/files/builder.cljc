@@ -9,12 +9,13 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
+   [app.common.files.changes :as ch]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
-   [app.common.pages.changes :as ch]
    [app.common.pprint :as pp]
    [app.common.schema :as sm]
+   [app.common.svg :as csvg]
    [app.common.types.components-list :as ctkl]
    [app.common.types.container :as ctn]
    [app.common.types.file :as ctf]
@@ -46,11 +47,11 @@
                         (and add-container? (nil? component-id))
                         (assoc :page-id  (:current-page-id file)
                                :frame-id (:current-frame-id file)))
-         valid? (ch/valid-change? change)]
+         valid? (ch/check-change! change)]
 
      (when-not valid?
        (let [explain (sm/explain ::ch/change change)]
-         (pp/pprint (sm/humanize-data explain))
+         (pp/pprint (sm/humanize-explain explain))
          (when fail-on-spec?
            (ex/raise :type :assertion
                      :code :data-validation
@@ -300,9 +301,13 @@
     (-> file
         (update :parent-stack pop))))
 
-(defn create-shape [file type data]
-  (let [obj (-> (cts/setup-shape (assoc data :type type))
+(defn create-shape
+  [file type data]
+  (let [obj (-> (assoc data :type type)
+                (update :svg-attrs csvg/attrs->props)
+                (cts/setup-shape)
                 (check-name file :type))]
+
     (-> file
         (commit-shape obj)
         (assoc :last-id (:id obj))
@@ -519,7 +524,10 @@
                    (dissoc :main-instance-y))
 
          obj   (-> (cts/setup-shape attrs)
-                   (check-name file root-type))]
+                   (check-name file root-type)
+                   ;; Components need to have nil values for frame and parent
+                   (assoc :frame-id nil)
+                   (assoc :parent-id nil))]
 
      (-> file
          (commit-change
@@ -532,19 +540,24 @@
            :shapes [obj]})
 
          (assoc :last-id (:id obj))
-         (update :parent-stack conjv (:id obj))
+         (assoc :parent-stack [(:id obj)])
          (assoc :current-component-id (:id obj))
-         (assoc :current-frame-id (when (= (:type obj) :frame)
-                                    (:id obj)))))))
+         (assoc :current-frame-id (if (= (:type obj) :frame) (:id obj) uuid/zero))))))
 
 (defn finish-component
   [file]
   (let [component-id (:current-component-id file)
+        component-data (ctkl/get-component (:data file) component-id)
+
         component    (lookup-shape file component-id)
         children     (->> component :shapes (mapv #(lookup-shape file %)))
 
         file
         (cond
+          ;; Components-v2 component we skip this step
+          (and component-data (:main-instance-id component-data))
+          file
+
           (empty? children)
           (commit-change
            file
@@ -746,3 +759,7 @@
           :page-id page-id
           :option :guides
           :value new-guides}))))
+
+(defn strip-image-extension [filename]
+  (let [image-extensions-re #"(\.png)|(\.jpg)|(\.jpeg)|(\.webp)|(\.gif)|(\.svg)$"]
+    (str/replace filename image-extensions-re "")))

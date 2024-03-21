@@ -6,18 +6,19 @@
 
 (ns backend-tests.rpc-profile-test
   (:require
+   [app.auth :as auth]
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.db :as db]
    [app.rpc :as-alias rpc]
-   [app.auth :as auth]
+   [app.rpc.commands.profile :as profile]
    [app.tokens :as tokens]
    [app.util.time :as dt]
    [backend-tests.helpers :as th]
    [clojure.java.io :as io]
    [clojure.test :as t]
    [cuerdas.core :as str]
-   [datoteka.core :as fs]
+   [datoteka.fs :as fs]
    [mockery.core :refer [with-mocks]]))
 
 ;; TODO: profile deletion with teams
@@ -115,8 +116,7 @@
             out  (th/command! data)]
 
         ;; (th/print-result! out)
-        (t/is (nil? (:error out)))))
-    ))
+        (t/is (nil? (:error out)))))))
 
 (t/deftest profile-deletion-simple
   (let [prof (th/create-profile* 1)
@@ -126,7 +126,7 @@
 
     ;; profile is not deleted because it does not meet all
     ;; conditions to be deleted.
-    (let [result (th/run-task! :objects-gc {:min-age (dt/duration 0)})]
+    (let [result (th/run-task! :objects-gc {:min-age 0})]
       (t/is (= 0 (:processed result))))
 
     ;; Request profile to be deleted
@@ -145,12 +145,20 @@
       (t/is (= 1 (count (:result out)))))
 
     ;; execute permanent deletion task
-    (let [result (th/run-task! :objects-gc {:min-age (dt/duration "-1m")})]
-      (t/is (= 2 (:processed result))))
+    (let [result (th/run-task! :objects-gc {:min-age 0})]
+      (t/is (= 1 (:processed result))))
 
     (let [row (th/db-get :team
                          {:id (:default-team-id prof)}
-                         {::db/remove-deleted? false})]
+                         {::db/remove-deleted false})]
+      (t/is (nil? (:deleted-at row))))
+
+    (let [result (th/run-task! :orphan-teams-gc {:min-age 0})]
+      (t/is (= 1 (:processed result))))
+
+    (let [row (th/db-get :team
+                         {:id (:default-team-id prof)}
+                         {::db/remove-deleted false})]
       (t/is (dt/instant? (:deleted-at row))))
 
     ;; query profile after delete
@@ -160,68 +168,6 @@
       ;; (th/print-result! out)
       (let [result (:result out)]
         (t/is (= uuid/zero (:id result)))))))
-
-(t/deftest profile-immediate-deletion
-  (let [prof1 (th/create-profile* 1)
-        prof2 (th/create-profile* 2)
-        file  (th/create-file* 1 {:profile-id (:id prof1)
-                                  :project-id (:default-project-id prof1)
-                                  :is-shared false})
-
-        team  (th/create-team* 1 {:profile-id (:id prof1)})
-        _     (th/create-team-role* {:team-id (:id team)
-                                     :profile-id (:id prof2)
-                                     :role :admin})]
-
-    ;; profile is not deleted because it does not meet all
-    ;; conditions to be deleted.
-    (let [result (th/run-task! :objects-gc {:min-age (dt/duration 0)})]
-      (t/is (= 0 (:orphans result)))
-      (t/is (= 0 (:processed result))))
-
-    ;; just delete the profile
-    (th/db-delete! :profile {:id (:id prof1)})
-
-    ;; query files after profile deletion, expecting not found
-    (let [params {::th/type :get-project-files
-                  ::rpc/profile-id (:id prof1)
-                  :project-id (:default-project-id prof1)}
-          out    (th/command! params)]
-      ;; (th/print-result! out)
-      (t/is (not (th/success? out)))
-      (let [edata (-> out :error ex-data)]
-        (t/is (= :not-found (:type edata)))))
-
-    ;; the files and projects still exists on the database
-    (let [files    (th/db-query :file {:project-id (:default-project-id prof1)})
-          projects (th/db-query :project {:team-id (:default-team-id prof1)})]
-      (t/is (= 1 (count files)))
-      (t/is (= 1 (count projects))))
-
-    ;; execute the gc task
-    (let [result (th/run-task! :objects-gc {:min-age (dt/duration "-1m")})]
-      (t/is (= 1 (:processed result)))
-      (t/is (= 1 (:orphans result))))
-
-    ;; Check the deletion flag on the default profile team
-    (let [row (th/db-get :team
-                         {:id (:default-team-id prof1)}
-                         {::db/remove-deleted? false})]
-      (t/is (dt/instant? (:deleted-at row))))
-
-    ;; Check the deletion flag on the shared team
-    (let [row (th/db-get :team
-                         {:id (:id team)}
-                         {::db/remove-deleted? false})]
-      (t/is (nil? (:deleted-at row))))
-
-    ;; Check the roles on the shared team
-    (let [rows (th/db-query :team-profile-rel {:team-id (:id team)})]
-      (t/is (= 1 (count rows)))
-      (t/is (= (:id prof2) (get-in rows [0 :profile-id])))
-      (t/is (= false (get-in rows [0 :is-owner]))))
-
-    ))
 
 (t/deftest registration-domain-whitelist
   (let [whitelist #{"gmail.com" "hey.com" "ya.ru"}]
@@ -240,41 +186,12 @@
         token (get-in out [:result :token])]
     (t/is (string? token))
 
-
     ;; try register without token
     (let [data  {::th/type :register-profile
                  :fullname "foobar"
                  :accept-terms-and-privacy true}
           out   (th/command! data)]
-      (let [error (:error out)]
-        (t/is (th/ex-info? error))
-        (t/is (th/ex-of-type? error :validation))
-        (t/is (th/ex-of-code? error :spec-validation))))
-
-    ;; try correct register
-    (let [data  {::th/type :register-profile
-                 :token token
-                 :fullname "foobar"
-                 :accept-terms-and-privacy true
-                 :accept-newsletter-subscription true}]
-      (let [{:keys [result error]} (th/command! data)]
-        (t/is (nil? error))))
-    ))
-
-(t/deftest prepare-register-and-register-profile-1
-  (let [data  {::th/type :prepare-register-profile
-               :email "user@example.com"
-               :password "foobar"}
-        out   (th/command! data)
-        token (get-in out [:result :token])]
-    (t/is (string? token))
-
-
-    ;; try register without token
-    (let [data  {::th/type :register-profile
-                 :fullname "foobar"
-                 :accept-terms-and-privacy true}
-          out   (th/command! data)]
+      ;; (th/print-result! out)
       (let [error (:error out)]
         (t/is (th/ex-info? error))
         (t/is (th/ex-of-type? error :validation))
@@ -284,12 +201,24 @@
     (let [data  {::th/type :register-profile
                  :token token
                  :fullname "foobar"
+                 :utm_campaign "utma"
+                 :mtm_campaign "mtma"
                  :accept-terms-and-privacy true
                  :accept-newsletter-subscription true}]
-      (let [{:keys [result error] :as out} (th/command! data)]
-        ;; (th/print-result! out)
+      (let [{:keys [result error]} (th/command! data)]
         (t/is (nil? error))))
-    ))
+
+    (let [profile (some-> (th/db-get :profile {:email "user@example.com"})
+                          (profile/decode-row))]
+      (t/is (= "penpot" (:auth-backend profile)))
+      (t/is (= "foobar" (:fullname profile)))
+      (t/is (false? (:is-active profile)))
+      (t/is (uuid? (:default-team-id profile)))
+      (t/is (uuid? (:default-project-id profile)))
+
+      (let [props (:props profile)]
+        (t/is (= "utma" (:penpot/utm-campaign props)))
+        (t/is (= "mtma" (:penpot/mtm-campaign props)))))))
 
 (t/deftest prepare-register-and-register-profile-2
   (with-redefs [app.rpc.commands.auth/register-retry-threshold (dt/duration 500)]
@@ -350,10 +279,7 @@
                      :accept-newsletter-subscription true}
               out   (th/command! data)]
           (t/is (th/success? out))
-          (t/is (= 1 (:call-count @mock))))
-
-        ))
-    ))
+          (t/is (= 1 (:call-count @mock))))))))
 
 
 (t/deftest prepare-and-register-with-invitation-and-disabled-registration-1
@@ -405,8 +331,7 @@
       (t/is (not (th/success? out)))
       (let [edata (-> out :error ex-data)]
         (t/is (= :restriction (:type edata)))
-        (t/is (= :email-does-not-match-invitation (:code edata))))
-      )))
+        (t/is (= :email-does-not-match-invitation (:code edata)))))))
 
 (t/deftest prepare-register-with-registration-disabled
   (with-redefs [app.config/flags #{}]
@@ -427,10 +352,10 @@
                  :password "foobar"}
         out     (th/command! data)]
 
-      (t/is (not (th/success? out)))
-      (let [edata (-> out :error ex-data)]
-        (t/is (= :validation (:type edata)))
-        (t/is (= :email-already-exists (:code edata))))))
+    (t/is (not (th/success? out)))
+    (let [edata (-> out :error ex-data)]
+      (t/is (= :validation (:type edata)))
+      (t/is (= :email-already-exists (:code edata))))))
 
 (t/deftest register-profile-with-bounced-email
   (let [pool  (:app.db/pool th/*system*)
@@ -566,9 +491,7 @@
         (t/is (= 2 (:call-count @mock)))
         (t/is (th/ex-info? error))
         (t/is (th/ex-of-type? error :validation))
-        (t/is (th/ex-of-code? error :email-has-permanent-bounces)))
-
-      )))
+        (t/is (th/ex-of-code? error :email-has-permanent-bounces))))))
 
 
 (t/deftest update-profile-password
@@ -579,8 +502,7 @@
                :password "foobarfoobar"}
         out   (th/command! data)]
     (t/is (nil? (:error out)))
-    (t/is (nil? (:result out)))
-  ))
+    (t/is (nil? (:result out)))))
 
 
 (t/deftest update-profile-password-bad-old-password

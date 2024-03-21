@@ -10,24 +10,28 @@
   importation."
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.shapes :as gsh]
+   [app.common.svg :as csvg]
    [app.main.ui.context :as muc]
    [app.util.json :as json]
    [app.util.object :as obj]
-   [app.util.svg :as usvg]
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
 
-(def include-metadata-ctx (mf/create-context false))
+(def ^:private internal-counter (atom 0))
+
+(def include-metadata-ctx
+  (mf/create-context false))
 
 (mf/defc render-xml
   [{{:keys [tag attrs content] :as node} :xml}]
 
   (cond
     (map? node)
-    [:> (d/name tag) (clj->js (usvg/clean-attrs attrs))
+    [:> (d/name tag) (obj/map->obj (csvg/attrs->props attrs))
      (for [child content]
-       [:& render-xml {:xml child}])]
+       [:& render-xml {:xml child :key (swap! internal-counter inc)}])]
 
     (string? node)
     node
@@ -100,6 +104,9 @@
           (-> (add! :show-content)
               (add! :hide-in-viewer)))
 
+        (cond-> (and frame? (:use-for-thumbnail shape))
+          (add! :use-for-thumbnail))
+
         (cond-> (and (or rect? image? frame?) (some? (:r1 shape)))
           (-> (add! :r1)
               (add! :r2)
@@ -165,10 +172,10 @@
 (mf/defc export-flows
   [{:keys [flows]}]
   [:> "penpot:flows" #js {}
-    (for [{:keys [id name starting-frame]} flows]
-      [:> "penpot:flow" #js {:id id
-                             :name name
-                             :starting-frame starting-frame}])])
+   (for [{:keys [id name starting-frame]} flows]
+     [:> "penpot:flow" #js {:id id
+                            :name name
+                            :starting-frame starting-frame}])])
 
 (mf/defc export-guides
   [{:keys [guides]}]
@@ -200,6 +207,7 @@
    (for [{:keys [style hidden color offset-x offset-y blur spread]} shadow]
      [:> "penpot:shadow"
       #js {:penpot:shadow-type (d/name style)
+           :key (swap! internal-counter inc)
            :penpot:hidden (str hidden)
            :penpot:color (str (:color color))
            :penpot:opacity (str (:opacity color))
@@ -221,6 +229,7 @@
    (for [{:keys [scale suffix type]} exports]
      [:> "penpot:export"
       #js {:penpot:type   (d/name type)
+           :key (swap! internal-counter inc)
            :penpot:suffix suffix
            :penpot:scale  (str scale)}])))
 
@@ -247,7 +256,7 @@
    [:*
     (when (contains? shape :svg-attrs)
       (let [svg-transform (get shape :svg-transform)
-            svg-attrs     (->> shape :svg-attrs keys (mapv d/name) (str/join ",") )
+            svg-attrs     (->> shape :svg-attrs keys (mapv d/name) (str/join ","))
             svg-defs      (->> shape :svg-defs keys (mapv d/name) (str/join ","))]
         [:> "penpot:svg-import"
          #js {:penpot:svg-attrs          (when-not (empty? svg-attrs) svg-attrs)
@@ -262,7 +271,8 @@
               :penpot:svg-viewbox-width  (get-in shape [:svg-viewbox :width])
               :penpot:svg-viewbox-height (get-in shape [:svg-viewbox :height])}
          (for [[def-id def-xml] (:svg-defs shape)]
-           [:> "penpot:svg-def" #js {:def-id def-id}
+           [:> "penpot:svg-def" #js {:def-id def-id
+                                     :key (swap! internal-counter inc)}
             [:& render-xml {:xml def-xml}]])]))
 
     (when (= (:type shape) :svg-raw)
@@ -278,40 +288,54 @@
                                 (clj->js))))]
         [:> "penpot:svg-content" props
          (for [leaf (->> shape :content :content (filter string?))]
-           [:> "penpot:svg-child" {} leaf])]))]))
+           [:> "penpot:svg-child" {:key (swap! internal-counter inc)} leaf])]))]))
 
 
 (defn- export-fills-data [{:keys [fills]}]
-  (when-let [fills (seq fills)]
-    (mf/html
-     [:> "penpot:fills" #js {}
-      (for [[index fill] (d/enumerate fills)]
-        [:> "penpot:fill"
-         #js {:penpot:fill-color          (if (some? (:fill-color-gradient fill))
-                                              (str/format "url(#%s)" (str "fill-color-gradient_" (mf/use-ctx muc/render-id) "_" index))
-                                              (d/name (:fill-color fill)))
-              :penpot:fill-color-ref-file (d/name (:fill-color-ref-file fill))
-              :penpot:fill-color-ref-id   (d/name (:fill-color-ref-id fill))
-              :penpot:fill-opacity        (d/name (:fill-opacity fill))}])])))
+  (when-let [fills     (seq fills)]
+    (let [render-id (mf/use-ctx muc/render-id)]
+      (mf/html
+       [:> "penpot:fills" #js {}
+        (for [[index fill] (d/enumerate fills)]
+          (let [fill-image-id (dm/str "fill-image-" render-id "-" index)]
+            [:> "penpot:fill"
+             #js {:penpot:fill-color          (cond
+                                                (some? (:fill-color-gradient fill))
+                                                (str/format "url(#%s)" (str "fill-color-gradient-" render-id "-" index))
+
+                                                :else
+                                                (d/name (:fill-color fill)))
+                  :key                        (swap! internal-counter inc)
+
+                  :penpot:fill-image-id       (when (:fill-image fill) fill-image-id)
+                  :penpot:fill-color-ref-file (d/name (:fill-color-ref-file fill))
+                  :penpot:fill-color-ref-id   (d/name (:fill-color-ref-id fill))
+                  :penpot:fill-opacity        (d/name (:fill-opacity fill))}]))]))))
 
 (defn- export-strokes-data [{:keys [strokes]}]
   (when-let [strokes (seq strokes)]
-    (mf/html
-     [:> "penpot:strokes" #js {}
-      (for [[index stroke] (d/enumerate strokes)]
-        [:> "penpot:stroke"
-         #js {:penpot:stroke-color          (if (some? (:stroke-color-gradient stroke))
-                                              (str/format "url(#%s)" (str "stroke-color-gradient_" (mf/use-ctx muc/render-id) "_" index))
-                                              (d/name (:stroke-color stroke)))
-              :penpot:stroke-color-ref-file (d/name (:stroke-color-ref-file stroke))
-              :penpot:stroke-color-ref-id   (d/name (:stroke-color-ref-id stroke))
-              :penpot:stroke-opacity        (d/name (:stroke-opacity stroke))
-              :penpot:stroke-style          (d/name (:stroke-style stroke))
-              :penpot:stroke-width          (d/name (:stroke-width stroke))
-              :penpot:stroke-alignment      (d/name (:stroke-alignment stroke))
-              :penpot:stroke-cap-start      (d/name (:stroke-cap-start stroke))
-              :penpot:stroke-cap-end        (d/name (:stroke-cap-end stroke))}])])))
+    (let [render-id (mf/use-ctx muc/render-id)]
+      (mf/html
+       [:> "penpot:strokes" #js {}
+        (for [[index stroke] (d/enumerate strokes)]
+          (let [stroke-image-id (dm/str "stroke-image-" render-id "-" index)]
+            [:> "penpot:stroke"
+             #js {:penpot:stroke-color          (cond
+                                                  (some? (:stroke-color-gradient stroke))
+                                                  (str/format "url(#%s)" (str "stroke-color-gradient-" render-id "-" index))
 
+                                                  :else
+                                                  (d/name (:stroke-color stroke)))
+                  :key                          (swap! internal-counter inc)
+                  :penpot:stroke-image-id       (when (:stroke-image stroke) stroke-image-id)
+                  :penpot:stroke-color-ref-file (d/name (:stroke-color-ref-file stroke))
+                  :penpot:stroke-color-ref-id   (d/name (:stroke-color-ref-id stroke))
+                  :penpot:stroke-opacity        (d/name (:stroke-opacity stroke))
+                  :penpot:stroke-style          (d/name (:stroke-style stroke))
+                  :penpot:stroke-width          (d/name (:stroke-width stroke))
+                  :penpot:stroke-alignment      (d/name (:stroke-alignment stroke))
+                  :penpot:stroke-cap-start      (d/name (:stroke-cap-start stroke))
+                  :penpot:stroke-cap-end        (d/name (:stroke-cap-end stroke))}]))]))))
 
 (defn- export-interactions-data [{:keys [interactions]}]
   (when-let [interactions (seq interactions)]
@@ -327,6 +351,7 @@
               :penpot:overlay-position-x ((d/nilf get-in) interaction [:overlay-position :x])
               :penpot:overlay-position-y ((d/nilf get-in) interaction [:overlay-position :y])
               :penpot:url (:url interaction)
+              :key (swap! internal-counter inc)
               :penpot:close-click-outside ((d/nilf str) (:close-click-outside interaction))
               :penpot:background-overlay ((d/nilf str) (:background-overlay interaction))
               :penpot:preserve-scroll ((d/nilf str) (:preserve-scroll interaction))}])])))
@@ -373,6 +398,7 @@
        (for [[idx {:keys [type value]}] (d/enumerate layout-grid-rows)]
          [:> "penpot:grid-track"
           #js {:penpot:index idx
+               :key (swap! internal-counter inc)
                :penpot:type (d/name type)
                :penpot:value value}])]
 
@@ -380,6 +406,7 @@
        (for [[idx {:keys [type value]}] (d/enumerate layout-grid-columns)]
          [:> "penpot:grid-track"
           #js {:penpot:index idx
+               :key (swap! internal-counter inc)
                :penpot:type (d/name type)
                :penpot:value value}])]
 
@@ -396,6 +423,7 @@
                         shapes]}] layout-grid-cells]
          [:> "penpot:grid-cell"
           #js {:penpot:id id
+               :key (swap! internal-counter inc)
                :penpot:area-name area-name
                :penpot:row row
                :penpot:row-span row-span
@@ -461,5 +489,5 @@
      (export-strokes-data          shape)
      (export-grid-data             shape)
      (export-layout-container-data shape)
-     (export-layout-item-data     shape)]))
+     (export-layout-item-data      shape)]))
 

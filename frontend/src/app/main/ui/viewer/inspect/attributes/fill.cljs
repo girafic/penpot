@@ -5,7 +5,9 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.inspect.attributes.fill
+  (:require-macros [app.main.style :as stl])
   (:require
+   [app.main.ui.components.title-bar :refer [inspect-title-bar]]
    [app.main.ui.viewer.inspect.attributes.common :refer [color-row]]
    [app.util.code-gen.style-css :as css]
    [app.util.i18n :refer [tr]]
@@ -18,7 +20,8 @@
    :opacity (:fill-opacity shape)
    :gradient (:fill-color-gradient shape)
    :id (:fill-color-ref-id shape)
-   :file-id (:fill-color-ref-file shape)})
+   :file-id (:fill-color-ref-file shape)
+   :image (:fill-image shape)})
 
 (defn has-fill? [shape]
   (and
@@ -32,11 +35,12 @@
   [{:keys [objects shape]}]
   (let [format*   (mf/use-state :hex)
         format    (deref format*)
-
         color     (shape->color shape)
-        on-change (mf/use-fn #(reset! format* %))]
-
-    [:div.attributes-fill-block
+        on-change
+        (mf/use-fn
+         (fn [format]
+           (reset! format* format)))]
+    [:div {:class (stl/css :attributes-fill-block)}
      [:& color-row
       {:color color
        :format format
@@ -48,11 +52,12 @@
   [{:keys [shapes]}]
   (let [shapes (filter has-fill? shapes)]
     (when (seq shapes)
-      [:div.attributes-block
-       [:div.attributes-block-title
-        [:div.attributes-block-title-text (tr "inspect.attributes.fill")]]
+      [:div {:class (stl/css :attributes-block)}
+       [:& inspect-title-bar
+        {:title (tr "inspect.attributes.fill")
+         :class (stl/css :title-spacing-fill)}]
 
-       [:div.attributes-fill-blocks
+       [:div {:class (stl/css :attributes-content)}
         (for [shape shapes]
           (if (seq (:fills shape))
             (for [value (:fills shape [])]

@@ -24,6 +24,7 @@
    [app.main :as-alias main]
    [app.rpc :as-alias rpc]
    [app.rpc.retry :as rtry]
+   [app.setup :as-alias setup]
    [app.tokens :as tokens]
    [app.util.services :as-alias sv]
    [app.util.time :as dt]
@@ -33,7 +34,7 @@
    [integrant.core :as ig]
    [lambdaisland.uri :as u]
    [promesa.exec :as px]
-   [yetti.request :as yrq]))
+   [ring.request :as rreq]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; HELPERS
@@ -41,9 +42,9 @@
 
 (defn parse-client-ip
   [request]
-  (or (some-> (yrq/get-header request "x-forwarded-for") (str/split ",") first)
-      (yrq/get-header request "x-real-ip")
-      (some-> (yrq/remote-addr request) str)))
+  (or (some-> (rreq/get-header request "x-forwarded-for") (str/split ",") first)
+      (rreq/get-header request "x-real-ip")
+      (some-> (rreq/remote-addr request) str)))
 
 (defn extract-utm-params
   "Extracts additional data from params and namespace them under
@@ -133,7 +134,7 @@
   [_ {:keys [::db/pool] :as cfg}]
   (cond
     (db/read-only? pool)
-    (l/warn :hint "audit: disabled (db is read-only)")
+    (l/warn :hint "audit disabled (db is read-only)")
 
     :else
     cfg))
@@ -187,8 +188,7 @@
          false)}))
 
 (defn- handle-event!
-  [conn-or-pool event]
-  (us/verify! ::event event)
+  [cfg event]
   (let [params {:id (uuid/next)
                 :name (::name event)
                 :type (::type event)
@@ -201,19 +201,15 @@
       ;; NOTE: this operation may cause primary key conflicts on inserts
       ;; because of the timestamp precission (two concurrent requests), in
       ;; this case we just retry the operation.
-      (rtry/with-retry {::rtry/when rtry/conflict-exception?
-                        ::rtry/max-retries 6
-                        ::rtry/label "persist-audit-log"
-                        ::db/conn (dm/check db/connection? conn-or-pool)}
-        (let [now (dt/now)]
-          (db/insert! conn-or-pool :audit-log
-                      (-> params
-                          (update :props db/tjson)
-                          (update :context db/tjson)
-                          (update :ip-addr db/inet)
-                          (assoc :created-at now)
-                          (assoc :tracked-at now)
-                          (assoc :source "backend"))))))
+      (let [tnow   (dt/now)
+            params (-> params
+                       (assoc :created-at tnow)
+                       (assoc :tracked-at tnow)
+                       (update :props db/tjson)
+                       (update :context db/tjson)
+                       (update :ip-addr db/inet)
+                       (assoc :source "backend"))]
+        (db/insert! cfg :audit-log params)))
 
     (when (and (contains? cf/flags :webhooks)
                (::webhooks/event? event))
@@ -226,7 +222,7 @@
                             :else               label)
             dedupe?       (boolean (and batch-key batch-timeout))]
 
-        (wrk/submit! ::wrk/conn conn-or-pool
+        (wrk/submit! ::wrk/conn (::db/conn cfg)
                      ::wrk/task :process-webhook-event
                      ::wrk/queue :webhooks
                      ::wrk/max-retries 0
@@ -243,12 +239,16 @@
 (defn submit!
   "Submit audit event to the collector."
   [cfg params]
-  (let [conn (or (::db/conn cfg) (::db/pool cfg))]
-    (us/assert! ::db/pool-or-conn conn)
-    (try
-      (handle-event! conn (d/without-nils params))
-      (catch Throwable cause
-        (l/error :hint "audit: unexpected error processing event" :cause cause)))))
+  (try
+    (let [event (d/without-nils params)
+          cfg   (-> cfg
+                    (assoc ::rtry/when rtry/conflict-exception?)
+                    (assoc ::rtry/max-retries 6)
+                    (assoc ::rtry/label "persist-audit-log"))]
+      (us/verify! ::event event)
+      (rtry/invoke! cfg db/tx-run! handle-event! event))
+    (catch Throwable cause
+      (l/error :hint "unexpected error processing event" :cause cause))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TASK: ARCHIVE
@@ -262,7 +262,7 @@
 (s/def ::tasks/uri ::us/string)
 
 (defmethod ig/pre-init-spec ::tasks/archive-task [_]
-  (s/keys :req [::db/pool ::main/props ::http.client/client]))
+  (s/keys :req [::db/pool ::setup/props ::http.client/client]))
 
 (defmethod ig/init-key ::tasks/archive
   [_ cfg]
@@ -288,7 +288,7 @@
                 (px/sleep 100)
                 (recur (+ total ^long n)))
               (when (pos? total)
-                (l/debug :hint "events archived" :total total)))))))))
+                (l/dbg :hint "events archived" :total total)))))))))
 
 (def ^:private sql:retrieve-batch-of-audit-log
   "select *
@@ -323,7 +323,7 @@
                               :context]))
 
           (send [events]
-            (let [token   (tokens/generate (::main/props cfg)
+            (let [token   (tokens/generate (::setup/props cfg)
                                            {:iss "authentication"
                                             :iat (dt/now)
                                             :uid uuid/zero})
@@ -332,11 +332,11 @@
                            "origin" (cf/get :public-uri)
                            "cookie" (u/map->query-string {:auth-token token})}
                   params  {:uri uri
-                           :timeout 6000
+                           :timeout 12000
                            :method :post
                            :headers headers
                            :body body}
-                  resp    (http.client/req! cfg params {:sync? true})]
+                  resp    (http.client/req! cfg params)]
               (if (= (:status resp) 204)
                 true
                 (do
@@ -348,7 +348,6 @@
           (mark-as-archived [conn rows]
             (db/exec-one! conn ["update audit_log set archived_at=now() where id = ANY(?)"
                                 (->> (map :id rows)
-                                     (into-array java.util.UUID)
                                      (db/create-array conn "uuid"))]))]
 
     (db/with-atomic [conn pool]
@@ -357,7 +356,7 @@
                          (map row->event))
             events (into [] xform rows)]
         (when-not (empty? events)
-          (l/trace :hint "archive events chunk" :uri uri :events (count events))
+          (l/trc :hint "archive events chunk" :uri uri :events (count events))
           (when (send events)
             (mark-as-archived conn rows)
             (count events)))))))

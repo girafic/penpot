@@ -915,7 +915,7 @@ msgstr "Email"
 
 #: src/app/main/ui/settings/feedback.cljs
 msgid "feedback.twitter-go-to"
-msgstr "Przejdź do Twittera"
+msgstr "Przejdź do Xa"
 
 #: src/app/main/ui/settings/feedback.cljs
 msgid "feedback.twitter-subtitle1"
@@ -923,7 +923,7 @@ msgstr "Służymy pomocą w kwestiach technicznych."
 
 #: src/app/main/ui/settings/feedback.cljs
 msgid "feedback.twitter-title"
-msgstr "Konto wsparcia na Twitterze"
+msgstr "Konto wsparcia na Xze"
 
 #: src/app/main/ui/settings/password.cljs
 msgid "generic.error"
@@ -996,10 +996,6 @@ msgstr "Szerokość"
 #: src/app/main/ui/inspect/attributes/shadow.cljs
 msgid "inspect.attributes.shadow"
 msgstr "Cień"
-
-#: src/app/main/ui/inspect/attributes/shadow.cljs
-msgid "inspect.attributes.shadow.shorthand.spread"
-msgstr "S"
 
 #: src/app/main/ui/inspect/attributes/layout.cljs
 msgid "inspect.attributes.size"
@@ -2015,12 +2011,6 @@ msgstr "Przewodnik współtworzenia"
 msgid "onboarding-v2.welcome.title"
 msgstr "Witamy w Penpot!"
 
-msgid "onboarding.choice.team-up.create-later"
-msgstr "Utwórz zespół później"
-
-msgid "onboarding.choice.team-up.create-team"
-msgstr "Nazwa twojego zespołu"
-
 msgid "onboarding.choice.team-up.create-team-desc"
 msgstr "Po nazwaniu swojego zespołu będziesz mógł zapraszać osoby do dołączenia."
 
@@ -2035,17 +2025,8 @@ msgstr ""
 "Pamiętaj, aby uwzględnić wszystkich. Deweloperzy, projektanci, "
 "managerowie... różnorodność się sumuje :)"
 
-msgid "onboarding.choice.team-up.invite-members-skip"
-msgstr "Utwórz zespół i zaproś później"
-
-msgid "onboarding.choice.team-up.invite-members-submit"
-msgstr "Utwórz zespół i wyślij zaproszenia"
-
 msgid "onboarding.choice.team-up.roles"
 msgstr "Zaproś z rolą:"
-
-msgid "onboarding.contrib.desc2.1"
-msgstr "Możesz uzyskać dostęp do"
 
 msgid "onboarding.newsletter.accept"
 msgstr "Tak, zasubskrybuj"
@@ -2060,15 +2041,6 @@ msgstr "Polityka prywatności."
 
 msgid "onboarding.newsletter.title"
 msgstr "Chcesz otrzymywać informacje o Penpot?"
-
-msgid "onboarding.slide.0.title"
-msgstr "Biblioteki projektowe, style i komponenty"
-
-msgid "onboarding.slide.1.title"
-msgstr "Ożyw swoje projekty dzięki interakcjom"
-
-msgid "onboarding.slide.3.alt"
-msgstr "Wymiana i lowcode"
 
 msgid "onboarding.team-modal.create-team"
 msgstr "Utwórz zespół"
@@ -2479,9 +2451,6 @@ msgstr "Przełącz tryb skupienia"
 msgid "shortcuts.toggle-fullscreen"
 msgstr "Przełącz tryb pełnoekranowy"
 
-msgid "shortcuts.toggle-grid"
-msgstr "Pokaż/ukryj siatkę"
-
 msgid "shortcuts.toggle-history"
 msgstr "Przełącz historię"
 
@@ -2499,15 +2468,6 @@ msgstr "Zablokuj proporcje"
 
 msgid "shortcuts.toggle-rules"
 msgstr "Pokaż/ukryj linijki"
-
-msgid "shortcuts.toggle-scale-text"
-msgstr "Przełącz skalowanie tekstu"
-
-msgid "shortcuts.toggle-snap-grid"
-msgstr "Przyciągaj do siatki"
-
-msgid "shortcuts.toggle-snap-guide"
-msgstr "Przyciągaj do prowadnic"
 
 msgid "shortcuts.toggle-textpalette"
 msgstr "Przełącz paletę tekstu"
@@ -2639,10 +2599,6 @@ msgid "viewer.header.share.copy-link"
 msgstr "Kopiuj link"
 
 #: src/app/main/ui/viewer/header.cljs
-msgid "viewer.header.share.subtitle"
-msgstr "Każda osoba mająca link będzie miała dostęp"
-
-#: src/app/main/ui/viewer/header.cljs
 msgid "viewer.header.show-interactions"
 msgstr "Pokaż interakcje"
 
@@ -2769,10 +2725,6 @@ msgstr[0] "Wybrano %s element"
 msgstr[1] "Wybrano %s elementy"
 msgstr[2] "Wybrano %s elementów"
 
-#: src/app/main/ui/workspace/sidebar/assets.cljs
-msgid "workspace.assets.shared"
-msgstr "UDOSTĘPNIONE"
-
 #: src/app/main/ui/workspace/sidebar/assets.cljs, src/app/main/ui/workspace/sidebar/assets.cljs
 msgid "workspace.assets.typography"
 msgstr "Typografia"
@@ -2845,10 +2797,6 @@ msgid "workspace.header.menu.disable-scale-text"
 msgstr "Wyłącz skalowanie tekstu"
 
 #: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.disable-snap-grid"
-msgstr "Wyłącz przyciąganie do siatki"
-
-#: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.disable-snap-guides"
 msgstr "Wyłącz przyciąganie do prowadnic"
 
@@ -2864,10 +2812,6 @@ msgid "workspace.header.menu.enable-scale-text"
 msgstr "Włącz skalowanie tekstu"
 
 #: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.enable-snap-grid"
-msgstr "Przyciągaj do siatki"
-
-#: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.enable-snap-guides"
 msgstr "Przyciągaj do prowadnic"
 
@@ -2877,10 +2821,6 @@ msgstr "Włącz przyciąganie do piksela"
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.hide-artboard-names"
 msgstr "Ukryj nazwy obszarów kompozycji"
-
-#: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.hide-grid"
-msgstr "Ukryj siatki"
 
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.hide-palette"
@@ -2924,10 +2864,6 @@ msgstr "Zaznacz wszystko"
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.show-artboard-names"
 msgstr "Pokaz nazwy obszarów kompozycji"
-
-#: src/app/main/ui/workspace/header.cljs
-msgid "workspace.header.menu.show-grid"
-msgstr "Pokaż siatkę"
 
 #: src/app/main/ui/workspace/header.cljs
 msgid "workspace.header.menu.show-palette"
@@ -3083,9 +3019,6 @@ msgstr "Aktualizuj"
 #: src/app/main/ui/workspace/libraries.cljs
 msgid "workspace.libraries.updates"
 msgstr "AKTUALIZACJE"
-
-msgid "workspace.library.store"
-msgstr "Przechowaj biblioteki"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
 msgid "workspace.options.add-interaction"
@@ -3646,14 +3579,6 @@ msgid "workspace.options.layout.direction.column"
 msgstr "Kolumna"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/layout.cljs
-msgid "workspace.options.layout.direction.reverse-column"
-msgstr "Odwrć kolumny"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/layout.cljs
-msgid "workspace.options.layout.direction.reverse-row"
-msgstr "Odwróć wiersze"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/layout.cljs
 msgid "workspace.options.layout.direction.row"
 msgstr "Wiersz"
 
@@ -3732,12 +3657,12 @@ msgid "workspace.options.radius"
 msgstr "Promień"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
-msgid "workspace.options.radius.all-corners"
-msgstr "Wszystkie rogi"
+msgid "workspace.options.radius-bottom-left"
+msgstr "Dolne lewo"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
-msgid "workspace.options.radius.single-corners"
-msgstr "Poszczególne narożniki"
+msgid "workspace.options.radius-bottom-right"
+msgstr "Dolne prawo"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.radius-top-left"
@@ -3748,12 +3673,12 @@ msgid "workspace.options.radius-top-right"
 msgstr "Górne prawo"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
-msgid "workspace.options.radius-bottom-left"
-msgstr "Dolne lewo"
+msgid "workspace.options.radius.all-corners"
+msgstr "Wszystkie rogi"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
-msgid "workspace.options.radius-bottom-right"
-msgstr "Dolne prawo"
+msgid "workspace.options.radius.single-corners"
+msgstr "Poszczególne narożniki"
 
 msgid "workspace.options.recent-fonts"
 msgstr "Bieżące"
@@ -3916,24 +3841,8 @@ msgid "workspace.options.text-options.align-bottom"
 msgstr "Wyrównaj do dołu"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
-msgid "workspace.options.text-options.text-align-center"
-msgstr "Wyrównaj do środka (%s)"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
-msgid "workspace.options.text-options.text-align-justify"
-msgstr "Wyjustuj (%s)"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
-msgid "workspace.options.text-options.text-align-left"
-msgstr "Wyrównaj do lewej (%s)"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
 msgid "workspace.options.text-options.align-middle"
 msgstr "Wyrównaj do środka"
-
-#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
-msgid "workspace.options.text-options.text-align-right"
-msgstr "Wyrównaj do prawej (%s)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
 msgid "workspace.options.text-options.align-top"
@@ -3978,6 +3887,22 @@ msgstr "Brak"
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
 msgid "workspace.options.text-options.strikethrough"
 msgstr "Przekreślenie (%s)"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
+msgid "workspace.options.text-options.text-align-center"
+msgstr "Wyrównaj do środka (%s)"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
+msgid "workspace.options.text-options.text-align-justify"
+msgstr "Wyjustuj (%s)"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
+msgid "workspace.options.text-options.text-align-left"
+msgstr "Wyrównaj do lewej (%s)"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
+msgid "workspace.options.text-options.text-align-right"
+msgstr "Wyrównaj do prawej (%s)"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
 msgid "workspace.options.text-options.title"
@@ -4045,35 +3970,6 @@ msgstr "Rozłącz węzły (%s)"
 
 msgid "workspace.path.actions.snap-nodes"
 msgstr "Przyciągnij węzły (%s)"
-
-#: src/app/main/ui/workspace.cljs
-msgid "workspace.remove-graphics.error-hint"
-msgstr ""
-"Aby spróbować ponownie, możesz ponownie załadować ten plik. Jeśli problem "
-"będzie się powtarzał, sugerujemy przejrzenie listy i rozważenie usunięcia "
-"uszkodzonej grafiki."
-
-#: src/app/main/ui/workspace.cljs
-msgid "workspace.remove-graphics.error-msg"
-msgstr "Niektórych grafik nie udało się zaktualizować."
-
-#: src/app/main/ui/workspace.cljs
-msgid "workspace.remove-graphics.progress"
-msgstr "Konwersja %s/%s"
-
-#: src/app/main/ui/workspace.cljs
-msgid "workspace.remove-graphics.text1"
-msgstr ""
-"Grafika biblioteczna jest od teraz komponentami, co sprawi, że będą "
-"znacznie potężniejsze."
-
-#: src/app/main/ui/workspace.cljs
-msgid "workspace.remove-graphics.text2"
-msgstr "Ta aktualizacja jest działaniem jednorazowym."
-
-#: src/app/main/ui/workspace.cljs
-msgid "workspace.remove-graphics.title"
-msgstr "Aktualizowanie %s..."
 
 #: src/app/main/ui/workspace/context_menu.cljs
 msgid "workspace.shape.menu.add-flex"

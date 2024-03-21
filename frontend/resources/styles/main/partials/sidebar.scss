@@ -24,8 +24,7 @@
     grid-template-rows: 100%;
     height: calc(100% - 2px);
 
-    .tool-window,
-    .sitemap {
+    .tool-window {
       position: relative;
       border-bottom: 1px solid $color-gray-60;
       display: flex;
@@ -78,20 +77,21 @@
           margin-left: auto;
         }
 
-        span.tool-link {
+        span.tool-link,
+        span.shared-library {
           margin-left: auto;
+          padding-left: 17px;
+          display: flex;
 
           svg {
             fill: $color-gray-30;
-            height: 16px;
-            width: 16px;
+            height: 20px;
+            width: 20px;
           }
+        }
 
-          &:hover {
-            svg {
-              fill: $color-primary;
-            }
-          }
+        span.tool-link:hover svg {
+          fill: $color-primary;
         }
 
         span.library-title {
@@ -101,6 +101,9 @@
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+          &:first-letter {
+            text-transform: uppercase;
+          }
         }
 
         .tool-window-bar-icon {
@@ -155,11 +158,6 @@
           padding: 0.25rem;
         }
       }
-    }
-
-    .assets-bar .tool-window {
-      flex: none;
-      height: auto;
     }
   }
 
@@ -324,16 +322,22 @@ button.collapse-sidebar {
   }
 }
 
-#layers.tool-window {
-  overflow: auto;
-}
-
 .layers-tab {
   display: grid;
   grid-template-rows: auto 1fr;
   grid-template-columns: 100%;
   height: 100%;
   overflow: hidden;
+  position: relative;
+  .resize-area-horiz {
+    position: absolute;
+    top: var(--height, 200px);
+    left: 0;
+    height: 8px;
+    width: 100%;
+    z-index: 10;
+    cursor: ns-resize;
+  }
 }
 
 .shortcuts,
@@ -561,10 +565,10 @@ button.collapse-sidebar {
 
     &:hover {
       svg {
-        stroke: var(--color-primary);
+        stroke: $color-primary;
       }
       label {
-        color: var(--color-primary);
+        color: $color-primary;
       }
     }
   }

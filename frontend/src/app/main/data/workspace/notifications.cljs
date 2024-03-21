@@ -8,19 +8,22 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
-   [app.common.pages.changes :as cpc]
+   [app.common.files.changes :as cpc]
    [app.common.schema :as sm]
+   [app.common.uuid :as uuid]
+   [app.main.data.common :refer [handle-notification]]
    [app.main.data.websocket :as dws]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.persistence :as dwp]
-   [app.main.streams :as ms]
    [app.util.globals :refer [global]]
+   [app.util.mouse :as mse]
    [app.util.object :as obj]
+   [app.util.rxops :as rxs]
    [app.util.time :as dt]
-   [beicon.core :as rx]
+   [beicon.v2.core :as rx]
    [clojure.set :as set]
-   [potok.core :as ptk]))
+   [potok.v2.core :as ptk]))
 
 (declare process-message)
 (declare handle-presence)
@@ -35,7 +38,7 @@
   (ptk/reify ::initialize
     ptk/WatchEvent
     (watch [_ state stream]
-      (let [stoper     (rx/filter (ptk/type? ::finalize) stream)
+      (let [stopper     (rx/filter (ptk/type? ::finalize) stream)
             profile-id (:profile-id state)
 
             initmsg    [{:type :subscribe-file
@@ -57,8 +60,9 @@
                                   (rx/filter (ptk/type? ::dws/message))
                                   (rx/map deref)
                                   (rx/filter (fn [{:keys [subs-id] :as msg}]
-                                               (or (= subs-id team-id)
+                                               (or (= subs-id uuid/zero)
                                                    (= subs-id profile-id)
+                                                   (= subs-id team-id)
                                                    (= subs-id file-id))))
                                   (rx/map process-message))
 
@@ -78,11 +82,12 @@
                              ;; Emit to all other connected users the current pointer
                              ;; position changes.
                              (->> stream
-                                  (rx/filter ms/pointer-event?)
-                                  (rx/sample 50)
+                                  (rx/filter mse/pointer-event?)
+                                  (rx/filter #(= :viewport (mse/get-pointer-source %)))
+                                  (rx/pipe (rxs/throttle 100))
                                   (rx/map #(handle-pointer-send file-id (:pt %)))))
 
-                            (rx/take-until stoper))]
+                            (rx/take-until stopper))]
 
         (rx/concat stream (rx/of (dws/send endmsg)))))))
 
@@ -96,6 +101,7 @@
     :pointer-update (handle-pointer-update msg)
     :file-change    (handle-file-change msg)
     :library-change (handle-library-change msg)
+    :notification   (handle-notification msg)
     nil))
 
 (defn- handle-pointer-send
@@ -119,17 +125,15 @@
 ;; --- Handle: Presence
 
 (def ^:private presence-palette
-  #{"#02bf51" ; darkpastelgreen text white
-    "#00fa9a" ; mediumspringgreen text black
-    "#b22222" ; firebrick text white
-    "#ff8c00" ; darkorage text white
-    "#ffd700" ; gold text black
-    "#ba55d3" ; mediumorchid text white
-    "#dda0dd" ; plum text black
-    "#008ab8" ; blueNCS text white
-    "#00bfff" ; deepskyblue text white
-    "#ff1493" ; deeppink text white
-    "#ffafda" ; carnationpink text black
+  #{"#f49ef7" ; pink
+    "#75cafc" ; blue
+    "#fdcf79" ; gold
+    "#a9bdfa" ; indigo
+    "#faa6b7" ; red
+    "#cbaaff" ; purple
+    "#f9b489" ; orange
+    "#dee563" ; yellow -> default presence color
+    "#b1e96f" ; lemon
     })
 
 (defn handle-presence
@@ -140,7 +144,8 @@
                               (remove nil?))
                   used  (into #{} xfm presence)
                   avail (set/difference presence-palette used)]
-              (or (first avail) "var(--color-black)")))
+              ;; If all colores are used we select the default one
+              (or (first avail) "#dee563")))
 
           (update-color [color presence]
             (if (some? color)
@@ -154,10 +159,7 @@
                 (assoc :updated-at (dt/now))
                 (assoc :version version)
                 (update :color update-color presence)
-                (assoc :text-color (if (contains? ["#00fa9a" "#ffd700" "#dda0dd" "#ffafda"]
-                                                  (update-color (:color presence) presence))
-                                     "#000"
-                                     "#fff"))))
+                (assoc :text-color "#000000")))
 
           (update-presence [presence]
             (-> presence
@@ -183,18 +185,23 @@
                           :updated-at (dt/now)
                           :page-id page-id))))))
 
-(def schema:handle-file-change
-  [:map
-   [:type :keyword]
-   [:profile-id ::sm/uuid]
-   [:file-id ::sm/uuid]
-   [:session-id ::sm/uuid]
-   [:revn :int]
-   [:changes ::cpc/changes]])
+(def ^:private
+  schema:handle-file-change
+  (sm/define
+    [:map {:title "handle-file-change"}
+     [:type :keyword]
+     [:profile-id ::sm/uuid]
+     [:file-id ::sm/uuid]
+     [:session-id ::sm/uuid]
+     [:revn :int]
+     [:changes ::cpc/changes]]))
 
 (defn handle-file-change
   [{:keys [file-id changes] :as msg}]
-  (dm/assert! (sm/valid? schema:handle-file-change msg))
+  (dm/assert!
+   "expected valid arguments"
+   (sm/check! schema:handle-file-change msg))
+
   (ptk/reify ::handle-file-change
     IDeref
     (-deref [_] {:changes changes})
@@ -240,19 +247,24 @@
          (when-not (empty? changes-by-pages)
            (rx/from (map process-page-changes changes-by-pages))))))))
 
-(def schema:handle-library-change
-  [:map
-   [:type :keyword]
-   [:profile-id ::sm/uuid]
-   [:file-id ::sm/uuid]
-   [:session-id ::sm/uuid]
-   [:revn :int]
-   [:modified-at ::sm/inst]
-   [:changes ::cpc/changes]])
+(def ^:private
+  schema:handle-library-change
+  (sm/define
+    [:map {:title "handle-library-change"}
+     [:type :keyword]
+     [:profile-id ::sm/uuid]
+     [:file-id ::sm/uuid]
+     [:session-id ::sm/uuid]
+     [:revn :int]
+     [:modified-at ::sm/inst]
+     [:changes ::cpc/changes]]))
 
 (defn handle-library-change
   [{:keys [file-id modified-at changes revn] :as msg}]
-  (dm/assert! (sm/valid? schema:handle-library-change msg))
+  (dm/assert!
+   "expected valid arguments"
+   (sm/check! schema:handle-library-change msg))
+
   (ptk/reify ::handle-library-change
     ptk/WatchEvent
     (watch [_ state _]

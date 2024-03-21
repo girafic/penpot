@@ -28,7 +28,9 @@
   [{:keys [page-id frame-id axis ranges bounds] :as message}]
   (let [match-bounds?
         (fn [[_ data]]
-          (some #(grc/contains-point? bounds %) (map :pt data)))]
+          (some #(or (= :guide (:type %))
+                     (= :layout (:type %))
+                     (grc/contains-point? bounds (:pt %))) data))]
     (->> (into []
                (comp (mapcat #(sd/query @state page-id frame-id axis %))
                      (distinct))

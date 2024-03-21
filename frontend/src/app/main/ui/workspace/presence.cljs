@@ -8,79 +8,71 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.config :as cfg]
    [app.main.refs :as refs]
-   [app.main.ui.context :as ctx]
    [app.util.dom :as dom]
    [app.util.timers :as tm]
    [rumext.v2 :as mf]))
 
-;; --- SESSION WIDGET
-
 (mf/defc session-widget
-  [{:keys [session profile index] :as props}]
-  [:li.tooltip.tooltip-bottom
-   {:class (stl/css :session-icon)
-    :style #js {"zIndex" (str (or (+ 1 (* -1 index)) 0))}
-    :alt (:fullname profile)}
-   [:img {:alt (:fullname profile)
-          :style {:border-color (:color session)}
-          :src (cfg/resolve-profile-photo-url profile)}]])
+  {::mf/props :obj
+   ::mf/memo true}
+  [{:keys [color profile index]}]
+  (let [profile       (assoc profile :color color)
+        full-name     (:fullname profile)]
+    [:li {:class (stl/css :session-icon)
+          :style {:z-index (dm/str (+ 1 (* -1 index)))
+                  :background-color color}
+          :title full-name}
+     [:img {:alt full-name
+            :style {:background-color color}
+            :src (cfg/resolve-profile-photo-url profile)}]]))
 
 (mf/defc active-sessions
-  {::mf/wrap [mf/memo]}
+  {::mf/memo true}
   []
-  (let [new-css-system (mf/use-ctx ctx/new-css-system)
-        users          (mf/deref refs/users)
+  (let [users          (mf/deref refs/users)
         presence       (mf/deref refs/workspace-presence)
-        user-ids       (vals presence)
-        num-users      (count user-ids)
-        first-users    (take 2 user-ids)
+
+        sessions       (vals presence)
+        num-sessions   (count sessions)
+
         open*          (mf/use-state false)
-        open?          (deref open*)
-        open-users-widget
+        open?          (and ^boolean (deref open*) (> num-sessions 2))
+        on-open
         (mf/use-fn
          (fn []
            (reset! open* true)
            (tm/schedule-on-idle
             #(dom/focus! (dom/get-element "users-close")))))
-        close-users-widget (mf/use-fn #(reset! open* false))]
 
-    (if new-css-system
-      [:*
-       (when (and (< 2 num-users) open?)
-         [:button
-          {:id "users-close"
-           :class (stl/css :active-users-opened)
-           :on-click close-users-widget
-           :on-blur close-users-widget}
-          [:ul {:class (stl/css :active-users-list)}
-           (when (< 2 num-users)
-             [:span {:class (stl/css :users-num)} num-users])
-           (for [session user-ids]
-             [:& session-widget
-              {:session session
-               :index 0
-               :profile (get users (:profile-id session))
-               :key (:id session)}])]])
+        on-close
+        (mf/use-fn #(reset! open* false))]
 
-       [:button {:class (stl/css-case :active-users true)
-                 :on-click open-users-widget}
-
+    [:*
+     (when ^boolean open?
+       [:button {:id "users-close"
+                 :class (stl/css :active-users-opened)
+                 :on-click on-close
+                 :on-blur on-close}
         [:ul {:class (stl/css :active-users-list)}
-         (when (< 2 num-users) [:span {:class (stl/css :users-num)} num-users])
-         (for [[index session] (d/enumerate first-users)]
+         (for [session sessions]
            [:& session-widget
-            {:session session
-             :index index
+            {:color (:color session)
+             :index 0
              :profile (get users (:profile-id session))
-             :key (:id session)}])]]]
+             :key (dm/str (:id session))}])]])
 
-      [:ul.active-users
-       (for [session (vals presence)]
+     [:button {:class (stl/css-case :active-users true)
+               :on-click on-open}
+      [:ul {:class (stl/css :active-users-list)}
+       (when (> num-sessions 2)
+         [:span {:class (stl/css :users-num)} (dm/str "+" (- num-sessions 2))])
+
+       (for [[index session] (d/enumerate (take 2 sessions))]
          [:& session-widget
-          {:session session
+          {:color (:color session)
+           :index index
            :profile (get users (:profile-id session))
-           :key (:id session)}])])))
-
-
+           :key (dm/str (:id session))}])]]]))

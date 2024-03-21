@@ -8,58 +8,63 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
+   [app.common.geom.line :as gl]
    [app.common.geom.point :as gpt]
+   [app.common.geom.shapes.common :as gco]
    [app.common.geom.shapes.grid-layout.layout-data :as ld]
    [app.common.geom.shapes.points :as gpo]
    [app.common.geom.shapes.transforms :as gtr]
    [app.common.math :as mth]
-   [app.common.pages.helpers :as cph]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape.layout :as ctl]))
 
 (defn cell-bounds
+  "Retrieves the points that define the bounds for given cell"
   [{:keys [origin row-tracks column-tracks layout-bounds column-gap row-gap] :as layout-data} {:keys [row column row-span column-span] :as cell}]
 
   (let [hv     #(gpo/start-hv layout-bounds %)
         vv     #(gpo/start-vv layout-bounds %)
 
-        span-column-tracks (subvec column-tracks (dec column) (+ (dec column) column-span))
-        span-row-tracks (subvec row-tracks (dec row) (+ (dec row) row-span))
+        span-column-tracks (d/safe-subvec column-tracks (dec column) (+ (dec column) column-span))
+        span-row-tracks (d/safe-subvec row-tracks (dec row) (+ (dec row) row-span))]
 
-        p1
-        (gpt/add
-         origin
-         (gpt/add
-          (gpt/to-vec origin (dm/get-in span-column-tracks [0 :start-p]))
-          (gpt/to-vec origin (dm/get-in span-row-tracks [0 :start-p]))))
+    (when (and span-column-tracks span-row-tracks)
+      (let [p1
+            (gpt/add
+             origin
+             (gpt/add
+              (gpt/to-vec origin (dm/get-in span-column-tracks [0 :start-p]))
+              (gpt/to-vec origin (dm/get-in span-row-tracks [0 :start-p]))))
 
-        p2
-        (as-> p1  $
-          (reduce (fn [p track] (gpt/add p (hv (:size track)))) $ span-column-tracks)
-          (gpt/add $ (hv (* column-gap (dec (count span-column-tracks))))))
+            p2
+            (as-> p1  $
+              (reduce (fn [p track] (gpt/add p (hv (:size track)))) $ span-column-tracks)
+              (gpt/add $ (hv (* column-gap (dec (count span-column-tracks))))))
 
-        p3
-        (as-> p2  $
-          (reduce (fn [p track] (gpt/add p (vv (:size track)))) $ span-row-tracks)
-          (gpt/add $ (vv (* row-gap (dec (count span-row-tracks))))))
+            p3
+            (as-> p2  $
+              (reduce (fn [p track] (gpt/add p (vv (:size track)))) $ span-row-tracks)
+              (gpt/add $ (vv (* row-gap (dec (count span-row-tracks))))))
 
-        p4
-        (as-> p1  $
-          (reduce (fn [p track] (gpt/add p (vv (:size track)))) $ span-row-tracks)
-          (gpt/add $ (vv (* row-gap (dec (count span-row-tracks))))))]
-
-    [p1 p2 p3 p4]))
+            p4
+            (as-> p1  $
+              (reduce (fn [p track] (gpt/add p (vv (:size track)))) $ span-row-tracks)
+              (gpt/add $ (vv (* row-gap (dec (count span-row-tracks))))))]
+        [p1 p2 p3 p4]))))
 
 (defn calc-fill-width-data
   "Calculates the size and modifiers for the width of an auto-fill child"
   [_parent
    transform
    transform-inverse
-   _child
+   child
    child-origin child-width
    cell-bounds]
 
-  (let [target-width (max (gpo/width-points cell-bounds) 0.01)
+  (let [target-width (max (- (gpo/width-points cell-bounds) (ctl/child-width-margin child)) 0.01)
+        max-width (max (ctl/child-max-width child) 0.01)
+        target-width (mth/clamp target-width (ctl/child-min-width child) max-width)
         fill-scale (/ target-width child-width)]
     {:width target-width
      :modifiers (ctm/resize-modifiers (gpt/point fill-scale 1) child-origin transform transform-inverse)}))
@@ -68,10 +73,12 @@
   "Calculates the size and modifiers for the height of an auto-fill child"
   [_parent
    transform transform-inverse
-   _child
+   child
    child-origin child-height
    cell-bounds]
-  (let [target-height (max (gpo/height-points cell-bounds) 0.01)
+  (let [target-height (max (- (gpo/height-points cell-bounds) (ctl/child-height-margin child)) 0.01)
+        max-height (max (ctl/child-max-height child) 0.01)
+        target-height (mth/clamp target-height (ctl/child-min-height child) max-height)
         fill-scale (/ target-height child-height)]
     {:height target-height
      :modifiers (ctm/resize-modifiers (gpt/point 1 fill-scale) child-origin transform transform-inverse)}))
@@ -106,7 +113,7 @@
          (cond-> fill-height (ctm/add-modifiers (:modifiers fill-height))))]))
 
 (defn child-position-delta
-  [parent child-bounds child-width child-height layout-data cell-data]
+  [parent child child-bounds child-width child-height layout-data cell-data]
   (let [cell-bounds (cell-bounds layout-data cell-data)
         child-origin (gpo/origin child-bounds)
 
@@ -126,30 +133,39 @@
         hv     (partial gpo/start-hv cell-bounds)
         vv     (partial gpo/start-vv cell-bounds)
 
+        [top-m right-m bottom-m left-m] (ctl/child-margins child)
+
         ;; Adjust alignment/justify
         [from-h to-h]
         (case justify
           :end
           [(gpt/add origin-h (hv child-width))
-           (nth cell-bounds 1)]
+           (gpt/subtract (nth cell-bounds 1) (hv right-m))]
 
           :center
           [(gpt/add origin-h (hv (/ child-width 2)))
-           (gpo/project-point cell-bounds :h (gpo/center cell-bounds))]
+           (-> (gpo/project-point cell-bounds :h (gpo/center cell-bounds))
+               (gpt/add (hv (/ left-m 2)))
+               (gpt/subtract (hv (/ right-m 2))))]
 
-          [origin-h (first cell-bounds)])
+          [origin-h
+           (gpt/add (first cell-bounds) (hv left-m))])
 
         [from-v to-v]
         (case align
           :end
           [(gpt/add origin-v (vv child-height))
-           (nth cell-bounds 3)]
+           (gpt/subtract (nth cell-bounds 3) (vv bottom-m))]
 
           :center
           [(gpt/add origin-v (vv (/ child-height 2)))
-           (gpo/project-point cell-bounds :v (gpo/center cell-bounds))]
+           (-> (gpo/project-point cell-bounds :v (gpo/center cell-bounds))
+               (gpt/add (vv top-m))
+               (gpt/subtract (vv bottom-m)))]
 
-          [origin-v (first cell-bounds)])]
+          [origin-v
+           (gpt/add (first cell-bounds) (vv top-m))])]
+
     (-> (gpt/point)
         (gpt/add (gpt/to-vec from-h to-h))
         (gpt/add (gpt/to-vec from-v to-v)))))
@@ -160,24 +176,12 @@
   (let [[child-width child-height fill-modifiers]
         (fill-modifiers parent parent-bounds child child-bounds layout-data cell-data)
 
-        position-delta (child-position-delta parent child-bounds child-width child-height layout-data cell-data)]
+        position-delta (child-position-delta parent child child-bounds child-width child-height layout-data cell-data)]
 
     (cond-> (ctm/empty)
-      (not (ctl/layout-absolute? child))
+      (not (ctl/position-absolute? child))
       (-> (ctm/add-modifiers fill-modifiers)
           (ctm/move position-delta)))))
-
-
-(defn line-value
-  [[{px :x py :y} {vx :x vy :y}] {:keys [x y]}]
-  (let [a vy
-        b (- vx)
-        c (+ (* (- vy) px) (* vx py))]
-    (+ (* a x) (* b y) c)))
-
-(defn is-inside-lines?
-  [line-1 line-2 pos]
-  (< (* (line-value line-1 pos) (line-value line-2 pos)) 0))
 
 (defn get-position-grid-coord
   [{:keys [layout-bounds row-tracks column-tracks]} position]
@@ -191,7 +195,7 @@
             (fn is-inside-track? [{:keys [start-p size] :as track}]
               (let [unit-v    (vfn 1)
                     end-p     (gpt/add start-p (ofn size))]
-                (is-inside-lines? [start-p unit-v] [end-p unit-v]  position)))))
+                (gl/is-inside-lines? [start-p unit-v] [end-p unit-v]  position)))))
 
         make-min-distance-track
         (fn [type]
@@ -199,8 +203,8 @@
             (fn [[selected selected-dist] [cur-idx {:keys [start-p size] :as track}]]
               (let [unit-v    (vfn 1)
                     end-p     (gpt/add start-p (ofn size))
-                    dist-1    (mth/abs (line-value [start-p unit-v] position))
-                    dist-2    (mth/abs (line-value [end-p unit-v] position))]
+                    dist-1    (mth/abs (gl/line-value [start-p unit-v] position))
+                    dist-2    (mth/abs (gl/line-value [end-p unit-v] position))]
 
                 (if (or (< dist-1 selected-dist) (< dist-2 selected-dist))
                   [[cur-idx track] (min dist-1 dist-2)]
@@ -237,9 +241,11 @@
   [frame-id objects position]
 
   (let [frame       (get objects frame-id)
-        children    (->> (cph/get-immediate-children objects (:id frame))
+        children    (->> (cfh/get-immediate-children objects (:id frame))
                          (remove :hidden)
                          (map #(vector (gpo/parent-coords-bounds (:points %) (:points frame)) %)))
-        layout-data (ld/calc-layout-data frame children (:points frame))]
+
+        bounds (d/lazy-map (keys objects) #(gco/shape->points (get objects %)))
+        layout-data (ld/calc-layout-data frame (:points frame) children bounds objects)]
 
     (get-position-grid-coord layout-data position)))

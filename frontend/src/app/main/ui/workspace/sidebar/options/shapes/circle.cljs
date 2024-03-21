@@ -14,7 +14,7 @@
    [app.main.ui.workspace.sidebar.options.menus.fill :refer [fill-attrs fill-menu]]
    [app.main.ui.workspace.sidebar.options.menus.grid-cell :as grid-cell]
    [app.main.ui.workspace.sidebar.options.menus.layer :refer [layer-attrs layer-menu]]
-   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [layout-container-flex-attrs layout-container-menu]] 
+   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [layout-container-flex-attrs layout-container-menu]]
    [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-attrs layout-item-menu]]
    [app.main.ui.workspace.sidebar.options.menus.measures :refer [measure-attrs measures-menu]]
    [app.main.ui.workspace.sidebar.options.menus.shadow :refer [shadow-menu]]
@@ -43,17 +43,26 @@
         is-grid-parent-ref (mf/use-memo (mf/deps ids) #(refs/grid-layout-child? ids))
         is-grid-parent? (mf/deref is-grid-parent-ref)
 
-        is-layout-child-absolute? (ctl/layout-absolute? shape)
+        is-layout-child-absolute? (ctl/item-absolute? shape)
 
         ids (hooks/use-equal-memo ids)
         parents-by-ids-ref (mf/use-memo (mf/deps ids) #(refs/parents-by-ids ids))
         parents (mf/deref parents-by-ids-ref)]
     [:*
+     [:& layer-menu {:ids ids
+                     :type type
+                     :values layer-values}]
+
      [:& measures-menu {:ids ids
                         :type type
                         :values measure-values
                         :shape shape}]
-     [:& layout-container-menu {:type type :ids [(:id shape)] :values layout-container-values :multiple false}]
+
+     [:& layout-container-menu
+      {:type type
+       :ids [(:id shape)]
+       :values layout-container-values
+       :multiple false}]
 
      (when (and (= (count ids) 1) is-layout-child? is-grid-parent?)
        [:& grid-cell/options
@@ -69,12 +78,11 @@
                              :is-flex-parent? is-flex-parent?
                              :is-grid-parent? is-grid-parent?
                              :shape shape}])
-     (when (or (not is-layout-child?) is-layout-child-absolute?)
+
+     (when (or (not ^boolean is-layout-child?) ^boolean is-layout-child-absolute?)
        [:& constraints-menu {:ids ids
                              :values constraint-values}])
-     [:& layer-menu {:ids ids
-                     :type type
-                     :values layer-values}]
+
      [:& fill-menu {:ids ids
                     :type type
                     :values (select-keys shape fill-attrs)}]

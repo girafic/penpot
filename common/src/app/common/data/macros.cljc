@@ -13,8 +13,8 @@
    #?(:clj [clojure.core :as c]
       :cljs [cljs.core :as c])
    [app.common.data :as d]
-   [cuerdas.core :as str]
-   [cljs.analyzer.api :as aapi]))
+   [cljs.analyzer.api :as aapi]
+   [cuerdas.core :as str]))
 
 (defmacro select-keys
   "A macro version of `select-keys`. Useful when keys vector is known
@@ -24,7 +24,7 @@
   keys in contrast to clojure.core/select-keys"
   [target keys]
   (assert (vector? keys) "keys expected to be a vector")
-  `{ ~@(mapcat (fn [key] [key (list `c/get target key)]) keys) ~@[] })
+  `{~@(mapcat (fn [key] [key (list `c/get target key)]) keys) ~@[]})
 
 (defmacro get-in
   "A macro version of `get-in`. Useful when the keys vector is known at
@@ -121,9 +121,8 @@
   directly on CLJS, on CLJ works as get."
   [obj prop]
   (if (:ns &env)
-    (list (symbol ".") (with-meta obj {:tag 'js}) (symbol (str "-" (c/name prop))))
+    (list 'js* (c/str "(~{}?." (str/snake prop) "?? ~{})") obj (list 'cljs.core/get obj prop))
     (list `c/get obj prop)))
-
 
 (def ^:dynamic *assert-context* nil)
 
@@ -141,7 +140,7 @@
                 :else
                 (str "expr assert: " (pr-str expr)))]
      (when *assert*
-       `(binding [*assert-context* true]
+       `(binding [*assert-context* ~hint]
           (when-not ~expr
             (let [hint#   ~hint
                   params# {:type :assertion
@@ -162,7 +161,7 @@
 
                 :else
                 (str "expr assert: " (pr-str expr)))]
-     `(binding [*assert-context* true]
+     `(binding [*assert-context* ~hint]
         (when-not ~expr
           (let [hint#   ~hint
                 params# {:type :assertion

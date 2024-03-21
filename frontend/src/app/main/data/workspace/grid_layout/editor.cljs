@@ -6,9 +6,11 @@
 
 (ns app.main.data.workspace.grid-layout.editor
   (:require
+   [app.common.data.macros :as dm]
    [app.common.geom.rect :as grc]
+   [app.common.types.shape.layout :as ctl]
    [app.main.data.workspace.state-helpers :as wsh]
-   [potok.core :as ptk]))
+   [potok.v2.core :as ptk]))
 
 (defn hover-grid-cell
   [grid-id cell-id add-to-set]
@@ -24,19 +26,61 @@
              (conj hover-set cell-id)
              (disj hover-set cell-id))))))))
 
-(defn select-grid-cell
+(defn add-to-selection
+  ([grid-id cell-id]
+   (add-to-selection grid-id cell-id false))
+  ([grid-id cell-id shift?]
+   (ptk/reify ::add-to-selection
+     ptk/UpdateEvent
+     (update [_ state]
+       (if shift?
+         (let [objects  (wsh/lookup-page-objects state)
+               grid     (get objects grid-id)
+               selected (or (dm/get-in state [:workspace-grid-edition grid-id :selected]) #{})
+               selected (into selected [cell-id])
+               cells    (->> selected (map #(dm/get-in grid [:layout-grid-cells %])))
+
+               {:keys [first-row last-row first-column last-column]} (ctl/cells-coordinates cells)
+               new-selected
+               (into #{}
+                     (map :id)
+                     (ctl/cells-in-area grid first-row last-row first-column last-column))]
+           (assoc-in state [:workspace-grid-edition grid-id :selected] new-selected))
+         (update-in state [:workspace-grid-edition grid-id :selected] (fnil conj #{}) cell-id))))))
+
+(defn set-selection
   [grid-id cell-id]
-  (ptk/reify ::select-grid-cell
+  (ptk/reify ::set-selection
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-grid-edition grid-id :selected] cell-id))))
+      (assoc-in state [:workspace-grid-edition grid-id :selected] #{cell-id}))))
 
 (defn remove-selection
-  [grid-id]
+  [grid-id cell-id]
   (ptk/reify ::remove-selection
     ptk/UpdateEvent
     (update [_ state]
+      (update-in state [:workspace-grid-edition grid-id :selected] disj cell-id))))
+
+(defn clear-selection
+  [grid-id]
+  (ptk/reify ::clear-selection
+    ptk/UpdateEvent
+    (update [_ state]
       (update-in state [:workspace-grid-edition grid-id] dissoc :selected))))
+
+(defn clean-selection
+  [grid-id]
+  (ptk/reify ::clean-selection
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [objects (wsh/lookup-page-objects state)
+            shape (get objects grid-id)]
+        (update-in state [:workspace-grid-edition grid-id :selected]
+                   (fn [selected]
+                     (into #{}
+                           (filter #(contains? (:layout-grid-cells shape) %))
+                           selected)))))))
 
 (defn stop-grid-layout-editing
   [grid-id]
@@ -62,3 +106,18 @@
                         (-> local
                             (update :vbox merge (select-keys srect [:x :y :x1 :x2 :y1 :y2])))))))))))
 
+(defn select-track-cells
+  [grid-id type index]
+  (ptk/reify ::select-track-cells
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [objects (wsh/lookup-page-objects state)
+            parent  (get objects grid-id)
+
+            cells
+            (if (= type :column)
+              (ctl/cells-by-column parent index)
+              (ctl/cells-by-row parent index))
+
+            selected (into #{} (map :id) cells)]
+        (assoc-in state [:workspace-grid-edition grid-id :selected] selected)))))

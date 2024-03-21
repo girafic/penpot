@@ -11,7 +11,7 @@
    [app.common.data.macros :as dm]
    [app.main.data.workspace :as dw]
    [app.main.store :as st]
-   [app.main.ui.context :as ctx]
+   [app.util.debug :as dbg]
    [app.util.dom :as dom]
    [app.util.keyboard :as kbd]
    [cuerdas.core :as str]
@@ -37,7 +37,8 @@
         ref              (d/nilv external-ref local-ref)
 
         shape-for-rename (mf/deref lens:shape-for-rename)
-        new-css-system   (mf/use-ctx ctx/new-css-system)
+
+        has-path?        (str/includes? shape-name "/")
 
         start-edit
         (mf/use-fn
@@ -87,7 +88,8 @@
 
     (if ^boolean edition?
       [:input
-       {:class (stl/css new-css-system :element-name :element-name-input)
+       {:class (stl/css :element-name
+                        :element-name-input)
         :style {"--depth" depth "--parent-size" parent-size}
         :type "text"
         :ref ref
@@ -95,17 +97,18 @@
         :on-key-down on-key-down
         :auto-focus true
         :default-value (d/nilv shape-name "")}]
-      [:span
-       {:class (if ^boolean new-css-system
-                 (stl/css-case
-                  :element-name true
-                  :selected selected?
-                  :hidden hidden?
-                  :type-comp type-comp
-                  :type-frame type-frame)
-                 (stl/css* :element-name))
-        :style {"--depth" depth "--parent-size" parent-size}
-        :ref ref
-        :on-double-click start-edit}
-       (d/nilv shape-name "")
-       (when ^boolean shape-touched? " *")])))
+      [:*
+       [:span
+        {:class (stl/css-case
+                 :element-name true
+                 :left-ellipsis has-path?
+                 :selected selected?
+                 :hidden hidden?
+                 :type-comp type-comp
+                 :type-frame type-frame)
+         :style {"--depth" depth "--parent-size" parent-size}
+         :ref ref
+         :on-double-click start-edit}
+        (d/nilv shape-name "")]
+       (when (and (dbg/enabled? :show-touched) ^boolean shape-touched?)
+         [:span {:class (stl/css :element-name-touched)} "*"])])))

@@ -5,26 +5,27 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.debug.components-preview
-  (:require-macros [app.main.style :refer [css styles]])
-  (:require [app.common.data :as d]
-            [app.main.data.users :as du]
-            [app.main.refs :as refs]
-            [app.main.store :as st]
-            [app.main.ui.components.radio-buttons :refer [radio-button radio-buttons]]
-            [app.main.ui.components.search-bar :refer [search-bar]]
-            [app.main.ui.components.tab-container :refer [tab-container tab-element]]
-            [app.main.ui.components.title-bar :refer [title-bar]]
-            [app.main.ui.icons :as i]
-            [app.util.dom :as dom]
-            [rumext.v2 :as mf]))
+  (:require-macros [app.main.style :as stl])
+  (:require
+   [app.common.data :as d]
+   [app.main.data.users :as du]
+   [app.main.refs :as refs]
+   [app.main.store :as st]
+   [app.main.ui.components.radio-buttons :refer [radio-button radio-buttons]]
+   [app.main.ui.components.search-bar :refer [search-bar]]
+   [app.main.ui.components.tab-container :refer [tab-container tab-element]]
+   [app.main.ui.components.title-bar :refer [title-bar]]
+   [app.main.ui.icons :as i]
+   [app.util.dom :as dom]
+   [rumext.v2 :as mf]))
 
 (mf/defc component-wrapper
   {::mf/wrap-props false}
   [props]
   (let [children (unchecked-get props "children")
         title    (unchecked-get props "title")]
-    [:div {:class (dom/classnames (css :component) true)}
-     [:h4 {:class (dom/classnames (css :component-name) true)} title]
+    [:div {:class (stl/css :component)}
+     [:h4 {:class (stl/css :component-name)} title]
      children]))
 
 (mf/defc components-preview
@@ -38,16 +39,16 @@
                     (let [theme (dom/event->value event)
                           data (assoc initial :theme theme)]
                       (st/emit! (du/update-profile data))))
-        colors [:bg-primary
-                :bg-secondary
-                :bg-tertiary
-                :bg-cuaternary
-                :fg-primary
-                :fg-secondary
-                :acc
-                :acc-muted
-                :acc-secondary
-                :acc-tertiary]
+        colors ["var(--color-background-primary)"
+                "var(--color-background-secondary)"
+                "var(--color-background-tertiary)"
+                "var(--color-background-quaternary)"
+                "var(--color-foreground-primary)"
+                "var(--color-foreground-secondary)"
+                "var(--color-accent-primary)"
+                "var(--color-accent-primary-muted)"
+                "var(--color-accent-secondary)"
+                "var(--color-accent-tertiary)"]
 
         ;; COMPONENTS FNs
         state* (mf/use-state {:collapsed? true
@@ -77,7 +78,7 @@
         on-btn-click (mf/use-fn #(prn "eyy"))]
 
     [:section.debug-components-preview
-     [:div {:class (dom/classnames (css :themes-row) true)}
+     [:div {:class (stl/css :themes-row)}
       [:h2 "Themes"]
       [:select {:label "Select theme color"
                 :name :theme
@@ -86,40 +87,41 @@
                 :on-change on-change}
        [:option {:label "Penpot Dark (default)" :value "default"}]
        [:option  {:label "Penpot Light" :value "light"}]]
-      [:div {:class (dom/classnames (css :wrapper) true)}
-       (let [css (styles)]
-         (for [color colors]
-           [:div {:key color
-                  :class (dom/classnames (get css color) true
-                                         (get css :rect) true)}
-            (d/name color)]))]]
-     [:div {:class (dom/classnames (css :components-row) true)}
-      [:h2 {:class (dom/classnames (css :title) true)} "Components"]
-      [:div {:class (dom/classnames (css :components-wrapper) true)}
-       [:div {:class (dom/classnames (css :component-group) true)}
+      [:div {:class (stl/css :wrapper)}
+       (for [color colors]
+         [:div {:class (stl/css :color-wrapper)}
+          [:span (d/name color)]
+          [:div {:key color
+                 :style {:background color}
+                 :class (stl/css :rect)}]])]]
+
+     [:div {:class (stl/css :components-row)}
+      [:h2 {:class (stl/css :title)} "Components"]
+      [:div {:class (stl/css :components-wrapper)}
+       [:div {:class (stl/css :components-group)}
         [:h3 "Titles"]
         [:& component-wrapper
          {:title "Title"}
-         [:& title-bar {:collapsable? false
-                        :title        "Title"}]]
+         [:& title-bar {:collapsable false
+                        :title       "Title"}]]
         [:& component-wrapper
          {:title  "Title and action button"}
-         [:& title-bar {:collapsable? false
+         [:& title-bar {:collapsable  false
                         :title        "Title"
                         :on-btn-click on-btn-click
-                        :btn-children i/add-refactor}]]
+                        :btn-children i/add}]]
         [:& component-wrapper
          {:title "Collapsed title and action button"}
-         [:& title-bar {:collapsable? true
-                        :collapsed?   collapsed?
+         [:& title-bar {:collapsable  true
+                        :collapsed    collapsed?
                         :on-collapsed  toggle-collapsed
                         :title        "Title"
                         :on-btn-click on-btn-click
-                        :btn-children i/add-refactor}]]
+                        :btn-children i/add}]]
         [:& component-wrapper
          {:title "Collapsed title and children"}
-         [:& title-bar {:collapsable? true
-                        :collapsed?   collapsed?
+         [:& title-bar {:collapsable  true
+                        :collapsed    collapsed?
                         :on-collapsed  toggle-collapsed
                         :title        "Title"}
           [:& tab-container {:on-change-tab set-tab
@@ -129,7 +131,7 @@
            [:& tab-element {:id :second
                             :title "B tab"}]]]]]
 
-       [:div {:class (dom/classnames (css :component-group) true)}
+       [:div {:class (stl/css :components-group)}
         [:h3 "Tabs component"]
         [:& component-wrapper
          {:title "2 tab component"}
@@ -154,7 +156,7 @@
                            :title "Third tab"}
            [:div "This is third tab content"]]]]]
 
-       [:div {:class (dom/classnames (css :component-group) true)}
+       [:div {:class (stl/css :components-group)}
         [:h3 "Search bar"]
         [:& component-wrapper
          {:title "Search bar only"}
@@ -166,21 +168,21 @@
          [:& search-bar {:on-change update-search
                          :value input-value
                          :placeholder "Test value"}
-          [:button {:class (dom/classnames (css :test-button) true)
+          [:button {:class (stl/css :button-secondary)
                     :on-click on-btn-click}
            "X"]]]]
 
-       [:div {:class (dom/classnames (css :component-group) true)}
+       [:div {:class (stl/css :components-group)}
         [:h3 "Radio buttons"]
         [:& component-wrapper
          {:title "Two radio buttons (toggle)"}
          [:& radio-buttons {:selected radio-selected
                             :on-change set-radio-selected
                             :name "listing-style"}
-          [:& radio-button {:icon (mf/html i/view-as-list-refactor)
+          [:& radio-button {:icon i/view-as-list
                             :value "first"
                             :id :list}]
-          [:& radio-button {:icon (mf/html i/flex-grid-refactor)
+          [:& radio-button {:icon i/flex-grid
                             :value "second"
                             :id :grid}]]]
         [:& component-wrapper
@@ -188,14 +190,14 @@
          [:& radio-buttons {:selected radio-selected
                             :on-change set-radio-selected
                             :name "listing-style"}
-          [:& radio-button {:icon (mf/html i/view-as-list-refactor)
+          [:& radio-button {:icon i/view-as-list
                             :value "first"
                             :id :first}]
-          [:& radio-button {:icon (mf/html i/flex-grid-refactor)
+          [:& radio-button {:icon i/flex-grid
                             :value "second"
                             :id :second}]
 
-          [:& radio-button {:icon (mf/html i/add-refactor)
+          [:& radio-button {:icon i/add
                             :value "third"
                             :id :third}]]]
 
@@ -204,17 +206,65 @@
          [:& radio-buttons {:selected radio-selected
                             :on-change set-radio-selected
                             :name "listing-style"}
-          [:& radio-button {:icon (mf/html i/view-as-list-refactor)
+          [:& radio-button {:icon i/view-as-list
                             :value "first"
                             :id :first}]
-          [:& radio-button {:icon (mf/html i/flex-grid-refactor)
+          [:& radio-button {:icon i/flex-grid
                             :value "second"
                             :id :second}]
 
-          [:& radio-button {:icon (mf/html i/add-refactor)
+          [:& radio-button {:icon i/add
                             :value "third"
                             :id :third}]
 
-          [:& radio-button {:icon (mf/html i/board-refactor)
+          [:& radio-button {:icon i/board
                             :value "forth"
-                            :id :forth}]]]]]]]))
+                            :id :forth}]]]]
+       [:div {:class (stl/css :components-group)}
+        [:h3 "Buttons"]
+        [:& component-wrapper
+         {:title "Button primary"}
+         [:button  {:class (stl/css :button-primary)}
+          "Primary"]]
+        [:& component-wrapper
+         {:title "Button primary with icon"}
+         [:button  {:class (stl/css :button-primary)}
+          i/add]]
+
+        [:& component-wrapper
+         {:title "Button secondary"}
+         [:button  {:class (stl/css :button-secondary)}
+          "secondary"]]
+        [:& component-wrapper
+         {:title "Button secondary with icon"}
+         [:button  {:class (stl/css :button-secondary)}
+          i/add]]
+
+        [:& component-wrapper
+         {:title "Button tertiary"}
+         [:button  {:class (stl/css :button-tertiary)}
+          "tertiary"]]
+        [:& component-wrapper
+         {:title "Button tertiary with icon"}
+         [:button  {:class (stl/css :button-tertiary)}
+          i/add]]]
+       [:div {:class (stl/css :components-group)}
+        [:h3 "Inputs"]
+        [:& component-wrapper
+         {:title "Only input"}
+         [:div {:class (stl/css :input-wrapper)}
+          [:input  {:class (stl/css :basic-input)
+                    :placeholder "----"}]]]
+        [:& component-wrapper
+         {:title "Input with label"}
+         [:div {:class (stl/css :input-wrapper)}
+          [:span {:class (stl/css :input-label)} "label"]
+          [:input  {:class (stl/css :basic-input)
+                    :placeholder "----"}]]]
+        [:& component-wrapper
+         {:title "Input with icon"}
+         [:div {:class (stl/css :input-wrapper)}
+          [:span {:class (stl/css :input-label)}
+           i/add]
+          [:input  {:class (stl/css :basic-input)
+                    :placeholder "----"}]]]]]]]))

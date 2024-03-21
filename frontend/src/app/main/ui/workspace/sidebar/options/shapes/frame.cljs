@@ -12,7 +12,7 @@
    [app.main.ui.hooks :as hooks]
    [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-menu]]
    [app.main.ui.workspace.sidebar.options.menus.color-selection :refer [color-selection-menu]]
-   [app.main.ui.workspace.sidebar.options.menus.component :refer [component-attrs component-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.component :refer [component-menu]]
    [app.main.ui.workspace.sidebar.options.menus.constraints :refer [constraint-attrs constraints-menu]]
    [app.main.ui.workspace.sidebar.options.menus.fill :refer [fill-attrs-shape fill-menu]]
    [app.main.ui.workspace.sidebar.options.menus.frame-grid :refer [frame-grid]]
@@ -36,7 +36,6 @@
         constraint-values (select-keys shape constraint-attrs)
         layout-container-values (select-keys shape layout-container-flex-attrs)
         layout-item-values (select-keys shape layout-item-attrs)
-        [comp-ids comp-values] [[(:id shape)] (select-keys shape component-attrs)]
 
         ids (hooks/use-equal-memo ids)
 
@@ -50,23 +49,29 @@
         is-grid-parent? (mf/deref is-grid-parent-ref)
 
         is-layout-container? (ctl/any-layout? shape)
-        is-layout-child-absolute? (ctl/layout-absolute? shape)
+        is-flex-layout? (ctl/flex-layout? shape)
+        is-grid-layout? (ctl/grid-layout? shape)
+        is-layout-child-absolute? (ctl/item-absolute? shape)
 
         ids (hooks/use-equal-memo ids)
         parents-by-ids-ref (mf/use-memo (mf/deps ids) #(refs/parents-by-ids ids))
         parents (mf/deref parents-by-ids-ref)]
     [:*
+     [:& layer-menu {:ids ids
+                     :type type
+                     :values layer-values}]
      [:& measures-menu {:ids [(:id shape)]
                         :values measure-values
                         :type type
                         :shape shape}]
-     [:& component-menu {:ids comp-ids
-                         :values comp-values
-                         :shape shape}]
-     (when (or (not is-layout-child?) is-layout-child-absolute?)
-       [:& constraints-menu {:ids ids
-                             :values constraint-values}])
-     [:& layout-container-menu {:type type :ids [(:id shape)] :values layout-container-values :multiple false}]
+
+     [:& component-menu {:shapes [shape]}]
+
+     [:& layout-container-menu
+      {:type type
+       :ids [(:id shape)]
+       :values layout-container-values
+       :multiple false}]
 
      (when (and (= (count ids) 1) is-layout-child? is-grid-parent?)
        [:& grid-cell/options
@@ -80,24 +85,26 @@
          :values layout-item-values
          :is-flex-parent? is-flex-parent?
          :is-grid-parent? is-grid-parent?
+         :is-flex-layout? is-flex-layout?
+         :is-grid-layout? is-grid-layout?
          :is-layout-child? is-layout-child?
          :is-layout-container? is-layout-container?
          :shape shape}])
 
-     [:& layer-menu {:ids ids
-                     :type type
-                     :values layer-values}]
+     (when (or (not ^boolean is-layout-child?) ^boolean is-layout-child-absolute?)
+       [:& constraints-menu {:ids ids
+                             :values constraint-values}])
+
      [:& fill-menu {:ids ids
                     :type type
                     :values (select-keys shape fill-attrs-shape)}]
      [:& stroke-menu {:ids ids
                       :type type
                       :values stroke-values}]
-          (when (> (count objects) 2)
-            [:& color-selection-menu {:type type
-                                      :shapes (vals objects)
-                                      :file-id file-id
-                                      :shared-libs shared-libs}])
+     [:& color-selection-menu {:type type
+                               :shapes (vals objects)
+                               :file-id file-id
+                               :shared-libs shared-libs}]
      [:& shadow-menu {:ids ids
                       :values (select-keys shape [:shadow])}]
      [:& blur-menu {:ids ids

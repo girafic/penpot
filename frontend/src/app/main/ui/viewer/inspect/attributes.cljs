@@ -5,6 +5,7 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.viewer.inspect.attributes
+  (:require-macros [app.main.style :as stl])
   (:require
    [app.common.types.components-list :as ctkl]
    [app.main.ui.hooks :as hooks]
@@ -40,7 +41,7 @@
         content (when (= (count shapes) 1)
                   (ctkl/get-component-annotation (first shapes) libraries))]
 
-    [:div.element-options
+    [:div {:class (stl/css :element-options)}
      (for [[idx option] (map-indexed vector options)]
        [:> (case option
              :geometry         geometry-panel

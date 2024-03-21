@@ -6,7 +6,9 @@
 
 (ns app.main.ui.shapes.grid-layout-viewer
   (:require
+   [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
@@ -36,11 +38,11 @@
              :y area-y
              :width area-width
              :height area-height
-             :style {:fill "var(--color-distance)"
+             :style {:fill "var(--color-accent-quaternary)"
                      :fill-opacity 0.3}}]
      [:text {:x area-text-x
              :y area-text-y
-             :style {:fill "var(--color-distance)"
+             :style {:fill "var(--color-accent-quaternary)"
                      :font-family "worksans"
                      :font-weight 600
                      :font-size 14
@@ -69,7 +71,7 @@
        :y (:y cell-origin)
        :width cell-width
        :height cell-height
-       :style {:stroke "var(--color-distance)"
+       :style {:stroke "var(--color-accent-quaternary)"
                :stroke-width 1.5
                :fill "none"}}]
 
@@ -82,14 +84,14 @@
   {::mf/wrap-props false}
   [props]
   (let [shape (unchecked-get props "shape")
-        childs (unchecked-get props "childs")
-
+        objects (unchecked-get props "objects")
+        bounds (d/lazy-map (keys objects) #(gsh/shape->points (get objects %)))
         children
-        (->> childs
+        (->> (cfh/get-immediate-children objects (:id shape))
              (remove :hidden)
              (map #(vector (gpo/parent-coords-bounds (:points %) (:points shape)) %)))
 
-        layout-data (gsg/calc-layout-data shape children (:points shape))]
+        layout-data (gsg/calc-layout-data shape (:points shape) children bounds objects)]
 
     [:g.cells
      (for [cell (ctl/get-cells shape {:sort? true})]

@@ -12,6 +12,8 @@
    [app.common.geom.point :as gpt]
    [app.common.math :as mth]
    [app.common.record :as rc]
+   [app.common.schema :as sm]
+   [app.common.schema.generators :as sg]
    [app.common.transit :as t]))
 
 (rc/defrecord Rect [x y width height x1 y1 x2 y2])
@@ -61,10 +63,36 @@
      (make-rect x1 y1 (- x2 x1) (- y2 y1))))
 
   ([x y width height]
-   (when (d/num? x y width height)
+   (if (d/num? x y width height)
      (let [w (mth/max width 0.01)
            h (mth/max height 0.01)]
-       (pos->Rect x y w h x y (+ x w) (+ y h))))))
+       (pos->Rect x y w h x y (+ x w) (+ y h)))
+     (make-rect))))
+
+(def ^:private schema:rect-attrs
+  [:map {:title "RectAttrs"}
+   [:x ::sm/safe-number]
+   [:y ::sm/safe-number]
+   [:width ::sm/safe-number]
+   [:height ::sm/safe-number]
+   [:x1 ::sm/safe-number]
+   [:y1 ::sm/safe-number]
+   [:x2 ::sm/safe-number]
+   [:y2 ::sm/safe-number]])
+
+(sm/define! ::rect
+  [:and
+   {:gen/gen (->> (sg/tuple (sg/small-double)
+                            (sg/small-double)
+                            (sg/small-double)
+                            (sg/small-double))
+                  (sg/fmap #(apply make-rect %)))}
+   [:fn rect?]
+   schema:rect-attrs])
+
+(def valid-rect?
+  (sm/lazy-validator
+   [:and [:fn rect?] schema:rect-attrs]))
 
 (def empty-rect
   (make-rect 0 0 0.01 0.01))
@@ -261,35 +289,35 @@
         (make-rect minx miny (- maxx minx) (- maxy miny))))))
 
 (defn center->rect
-  [point w h]
-  (when (some? point)
-    (let [x (dm/get-prop point :x)
-          y (dm/get-prop point :y)]
-      (when (d/num? x y w h)
-        (make-rect (- x (/ w 2))
-                   (- y (/ h 2))
-                   w
-                   h)))))
+  ([point size]
+   (center->rect point size size))
+  ([point w h]
+   (when (some? point)
+     (let [x (dm/get-prop point :x)
+           y (dm/get-prop point :y)]
+       (when (d/num? x y w h)
+         (make-rect (- x (/ w 2))
+                    (- y (/ h 2))
+                    w
+                    h))))))
 
 (defn s=
   [a b]
   (mth/almost-zero? (- a b)))
 
-;; FIXME: performance
 (defn overlaps-rects?
   "Check for two rects to overlap. Rects won't overlap only if
    one of them is fully to the left or the top"
   [rect-a rect-b]
+  (let [x1a (dm/get-prop rect-a :x)
+        y1a (dm/get-prop rect-a :y)
+        x2a (+ x1a (dm/get-prop rect-a :width))
+        y2a (+ y1a (dm/get-prop rect-a :height))
 
-  (let [x1a (:x rect-a)
-        y1a (:y rect-a)
-        x2a (+ (:x rect-a) (:width rect-a))
-        y2a (+ (:y rect-a) (:height rect-a))
-
-        x1b (:x rect-b)
-        y1b (:y rect-b)
-        x2b (+ (:x rect-b) (:width rect-b))
-        y2b (+ (:y rect-b) (:height rect-b))]
+        x1b (dm/get-prop rect-b :x)
+        y1b (dm/get-prop rect-b :y)
+        x2b (+ x1b (dm/get-prop rect-b :width))
+        y2b (+ y1b (dm/get-prop rect-b :height))]
 
     (and (or (> x2a x1b)  (s= x2a x1b))
          (or (>= x2b x1a) (s= x2b x1a))
@@ -353,3 +381,19 @@
                      (mth/max by1 y1)
                      (mth/min bx2 x2)
                      (mth/min by2 y2)))))
+(defn fix-aspect-ratio
+  [bounds aspect-ratio]
+  (if aspect-ratio
+    (let [width (dm/get-prop bounds :width)
+          height (dm/get-prop bounds :height)
+          target-height (* width aspect-ratio)
+          target-width (* height (/ 1 aspect-ratio))]
+      (cond-> bounds
+        (> target-height height)
+        (-> (assoc :height target-height)
+            (update :y - (/ (- target-height height) 2)))
+
+        (< target-height height)
+        (-> (assoc :width target-width)
+            (update :x - (/ (- target-width width) 2)))))
+    bounds))

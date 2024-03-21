@@ -9,7 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
-   [app.common.pages.helpers :as cph]
+   [app.common.files.helpers :as cph]
    [app.common.types.shape-tree :as ctt]
    [app.common.types.shape.layout :as ctl]
    [app.main.data.workspace.state-helpers :as wsh]
@@ -82,16 +82,29 @@
                (dm/get-in state [:dashboard-local :selected-project]))
              st/state))
 
+(defn- dashboard-extract-selected
+  [files selected]
+  (let [get-file #(get files %)
+        sim-file #(select-keys % [:id :name :project-id :is-shared])
+        xform    (comp (keep get-file)
+                       (map sim-file))]
+    (->> (into #{} xform selected)
+         (d/index-by :id))))
+
+(def dashboard-selected-search
+  (l/derived (fn [state]
+               ;; we need to this because :dashboard-search-result is a list
+               ;; of maps and we need a map of maps (using :id as key).
+               (let [files (d/index-by :id (:dashboard-search-result state))]
+                 (->> (dm/get-in state [:dashboard-local :selected-files])
+                      (dashboard-extract-selected files))))
+             st/state))
+
 (def dashboard-selected-files
   (l/derived (fn [state]
-               (let [get-file #(dm/get-in state [:dashboard-files %])
-                     sim-file #(select-keys % [:id :name :project-id :is-shared])
-                     selected (get-in state [:dashboard-local :selected-files])
-                     xform    (comp (map get-file)
-                                    (map sim-file))]
-                 (->> (into #{} xform selected)
-                      (d/index-by :id))))
-             st/state =))
+               (->> (dm/get-in state [:dashboard-local :selected-files])
+                    (dashboard-extract-selected (:dashboard-files state))))
+             st/state))
 
 ;; ---- Workspace refs
 
@@ -125,6 +138,9 @@
 (defn make-selected-ref
   [id]
   (l/derived #(contains? % id) selected-shapes))
+
+(def highlighted-shapes
+  (l/derived :highlighted workspace-local))
 
 (def export-in-progress?
   (l/derived :export-in-progress? export))
@@ -192,6 +208,9 @@
 
 (def snap-pixel?
   (l/derived #(contains? % :snap-pixel-grid) workspace-layout))
+
+(def rulers?
+  (l/derived #(contains? % :rulers) workspace-layout))
 
 (def workspace-file
   "A ref to a striped vision of file (without data)."
@@ -311,8 +330,8 @@
   [id]
   (l/derived
    (fn [objects]
-     (let [children-ids (get-in objects [id :shapes])]
-       (into [] (keep (d/getf objects)) children-ids)))
+     (->> (dm/get-in objects [id :shapes])
+          (into [] (keep (d/getf objects)))))
    workspace-page-objects =))
 
 (defn all-children-objects
@@ -416,10 +435,6 @@
              ids)))
    st/state =))
 
-;; Remove this when deprecating components-v2
-(def remove-graphics
-  (l/derived :remove-graphics st/state))
-
 ;; ---- Viewer refs
 
 (defn lookup-viewer-objects-by-id
@@ -472,15 +487,15 @@
                (dm/get-in state [:viewer-local :zoom-type]))
              st/state))
 
-(def thumbnail-data
-  (l/derived #(get % :workspace-thumbnails {}) st/state))
+(def workspace-thumbnails
+  (l/derived :workspace-thumbnails st/state))
 
-(defn thumbnail-frame-data
-  [page-id frame-id]
+(defn workspace-thumbnail-by-id
+  [object-id]
   (l/derived
-   (fn [thumbnails]
-     (get thumbnails (dm/str page-id frame-id)))
-   thumbnail-data))
+   (fn [state]
+     (dm/get-in state [:workspace-thumbnails object-id]))
+   st/state))
 
 (def workspace-text-modifier
   (l/derived :workspace-text-modifier st/state))
@@ -524,6 +539,7 @@
           (every? (partial ctl/grid-layout-immediate-child? objects))))
    workspace-page-objects =))
 
+;; FIXME: move to viewer.inspect.code
 (defn get-flex-child-viewer
   [ids page-id]
   (l/derived
@@ -535,7 +551,7 @@
              ids)))
    st/state =))
 
-
+;; FIXME: move to viewer.inspect.code
 (defn get-viewer-objects
   ([]
    (let [route      (deref route)
@@ -559,9 +575,6 @@
   [id]
   (l/derived #(get % id) workspace-grid-edition))
 
-(def workspace-annotations
-  (l/derived #(get % :workspace-annotations {}) st/state))
-
 (def current-file-id
   (l/derived :current-file-id st/state))
 
@@ -570,3 +583,12 @@
 
 (defn workspace-preview-blend-by-id [id]
   (l/derived (l/key id) workspace-preview-blend =))
+
+(def specialized-panel
+  (l/derived :specialized-panel st/state))
+
+(def updating-library
+  (l/derived :updating-library st/state))
+
+(def persistence-state
+  (l/derived (comp :status :workspace-persistence) st/state))

@@ -7,13 +7,14 @@
 (ns app.common.geom.shapes.path
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes.common :as gco]
    [app.common.math :as mth]
-   [app.common.path.commands :as upc]
-   [app.common.path.subpaths :as sp]))
+   [app.common.svg.path.command :as upc]
+   [app.common.svg.path.subpath :as sp]))
 
 (def ^:const curve-curve-precision 0.1)
 (def ^:const curve-range-precision 2)
@@ -340,30 +341,43 @@
      (grc/points->rect points))))
 
 (defn content->selrect [content]
-  (let [calc-extremities
-        (fn [command prev]
-          (case (:command command)
-            :move-to [(command->point command)]
+  (let [extremities
+        (loop [points #{}
+               from-p nil
+               move-p nil
+               content (seq content)]
+          (if content
+            (let [command (first content)
+                  to-p    (command->point command)
 
-            ;; If it's a line we add the beginning point and endpoint
-            :line-to [(command->point prev)
-                      (command->point command)]
+                  [from-p move-p command-pts]
+                  (case (:command command)
+                    :move-to    [to-p   to-p   (when to-p [to-p])]
+                    :close-path [move-p move-p (when move-p [move-p])]
+                    :line-to    [to-p   move-p (when (and from-p to-p) [from-p to-p])]
+                    :curve-to   [to-p   move-p
+                                 (let [c1 (command->point command :c1)
+                                       c2 (command->point command :c2)
+                                       curve [from-p to-p c1 c2]]
+                                   (when (and from-p to-p c1 c2)
+                                     (into [from-p to-p]
+                                           (->> (curve-extremities curve)
+                                                (map #(curve-values curve %))))))]
+                    [to-p move-p []])]
 
-            ;; We return the bezier extremities
-            :curve-to (into [(command->point prev)
-                             (command->point command)]
-                            (let [curve [(command->point prev)
-                                         (command->point command)
-                                         (command->point command :c1)
-                                         (command->point command :c2)]]
-                              (->> (curve-extremities curve)
-                                   (map #(curve-values curve %)))))
-            []))
+              (recur (apply conj points command-pts) from-p move-p (next content)))
+            points))
 
-        extremities (mapcat calc-extremities
-                            content
-                            (concat [nil] content))]
-    (grc/points->rect extremities)))
+        ;; We haven't found any extremes so we turn the commands to points
+        extremities
+        (if (empty? extremities)
+          (->> content (keep command->point))
+          extremities)]
+
+    ;; If no points are returned we return an empty rect.
+    (if (d/not-empty? extremities)
+      (grc/points->rect extremities)
+      (grc/make-rect))))
 
 (defn move-content [content move-vec]
   (let [dx (:x move-vec)
@@ -477,8 +491,7 @@
                      result)
             last-start (if (= :move-to command)
                          point
-                         last-start)
-            ]
+                         last-start)]
         (recur (first pending)
                (rest pending)
                result
@@ -523,7 +536,7 @@
   "Point on line"
   [position from-p to-p]
 
-  (let [e1 (gpt/to-vec from-p to-p )
+  (let [e1 (gpt/to-vec from-p to-p)
         e2 (gpt/to-vec from-p position)
 
         len2 (+ (mth/sq (:x e1)) (mth/sq (:y e1)))
@@ -730,7 +743,7 @@
                                       ray-t (get-line-tval ray-line curve-v)]
                                   (and (> ray-t 0)
                                        (> (mth/abs (- curve-tg-angle 180)) 0.01)
-                                       (> (mth/abs (- curve-tg-angle 0)) 0.01)) )))]
+                                       (> (mth/abs (- curve-tg-angle 0)) 0.01)))))]
     (->> curve-ts
          (mapv #(vector (curve-values curve %)
                         (curve-windup curve %))))))
@@ -963,7 +976,7 @@
           flip-y (gmt/scale (gpt/point 1 -1))
           :always (gmt/multiply (:transform-inverse shape (gmt/matrix))))
 
-        center (or (gco/shape->center shape)
+        center (or (some-> (dm/get-prop shape :selrect) grc/rect->center)
                    (content-center content))
 
         base-content (transform-content
@@ -982,6 +995,7 @@
         selrect (-> points
                     (gco/transform-points points-center transform-inverse)
                     (grc/points->rect))]
+
     [points selrect]))
 
 (defn open-path?

@@ -5,6 +5,7 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.nudge
+  (:require-macros [app.main.style :as stl])
   (:require
    [app.main.data.modal :as modal]
    [app.main.data.workspace :as dw]
@@ -40,21 +41,24 @@
       (->> (events/listen js/document EventType.KEYDOWN on-keydown)
            (partial events/unlistenByKey)))
 
-    [:div.nudge-modal-overlay
-     [:div.nudge-modal-container
-      [:div.nudge-modal-header
-       [:p.nudge-modal-title (tr "modals.nudge-title")]
-       [:button.modal-close-button {:on-click on-close} i/close]]
-      [:div.nudge-modal-body
-       [:div.input-wrapper
-        [:span
-         [:p.nudge-subtitle (tr "modals.small-nudge")]
-         [:> numeric-input* {:min 0.01
-                             :value (:small nudge)
-                             :on-change update-small}]]]
-       [:div.input-wrapper
-        [:span
-         [:p.nudge-subtitle (tr "modals.big-nudge")]
-         [:> numeric-input* {:min 0.01
-                             :value (:big nudge)
-                             :on-change update-big}]]]]]]))
+    [:div {:class (stl/css :modal-overlay)}
+     [:div {:class (stl/css :modal-container)}
+      [:div {:class (stl/css :modal-header)}
+       [:h2 {:class (stl/css :modal-title)} (tr "modals.nudge-title")]
+       [:button {:class (stl/css :modal-close-btn)
+                 :on-click on-close} i/close]]
+      [:div {:class (stl/css :modal-content)}
+       [:div {:class (stl/css :input-wrapper)}
+        [:label {:class (stl/css :modal-msg)
+                 :for "nudge-small"} (tr "modals.small-nudge")]
+        [:> numeric-input* {:min 0.01
+                            :id "nudge-small"
+                            :value (:small nudge)
+                            :on-change update-small}]]
+       [:div {:class (stl/css :input-wrapper)}
+        [:label {:class (stl/css :modal-msg)
+                 :for "nudge-big"} (tr "modals.big-nudge")]
+        [:> numeric-input* {:min 0.01
+                            :id "nudge-big"
+                            :value (:big nudge)
+                            :on-change update-big}]]]]]))

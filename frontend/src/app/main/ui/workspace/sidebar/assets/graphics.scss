@@ -9,8 +9,6 @@
 .graphics-group {
   .drop-space {
     height: $s-12;
-    border-radius: $br-8;
-    background-color: var(--assets-item-background-color);
   }
   .asset-grid {
     display: grid;
@@ -24,7 +22,7 @@
       border: $s-2 solid transparent;
       border-radius: $br-8;
       aspect-ratio: 1/1;
-      background-color: var(--assets-item-background-color);
+      background-color: var(--color-foreground-secondary);
       overflow: hidden;
       cursor: pointer;
       img {
@@ -38,7 +36,7 @@
         height: 10vh;
       }
       .cell-name {
-        @include titleTipography;
+        @include bodySmallTypography;
         @include textEllipsis;
         display: none;
         position: absolute;
@@ -89,8 +87,7 @@
     }
   }
   .asset-enum {
-    margin: 0 $s-12;
-
+    padding-bottom: $s-4;
     .enum-item {
       position: relative;
       display: flex;
@@ -113,7 +110,7 @@
       }
 
       .item-name {
-        @include titleTipography;
+        @include bodySmallTypography;
         @include textEllipsis;
         padding-left: $s-8;
         color: var(--assets-item-name-foreground-color);
@@ -174,6 +171,7 @@
   border-radius: $br-8;
   svg {
     @extend .button-icon;
+    stroke: var(--icon-foreground);
   }
 }
 
@@ -185,5 +183,6 @@
   border-radius: $br-8;
   svg {
     @extend .button-icon;
+    stroke: var(--icon-foreground);
   }
 }

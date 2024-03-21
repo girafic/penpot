@@ -12,8 +12,10 @@
    [app.main.ui.css-cursors :as cur]
    [app.main.ui.formats :refer [format-number]]))
 
-(defn format-viewbox [vbox]
-  (dm/str (format-number(:x vbox 0)) " "
+(defn format-viewbox
+  "Format a viewbox to a string"
+  [vbox]
+  (dm/str (format-number (:x vbox 0)) " "
           (format-number (:y vbox 0)) " "
           (format-number (:width vbox 0)) " "
           (format-number (:height vbox 0))))
