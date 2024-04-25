@@ -86,13 +86,11 @@
 
 (defn resend-email-verification-email!
   [email]
-  (let [sprops  (:app.setup/props main/system)
-        pool    (:app.db/pool main/system)
-        email   (profile/clean-email email)
-        profile (profile/get-profile-by-email pool email)]
-
-    (auth/send-email-verification! pool sprops profile)
-    :email-sent))
+  (db/tx-run! main/system
+              (fn [{:keys [::db/conn] :as cfg}]
+                (let [email   (profile/clean-email email)
+                      profile (profile/get-profile-by-email conn email)]
+                  (#'auth/send-email-verification! cfg profile)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PROFILES MANAGEMENT
@@ -429,7 +427,9 @@
           (try
             (l/trc :hint "process:file:start" :file-id (str file-id) :index idx)
             (let [system (assoc main/system ::db/rollback rollback?)]
-              (db/tx-run! system h/process-file! file-id update-fn opts))
+              (db/tx-run! system (fn [system]
+                                   (binding [h/*system* system]
+                                     (h/process-file! system file-id update-fn opts)))))
 
             (catch Throwable cause
               (l/wrn :hint "unexpected error on processing file (skiping)"

@@ -91,7 +91,7 @@
 
         color     (cond
                     (some? gradient)
-                    (str/ffmt "url(#stroke-color-gradient-%s-%s)" render-id index)
+                    (str/ffmt "url(#stroke-color-gradient-%-%)" render-id index)
 
                     (some? image)
                     (str/ffmt "url(#stroke-fill-%-%)" render-id index)
@@ -209,7 +209,8 @@
 
         props         #js {:id (dm/str "stroke-color-gradient-" render-id "-" index)
                            :gradient gradient
-                           :shape shape}
+                           :shape shape
+                           :force-transform (cfh/path-shape? shape)}
         stroke-image  (:stroke-image stroke)
         uri           (when stroke-image (cf/resolve-file-media stroke-image))
 
@@ -248,7 +249,8 @@
                   :width (/ w (dm/get-prop selrect :width))
                   :height (/ h (dm/get-prop selrect :height))
                   :viewBox "0 0 1 1"
-                  :preserveAspectRatio "xMidYMid slice"}
+                  :preserveAspectRatio "xMidYMid slice"
+                  :patternTransform (when (cfh/path-shape? shape) (gsh/transform-str shape))}
         [:> :image image-props]])
 
      (cond
@@ -476,7 +478,8 @@
         svg-attrs     (attrs/get-svg-props shape render-id)
 
         style         (-> (obj/get props "style")
-                          (obj/clone))
+                          (obj/clone)
+                          (obj/merge! (obj/get svg-attrs "style")))
 
         props        (mf/spread-props svg-attrs
                                       {:id stroke-id

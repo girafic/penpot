@@ -16,6 +16,7 @@
    [app.common.files.migrations :as fmg]
    [app.common.files.shapes-helpers :as cfsh]
    [app.common.files.validate :as cfv]
+   [app.common.fressian :as fres]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
@@ -32,6 +33,7 @@
    [app.common.types.container :as ctn]
    [app.common.types.file :as ctf]
    [app.common.types.grid :as ctg]
+   [app.common.types.modifiers :as ctm]
    [app.common.types.page :as ctp]
    [app.common.types.pages-list :as ctpl]
    [app.common.types.shape :as cts]
@@ -47,18 +49,17 @@
    [app.rpc.commands.files-snapshot :as fsnap]
    [app.rpc.commands.media :as cmd.media]
    [app.storage :as sto]
+   [app.storage.impl :as impl]
    [app.storage.tmp :as tmp]
    [app.svgo :as svgo]
    [app.util.blob :as blob]
-   [app.util.cache :as cache]
-   [app.util.events :as events]
    [app.util.pointer-map :as pmap]
    [app.util.time :as dt]
    [buddy.core.codecs :as bc]
    [clojure.set :refer [rename-keys]]
    [cuerdas.core :as str]
+   [datoteka.fs :as fs]
    [datoteka.io :as io]
-   [promesa.exec :as px]
    [promesa.util :as pu]))
 
 (def ^:dynamic *stats*
@@ -67,7 +68,7 @@
 
 (def ^:dynamic *cache*
   "A dynamic var for setting up a cache instance."
-  nil)
+  false)
 
 (def ^:dynamic *skip-on-graphic-error*
   "A dynamic var for setting up the default error behavior for graphics processing."
@@ -98,6 +99,8 @@
 
     (some? data)
     (assoc :data (blob/decode data))))
+
+(set! *warn-on-reflection* true)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; FILE PREPARATION BEFORE MIGRATION
@@ -215,10 +218,15 @@
                 (update :pages-index update-vals fix-container)
                 (d/update-when :components update-vals fix-container))))
 
-        fix-page-invalid-options
+        fix-invalid-page
         (fn [file-data]
           (letfn [(update-page [page]
-                    (update page :options fix-options))
+                    (-> page
+                        (update :name (fn [name]
+                                        (if (nil? name)
+                                          "Page"
+                                          name)))
+                        (update :options fix-options)))
 
                   (fix-background [options]
                     (if (and (contains? options :background)
@@ -433,7 +441,8 @@
           (letfn [(fix-component [components id component]
                     (let [root-shape (ctst/get-shape component (:id component))]
                       (if (or (empty? (:objects component))
-                              (nil? root-shape))
+                              (nil? root-shape)
+                              (nil? (:type root-shape)))
                         (dissoc components id)
                         components)))]
 
@@ -731,43 +740,61 @@
         (fn [file-data]
           ;; Remap shape-refs so that they point to the near main.
           ;; At the same time, if there are any dangling ref, detach the shape and its children.
-          (letfn [(fix-container [container]
-                    (reduce fix-shape container (ctn/shapes-seq container)))
+          (let [count  (volatile! 0)
 
-                  (fix-shape [container shape]
-                    (if (ctk/in-component-copy? shape)
-                      ;; First look for the direct shape.
-                      (let [root         (ctn/get-component-shape (:objects container) shape)
-                            libraries    (assoc-in libraries [(:id file-data) :data] file-data)
-                            library      (get libraries (:component-file root))
-                            component    (ctkl/get-component (:data library) (:component-id root) true)
-                            direct-shape (ctf/get-component-shape (:data library) component (:shape-ref shape))]
-                        (if (some? direct-shape)
-                          ;; If it exists, there is nothing else to do.
-                          container
-                          ;; If not found, find the near shape.
-                          (let [near-shape (d/seek #(= (:shape-ref %) (:shape-ref shape))
-                                                   (ctf/get-component-shapes (:data library) component))]
-                            (if (some? near-shape)
-                              ;; If found, update the ref to point to the near shape.
-                              (ctn/update-shape container (:id shape) #(assoc % :shape-ref (:id near-shape)))
-                              ;; If not found, it may be a fostered component. Try to locate a direct shape
-                              ;; in the head component.
-                              (let [head           (ctn/get-head-shape (:objects container) shape)
-                                    library-2      (get libraries (:component-file head))
-                                    component-2    (ctkl/get-component (:data library-2) (:component-id head) true)
-                                    direct-shape-2 (ctf/get-component-shape (:data library-2) component-2 (:shape-ref shape))]
-                                (if (some? direct-shape-2)
-                                  ;; If it exists, there is nothing else to do.
-                                  container
-                                  ;; If not found, detach shape and all children.
-                                  ;; container
-                                  (detach-shape container shape)))))))
-                      container))]
+                fix-shape
+                (fn [container shape]
+                  (if (ctk/in-component-copy? shape)
+                    ;; First look for the direct shape.
+                    (let [root         (ctn/get-component-shape (:objects container) shape)
+                          libraries    (assoc-in libraries [(:id file-data) :data] file-data)
+                          library      (get libraries (:component-file root))
+                          component    (ctkl/get-component (:data library) (:component-id root) true)
+                          direct-shape (ctf/get-component-shape (:data library) component (:shape-ref shape))]
+                      (if (some? direct-shape)
+                        ;; If it exists, there is nothing else to do.
+                        container
+                        ;; If not found, find the near shape.
+                        (let [near-shape (d/seek #(= (:shape-ref %) (:shape-ref shape))
+                                                 (ctf/get-component-shapes (:data library) component))]
+                          (if (some? near-shape)
+                            ;; If found, update the ref to point to the near shape.
+                            (do
+                              (vswap! count inc)
+                              (ctn/update-shape container (:id shape) #(assoc % :shape-ref (:id near-shape))))
+                            ;; If not found, it may be a fostered component. Try to locate a direct shape
+                            ;; in the head component.
+                            (let [head           (ctn/get-head-shape (:objects container) shape)
+                                  library-2      (get libraries (:component-file head))
+                                  component-2    (ctkl/get-component (:data library-2) (:component-id head) true)
+                                  direct-shape-2 (ctf/get-component-shape (:data library-2) component-2 (:shape-ref shape))]
+                              (if (some? direct-shape-2)
+                                ;; If it exists, there is nothing else to do.
+                                container
+                                ;; If not found, detach shape and all children.
+                                ;; container
+                                (do
+                                  (vswap! count inc)
+                                  (detach-shape container shape))))))))
+                    container))
 
-            (-> file-data
-                (update :pages-index update-vals fix-container)
-                (d/update-when :components update-vals fix-container))))
+                fix-container
+                (fn [container]
+                  (reduce fix-shape container (ctn/shapes-seq container)))]
+
+            [(-> file-data
+                 (update :pages-index update-vals fix-container)
+                 (d/update-when :components update-vals fix-container))
+             @count]))
+
+        remap-refs-recur
+        ;; remapping refs can generate cascade changes so we call it until no changes are done
+        (fn [file-data]
+          (loop [f-data file-data]
+            (let [[f-data count] (remap-refs f-data)]
+              (if (= count 0)
+                f-data
+                (recur f-data)))))
 
         fix-converted-copies
         (fn [file-data]
@@ -847,10 +874,11 @@
 
                   (fix-shape [shape]
                     (if (or (nil? (:parent-id shape)) (ctk/instance-head? shape))
-                      (let [frame? (= :frame (:type shape))]
-                        (assoc shape
-                               :type :frame            ; Old groups must be converted
-                               :fills (or (:fills shape) []) ; to frames and conform to spec
+                      (let [frame?     (= :frame (:type shape))
+                            not-group? (not= :group (:type shape))]
+                        (assoc shape                         ; Old groups must be converted
+                               :type :frame                  ; to frames and conform to spec
+                               :fills (if not-group? (d/nilv (:fills shape) []) [])  ; Groups never should have fill
                                :shapes (or (:shapes shape) [])
                                :hide-in-viewer (if frame? (boolean (:hide-in-viewer shape)) true)
                                :show-content   (if frame? (boolean (:show-content shape)) true)
@@ -954,6 +982,29 @@
             (-> file-data
                 (update :pages-index update-vals fix-container))))
 
+
+        fix-copies-names
+        (fn [file-data]
+                  ;; Rename component heads to add the component path to the name
+          (letfn [(fix-container [container]
+                    (d/update-when container :objects #(cfh/reduce-objects % fix-shape %)))
+
+                  (fix-shape [objects shape]
+                    (let [root         (ctn/get-component-shape objects shape)
+                          libraries    (assoc-in libraries [(:id file-data) :data] file-data)
+                          library      (get libraries (:component-file root))
+                          component    (ctkl/get-component (:data library) (:component-id root) true)
+                          path         (str/trim (:path component))]
+                      (if (and (ctk/instance-head? shape)
+                               (some? component)
+                               (= (:name component) (:name shape))
+                               (not (str/empty? path)))
+                        (update objects (:id shape) assoc :name (str path " / " (:name component)))
+                        objects)))]
+
+            (-> file-data
+                (update :pages-index update-vals fix-container))))
+
         fix-copies-of-detached
         (fn [file-data]
                   ;; Find any copy that is referencing a  shape inside a component that have
@@ -974,7 +1025,7 @@
 
     (-> file-data
         (fix-file-data)
-        (fix-page-invalid-options)
+        (fix-invalid-page)
         (fix-misc-shape-issues)
         (fix-recent-colors)
         (fix-missing-image-metadata)
@@ -993,8 +1044,8 @@
         (remove-nested-roots)
         (add-not-nested-roots)
         (fix-components-without-id)
-        (remap-refs)
         (fix-converted-copies)
+        (remap-refs-recur)
         (wrap-non-group-component-roots)
         (detach-non-group-instance-roots)
         (transform-to-frames)
@@ -1003,8 +1054,9 @@
         (fix-component-nil-objects)
         (fix-false-copies)
         (fix-component-root-without-component)
-        (fix-copies-of-detached); <- Do not add fixes after this and fix-orphan-copies call
-        )))
+        (fix-copies-names)
+        (fix-copies-of-detached)))); <- Do not add fixes after this and fix-orphan-copies call
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; COMPONENTS MIGRATION
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1053,8 +1105,8 @@
    {:type :frame
     :x (:x position)
     :y (:y position)
-    :width (+ width (* 2 grid-gap))
-    :height (+ height (* 2 grid-gap))
+    :width (+ width grid-gap)
+    :height (+ height grid-gap)
     :name name
     :frame-id uuid/zero
     :parent-id uuid/zero}))
@@ -1143,9 +1195,6 @@
             add-instance-grid
             (fn [fdata frame-id grid assets]
               (reduce (fn [result [component position]]
-                        (events/tap :progress {:op :migrate-component
-                                               :id (:id component)
-                                               :name (:name component)})
                         (add-main-instance result component frame-id (gpt/add position
                                                                               (gpt/point grid-gap grid-gap))))
                       fdata
@@ -1205,7 +1254,7 @@
                           :frame-id frame-id
                           :parent-id frame-id})
                         (assoc
-                         :proportion (/ width height)
+                         :proportion (float (/ width height))
                          :proportion-lock true))
 
         img-shape   (cts/setup-shape
@@ -1246,7 +1295,7 @@
             (try
               (let [item (if (str/starts-with? href "data:")
                            (let [[mtype data] (parse-datauri href)
-                                 size         (alength data)
+                                 size         (alength ^bytes data)
                                  path         (tmp/tempfile :prefix "penpot.media.download.")
                                  written      (io/write-to-file! data path :size size)]
 
@@ -1315,32 +1364,54 @@
                          {::sql/columns [:media-id]})]
     (:media-id fmobject)))
 
-(defn- get-sobject-content
+(defn get-sobject-content
   [id]
   (let [storage  (::sto/storage *system*)
         sobject  (sto/get-object storage id)]
+
+    (when-not sobject
+      (throw (RuntimeException. "sobject is nil")))
+    (when (> (:size sobject) 1135899)
+      (throw (RuntimeException. "svg too big")))
+
     (with-open [stream (sto/get-object-data storage sobject)]
       (slurp stream))))
 
+(defn get-optimized-svg
+  [sid]
+  (let [svg-text (get-sobject-content sid)
+        svg-text (svgo/optimize *system* svg-text)]
+    (csvg/parse svg-text)))
+
+(def base-path "/data/cache")
+
+(defn get-sobject-cache-path
+  [sid]
+  (let [path (impl/id->path sid)]
+    (fs/join base-path path)))
+
+(defn get-cached-svg
+  [sid]
+  (let [path (get-sobject-cache-path sid)]
+    (if (fs/exists? path)
+      (with-open [^java.lang.AutoCloseable stream (io/input-stream path)]
+        (let [reader (fres/reader stream)]
+          (fres/read! reader)))
+      (get-optimized-svg sid))))
+
 (defn- create-shapes-for-svg
   [{:keys [id] :as mobj} file-id objects frame-id position]
-  (let [get-svg (fn [sid]
-                  (let [svg-text (get-sobject-content sid)
-                        svg-text (svgo/optimize *system* svg-text)]
-                    (-> (csvg/parse svg-text)
-                        (assoc :name (:name mobj)))))
-
-        sid      (resolve-sobject-id id)
-        svg-data (if (cache/cache? *cache*)
-                   (cache/get *cache* sid (px/wrap-bindings get-svg))
-                   (get-svg sid))
-
-        svg-data (collect-and-persist-images svg-data file-id id)]
+  (let [sid      (resolve-sobject-id id)
+        svg-data (if *cache*
+                   (get-cached-svg sid)
+                   (get-optimized-svg sid))
+        svg-data (collect-and-persist-images svg-data file-id id)
+        svg-data (assoc svg-data :name (:name mobj))]
 
     (sbuilder/create-svg-shapes svg-data position objects frame-id frame-id #{} false)))
 
 (defn- process-media-object
-  [fdata page-id frame-id mobj position]
+  [fdata page-id frame-id mobj position shape-cb]
   (let [page    (ctpl/get-page fdata page-id)
         file-id (get fdata :id)
 
@@ -1390,16 +1461,17 @@
                                      cfsh/prepare-create-artboard-from-selection)
         changes (fcb/concat-changes changes changes2)]
 
+    (shape-cb shape)
     (:redo-changes changes)))
 
 (defn- create-media-grid
-  [fdata page-id frame-id grid media-group]
+  [fdata page-id frame-id grid media-group shape-cb]
   (letfn [(process [fdata mobj position]
             (let [position (gpt/add position (gpt/point grid-gap grid-gap))
                   tp       (dt/tpoint)
                   err      (volatile! false)]
               (try
-                (let [changes (process-media-object fdata page-id frame-id mobj position)]
+                (let [changes (process-media-object fdata page-id frame-id mobj position shape-cb)]
                   (cp/process-changes fdata changes false))
 
                 (catch Throwable cause
@@ -1442,11 +1514,45 @@
 
     (->> (d/zip media-group grid)
          (reduce (fn [fdata [mobj position]]
-                   (events/tap :progress {:op :migrate-graphic
-                                          :id (:id mobj)
-                                          :name (:name mobj)})
                    (or (process fdata mobj position) fdata))
                  (assoc-in fdata [:options :components-v2] true)))))
+
+(defn- fix-graphics-size
+  [fdata new-grid page-id frame-id]
+  (let [modify-shape (fn [page shape-id modifiers]
+                       (ctn/update-shape page shape-id #(gsh/transform-shape % modifiers)))
+
+        resize-frame (fn [page]
+                       (let [{:keys [width height]} (meta new-grid)
+
+                             frame  (ctst/get-shape page frame-id)
+                             width  (+ width grid-gap)
+                             height (+ height grid-gap)
+
+                             modif-frame (ctm/resize nil
+                                                     (gpt/point (/ width (:width frame))
+                                                                (/ height (:height frame)))
+                                                     (gpt/point (:x frame) (:y frame)))]
+
+                         (modify-shape page frame-id modif-frame)))
+
+        move-components (fn [page]
+                          (let [frame (get (:objects page) frame-id)
+                                shapes (map (d/getf (:objects page)) (:shapes frame))]
+                            (->> (d/zip shapes new-grid)
+                                 (reduce (fn [page [shape position]]
+                                           (let [position (gpt/add position (gpt/point grid-gap grid-gap))
+                                                 modif-shape (ctm/move nil
+                                                                       (gpt/point (- (:x position) (:x (:selrect shape)))
+                                                                                  (- (:y position) (:y (:selrect shape)))))
+                                                 children-ids (cfh/get-children-ids-with-self (:objects page) (:id shape))]
+                                             (reduce #(modify-shape %1 %2 modif-shape)
+                                                     page
+                                                     children-ids)))
+                                         page))))]
+    (-> fdata
+        (ctpl/update-page page-id resize-frame)
+        (ctpl/update-page page-id move-components))))
 
 (defn- migrate-graphics
   [fdata]
@@ -1485,11 +1591,31 @@
                                                                           (:id frame)
                                                                           (:id frame)
                                                                           nil
-                                                                          true))]
-            (recur (next groups)
-                   (create-media-grid fdata page-id (:id frame) grid assets)
-                   (gpt/add position (gpt/point 0 (+ height (* 2 grid-gap) frame-gap))))))))))
+                                                                          true))
+                new-shapes (volatile! [])
+                add-shape #(vswap! new-shapes conj %)
 
+                fdata' (create-media-grid fdata page-id (:id frame) grid assets add-shape)
+
+                ;; When svgs had different width&height and viewport,
+                ;; sometimes the old graphics importer didn't
+                ;; calculate well the media object size. So, after
+                ;; migration we recalculate grid size from the actual
+                ;; size of the created shapes.
+                fdata' (if-let [grid (ctst/generate-shape-grid @new-shapes position grid-gap)]
+                         (let [{new-width :width new-height :height} (meta grid)]
+                           (if-not (and (mth/close? width new-width) (mth/close? height new-height))
+                             (do
+                               (l/inf :hint "fixing graphics sizes"
+                                      :file-id (str (:id fdata))
+                                      :group group-name)
+                               (fix-graphics-size fdata' grid page-id (:id frame)))
+                             fdata'))
+                         fdata')]
+
+            (recur (next groups)
+                   fdata'
+                   (gpt/add position (gpt/point 0 (+ height (* 2 grid-gap) frame-gap))))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PRIVATE HELPERS
@@ -1555,6 +1681,7 @@
     (db/update! conn :file
                 {:data (blob/encode (:data file))
                  :features (db/create-array conn "text" (:features file))
+                 :version (:version file)
                  :revn (:revn file)}
                 {:id (:id file)})))
 
@@ -1604,7 +1731,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn migrate-file!
-  [system file-id & {:keys [validate? skip-on-graphic-error? label]}]
+  [system file-id & {:keys [validate? skip-on-graphic-error? label rown]}]
   (let [tpoint (dt/tpoint)
         err    (volatile! false)]
 
@@ -1625,11 +1752,6 @@
                         (let [file (get-file system file-id)
                               file (process-file! system file :validate? validate?)]
 
-                          (events/tap :progress
-                                      {:op :migrate-file
-                                       :name (:name file)
-                                       :id (:id file)})
-
                           (persist-file! system file)))))
 
         (catch Throwable cause
@@ -1644,33 +1766,24 @@
                 components (get @*file-stats* :processed-components 0)
                 graphics   (get @*file-stats* :processed-graphics 0)]
 
-            (if (cache/cache? *cache*)
-              (let [cache-stats (cache/stats *cache*)]
-                (l/dbg :hint "migrate:file:end"
-                       :file-id (str file-id)
-                       :graphics graphics
-                       :components components
-                       :validate validate?
-                       :crt (mth/to-fixed (:hit-rate cache-stats) 2)
-                       :crq (str (:req-count cache-stats))
-                       :error @err
-                       :elapsed (dt/format-duration elapsed)))
-              (l/dbg :hint "migrate:file:end"
-                     :file-id (str file-id)
-                     :graphics graphics
-                     :components components
-                     :validate validate?
-                     :error @err
-                     :elapsed (dt/format-duration elapsed)))
+            (l/dbg :hint "migrate:file:end"
+                   :file-id (str file-id)
+                   :graphics graphics
+                   :components components
+                   :validate validate?
+                   :rown rown
+                   :error @err
+                   :elapsed (dt/format-duration elapsed))
 
             (some-> *stats* (swap! update :processed-files (fnil inc 0)))
             (some-> *team-stats* (swap! update :processed-files (fnil inc 0)))))))))
 
 (defn migrate-team!
-  [system team-id & {:keys [validate? skip-on-graphic-error? label]}]
+  [system team-id & {:keys [validate? rown skip-on-graphic-error? label]}]
 
   (l/dbg :hint "migrate:team:start"
-         :team-id (dm/str team-id))
+         :team-id (dm/str team-id)
+         :rown rown)
 
   (let [tpoint (dt/tpoint)
         err    (volatile! false)
@@ -1691,11 +1804,6 @@
                                  (conj "components/v2")
                                  (conj "layout/grid")
                                  (conj "styles/v2"))]
-
-                (events/tap :progress
-                            {:op :migrate-team
-                             :name (:name team)
-                             :id id})
 
                 (run! (partial migrate-file system)
                       (get-and-lock-team-files conn id))
@@ -1723,21 +1831,10 @@
             (when-not @err
               (some-> *stats* (swap! update :processed-teams (fnil inc 0))))
 
-            (if (cache/cache? *cache*)
-              (let [cache-stats (cache/stats *cache*)]
-                (l/dbg :hint "migrate:team:end"
-                       :team-id (dm/str team-id)
-                       :files files
-                       :components components
-                       :graphics graphics
-                       :crt (mth/to-fixed (:hit-rate cache-stats) 2)
-                       :crq (str (:req-count cache-stats))
-                       :error @err
-                       :elapsed (dt/format-duration elapsed)))
-
-              (l/dbg :hint "migrate:team:end"
-                     :team-id (dm/str team-id)
-                     :files files
-                     :components components
-                     :graphics graphics
-                     :elapsed (dt/format-duration elapsed)))))))))
+            (l/dbg :hint "migrate:team:end"
+                   :team-id (dm/str team-id)
+                   :rown rown
+                   :files files
+                   :components components
+                   :graphics graphics
+                   :elapsed (dt/format-duration elapsed))))))))

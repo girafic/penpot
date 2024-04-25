@@ -353,13 +353,14 @@
    (ptk/reify ::create-artboard-from-selection
      ptk/WatchEvent
      (watch [it state _]
-       (let [page-id  (:current-page-id state)
-             objects  (wsh/lookup-page-objects state page-id)
-             selected (wsh/lookup-selected state)
-             selected (cfh/clean-loops objects selected)
+       (let [page-id      (:current-page-id state)
+             objects      (wsh/lookup-page-objects state page-id)
+             selected     (->> (wsh/lookup-selected state)
+                               (cfh/clean-loops objects)
+                               (remove #(ctn/has-any-copy-parent? objects (get objects %))))
 
-             changes  (-> (pcb/empty-changes it page-id)
-                          (pcb/with-objects objects))
+             changes      (-> (pcb/empty-changes it page-id)
+                              (pcb/with-objects objects))
 
              [frame-shape changes]
              (cfsh/prepare-create-artboard-from-selection changes
@@ -386,7 +387,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn update-shape-flags
-  [ids {:keys [blocked hidden transforming undo-group] :as flags}]
+  [ids {:keys [blocked hidden undo-group] :as flags}]
   (dm/assert!
    "expected valid coll of uuids"
    (every? uuid? ids))
@@ -402,15 +403,14 @@
             (fn [obj]
               (cond-> obj
                 (boolean? blocked) (assoc :blocked blocked)
-                (boolean? hidden) (assoc :hidden hidden)
-                (boolean? transforming) (assoc :transforming transforming)))
+                (boolean? hidden) (assoc :hidden hidden)))
             objects (wsh/lookup-page-objects state)
             ;; We have change only the hidden behaviour, to hide only the
             ;; selected shape, block behaviour remains the same.
             ids     (if (boolean? blocked)
                       (into ids (->> ids (mapcat #(cfh/get-children-ids objects %))))
                       ids)]
-        (rx/of (dch/update-shapes ids update-fn {:attrs #{:blocked :hidden :transforming} :undo-group undo-group}))))))
+        (rx/of (dch/update-shapes ids update-fn {:attrs #{:blocked :hidden} :undo-group undo-group}))))))
 
 (defn toggle-visibility-selected
   []

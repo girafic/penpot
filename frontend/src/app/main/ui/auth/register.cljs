@@ -18,34 +18,28 @@
    [app.main.ui.components.forms :as fm]
    [app.main.ui.components.link :as lk]
    [app.main.ui.icons :as i]
-   [app.main.ui.notifications.context-notification :refer [context-notification]]
    [app.util.i18n :refer [tr tr-html]]
    [app.util.router :as rt]
    [beicon.v2.core :as rx]
    [cljs.spec.alpha :as s]
    [rumext.v2 :as mf]))
 
-(mf/defc demo-warning
-  [_]
-  [:div {:class (stl/css :banner)}
-   [:& context-notification
-    {:type :warning
-     :content (tr "auth.demo-warning")}]])
-
 ;; --- PAGE: Register
 
-(defn- validate
+(defn- validate-password-length
   [errors data]
   (let [password (:password data)]
     (cond-> errors
       (> 8 (count password))
-      (assoc :password {:message "errors.password-too-short"})
-      :always
-      (d/update-when :email
-                     (fn [{:keys [code] :as error}]
-                       (cond-> error
-                         (= code ::us/email)
-                         (assoc :message (tr "errors.email-invalid"))))))))
+      (assoc :password {:message "errors.password-too-short"}))))
+
+(defn- validate-email
+  [errors _]
+  (d/update-when errors :email
+                 (fn [{:keys [code] :as error}]
+                   (cond-> error
+                     (= code ::us/email)
+                     (assoc :message (tr "errors.email-invalid"))))))
 
 (s/def ::fullname ::us/not-empty-string)
 (s/def ::password ::us/not-empty-string)
@@ -57,23 +51,12 @@
   (s/keys :req-un [::password ::email]
           :opt-un [::invitation-token]))
 
-(defn- handle-prepare-register-error
+(defn- on-prepare-register-error
   [form cause]
   (let [{:keys [type code]} (ex-data cause)]
     (condp = [type code]
       [:restriction :registration-disabled]
       (st/emit! (msg/error (tr "errors.registration-disabled")))
-
-      [:restriction :profile-blocked]
-      (st/emit! (msg/error (tr "errors.profile-blocked")))
-
-      [:validation :email-has-permanent-bounces]
-      (let [email (get @form [:data :email])]
-        (st/emit! (msg/error (tr "errors.email-has-permanent-bounces" email))))
-
-      [:validation :email-already-exists]
-      (swap! form assoc-in [:errors :email]
-             {:message "errors.email-already-exists"})
 
       [:validation :email-as-password]
       (swap! form assoc-in [:errors :password]
@@ -81,36 +64,38 @@
 
       (st/emit! (msg/error (tr "errors.generic"))))))
 
-(defn- handle-prepare-register-success
+(defn- on-prepare-register-success
   [params]
   (st/emit! (rt/nav :auth-register-validate {} params)))
 
 (mf/defc register-form
-  [{:keys [params on-success-callback] :as props}]
+  [{:keys [params on-success-callback]}]
   (let [initial (mf/use-memo (mf/deps params) (constantly params))
         form    (fm/use-form :spec ::register-form
-                             :validators [validate
+                             :validators [validate-password-length
+                                          validate-email
                                           (fm/validate-not-empty :password (tr "auth.password-not-empty"))]
                              :initial initial)
-        submitted? (mf/use-state false)
 
-        on-success (fn [p]
-                     (if (nil? on-success-callback)
-                       (handle-prepare-register-success p)
-                       (on-success-callback p)))
+        submitted? (mf/use-state false)
 
         on-submit
         (mf/use-fn
+         (mf/deps on-success-callback)
          (fn [form _event]
            (reset! submitted? true)
-           (let [cdata (:clean-data @form)]
+           (let [cdata      (:clean-data @form)
+                 on-success (fn [data]
+                              (if (nil? on-success-callback)
+                                (on-prepare-register-success data)
+                                (on-success-callback data)))
+                 on-error   (fn [data]
+                              (on-prepare-register-error form data))]
+
              (->> (rp/cmd! :prepare-register-profile cdata)
                   (rx/map #(merge % params))
                   (rx/finalize #(reset! submitted? false))
-                  (rx/subs!
-                   on-success
-                   (partial handle-prepare-register-error form))))))]
-
+                  (rx/subs! on-success on-error)))))]
 
     [:& fm/form {:on-submit on-submit :form form}
      [:div {:class (stl/css :fields-row)}
@@ -134,55 +119,50 @@
        :data-test "register-form-submit"
        :class (stl/css :register-btn)}]]))
 
-
 (mf/defc register-methods
-  [{:keys [params on-success-callback] :as props}]
+  {::mf/props :obj}
+  [{:keys [params on-success-callback]}]
   [:*
    (when login/show-alt-login-buttons?
-     [:*
-      [:hr {:class (stl/css :separator)}]
-      [:& login/login-buttons {:params params}]])
+     [:& login/login-buttons {:params params}])
    [:hr {:class (stl/css :separator)}]
    [:& register-form {:params params :on-success-callback on-success-callback}]])
 
 (mf/defc register-page
-  [{:keys [params] :as props}]
-  [:div {:class (stl/css :auth-form)}
+  {::mf/props :obj}
+  [{:keys [params]}]
+  [:div {:class (stl/css :auth-form-wrapper)}
    [:h1 {:class (stl/css :auth-title)
          :data-test "registration-title"} (tr "auth.register-title")]
-   [:div {:class (stl/css :auth-subtitle)} (tr "auth.register-subtitle")]
+   [:p {:class (stl/css :auth-tagline)}
+    (tr "auth.login-tagline")]
 
    (when (contains? cf/flags :demo-warning)
-     [:& demo-warning])
+     [:& login/demo-warning])
 
    [:& register-methods {:params params}]
 
    [:div {:class (stl/css :links)}
-    [:div {:class (stl/css :link-entry :account)}
-     [:span (tr "auth.already-have-account") " "]
-
+    [:div {:class (stl/css :account)}
+     [:span {:class (stl/css :account-text)} (tr "auth.already-have-account") " "]
      [:& lk/link {:action  #(st/emit! (rt/nav :auth-login {} params))
+                  :class (stl/css :account-link)
                   :data-test "login-here-link"}
       (tr "auth.login-here")]]
 
     (when (contains? cf/flags :demo-users)
-      [:div {:class (stl/css :link-entry :demo-users)}
-       [:span (tr "auth.create-demo-profile") " "]
-       [:& lk/link {:action  #(st/emit! (du/create-demo-profile))}
-        (tr "auth.create-demo-account")]])]])
+      [:*
+       [:hr {:class (stl/css :separator)}]
+       [:div {:class (stl/css :demo-account)}
+        [:& lk/link {:action login/create-demo-profile
+                     :class (stl/css :demo-account-link)}
+         (tr "auth.create-demo-account")]]])]])
 
 ;; --- PAGE: register validation
 
 (defn- handle-register-error
-  [form error]
-  (case (:code error)
-    :email-already-exists
-    (swap! form assoc-in [:errors :email]
-           {:message "errors.email-already-exists"})
-
-    (do
-      (println (:explain error))
-      (st/emit! (msg/error (tr "errors.generic"))))))
+  [_form _data]
+  (st/emit! (msg/error (tr "errors.generic"))))
 
 (defn- handle-register-success
   [data]
@@ -191,8 +171,6 @@
     (let [token (:invitation-token data)]
       (st/emit! (rt/nav :auth-verify-token {} {:token token})))
 
-    ;; The :is-active flag is true, when insecure-register is enabled
-    ;; or the user used external auth provider.
     (:is-active data)
     (st/emit! (du/login-from-register))
 
@@ -212,7 +190,7 @@
                      ::accept-newsletter-subscription])))
 
 (mf/defc register-validate-form
-  [{:keys [params on-success-callback] :as props}]
+  [{:keys [params on-success-callback]}]
   (let [form       (fm/use-form :spec ::register-validate-form
                                 :validators [(fm/validate-not-empty :fullname (tr "auth.name.not-all-space"))
                                              (fm/validate-length :fullname fm/max-length-allowed (tr "auth.name.too-long"))]
@@ -234,7 +212,8 @@
                   (rx/subs! on-success
                             (partial handle-register-error form))))))]
 
-    [:& fm/form {:on-submit on-submit :form form}
+    [:& fm/form {:on-submit on-submit :form form
+                 :class (stl/css :register-validate-form)}
      [:div {:class (stl/css :fields-row)}
       [:& fm/input {:name :fullname
                     :label (tr "auth.fullname")
@@ -263,8 +242,8 @@
 
 
 (mf/defc register-validate-page
-  [{:keys [params] :as props}]
-  [:div {:class (stl/css :auth-form)}
+  [{:keys [params]}]
+  [:div {:class (stl/css :auth-form-wrapper)}
    [:h1 {:class (stl/css :auth-title)
          :data-test "register-title"} (tr "auth.register-title")]
    [:div {:class (stl/css :auth-subtitle)} (tr "auth.register-subtitle")]
@@ -274,16 +253,15 @@
    [:& register-validate-form {:params params}]
 
    [:div {:class (stl/css :links)}
-    [:div {:class (stl/css :link-entry :go-back)}
-     [:& lk/link {:action  #(st/emit! (rt/nav :auth-register {} {}))}
+    [:div {:class (stl/css :go-back)}
+     [:& lk/link {:action  #(st/emit! (rt/nav :auth-register {} {}))
+                  :class (stl/css :go-back-link)}
       (tr "labels.go-back")]]]])
 
 (mf/defc register-success-page
-  [{:keys [params] :as props}]
-  [:div {:class (stl/css :auth-form :register-success)}
+  [{:keys [params]}]
+  [:div {:class (stl/css :auth-form-wrapper :register-success)}
    [:div {:class (stl/css :notification-icon)} i/icon-verify]
    [:div {:class (stl/css :notification-text)} (tr "auth.verification-email-sent")]
    [:div {:class (stl/css :notification-text-email)} (:email params "")]
    [:div {:class (stl/css :notification-text)} (tr "auth.check-your-email")]])
-
-

@@ -7,6 +7,7 @@
 @use "common/refactor/common-refactor.scss" as *;
 
 .auth-section {
+  position: relative;
   align-items: center;
   background: var(--panel-background-color);
   display: grid;
@@ -17,15 +18,20 @@
   width: 100%;
   overflow: auto;
 
-  &.no-illustration {
-    display: flex;
-    justify-content: center;
-  }
-
   @media (max-width: 992px) {
     display: flex;
     justify-content: center;
   }
+}
+
+.logo-container {
+  position: absolute;
+  top: $s-20;
+  left: $s-20;
+  display: flex;
+  justify-content: flex-start;
+  width: $s-120;
+  margin-block-end: $s-52;
 }
 
 .login-illustration {
@@ -48,44 +54,40 @@
 
 .auth-content {
   grid-column: 4 / 6;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: $s-24;
   height: fit-content;
   max-width: $s-412;
-  padding-bottom: $s-8;
+  padding-block-end: $s-8;
   position: relative;
   width: 100%;
 }
 
 .logo-btn {
-  display: flex;
-  justify-content: flex-start;
-  margin-bottom: $s-52;
-  width: $s-120;
-
   svg {
     width: $s-120;
     height: $s-40;
-    fill: $df-primary;
-    stroke: $df-primary;
+    fill: var(--main-icon-foreground);
   }
 }
 
 .terms-login {
-  font-size: $fs-11;
-  position: absolute;
-  bottom: 0;
-  width: 100%;
+  @include bodySmallTypography;
   display: flex;
   gap: $s-4;
   justify-content: center;
+  width: 100%;
+}
 
-  a {
-    font-weight: $fw700;
-    color: $df-secondary;
-  }
-  span {
-    border-bottom: $s-1 solid transparent;
-    color: $df-secondary;
+.and-text {
+  border-bottom: $s-1 solid transparent;
+  color: var(--title-foreground-color);
+}
+
+.auth-link {
+  color: var(--link-foreground-color);
+  &:hover {
+    text-decoration: underline;
   }
 }

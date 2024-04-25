@@ -154,6 +154,17 @@
      :else
      (get-head-shape objects (get objects (:parent-id shape)) options))))
 
+(defn get-child-heads
+  "Get all recursive childs that are heads (when a head is found, do not
+   continue down looking for subsequent nested heads)."
+  [objects shape-id]
+  (let [shape (get objects shape-id)]
+    (if (nil? shape)
+      []
+      (if (ctk/instance-head? shape)
+        [shape]
+        (mapcat #(get-child-heads objects %) (:shapes shape))))))
+
 (defn get-parent-heads
   "Get all component heads that are ancestors of the shape, in top-down order
    (include self if it's also a head)."
@@ -169,6 +180,20 @@
   (->> (cfh/get-parents-with-self objects (:id shape))
        (filter #(and (ctk/instance-head? %) (ctk/in-component-copy? %)))
        (reverse)))
+
+(defn get-nesting-level-delta
+  "Get how many levels a shape will 'go up' if moved under the new parent."
+  [objects shape new-parent]
+  (let [orig-heads (->> (get-parent-copy-heads objects shape)
+                        (remove #(= (:id %) (:id shape))))
+        dest-heads (get-parent-copy-heads objects new-parent)
+
+        ;; Calculate how many parent heads share in common the original
+        ;; shape and the new parent.
+        pairs        (map vector orig-heads dest-heads)
+        common-count (count (take-while (fn [a b] (= a b)) pairs))]
+
+    (- (count orig-heads) common-count)))
 
 (defn get-instance-root
   "Get the parent shape at the top of the component instance (main or copy)."
@@ -186,20 +211,33 @@
     :else
     (get-instance-root objects (get objects (:parent-id shape)))))
 
+(defn find-component-main
+  "If the shape is a component main instance or is inside one, return that instance"
+  ([objects shape]
+   (find-component-main objects shape true))
+  ([objects shape only-direct-child?]
+   (cond
+     (or (nil? shape) (cfh/root? shape))
+     nil
+     (nil? (:parent-id shape))  ; This occurs in the root of components v1
+     shape
+     (ctk/main-instance? shape)
+     shape
+     (and only-direct-child?           ;; If we are asking only for direct childs of a component-main,
+          (ctk/instance-head? shape))  ;; stop when we found a instance-head that isn't main-instance
+     nil
+     (and (not only-direct-child?)
+          (ctk/instance-root? shape))
+     nil
+     :else
+     (find-component-main objects (get objects (:parent-id shape))))))
+
 (defn inside-component-main?
   "Check if the shape is a component main instance or is inside one."
-  [objects shape]
-  (cond
-    (or (nil? shape) (cfh/root? shape))
-    false
-    (nil? (:parent-id shape))  ; This occurs in the root of components v1
-    true
-    (ctk/main-instance? shape)
-    true
-    (ctk/instance-head? shape)
-    false
-    :else
-    (inside-component-main? objects (get objects (:parent-id shape)))))
+  ([objects shape]
+   (inside-component-main? objects shape true))
+  ([objects shape only-direct-child?]
+   (some? (find-component-main objects shape only-direct-child?))))
 
 (defn in-any-component?
   "Check if the shape is part of any component (main or copy), wether it's
@@ -286,6 +324,19 @@
 
     [new-root-shape (map remap-frame-id new-shapes) updated-shapes]))
 
+(defn remove-swap-keep-attrs
+  "Remove flex children properties except the fit-content for flex layouts. These are properties
+  that we don't have to propagate to copies but will be respected when swapping components"
+  [shape]
+  (let [layout-item-h-sizing (when (and (ctl/flex-layout? shape) (ctl/auto-width? shape)) :auto)
+        layout-item-v-sizing (when (and (ctl/flex-layout? shape) (ctl/auto-height? shape)) :auto)]
+    (-> shape
+        (d/without-keys ctk/swap-keep-attrs)
+        (cond-> (some? layout-item-h-sizing)
+          (assoc :layout-item-h-sizing layout-item-h-sizing))
+        (cond-> (some? layout-item-v-sizing)
+          (assoc :layout-item-v-sizing layout-item-v-sizing)))))
+
 (defn make-component-instance
   "Generate a new instance of the component inside the given container.
 
@@ -306,7 +357,7 @@
                            (-> (get-shape component-page (:main-instance-id component))
                                (assoc :parent-id nil) ;; On v2 we force parent-id to nil in order to behave like v1
                                (assoc :frame-id uuid/zero)
-                               (d/without-keys ctk/swap-keep-attrs))
+                               (remove-swap-keep-attrs))
                            (get-shape component (:id component)))
 
          orig-pos        (gpt/point (:x component-shape) (:y component-shape))
@@ -335,7 +386,8 @@
          (fn [new-shape original-shape]
            (let [new-name (:name new-shape)
                  root?    (or (ctk/instance-root? original-shape)   ; If shape is inside a component (not components-v2)
-                              (nil? (:parent-id original-shape)))]  ; we detect it by having no parent)
+                              (nil? (:parent-id original-shape)))  ; we detect it by having no parent)
+                 swap-slot (ctk/get-swap-slot original-shape)]
 
              (when root?
                (vswap! unames conj new-name))
@@ -346,6 +398,9 @@
                :always
                (-> (gsh/move delta)
                    (dissoc :touched))
+
+               (some? swap-slot)
+               (assoc :touched #{(ctk/build-swap-slot-group swap-slot)})
 
                (and main-instance? root?)
                (assoc :main-instance true)
@@ -459,6 +514,7 @@
     (or
       ;;We don't want to change the structure of component copies
      (ctk/in-component-copy? parent)
+     (has-any-copy-parent? objects parent)
       ;; If we are moving something containing a main instance the container can't be part of a component (neither main nor copy)
      (and selected-main-instance? parent-in-component?)
       ;; Avoid placing a shape as a direct or indirect child of itself,

@@ -31,7 +31,7 @@
    [app.common.uuid :as uuid]
    [clojure.set :as set]))
 
-(cr/defrecord Shape [id name type x y width height rotation selrect points transform transform-inverse parent-id frame-id])
+(cr/defrecord Shape [id name type x y width height rotation selrect points transform transform-inverse parent-id frame-id flip-x flip-y])
 
 (defn shape?
   [o]
@@ -483,8 +483,8 @@
 (defn- setup-image
   [{:keys [metadata] :as shape}]
   (-> shape
-      (assoc :proportion (/ (:width metadata)
-                            (:height metadata)))
+      (assoc :proportion (float (/ (:width metadata)
+                                   (:height metadata))))
       (assoc :proportion-lock true)))
 
 (defn setup-shape

@@ -73,6 +73,9 @@
     ;; Show an asterisk for touched copies
     :show-touched
 
+    ;; Show the id with the name
+    :show-ids
+
     ;;
     :grid-layout
 
@@ -80,7 +83,13 @@
     :grid-cells
 
     ;; Show info about shapes
-    :shape-panel})
+    :shape-panel
+
+    ;; Show what is touched in copies
+    :display-touched
+
+    ;; Show some visual indicators for bool shape
+    :bool-shapes})
 
 (defn enable!
   [option]

@@ -8,8 +8,8 @@
   (:require
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
-   [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.shapes.bounds :as gsb]
    [app.common.types.shape.layout :as ctl]
    [app.config :as cf]
    [app.main.ui.context :as muc]
@@ -119,7 +119,7 @@
         points   (dm/get-prop shape :points)
 
         bounds   (mf/with-memo [bounds points]
-                   (or bounds (grc/points->rect points)))
+                   (or bounds (gsb/get-frame-bounds shape)))
 
         thumb    (:thumbnail shape)
 
@@ -168,9 +168,10 @@
     [props]
     (let [shape         (unchecked-get props "shape")
           childs        (unchecked-get props "childs")
+          reverse?      (and (ctl/flex-layout? shape) (ctl/reverse? shape))
           childs        (cond-> childs
                           (ctl/any-layout? shape)
-                          (ctl/sort-layout-children-z-index))]
+                          (ctl/sort-layout-children-z-index reverse?))]
 
       [:> frame-container props
        [:g.frame-children

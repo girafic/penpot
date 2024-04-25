@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 2.0.2
+
+### :sparkles: Enhancements
+
+- Fix locking contention on cron subsystem (causes backend start blocking)
+- Fix locking contention on file object thumbails backend RPC calls
+
+### :bug: Bugs fixed
+
+- Fix color palette sorting [Taiga Issue #7458](https://tree.taiga.io/project/penpot/issue/7458)
+
+## 2.0.1
+
+### :bug: Bugs fixed
+
+- Fix different issues related to components v2 migrations including [Github #4443](https://github.com/penpot/penpot/issues/4443)
+
 ## 2.0.0 - I Just Can't Get Enough
 
 ### :rocket: Epics and highlights
@@ -14,6 +31,8 @@
 ### :boom: Breaking changes & Deprecations
 
 - New strokes default to inside border [Taiga #6847](https://tree.taiga.io/project/penpot/issue/6847)
+- Change default z ordering on layers in flex layout. The previous behavior was inconsistent with how HTML works and we changed it to be more consistent. Previous layers that overlapped could be hidden, the fastest way to fix this is changing the z-index property but a better way is to change the order of your layers.
+
 
 ### :heart: Community contributions (Thank you!)
 - New Hausa, Yoruba and Igbo translations and  update translation files (by All For Tech Empowerment Foundation) [Taiga #6950](https://tree.taiga.io/project/penpot/us/6950), [Taiga #6534](https://tree.taiga.io/project/penpot/us/6534)
@@ -130,7 +149,9 @@
 - Fix problem with hand tool stuck [Github #3318](https://github.com/penpot/penpot/issues/3318)
 - Fix problem with fix scrolling on nested elements [Github #3508](https://github.com/penpot/penpot/issues/3508)
 - Fix problem when changing typography assets [Github #3683](https://github.com/penpot/penpot/issues/3683)
-
+- Internal error when you copy and paste some main components between files [Taiga #7397](https://tree.taiga.io/project/penpot/issue/7397)
+- Fix toolbar disappearing [Taiga #7411](https://tree.taiga.io/project/penpot/issue/7411)
+- Fix long text on tab breaks UI [Taiga Issue #7421](https://tree.taiga.io/project/penpot/issue/7421)
 
 ## 1.19.5
 

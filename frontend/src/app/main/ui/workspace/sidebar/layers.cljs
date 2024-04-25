@@ -10,6 +10,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.workspace :as dw]
    [app.main.refs :as refs]
@@ -143,11 +144,17 @@
                   (conj :rect :circle :path :bool))]
     (or (= uuid/zero id)
         (and (or (str/includes? (str/lower (:name shape)) (str/lower search))
-                 (str/includes? (dm/str (:id shape)) (str/lower search)))
+                 ;; Only for local development we allow search for ids. Otherwise will be hard
+                 ;; search for numbers or single letter shape names (ie: "A")
+                 (and *assert*
+                      (str/includes? (dm/str (:id shape)) (str/lower search))))
              (or (empty? filters)
                  (and (contains? filters :component)
                       (contains? shape :component-id))
-                 (let [direct-filters (into #{} (filter #{:frame :rect :circle :path :bool :image :text}) filters)]
+                 (and (contains? filters :image)
+                      (some? (cts/has-images? shape)))
+
+                 (let [direct-filters (into #{} (filter #{:frame :rect :circle :path :bool :text}) filters)]
                    (contains? direct-filters (:type shape)))
                  (and (contains? filters :group)
                       (and (cfh/group-shape? shape)
@@ -166,7 +173,6 @@
                           :filters #{}
                           :num-items 100})
         state           (deref state*)
-
         current-filters (:filters state)
         current-items   (:num-items state)
         current-search  (:search-text state)

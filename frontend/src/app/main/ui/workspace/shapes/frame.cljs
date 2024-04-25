@@ -130,7 +130,7 @@
             container-ref  (mf/use-ref nil)
             content-ref    (mf/use-ref nil)
 
-            bounds         (gsb/get-object-bounds objects shape)
+            bounds         (gsb/get-object-bounds objects shape {:ignore-margin? false})
 
             x              (dm/get-prop bounds :x)
             y              (dm/get-prop bounds :y)
@@ -155,7 +155,8 @@
             task-ref       (mf/use-ref nil)
 
             on-load        (mf/use-fn (fn []
-                                        (check-thumbnail-size (mf/ref-val imposter-ref) bounds file-id page-id frame-id)
+                                        ;; We need to check if this is the culprit of the thumbnail regeneration.
+                                        ;; (check-thumbnail-size (mf/ref-val imposter-ref) bounds file-id page-id frame-id)
                                         (mf/set-ref-val! tries-ref 0)
                                         (reset! imposter-loaded true)))
             on-error       (mf/use-fn

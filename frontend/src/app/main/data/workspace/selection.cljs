@@ -28,8 +28,6 @@
    [app.main.data.modal :as md]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.collapse :as dwc]
-   [app.main.data.workspace.edition :as dwe]
-   [app.main.data.workspace.libraries-helpers :as dwlh]
    [app.main.data.workspace.specialized-panel :as-alias dwsp]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.undo :as dwu]
@@ -151,7 +149,7 @@
              objects (wsh/lookup-page-objects state page-id)]
          (rx/of
           (dwc/expand-all-parents [id] objects)
-          (dwe/clear-edition-mode)
+          :interrupt
           ::dwsp/interrupt))))))
 
 (defn select-prev-shape
@@ -404,6 +402,7 @@
                                                        ids-map
                                                        %2
                                                        delta
+                                                       nil
                                                        libraries
                                                        library-data
                                                        it
@@ -435,7 +434,7 @@
                             (gpt/subtract (-> origin-frame :selrect gpt/point)))
 
         instantiate-component
-        #(dwlh/generate-instantiate-component changes
+        #(cflh/generate-instantiate-component changes
                                               objects
                                               file-id
                                               (:component-id component-root)
@@ -448,7 +447,7 @@
                                               {})
 
         restore-component
-        #(let [restore (dwlh/prepare-restore-component changes library-data (:component-id component-root) it page delta (:id component-root) parent-id frame-id)]
+        #(let [restore (cflh/prepare-restore-component changes library-data (:component-id component-root) it page delta (:id component-root) parent-id frame-id)]
            [(:shape restore) (:changes restore)])
 
         [_shape changes]
@@ -459,10 +458,10 @@
 
 ;; TODO: move to common.files.shape-helpers
 (defn- prepare-duplicate-shape-change
-  ([changes objects page unames update-unames! ids-map obj delta libraries library-data it file-id]
-   (prepare-duplicate-shape-change changes objects page unames update-unames! ids-map obj delta libraries library-data it file-id (:frame-id obj) (:parent-id obj) false false))
+  ([changes objects page unames update-unames! ids-map obj delta level-delta libraries library-data it file-id]
+   (prepare-duplicate-shape-change changes objects page unames update-unames! ids-map obj delta level-delta libraries library-data it file-id (:frame-id obj) (:parent-id obj) false false true))
 
-  ([changes objects page unames update-unames! ids-map obj delta libraries library-data it file-id frame-id parent-id duplicating-component? child?]
+  ([changes objects page unames update-unames! ids-map obj delta level-delta libraries library-data it file-id frame-id parent-id duplicating-component? child? remove-swap-slot?]
    (cond
      (nil? obj)
      changes
@@ -485,11 +484,16 @@
                                       (ctk/instance-root? obj))
            duplicating-component? (or duplicating-component? (ctk/instance-head? obj))
            is-component-main?     (ctk/main-instance? obj)
+           subinstance-head?      (ctk/subinstance-head? obj)
+           instance-root?         (ctk/instance-root? obj)
 
-           original-ref-shape     (-> (ctf/find-original-ref-shape nil page libraries obj {:include-deleted? true})
-                                      :id)
            into-component?        (and duplicating-component?
                                        (ctn/in-any-component? objects parent))
+
+           level-delta            (if (some? level-delta)
+                                    level-delta
+                                    (ctn/get-nesting-level-delta objects obj parent))
+           new-shape-ref          (ctf/advance-shape-ref nil page libraries obj level-delta {:include-deleted? true})
 
            regenerate-component
            (fn [changes shape]
@@ -504,9 +508,16 @@
                       :parent-id parent-id
                       :frame-id frame-id)
 
+               (cond-> (and (not instance-root?)
+                            subinstance-head?
+                            remove-swap-slot?)
+                 (ctk/remove-swap-slot))
+
                (dissoc :shapes
-                       :main-instance
                        :use-for-thumbnail)
+
+               (cond-> (not is-component-root?)
+                 (dissoc :main-instance))
 
                (cond-> into-component?
                  (dissoc :component-root))
@@ -518,9 +529,9 @@
                (cond-> (or frame? group? bool?)
                  (assoc :shapes []))
 
-               (cond-> (and (some? original-ref-shape)
-                            (not= original-ref-shape (:shape-ref obj)))
-                 (assoc :shape-ref original-ref-shape))
+               (cond-> (and (some? new-shape-ref)
+                            (not= new-shape-ref (:shape-ref obj)))
+                 (assoc :shape-ref new-shape-ref))
 
                (gsh/move delta)
                (d/update-when :interactions #(ctsi/remap-interactions % ids-map objects))
@@ -561,6 +572,7 @@
                                                  ids-map
                                                  child
                                                  delta
+                                                 level-delta
                                                  libraries
                                                  library-data
                                                  it
@@ -568,7 +580,12 @@
                                                  (if frame? new-id frame-id)
                                                  new-id
                                                  duplicating-component?
-                                                 true))
+                                                 true
+                                                 (and remove-swap-slot?
+                                                      ;; only remove swap slot of children when the current shape
+                                                      ;; is not a subinstance head nor a instance root
+                                                      (not subinstance-head?)
+                                                      (not instance-root?))))
                changes
                (map (d/getf objects) (:shapes obj)))))))
 

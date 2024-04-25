@@ -35,6 +35,17 @@
          :login-with-gitlab
          :login-with-oidc]))
 
+(mf/defc demo-warning
+  {::mf/props :obj}
+  []
+  [:& context-notification
+   {:type :warning
+    :content (tr "auth.demo-warning")}])
+
+(defn create-demo-profile
+  []
+  (st/emit! (du/create-demo-profile)))
+
 (defn- login-with-oidc
   [event provider params]
   (dom/prevent-default event)
@@ -52,28 +63,6 @@
 
                      :else
                      (st/emit! (msg/error (tr "errors.generic"))))))))
-
-(defn- login-with-ldap
-  [event params]
-  (dom/prevent-default event)
-  (dom/stop-propagation event)
-  (let [{:keys [on-error]} (meta params)]
-    (->> (rp/cmd! :login-with-ldap params)
-         (rx/subs! (fn [profile]
-                     (if-let [token (:invitation-token profile)]
-                       (st/emit! (rt/nav :auth-verify-token {} {:token token}))
-                       (st/emit! (du/login-from-token {:profile profile}))))
-                   (fn [{:keys [type code] :as error}]
-                     (cond
-                       (and (= type :restriction)
-                            (= code :ldap-not-initialized))
-                       (st/emit! (msg/error (tr "errors.ldap-disabled")))
-
-                       (fn? on-error)
-                       (on-error error)
-
-                       :else
-                       (st/emit! (msg/error (tr "errors.generic")))))))))
 
 (s/def ::email ::us/email)
 (s/def ::password ::us/not-empty-string)
@@ -100,12 +89,17 @@
                              :initial initial)
 
         on-error
-        (fn [err]
-          (let [cause (ex-data err)]
+        (fn [cause]
+          (let [cause (ex-data cause)]
             (cond
               (and (= :restriction (:type cause))
                    (= :profile-blocked (:code cause)))
               (reset! error (tr "errors.profile-blocked"))
+
+              (and (= :restriction (:type cause))
+                   (= :ldap-not-initialized (:code cause)))
+              (st/emit! (msg/error (tr "errors.ldap-disabled")))
+
 
               (and (= :restriction (:type cause))
                    (= :admin-only-profile (:code cause)))
@@ -123,9 +117,10 @@
               (reset! error (tr "errors.generic")))))
 
         on-success-default
-        (fn [data]
-          (when-let [token (:invitation-token data)]
-            (st/emit! (rt/nav :auth-verify-token {} {:token token}))))
+        (mf/use-fn
+         (fn [data]
+           (when-let [token (:invitation-token data)]
+             (st/emit! (rt/nav :auth-verify-token {} {:token token})))))
 
         on-success
         (fn [data]
@@ -146,11 +141,15 @@
         (mf/use-callback
          (mf/deps form)
          (fn [event]
+           (dom/prevent-default event)
+           (dom/stop-propagation event)
+
            (reset! error nil)
-           (let [params (:clean-data @form)]
-             (login-with-ldap event (with-meta params
-                                      {:on-error on-error
-                                       :on-success on-success})))))
+           (let [params (:clean-data @form)
+                 params (with-meta params
+                          {:on-error on-error
+                           :on-success on-success})]
+             (st/emit! (du/login-with-ldap params)))))
 
         on-recovery-request
         (mf/use-fn
@@ -158,14 +157,15 @@
 
     [:*
      (when-let [message @error]
-       [:div {:class (stl/css :error-wrapper)}
-        [:& context-notification
-         {:type :warning
-          :content message
-          :data-test "login-banner"
-          :role "alert"}]])
+       [:& context-notification
+        {:type :warning
+         :content message
+         :data-test "login-banner"
+         :role "alert"}])
 
-     [:& fm/form {:on-submit on-submit :form form}
+     [:& fm/form {:on-submit on-submit
+                  :class (stl/css :login-form)
+                  :form form}
       [:div {:class (stl/css :fields-row)}
        [:& fm/input
         {:name :email
@@ -185,6 +185,7 @@
                      (contains? cf/flags :login-with-password)))
         [:div {:class (stl/css :fields-row :forgot-password)}
          [:& lk/link {:action on-recovery-request
+                      :class (stl/css :forgot-pass-link)
                       :data-test "forgot-password"}
           (tr "auth.forgot-password")]])
 
@@ -199,6 +200,7 @@
        (when (contains? cf/flags :login-with-ldap)
          [:> fm/submit-button*
           {:label (tr "auth.login-with-ldap-submit")
+           :class (stl/css :login-ldap-button)
            :on-click on-submit-ldap}])]]]))
 
 (mf/defc login-buttons
@@ -247,11 +249,11 @@
            (when (k/enter? event)
              (login-oidc event))))]
     (when (contains? cf/flags :login-with-oidc)
-      [:div {:class (stl/css :link-entry :link-oidc)}
-       [:a {:tab-index "0"
-            :on-key-down handle-key-down
-            :on-click login-oidc}
-        (tr "auth.login-with-oidc-submit")]])))
+      [:button {:tab-index "0"
+                :class (stl/css :link-entry :link-oidc)
+                :on-key-down handle-key-down
+                :on-click login-oidc}
+       (tr "auth.login-with-oidc-submit")])))
 
 (mf/defc login-methods
   [{:keys [params on-success-callback origin] :as props}]
@@ -274,32 +276,35 @@
   [{:keys [params] :as props}]
   (let [go-register
         (mf/use-fn
-         #(st/emit! (rt/nav :auth-register {} params)))
+         #(st/emit! (rt/nav :auth-register {} params)))]
 
-        on-create-demo-profile
-        (mf/use-fn
-         #(st/emit! (du/create-demo-profile)))]
-
-    [:div {:class (stl/css :auth-form)}
+    [:div {:class (stl/css :auth-form-wrapper)}
      [:h1 {:class (stl/css :auth-title)
-           :data-test "login-title"} (tr "auth.login-title")]
+           :data-test "login-title"} (tr "auth.login-account-title")]
 
-     [:hr {:class (stl/css :separator)}]
+     [:p {:class (stl/css :auth-tagline)}
+      (tr "auth.login-tagline")]
+
+     (when (contains? cf/flags :demo-warning)
+       [:& demo-warning])
 
      [:& login-methods {:params params}]
 
+     [:hr {:class (stl/css :separator)}]
+
      [:div {:class (stl/css :links)}
       (when (contains? cf/flags :registration)
-        [:div {:class (stl/css :link-entry :register)}
-         [:span (tr "auth.register") " "]
+        [:div {:class (stl/css :register)}
+         [:span {:class (stl/css :register-text)}
+          (tr "auth.register") " "]
          [:& lk/link {:action go-register
+                      :class (stl/css :register-link)
                       :data-test "register-submit"}
           (tr "auth.register-submit")]])]
 
      (when (contains? cf/flags :demo-users)
        [:div {:class (stl/css :link-entry :demo-account)}
         [:span (tr "auth.create-demo-profile") " "]
-        [:& lk/link {:action on-create-demo-profile
+        [:& lk/link {:action create-demo-profile
                      :data-test "demo-account-link"}
          (tr "auth.create-demo-account")]])]))
-

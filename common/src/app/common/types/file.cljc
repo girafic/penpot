@@ -216,14 +216,14 @@
 
     (some find-ref-shape-in-head (ctn/get-parent-heads (:objects container) shape))))
 
-(defn find-original-ref-shape
-  "Recursively call to find-ref-shape until find the original shape of the original component"
-  [file container libraries shape & options]
-  (let [ref-shape (find-ref-shape file container libraries shape options)]
-    (if (nil? (:shape-ref ref-shape))
-      ref-shape
-      (find-original-ref-shape file container libraries ref-shape options))))
-
+(defn advance-shape-ref
+  "Get the shape-ref of the near main of the shape, recursively repeated as many times
+   as the given levels."
+  [file container libraries shape levels & {:keys [include-deleted?] :or {include-deleted? false}}]
+  (let [ref-shape (find-ref-shape file container libraries shape :include-deleted? include-deleted? :with-context? true)]
+    (if (or (nil? (:shape-ref ref-shape)) (not (pos? levels)))
+      (:id ref-shape)
+      (advance-shape-ref file (:container (meta ref-shape)) libraries ref-shape (dec levels) :include-deleted? include-deleted?))))
 
 (defn find-ref-component
   "Locate the nearest component in the local file or libraries that is referenced by the

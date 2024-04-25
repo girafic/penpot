@@ -25,6 +25,7 @@
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
    [app.common.types.container :as ctn]
+   [app.common.types.file :as ctf]
    [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
    [app.common.types.shape.layout :as ctl]
@@ -354,20 +355,22 @@
   (ptk/reify ::finalize-file
     ptk/UpdateEvent
     (update [_ state]
-      (dissoc state
-              :current-file-id
-              :current-project-id
-              :workspace-data
-              :workspace-editor-state
-              :workspace-file
-              :workspace-libraries
-              :workspace-ready?
-              :workspace-media-objects
-              :workspace-persistence
-              :workspace-presence
-              :workspace-project
-              :workspace-project
-              :workspace-undo))
+      (-> state
+          (dissoc
+           :current-file-id
+           :current-project-id
+           :workspace-data
+           :workspace-editor-state
+           :workspace-file
+           :workspace-libraries
+           :workspace-media-objects
+           :workspace-persistence
+           :workspace-presence
+           :workspace-project
+           :workspace-ready?
+           :workspace-undo)
+          (update :workspace-global dissoc :read-only?)
+          (assoc-in [:workspace-global :options-mode] :design)))
 
     ptk/WatchEvent
     (watch [_ _ _]
@@ -679,12 +682,12 @@
 
 (defn end-rename-shape
   "End the ongoing shape rename process"
-  ([] (end-rename-shape nil))
-  ([name]
+  ([] (end-rename-shape nil nil))
+  ([shape-id name]
    (ptk/reify ::end-rename-shape
      ptk/WatchEvent
      (watch [_ state _]
-       (when-let [shape-id (dm/get-in state [:workspace-local :shape-for-rename])]
+       (when-let [shape-id (d/nilv shape-id (dm/get-in state [:workspace-local :shape-for-rename]))]
          (let [shape (wsh/lookup-shape state shape-id)
                name        (str/trim name)
                clean-name  (cfh/clean-path name)
@@ -786,9 +789,14 @@
 (defn relocate-shapes-changes [it objects parents parent-id page-id to-index ids
                                groups-to-delete groups-to-unmask shapes-to-detach
                                shapes-to-reroot shapes-to-deroot shapes-to-unconstraint]
-  (let [ordered-indexes (cfh/order-by-indexed-shapes objects ids)
-        shapes (map (d/getf objects) ordered-indexes)
-        parent (get objects parent-id)]
+  (let [ordered-indexes       (cfh/order-by-indexed-shapes objects ids)
+        shapes                (map (d/getf objects) ordered-indexes)
+        parent                (get objects parent-id)
+        component-main-parent (ctn/find-component-main objects parent false)
+        child-heads
+        (->> ordered-indexes
+             (mapcat #(ctn/get-child-heads objects %))
+             (map :id))]
 
     (-> (pcb/empty-changes it page-id)
         (pcb/with-objects objects)
@@ -800,6 +808,17 @@
         ;; Remove the hide in viewer flag
         (cond-> (and (not= uuid/zero parent-id) (cfh/frame-shape? parent))
           (pcb/update-shapes ordered-indexes #(cond-> % (cfh/frame-shape? %) (assoc :hide-in-viewer true))))
+
+        ;; Remove the swap slots if it is moving to a different component
+        (pcb/update-shapes child-heads
+                           (fn [shape]
+                             (cond-> shape
+                               (not= component-main-parent (ctn/find-component-main objects shape false))
+                               (ctk/remove-swap-slot))))
+
+        ;; Add component-root property when moving a component outside a component
+        (cond-> (not (ctn/get-instance-root objects parent))
+          (pcb/update-shapes child-heads #(assoc % :component-root true)))
 
         ;; Move the shapes
         (pcb/change-parent parent-id
@@ -968,7 +987,9 @@
                          (cond-> shapes-to-deroot deroot? (conj id))
                          (cond-> shapes-to-reroot reroot? (conj id))]))
                     [[] [] []]
-                    ids)
+                    (->> ids
+                         (mapcat #(ctn/get-child-heads objects %))
+                         (map :id)))
 
             changes (relocate-shapes-changes it
                                              objects
@@ -1572,7 +1593,9 @@
                            (->> (:strokes obj)
                                 (keep :stroke-image))
                            (when (cfh/image-shape? obj)
-                             [(:metadata obj)]))]
+                             [(:metadata obj)])
+                           (when (:fill-image obj)
+                             [(:fill-image obj)]))]
 
               (if (seq imgdata)
                 (->> (rx/from imgdata)
@@ -1597,6 +1620,34 @@
               shape
               (let [frame (get objects parent-frame-id)]
                 (gsh/translate-to-frame shape frame))))
+
+          ;; When copying an instance that is nested inside another one, we need to
+          ;; advance the shape refs to one or more levels of remote mains.
+          (advance-copies [state selected data]
+            (let [file      (wsh/get-local-file-full state)
+                  libraries (wsh/get-libraries state)
+                  page      (wsh/lookup-page state)
+                  heads     (mapcat #(ctn/get-child-heads (:objects data) %) selected)]
+              (update data :objects
+                      #(reduce (partial advance-copy file libraries page)
+                               %
+                               heads))))
+
+          (advance-copy [file libraries page objects shape]
+            (if (and (ctk/instance-head? shape) (not (ctk/main-instance? shape)))
+              (let [level-delta (ctn/get-nesting-level-delta (:objects page) shape uuid/zero)]
+                (if (pos? level-delta)
+                  (reduce (partial advance-shape file libraries page level-delta)
+                          objects
+                          (cfh/get-children-with-self objects (:id shape)))
+                  objects))
+              objects))
+
+          (advance-shape [file libraries page level-delta objects shape]
+            (let [new-shape-ref (ctf/advance-shape-ref file page libraries shape level-delta {:include-deleted? true})]
+              (cond-> objects
+                (and (some? new-shape-ref) (not= new-shape-ref (:shape-ref shape)))
+                (assoc-in [(:id shape) :shape-ref] new-shape-ref))))
 
           (on-copy-error [error]
             (js/console.error "clipboard blocked:" error)
@@ -1636,6 +1687,7 @@
                    (rx/merge-map (partial prepare-object objects frame-id))
                    (rx/reduce collect-data initial)
                    (rx/map (partial sort-selected state))
+                   (rx/map (partial advance-copies state selected))
                    (rx/map #(t/encode-str % {:type :json-verbose}))
                    (rx/map wapi/write-to-clipboard)
                    (rx/catch on-copy-error)
@@ -1659,8 +1711,14 @@
           (process-entry [[type data]]
             (case type
               :text
-              (if (str/empty? data)
+              (cond
+                (str/empty? data)
                 (rx/empty)
+
+                (re-find #"<svg\s" data)
+                (rx/of (paste-svg-text data))
+
+                :else
                 (rx/of (paste-text data)))
 
               :transit
@@ -1705,8 +1763,7 @@
                 text-data    (some-> pdata wapi/extract-text)
                 transit-data (ex/ignoring (some-> text-data t/decode-str))]
             (cond
-              (and (string? text-data)
-                   (str/includes? text-data "<svg "))
+              (and (string? text-data) (re-find #"<svg\s" text-data))
               (rx/of (paste-svg-text text-data))
 
               (seq image-data)
@@ -1803,13 +1860,19 @@
 (defn paste-shapes
   [{in-viewport? :in-viewport :as pdata}]
   (letfn [(translate-media [mdata media-idx attr-path]
-            (let [id   (get-in mdata attr-path)
+            (let [id   (-> (get-in mdata attr-path)
+                           (:id))
                   mobj (get media-idx id)]
               (if mobj
-                (update-in mdata attr-path (fn [value]
-                                             (-> value
-                                                 (assoc :id (:id mobj))
-                                                 (assoc :path (:path mobj)))))
+                (if (empty? attr-path)
+                  (-> mdata
+                      (assoc :id (:id mobj))
+                      (assoc :path (:path mobj)))
+                  (update-in mdata attr-path (fn [value]
+                                               (-> value
+                                                   (assoc :id (:id mobj))
+                                                   (assoc :path (:path mobj))))))
+
                 mdata)))
 
           (add-obj? [chg]
@@ -1819,15 +1882,15 @@
           ;; references to the new uploaded media-objects.
           (process-rchange [media-idx change]
             (let [;; Texts can have different fills for pieces of the text
-                  tr-fill-xf    (map #(translate-media % media-idx [:fill-image :id]))
-                  tr-stroke-xf  (map #(translate-media % media-idx [:stroke-image :id]))]
-
+                  tr-fill-xf    (map #(translate-media % media-idx [:fill-image]))
+                  tr-stroke-xf  (map #(translate-media % media-idx [:stroke-image]))]
               (if (add-obj? change)
                 (update change :obj (fn [obj]
                                       (-> obj
                                           (update :fills #(into [] tr-fill-xf %))
                                           (update :strokes #(into [] tr-stroke-xf %))
-                                          (d/update-when :metadata translate-media media-idx [:id])
+                                          (d/update-when :metadata translate-media media-idx [])
+                                          (d/update-when :fill-image translate-media media-idx [])
                                           (d/update-when :content
                                                          (fn [content]
                                                            (txt/xform-nodes tr-fill-xf content)))
@@ -1953,10 +2016,11 @@
         (let [file-id      (:current-file-id state)
               page         (wsh/lookup-page state)
 
-              media-idx    (->> (:media pdata)
+              media-idx    (->> (:images pdata)
                                 (d/index-by :prev-id))
 
               selected     (:selected pdata)
+
               objects      (:objects pdata)
 
               position     (deref ms/mouse-position)
@@ -1980,10 +2044,13 @@
                              index
                              0)
 
+              selected     (if (and (ctl/flex-layout? page-objects parent-id) (not (ctl/reverse? page-objects parent-id)))
+                             (into (d/ordered-set) (reverse selected))
+                             selected)
+
               objects      (update-vals objects (partial process-shape file-id frame-id parent-id))
 
               all-objects  (merge page-objects objects)
-
 
 
               drop-cell    (when (ctl/grid-layout? all-objects parent-id)

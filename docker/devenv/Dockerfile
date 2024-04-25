@@ -5,8 +5,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 ENV NODE_VERSION=v20.11.1 \
     CLOJURE_VERSION=1.11.1.1435 \
-    CLJKONDO_VERSION=2024.02.12 \
-    BABASHKA_VERSION=1.3.188 \
+    CLJKONDO_VERSION=2024.03.13 \
+    BABASHKA_VERSION=1.3.189 \
     CLJFMT_VERSION=0.12.0 \
     LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8
@@ -143,23 +143,23 @@ RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
     case "${ARCH}" in \
        aarch64|arm64) \
-         BINARY_URL="https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-arm64.tar.xz"; \
+         BINARY_URL="https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-arm64.tar.gz"; \
          ;; \
        amd64|x86_64) \
-         BINARY_URL="https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"; \
+         BINARY_URL="https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.gz"; \
          ;; \
        *) \
          echo "Unsupported arch: ${ARCH}"; \
          exit 1; \
          ;; \
     esac; \
-    curl -LfsSo /tmp/nodejs.tar.xz ${BINARY_URL}; \
+    curl -LfsSo /tmp/nodejs.tar.gz ${BINARY_URL}; \
     mkdir -p /usr/local/nodejs; \
     cd /usr/local/nodejs; \
-    tar -xf /tmp/nodejs.tar.xz --strip-components=1; \
+    tar -xf /tmp/nodejs.tar.gz --strip-components=1; \
     chown -R root /usr/local/nodejs; \
     corepack enable; \
-    rm -rf /tmp/nodejs.tar.xz;
+    rm -rf /tmp/nodejs.tar.gz;
 
 RUN set -ex; \
     ARCH="$(dpkg --print-architecture)"; \
@@ -249,6 +249,7 @@ EXPOSE 6060
 EXPOSE 9090
 
 COPY files/nginx.conf /etc/nginx/nginx.conf
+COPY files/nginx-mime.types /etc/nginx/mime.types
 COPY files/phantomjs-mock /usr/bin/phantomjs
 
 COPY files/bashrc         /root/.bashrc

@@ -169,10 +169,11 @@
 
 (defn get-parent-with-data
   [^js node name]
-  (loop [current node]
-    (if (or (nil? current) (obj/in? (.-dataset current) name))
-      current
-      (recur (.-parentElement current)))))
+  (let [name (str/camel name)]
+    (loop [current node]
+      (if (or (nil? current) (obj/in? (.-dataset current) name))
+        current
+        (recur (.-parentElement current))))))
 
 (defn get-parent-with-selector
   [^js node selector]
@@ -645,6 +646,12 @@
   (when (some? element)
     (.-scrollLeft element)))
 
+(defn scroll-to
+  ([^js element options]
+   (.scrollTo element options))
+  ([^js element x y]
+   (.scrollTo element x y)))
+
 (defn set-scroll-pos!
   [^js element scroll]
   (when (some? element)
@@ -755,6 +762,12 @@
 (defn reload-current-window
   []
   (.reload (.-location js/window)))
+
+(defn scroll-by!
+  ([element x y]
+   (.scrollBy ^js element x y))
+  ([x y]
+   (scroll-by! js/window x y)))
 
 (defn animate!
   ([item keyframes duration] (animate! item keyframes duration nil))

@@ -28,7 +28,6 @@
    [app.main.data.workspace.collapse :as dwc]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.selection :as dws]
-   [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.snap :as snap]
@@ -291,10 +290,10 @@
     ptk/WatchEvent
     (watch [_ _ stream]
       (rx/concat
-       (rx/of (dwsh/update-shape-flags ids {:transforming true}))
+       (rx/of #(assoc-in % [:workspace-local :transform] :move))
        (->> (rx/timer 1000)
             (rx/map (fn []
-                      (dwsh/update-shape-flags ids {:transforming false})))
+                      #(assoc-in % [:workspace-local :transform] nil)))
             (rx/take-until
              (rx/filter (ptk/type? ::trigger-bounding-box-cloaking) stream)))))))
 
@@ -505,7 +504,9 @@
              ids     (if (nil? ids) selected ids)
              shapes  (into []
                            (comp (map (d/getf objects))
-                                 (remove ctk/in-component-copy-not-head?))
+                                 (remove #(let [parent (get objects (:parent-id %))]
+                                            (and (ctk/in-component-copy? parent)
+                                                 (ctl/any-layout? parent)))))
                            ids)
 
              duplicate-move-started? (get-in state [:workspace-local :duplicate-move-started?] false)
@@ -583,7 +584,6 @@
                               :else
                               [move-vector nil])]
 
-
                         (-> (dwm/create-modif-tree ids (ctm/move-modifiers move-vector))
                             (dwm/build-change-frame-modifiers objects selected target-frame drop-index cell-data)
                             (dwm/set-modifiers false false {:snap-ignore-axis snap-ignore-axis}))))))
@@ -606,11 +606,11 @@
               (->> move-stream
                    (rx/last)
                    (rx/mapcat
-                    (fn [[_ target-frame drop-index]]
+                    (fn [[_ target-frame drop-index drop-cell]]
                       (let [undo-id (js/Symbol)]
                         (rx/of (dwu/start-undo-transaction undo-id)
-                               (move-shapes-to-frame ids target-frame drop-index)
                                (dwm/apply-modifiers {:undo-transation? false})
+                               (move-shapes-to-frame ids target-frame drop-index drop-cell)
                                (finish-transform)
                                (dwu/commit-undo-transaction undo-id))))))))))))))
 
@@ -832,7 +832,7 @@
                                      :ignore-snap-pixel true}))))))
 
 (defn- move-shapes-to-frame
-  [ids frame-id drop-index]
+  [ids frame-id drop-index [row column :as cell]]
   (ptk/reify ::move-shapes-to-frame
     ptk/WatchEvent
     (watch [it state _]
@@ -842,7 +842,13 @@
             frame    (get objects frame-id)
             layout?  (:layout frame)
 
-            shapes (->> ids (cfh/clean-loops objects) (keep lookup))
+            component-main-frame (ctn/find-component-main objects frame false)
+
+            shapes (->> ids
+                        (cfh/clean-loops objects)
+                        (keep lookup)
+                        ;;remove shapes inside copies, because we can't change the structure of copies
+                        (remove #(ctk/in-component-copy? (get objects (:parent-id %)))))
 
             moving-shapes
             (cond->> shapes
@@ -905,26 +911,47 @@
             moving-shapes-ids
             (map :id moving-shapes)
 
+            moving-shapes-children-ids
+            (->> moving-shapes-ids
+                 (mapcat #(cfh/get-children-ids-with-self objects %)))
+
+            child-heads
+            (->> moving-shapes-ids
+                 (mapcat #(ctn/get-child-heads objects %))
+                 (map :id))
+
             changes
             (-> (pcb/empty-changes it page-id)
                 (pcb/with-objects objects)
                 ;; Remove layout-item properties when moving a shape outside a layout
                 (cond-> (not (ctl/any-layout? objects frame-id))
                   (pcb/update-shapes moving-shapes-ids ctl/remove-layout-item-data))
+                ;; Remove the swap slots if it is moving to a different component
+                (pcb/update-shapes child-heads
+                                   (fn [shape]
+                                     (cond-> shape
+                                       (not= component-main-frame (ctn/find-component-main objects shape false))
+                                       (ctk/remove-swap-slot))))
                 ;; Remove component-root property when moving a shape inside a component
                 (cond-> (ctn/get-instance-root objects frame)
-                  (pcb/update-shapes moving-shapes-ids #(dissoc % :component-root)))
+                  (pcb/update-shapes moving-shapes-children-ids #(dissoc % :component-root)))
                 ;; Add component-root property when moving a component outside a component
                 (cond-> (not (ctn/get-instance-root objects frame))
-                  (pcb/update-shapes moving-shapes-ids (fn [shape]
-                                                         (if (ctk/instance-head? shape)
-                                                           (assoc shape :component-root true)
-                                                           shape))))
+                  (pcb/update-shapes child-heads #(assoc % :component-root true)))
                 (pcb/update-shapes moving-shapes-ids #(cond-> % (cfh/frame-shape? %) (assoc :hide-in-viewer true)))
                 (pcb/update-shapes shape-ids-to-detach ctk/detach-shape)
                 (pcb/change-parent frame-id moving-shapes drop-index)
                 (cond-> (ctl/grid-layout? objects frame-id)
-                  (-> (pcb/update-shapes [frame-id] ctl/assign-cell-positions {:with-objects? true})
+                  (-> (pcb/update-shapes
+                       [frame-id]
+                       (fn [frame objects]
+                         (-> frame
+                             ;; Assign the cell when pushing into a specific grid cell
+                             (cond-> (some? cell)
+                               (-> (ctl/push-into-cell moving-shapes-ids row column)
+                                   (ctl/assign-cells objects)))
+                             (ctl/assign-cell-positions objects)))
+                       {:with-objects? true})
                       (pcb/reorder-grid-children [frame-id])))
                 (pcb/remove-objects empty-parents))]
 
@@ -955,7 +982,7 @@
             selrect   (gsh/shapes->rect shapes)
             center    (grc/rect->center selrect)
             modifiers (dwm/create-modif-tree selected (ctm/resize-modifiers (gpt/point -1.0 1.0) center))]
-        (rx/of (dwm/apply-modifiers {:modifiers modifiers}))))))
+        (rx/of (dwm/apply-modifiers {:modifiers modifiers :ignore-snap-pixel true}))))))
 
 (defn flip-vertical-selected []
   (ptk/reify ::flip-vertical-selected
@@ -967,4 +994,4 @@
             selrect   (gsh/shapes->rect shapes)
             center    (grc/rect->center selrect)
             modifiers (dwm/create-modif-tree selected (ctm/resize-modifiers (gpt/point 1.0 -1.0) center))]
-        (rx/of (dwm/apply-modifiers {:modifiers modifiers}))))))
+        (rx/of (dwm/apply-modifiers {:modifiers modifiers :ignore-snap-pixel true}))))))

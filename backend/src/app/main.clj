@@ -21,10 +21,10 @@
    [app.http.session :as-alias session]
    [app.http.session.tasks :as-alias session.tasks]
    [app.http.websocket :as http.ws]
-   [app.loggers.audit.tasks :as-alias audit.tasks]
    [app.loggers.webhooks :as-alias webhooks]
    [app.metrics :as-alias mtx]
    [app.metrics.definition :as-alias mdef]
+   [app.migrations.v2 :as migrations.v2]
    [app.msgbus :as-alias mbus]
    [app.redis :as-alias rds]
    [app.rpc :as-alias rpc]
@@ -346,9 +346,11 @@
      :storage-gc-deleted (ig/ref ::sto.gc-deleted/handler)
      :storage-gc-touched (ig/ref ::sto.gc-touched/handler)
      :session-gc         (ig/ref ::session.tasks/gc)
-     :audit-log-archive  (ig/ref ::audit.tasks/archive)
-     :audit-log-gc       (ig/ref ::audit.tasks/gc)
+     :audit-log-archive  (ig/ref :app.loggers.audit.archive-task/handler)
+     :audit-log-gc       (ig/ref :app.loggers.audit.gc-task/handler)
 
+     :object-update
+     (ig/ref :app.tasks.object-update/handler)
      :process-webhook-event
      (ig/ref ::webhooks/process-event-handler)
      :run-webhook
@@ -376,7 +378,10 @@
     ::sto/storage (ig/ref ::sto/storage)}
 
    :app.tasks.orphan-teams-gc/handler
-   {::db/pool     (ig/ref ::db/pool)}
+   {::db/pool (ig/ref ::db/pool)}
+
+   :app.tasks.object-update/handler
+   {::db/pool (ig/ref ::db/pool)}
 
    :app.tasks.file-gc/handler
    {::db/pool     (ig/ref ::db/pool)
@@ -411,12 +416,12 @@
    ::svgo/optimizer
    {}
 
-   ::audit.tasks/archive
+   :app.loggers.audit.archive-task/handler
    {::setup/props        (ig/ref ::setup/props)
     ::db/pool            (ig/ref ::db/pool)
     ::http.client/client (ig/ref ::http.client/client)}
 
-   ::audit.tasks/gc
+   :app.loggers.audit.gc-task/handler
    {::db/pool (ig/ref ::db/pool)}
 
    ::webhooks/process-event-handler
@@ -494,7 +499,7 @@
     ::mtx/metrics (ig/ref ::mtx/metrics)
     ::db/pool     (ig/ref ::db/pool)}
 
-   [::default ::wrk/worker]
+   [::default ::wrk/runner]
    {::wrk/parallelism (cf/get ::worker-default-parallelism 1)
     ::wrk/queue       :default
     ::rds/redis       (ig/ref ::rds/redis)
@@ -502,7 +507,7 @@
     ::mtx/metrics     (ig/ref ::mtx/metrics)
     ::db/pool         (ig/ref ::db/pool)}
 
-   [::webhook ::wrk/worker]
+   [::webhook ::wrk/runner]
    {::wrk/parallelism (cf/get ::worker-webhook-parallelism 1)
     ::wrk/queue       :webhooks
     ::rds/redis       (ig/ref ::rds/redis)
@@ -527,6 +532,15 @@
          :flags (str/join "," (map name cf/flags))
          :worker? (contains? cf/flags :backend-worker)
          :version (:full cf/version)))
+
+(defn start-custom
+  [config]
+  (ig/load-namespaces config)
+  (alter-var-root #'system (fn [sys]
+                             (when sys (ig/halt! sys))
+                             (-> config
+                                 (ig/prep)
+                                 (ig/init)))))
 
 (defn stop
   []
@@ -574,6 +588,11 @@
         (nrepl/start-server :bind "0.0.0.0" :port 6064 :handler cider-nrepl-handler))
 
       (start)
+
+      (when (contains? cf/flags :v2-migration)
+        (px/sleep 5000)
+        (migrations.v2/migrate app.main/system))
+
       (deref p))
     (catch Throwable cause
       (binding [*out* *err*]

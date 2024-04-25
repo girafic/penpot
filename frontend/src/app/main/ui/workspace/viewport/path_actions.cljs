@@ -27,7 +27,7 @@
   (i/icon-xref :add (stl/css :add-icon :pathbar-icon)))
 
 (def ^:private remove-icon
-  (i/icon-xref :remove-icon (stl/css :remove-icon :pathbar-icon)))
+  (i/icon-xref :remove (stl/css :remove :pathbar-icon)))
 
 (def ^:private merge-nodes-icon
   (i/icon-xref :merge-nodes (stl/css :merge-nodes-icon :pathbar-icon)))
@@ -142,7 +142,8 @@
          (fn [_]
            (st/emit! (drp/toggle-snap))))]
 
-    [:div {:class (stl/css :sub-actions)}
+    [:div {:class (stl/css :sub-actions)
+           :data-dont-clear-path true}
      [:div {:class (stl/css :sub-actions-group)}
 
       ;; Draw Mode

@@ -9,6 +9,7 @@
   (:require
    [app.main.features :as features]
    [app.main.store :as st]
+   [app.plugins :as plugins]
    [app.util.timers :as tm]))
 
 (defn ^:export is-components-v2 []
@@ -23,3 +24,9 @@
 
 (defn ^:export get-team-enabled []
   (clj->js (features/get-team-enabled-features @st/state)))
+
+(defn ^:export plugins []
+  (st/emit! (features/enable-feature "plugins/runtime"))
+  (plugins/init!)
+  nil)
+

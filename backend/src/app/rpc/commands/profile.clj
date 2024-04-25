@@ -46,6 +46,10 @@
   (let [email (str/lower email)
         email (if (str/starts-with? email "mailto:")
                 (subs email 7)
+                email)
+        email (if (or (str/starts-with? email "<")
+                      (str/ends-with? email ">"))
+                (str/trim email "<>")
                 email)]
     email))
 
@@ -87,8 +91,8 @@
 
 (defn get-profile
   "Get profile by id. Throws not-found exception if no profile found."
-  [conn id & {:as attrs}]
-  (-> (db/get-by-id conn :profile id attrs)
+  [conn id & {:as opts}]
+  (-> (db/get-by-id conn :profile id opts)
       (decode-row)))
 
 ;; --- MUTATION: Update Profile (own)
@@ -233,7 +237,7 @@
                          :file-mtype (:mtype file)}}))))
 
 (defn- generate-thumbnail!
-  [file]
+  [_ file]
   (let [input   (media/run {:cmd :info :input file})
         thumb   (media/run {:cmd :profile-thumbnail
                             :format :jpeg
@@ -250,14 +254,14 @@
      :content-type (:mtype thumb)}))
 
 (defn upload-photo
-  [{:keys [::sto/storage ::wrk/executor] :as cfg} {:keys [file]}]
+  [{:keys [::sto/storage ::wrk/executor] :as cfg} {:keys [file] :as params}]
   (let [params (-> cfg
-                   (assoc ::climit/id :process-image/global)
+                   (assoc ::climit/id [[:process-image/by-profile (:profile-id params)]
+                                       [:process-image/global]])
                    (assoc ::climit/label "upload-photo")
                    (assoc ::climit/executor executor)
                    (climit/invoke! generate-thumbnail! file))]
     (sto/put-object! storage params)))
-
 
 ;; --- MUTATION: Request Email Change
 

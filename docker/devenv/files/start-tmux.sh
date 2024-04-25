@@ -6,25 +6,24 @@ cd ~;
 
 source ~/.bashrc
 
-set -e;
-
 echo "[start-tmux.sh] Installing node dependencies"
 pushd ~/penpot/frontend/
 yarn install
+yarn run playwright install --with-deps chromium
 popd
 pushd ~/penpot/exporter/
 yarn install
-npx playwright install chromium
+yarn run playwright install --with-deps chromium
 popd
 
 tmux -2 new-session -d -s penpot
 
-tmux rename-window -t penpot:0 'gulp'
+tmux rename-window -t penpot:0 'frontend watch'
 tmux select-window -t penpot:0
 tmux send-keys -t penpot 'cd penpot/frontend' enter C-l
-tmux send-keys -t penpot 'npx gulp watch' enter
+tmux send-keys -t penpot 'yarn run watch' enter
 
-tmux new-window -t penpot:1 -n 'shadow watch'
+tmux new-window -t penpot:1 -n 'frontend shadow'
 tmux select-window -t penpot:1
 tmux send-keys -t penpot 'cd penpot/frontend' enter C-l
 tmux send-keys -t penpot 'clojure -M:dev:shadow-cljs watch main' enter

@@ -4,7 +4,7 @@ export PENPOT_HOST=devenv
 export PENPOT_TENANT=dev
 export PENPOT_FLAGS="\
        $PENPOT_FLAGS \
-       enable-registration
+       enable-login-with-ldap \
        enable-login-with-password
        enable-login-with-oidc \
        enable-login-with-google \
@@ -26,12 +26,11 @@ export PENPOT_FLAGS="\
        enable-soft-rpc-rlimit \
        enable-webhooks \
        enable-access-tokens \
-       disable-feature-components-v2 \
        enable-file-validation \
-       enable-file-schema-validation \
-       disable-soft-file-schema-validation \
-       disable-soft-file-validation";
+       enable-file-schema-validation";
 
+# Default deletion delay for devenv
+export PENPOT_DELETION_DELAY="24h"
 
 # Setup default upload media file size to 100MiB
 export PENPOT_MEDIA_MAX_FILE_SIZE=104857600

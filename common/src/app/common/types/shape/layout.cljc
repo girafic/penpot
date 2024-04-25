@@ -495,9 +495,11 @@
   (= layout-align-items :stretch))
 
 (defn reverse?
-  [{:keys [layout-flex-dir]}]
-  (or (= :row-reverse layout-flex-dir)
-      (= :column-reverse layout-flex-dir)))
+  ([objects id]
+   (reverse? (get objects id)))
+  ([{:keys [layout-flex-dir]}]
+   (or (= :row-reverse layout-flex-dir)
+       (= :column-reverse layout-flex-dir))))
 
 (defn space-between?
   [{:keys [layout-justify-content]}]
@@ -543,19 +545,21 @@
    (or (:layout-item-z-index shape) 0)))
 
 (defn- comparator-layout-z-index
-  [[idx-a child-a] [idx-b child-b]]
+  [reverse? [idx-a child-a] [idx-b child-b]]
   (cond
     (> (layout-z-index child-a) (layout-z-index child-b)) 1
     (< (layout-z-index child-a) (layout-z-index child-b)) -1
+    (and (< idx-a idx-b) reverse?) -1
+    (and (> idx-a idx-b) reverse?) 1
     (< idx-a idx-b) 1
     (> idx-a idx-b) -1
     :else 0))
 
 (defn sort-layout-children-z-index
-  [children]
+  [children reverse?]
   (->> children
        (d/enumerate)
-       (sort comparator-layout-z-index)
+       (sort (partial comparator-layout-z-index reverse?))
        (mapv second)))
 
 (defn change-h-sizing?
@@ -1292,11 +1296,14 @@
         (->> (range start-index (inc to-index))
              (map vector shape-ids)
              (reduce (fn [[parent cells] [shape-id idx]]
-                       (let [[parent cells] (free-cell-push parent cells idx)]
-                         [(update-in parent [:layout-grid-cells (get-in cells [idx :id])]
-                                     assoc :position :manual
-                                     :shapes [shape-id])
-                          cells]))
+                       ;; If the shape to put in a cell is the same that is already in the cell we do nothing
+                       (if (= shape-id (get-in parent [:layout-grid-cells (get-in cells [idx :id]) :shapes 0]))
+                         [parent cells]
+                         (let [[parent cells] (free-cell-push parent cells idx)]
+                           [(update-in parent [:layout-grid-cells (get-in cells [idx :id])]
+                                       assoc :position :manual
+                                       :shapes [shape-id])
+                            cells])))
                      [parent cells])
              (first)))
       parent)))

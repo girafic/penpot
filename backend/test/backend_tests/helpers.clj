@@ -112,7 +112,7 @@
    ;; "alter table task set unlogged;\n"
    ;; "alter table task_default set unlogged;\n"
    ;; "alter table task_completed set unlogged;\n"
-   "alter table audit_log_default set unlogged ;\n"
+   "alter table audit_log set unlogged ;\n"
    "alter table storage_object set unlogged;\n"
    "alter table server_error_report set unlogged;\n"
    "alter table server_prop set unlogged;\n"
@@ -156,8 +156,8 @@
                              :app.loggers.database/reporter
                              :app.worker/cron
                              :app.worker/dispatcher
-                             [:app.main/default :app.worker/worker]
-                             [:app.main/webhook :app.worker/worker]))
+                             [:app.main/default :app.worker/runner]
+                             [:app.main/webhook :app.worker/runner]))
           _      (ig/load-namespaces system)
           system (-> (ig/prep system)
                      (ig/init))]

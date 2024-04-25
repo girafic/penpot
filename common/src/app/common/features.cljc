@@ -48,22 +48,23 @@
     "fdata/shape-data-type"
     "components/v2"
     "styles/v2"
-    "layout/grid"})
+    "layout/grid"
+    "plugins/runtime"})
 
-;; A set of features enabled by default for each file, they are
-;; implicit and are enabled by default and can't be disabled. The
-;; features listed in this set are mainly freatures addedby file
-;; migrations process, so all features referenced in migrations should
-;; be here.
-(def default-enabled-features
-  #{"fdata/shape-data-type"})
+;; A set of features enabled by default
+(def default-features
+  #{"fdata/shape-data-type"
+    "styles/v2"
+    "layout/grid"
+    "components/v2"})
 
 ;; A set of features which only affects on frontend and can be enabled
 ;; and disabled freely by the user any time. This features does not
 ;; persist on file features field but can be permanently enabled on
 ;; team feature field
 (def frontend-only-features
-  #{"styles/v2"})
+  #{"styles/v2"
+    "plugins/runtime"})
 
 ;; Features that are mainly backend only or there are a proper
 ;; fallback when frontend reports no support for it
@@ -78,7 +79,9 @@
 (def no-migration-features
   (-> #{"fdata/objects-map"
         "fdata/pointer-map"
-        "layout/grid"}
+        "layout/grid"
+        "fdata/shape-data-type"
+        "plugins/runtime"}
       (into frontend-only-features)))
 
 (sm/def! ::features
@@ -97,6 +100,7 @@
     :feature-grid-layout "layout/grid"
     :feature-fdata-objects-map "fdata/objects-map"
     :feature-fdata-pointer-map "fdata/pointer-map"
+    :feature-plugins "plugins/runtime"
     nil))
 
 (defn migrate-legacy-features
@@ -129,7 +133,7 @@
 (defn get-enabled-features
   "Get the globally enabled fratures set."
   [flags]
-  (into default-enabled-features xf-flag-to-feature flags))
+  (into default-features xf-flag-to-feature flags))
 
 (defn get-team-enabled-features
   "Get the team enabled features.
@@ -141,7 +145,6 @@
         team-features    (into #{} xf-remove-ephimeral (:features team))]
     (-> enabled-features
         (set/intersection no-migration-features)
-        (set/union default-enabled-features)
         (set/union team-features))))
 
 (defn check-client-features!
@@ -244,7 +247,7 @@
   (let [not-supported (-> (or source-features #{})
                           (set/difference destination-features)
                           (set/difference no-migration-features)
-                          (set/difference default-enabled-features)
+                          (set/difference default-features)
                           (seq))]
     (when not-supported
       (ex/raise :type :restriction
@@ -256,7 +259,7 @@
   (let [not-supported (-> (or destination-features #{})
                           (set/difference source-features)
                           (set/difference no-migration-features)
-                          (set/difference default-enabled-features)
+                          (set/difference default-features)
                           (seq))]
     (when not-supported
       (ex/raise :type :restriction

@@ -54,14 +54,17 @@
          (let [props (.-props tab)
                id    (.-id props)
                title (.-title props)
-               sid   (d/name id)]
+               sid   (d/name id)
+               tooltip (if (string? title) title nil)]
            [:div {:key (str/concat "tab-" sid)
+                  :title tooltip
                   :data-id sid
                   :on-click on-click
                   :class  (stl/css-case
                            :tab-container-tab-title true
                            :current (= selected id))}
-            title]))]]
+            [:span {:class (stl/css :content)}
+             title]]))]]
 
      [:div {:class (dm/str content-class " " (stl/css  :tab-container-content))}
       (d/seek #(= selected (-> % .-props .-id))

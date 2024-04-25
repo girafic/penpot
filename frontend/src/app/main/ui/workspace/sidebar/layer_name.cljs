@@ -51,21 +51,21 @@
 
         accept-edit
         (mf/use-fn
-         (mf/deps on-stop-edit)
+         (mf/deps shape-id on-stop-edit)
          (fn []
            (let [name-input     (mf/ref-val ref)
                  name           (str/trim (dom/get-value name-input))]
              (on-stop-edit)
              (reset! edition* false)
-             (st/emit! (dw/end-rename-shape name)))))
+             (st/emit! (dw/end-rename-shape shape-id name)))))
 
         cancel-edit
         (mf/use-fn
-         (mf/deps on-stop-edit)
+         (mf/deps shape-id on-stop-edit)
          (fn []
            (on-stop-edit)
            (reset! edition* false)
-           (st/emit! (dw/end-rename-shape nil))))
+           (st/emit! (dw/end-rename-shape shape-id nil))))
 
         on-key-down
         (mf/use-fn
@@ -109,6 +109,8 @@
          :style {"--depth" depth "--parent-size" parent-size}
          :ref ref
          :on-double-click start-edit}
-        (d/nilv shape-name "")]
+        (if (dbg/enabled? :show-ids)
+          (str (d/nilv shape-name "") " | " (str/slice (str shape-id) 24))
+          (d/nilv shape-name ""))]
        (when (and (dbg/enabled? :show-touched) ^boolean shape-touched?)
          [:span {:class (stl/css :element-name-touched)} "*"])])))

@@ -26,6 +26,7 @@
    [app.main.ui.hooks :as h]
    [app.main.ui.icons :as i]
    [app.main.ui.workspace.sidebar.assets.common :as cmm]
+   [app.util.debug :as dbg]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.timers :as tm]
@@ -183,7 +184,7 @@
                      :class (stl/css-case
                              :icon true
                              :icon-tick true
-                             :hidden invalid-text?)}
+                             :invalid invalid-text?)}
                i/tick]
               [:div {:class (stl/css :icon :icon-cross)
                      :title (tr "labels.discard")
@@ -247,18 +248,13 @@
   {::mf/props :obj}
   [{:keys [item on-enter-group]}]
   (let [group-name (:name item)
-        path (cfh/butlast-path-with-dots group-name)
         on-group-click #(on-enter-group group-name)]
     [:div {:class (stl/css :component-group)
            :on-click on-group-click
            :title group-name}
 
-     [:div {:class (stl/css :path-wrapper)}
-      (when-not (str/blank? path)
-        [:span {:class (stl/css :component-group-path)}
-         (str "\u00A0\u2022\u00A0" path)])
-      [:span {:class (stl/css :component-group-name)}
-       (cfh/last-path group-name)]]
+     [:span {:class (stl/css :component-group-name)}
+      (cfh/last-path group-name)]
 
      [:span {:class (stl/css :arrow-icon)}
       i/arrow]]))
@@ -415,10 +411,7 @@
         (mf/use-fn
          (fn [style]
            (swap! filters* assoc :listing-thumbs? (= style "grid"))))
-
-        filters-but-last (cfh/butlast-path (:path filters))
-        last-filters     (cfh/last-path (:path filters))
-        filter-path-with-dots (->> filters-but-last (cfh/split-path) (cfh/join-path-with-dot))]
+        filter-path-with-dots (->> (:path filters) (cfh/split-path) (cfh/join-path-with-dot))]
 
     [:div {:class (stl/css :component-swap)}
      [:div {:class (stl/css :element-set-title)}
@@ -461,10 +454,8 @@
                    :on-click on-go-back
                    :title filter-path-with-dots}
           [:span {:class (stl/css :back-arrow)} i/arrow]
-          (when-not (= "" filter-path-with-dots)
-            [:span {:class (stl/css :path-name)}
-             (dm/str "\u00A0\u2022\u00A0" filter-path-with-dots)])
-          [:span {:class (stl/css :path-name-last)} last-filters]])
+          [:span {:class (stl/css :path-name)}
+           filter-path-with-dots]])
 
        (when (empty? items)
          [:div {:class (stl/css :component-list-empty)}
@@ -615,9 +606,10 @@
 
             [:div {:class (stl/css :name-wrapper)}
              [:div {:class (stl/css :component-name)}
-              (if multi
-                (tr "settings.multiple")
-                (cfh/last-path shape-name))]
+              [:span {:class (stl/css :component-name-inside)}
+               (if multi
+                 (tr "settings.multiple")
+                 (cfh/last-path shape-name))]]
 
              (when (and can-swap? (not multi))
                [:div {:class (stl/css :component-parent-name)}
@@ -639,4 +631,6 @@
             [:& component-swap {:shapes copies}])
 
           (when (and (not swap-opened?) (not multi) components-v2)
-            [:& component-annotation {:id id :shape shape :component component}])])])))
+            [:& component-annotation {:id id :shape shape :component component}])
+          (when (dbg/enabled? :display-touched)
+            [:div ":touched " (str (:touched shape))])])])))

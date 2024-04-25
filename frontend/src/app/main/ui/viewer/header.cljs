@@ -180,7 +180,7 @@
        :on-zoom-fit  handle-zoom-fit
        :on-fullscreen toggle-fullscreen}]
 
-     (when (:can-edit permissions)
+     (when (:in-team permissions)
        [:span {:on-click go-to-workspace
                :class (stl/css :edit-btn)}
         i/curve])
@@ -191,7 +191,9 @@
              :on-click toggle-fullscreen}
       i/expand]
 
-     (when (:is-admin permissions)
+     (when (and
+            (:in-team permissions)
+            (:is-admin permissions))
        [:button {:on-click open-share-dialog
                  :class (stl/css :share-btn)}
         (tr "labels.share")])
@@ -201,18 +203,13 @@
                :class (stl/css :go-log-btn)} (tr "labels.log-or-sign")])]))
 
 (mf/defc header-sitemap
-  [{:keys [project file page frame] :as props}]
+  [{:keys [project file page frame toggle-thumbnails] :as props}]
   (let [project-name   (:name project)
         file-name      (:name file)
         page-name      (:name page)
         page-id        (:id page)
         frame-name     (:name frame)
         show-dropdown? (mf/use-state false)
-
-        toggle-thumbnails
-        (mf/use-fn
-         (fn []
-           (st/emit! dv/toggle-thumbnails-panel)))
 
         open-dropdown
         (mf/use-fn
@@ -254,12 +251,13 @@
             (when (= page-id id)
               [:span {:class (stl/css :icon-check)} i/tick])])]]]
       [:div {:class (stl/css :current-frame)
+             :id "current-frame"
              :on-click toggle-thumbnails}
        [:span {:class (stl/css :frame-name)} frame-name]
        [:span {:class (stl/css :icon)} i/arrow]]]]))
 
 (mf/defc header
-  [{:keys [project file page frame zoom section permissions index interactions-mode]}]
+  [{:keys [project file page frame zoom section permissions index interactions-mode shown-thumbnails]}]
   (let [go-to-dashboard
         (mf/use-fn
          #(st/emit! (dv/go-to-dashboard)))
@@ -282,17 +280,31 @@
                              (keyword))]
              (if (or (= section :interactions) (:is-logged permissions))
                (st/emit! (dv/go-to-section section))
-               (open-login-dialog)))))]
+               (open-login-dialog)))))
+
+        toggle-thumbnails
+        (mf/use-fn
+         (fn []
+           (st/emit! dv/toggle-thumbnails-panel)))
+
+
+        close-thumbnails
+        (mf/use-fn
+         (mf/deps shown-thumbnails)
+         (fn [_]
+           (when shown-thumbnails
+             (st/emit! dv/close-thumbnails-panel))))]
 
 
     [:header {:class (stl/css-case :viewer-header true
-                                   :fullscreen (mf/deref fullscreen-ref))}
+                                   :fullscreen (mf/deref fullscreen-ref))
+              :on-click close-thumbnails}
      [:div {:class (stl/css :nav-zone)}
-            ;; If the user doesn't have permission we disable the link
+      ;; If the user doesn't have permission we disable the link
       [:a {:class (stl/css :home-link)
            :on-click go-to-dashboard
-           :style {:cursor (when-not (:can-edit permissions) "auto")
-                   :pointer-events (when-not (:can-edit permissions) "none")}}
+           :style {:cursor (when-not (:in-team permissions) "auto")
+                   :pointer-events (when-not (:in-team permissions) "none")}}
        [:span {:class (stl/css :logo-icon)}
         i/logo-icon]]
 
@@ -300,6 +312,7 @@
                           :file file
                           :page page
                           :frame frame
+                          :toggle-thumbnails toggle-thumbnails
                           :index index}]]
 
      [:div {:class (stl/css :mode-zone)}
@@ -310,7 +323,7 @@
                 :title (tr "viewer.header.interactions-section" (sc/get-tooltip :open-interactions))}
        i/play]
 
-      (when (or (:can-edit permissions)
+      (when (or (:in-team permissions)
                 (= (:who-comment permissions) "all"))
         [:button {:on-click navigate
                   :data-value "comments"
