@@ -69,6 +69,11 @@
              ::page page
              ::page-id (:id page)))
 
+(defn with-page-id
+  [changes page-id]
+  (vary-meta changes assoc
+             ::page-id page-id))
+
 (defn with-container
   [changes container]
   (if (cfh/page? container)
@@ -715,6 +720,7 @@
                                    (map lookupf)
                                    (map mk-change))
                              updated-shapes))))
+
          (apply-changes-local)))))
 
 (defn update-component

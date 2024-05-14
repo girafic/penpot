@@ -12,7 +12,6 @@
    [app.common.files.changes :as cp]
    [app.common.files.changes-builder :as fcb]
    [app.common.files.helpers :as cfh]
-   [app.common.files.libraries-helpers :as cflh]
    [app.common.files.migrations :as fmg]
    [app.common.files.shapes-helpers :as cfsh]
    [app.common.files.validate :as cfv]
@@ -23,6 +22,7 @@
    [app.common.geom.shapes :as gsh]
    [app.common.geom.shapes.path :as gshp]
    [app.common.logging :as l]
+   [app.common.logic.libraries :as cll]
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.svg :as csvg]
@@ -1450,16 +1450,15 @@
                 page
                 (cons shape children))
 
-        [_ _ changes2]
-        (cflh/generate-add-component nil
-                                     [shape]
-                                     (:objects page)
-                                     (:id page)
-                                     file-id
-                                     true
-                                     nil
-                                     cfsh/prepare-create-artboard-from-selection)
-        changes (fcb/concat-changes changes changes2)]
+        [_ _ changes]
+        (cll/generate-add-component changes
+                                    [shape]
+                                    (:objects page)
+                                    (:id page)
+                                    file-id
+                                    true
+                                    nil
+                                    cfsh/prepare-create-artboard-from-selection)]
 
     (shape-cb shape)
     (:redo-changes changes)))
