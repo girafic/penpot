@@ -10,58 +10,184 @@
    [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.schema :as sm]
    [app.common.schema.desc-native :as smd]
+   [app.common.schema.generators :as sg]
    [app.common.types.color :as ctc]
    [app.common.types.colors-list :as ctcl]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
    [app.common.types.container :as ctn]
    [app.common.types.file :as ctf]
+   [app.common.types.grid :as ctg]
    [app.common.types.page :as ctp]
    [app.common.types.pages-list :as ctpl]
    [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
    [app.common.types.typographies-list :as ctyl]
    [app.common.types.typography :as ctt]
+   [app.common.uuid :as uuid]
    [clojure.set :as set]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SCHEMAS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def ^:private
-  schema:operation
-  (sm/define
-    [:multi {:dispatch :type :title "Operation" ::smd/simplified true}
-     [:set
-      [:map {:title "SetOperation"}
-       [:type [:= :set]]
-       [:attr :keyword]
-       [:val :any]
-       [:ignore-touched {:optional true} :boolean]
-       [:ignore-geometry {:optional true} :boolean]]]
-     [:set-touched
-      [:map {:title "SetTouchedOperation"}
-       [:type [:= :set-touched]]
-       [:touched [:maybe [:set :keyword]]]]]
-     [:set-remote-synced
-      [:map {:title "SetRemoteSyncedOperation"}
-       [:type [:= :set-remote-synced]]
-       [:remote-synced {:optional true} [:maybe :boolean]]]]]))
+(def schema:operation
+  [:multi {:dispatch :type
+           :title "Operation"
+           :decode/json #(update % :type keyword)
+           ::smd/simplified true}
+   [:assign
+    [:map {:title "AssignOperation"}
+     [:type [:= :assign]]
+     ;; NOTE: the full decoding is happening on the handler because it
+     ;; needs a proper context of the current shape and its type
+     [:value [:map-of :keyword :any]]
+     [:ignore-touched {:optional true} :boolean]
+     [:ignore-geometry {:optional true} :boolean]]]
+   [:set
+    [:map {:title "SetOperation"}
+     [:type [:= :set]]
+     [:attr :keyword]
+     [:val :any]
+     [:ignore-touched {:optional true} :boolean]
+     [:ignore-geometry {:optional true} :boolean]]]
+   [:set-touched
+    [:map {:title "SetTouchedOperation"}
+     [:type [:= :set-touched]]
+     [:touched [:maybe [:set :keyword]]]]]
+   [:set-remote-synced
+    [:map {:title "SetRemoteSyncedOperation"}
+     [:type [:= :set-remote-synced]]
+     [:remote-synced {:optional true} [:maybe :boolean]]]]])
 
-(sm/define! ::change
+(def schema:set-default-grid-change
+  (let [gen (->> (sg/elements #{:square :column :row})
+                 (sg/mcat (fn [grid-type]
+                            (sg/fmap (fn [params]
+                                       {:page-id (uuid/next)
+                                        :type :set-default-grid
+                                        :grid-type grid-type
+                                        :params params})
+
+                                     (case grid-type
+                                       :square (sg/generator ctg/schema:square-params)
+                                       :column (sg/generator ctg/schema:column-params)
+                                       :row    (sg/generator ctg/schema:column-params))))))]
+
+    [:multi {:decode/json #(update % :grid-type keyword)
+             :gen/gen gen
+             :dispatch :grid-type
+             ::smd/simplified true}
+     [:square
+      [:map
+       [:type [:= :set-default-grid]]
+       [:page-id ::sm/uuid]
+       [:grid-type [:= :square]]
+       [:params [:maybe ctg/schema:square-params]]]]
+
+     [:column
+      [:map
+       [:type [:= :set-default-grid]]
+       [:page-id ::sm/uuid]
+       [:grid-type [:= :column]]
+       [:params [:maybe ctg/schema:column-params]]]]
+
+     [:row
+      [:map
+       [:type [:= :set-default-grid]]
+       [:page-id ::sm/uuid]
+       [:grid-type [:= :row]]
+       [:params [:maybe ctg/schema:column-params]]]]]))
+
+(def schema:set-guide-change
+  (let [schema [:map {:title "SetGuideChange"}
+                [:type [:= :set-guide]]
+                [:page-id ::sm/uuid]
+                [:id ::sm/uuid]
+                [:params [:maybe ::ctp/guide]]]
+        gen    (->> (sg/generator schema)
+                    (sg/fmap (fn [change]
+                               (if (some? (:params change))
+                                 (update change :params assoc :id (:id change))
+                                 change))))]
+    [:schema {:gen/gen gen} schema]))
+
+(def schema:set-flow-change
+  (let [schema [:map {:title "SetFlowChange"}
+                [:type [:= :set-flow]]
+                [:page-id ::sm/uuid]
+                [:id ::sm/uuid]
+                [:params [:maybe ::ctp/flow]]]
+
+        gen    (->> (sg/generator schema)
+                    (sg/fmap (fn [change]
+                               (if (some? (:params change))
+                                 (update change :params assoc :id (:id change))
+                                 change))))]
+
+    [:schema {:gen/gen gen} schema]))
+
+(def schema:set-plugin-data-change
+  (let [types  #{:file :page :shape :color :typography :component}
+
+        schema [:map {:title "SetPagePluginData"}
+                [:type [:= :set-plugin-data]]
+                [:object-type [::sm/one-of types]]
+                ;; It's optional because files don't need the id for type :file
+                [:object-id {:optional true} ::sm/uuid]
+                [:page-id {:optional true} ::sm/uuid]
+                [:namespace {:gen/gen (sg/word-keyword)} :keyword]
+                [:key {:gen/gen (sg/word-string)} :string]
+                [:value [:maybe [:string {:gen/gen (sg/word-string)}]]]]
+
+        check1 [:fn {:error/path [:page-id]
+                     :error/message "missing page-id"}
+                (fn [{:keys [object-type] :as change}]
+                  (if (= :shape object-type)
+                    (uuid? (:page-id change))
+                    true))]
+
+        gen    (->> (sg/generator schema)
+                    (sg/filter :object-id)
+                    (sg/filter :page-id)
+                    (sg/fmap (fn [{:keys [object-type] :as change}]
+                               (cond
+                                 (= :file object-type)
+                                 (-> change
+                                     (dissoc :object-id)
+                                     (dissoc :page-id))
+
+                                 (= :shape object-type)
+                                 change
+
+                                 :else
+                                 (dissoc change :page-id)))))]
+
+    [:and {:gen/gen gen} schema check1]))
+
+(def schema:change
   [:schema
-   [:multi {:dispatch :type :title "Change" ::smd/simplified true}
+   [:multi {:dispatch :type
+            :title "Change"
+            :decode/json #(update % :type keyword)
+            ::smd/simplified true}
     [:set-option
-     [:map {:title "SetOptionChange"}
-      [:type [:= :set-option]]
+
+     ;; DEPRECATED: remove before 2.3 release
+     ;;
+     ;; Is still there for not cause error when event is received
+     [:map {:title "SetOptionChange"}]]
+
+    [:set-comment-thread-position
+     [:map
+      [:comment-thread-id ::sm/uuid]
       [:page-id ::sm/uuid]
-      [:option [:union
-                [:keyword]
-                [:vector {:gen/max 10} :keyword]]]
-      [:value :any]]]
+      [:frame-id [:maybe ::sm/uuid]]
+      [:position [:maybe ::gpt/point]]]]
 
     [:add-obj
      [:map {:title "AddObjChange"}
@@ -90,6 +216,10 @@
       [:page-id {:optional true} ::sm/uuid]
       [:component-id {:optional true} ::sm/uuid]
       [:ignore-touched {:optional true} :boolean]]]
+
+    [:set-guide schema:set-guide-change]
+    [:set-flow schema:set-flow-change]
+    [:set-default-grid schema:set-default-grid-change]
 
     [:fix-obj
      [:map {:title "FixObjChange"}
@@ -131,7 +261,12 @@
      [:map {:title "ModPageChange"}
       [:type [:= :mod-page]]
       [:id ::sm/uuid]
-      [:name :string]]]
+      ;; All props are optional, background can be nil because is the
+      ;; way to remove already set background
+      [:background {:optional true} [:maybe ::ctc/rgb-color]]
+      [:name {:optional true} :string]]]
+
+    [:set-plugin-data schema:set-plugin-data-change]
 
     [:del-page
      [:map {:title "DelPageChange"}
@@ -154,22 +289,21 @@
     [:add-color
      [:map {:title "AddColorChange"}
       [:type [:= :add-color]]
-      [:color :any]]]
+      [:color ::ctc/color]]]
 
     [:mod-color
      [:map {:title "ModColorChange"}
       [:type [:= :mod-color]]
-      [:color :any]]]
+      [:color ::ctc/color]]]
 
     [:del-color
      [:map {:title "DelColorChange"}
       [:type [:= :del-color]]
       [:id ::sm/uuid]]]
 
+    ;; DEPRECATED: remove before 2.3
     [:add-recent-color
-     [:map {:title "AddRecentColorChange"}
-      [:type [:= :add-recent-color]]
-      [:color ::ctc/recent-color]]]
+     [:map {:title "AddRecentColorChange"}]]
 
     [:add-media
      [:map {:title "AddMediaChange"}
@@ -234,14 +368,17 @@
       [:type [:= :del-typography]]
       [:id ::sm/uuid]]]]])
 
-(sm/define! ::changes
-  [:sequential {:gen/max 2} ::change])
+(def schema:changes
+  [:sequential {:gen/max 5 :gen/min 1} schema:change])
 
-(def check-change!
-  (sm/check-fn ::change))
+(sm/register! ::change schema:change)
+(sm/register! ::changes schema:changes)
+
+(def valid-change?
+  (sm/lazy-validator schema:change))
 
 (def check-changes!
-  (sm/check-fn ::changes))
+  (sm/check-fn schema:changes))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Specific helpers
@@ -256,6 +393,16 @@
 ;; Page Transformation Changes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(def ^:dynamic *touched-changes*
+  "A dynamic var that used for track changes that touch shapes on
+  first processing phase of changes. Should be set to a hash-set
+  instance and will contain changes that caused the touched
+  modification."
+  nil)
+
+(defmulti process-change (fn [_ change] (:type change)))
+(defmulti process-operation (fn [_ op] (:type op)))
+
 ;; Changes Processing Impl
 
 (defn validate-shapes!
@@ -267,10 +414,11 @@
               ;; If object has changed or is new verify is correct
               (when (and (some? shape-new)
                          (not= shape-old shape-new))
-                (dm/verify!
-                 "expected valid shape"
-                 (and (cts/check-shape! shape-new)
-                      (cts/shape? shape-new))))))]
+                (when-not (and (cts/valid-shape? shape-new)
+                               (cts/shape? shape-new))
+                  (ex/raise :type :assertion
+                            :code :data-validation
+                            :hint "invalid shape found after applying changes")))))]
 
     (->> (into #{} (map :page-id) items)
          (mapcat (fn [page-id]
@@ -284,34 +432,105 @@
                       nil))))
          (run! validate-shape!))))
 
-(defmulti process-change (fn [_ change] (:type change)))
-(defmulti process-operation (fn [_ _ op] (:type op)))
+(defn- process-touched-change
+  [data {:keys [id page-id component-id]}]
+  (let [objects (if page-id
+                  (-> data :pages-index (get page-id) :objects)
+                  (-> data :components (get component-id) :objects))
+        shape   (get objects id)
+        croot   (ctn/get-component-shape objects shape {:allow-main? true})]
+
+    (if (and (some? croot) (ctk/main-instance? croot))
+      (ctkl/set-component-modified data (:component-id croot))
+      (if (some? component-id)
+        (ctkl/set-component-modified data component-id)
+        data))))
 
 (defn process-changes
   ([data items]
    (process-changes data items true))
 
   ([data items verify?]
-   ;; When verify? false we spec the schema validation. Currently used to make just
-   ;; 1 validation even if the changes are applied twice
+   ;; When verify? false we spec the schema validation. Currently used
+   ;; to make just 1 validation even if the changes are applied twice
    (when verify?
-     (dm/verify!
-      "expected valid changes"
-      (check-changes! items)))
+     (check-changes! items))
 
-   (let [result (reduce #(or (process-change %1 %2) %1) data items)]
-     ;; Validate result shapes (only on the backend)
-     #?(:clj (validate-shapes! data result items))
-     result)))
+   (binding [*touched-changes* (volatile! #{})]
+     (let [result (reduce #(or (process-change %1 %2) %1) data items)
+           result (reduce process-touched-change result @*touched-changes*)]
+       ;; Validate result shapes (only on the backend)
+       ;;
+       ;; TODO: (PERF) add changed shapes tracking and only validate
+       ;; the tracked changes instead of iterate over all shapes
+       #?(:clj (validate-shapes! data result items))
+       result))))
 
+;; DEPRECATED: remove before 2.3 release
 (defmethod process-change :set-option
-  [data {:keys [page-id option value]}]
+  [data _]
+  data)
+
+;; --- Comment Threads
+
+(defmethod process-change :set-comment-thread-position
+  [data {:keys [page-id comment-thread-id position frame-id]}]
   (d/update-in-when data [:pages-index page-id]
-                    (fn [data]
-                      (let [path (if (seqable? option) option [option])]
-                        (if value
-                          (assoc-in data (into [:options] path) value)
-                          (assoc data :options (d/dissoc-in (:options data) path)))))))
+                    (fn [page]
+                      (if (and position frame-id)
+                        (update page :comment-thread-positions assoc
+                                comment-thread-id {:frame-id frame-id
+                                                   :position position})
+                        (update page :comment-thread-positions dissoc
+                                comment-thread-id)))))
+
+;; --- Guides
+
+(defmethod process-change :set-guide
+  [data {:keys [page-id id params]}]
+  (if (nil? params)
+    (d/update-in-when data [:pages-index page-id]
+                      (fn [page]
+                        (let [guides (get page :guides)
+                              guides (dissoc guides id)]
+                          (if (empty? guides)
+                            (dissoc page :guides)
+                            (assoc page :guides guides)))))
+
+    (let [params (assoc params :id id)]
+      (d/update-in-when data [:pages-index page-id] update :guides assoc id params))))
+
+;; --- Flows
+
+(defmethod process-change :set-flow
+  [data {:keys [page-id id params]}]
+  (if (nil? params)
+    (d/update-in-when data [:pages-index page-id]
+                      (fn [page]
+                        (let [flows (get page :flows)
+                              flows (dissoc flows id)]
+                          (if (empty? flows)
+                            (dissoc page :flows)
+                            (assoc page :flows flows)))))
+
+    (let [params (assoc params :id id)]
+      (d/update-in-when data [:pages-index page-id] update :flows assoc id params))))
+
+;; --- Grids
+
+(defmethod process-change :set-default-grid
+  [data {:keys [page-id grid-type params]}]
+  (if (nil? params)
+    (d/update-in-when data [:pages-index page-id]
+                      (fn [page]
+                        (let [default-grids (get page :default-grids)
+                              default-grids (dissoc default-grids grid-type)]
+                          (if (empty? default-grids)
+                            (dissoc page :default-grids)
+                            (assoc page :default-grids default-grids)))))
+    (d/update-in-when data [:pages-index page-id] update :default-grids assoc grid-type params)))
+
+;; --- Shape / Obj
 
 (defmethod process-change :add-obj
   [data {:keys [id obj page-id component-id frame-id parent-id index ignore-touched]}]
@@ -323,83 +542,51 @@
       (d/update-in-when data [:pages-index page-id] update-container)
       (d/update-in-when data [:components component-id] update-container))))
 
+(defn- process-operations
+  [objects {:keys [id operations] :as change}]
+  (if-let [shape (get objects id)]
+    (let [shape    (reduce process-operation shape operations)
+          touched? (-> shape meta ::ctn/touched)]
+      ;; NOTE: processing operation functions can assign
+      ;; the ::ctn/touched metadata on shapes, in this case we
+      ;; need to report them for to be used in the second
+      ;; phase of changes procesing
+      (when touched? (some-> *touched-changes* (vswap! conj change)))
+      (assoc objects id shape))
+
+    objects))
+
 (defmethod process-change :mod-obj
-  [data {:keys [id page-id component-id operations]}]
-  (let [changed? (atom false)
+  [data {:keys [page-id component-id] :as change}]
+  (if page-id
+    (d/update-in-when data [:pages-index page-id :objects] process-operations change)
+    (d/update-in-when data [:components component-id :objects] process-operations change)))
 
-        process-and-register (partial process-operation
-                                      (fn [_shape] (reset! changed? true)))
+(defn- process-children-reordering
+  [objects {:keys [parent-id shapes] :as change}]
+  (if-let [old-shapes (dm/get-in objects [parent-id :shapes])]
+    (let [id->idx
+          (update-vals
+           (->> (d/enumerate shapes)
+                (group-by second))
+           (comp first first))
 
-        update-fn (fn [objects]
-                    (d/update-when objects id
-                                   #(reduce process-and-register % operations)))
+          new-shapes
+          (vec (sort-by #(d/nilv (id->idx %) -1) < old-shapes))]
 
-        check-modify-component (fn [data]
-                                 (if @changed?
-                                   ;; When a shape is modified, if it belongs to a main component instance,
-                                   ;; the component needs to be marked as modified.
-                                   (let [objects (if page-id
-                                                   (-> data :pages-index (get page-id) :objects)
-                                                   (-> data :components (get component-id) :objects))
-                                         shape (get objects id)
-                                         component-root (ctn/get-component-shape objects shape {:allow-main? true})]
-                                     (if (and (some? component-root) (ctk/main-instance? component-root))
-                                       (ctkl/set-component-modified data (:component-id component-root))
-                                       (if (some? component-id)
-                                         (ctkl/set-component-modified data component-id)
-                                         data)))
-                                   data))]
+      (if (not= old-shapes new-shapes)
+        (do
+          (some-> *touched-changes* (vswap! conj change))
+          (update objects parent-id assoc :shapes new-shapes))
+        objects))
 
-    (as-> data $
-      (if page-id
-        (d/update-in-when $ [:pages-index page-id :objects] update-fn)
-        (d/update-in-when $ [:components component-id :objects] update-fn))
-      (check-modify-component $))))
+    objects))
 
 (defmethod process-change :reorder-children
-  [data {:keys [parent-id shapes page-id component-id]}]
-  (let [changed? (atom false)
-
-        update-fn
-        (fn [objects]
-          (let [old-shapes (dm/get-in objects [parent-id :shapes])
-
-                id->idx
-                (update-vals
-                 (->> shapes
-                      d/enumerate
-                      (group-by second))
-                 (comp first first))
-
-                new-shapes
-                (into [] (sort-by #(d/nilv (id->idx %) -1) < old-shapes))]
-
-            (reset! changed? (not= old-shapes new-shapes))
-
-            (cond-> objects
-              @changed?
-              (d/assoc-in-when [parent-id :shapes] new-shapes))))
-
-        check-modify-component
-        (fn [data]
-          (if @changed?
-            ;; When a shape is modified, if it belongs to a main component instance,
-            ;; the component needs to be marked as modified.
-            (let [objects (if page-id
-                            (-> data :pages-index (get page-id) :objects)
-                            (-> data :components (get component-id) :objects))
-                  shape (get objects parent-id)
-                  component-root (ctn/get-component-shape objects shape {:allow-main? true})]
-              (if (and (some? component-root) (ctk/main-instance? component-root))
-                (ctkl/set-component-modified data (:component-id component-root))
-                data))
-            data))]
-
-    (as-> data $
-      (if page-id
-        (d/update-in-when $ [:pages-index page-id :objects] update-fn)
-        (d/update-in-when $ [:components component-id :objects] update-fn))
-      (check-modify-component $))))
+  [data {:keys [page-id component-id] :as change}]
+  (if page-id
+    (d/update-in-when data [:pages-index page-id :objects] process-children-reordering change)
+    (d/update-in-when data [:components component-id :objects] process-children-reordering change)))
 
 (defmethod process-change :del-obj
   [data {:keys [page-id component-id id ignore-touched]}]
@@ -525,6 +712,7 @@
                       (d/update-in-when [pid :shapes] d/without-obj sid)
                       (d/update-in-when [pid :shapes] d/vec-without-nils)
                       (cond-> component? (d/update-when pid #(dissoc % :remote-synced))))))))
+
           (update-parent-id [objects id]
             (-> objects
                 (d/update-when id assoc :parent-id parent-id)))
@@ -583,8 +771,46 @@
     (ctpl/add-page data page)))
 
 (defmethod process-change :mod-page
-  [data {:keys [id name]}]
-  (d/update-in-when data [:pages-index id] assoc :name name))
+  [data {:keys [id] :as params}]
+  (d/update-in-when data [:pages-index id]
+                    (fn [page]
+                      (let [name (get params :name)
+                            bg   (get params :background :not-found)]
+                        (cond-> page
+                          (string? name)
+                          (assoc :name name)
+
+                          (string? bg)
+                          (assoc :background bg)
+
+                          (nil? bg)
+                          (dissoc :background))))))
+
+(defmethod process-change :set-plugin-data
+  [data {:keys [object-type object-id page-id namespace key value]}]
+  (letfn [(update-fn [data]
+            (if (some? value)
+              (assoc-in data [:plugin-data namespace key] value)
+              (update-in data [:plugin-data namespace] dissoc key)))]
+
+    (case object-type
+      :file
+      (update-fn data)
+
+      :page
+      (d/update-in-when data [:pages-index object-id] update-fn)
+
+      :shape
+      (d/update-in-when data [:pages-index page-id :objects object-id] update-fn)
+
+      :color
+      (d/update-in-when data [:colors object-id] update-fn)
+
+      :typography
+      (d/update-in-when data [:typographies object-id] update-fn)
+
+      :component
+      (d/update-in-when data [:components object-id] update-fn))))
 
 (defmethod process-change :del-page
   [data {:keys [id]}]
@@ -606,18 +832,11 @@
   [data {:keys [id]}]
   (ctcl/delete-color data id))
 
+;; DEPRECATED: remove before 2.3
 (defmethod process-change :add-recent-color
-  [data {:keys [color]}]
-  ;; Moves the color to the top of the list and then truncates up to 15
-  (update
-   data
-   :recent-colors
-   (fn [rc]
-     (let [rc (->> rc (d/removev (partial ctc/eq-recent-color? color)))
-           rc (-> rc (conj color))]
-       (cond-> rc
-         (> (count rc) 15)
-         (subvec 1))))))
+  [data _]
+  data)
+
 
 ;; -- Media
 
@@ -671,70 +890,48 @@
 
 ;; === Operations
 
+(def ^:private decode-shape
+  (sm/decoder cts/schema:shape sm/json-transformer))
+
+(defmethod process-operation :assign
+  [{:keys [type] :as shape} {:keys [value] :as op}]
+  (let [modifications (assoc value :type type)
+        modifications (decode-shape modifications)]
+    (reduce-kv (fn [shape k v]
+                 (process-operation shape {:type :set
+                                           :attr k
+                                           :val v
+                                           :ignore-touched (:ignore-touched op)
+                                           :ignore-geometry (:ignore-geometry op)}))
+               shape
+               modifications)))
+
 (defmethod process-operation :set
-  [on-changed shape op]
-  (let [attr            (:attr op)
-        group           (get ctk/sync-attrs attr)
-        val             (:val op)
-        shape-val       (get shape attr)
-        ignore          (or (:ignore-touched op) (= attr :position-data)) ;; position-data is a derived attribute and
-        ignore-geometry (:ignore-geometry op)                             ;; never triggers touched by itself
-        is-geometry?    (and (or (= group :geometry-group)
-                                 (and (= group :content-group) (= (:type shape) :path)))
-                             (not (#{:width :height} attr))) ;; :content in paths are also considered geometric
-                        ;; TODO: the check of :width and :height probably may be removed
-                        ;;       after the check added in data/workspace/modifiers/check-delta
-                        ;;       function. Better check it and test toroughly when activating
-                        ;;       components-v2 mode.
-        in-copy?        (ctk/in-component-copy? shape)
-
-        ;; For geometric attributes, there are cases in that the value changes
-        ;; slightly (e.g. when rounding to pixel, or when recalculating text
-        ;; positions in different zoom levels). To take this into account, we
-        ;; ignore geometric changes smaller than 1 pixel.
-        equal? (if is-geometry?
-                 (gsh/close-attrs? attr val shape-val 1)
-                 (gsh/close-attrs? attr val shape-val))]
-
-    ;; Notify when value has changed, except when it has not moved relative to the
-    ;; component head.
-    (when (and group (not equal?) (not (and ignore-geometry is-geometry?)))
-      (on-changed shape))
-
-    (cond-> shape
-      ;; Depending on the origin of the attribute change, we need or not to
-      ;; set the "touched" flag for the group the attribute belongs to.
-      ;; In some cases we need to ignore touched only if the attribute is
-      ;; geometric (position, width or transformation).
-      (and in-copy? group (not ignore) (not equal?)
-           (not (and ignore-geometry is-geometry?)))
-      (-> (update :touched cfh/set-touched-group group)
-          (dissoc :remote-synced))
-
-      (nil? val)
-      (dissoc attr)
-
-      (some? val)
-      (assoc attr val))))
+  [shape op]
+  (ctn/set-shape-attr shape
+                      (:attr op)
+                      (:val op)
+                      :ignore-touched (:ignore-touched op)
+                      :ignore-geometry (:ignore-geometry op)))
 
 (defmethod process-operation :set-touched
-  [_ shape op]
-  (let [touched (:touched op)
+  [shape op]
+  (let [touched  (:touched op)
         in-copy? (ctk/in-component-copy? shape)]
     (if (or (not in-copy?) (nil? touched) (empty? touched))
       (dissoc shape :touched)
       (assoc shape :touched touched))))
 
 (defmethod process-operation :set-remote-synced
-  [_ shape op]
+  [shape op]
   (let [remote-synced (:remote-synced op)
-        in-copy? (ctk/in-component-copy? shape)]
+        in-copy?      (ctk/in-component-copy? shape)]
     (if (or (not in-copy?) (not remote-synced))
       (dissoc shape :remote-synced)
       (assoc shape :remote-synced true))))
 
 (defmethod process-operation :default
-  [_ _ op]
+  [_ op]
   (ex/raise :type :not-implemented
             :code :operation-not-implemented
             :context {:type (:type op)}))
@@ -860,5 +1057,3 @@
 (defmethod frames-changed :default
   [_ _]
   nil)
-
-

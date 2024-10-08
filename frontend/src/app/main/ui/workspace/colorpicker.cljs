@@ -21,7 +21,8 @@
    [app.main.store :as st]
    [app.main.ui.components.file-uploader :refer [file-uploader]]
    [app.main.ui.components.select :refer [select]]
-   [app.main.ui.components.tab-container :refer [tab-container tab-element]]
+   [app.main.ui.ds.foundations.assets.icon :as ic]
+   [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
    [app.main.ui.icons :as i]
    [app.main.ui.workspace.colorpicker.color-inputs :refer [color-inputs]]
    [app.main.ui.workspace.colorpicker.gradients :refer [gradients]]
@@ -168,7 +169,9 @@
            (if (and (some? (:color color)) (some? (:gradient data)))
              (handle-change-color {:hex (:color color) :alpha (:opacity color)})
              (do
-               (st/emit! (dc/apply-color-from-colorpicker color))
+               (st/emit!
+                (dwl/add-recent-color color)
+                (dc/apply-color-from-colorpicker color))
                (on-change color)))))
 
         on-add-library-color
@@ -206,7 +209,50 @@
              [{:value :linear-gradient :label (tr "media.linear")}
               {:value :radial-gradient :label (tr "media.radial")}])
            (when (not disable-image)
-             [{:value :image :label (tr "media.image")}])))]
+             [{:value :image :label (tr "media.image")}])))
+
+        tabs
+        #js [#js {:aria-label (tr "workspace.libraries.colors.rgba")
+                  :icon ic/rgba
+                  :id "ramp"
+                  :content (mf/html (if picking-color?
+                                      [:div {:class (stl/css :picker-detail-wrapper)}
+                                       [:div {:class (stl/css :center-circle)}]
+                                       [:canvas#picker-detail {:class (stl/css :picker-detail) :width 256 :height 140}]]
+                                      [:& ramp-selector
+                                       {:color current-color
+                                        :disable-opacity disable-opacity
+                                        :on-change handle-change-color
+                                        :on-start-drag on-start-drag
+                                        :on-finish-drag on-finish-drag}]))}
+
+             #js {:aria-label "Harmony"
+                  :icon ic/rgba-complementary
+                  :id "harmony"
+                  :content (mf/html (if picking-color?
+                                      [:div {:class (stl/css :picker-detail-wrapper)}
+                                       [:div {:class (stl/css :center-circle)}]
+                                       [:canvas#picker-detail {:class (stl/css :picker-detail) :width 256 :height 140}]]
+                                      [:& harmony-selector
+                                       {:color current-color
+                                        :disable-opacity disable-opacity
+                                        :on-change handle-change-color
+                                        :on-start-drag on-start-drag
+                                        :on-finish-drag on-finish-drag}]))}
+
+             #js {:aria-label "HSVA"
+                  :icon ic/hsva
+                  :id "hsva"
+                  :content (mf/html (if picking-color?
+                                      [:div {:class (stl/css :picker-detail-wrapper)}
+                                       [:div {:class (stl/css :center-circle)}]
+                                       [:canvas#picker-detail {:class (stl/css :picker-detail) :width 256 :height 140}]]
+                                      [:& hsva-selector
+                                       {:color current-color
+                                        :disable-opacity disable-opacity
+                                        :on-change handle-change-color
+                                        :on-start-drag on-start-drag
+                                        :on-finish-drag on-finish-drag}]))}]]
 
     ;; Initialize colorpicker state
     (mf/with-effect []
@@ -304,46 +350,9 @@
              :on-selected on-fill-image-selected}]]])
        [:*
         [:div {:class (stl/css :colorpicker-tabs)}
-         [:& tab-container
-          {:on-change-tab on-change-tab
-           :selected @active-color-tab
-           :collapsable false}
-
-          [:& tab-element {:id :ramp :title i/rgba}
-           (if picking-color?
-             [:div {:class (stl/css :picker-detail-wrapper)}
-              [:div {:class (stl/css :center-circle)}]
-              [:canvas#picker-detail {:class (stl/css :picker-detail) :width 256 :height 140}]]
-             [:& ramp-selector
-              {:color current-color
-               :disable-opacity disable-opacity
-               :on-change handle-change-color
-               :on-start-drag on-start-drag
-               :on-finish-drag on-finish-drag}])]
-
-          [:& tab-element {:id :harmony :title i/rgba-complementary}
-           (if picking-color?
-             [:div {:class (stl/css :picker-detail-wrapper)}
-              [:div {:class (stl/css :center-circle)}]
-              [:canvas#picker-detail {:class (stl/css :picker-detail) :width 256 :height 140}]]
-             [:& harmony-selector
-              {:color current-color
-               :disable-opacity disable-opacity
-               :on-change handle-change-color
-               :on-start-drag on-start-drag
-               :on-finish-drag on-finish-drag}])]
-
-          [:& tab-element {:id :hsva :title i/hsva}
-           (if picking-color?
-             [:div {:class (stl/css :picker-detail-wrapper)}
-              [:div {:class (stl/css :center-circle)}]
-              [:canvas#picker-detail {:class (stl/css :picker-detail) :width 256 :height 140}]]
-             [:& hsva-selector
-              {:color current-color
-               :disable-opacity disable-opacity
-               :on-change handle-change-color
-               :on-start-drag on-start-drag
-               :on-finish-drag on-finish-drag}])]]]
+         [:> tab-switcher* {:tabs tabs
+                            :default-selected "ramp"
+                            :on-change-tab on-change-tab}]]
 
         [:& color-inputs
          {:type (if (= @active-color-tab :hsva) :hsv :rgb)
@@ -372,15 +381,14 @@
 (defn calculate-position
   "Calculates the style properties for the given coordinates and position"
   [{vh :height} position x y]
-  (let [;; picker height in pixels
-        h        510
-
+  (let [;; picker size in pixels
+        h 510
+        w 284
         ;; Checks for overflow outside the viewport height
         max-y   (- vh h)
         rulers? (mf/deref refs/rulers?)
         left-offset (if rulers? 40 18)
-
-        x-pos 400]
+        right-offset (+ w 40)]
 
     (cond
       (or (nil? x) (nil? y))
@@ -388,9 +396,9 @@
 
       (= position :left)
       (if (> y max-y)
-        #js {:left (dm/str (- x x-pos) "px")
+        #js {:left (dm/str (- x right-offset) "px")
              :bottom "1rem"}
-        #js {:left (dm/str (- x x-pos) "px")
+        #js {:left (dm/str (- x right-offset) "px")
              :top (dm/str (- y 70) "px")})
 
       (= position :right)
@@ -440,6 +448,7 @@
          (on-close @last-change)))
 
     [:div {:class (stl/css :colorpicker-tooltip)
+           :data-testid "colorpicker"
            :style style}
 
      [:& colorpicker {:data data

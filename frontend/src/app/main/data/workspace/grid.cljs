@@ -6,11 +6,12 @@
 
 (ns app.main.data.workspace.grid
   (:require
-   [app.common.colors :as clr]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.changes-builder :as pcb]
-   [app.main.data.workspace.changes :as dch]
+   [app.common.types.grid :as ctg]
+   [app.main.data.changes :as dch]
+   [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.state-helpers :as wsh]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -19,25 +20,6 @@
 ;; Grid
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defonce ^:private default-square-params
-  {:size 16
-   :color {:color clr/info
-           :opacity 0.4}})
-
-(defonce ^:private default-layout-params
-  {:size 12
-   :type :stretch
-   :item-length nil
-   :gutter 8
-   :margin 0
-   :color {:color clr/default-layout
-           :opacity 0.1}})
-
-(defonce default-grid-params
-  {:square default-square-params
-   :column default-layout-params
-   :row    default-layout-params})
-
 (defn add-frame-grid
   [frame-id]
   (dm/assert! (uuid? frame-id))
@@ -45,14 +27,14 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [page-id (:current-page-id state)
-            data    (get-in state [:workspace-data :pages-index page-id])
-            params  (or (get-in data [:options :saved-grids :square])
-                        (:square default-grid-params))
+            page    (dm/get-in state [:workspace-data :pages-index page-id])
+            params  (or (dm/get-in page [:default-grids :square])
+                        (:square ctg/default-grid-params))
             grid    {:type :square
                      :params params
                      :display true}]
-        (rx/of (dch/update-shapes [frame-id]
-                                  (fn [obj] (update obj :grids (fnil #(conj % grid) [])))))))))
+        (rx/of (dwsh/update-shapes [frame-id]
+                                   (fn [obj] (update obj :grids (fnil #(conj % grid) [])))))))))
 
 
 (defn remove-frame-grid
@@ -60,14 +42,14 @@
   (ptk/reify ::remove-frame-grid
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (dch/update-shapes [frame-id] (fn [o] (update o :grids (fnil #(d/remove-at-index % index) []))))))))
+      (rx/of (dwsh/update-shapes [frame-id] (fn [o] (update o :grids (fnil #(d/remove-at-index % index) []))))))))
 
 (defn set-frame-grid
   [frame-id index data]
   (ptk/reify ::set-frame-grid
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (dch/update-shapes [frame-id] #(assoc-in % [:grids index] data))))))
+      (rx/of (dwsh/update-shapes [frame-id] #(assoc-in % [:grids index] data))))))
 
 (defn set-default-grid
   [type params]
@@ -78,4 +60,4 @@
         (rx/of (dch/commit-changes
                 (-> (pcb/empty-changes it)
                     (pcb/with-page page)
-                    (pcb/set-page-option [:saved-grids type] params))))))))
+                    (pcb/set-default-grid type params))))))))

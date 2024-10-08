@@ -266,7 +266,11 @@
         (pcb/update-shapes [shape-id] #(assoc % :component-root true))
 
         :always
-        ; Near shape-refs need to be advanced one level
+        ; First level subinstances of a detached component can't have swap-slot
+        (pcb/update-shapes [shape-id] ctk/remove-swap-slot)
+
+        (nil? (ctk/get-swap-slot shape))
+        ; Near shape-refs need to be advanced one level (except if the head is already swapped)
         (generate-advance-nesting-level nil container libraries (:id shape)))
 
       ;; Otherwise, detach the shape and all children
@@ -280,9 +284,27 @@
   (let [children (cfh/get-children-with-self (:objects container) shape-id)
         skip-near (fn [changes shape]
                     (let [ref-shape (ctf/find-ref-shape file container libraries shape {:include-deleted? true})]
-                      (if (some? (:shape-ref ref-shape))
-                        (pcb/update-shapes changes [(:id shape)] #(assoc % :shape-ref (:shape-ref ref-shape)))
-                        changes)))]
+                      (cond-> changes
+                        (some? (:shape-ref ref-shape))
+                        (pcb/update-shapes [(:id shape)] #(assoc % :shape-ref (:shape-ref ref-shape)))
+
+                        ;; When advancing level, the normal touched groups (not swap slots) of the
+                        ;; ref-shape must be merged into the current shape, because they refer to
+                        ;; the new referenced shape.
+                        (some? ref-shape)
+                        (pcb/update-shapes
+                         [(:id shape)]
+                         #(assoc % :touched
+                                 (clojure.set/union (:touched shape)
+                                                    (ctk/normal-touched-groups ref-shape))))
+
+                        ;; Swap slot must also be copied if the current shape has not any,
+                        ;; except if this is the first level subcopy.
+                        (and (some? (ctk/get-swap-slot ref-shape))
+                             (nil? (ctk/get-swap-slot shape))
+                             (not= (:id shape) shape-id))
+                        (pcb/update-shapes [(:id shape)] #(ctk/set-swap-slot % (ctk/get-swap-slot ref-shape))))))]
+
     (reduce skip-near changes children)))
 
 (defn prepare-restore-component
@@ -1190,7 +1212,7 @@
                                                        :shapes all-parents}))
         changes' (reduce del-obj-change changes' new-shapes)]
 
-    (if (and (cfh/touched-group? parent-shape :shapes-group) omit-touched?)
+    (if (and (ctk/touched-group? parent-shape :shapes-group) omit-touched?)
       changes
       changes')))
 
@@ -1345,7 +1367,7 @@
                          changes'
                          ids)]
 
-    (if (and (cfh/touched-group? parent :shapes-group) omit-touched?)
+    (if (and (ctk/touched-group? parent :shapes-group) omit-touched?)
       changes
       changes')))
 
@@ -1381,7 +1403,7 @@
                                                   :ignore-touched true
                                                   :syncing true})))]
 
-    (if (and (cfh/touched-group? parent :shapes-group) omit-touched?)
+    (if (and (ctk/touched-group? parent :shapes-group) omit-touched?)
       changes
       changes')))
 
@@ -1842,12 +1864,11 @@
                     ;; if the shape isn't inside a main component, it shouldn't have a swap slot
                     (and (nil? (ctk/get-swap-slot new-shape))
                          inside-comp?)
-                    (update :touched cfh/set-touched-group (-> (ctf/find-swap-slot shape
-                                                                                   page
-                                                                                   {:id (:id file)
-                                                                                    :data file}
-                                                                                   libraries)
-                                                               (ctk/build-swap-slot-group))))]
+                    (ctk/set-swap-slot (ctf/find-swap-slot shape
+                                                           page
+                                                           {:id (:id file)
+                                                            :data file}
+                                                           libraries)))]
 
     [new-shape (-> changes
                    ;; Restore the properties
@@ -1926,54 +1947,54 @@
 
 (defn generate-duplicate-flows
   [changes shapes page ids-map]
-  (let [flows            (-> page :options :flows)
-        unames           (volatile! (into #{} (map :name flows)))
-        frames-with-flow (->> shapes
-                              (filter #(= (:type %) :frame))
-                              (filter #(some? (ctp/get-frame-flow flows (:id %)))))]
-    (if-not (empty? frames-with-flow)
-      (let [update-flows (fn [flows]
-                           (reduce
-                            (fn [flows frame]
-                              (let [name     (cfh/generate-unique-name @unames "Flow 1")
-                                    _        (vswap! unames conj name)
-                                    new-flow {:id (uuid/next)
-                                              :name name
-                                              :starting-frame (get ids-map (:id frame))}]
-                                (ctp/add-flow flows new-flow)))
-                            flows
-                            frames-with-flow))]
-        (pcb/update-page-option changes :flows update-flows))
-      changes)))
+  (let [flows            (get page :flows)
+        unames           (volatile! (cfh/get-used-names (vals flows)))
+        has-flow?        (partial ctp/get-frame-flow flows)]
+
+    (reduce (fn [changes frame-id]
+              (let [name     (cfh/generate-unique-name @unames "Flow 1")
+                    frame-id (get ids-map frame-id)
+                    flow-id  (uuid/next)
+                    new-flow {:id flow-id
+                              :name name
+                              :starting-frame frame-id}]
+
+                (vswap! unames conj name)
+                (pcb/set-flow changes flow-id new-flow)))
+
+            changes
+            (->> shapes
+                 (filter cfh/frame-shape?)
+                 (map :id)
+                 (filter has-flow?)))))
 
 (defn generate-duplicate-guides
   [changes shapes page ids-map delta]
-  (let [guides (get-in page [:options :guides])
-        frames (->> shapes (filter cfh/frame-shape?))
+  (let [guides (get page :guides)
+        frames (filter cfh/frame-shape? shapes)]
 
-        new-guides
-        (reduce
-         (fn [g frame]
-           (let [new-id     (ids-map (:id frame))
-                 new-frame  (-> frame (gsh/move delta))
+    ;; FIXME: this can be implemented efficiently just indexing guides
+    ;; by frame-id instead of iterate over all guides all the time
 
-                 new-guides
-                 (->> guides
-                      (vals)
-                      (filter #(= (:frame-id %) (:id frame)))
-                      (map #(-> %
-                                (assoc :id (uuid/next))
-                                (assoc :frame-id new-id)
-                                (assoc :position (if (= (:axis %) :x)
-                                                   (+ (:position %) (- (:x new-frame) (:x frame)))
-                                                   (+ (:position %) (- (:y new-frame) (:y frame))))))))]
-             (cond-> g
-               (not-empty new-guides)
-               (conj (into {} (map (juxt :id identity) new-guides))))))
-         guides
-         frames)]
-    (-> (pcb/with-page changes page)
-        (pcb/set-page-option :guides new-guides))))
+    (reduce (fn [changes frame]
+              (let [new-id     (get ids-map (:id frame))
+                    new-frame  (gsh/move frame delta)]
+
+                (reduce-kv (fn [changes _ guide]
+                             (if (= (:id frame) (:frame-id guide))
+                               (let [guide-id (uuid/next)
+                                     position (if (= (:axis guide) :x)
+                                                (+ (:position guide) (- (:x new-frame) (:x frame)))
+                                                (+ (:position guide) (- (:y new-frame) (:y frame))))
+                                     guide    {:id guide-id
+                                               :frame-id new-id
+                                               :position position}]
+                                 (pcb/set-guide changes guide-id guide))
+                               changes))
+                           changes
+                           guides)))
+            (pcb/with-page changes page)
+            frames)))
 
 (defn generate-duplicate-component-change
   [changes objects page component-root parent-id frame-id delta libraries library-data]

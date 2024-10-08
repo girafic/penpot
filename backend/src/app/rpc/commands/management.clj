@@ -16,6 +16,7 @@
    [app.config :as cf]
    [app.db :as db]
    [app.http.sse :as sse]
+   [app.loggers.audit :as audit]
    [app.loggers.webhooks :as-alias webhooks]
    [app.rpc :as-alias rpc]
    [app.rpc.commands.files :as files]
@@ -87,10 +88,9 @@
 
 (def ^:private
   schema:duplicate-file
-  (sm/define
-    [:map {:title "duplicate-file"}
-     [:file-id ::sm/uuid]
-     [:name {:optional true} :string]]))
+  [:map {:title "duplicate-file"}
+   [:file-id ::sm/uuid]
+   [:name {:optional true} [:string {:max 250}]]])
 
 (sv/defmethod ::duplicate-file
   "Duplicate a single file in the same team."
@@ -149,10 +149,9 @@
 
 (def ^:private
   schema:duplicate-project
-  (sm/define
-    [:map {:title "duplicate-project"}
-     [:project-id ::sm/uuid]
-     [:name {:optional true} :string]]))
+  [:map {:title "duplicate-project"}
+   [:project-id ::sm/uuid]
+   [:name {:optional true} [:string {:max 250}]]])
 
 (sv/defmethod ::duplicate-project
   "Duplicate an entire project with all the files"
@@ -326,10 +325,9 @@
 
 (def ^:private
   schema:move-files
-  (sm/define
-    [:map {:title "move-files"}
-     [:ids ::sm/set-of-uuid]
-     [:project-id ::sm/uuid]]))
+  [:map {:title "move-files"}
+   [:ids ::sm/set-of-uuid]
+   [:project-id ::sm/uuid]])
 
 (sv/defmethod ::move-files
   "Move a set of files from one project to other."
@@ -381,10 +379,9 @@
 
 (def ^:private
   schema:move-project
-  (sm/define
-    [:map {:title "move-project"}
-     [:team-id ::sm/uuid]
-     [:project-id ::sm/uuid]]))
+  [:map {:title "move-project"}
+   [:team-id ::sm/uuid]
+   [:project-id ::sm/uuid]])
 
 (sv/defmethod ::move-project
   "Move projects between teams"
@@ -396,25 +393,38 @@
 
 ;; --- COMMAND: Clone Template
 
-(defn- clone-template
-  [{:keys [::wrk/executor ::bf.v1/project-id] :as cfg} template]
-  (db/tx-run! cfg (fn [{:keys [::db/conn] :as cfg}]
+(defn clone-template
+  [cfg {:keys [project-id profile-id] :as params} template]
+  (db/tx-run! cfg (fn [{:keys [::db/conn ::wrk/executor] :as cfg}]
                     ;; NOTE: the importation process performs some operations that
                     ;; are not very friendly with virtual threads, and for avoid
                     ;; unexpected blocking of other concurrent operations we
                     ;; dispatch that operation to a dedicated executor.
-                    (let [result (px/submit! executor (partial bf.v1/import-files! cfg template))]
+                    (let [cfg    (-> cfg
+                                     (assoc ::bf.v1/project-id project-id)
+                                     (assoc ::bf.v1/profile-id profile-id))
+                          result (px/invoke! executor (partial bf.v1/import-files! cfg template))]
+
                       (db/update! conn :project
                                   {:modified-at (dt/now)}
                                   {:id project-id})
-                      (deref result)))))
+
+                      (let [props (audit/clean-props params)]
+                        (doseq [file-id result]
+                          (let [props (assoc props :id file-id)
+                                event (-> (audit/event-from-rpc-params params)
+                                          (assoc ::audit/profile-id profile-id)
+                                          (assoc ::audit/name "create-file")
+                                          (assoc ::audit/props props))]
+                            (audit/submit! cfg event))))
+
+                      result))))
 
 (def ^:private
   schema:clone-template
-  (sm/define
-    [:map {:title "clone-template"}
-     [:project-id ::sm/uuid]
-     [:template-id ::sm/word-string]]))
+  [:map {:title "clone-template"}
+   [:project-id ::sm/uuid]
+   [:template-id ::sm/word-string]])
 
 (sv/defmethod ::clone-template
   "Clone into the specified project the template by its id."
@@ -426,15 +436,14 @@
   (let [project   (db/get-by-id pool :project project-id {:columns [:id :team-id]})
         _         (teams/check-edition-permissions! pool profile-id (:team-id project))
         template  (tmpl/get-template-stream cfg template-id)
-        params    (-> cfg
-                      (assoc ::bf.v1/project-id (:id project))
-                      (assoc ::bf.v1/profile-id profile-id))]
+        params    (assoc params :profile-id profile-id)]
+
     (when-not template
       (ex/raise :type :not-found
                 :code :template-not-found
                 :hint "template not found"))
 
-    (sse/response #(clone-template params template))))
+    (sse/response #(clone-template cfg params template))))
 
 ;; --- COMMAND: Get list of builtin templates
 

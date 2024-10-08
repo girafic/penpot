@@ -6,11 +6,16 @@
 
 (ns user
   (:require
+   [app.common.data :as d]
+   [app.common.fressian :as fres]
+   [app.common.json :as json]
    [app.common.pprint :as pp]
    [app.common.schema :as sm]
    [app.common.schema.desc-js-like :as smdj]
    [app.common.schema.desc-native :as smdn]
    [app.common.schema.generators :as sg]
+   [malli.core :as m]
+   [malli.util :as mu]
    [clojure.java.io :as io]
    [clojure.pprint :refer [pprint print-table]]
    [clojure.repl :refer :all]

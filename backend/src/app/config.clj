@@ -11,29 +11,16 @@
    [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.flags :as flags]
-   [app.common.spec :as us]
+   [app.common.schema :as sm]
    [app.common.version :as v]
+   [app.util.overrides]
    [app.util.time :as dt]
    [clojure.core :as c]
    [clojure.java.io :as io]
-   [clojure.pprint :as pprint]
-   [clojure.spec.alpha :as s]
    [cuerdas.core :as str]
    [datoteka.fs :as fs]
    [environ.core :refer [env]]
    [integrant.core :as ig]))
-
-(prefer-method print-method
-               clojure.lang.IRecord
-               clojure.lang.IDeref)
-
-(prefer-method print-method
-               clojure.lang.IPersistentMap
-               clojure.lang.IDeref)
-
-(prefer-method pprint/simple-dispatch
-               clojure.lang.IPersistentMap
-               clojure.lang.IDeref)
 
 (defmethod ig/init-key :default
   [_ data]
@@ -45,18 +32,19 @@
     (d/without-nils data)
     data))
 
-(def defaults
+(def default
   {:database-uri "postgresql://postgres/penpot"
    :database-username "penpot"
    :database-password "penpot"
 
-   :default-blob-version 5
+   :default-blob-version 4
 
-   :rpc-rlimit-config (fs/path "resources/rlimit.edn")
-   :rpc-climit-config (fs/path "resources/climit.edn")
+   :rpc-rlimit-config "resources/rlimit.edn"
+   :rpc-climit-config "resources/climit.edn"
 
-   :file-change-snapshot-every 5
-   :file-change-snapshot-timeout "3h"
+   :auto-file-snapshot-total 10
+   :auto-file-snapshot-every 5
+   :auto-file-snapshot-timeout "3h"
 
    :public-uri "http://localhost:3449"
    :host "localhost"
@@ -64,8 +52,8 @@
 
    :redis-uri "redis://redis/0"
 
-   :assets-storage-backend :assets-fs
-   :storage-assets-fs-directory "assets"
+   :objects-storage-backend "fs"
+   :objects-storage-fs-directory "assets"
 
    :assets-path "/internal/assets/"
    :smtp-default-reply-to "Penpot <no-reply@example.com>"
@@ -87,251 +75,156 @@
    :ldap-attrs-fullname "cn"
 
    ;; a server prop key where initial project is stored.
-   :initial-project-skey "initial-project"})
+   :initial-project-skey "initial-project"
 
-(s/def ::default-rpc-rlimit ::us/vector-of-strings)
-(s/def ::rpc-rlimit-config ::fs/path)
-(s/def ::rpc-climit-config ::fs/path)
+   ;; time to avoid email sending after profile modification
+   :email-verify-threshold "15m"})
 
-(s/def ::media-max-file-size ::us/integer)
+(def schema:config
+  (do #_sm/optional-keys
+   [:map {:title "config"}
+    [:flags {:optional true} [::sm/set :string]]
+    [:admins {:optional true} [::sm/set ::sm/email]]
+    [:secret-key {:optional true} :string]
 
-(s/def ::flags ::us/vector-of-keywords)
-(s/def ::telemetry-enabled ::us/boolean)
+    [:tenant {:optional false} :string]
+    [:public-uri {:optional false} :string]
+    [:host {:optional false} :string]
 
-(s/def ::audit-log-archive-uri ::us/string)
-(s/def ::audit-log-http-handler-concurrency ::us/integer)
+    [:http-server-port {:optional true} ::sm/int]
+    [:http-server-host {:optional true} :string]
+    [:http-server-max-body-size {:optional true} ::sm/int]
+    [:http-server-max-multipart-body-size {:optional true} ::sm/int]
+    [:http-server-io-threads {:optional true} ::sm/int]
+    [:http-server-worker-threads {:optional true} ::sm/int]
 
-(s/def ::deletion-delay ::dt/duration)
+    [:telemetry-uri {:optional true} :string]
+    [:telemetry-with-taiga {:optional true} ::sm/boolean] ;; DELETE
 
-(s/def ::admins ::us/set-of-valid-emails)
-(s/def ::file-change-snapshot-every ::us/integer)
-(s/def ::file-change-snapshot-timeout ::dt/duration)
+    [:auto-file-snapshot-total {:optional true} ::sm/int]
+    [:auto-file-snapshot-every {:optional true} ::sm/int]
+    [:auto-file-snapshot-timeout {:optional true} ::dt/duration]
 
-(s/def ::default-executor-parallelism ::us/integer)
-(s/def ::scheduled-executor-parallelism ::us/integer)
+    [:media-max-file-size {:optional true} ::sm/int]
+    [:deletion-delay {:optional true} ::dt/duration] ;; REVIEW
+    [:telemetry-enabled {:optional true} ::sm/boolean]
+    [:default-blob-version {:optional true} ::sm/int]
+    [:allow-demo-users {:optional true} ::sm/boolean]
+    [:error-report-webhook {:optional true} :string]
+    [:user-feedback-destination {:optional true} :string]
 
-(s/def ::worker-default-parallelism ::us/integer)
-(s/def ::worker-webhook-parallelism ::us/integer)
+    [:default-rpc-rlimit {:optional true} [::sm/vec :string]]
+    [:rpc-rlimit-config {:optional true} ::fs/path]
+    [:rpc-climit-config {:optional true} ::fs/path]
 
-(s/def ::authenticated-cookie-domain ::us/string)
-(s/def ::authenticated-cookie-name ::us/string)
-(s/def ::auth-token-cookie-name ::us/string)
-(s/def ::auth-token-cookie-max-age ::dt/duration)
+    [:audit-log-archive-uri {:optional true} :string]
+    [:audit-log-http-handler-concurrency {:optional true} ::sm/int]
 
-(s/def ::secret-key ::us/string)
-(s/def ::allow-demo-users ::us/boolean)
-(s/def ::assets-path ::us/string)
-(s/def ::database-password (s/nilable ::us/string))
-(s/def ::database-uri ::us/string)
-(s/def ::database-username (s/nilable ::us/string))
-(s/def ::database-readonly ::us/boolean)
-(s/def ::database-min-pool-size ::us/integer)
-(s/def ::database-max-pool-size ::us/integer)
+    [:default-executor-parallelism {:optional true} ::sm/int] ;; REVIEW
+    [:scheduled-executor-parallelism {:optional true} ::sm/int] ;; REVIEW
+    [:worker-default-parallelism {:optional true} ::sm/int]
+    [:worker-webhook-parallelism {:optional true} ::sm/int]
 
-(s/def ::quotes-teams-per-profile ::us/integer)
-(s/def ::quotes-access-tokens-per-profile ::us/integer)
-(s/def ::quotes-projects-per-team ::us/integer)
-(s/def ::quotes-invitations-per-team ::us/integer)
-(s/def ::quotes-profiles-per-team ::us/integer)
-(s/def ::quotes-files-per-project ::us/integer)
-(s/def ::quotes-files-per-team ::us/integer)
-(s/def ::quotes-font-variants-per-team ::us/integer)
-(s/def ::quotes-comment-threads-per-file ::us/integer)
-(s/def ::quotes-comments-per-file ::us/integer)
+    [:database-password {:optional true} [:maybe :string]]
+    [:database-uri {:optional true} :string]
+    [:database-username {:optional true} [:maybe :string]]
+    [:database-readonly {:optional true} ::sm/boolean]
+    [:database-min-pool-size {:optional true} ::sm/int]
+    [:database-max-pool-size {:optional true} ::sm/int]
 
-(s/def ::default-blob-version ::us/integer)
-(s/def ::error-report-webhook ::us/string)
-(s/def ::user-feedback-destination ::us/string)
-(s/def ::github-client-id ::us/string)
-(s/def ::github-client-secret ::us/string)
-(s/def ::gitlab-base-uri ::us/string)
-(s/def ::gitlab-client-id ::us/string)
-(s/def ::gitlab-client-secret ::us/string)
-(s/def ::google-client-id ::us/string)
-(s/def ::google-client-secret ::us/string)
-(s/def ::oidc-client-id ::us/string)
-(s/def ::oidc-user-info-source ::us/keyword)
-(s/def ::oidc-client-secret ::us/string)
-(s/def ::oidc-base-uri ::us/string)
-(s/def ::oidc-token-uri ::us/string)
-(s/def ::oidc-auth-uri ::us/string)
-(s/def ::oidc-user-uri ::us/string)
-(s/def ::oidc-jwks-uri ::us/string)
-(s/def ::oidc-scopes ::us/set-of-strings)
-(s/def ::oidc-roles ::us/set-of-strings)
-(s/def ::oidc-roles-attr ::us/string)
-(s/def ::oidc-email-attr ::us/string)
-(s/def ::oidc-name-attr ::us/string)
-(s/def ::host ::us/string)
-(s/def ::http-server-port ::us/integer)
-(s/def ::http-server-host ::us/string)
-(s/def ::http-server-max-body-size ::us/integer)
-(s/def ::http-server-max-multipart-body-size ::us/integer)
-(s/def ::http-server-io-threads ::us/integer)
-(s/def ::http-server-worker-threads ::us/integer)
-(s/def ::ldap-attrs-email ::us/string)
-(s/def ::ldap-attrs-fullname ::us/string)
-(s/def ::ldap-attrs-username ::us/string)
-(s/def ::ldap-base-dn ::us/string)
-(s/def ::ldap-bind-dn ::us/string)
-(s/def ::ldap-bind-password ::us/string)
-(s/def ::ldap-host ::us/string)
-(s/def ::ldap-port ::us/integer)
-(s/def ::ldap-ssl ::us/boolean)
-(s/def ::ldap-starttls ::us/boolean)
-(s/def ::ldap-user-query ::us/string)
-(s/def ::media-directory ::us/string)
-(s/def ::media-uri ::us/string)
-(s/def ::profile-bounce-max-age ::dt/duration)
-(s/def ::profile-bounce-threshold ::us/integer)
-(s/def ::profile-complaint-max-age ::dt/duration)
-(s/def ::profile-complaint-threshold ::us/integer)
-(s/def ::public-uri ::us/string)
-(s/def ::redis-uri ::us/string)
-(s/def ::registration-domain-whitelist ::us/set-of-strings)
+    [:quotes-teams-per-profile {:optional true} ::sm/int]
+    [:quotes-access-tokens-per-profile {:optional true} ::sm/int]
+    [:quotes-projects-per-team {:optional true} ::sm/int]
+    [:quotes-invitations-per-team {:optional true} ::sm/int]
+    [:quotes-profiles-per-team {:optional true} ::sm/int]
+    [:quotes-files-per-project {:optional true} ::sm/int]
+    [:quotes-files-per-team {:optional true} ::sm/int]
+    [:quotes-font-variants-per-team {:optional true} ::sm/int]
+    [:quotes-comment-threads-per-file {:optional true} ::sm/int]
+    [:quotes-comments-per-file {:optional true} ::sm/int]
 
-(s/def ::smtp-default-from ::us/string)
-(s/def ::smtp-default-reply-to ::us/string)
-(s/def ::smtp-host ::us/string)
-(s/def ::smtp-password (s/nilable ::us/string))
-(s/def ::smtp-port ::us/integer)
-(s/def ::smtp-ssl ::us/boolean)
-(s/def ::smtp-tls ::us/boolean)
-(s/def ::smtp-username (s/nilable ::us/string))
-(s/def ::urepl-host ::us/string)
-(s/def ::urepl-port ::us/integer)
-(s/def ::prepl-host ::us/string)
-(s/def ::prepl-port ::us/integer)
-(s/def ::assets-storage-backend ::us/keyword)
-(s/def ::storage-assets-fs-directory ::us/string)
-(s/def ::storage-assets-s3-bucket ::us/string)
-(s/def ::storage-assets-s3-region ::us/keyword)
-(s/def ::storage-assets-s3-endpoint ::us/string)
-(s/def ::storage-assets-s3-io-threads ::us/integer)
-(s/def ::telemetry-uri ::us/string)
-(s/def ::telemetry-with-taiga ::us/boolean)
-(s/def ::tenant ::us/string)
+    [:auth-data-cookie-domain {:optional true} :string]
+    [:auth-token-cookie-name {:optional true} :string]
+    [:auth-token-cookie-max-age {:optional true} ::dt/duration]
 
-(s/def ::config
-  (s/keys :opt-un [::secret-key
-                   ::flags
-                   ::admins
-                   ::deletion-delay
-                   ::allow-demo-users
-                   ::audit-log-archive-uri
-                   ::audit-log-http-handler-concurrency
-                   ::auth-token-cookie-name
-                   ::auth-token-cookie-max-age
-                   ::authenticated-cookie-name
-                   ::authenticated-cookie-domain
-                   ::database-password
-                   ::database-uri
-                   ::database-username
-                   ::database-readonly
-                   ::database-min-pool-size
-                   ::database-max-pool-size
-                   ::default-blob-version
-                   ::default-rpc-rlimit
-                   ::error-report-webhook
-                   ::default-executor-parallelism
-                   ::scheduled-executor-parallelism
-                   ::worker-default-parallelism
-                   ::worker-webhook-parallelism
-                   ::file-change-snapshot-every
-                   ::file-change-snapshot-timeout
-                   ::user-feedback-destination
-                   ::github-client-id
-                   ::github-client-secret
-                   ::gitlab-base-uri
-                   ::gitlab-client-id
-                   ::gitlab-client-secret
-                   ::google-client-id
-                   ::google-client-secret
-                   ::oidc-client-id
-                   ::oidc-client-secret
-                   ::oidc-user-info-source
-                   ::oidc-base-uri
-                   ::oidc-token-uri
-                   ::oidc-auth-uri
-                   ::oidc-user-uri
-                   ::oidc-jwks-uri
-                   ::oidc-scopes
-                   ::oidc-roles-attr
-                   ::oidc-email-attr
-                   ::oidc-name-attr
-                   ::oidc-roles
-                   ::host
-                   ::http-server-host
-                   ::http-server-port
-                   ::http-server-max-body-size
-                   ::http-server-max-multipart-body-size
-                   ::http-server-io-threads
-                   ::http-server-worker-threads
-                   ::ldap-attrs-email
-                   ::ldap-attrs-fullname
-                   ::ldap-attrs-username
-                   ::ldap-base-dn
-                   ::ldap-bind-dn
-                   ::ldap-bind-password
-                   ::ldap-host
-                   ::ldap-port
-                   ::ldap-ssl
-                   ::ldap-starttls
-                   ::ldap-user-query
-                   ::local-assets-uri
-                   ::media-max-file-size
-                   ::profile-bounce-max-age
-                   ::profile-bounce-threshold
-                   ::profile-complaint-max-age
-                   ::profile-complaint-threshold
-                   ::public-uri
+    [:registration-domain-whitelist {:optional true} [::sm/set :string]]
+    [:email-verify-threshold {:optional true} ::dt/duration]
 
-                   ::quotes-teams-per-profile
-                   ::quotes-access-tokens-per-profile
-                   ::quotes-projects-per-team
-                   ::quotes-invitations-per-team
-                   ::quotes-profiles-per-team
-                   ::quotes-files-per-project
-                   ::quotes-files-per-team
-                   ::quotes-font-variants-per-team
-                   ::quotes-comment-threads-per-file
-                   ::quotes-comments-per-file
+    [:github-client-id {:optional true} :string]
+    [:github-client-secret {:optional true} :string]
+    [:gitlab-base-uri {:optional true} :string]
+    [:gitlab-client-id {:optional true} :string]
+    [:gitlab-client-secret {:optional true} :string]
+    [:google-client-id {:optional true} :string]
+    [:google-client-secret {:optional true} :string]
+    [:oidc-client-id {:optional true} :string]
+    [:oidc-user-info-source {:optional true} :keyword]
+    [:oidc-client-secret {:optional true} :string]
+    [:oidc-base-uri {:optional true} :string]
+    [:oidc-token-uri {:optional true} :string]
+    [:oidc-auth-uri {:optional true} :string]
+    [:oidc-user-uri {:optional true} :string]
+    [:oidc-jwks-uri {:optional true} :string]
+    [:oidc-scopes {:optional true} [::sm/set :string]]
+    [:oidc-roles {:optional true} [::sm/set :string]]
+    [:oidc-roles-attr {:optional true} :string]
+    [:oidc-email-attr {:optional true} :string]
+    [:oidc-name-attr {:optional true} :string]
 
-                   ::redis-uri
-                   ::registration-domain-whitelist
-                   ::rpc-rlimit-config
-                   ::rpc-climit-config
+    [:ldap-attrs-email {:optional true} :string]
+    [:ldap-attrs-fullname {:optional true} :string]
+    [:ldap-attrs-username {:optional true} :string]
+    [:ldap-base-dn {:optional true} :string]
+    [:ldap-bind-dn {:optional true} :string]
+    [:ldap-bind-password {:optional true} :string]
+    [:ldap-host {:optional true} :string]
+    [:ldap-port {:optional true} ::sm/int]
+    [:ldap-ssl {:optional true} ::sm/boolean]
+    [:ldap-starttls {:optional true} ::sm/boolean]
+    [:ldap-user-query {:optional true} :string]
 
-                   ::semaphore-process-font
-                   ::semaphore-process-image
-                   ::semaphore-update-file
-                   ::semaphore-auth
+    [:profile-bounce-max-age {:optional true} ::dt/duration]
+    [:profile-bounce-threshold {:optional true} ::sm/int]
+    [:profile-complaint-max-age {:optional true} ::dt/duration]
+    [:profile-complaint-threshold {:optional true} ::sm/int]
 
-                   ::smtp-default-from
-                   ::smtp-default-reply-to
-                   ::smtp-host
-                   ::smtp-password
-                   ::smtp-port
-                   ::smtp-ssl
-                   ::smtp-tls
-                   ::smtp-username
+    [:redis-uri {:optional true} :string]
 
-                   ::urepl-host
-                   ::urepl-port
-                   ::prepl-host
-                   ::prepl-port
+    [:email-domain-blacklist {:optional true} ::fs/path]
+    [:email-domain-whitelist {:optional true} ::fs/path]
 
-                   ::assets-storage-backend
-                   ::storage-assets-fs-directory
-                   ::storage-assets-s3-bucket
-                   ::storage-assets-s3-region
-                   ::storage-assets-s3-endpoint
-                   ::storage-assets-s3-io-threads
-                   ::telemetry-enabled
-                   ::telemetry-uri
-                   ::telemetry-referer
-                   ::telemetry-with-taiga
-                   ::tenant]))
+    [:smtp-default-from {:optional true} :string]
+    [:smtp-default-reply-to {:optional true} :string]
+    [:smtp-host {:optional true} :string]
+    [:smtp-password {:optional true} [:maybe :string]]
+    [:smtp-port {:optional true} ::sm/int]
+    [:smtp-ssl {:optional true} ::sm/boolean]
+    [:smtp-tls {:optional true} ::sm/boolean]
+    [:smtp-username {:optional true} [:maybe :string]]
+
+    [:urepl-host {:optional true} :string]
+    [:urepl-port {:optional true} ::sm/int]
+    [:prepl-host {:optional true} :string]
+    [:prepl-port {:optional true} ::sm/int]
+
+    [:media-directory {:optional true} :string] ;; REVIEW
+    [:media-uri {:optional true} :string]
+    [:assets-path {:optional true} :string]
+
+    ;; Legacy, will be removed in 2.5
+    [:assets-storage-backend {:optional true} :keyword]
+    [:storage-assets-fs-directory {:optional true} :string]
+    [:storage-assets-s3-bucket {:optional true} :string]
+    [:storage-assets-s3-region {:optional true} :keyword]
+    [:storage-assets-s3-endpoint {:optional true} :string]
+    [:storage-assets-s3-io-threads {:optional true} ::sm/int]
+
+    [:objects-storage-backend {:optional true} :keyword]
+    [:objects-storage-fs-directory {:optional true} :string]
+    [:objects-storage-s3-bucket {:optional true} :string]
+    [:objects-storage-s3-region {:optional true} :keyword]
+    [:objects-storage-s3-endpoint {:optional true} :string]
+    [:objects-storage-s3-io-threads {:optional true} ::sm/int]]))
 
 (def default-flags
   [:enable-backend-api-doc
@@ -359,20 +252,22 @@
      {}
      env)))
 
-(defn- read-config
-  []
-  (try
-    (->> (read-env "penpot")
-         (merge defaults)
-         (us/conform ::config))
-    (catch Throwable e
-      (when (ex/error? e)
-        (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;")
-        (println "Error on validating configuration:")
-        (println (some-> e ex-data ex/explain))
-        (println (ex/explain (ex-data e)))
-        (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;"))
-      (throw e))))
+(def decode-config
+  (sm/decoder schema:config sm/string-transformer))
+
+(def validate-config
+  (sm/validator schema:config))
+
+(def explain-config
+  (sm/explainer schema:config))
+
+(defn read-config
+  "Reads the configuration from enviroment variables and decodes all
+  known values."
+  [& {:keys [prefix default] :or {prefix "penpot"}}]
+  (->> (read-env prefix)
+       (merge default)
+       (decode-config)))
 
 (def version
   (v/parse (or (some-> (io/resource "version.txt")
@@ -380,10 +275,28 @@
                        (str/trim))
                "%version%")))
 
-(defonce ^:dynamic config (read-config))
+(defonce ^:dynamic config (read-config :default default))
 (defonce ^:dynamic flags (parse-flags config))
 
-(def deletion-delay
+(defn validate!
+  "Validate the currently loaded configuration data."
+  [& {:keys [exit-on-error?] :or {exit-on-error? true}}]
+  (if (validate-config config)
+    true
+    (let [explain (explain-config config)]
+      (println "Error on validating configuration:")
+      (sm/pretty-explain explain
+                         :variant ::sm/schemaless-explain
+                         :message "Configuration Validation Error")
+      (flush)
+      (if exit-on-error?
+        (System/exit -1)
+        (ex/raise :type :validation
+                  :code :config-validaton
+                  ::sm/explain explain)))))
+
+(defn get-deletion-delay
+  []
   (or (c/get config :deletion-delay)
       (dt/duration {:days 7})))
 

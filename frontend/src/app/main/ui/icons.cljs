@@ -9,8 +9,7 @@
   (:require-macros [app.main.ui.icons :refer [icon-xref collect-icons]])
   (:require
    [app.common.data :as d]
-   [cuerdas.core :as str]
-   [rumext.v2 :as mf]))
+   [cuerdas.core :as str]))
 
 ;; Keep the list of icons sorted
 (def ^:icon icon-verify (icon-xref :icon-verify))
@@ -144,6 +143,7 @@
 (def ^:icon img (icon-xref :img))
 (def ^:icon interaction (icon-xref :interaction))
 (def ^:icon join-nodes (icon-xref :join-nodes))
+(def ^:icon external-link (icon-xref :external-link))
 (def ^:icon justify-content-column-around (icon-xref :justify-content-column-around))
 (def ^:icon justify-content-column-between (icon-xref :justify-content-column-between))
 (def ^:icon justify-content-column-center (icon-xref :justify-content-column-center))
@@ -160,13 +160,13 @@
 (def ^:icon library (icon-xref :library))
 (def ^:icon locate (icon-xref :locate))
 (def ^:icon lock (icon-xref :lock))
+(def ^:icon margin (icon-xref :margin))
 (def ^:icon margin-bottom (icon-xref :margin-bottom))
 (def ^:icon margin-left (icon-xref :margin-left))
 (def ^:icon margin-left-right (icon-xref :margin-left-right))
 (def ^:icon margin-right (icon-xref :margin-right))
-(def ^:icon margin-top-bottom (icon-xref :margin-top-bottom))
 (def ^:icon margin-top (icon-xref :margin-top))
-(def ^:icon margin (icon-xref :margin))
+(def ^:icon margin-top-bottom (icon-xref :margin-top-bottom))
 (def ^:icon mask (icon-xref :mask))
 (def ^:icon masked (icon-xref :masked))
 (def ^:icon menu (icon-xref :menu))
@@ -177,26 +177,30 @@
 (def ^:icon msg-success (icon-xref :msg-success))
 (def ^:icon msg-warning (icon-xref :msg-warning))
 (def ^:icon open-link (icon-xref :open-link))
+(def ^:icon oauth-1 (icon-xref :oauth-1))
+(def ^:icon oauth-2 (icon-xref :oauth-2))
+(def ^:icon oauth-3 (icon-xref :oauth-3))
 (def ^:icon padding-bottom (icon-xref :padding-bottom))
 (def ^:icon padding-extended (icon-xref :padding-extended))
-(def ^:icon padding-left-right (icon-xref :padding-left-right))
 (def ^:icon padding-left (icon-xref :padding-left))
+(def ^:icon padding-left-right (icon-xref :padding-left-right))
 (def ^:icon padding-right (icon-xref :padding-right))
-(def ^:icon padding-top-bottom (icon-xref :padding-top-bottom))
 (def ^:icon padding-top (icon-xref :padding-top))
+(def ^:icon padding-top-bottom (icon-xref :padding-top-bottom))
 (def ^:icon path (icon-xref :path))
 (def ^:icon pentool (icon-xref :pentool))
 (def ^:icon picker (icon-xref :picker))
 (def ^:icon pin (icon-xref :pin))
 (def ^:icon play (icon-xref :play))
+(def ^:icon puzzle (icon-xref :puzzle))
 (def ^:icon rectangle (icon-xref :rectangle))
 (def ^:icon reload (icon-xref :reload))
 (def ^:icon remove-icon (icon-xref :remove))
-(def ^:icon rgba-complementary (icon-xref :rgba-complementary))
 (def ^:icon rgba (icon-xref :rgba))
+(def ^:icon rgba-complementary (icon-xref :rgba-complementary))
 (def ^:icon rotation (icon-xref :rotation))
-(def ^:icon row-reverse (icon-xref :row-reverse))
 (def ^:icon row (icon-xref :row))
+(def ^:icon row-reverse (icon-xref :row-reverse))
 (def ^:icon search (icon-xref :search))
 (def ^:icon separate-nodes (icon-xref :separate-nodes))
 (def ^:icon shown (icon-xref :shown))
@@ -218,6 +222,7 @@
 (def ^:icon svg (icon-xref :svg))
 (def ^:icon swatches (icon-xref :swatches))
 (def ^:icon switch (icon-xref :switch))
+(def ^:icon text (icon-xref :text))
 (def ^:icon text-align-center (icon-xref :text-align-center))
 (def ^:icon text-align-left (icon-xref :text-align-left))
 (def ^:icon text-align-right (icon-xref :text-align-right))
@@ -239,7 +244,6 @@
 (def ^:icon text-top (icon-xref :text-top))
 (def ^:icon text-underlined (icon-xref :text-underlined))
 (def ^:icon text-uppercase (icon-xref :text-uppercase))
-(def ^:icon text (icon-xref :text))
 (def ^:icon thumbnail (icon-xref :thumbnail))
 (def ^:icon tick (icon-xref :tick))
 (def ^:icon to-corner (icon-xref :to-corner))
@@ -258,40 +262,9 @@
 (def ^:icon view-as-list (icon-xref :view-as-list))
 (def ^:icon wrap (icon-xref :wrap))
 
-
-(def ^:icon loader-pencil
-  (mf/html
-   [:svg
-    {:viewBox "0 0 677.34762 182.15429"
-     :height "182"
-     :width "667"
-     :id "loader-pencil"}
-    [:g
-     [:path
-      {:id "body-body"
-       :d
-       "M128.273 0l-3.9 2.77L0 91.078l128.273 91.076 549.075-.006V.008L128.273 0zm20.852 30l498.223.006V152.15l-498.223.007V30zm-25 9.74v102.678l-49.033-34.813-.578-32.64 49.61-35.225z"}]
-     [:path
-      {:id "loader-line"
-       :d
-       "M134.482 157.147v25l518.57.008.002-25-518.572-.008z"}]]]))
-
 (def default
   "A collection of all icons"
   (collect-icons))
-
-(mf/defc debug-icons-preview
-  {::mf/wrap-props false}
-  []
-  (let [entries   (->> (seq (js/Object.entries default))
-                       (sort-by first))]
-    [:section.debug-icons-preview
-     [:h2 "icons"]
-     (for [[key val] entries]
-       [:div.icon-item-old {:key key
-                            :title key}
-        val
-        [:span key]])]))
 
 (defn key->icon
   [icon-key]

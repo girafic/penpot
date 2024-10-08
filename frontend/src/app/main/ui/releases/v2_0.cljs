@@ -17,7 +17,7 @@
   (mf/html
    (case slide
      :start
-     [:div {:class (stl/css :modal-overlay)}
+     [:div {:class (stl/css-case :modal-overlay true)}
       [:div.animated {:class klass}
        [:div {:class (stl/css :modal-container)}
         [:img {:src "images/features/2.0-intro-image.png"
@@ -61,7 +61,7 @@
                     :on-click next} "Continue"]]]]]]
 
      0
-     [:div {:class (stl/css :modal-overlay)}
+     [:div {:class (stl/css-case :modal-overlay true)}
       [:div.animated {:class klass}
        [:div {:class (stl/css :modal-container)}
         [:img {:src "images/features/2.0-css-grid.gif"
@@ -101,7 +101,7 @@
                     :class (stl/css :next-btn)} "Continue"]]]]]]
 
      1
-     [:div {:class (stl/css :modal-overlay)}
+     [:div {:class (stl/css-case :modal-overlay true)}
       [:div.animated {:class klass}
        [:div {:class (stl/css :modal-container)}
         [:img {:src "images/features/2.0-new-ui.gif"
@@ -135,7 +135,7 @@
                     :class (stl/css :next-btn)} "Continue"]]]]]]
 
      2
-     [:div {:class (stl/css :modal-overlay)}
+     [:div {:class (stl/css-case :modal-overlay true)}
       [:div.animated {:class klass}
        [:div {:class (stl/css :modal-container)}
         [:img {:src "images/features/2.0-components.gif"
@@ -170,7 +170,7 @@
                     :class (stl/css :next-btn)} "Continue"]]]]]]
 
      3
-     [:div {:class (stl/css :modal-overlay)}
+     [:div {:class (stl/css-case :modal-overlay true)}
       [:div.animated {:class klass}
        [:div {:class (stl/css :modal-container)}
         [:img {:src "images/features/2.0-html.gif"

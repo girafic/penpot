@@ -10,18 +10,19 @@
    [app.common.data.macros :as dm]
    [app.common.files.repair :as cfr]
    [app.common.files.validate :as cfv]
+   [app.common.json :as json]
    [app.common.logging :as l]
-   [app.common.math :as mth]
+   [app.common.schema :as sm]
    [app.common.transit :as t]
    [app.common.types.file :as ctf]
    [app.common.uri :as u]
    [app.common.uuid :as uuid]
    [app.config :as cf]
+   [app.main.data.changes :as dwc]
    [app.main.data.dashboard.shortcuts]
    [app.main.data.preview :as dp]
    [app.main.data.viewer.shortcuts]
    [app.main.data.workspace :as dw]
-   [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.path.shortcuts]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shortcuts]
@@ -52,8 +53,6 @@
 (def debug-exclude-events
   #{:app.main.data.workspace.notifications/handle-pointer-update
     :app.main.data.workspace.notifications/handle-pointer-send
-    :app.main.data.workspace.persistence/update-persistence-status
-    :app.main.data.workspace.changes/update-indices
     :app.main.data.websocket/send-message
     :app.main.data.workspace.selection/change-hover-state})
 
@@ -99,26 +98,14 @@
        (effect-fn input)
        (rf result input)))))
 
-(defn prettify
-  "Prepare x for cleaner output when logged."
-  [x]
-  (cond
-    (map? x) (d/mapm #(prettify %2) x)
-    (vector? x) (mapv prettify x)
-    (seq? x) (map prettify x)
-    (set? x) (into #{} (map prettify) x)
-    (number? x) (mth/precision x 4)
-    (uuid? x) (str/concat "#uuid " x)
-    :else x))
-
 (defn ^:export logjs
   ([str] (tap (partial logjs str)))
   ([str val]
-   (js/console.log str (clj->js (prettify val) :keyword-fn (fn [v] (str/concat v))))
+   (js/console.log str (json/->js val))
    val))
 
 (when (exists? js/window)
-  (set! (.-dbg ^js js/window) clj->js)
+  (set! (.-dbg ^js js/window) json/->js)
   (set! (.-pp ^js js/window) pprint))
 
 (defonce widget-style "
@@ -279,15 +266,23 @@
    (let [page-id    (get state :current-page-id)
          file       (assoc (get state :workspace-file)
                            :data (get state :workspace-data))
-         libraries  (get state :workspace-libraries)]
-     (ctf/dump-subtree file page-id shape-id libraries {:show-ids show-ids
-                                                        :show-touched show-touched
-                                                        :show-modified show-modified}))))
+         libraries  (get state :workspace-libraries)
+         shape-id   (if (some? shape-id)
+                      (uuid/uuid shape-id)
+                      (let [objects (get-in state [:workspace-data :pages-index page-id :objects])
+                            selected (get-in state [:workspace-local :selected])]
+                        (->> selected (map (d/getf objects)) first :id)))]
+     (if (some? shape-id)
+       (ctf/dump-subtree file page-id shape-id libraries {:show-ids show-ids
+                                                          :show-touched show-touched
+                                                          :show-modified show-modified})
+       (println "no selected shape")))))
+
 (defn ^:export dump-subtree
-  ([shape-id] (dump-subtree' @st/state (uuid/uuid shape-id)))
-  ([shape-id show-ids] (dump-subtree' @st/state (uuid/uuid shape-id) show-ids false false))
-  ([shape-id show-ids show-touched] (dump-subtree' @st/state (uuid/uuid shape-id) show-ids show-touched false))
-  ([shape-id show-ids show-touched show-modified] (dump-subtree' @st/state (uuid/uuid shape-id) show-ids show-touched show-modified)))
+  ([shape-id] (dump-subtree' @st/state shape-id))
+  ([shape-id show-ids] (dump-subtree' @st/state shape-id show-ids false false))
+  ([shape-id show-ids show-touched] (dump-subtree' @st/state shape-id show-ids show-touched false))
+  ([shape-id show-ids show-touched show-modified] (dump-subtree' @st/state shape-id show-ids show-touched show-modified)))
 
 (when *assert*
   (defonce debug-subscription
@@ -303,7 +298,7 @@
 
   (let [file-id (:current-file-id @st/state)
         changes (t/decode-str changes*)]
-    (st/emit! (dch/commit-changes {:redo-changes changes
+    (st/emit! (dwc/commit-changes {:redo-changes changes
                                    :undo-changes []
                                    :save-undo? true
                                    :file-id file-id}))))
@@ -473,7 +468,7 @@
                      (let [result (map (fn [row]
                                          (update row :id str))
                                        result)]
-                       (js/console.table (clj->js result))))
+                       (js/console.table (json/->js result))))
                    (fn [cause]
                      (js/console.log "EE:" cause))))
     nil))
@@ -488,22 +483,34 @@
          (rx/map http/conditional-decode-transit)
          (rx/mapcat rp/handle-response)
          (rx/subs! (fn [{:keys [id]}]
-                     (println "Snapshot saved:" (str id)))
+                     (println "Snapshot saved:" (str id) label))
                    (fn [cause]
                      (js/console.log "EE:" cause))))))
 
 (defn ^:export restore-snapshot
-  [id file-id]
+  [label file-id]
   (when-let [file-id (or (d/parse-uuid file-id)
                          (:current-file-id @st/state))]
-    (when-let [id (d/parse-uuid id)]
+    (let [snapshot-id (sm/parse-uuid label)
+          label       (if snapshot-id nil label)
+          params      (cond-> {:file-id file-id}
+                        (uuid? snapshot-id)
+                        (assoc :id snapshot-id)
+
+                        (string? label)
+                        (assoc :label label))]
       (->> (http/send! {:method :post
                         :uri (u/join cf/public-uri "api/rpc/command/restore-file-snapshot")
-                        :body (http/transit-data {:file-id file-id :id id})})
+                        :body (http/transit-data params)})
            (rx/map http/conditional-decode-transit)
            (rx/mapcat rp/handle-response)
            (rx/subs! (fn [_]
-                       (println "Snapshot restored " id)
-                       #_(.reload js/location))
+                       (println "Snapshot restored " (or snapshot-id label)))
+                     #_(.reload js/location)
                      (fn [cause]
                        (js/console.log "EE:" cause)))))))
+
+
+(defn ^:export enable-text-v2
+  []
+  (st/emit! (features/enable-feature "text-editor/v2")))

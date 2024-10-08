@@ -44,6 +44,10 @@
         (some? image)
         (tr "media.image")))))
 
+(defn- breakable-color-title
+  [title]
+  (str/replace title "." ".\u200B"))
+
 (mf/defc color-bullet
   {::mf/wrap [mf/memo]
    ::mf/wrap-props false}
@@ -76,6 +80,7 @@
                   :is-transparent (and opacity (> 1 opacity))
                   :grid-area area
                   :read-only read-only?)
+          :role "button"
           :data-readonly (str read-only?)
           :on-click on-click
           :title (color-title color)}
@@ -111,4 +116,4 @@
               :title name
               :on-click on-click
               :on-double-click on-double-click}
-       (or name color (uc/gradient-type->string (:type gradient)))])))
+       (breakable-color-title (or name color (uc/gradient-type->string (:type gradient))))])))

@@ -35,12 +35,12 @@
 
 (def ^:private schema:create-temp-file
   [:map {:title "create-temp-file"}
-   [:name :string]
+   [:name [:string {:max 250}]]
    [:project-id ::sm/uuid]
    [:id {:optional true} ::sm/uuid]
-   [:is-shared :boolean]
+   [:is-shared ::sm/boolean]
    [:features ::cfeat/features]
-   [:create-page :boolean]])
+   [:create-page ::sm/boolean]])
 
 (sv/defmethod ::create-temp-file
   {::doc/added "1.17"
@@ -83,7 +83,7 @@
 (def ^:private schema:update-temp-file
   [:map {:title "update-temp-file"}
    [:changes [:vector ::cpc/change]]
-   [:revn {:min 0} :int]
+   [:revn [::sm/int {:min 0}]]
    [:session-id ::sm/uuid]
    [:id ::sm/uuid]])
 

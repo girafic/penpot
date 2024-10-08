@@ -7,19 +7,19 @@
 (ns app.http.middleware
   (:require
    [app.common.exceptions :as ex]
+   [app.common.json :as json]
    [app.common.logging :as l]
+   [app.common.schema :as-alias sm]
    [app.common.transit :as t]
    [app.config :as cf]
-   [app.util.json :as json]
+   [app.http.errors :as errors]
+   [app.util.pointer-map :as pmap]
    [cuerdas.core :as str]
    [ring.request :as rreq]
    [ring.response :as rres]
    [yetti.adapter :as yt]
    [yetti.middleware :as ymw])
   (:import
-   com.fasterxml.jackson.core.JsonParseException
-   com.fasterxml.jackson.core.io.JsonEOFException
-   com.fasterxml.jackson.databind.exc.MismatchedInputException
    io.undertow.server.RequestTooBigException
    java.io.InputStream
    java.io.OutputStream))
@@ -34,11 +34,12 @@
   {:name ::params
    :compile (constantly ymw/wrap-params)})
 
-(def ^:private json-mapper
-  (json/mapper
-   {:encode-key-fn str/camel
-    :decode-key-fn (comp keyword str/kebab)
-    :pretty true}))
+(defn- get-reader
+  ^java.io.BufferedReader
+  [request]
+  (let [^InputStream body (rreq/body request)]
+    (java.io.BufferedReader.
+     (java.io.InputStreamReader. body))))
 
 (defn wrap-parse-request
   [handler]
@@ -53,8 +54,8 @@
                         (update :params merge params))))
 
                 (str/starts-with? header "application/json")
-                (with-open [^InputStream is (rreq/body request)]
-                  (let [params (json/decode is json-mapper)]
+                (with-open [reader (get-reader request)]
+                  (let [params (json/read reader :key-fn json/read-kebab-key)]
                     (-> request
                         (assoc :body-params params)
                         (update :params merge params))))
@@ -62,35 +63,33 @@
                 :else
                 request)))
 
-          (handle-error [cause]
+          (handle-error [cause request]
             (cond
               (instance? RuntimeException cause)
               (if-let [cause (ex-cause cause)]
-                (handle-error cause)
-                (throw cause))
+                (handle-error cause request)
+                (errors/handle cause request))
 
               (instance? RequestTooBigException cause)
               (ex/raise :type :validation
                         :code :request-body-too-large
                         :hint (ex-message cause))
 
-              (or (instance? JsonEOFException cause)
-                  (instance? JsonParseException cause)
-                  (instance? MismatchedInputException cause))
+              (instance? java.io.EOFException cause)
               (ex/raise :type :validation
                         :code :malformed-json
                         :hint (ex-message cause)
                         :cause cause)
 
               :else
-              (throw cause)))]
+              (errors/handle cause request)))]
 
     (fn [request]
       (if (= (rreq/method request) :post)
-        (let [request (ex/try! (process-request request))]
-          (if (ex/exception? request)
-            (handle-error request)
-            (handler request)))
+        (try
+          (-> request process-request handler)
+          (catch Throwable cause
+            (handle-error cause request)))
         (handler request)))))
 
 (def parse-request
@@ -105,6 +104,12 @@
   (yetti.util.BufferedOutputStream. os (int chunk-size)))
 
 (def ^:const buffer-size (:xnio/buffer-size yt/defaults))
+
+(defn- write-json-value
+  [_ val]
+  (if (pmap/pointer-map? val)
+    [(pmap/get-id val) (meta val)]
+    val))
 
 (defn wrap-format-response
   [handler]
@@ -127,9 +132,11 @@
             (reify rres/StreamableResponseBody
               (-write-body-to-stream [_ _ output-stream]
                 (try
-                  (with-open [^OutputStream bos (buffered-output-stream output-stream buffer-size)]
-                    (json/write! bos data json-mapper))
-
+                  (let [encode (or (-> data meta :encode/json) identity)
+                        data   (encode data)]
+                    (with-open [^OutputStream bos (buffered-output-stream output-stream buffer-size)]
+                      (with-open [^java.io.OutputStreamWriter writer (java.io.OutputStreamWriter. bos)]
+                        (json/write writer data :key-fn json/write-camel-key :value-fn write-json-value))))
                   (catch java.io.IOException _)
                   (catch Throwable cause
                     (binding [l/*context* {:value data}]

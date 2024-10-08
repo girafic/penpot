@@ -7,8 +7,8 @@
 (ns app.main.ui.dashboard.project-menu
   (:require
    [app.main.data.dashboard :as dd]
-   [app.main.data.messages :as msg]
    [app.main.data.modal :as modal]
+   [app.main.data.notifications :as ntf]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.context-menu-a11y :refer [context-menu-a11y]]
@@ -30,7 +30,7 @@
 
         on-duplicate-success
         (fn [new-project]
-          (st/emit! (msg/success (tr "dashboard.success-duplicate-project"))
+          (st/emit! (ntf/success (tr "dashboard.success-duplicate-project"))
                     (rt/nav :dashboard-files
                             {:team-id (:team-id new-project)
                              :project-id (:id new-project)})))
@@ -51,12 +51,12 @@
         (fn [team-id]
           (let [data  {:id (:id project) :team-id team-id}
                 mdata {:on-success #(on-move-success team-id)}]
-            #(st/emit! (msg/success (tr "dashboard.success-move-project"))
+            #(st/emit! (ntf/success (tr "dashboard.success-move-project"))
                        (dd/move-project (with-meta data mdata)))))
 
         delete-fn
         (fn [_]
-          (st/emit! (msg/success (tr "dashboard.success-delete-project"))
+          (st/emit! (ntf/success (tr "dashboard.success-delete-project"))
                     (dd/delete-project project)
                     (dd/go-to-projects (:team-id project))))
 
@@ -85,12 +85,12 @@
                    {:option-name    (tr "labels.rename")
                     :id             "project-menu-rename"
                     :option-handler on-edit
-                    :data-test      "project-rename"})
+                    :data-testid      "project-rename"})
                  (when-not (:is-default project)
                    {:option-name    (tr "dashboard.duplicate")
                     :id             "project-menu-duplicated"
                     :option-handler on-duplicate
-                    :data-test      "project-duplicate"})
+                    :data-testid      "project-duplicate"})
                  (when-not (:is-default project)
                    {:option-name    (tr "dashboard.pin-unpin")
                     :id             "project-menu-pin"
@@ -103,19 +103,19 @@
                                        {:option-name    (:name team)
                                         :id             (:name team)
                                         :option-handler (on-move (:id team))})
-                    :data-test      "project-move-to"})
+                    :data-testid      "project-move-to"})
                  (when (some? on-import)
                    {:option-name    (tr "dashboard.import")
                     :id             "project-menu-import"
                     :option-handler on-import-files
-                    :data-test      "file-import"})
+                    :data-testid      "file-import"})
                  (when-not (:is-default project)
                    {:option-name    :separator})
                  (when-not (:is-default project)
                    {:option-name    (tr "labels.delete")
                     :id             "project-menu-delete"
                     :option-handler on-delete
-                    :data-test      "project-delete"})]]
+                    :data-testid      "project-delete"})]]
 
     [:*
      [:& udi/import-form {:ref file-input

@@ -8,8 +8,9 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
+   [app.main.data.events :as ev]
    [app.main.data.exports :as de]
-   [app.main.data.workspace.changes :as dch]
+   [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -20,6 +21,7 @@
    [app.util.dom :as dom]
    [app.util.i18n :refer  [tr c]]
    [app.util.keyboard :as kbd]
+   [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
 (def exports-attrs
@@ -75,8 +77,12 @@
                  (cond-> sname
                    (some? suffix)
                    (str suffix))
-                 (st/emit! (de/request-simple-export {:export (merge export defaults)})))
-               (st/emit! (de/show-workspace-export-dialog {:selected (reverse ids)})))
+                 (st/emit!
+                  (de/request-simple-export {:export (merge export defaults)})
+                  (ptk/event
+                   ::ev/event {::ev/name "export-shapes" ::ev/origin "workspace:sidebar" :num-shapes 1})))
+               (st/emit!
+                (de/show-workspace-export-dialog {:selected (reverse ids) :origin "workspace:sidebar"})))
 
              ;; In other all cases we only allowed to have a single
              ;; shape-id because multiple shape-ids are handled
@@ -88,8 +94,14 @@
                    exports  (mapv #(merge % defaults) exports)]
                (if (= 1 (count exports))
                  (let [export (first exports)]
-                   (st/emit! (de/request-simple-export {:export export})))
-                 (st/emit! (de/request-multiple-export {:exports exports})))))))
+                   (st/emit!
+                    (de/request-simple-export {:export export})
+                    (ptk/event
+                     ::ev/event {::ev/name "export-shapes" ::ev/origin "workspace:sidebar" :num-shapes 1})))
+                 (st/emit!
+                  (de/request-multiple-export {:exports exports})
+                  (ptk/event
+                   ::ev/event {::ev/name "export-shapes" ::ev/origin "workspace:sidebar" :num-shapes (count exports)})))))))
 
         ;; TODO: maybe move to specific events for avoid to have this logic here?
         add-export
@@ -97,9 +109,9 @@
          (mf/deps ids)
          (fn []
            (let [xspec {:type :png :suffix "" :scale 1}]
-             (st/emit! (dch/update-shapes ids
-                                          (fn [shape]
-                                            (assoc shape :exports (into [xspec] (:exports shape)))))))))
+             (st/emit! (dwsh/update-shapes ids
+                                           (fn [shape]
+                                             (assoc shape :exports (into [xspec] (:exports shape)))))))))
 
         delete-export
         (mf/use-fn
@@ -110,16 +122,16 @@
                                                               (mapv second)))
 
                  remove (fn [shape] (update shape :exports remove-fill-by-index position))]
-             (st/emit! (dch/update-shapes ids remove)))))
+             (st/emit! (dwsh/update-shapes ids remove)))))
 
         on-scale-change
         (mf/use-fn
          (mf/deps ids)
          (fn [index event]
            (let [scale (d/parse-double event)]
-             (st/emit! (dch/update-shapes ids
-                                          (fn [shape]
-                                            (assoc-in shape [:exports index :scale] scale)))))))
+             (st/emit! (dwsh/update-shapes ids
+                                           (fn [shape]
+                                             (assoc-in shape [:exports index :scale] scale)))))))
 
         on-suffix-change
         (mf/use-fn
@@ -129,26 +141,26 @@
                  index   (-> (dom/get-current-target event)
                              (dom/get-data "value")
                              (d/parse-integer))]
-             (st/emit! (dch/update-shapes ids
-                                          (fn [shape]
-                                            (assoc-in shape [:exports index :suffix] value)))))))
+             (st/emit! (dwsh/update-shapes ids
+                                           (fn [shape]
+                                             (assoc-in shape [:exports index :suffix] value)))))))
 
         on-type-change
         (mf/use-fn
          (mf/deps ids)
          (fn [index event]
            (let [type (keyword event)]
-             (st/emit! (dch/update-shapes ids
-                                          (fn [shape]
-                                            (assoc-in shape [:exports index :type] type)))))))
+             (st/emit! (dwsh/update-shapes ids
+                                           (fn [shape]
+                                             (assoc-in shape [:exports index :type] type)))))))
 
         on-remove-all
         (mf/use-fn
          (mf/deps ids)
          (fn []
-           (st/emit! (dch/update-shapes ids
-                                        (fn [shape]
-                                          (assoc shape :exports []))))))
+           (st/emit! (dwsh/update-shapes ids
+                                         (fn [shape]
+                                           (assoc shape :exports []))))))
         manage-key-down
         (mf/use-fn
          (fn [event]

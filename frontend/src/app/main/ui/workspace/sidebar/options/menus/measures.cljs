@@ -9,12 +9,13 @@
   (:require
    [app.common.data :as d]
    [app.common.geom.shapes :as gsh]
+   [app.common.logic.shapes :as cls]
    [app.common.types.shape.layout :as ctl]
    [app.common.types.shape.radius :as ctsr]
    [app.main.constants :refer [size-presets]]
    [app.main.data.workspace :as udw]
-   [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.interactions :as dwi]
+   [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -249,13 +250,13 @@
         (mf/use-fn
          (mf/deps ids-with-children)
          (fn [update-fn]
-           (dch/update-shapes ids-with-children
-                              (fn [shape]
-                                (if (ctsr/has-radius? shape)
-                                  (update-fn shape)
-                                  shape))
-                              {:reg-objects? true
-                               :attrs [:rx :ry :r1 :r2 :r3 :r4]})))
+           (dwsh/update-shapes ids-with-children
+                               (fn [shape]
+                                 (if (ctsr/has-radius? shape)
+                                   (update-fn shape)
+                                   shape))
+                               {:reg-objects? true
+                                :attrs [:rx :ry :r1 :r2 :r3 :r4]})))
 
         on-switch-to-radius-1
         (mf/use-fn
@@ -317,7 +318,7 @@
          (mf/deps ids)
          (fn [event]
            (let [value (-> event dom/get-target dom/checked?)]
-             (st/emit! (dch/update-shapes ids (fn [shape] (assoc shape :show-content (not value))))))))
+             (st/emit! (dwsh/update-shapes ids (fn [shape] (assoc shape :show-content (not value))))))))
 
         on-change-show-in-viewer
         (mf/use-fn
@@ -325,16 +326,15 @@
          (fn [event]
            (let [value (-> event dom/get-target dom/checked?)
                  undo-id (js/Symbol)]
-             (do
-               (st/emit! (dwu/start-undo-transaction undo-id)
-                         (dch/update-shapes ids (fn [shape] (assoc shape :hide-in-viewer (not value)))))
+             (st/emit! (dwu/start-undo-transaction undo-id)
+                       (dwsh/update-shapes ids (fn [shape] (cls/change-show-in-viewer shape (not value)))))
 
-               (when-not value
+             (when-not value
                  ;; when a frame is no longer shown in view mode, cannot have
                  ;; interactions that navigate to it.
-                 (apply st/emit! (map #(dwi/remove-all-interactions-nav-to %) ids)))
+               (apply st/emit! (map #(dwi/remove-all-interactions-nav-to %) ids)))
 
-               (st/emit! (dwu/commit-undo-transaction undo-id))))))]
+             (st/emit! (dwu/commit-undo-transaction undo-id)))))]
 
     (mf/use-layout-effect
      (mf/deps radius-mode @radius-multi?)
@@ -399,7 +399,7 @@
                              :placeholder (if (= :multiple (:width values)) (tr "settings.multiple") "--")
                              :on-change on-width-change
                              :disabled disabled-width-sizing?
-                             :className (stl/css :numeric-input)
+                             :class (stl/css :numeric-input)
                              :value (:width values)}]]
         [:div {:class (stl/css-case :height true
                                     :disabled disabled-height-sizing?)
@@ -410,7 +410,7 @@
                              :placeholder (if (= :multiple (:height values)) (tr "settings.multiple") "--")
                              :on-change on-height-change
                              :disabled disabled-height-sizing?
-                             :className (stl/css :numeric-input)
+                             :class (stl/css :numeric-input)
                              :value (:height values)}]]
         [:button {:class (stl/css-case
                           :lock-size-btn true
@@ -430,7 +430,7 @@
                              :placeholder (if (= :multiple (:x values)) (tr "settings.multiple") "--")
                              :on-change on-pos-x-change
                              :disabled disabled-position-x?
-                             :className (stl/css :numeric-input)
+                             :class (stl/css :numeric-input)
                              :value (:x values)}]]
 
         [:div {:class (stl/css-case :y-position true
@@ -441,7 +441,7 @@
                              :placeholder (if (= :multiple (:y values)) (tr "settings.multiple") "--")
                              :disabled disabled-position-y?
                              :on-change on-pos-y-change
-                             :className (stl/css :numeric-input)
+                             :class (stl/css :numeric-input)
                              :value (:y values)}]]])
      (when (or (options :rotation) (options :radius))
        [:div {:class (stl/css :rotation-radius)}
@@ -457,7 +457,7 @@
              :data-wrap true
              :placeholder (if (= :multiple (:rotation values)) (tr "settings.multiple") "--")
              :on-change on-rotation-change
-             :className (stl/css :numeric-input)
+             :class (stl/css :numeric-input)
              :value (:rotation values)}]])
 
         (when (options :radius)
@@ -473,19 +473,19 @@
                  :ref radius-input-ref
                  :min 0
                  :on-change on-radius-1-change
-                 :className (stl/css :numeric-input)
+                 :class (stl/css :numeric-input)
                  :value (:rx values)}]]
 
               @radius-multi?
               [:div {:class (stl/css :radius-1)
                      :title (tr "workspace.options.radius")}
                [:span {:class (stl/css :icon)}  i/corner-radius]
-               [:input.input-text
+               [:input
                 {:type "number"
                  :placeholder "Mixed"
                  :min 0
                  :on-change on-radius-multi-change
-                 :className (stl/css :numeric-input)
+                 :class (stl/css :numeric-input)
                  :value (if all-equal? (:rx values) nil)}]]
 
 
@@ -497,7 +497,7 @@
                  {:placeholder "--"
                   :min 0
                   :on-change on-radius-r1-change
-                  :className (stl/css :numeric-input)
+                  :class (stl/css :numeric-input)
                   :value (:r1 values)}]]
 
                [:div {:class (stl/css :small-input)
@@ -506,7 +506,7 @@
                  {:placeholder "--"
                   :min 0
                   :on-change on-radius-r2-change
-                  :className (stl/css :numeric-input)
+                  :class (stl/css :numeric-input)
                   :value (:r2 values)}]]
 
                [:div {:class (stl/css :small-input)
@@ -515,7 +515,7 @@
                  {:placeholder "--"
                   :min 0
                   :on-change on-radius-r4-change
-                  :className (stl/css :numeric-input)
+                  :class (stl/css :numeric-input)
                   :value (:r4 values)}]]
 
                [:div {:class (stl/css :small-input)
@@ -524,7 +524,7 @@
                  {:placeholder "--"
                   :min 0
                   :on-change on-radius-r3-change
-                  :className (stl/css :numeric-input)
+                  :class (stl/css :numeric-input)
                   :value (:r3 values)}]]])]
            [:button {:class (stl/css-case :radius-mode true
                                           :selected (= radius-mode :radius-4))

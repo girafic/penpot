@@ -7,11 +7,10 @@
 (ns app.main.ui.auth.login
   (:require-macros [app.main.style :as stl])
   (:require
-   [app.common.data :as d]
    [app.common.logging :as log]
-   [app.common.spec :as us]
+   [app.common.schema :as sm]
    [app.config :as cf]
-   [app.main.data.messages :as msg]
+   [app.main.data.notifications :as ntf]
    [app.main.data.users :as du]
    [app.main.repo :as rp]
    [app.main.store :as st]
@@ -24,8 +23,8 @@
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as k]
    [app.util.router :as rt]
+   [app.util.storage :as s]
    [beicon.v2.core :as rx]
-   [cljs.spec.alpha :as s]
    [rumext.v2 :as mf]))
 
 (def show-alt-login-buttons?
@@ -39,53 +38,59 @@
   {::mf/props :obj}
   []
   [:& context-notification
-   {:type :warning
+   {:level :warning
     :content (tr "auth.demo-warning")}])
 
 (defn create-demo-profile
   []
   (st/emit! (du/create-demo-profile)))
 
+(defn- store-login-redirect
+  [save-login-redirect]
+  (binding [s/*sync* true]
+    (if (some? save-login-redirect)
+      ;; Save the current login raw uri for later redirect user back to
+      ;; the same page, we need it to be synchronous because the user is
+      ;; going to be redirected instantly to the oidc provider uri
+      (swap! s/session assoc :login-redirect (rt/get-current-href))
+      ;; Clean the login redirect
+      (swap! s/session dissoc :login-redirect))))
+
 (defn- login-with-oidc
   [event provider params]
   (dom/prevent-default event)
+
+  (store-login-redirect (:save-login-redirect params))
+
+  ;; FIXME: this code should be probably moved outside of the UI
   (->> (rp/cmd! :login-with-oidc (assoc params :provider provider))
        (rx/subs! (fn [{:keys [redirect-uri] :as rsp}]
                    (if redirect-uri
-                     (.replace js/location redirect-uri)
+                     (st/emit! (rt/nav-raw :uri redirect-uri))
                      (log/error :hint "unexpected response from OIDC method"
                                 :resp (pr-str rsp))))
-                 (fn [{:keys [type code] :as error}]
-                   (cond
-                     (and (= type :restriction)
-                          (= code :provider-not-configured))
-                     (st/emit! (msg/error (tr "errors.auth-provider-not-configured")))
+                 (fn [cause]
+                   (let [{:keys [type code] :as error} (ex-data cause)]
+                     (cond
+                       (and (= type :restriction)
+                            (= code :provider-not-configured))
+                       (st/emit! (ntf/error (tr "errors.auth-provider-not-configured")))
 
-                     :else
-                     (st/emit! (msg/error (tr "errors.generic"))))))))
+                       :else
+                       (st/emit! (ntf/error (tr "errors.generic")))))))))
 
-(s/def ::email ::us/email)
-(s/def ::password ::us/not-empty-string)
-(s/def ::invitation-token ::us/not-empty-string)
-
-(s/def ::login-form
-  (s/keys :req-un [::email ::password]
-          :opt-un [::invitation-token]))
-
-(defn handle-error-messages
-  [errors _data]
-  (d/update-when errors :email
-                 (fn [{:keys [code] :as error}]
-                   (cond-> error
-                     (= code ::us/email)
-                     (assoc :message (tr "errors.email-invalid"))))))
+(def ^:private schema:login-form
+  [:map {:title "LoginForm"}
+   [:email [::sm/email {:error/code "errors.invalid-email"}]]
+   [:password [:string {:min 1}]]
+   [:invitation-token {:optional true}
+    [:string {:min 1}]]])
 
 (mf/defc login-form
-  [{:keys [params on-success-callback origin] :as props}]
-  (let [initial (mf/use-memo (mf/deps params) (constantly params))
+  [{:keys [params on-success-callback on-recovery-request origin] :as props}]
+  (let [initial (mf/with-memo [params] params)
         error   (mf/use-state false)
-        form    (fm/use-form :spec ::login-form
-                             :validators [handle-error-messages]
+        form    (fm/use-form :schema schema:login-form
                              :initial initial)
 
         on-error
@@ -98,8 +103,7 @@
 
               (and (= :restriction (:type cause))
                    (= :ldap-not-initialized (:code cause)))
-              (st/emit! (msg/error (tr "errors.ldap-disabled")))
-
+              (st/emit! (ntf/error (tr "errors.ldap-disabled")))
 
               (and (= :restriction (:type cause))
                    (= :admin-only-profile (:code cause)))
@@ -131,6 +135,7 @@
         on-submit
         (mf/use-callback
          (fn [form _event]
+           (store-login-redirect (:save-login-redirect params))
            (reset! error nil)
            (let [params (with-meta (:clean-data @form)
                           {:on-error on-error
@@ -151,16 +156,18 @@
                            :on-success on-success})]
              (st/emit! (du/login-with-ldap params)))))
 
-        on-recovery-request
+        default-recovery-req
         (mf/use-fn
-         #(st/emit! (rt/nav :auth-recovery-request)))]
+         #(st/emit! (rt/nav :auth-recovery-request)))
+
+        on-recovery-request (or on-recovery-request
+                                default-recovery-req)]
 
     [:*
      (when-let [message @error]
        [:& context-notification
-        {:type :warning
+        {:level :error
          :content message
-         :data-test "login-banner"
          :role "alert"}])
 
      [:& fm/form {:on-submit on-submit
@@ -170,7 +177,7 @@
        [:& fm/input
         {:name :email
          :type "email"
-         :label (tr "auth.email")
+         :label (tr "auth.work-email")
          :class (stl/css :form-field)}]]
 
       [:div {:class (stl/css :fields-row)}
@@ -186,7 +193,7 @@
         [:div {:class (stl/css :fields-row :forgot-password)}
          [:& lk/link {:action on-recovery-request
                       :class (stl/css :forgot-pass-link)
-                      :data-test "forgot-password"}
+                      :data-testid "forgot-password"}
           (tr "auth.forgot-password")]])
 
       [:div {:class (stl/css :buttons-stack)}
@@ -194,7 +201,7 @@
                  (contains? cf/flags :login-with-password))
          [:> fm/submit-button*
           {:label (tr "auth.login-submit")
-           :data-test "login-submit"
+           :data-testid "login-submit"
            :class (stl/css :login-button)}])
 
        (when (contains? cf/flags :login-with-ldap)
@@ -256,7 +263,7 @@
        (tr "auth.login-with-oidc-submit")])))
 
 (mf/defc login-methods
-  [{:keys [params on-success-callback origin] :as props}]
+  [{:keys [params on-success-callback on-recovery-request origin] :as props}]
   [:*
    (when show-alt-login-buttons?
      [:*
@@ -270,7 +277,7 @@
    (when (or (contains? cf/flags :login)
              (contains? cf/flags :login-with-password)
              (contains? cf/flags :login-with-ldap))
-     [:& login-form {:params params :on-success-callback on-success-callback :origin origin}])])
+     [:& login-form {:params params :on-success-callback on-success-callback :on-recovery-request on-recovery-request :origin origin}])])
 
 (mf/defc login-page
   [{:keys [params] :as props}]
@@ -280,7 +287,7 @@
 
     [:div {:class (stl/css :auth-form-wrapper)}
      [:h1 {:class (stl/css :auth-title)
-           :data-test "login-title"} (tr "auth.login-account-title")]
+           :data-testid "login-title"} (tr "auth.login-account-title")]
 
      [:p {:class (stl/css :auth-tagline)}
       (tr "auth.login-tagline")]
@@ -299,12 +306,5 @@
           (tr "auth.register") " "]
          [:& lk/link {:action go-register
                       :class (stl/css :register-link)
-                      :data-test "register-submit"}
-          (tr "auth.register-submit")]])]
-
-     (when (contains? cf/flags :demo-users)
-       [:div {:class (stl/css :link-entry :demo-account)}
-        [:span (tr "auth.create-demo-profile") " "]
-        [:& lk/link {:action create-demo-profile
-                     :data-test "demo-account-link"}
-         (tr "auth.create-demo-account")]])]))
+                      :data-testid "register-submit"}
+          (tr "auth.register-submit")]])]]))

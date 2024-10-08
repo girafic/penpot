@@ -78,6 +78,12 @@
 
 (def text-all-attrs (d/concat-set shape-attrs root-attrs paragraph-attrs text-node-attrs))
 
+(def text-style-attrs
+  (d/concat-vec root-attrs paragraph-attrs text-node-attrs))
+
+(def default-root-attrs
+  {:vertical-align "top"})
+
 (def default-text-attrs
   {:typography-ref-file nil
    :typography-ref-id nil
@@ -92,8 +98,12 @@
    :text-transform "none"
    :text-align "left"
    :text-decoration "none"
+   :text-direction "ltr"
    :fills [{:fill-color clr/black
             :fill-opacity 1}]})
+
+(def default-attrs
+  (merge default-root-attrs default-text-attrs))
 
 (def typography-fields
   [:font-id
@@ -361,7 +371,7 @@
 
             new-acc
             (cond
-              (:children node)
+              (not (is-text-node? node))
               (reduce #(rec-style-text-map %1 %2 node-style) acc (:children node))
 
               (not= head-style node-style)
@@ -380,6 +390,28 @@
 
     (-> (rec-style-text-map [] node {})
         reverse)))
+
+(defn content-range->text+styles
+  "Given a root node of a text content extracts the texts with its associated styles"
+  [node start end]
+  (let [sss (content->text+styles node)]
+    (loop [styles  (seq sss)
+           taking? false
+           acc      0
+           result   []]
+      (if styles
+        (let [[node-style text] (first styles)
+              from      acc
+              to        (+ acc (count text))
+              taking?   (or taking? (and (<= from start) (< start to)))
+              text      (subs text (max 0 (- start acc)) (- end acc))
+              result    (cond-> result
+                          (and taking? (d/not-empty? text))
+                          (conj (assoc node-style :text text)))
+              continue? (or (> from end) (>= end to))]
+          (recur (when continue? (rest styles)) taking? to result))
+        result))))
+
 
 (defn content->text
   "Given a root node of a text content extracts the texts with its associated styles"
@@ -406,8 +438,14 @@
   [shape text]
   (let [content (:content shape)
 
-        paragraph-style (select-keys (->> content (node-seq is-paragraph-node?) first) text-all-attrs)
-        text-style (select-keys (->> content (node-seq is-text-node?) first) text-all-attrs)
+        root-styles (select-keys content root-attrs)
+
+        paragraph-style (merge
+                         default-text-attrs
+                         (select-keys (->> content (node-seq is-paragraph-node?) first) text-all-attrs))
+        text-style (merge
+                    default-text-attrs
+                    (select-keys (->> content (node-seq is-text-node?) first) text-all-attrs))
 
         paragraph-texts (str/split text "\n")
 
@@ -421,10 +459,12 @@
                   :children [(merge {:text pt} text-style)]}))))
 
         new-content
-        {:type "root"
-         :children
-         [{:type "paragraph-set"
-           :children paragraphs}]}]
+        (d/patch-object
+         {:type "root"
+          :children
+          [{:type "paragraph-set"
+            :children paragraphs}]}
+         root-styles)]
 
     (assoc shape :content new-content)))
 

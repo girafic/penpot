@@ -9,13 +9,14 @@
    [app.common.data :as d]
    [app.common.schema :as sm]
    [app.common.text :as txt]
+   [app.common.types.plugins :as ctpg]
    [app.common.uuid :as uuid]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SCHEMA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(sm/def! ::typography
+(sm/register! ::typography
   [:map {:title "Typography"}
    [:id ::sm/uuid]
    [:name :string]
@@ -29,7 +30,8 @@
    [:letter-spacing :string]
    [:text-transform :string]
    [:modified-at {:optional true} ::sm/inst]
-   [:path {:optional true} [:maybe :string]]])
+   [:path {:optional true} [:maybe :string]]
+   [:plugin-data {:optional true} ::ctpg/plugin-data]])
 
 (def check-typography!
   (sm/check-fn ::typography))

@@ -62,8 +62,8 @@
       (th/reset-mock! mock)
       (let [data (assoc data :emails ["foo@bar.com"])
             out  (th/command! data)]
-        (t/is (th/success? out))
-        (t/is (= 1 (:call-count (deref mock)))))
+        (t/is (not (th/success? out)))
+        (t/is (= 0 (:call-count (deref mock)))))
 
       ;; get invitation token
       (let [params {::th/type :get-team-invitation-token
@@ -86,7 +86,7 @@
         (t/is (= 0 (:call-count @mock)))
 
         (let [edata (-> out :error ex-data)]
-          (t/is (= :validation (:type edata)))
+          (t/is (= :restriction (:type edata)))
           (t/is (= :email-has-permanent-bounces (:code edata)))))
 
       ;; invite internal user that is muted
@@ -260,6 +260,7 @@
         (th/reset-mock! mock)
         (let [data (assoc data :emails [(:email profile2)])
               out  (th/command! data)]
+          ;; (th/print-result! out)
           (t/is (th/success? out))
           (t/is (= 0 (:call-count (deref mock)))))
 
@@ -391,6 +392,8 @@
         (t/is (= 1 (count result)))
         (t/is (= (:default-team-id profile1) (get-in result [0 :id])))))
 
+    (th/run-pending-tasks!)
+
     ;; run permanent deletion (should be noop)
     (let [result (th/run-task! :objects-gc {:min-age (dt/duration {:minutes 1})})]
       (t/is (= 0 (:processed result))))
@@ -457,9 +460,154 @@
       #_(th/print-result! out)
       (t/is (nil? (:error out))))
 
+    (th/run-pending-tasks!)
+
     (let [rows (th/db-exec! ["select * from team where id = ?" (:id team)])]
       (t/is (= 1 (count rows)))
       (t/is (dt/instant? (:deleted-at (first rows)))))
 
     (let [result (th/run-task! :objects-gc {:min-age 0})]
       (t/is (= 5 (:processed result))))))
+
+(t/deftest create-team-access-request
+  (with-mocks [mock {:target 'app.email/send! :return nil}]
+    (let [owner      (th/create-profile* 1 {:is-active true :email "owner@bar.com"})
+          requester  (th/create-profile* 3 {:is-active true :email "requester@bar.com"})
+          team       (th/create-team* 1 {:profile-id (:id owner)})
+          proj       (th/create-project* 1 {:profile-id (:id owner)
+                                            :team-id (:id team)})
+          file       (th/create-file* 1 {:profile-id (:id owner)
+                                         :project-id (:id proj)})
+
+          data       {::th/type :create-team-access-request
+                      ::rpc/profile-id (:id requester)
+                      :file-id (:id file)}]
+
+      ;; request success
+      (let [out        (th/command! data)
+            ;; retrieve the value from the database and check its content
+            request    (db/exec-one!
+                        th/*pool*
+                        ["select count(*) as num from team_access_request where team_id = ? and requester_id = ?"
+                         (:id team) (:id requester)])]
+
+        (t/is (th/success? out))
+        (t/is (= 1 (:call-count @mock)))
+        (t/is (= 1 (:num request))))
+
+      ;; request again fails
+      (th/reset-mock! mock)
+      (let [out        (th/command! data)
+            edata (-> out :error ex-data)]
+        (t/is (not (th/success? out)))
+        (t/is (= 0 (:call-count @mock)))
+
+        (t/is (= :validation (:type edata)))
+        (t/is (= :request-already-sent (:code edata))))
+
+
+      ;; request again when is expired success
+      (th/reset-mock! mock)
+
+      (db/exec-one!
+       th/*pool*
+       ["update team_access_request set valid_until = ? where team_id = ? and requester_id = ?"
+        (dt/in-past "1h") (:id team) (:id requester)])
+
+      (t/is (th/success? (th/command! data)))
+      (t/is (= 1 (:call-count @mock))))))
+
+
+(t/deftest create-team-access-request-owner-muted
+  (with-mocks [mock {:target 'app.email/send! :return nil}]
+    (let [owner       (th/create-profile* 1 {:is-active true :is-muted true :email "owner@bar.com"})
+          requester   (th/create-profile* 2 {:is-active true :email "requester@bar.com"})
+          team        (th/create-team* 1 {:profile-id (:id owner)})
+          proj        (th/create-project* 1 {:profile-id (:id owner)
+                                             :team-id (:id team)})
+          file        (th/create-file* 1 {:profile-id (:id owner)
+                                          :project-id (:id proj)})
+
+          data        {::th/type :create-team-access-request
+                       ::rpc/profile-id (:id requester)
+                       :file-id (:id file)}]
+
+      ;; request to team with owner muted should success
+      (t/is (th/success? (th/command! data)))
+      (t/is (= 1 (:call-count @mock))))))
+
+
+(t/deftest create-team-access-request-requester-muted
+  (with-mocks [mock {:target 'app.email/send! :return nil}]
+    (let [owner       (th/create-profile* 1 {:is-active true :email "owner@bar.com"})
+          requester   (th/create-profile* 2 {:is-active true :is-muted true :email "requester@bar.com"})
+          team        (th/create-team* 1 {:profile-id (:id owner)})
+          proj        (th/create-project* 1 {:profile-id (:id owner)
+                                             :team-id (:id team)})
+          file        (th/create-file* 1 {:profile-id (:id owner)
+                                          :project-id (:id proj)})
+
+          data        {::th/type :create-team-access-request
+                       ::rpc/profile-id (:id requester)
+                       :file-id (:id file)}
+
+          out   (th/command! data)
+          edata (-> out :error ex-data)]
+
+      ;; request with requester muted should fail
+      (t/is (not (th/success? out)))
+      (t/is (= 0 (:call-count @mock)))
+
+      (t/is (= :validation (:type edata)))
+      (t/is (= :member-is-muted (:code edata)))
+      (t/is (= (:email requester) (:email edata))))))
+
+
+(t/deftest create-team-access-request-owner-bounce
+  (with-mocks [mock {:target 'app.email/send! :return nil}]
+    (let [owner       (th/create-profile* 1 {:is-active true :email "owner@bar.com"})
+          requester   (th/create-profile* 2 {:is-active true :email "requester@bar.com"})
+          team        (th/create-team* 1 {:profile-id (:id owner)})
+          proj        (th/create-project* 1 {:profile-id (:id owner)
+                                             :team-id (:id team)})
+          file        (th/create-file* 1 {:profile-id (:id owner)
+                                          :project-id (:id proj)})
+
+          pool        (:app.db/pool th/*system*)
+          data        {::th/type :create-team-access-request
+                       ::rpc/profile-id (:id requester)
+                       :file-id (:id file)}]
+
+
+      (th/create-global-complaint-for pool {:type :bounce :email "owner@bar.com"})
+      (let [out   (th/command! data)
+            edata (-> out :error ex-data)]
+
+        ;; request with owner bounce should fail
+        (t/is (not (th/success? out)))
+        (t/is (= 0 (:call-count @mock)))
+
+        (t/is (= :restriction (:type edata)))
+        (t/is (= :email-has-permanent-bounces (:code edata)))
+        (t/is (= "private" (:email edata)))))))
+
+(t/deftest create-team-access-request-requester-bounce
+  (with-mocks [mock {:target 'app.email/send! :return nil}]
+    (let [owner       (th/create-profile* 1 {:is-active true :email "owner@bar.com"})
+          requester   (th/create-profile* 2 {:is-active true :email "requester@bar.com"})
+          team        (th/create-team* 1 {:profile-id (:id owner)})
+          proj        (th/create-project* 1 {:profile-id (:id owner)
+                                             :team-id (:id team)})
+          file        (th/create-file* 1 {:profile-id (:id owner)
+                                          :project-id (:id proj)})
+
+          pool        (:app.db/pool th/*system*)
+          data        {::th/type :create-team-access-request
+                       ::rpc/profile-id (:id requester)
+                       :file-id (:id file)}]
+
+      ;; request with requester bounce should success
+      (th/create-global-complaint-for pool {:type :bounce :email "requester@bar.com"})
+      (t/is (th/success? (th/command! data)))
+      (t/is (= 1 (:call-count @mock))))))
+

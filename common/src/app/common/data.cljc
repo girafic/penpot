@@ -9,7 +9,7 @@
   data resources."
   (:refer-clojure :exclude [read-string hash-map merge name update-vals
                             parse-double group-by iteration concat mapcat
-                            parse-uuid max min])
+                            parse-uuid max min regexp?])
   #?(:cljs
      (:require-macros [app.common.data]))
 
@@ -44,8 +44,8 @@
 
 (defn ordered-map
   ([] lkm/empty-linked-map)
-  ([a] (conj lkm/empty-linked-map a))
-  ([a & xs] (apply conj lkm/empty-linked-map a xs)))
+  ([k a] (assoc lkm/empty-linked-map k a))
+  ([k a & xs] (apply assoc lkm/empty-linked-map k a xs)))
 
 (defn ordered-set?
   [o]
@@ -223,7 +223,6 @@
 (defn vec-without-nils
   [coll]
   (into [] (remove nil?) coll))
-
 
 (defn without-nils
   "Given a map, return a map removing key-value
@@ -565,6 +564,41 @@
                 new-elems
                 (remove p? after))))
 
+(defn addm-at-index
+  "Insert an element in an ordered map at an arbitrary index"
+  [coll index key element]
+  (assert (ordered-map? coll))
+  (-> (ordered-map)
+      (into (take index coll))
+      (assoc key element)
+      (into (drop index coll))))
+
+(defn insertm-at-index
+  "Insert a map {k v} of elements in an ordered map at an arbitrary index"
+  [coll index new-elems]
+  (assert (ordered-map? coll))
+  (-> (ordered-map)
+      (into (take index coll))
+      (into new-elems)
+      (into (drop index coll))))
+
+(defn adds-at-index
+  "Insert an element in an ordered set at an arbitrary index"
+  [coll index element]
+  (assert (ordered-set? coll))
+  (-> (ordered-set)
+      (into (take index coll))
+      (conj element)
+      (into (drop index coll))))
+
+(defn inserts-at-index
+  "Insert a list of elements in an ordered set at an arbitrary index"
+  [coll index new-elems]
+  (assert (ordered-set? coll))
+  (-> (ordered-set)
+      (into (take index coll))
+      (into new-elems)
+      (into (drop index coll))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Data Parsing / Conversion
@@ -641,6 +675,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Utilities
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn regexp?
+  "Return `true` if `x` is a regexp pattern
+  instance."
+  [x]
+  #?(:cljs (cljs.core/regexp? x)
+     :clj (instance? java.util.regex.Pattern x)))
 
 (defn nilf
   "Returns a new function that if you pass nil as any argument will

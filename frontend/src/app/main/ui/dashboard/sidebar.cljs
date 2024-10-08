@@ -13,8 +13,8 @@
    [app.config :as cf]
    [app.main.data.dashboard :as dd]
    [app.main.data.events :as ev]
-   [app.main.data.messages :as msg]
    [app.main.data.modal :as modal]
+   [app.main.data.notifications :as ntf]
    [app.main.data.users :as du]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -149,7 +149,7 @@
         on-drop-success
         (mf/use-fn
          (mf/deps (:id item))
-         #(st/emit! (msg/success (tr "dashboard.success-move-file"))
+         #(st/emit! (ntf/success (tr "dashboard.success-move-file"))
                     (dd/go-to-files (:id item))))
 
         on-drop
@@ -256,11 +256,13 @@
      (if (or @focused? (seq search-term))
        [:button {:class (stl/css :search-btn :clear-search-btn)
                  :tab-index "0"
+                 :aria-label "dashboard-clear-search"
                  :on-click on-clear-click
                  :on-key-down handle-clear-search}
         clear-search-icon]
 
        [:button {:class (stl/css :search-btn)
+                 :aria-label "dashboard-search"
                  :on-click on-clear-click}
         search-icon])]))
 
@@ -360,13 +362,13 @@
         (fn [{:keys [code] :as error}]
           (condp = code
             :no-enough-members-for-leave
-            (rx/of (msg/error (tr "errors.team-leave.insufficient-members")))
+            (rx/of (ntf/error (tr "errors.team-leave.insufficient-members")))
 
             :member-does-not-exist
-            (rx/of (msg/error (tr "errors.team-leave.member-does-not-exists")))
+            (rx/of (ntf/error (tr "errors.team-leave.member-does-not-exists")))
 
             :owner-cant-leave-team
-            (rx/of (msg/error (tr "errors.team-leave.owner-cant-leave")))
+            (rx/of (ntf/error (tr "errors.team-leave.owner-cant-leave")))
 
             (rx/throw error)))
 
@@ -504,13 +506,13 @@
                               :on-key-down handle-members
                               :className   (stl/css :team-options-item)
                               :id          "teams-options-members"
-                              :data-test   "team-members"}
+                              :data-testid   "team-members"}
       (tr "labels.members")]
      [:> dropdown-menu-item* {:on-click    go-invitations
                               :on-key-down handle-invitations
                               :className   (stl/css :team-options-item)
                               :id          "teams-options-invitations"
-                              :data-test   "team-invitations"}
+                              :data-testid   "team-invitations"}
       (tr "labels.invitations")]
 
      (when (contains? cf/flags :webhooks)
@@ -524,7 +526,7 @@
                               :on-key-down handle-settings
                               :className   (stl/css :team-options-item)
                               :id          "teams-options-settings"
-                              :data-test   "team-settings"}
+                              :data-testid   "team-settings"}
       (tr "labels.settings")]
 
      [:hr {:class (stl/css :team-option-separator)}]
@@ -533,7 +535,7 @@
                                 :on-key-down handle-rename
                                 :id          "teams-options-rename"
                                 :className   (stl/css :team-options-item)
-                                :data-test   "rename-team"}
+                                :data-testid   "rename-team"}
         (tr "labels.rename")])
 
      (cond
@@ -550,7 +552,7 @@
                                 :on-key-down handle-leave-as-owner-clicked
                                 :id          "teams-options-leave-team"
                                 :className   (stl/css :team-options-item)
-                                :data-test   "leave-team"}
+                                :data-testid   "leave-team"}
         (tr "dashboard.leave-team")]
 
        (> (count members) 1)
@@ -565,7 +567,7 @@
                                 :on-key-down handle-on-delete-clicked
                                 :id          "teams-options-delete-team"
                                 :className   (stl/css :team-options-item :warning)
-                                :data-test   "delete-team"}
+                                :data-testid   "delete-team"}
         (tr "dashboard.delete-team")])]))
 
 (mf/defc sidebar-team-switch
@@ -654,6 +656,7 @@
       (when-not (:is-default team)
         [:button {:class (stl/css :switch-options)
                   :on-click handle-show-opts-click
+                  :aria-label "team-management"
                   :tab-index "0"
                   :on-key-down handle-show-opts-keydown}
          menu-icon])]
@@ -783,7 +786,6 @@
        [:li {:class (stl/css-case :current drafts?
                                   :sidebar-nav-item true)}
         [:& link {:action go-drafts
-                  :data-testid "drafts-link-sidebar"
                   :class (stl/css :sidebar-link)
                   :keyboard-action go-drafts-with-key}
          [:span {:class (stl/css :element-title)} (tr "labels.drafts")]]]
@@ -792,6 +794,7 @@
        [:li {:class (stl/css-case :current libs?
                                   :sidebar-nav-item true)}
         [:& link {:action go-libs
+                  :data-testid "libs-link-sidebar"
                   :class (stl/css :sidebar-link)
                   :keyboard-action go-libs-with-key}
          [:span {:class (stl/css :element-title)} (tr "labels.shared-libraries")]]]]]
@@ -804,12 +807,12 @@
         [:& link {:action go-fonts
                   :class (stl/css :sidebar-link)
                   :keyboard-action go-fonts-with-key
-                  :data-test "fonts"}
+                  :data-testid "fonts"}
          [:span {:class (stl/css :element-title)} (tr "labels.fonts")]]]]]
 
 
      [:div {:class (stl/css :sidebar-content-section)
-            :data-test "pinned-projects"}
+            :data-testid "pinned-projects"}
       (if (seq pinned-projects)
         [:ul {:class (stl/css :sidebar-nav :pinned-projects)}
          (for [item pinned-projects]
@@ -946,11 +949,11 @@
          :on-hide-comments handle-hide-comments}])
 
      [:div {:class (stl/css :profile-section)}
-      [:div {:class (stl/css :profile)
-             :tab-index "0"
-             :on-click handle-click
-             :on-key-down handle-key-down
-             :data-test "profile-btn"}
+      [:button {:class (stl/css :profile)
+                :tab-index "0"
+                :on-click handle-click
+                :on-key-down handle-key-down
+                :data-testid "profile-btn"}
        [:img {:src photo
               :class (stl/css :profile-img)
               :alt (:fullname profile)}]
@@ -961,7 +964,7 @@
              :class (stl/css :profile-dropdown-item)
              :on-click handle-set-profile
              :on-key-down handle-key-down-profile
-             :data-test "profile-profile-opt"}
+             :data-testid "profile-profile-opt"}
         (tr "labels.your-account")]
 
        [:li {:class (stl/css :profile-separator)}]
@@ -971,7 +974,7 @@
              :data-url "https://help.penpot.app"
              :on-click handle-click-url
              :on-key-down handle-keydown-url
-             :data-test "help-center-profile-opt"}
+             :data-testid "help-center-profile-opt"}
         (tr "labels.help-center")]
 
        [:li {:tab-index (if show "0" "-1")
@@ -1001,7 +1004,7 @@
              :data-url "https://penpot.app/libraries-templates"
              :on-click handle-click-url
              :on-key-down handle-keydown-url
-             :data-test "libraries-templates-profile-opt"}
+             :data-testid "libraries-templates-profile-opt"}
         (tr "labels.libraries-and-templates")]
 
        [:li {:tab-index (if show "0" "-1")
@@ -1025,14 +1028,14 @@
                :tab-index (if show "0" "-1")
                :on-click handle-feedback-click
                :on-key-down handle-feedback-keydown
-               :data-test "feedback-profile-opt"}
+               :data-testid "feedback-profile-opt"}
           (tr "labels.give-feedback")])
 
        [:li {:class (stl/css :profile-dropdown-item :item-with-icon)
              :tab-index (if show "0" "-1")
              :on-click handle-logout-click
              :on-key-down handle-logout-keydown
-             :data-test "logout-profile-opt"}
+             :data-testid "logout-profile-opt"}
         exit-icon
         (tr "labels.logout")]]
 
@@ -1048,7 +1051,7 @@
   [props]
   (let [team    (obj/get props "team")
         profile (obj/get props "profile")]
-    [:nav {:class (stl/css :dashboard-sidebar)}
+    [:nav {:class (stl/css :dashboard-sidebar) :data-testid "dashboard-sidebar"}
      [:> sidebar-content props]
      [:& profile-section
       {:profile profile

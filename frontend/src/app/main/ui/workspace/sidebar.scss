@@ -59,11 +59,11 @@ $width-settings-bar-max: $s-500;
 
 .right-settings-bar {
   grid-area: right-sidebar;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
   width: $width-settings-bar;
   background-color: var(--panel-background-color);
-  height: 100%;
-  display: flex;
-  flex-direction: column;
   z-index: 0;
   &.not-expand {
     max-width: $width-settings-bar;
@@ -84,10 +84,27 @@ $width-settings-bar-max: $s-500;
 
 .resize-area-horiz {
   position: absolute;
-  // top: calc($s-88 + var(--height, 200px));
   left: 0;
   width: 100%;
-  // height: $s-8;
   border-bottom: $s-2 solid var(--resize-area-border-color);
   cursor: ns-resize;
+}
+
+.left-sidebar-tabs {
+  --tabs-nav-padding-inline-start: var(--sp-m);
+  --tabs-nav-padding-inline-end: var(--sp-m);
+}
+
+.collapse-sidebar-button {
+  --collapse-icon-color: var(--color-foreground-secondary);
+  @include flexCenter;
+  @include buttonStyle;
+  height: 100%;
+  width: $s-24;
+  border-radius: $br-5;
+  color: var(--collapse-icon-color);
+  transform: rotate(180deg);
+  &:hover {
+    --collapse-icon-color: var(--color-foreground-primary);
+  }
 }

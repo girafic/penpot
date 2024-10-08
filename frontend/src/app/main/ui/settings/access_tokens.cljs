@@ -7,9 +7,9 @@
 (ns app.main.ui.settings.access-tokens
   (:require-macros [app.main.style :as stl])
   (:require
-   [app.common.spec :as us]
-   [app.main.data.messages :as msg]
+   [app.common.schema :as sm]
    [app.main.data.modal :as modal]
+   [app.main.data.notifications :as ntf]
    [app.main.data.users :as du]
    [app.main.store :as st]
    [app.main.ui.components.context-menu-a11y :refer [context-menu-a11y]]
@@ -20,8 +20,6 @@
    [app.util.keyboard :as kbd]
    [app.util.time :as dt]
    [app.util.webapi :as wapi]
-   [cljs.spec.alpha :as s]
-   [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -40,17 +38,10 @@
 (def token-created-ref
   (l/derived :access-token-created st/state))
 
-(s/def ::name ::us/not-empty-string)
-(s/def ::expiration-date ::us/not-empty-string)
-(s/def ::access-token-form
-  (s/keys :req-un [::name ::expiration-date]))
-
-(defn- name-validator
-  [errors data]
-  (let [name (:name data)]
-    (cond-> errors
-      (str/blank? name)
-      (assoc :name {:message (tr "dashboard.access-tokens.errors-required-name")}))))
+(def ^:private schema:form
+  [:map {:title "AccessTokenForm"}
+   [:name [::sm/text {:max 250}]]
+   [:expiration-date [::sm/text {:max 250}]]])
 
 (def initial-data
   {:name "" :expiration-date "never"})
@@ -61,10 +52,8 @@
   []
   (let [form    (fm/use-form
                  :initial initial-data
-                 :spec ::access-token-form
-                 :validators [name-validator
-                              (fm/validate-not-empty :name (tr "auth.name.not-all-space"))
-                              (fm/validate-length :name fm/max-length-allowed (tr "auth.name.too-long"))])
+                 :schema schema:form)
+
         created  (mf/deref token-created-ref)
         created? (mf/use-state false)
         locale   (mf/deref i18n/locale)
@@ -75,7 +64,7 @@
          (fn [_]
            (let [message (tr "dashboard.access-tokens.create.success")]
              (st/emit! (du/fetch-access-tokens)
-                       (msg/success message)
+                       (ntf/success message)
                        (reset! created? true)))))
 
         on-close
@@ -88,7 +77,7 @@
         on-error
         (mf/use-fn
          (fn [_]
-           (st/emit! (msg/error (tr "errors.generic"))
+           (st/emit! (ntf/error (tr "errors.generic"))
                      (modal/hide))))
 
         on-submit
@@ -110,8 +99,8 @@
          (fn [event]
            (dom/prevent-default event)
            (wapi/write-to-clipboard (:token created))
-           (st/emit! (msg/show {:type :info
-                                :notification-type :toast
+           (st/emit! (ntf/show {:level :info
+                                :type :toast
                                 :content (tr "dashboard.access-tokens.copied-success")
                                 :timeout 7000}))))]
 

@@ -49,7 +49,8 @@
     "components/v2"
     "styles/v2"
     "layout/grid"
-    "plugins/runtime"})
+    "plugins/runtime"
+    "text-editor/v2"})
 
 ;; A set of features enabled by default
 (def default-features
@@ -64,7 +65,8 @@
 ;; team feature field
 (def frontend-only-features
   #{"styles/v2"
-    "plugins/runtime"})
+    "plugins/runtime"
+    "text-editor/v2"})
 
 ;; Features that are mainly backend only or there are a proper
 ;; fallback when frontend reports no support for it
@@ -81,15 +83,16 @@
         "fdata/pointer-map"
         "layout/grid"
         "fdata/shape-data-type"
-        "plugins/runtime"}
+        "plugins/runtime"
+        "text-editor/v2"}
       (into frontend-only-features)))
 
-(sm/def! ::features
+(sm/register! ::features
   [:schema
    {:title "FileFeatures"
     ::smdj/inline true
     :gen/gen (smg/subseq supported-features)}
-   ::sm/set-of-strings])
+   [::sm/set :string]])
 
 (defn- flag->feature
   "Translate a flag to a feature name"
@@ -101,6 +104,7 @@
     :feature-fdata-objects-map "fdata/objects-map"
     :feature-fdata-pointer-map "fdata/pointer-map"
     :feature-plugins "plugins/runtime"
+    :feature-text-editor-v2 "text-editor/v2"
     nil))
 
 (defn migrate-legacy-features

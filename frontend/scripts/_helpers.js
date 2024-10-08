@@ -19,19 +19,26 @@ function getCoreCount() {
   return os.cpus().length;
 }
 
-// const __filename = url.fileURLToPath(import.meta.url);
 export const dirname = url.fileURLToPath(new URL(".", import.meta.url));
 
 export function startWorker() {
   return wpool.pool(dirname + "/_worker.js", {
-    maxWorkers: getCoreCount()
+    maxWorkers: getCoreCount(),
   });
 }
 
-async function findFiles(basePath, predicate, options={}) {
-  predicate = predicate ?? function() { return true; }
+export const isDebug = process.env.NODE_ENV !== "production";
 
-  let files = await fs.readdir(basePath, {recursive: options.recursive ?? false})
+async function findFiles(basePath, predicate, options = {}) {
+  predicate =
+    predicate ??
+    function () {
+      return true;
+    };
+
+  let files = await fs.readdir(basePath, {
+    recursive: options.recursive ?? false,
+  });
   files = files.map((path) => ph.join(basePath, path));
 
   return files;
@@ -42,8 +49,11 @@ function syncDirs(originPath, destPath) {
 
   return new Promise((resolve, reject) => {
     proc.exec(command, (cause, stdout) => {
-      if (cause) { reject(cause); }
-      else { resolve(); }
+      if (cause) {
+        reject(cause);
+      } else {
+        resolve();
+      }
     });
   });
 }
@@ -67,46 +77,86 @@ export async function compileSass(worker, path, options) {
   return worker.exec("compileSass", [path, options]);
 }
 
+export async function compileSassDebug(worker) {
+  const result = await compileSass(worker, "resources/styles/debug.scss", {});
+  return `${result.css}\n`;
+}
+
+export async function compileSassStorybook(worker) {
+  const limitFn = pLimit(4);
+  const sourceDir = ph.join("src", "app", "main", "ui", "ds");
+
+  const dsFiles = (await fs.readdir(sourceDir, { recursive: true }))
+    .filter(isSassFile)
+    .map((filename) => ph.join(sourceDir, filename));
+  const procs = [compileSass(worker, "resources/styles/main-default.scss", {})];
+
+  for (let path of dsFiles) {
+    const proc = limitFn(() => compileSass(worker, path, { modules: true }));
+    procs.push(proc);
+  }
+
+  const result = await Promise.all(procs);
+  return result.reduce(
+    (acc, item) => {
+      acc.index[item.outputPath] = item.css;
+      acc.items.push(item.outputPath);
+      return acc;
+    },
+    { index: {}, items: [] },
+  );
+}
+
 export async function compileSassAll(worker) {
   const limitFn = pLimit(4);
   const sourceDir = "src";
 
-  let files = await fs.readdir(sourceDir, { recursive: true })
-  files = files.filter((path) => path.endsWith(".scss"));
-  files = files.map((path) => ph.join(sourceDir, path));
-  // files = files.slice(0, 10);
+  const isDesignSystemFile = (path) => {
+    return path.startsWith("app/main/ui/ds/");
+  };
 
-  const procs = [
-    compileSass(worker, "resources/styles/main-default.scss", {}),
-    compileSass(worker, "resources/styles/debug.scss", {})
-  ];
+  const isOldComponentSystemFile = (path) => {
+    return path.startsWith("app/main/ui/components/");
+  };
 
-  for (let path of files) {
-    const proc = limitFn(() => compileSass(worker, path, {modules: true}));
+  let files = (await fs.readdir(sourceDir, { recursive: true })).filter(
+    isSassFile,
+  );
+
+  const appFiles = files
+    .filter((path) => !isDesignSystemFile(path))
+    .filter((path) => !isOldComponentSystemFile(path))
+    .map((path) => ph.join(sourceDir, path));
+
+  const dsFiles = files
+    .filter(isDesignSystemFile)
+    .map((path) => ph.join(sourceDir, path));
+
+  const oldComponentsFiles = files
+    .filter(isOldComponentSystemFile)
+    .map((path) => ph.join(sourceDir, path));
+
+  const procs = [compileSass(worker, "resources/styles/main-default.scss", {})];
+
+  for (let path of [...oldComponentsFiles, ...dsFiles, ...appFiles]) {
+    const proc = limitFn(() => compileSass(worker, path, { modules: true }));
     procs.push(proc);
   }
 
   const result = await Promise.all(procs);
 
-  return result.reduce((acc, item, index) => {
-    acc.index[item.outputPath] = item.css;
-    acc.items.push(item.outputPath);
-    return acc;
-  }, {index:{}, items: []});
-}
-
-function compare(a, b) {
-  if (a < b) {
-    return -1;
-  } else if (a > b) {
-    return 1;
-  } else {
-    return 0;
-  }
+  return result.reduce(
+    (acc, item) => {
+      acc.index[item.outputPath] = item.css;
+      acc.items.push(item.outputPath);
+      return acc;
+    },
+    { index: {}, items: [] },
+  );
 }
 
 export function concatSass(data) {
-  const output = []
+  const output = [];
 
   for (let path of data.items) {
     output.push(data.index[path]);
@@ -118,10 +168,9 @@ export function concatSass(data) {
 export async function watch(baseDir, predicate, callback) {
   predicate = predicate ?? (() => true);
 
-
   const watcher = new Watcher(baseDir, {
     persistent: true,
-    recursive: true
+    recursive: true,
   });
 
   watcher.on("change", (path) => {
@@ -133,7 +182,7 @@ export async function watch(baseDir, predicate, callback) {
 
 async function readShadowManifest() {
   try {
-    const manifestPath = "resources/public/js/manifest.json"
+    const manifestPath = "resources/public/js/manifest.json";
     let content = await fs.readFile(manifestPath, { encoding: "utf8" });
     content = JSON.parse(content);
 
@@ -148,7 +197,6 @@ async function readShadowManifest() {
 
     return index;
   } catch (cause) {
-    // log.error("error on reading manifest (using default)", cause);
     return {
       config: "js/config.js",
       polyfills: "js/polyfills.js",
@@ -160,14 +208,14 @@ async function readShadowManifest() {
   }
 }
 
-async function renderTemplate(path, context={}, partials={}) {
-  const content = await fs.readFile(path, {encoding: "utf-8"});
+async function renderTemplate(path, context = {}, partials = {}) {
+  const content = await fs.readFile(path, { encoding: "utf-8" });
 
   const ts = Math.floor(new Date());
 
   context = Object.assign({}, context, {
     ts: ts,
-    isDebug: process.env.NODE_ENV !== "production"
+    isDebug,
   });
 
   return mustache.render(content, context, partials);
@@ -214,9 +262,8 @@ async function readTranslations() {
     // this happens when file does not matches correct
     // iso code for the language.
     ["ja_jp", "jpn_JP"],
-    // ["fi", "fin_FI"],
     ["uk", "ukr_UA"],
-    "ha"
+    "ha",
   ];
   const result = {};
 
@@ -227,7 +274,9 @@ async function readTranslations() {
       lang = lang[0];
     }
 
-    const content = await fs.readFile(`./translations/${filename}`, { encoding: "utf-8" });
+    const content = await fs.readFile(`./translations/${filename}`, {
+      encoding: "utf-8",
+    });
 
     lang = lang.toLowerCase();
 
@@ -261,26 +310,35 @@ async function readTranslations() {
           }
         });
       }
-      // if (key === "modals.delete-font.title") {
-      //   console.dir(trdata[key], {depth:10});
-      //   console.dir(result[key], {depth:10});
-      // }
     }
   }
 
-  return JSON.stringify(result);
+  return result;
+}
+
+function filterTranslations(translations, langs = [], keyFilter) {
+  const filteredEntries = Object.entries(translations)
+    .filter(([translationKey, _]) => keyFilter(translationKey))
+    .map(([translationKey, value]) => {
+      const langEntries = Object.entries(value).filter(([lang, _]) =>
+        langs.includes(lang),
+      );
+      return [translationKey, Object.fromEntries(langEntries)];
+    });
+
+  return Object.fromEntries(filteredEntries);
 }
 
 async function generateSvgSprite(files, prefix) {
   const spriter = new SVGSpriter({
     mode: {
-      symbol: { inline: true }
-    }
+      symbol: { inline: true },
+    },
   });
 
   for (let path of files) {
-    const name = `${prefix}${ph.basename(path)}`
-    const content = await fs.readFile(path, {encoding: "utf-8"});
+    const name = `${prefix}${ph.basename(path)}`;
+    const content = await fs.readFile(path, { encoding: "utf-8" });
     spriter.add(name, name, content);
   }
 
@@ -290,47 +348,108 @@ async function generateSvgSprite(files, prefix) {
 }
 
 async function generateSvgSprites() {
-  await fs.mkdir("resources/public/images/sprites/symbol/", { recursive: true });
+  await fs.mkdir("resources/public/images/sprites/symbol/", {
+    recursive: true,
+  });
 
   const icons = await findFiles("resources/images/icons/", isSvgFile);
   const iconsSprite = await generateSvgSprite(icons, "icon-");
-  await fs.writeFile("resources/public/images/sprites/symbol/icons.svg", iconsSprite);
+  await fs.writeFile(
+    "resources/public/images/sprites/symbol/icons.svg",
+    iconsSprite,
+  );
 
   const cursors = await findFiles("resources/images/cursors/", isSvgFile);
-  const cursorsSprite = await generateSvgSprite(icons, "cursor-");
-  await fs.writeFile("resources/public/images/sprites/symbol/cursors.svg", cursorsSprite);
+  const cursorsSprite = await generateSvgSprite(cursors, "cursor-");
+  await fs.writeFile(
+    "resources/public/images/sprites/symbol/cursors.svg",
+    cursorsSprite,
+  );
+
+  const assets = await findFiles("resources/images/assets/", isSvgFile);
+  const assetsSprite = await generateSvgSprite(assets, "asset-");
+  await fs.writeFile(
+    "resources/public/images/sprites/assets.svg",
+    assetsSprite,
+  );
 }
 
 async function generateTemplates() {
+  const isDebug = process.env.NODE_ENV !== "production";
   await fs.mkdir("./resources/public/", { recursive: true });
 
-  const translations = await readTranslations();
+  let translations = await readTranslations();
+  const storybookTranslations = JSON.stringify(
+    filterTranslations(translations, ["en"], (key) =>
+      key.startsWith("labels."),
+    ),
+  );
+  translations = JSON.stringify(translations);
+
   const manifest = await readShadowManifest();
   let content;
 
-  const iconsSprite = await fs.readFile("resources/public/images/sprites/symbol/icons.svg", "utf8");
-  const cursorsSprite = await fs.readFile("resources/public/images/sprites/symbol/cursors.svg", "utf8");
+  const iconsSprite = await fs.readFile(
+    "resources/public/images/sprites/symbol/icons.svg",
+    "utf8",
+  );
+  const cursorsSprite = await fs.readFile(
+    "resources/public/images/sprites/symbol/cursors.svg",
+    "utf8",
+  );
+  const assetsSprite = await fs.readFile(
+    "resources/public/images/sprites/assets.svg",
+    "utf-8",
+  );
   const partials = {
     "../public/images/sprites/symbol/icons.svg": iconsSprite,
     "../public/images/sprites/symbol/cursors.svg": cursorsSprite,
+    "../public/images/sprites/assets.svg": assetsSprite,
   };
 
-  const pluginRuntimeUri = (process.env.PENPOT_PLUGIN_DEV === "true") ? "http://localhost:4200" : "./plugins-runtime";
+  const pluginRuntimeUri =
+    process.env.PENPOT_PLUGIN_DEV === "true"
+      ? "http://localhost:4200"
+      : "./plugins-runtime";
 
-  content = await renderTemplate("resources/templates/index.mustache", {
-    manifest: manifest,
-    translations: JSON.stringify(translations),
-    pluginRuntimeUri,
-  }, partials);
+  content = await renderTemplate(
+    "resources/templates/index.mustache",
+    {
+      manifest: manifest,
+      translations: JSON.stringify(translations),
+      pluginRuntimeUri,
+      isDebug,
+    },
+    partials,
+  );
 
   await fs.writeFile("./resources/public/index.html", content);
 
-  content = await renderTemplate("resources/templates/preview-body.mustache", {
-    manifest: manifest,
-    translations: JSON.stringify(translations),
-  });
+  content = await renderTemplate(
+    "resources/templates/challenge.mustache",
+    {},
+    partials,
+  );
+  await fs.writeFile("./resources/public/challenge.html", content);
 
+  content = await renderTemplate(
+    "resources/templates/preview-body.mustache",
+    {
+      manifest: manifest,
+    },
+    partials,
+  );
   await fs.writeFile("./.storybook/preview-body.html", content);
+
+  content = await renderTemplate(
+    "resources/templates/preview-head.mustache",
+    {
+      manifest: manifest,
+      translations: JSON.stringify(storybookTranslations),
+    },
+    partials,
+  );
+  await fs.writeFile("./.storybook/preview-head.html", content);
 
   content = await renderTemplate("resources/templates/render.mustache", {
     manifest: manifest,
@@ -347,16 +466,37 @@ async function generateTemplates() {
   await fs.writeFile("./resources/public/rasterizer.html", content);
 }
 
+export async function compileStorybookStyles() {
+  const worker = startWorker();
+  const start = process.hrtime();
+
+  log.info("init: compile storybook styles");
+  let result = await compileSassStorybook(worker);
+  result = concatSass(result);
+
+  await fs.mkdir("./resources/public/css", { recursive: true });
+  await fs.writeFile("./resources/public/css/ds.css", result);
+
+  const end = process.hrtime(start);
+  log.info("done: compile storybook styles", `(${ppt(end)})`);
+  worker.terminate();
+}
+
 export async function compileStyles() {
   const worker = startWorker();
   const start = process.hrtime();
 
-  log.info("init: compile styles")
+  log.info("init: compile styles");
   let result = await compileSassAll(worker);
   result = concatSass(result);
 
   await fs.mkdir("./resources/public/css", { recursive: true });
   await fs.writeFile("./resources/public/css/main.css", result);
+
+  if (isDebug) {
+    let debugCSS = await compileSassDebug(worker);
+    await fs.writeFile("./resources/public/css/debug.css", debugCSS);
+  }
 
   const end = process.hrtime(start);
   log.info("done: compile styles", `(${ppt(end)})`);
@@ -365,7 +505,7 @@ export async function compileStyles() {
 
 export async function compileSvgSprites() {
   const start = process.hrtime();
-  log.info("init: compile svgsprite")
+  log.info("init: compile svgsprite");
   await generateSvgSprites();
   const end = process.hrtime(start);
   log.info("done: compile svgsprite", `(${ppt(end)})`);
@@ -373,7 +513,7 @@ export async function compileSvgSprites() {
 
 export async function compileTemplates() {
   const start = process.hrtime();
-  log.info("init: compile templates")
+  log.info("init: compile templates");
   await generateTemplates();
   const end = process.hrtime(start);
   log.info("done: compile templates", `(${ppt(end)})`);
@@ -381,13 +521,12 @@ export async function compileTemplates() {
 
 export async function compilePolyfills() {
   const start = process.hrtime();
-  log.info("init: compile polyfills")
-
+  log.info("init: compile polyfills");
 
   const files = await findFiles("resources/polyfills/", isJsFile);
   let result = [];
   for (let path of files) {
-    const content = await fs.readFile(path, {encoding:"utf-8"});
+    const content = await fs.readFile(path, { encoding: "utf-8" });
     result.push(content);
   }
 
@@ -400,13 +539,15 @@ export async function compilePolyfills() {
 
 export async function copyAssets() {
   const start = process.hrtime();
-  log.info("init: copy assets")
+  log.info("init: copy assets");
 
   await syncDirs("resources/images/", "resources/public/images/");
   await syncDirs("resources/fonts/", "resources/public/fonts/");
-  await syncDirs("resources/plugins-runtime/", "resources/public/plugins-runtime/");
+  await syncDirs(
+    "resources/plugins-runtime/",
+    "resources/public/plugins-runtime/",
+  );
 
   const end = process.hrtime(start);
   log.info("done: copy assets", `(${ppt(end)})`);
 }
-

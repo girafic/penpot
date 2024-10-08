@@ -9,18 +9,21 @@
   (:require
    ["jszip" :as zip]
    [app.common.data :as d]
+   [app.common.exceptions :as ex]
    [app.common.files.builder :as fb]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes.path :as gpa]
+   [app.common.json :as json]
    [app.common.logging :as log]
    [app.common.media :as cm]
    [app.common.pprint :as pp]
+   [app.common.schema :as sm]
    [app.common.text :as ct]
+   [app.common.time :as tm]
    [app.common.uuid :as uuid]
    [app.main.repo :as rp]
    [app.util.http :as http]
    [app.util.i18n :as i18n :refer [tr]]
-   [app.util.json :as json]
    [app.util.sse :as sse]
    [app.util.webapi :as wapi]
    [app.util.zip :as uz]
@@ -37,6 +40,29 @@
 
 (def conjv (fnil conj []))
 
+(def ^:private iso-date-rx
+  "Incomplete ISO regex for detect datetime-like values on strings"
+  #"^\d{4}-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\d.*")
+
+(defn read-json-key
+  [m]
+  (or (sm/parse-uuid m)
+      (json/read-kebab-key m)))
+
+(defn read-json-val
+  [m]
+  (cond
+    (and (string? m)
+         (re-matches sm/uuid-rx m))
+    (uuid/uuid m)
+
+    (and (string? m)
+         (re-matches iso-date-rx m))
+    (or (ex/ignoring (tm/parse-instant m)) m)
+
+    :else
+    m))
+
 (defn get-file
   "Resolves the file inside the context given its id and the data"
   ([context type]
@@ -50,7 +76,9 @@
          path (case type
                 :manifest           (str "manifest.json")
                 :page               (str file-id "/" id ".svg")
-                :colors             (str file-id "/colors.json")
+                :colors-list        (str file-id "/colors.json")
+                :colors             (let [ext (cm/mtype->extension (:mtype media))]
+                                      (str/concat file-id "/colors/" id ext))
                 :typographies       (str file-id "/typographies.json")
                 :media-list         (str file-id "/media.json")
                 :media              (let [ext (cm/mtype->extension (:mtype media))]
@@ -60,22 +88,22 @@
 
          parse-svg?  (and (not= type :media) (str/ends-with? path "svg"))
          parse-json? (and (not= type :media) (str/ends-with? path "json"))
-         no-parse?   (or (= type :media)
-                         (not (or parse-svg? parse-json?)))
-
-         file-type (if (or parse-svg? parse-json?) "text" "blob")]
+         file-type   (if (or parse-svg? parse-json?) "text" "blob")]
 
      (log/debug :action "parsing" :path path)
 
-     (cond->> (uz/get-file (:zip context) path file-type)
-       parse-svg?
-       (rx/map (comp tubax/xml->clj :content))
+     (let [stream (->> (uz/get-file (:zip context) path file-type)
+                       (rx/map :content))]
 
-       parse-json?
-       (rx/map (comp json/decode :content))
+       (cond
+         parse-svg?
+         (rx/map tubax/xml->clj stream)
 
-       no-parse?
-       (rx/map :content)))))
+         parse-json?
+         (rx/map #(json/decode % :key-fn read-json-key :val-fn read-json-val) stream)
+
+         :else
+         stream)))))
 
 (defn progress!
   ([context type]
@@ -223,6 +251,32 @@
               (uuid? (get item :typography-ref-file))
               (d/update-when :typography-ref-file resolve)))))))
 
+(defn resolve-fills-content
+  [fills context]
+  (let [resolve (:resolve context)]
+    (->> fills
+         (mapv
+          (fn [fill]
+            (cond-> fill
+              (uuid? (get fill :fill-color-ref-id))
+              (d/update-when :fill-color-ref-id resolve)
+
+              (uuid? (get fill :fill-color-ref-file))
+              (d/update-when :fill-color-ref-file resolve)))))))
+
+(defn resolve-strokes-content
+  [fills context]
+  (let [resolve (:resolve context)]
+    (->> fills
+         (mapv
+          (fn [fill]
+            (cond-> fill
+              (uuid? (get fill :stroke-color-ref-id))
+              (d/update-when :stroke-color-ref-id resolve)
+
+              (uuid? (get fill :stroke-color-ref-file))
+              (d/update-when :stroke-color-ref-file resolve)))))))
+
 (defn resolve-data-ids
   [data type context]
   (let [resolve (:resolve context)]
@@ -237,6 +291,12 @@
 
         (cond-> (= type :text)
           (d/update-when :content resolve-text-content context))
+
+        (cond-> (:fills data)
+          (d/update-when :fills resolve-fills-content context))
+
+        (cond-> (:strokes data)
+          (d/update-when :strokes resolve-strokes-content context))
 
         (cond-> (and (= type :frame) (= :grid (:layout data)))
           (update
@@ -253,6 +313,7 @@
         frame (when (and (some? frame-id) (not= frame-id uuid/zero))
                 (fb/lookup-shape file frame-id))]
 
+    (js/console.log "    translate-frame" (clj->js frame))
     (if (some? frame)
       (-> data
           (d/update-when :x + (:x frame))
@@ -278,13 +339,18 @@
             old-id       (parser/get-id node)
             interactions (->> (parser/parse-interactions node)
                               (mapv #(update % :destination resolve)))
-
             data         (-> (parser/parse-data type node)
                              (resolve-data-ids type context)
                              (cond-> (some? old-id)
                                (assoc :id (resolve old-id)))
                              (cond-> (< (:version context 1) 2)
-                               (translate-frame type file)))]
+                               (translate-frame type file))
+                             ;; Shapes inside the deleted component should be stored with absolute coordinates
+                             ;; so we calculate that with the x and y stored in the context
+                             (cond-> (:x context)
+                               (assoc :x (:x context)))
+                             (cond-> (:y context)
+                               (assoc :y (:y context))))]
         (try
           (let [file (case type
                        :frame    (fb/add-artboard   file data)
@@ -386,22 +452,28 @@
 
 (defn import-page
   [context file [page-id page-name content]]
-  (let [nodes (->> content parser/node-seq)
-        file-id (:id file)
-        resolve (:resolve context)
+  (let [nodes     (parser/node-seq content)
+        file-id   (:id file)
+        resolve   (:resolve context)
         page-data (-> (parser/parse-page-data content)
                       (assoc :name page-name)
                       (assoc :id (resolve page-id)))
-        flows     (->> (get-in page-data [:options :flows])
-                       (mapv #(update % :starting-frame resolve)))
+        flows     (->> (get page-data :flows)
+                       (update-vals #(update % :starting-frame resolve))
+                       (not-empty))
 
-        guides    (-> (get-in page-data [:options :guides])
-                      (update-vals #(update % :frame-id resolve)))
+        guides    (-> (get page-data :guides)
+                      (update-vals #(update % :frame-id resolve))
+                      (not-empty))
 
-        page-data (-> page-data
-                      (d/assoc-in-when [:options :flows] flows)
-                      (d/assoc-in-when [:options :guides] guides))
-        file      (-> file (fb/add-page page-data))
+        page-data (cond-> page-data
+                    flows
+                    (assoc :flows flows)
+
+                    guides
+                    (assoc :guides guides))
+
+        file      (fb/add-page file page-data)
 
         ;; Preprocess nodes to parallel upload the images. Store the result in a table
         ;; old-node => node with image
@@ -456,17 +528,19 @@
          (rx/map fb/finish-component))))
 
 (defn import-deleted-component [context file node]
-  (let [resolve            (:resolve context)
-        content            (parser/find-node node :g)
-        file-id            (:id file)
-        old-id             (parser/get-id node)
-        id                 (resolve old-id)
-        path               (get-in node [:attrs :penpot:path] "")
-        main-instance-id   (resolve (uuid (get-in node [:attrs :penpot:main-instance-id] "")))
-        main-instance-page (resolve (uuid (get-in node [:attrs :penpot:main-instance-page] "")))
-        main-instance-x    (get-in node [:attrs :penpot:main-instance-x] "")
-        main-instance-y    (get-in node [:attrs :penpot:main-instance-y] "")
-        type               (parser/get-type content)
+  (let [resolve              (:resolve context)
+        content              (parser/find-node node :g)
+        file-id              (:id file)
+        old-id               (parser/get-id node)
+        id                   (resolve old-id)
+        path                 (get-in node [:attrs :penpot:path] "")
+        main-instance-id     (resolve (uuid (get-in node [:attrs :penpot:main-instance-id] "")))
+        main-instance-page   (resolve (uuid (get-in node [:attrs :penpot:main-instance-page] "")))
+        main-instance-x      (-> (get-in node [:attrs :penpot:main-instance-x] "") (d/parse-double))
+        main-instance-y      (-> (get-in node [:attrs :penpot:main-instance-y] "") (d/parse-double))
+        main-instance-parent (resolve (uuid (get-in node [:attrs :penpot:main-instance-parent] "")))
+        main-instance-frame  (resolve (uuid (get-in node [:attrs :penpot:main-instance-frame] "")))
+        type                 (parser/get-type content)
 
         data (-> (parser/parse-data type content)
                  (assoc :path path)
@@ -474,12 +548,20 @@
                  (assoc :main-instance-id main-instance-id)
                  (assoc :main-instance-page main-instance-page)
                  (assoc :main-instance-x main-instance-x)
-                 (assoc :main-instance-y main-instance-y))
+                 (assoc :main-instance-y main-instance-y)
+                 (assoc :main-instance-parent main-instance-parent)
+                 (assoc :main-instance-frame main-instance-frame))
 
-        file         (-> file (fb/start-component data))
+        file         (-> file
+                         (fb/start-component data)
+                         (fb/start-deleted-component data))
         component-id (:current-component-id file)
-        children     (parser/node-seq node)]
+        children     (parser/node-seq node)
 
+        ;; Shapes inside the deleted component should be stored with absolute coordinates so we include this info in the context.
+        context (-> context
+                    (assoc :x main-instance-x)
+                    (assoc :y main-instance-y))]
     (->> (rx/from children)
          (rx/filter parser/shape?)
          (rx/skip 1)
@@ -487,11 +569,7 @@
          (rx/mapcat (partial resolve-media context file-id))
          (rx/reduce (partial process-import-node context) file)
          (rx/map fb/finish-component)
-         (rx/map (partial fb/finish-deleted-component
-                          component-id
-                          main-instance-page
-                          main-instance-x
-                          main-instance-y)))))
+         (rx/map (partial fb/finish-deleted-component component-id)))))
 
 (defn process-pages
   [context file]
@@ -516,15 +594,36 @@
   (if (:has-colors context)
     (let [resolve (:resolve context)
           add-color
-          (fn [file [id color]]
+          (fn [file color]
             (let [color (-> color
                             (d/update-in-when [:gradient :type] keyword)
-                            (assoc :id (resolve id)))]
+                            (d/update-in-when [:image :id] resolve)
+                            (update :id resolve))]
               (fb/add-library-color file color)))]
-      (->> (get-file context :colors)
-           (rx/merge-map (comp d/kebab-keys parser/string->uuid))
+      (->> (get-file context :colors-list)
+           (rx/merge-map identity)
+           (rx/mapcat
+            (fn [[id color]]
+              (let [color (assoc color :id id)
+                    color-image (:image color)
+                    upload-image? (some? color-image)
+                    color-image-id (:id color-image)]
+                (if upload-image?
+                  (->> (get-file context :colors color-image-id color-image)
+                       (rx/map (fn [blob]
+                                 (let [content (.slice blob 0 (.-size blob) (:mtype color-image))]
+                                   {:name (:name color-image)
+                                    :id (resolve color-image-id)
+                                    :file-id (:id file)
+                                    :content content
+                                    :is-local false})))
+                       (rx/tap #(progress! context :upload-media (:name %)))
+                       (rx/merge-map #(rp/cmd! :upload-file-media-object %))
+                       (rx/map (constantly color))
+                       (rx/catch #(do (.error js/console (str "Error uploading color-image: " (:name color-image)))
+                                      (rx/empty))))
+                  (rx/of color)))))
            (rx/reduce add-color file)))
-
     (rx/of file)))
 
 (defn process-library-typographies
@@ -532,7 +631,7 @@
   (if (:has-typographies context)
     (let [resolve (:resolve context)]
       (->> (get-file context :typographies)
-           (rx/merge-map (comp d/kebab-keys parser/string->uuid))
+           (rx/merge-map identity)
            (rx/map (fn [[id typography]]
                      (-> typography
                          (d/kebab-keys)
@@ -546,7 +645,7 @@
   (if (:has-media context)
     (let [resolve (:resolve context)]
       (->> (get-file context :media-list)
-           (rx/merge-map (comp d/kebab-keys parser/string->uuid))
+           (rx/merge-map identity)
            (rx/mapcat
             (fn [[id media]]
               (let [media (-> media
@@ -658,7 +757,6 @@
                        (rx/filter (fn [data] (= "application/zip" (:type data))))
                        (rx/merge-map #(zip/loadAsync (:body %)))
                        (rx/merge-map #(get-file {:zip %} :manifest))
-                       (rx/map (comp d/kebab-keys parser/string->uuid))
                        (rx/map
                         (fn [data]
                           ;; Checks if the file is exported with components v2 and the current team only

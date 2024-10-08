@@ -33,7 +33,6 @@
    [app.util.pointer-map :as pmap]
    [app.util.services :as sv]
    [app.util.time :as dt]
-   [clojure.spec.alpha :as s]
    [cuerdas.core :as str]))
 
 ;; --- FEATURES
@@ -86,11 +85,8 @@
    ::doc/module :files
    ::sm/params [:map {:title "get-file-object-thumbnails"}
                 [:file-id ::sm/uuid]
-                [:tag {:optional true} :string]]
-   ::sm/result [:map-of :string :string]
-   ::cond/get-object #(files/get-minimal-file %1 (:file-id %2))
-   ::cond/reuse-key? true
-   ::cond/key-fn files/get-file-etag}
+                [:tag {:optional true} [:string {:max 50}]]]
+   ::sm/result [:map-of [:string {:max 250}] [:string {:max 250}]]}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id file-id tag] :as params}]
   (dm/with-open [conn (db/open pool)]
     (files/check-read-permissions! conn profile-id file-id)
@@ -183,18 +179,16 @@
 
 (def ^:private
   schema:get-file-data-for-thumbnail
-  (sm/define
-    [:map {:title "get-file-data-for-thumbnail"}
-     [:file-id ::sm/uuid]
-     [:features {:optional true} ::cfeat/features]]))
+  [:map {:title "get-file-data-for-thumbnail"}
+   [:file-id ::sm/uuid]
+   [:features {:optional true} ::cfeat/features]])
 
 (def ^:private
   schema:partial-file
-  (sm/define
-    [:map {:title "PartialFile"}
-     [:id ::sm/uuid]
-     [:revn {:min 0} :int]
-     [:page :any]]))
+  [:map {:title "PartialFile"}
+   [:id ::sm/uuid]
+   [:revn {:min 0} ::sm/int]
+   [:page :any]])
 
 (sv/defmethod ::get-file-data-for-thumbnail
   "Retrieves the data for generate the thumbnail of the file. Used
@@ -237,7 +231,7 @@
   "INSERT INTO file_tagged_object_thumbnail (file_id, object_id, tag, media_id)
    VALUES (?, ?, ?, ?)
        ON CONFLICT (file_id, object_id, tag)
-       DO UPDATE SET updated_at=?, media_id=?, deleted_at=null
+       DO UPDATE SET updated_at=?, media_id=?, deleted_at=?
    RETURNING *")
 
 (defn- persist-thumbnail!
@@ -255,23 +249,25 @@
                       :content-type mtype
                       :bucket "file-object-thumbnail"})))
 
-
-
 (defn- create-file-object-thumbnail!
-  [{:keys [::sto/storage] :as cfg} file-id object-id media tag]
-  (let [tsnow     (dt/now)
-        media     (persist-thumbnail! storage media tsnow)
+  [{:keys [::sto/storage] :as cfg} file object-id media tag]
+  (let [file-id   (:id file)
+        timestamp (dt/now)
+        media     (persist-thumbnail! storage media timestamp)
         [th1 th2] (db/tx-run! cfg (fn [{:keys [::db/conn]}]
                                     (let [th1 (db/exec-one! conn [sql:get-file-object-thumbnail file-id object-id tag])
                                           th2 (db/exec-one! conn [sql:create-file-object-thumbnail
-                                                                  file-id object-id tag (:id media)
-                                                                  tsnow (:id media)])]
+                                                                  file-id object-id tag
+                                                                  (:id media)
+                                                                  timestamp
+                                                                  (:id media)
+                                                                  (:deleted-at file)])]
                                       [th1 th2])))]
 
     (when (and (some? th1)
                (not= (:media-id th1)
                      (:media-id th2)))
-      (sto/touch-object! storage (:media-id th1) :async true))
+      (sto/touch-object! storage (:media-id th1)))
 
     th2))
 
@@ -279,9 +275,9 @@
   schema:create-file-object-thumbnail
   [:map {:title "create-file-object-thumbnail"}
    [:file-id ::sm/uuid]
-   [:object-id :string]
+   [:object-id [:string {:max 250}]]
    [:media ::media/upload]
-   [:tag {:optional true} :string]])
+   [:tag {:optional true} [:string {:max 50}]]])
 
 (sv/defmethod ::create-file-object-thumbnail
   {::doc/added "1.19"
@@ -298,9 +294,8 @@
   (media/validate-media-size! media)
 
   (db/run! cfg files/check-edition-permissions! profile-id file-id)
-
-  (let [cfg (update cfg ::sto/storage media/configure-assets-storage)]
-    (create-file-object-thumbnail! cfg file-id object-id media (or tag "frame"))))
+  (when-let [file (files/get-minimal-file cfg file-id {::db/check-deleted false})]
+    (create-file-object-thumbnail! cfg file object-id media (or tag "frame"))))
 
 ;; --- MUTATION COMMAND: delete-file-object-thumbnail
 
@@ -317,25 +312,23 @@
                  :object-id object-id
                  :tag tag})))
 
-(s/def ::delete-file-object-thumbnail
-  (s/keys :req [::rpc/profile-id]
-          :req-un [::file-id ::object-id]))
+(def ^:private schema:delete-file-object-thumbnail
+  [:map {:title "delete-file-object-thumbnail"}
+   [:file-id ::sm/uuid]
+   [:object-id [:string {:max 250}]]])
 
 (sv/defmethod ::delete-file-object-thumbnail
   {::doc/added "1.19"
    ::doc/module :files
-   ::doc/deprecated "1.20"
-   ::climit/id [[:file-thumbnail-ops/by-profile ::rpc/profile-id]
-                [:file-thumbnail-ops/global]]
+   ::sm/params schema:delete-file-object-thumbnail
    ::audit/skip true}
   [cfg {:keys [::rpc/profile-id file-id object-id]}]
+  (files/check-edition-permissions! cfg profile-id file-id)
   (db/tx-run! cfg (fn [{:keys [::db/conn] :as cfg}]
-                    (files/check-edition-permissions! conn profile-id file-id)
-                    (when-not (db/read-only? conn)
-                      (-> cfg
-                          (update ::sto/storage media/configure-assets-storage conn)
-                          (delete-file-object-thumbnail! file-id object-id))
-                      nil))))
+                    (-> cfg
+                        (update ::sto/storage sto/configure conn)
+                        (delete-file-object-thumbnail! file-id object-id))
+                    nil)))
 
 ;; --- MUTATION COMMAND: create-file-thumbnail
 
@@ -392,7 +385,7 @@
   schema:create-file-thumbnail
   [:map {:title "create-file-thumbnail"}
    [:file-id ::sm/uuid]
-   [:revn :int]
+   [:revn ::sm/int]
    [:media ::media/upload]])
 
 (sv/defmethod ::create-file-thumbnail
@@ -411,6 +404,6 @@
   (db/tx-run! cfg (fn [{:keys [::db/conn] :as cfg}]
                     (files/check-edition-permissions! conn profile-id file-id)
                     (when-not (db/read-only? conn)
-                      (let [cfg   (update cfg ::sto/storage media/configure-assets-storage)
-                            media (create-file-thumbnail! cfg params)]
-                        {:uri (files/resolve-public-uri (:id media))})))))
+                      (let [media (create-file-thumbnail! cfg params)]
+                        {:uri (files/resolve-public-uri (:id media))
+                         :id (:id media)})))))

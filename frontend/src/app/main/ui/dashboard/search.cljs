@@ -19,7 +19,8 @@
 
 (mf/defc search-page
   [{:keys [team search-term] :as props}]
-  (let [result (mf/deref refs/dashboard-search-result)
+  (let [search-term (or search-term "")
+        result (mf/deref refs/dashboard-search-result)
         [rowref limit] (hooks/use-dynamic-grid-item-width)]
 
     (mf/use-effect
@@ -37,7 +38,7 @@
        (st/emit! (dd/search {:search-term search-term})
                  (dd/clear-selected-files))))
     [:*
-     [:header {:class (stl/css :dashboard-header)}
+     [:header {:class (stl/css :dashboard-header) :data-testid "dashboard-header"}
       [:div#dashboard-search-title {:class (stl/css :dashboard-title)}
        [:h1 (tr "dashboard.title-search")]]]
 

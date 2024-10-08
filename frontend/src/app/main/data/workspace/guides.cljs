@@ -11,24 +11,18 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.types.page :as ctp]
+   [app.main.data.changes :as dwc]
    [app.main.data.events :as ev]
-   [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.state-helpers :as wsh]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
-(defn make-update-guide
-  [guide]
-  (fn [other]
-    (cond-> other
-      (= (:id other) (:id guide))
-      (merge guide))))
-
 (defn update-guides
-  [guide]
+  [{:keys [id] :as guide}]
+
   (dm/assert!
    "expected valid guide"
-   (ctp/check-page-guide! guide))
+   (ctp/valid-guide? guide))
 
   (ptk/reify ::update-guides
     ev/Event
@@ -41,14 +35,15 @@
             changes
             (-> (pcb/empty-changes it)
                 (pcb/with-page page)
-                (pcb/update-page-option :guides assoc (:id guide) guide))]
-        (rx/of (dch/commit-changes changes))))))
+                (pcb/set-guide id guide))]
+        (rx/of (dwc/commit-changes changes))))))
 
 (defn remove-guide
-  [guide]
+  [{:keys [id] :as guide}]
+
   (dm/assert!
    "expected valid guide"
-   (ctp/check-page-guide! guide))
+   (ctp/valid-guide? guide))
 
   (ptk/reify ::remove-guide
     ev/Event
@@ -57,7 +52,7 @@
     ptk/UpdateEvent
     (update [_ state]
       (let [sdisj (fnil disj #{})]
-        (update-in state [:workspace-guides :hover] sdisj (:id guide))))
+        (update-in state [:workspace-guides :hover] sdisj id)))
 
     ptk/WatchEvent
     (watch [it state _]
@@ -65,33 +60,38 @@
             changes
             (-> (pcb/empty-changes it)
                 (pcb/with-page page)
-                (pcb/update-page-option :guides dissoc (:id guide)))]
-        (rx/of (dch/commit-changes changes))))))
+                (pcb/set-guide id nil))]
+        (rx/of (dwc/commit-changes changes))))))
 
 (defn remove-guides
   [ids]
+
+  (dm/assert!
+   "expected a set of ids"
+   (every? uuid? ids))
+
   (ptk/reify ::remove-guides
     ptk/WatchEvent
     (watch [_ state _]
-      (let [page       (wsh/lookup-page state)
-            guides     (get-in page [:options :guides] {})
+      (let [{:keys [guides] :as page} (wsh/lookup-page state)
             guides (-> (select-keys guides ids) (vals))]
-        (rx/from (->> guides (mapv #(remove-guide %))))))))
+        (rx/from (mapv remove-guide guides))))))
 
 (defmethod ptk/resolve ::move-frame-guides
-  [_ ids]
+  [_ args]
   (dm/assert!
    "expected a coll of uuids"
-   (every? uuid? ids))
+   (every? uuid? (:ids args)))
   (ptk/reify ::move-frame-guides
     ptk/WatchEvent
     (watch [_ state _]
-      (let [objects (wsh/lookup-page-objects state)
+      (let [ids (:ids args)
+            object-modifiers (:modifiers args)
+
+            objects (wsh/lookup-page-objects state)
 
             is-frame? (fn [id] (= :frame (get-in objects [id :type])))
             frame-ids? (into #{} (filter is-frame?) ids)
-
-            object-modifiers  (get state :workspace-modifiers)
 
             build-move-event
             (fn [guide]
@@ -104,7 +104,7 @@
                     guide (update guide :position + (get moved (:axis guide)))]
                 (update-guides guide)))
 
-            guides (-> state wsh/lookup-page-options :guides vals)]
+            guides (-> state wsh/lookup-page :guides vals)]
 
         (->> guides
              (filter (comp frame-ids? :frame-id))

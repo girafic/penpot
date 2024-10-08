@@ -52,7 +52,7 @@
 .separator {
   margin-top: $s-8;
   height: $s-4;
-  border-top: $s-1 solid $db-secondary;
+  border-top: $s-1 solid var(--color-background-secondary);
 }
 
 .shortcut {
@@ -95,7 +95,15 @@
     top: $s-148;
   }
 
+  &.plugins {
+    top: $s-180;
+  }
+
   &.help-info {
-    top: $s-196;
+    top: $s-232;
+  }
+
+  &.help-info-old {
+    top: $s-192;
   }
 }

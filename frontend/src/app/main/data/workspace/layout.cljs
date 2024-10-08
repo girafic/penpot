@@ -10,7 +10,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.main.data.events :as ev]
-   [app.util.storage :refer [storage]]
+   [app.util.storage :as storage]
    [clojure.set :as set]
    [potok.v2.core :as ptk]))
 
@@ -20,6 +20,7 @@
     :comments
     :assets
     :document-history
+    :hide-palettes
     :colorpalette
     :element-options
     :rulers
@@ -134,7 +135,8 @@
   "A map of layout flags that should be persisted in local storage; the
   value corresponds to the key that will be used for save the data in
   storage object. It should be namespace qualified."
-  {:colorpalette :app.main.data.workspace/show-colorpalette?
+  {:hide-palettes :app.main.data.workspace/hide-palettes?
+   :colorpalette :app.main.data.workspace/show-colorpalette?
    :textpalette :app.main.data.workspace/show-textpalette?})
 
 (defn load-layout-flags
@@ -142,7 +144,7 @@
   stored in Storage."
   [layout]
   (reduce (fn [layout [flag key]]
-            (condp = (get @storage key ::none)
+            (condp = (get storage/user key ::none)
               ::none layout
               false  (disj layout flag)
               true   (conj layout flag)))
@@ -153,7 +155,7 @@
   "Given a set of layout flags, and persist a subset of them to the Storage."
   [layout]
   (doseq [[flag key] layout-flags-persistence-mapping]
-    (swap! storage assoc key (contains? layout flag))))
+    (swap! storage/user assoc key (contains? layout flag))))
 
 (def layout-state-persistence-mapping
   "A mapping of keys that need to be persisted from `:workspace-global` into Storage."
@@ -165,7 +167,7 @@
   props that are previously persisted in the Storage."
   [state]
   (reduce (fn [state [key skey]]
-            (let [val (get @storage skey ::none)]
+            (let [val (get storage/user skey ::none)]
               (if (= val ::none)
                 state
                 (assoc state key val))))
@@ -179,7 +181,7 @@
   (doseq [[key skey] layout-state-persistence-mapping]
     (let [val (get state key ::does-not-exist)]
       (if (= val ::does-not-exist)
-        (swap! storage dissoc skey)
-        (swap! storage assoc skey val)))))
+        (swap! storage/user dissoc skey)
+        (swap! storage/user assoc skey val)))))
 
 

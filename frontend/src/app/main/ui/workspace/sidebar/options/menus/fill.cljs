@@ -49,23 +49,23 @@
                 (tr "workspace.options.fill"))
 
         ;; Excluding nil values
-        values (d/without-nils values)
-        fills (:fills values)
-        has-fills? (or (= :multiple fills) (some? (seq fills)))
+        values               (d/without-nils values)
+        fills                (:fills values)
+        has-fills?           (or (= :multiple fills) (some? (seq fills)))
 
 
-        state*          (mf/use-state has-fills?)
-        open?           (deref state*)
+        state*               (mf/use-state has-fills?)
+        open?                (deref state*)
 
-        toggle-content  (mf/use-fn #(swap! state* not))
+        toggle-content       (mf/use-fn #(swap! state* not))
 
-        open-content    (mf/use-fn #(reset! state* true))
+        open-content         (mf/use-fn #(reset! state* true))
 
-        close-content    (mf/use-fn #(reset! state* false))
+        close-content        (mf/use-fn #(reset! state* false))
 
         hide-fill-on-export? (:hide-fill-on-export values false)
 
-        checkbox-ref (mf/use-ref)
+        checkbox-ref         (mf/use-ref)
 
         on-add
         (mf/use-fn
@@ -94,7 +94,7 @@
             (st/emit! (dc/remove-fill ids {:color default-color
                                            :opacity 1} index))
             (when (or (= :multiple fills)
-                      (= 1 (count (seq fills))))
+                      (= 0 (count (seq fills))))
               (close-content))))
 
         on-remove-all
@@ -146,6 +146,7 @@
 
        (when (and (not disable-remove?) (not (= :multiple fills)))
          [:button {:class (stl/css :add-fill)
+                   :data-testid "add-fill"
                    :on-click on-add} i/add])]]
 
      (when open?

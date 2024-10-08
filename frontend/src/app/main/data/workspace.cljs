@@ -19,6 +19,7 @@
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.geom.shapes.grid-layout :as gslg]
+   [app.common.logging :as log]
    [app.common.logic.libraries :as cll]
    [app.common.logic.shapes :as cls]
    [app.common.schema :as sm]
@@ -34,18 +35,19 @@
    [app.common.types.typography :as ctt]
    [app.common.uuid :as uuid]
    [app.config :as cf]
+   [app.main.data.changes :as dch]
    [app.main.data.comments :as dcm]
    [app.main.data.events :as ev]
    [app.main.data.fonts :as df]
-   [app.main.data.messages :as msg]
    [app.main.data.modal :as modal]
+   [app.main.data.notifications :as ntf]
+   [app.main.data.persistence :as dps]
+   [app.main.data.plugins :as dp]
    [app.main.data.users :as du]
    [app.main.data.workspace.bool :as dwb]
-   [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.collapse :as dwco]
    [app.main.data.workspace.drawing :as dwd]
    [app.main.data.workspace.edition :as dwe]
-   [app.main.data.workspace.fix-bool-contents :as fbc]
    [app.main.data.workspace.fix-broken-shapes :as fbs]
    [app.main.data.workspace.fix-deleted-fonts :as fdf]
    [app.main.data.workspace.groups :as dwg]
@@ -59,7 +61,6 @@
    [app.main.data.workspace.notifications :as dwn]
    [app.main.data.workspace.path :as dwdp]
    [app.main.data.workspace.path.shapes-to-path :as dwps]
-   [app.main.data.workspace.persistence :as dwp]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shape-layout :as dwsl]
    [app.main.data.workspace.shapes :as dwsh]
@@ -74,19 +75,24 @@
    [app.main.repo :as rp]
    [app.main.streams :as ms]
    [app.main.worker :as uw]
+   [app.renderer-v2 :as renderer]
    [app.util.dom :as dom]
    [app.util.globals :as ug]
    [app.util.http :as http]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.router :as rt]
+   [app.util.storage :as storage]
    [app.util.timers :as tm]
    [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
    [cljs.spec.alpha :as s]
+   [clojure.set :as set]
    [cuerdas.core :as str]
-   [potok.v2.core :as ptk]))
+   [potok.v2.core :as ptk]
+   [promesa.core :as p]))
 
 (def default-workspace-local {:zoom 1})
+(log/set-level! :debug)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Workspace Initialization
@@ -127,7 +133,7 @@
        (when (and (not (boolean (-> state :profile :props :v2-info-shown)))
                   (features/active-feature? state "components/v2"))
          (modal/show :v2-info {}))
-       (fbc/fix-bool-contents)
+       (dp/check-open-plugin)
        (fdf/fix-deleted-fonts)
        (fbs/fix-broken-shapes)))))
 
@@ -335,21 +341,42 @@
     ptk/UpdateEvent
     (update [_ state]
       (assoc state
+             :recent-colors (:recent-colors storage/user)
              :workspace-ready? false
              :current-file-id file-id
              :current-project-id project-id
              :workspace-presence {}))
 
     ptk/WatchEvent
-    (watch [_ _ _]
-      (rx/of msg/hide
-             (dcm/retrieve-comment-threads file-id)
-             (dwp/initialize-file-persistence file-id)
-             (fetch-bundle project-id file-id)))
+    (watch [_ _ stream]
+      (log/debug :hint "initialize-file" :file-id file-id)
+      (let [stoper-s (rx/filter (ptk/type? ::finalize-file) stream)]
+        (rx/merge
+         (rx/of (ntf/hide)
+                (features/initialize)
+                (dcm/retrieve-comment-threads file-id)
+                (fetch-bundle project-id file-id))
+
+         (when (contains? cf/flags :renderer-v2)
+           (rx/of (renderer/init)))
+
+         (->> stream
+              (rx/filter dch/commit?)
+              (rx/map deref)
+              (rx/mapcat (fn [{:keys [save-undo? undo-changes redo-changes undo-group tags stack-undo?]}]
+                           (if (and save-undo? (seq undo-changes))
+                             (let [entry {:undo-changes undo-changes
+                                          :redo-changes redo-changes
+                                          :undo-group undo-group
+                                          :tags tags}]
+                               (rx/of (dwu/append-undo entry stack-undo?)))
+                             (rx/empty))))
+
+              (rx/take-until stoper-s)))))
 
     ptk/EffectEvent
     (effect [_ _ _]
-      (let [name (str "workspace-" file-id)]
+      (let [name (dm/str "workspace-" file-id)]
         (unchecked-set ug/global "name" name)))))
 
 (defn finalize-file
@@ -460,8 +487,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn create-page
-  [{:keys [file-id]}]
-  (let [id (uuid/next)]
+  [{:keys [page-id file-id]}]
+  (let [id (or page-id (uuid/next))]
     (ptk/reify ::create-page
       ev/Event
       (-data [_]
@@ -545,9 +572,38 @@
     (watch [it state _]
       (let [page    (get-in state [:workspace-data :pages-index id])
             changes (-> (pcb/empty-changes it)
-                        (pcb/mod-page page name))]
+                        (pcb/mod-page page {:name name}))]
 
         (rx/of (dch/commit-changes changes))))))
+
+(defn set-plugin-data
+  ([file-id type namespace key value]
+   (set-plugin-data file-id type nil nil namespace key value))
+  ([file-id type id namespace key value]
+   (set-plugin-data file-id type id nil namespace key value))
+  ([file-id type id page-id namespace key value]
+   (dm/assert! (contains? #{:file :page :shape :color :typography :component} type))
+   (dm/assert! (or (nil? id) (uuid? id)))
+   (dm/assert! (or (nil? page-id) (uuid? page-id)))
+   (dm/assert! (uuid? file-id))
+   (dm/assert! (keyword? namespace))
+   (dm/assert! (string? key))
+   (dm/assert! (or (nil? value) (string? value)))
+
+   (ptk/reify ::set-file-plugin-data
+     ptk/WatchEvent
+     (watch [it state _]
+       (let [file-data
+             (if (= file-id (:current-file-id state))
+               (:workspace-data state)
+               (get-in state [:workspace-libraries file-id :data]))
+
+             changes
+             (-> (pcb/empty-changes it)
+                 (pcb/with-file-data file-data)
+                 (assoc :file-id file-id)
+                 (pcb/set-plugin-data type id page-id namespace key value))]
+         (rx/of (dch/commit-changes changes)))))))
 
 (declare purge-page)
 (declare go-to-file)
@@ -671,7 +727,7 @@
   (ptk/reify ::update-shape
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (dch/update-shapes [id] #(merge % attrs))))))
+      (rx/of (dwsh/update-shapes [id] #(merge % attrs))))))
 
 (defn start-rename-shape
   "Start shape renaming process"
@@ -808,15 +864,14 @@
             ids      (filter #(not (cfh/is-parent? objects parent-id %)) ids)
 
             all-parents (into #{parent-id} (map #(cfh/get-parent-id objects %)) ids)
-            parents  (if ignore-parents? #{parent-id} all-parents)
 
-            changes (cls/generate-relocate-shapes (pcb/empty-changes it)
-                                                  objects
-                                                  parents
-                                                  parent-id
-                                                  page-id
-                                                  to-index
-                                                  ids)
+            changes (cls/generate-relocate (pcb/empty-changes it)
+                                           objects
+                                           parent-id
+                                           page-id
+                                           to-index
+                                           ids
+                                           :ignore-parents? ignore-parents?)
             undo-id (js/Symbol)]
 
         (rx/of (dwu/start-undo-transaction undo-id)
@@ -923,25 +978,27 @@
     (map #(gal/align-to-rect % rect axis) selected-objs)))
 
 (defn align-objects
-  [axis]
-  (dm/assert!
-   "expected valid align axis value"
-   (contains? gal/valid-align-axis axis))
+  ([axis]
+   (align-objects axis nil))
+  ([axis selected]
+   (dm/assert!
+    "expected valid align axis value"
+    (contains? gal/valid-align-axis axis))
 
-  (ptk/reify ::align-objects
-    ptk/WatchEvent
-    (watch [_ state _]
-      (let [objects  (wsh/lookup-page-objects state)
-            selected (wsh/lookup-selected state)
-            moved    (if (= 1 (count selected))
-                       (align-object-to-parent objects (first selected) axis)
-                       (align-objects-list objects selected axis))
-            undo-id (js/Symbol)]
-        (when (can-align? selected objects)
-          (rx/of (dwu/start-undo-transaction undo-id)
-                 (dwt/position-shapes moved)
-                 (ptk/data-event :layout/update {:ids selected})
-                 (dwu/commit-undo-transaction undo-id)))))))
+   (ptk/reify ::align-objects
+     ptk/WatchEvent
+     (watch [_ state _]
+       (let [objects  (wsh/lookup-page-objects state)
+             selected (or selected (wsh/lookup-selected state))
+             moved    (if (= 1 (count selected))
+                        (align-object-to-parent objects (first selected) axis)
+                        (align-objects-list objects selected axis))
+             undo-id (js/Symbol)]
+         (when (can-align? selected objects)
+           (rx/of (dwu/start-undo-transaction undo-id)
+                  (dwt/position-shapes moved)
+                  (ptk/data-event :layout/update {:ids selected})
+                  (dwu/commit-undo-transaction undo-id))))))))
 
 (defn can-distribute? [selected]
   (cond
@@ -950,25 +1007,27 @@
     :else true))
 
 (defn distribute-objects
-  [axis]
-  (dm/assert!
-   "expected valid distribute axis value"
-   (contains? gal/valid-dist-axis axis))
+  ([axis]
+   (distribute-objects axis nil))
+  ([axis ids]
+   (dm/assert!
+    "expected valid distribute axis value"
+    (contains? gal/valid-dist-axis axis))
 
-  (ptk/reify ::distribute-objects
-    ptk/WatchEvent
-    (watch [_ state _]
-      (let [page-id   (:current-page-id state)
-            objects   (wsh/lookup-page-objects state page-id)
-            selected  (wsh/lookup-selected state)
-            moved     (-> (map #(get objects %) selected)
-                          (gal/distribute-space axis))
-            undo-id  (js/Symbol)]
-        (when (can-distribute? selected)
-          (rx/of (dwu/start-undo-transaction undo-id)
-                 (dwt/position-shapes moved)
-                 (ptk/data-event :layout/update {:ids selected})
-                 (dwu/commit-undo-transaction undo-id)))))))
+   (ptk/reify ::distribute-objects
+     ptk/WatchEvent
+     (watch [_ state _]
+       (let [page-id   (:current-page-id state)
+             objects   (wsh/lookup-page-objects state page-id)
+             selected  (or ids (wsh/lookup-selected state))
+             moved     (-> (map #(get objects %) selected)
+                           (gal/distribute-space axis))
+             undo-id  (js/Symbol)]
+         (when (can-distribute? selected)
+           (rx/of (dwu/start-undo-transaction undo-id)
+                  (dwt/position-shapes moved)
+                  (ptk/data-event :layout/update {:ids selected})
+                  (dwu/commit-undo-transaction undo-id))))))))
 
 ;; --- Shape Proportions
 
@@ -982,7 +1041,7 @@
                   (assoc shape :proportion-lock false)
                   (-> (assoc shape :proportion-lock true)
                       (gpp/assign-proportions))))]
-        (rx/of (dch/update-shapes [id] assign-proportions))))))
+        (rx/of (dwsh/update-shapes [id] assign-proportions))))))
 
 (defn toggle-proportion-lock
   []
@@ -996,8 +1055,8 @@
             multi         (attrs/get-attrs-multi selected-obj [:proportion-lock])
             multi?        (= :multiple (:proportion-lock multi))]
         (if multi?
-          (rx/of (dch/update-shapes selected #(assoc % :proportion-lock true)))
-          (rx/of (dch/update-shapes selected #(update % :proportion-lock not))))))))
+          (rx/of (dwsh/update-shapes selected #(assoc % :proportion-lock true)))
+          (rx/of (dwsh/update-shapes selected #(update % :proportion-lock not))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Navigation
@@ -1076,6 +1135,14 @@
     ptk/UpdateEvent
     (update [_ state]
       (assoc-in state [:workspace-assets :open-status file-id section] open?))))
+
+(defn clear-assets-section-open
+  []
+  (ptk/reify ::clear-assets-section-open
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-assets :open-status] {}))))
+
 
 (defn set-assets-group-open
   [file-id section path open?]
@@ -1258,7 +1325,7 @@
                        (assoc :section section)
                        (some? frame-id)
                        (assoc :frame-id frame-id))]
-         (rx/of ::dwp/force-persist
+         (rx/of ::dps/force-persist
                 (rt/nav-new-window* {:rname :viewer
                                      :path-params pparams
                                      :query-params qparams
@@ -1271,7 +1338,7 @@
      ptk/WatchEvent
      (watch [_ state _]
        (when-let [team-id (or team-id (:current-team-id state))]
-         (rx/of ::dwp/force-persist
+         (rx/of ::dps/force-persist
                 (rt/nav :dashboard-projects {:team-id team-id})))))))
 
 (defn go-to-dashboard-fonts
@@ -1280,7 +1347,7 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [team-id (:current-team-id state)]
-        (rx/of ::dwp/force-persist
+        (rx/of ::dps/force-persist
                (rt/nav :dashboard-fonts {:team-id team-id}))))))
 
 
@@ -1479,7 +1546,8 @@
             (let [objects  (wsh/lookup-page-objects state)
                   selected (->> (wsh/lookup-selected state)
                                 (cfh/clean-loops objects))
-                  features (features/get-team-enabled-features state)
+                  features (-> (features/get-team-enabled-features state)
+                               (set/difference cfeat/frontend-only-features))
 
                   file-id  (:current-file-id state)
                   frame-id (cfh/common-parent-frame objects selected)
@@ -1496,15 +1564,40 @@
                   shapes   (->> (cfh/selected-with-children objects selected)
                                 (keep (d/getf objects)))]
 
-              (->> (rx/from shapes)
-                   (rx/merge-map (partial prepare-object objects frame-id))
-                   (rx/reduce collect-data initial)
-                   (rx/map (partial sort-selected state))
-                   (rx/map (partial advance-copies state selected))
-                   (rx/map #(t/encode-str % {:type :json-verbose}))
-                   (rx/map wapi/write-to-clipboard)
-                   (rx/catch on-copy-error)
-                   (rx/ignore)))))))))
+              ;; The clipboard API doesn't handle well asynchronous calls because it expects to use
+              ;; the clipboard in an user interaction. If you do an async call the callback is outside
+              ;; the thread of the UI and so Safari blocks the copying event.
+              ;; We use the API `ClipboardItem` that allows promises to be passed and so the event
+              ;; will wait for the promise to resolve and everything should work as expected.
+              ;; This only works in the current versions of the browsers.
+              (if (some? (unchecked-get ug/global "ClipboardItem"))
+                (let [resolve-data-promise
+                      (p/create
+                       (fn [resolve reject]
+                         (->> (rx/from shapes)
+                              (rx/merge-map (partial prepare-object objects frame-id))
+                              (rx/reduce collect-data initial)
+                              (rx/map (partial sort-selected state))
+                              (rx/map (partial advance-copies state selected))
+                              (rx/map #(t/encode-str % {:type :json-verbose}))
+                              (rx/map #(wapi/create-blob % "text/plain"))
+                              (rx/subs! resolve reject))))]
+                  (->> (rx/from (wapi/write-to-clipboard-promise "text/plain" resolve-data-promise))
+                       (rx/catch on-copy-error)
+                       (rx/ignore)))
+
+                ;; FIXME: this is to support Firefox versions below 116 that don't support `ClipboardItem`
+                ;; after the version 116 is less common we could remove this.
+                ;; https://caniuse.com/?search=ClipboardItem
+                (->> (rx/from shapes)
+                     (rx/merge-map (partial prepare-object objects frame-id))
+                     (rx/reduce collect-data initial)
+                     (rx/map (partial sort-selected state))
+                     (rx/map (partial advance-copies state selected))
+                     (rx/map #(t/encode-str % {:type :json-verbose}))
+                     (rx/map wapi/write-to-clipboard)
+                     (rx/catch on-copy-error)
+                     (rx/ignore))))))))))
 
 (declare ^:private paste-transit)
 (declare ^:private paste-text)
@@ -1540,7 +1633,7 @@
           (on-error [cause]
             (let [data (ex-data cause)]
               (if (:not-implemented data)
-                (rx/of (msg/warn (tr "errors.clipboard-not-implemented")))
+                (rx/of (ntf/warn (tr "errors.clipboard-not-implemented")))
                 (js/console.error "Clipboard error:" cause))
               (rx/empty)))]
 
@@ -1621,17 +1714,19 @@
 
 (def ^:private
   schema:paste-data
-  (sm/define
-    [:map {:title "paste-data"}
-     [:type [:= :copied-shapes]]
-     [:features ::sm/set-of-strings]
-     [:version :int]
-     [:file-id ::sm/uuid]
-     [:selected ::sm/set-of-uuid]
-     [:objects
-      [:map-of ::sm/uuid :map]]
-     [:images [:set :map]]
-     [:position {:optional true} ::gpt/point]]))
+  [:map {:title "paste-data"}
+   [:type [:= :copied-shapes]]
+   [:features ::sm/set-of-strings]
+   [:version :int]
+   [:file-id ::sm/uuid]
+   [:selected ::sm/set-of-uuid]
+   [:objects
+    [:map-of ::sm/uuid :map]]
+   [:images [:set :map]]
+   [:position {:optional true} ::gpt/point]])
+
+(def paste-data-valid?
+  (sm/lazy-validator schema:paste-data))
 
 (defn- paste-transit
   [{:keys [images] :as pdata}]
@@ -1656,9 +1751,10 @@
         (let [file-id (:current-file-id state)
               features (features/get-team-enabled-features state)]
 
-          (sm/validate! schema:paste-data pdata
-                        {:hint "invalid paste data"
-                         :code :invalid-paste-data})
+          (when-not (paste-data-valid? pdata)
+            (ex/raise :type :validation
+                      :code :invalid-paste-data
+                      :hibt "invalid paste data found"))
 
           (cfeat/check-paste-features! features (:features pdata))
           (if (= file-id (:file-id pdata))
@@ -1997,16 +2093,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn change-canvas-color
-  [color]
-  (ptk/reify ::change-canvas-color
-    ptk/WatchEvent
-    (watch [it state _]
-      (let [page    (wsh/lookup-page state)
-            changes (-> (pcb/empty-changes it)
-                        (pcb/with-page page)
-                        (pcb/set-page-option :background (:color color)))]
-
-        (rx/of (dch/commit-changes changes))))))
+  ([color]
+   (change-canvas-color nil color))
+  ([page-id color]
+   (ptk/reify ::change-canvas-color
+     ptk/WatchEvent
+     (watch [it state _]
+       (let [page-id (or page-id (:current-page-id state))
+             page    (wsh/lookup-page state page-id)
+             changes (-> (pcb/empty-changes it)
+                         (pcb/with-page page)
+                         (pcb/mod-page {:background (:color color)}))]
+         (rx/of (dch/commit-changes changes)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Read only

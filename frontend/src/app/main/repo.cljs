@@ -10,13 +10,14 @@
    [app.common.transit :as t]
    [app.common.uri :as u]
    [app.config :as cf]
+   [app.main.data.events :as-alias ev]
    [app.util.http :as http]
    [app.util.sse :as sse]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]))
 
 (defn handle-response
-  [{:keys [status body] :as response}]
+  [{:keys [status body headers] :as response}]
   (cond
     (= 204 status)
     ;; We need to send "something" so the streams listening downstream can act
@@ -39,6 +40,13 @@
                        {:type :validation
                         :code :request-body-too-large}))
 
+    (and (= status 403)
+         (or (= "cloudflare" (get headers "server"))
+             (= "challenge" (get headers "cf-mitigated"))))
+    (rx/throw (ex-info "http error"
+                       {:type :authorization
+                        :code :challenge-required}))
+
     (and (>= status 400) (map? body))
     (rx/throw (ex-info "http error" body))
 
@@ -47,6 +55,7 @@
      (ex-info "http error"
               {:type :unexpected-error
                :status status
+               :headers headers
                :data body}))))
 
 (def default-options
@@ -93,11 +102,12 @@
                     (= query-params :all)  :get
                     (str/starts-with? nid "get-") :get
                     :else :post)
-
         request   {:method method
                    :uri (u/join cf/public-uri "api/rpc/command/" nid)
                    :credentials "include"
-                   :headers {"accept" "application/transit+json,text/event-stream,*/*"}
+                   :headers {"accept" "application/transit+json,text/event-stream,*/*"
+                             "x-external-session-id" (cf/external-session-id)
+                             "x-event-origin" (::ev/origin (meta params))}
                    :body (when (= method :post)
                            (if form-data?
                              (http/form-data params)
@@ -136,6 +146,8 @@
     (->> (http/send! {:method :post
                       :uri uri
                       :credentials "include"
+                      :headers {"x-external-session-id" (cf/external-session-id)
+                                "x-event-origin" (::ev/origin (meta params))}
                       :query params})
          (rx/map http/conditional-decode-transit)
          (rx/mapcat handle-response))))
@@ -145,6 +157,8 @@
   (->> (http/send! {:method :post
                     :uri (u/join cf/public-uri "api/export")
                     :body (http/transit-data (dissoc params :blob?))
+                    :headers {"x-external-session-id" (cf/external-session-id)
+                              "x-event-origin" (::ev/origin (meta params))}
                     :credentials "include"
                     :response-type (if blob? :blob :text)})
        (rx/map http/conditional-decode-transit)
@@ -164,6 +178,8 @@
   (->> (http/send! {:method :post
                     :uri  (u/join cf/public-uri "api/rpc/command/" (name id))
                     :credentials "include"
+                    :headers {"x-external-session-id" (cf/external-session-id)
+                              "x-event-origin" (::ev/origin (meta params))}
                     :body (http/form-data params)})
        (rx/map http/conditional-decode-transit)
        (rx/mapcat handle-response)))

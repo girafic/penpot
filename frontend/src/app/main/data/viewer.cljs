@@ -49,11 +49,10 @@
 
 (def ^:private
   schema:initialize
-  (sm/define
-    [:map {:title "initialize"}
-     [:file-id ::sm/uuid]
-     [:share-id {:optional true} [:maybe ::sm/uuid]]
-     [:page-id {:optional true} ::sm/uuid]]))
+  [:map {:title "initialize"}
+   [:file-id ::sm/uuid]
+   [:share-id {:optional true} [:maybe ::sm/uuid]]
+   [:page-id {:optional true} ::sm/uuid]])
 
 (defn initialize
   [{:keys [file-id share-id interactions-show?] :as params}]
@@ -102,11 +101,10 @@
 
 (def ^:private
   schema:fetch-bundle
-  (sm/define
-    [:map {:title "fetch-bundle"}
-     [:page-id ::sm/uuid]
-     [:file-id ::sm/uuid]
-     [:share-id {:optional true} ::sm/uuid]]))
+  [:map {:title "fetch-bundle"}
+   [:page-id ::sm/uuid]
+   [:file-id ::sm/uuid]
+   [:share-id {:optional true} ::sm/uuid]])
 
 (defn- fetch-bundle
   [{:keys [file-id share-id] :as params}]
@@ -134,7 +132,7 @@
                                       (uuid? share-id)
                                       (assoc :share-id share-id))]
                          (->> (rp/cmd! :get-file-fragment params)
-                              (rx/map :content)
+                              (rx/map :data)
                               (rx/map #(vector key %)))))]
 
         (->> (rp/cmd! :get-view-only-bundle params')
@@ -253,6 +251,18 @@
 
 ;; --- Zoom Management
 
+(def update-zoom-querystring
+  (ptk/reify ::update-zoom-querystring
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [zoom-type (get-in state [:viewer-local :zoom-type])
+            route (:route state)
+            screen (-> route :data :name keyword)
+            qparams (:query-params route)
+            pparams (:path-params route)]
+
+        (rx/of (rt/nav screen pparams (assoc qparams :zoom zoom-type)))))))
+
 (def increase-zoom
   (ptk/reify ::increase-zoom
     ptk/UpdateEvent
@@ -293,7 +303,10 @@
             minzoom   (min wdiff hdiff)]
         (-> state
             (assoc-in  [:viewer-local :zoom] minzoom)
-            (assoc-in  [:viewer-local :zoom-type] :fit))))))
+            (assoc-in  [:viewer-local :zoom-type] :fit))))
+
+    ptk/WatchEvent
+    (watch [_ _ _] (rx/of update-zoom-querystring))))
 
 (def zoom-to-fill
   (ptk/reify ::zoom-to-fill
@@ -309,7 +322,9 @@
             maxzoom   (max wdiff hdiff)]
         (-> state
             (assoc-in  [:viewer-local :zoom] maxzoom)
-            (assoc-in  [:viewer-local :zoom-type] :fill))))))
+            (assoc-in  [:viewer-local :zoom-type] :fill))))
+    ptk/WatchEvent
+    (watch [_ _ _] (rx/of update-zoom-querystring))))
 
 (def toggle-zoom-style
   (ptk/reify ::toggle-zoom-style

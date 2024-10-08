@@ -5,7 +5,6 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.plugins.viewport
-  "RPC for plugins runtime."
   (:require
    [app.common.data.macros :as dm]
    [app.common.record :as crc]
@@ -14,10 +13,18 @@
    [app.main.data.workspace.viewport :as dwv]
    [app.main.data.workspace.zoom :as dwz]
    [app.main.store :as st]
+   [app.plugins.format :as format]
+   [app.plugins.utils :as u]
    [app.util.object :as obj]))
 
-(deftype ViewportProxy []
+(deftype ViewportProxy [$plugin]
   Object
+  (zoomReset [_]
+    (st/emit! dwz/reset-zoom))
+
+  (zoomToFitAll [_]
+    (st/emit! dwz/zoom-to-fit-all))
+
   (zoomIntoView [_ shapes]
     (let [ids
           (->> shapes
@@ -32,10 +39,13 @@
   {:name js/Symbol.toStringTag
    :get (fn [] (str "ViewportProxy"))})
 
-(defn create-proxy
-  []
+(defn viewport-proxy? [p]
+  (instance? ViewportProxy p))
+
+(defn viewport-proxy
+  [plugin-id]
   (crc/add-properties!
-   (ViewportProxy.)
+   (ViewportProxy. plugin-id)
    {:name "center"
     :get
     (fn [_]
@@ -48,7 +58,14 @@
     (fn [_ value]
       (let [new-x (obj/get value "x")
             new-y (obj/get value "y")]
-        (when (and (us/safe-number? new-x) (us/safe-number? new-y))
+        (cond
+          (not (us/safe-number? new-x))
+          (u/display-not-valid :center-x new-x)
+
+          (not (us/safe-number? new-y))
+          (u/display-not-valid :center-y new-y)
+
+          :else
           (let [vb (dm/get-in @st/state [:workspace-local :vbox])
                 old-x (+ (:x vb) (/ (:width vb) 2))
                 old-y (+ (:y vb) (/ (:height vb) 2))
@@ -65,14 +82,18 @@
       (dm/get-in @st/state [:workspace-local :zoom]))
     :set
     (fn [_ value]
-      (when (us/safe-number? value)
+      (cond
+        (not (us/safe-number? value))
+        (u/display-not-valid :zoom value)
+
+        :else
         (let [z (dm/get-in @st/state [:workspace-local :zoom])]
           (st/emit! (dwz/set-zoom (/ value z))))))}
 
    {:name "bounds"
     :get
     (fn [_]
-      (let [vport (dm/get-in @st/state [:workspace-local :vport])]
-        (.freeze js/Object (clj->js vport))))}))
+      (let [vbox (dm/get-in @st/state [:workspace-local :vbox])]
+        (.freeze js/Object (format/format-bounds vbox))))}))
 
 

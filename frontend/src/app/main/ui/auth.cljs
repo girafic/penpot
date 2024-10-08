@@ -8,42 +8,25 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
-   [app.config :as cf]
    [app.main.data.users :as du]
    [app.main.store :as st]
    [app.main.ui.auth.login :refer [login-page]]
    [app.main.ui.auth.recovery :refer [recovery-page]]
    [app.main.ui.auth.recovery-request :refer [recovery-request-page]]
-   [app.main.ui.auth.register :refer [register-page register-success-page register-validate-page]]
+   [app.main.ui.auth.register :refer [register-page register-success-page register-validate-page terms-register]]
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
 
-(mf/defc terms-login
-  []
-  (let [show-all?     (and cf/terms-of-service-uri cf/privacy-policy-uri)
-        show-terms?   (some? cf/terms-of-service-uri)
-        show-privacy? (some? cf/privacy-policy-uri)]
-
-    (when show-all?
-      [:div {:class (stl/css :terms-login)}
-       (when show-terms?
-         [:a {:href cf/terms-of-service-uri :target "_blank" :class (stl/css :auth-link)}
-          (tr "auth.terms-of-service")])
-
-       (when show-all?
-         [:span {:class (stl/css :and-text)}
-          (dm/str "  " (tr "labels.and") "  ")])
-
-       (when show-privacy?
-         [:a {:href cf/privacy-policy-uri :target "_blank" :class (stl/css :auth-link)}
-          (tr "auth.privacy-policy")])])))
 
 (mf/defc auth
   {::mf/props :obj}
   [{:keys [route]}]
   (let [section (dm/get-in route [:data :name])
+        show-login-icon (and
+                         (not= section :auth-register-validate)
+                         (not= section :auth-register-success))
         params  (:query-params route)
         error   (:error params)]
 
@@ -55,8 +38,9 @@
         (st/emit! (du/show-redirect-error error))))
 
     [:main {:class (stl/css :auth-section)}
-     [:h1 {:class (stl/css :logo-container)}
-      [:a {:href "#/" :title "Penpot" :class (stl/css :logo-btn)} i/logo]]
+     (when show-login-icon
+       [:h1 {:class (stl/css :logo-container)}
+        [:a {:href "#/" :title "Penpot" :class (stl/css :logo-btn)} i/logo]])
      [:div {:class (stl/css :login-illustration)}
       i/login-illustration]
 
@@ -82,4 +66,4 @@
         [:& recovery-page {:params params}])
 
       (when (= section :auth-register)
-        [:& terms-login])]]))
+        [:& terms-register])]]))

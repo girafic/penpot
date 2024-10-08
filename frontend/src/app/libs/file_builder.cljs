@@ -12,13 +12,13 @@
    [app.common.media :as cm]
    [app.common.types.components-list :as ctkl]
    [app.common.uuid :as uuid]
-   [app.util.dom :as dom]
    [app.util.json :as json]
    [app.util.webapi :as wapi]
    [app.util.zip :as uz]
    [app.worker.export :as e]
    [beicon.v2.core :as rx]
-   [cuerdas.core :as str]))
+   [cuerdas.core :as str]
+   [promesa.core :as p]))
 
 (defn parse-data [data]
   (as-> data $
@@ -249,19 +249,33 @@
   (deleteObject [_ id]
     (set! file (fb/delete-object file (uuid/uuid id))))
 
+  (getId [_]
+    (:id file))
+
+  (getCurrentPageId [_]
+    (:current-page-id file))
+
   (asMap [_]
     (clj->js file))
 
+  (newId [_]
+    (uuid/next))
+
   (export [_]
-    (->> (export-file file)
-         (rx/subs!
-          (fn [value]
-            (when  (not (contains? value :type))
-              (let [[file export-blob] value]
-                (dom/trigger-download (:name file) export-blob))))))))
+    (p/create
+     (fn [resolve reject]
+       (->> (export-file file)
+            (rx/take 1)
+            (rx/subs!
+             (fn [value]
+               (when (not (contains? value :type))
+                 (let [[_ export-blob] value]
+                   (resolve export-blob))))
+             reject))))))
 
 (defn create-file-export [^string name]
-  (File. (fb/create-file name)))
+  (binding [cfeat/*current* cfeat/default-features]
+    (File. (fb/create-file name))))
 
 (defn exports []
   #js {:createFile    create-file-export})

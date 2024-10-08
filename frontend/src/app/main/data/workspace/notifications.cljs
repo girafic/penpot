@@ -11,11 +11,10 @@
    [app.common.files.changes :as cpc]
    [app.common.schema :as sm]
    [app.common.uuid :as uuid]
+   [app.main.data.changes :as dch]
    [app.main.data.common :refer [handle-notification]]
    [app.main.data.websocket :as dws]
-   [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.libraries :as dwl]
-   [app.main.data.workspace.persistence :as dwp]
    [app.util.globals :refer [global]]
    [app.util.mouse :as mse]
    [app.util.object :as obj]
@@ -24,6 +23,8 @@
    [beicon.v2.core :as rx]
    [clojure.set :as set]
    [potok.v2.core :as ptk]))
+
+;; FIXME: this ns should be renamed to something different
 
 (declare process-message)
 (declare handle-presence)
@@ -84,7 +85,7 @@
                              (->> stream
                                   (rx/filter mse/pointer-event?)
                                   (rx/filter #(= :viewport (mse/get-pointer-source %)))
-                                  (rx/pipe (rxs/throttle 100))
+                                  (rx/pipe (rxs/throttle 50))
                                   (rx/map #(handle-pointer-send file-id (:pt %)))))
 
                             (rx/take-until stopper))]
@@ -110,9 +111,15 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [page-id (:current-page-id state)
+            local   (:workspace-local state)
+
             message {:type :pointer-update
                      :file-id file-id
                      :page-id page-id
+                     :zoom (:zoom local)
+                     :zoom-inverse (:zoom-inverse local)
+                     :vbox (:vbox local)
+                     :vport (:vport local)
                      :position point}]
         (rx/of (dws/send message))))))
 
@@ -174,96 +181,75 @@
           (update state :workspace-presence update-presence))))))
 
 (defn handle-pointer-update
-  [{:keys [page-id session-id position] :as msg}]
+  [{:keys [page-id session-id position zoom zoom-inverse vbox vport] :as msg}]
   (ptk/reify ::handle-pointer-update
     ptk/UpdateEvent
     (update [_ state]
       (update-in state [:workspace-presence session-id]
                  (fn [session]
                    (assoc session
+                          :zoom zoom
+                          :zoom-inverse zoom-inverse
+                          :vbox vbox
+                          :vport vport
                           :point position
                           :updated-at (dt/now)
                           :page-id page-id))))))
 
 (def ^:private
   schema:handle-file-change
-  (sm/define
-    [:map {:title "handle-file-change"}
-     [:type :keyword]
-     [:profile-id ::sm/uuid]
-     [:file-id ::sm/uuid]
-     [:session-id ::sm/uuid]
-     [:revn :int]
-     [:changes ::cpc/changes]]))
+  [:map {:title "handle-file-change"}
+   [:type :keyword]
+   [:profile-id ::sm/uuid]
+   [:file-id ::sm/uuid]
+   [:session-id ::sm/uuid]
+   [:revn :int]
+   [:changes ::cpc/changes]])
+
+(def ^:private check-file-change-params!
+  (sm/check-fn schema:handle-file-change))
 
 (defn handle-file-change
-  [{:keys [file-id changes] :as msg}]
+  [{:keys [file-id changes revn] :as msg}]
+
   (dm/assert!
-   "expected valid arguments"
-   (sm/check! schema:handle-file-change msg))
+   "expected valid parameters"
+   (check-file-change-params! msg))
 
   (ptk/reify ::handle-file-change
     IDeref
     (-deref [_] {:changes changes})
 
     ptk/WatchEvent
-    (watch [_ state _]
-      (let [page-id (:current-page-id state)
-            position-data-operation?
-            (fn [{:keys [type attr]}]
-              (and (= :set type) (= attr :position-data)))
+    (watch [_ _ _]
+      ;; The commit event is responsible to apply the data localy
+      ;; and update the persistence internal state with the updated
+      ;; file-revn
+      (rx/of (dch/commit {:file-id file-id
+                          :file-revn revn
+                          :save-undo? false
+                          :source :remote
+                          :redo-changes (vec changes)
+                          :undo-changes []})))))
 
-            ;;add-origin-session-id
-            ;;(fn [{:keys [] :as op}]
-            ;;  (cond-> op
-            ;;    (position-data-operation? op)
-            ;;    (update :val with-meta {:session-id (:session-id msg)})))
+(def ^:private schema:handle-library-change
+  [:map {:title "handle-library-change"}
+   [:type :keyword]
+   [:profile-id ::sm/uuid]
+   [:file-id ::sm/uuid]
+   [:session-id ::sm/uuid]
+   [:revn :int]
+   [:modified-at ::sm/inst]
+   [:changes ::cpc/changes]])
 
-            update-position-data
-            (fn [change]
-              ;; Remove the position data from remote operations. Will be changed localy, otherwise
-              ;; creates a strange "out-of-sync" behaviour.
-              (cond-> change
-                (and (= page-id (:page-id change))
-                     (= :mod-obj (:type change)))
-                (update :operations #(d/removev position-data-operation? %))))
-
-            process-page-changes
-            (fn [[page-id changes]]
-              (dch/update-indices page-id changes))
-
-            ;; We update `position-data` from the incoming message
-            changes (->> changes
-                         (mapv update-position-data)
-                         (d/removev (fn [change]
-                                      (and (= page-id (:page-id change))
-                                           (:ignore-remote? change)))))
-
-            changes-by-pages (group-by :page-id changes)]
-
-        (rx/merge
-         (rx/of (dwp/shapes-changes-persisted file-id (assoc msg :changes changes)))
-
-         (when-not (empty? changes-by-pages)
-           (rx/from (map process-page-changes changes-by-pages))))))))
-
-(def ^:private
-  schema:handle-library-change
-  (sm/define
-    [:map {:title "handle-library-change"}
-     [:type :keyword]
-     [:profile-id ::sm/uuid]
-     [:file-id ::sm/uuid]
-     [:session-id ::sm/uuid]
-     [:revn :int]
-     [:modified-at ::sm/inst]
-     [:changes ::cpc/changes]]))
+(def ^:private check-library-change-params!
+  (sm/check-fn schema:handle-library-change))
 
 (defn handle-library-change
   [{:keys [file-id modified-at changes revn] :as msg}]
   (dm/assert!
    "expected valid arguments"
-   (sm/check! schema:handle-library-change msg))
+   (check-library-change-params! msg))
 
   (ptk/reify ::handle-library-change
     ptk/WatchEvent

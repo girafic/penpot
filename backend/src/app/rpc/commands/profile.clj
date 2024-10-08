@@ -10,6 +10,7 @@
    [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.schema :as sm]
+   [app.common.types.plugins :refer [schema:plugin-registry]]
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.db :as db]
@@ -28,7 +29,7 @@
    [app.tokens :as tokens]
    [app.util.services :as sv]
    [app.util.time :as dt]
-   [app.worker :as-alias wrk]
+   [app.worker :as wrk]
    [cuerdas.core :as str]
    [promesa.exec :as px]))
 
@@ -39,6 +40,33 @@
 (declare get-profile)
 (declare strip-private-attrs)
 (declare verify-password)
+
+(def schema:props
+  [:map {:title "ProfileProps"}
+   [:plugins {:optional true} schema:plugin-registry]
+   [:newsletter-updates {:optional true} ::sm/boolean]
+   [:newsletter-news {:optional true} ::sm/boolean]
+   [:onboarding-team-id {:optional true} ::sm/uuid]
+   [:onboarding-viewed {:optional true} ::sm/boolean]
+   [:v2-info-shown {:optional true} ::sm/boolean]
+   [:welcome-file-id {:optional true} [:maybe ::sm/boolean]]
+   [:release-notes-viewed {:optional true}
+    [::sm/text {:max 100}]]])
+
+(def schema:profile
+  [:map {:title "Profile"}
+   [:id ::sm/uuid]
+   [:fullname [::sm/word-string {:max 250}]]
+   [:email ::sm/email]
+   [:is-active {:optional true} ::sm/boolean]
+   [:is-blocked {:optional true} ::sm/boolean]
+   [:is-demo {:optional true} ::sm/boolean]
+   [:is-muted {:optional true} ::sm/boolean]
+   [:created-at {:optional true} ::sm/inst]
+   [:modified-at {:optional true} ::sm/inst]
+   [:default-project-id {:optional true} ::sm/uuid]
+   [:default-team-id {:optional true} ::sm/uuid]
+   [:props {:optional true} schema:props]])
 
 (defn clean-email
   "Clean and normalizes email address string"
@@ -52,24 +80,6 @@
                 (str/trim email "<>")
                 email)]
     email))
-
-(def ^:private
-  schema:profile
-  (sm/define
-    [:map {:title "Profile"}
-     [:id ::sm/uuid]
-     [:fullname [::sm/word-string {:max 250}]]
-     [:email ::sm/email]
-     [:is-active {:optional true} :boolean]
-     [:is-blocked {:optional true} :boolean]
-     [:is-demo {:optional true} :boolean]
-     [:is-muted {:optional true} :boolean]
-     [:created-at {:optional true} ::sm/inst]
-     [:modified-at {:optional true} ::sm/inst]
-     [:default-project-id {:optional true} ::sm/uuid]
-     [:default-team-id {:optional true} ::sm/uuid]
-     [:props {:optional true}
-      [:map-of {:title "ProfileProps"} :keyword :any]]]))
 
 ;; --- QUERY: Get profile (own)
 
@@ -99,18 +109,16 @@
 
 (def ^:private
   schema:update-profile
-  (sm/define
-    [:map {:title "update-profile"}
-     [:fullname [::sm/word-string {:max 250}]]
-     [:lang {:optional true} [:string {:max 5}]]
-     [:theme {:optional true} [:string {:max 250}]]]))
+  [:map {:title "update-profile"}
+   [:fullname [::sm/word-string {:max 250}]]
+   [:lang {:optional true} [:string {:max 8}]]
+   [:theme {:optional true} [:string {:max 250}]]])
 
 (sv/defmethod ::update-profile
   {::doc/added "1.0"
    ::sm/params schema:update-profile
    ::sm/result schema:profile}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id fullname lang theme] :as params}]
-
   (db/with-atomic [conn pool]
     ;; NOTE: we need to retrieve the profile independently if we use
     ;; it or not for explicit locking and avoid concurrent updates of
@@ -145,11 +153,10 @@
 
 (def ^:private
   schema:update-profile-password
-  (sm/define
-    [:map {:title "update-profile-password"}
-     [:password [::sm/word-string {:max 500}]]
-     ;; Social registered users don't have old-password
-     [:old-password {:optional true} [:maybe [::sm/word-string {:max 500}]]]]))
+  [:map {:title "update-profile-password"}
+   [:password [::sm/word-string {:max 500}]]
+   ;; Social registered users don't have old-password
+   [:old-password {:optional true} [:maybe [::sm/word-string {:max 500}]]]])
 
 (sv/defmethod ::update-profile-password
   {::doc/added "1.0"
@@ -200,9 +207,8 @@
 
 (def ^:private
   schema:update-profile-photo
-  (sm/define
-    [:map {:title "update-profile-photo"}
-     [:file ::media/upload]]))
+  [:map {:title "update-profile-photo"}
+   [:file ::media/upload]])
 
 (sv/defmethod ::update-profile-photo
   {:doc/added "1.1"
@@ -211,8 +217,7 @@
   [cfg {:keys [::rpc/profile-id file] :as params}]
   ;; Validate incoming mime type
   (media/validate-media-type! file #{"image/jpeg" "image/png" "image/webp"})
-  (let [cfg (update cfg ::sto/storage media/configure-assets-storage)]
-    (update-profile-photo cfg (assoc params :profile-id profile-id))))
+  (update-profile-photo cfg (assoc params :profile-id profile-id)))
 
 (defn update-profile-photo
   [{:keys [::db/pool ::sto/storage] :as cfg} {:keys [profile-id file] :as params}]
@@ -270,26 +275,25 @@
 
 (def ^:private
   schema:request-email-change
-  (sm/define
-    [:map {:title "request-email-change"}
-     [:email ::sm/email]]))
+  [:map {:title "request-email-change"}
+   [:email ::sm/email]])
 
 (sv/defmethod ::request-email-change
   {::doc/added "1.0"
    ::sm/params schema:request-email-change}
-  [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id email] :as params}]
-  (db/with-atomic [conn pool]
-    (let [profile (db/get-by-id conn :profile profile-id)
-          cfg     (assoc cfg ::conn conn)
-          params  (assoc params
-                         :profile profile
-                         :email (clean-email email))]
-      (if (contains? cf/flags :smtp)
-        (request-email-change! cfg params)
-        (change-email-immediately! cfg params)))))
+  [cfg {:keys [::rpc/profile-id email] :as params}]
+  (db/tx-run! cfg
+              (fn [cfg]
+                (let [profile (db/get-by-id cfg :profile profile-id)
+                      params  (assoc params
+                                     :profile profile
+                                     :email (clean-email email))]
+                  (if (contains? cf/flags :smtp)
+                    (request-email-change! cfg params)
+                    (change-email-immediately! cfg params))))))
 
 (defn- change-email-immediately!
-  [{:keys [::conn]} {:keys [profile email] :as params}]
+  [{:keys [::db/conn]} {:keys [profile email] :as params}]
   (when (not= email (:email profile))
     (check-profile-existence! conn params))
 
@@ -300,7 +304,7 @@
   {:changed true})
 
 (defn- request-email-change!
-  [{:keys [::conn] :as cfg} {:keys [profile email] :as params}]
+  [{:keys [::db/conn] :as cfg} {:keys [profile email] :as params}]
   (let [token   (tokens/generate (::setup/props cfg)
                                  {:iss :change-email
                                   :exp (dt/in-future "15m")
@@ -320,9 +324,28 @@
                 :hint "looks like the profile has reported repeatedly as spam or has permanent bounces."))
 
     (when (eml/has-bounce-reports? conn email)
-      (ex/raise :type :validation
+      (ex/raise :type :restriction
                 :code :email-has-permanent-bounces
-                :hint "looks like the email you invite has been repeatedly reported as spam or permanent bounce"))
+                :email email
+                :hint "looks like the email has bounce reports"))
+
+    (when (eml/has-complaint-reports? conn email)
+      (ex/raise :type :restriction
+                :code :email-has-complaints
+                :email email
+                :hint "looks like the email has spam complaint reports"))
+
+    (when (eml/has-bounce-reports? conn (:email profile))
+      (ex/raise :type :restriction
+                :code :email-has-permanent-bounces
+                :email (:email profile)
+                :hint "looks like the email has bounce reports"))
+
+    (when (eml/has-complaint-reports? conn (:email profile))
+      (ex/raise :type :restriction
+                :code :email-has-complaints
+                :email (:email profile)
+                :hint "looks like the email has spam complaint reports"))
 
     (eml/send! {::eml/conn conn
                 ::eml/factory eml/change-email
@@ -334,46 +357,48 @@
                 :extra-data ptoken})
     nil))
 
-
 ;; --- MUTATION: Update Profile Props
 
 (def ^:private
   schema:update-profile-props
-  (sm/define
-    [:map {:title "update-profile-props"}
-     [:props [:map-of :keyword :any]]]))
+  [:map {:title "update-profile-props"}
+   [:props schema:props]])
+
+(defn update-profile-props
+  [{:keys [::db/conn] :as cfg} profile-id props]
+  (let [profile (get-profile conn profile-id ::sql/for-update true)
+        props   (reduce-kv (fn [props k v]
+                             ;; We don't accept namespaced keys
+                             (if (simple-ident? k)
+                               (if (nil? v)
+                                 (dissoc props k)
+                                 (assoc props k v))
+                               props))
+                           (:props profile)
+                           props)]
+
+    (db/update! conn :profile
+                {:props (db/tjson props)}
+                {:id profile-id})
+
+    (filter-props props)))
 
 (sv/defmethod ::update-profile-props
   {::doc/added "1.0"
    ::sm/params schema:update-profile-props}
-  [{:keys [::db/pool]} {:keys [::rpc/profile-id props]}]
-  (db/with-atomic [conn pool]
-    (let [profile (get-profile conn profile-id ::sql/for-update true)
-          props   (reduce-kv (fn [props k v]
-                               ;; We don't accept namespaced keys
-                               (if (simple-ident? k)
-                                 (if (nil? v)
-                                   (dissoc props k)
-                                   (assoc props k v))
-                                 props))
-                             (:props profile)
-                             props)]
-
-      (db/update! conn :profile
-                  {:props (db/tjson props)}
-                  {:id profile-id})
-
-      (filter-props props))))
+  [cfg {:keys [::rpc/profile-id props]}]
+  (db/tx-run! cfg (fn [cfg]
+                    (update-profile-props cfg profile-id props))))
 
 ;; --- MUTATION: Delete Profile
 
-(declare ^:private get-owned-teams-with-participants)
+(declare ^:private get-owned-teams)
 
 (sv/defmethod ::delete-profile
   {::doc/added "1.0"}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id] :as params}]
   (db/with-atomic [conn pool]
-    (let [teams      (get-owned-teams-with-participants conn profile-id)
+    (let [teams      (get-owned-teams conn profile-id)
           deleted-at (dt/now)]
 
       ;; If we found owned teams with participants, we don't allow
@@ -385,14 +410,17 @@
                   :hint "The user need to transfer ownership of owned teams."
                   :context {:teams (mapv :id teams)}))
 
-      (doseq [{:keys [id]} teams]
-        (db/update! conn :team
-                    {:deleted-at deleted-at}
-                    {:id id}))
-
+      ;; Mark profile deleted immediatelly
       (db/update! conn :profile
                   {:deleted-at deleted-at}
                   {:id profile-id})
+
+      ;; Schedule cascade deletion to a worker
+      (wrk/submit! {::db/conn conn
+                    ::wrk/task :delete-object
+                    ::wrk/params {:object :profile
+                                  :deleted-at deleted-at
+                                  :id profile-id}})
 
       (rph/with-transform {} (session/delete-fn cfg)))))
 
@@ -400,22 +428,21 @@
 ;; --- HELPERS
 
 (def sql:owned-teams
-  "with owner_teams as (
-      select tpr.team_id as id
-        from team_profile_rel as tpr
-       where tpr.is_owner is true
-         and tpr.profile_id = ?
+  "WITH owner_teams AS (
+      SELECT tpr.team_id AS id
+        FROM team_profile_rel AS tpr
+       WHERE tpr.is_owner IS TRUE
+         AND tpr.profile_id = ?
    )
-   select tpr.team_id as id,
-          count(tpr.profile_id) - 1 as participants
-     from team_profile_rel as tpr
-    where tpr.team_id in (select id from owner_teams)
-      and tpr.profile_id != ?
-    group by 1")
+   SELECT tpr.team_id AS id,
+          count(tpr.profile_id) - 1 AS participants
+     FROM team_profile_rel AS tpr
+    WHERE tpr.team_id IN (SELECT id from owner_teams)
+    GROUP BY 1")
 
-(defn- get-owned-teams-with-participants
+(defn get-owned-teams
   [conn profile-id]
-  (db/exec! conn [sql:owned-teams profile-id profile-id]))
+  (db/exec! conn [sql:owned-teams profile-id]))
 
 (def ^:private sql:profile-existence
   "select exists (select * from profile

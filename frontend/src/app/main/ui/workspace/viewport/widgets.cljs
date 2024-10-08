@@ -40,7 +40,7 @@
                :pattern-units "userSpaceOnUse"}
      [:path {:d "M 1 0 L 0 0 0 1"
              :style {:fill "none"
-                     :stroke (if (dbg/enabled? :pixel-grid) "red" "var(--color-info)")
+                     :stroke (if (dbg/enabled? :pixel-grid) "red" "var(--status-color-info-500)")
                      :stroke-opacity (if (dbg/enabled? :pixel-grid) 1 "0.2")
                      :stroke-width (str (/ 1 zoom))}}]]]
    [:rect {:x (:x vbox)
@@ -67,6 +67,7 @@
     [:rect.selection-rect
      {:x (:x data)
       :y (:y data)
+      :data-testid "workspace-selection-rect"
       :width (:width data)
       :height (:height data)
       :style {;; Primary with 0.1 opacity
@@ -86,28 +87,27 @@
 
         color (if selected?
                 (if (ctn/in-any-component? objects frame)
-                  "var(--color-component-highlight)"
+                  "var(--assets-component-hightlight)"
                   "var(--color-accent-tertiary)")
                 "#8f9da3") ;; TODO: Set this color on the DS
 
         on-pointer-down
-        (mf/use-callback
+        (mf/use-fn
          (mf/deps (:id frame) on-frame-select workspace-read-only?)
-         (fn [bevent]
-           (let [event  (.-nativeEvent bevent)]
-             (when (= 1 (.-which event))
-               (dom/prevent-default bevent)
-               (dom/stop-propagation bevent)
-               (on-frame-select event (:id frame))))))
+         (fn [event]
+           (when (dom/left-mouse? event)
+             (dom/prevent-default event)
+             (dom/stop-propagation event)
+             (on-frame-select event (:id frame)))))
 
         on-double-click
-        (mf/use-callback
+        (mf/use-fn
          (mf/deps (:id frame))
          #(st/emit! (dw/go-to-layout :layers)
                     (dw/start-rename-shape (:id frame))))
 
         on-context-menu
-        (mf/use-callback
+        (mf/use-fn
          (mf/deps frame workspace-read-only?)
          (fn [bevent]
            (let [event    (.-nativeEvent bevent)
@@ -118,13 +118,13 @@
                (st/emit! (dw/show-shape-context-menu {:position position :shape frame}))))))
 
         on-pointer-enter
-        (mf/use-callback
+        (mf/use-fn
          (mf/deps (:id frame) on-frame-enter)
          (fn [_]
            (on-frame-enter (:id frame))))
 
         on-pointer-leave
-        (mf/use-callback
+        (mf/use-fn
          (mf/deps (:id frame) on-frame-leave)
          (fn [_]
            (on-frame-leave (:id frame))))
@@ -220,75 +220,75 @@
                           :on-frame-select on-frame-select
                           :grid-edition? (and (= id edition) grid-edition?)}]))]))
 
-(mf/defc frame-flow
-  [{:keys [flow frame selected? zoom on-frame-enter on-frame-leave on-frame-select]}]
-  (let [{:keys [x y]} frame
-        flow-pos (gpt/point x (- y (/ 35 zoom)))
+(mf/defc frame-flow*
+  {::mf/props :obj}
+  [{:keys [flow frame is-selected zoom on-frame-enter on-frame-leave on-frame-select]}]
+  (let [x         (dm/get-prop frame :x)
+        y         (dm/get-prop frame :y)
+        pos       (gpt/point x (- y (/ 35 zoom)))
+
+        frame-id  (:id frame)
+        flow-id   (:id flow)
+        flow-name (:name flow)
 
         on-pointer-down
-        (mf/use-callback
-         (mf/deps (:id frame) on-frame-select)
-         (fn [bevent]
-           (let [event  (.-nativeEvent bevent)
-                 params {:section "interactions"
-                         :frame-id (:id frame)}]
-             (when (= 1 (.-which event))
+        (mf/use-fn
+         (mf/deps frame-id on-frame-select)
+         (fn [event]
+           (let [params {:section "interactions"
+                         :frame-id frame-id}]
+             (when (dom/left-mouse? event)
                (dom/prevent-default event)
                (dom/stop-propagation event)
                (st/emit! (dw/go-to-viewer params))))))
 
         on-double-click
-        (mf/use-callback
-         (mf/deps (:id frame))
-         #(st/emit! (dwi/start-rename-flow (:id flow))))
+        (mf/use-fn
+         (mf/deps flow-id)
+         #(st/emit! (dwi/start-rename-flow flow-id)))
 
         on-pointer-enter
-        (mf/use-callback
-         (mf/deps (:id frame) on-frame-enter)
+        (mf/use-fn
+         (mf/deps frame-id on-frame-enter)
          (fn [_]
-           (on-frame-enter (:id frame))))
+           (when (fn? on-frame-enter)
+             (on-frame-enter frame-id))))
 
         on-pointer-leave
-        (mf/use-callback
-         (mf/deps (:id frame) on-frame-leave)
+        (mf/use-fn
+         (mf/deps frame-id on-frame-leave)
          (fn [_]
-           (on-frame-leave (:id frame))))]
+           (when (fn? on-frame-leave)
+             (on-frame-leave frame-id))))]
 
     [:foreignObject {:x 0
                      :y -15
                      :width 100000
                      :height 24
-                     :transform (vwu/text-transform flow-pos zoom)}
+                     :transform (vwu/text-transform pos zoom)}
      [:div {:class (stl/css-case :flow-badge true
-                                 :selected selected?)}
+                                 :selected is-selected)}
       [:div {:class (stl/css :content)
              :on-pointer-down on-pointer-down
              :on-double-click on-double-click
              :on-pointer-enter on-pointer-enter
              :on-pointer-leave on-pointer-leave}
        i/play
-       [:span (:name flow)]]]]))
+       [:span flow-name]]]]))
 
-(mf/defc frame-flows
-  {::mf/wrap-props false}
-  [props]
-  (let [flows     (unchecked-get props "flows")
-        objects   (unchecked-get props "objects")
-        zoom      (unchecked-get props "zoom")
-        selected  (or (unchecked-get props "selected") #{})
-
-        on-frame-enter  (unchecked-get props "on-frame-enter")
-        on-frame-leave  (unchecked-get props "on-frame-leave")
-        on-frame-select (unchecked-get props "on-frame-select")]
-    [:g.frame-flows
-     (for [[index flow] (d/enumerate flows)]
-       (let [frame (get objects (:starting-frame flow))]
-         [:& frame-flow {:key (dm/str (:id frame) "-" index)
-                         :flow flow
-                         :frame frame
-                         :selected? (contains? selected (:id frame))
-                         :zoom zoom
-                         :on-frame-enter on-frame-enter
-                         :on-frame-leave on-frame-leave
-                         :on-frame-select on-frame-select}]))]))
+(mf/defc frame-flows*
+  {::mf/props :obj}
+  [{:keys [flows objects zoom selected on-frame-enter on-frame-leave on-frame-select]}]
+  [:g.frame-flows
+   (for [[flow-id flow] flows]
+     (let [frame    (get objects (:starting-frame flow))
+           frame-id (dm/get-prop frame :id)]
+       [:> frame-flow* {:key (dm/str frame-id "-" flow-id)
+                        :flow flow
+                        :frame frame
+                        :is-selected (contains? selected frame-id)
+                        :zoom zoom
+                        :on-frame-enter on-frame-enter
+                        :on-frame-leave on-frame-leave
+                        :on-frame-select on-frame-select}]))])
 

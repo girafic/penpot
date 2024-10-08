@@ -18,7 +18,7 @@
    [app.main.ui.formats :as fmt]
    [app.main.ui.icons :as i]
    [app.main.ui.viewer.comments :refer [comments-menu]]
-   [app.main.ui.viewer.interactions :refer [flows-menu interactions-menu]]
+   [app.main.ui.viewer.interactions :refer [flows-menu* interactions-menu]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [okulary.core :as l]
@@ -120,7 +120,7 @@
                    :key (dm/str "zoom-fullscreen-" sc)} sc])]]]]]))
 
 (mf/defc header-options
-  [{:keys [section zoom page file index permissions interactions-mode]}]
+  [{:keys [section zoom page file index permissions interactions-mode share]}]
   (let [fullscreen?    (mf/deref fullscreen-ref)
 
         toggle-fullscreen
@@ -138,7 +138,7 @@
          (mf/deps page)
          (fn []
            (modal/show! :share-link {:page page :file file})
-           (modal/allow-click-outside!)))
+           (modal/disallow-click-outside!)))
 
         handle-increase
         (mf/use-fn
@@ -159,6 +159,12 @@
         handle-zoom-fit
         (mf/use-fn
          #(st/emit! dv/zoom-to-fit))]
+    (mf/with-effect [permissions share]
+      (when (and
+             (:in-team permissions)
+             (:is-admin permissions)
+             share)
+        (open-share-dialog)))
 
     [:div {:class (stl/css :options-zone)}
      [:& export-progress-widget]
@@ -166,7 +172,7 @@
      (case section
        :interactions [:*
                       (when index
-                        [:& flows-menu {:page page :index index}])
+                        [:> flows-menu* {:page page :index index}])
                       [:& interactions-menu {:interactions-mode interactions-mode}]]
        :comments [:& comments-menu]
        [:div {:class (stl/css :view-options)}])
@@ -256,8 +262,12 @@
        [:span {:class (stl/css :frame-name)} frame-name]
        [:span {:class (stl/css :icon)} i/arrow]]]]))
 
+(def ^:private penpot-logo-icon
+  (i/icon-xref :penpot-logo-icon (stl/css :logo-icon)))
+
+
 (mf/defc header
-  [{:keys [project file page frame zoom section permissions index interactions-mode shown-thumbnails]}]
+  [{:keys [project file page frame zoom section permissions index interactions-mode shown-thumbnails share]}]
   (let [go-to-dashboard
         (mf/use-fn
          #(st/emit! (dv/go-to-dashboard)))
@@ -303,10 +313,10 @@
       ;; If the user doesn't have permission we disable the link
       [:a {:class (stl/css :home-link)
            :on-click go-to-dashboard
+           :data-testid "penpot-logo-link"
            :style {:cursor (when-not (:in-team permissions) "auto")
                    :pointer-events (when-not (:in-team permissions) "none")}}
-       [:span {:class (stl/css :logo-icon)}
-        i/logo-icon]]
+       penpot-logo-icon]
 
       [:& header-sitemap {:project project
                           :file file
@@ -347,4 +357,5 @@
                          :file file
                          :index index
                          :zoom zoom
-                         :interactions-mode interactions-mode}]]))
+                         :interactions-mode interactions-mode
+                         :share share}]]))

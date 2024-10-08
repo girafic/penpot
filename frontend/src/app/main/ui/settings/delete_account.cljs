@@ -7,8 +7,8 @@
 (ns app.main.ui.settings.delete-account
   (:require-macros [app.main.style :as stl])
   (:require
-   [app.main.data.messages :as msg]
    [app.main.data.modal :as modal]
+   [app.main.data.notifications :as ntf]
    [app.main.data.users :as du]
    [app.main.store :as st]
    [app.main.ui.icons :as i]
@@ -18,11 +18,12 @@
    [rumext.v2 :as mf]))
 
 (defn on-error
-  [{:keys [code] :as error}]
-  (if (= :owner-teams-with-people code)
-    (let [msg (tr "notifications.profile-deletion-not-allowed")]
-      (rx/of (msg/error msg)))
-    (rx/throw error)))
+  [cause]
+  (let [code (-> cause ex-data :code)]
+    (if (= :owner-teams-with-people code)
+      (let [msg (tr "notifications.profile-deletion-not-allowed")]
+        (rx/of (ntf/error msg)))
+      (rx/throw cause))))
 
 (mf/defc delete-account-modal
   {::mf/register modal/components
@@ -48,7 +49,7 @@
 
       [:div {:class (stl/css :modal-content)}
        [:& context-notification
-        {:type :warning
+        {:level :warning
          :content (tr "modals.delete-account.info")}]]
 
       [:div {:class (stl/css :modal-footer)}
@@ -59,6 +60,6 @@
         [:button {:class (stl/css-case :accept-button true
                                        :danger true)
                   :on-click on-accept
-                  :data-test "delete-account-btn"}
+                  :data-testid "delete-account-btn"}
          (tr "modals.delete-account.confirm")]]]]]))
 

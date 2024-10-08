@@ -9,10 +9,11 @@
   (:require
    [app.common.types.components-list :as ctkl]
    [app.config :as cf]
-   [app.main.data.messages :as msg]
    [app.main.data.modal :as modal]
+   [app.main.data.notifications :as ntf]
    [app.main.features :as features]
    [app.main.repo :as rp]
+   [app.main.store :as st]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -58,6 +59,10 @@
   []
   (.reload js/location))
 
+(defn hide-notifications!
+  []
+  (st/emit! (ntf/hide)))
+
 (defn handle-notification
   [{:keys [message code level] :as params}]
   (ptk/reify ::show-notification
@@ -67,15 +72,24 @@
         :upgrade-version
         (when (or (not= (:version params) (:full cf/version))
                   (true? (:force params)))
-          (rx/of (msg/dialog
+          (rx/of (ntf/dialog
                   :content (tr "notifications.by-code.upgrade-version")
                   :controls :inline-actions
-                  :notification-type :inline
-                  :type level
+                  :type :inline
+                  :level level
                   :actions [{:label "Refresh" :callback force-reload!}]
                   :tag :notification)))
 
-        (rx/of (msg/dialog
+        :maintenance
+        (rx/of (ntf/dialog
+                :content (tr "notifications.by-code.maintenance")
+                :controls :inline-actions
+                :type level
+                :actions [{:label (tr "labels.accept")
+                           :callback hide-notifications!}]
+                :tag :notification))
+
+        (rx/of (ntf/dialog
                 :content message
                 :controls :close
                 :type level
@@ -141,3 +155,18 @@
                          :files files
                          :binary? binary?}))))))))
 
+;;;;;;;;;;;;;;;;;;;;;;
+;; Team Request
+;;;;;;;;;;;;;;;;;;;;;;
+
+(defn create-team-access-request
+  [params]
+  (ptk/reify ::create-team-access-request
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (let [{:keys [on-success on-error]
+             :or {on-success identity
+                  on-error rx/throw}} (meta params)]
+        (->> (rp/cmd! :create-team-access-request params)
+             (rx/tap on-success)
+             (rx/catch on-error))))))

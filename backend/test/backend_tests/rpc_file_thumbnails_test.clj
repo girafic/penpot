@@ -114,11 +114,10 @@
 
       ;; Run the File GC task that should remove unused file object
       ;; thumbnails
-      (let [result (th/run-task! :file-gc {:min-age 0})]
-        (t/is (= 1 (:processed result))))
+      (th/run-task! :file-gc {:min-age 0 :file-id (:id file)})
 
       (let [result (th/run-task! :objects-gc {:min-age 0})]
-        (t/is (= 2 (:processed result))))
+        (t/is (= 3 (:processed result))))
 
       ;; check if row2 related thumbnail row still exists
       (let [[row :as rows] (th/db-query :file-tagged-object-thumbnail
@@ -134,7 +133,7 @@
       (t/is (some? (sto/get-object storage (:media-id row2))))
 
       ;; run the task again
-      (let [res (th/run-task! "storage-gc-touched" {:min-age 0})]
+      (let [res (th/run-task! :storage-gc-touched {:min-age 0})]
         (t/is (= 1 (:delete res)))
         (t/is (= 0 (:freeze res))))
 
@@ -217,8 +216,7 @@
 
       ;; Run the File GC task that should remove unused file object
       ;; thumbnails
-      (let [result (th/run-task! :file-gc {:min-age 0})]
-        (t/is (= 1 (:processed result))))
+      (t/is (true? (th/run-task! :file-gc {:min-age 0 :file-id (:id file)})))
 
       (let [result (th/run-task! :objects-gc {:min-age 0})]
         (t/is (= 2 (:processed result))))
@@ -346,13 +344,5 @@
                              (assoc :size 312043))))
           out  (th/command! data)]
       (t/is (nil? (:error out)))
-      (t/is (map? (:result out))))
+      (t/is (map? (:result out))))))
 
-    (let [[row1 :as rows]
-          (->> (th/db-query :task {:name "object-update"})
-               (map #(update % :props db/decode-transit-pgobject)))]
-
-      ;; (app.common.pprint/pprint rows)
-      (t/is (= 1 (count rows)))
-      (t/is (> (inst-ms (dt/diff (:created-at row1) (:scheduled-at row1)))
-               (inst-ms (dt/duration "4m")))))))

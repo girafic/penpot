@@ -22,6 +22,9 @@
    [app.common.schema :as sm]
    [app.common.svg :as csvg]
    [app.common.text :as txt]
+   [app.common.types.color :as ctc]
+   [app.common.types.component :as ctk]
+   [app.common.types.file :as ctf]
    [app.common.types.shape :as cts]
    [app.common.types.shape.shadow :as ctss]
    [app.common.uuid :as uuid]
@@ -860,11 +863,9 @@
               (assoc shadow :color color)))
 
           (update-object [object]
-            (d/update-when object :shadow
-                           #(into []
-                                  (comp (map fix-shadow)
-                                        (filter valid-shadow?))
-                                  %)))
+            (let [xform (comp (map fix-shadow)
+                              (filter valid-shadow?))]
+              (d/update-when object :shadow #(into [] xform %))))
 
           (update-container [container]
             (d/update-when container :objects update-vals update-object))]
@@ -897,6 +898,182 @@
     (-> data
         (update :pages-index update-vals update-container)
         (update :components update-vals update-container))))
+
+(defn migrate-up-47
+  [data]
+  (letfn [(fix-shape [page shape]
+            (let [file {:id (:id data) :data data}
+                  component-file (:component-file shape)
+                  ;; On cloning a file, the component-file of the shapes point to the old file id
+                  ;; this is a workaround to be able to found the components in that case
+                  libraries {component-file {:id component-file :data data}}
+                  ref-shape  (ctf/find-ref-shape file page libraries shape {:include-deleted? true :with-context? true})
+                  ref-parent (get (:objects (:container (meta ref-shape))) (:parent-id ref-shape))
+                  shape-swap-slot (ctk/get-swap-slot shape)
+                  ref-swap-slot   (ctk/get-swap-slot ref-shape)]
+              (if (and (some? shape-swap-slot)
+                       (= shape-swap-slot ref-swap-slot)
+                       (ctk/main-instance? ref-parent))
+                (ctk/remove-swap-slot shape)
+                shape)))
+
+          (update-page [page]
+            (d/update-when page :objects update-vals (partial fix-shape page)))]
+    (-> data
+        (update :pages-index update-vals update-page))))
+
+(defn migrate-up-48
+  [data]
+  (letfn [(fix-shape [shape]
+            (let [swap-slot (ctk/get-swap-slot shape)]
+              (if (and (some? swap-slot)
+                       (not (ctk/subcopy-head? shape)))
+                (ctk/remove-swap-slot shape)
+                shape)))
+
+          (update-page [page]
+            (d/update-when page :objects update-vals fix-shape))]
+    (-> data
+        (update :pages-index update-vals update-page))))
+
+(defn migrate-up-49
+  "Remove hide-in-viewer for shapes that are origin or destination of an interaction"
+  [data]
+  (letfn [(update-object [destinations object]
+            (cond-> object
+              (or (:interactions object)
+                  (contains? destinations (:id object)))
+              (dissoc object :hide-in-viewer)))
+
+          (update-page [page]
+            (let [destinations (->> page
+                                    :objects
+                                    (vals)
+                                    (mapcat :interactions)
+                                    (map :destination)
+                                    (set))]
+              (update page :objects update-vals (partial update-object destinations))))]
+
+    (update data :pages-index update-vals update-page)))
+
+(defn migrate-up-50
+  "This migration mainly fixes paths with curve-to segments
+  without :c1x :c1y :c2x :c2y properties. Additionally, we found a
+  case where the params instead to be plain hash-map, is a points
+  instance. This migration normalizes all params to plain map."
+
+  [data]
+  (let [update-segment
+        (fn [{:keys [command params] :as segment}]
+          (let [params (into {} params)
+                params (cond
+                         (= :curve-to command)
+                         (let [x (get params :x)
+                               y (get params :y)]
+
+                           (cond-> params
+                             (nil? (:c1x params))
+                             (assoc :c1x x)
+
+                             (nil? (:c1y params))
+                             (assoc :c1y y)
+
+                             (nil? (:c2x params))
+                             (assoc :c2x x)
+
+                             (nil? (:c2y params))
+                             (assoc :c2y y)))
+
+                         :else
+                         params)]
+
+            (assoc segment :params params)))
+
+        update-shape
+        (fn [shape]
+          (if (cfh/path-shape? shape)
+            (d/update-when shape :content (fn [content] (mapv update-segment content)))
+            shape))
+
+        update-container
+        (fn [page]
+          (d/update-when page :objects update-vals update-shape))]
+
+    (-> data
+        (update :pages-index update-vals update-container)
+        (update :components update-vals update-container))))
+
+(def ^:private valid-color?
+  (sm/lazy-validator ::ctc/color))
+
+(defn migrate-up-51
+  "This migration fixes library invalid colors"
+  [data]
+  (let [update-colors
+        (fn [colors]
+          (into {} (filter #(-> % val valid-color?) colors)))]
+    (update data :colors update-colors)))
+
+(defn migrate-up-52
+  "Fixes incorrect value on `layout-wrap-type` prop"
+  [data]
+  (letfn [(update-shape [shape]
+            (if (= :no-wrap (:layout-wrap-type shape))
+              (assoc shape :layout-wrap-type :nowrap)
+              shape))
+
+          (update-page [page]
+            (d/update-when page :objects update-vals update-shape))]
+
+    (update data :pages-index update-vals update-page)))
+
+(defn migrate-up-54
+  "Fixes shapes with invalid colors in shadow: it first tries a non
+  destructive fix, and if it is not possible, then, shadow is removed"
+  [data]
+  (letfn [(fix-shadow [shadow]
+            (update shadow :color d/without-nils))
+
+          (update-shape [shape]
+            (let [xform (comp (map fix-shadow)
+                              (filter valid-shadow?))]
+              (d/update-when shape :shadow #(into [] xform %))))
+
+          (update-container [container]
+            (d/update-when container :objects update-vals update-shape))]
+
+    (-> data
+        (update :pages-index update-vals update-container)
+        (update :components update-vals update-container))))
+
+(defn migrate-up-55
+  "This migration moves page options to the page level"
+  [data]
+  (let [update-page
+        (fn [{:keys [options] :as page}]
+          (cond-> page
+            (and (some? (:saved-grids options))
+                 (not (contains? page :default-grids)))
+            (assoc :default-grids (:saved-grids options))
+
+            (and (some? (:background options))
+                 (not (contains? page :background)))
+            (assoc :background (:background options))
+
+            (and (some? (:flows options))
+                 (or (not (contains? page :flows))
+                     (not (map? (:flows page)))))
+            (assoc :flows (d/index-by :id (:flows options)))
+
+            (and (some? (:guides options))
+                 (not (contains? page :guides)))
+            (assoc :guides (:guides options))
+
+            (and (some? (:comment-threads-position options))
+                 (not (contains? page :comment-thread-positions)))
+            (assoc :comment-thread-positions (:comment-threads-position options))))]
+
+    (update data :pages-index d/update-vals update-page)))
 
 (def migrations
   "A vector of all applicable migrations"
@@ -935,4 +1112,13 @@
    {:id 43 :migrate-up migrate-up-43}
    {:id 44 :migrate-up migrate-up-44}
    {:id 45 :migrate-up migrate-up-45}
-   {:id 46 :migrate-up migrate-up-46}])
+   {:id 46 :migrate-up migrate-up-46}
+   {:id 47 :migrate-up migrate-up-47}
+   {:id 48 :migrate-up migrate-up-48}
+   {:id 49 :migrate-up migrate-up-49}
+   {:id 50 :migrate-up migrate-up-50}
+   {:id 51 :migrate-up migrate-up-51}
+   {:id 52 :migrate-up migrate-up-52}
+   {:id 53 :migrate-up migrate-up-26}
+   {:id 54 :migrate-up migrate-up-54}
+   {:id 55 :migrate-up migrate-up-55}])

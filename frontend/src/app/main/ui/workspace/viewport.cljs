@@ -5,6 +5,7 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.viewport
+  (:require-macros [app.main.style :as stl])
   (:require
    [app.common.colors :as clr]
    [app.common.data :as d]
@@ -14,15 +15,18 @@
    [app.common.types.shape-tree :as ctt]
    [app.common.types.shape.layout :as ctl]
    [app.main.data.workspace.modifiers :as dwm]
+   [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.flex-controls :as mfc]
    [app.main.ui.hooks :as ui-hooks]
    [app.main.ui.measurements :as msr]
    [app.main.ui.shapes.export :as use]
    [app.main.ui.workspace.shapes :as shapes]
-   [app.main.ui.workspace.shapes.text.editor :as editor]
+   [app.main.ui.workspace.shapes.text.editor :as editor-v1]
    [app.main.ui.workspace.shapes.text.text-edition-outline :refer [text-edition-outline]]
+   [app.main.ui.workspace.shapes.text.v2-editor :as editor-v2]
    [app.main.ui.workspace.shapes.text.viewport-texts-html :as stvh]
    [app.main.ui.workspace.viewport.actions :as actions]
    [app.main.ui.workspace.viewport.comments :as comments]
@@ -91,28 +95,24 @@
 
         vbox'             (mf/use-debounce 100 vbox)
 
-        ;; CONTEXT
-        page-id           (mf/use-ctx ctx/current-page-id)
-
         ;; DEREFS
         drawing           (mf/deref refs/workspace-drawing)
-        options           (mf/deref refs/workspace-page-options)
         focus             (mf/deref refs/workspace-focus-selected)
 
-        objects-ref       (mf/use-memo #(refs/workspace-page-objects-by-id page-id))
-        objects           (mf/deref objects-ref)
-        base-objects      (-> objects (ui-hooks/with-focus-objects focus))
+        page              (mf/deref refs/workspace-page)
+        objects           (get page :objects)
+        page-id           (get page :id)
+        background        (get page :background clr/canvas)
+
+        base-objects      (ui-hooks/with-focus-objects objects focus)
 
         modifiers         (mf/deref refs/workspace-modifiers)
         text-modifiers    (mf/deref refs/workspace-text-modifier)
 
-        objects-modified  (mf/with-memo
-                            [base-objects text-modifiers modifiers]
+        objects-modified  (mf/with-memo [base-objects text-modifiers modifiers]
                             (apply-modifiers-to-selected selected base-objects text-modifiers modifiers))
 
-        selected-shapes   (->> selected (keep (d/getf objects-modified)))
-
-        background        (get options :background clr/canvas)
+        selected-shapes   (keep (d/getf objects-modified) selected)
 
         ;; STATE
         alt?              (mf/use-state false)
@@ -276,9 +276,9 @@
     (hooks/setup-shortcuts node-editing? drawing-path? text-editing? grid-editing?)
     (hooks/setup-active-frames base-objects hover-ids selected active-frames zoom transform vbox)
 
-    [:div.viewport {:style #js {"--zoom" zoom} :data-testid "viewport"}
+    [:div {:class (stl/css :viewport) :style #js {"--zoom" zoom} :data-testid "viewport"}
      [:& top-bar/top-bar {:layout layout}]
-     [:div.viewport-overlays
+     [:div {:class (stl/css :viewport-overlays)}
       ;; The behaviour inside a foreign object is a bit different that in plain HTML so we wrap
       ;; inside a foreign object "dummy" so this awkward behaviour is take into account
       [:svg {:style {:top 0 :left 0 :position "fixed" :width "100%" :height "100%" :opacity (when-not (dbg/enabled? :html-text) 0)}}
@@ -304,12 +304,12 @@
       (when picking-color?
         [:& pixel-overlay/pixel-overlay {:vport vport
                                          :vbox vbox
-                                         :options options
                                          :layout layout
                                          :viewport-ref viewport-ref}])]
 
-     [:svg.render-shapes
+     [:svg
       {:id "render"
+       :class (stl/css :render-shapes)
        :xmlns "http://www.w3.org/2000/svg"
        :xmlnsXlink "http://www.w3.org/1999/xlink"
        :xmlns:penpot "https://penpot.app/xmlns"
@@ -336,7 +336,7 @@
         [:stop {:offset "100%" :stop-color (str "color-mix(in srgb-linear, " background " 90%, #777)") :stop-opacity 1}]]]
 
       (when (dbg/enabled? :show-export-metadata)
-        [:& use/export-page {:options options}])
+        [:& use/export-page {:page page}])
 
       ;; We need a "real" background shape so layer transforms work properly in firefox
       [:rect {:width (:width vbox 0)
@@ -359,7 +359,7 @@
        :key (str "viewport" page-id)
        :view-box (utils/format-viewbox vbox)
        :ref on-viewport-ref
-       :class (dm/str @cursor (when drawing-tool " drawing"))
+       :class (dm/str @cursor (when drawing-tool " drawing") " " (stl/css :viewport-controls))
        :style {:touch-action "none"}
        :fill "none"
 
@@ -386,8 +386,11 @@
 
       [:g {:style {:pointer-events (if disable-events? "none" "auto")}}
        (when show-text-editor?
-         [:& editor/text-editor-svg {:shape editing-shape
-                                     :modifiers modifiers}])
+         (if (features/active-feature? @st/state "text-editor/v2")
+           [:& editor-v2/text-editor {:shape editing-shape
+                                      :modifiers modifiers}]
+           [:& editor-v1/text-editor-svg {:shape editing-shape
+                                          :modifiers modifiers}]))
 
        (when show-frame-outline?
          (let [outlined-frame-id
@@ -483,8 +486,8 @@
          :focus focus}]
 
        (when show-prototypes?
-         [:& widgets/frame-flows
-          {:flows (:flows options)
+         [:> widgets/frame-flows*
+          {:flows (:flows page)
            :objects objects-modified
            :selected selected
            :zoom zoom
@@ -554,11 +557,11 @@
            :show-rulers? show-rulers?}])
 
        (when (and show-rulers? show-grids?)
-         [:& guides/viewport-guides
+         [:> guides/viewport-guides*
           {:zoom zoom
            :vbox vbox
            :hover-frame guide-frame
-           :disabled-guides? disabled-guides?
+           :disabled-guides disabled-guides?
            :modifiers modifiers}])
 
        ;; DEBUG LAYOUT DROP-ZONES
@@ -636,8 +639,8 @@
               :objects base-objects
               :modifiers modifiers
               :shape frame
-              :view-only true}]))
-
+              :view-only true}]))]
+       [:g.scrollbar-wrapper {:clipPath "url(#clip-handlers)"}
         [:& scroll-bars/viewport-scrollbars
          {:objects base-objects
           :zoom zoom

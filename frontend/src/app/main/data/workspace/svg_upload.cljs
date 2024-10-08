@@ -14,7 +14,7 @@
    [app.common.svg.shapes-builder :as csvg.shapes-builder]
    [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
-   [app.main.data.workspace.changes :as dch]
+   [app.main.data.changes :as dch]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.data.workspace.undo :as dwu]
@@ -64,7 +64,8 @@
   ([svg-data position]
    (add-svg-shapes nil svg-data position nil))
 
-  ([id svg-data position {:keys [change-selection?] :or {change-selection? false}}]
+  ([id svg-data position {:keys [change-selection? ignore-selection?]
+                          :or {ignore-selection? false change-selection? true}}]
    (ptk/reify ::add-svg-shapes
      ptk/WatchEvent
      (watch [it state _]
@@ -72,17 +73,23 @@
          (let [id              (d/nilv id (uuid/next))
                page-id         (:current-page-id state)
                objects         (wsh/lookup-page-objects state page-id)
-               frame-id        (ctst/top-nested-frame objects position)
-               selected        (wsh/lookup-selected state)
+               selected        (if ignore-selection? #{} (wsh/lookup-selected state))
                base            (cfh/get-base-shape objects selected)
 
                selected-id     (first selected)
                selected-frame? (and (= 1 (count selected))
                                     (= :frame (dm/get-in objects [selected-id :type])))
 
+               base-id         (:parent-id base)
+
+               frame-id        (if (or selected-frame? (empty? selected)
+                                       (not= :frame (dm/get-in objects [base-id :type])))
+                                 (ctst/top-nested-frame objects position)
+                                 base-id)
+
                parent-id       (if (or selected-frame? (empty? selected))
                                  frame-id
-                                 (:parent-id base))
+                                 base-id)
 
                [new-shape new-children]
                (csvg.shapes-builder/create-svg-shapes id svg-data position objects frame-id parent-id selected true)

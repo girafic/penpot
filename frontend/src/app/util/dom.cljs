@@ -92,7 +92,6 @@
                       "</style>")]
     (.insertAdjacentHTML ^js node "beforeend" style)))
 
-
 (defn get-element-by-class
   ([classname]
    (dom/getElementByClass classname))
@@ -632,6 +631,11 @@
   (when (some? node)
     (.setAttribute node attr value)))
 
+(defn set-style!
+  [^js node ^string style value]
+  (when (some? node)
+    (.setProperty (.-style node) style value)))
+
 (defn remove-attribute! [^js node ^string attr]
   (when (some? node)
     (.removeAttribute node attr)))
@@ -760,8 +764,10 @@
   (.back (.-history js/window)))
 
 (defn reload-current-window
-  []
-  (.reload (.-location js/window)))
+  ([]
+   (.reload globals/location))
+  ([force?]
+   (.reload globals/location force?)))
 
 (defn scroll-by!
   ([element x y]

@@ -405,12 +405,13 @@
   (dm/assert! (string? name))
   (ptk/reify ::create-team
     ptk/WatchEvent
-    (watch [_ state _]
+    (watch [it state _]
       (let [{:keys [on-success on-error]
              :or {on-success identity
                   on-error rx/throw}} (meta params)
-            features (features/get-enabled-features state)]
-        (->> (rp/cmd! :create-team {:name name :features features})
+            features (features/get-enabled-features state)
+            params {:name name :features features}]
+        (->> (rp/cmd! :create-team (with-meta params (meta it)))
              (rx/tap on-success)
              (rx/map team-created)
              (rx/catch on-error))))))
@@ -421,7 +422,7 @@
   [{:keys [name emails role] :as params}]
   (ptk/reify ::create-team-with-invitations
     ptk/WatchEvent
-    (watch [_ state _]
+    (watch [it state _]
       (let [{:keys [on-success on-error]
              :or {on-success identity
                   on-error rx/throw}} (meta params)
@@ -430,7 +431,7 @@
                       :emails emails
                       :role role
                       :features features}]
-        (->> (rp/cmd! :create-team-with-invitations params)
+        (->> (rp/cmd! :create-team-with-invitations (with-meta params (meta it)))
              (rx/tap on-success)
              (rx/map team-created)
              (rx/catch on-error))))))
@@ -553,12 +554,12 @@
        :resend resend?})
 
     ptk/WatchEvent
-    (watch [_ _ _]
+    (watch [it _ _]
       (let [{:keys [on-success on-error]
              :or {on-success identity
                   on-error rx/throw}} (meta params)
             params (dissoc params :resend?)]
-        (->> (rp/cmd! :create-team-invitations params)
+        (->> (rp/cmd! :create-team-invitations (with-meta params (meta it)))
              (rx/tap on-success)
              (rx/catch on-error))))))
 
@@ -897,8 +898,7 @@
       (-> state
           (d/update-in-when [:dashboard-files id :is-shared] (constantly is-shared))
           (d/update-in-when [:dashboard-recent-files id :is-shared] (constantly is-shared))
-          (cond->
-           (not is-shared)
+          (cond-> (not is-shared)
             (d/update-when :dashboard-shared-files dissoc id))))
 
     ptk/WatchEvent
@@ -908,7 +908,7 @@
              (rx/ignore))))))
 
 (defn set-file-thumbnail
-  [file-id thumbnail-uri]
+  [file-id thumbnail-id]
   (ptk/reify ::set-file-thumbnail
     ptk/UpdateEvent
     (update [_ state]
@@ -916,10 +916,10 @@
                 (->> files
                      (mapv #(cond-> %
                               (= file-id (:id %))
-                              (assoc :thumbnail-uri thumbnail-uri)))))]
+                              (assoc :thumbnail-id thumbnail-id)))))]
         (-> state
-            (d/update-in-when [:dashboard-files file-id] assoc :thumbnail-uri thumbnail-uri)
-            (d/update-in-when [:dashboard-recent-files file-id] assoc :thumbnail-uri thumbnail-uri)
+            (d/update-in-when [:dashboard-files file-id] assoc :thumbnail-id thumbnail-id)
+            (d/update-in-when [:dashboard-recent-files file-id] assoc :thumbnail-id thumbnail-id)
             (d/update-when :dashboard-search-result update-search-files))))))
 
 ;; --- EVENT: create-file
@@ -941,7 +941,7 @@
           (update-in [:dashboard-projects project-id :count] inc)))))
 
 (defn create-file
-  [{:keys [project-id] :as params}]
+  [{:keys [project-id name] :as params}]
   (dm/assert! (uuid? project-id))
   (ptk/reify ::create-file
     ev/Event
@@ -955,7 +955,7 @@
 
             files    (get state :dashboard-files)
             unames   (cfh/get-used-names files)
-            name     (cfh/generate-unique-name unames (str (tr "dashboard.new-file-prefix") " 1"))
+            name     (or name (cfh/generate-unique-name unames (str (tr "dashboard.new-file-prefix") " 1")))
             features (-> (features/get-team-enabled-features state)
                          (set/difference cfeat/frontend-only-features))
             params   (-> params

@@ -17,7 +17,6 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
-   [app.main.ui.components.forms :as fm]
    [app.main.ui.icons :as i]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
@@ -36,6 +35,7 @@
         on-focus         (unchecked-get props "on-focus")
         on-blur          (unchecked-get props "on-blur")
         placeholder      (unchecked-get props "placeholder")
+        max-length       (unchecked-get props "max-length")
         on-change        (unchecked-get props "on-change")
         on-esc           (unchecked-get props "on-esc")
         on-ctrl-enter    (unchecked-get props "on-ctrl-enter")
@@ -89,14 +89,15 @@
                 :on-blur on-blur
                 :value value
                 :placeholder placeholder
-                :on-change on-change*}]))
+                :on-change on-change*
+                :max-length max-length}]))
 
 (mf/defc reply-form
   [{:keys [thread] :as props}]
   (let [show-buttons? (mf/use-state false)
         content       (mf/use-state "")
 
-        disabled? (or (fm/all-spaces? @content)
+        disabled? (or (str/blank? @content)
                       (str/empty-or-nil? @content))
 
         on-focus
@@ -129,7 +130,8 @@
                             :on-focus on-focus
                             :select-on-focus? false
                             :on-ctrl-enter on-submit
-                            :on-change on-change}]
+                            :on-change on-change
+                            :max-length 750}]
      (when (or @show-buttons? (seq @content))
        [:div {:class (stl/css :buttons-wrapper)}
         [:input.btn-secondary
@@ -155,7 +157,7 @@
         pos-x    (* (:x position) zoom)
         pos-y    (* (:y position) zoom)
 
-        disabled? (or (fm/all-spaces? content)
+        disabled? (or (str/blank? content)
                       (str/empty-or-nil? content))
 
         on-esc
@@ -181,6 +183,7 @@
     [:*
      [:div
       {:class (stl/css :floating-thread-bubble)
+       :data-testid "floating-thread-bubble"
        :style {:top (str pos-y "px")
                :left (str pos-x "px")}
        :on-click dom/stop-propagation}
@@ -196,7 +199,8 @@
                               :select-on-focus? false
                               :on-esc on-esc
                               :on-change on-change
-                              :on-ctrl-enter on-submit}]
+                              :on-ctrl-enter on-submit
+                              :max-length 750}]
        [:div {:class (stl/css :buttons-wrapper)}
 
         [:input {:on-click on-esc
@@ -224,7 +228,7 @@
          (mf/deps @content)
          (fn [] (on-submit @content)))
 
-        disabled? (or (fm/all-spaces? @content)
+        disabled? (or (str/blank? @content)
                       (str/empty-or-nil? @content))]
 
     [:div {:class (stl/css :edit-form)}
@@ -233,7 +237,8 @@
                             :select-on-focus true
                             :select-on-focus? false
                             :on-ctrl-enter on-submit*
-                            :on-change on-change}]
+                            :on-change on-change
+                            :max-length 750}]
      [:div {:class (stl/css :buttons-wrapper)}
       [:input  {:type "button"
                 :value "Cancel"
@@ -435,9 +440,9 @@
           [:* {:key (dm/str (:id item))}
            [:& comment-item {:comment item
                              :users users
-                             :origin origin}]])
-        [:div {:ref ref}]]
-       [:& reply-form {:thread thread}]])))
+                             :origin origin}]])]
+       [:& reply-form {:thread thread}]
+       [:div {:ref ref}]])))
 
 (defn use-buble
   [zoom {:keys [position frame-id]}]
@@ -558,6 +563,7 @@
            :on-pointer-move on-pointer-move*
            :on-click on-click*
            :on-lost-pointer-capture on-lost-pointer-capture
+           :data-testid "floating-thread-bubble"
            :class (stl/css-case
                    :floating-thread-bubble true
                    :resolved (:is-resolved thread)

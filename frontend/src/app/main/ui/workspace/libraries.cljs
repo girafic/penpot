@@ -16,6 +16,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.modal :as modal]
    [app.main.data.users :as du]
+   [app.main.data.workspace.colors :as mdc]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.refs :as refs]
    [app.main.render :refer [component-svg]]
@@ -23,8 +24,9 @@
    [app.main.ui.components.color-bullet :as cb]
    [app.main.ui.components.link-button :as lb]
    [app.main.ui.components.search-bar :refer [search-bar]]
-   [app.main.ui.components.tab-container :refer [tab-container tab-element]]
    [app.main.ui.components.title-bar :refer [title-bar]]
+   [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
+   [app.main.ui.hooks :as h]
    [app.main.ui.icons :as i]
    [app.util.color :as uc]
    [app.util.dom :as dom]
@@ -113,6 +115,7 @@
         components     (:components library)
         media          (:media library)
         typographies   (:typographies library)
+        selected       (h/use-shared-state mdc/colorpalette-selected-broadcast-key :recent)
 
         empty-library? (and
                         (zero? (count colors))
@@ -146,6 +149,7 @@
            (let [library-id (some-> (dom/get-current-target event)
                                     (dom/get-data "library-id")
                                     (parse-uuid))]
+             (reset! selected library-id)
              (st/emit! (dwl/link-file-to-library file-id library-id)))))
 
         unlink-library
@@ -155,6 +159,8 @@
            (let [library-id (some-> (dom/get-current-target event)
                                     (dom/get-data "library-id")
                                     (parse-uuid))]
+             (when (= library-id @selected)
+               (reset! selected :file))
              (st/emit! (dwl/unlink-file-from-library file-id library-id)
                        (dwl/sync-file file-id library-id)))))
 
@@ -224,7 +230,8 @@
 
        (for [{:keys [id name] :as library} linked-libraries]
          [:div {:class (stl/css :section-list-item)
-                :key (dm/str id)}
+                :key (dm/str id)
+                :data-testid "library-item"}
           [:div {:class (stl/css :item-content)}
            [:div {:class (stl/css :item-name)} name]
            [:ul {:class (stl/css :item-contents)}
@@ -257,7 +264,8 @@
         [:div {:class (stl/css :section-list-shared)}
          (for [{:keys [id name] :as library} shared-libraries]
            [:div {:class (stl/css :section-list-item)
-                  :key (dm/str id)}
+                  :key (dm/str id)
+                  :data-testid "library-item"}
             [:div {:class (stl/css :item-content)}
              [:div {:class (stl/css :item-name)} name]
              [:ul {:class (stl/css :item-contents)}
@@ -479,9 +487,6 @@
         file-id        (:id file)
         shared?        (:is-shared file)
 
-        selected-tab*  (mf/use-state starting-tab)
-        selected-tab   (deref selected-tab*)
-
         libraries      (mf/deref refs/workspace-libraries)
         libraries      (mf/with-memo [libraries]
                          (d/removem (fn [[_ val]] (:is-indirect val)) libraries))
@@ -489,9 +494,6 @@
         ;; NOTE: we really don't need react on shared files
         shared-libraries
         (mf/deref refs/workspace-shared-files)
-
-        on-tab-change
-        (mf/use-fn #(reset! selected-tab* %))
 
         close-dialog-outside
         (mf/use-fn (fn [event]
@@ -501,32 +503,38 @@
         close-dialog
         (mf/use-fn (fn [_]
                      (modal/hide!)
-                     (modal/disallow-click-outside!)))]
+                     (modal/disallow-click-outside!)))
+
+        tabs
+        #js [#js {:label (tr "workspace.libraries.libraries")
+                  :id "libraries"
+                  :content (mf/html [:& libraries-tab {:file-id file-id
+                                                       :shared? shared?
+                                                       :linked-libraries libraries
+                                                       :shared-libraries shared-libraries}])}
+
+             #js {:label (tr "workspace.libraries.updates")
+                  :id "updates"
+                  :content (mf/html [:& updates-tab {:file-id file-id
+                                                     :file-data file-data
+                                                     :libraries libraries}])}]]
 
     (mf/with-effect [team-id]
       (when team-id
         (st/emit! (dwl/fetch-shared-files {:team-id team-id}))))
 
-    [:div {:class (stl/css :modal-overlay) :on-click close-dialog-outside}
+    [:div {:class (stl/css :modal-overlay) :on-click close-dialog-outside :data-testid "libraries-modal"}
      [:div {:class (stl/css :modal-dialog)}
       [:button {:class (stl/css :close-btn)
-                :on-click close-dialog}
+                :on-click close-dialog
+                :aria-label (tr "labels.close")
+                :data-testid "close-libraries"}
        close-icon]
       [:div {:class (stl/css :modal-title)}
        (tr "workspace.libraries.libraries")]
-      [:& tab-container
-       {:on-change-tab on-tab-change
-        :selected selected-tab
-        :collapsable false}
-       [:& tab-element {:id :libraries :title (tr "workspace.libraries.libraries")}
-        [:& libraries-tab {:file-id file-id
-                           :shared? shared?
-                           :linked-libraries libraries
-                           :shared-libraries shared-libraries}]]
-       [:& tab-element {:id :updates :title (tr "workspace.libraries.updates")}
-        [:& updates-tab {:file-id file-id
-                         :file-data file-data
-                         :libraries libraries}]]]]]))
+
+      [:> tab-switcher* {:tabs tabs
+                         :default-selected (dm/str starting-tab)}]]]))
 
 (mf/defc v2-info-dialog
   {::mf/register modal/components

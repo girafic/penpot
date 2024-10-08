@@ -5,15 +5,12 @@ export DEVENV_IMGNAME="$ORGANIZATION/devenv";
 export DEVENV_PNAME="penpotdev";
 
 export CURRENT_USER_ID=$(id -u);
-export CURRENT_VERSION=$(cat ./version.txt);
 export CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD);
-export CURRENT_HASH=$(git rev-parse --short HEAD);
-export CURRENT_COMMITS=$(git rev-list --count HEAD)
 
-set -ex
+set -e
 
 function print-current-version {
-    echo -n "$CURRENT_VERSION-$CURRENT_COMMITS-g$CURRENT_HASH"
+    echo -n "$(git describe --tags --match "*.*.*")";
 }
 
 function build-devenv {
@@ -65,6 +62,12 @@ function start-devenv {
     docker compose -p $DEVENV_PNAME -f docker/devenv/docker-compose.yaml up -d;
 }
 
+function create-devenv {
+    pull-devenv-if-not-exists $@;
+
+    docker compose -p $DEVENV_PNAME -f docker/devenv/docker-compose.yaml create;
+}
+
 function stop-devenv {
     docker compose -p $DEVENV_PNAME -f docker/devenv/docker-compose.yaml stop -t 2;
 }
@@ -106,6 +109,7 @@ function build {
            --mount source=${DEVENV_PNAME}_user_data,type=volume,target=/home/penpot/ \
            --mount source=`pwd`,type=bind,target=/home/penpot/penpot \
            -e EXTERNAL_UID=$CURRENT_USER_ID \
+           -e BUILD_STORYBOOK=$BUILD_STORYBOOK \
            -e SHADOWCLJS_EXTRA_PARAMS=$SHADOWCLJS_EXTRA_PARAMS \
            -w /home/penpot/penpot/$1 \
            $DEVENV_IMGNAME:latest sudo -EH -u penpot ./scripts/build $version
@@ -194,6 +198,7 @@ function usage {
     echo "Options:"
     echo "- pull-devenv                      Pulls docker development oriented image"
     echo "- build-devenv                     Build docker development oriented image"
+    echo "- create-devenv                    Create the development oriented docker compose service."
     echo "- start-devenv                     Start the development oriented docker compose service."
     echo "- stop-devenv                      Stops the development oriented docker compose service."
     echo "- drop-devenv                      Remove the development oriented docker compose containers, volumes and clean images."
@@ -221,6 +226,10 @@ case $1 in
 
     push-devenv)
         push-devenv ${@:2}
+        ;;
+
+    create-devenv)
+        create-devenv ${@:2}
         ;;
 
     start-devenv)

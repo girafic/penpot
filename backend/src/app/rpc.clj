@@ -29,6 +29,7 @@
    [app.rpc.rlimit :as rlimit]
    [app.setup :as-alias setup]
    [app.storage :as-alias sto]
+   [app.util.inet :as inet]
    [app.util.services :as sv]
    [app.util.time :as dt]
    [clojure.spec.alpha :as s]
@@ -70,6 +71,22 @@
         (handle-response-transformation request mdata)
         (handle-before-comple-hook mdata))))
 
+(defn get-external-session-id
+  [request]
+  (when-let [session-id (rreq/get-header request "x-external-session-id")]
+    (when-not (or (> (count session-id) 256)
+                  (= session-id "null")
+                  (str/blank? session-id))
+      session-id)))
+
+(defn- get-external-event-origin
+  [request]
+  (when-let [origin (rreq/get-header request "x-event-origin")]
+    (when-not (or (> (count origin) 256)
+                  (= origin "null")
+                  (str/blank? origin))
+      origin)))
+
 (defn- rpc-handler
   "Ring handler that dispatches cmd requests and convert between
   internal async flow into ring async flow."
@@ -79,8 +96,16 @@
         profile-id   (or (::session/profile-id request)
                          (::actoken/profile-id request))
 
+        ip-addr      (inet/parse-request request)
+        session-id   (get-external-session-id request)
+        event-origin (get-external-event-origin request)
+
         data         (-> params
+                         (assoc ::handler-name handler-name)
+                         (assoc ::ip-addr ip-addr)
                          (assoc ::request-at (dt/now))
+                         (assoc ::external-session-id session-id)
+                         (assoc ::external-event-origin event-origin)
                          (assoc ::session/id (::session/id request))
                          (assoc ::cond/key etag)
                          (cond-> (uuid? profile-id)
@@ -124,6 +149,13 @@
                   :hint "authentication required for this endpoint")
         (f cfg params)))))
 
+(defn- wrap-db-transaction
+  [_ f mdata]
+  (if (::db/transaction mdata)
+    (fn [cfg params]
+      (db/tx-run! cfg f params))
+    f))
+
 (defn- wrap-audit
   [_ f mdata]
   (if (or (contains? cf/flags :webhooks)
@@ -153,49 +185,32 @@
   (if-let [schema (::sm/params mdata)]
     (let [validate (sm/validator schema)
           explain  (sm/explainer schema)
-          decode   (sm/decoder schema)]
+          decode   (sm/decoder schema sm/json-transformer)
+          encode   (sm/encoder schema sm/json-transformer)]
       (fn [cfg params]
         (let [params (decode params)]
           (if (validate params)
-            (f cfg params)
-
+            (let [result (f cfg params)]
+              (if (instance? clojure.lang.IObj result)
+                (vary-meta result assoc :encode/json encode)
+                result))
             (let [params (d/without-qualified params)]
               (ex/raise :type :validation
                         :code :params-validation
                         ::sm/explain (explain params)))))))
     f))
 
-(defn- wrap-output-validation
-  [_ f mdata]
-  (if (contains? cf/flags :rpc-output-validation)
-    (or (when-let [schema (::sm/result mdata)]
-          (let [schema   (if (sm/lazy-schema? schema)
-                           schema
-                           (sm/define schema))
-                validate (sm/validator schema)
-                explain  (sm/explainer schema)]
-            (fn [cfg params]
-              (let [response (f cfg params)]
-                (when (map? response)
-                  (when-not (validate response)
-                    (ex/raise :type :validation
-                              :code :data-validation
-                              ::sm/explain (explain response))))
-                response))))
-        f)
-    f))
-
 (defn- wrap-all
   [cfg f mdata]
   (as-> f $
-    (wrap-metrics cfg $ mdata)
+    (wrap-db-transaction cfg $ mdata)
     (cond/wrap cfg $ mdata)
     (retry/wrap-retry cfg $ mdata)
     (climit/wrap cfg $ mdata)
+    (wrap-metrics cfg $ mdata)
     (rlimit/wrap cfg $ mdata)
     (wrap-audit cfg $ mdata)
     (wrap-spec-conform cfg $ mdata)
-    (wrap-output-validation cfg $ mdata)
     (wrap-params-validation cfg $ mdata)
     (wrap-authentication cfg $ mdata)))
 

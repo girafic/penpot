@@ -65,6 +65,7 @@
              (st/emit! (dcm/update-options {:show-sidebar? (not mode)})))))]
 
     [:div {:class (stl/css :view-options)
+           :data-testid "viewer-comments-dropdown"
            :on-click toggle-dropdown}
      [:span {:class (stl/css :dropdown-title)} (tr "labels.comments")]
      [:span {:class (stl/css :icon-dropdown)} i/arrow]
@@ -134,9 +135,11 @@
         page-id        (:id page)
         file-id        (:id file)
         frame-id       (:id frame)
+        vsize          (-> (mf/deref refs/viewer-local)
+                           :viewport-size)
 
         tpos-ref     (mf/with-memo [page-id]
-                       (-> (l/in [:pages page-id :options :comment-threads-position])
+                       (-> (l/in [:pages page-id :comment-thread-positions])
                            (l/derived refs/viewer-data)))
 
         positions    (mf/deref tpos-ref)
@@ -216,6 +219,7 @@
          [:& cmt/thread-comments
           {:thread thread
            :position-modifier modifier1
+           :viewport {:offset-x 0 :offset-y 0 :width (:width vsize) :height (:height vsize)}
            :users users
            :zoom zoom}])
 

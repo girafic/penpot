@@ -7,14 +7,18 @@
 (ns app.email
   "Main api for send emails."
   (:require
+   [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
    [app.common.logging :as l]
    [app.common.pprint :as pp]
+   [app.common.schema :as sm]
    [app.common.spec :as us]
    [app.config :as cf]
    [app.db :as db]
    [app.db.sql :as sql]
    [app.email.invite-to-team :as-alias email.invite-to-team]
+   [app.email.join-team :as-alias email.join-team]
+   [app.email.request-team-access :as-alias email.request-team-access]
    [app.metrics :as mtx]
    [app.util.template :as tmpl]
    [app.worker :as wrk]
@@ -149,9 +153,27 @@
     "mail.smtp.timeout" timeout
     "mail.smtp.connectiontimeout" timeout}))
 
+(def ^:private schema:smtp-config
+  [:map
+   [::username {:optional true} :string]
+   [::password {:optional true} :string]
+   [::tls {:optional true} ::sm/boolean]
+   [::ssl {:optional true} ::sm/boolean]
+   [::host {:optional true} :string]
+   [::port {:optional true} ::sm/int]
+   [::default-from {:optional true} :string]
+   [::default-reply-to {:optional true} :string]])
+
+(def valid-smtp-config?
+  (sm/check-fn schema:smtp-config))
+
 (defn- create-smtp-session
   ^Session
   [cfg]
+  (dm/assert!
+   "expected valid smtp config"
+   (valid-smtp-config? cfg))
+
   (let [props (opts->props cfg)]
     (Session/getInstance props)))
 
@@ -262,43 +284,20 @@
   (let [email (if factory
                 (factory context)
                 (dissoc context ::conn))]
-    (wrk/submit! (merge
-                  {::wrk/task :sendmail
-                   ::wrk/delay 0
-                   ::wrk/max-retries 4
-                   ::wrk/priority 200
-                   ::wrk/conn conn}
-                  email))))
+    (wrk/submit! {::wrk/task :sendmail
+                  ::wrk/delay 0
+                  ::wrk/max-retries 4
+                  ::wrk/priority 200
+                  ::db/conn conn
+                  ::wrk/params email})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SENDMAIL FN / TASK HANDLER
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(s/def ::username ::cf/smtp-username)
-(s/def ::password ::cf/smtp-password)
-(s/def ::tls ::cf/smtp-tls)
-(s/def ::ssl ::cf/smtp-ssl)
-(s/def ::host ::cf/smtp-host)
-(s/def ::port ::cf/smtp-port)
-(s/def ::default-reply-to ::cf/smtp-default-reply-to)
-(s/def ::default-from ::cf/smtp-default-from)
-
-(s/def ::smtp-config
-  (s/keys :opt [::username
-                ::password
-                ::tls
-                ::ssl
-                ::host
-                ::port
-                ::default-from
-                ::default-reply-to]))
-
 (declare send-to-logger!)
 
 (s/def ::sendmail fn?)
-
-(defmethod ig/pre-init-spec ::sendmail [_]
-  (s/spec ::smtp-config))
 
 (defmethod ig/init-key ::sendmail
   [_ cfg]
@@ -307,6 +306,8 @@
       (let [session (create-smtp-session cfg)]
         (with-open [transport (.getTransport session (if (::ssl cfg) "smtps" "smtp"))]
           (.connect ^Transport transport
+                    ^String (::host cfg)
+                    ^String (::port cfg)
                     ^String (::username cfg)
                     ^String (::password cfg))
 
@@ -400,6 +401,79 @@
   "Teams member invitation email."
   (template-factory ::invite-to-team))
 
+
+(s/def ::email.join-team/invited-by ::us/string)
+(s/def ::email.join-team/team ::us/string)
+(s/def ::email.join-team/team-id ::us/uuid)
+
+(s/def ::join-team
+  (s/keys :req-un [::email.join-team/invited-by
+                   ::email.join-team/team-id
+                   ::email.join-team/team]))
+
+(def join-team
+  "Teams member joined after request email."
+  (template-factory ::join-team))
+
+(s/def ::email.request-team-access/requested-by ::us/string)
+(s/def ::email.request-team-access/requested-by-email ::us/string)
+(s/def ::email.request-team-access/team-name ::us/string)
+(s/def ::email.request-team-access/team-id ::us/uuid)
+(s/def ::email.request-team-access/file-name ::us/string)
+(s/def ::email.request-team-access/file-id ::us/uuid)
+(s/def ::email.request-team-access/page-id ::us/uuid)
+
+(s/def ::request-file-access
+  (s/keys :req-un [::email.request-team-access/requested-by
+                   ::email.request-team-access/requested-by-email
+                   ::email.request-team-access/team-name
+                   ::email.request-team-access/team-id
+                   ::email.request-team-access/file-name
+                   ::email.request-team-access/file-id
+                   ::email.request-team-access/page-id]))
+
+(def request-file-access
+  "File access request email."
+  (template-factory ::request-file-access))
+
+
+(s/def ::request-file-access-yourpenpot
+  (s/keys :req-un [::email.request-team-access/requested-by
+                   ::email.request-team-access/requested-by-email
+                   ::email.request-team-access/team-name
+                   ::email.request-team-access/team-id
+                   ::email.request-team-access/file-name
+                   ::email.request-team-access/file-id
+                   ::email.request-team-access/page-id]))
+
+(def request-file-access-yourpenpot
+  "File access on Your Penpot request email."
+  (template-factory ::request-file-access-yourpenpot))
+
+(s/def ::request-file-access-yourpenpot-view
+  (s/keys :req-un [::email.request-team-access/requested-by
+                   ::email.request-team-access/requested-by-email
+                   ::email.request-team-access/team-name
+                   ::email.request-team-access/team-id
+                   ::email.request-team-access/file-name
+                   ::email.request-team-access/file-id
+                   ::email.request-team-access/page-id]))
+
+(def request-file-access-yourpenpot-view
+  "File access on Your Penpot view mode request email."
+  (template-factory ::request-file-access-yourpenpot-view))
+
+(s/def ::request-team-access
+  (s/keys :req-un [::email.request-team-access/requested-by
+                   ::email.request-team-access/requested-by-email
+                   ::email.request-team-access/team-name
+                   ::email.request-team-access/team-id]))
+
+(def request-team-access
+  "Team access request email."
+  (template-factory ::request-team-access))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; BOUNCE/COMPLAINS HELPERS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -447,5 +521,13 @@
   ([conn email {:keys [threshold] :or {threshold 1}}]
    (let [reports (db/exec! conn (sql/select :global-complaint-report
                                             {:email email :type "bounce"}
+                                            {:limit 10}))]
+     (>= (count reports) threshold))))
+
+(defn has-reports?
+  ([conn email] (has-reports? conn email nil))
+  ([conn email {:keys [threshold] :or {threshold 1}}]
+   (let [reports (db/exec! conn (sql/select :global-complaint-report
+                                            {:email email}
                                             {:limit 10}))]
      (>= (count reports) threshold))))

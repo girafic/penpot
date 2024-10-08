@@ -42,7 +42,7 @@
                        (cond-> color
                          (:value color) (assoc :color (:value color) :opacity 1)
                          (:value color) (dissoc :value)
-                         true           (assoc :file-id file-id)))
+                         :always        (assoc :file-id file-id)))
 
         color-id    (:id color)
 
@@ -68,7 +68,9 @@
         (mf/use-fn
          (mf/deps color)
          (fn [event]
-           (st/emit! (dc/apply-color-from-palette (merge uc/empty-color color) (kbd/alt? event)))))
+           (st/emit!
+            (dwl/add-recent-color color)
+            (dc/apply-color-from-palette color (kbd/alt? event)))))
 
         rename-color
         (mf/use-fn
@@ -183,7 +185,9 @@
         on-click
         (mf/use-fn
          (mf/deps color-id apply-color on-asset-click)
-         (partial on-asset-click color-id apply-color))]
+         (do
+           (dwl/add-recent-color color)
+           (partial on-asset-click color-id apply-color)))]
 
     (mf/with-effect [editing?]
       (when editing?
@@ -260,8 +264,10 @@
            multi-colors? multi-assets? on-asset-click on-assets-delete
            on-clear-selection on-group on-rename-group on-ungroup colors
            selected-full]}]
-  (let [group-open?    (or ^boolean force-open?
-                           ^boolean (get open-groups prefix (if (= prefix "") true false)))
+  (let [group-open?    (if (false? (get open-groups prefix)) ;; if the user has closed it specifically, respect that
+                         false
+                         (or ^boolean force-open?
+                             ^boolean (get open-groups prefix (if (= prefix "") true false))))
         dragging*      (mf/use-state false)
         dragging?      (deref dragging*)
 

@@ -22,52 +22,53 @@ jobs:
 
       # Download and cache dependencies
       - restore_cache:
-         keys:
-           - v1-dependencies-{{ checksum "backend/deps.edn" }}-{{ checksum "frontend/deps.edn"}}-{{ checksum "common/deps.edn"}}
-           # fallback to using the latest cache if no exact match is found
-           - v1-dependencies-
+          keys:
+            - v1-dependencies-{{ checksum "backend/deps.edn" }}-{{ checksum "frontend/deps.edn"}}-{{ checksum "common/deps.edn"}}
+            # fallback to using the latest cache if no exact match is found
+            - v1-dependencies-
 
       - run: cd .clj-kondo && cat config.edn
       - run: cat .cljfmt.edn
       - run: clj-kondo --version
 
       - run:
-          name: "fmt check backend [clj]"
+          name: "backend fmt check"
           working_directory: "./backend"
           command: |
             yarn install
             yarn run fmt:clj:check
 
       - run:
-          name: "fmt check exporter [clj]"
+          name: "exporter fmt check"
           working_directory: "./exporter"
           command: |
             yarn install
             yarn run fmt:clj:check
 
       - run:
-          name: "fmt check common [clj]"
+          name: "common fmt check"
           working_directory: "./common"
           command: |
             yarn install
             yarn run fmt:clj:check
 
       - run:
-          name: "fmt check frontend [clj]"
+          name: "frontend fmt check"
           working_directory: "./frontend"
           command: |
             yarn install
             yarn run fmt:clj:check
+            yarn run fmt:js:check
 
       - run:
-          name: common lint
+          name: "common linter check"
           working_directory: "./common"
           command: |
             yarn install
             yarn run lint:clj
 
       - run:
-          name: frontend lint
+          name: "frontend linter check"
           working_directory: "./frontend"
           command: |
             yarn install
@@ -75,14 +76,14 @@ jobs:
             yarn run lint:clj
 
       - run:
-          name: backend lint
+          name: "backend linter check"
           working_directory: "./backend"
           command: |
             yarn install
             yarn run lint:clj
 
       - run:
-          name: exporter lint
+          name: "exporter linter check"
           working_directory: "./exporter"
           command: |
             yarn install
@@ -107,8 +108,8 @@ jobs:
           working_directory: "./frontend"
           command: |
             yarn install
-            yarn run compile
-            clojure -M:dev:shadow-cljs compile main
+            yarn run build:app:assets
+            clojure -M:dev:shadow-cljs release main
             yarn playwright install --with-deps chromium
             yarn e2e:test
 
@@ -116,7 +117,7 @@ jobs:
           name: "backend tests"
           working_directory: "./backend"
           command: |
-            clojure -X:dev:test :patterns '["backend-tests.*-test"]'
+            clojure -M:dev:test
 
           environment:
             PENPOT_TEST_DATABASE_URI: "postgresql://localhost/penpot_test"
@@ -125,7 +126,6 @@ jobs:
             PENPOT_TEST_REDIS_URI: "redis://localhost/1"
 
       - save_cache:
-         paths:
-           - ~/.m2
-         key: v1-dependencies-{{ checksum "backend/deps.edn" }}-{{ checksum "frontend/deps.edn"}}-{{ checksum "common/deps.edn"}}
-
+          paths:
+            - ~/.m2
+          key: v1-dependencies-{{ checksum "backend/deps.edn" }}-{{ checksum "frontend/deps.edn"}}-{{ checksum "common/deps.edn"}}

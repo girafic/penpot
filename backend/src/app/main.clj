@@ -102,13 +102,13 @@
    {::mdef/name "penpot_tasks_timing"
     ::mdef/help "Background tasks timing (milliseconds)."
     ::mdef/labels ["name"]
-    ::mdef/type :summary}
+    ::mdef/type :histogram}
 
    :redis-eval-timing
    {::mdef/name "penpot_redis_eval_timing"
     ::mdef/help "Redis EVAL commands execution timings (ms)"
     ::mdef/labels ["name"]
-    ::mdef/type :summary}
+    ::mdef/type :histogram}
 
    :rpc-climit-queue
    {::mdef/name "penpot_rpc_climit_queue"
@@ -126,7 +126,7 @@
    {::mdef/name "penpot_rpc_climit_timing"
     ::mdef/help "Summary of the time between queuing and executing on the CLIMIT"
     ::mdef/labels ["name"]
-    ::mdef/type :summary}
+    ::mdef/type :histogram}
 
    :audit-http-handler-queue-size
    {::mdef/name "penpot_audit_http_handler_queue_size"
@@ -144,7 +144,7 @@
    {::mdef/name "penpot_audit_http_handler_timing"
     ::mdef/help "Summary of the time between queuing and executing on the audit log http handler"
     ::mdef/labels []
-    ::mdef/type :summary}
+    ::mdef/type :histogram}
 
    :executors-active-threads
    {::mdef/name "penpot_executors_active_threads"
@@ -254,7 +254,7 @@
    {::http.client/client (ig/ref ::http.client/client)}
 
    ::oidc.providers/gitlab
-   {}
+   {::http.client/client (ig/ref ::http.client/client)}
 
    ::oidc.providers/generic
    {::http.client/client (ig/ref ::http.client/client)}
@@ -267,7 +267,9 @@
                           :github (ig/ref ::oidc.providers/github)
                           :gitlab (ig/ref ::oidc.providers/gitlab)
                           :oidc   (ig/ref ::oidc.providers/generic)}
-    ::session/manager    (ig/ref ::session/manager)}
+    ::session/manager    (ig/ref ::session/manager)
+    ::email/blacklist    (ig/ref ::email/blacklist)
+    ::email/whitelist    (ig/ref ::email/whitelist)}
 
    :app.http/router
    {::session/manager    (ig/ref ::session/manager)
@@ -322,7 +324,10 @@
     ::rpc/climit         (ig/ref ::rpc/climit)
     ::rpc/rlimit         (ig/ref ::rpc/rlimit)
     ::setup/templates    (ig/ref ::setup/templates)
-    ::setup/props        (ig/ref ::setup/props)}
+    ::setup/props        (ig/ref ::setup/props)
+
+    ::email/blacklist    (ig/ref ::email/blacklist)
+    ::email/whitelist    (ig/ref ::email/whitelist)}
 
    :app.rpc.doc/routes
    {:methods (ig/ref :app.rpc/methods)}
@@ -338,8 +343,9 @@
     ::wrk/tasks
     {:sendmail           (ig/ref ::email/handler)
      :objects-gc         (ig/ref :app.tasks.objects-gc/handler)
-     :orphan-teams-gc    (ig/ref :app.tasks.orphan-teams-gc/handler)
      :file-gc            (ig/ref :app.tasks.file-gc/handler)
+     :file-gc-scheduler  (ig/ref :app.tasks.file-gc-scheduler/handler)
+     :offload-file-data  (ig/ref :app.tasks.offload-file-data/handler)
      :file-xlog-gc       (ig/ref :app.tasks.file-xlog-gc/handler)
      :tasks-gc           (ig/ref :app.tasks.tasks-gc/handler)
      :telemetry          (ig/ref :app.tasks.telemetry/handler)
@@ -349,12 +355,18 @@
      :audit-log-archive  (ig/ref :app.loggers.audit.archive-task/handler)
      :audit-log-gc       (ig/ref :app.loggers.audit.gc-task/handler)
 
-     :object-update
-     (ig/ref :app.tasks.object-update/handler)
+     :delete-object
+     (ig/ref :app.tasks.delete-object/handler)
      :process-webhook-event
      (ig/ref ::webhooks/process-event-handler)
      :run-webhook
      (ig/ref ::webhooks/run-webhook-handler)}}
+
+   ::email/blacklist
+   {}
+
+   ::email/whitelist
+   {}
 
    ::email/sendmail
    {::email/host             (cf/get :smtp-host)
@@ -377,18 +389,23 @@
    {::db/pool     (ig/ref ::db/pool)
     ::sto/storage (ig/ref ::sto/storage)}
 
-   :app.tasks.orphan-teams-gc/handler
-   {::db/pool (ig/ref ::db/pool)}
-
-   :app.tasks.object-update/handler
+   :app.tasks.delete-object/handler
    {::db/pool (ig/ref ::db/pool)}
 
    :app.tasks.file-gc/handler
    {::db/pool     (ig/ref ::db/pool)
     ::sto/storage (ig/ref ::sto/storage)}
 
-   :app.tasks.file-xlog-gc/handler
+   :app.tasks.file-gc-scheduler/handler
    {::db/pool (ig/ref ::db/pool)}
+
+   :app.tasks.offload-file-data/handler
+   {::db/pool     (ig/ref ::db/pool)
+    ::sto/storage (ig/ref ::sto/storage)}
+
+   :app.tasks.file-xlog-gc/handler
+   {::db/pool     (ig/ref ::db/pool)
+    ::sto/storage (ig/ref ::sto/storage)}
 
    :app.tasks.telemetry/handler
    {::db/pool            (ig/ref ::db/pool)
@@ -441,17 +458,28 @@
    ::sto/storage
    {::db/pool      (ig/ref ::db/pool)
     ::sto/backends
-    {:assets-s3 (ig/ref [::assets :app.storage.s3/backend])
-     :assets-fs (ig/ref [::assets :app.storage.fs/backend])}}
+    {:s3 (ig/ref :app.storage.s3/backend)
+     :fs (ig/ref :app.storage.fs/backend)
 
-   [::assets :app.storage.s3/backend]
-   {::sto.s3/region     (cf/get :storage-assets-s3-region)
-    ::sto.s3/endpoint   (cf/get :storage-assets-s3-endpoint)
-    ::sto.s3/bucket     (cf/get :storage-assets-s3-bucket)
-    ::sto.s3/io-threads (cf/get :storage-assets-s3-io-threads)}
+     ;; LEGACY (should not be removed, can only be removed after an
+     ;; explicit migration because the database objects/rows will
+     ;; still reference the old names).
+     :assets-s3 (ig/ref :app.storage.s3/backend)
+     :assets-fs (ig/ref :app.storage.fs/backend)}}
 
-   [::assets :app.storage.fs/backend]
-   {::sto.fs/directory (cf/get :storage-assets-fs-directory)}})
+   :app.storage.s3/backend
+   {::sto.s3/region     (or (cf/get :storage-assets-s3-region)
+                            (cf/get :objects-storage-s3-region))
+    ::sto.s3/endpoint   (or (cf/get :storage-assets-s3-endpoint)
+                            (cf/get :objects-storage-s3-endpoint))
+    ::sto.s3/bucket     (or (cf/get :storage-assets-s3-bucket)
+                            (cf/get :objects-storage-s3-bucket))
+    ::sto.s3/io-threads (or (cf/get :storage-assets-s3-io-threads)
+                            (cf/get :objects-storage-s3-io-threads))}
+
+   :app.storage.fs/backend
+   {::sto.fs/directory (or (cf/get :storage-assets-fs-directory)
+                           (cf/get :objects-storage-fs-directory))}})
 
 
 (def worker-config
@@ -469,9 +497,6 @@
       :task :objects-gc}
 
      {:cron #app/cron "0 0 0 * * ?" ;; daily
-      :task :orphan-teams-gc}
-
-     {:cron #app/cron "0 0 0 * * ?" ;; daily
       :task :storage-gc-deleted}
 
      {:cron #app/cron "0 0 0 * * ?" ;; daily
@@ -481,7 +506,7 @@
       :task :tasks-gc}
 
      {:cron #app/cron "0 0 2 * * ?" ;; daily
-      :task :file-gc}
+      :task :file-gc-scheduler}
 
      {:cron #app/cron "0 30 */3,23 * * ?"
       :task :telemetry}
@@ -520,6 +545,7 @@
 
 (defn start
   []
+  (cf/validate!)
   (ig/load-namespaces (merge system-config worker-config))
   (alter-var-root #'system (fn [sys]
                              (when sys (ig/halt! sys))
