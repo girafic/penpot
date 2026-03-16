@@ -10,6 +10,7 @@
    [app.common.schema :as sm]
    [app.common.types.shape.layout :as ctl]
    [app.main.data.workspace.shape-layout :as dwsl]
+   [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.transforms :as dwt]
    [app.main.store :as st]
    [app.plugins.format :as format]
@@ -403,9 +404,12 @@
         (u/display-not-valid :appendChild "Plugin doesn't have 'content:write' permission")
 
         :else
-        (let [child-id  (obj/get child "$id")]
-          (st/emit! (dwt/move-shapes-to-frame #{child-id} id nil [row column])
-                    (ptk/data-event :layout/update {:ids [id]})))))))
+        (let [child-id      (obj/get child "$id")
+              child-page-id (obj/get child "$page")]
+          (if (= child-page-id page-id)
+            (st/emit! (dwt/move-shapes-to-frame #{child-id} id nil [row column])
+                      (ptk/data-event :layout/update {:ids [id]}))
+            (st/emit! (dwsh/relocate-shapes-to-page #{child-id} child-page-id page-id id 0))))))))
 
 (defn layout-cell-proxy? [p]
   (obj/type-of? p "GridCellProxy"))

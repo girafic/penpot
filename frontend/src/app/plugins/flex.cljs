@@ -259,13 +259,16 @@
         (u/display-not-valid :appendChild child)
 
         :else
-        (let [child-id (obj/get child "$id")
+        (let [child-id      (obj/get child "$id")
+              child-page-id (obj/get child "$page")
               shape (u/locate-shape file-id page-id id)
               index
               (if (and (natural-child-ordering? plugin-id) (not (ctl/reverse? shape)))
                 0
                 (count (:shapes shape)))]
-          (st/emit! (dwsh/relocate-shapes #{child-id} id index)))))
+          (if (= child-page-id page-id)
+            (st/emit! (dwsh/relocate-shapes #{child-id} id index))
+            (st/emit! (dwsh/relocate-shapes-to-page #{child-id} child-page-id page-id id index))))))
 
     :horizontalSizing
     {:this true

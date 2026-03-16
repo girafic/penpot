@@ -17,6 +17,7 @@
    [app.common.types.container :as ctn]
    [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
+   [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.comments :as dc]
    [app.main.data.event :as ev]
@@ -460,3 +461,190 @@
                  (ev/event {::ev/name "add-component-to-variant"}))
                (when add-new-variant?
                  (ev/event {::ev/name "add-new-variant" ::ev/origin "workspace:move-shapes-in-layers-tab"})))))))
+
+(defn relocate-shapes-to-page
+  "Move shapes (with all descendants) from source-page to a different
+  target page. Builds cross-page changes: add to target, delete from
+  source. Guides attached to moved frames are transferred too."
+  [ids source-page-id target-page-id target-parent-id to-index]
+  (dm/assert! (set? ids))
+  (dm/assert! (uuid? source-page-id))
+  (dm/assert! (uuid? target-page-id))
+  (dm/assert! (uuid? target-parent-id))
+  (dm/assert! (number? to-index))
+
+  (ptk/reify ::relocate-shapes-to-page
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [fdata          (dsh/lookup-file-data state)
+            source-page    (dm/get-in fdata [:pages-index source-page-id])
+            source-objects (:objects source-page)
+            target-objects (dm/get-in fdata [:pages-index target-page-id :objects])
+
+            ids      (cfh/clean-loops source-objects ids)
+
+            all-ids  (into []
+                           (mapcat #(cfh/get-children-ids-with-self source-objects %))
+                           ids)
+
+            all-ids-set (set all-ids)
+            root-ids    (set ids)
+
+            target-parent    (get target-objects target-parent-id)
+            target-frame-id  (cond
+                               (or (nil? target-parent) (cfh/root? target-parent))
+                               uuid/zero
+
+                               (cfh/frame-shape? target-parent)
+                               target-parent-id
+
+                               :else
+                               (:frame-id target-parent))
+
+            ;; -- Shape changes --
+
+            add-to-target
+            (mapv (fn [id]
+                    (let [shape (get source-objects id)]
+                      {:type      :add-obj
+                       :id        id
+                       :page-id   target-page-id
+                       :parent-id (if (root-ids id)
+                                    target-parent-id
+                                    (:parent-id shape))
+                       :frame-id  (if (root-ids id)
+                                    target-frame-id
+                                    (:frame-id shape))
+                       :obj       (cond-> shape
+                                    (contains? shape :shapes)
+                                    (assoc :shapes []))}))
+                  all-ids)
+
+            del-from-source
+            (mapv (fn [id]
+                    {:type    :del-obj
+                     :id      id
+                     :page-id source-page-id})
+                  (reverse all-ids))
+
+            del-from-target
+            (mapv (fn [id]
+                    {:type    :del-obj
+                     :id      id
+                     :page-id target-page-id})
+                  (reverse all-ids))
+
+            add-to-source
+            (mapv (fn [id]
+                    (let [shape (get source-objects id)]
+                      {:type      :add-obj
+                       :id        id
+                       :page-id   source-page-id
+                       :parent-id (:parent-id shape)
+                       :frame-id  (:frame-id shape)
+                       :index     (cfh/get-position-on-parent source-objects id)
+                       :obj       (cond-> shape
+                                    (contains? shape :shapes)
+                                    (assoc :shapes []))}))
+                  all-ids)
+
+            ;; -- Guide changes --
+            ;; Guides whose frame-id is among the moved shapes must be
+            ;; transferred from the source page to the target page.
+
+            frame-guides
+            (->> (:guides source-page)
+                 (vals)
+                 (filter #(contains? all-ids-set (:frame-id %))))
+
+            guide-add-to-target
+            (mapv (fn [guide]
+                    {:type    :set-guide
+                     :page-id target-page-id
+                     :id      (:id guide)
+                     :params  guide})
+                  frame-guides)
+
+            guide-del-from-source
+            (mapv (fn [guide]
+                    {:type    :set-guide
+                     :page-id source-page-id
+                     :id      (:id guide)
+                     :params  nil})
+                  frame-guides)
+
+            guide-del-from-target
+            (mapv (fn [guide]
+                    {:type    :set-guide
+                     :page-id target-page-id
+                     :id      (:id guide)
+                     :params  nil})
+                  frame-guides)
+
+            guide-add-to-source
+            (mapv (fn [guide]
+                    {:type    :set-guide
+                     :page-id source-page-id
+                     :id      (:id guide)
+                     :params  guide})
+                  frame-guides)
+
+            ;; -- Component changes --
+            ;; When a main component instance is moved to another page,
+            ;; update the component's main-instance-page so that
+            ;; referential integrity is preserved.
+
+            main-instances
+            (->> all-ids
+                 (map #(get source-objects %))
+                 (filter ctc/main-instance?))
+
+            comp-redo-changes
+            (mapv (fn [shape]
+                    (let [component (dm/get-in fdata [:components (:component-id shape)])]
+                      (cond-> {:type                :mod-component
+                               :id                  (:component-id shape)
+                               :main-instance-page  target-page-id}
+                        (some? (:variant-id component))
+                        (assoc :variant-id (:variant-id component))
+                        (some? (:variant-properties component))
+                        (assoc :variant-properties (:variant-properties component))
+                        (some? (:annotation component))
+                        (assoc :annotation (:annotation component)))))
+                  main-instances)
+
+            comp-undo-changes
+            (mapv (fn [shape]
+                    (let [component (dm/get-in fdata [:components (:component-id shape)])]
+                      (cond-> {:type                :mod-component
+                               :id                  (:component-id shape)
+                               :main-instance-page  source-page-id}
+                        (some? (:variant-id component))
+                        (assoc :variant-id (:variant-id component))
+                        (some? (:variant-properties component))
+                        (assoc :variant-properties (:variant-properties component))
+                        (some? (:annotation component))
+                        (assoc :annotation (:annotation component)))))
+                  main-instances)
+
+            ;; -- Combine --
+
+            redo-changes (-> (into add-to-target del-from-source)
+                             (into guide-add-to-target)
+                             (into guide-del-from-source)
+                             (into comp-redo-changes))
+
+            undo-changes (-> (into del-from-target add-to-source)
+                             (into guide-del-from-target)
+                             (into guide-add-to-source)
+                             (into comp-undo-changes))
+
+            changes  {:redo-changes redo-changes
+                      :undo-changes undo-changes
+                      :origin       it}
+
+            undo-id  (js/Symbol)]
+
+        (rx/of (dwu/start-undo-transaction undo-id)
+               (dch/commit-changes changes)
+               (dwu/commit-undo-transaction undo-id))))))

@@ -7594,6 +7594,10 @@ msgstr "Cut"
 msgid "workspace.shape.menu.delete"
 msgstr "Delete"
 
+#: src/app/main/ui/workspace/context_menu.cljs
+msgid "workspace.shape.menu.move-to-page"
+msgstr "Move to page"
+
 #: src/app/main/ui/workspace/context_menu.cljs:506
 msgid "workspace.shape.menu.delete-flow-start"
 msgstr "Delete flow start"

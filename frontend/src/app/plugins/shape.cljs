@@ -960,13 +960,16 @@
                  (u/display-not-valid :appendChild "Plugin doesn't have 'content:write' permission")
 
                  :else
-                 (let [child-id     (obj/get child "$id")
-                       is-reversed? (ctl/flex-layout? shape)
+                 (let [child-id      (obj/get child "$id")
+                       child-page-id (obj/get child "$page")
+                       is-reversed?  (ctl/flex-layout? shape)
                        index
                        (if (or (not (natural-child-ordering? plugin-id)) is-reversed?)
                          0
                          (count (:shapes shape)))]
-                   (st/emit! (dwsh/relocate-shapes #{child-id} id index))))))
+                   (if (= child-page-id page-id)
+                     (st/emit! (dwsh/relocate-shapes #{child-id} id index))
+                     (st/emit! (dwsh/relocate-shapes-to-page #{child-id} child-page-id page-id id index)))))))
 
            :insertChild
            (fn [index child]
@@ -985,13 +988,16 @@
                  (u/display-not-valid :insertChild "Plugin doesn't have 'content:write' permission")
 
                  :else
-                 (let [child-id (obj/get child "$id")
-                       is-reversed? (ctl/flex-layout? shape)
+                 (let [child-id      (obj/get child "$id")
+                       child-page-id (obj/get child "$page")
+                       is-reversed?  (ctl/flex-layout? shape)
                        index
                        (if (or (not (natural-child-ordering? plugin-id)) is-reversed?)
                          (- (count (:shapes shape)) index)
                          index)]
-                   (st/emit! (dwsh/relocate-shapes #{child-id} id index))))))
+                   (if (= child-page-id page-id)
+                     (st/emit! (dwsh/relocate-shapes #{child-id} id index))
+                     (st/emit! (dwsh/relocate-shapes-to-page #{child-id} child-page-id page-id id index)))))))
 
            ;; Only for frames
            :addFlexLayout

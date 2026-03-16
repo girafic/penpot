@@ -16,6 +16,7 @@
    [app.common.types.container :as ctn]
    [app.common.types.page :as ctp]
    [app.common.types.shape.layout :as ctl]
+   [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.event :as ev]
    [app.main.data.modal :as modal]
@@ -267,7 +268,14 @@
         ;; we really don't want rerender on object changes
         hover-ids         (deref refs/current-hover-ids)
         objects           (deref refs/workspace-page-objects)
-        hover-objs        (into [] (keep (d/getf objects)) hover-ids)]
+        hover-objs        (into [] (keep (d/getf objects)) hover-ids)
+
+        current-page-id   (mf/use-ctx ctx/current-page-id)
+        fdata             (deref refs/workspace-data)
+        pages             (:pages fdata)
+        pages-index       (:pages-index fdata)
+        other-pages       (filterv #(not= % current-page-id) pages)
+        selected-ids      (into #{} (map :id) shapes)]
 
     [:*
      (when (> (count hover-objs) 1)
@@ -293,6 +301,18 @@
      [:> menu-entry* {:title (tr "workspace.shape.menu.back")
                       :shortcut (sc/get-tooltip :bring-back)
                       :on-click do-send-to-back}]
+
+     (when (seq other-pages)
+       [:> menu-entry* {:title (tr "workspace.shape.menu.move-to-page")}
+        (for [pid other-pages]
+          (let [page (get pages-index pid)]
+            [:> menu-entry* {:key   (dm/str pid)
+                             :title (:name page)
+                             :on-click
+                             (fn []
+                               (st/emit!
+                                (dwsh/relocate-shapes-to-page
+                                 selected-ids current-page-id pid uuid/zero 0)))}]))])
 
      [:> menu-separator* {}]]))
 
