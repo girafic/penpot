@@ -8496,6 +8496,10 @@ msgstr "%s modificado"
 msgid "workspace.undo.entry.move"
 msgstr "Objetos movidos"
 
+#: src/app/main/ui/workspace/sidebar/history.cljs:149
+msgid "workspace.undo.entry.move-to-page"
+msgstr "Movido %s a otra página"
+
 #: src/app/main/ui/workspace/sidebar/history.cljs:111
 msgid "workspace.undo.entry.multiple.circle"
 msgstr "círculos"

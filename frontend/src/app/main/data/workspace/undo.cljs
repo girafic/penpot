@@ -234,6 +234,8 @@
              (rx/map first)
              (rx/map commit-undo-transaction))))))
 
+(declare ^:private assure-valid-current-page)
+
 (defn undo-to-index
   "Repeat undoing or redoing until dest-index is reached."
   [dest-index]
@@ -265,9 +267,8 @@
                          (dch/commit-changes {:redo-changes changes
                                               :undo-changes []
                                               :origin it
-                                              :save-undo? false})))))))))))
-
-(declare ^:private assure-valid-current-page)
+                                              :save-undo? false})
+                         (assure-valid-current-page changes)))))))))))
 
 (def undo
   "Undo the last action, or the last action in a group.
@@ -308,7 +309,7 @@
                                               :undo-changes []
                                               :save-undo? false
                                               :origin it})
-                         (assure-valid-current-page)))))))))))
+                         (assure-valid-current-page changes)))))))))))
 
 (def redo
   (ptk/reify ::redo
@@ -342,16 +343,30 @@
                          (dch/commit-changes {:redo-changes changes
                                               :undo-changes []
                                               :origin it
-                                              :save-undo? false})))))))))))
+                                              :save-undo? false})
+                         (assure-valid-current-page changes)))))))))))
 
 (defn- assure-valid-current-page
-  []
-  (ptk/reify ::assure-valid-current-page
-    ptk/WatchEvent
-    (watch [_ state _]
-      (let [page-id (:current-page-id state)
-            pages   (-> (dsh/lookup-file-data state)
-                        (get :pages))]
-        (if (contains? pages page-id)
-          (rx/empty)
-          (rx/of (dcm/go-to-workspace :page-id (first pages))))))))
+  "After undo/redo, make sure the view is on a valid page. When the
+   applied changes include cross-page additions (shapes added to a page
+   other than the current one), navigate to that page so the user can
+   see the result."
+  ([] (assure-valid-current-page nil))
+  ([changes]
+   (ptk/reify ::assure-valid-current-page
+     ptk/WatchEvent
+     (watch [_ state _]
+       (let [page-id (:current-page-id state)
+             pages   (-> (dsh/lookup-file-data state)
+                         (get :pages))]
+         (if-let [target-page
+                  (when (some? changes)
+                    (->> changes
+                         (some #(when (and (= :add-obj (:type %))
+                                          (some? (:page-id %))
+                                          (not= page-id (:page-id %)))
+                                  (:page-id %)))))]
+           (rx/of (dcm/go-to-workspace :page-id target-page))
+           (if (some #{page-id} pages)
+             (rx/empty)
+             (rx/of (dcm/go-to-workspace :page-id (first pages))))))))))

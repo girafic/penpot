@@ -146,6 +146,7 @@
       :modify (tr "workspace.undo.entry.modify" value)
       :delete (tr "workspace.undo.entry.delete" value)
       :move (tr "workspace.undo.entry.move" value)
+      :move-to-page (tr "workspace.undo.entry.move-to-page" value)
       (tr "workspace.undo.entry.unknown" value))))
 
 (defn entry->icon [{:keys [type]}]
@@ -192,6 +193,22 @@
         types (group-by first (keys entries))
         operations (group-by second (keys entries))
 
+        ;; Cross-page move detection: when every :new shape has a
+        ;; matching :delete for the same id, the operation is a
+        ;; "move to page" rather than a creation or deletion.
+        new-ids    (->> (keys entries)
+                        (filter #(= :new (second %)))
+                        (map last)
+                        (set))
+        delete-ids (->> (keys entries)
+                        (filter #(= :delete (second %)))
+                        (map last)
+                        (set))
+        cross-page-move?
+        (and (seq new-ids)
+             (seq delete-ids)
+             (= new-ids delete-ids))
+
         ;; The cases for the selection of the representative entry are a bit
         ;; convoluted. Best to read the comments to clarify.
         ;; At this stage we have cleaned the entries but we can have a batch
@@ -199,6 +216,13 @@
         ;; one that is most interesting for the user.
         selected-entry
         (cond
+          ;; Cross-page move: matching add+delete for same shapes
+          cross-page-move?
+          (let [new-entry (-> entries
+                              (get (first (filter #(= :new (second %)) (keys entries))))
+                              (last))]
+            (assoc new-entry :operation :move-to-page))
+
           ;; If we only have one operation over one shape we return the last change
           (single? entries)
           (-> entries (get (first (keys entries))) (last))
@@ -248,6 +272,7 @@
           :delete (->> candidates
                        (filter #(= :delete (:operation %)))
                        (map :id))
+          :move-to-page (:id selected-entry)
           candidates)]
 
     (assoc selected-entry :detail detail)))
@@ -264,7 +289,7 @@
 
     [:div {:class (stl/css :history-entry-detail)}
      (case (:operation entry)
-       :new
+       (:new :move-to-page)
        (:name (get-object (:detail entry) entries objects))
 
        :delete

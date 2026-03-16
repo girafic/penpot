@@ -13,9 +13,11 @@
    [app.common.files.shapes-helpers :as cfsh]
    [app.common.logic.shapes :as cls]
    [app.common.schema :as sm]
+   [app.common.path-names :as cpn]
    [app.common.types.component :as ctc]
    [app.common.types.container :as ctn]
    [app.common.types.shape :as cts]
+   [app.common.types.variant :as ctv]
    [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
@@ -490,6 +492,35 @@
             all-ids-set (set all-ids)
             root-ids    (set ids)
 
+            ;; Shapes that are variants (have :variant-id) need their
+            ;; variant metadata stripped — but only when their container
+            ;; is NOT also part of the move (i.e. they're being detached).
+            variant-ids (into #{}
+                              (filter (fn [id]
+                                        (let [shape (get source-objects id)]
+                                          (and (ctc/is-variant? shape)
+                                               (not (contains? (set ids) (:variant-id shape)))))))
+                              ids)
+
+            strip-variant
+            (fn [shape]
+              (-> shape
+                  (dissoc :variant-id :variant-name)
+                  (assoc :name (ctv/variant-name-to-name shape)
+                         :component-root true)))
+
+            ;; Detect variant containers on the source page that become
+            ;; empty after the moved shapes are removed.
+            all-parents     (into #{} (map #(:parent-id (get source-objects %))) ids)
+            empty-variant-conts
+            (into []
+                  (keep (fn [pid]
+                          (let [parent (get source-objects pid)]
+                            (when (and (ctc/is-variant-container? parent)
+                                       (empty? (remove (set ids) (:shapes parent))))
+                              parent))))
+                  all-parents)
+
             target-parent    (get target-objects target-parent-id)
             target-frame-id  (cond
                                (or (nil? target-parent) (cfh/root? target-parent))
@@ -505,7 +536,13 @@
 
             add-to-target
             (mapv (fn [id]
-                    (let [shape (get source-objects id)]
+                    (let [shape (get source-objects id)
+                          shape (cond-> shape
+                                  (variant-ids id)
+                                  (strip-variant)
+
+                                  (contains? shape :shapes)
+                                  (assoc :shapes []))]
                       {:type      :add-obj
                        :id        id
                        :page-id   target-page-id
@@ -515,9 +552,7 @@
                        :frame-id  (if (root-ids id)
                                     target-frame-id
                                     (:frame-id shape))
-                       :obj       (cond-> shape
-                                    (contains? shape :shapes)
-                                    (assoc :shapes []))}))
+                       :obj       shape}))
                   all-ids)
 
             del-from-source
@@ -549,8 +584,6 @@
                   all-ids)
 
             ;; -- Guide changes --
-            ;; Guides whose frame-id is among the moved shapes must be
-            ;; transferred from the source page to the target page.
 
             frame-guides
             (->> (:guides source-page)
@@ -590,9 +623,6 @@
                   frame-guides)
 
             ;; -- Component changes --
-            ;; When a main component instance is moved to another page,
-            ;; update the component's main-instance-page so that
-            ;; referential integrity is preserved.
 
             main-instances
             (->> all-ids
@@ -601,16 +631,28 @@
 
             comp-redo-changes
             (mapv (fn [shape]
-                    (let [component (dm/get-in fdata [:components (:component-id shape)])]
-                      (cond-> {:type                :mod-component
-                               :id                  (:component-id shape)
-                               :main-instance-page  target-page-id}
-                        (some? (:variant-id component))
-                        (assoc :variant-id (:variant-id component))
-                        (some? (:variant-properties component))
-                        (assoc :variant-properties (:variant-properties component))
-                        (some? (:annotation component))
-                        (assoc :annotation (:annotation component)))))
+                    (let [component (dm/get-in fdata [:components (:component-id shape)])
+                          detaching-variant (contains? variant-ids (:id shape))]
+                      (if detaching-variant
+                        ;; Strip variant data from the component
+                        (let [new-name (ctv/variant-name-to-name shape)
+                              [cpath cname] (cpn/split-group-name new-name)]
+                          {:type                :mod-component
+                           :id                  (:component-id shape)
+                           :main-instance-page  target-page-id
+                           :name                cname
+                           :path                cpath
+                           :annotation          (:annotation component)})
+                        ;; Non-variant or container also moving: preserve data
+                        (cond-> {:type                :mod-component
+                                 :id                  (:component-id shape)
+                                 :main-instance-page  target-page-id}
+                          (some? (:variant-id component))
+                          (assoc :variant-id (:variant-id component))
+                          (some? (:variant-properties component))
+                          (assoc :variant-properties (:variant-properties component))
+                          (some? (:annotation component))
+                          (assoc :annotation (:annotation component))))))
                   main-instances)
 
             comp-undo-changes
@@ -618,7 +660,9 @@
                     (let [component (dm/get-in fdata [:components (:component-id shape)])]
                       (cond-> {:type                :mod-component
                                :id                  (:component-id shape)
-                               :main-instance-page  source-page-id}
+                               :main-instance-page  source-page-id
+                               :name                (:name component)
+                               :path                (:path component)}
                         (some? (:variant-id component))
                         (assoc :variant-id (:variant-id component))
                         (some? (:variant-properties component))
@@ -627,17 +671,76 @@
                         (assoc :annotation (:annotation component)))))
                   main-instances)
 
+            ;; -- Empty variant container changes --
+            ;; When all variants are moved out of a container, delete
+            ;; the now-empty container from the source page and remove
+            ;; its component entry.
+
+            empty-cont-del
+            (into []
+                  (mapcat (fn [cont]
+                            (let [cont-ids (cfh/get-children-ids-with-self source-objects (:id cont))]
+                              (mapv (fn [id]
+                                      {:type    :del-obj
+                                       :id      id
+                                       :page-id source-page-id})
+                                    (reverse cont-ids)))))
+                  empty-variant-conts)
+
+            empty-cont-add
+            (into []
+                  (mapcat (fn [cont]
+                            (let [cont-ids (cfh/get-children-ids-with-self source-objects (:id cont))]
+                              (mapv (fn [id]
+                                      (let [shape (get source-objects id)]
+                                        {:type      :add-obj
+                                         :id        id
+                                         :page-id   source-page-id
+                                         :parent-id (:parent-id shape)
+                                         :frame-id  (:frame-id shape)
+                                         :index     (cfh/get-position-on-parent source-objects id)
+                                         :obj       (cond-> shape
+                                                      (contains? shape :shapes)
+                                                      (assoc :shapes []))}))
+                                    cont-ids))))
+                  empty-variant-conts)
+
+            empty-cont-comp-del
+            (into []
+                  (keep (fn [cont]
+                          (when (some? (:component-id cont))
+                            {:type :del-component
+                             :id   (:component-id cont)})))
+                  empty-variant-conts)
+
+            empty-cont-comp-add
+            (into []
+                  (keep (fn [cont]
+                          (when-let [comp (dm/get-in fdata [:components (:component-id cont)])]
+                            {:type :add-component
+                             :id   (:component-id cont)
+                             :name (:name comp)
+                             :path (:path comp)
+                             :main-instance-id (:main-instance-id comp)
+                             :main-instance-page (:main-instance-page comp)
+                             :annotation (:annotation comp)})))
+                  empty-variant-conts)
+
             ;; -- Combine --
 
             redo-changes (-> (into add-to-target del-from-source)
                              (into guide-add-to-target)
                              (into guide-del-from-source)
-                             (into comp-redo-changes))
+                             (into comp-redo-changes)
+                             (into empty-cont-del)
+                             (into empty-cont-comp-del))
 
             undo-changes (-> (into del-from-target add-to-source)
                              (into guide-del-from-target)
                              (into guide-add-to-source)
-                             (into comp-undo-changes))
+                             (into comp-undo-changes)
+                             (into empty-cont-add)
+                             (into empty-cont-comp-add))
 
             changes  {:redo-changes redo-changes
                       :undo-changes undo-changes

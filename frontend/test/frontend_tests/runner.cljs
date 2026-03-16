@@ -9,6 +9,7 @@
    [frontend-tests.logic.copying-and-duplicating-test]
    [frontend-tests.logic.frame-guides-test]
    [frontend-tests.logic.groups-test]
+   [frontend-tests.logic.move-to-page-test]
    [frontend-tests.logic.pasting-in-containers-test]
    [frontend-tests.plugins.context-shapes-test]
    [frontend-tests.svg-fills-test]
@@ -41,6 +42,7 @@
    'frontend-tests.logic.copying-and-duplicating-test
    'frontend-tests.logic.frame-guides-test
    'frontend-tests.logic.groups-test
+   'frontend-tests.logic.move-to-page-test
    'frontend-tests.logic.pasting-in-containers-test
    'frontend-tests.plugins.context-shapes-test
    'frontend-tests.svg-fills-test

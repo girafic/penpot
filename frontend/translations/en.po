@@ -8630,6 +8630,10 @@ msgstr "Modified %s"
 msgid "workspace.undo.entry.move"
 msgstr "Moved objects"
 
+#: src/app/main/ui/workspace/sidebar/history.cljs:149
+msgid "workspace.undo.entry.move-to-page"
+msgstr "Moved %s to another page"
+
 #: src/app/main/ui/workspace/sidebar/history.cljs:111
 msgid "workspace.undo.entry.multiple.circle"
 msgstr "circles"

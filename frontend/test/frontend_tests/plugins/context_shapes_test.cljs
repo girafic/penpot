@@ -8,6 +8,7 @@
   (:require
    [app.common.math :as m]
    [app.common.test-helpers.files :as cthf]
+   [app.common.test-helpers.ids-map :as cthi]
    [app.common.uuid :as uuid]
    [app.main.store :as st]
    [app.plugins.api :as api]
@@ -251,3 +252,45 @@
 
     (t/testing "Clone")
     (t/testing "Remove")))
+
+
+(t/deftest test-cross-page-append-child
+  (t/async
+    done
+    (let [file     (-> (cthf/sample-file :file1 :page-label :page1)
+                       (cthf/add-sample-page :page2))
+          store    (ths/setup-store file)
+          _        (set! st/state store)
+          page1-id (cthi/id :page1)
+          page2-id (cthi/id :page2)
+
+          ^js context (api/create-context "00000000-0000-0000-0000-000000000000")
+
+          ^js rect (.createRectangle context)
+          rect-id  (aget rect "$id")
+
+          ;; Switch to page 2 so the next shape is created there
+          _  (swap! store assoc :current-page-id page2-id)
+
+          ^js board (.createBoard context)
+          board-id  (aget board "$id")
+
+          file-id   (aget (. context -currentFile) "$id")]
+
+      ;; rect is on page1, board is on page2 — cross-page appendChild
+      (.appendChild board rect)
+
+      ;; Use a small delay to let async events settle
+      (js/setTimeout
+       (fn []
+         (let [state'  @store
+               page1'  (get-in state' [:files file-id :data :pages-index page1-id])
+               page2'  (get-in state' [:files file-id :data :pages-index page2-id])]
+           ;; Rect should be gone from page 1
+           (t/is (nil? (get-in page1' [:objects rect-id])))
+           ;; Rect should be present on page 2
+           (t/is (some? (get-in page2' [:objects rect-id])))
+           ;; Rect should be a child of the board
+           (t/is (some #{rect-id} (get-in page2' [:objects board-id :shapes]))))
+         (done))
+       200))))
