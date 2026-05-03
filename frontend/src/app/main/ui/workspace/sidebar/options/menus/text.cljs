@@ -25,6 +25,7 @@
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.controls.input :refer [input*]]
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
    [app.main.ui.ds.controls.shared.searchable-options-dropdown :refer [searchable-options-dropdown*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
@@ -34,6 +35,7 @@
    [app.main.ui.workspace.tokens.management.forms.controls.utils :as csu]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.keyboard :as kbd]
    [app.util.object :as obj]
    [app.util.text.content :as content]
    [app.util.text.ui :as txu]
@@ -231,44 +233,88 @@
 
 (mf/defc text-link-options*
   [{:keys [values on-change on-blur]}]
-  (let [link        (:link values)
-        link        (when (and (string? link) (not= link "")) link)
-        has-link?   (some? link)
-        handle-add
-        (mf/use-fn
-         (mf/deps on-change on-blur link)
-         (fn [_]
-           (let [current (or link "")
-                 input   (js/window.prompt
-                          (tr "workspace.options.text-options.link-prompt")
-                          current)]
-             (when (some? input)
-               (let [trimmed (.trim input)]
-                 (if (= trimmed "")
-                   (on-change {:link nil})
-                   (on-change {:link trimmed}))))
-             (when (some? on-blur) (on-blur)))))
+  (let [link-prop  (:link values)
+        link-prop  (cond
+                     (= link-prop :multiple) :multiple
+                     (and (string? link-prop) (not= link-prop "")) link-prop
+                     :else "")
 
-        handle-remove
+        local*     (mf/use-state (if (= link-prop :multiple) "" link-prop))
+
+        commit
         (mf/use-fn
          (mf/deps on-change on-blur)
+         (fn [value]
+           (let [trimmed (.trim (or value ""))]
+             (if (= trimmed "")
+               (on-change {:link nil})
+               (on-change {:link trimmed}))
+             (when (some? on-blur) (on-blur)))))
+
+        on-input-change
+        (mf/use-fn
+         (fn [event]
+           (reset! local* (-> event dom/get-target dom/get-input-value))))
+
+        on-input-blur
+        (mf/use-fn
+         (mf/deps commit)
          (fn [_]
-           (on-change {:link nil})
-           (when (some? on-blur) (on-blur))))]
+           (commit @local*)))
+
+        on-key-down
+        (mf/use-fn
+         (mf/deps commit link-prop)
+         (fn [event]
+           (cond
+             (kbd/enter? event)
+             (do (dom/prevent-default event)
+                 (commit (-> event dom/get-target dom/get-input-value)))
+
+             (kbd/esc? event)
+             (do (dom/prevent-default event)
+                 (reset! local* (if (= link-prop :multiple) "" link-prop))
+                 (.. event -target (blur))))))
+
+        handle-clear
+        (mf/use-fn
+         (mf/deps commit)
+         (fn [_]
+           (reset! local* "")
+           (commit "")))
+
+        placeholder (if (= link-prop :multiple)
+                      (tr "workspace.options.text-options.link-multiple")
+                      (tr "workspace.options.text-options.link-placeholder"))
+
+        has-value?  (and (not= link-prop :multiple)
+                         (string? link-prop)
+                         (not= link-prop ""))]
+
+    ;; Sync the local input with the selection's resolved link, except
+    ;; while it's :multiple (mixed selection); leave the field empty in
+    ;; that case so the placeholder communicates the mixed state.
+    (mf/with-effect [link-prop]
+      (when (not= link-prop :multiple)
+        (reset! local* link-prop)))
 
     [:div {:class (stl/css :text-link-options)}
-     [:> icon-button* {:variant (if has-link? "primary" "ghost")
-                       :aria-label (tr "workspace.options.text-options.link")
-                       :title (tr "workspace.options.text-options.link")
-                       :data-testid "text-link-add"
-                       :on-click handle-add
-                       :icon i/open-link}]
-     (when has-link?
+     [:> input* {:type "url"
+                 :variant "dense"
+                 :placeholder placeholder
+                 :aria-label (tr "workspace.options.text-options.link")
+                 :data-testid "text-link-input"
+                 :class (stl/css :text-link-input)
+                 :value (deref local*)
+                 :on-change on-input-change
+                 :on-blur on-input-blur
+                 :on-key-down on-key-down}]
+     (when has-value?
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.options.text-options.remove-link")
                          :title (tr "workspace.options.text-options.remove-link")
                          :data-testid "text-link-remove"
-                         :on-click handle-remove
+                         :on-click handle-clear
                          :icon i/broken-link}])]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -553,11 +599,12 @@
                            :on-click    toggle-more-options
                            :icon        i/menu}]]
 
+        [:> text-link-options* common-props]
+
         (when more-options-open?
           [:div {:class (stl/css :text-decoration-options)}
            [:> vertical-align* common-props]
            [:> text-decoration-options* (mf/spread-props common-props {:token-applied current-token-name})]
-           [:> text-link-options* common-props]
            [:> text-direction-options* common-props]])])
 
      (when (and token-typography-row-enabled? token-dropdown-open?)

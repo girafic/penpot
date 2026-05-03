@@ -7600,6 +7600,14 @@ msgstr "Remove link"
 msgid "workspace.options.text-options.link-prompt"
 msgstr "Enter a URL (leave empty to remove)"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
+msgid "workspace.options.text-options.link-placeholder"
+msgstr "Paste or type a URL"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
+msgid "workspace.options.text-options.link-multiple"
+msgstr "Multiple links"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/typography.cljs
 #, unused
 msgid "workspace.options.text-options.uppercase"

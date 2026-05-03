@@ -65,7 +65,13 @@
 }
 
 .text-link-options {
-  height: deprecated.$s-32;
   display: flex;
+  align-items: center;
   gap: deprecated.$s-4;
+  margin-top: deprecated.$s-4;
+}
+
+.text-link-input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
