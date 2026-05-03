@@ -1225,6 +1225,7 @@ pub struct TextSpan {
     pub text_transform: Option<TextTransform>,
     pub text_direction: TextDirection,
     pub fills: Vec<shapes::Fill>,
+    pub link: Option<String>,
 }
 
 impl TextSpan {
@@ -1254,11 +1255,20 @@ impl TextSpan {
             font_weight,
             font_variant_id,
             fills,
+            link: None,
         }
     }
 
     pub fn set_text(&mut self, text: String) {
         self.text = text;
+    }
+
+    pub fn set_link(&mut self, link: Option<String>) {
+        self.link = link;
+    }
+
+    pub fn has_link(&self) -> bool {
+        matches!(self.link.as_deref(), Some(s) if !s.is_empty())
     }
 
     #[allow(dead_code)]
@@ -1287,10 +1297,16 @@ impl TextSpan {
         style.set_height(max_line_height);
         style.set_height_override(true);
         style.set_foreground_paint(&paint);
-        style.set_decoration_type(match self.text_decoration {
+        // When the span has a link and no explicit decoration, force underline so
+        // that linked text is visually distinguishable on the canvas (Figma-style).
+        // If the user already chose a decoration we honor it — the existing
+        // decoration renderer below relies on a single decoration kind per span.
+        let decoration = match self.text_decoration {
             Some(text_decoration) => text_decoration,
+            None if self.has_link() => skia::textlayout::TextDecoration::UNDERLINE,
             None => skia::textlayout::TextDecoration::NO_DECORATION,
-        });
+        };
+        style.set_decoration_type(decoration);
 
         // Trick to avoid showing the text decoration
         style.set_decoration_thickness_multiplier(0.0);
@@ -1336,10 +1352,12 @@ impl TextSpan {
 
         style.set_font_size(self.font_size);
         style.set_letter_spacing(self.letter_spacing);
-        style.set_decoration_type(match self.text_decoration {
+        let decoration = match self.text_decoration {
             Some(text_decoration) => text_decoration,
+            None if self.has_link() => skia::textlayout::TextDecoration::UNDERLINE,
             None => skia::textlayout::TextDecoration::NO_DECORATION,
-        });
+        };
+        style.set_decoration_type(decoration);
         style
     }
 

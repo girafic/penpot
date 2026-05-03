@@ -140,6 +140,7 @@ pub struct RawTextSpan {
     font_variant_id: [u32; 4], // TODO: maybe add RawUUID type
     text_length: u32,
     fill_count: u32,
+    link_length: u32,
     fills: [RawFillData; MAX_TEXT_FILLS],
 }
 
@@ -199,6 +200,7 @@ pub struct RawParagraph {
     attrs: RawParagraphData,
     spans: Vec<RawTextSpan>,
     text_buffer: Vec<u8>,
+    link_buffer: Vec<u8>,
 }
 
 impl TryFrom<&Vec<u8>> for RawParagraph {
@@ -216,12 +218,31 @@ impl TryFrom<&Vec<u8>> for RawParagraph {
             raw_text_spans.push(text_span);
         }
 
-        let text_buffer = &bytes[offset..];
+        // The remaining bytes are the concatenation of text_buffer (sized by the
+        // sum of every span's text_length) followed by link_buffer (sized by the
+        // sum of every span's link_length).
+        let total_text_len: usize = raw_text_spans
+            .iter()
+            .map(|s| s.text_length as usize)
+            .sum();
+        let total_link_len: usize = raw_text_spans
+            .iter()
+            .map(|s| s.link_length as usize)
+            .sum();
+
+        if bytes.len() < offset + total_text_len + total_link_len {
+            return Err("Truncated text/link buffer".to_string());
+        }
+
+        let text_buffer = bytes[offset..offset + total_text_len].to_vec();
+        let link_offset = offset + total_text_len;
+        let link_buffer = bytes[link_offset..link_offset + total_link_len].to_vec();
 
         Ok(Self {
             attrs,
             spans: raw_text_spans,
-            text_buffer: text_buffer.to_vec(),
+            text_buffer,
+            link_buffer,
         })
     }
 }
@@ -230,18 +251,25 @@ impl From<RawParagraph> for shapes::Paragraph {
     fn from(value: RawParagraph) -> Self {
         let mut spans = vec![];
 
-        let mut offset = 0;
+        let mut text_offset = 0;
+        let mut link_offset = 0;
         for raw_span in value.spans.into_iter() {
-            let delta = raw_span.text_length as usize;
-            let text_buffer = &value.text_buffer[offset..offset + delta];
+            let text_delta = raw_span.text_length as usize;
+            let link_delta = raw_span.link_length as usize;
+            let text_buffer = &value.text_buffer[text_offset..text_offset + text_delta];
+            let link_buffer = &value.link_buffer[link_offset..link_offset + link_delta];
 
             let mut span = shapes::TextSpan::from(raw_span);
             if !text_buffer.is_empty() {
                 span.set_text(String::from_utf8_lossy(text_buffer).to_string());
             }
+            if !link_buffer.is_empty() {
+                span.set_link(Some(String::from_utf8_lossy(link_buffer).to_string()));
+            }
 
             spans.push(span);
-            offset += delta;
+            text_offset += text_delta;
+            link_offset += link_delta;
         }
 
         shapes::Paragraph::new(

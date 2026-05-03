@@ -16,7 +16,9 @@
    [app.render-wasm.wasm :as wasm]))
 
 (def ^:const PARAGRAPH-ATTR-U8-SIZE 12)
-(def ^:const SPAN-ATTR-U8-SIZE 64)
+;; Span attribute block size in bytes. Must match the layout of
+;; render-wasm/src/wasm/text.rs::RawTextSpan minus the trailing fills array.
+(def ^:const SPAN-ATTR-U8-SIZE 68)
 (def ^:const MAX-TEXT-FILLS types.fills.impl/MAX-FILLS)
 
 (defn- encode-text
@@ -92,6 +94,12 @@
                     text-length (mem/size text-buffer)
                     fills       (take MAX-TEXT-FILLS (get span :fills []))
 
+                    link-raw    (get span :link)
+                    link-str    (if (and (string? link-raw) (not= link-raw ""))
+                                  link-raw
+                                  "")
+                    link-length (mem/size (encode-text link-str))
+
                     font-variant-id
                     (get span :font-variant-id)
 
@@ -132,6 +140,7 @@
 
                     (mem/write-i32 dview text-length)
                     (mem/write-i32 dview (count fills))
+                    (mem/write-i32 dview link-length)
                     (mem/assert-written offset SPAN-ATTR-U8-SIZE)
 
                     (write-span-fills dview fills))))
@@ -140,7 +149,9 @@
 
 (defn write-shape-text
   ;; buffer has the following format:
-  ;; [<num-spans> <paragraph_attributes> <spans_attributes> <text>]
+  ;; [<num-spans> <paragraph_attributes> <spans_attributes> <text> <links>]
+  ;; <links> is the concatenation of each span's :link string (empty when
+  ;; absent); per-span lengths come from RawTextSpan.link_length.
   [spans paragraph text]
   (let [normalized-paragraph (f/normalize-paragraph-font paragraph)
         normalized-spans (map #(f/normalize-span-font % normalized-paragraph) spans)
@@ -152,16 +163,26 @@
         text-buffer   (encode-text text)
         text-size     (mem/size text-buffer)
 
-        total-size    (+ 4 metadata-size text-size)
+        link-text     (apply str (map (fn [span]
+                                        (let [v (get span :link)]
+                                          (if (and (string? v) (not= v "")) v "")))
+                                      normalized-spans))
+        link-buffer   (encode-text link-text)
+        link-size     (mem/size link-buffer)
+
+        total-size    (+ 4 metadata-size text-size link-size)
         heapu8        (mem/get-heap-u8)
         dview         (mem/get-data-view)
-        offset        (mem/alloc total-size)]
+        offset        (mem/alloc total-size)
+        offset-after-text
+        (-> offset
+            (mem/write-u32 dview num-spans)
+            (write-paragraph dview normalized-paragraph)
+            (write-spans dview normalized-spans normalized-paragraph)
+            (mem/write-buffer heapu8 text-buffer))]
 
-    (-> offset
-        (mem/write-u32 dview num-spans)
-        (write-paragraph dview normalized-paragraph)
-        (write-spans dview normalized-spans normalized-paragraph)
-        (mem/write-buffer heapu8 text-buffer))
+    (when (pos? link-size)
+      (mem/write-buffer offset-after-text heapu8 link-buffer))
 
     (h/call wasm/internal-module "_set_shape_text_content")))
 
