@@ -16,6 +16,7 @@
    [app.main.ui.shapes.fills :as fills]
    [app.main.ui.shapes.gradients :as grad]
    [app.util.object :as obj]
+   [cuerdas.core :as str]
    [rumext.v2 :as mf]))
 
 (def fill-attrs [:fill-color :fill-color-gradient :fill-opacity])
@@ -80,6 +81,9 @@
                      :dy "0.2em"
                      :y (- (:y data) (:height data))})
 
+              link  (:link data)
+              link  (when (and (string? link) (not (str/blank? link))) link)
+
               props (-> #js {:key (dm/str "text-" (:id shape) "-" index)
                              :x (if rtl? (+ (:x data) (:width data)) (:x data))
                              :y (:y data)
@@ -105,12 +109,19 @@
                         (dissoc :shadow :blur))
 
               ;; Need to create new render-id per text-block
-              render-id (dm/str render-id "-" index)]
+              render-id (dm/str render-id "-" index)
+              text-block
+              [:& shape-custom-strokes {:shape shape :position index :render-id render-id}
+               [:> :text props (:text data)]]]
 
           [:& (mf/provider muc/render-id) {:key index :value render-id}
            ;; Text fills definition. Need to be defined per-text block
            [:defs
             [:& fills/fills          {:shape shape :render-id render-id}]]
 
-           [:& shape-custom-strokes {:shape shape :position index :render-id render-id}
-            [:> :text props (:text data)]]]))]]))
+           (if link
+             [:a {:href link
+                  :target "_blank"
+                  :rel "noopener noreferrer"}
+              text-block]
+             text-block)]))]]))

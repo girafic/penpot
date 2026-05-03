@@ -7588,6 +7588,18 @@ msgstr "Create typography style"
 msgid "workspace.options.text-options.text-section"
 msgstr "Text section"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
+msgid "workspace.options.text-options.link"
+msgstr "Add link"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
+msgid "workspace.options.text-options.remove-link"
+msgstr "Remove link"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/text.cljs
+msgid "workspace.options.text-options.link-prompt"
+msgstr "Enter a URL (leave empty to remove)"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/typography.cljs
 #, unused
 msgid "workspace.options.text-options.uppercase"

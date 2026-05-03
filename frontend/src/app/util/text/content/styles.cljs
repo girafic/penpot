@@ -20,13 +20,25 @@
     nil
     (transit/decode-str value)))
 
+(defn- encode-link
+  [value]
+  (if (and (string? value) (not= value ""))
+    value
+    ""))
+
+(defn- decode-link
+  [value]
+  (when (and (string? value) (not= (str/trim value) ""))
+    (str/trim value)))
+
 (def mapping
   {:fills [encode decode]
    :typography-ref-id [encode decode]
    :typography-ref-file [encode decode]
    :font-id [identity identity]
    :font-variant-id [identity identity]
-   :vertical-align [identity identity]})
+   :vertical-align [identity identity]
+   :link [encode-link decode-link]})
 
 (defn normalize-style-value
   "This function adds units to style values"

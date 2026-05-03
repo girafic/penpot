@@ -106,6 +106,7 @@
                      :letter-spacing  (dm/str (get-prop styles "letter-spacing"))
                      :font-style      (dm/str (get-prop styles "font-style"))
                      :fills           (transit/decode-str (get-prop styles "--fills"))
+                     :link            (get-prop styles "--link")
                      :text            text})))]
 
     (when (some? shape-id)

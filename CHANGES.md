@@ -68,6 +68,7 @@
 - Show detailed messages on file import errors to help diagnose why a file could not be imported (by @jsdevninja) [Github #9004](https://github.com/penpot/penpot/issues/9004)
 - Add read-only preview mode for saved versions — click a version name to open a dedicated preview view (by @wdeveloper16) [Github #8976](https://github.com/penpot/penpot/issues/8976)
 - Add clipboard read/write permissions to the plugin system (by @wdeveloper16) [Github #9053](https://github.com/penpot/penpot/issues/9053)
+- Add inline links in text shapes: select text and assign a URL from the text options panel; rendered as anchors in viewer and exports.
 
 ### :bug: Bugs fixed
 

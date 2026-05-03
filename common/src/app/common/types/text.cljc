@@ -55,6 +55,9 @@
 (def text-transform-attrs
   [:text-transform])
 
+(def text-link-attrs
+  [:link])
+
 (def text-fills
   [:fills])
 
@@ -76,6 +79,7 @@
    text-spacing-attrs
    text-decoration-attrs
    text-transform-attrs
+   text-link-attrs
    text-fills))
 
 (def text-all-attrs (d/concat-set shape-attrs root-attrs paragraph-attrs text-node-attrs))

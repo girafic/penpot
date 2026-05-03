@@ -229,6 +229,48 @@
                          :allow-empty  true
                          :options      options}]]))
 
+(mf/defc text-link-options*
+  [{:keys [values on-change on-blur]}]
+  (let [link        (:link values)
+        link        (when (and (string? link) (not= link "")) link)
+        has-link?   (some? link)
+        handle-add
+        (mf/use-fn
+         (mf/deps on-change on-blur link)
+         (fn [_]
+           (let [current (or link "")
+                 input   (js/window.prompt
+                          (tr "workspace.options.text-options.link-prompt")
+                          current)]
+             (when (some? input)
+               (let [trimmed (.trim input)]
+                 (if (= trimmed "")
+                   (on-change {:link nil})
+                   (on-change {:link trimmed}))))
+             (when (some? on-blur) (on-blur)))))
+
+        handle-remove
+        (mf/use-fn
+         (mf/deps on-change on-blur)
+         (fn [_]
+           (on-change {:link nil})
+           (when (some? on-blur) (on-blur))))]
+
+    [:div {:class (stl/css :text-link-options)}
+     [:> icon-button* {:variant (if has-link? "primary" "ghost")
+                       :aria-label (tr "workspace.options.text-options.link")
+                       :title (tr "workspace.options.text-options.link")
+                       :data-testid "text-link-add"
+                       :on-click handle-add
+                       :icon i/open-link}]
+     (when has-link?
+       [:> icon-button* {:variant "ghost"
+                         :aria-label (tr "workspace.options.text-options.remove-link")
+                         :title (tr "workspace.options.text-options.remove-link")
+                         :data-testid "text-link-remove"
+                         :on-click handle-remove
+                         :icon i/broken-link}])]))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Helpers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -372,7 +414,9 @@
          (mf/deps values)
          (fn [ids attrs]
            (let [updated-attrs (-> (merge (txt/get-default-text-attrs) values attrs)
-                                   (select-keys txt/text-node-attrs))]
+                                   (select-keys txt/text-node-attrs)
+                                   ;; :link is per-span and must not become a sticky default
+                                   (dissoc :link))]
              (when (features/active-feature? @st/state "text-editor-wasm/v1")
                (st/emit! (dwt-v3/v3-update-text-editor-styles (first ids) attrs)))
              (st/emit! (dwt/save-font updated-attrs)
@@ -513,6 +557,7 @@
           [:div {:class (stl/css :text-decoration-options)}
            [:> vertical-align* common-props]
            [:> text-decoration-options* (mf/spread-props common-props {:token-applied current-token-name})]
+           [:> text-link-options* common-props]
            [:> text-direction-options* common-props]])])
 
      (when (and token-typography-row-enabled? token-dropdown-open?)

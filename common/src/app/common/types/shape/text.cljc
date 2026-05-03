@@ -56,6 +56,7 @@
              [:direction {:optional true} ::sm/text]
              [:text-decoration {:optional true} ::sm/text]
              [:text-transform {:optional true} ::sm/text]
+             [:link {:optional true} [:maybe ::sm/text]]
              [:typography-ref-id {:optional true} [:maybe ::sm/uuid]]
              [:typography-ref-file {:optional true} [:maybe ::sm/uuid]]]]]]]]]]]]])
 
@@ -77,4 +78,5 @@
     [:rtl {:optional true} :boolean]
     [:text {:optional true} :string]
     [:text-decoration {:optional true} ::sm/text]
-    [:text-transform {:optional true} ::sm/text]]])
+    [:text-transform {:optional true} ::sm/text]
+    [:link {:optional true} [:maybe ::sm/text]]]])
