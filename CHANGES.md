@@ -17,6 +17,7 @@
 - Add copy as image to clipboard option to workspace context menu (by @dfelinto) [Github #8313](https://github.com/penpot/penpot/pull/8313)
 - Import Tokens from linked library [Github #8391](https://github.com/penpot/penpot/pull/8391)
 - Add Tab/Shift+Tab navigation to rename layers sequentially (by @bittoby) [Github #8474](https://github.com/penpot/penpot/pull/8474)
+- Support Apple's native [`container`](https://github.com/apple/container) CLI as an alternative container runtime to Docker for the development environment and local image builds (select via `PENPOT_CONTAINER_RUNTIME=docker|container`)
 
 ### :bug: Bugs fixed
 

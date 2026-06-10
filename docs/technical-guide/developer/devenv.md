@@ -14,6 +14,10 @@ You can [look here][1] for complete instructions.
 
 [1]: /technical-guide/getting-started/#install-with-docker
 
+On Apple silicon Macs you can alternatively use Apple's native
+[`container`](https://github.com/apple/container) CLI instead of Docker. See
+[Container runtimes](#container-runtimes) below.
+
 
 Optionally, to improve performance, you can also increase the maximum number of
 user files able to be watched for changes with inotify:
@@ -54,6 +58,59 @@ manage.sh script:
 
 Having the container running and tmux opened inside the container,
 you are free to execute commands and open as many shells as you want.
+
+## Container runtimes
+
+By default the tooling uses **Docker** together with **Docker Compose**. On
+Apple silicon Macs you can instead use Apple's native
+[`container`](https://github.com/apple/container) CLI, which runs each Linux
+container in its own lightweight virtual machine. This avoids running Docker
+Desktop and integrates with macOS.
+
+`manage.sh` autodetects the runtime (preferring Docker when both are
+installed). You can force one explicitly with the `PENPOT_CONTAINER_RUNTIME`
+environment variable:
+
+```bash
+# use Docker (default)
+PENPOT_CONTAINER_RUNTIME=docker ./manage.sh run-devenv
+
+# use Apple's container CLI
+PENPOT_CONTAINER_RUNTIME=container ./manage.sh run-devenv
+```
+
+Before the first use, start Apple's container services once:
+
+```bash
+container system start
+```
+
+All the usual devenv subcommands (`pull-devenv`, `start-devenv`,
+`run-devenv`, `run-devenv-shell`, `stop-devenv`, `drop-devenv`,
+`log-devenv`) and local image builds (`build-devenv --local`,
+`build-*-docker-image`) work with both runtimes.
+
+Apple's `container` CLI has no `docker compose` equivalent, so for that runtime
+the devenv services (the `main` dev container plus `postgres`, `redis`,
+`minio`, `mailer` and `ldap`) are orchestrated natively by `manage.sh`,
+mirroring `docker/devenv/docker-compose.yaml`. The two must be kept in sync
+when either is changed.
+
+**Notes and current limitations** when using Apple's `container` CLI:
+
+- It requires macOS 26 (or newer) on Apple silicon for full networking support.
+- Multi-architecture builds and registry pushes (`docker buildx`) are
+  Docker-only. Use `./manage.sh build-devenv --local` to build the devenv image
+  locally instead.
+- The `--privileged` flag is not used (each container already runs in its own
+  VM); it is stripped transparently.
+- For a persistent, VM-like interactive Linux environment you can also use
+  `container machine` directly (e.g.
+  `container machine create alpine:3.22 --name my-machine`); the Penpot devenv
+  itself runs as a regular long-lived container.
+
+Production self-hosting still relies on Docker Compose
+([Install with Docker][1]); only the development tooling supports both runtimes.
 
 You can create a new shell just pressing the **Ctr+b c** shortcut. And
 **Ctrl+b w** for switch between windows, **Ctrl+b &** for kill the

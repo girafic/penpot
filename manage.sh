@@ -9,6 +9,12 @@ export CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD);
 
 export IMAGEMAGICK_VERSION=7.1.2-13
 
+# Load the container runtime abstraction layer. This selects between Docker and
+# Apple's `container` CLI (https://github.com/apple/container) and exposes the
+# runtime-agnostic helpers (oci-*, runtime-devenv-*) used below. The runtime can
+# be forced with the PENPOT_CONTAINER_RUNTIME=docker|container environment variable.
+source "$(dirname "$0")/scripts/_runtime.sh";
+
 # Safe directory to avoid ownership errors with Git
 git config --global --add safe.directory /home/penpot/penpot || true
 
@@ -53,7 +59,12 @@ function build-devenv {
 
     if [ "$1" = "--local" ]; then
         echo "Build local only $DEVENV_IMGNAME:latest image";
-        docker build -t $DEVENV_IMGNAME:latest .;
+        oci-build -t $DEVENV_IMGNAME:latest .;
+    elif runtime-is-container; then
+        popd;
+        echo "Multi-arch build & push is only supported with the Docker runtime (docker buildx)." >&2;
+        echo "With Apple's container CLI build a local image instead: ./manage.sh build-devenv --local" >&2;
+        exit 1;
     else
         echo "Build and push $DEVENV_IMGNAME:latest image";
         setup-buildx;
@@ -71,11 +82,11 @@ function build-devenv {
 
 function pull-devenv {
     set -ex
-    docker pull $DEVENV_IMGNAME:latest
+    oci-pull $DEVENV_IMGNAME:latest
 }
 
 function pull-devenv-if-not-exists {
-    if [[ ! $(docker images $DEVENV_IMGNAME:latest -q) ]]; then
+    if [[ ! $(oci-image-id $DEVENV_IMGNAME:latest) ]]; then
         pull-devenv $@
     fi
 }
@@ -83,55 +94,59 @@ function pull-devenv-if-not-exists {
 function start-devenv {
     pull-devenv-if-not-exists $@;
 
-    docker compose -p $DEVENV_PNAME -f docker/devenv/docker-compose.yaml up -d;
+    runtime-devenv-up;
 }
 
 function create-devenv {
     pull-devenv-if-not-exists $@;
 
-    docker compose -p $DEVENV_PNAME -f docker/devenv/docker-compose.yaml create;
+    runtime-devenv-create;
 }
 
 function stop-devenv {
-    docker compose -p $DEVENV_PNAME -f docker/devenv/docker-compose.yaml stop -t 2;
+    runtime-devenv-stop;
 }
 
 function drop-devenv {
-    docker compose -p $DEVENV_PNAME -f docker/devenv/docker-compose.yaml down -t 2 -v;
+    runtime-devenv-down;
 
     echo "Clean old development image $DEVENV_IMGNAME..."
-    docker images $DEVENV_IMGNAME -q | awk '{print $3}' | xargs --no-run-if-empty docker rmi
+    if runtime-is-container; then
+        container image delete $DEVENV_IMGNAME:latest >/dev/null 2>&1 || true;
+    else
+        docker images $DEVENV_IMGNAME -q | awk '{print $3}' | xargs --no-run-if-empty docker rmi
+    fi
 }
 
 function log-devenv {
-    docker compose -p $DEVENV_PNAME -f docker/devenv/docker-compose.yaml logs -f --tail=50
+    runtime-devenv-logs;
 }
 
 function run-devenv-tmux {
-    if [[ ! $(docker ps -f "name=penpot-devenv-main" -q) ]]; then
+    if ! oci-container-running "penpot-devenv-main"; then
         start-devenv
         echo "Waiting for containers fully start (5s)..."
         sleep 5;
     fi
 
-    docker exec -ti penpot-devenv-main sudo -EH -u penpot PENPOT_PLUGIN_DEV=$PENPOT_PLUGIN_DEV /home/start-tmux.sh
+    oci-exec -ti penpot-devenv-main sudo -EH -u penpot PENPOT_PLUGIN_DEV=$PENPOT_PLUGIN_DEV /home/start-tmux.sh
 }
 
 function run-devenv-shell {
-    if [[ ! $(docker ps -f "name=penpot-devenv-main" -q) ]]; then
+    if ! oci-container-running "penpot-devenv-main"; then
         start-devenv
     fi
-    docker exec -ti \
+    oci-exec -ti \
            -e JAVA_OPTS="$JAVA_OPTS" \
            -e EXTERNAL_UID=$CURRENT_USER_ID \
            penpot-devenv-main sudo -EH -u penpot $@
 }
 
 function run-devenv-isolated-shell {
-    docker volume create ${DEVENV_PNAME}_user_data;
-    docker run -ti --rm \
-           --mount source=${DEVENV_PNAME}_user_data,type=volume,target=/home/penpot/ \
-           --mount source=`pwd`,type=bind,target=/home/penpot/penpot \
+    oci-volume-create ${DEVENV_PNAME}_user_data;
+    oci-run -ti --rm \
+           $(oci-volume-mount-flag ${DEVENV_PNAME}_user_data /home/penpot/) \
+           $(oci-bind-mount-flag "`pwd`" /home/penpot/penpot) \
            -e EXTERNAL_UID=$CURRENT_USER_ID \
            -e BUILD_STORYBOOK=$BUILD_STORYBOOK \
            -e BUILD_WASM=$BUILD_WASM \
@@ -173,10 +188,10 @@ function build {
     local script=${2:-build}
 
     pull-devenv-if-not-exists;
-    docker volume create ${DEVENV_PNAME}_user_data;
-    docker run -t --rm \
-           --mount source=${DEVENV_PNAME}_user_data,type=volume,target=/home/penpot/ \
-           --mount source=`pwd`,type=bind,target=/home/penpot/penpot \
+    oci-volume-create ${DEVENV_PNAME}_user_data;
+    oci-run -t --rm \
+           $(oci-volume-mount-flag ${DEVENV_PNAME}_user_data /home/penpot/) \
+           $(oci-bind-mount-flag "`pwd`" /home/penpot/penpot) \
            -e EXTERNAL_UID=$CURRENT_USER_ID \
            -e BUILD_STORYBOOK=$BUILD_STORYBOOK \
            -e BUILD_WASM=$BUILD_WASM \
@@ -299,7 +314,7 @@ function build-docs-bundle {
 function build-frontend-docker-image {
     rsync -avr --delete ./bundles/frontend/ ./docker/images/bundle-frontend/;
     pushd ./docker/images;
-    docker build \
+    oci-build \
         -t penpotapp/frontend:$CURRENT_BRANCH -t penpotapp/frontend:latest \
         --build-arg BUNDLE_PATH="./bundle-frontend/" \
         -f Dockerfile.frontend .;
@@ -309,7 +324,7 @@ function build-frontend-docker-image {
 function build-backend-docker-image {
     rsync -avr --delete ./bundles/backend/ ./docker/images/bundle-backend/;
     pushd ./docker/images;
-    docker build \
+    oci-build \
         -t penpotapp/backend:$CURRENT_BRANCH -t penpotapp/backend:latest \
         --build-arg BUNDLE_PATH="./bundle-backend/" \
         -f Dockerfile.backend .;
@@ -319,7 +334,7 @@ function build-backend-docker-image {
 function build-exporter-docker-image {
     rsync -avr --delete ./bundles/exporter/ ./docker/images/bundle-exporter/;
     pushd ./docker/images;
-    docker build \
+    oci-build \
         -t penpotapp/exporter:$CURRENT_BRANCH -t penpotapp/exporter:latest \
         --build-arg BUNDLE_PATH="./bundle-exporter/" \
         -f Dockerfile.exporter .;
@@ -329,7 +344,7 @@ function build-exporter-docker-image {
 function build-mcp-docker-image {
     rsync -avr --delete ./bundles/mcp/ ./docker/images/bundle-mcp/;
     pushd ./docker/images;
-    docker build \
+    oci-build \
         -t penpotapp/mcp:$CURRENT_BRANCH -t penpotapp/mcp:latest \
         --build-arg BUNDLE_PATH="./bundle-mcp/" \
         -f Dockerfile.mcp .;
@@ -339,7 +354,7 @@ function build-mcp-docker-image {
 function build-storybook-docker-image {
     rsync -avr --delete ./bundles/storybook/ ./docker/images/bundle-storybook/;
     pushd ./docker/images;
-    docker build \
+    oci-build \
         -t penpotapp/storybook:$CURRENT_BRANCH -t penpotapp/storybook:latest \
         --build-arg BUNDLE_PATH="./bundle-storybook/" \
         -f Dockerfile.storybook .;
@@ -378,6 +393,10 @@ function usage {
     echo "- build-storybook-docker-image     Build storybook docker images."
     echo ""
     echo "- version                          Show penpot's version."
+    echo ""
+    echo "Container runtime: '$PENPOT_RUNTIME' (override with PENPOT_CONTAINER_RUNTIME=docker|container)."
+    echo "Apple's container CLI (https://github.com/apple/container) is supported as an"
+    echo "alternative to Docker for the devenv and local image builds on Apple silicon."
 }
 
 case $1 in
