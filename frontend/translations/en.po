@@ -6800,6 +6800,12 @@ msgstr "Duration"
 msgid "workspace.animation.easing"
 msgstr "Easing"
 
+msgid "workspace.animation.export"
+msgstr "Export"
+
+msgid "workspace.animation.export-css"
+msgstr "Export animation as CSS @keyframes"
+
 msgid "workspace.animation.add-keyframe"
 msgstr "Add keyframe"
 

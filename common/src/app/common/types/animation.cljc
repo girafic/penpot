@@ -25,7 +25,8 @@
    [app.common.schema :as sm]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape.interactions :as cti]
-   [app.common.uuid :as uuid]))
+   [app.common.uuid :as uuid]
+   [clojure.string :as str]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SCHEMA
@@ -315,3 +316,95 @@
   deleted). Returns the updated timeline."
   [timeline shape-ids]
   (update timeline :tracks #(apply dissoc % shape-ids)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; CSS EXPORT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- fmt
+  "Format a number for CSS: rounded to 3 decimals, integers without a
+  trailing `.0`."
+  [v]
+  (let [r (mth/precision v 3)]
+    (if (== r (mth/round r))
+      (str (long r))
+      (str r))))
+
+(defn easing->css
+  "Render a keyframe easing as a CSS timing-function string."
+  [easing]
+  (cond
+    (map? easing)
+    (let [[a b c d] (:curve easing)]
+      (str "cubic-bezier(" (fmt a) ", " (fmt b) ", " (fmt c) ", " (fmt d) ")"))
+
+    (keyword? easing)
+    (case easing
+      :linear "linear"
+      :ease "ease"
+      :ease-in "ease-in"
+      :ease-out "ease-out"
+      :ease-in-out "ease-in-out"
+      "linear")
+
+    :else "linear"))
+
+(defn- short-id
+  [id]
+  (subs (str id) 0 8))
+
+(defn- values->declarations
+  "Build the CSS declarations (transform + opacity) for `shape` given the
+  interpolated absolute `values` at one keyframe stop."
+  [shape values]
+  (let [selrect (:selrect shape)
+        base-x  (:x selrect)
+        base-y  (:y selrect)
+        base-r  (or (:rotation shape) 0)
+        dx      (- (get values :x base-x) base-x)
+        dy      (- (get values :y base-y) base-y)
+        sx      (get values :scale-x 1)
+        sy      (get values :scale-y 1)
+        rot     (- (get values :rotation base-r) base-r)
+        transform (str "translate(" (fmt dx) "px, " (fmt dy) "px) "
+                       "rotate(" (fmt rot) "deg) "
+                       "scale(" (fmt sx) ", " (fmt sy) ")")
+        decls [(str "transform: " transform ";")]]
+    (cond-> decls
+      (contains? values :opacity)
+      (conj (str "opacity: " (fmt (:opacity values)) ";")))))
+
+(defn- track->keyframes-css
+  [timeline shape track kf-name]
+  (let [duration (max 1 (:duration timeline))
+        sid      (:shape-id track)
+        kfs      (:keyframes track)
+        times    (-> (into (sorted-set 0 duration) (map :time kfs)) vec)
+        stops    (for [t times]
+                   (let [values     (get (values-at timeline t) sid {})
+                         pct        (fmt (* 100.0 (/ (double t) duration)))
+                         seg-easing (some #(when (= (:time %) t) (:easing %)) kfs)
+                         decls      (cond-> (values->declarations shape values)
+                                      (and seg-easing (< t duration))
+                                      (conj (str "animation-timing-function: "
+                                                 (easing->css seg-easing) ";")))]
+                     (str "  " pct "% { " (str/join " " decls) " }")))]
+    (str "@keyframes " kf-name " {\n" (str/join "\n" stops) "\n}")))
+
+(defn timeline->css
+  "Generate a CSS string (`@keyframes` blocks + per-shape `animation`
+  rules) for `timeline`, using the base geometry from `objects`. Pure."
+  [timeline objects]
+  (let [duration (max 1 (:duration timeline))
+        iter     (if (:loop timeline) "infinite" "1")]
+    (->> (:tracks timeline)
+         (keep (fn [[sid track]]
+                 (when-let [shape (get objects sid)]
+                   (let [kf-name  (str "penpot-anim-" (short-id sid))
+                         selector (str ".penpot-shape-" (short-id sid))
+                         comment  (str "/* " (or (:name shape) (str sid)) " */")]
+                     (str comment "\n"
+                          (track->keyframes-css timeline shape track kf-name) "\n\n"
+                          selector " {\n  animation: " kf-name " "
+                          duration "ms linear " iter ";\n}")))))
+         (str/join "\n\n"))))

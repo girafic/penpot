@@ -172,6 +172,9 @@
                           (keyword))]
              (st/emit! (dwa/add-keyframe prop)))))
 
+        on-export-css
+        (mf/use-fn #(st/emit! (dwa/export-css)))
+
         on-close
         (mf/use-fn #(st/emit! (dwa/close-timeline)))]
 
@@ -217,6 +220,11 @@
                :title (tr "workspace.animation.auto-keyframe")
                :on-click on-toggle-auto-key}
       (tr "workspace.animation.rec")]
+
+     [:button {:class (stl/css :ctrl-btn)
+               :title (tr "workspace.animation.export-css")
+               :on-click on-export-css}
+      (tr "workspace.animation.export")]
 
      [:button {:class (stl/css :close-btn)
                :title (tr "labels.close")

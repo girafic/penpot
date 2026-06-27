@@ -17,7 +17,10 @@
    [app.main.data.helpers :as dsh]
    [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.modifiers :as dwm]
+   [app.util.dom :as dom]
+   [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
+   [clojure.string :as str]
    [potok.v2.core :as ptk]))
 
 (def ^:private frame-step
@@ -316,3 +319,25 @@
     ptk/UpdateEvent
     (update [_ state]
       (update-in state [:workspace-animation :auto-key?] not))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; EXPORT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- safe-filename
+  [name ext]
+  (dm/str (-> (or name "animation")
+              (str/replace #"[^a-zA-Z0-9_-]+" "-"))
+          ext))
+
+(defn export-css
+  "Generate and download a CSS `@keyframes` file for the current timeline."
+  []
+  (ptk/reify ::export-css
+    ptk/EffectEvent
+    (effect [_ state _]
+      (when-let [tl (current-timeline state)]
+        (let [objects (dsh/lookup-page-objects state)
+              css     (cta/timeline->css tl objects)
+              blob    (wapi/create-blob css "text/css")]
+          (dom/trigger-download (safe-filename (:name tl) ".css") blob))))))
