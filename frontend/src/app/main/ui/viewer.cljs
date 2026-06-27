@@ -599,10 +599,12 @@
                                 :on-click click-on-screen}
 
        ;; Floating timeline-animation playback control (Penpot Motion).
-       ;; Shown when the page has timelines and we are not in inspect mode.
-       (let [timelines (:timelines base-page)]
-         (when (and (not= section :inspect) (seq timelines))
-           (let [tl-id    (or (:timeline-id viewer-timeline) (ffirst timelines))
+       ;; Timelines are board-scoped, so we play the timeline of the board
+       ;; (frame) currently being viewed.
+       (let [timelines (:timelines base-page)
+             board-id  (:id frame)]
+         (when (and (not= section :inspect) (contains? timelines board-id))
+           (let [tl-id    board-id
                  playing? (:playing? viewer-timeline)]
              [:div {:style #js {"position" "absolute" "bottom" "16px" "left" "50%"
                                 "transform" "translateX(-50%)" "zIndex" 10
