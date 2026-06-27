@@ -54,7 +54,7 @@
 
 (mf/defc keyframe*
   {::mf/private true}
-  [{:keys [keyframe shape-id duration lane-node-ref]}]
+  [{:keys [keyframe shape-id duration lane-node-ref selected?]}]
   (let [time        (:time keyframe)
         kf-id       (:id keyframe)
         dragging-ref (mf/use-ref false)
@@ -86,19 +86,27 @@
          (mf/deps shape-id kf-id)
          (fn [event]
            (dom/stop-propagation event)
-           (st/emit! (dwa/delete-keyframe shape-id kf-id))))]
+           (st/emit! (dwa/delete-keyframe shape-id kf-id))))
 
-    [:div {:class (stl/css :keyframe)
+        on-click
+        (mf/use-fn
+         (mf/deps shape-id kf-id)
+         (fn [event]
+           (dom/stop-propagation event)
+           (st/emit! (dwa/select-keyframe shape-id kf-id))))]
+
+    [:div {:class (stl/css-case :keyframe true :selected selected?)
            :style #js {"left" (time->pct time duration)}
            :title (dm/str time " ms")
            :on-pointer-down on-pointer-down
            :on-pointer-move on-pointer-move
            :on-pointer-up on-pointer-up
+           :on-click on-click
            :on-double-click on-double-click}]))
 
 (mf/defc property-lane*
   {::mf/private true}
-  [{:keys [shape-id keyframes duration]}]
+  [{:keys [shape-id keyframes duration selected-kf-id]}]
   (let [node-ref (mf/use-ref nil)]
     [:div {:class (stl/css :property-lane)
            :ref node-ref}
@@ -107,13 +115,16 @@
                       :keyframe kf
                       :shape-id shape-id
                       :duration duration
+                      :selected? (= (:id kf) selected-kf-id)
                       :lane-node-ref node-ref}])]))
 
 (mf/defc track*
   {::mf/private true}
-  [{:keys [track shape-name duration]}]
+  [{:keys [track shape-name duration selected-kf]}]
   (let [shape-id  (:shape-id track)
-        by-prop   (group-by :property (:keyframes track))]
+        by-prop   (group-by :property (:keyframes track))
+        selected-kf-id (when (= (:shape-id selected-kf) shape-id)
+                         (:keyframe-id selected-kf))]
     [:div {:class (stl/css :track)}
      [:div {:class (stl/css :track-header)}
       [:span {:class (stl/css :track-name) :title shape-name} shape-name]]
@@ -125,7 +136,8 @@
          [:span {:class (stl/css :lane-label)} label]
          [:> property-lane* {:shape-id shape-id
                              :keyframes kfs
-                             :duration duration}]])]]))
+                             :duration duration
+                             :selected-kf-id selected-kf-id}]])]]))
 
 (mf/defc toolbar*
   {::mf/private true}
@@ -212,6 +224,95 @@
       [:> i/icon* {:icon-id i/close}]]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; EASING EDITOR (cubic-bezier)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^:private easing-presets
+  [{:id :linear      :label "Linear" :curve [0.0 0.0 1.0 1.0]}
+   {:id :ease        :label "Ease"   :curve [0.25 0.1 0.25 1.0]}
+   {:id :ease-in     :label "In"     :curve [0.42 0.0 1.0 1.0]}
+   {:id :ease-out    :label "Out"    :curve [0.0 0.0 0.58 1.0]}
+   {:id :ease-in-out :label "In-Out" :curve [0.42 0.0 0.58 1.0]}])
+
+(defn- easing->curve
+  [easing]
+  (cond
+    (map? easing)     (:curve easing)
+    (keyword? easing) (or (some #(when (= (:id %) easing) (:curve %)) easing-presets)
+                          [0.0 0.0 1.0 1.0])
+    :else             [0.0 0.0 1.0 1.0]))
+
+(def ^:private ee-size 132)
+
+(mf/defc easing-editor*
+  {::mf/private true}
+  [{:keys [shape-id keyframe-id easing]}]
+  (let [[x1 y1 x2 y2] (easing->curve easing)
+        svg-ref (mf/use-ref nil)
+        drag*   (mf/use-state nil)
+
+        emit-curve
+        (mf/use-fn
+         (mf/deps shape-id keyframe-id)
+         (fn [c]
+           (st/emit! (dwa/set-keyframe-easing shape-id keyframe-id {:type :bezier :curve c}))))
+
+        on-handle-down
+        (mf/use-fn
+         (fn [handle event]
+           (dom/stop-propagation event)
+           (dom/capture-pointer event)
+           (reset! drag* handle)))
+
+        on-move
+        (mf/use-fn
+         (mf/deps x1 y1 x2 y2 emit-curve)
+         (fn [event]
+           (when-let [handle @drag*]
+             (let [node (mf/ref-val svg-ref)
+                   rect (dom/get-bounding-rect node)
+                   pos  (dom/get-client-position event)
+                   px   (-> (/ (- (:x pos) (:left rect)) (max 1 (:width rect))) (max 0.0) (min 1.0))
+                   vy   (-> (- 1.0 (/ (- (:y pos) (:top rect)) (max 1 (:height rect)))) (max 0.0) (min 1.0))]
+               (emit-curve (if (= handle :p1) [px vy x2 y2] [x1 y1 px vy]))))))
+
+        on-up
+        (mf/use-fn
+         (fn [event]
+           (dom/release-pointer event)
+           (reset! drag* nil)))
+
+        ux (fn [v] (* v ee-size))
+        uy (fn [v] (* (- 1.0 v) ee-size))]
+
+    [:div {:class (stl/css :easing-editor)}
+     [:div {:class (stl/css :easing-presets)}
+      (for [{:keys [id label]} easing-presets]
+        [:button {:key (name id)
+                  :class (stl/css :preset-btn)
+                  :on-click #(st/emit! (dwa/set-keyframe-easing shape-id keyframe-id id))}
+         label])]
+     [:svg {:class (stl/css :easing-svg)
+            :ref svg-ref
+            :width ee-size :height ee-size}
+      [:line {:x1 0 :y1 (uy 0.0) :x2 (ux x1) :y2 (uy y1) :class (stl/css :easing-handle-line)}]
+      [:line {:x1 ee-size :y1 (uy 1.0) :x2 (ux x2) :y2 (uy y2) :class (stl/css :easing-handle-line)}]
+      [:path {:d (dm/str "M0," (uy 0.0)
+                         " C" (ux x1) "," (uy y1)
+                         " " (ux x2) "," (uy y2)
+                         " " ee-size "," (uy 1.0))
+              :class (stl/css :easing-curve)}]
+      ;; pointer capture (set on pointer-down) routes move/up to the handle
+      [:circle {:cx (ux x1) :cy (uy y1) :r 6 :class (stl/css :easing-handle)
+                :on-pointer-down (fn [e] (on-handle-down :p1 e))
+                :on-pointer-move on-move
+                :on-pointer-up on-up}]
+      [:circle {:cx (ux x2) :cy (uy y2) :r 6 :class (stl/css :easing-handle)
+                :on-pointer-down (fn [e] (on-handle-down :p2 e))
+                :on-pointer-move on-move
+                :on-pointer-up on-up}]]]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ROOT
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -239,6 +340,12 @@
         auto-key?  (get anim :auto-key? false)
         duration   (get timeline :duration 1000)
         selected?  (boolean (seq selected))
+
+        selected-kf (:selected-kf anim)
+        selected-keyframe
+        (when selected-kf
+          (->> (get-in timeline [:tracks (:shape-id selected-kf) :keyframes])
+               (d/seek #(= (:id %) (:keyframe-id selected-kf)))))
 
         ruler-ref  (mf/use-ref nil)
         drag-ref   (mf/use-ref false)
@@ -282,25 +389,34 @@
                       :selected? selected?}]
 
         [:div {:class (stl/css :timeline-body)}
-         [:div {:class (stl/css :ruler)
-                :ref ruler-ref
-                :on-pointer-down on-ruler-down
-                :on-pointer-move on-ruler-move
-                :on-pointer-up on-ruler-up}
-          [:span {:class (stl/css :ruler-time)} (dm/str playhead " / " duration " ms")]
-          [:div {:class (stl/css :playhead)
-                 :style #js {"left" (time->pct playhead duration)}}]]
+         [:div {:class (stl/css :timeline-main)}
+          [:div {:class (stl/css :ruler)
+                 :ref ruler-ref
+                 :on-pointer-down on-ruler-down
+                 :on-pointer-move on-ruler-move
+                 :on-pointer-up on-ruler-up}
+           [:span {:class (stl/css :ruler-time)} (dm/str playhead " / " duration " ms")]
+           [:div {:class (stl/css :playhead)
+                  :style #js {"left" (time->pct playhead duration)}}]]
 
-         [:div {:class (stl/css :tracks)}
-          ;; playhead line spanning the tracks area
-          [:div {:class (stl/css :playhead-line)
-                 :style #js {"left" (time->pct playhead duration)}}]
+          [:div {:class (stl/css :tracks)}
+           ;; playhead line spanning the tracks area
+           [:div {:class (stl/css :playhead-line)
+                  :style #js {"left" (time->pct playhead duration)}}]
 
-          (if (seq (:tracks timeline))
-            (for [[shape-id track] (:tracks timeline)]
-              [:> track* {:key (dm/str shape-id)
-                          :track track
-                          :shape-name (get-in objects [shape-id :name] "?")
-                          :duration duration}])
-            [:div {:class (stl/css :tracks-hint)}
-             (tr "workspace.animation.tracks-hint")])]]])]))
+           (if (seq (:tracks timeline))
+             (for [[shape-id track] (:tracks timeline)]
+               [:> track* {:key (dm/str shape-id)
+                           :track track
+                           :shape-name (get-in objects [shape-id :name] "?")
+                           :duration duration
+                           :selected-kf selected-kf}])
+             [:div {:class (stl/css :tracks-hint)}
+              (tr "workspace.animation.tracks-hint")])]]
+
+         (when selected-keyframe
+           [:div {:class (stl/css :easing-panel)}
+            [:span {:class (stl/css :easing-title)} (tr "workspace.animation.easing")]
+            [:> easing-editor* {:shape-id (:shape-id selected-kf)
+                                :keyframe-id (:keyframe-id selected-kf)
+                                :easing (:easing selected-keyframe)}]])]]])]))

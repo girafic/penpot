@@ -6797,6 +6797,9 @@ msgstr "Loop"
 msgid "workspace.animation.duration"
 msgstr "Duration"
 
+msgid "workspace.animation.easing"
+msgstr "Easing"
+
 msgid "workspace.animation.add-keyframe"
 msgstr "Add keyframe"
 

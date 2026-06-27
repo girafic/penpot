@@ -94,7 +94,8 @@
       (-> state
           (assoc-in [:workspace-animation :current-id] id)
           (assoc-in [:workspace-animation :playhead] 0)
-          (assoc-in [:workspace-animation :playing?] false)))))
+          (assoc-in [:workspace-animation :playing?] false)
+          (update :workspace-animation dissoc :selected-kf)))))
 
 (defn delete-timeline
   [id]
@@ -205,6 +206,17 @@
           (rx/of (commit-timeline it state (:id tl') tl')
                  (apply-preview)))
         (rx/empty)))))
+
+(defn select-keyframe
+  "Mark a keyframe as selected (for the easing editor). `nil` clears it."
+  [shape-id keyframe-id]
+  (ptk/reify ::select-keyframe
+    ptk/UpdateEvent
+    (update [_ state]
+      (if (and shape-id keyframe-id)
+        (assoc-in state [:workspace-animation :selected-kf]
+                  {:shape-id shape-id :keyframe-id keyframe-id})
+        (update state :workspace-animation dissoc :selected-kf)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PLAYBACK & PREVIEW
