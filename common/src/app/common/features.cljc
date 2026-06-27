@@ -58,7 +58,8 @@
     "text-editor-wasm/v1"
     "render-wasm/v1"
     "wasm-export/v1"
-    "variants/v1"})
+    "variants/v1"
+    "animation/v1"})
 
 ;; A set of features enabled by default
 (def default-features
@@ -84,7 +85,8 @@
     "text-editor-wasm/v1"
     "tokens/numeric-input"
     "render-wasm/v1"
-    "wasm-export/v1"})
+    "wasm-export/v1"
+    "animation/v1"})
 
 ;; Features that are mainly backend only or there are a proper
 ;; fallback when frontend reports no support for it
@@ -136,6 +138,7 @@
     :feature-render-wasm "render-wasm/v1"
     :feature-variants "variants/v1"
     :feature-token-input "tokens/numeric-input"
+    :feature-animation "animation/v1"
     nil))
 
 (defn migrate-legacy-features
