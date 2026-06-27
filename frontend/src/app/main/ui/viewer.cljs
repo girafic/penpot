@@ -12,7 +12,9 @@
    [app.common.exceptions :as ex]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
+   [app.common.geom.shapes :as gsh]
    [app.common.geom.shapes.bounds :as gsb]
+   [app.common.types.animation :as cta]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.types.text :as txt]
    [app.main.data.comments :as dcm]
@@ -50,6 +52,29 @@
 
 (def current-overlays-ref
   (l/derived :viewer-overlays st/state))
+
+(def ^:private viewer-timeline-ref
+  (l/derived #(dm/get-in % [:viewer-local :timeline]) st/state))
+
+(defn- animate-page
+  "When a timeline is active, return `page` with its objects recomputed at
+  the current playback time (transforms via the modifiers engine, opacity
+  as a per-shape override). Otherwise return `page` unchanged."
+  [page {:keys [timeline-id time] :as _viewer-timeline}]
+  (let [timeline (dm/get-in page [:timelines timeline-id])]
+    (if (nil? timeline)
+      page
+      (let [objects    (:objects page)
+            time       (or time 0)
+            modif-tree (cta/timeline->modif-tree timeline objects time)
+            objects'   (gsh/apply-objects-modifiers objects modif-tree)
+            opacity    (cta/timeline->opacity timeline time)
+            objects'   (reduce-kv
+                        (fn [objs shape-id op]
+                          (d/update-when objs shape-id assoc :opacity op))
+                        objects'
+                        opacity)]
+        (assoc page :objects objects')))))
 
 (defn- calculate-size
   "Calculate the total size we must reserve for the frame, including possible paddings
@@ -299,13 +324,19 @@
         viewer-section-ref   (mf/use-ref nil)
 
         current-animations (mf/deref current-animations-ref)
+        viewer-timeline    (mf/deref viewer-timeline-ref)
 
         page-id (or page-id (-> file :data :pages first))
 
-        page (mf/use-memo
-              (mf/deps data page-id)
-              (fn []
-                (get-in data [:pages page-id])))
+        base-page (mf/use-memo
+                   (mf/deps data page-id)
+                   (fn []
+                     (get-in data [:pages page-id])))
+
+        ;; When a timeline is playing/scrubbed, render shapes recomputed at
+        ;; the current time; otherwise render the page as-is.
+        page (mf/with-memo [base-page viewer-timeline]
+               (animate-page base-page viewer-timeline))
 
         text-shapes
         (hooks/use-equal-memo
@@ -566,6 +597,29 @@
                                 :class (stl/css-case :viewer-section true
                                                      :fullscreen fullscreen?)
                                 :on-click click-on-screen}
+
+       ;; Floating timeline-animation playback control (Penpot Motion).
+       ;; Shown when the page has timelines and we are not in inspect mode.
+       (let [timelines (:timelines base-page)]
+         (when (and (not= section :inspect) (seq timelines))
+           (let [tl-id    (or (:timeline-id viewer-timeline) (ffirst timelines))
+                 playing? (:playing? viewer-timeline)]
+             [:div {:style #js {"position" "absolute" "bottom" "16px" "left" "50%"
+                                "transform" "translateX(-50%)" "zIndex" 10
+                                "display" "flex" "gap" "8px" "padding" "6px 10px"
+                                "borderRadius" "8px"
+                                "background" "var(--color-background-primary)"
+                                "border" "1px solid var(--panel-border-color)"}
+                    :on-click dom/stop-propagation}
+              [:button {:style #js {"cursor" "pointer" "minWidth" "28px"}
+                        :title (tr "workspace.animation.play")
+                        :on-click #(st/emit! (dv/toggle-play-timeline tl-id))}
+               (if playing? "❚❚" "►")]
+              [:button {:style #js {"cursor" "pointer" "minWidth" "28px"}
+                        :title (tr "workspace.animation.rewind")
+                        :on-click #(st/emit! (dv/stop-timeline))}
+               "■"]])))
+
        (cond
          (empty? frames)
          [:section {:class (stl/css :empty-state)}
