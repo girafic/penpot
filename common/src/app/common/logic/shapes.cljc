@@ -278,9 +278,11 @@
                          changes
                          guides-to-delete)
 
-         ;; Prune keyframe-animation tracks that reference any deleted
-         ;; shape (mirrors the flows cleanup above). Uses the complete set
-         ;; of removed ids (targets + descendants + emptied parents).
+         ;; Keyframe-animation cleanup (timelines are keyed by board-id):
+         ;; - if the board itself is deleted, drop its whole timeline;
+         ;; - otherwise prune tracks that reference any deleted shape.
+         ;; Uses the complete set of removed ids (targets + descendants +
+         ;; emptied parents). Mirrors the flows cleanup above.
          all-deleted-ids
          (-> (set ids-to-delete)
              (into descendants-to-delete)
@@ -288,14 +290,18 @@
 
          changes (->> (:timelines page)
                       (reduce
-                       (fn [changes [timeline-id timeline]]
-                         (let [pruned (cta/remove-shapes timeline all-deleted-ids)]
-                           (if (= (:tracks pruned) (:tracks timeline))
-                             changes
-                             (-> changes
-                                 (pcb/with-page page)
-                                 (pcb/set-timeline timeline-id
-                                                   (when (seq (:tracks pruned)) pruned))))))
+                       (fn [changes [board-id timeline]]
+                         (if (contains? all-deleted-ids board-id)
+                           (-> changes
+                               (pcb/with-page page)
+                               (pcb/set-timeline board-id nil))
+                           (let [pruned (cta/remove-shapes timeline all-deleted-ids)]
+                             (if (= (:tracks pruned) (:tracks timeline))
+                               changes
+                               (-> changes
+                                   (pcb/with-page page)
+                                   (pcb/set-timeline board-id
+                                                     (when (seq (:tracks pruned)) pruned)))))))
                        changes))
 
          changes (reduce (fn [changes component-id]

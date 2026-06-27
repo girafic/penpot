@@ -12,6 +12,7 @@
   (:require
    [app.common.data.macros :as dm]
    [app.common.files.changes-builder :as pcb]
+   [app.common.files.helpers :as cfh]
    [app.common.types.animation :as cta]
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
@@ -35,13 +36,20 @@
   [state]
   (get (dsh/lookup-page state) :timelines))
 
-(defn current-timeline-id
+(defn active-board-id
+  "The board (top-level frame) the timeline dock currently targets,
+  derived from the selection: the selected board itself, or the root
+  frame containing the selected shapes. `nil` when nothing is selected."
   [state]
-  (dm/get-in state [:workspace-animation :current-id]))
+  (let [objects  (dsh/lookup-page-objects state)
+        selected (dsh/lookup-selected state)]
+    (when-let [shape-id (first selected)]
+      (cfh/get-shape-id-root-frame objects shape-id))))
 
 (defn current-timeline
+  "The timeline of the active board (timelines are keyed by board-id)."
   [state]
-  (get (get-timelines state) (current-timeline-id state)))
+  (get (get-timelines state) (active-board-id state)))
 
 (defn playhead
   [state]
@@ -61,51 +69,44 @@
     :scale-y  1
     nil))
 
-(declare select-timeline)
 (declare apply-preview)
 
 (defn- commit-timeline
-  "Build a change that sets (or, when `timeline` is nil, deletes) a
-  timeline on the current page."
-  [it state id timeline]
+  "Build a change that sets (or, when `timeline` is nil, deletes) the
+  timeline keyed by `board-id` on the current page."
+  [it state board-id timeline]
   (let [page (dsh/lookup-page state)]
     (dch/commit-changes
      (-> (pcb/empty-changes it)
          (pcb/with-page page)
-         (pcb/set-timeline id timeline)))))
+         (pcb/set-timeline board-id timeline)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TIMELINE CRUD
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn create-timeline
+  "Create a timeline for the active board (the board of the current
+  selection). No-op when there is no active board."
   ([] (create-timeline nil))
   ([opts]
    (ptk/reify ::create-timeline
      ptk/WatchEvent
      (watch [it state _]
-       (let [timeline (cta/make-timeline (or opts {}))]
-         (rx/of (commit-timeline it state (:id timeline) timeline)
-                (select-timeline (:id timeline))
-                (layout/toggle-layout-flag :animation-timeline :force? true)))))))
-
-(defn select-timeline
-  [id]
-  (ptk/reify ::select-timeline
-    ptk/UpdateEvent
-    (update [_ state]
-      (-> state
-          (assoc-in [:workspace-animation :current-id] id)
-          (assoc-in [:workspace-animation :playhead] 0)
-          (assoc-in [:workspace-animation :playing?] false)
-          (update :workspace-animation dissoc :selected-kf)))))
+       (if-let [board-id (active-board-id state)]
+         (let [objects  (dsh/lookup-page-objects state)
+               name     (or (:name opts) (:name (get objects board-id)) "Animation")
+               timeline (cta/make-timeline (merge opts {:board-id board-id :name name}))]
+           (rx/of (commit-timeline it state board-id timeline)
+                  (layout/toggle-layout-flag :animation-timeline :force? true)))
+         (rx/empty))))))
 
 (defn delete-timeline
-  [id]
+  [board-id]
   (ptk/reify ::delete-timeline
     ptk/WatchEvent
     (watch [it state _]
-      (rx/of (commit-timeline it state id nil)
+      (rx/of (commit-timeline it state board-id nil)
              (dwm/clear-local-transform)))))
 
 (defn- update-current-timeline
@@ -116,7 +117,7 @@
     (watch [it state _]
       (if-let [tl (current-timeline state)]
         (let [tl' (f tl)]
-          (rx/of (commit-timeline it state (:id tl') tl')
+          (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview)))
         (rx/empty)))))
 
@@ -160,7 +161,7 @@
                                                  :easing :ease}))))
                         tl
                         selected)]
-          (rx/of (commit-timeline it state (:id tl') tl')))
+          (rx/of (commit-timeline it state (:board-id tl') tl')))
         (rx/empty)))))
 
 (defn move-keyframe
@@ -171,7 +172,7 @@
       (if-let [tl (current-timeline state)]
         (let [tl' (cta/update-keyframe tl shape-id keyframe-id
                                        #(assoc % :time (max 0 (int time))))]
-          (rx/of (commit-timeline it state (:id tl') tl')
+          (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview)))
         (rx/empty)))))
 
@@ -183,7 +184,7 @@
       (if-let [tl (current-timeline state)]
         (let [tl' (cta/update-keyframe tl shape-id keyframe-id
                                        #(assoc % :value value))]
-          (rx/of (commit-timeline it state (:id tl') tl')
+          (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview)))
         (rx/empty)))))
 
@@ -195,7 +196,7 @@
       (if-let [tl (current-timeline state)]
         (let [tl' (cta/update-keyframe tl shape-id keyframe-id
                                        #(assoc % :easing easing))]
-          (rx/of (commit-timeline it state (:id tl') tl')
+          (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview)))
         (rx/empty)))))
 
@@ -206,7 +207,7 @@
     (watch [it state _]
       (if-let [tl (current-timeline state)]
         (let [tl' (cta/remove-keyframe tl shape-id keyframe-id)]
-          (rx/of (commit-timeline it state (:id tl') tl')
+          (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview)))
         (rx/empty)))))
 

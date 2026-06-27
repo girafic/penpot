@@ -67,9 +67,12 @@
    [:shape-id ::sm/uuid]
    [:keyframes [:vector {:gen/max 8} schema:keyframe]]])
 
+;; A timeline is scoped to a board (top-level frame). The page-level
+;; `:timelines` map is keyed by `:board-id`, so each board owns at most
+;; one timeline (like Figma Motion).
 (def schema:timeline
   [:map {:title "AnimationTimeline"}
-   [:id ::sm/uuid]
+   [:board-id ::sm/uuid]
    [:name :string]
    [:duration ::sm/safe-int]
    [:loop {:optional true} :boolean]
@@ -96,8 +99,10 @@
 (def default-duration 1000)
 
 (defn make-timeline
-  [{:keys [id name duration loop loop-count]}]
-  (cond-> {:id (or id (uuid/next))
+  "Create a timeline for `board-id` (a top-level frame). The page-level
+  `:timelines` map is keyed by this same board-id."
+  [{:keys [board-id name duration loop loop-count]}]
+  (cond-> {:board-id board-id
            :name (or name "Animation")
            :duration (or duration default-duration)
            :tracks {}}

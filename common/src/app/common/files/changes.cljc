@@ -138,6 +138,8 @@
     (sm/update-properties schema assoc :gen/gen gen)))
 
 (def schema:set-timeline-change
+  ;; `:id` is the board-id (top-level frame); the page `:timelines` map is
+  ;; keyed by it and the timeline carries the same value as `:board-id`.
   (let [schema [:map {:title "SetTimelineChange"}
                 [:type [:= :set-timeline]]
                 [:page-id ::sm/uuid]
@@ -147,7 +149,7 @@
         gen    (->> (sg/generator schema)
                     (sg/fmap (fn [change]
                                (if (some? (:params change))
-                                 (update change :params assoc :id (:id change))
+                                 (update change :params assoc :board-id (:id change))
                                  change))))]
 
     (sm/update-properties schema assoc :gen/gen gen)))
@@ -582,7 +584,7 @@
                             (dissoc page :timelines)
                             (assoc page :timelines timelines)))))
 
-    (let [params (assoc params :id id)]
+    (let [params (assoc params :board-id id)]
       (d/update-in-when data [:pages-index page-id] update :timelines assoc id params))))
 
 ;; --- Grids

@@ -6821,6 +6821,12 @@ msgstr "REC"
 msgid "workspace.animation.empty"
 msgstr "No animation yet."
 
+msgid "workspace.animation.empty-board"
+msgstr "No animation for “%s” yet."
+
+msgid "workspace.animation.select-board"
+msgstr "Select a board to animate."
+
 msgid "workspace.animation.create"
 msgstr "Create animation"
 

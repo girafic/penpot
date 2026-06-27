@@ -13,15 +13,20 @@
    [clojure.test :as t]))
 
 (defn- mk-timeline []
-  (cta/make-timeline {:name "Test" :duration 1000}))
+  (cta/make-timeline {:board-id (uuid/next) :name "Test" :duration 1000}))
 
 (t/deftest make-timeline-defaults
-  (let [tl (cta/make-timeline {})]
-    (t/is (uuid? (:id tl)))
+  (let [board-id (uuid/next)
+        tl (cta/make-timeline {:board-id board-id})]
+    (t/is (= board-id (:board-id tl)))
     (t/is (= "Animation" (:name tl)))
     (t/is (= cta/default-duration (:duration tl)))
     (t/is (= {} (:tracks tl)))
     (t/is (cta/valid-timeline? tl))))
+
+(t/deftest timeline-requires-board-id
+  (t/is (cta/valid-timeline? (mk-timeline)))
+  (t/is (not (cta/valid-timeline? (dissoc (mk-timeline) :board-id)))))
 
 (t/deftest add-and-remove-keyframe
   (let [sid (uuid/next)
@@ -144,7 +149,7 @@
   (let [shape (cts/setup-shape {:type :rect :x 10 :y 20 :width 100 :height 100})
         sid   (:id shape)
         bx    (-> shape :selrect :x)
-        tl    (-> (cta/make-timeline {:duration 1000 :loop true})
+        tl    (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000 :loop true})
                   (cta/add-keyframe sid {:time 0 :property :x :value bx :easing :ease-in})
                   (cta/add-keyframe sid {:time 1000 :property :x :value (+ bx 100)})
                   (cta/add-keyframe sid {:time 0 :property :opacity :value 1})

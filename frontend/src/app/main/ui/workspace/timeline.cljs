@@ -12,6 +12,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.main.data.workspace.animation :as dwa]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -141,7 +142,7 @@
 
 (mf/defc toolbar*
   {::mf/private true}
-  [{:keys [timeline playing? auto-key? selected?]}]
+  [{:keys [timeline board-name playing? auto-key? selected?]}]
   (let [duration (:duration timeline)
 
         on-toggle-play
@@ -179,6 +180,8 @@
         (mf/use-fn #(st/emit! (dwa/close-timeline)))]
 
     [:div {:class (stl/css :toolbar)}
+     (when board-name
+       [:span {:class (stl/css :board-name) :title board-name} board-name])
      [:div {:class (stl/css :playback-controls)}
       [:button {:class (stl/css-case :play-btn true :active playing?)
                 :title (tr "workspace.animation.play")
@@ -326,13 +329,16 @@
 
 (mf/defc empty-state*
   {::mf/private true}
-  []
+  [{:keys [board-name]}]
   (let [on-create (mf/use-fn #(st/emit! (dwa/create-timeline)))]
     [:div {:class (stl/css :empty-state)}
-     [:p (tr "workspace.animation.empty")]
-     [:button {:class (stl/css :create-btn)
-               :on-click on-create}
-      (tr "workspace.animation.create")]]))
+     (if board-name
+       [:*
+        [:p (tr "workspace.animation.empty-board" board-name)]
+        [:button {:class (stl/css :create-btn)
+                  :on-click on-create}
+         (tr "workspace.animation.create")]]
+       [:p (tr "workspace.animation.select-board")])]))
 
 (mf/defc timeline*
   []
@@ -341,8 +347,11 @@
         objects    (mf/deref refs/workspace-page-objects)
         selected   (mf/deref refs/selected-shapes)
 
-        current-id (:current-id anim)
-        timeline   (get timelines current-id)
+        ;; The dock targets the board (top-level frame) of the selection.
+        board-id   (when-let [sid (:id (first selected))]
+                     (cfh/get-shape-id-root-frame objects sid))
+        board-name (get-in objects [board-id :name])
+        timeline   (get timelines board-id)
         playhead   (get anim :playhead 0)
         playing?   (get anim :playing? false)
         auto-key?  (get anim :auto-key? false)
@@ -389,9 +398,10 @@
 
     [:section {:class (stl/css :timeline-dock)}
      (if (nil? timeline)
-       [:> empty-state* {}]
+       [:> empty-state* {:board-name board-name}]
        [:*
         [:> toolbar* {:timeline timeline
+                      :board-name board-name
                       :playing? playing?
                       :auto-key? auto-key?
                       :selected? selected?}]

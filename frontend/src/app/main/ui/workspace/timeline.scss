@@ -35,6 +35,15 @@ $dock-height: 240px;
   border-bottom: 1px solid var(--panel-border-color);
 }
 
+.board-name {
+  font-weight: 600;
+  color: var(--color-foreground-primary);
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .playback-controls {
   display: flex;
   align-items: center;
