@@ -33,7 +33,8 @@
     :display-artboard-names
     :snap-ruler-guides
     :show-pixel-grid
-    :snap-pixel-grid})
+    :snap-pixel-grid
+    :animation-timeline})
 
 (def presets
   {:assets
