@@ -133,3 +133,26 @@
     (t/testing "accepts a set of ids (as used by the deletion path)"
       (let [tl3 (cta/remove-shapes tl #{a b})]
         (t/is (empty? (:tracks tl3)))))))
+
+(t/deftest easing->css-output
+  (t/is (= "linear" (cta/easing->css :linear)))
+  (t/is (= "ease-in-out" (cta/easing->css :ease-in-out)))
+  (t/is (= "cubic-bezier(0.42, 0, 0.58, 1)"
+           (cta/easing->css {:type :bezier :curve [0.42 0.0 0.58 1.0]}))))
+
+(t/deftest timeline->css-output
+  (let [shape (cts/setup-shape {:type :rect :x 10 :y 20 :width 100 :height 100})
+        sid   (:id shape)
+        bx    (-> shape :selrect :x)
+        tl    (-> (cta/make-timeline {:duration 1000 :loop true})
+                  (cta/add-keyframe sid {:time 0 :property :x :value bx :easing :ease-in})
+                  (cta/add-keyframe sid {:time 1000 :property :x :value (+ bx 100)})
+                  (cta/add-keyframe sid {:time 0 :property :opacity :value 1})
+                  (cta/add-keyframe sid {:time 1000 :property :opacity :value 0}))
+        css   (cta/timeline->css tl {sid shape})]
+    (t/is (re-find #"@keyframes penpot-anim-" css))
+    (t/is (re-find #"\.penpot-shape-" css))
+    (t/is (re-find #"translate\(100px, 0px\)" css))
+    (t/is (re-find #"opacity: 0;" css))
+    (t/is (re-find #"animation-timing-function: ease-in;" css))
+    (t/is (re-find #"linear infinite;" css))))
