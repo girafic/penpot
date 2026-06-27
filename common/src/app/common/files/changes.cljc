@@ -15,6 +15,7 @@
    [app.common.schema :as sm]
    [app.common.schema.desc-native :as smd]
    [app.common.schema.generators :as sg]
+   [app.common.types.animation :as cta]
    [app.common.types.color :as ctc]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
@@ -136,6 +137,21 @@
 
     (sm/update-properties schema assoc :gen/gen gen)))
 
+(def schema:set-timeline-change
+  (let [schema [:map {:title "SetTimelineChange"}
+                [:type [:= :set-timeline]]
+                [:page-id ::sm/uuid]
+                [:id ::sm/uuid]
+                [:params [:maybe cta/schema:timeline]]]
+
+        gen    (->> (sg/generator schema)
+                    (sg/fmap (fn [change]
+                               (if (some? (:params change))
+                                 (update change :params assoc :id (:id change))
+                                 change))))]
+
+    (sm/update-properties schema assoc :gen/gen gen)))
+
 (def schema:set-plugin-data-change
   (let [types  #{:file :page :shape :color :typography :component}
 
@@ -216,6 +232,7 @@
 
    [:set-guide schema:set-guide-change]
    [:set-flow schema:set-flow-change]
+   [:set-timeline schema:set-timeline-change]
    [:set-default-grid schema:set-default-grid-change]
 
    [:fix-obj
@@ -551,6 +568,22 @@
 
     (let [params (assoc params :id id)]
       (d/update-in-when data [:pages-index page-id] update :flows assoc id params))))
+
+;; --- Timelines (keyframe animations)
+
+(defmethod process-change :set-timeline
+  [data {:keys [page-id id params]}]
+  (if (nil? params)
+    (d/update-in-when data [:pages-index page-id]
+                      (fn [page]
+                        (let [timelines (get page :timelines)
+                              timelines (dissoc timelines id)]
+                          (if (empty? timelines)
+                            (dissoc page :timelines)
+                            (assoc page :timelines timelines)))))
+
+    (let [params (assoc params :id id)]
+      (d/update-in-when data [:pages-index page-id] update :timelines assoc id params))))
 
 ;; --- Grids
 

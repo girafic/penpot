@@ -167,6 +167,10 @@
     ;; Activates the nitrate module
     :nitrate
 
+    ;; Enables the keyframe-based timeline animation feature
+    ;; (a.k.a. Penpot Motion). Maps to the "animation/v1" file feature.
+    :feature-animation
+
     :mcp
     :background-blur
     :available-viewer-wasm

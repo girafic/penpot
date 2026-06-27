@@ -364,6 +364,27 @@
     ;; FIXME: not sure if we need this
     (apply-changes-local changes)))
 
+(defn set-timeline
+  "Set (or, when `timeline` is nil, delete) a page level keyframe
+  animation timeline. Mirrors `set-flow`."
+  [changes id timeline]
+  (assert-page-id! changes)
+  (assert-page! changes)
+  (let [page-id (::page-id (meta changes))
+        page    (::page (meta changes))
+        old-val (dm/get-in page [:timelines id])
+
+        changes (-> changes
+                    (update :redo-changes conj {:type :set-timeline
+                                                :page-id page-id
+                                                :id id
+                                                :params timeline})
+                    (update :undo-changes conj {:type :set-timeline
+                                                :page-id page-id
+                                                :id id
+                                                :params old-val}))]
+    (apply-changes-local changes)))
+
 (defn set-comment-thread-position
   [changes {:keys [id frame-id position] :as thread}]
   (assert-page-id! changes)
