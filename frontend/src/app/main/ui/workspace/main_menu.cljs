@@ -342,6 +342,7 @@
    ::mf/wrap [mf/memo]}
   [{:keys [layout toggle-flag on-close]}]
   (let [read-only?   (mf/use-ctx ctx/workspace-read-only?)
+        animation?   (features/use-feature "animation/v1")
 
         toggle-color-palette
         (mf/use-fn
@@ -422,6 +423,19 @@
          (tr "workspace.header.menu.hide-comments")
          (tr "workspace.header.menu.show-comments"))]
       [:> shortcuts* {:id :toggle-comments-visibility}]]
+     (when (and animation? (not ^boolean read-only?))
+       [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
+                                :on-click    toggle-flag
+                                :on-key-down (fn [event]
+                                               (when (kbd/enter? event)
+                                                 (toggle-flag event)))
+                                :data-testid "animation-timeline"
+                                :id          "file-menu-animation-timeline"}
+        [:span {:class (stl/css :item-name)}
+         (if (contains? layout :animation-timeline)
+           (tr "workspace.header.menu.hide-timeline")
+           (tr "workspace.header.menu.show-timeline"))]])
+
 
      (when-not ^boolean read-only?
        [:*
