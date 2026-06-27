@@ -128,4 +128,8 @@
                (cta/add-keyframe b {:time 0 :property :y :value 0}))
         tl2 (cta/remove-shapes tl [a])]
     (t/is (nil? (cta/get-track tl2 a)))
-    (t/is (some? (cta/get-track tl2 b)))))
+    (t/is (some? (cta/get-track tl2 b)))
+
+    (t/testing "accepts a set of ids (as used by the deletion path)"
+      (let [tl3 (cta/remove-shapes tl #{a b})]
+        (t/is (empty? (:tracks tl3)))))))
