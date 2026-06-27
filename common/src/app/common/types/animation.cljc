@@ -256,10 +256,11 @@
   (some #(contains? values %) props))
 
 (defn- shape->modifiers
-  "Build a single modifiers record applying the animated transform
-  properties (position / scale / rotation) for `shape`, given the
-  interpolated absolute `values` for this shape. Opacity is handled
-  separately (not expressible as a transform modifier)."
+  "Build a single modifiers record for `shape` from the interpolated
+  absolute `values`. Position/scale/rotation become geometry modifiers;
+  opacity becomes a `:change-property` structure modifier so it rides the
+  same modifier pipeline in every renderer (SVG via `transform-shape`,
+  WASM via `set-shape-opacity`) and in export."
   [shape values]
   (let [selrect (:selrect shape)
         base-x  (:x selrect)
@@ -280,13 +281,17 @@
       (ctm/move (gpt/point (- target-x base-x) (- target-y base-y)))
 
       (has? values :rotation)
-      (ctm/rotation center (- target-r base-r)))))
+      (ctm/rotation center (- target-r base-r))
+
+      (has? values :opacity)
+      (ctm/change-property :opacity (get values :opacity)))))
 
 (defn timeline->modif-tree
-  "Compute a transient modif-tree `{shape-id {:modifiers ...}}` for the
-  transform properties (x/y/scale/rotation) of `timeline` at `time`.
-  Designed to be fed to `set-modifiers` (editor preview) or applied
-  through `transform-shape` (viewer)."
+  "Compute a transient modif-tree `{shape-id {:modifiers ...}}` for
+  `timeline` at `time`, covering transforms (x/y/scale/rotation) and
+  opacity (as a change-property modifier). Designed to be fed to
+  `set-modifiers` / `set-wasm-modifiers` (editor preview) or applied
+  through `transform-shape` (viewer/export)."
   [timeline objects time]
   (reduce-kv
    (fn [tree shape-id values]

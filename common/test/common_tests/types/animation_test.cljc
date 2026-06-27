@@ -8,6 +8,7 @@
   (:require
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.modifiers :as ctm]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [clojure.test :as t]))
@@ -124,6 +125,23 @@
     (t/is (not (contains? tree0 sid)))
     (t/is (contains? tree1 sid))
     (t/is (some? (get-in tree1 [sid :modifiers])))))
+
+(t/deftest opacity-is-a-change-property-modifier
+  ;; Opacity must ride the modifier pipeline (so it works in the WASM
+  ;; renderer via set-shape-opacity, and in SVG/export via transform-shape).
+  (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
+        sid   (:id shape)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe sid {:time 0 :property :opacity :value 1})
+                  (cta/add-keyframe sid {:time 1000 :property :opacity :value 0}))
+        tree  (cta/timeline->modif-tree tl {sid shape} 500)
+        modifiers (get-in tree [sid :modifiers])]
+    (t/testing "opacity-only track still yields a (non-empty) modifier"
+      (t/is (contains? tree sid))
+      (t/is (not (ctm/empty? modifiers))))
+    (t/testing "applying the modifier sets the interpolated opacity"
+      (let [shape' (ctm/apply-structure-modifiers shape modifiers)]
+        (t/is (mth/close? 0.5 (double (:opacity shape')) 0.001))))))
 
 (t/deftest remove-shapes-drops-tracks
   (let [a (uuid/next)

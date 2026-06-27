@@ -58,8 +58,9 @@
 
 (defn- animate-page
   "When a timeline is active, return `page` with its objects recomputed at
-  the current playback time (transforms via the modifiers engine, opacity
-  as a per-shape override). Otherwise return `page` unchanged."
+  the current playback time. `timeline->modif-tree` covers transforms and
+  opacity (the latter as a change-property modifier applied by
+  `transform-shape`). Otherwise return `page` unchanged."
   [page {:keys [timeline-id time] :as _viewer-timeline}]
   (let [timeline (dm/get-in page [:timelines timeline-id])]
     (if (nil? timeline)
@@ -67,13 +68,7 @@
       (let [objects    (:objects page)
             time       (or time 0)
             modif-tree (cta/timeline->modif-tree timeline objects time)
-            objects'   (gsh/apply-objects-modifiers objects modif-tree)
-            opacity    (cta/timeline->opacity timeline time)
-            objects'   (reduce-kv
-                        (fn [objs shape-id op]
-                          (d/update-when objs shape-id assoc :opacity op))
-                        objects'
-                        opacity)]
+            objects'   (gsh/apply-objects-modifiers objects modif-tree)]
         (assoc page :objects objects')))))
 
 (defn- calculate-size

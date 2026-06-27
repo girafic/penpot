@@ -18,6 +18,7 @@
    [app.main.data.helpers :as dsh]
    [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.modifiers :as dwm]
+   [app.main.features :as features]
    [app.util.dom :as dom]
    [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
@@ -227,10 +228,16 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn apply-preview
-  "Recompute and apply the transient transform modifiers for the current
-  timeline at the playhead (editor scrubbing/playback preview). Opacity
-  is animated in viewer/export; the editor preview covers the transform
-  properties through the existing workspace-modifiers merge."
+  "Recompute and apply the transient modifiers for the current timeline at
+  the playhead (editor scrubbing/playback preview). The modif-tree covers
+  transforms AND opacity (as a change-property modifier).
+
+  Renderer-aware: with the WASM renderer (`render-wasm/v1`) the modifiers
+  are pushed to the WASM canvas via `set-wasm-modifiers` (transforms for
+  every shape + opacity via `set-shape-opacity`); with the classic SVG
+  renderer they go through `set-modifiers` (transforms preview live via
+  `use-dynamic-modifiers`; opacity preview is not shown by that legacy
+  path). When there is no active timeline, any stale preview is cleared."
   []
   (ptk/reify ::apply-preview
     ptk/WatchEvent
@@ -239,8 +246,10 @@
         (let [objects    (dsh/lookup-page-objects state)
               time       (playhead state)
               modif-tree (cta/timeline->modif-tree tl objects time)]
-          (rx/of (dwm/set-modifiers modif-tree)))
-        (rx/empty)))))
+          (if ^boolean (features/active-feature? state "render-wasm/v1")
+            (rx/of (dwm/set-wasm-modifiers modif-tree))
+            (rx/of (dwm/set-modifiers modif-tree))))
+        (rx/of (dwm/clear-local-transform))))))
 
 (defn set-playhead
   [time]
