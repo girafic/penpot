@@ -31,6 +31,7 @@
    [app.main.ui.workspace.plugins]
    [app.main.ui.workspace.sidebar :refer [sidebar*]]
    [app.main.ui.workspace.sidebar.history :refer [history-toolbox*]]
+   [app.main.ui.workspace.timeline :refer [timeline*]]
    [app.main.ui.workspace.tokens.export]
    [app.main.ui.workspace.tokens.export.modal]
    [app.main.ui.workspace.tokens.import]
@@ -71,6 +72,8 @@
         colorpalette?  (:colorpalette layout)
         textpalette?   (:textpalette layout)
         hide-ui?       (:hide-ui layout)
+        animation?     (features/use-feature "animation/v1")
+        timeline?      (and animation? (:animation-timeline layout))
 
         on-resize
         (mf/use-fn
@@ -114,6 +117,9 @@
          :palete-size
          (when (and (or colorpalette? textpalette?) (not hide-ui?))
            @palete-size)}]]]
+
+     (when (and timeline? (not hide-ui?))
+       [:> timeline*])
 
      (when-not hide-ui?
        [:> sidebar* {:layout layout

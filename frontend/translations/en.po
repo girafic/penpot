@@ -6779,6 +6779,63 @@ msgstr "Hide comments"
 msgid "workspace.header.menu.hide-guides"
 msgstr "Hide guides"
 
+msgid "workspace.header.menu.hide-timeline"
+msgstr "Hide animation timeline"
+
+msgid "workspace.header.menu.show-timeline"
+msgstr "Show animation timeline"
+
+msgid "workspace.animation.play"
+msgstr "Play / pause"
+
+msgid "workspace.animation.rewind"
+msgstr "Rewind to start"
+
+msgid "workspace.animation.loop"
+msgstr "Loop"
+
+msgid "workspace.animation.duration"
+msgstr "Duration"
+
+msgid "workspace.animation.easing"
+msgstr "Easing"
+
+msgid "workspace.animation.export"
+msgstr "Export"
+
+msgid "workspace.animation.export-css"
+msgstr "Export animation as CSS @keyframes"
+
+msgid "workspace.animation.export-lottie"
+msgstr "Export animation as Lottie (JSON)"
+
+msgid "workspace.animation.add-keyframe"
+msgstr "Add keyframe"
+
+msgid "workspace.animation.select-shape"
+msgstr "Select a shape to add a keyframe"
+
+msgid "workspace.animation.auto-keyframe"
+msgstr "Auto-record keyframes"
+
+msgid "workspace.animation.rec"
+msgstr "REC"
+
+msgid "workspace.animation.empty"
+msgstr "No animation yet."
+
+msgid "workspace.animation.empty-board"
+msgstr "No animation for “%s” yet."
+
+msgid "workspace.animation.select-board"
+msgstr "Select a board to animate."
+
+msgid "workspace.animation.create"
+msgstr "Create animation"
+
+msgid "workspace.animation.tracks-hint"
+msgstr "Select a shape and add a keyframe to start animating."
+
 #: src/app/main/ui/workspace/main_menu.cljs:435
 msgid "workspace.header.menu.hide-palette"
 msgstr "Hide color palette"

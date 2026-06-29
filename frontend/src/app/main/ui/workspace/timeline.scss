@@ -1,0 +1,323 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "ds/spacing.scss" as *;
+@use "ds/z-index.scss" as *;
+@use "refactor/common-refactor.scss" as deprecated;
+
+$track-label-width: 160px;
+$dock-height: 240px;
+
+.timeline-dock {
+  position: absolute;
+  left: var(--left-sidebar-width, 318px);
+  right: var(--right-sidebar-width, 318px);
+  bottom: 0;
+  height: $dock-height;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-background-primary);
+  border-top: 1px solid var(--panel-border-color);
+  z-index: deprecated.$z-index-2;
+  font-size: deprecated.$fs-12;
+  color: var(--color-foreground-secondary);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-8;
+  height: 40px;
+  padding: 0 deprecated.$s-8;
+  border-bottom: 1px solid var(--panel-border-color);
+}
+
+.board-name {
+  font-weight: 600;
+  color: var(--color-foreground-primary);
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.playback-controls {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+}
+
+.play-btn,
+.ctrl-btn,
+.close-btn,
+.prop-btn,
+.create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+  height: 28px;
+  padding: 0 deprecated.$s-8;
+  border: 1px solid transparent;
+  border-radius: deprecated.$br-8;
+  background-color: var(--color-background-tertiary);
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-quaternary);
+  }
+
+  &.active {
+    background-color: var(--color-accent-primary-muted);
+    color: var(--color-accent-primary);
+    border-color: var(--color-accent-primary);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.pause-icon {
+  width: 10px;
+  height: 12px;
+  border-left: 3px solid currentColor;
+  border-right: 3px solid currentColor;
+}
+
+.duration-field {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+
+  input {
+    width: 72px;
+    height: 28px;
+    padding: 0 deprecated.$s-8;
+    border: 1px solid var(--panel-border-color);
+    border-radius: deprecated.$br-8;
+    background-color: var(--color-background-tertiary);
+    color: var(--color-foreground-primary);
+  }
+}
+
+.add-keyframe-group {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+  flex-wrap: wrap;
+
+  .group-label {
+    margin-right: deprecated.$s-4;
+  }
+}
+
+.close-btn {
+  margin-left: auto;
+}
+
+.timeline-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.timeline-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ruler {
+  position: relative;
+  height: 24px;
+  margin-left: $track-label-width;
+  border-bottom: 1px solid var(--panel-border-color);
+  cursor: ew-resize;
+  user-select: none;
+
+  .ruler-time {
+    position: absolute;
+    right: deprecated.$s-8;
+    top: 4px;
+    font-size: deprecated.$fs-10;
+    color: var(--color-foreground-secondary);
+    pointer-events: none;
+  }
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 100%;
+  border-left: 2px solid var(--color-accent-primary);
+  transform: translateX(-1px);
+}
+
+.tracks {
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.playhead-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  margin-left: $track-label-width;
+  width: 0;
+  border-left: 1px solid var(--color-accent-primary);
+  pointer-events: none;
+  z-index: deprecated.$z-index-1;
+}
+
+.tracks-hint {
+  padding: deprecated.$s-16;
+  color: var(--color-foreground-secondary);
+}
+
+.track {
+  border-bottom: 1px solid var(--panel-border-color);
+}
+
+.track-header {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  width: $track-label-width;
+  padding: 0 deprecated.$s-8;
+
+  .track-name {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--color-foreground-primary);
+  }
+}
+
+.track-lanes {
+  display: flex;
+  flex-direction: column;
+}
+
+.lane-row {
+  display: flex;
+  align-items: center;
+  height: 24px;
+}
+
+.lane-label {
+  width: $track-label-width;
+  padding: 0 deprecated.$s-8;
+  flex: none;
+  color: var(--color-foreground-secondary);
+}
+
+.property-lane {
+  position: relative;
+  height: 100%;
+  flex: 1;
+  margin-right: deprecated.$s-8;
+  background-color: var(--color-background-tertiary);
+  border-radius: deprecated.$br-8;
+}
+
+.keyframe {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  transform: translateY(-50%) rotate(45deg);
+  background-color: var(--color-accent-primary);
+  border: 1px solid var(--color-background-primary);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-accent-secondary);
+  }
+
+  &.selected {
+    background-color: var(--color-accent-secondary);
+    border-color: var(--color-accent-primary);
+  }
+}
+
+.easing-panel {
+  display: flex;
+  flex-direction: column;
+  gap: deprecated.$s-8;
+  width: 160px;
+  flex: none;
+  padding: deprecated.$s-8;
+  border-left: 1px solid var(--panel-border-color);
+}
+
+.easing-title {
+  color: var(--color-foreground-primary);
+}
+
+.easing-editor {
+  display: flex;
+  flex-direction: column;
+  gap: deprecated.$s-8;
+}
+
+.easing-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: deprecated.$s-4;
+
+  .preset-btn {
+    height: 22px;
+    padding: 0 deprecated.$s-8;
+    border: 1px solid var(--panel-border-color);
+    border-radius: deprecated.$br-8;
+    background-color: var(--color-background-tertiary);
+    color: var(--color-foreground-secondary);
+    cursor: pointer;
+
+    &:hover {
+      background-color: var(--color-background-quaternary);
+    }
+  }
+}
+
+.easing-svg {
+  background-color: var(--color-background-tertiary);
+  border: 1px solid var(--panel-border-color);
+  border-radius: deprecated.$br-8;
+  touch-action: none;
+}
+
+.easing-curve {
+  fill: none;
+  stroke: var(--color-accent-primary);
+  stroke-width: 2;
+}
+
+.easing-handle-line {
+  stroke: var(--color-foreground-secondary);
+  stroke-width: 1;
+}
+
+.easing-handle {
+  fill: var(--color-accent-primary);
+  cursor: grab;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: deprecated.$s-12;
+  height: 100%;
+}

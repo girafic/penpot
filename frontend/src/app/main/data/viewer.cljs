@@ -910,3 +910,79 @@
          (rx/of (rt/nav :workspace params
                         ::rt/new-window true
                         ::rt/window-name name)))))))
+
+;; --- Timeline animation playback (Penpot Motion) ---
+;;
+;; Plays a page-level keyframe timeline in the viewer. State lives under
+;; `[:viewer-local :timeline] {:timeline-id :time :playing?}`. Playback is
+;; a requestAnimationFrame-paced loop feeding the shared pure engine
+;; `app.common.types.animation`; the rendered shapes are recomputed from
+;; geometry (not WAAPI) in `app.main.ui.viewer`.
+
+(def ^:private timeline-frame-step 16)
+
+(defn- viewer-current-page
+  [state]
+  (let [params  (rt/get-params state)
+        page-id (some-> (:page-id params) uuid/parse)]
+    (dm/get-in state [:viewer :pages page-id])))
+
+(declare pause-timeline)
+
+(defn seek-timeline
+  [time]
+  (ptk/reify ::seek-timeline
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:viewer-local :timeline :time] (max 0 (int time))))))
+
+(defn play-timeline
+  [timeline-id]
+  (ptk/reify ::play-timeline
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:viewer-local :timeline]
+                 assoc :timeline-id timeline-id :playing? true))
+
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [page     (viewer-current-page state)
+            timeline (dm/get-in page [:timelines timeline-id])
+            duration (or (:duration timeline) 0)
+            loop?    (boolean (:loop timeline))
+            start    (let [p (dm/get-in state [:viewer-local :timeline :time] 0)]
+                       (if (>= p duration) 0 p))
+            stopper  (rx/filter (ptk/type? ::pause-timeline) stream)]
+        (if (or (nil? timeline) (<= duration 0))
+          (rx/empty)
+          (rx/concat
+           (->> (rx/interval timeline-frame-step)
+                (rx/map (fn [i] (+ start (* (inc i) timeline-frame-step))))
+                (rx/map (fn [t] (if loop? (mod t duration) t)))
+                (rx/take-while (fn [t] (or loop? (<= t duration))))
+                (rx/take-until stopper)
+                (rx/map seek-timeline))
+           (rx/of (pause-timeline))))))))
+
+(defn pause-timeline
+  []
+  (ptk/reify ::pause-timeline
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:viewer-local :timeline :playing?] false))))
+
+(defn toggle-play-timeline
+  [timeline-id]
+  (ptk/reify ::toggle-play-timeline
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (dm/get-in state [:viewer-local :timeline :playing?])
+        (rx/of (pause-timeline))
+        (rx/of (play-timeline timeline-id))))))
+
+(defn stop-timeline
+  []
+  (ptk/reify ::stop-timeline
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (pause-timeline) (seek-timeline 0)))))

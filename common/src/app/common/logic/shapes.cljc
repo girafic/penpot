@@ -12,6 +12,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
    [app.common.logic.variant-properties :as clvp]
+   [app.common.types.animation :as cta]
    [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
    [app.common.types.pages-list :as ctpl]
@@ -276,6 +277,32 @@
                                (pcb/set-flow guide-id nil)))
                          changes
                          guides-to-delete)
+
+         ;; Keyframe-animation cleanup (timelines are keyed by board-id):
+         ;; - if the board itself is deleted, drop its whole timeline;
+         ;; - otherwise prune tracks that reference any deleted shape.
+         ;; Uses the complete set of removed ids (targets + descendants +
+         ;; emptied parents). Mirrors the flows cleanup above.
+         all-deleted-ids
+         (-> (set ids-to-delete)
+             (into descendants-to-delete)
+             (into empty-parents))
+
+         changes (->> (:timelines page)
+                      (reduce
+                       (fn [changes [board-id timeline]]
+                         (if (contains? all-deleted-ids board-id)
+                           (-> changes
+                               (pcb/with-page page)
+                               (pcb/set-timeline board-id nil))
+                           (let [pruned (cta/remove-shapes timeline all-deleted-ids)]
+                             (if (= (:tracks pruned) (:tracks timeline))
+                               changes
+                               (-> changes
+                                   (pcb/with-page page)
+                                   (pcb/set-timeline board-id
+                                                     (when (seq (:tracks pruned)) pruned)))))))
+                       changes))
 
          changes (reduce (fn [changes component-id]
                            ;; It's important to delete the component before the main instance, because we

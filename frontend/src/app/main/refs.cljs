@@ -158,6 +158,11 @@
   "All tokens related ephimeral state"
   (l/derived :workspace-tokens st/state))
 
+(def workspace-animation
+  "Transient timeline-animation state (current timeline, playhead,
+  playing?, auto-key?)."
+  (l/derived :workspace-animation st/state))
+
 (def workspace-selrect
   (let [a (atom nil)]
     (rx/sub! ms/workspace-selrect #(reset! a %))
