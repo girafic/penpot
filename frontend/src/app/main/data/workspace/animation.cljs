@@ -351,3 +351,17 @@
               css     (cta/timeline->css tl objects)
               blob    (wapi/create-blob css "text/css")]
           (dom/trigger-download (safe-filename (:name tl) ".css") blob))))))
+
+(defn export-lottie
+  "Generate and download a Lottie (bodymovin JSON) file for the current
+  timeline. The Lottie map contains no uuids, so it serializes cleanly."
+  []
+  (ptk/reify ::export-lottie
+    ptk/EffectEvent
+    (effect [_ state _]
+      (when-let [tl (current-timeline state)]
+        (let [objects (dsh/lookup-page-objects state)
+              data    (cta/timeline->lottie tl objects)
+              json    (js/JSON.stringify (clj->js data) nil 2)
+              blob    (wapi/create-blob json "application/json")]
+          (dom/trigger-download (safe-filename (:name tl) ".json") blob))))))

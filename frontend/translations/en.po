@@ -6806,6 +6806,9 @@ msgstr "Export"
 msgid "workspace.animation.export-css"
 msgstr "Export animation as CSS @keyframes"
 
+msgid "workspace.animation.export-lottie"
+msgstr "Export animation as Lottie (JSON)"
+
 msgid "workspace.animation.add-keyframe"
 msgstr "Add keyframe"
 

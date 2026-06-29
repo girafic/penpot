@@ -418,3 +418,187 @@
                           selector " {\n  animation: " kf-name " "
                           duration "ms linear " iter ";\n}")))))
          (str/join "\n\n"))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; LOTTIE (bodymovin JSON) EXPORT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Builds a Lottie animation document (a plain map ready to be
+;; JSON-encoded). The board (the timeline's `:board-id`) is the
+;; composition; each tracked shape becomes a shape layer whose transform
+;; (position/scale/rotation/opacity) is animated with native Lottie
+;; keyframes + cubic-bezier easing handles. Shape geometry is exported as
+;; a placeholder rectangle of the shape's bounds and first fill colour
+;; (full vector fidelity -- paths/strokes/text -- is a follow-up).
+
+(def ^:private lottie-fps 60)
+
+(defn- ms->frames
+  [ms]
+  (mth/precision (* (/ (double ms) 1000.0) lottie-fps) 3))
+
+(defn- easing->bezier-curve
+  [easing]
+  (cond
+    (map? easing)     (:curve easing)
+    (keyword? easing) (preset-curves easing (preset-curves :linear))
+    :else             (preset-curves :linear)))
+
+(defn- hex->rgb01
+  "Parse a `#rrggbb` colour into normalized [r g b] (0..1). Falls back to a
+  neutral grey."
+  [hex]
+  (let [h (cond
+            (and (string? hex) (str/starts-with? hex "#")) (subs hex 1)
+            (string? hex) hex
+            :else nil)]
+    (if (and h (= 6 (count h)))
+      (let [pp (fn [s]
+                 (/ (double #?(:clj (Integer/parseInt s 16)
+                               :cljs (js/parseInt s 16)))
+                    255.0))]
+        [(pp (subs h 0 2)) (pp (subs h 2 4)) (pp (subs h 4 6))])
+      [0.694 0.698 0.710])))
+
+(defn- shape-fill-rgb
+  [shape]
+  (hex->rgb01 (-> shape :fills first :fill-color)))
+
+(defn- lottie-keyframes
+  "Build a Lottie keyframe vector for a single-property keyframe list.
+  `val-fn` maps a keyframe value to its Lottie `s` array. The segment
+  easing is carried on the starting keyframe via `:o`/`:i` (or `:h 1` for
+  a stepped hold)."
+  [kfs val-fn]
+  (let [kfs (sort-keyframes kfs)
+        n   (count kfs)]
+    (vec (map-indexed
+          (fn [i kf]
+            (let [base {:t (ms->frames (:time kf)) :s (val-fn (:value kf))}]
+              (cond
+                (= i (dec n))
+                base
+
+                (= :step (:interpolation kf :linear))
+                (assoc base :h 1)
+
+                :else
+                (let [[x1 y1 x2 y2] (easing->bezier-curve (:easing kf))]
+                  (assoc base :o {:x [x1] :y [y1]} :i {:x [x2] :y [y2]})))))
+          kfs))))
+
+(defn- lottie-prop-1d
+  "A 1D Lottie property (split position x/y, rotation, opacity). Static
+  values are scalars; animated values use keyframes with `s` of `[v]`."
+  [kfs scalar-fn default-scalar]
+  (if (empty? kfs)
+    {:a 0 :k default-scalar}
+    {:a 1 :k (lottie-keyframes kfs (fn [v] [(scalar-fn v)]))}))
+
+(defn- lottie-scale-prop
+  "Combine the (separate) scale-x and scale-y tracks into one 2D Lottie
+  scale property (percentages)."
+  [sx-kfs sy-kfs]
+  (if (and (empty? sx-kfs) (empty? sy-kfs))
+    {:a 0 :k [100 100 100]}
+    (let [sx    (sort-keyframes sx-kfs)
+          sy    (sort-keyframes sy-kfs)
+          times (->> (concat sx sy) (map :time) distinct sort vec)
+          n     (count times)
+          at    (fn [kfs t] (some #(when (= (:time %) t) %) kfs))]
+      {:a 1
+       :k (vec (map-indexed
+                (fn [i t]
+                  (let [vx   (or (property-value-at sx t) 1)
+                        vy   (or (property-value-at sy t) 1)
+                        kf   (or (at sx t) (at sy t))
+                        base {:t (ms->frames t) :s [(* 100.0 vx) (* 100.0 vy) 100]}]
+                    (cond
+                      (= i (dec n))
+                      base
+
+                      (= :step (:interpolation kf :linear))
+                      (assoc base :h 1)
+
+                      :else
+                      (let [[x1 y1 x2 y2] (easing->bezier-curve (:easing kf))]
+                        (assoc base :o {:x [x1] :y [y1]} :i {:x [x2] :y [y2]})))))
+                times))})))
+
+(defn- shape->lottie-layer
+  "Build a Lottie shape layer for `shape`/`track`. `ox`/`oy` is the board
+  origin so coordinates are relative to the composition."
+  [ind shape track ox oy]
+  (let [by-prop (group-by :property (:keyframes track))
+        selrect (:selrect shape)
+        sw      (double (:width selrect))
+        sh      (double (:height selrect))
+        cx      (+ (- (:x selrect) ox) (/ sw 2.0))
+        cy      (+ (- (:y selrect) oy) (/ sh 2.0))
+        base-r  (or (:rotation shape) 0)
+        [r g b] (shape-fill-rgb shape)]
+    {:ddd 0
+     :ind (inc ind)
+     :ty 4
+     :nm (or (:name shape) (str "layer-" (inc ind)))
+     :sr 1
+     :ks {:o (lottie-prop-1d (by-prop :opacity) (fn [v] (* 100.0 v)) 100)
+          :r (lottie-prop-1d (by-prop :rotation) identity base-r)
+          :p {:s true
+              :x (lottie-prop-1d (by-prop :x) (fn [v] (+ (- v ox) (/ sw 2.0))) cx)
+              :y (lottie-prop-1d (by-prop :y) (fn [v] (+ (- v oy) (/ sh 2.0))) cy)}
+          :a {:a 0 :k [cx cy 0]}
+          :s (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y))}
+     :ao 0
+     :shapes [{:ty "gr"
+               :nm "shape"
+               :np 3
+               :it [{:ty "rc" :d 1 :nm "rect"
+                     :s {:a 0 :k [sw sh]}
+                     :p {:a 0 :k [cx cy]}
+                     :r {:a 0 :k 0}}
+                    {:ty "fl" :nm "fill" :r 1
+                     :c {:a 0 :k [r g b 1]}
+                     :o {:a 0 :k 100}}
+                    {:ty "tr" :nm "transform"
+                     :p {:a 0 :k [0 0]}
+                     :a {:a 0 :k [0 0]}
+                     :s {:a 0 :k [100 100]}
+                     :r {:a 0 :k 0}
+                     :o {:a 0 :k 100}}]}]
+     :ip 0
+     :op (ms->frames (max 1 (:duration track 0)))
+     :st 0
+     :bm 0}))
+
+(defn timeline->lottie
+  "Generate a Lottie (bodymovin) animation document (a plain map ready for
+  JSON encoding) for `timeline`, using `objects` for geometry. The board
+  (`:board-id`) is the composition. Pure."
+  [timeline objects]
+  (let [duration  (max 1 (:duration timeline))
+        op-frames (ms->frames duration)
+        board     (get objects (:board-id timeline))
+        bsr       (:selrect board)
+        ox        (or (:x bsr) 0)
+        oy        (or (:y bsr) 0)
+        width     (or (:width bsr) 100)
+        height    (or (:height bsr) 100)
+        layers    (->> (:tracks timeline)
+                       (keep (fn [[sid track]]
+                               (when-let [shape (get objects sid)]
+                                 [(assoc track :duration duration) shape])))
+                       (map-indexed (fn [i [track shape]]
+                                      (shape->lottie-layer i shape track ox oy)))
+                       vec)]
+    {:v "5.7.0"
+     :fr lottie-fps
+     :ip 0
+     :op op-frames
+     :w (mth/round width)
+     :h (mth/round height)
+     :nm (or (:name timeline) "Penpot Animation")
+     :ddd 0
+     :assets []
+     :layers layers}))
