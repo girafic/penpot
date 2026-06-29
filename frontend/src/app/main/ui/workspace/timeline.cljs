@@ -176,6 +176,9 @@
         on-export-css
         (mf/use-fn #(st/emit! (dwa/export-css)))
 
+        on-export-lottie
+        (mf/use-fn #(st/emit! (dwa/export-lottie)))
+
         on-close
         (mf/use-fn #(st/emit! (dwa/close-timeline)))]
 
@@ -227,7 +230,12 @@
      [:button {:class (stl/css :ctrl-btn)
                :title (tr "workspace.animation.export-css")
                :on-click on-export-css}
-      (tr "workspace.animation.export")]
+      "CSS"]
+
+     [:button {:class (stl/css :ctrl-btn)
+               :title (tr "workspace.animation.export-lottie")
+               :on-click on-export-lottie}
+      "Lottie"]
 
      [:button {:class (stl/css :close-btn)
                :title (tr "labels.close")

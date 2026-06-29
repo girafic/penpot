@@ -179,3 +179,31 @@
     (t/is (re-find #"opacity: 0;" css))
     (t/is (re-find #"animation-timing-function: ease-in;" css))
     (t/is (re-find #"linear infinite;" css))))
+
+(t/deftest timeline->lottie-output
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 800 :height 600})
+        bid   (:id board)
+        shape (cts/setup-shape {:type :rect :x 100 :y 100 :width 200 :height 100})
+        sid   (:id shape)
+        bx    (-> shape :selrect :x)
+        tl    (-> (cta/make-timeline {:board-id bid :name "Anim" :duration 1000 :loop true})
+                  (cta/add-keyframe sid {:time 0 :property :x :value bx :easing :ease-in})
+                  (cta/add-keyframe sid {:time 1000 :property :x :value (+ bx 300)})
+                  (cta/add-keyframe sid {:time 0 :property :opacity :value 1})
+                  (cta/add-keyframe sid {:time 1000 :property :opacity :value 0}))
+        L     (cta/timeline->lottie tl {bid board sid shape})
+        layer (first (:layers L))
+        ks    (:ks layer)]
+    (t/is (= "5.7.0" (:v L)))
+    (t/is (= 60 (:fr L)))
+    (t/is (= 60.0 (:op L)))                         ; 1000ms @ 60fps
+    (t/is (= 800 (:w L)))
+    (t/is (= 600 (:h L)))
+    (t/is (= 4 (:ty layer)))
+    (t/is (true? (get-in ks [:p :s])))              ; split position
+    (t/is (= 1 (get-in ks [:p :x :a])))             ; x animated
+    (t/is (= 1 (get-in ks [:o :a])))                ; opacity animated
+    (t/is (= [100.0] (get-in ks [:o :k 0 :s])))     ; opacity 1 -> 100
+    (t/is (= [0.0] (get-in ks [:o :k 1 :s])))       ; opacity 0 -> 0
+    ;; anchor is the shape centre
+    (t/is (= [200.0 150.0 0] (get-in ks [:a :k])))))
