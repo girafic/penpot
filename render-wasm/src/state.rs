@@ -116,6 +116,19 @@ impl State {
     }
 
     pub fn process_animation_frame(&mut self, timestamp: i32) -> Result<(), String> {
+        if !self.render_state.render_in_progress && self.render_state.has_animated_shapes() {
+            // The previous pass finished but left animated shader fills
+            // behind: invalidate just their tiles and start a new pass so
+            // they get re-rendered with an updated time uniform.
+            for id in self.render_state.take_animated_shape_ids() {
+                self.render_state.mark_touched(id);
+            }
+            self.render_state.rebuild_touched_tiles(&self.shapes);
+            self.render_state
+                .start_render_loop(None, &self.shapes, timestamp, false)?;
+            return Ok(());
+        }
+
         self.render_state
             .process_animation_frame(None, &self.shapes, timestamp)?;
         Ok(())

@@ -1,7 +1,8 @@
 use skia_safe::{self as skia, Paint, Rect};
 
 pub use super::Color;
-use crate::utils::get_image;
+use crate::render::shaders::{CompiledShader, RESOLUTION_UNIFORM, TIME_UNIFORM};
+use crate::utils::{get_image, get_shader, get_shader_time};
 use crate::uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -131,12 +132,101 @@ impl ImageFill {
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub struct SolidColor(pub Color);
 
+pub const MAX_SHADER_COLORS: usize = 4;
+pub const MAX_SHADER_PARAMS: usize = 4;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShaderFill {
+    id: Uuid,
+    opacity: u8,
+    colors: [Color; MAX_SHADER_COLORS],
+    params: [f32; MAX_SHADER_PARAMS],
+}
+
+impl ShaderFill {
+    pub fn new(
+        id: Uuid,
+        opacity: u8,
+        colors: [Color; MAX_SHADER_COLORS],
+        params: [f32; MAX_SHADER_PARAMS],
+    ) -> Self {
+        Self {
+            id,
+            opacity,
+            colors,
+            params,
+        }
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn opacity(&self) -> u8 {
+        self.opacity
+    }
+
+    /// Builds the uniform data blob for this fill by introspecting the
+    /// uniforms declared by the compiled runtime effect. Every uniform of
+    /// the v1 contract (`u_time`, `u_resolution`, `u_color1..4`,
+    /// `u_param1..4`) is optional; unknown uniforms are left zeroed.
+    fn uniform_data(&self, shader: &CompiledShader, bounding_box: &Rect) -> Vec<u8> {
+        let mut data = vec![0u8; shader.effect.uniform_size()];
+
+        let mut write_floats = |offset: usize, values: &[f32]| {
+            let bytes_len = values.len() * 4;
+            if offset + bytes_len > data.len() {
+                return;
+            }
+            for (i, value) in values.iter().enumerate() {
+                let base = offset + i * 4;
+                data[base..base + 4].copy_from_slice(&value.to_le_bytes());
+            }
+        };
+
+        for uniform in shader.effect.uniforms() {
+            let offset = uniform.offset();
+            match uniform.name() {
+                TIME_UNIFORM => write_floats(offset, &[get_shader_time()]),
+                RESOLUTION_UNIFORM => {
+                    write_floats(offset, &[bounding_box.width(), bounding_box.height()])
+                }
+                "u_color1" | "u_color2" | "u_color3" | "u_color4" => {
+                    let index = (uniform.name().as_bytes()[7] - b'1') as usize;
+                    let color = skia::Color4f::from(self.colors[index]);
+                    write_floats(offset, &[color.r, color.g, color.b, color.a]);
+                }
+                "u_param1" | "u_param2" | "u_param3" | "u_param4" => {
+                    let index = (uniform.name().as_bytes()[7] - b'1') as usize;
+                    write_floats(offset, &[self.params[index]]);
+                }
+                _ => {}
+            }
+        }
+
+        data
+    }
+
+    /// Returns the runtime-effect shader for this fill, positioned so that
+    /// `fragCoord` is local to the shape (origin at the bounding box
+    /// top-left). Returns `None` when the shader is not cached yet,
+    /// mirroring the behavior of image fills with missing images.
+    pub fn to_shader(&self, bounding_box: &Rect) -> Option<skia::Shader> {
+        let shader = get_shader(&self.id)?;
+        let uniforms = skia::Data::new_copy(&self.uniform_data(&shader, bounding_box));
+        let mut matrix = skia::Matrix::new_identity();
+        matrix.pre_translate((bounding_box.left, bounding_box.top));
+        shader.effect.make_shader(uniforms, &[], Some(&matrix))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Fill {
     Solid(SolidColor),
     LinearGradient(Gradient),
     RadialGradient(Gradient),
     Image(ImageFill),
+    Shader(ShaderFill),
 }
 
 impl Fill {
@@ -146,6 +236,7 @@ impl Fill {
             Fill::LinearGradient(g) => g.opacity as f32 / 255.0,
             Fill::RadialGradient(g) => g.opacity as f32 / 255.0,
             Fill::Image(i) => i.opacity as f32 / 255.0,
+            Fill::Shader(s) => s.opacity as f32 / 255.0,
         }
     }
 
@@ -168,6 +259,10 @@ impl Fill {
             Fill::Image(i) => Fill::Image(ImageFill {
                 opacity: 255,
                 ..i.clone()
+            }),
+            Fill::Shader(s) => Fill::Shader(ShaderFill {
+                opacity: 255,
+                ..s.clone()
             }),
         }
     }
@@ -206,6 +301,15 @@ impl Fill {
                 p.set_anti_alias(anti_alias);
                 p.set_blend_mode(skia::BlendMode::SrcOver);
                 p.set_alpha(image_fill.opacity);
+                p
+            }
+            Self::Shader(shader_fill) => {
+                let mut p = skia::Paint::default();
+                p.set_shader(shader_fill.to_shader(rect));
+                p.set_alpha(shader_fill.opacity);
+                p.set_style(skia::PaintStyle::Fill);
+                p.set_anti_alias(anti_alias);
+                p.set_blend_mode(skia::BlendMode::SrcOver);
                 p
             }
         }
@@ -254,6 +358,20 @@ pub fn get_fill_shader(fill: &Fill, bounding_box: &Rect) -> Option<skia::Shader>
                 }
             }
             image_shader
+        }
+        Fill::Shader(shader_fill) => {
+            shader_fill.to_shader(bounding_box).map(|runtime_shader| {
+                // Apply the fill opacity in shader space so it is honored
+                // when several fills get merged into a single paint.
+                let opacity = shader_fill.opacity() as f32 / 255.0;
+                let alpha_color = skia::Color4f::new(1.0, 1.0, 1.0, opacity);
+                let alpha_shader = skia::shaders::color(alpha_color.to_color());
+                skia::shaders::blend(
+                    skia::Blender::mode(skia::BlendMode::DstIn),
+                    runtime_shader,
+                    alpha_shader,
+                )
+            })
         }
     }
 }

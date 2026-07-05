@@ -31,6 +31,7 @@
 
         gradient (:gradient color-item)
         image    (:image color-item)
+        shader   (:shader color-item)
         color    (:color color-item)]
 
     (if (some? name)
@@ -44,6 +45,9 @@
         (some? image)
         (str/ffmt "% (%)" path-and-name (tr "media.image"))
 
+        (some? shader)
+        (str/ffmt "% (%)" path-and-name (tr "media.shader"))
+
         :else
         path-and-name)
 
@@ -55,7 +59,10 @@
         (uc/gradient-type->string (:type gradient))
 
         (some? image)
-        (tr "media.image")))))
+        (tr "media.image")
+
+        (some? shader)
+        (tr "media.shader")))))
 
 (def ^:private schema:swatch
   [:map {:title "SchemaSwatch"}
@@ -134,6 +141,11 @@
                      (let [uri (cfg/resolve-file-media image)]
                        [:div {:class (stl/css :swatch-image)
                               :style {:background-image (str/ffmt "url(%)" uri)}}])
+
+                     (some? (:shader background))
+                     [:div {:class (stl/css :swatch-gradient)
+                            :style {:background-image "conic-gradient(from 45deg, #7c3aed, #0ea5e9, #4ade80, #facc15, #7c3aed)"}}]
+
                      has-errors
                      [:div {:class (stl/css :swatch-error)}]
                      :else

@@ -135,6 +135,7 @@
                          :y (.-clientY ^js event)
                          :on-accept edit-color
                          :origin :assets
+                         :disable-shader true
                          :data color
                          :position :right})))
 
@@ -419,6 +420,7 @@
                                     :y y-position
                                     :on-accept add-color
                                     :origin :assets
+                                    :disable-shader true
                                     :data {:color "#406280"
                                            :opacity 1}
                                     :position :right})))))

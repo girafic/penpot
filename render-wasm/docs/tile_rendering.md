@@ -211,6 +211,29 @@ Each rendering frame begins with the following inputs:
      - Detect the visible tiles.
      - Fetch them from the cache or render them if needed.
 
+## Animated shader fills
+
+Shapes with an animated shader fill (a SkSL runtime shader that
+declares a `u_time` uniform) keep the `requestAnimationFrame` loop
+alive after the regular render pass finishes:
+
+1. While rendering, `RenderState` collects the ids of shapes whose
+   fills reference an animated shader (`animated_shape_ids`).
+2. When the pass finishes and the set is non-empty,
+   `process_animation_frame` re-schedules another animation frame
+   instead of stopping.
+3. On the next tick (`State::process_animation_frame`), the collected
+   shapes are marked as touched and only *their* tiles are invalidated
+   via `rebuild_touched_tiles`; then a new render pass starts with an
+   updated timestamp. All tiles of a single pass share the same
+   `u_time` value to avoid tearing across tile boundaries.
+
+Tiles without animated shaders stay cached, so static content pays no
+extra cost. The loop naturally stops when the animated shapes leave
+the viewport (they are no longer rendered, so they are no longer
+collected) and pauses during pan/zoom (`render_from_cache` cancels the
+pending animation frame; the next regular render re-arms it).
+
 ## Summary of Benefits
 
 - **Modular pipeline**: It separates surfaces per layer, enabling composite rendering.

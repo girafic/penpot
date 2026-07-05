@@ -16,6 +16,7 @@
    [app.common.types.shape :as shp]
    [app.common.types.shape.shadow :as types.shadow]
    [app.common.types.text :as txt]
+   [app.common.uuid :as uuid]
    [app.main.broadcast :as mbc]
    [app.main.data.helpers :as dsh]
    [app.main.data.modal :as md]
@@ -142,6 +143,9 @@
 
            (contains? color :image)
            (assoc :fill-image (:image color))
+
+           (contains? color :shader)
+           (assoc :fill-shader (:shader color))
 
            :always
            (d/without-nils)
@@ -553,6 +557,7 @@
                                                 :opacity 1}
                                          :disable-opacity false
                                          :disable-gradient false
+                                         :disable-shader true
                                          :on-change handle-change-color}
                                  :allow-click-outside true})))))))
 
@@ -775,6 +780,11 @@
     (= type :image)
     (clear-image-components current-color)
 
+    (= type :shader)
+    (-> current-color
+        (select-keys [:shader :opacity])
+        (d/without-nils))
+
     :else
     (d/without-nils
      {:opacity opacity
@@ -810,6 +820,7 @@
               (rx/filter (ptk/type? ::update-colorpicker-color) stream)
               (->> (rx/filter (ptk/type? ::activate-colorpicker-gradient) stream)
                    (rx/debounce 20))
+              (rx/filter (ptk/type? ::update-colorpicker-shader) stream)
               (rx/filter (ptk/type? ::update-colorpicker-stops) stream)
               (rx/filter (ptk/type? ::update-colorpicker-gradient-opacity) stream)
               (rx/filter (ptk/type? ::update-colorpicker-add-stop) stream)
@@ -1021,6 +1032,7 @@
                                 (update :current-color merge changes)
                                 (update :current-color materialize-color-components)
                                 (update :current-color #(if (not= type :image) (dissoc % :image) %))
+                                (update :current-color #(if (not= type :shader) (dissoc % :shader) %))
                                 ;; current color can be a library one
                                 ;; I'm changing via colorpicker
                                 (update :current-color dissoc :ref-id :ref-file))]
@@ -1032,7 +1044,7 @@
 
                     (-> state
                         (dissoc :gradient :stops :editing-stop)
-                        (cond-> (not= :image type)
+                        (cond-> (not (contains? #{:image :shader} type))
                           (assoc :type :color))))))))
     ptk/WatchEvent
     (watch [_ state _]
@@ -1046,7 +1058,7 @@
 
         (when (and add-recent? (not ignore-color?))
           (when-let [color (-> state
-                               (select-keys [:image :gradient :color :opacity])
+                               (select-keys [:image :gradient :color :shader :opacity])
                                (not-empty))]
             (rx/of (add-recent-color color))))))))
 
@@ -1118,6 +1130,33 @@
                 (-> state
                     (assoc :type :image)
                     (dissoc :editing-stop :stops :gradient)))))))
+
+(defn activate-colorpicker-shader
+  []
+  (ptk/reify ::activate-colorpicker-shader
+    ptk/UpdateEvent
+    (update [_ state]
+      (update state :colorpicker
+              (fn [state]
+                (-> state
+                    (assoc :type :shader)
+                    (dissoc :editing-stop :stops :gradient)))))))
+
+(defn update-colorpicker-shader
+  "Merge changes into the shader of the current color. Whenever the
+  source changes a fresh id is assigned: the id is the key of the wasm
+  shader cache, so a new source MUST get a new id."
+  [changes]
+  (ptk/reify ::update-colorpicker-shader
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:colorpicker :current-color :shader]
+                 (fn [shader]
+                   (let [shader' (merge shader changes)]
+                     (cond-> shader'
+                       (or (not= (:source shader') (:source shader))
+                           (nil? (:id shader')))
+                       (assoc :id (uuid/next)))))))))
 
 (defn- stroke->color-att
   [stroke file-id libraries]

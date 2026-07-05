@@ -147,12 +147,18 @@
          :icon i/tokens}]]]]))
 
 (mf/defc color-row*
-  [{:keys [index color class disable-gradient disable-opacity disable-image disable-picker hidden
+  [{:keys [index color class disable-gradient disable-opacity disable-image disable-shader disable-picker hidden
            on-change on-reorder on-detach on-open on-close on-remove origin on-detach-token
            disable-drag on-focus on-blur select-only select-on-focus on-token-change applied-token]}]
 
   (let [token-color      (contains? cfg/flags :token-color)
         libraries        (mf/deref refs/files)
+
+        ;; Shader fills are only supported on shape fills (v1); default
+        ;; the tab availability from the origin unless explicitly set
+        disable-shader   (if (some? disable-shader)
+                           disable-shader
+                           (not= origin :fill))
 
         color-without-hash (mf/use-memo
                             (mf/deps color)
@@ -170,6 +176,8 @@
                               (dm/get-in color [:gradient :type]))
         image-color?     (and (not ^boolean has-multiple-colors)
                               (:image color))
+        shader-color?    (and (not ^boolean has-multiple-colors)
+                              (:shader color))
 
         editing-text*    (mf/use-state false)
         is-editing-text    (deref editing-text*)
@@ -243,7 +251,7 @@
 
         open-modal
         (mf/use-fn
-         (mf/deps disable-gradient disable-opacity disable-image disable-picker on-change on-close on-open tokens index applied-token)
+         (mf/deps disable-gradient disable-opacity disable-image disable-shader disable-picker on-change on-close on-open tokens index applied-token)
          (fn [color pos tab]
            (let [color (cond
                          ^boolean has-multiple-colors
@@ -260,6 +268,7 @@
                         :disable-gradient disable-gradient
                         :disable-opacity disable-opacity
                         :disable-image disable-image
+                        :disable-shader disable-shader
                         ;; on-change second parameter means if the source is the color-picker
                         :on-change #(on-change % index)
                         :on-token-change on-token-change
@@ -404,6 +413,19 @@
                                 :on-opacity-change on-opacity-change}
         [:div {:class (stl/css :color-name)}
          (tr "media.image")]]
+
+       shader-color?
+       [:> color-info-wrapper* {:class (stl/css-case :color-name-wrapper true
+                                                     :no-opacity ^boolean disable-opacity)
+                                :handle-click-color handle-click-color
+                                :color color
+                                :opacity (not ^boolean disable-opacity)
+                                :select-on-focus select-on-focus
+                                :on-focus on-focus'
+                                :on-blur on-blur'
+                                :on-opacity-change on-opacity-change}
+        [:div {:class (stl/css :color-name)}
+         (tr "media.shader")]]
 
        :else
        [:> color-info-wrapper* {:class (stl/css-case :color-name-wrapper true

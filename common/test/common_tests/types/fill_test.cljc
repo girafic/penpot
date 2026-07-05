@@ -44,6 +44,11 @@
                                    (:width image-b))
                        (mth/close? (:height image-a)
                                    (:height image-b)))))
+           (and (contains? fill-a :fill-shader)
+                (mth/close? (:fill-opacity fill-a 1.0)
+                            (:fill-opacity fill-b 1.0))
+                (= (:fill-shader fill-a)
+                   (:fill-shader fill-b)))
            (and (contains? fill-a :fill-color-gradient)
                 (mth/close? (:fill-opacity fill-a 1)
                             (:fill-opacity fill-b 1))
@@ -169,6 +174,22 @@
     (t/is (types.fills/fills? fills))
     (t/is (= 1 (count fills)))
     (t/is (equivalent-fill? (first fills) sample-fill-6))))
+
+(def sample-fill-7
+  {:fill-opacity 0.5
+   :fill-shader {:id #uuid "b30f028d-cc2f-8035-8006-3a93bd0e137c"
+                 :source "half4 main(float2 fragCoord) { return half4(1.0, 0.0, 0.0, 1.0); }"
+                 :preset "plasma"
+                 :colors ["#fabada" "#123456"]
+                 :params [1.5 0.25]}})
+
+(t/deftest build-from-plain-7
+  (let [fills (types.fills/from-plain [sample-fill-7])]
+    (t/is (types.fills/fills? fills))
+    (t/is (= 1 (count fills)))
+    (t/is (equivalent-fill? (first fills) sample-fill-7))
+    (t/is (= [(get sample-fill-7 :fill-shader)]
+             (vec (types.fills/get-shaders fills))))))
 
 (t/deftest fills-datatype-roundtrip
   (smt/check!

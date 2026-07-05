@@ -3223,6 +3223,28 @@ msgstr "Radial"
 msgid "media.solid"
 msgstr "Sólido"
 
+msgid "media.shader"
+msgstr "Shader"
+
+msgid "workspace.colorpicker.shader.presets"
+msgstr "Elige un preajuste"
+
+msgid "workspace.colorpicker.shader.preset.noise-gradient"
+msgstr "Degradado de ruido"
+
+msgid "workspace.colorpicker.shader.preset.waves"
+msgstr "Olas"
+
+msgid "workspace.colorpicker.shader.preset.plasma"
+msgstr "Plasma"
+
+msgid "workspace.colorpicker.shader.preset.mesh-gradient"
+msgstr "Degradado de malla"
+
+msgid "workspace.colorpicker.shader.help"
+msgstr "Shader SkSL con uniforms opcionales: u_time (segundos), u_resolution (px), u_color1..4, u_param1..4. Punto de entrada: half4 main(float2 fragCoord)."
+
+
 #: src/app/main/data/common.cljs:118
 msgid "modals.add-shared-confirm-empty.hint"
 msgstr ""

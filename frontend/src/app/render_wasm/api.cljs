@@ -456,6 +456,52 @@
                           :cause cause)
                (rx/empty)))))}))
 
+(defn- store-shader!
+  "Uploads the SkSL source of a shader fill to the wasm shader cache.
+  Memory layout: 16 bytes shape uuid + 16 bytes shader uuid + UTF-8 source."
+  [shape-id shader]
+  (let [shader-id (get shader :id)
+        source    (get shader :source "")
+        data      (.encode (js/TextEncoder.) source)
+        size      (+ 32 (.-byteLength data))
+        offset    (mem/alloc size)
+        heap      (mem/get-heap-u8)
+        dview     (mem/get-data-view)]
+    (mem/write-uuid offset dview shape-id)
+    (mem/write-uuid (+ offset 16) dview shader-id)
+    (mem/write-buffer (+ offset 32) heap data)
+    (h/call wasm/internal-module "_store_shader")))
+
+(defn- process-fill-shader
+  [shape-id shader]
+  (let [id     (get shader :id)
+        buffer (uuid/get-u32 id)
+        cached-shader? (h/call wasm/internal-module "_is_shader_cached"
+                               (aget buffer 0)
+                               (aget buffer 1)
+                               (aget buffer 2)
+                               (aget buffer 3))]
+    (when (zero? cached-shader?)
+      (store-shader! shape-id shader))))
+
+(defn validate-shader
+  "Compiles the SkSL source in wasm without storing it. Returns nil when
+  the source compiles, otherwise the compiler error message string."
+  [source]
+  (let [data   (.encode (js/TextEncoder.) (str source " "))
+        size   (.-byteLength data)
+        offset (mem/alloc size)
+        heap   (mem/get-heap-u8)]
+    (mem/write-buffer offset heap data)
+    (let [ptr   (h/call wasm/internal-module "_validate_shader")
+          heap  (mem/get-heap-u8)
+          len   (.getUint32 (js/DataView. (.-buffer heap)) ptr true)
+          error (when (pos? len)
+                  (.decode (js/TextDecoder. "utf-8")
+                           (.slice heap (+ ptr 4) (+ ptr 4 len))))]
+      (mem/free)
+      error)))
+
 (defn- get-fill-images
   [leaf]
   (filter :fill-image (:fills leaf)))
@@ -489,29 +535,36 @@
   [shape-id fills thumbnail?]
   (if (empty? fills)
     (h/call wasm/internal-module "_clear_shape_fills")
-    (let [fills  (types.fills/coerce fills)
-          offset (mem/alloc->offset-32 (types.fills/get-byte-size fills))
-          heap   (mem/get-heap-u32)]
+    (let [fills (types.fills/coerce fills)]
+      ;; upload the sksl sources of shader fills before setting the
+      ;; fills, so the first render finds them compiled; each upload
+      ;; owns its own alloc/free cycle so it MUST happen before the
+      ;; fills buffer allocation below
+      (run! (partial process-fill-shader shape-id)
+            (types.fills/get-shaders fills))
 
-      ;; write fills to the heap
-      (types.fills/write-to fills heap offset)
+      (let [offset (mem/alloc->offset-32 (types.fills/get-byte-size fills))
+            heap   (mem/get-heap-u32)]
 
-      ;; send fills to wasm
-      (h/call wasm/internal-module "_set_shape_fills")
+        ;; write fills to the heap
+        (types.fills/write-to fills heap offset)
 
-      ;; load images for image fills if not cached
-      (keep (fn [id]
-              (let [buffer        (uuid/get-u32 id)
-                    cached-image? (h/call wasm/internal-module "_is_image_cached"
-                                          (aget buffer 0)
-                                          (aget buffer 1)
-                                          (aget buffer 2)
-                                          (aget buffer 3)
-                                          thumbnail?)]
-                (when (zero? cached-image?)
-                  (fetch-image shape-id id thumbnail?))))
+        ;; send fills to wasm
+        (h/call wasm/internal-module "_set_shape_fills")
 
-            (types.fills/get-image-ids fills)))))
+        ;; load images for image fills if not cached
+        (keep (fn [id]
+                (let [buffer        (uuid/get-u32 id)
+                      cached-image? (h/call wasm/internal-module "_is_image_cached"
+                                            (aget buffer 0)
+                                            (aget buffer 1)
+                                            (aget buffer 2)
+                                            (aget buffer 3)
+                                            thumbnail?)]
+                  (when (zero? cached-image?)
+                    (fetch-image shape-id id thumbnail?))))
+
+              (types.fills/get-image-ids fills))))))
 
 (defn set-shape-strokes
   [shape-id strokes thumbnail?]

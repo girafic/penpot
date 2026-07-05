@@ -7,6 +7,7 @@ use crate::STATE;
 
 mod gradient;
 mod image;
+pub mod shader;
 mod solid;
 
 const RAW_FILL_DATA_SIZE: usize = std::mem::size_of::<RawFillData>();
@@ -19,6 +20,7 @@ pub enum RawFillData {
     Linear(gradient::RawGradientData) = 0x01,
     Radial(gradient::RawGradientData) = 0x02,
     Image(image::RawImageFillData) = 0x03,
+    Shader(shader::RawShaderFillData) = 0x04,
 }
 
 impl From<RawFillData> for shapes::Fill {
@@ -32,6 +34,7 @@ impl From<RawFillData> for shapes::Fill {
                 shapes::Fill::RadialGradient(radial_fill_data.into())
             }
             RawFillData::Image(image_fill_data) => shapes::Fill::Image(image_fill_data.into()),
+            RawFillData::Shader(shader_fill_data) => shapes::Fill::Shader(shader_fill_data.into()),
         }
     }
 }
@@ -108,6 +111,36 @@ mod tests {
             4 + std::mem::size_of::<gradient::RawGradientData>()
         );
         assert_eq!(std::mem::align_of::<RawFillData>(), 4);
+    }
+
+    #[test]
+    fn test_raw_fill_data_from_bytes_to_shader_fill() {
+        let mut bytes = vec![0x00; std::mem::size_of::<RawFillData>()];
+        bytes[0] = 0x04;
+        // shader uuid quartet
+        bytes[4..8].copy_from_slice(&0x11111111_u32.to_le_bytes());
+        bytes[8..12].copy_from_slice(&0x22222222_u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&0x33333333_u32.to_le_bytes());
+        bytes[16..20].copy_from_slice(&0x44444444_u32.to_le_bytes());
+        // opacity + flags
+        bytes[20] = 0x80;
+        bytes[21] = 0x01;
+        // first color (ARGB) and first param
+        bytes[24..28].copy_from_slice(&0xffaabbcc_u32.to_le_bytes());
+        bytes[40..44].copy_from_slice(&2.5_f32.to_le_bytes());
+
+        let raw_fill = RawFillData::try_from(&bytes[..]);
+        assert!(raw_fill.is_ok());
+
+        let fill: shapes::Fill = raw_fill.unwrap().into();
+        let shapes::Fill::Shader(shader_fill) = fill else {
+            panic!("Expected a shader fill");
+        };
+        assert_eq!(
+            shader_fill.id(),
+            crate::utils::uuid_from_u32_quartet(0x11111111, 0x22222222, 0x33333333, 0x44444444)
+        );
+        assert_eq!(shader_fill.opacity(), 0x80);
     }
 
     #[test]

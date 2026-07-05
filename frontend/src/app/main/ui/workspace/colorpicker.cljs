@@ -40,6 +40,8 @@
    [app.main.ui.workspace.colorpicker.hsva :refer [hsva-selector]]
    [app.main.ui.workspace.colorpicker.libraries :refer [libraries]]
    [app.main.ui.workspace.colorpicker.ramp :refer [ramp-selector*]]
+   [app.main.ui.workspace.colorpicker.shader :refer [shader-panel*]]
+   [app.main.ui.workspace.colorpicker.shader-presets :as shader-presets]
    [app.main.ui.workspace.colorpicker.shortcuts :as sc]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
@@ -94,7 +96,7 @@
       (dom/set-css-property! node "--saturation-grad-to" (format-hsl hsl-to)))))
 
 (mf/defc colorpicker
-  [{:keys [data disable-gradient disable-opacity disable-image on-change on-accept origin combined-tokens color-origin on-token-change tab applied-token]}]
+  [{:keys [data disable-gradient disable-opacity disable-image disable-shader on-change on-accept origin combined-tokens color-origin on-token-change tab applied-token]}]
   (let [state                  (mf/deref refs/colorpicker)
         node-ref               (mf/use-ref)
 
@@ -118,8 +120,14 @@
 
         current-color          (:current-color state)
 
-        active-fill-tab        (if (:image data)
+        active-fill-tab        (cond
+                                 (:shader data)
+                                 :shader
+
+                                 (:image data)
                                  :image
+
+                                 :else
                                  (if-let [gradient (:gradient data)]
                                    (case (:type gradient)
                                      :linear :linear-gradient
@@ -143,9 +151,12 @@
 
                                  color-type)
 
-        disabled-color-accept? (and
-                                (= selected-mode :image)
-                                (not (:image current-color)))
+        disabled-color-accept? (or (and
+                                    (= selected-mode :image)
+                                    (not (:image current-color)))
+                                   (and
+                                    (= selected-mode :shader)
+                                    (not (:shader current-color))))
 
         on-fill-image-success
         (mf/use-fn
@@ -183,11 +194,23 @@
 
         handle-change-mode
         (mf/use-fn
+         (mf/deps current-color)
          (fn [value]
            (case value
              :color (st/emit! (dc/activate-colorpicker-color))
              :gradient (st/emit! (dc/activate-colorpicker-gradient :linear-gradient))
              :image (st/emit! (dc/activate-colorpicker-image))
+             :shader (do
+                       (st/emit! (dc/activate-colorpicker-shader))
+                       ;; Seed the shader with the first preset so the
+                       ;; user gets an immediate result on tab switch
+                       (when-not (:shader current-color)
+                         (let [preset (first shader-presets/presets)]
+                           (st/emit! (dc/update-colorpicker-shader
+                                      {:source (:source preset)
+                                       :preset (:name preset)
+                                       :colors (:colors preset)
+                                       :params (:params preset)})))))
              nil)))
 
         handle-change-color
@@ -248,14 +271,20 @@
            (on-accept (dc/get-color-from-colorpicker-state state))
            (modal/hide!)))
 
+        render-wasm?
+        (features/use-feature "render-wasm/v1")
+
         options
-        (mf/with-memo [selected-mode disable-gradient disable-image]
+        (mf/with-memo [selected-mode disable-gradient disable-image disable-shader render-wasm?]
           (d/concat-vec
            [{:value :color :label (tr "media.solid")}]
            (when (not disable-gradient)
              [{:value :gradient :label (tr "media.gradient")}])
            (when (not disable-image)
-             [{:value :image :label (tr "media.image")}])))
+             [{:value :image :label (tr "media.image")}])
+           ;; Shader fills can only be rendered by the wasm renderer
+           (when (and render-wasm? (not disable-shader))
+             [{:value :shader :label (tr "media.shader")}])))
 
         handle-change-gradient-selected-stop
         (mf/use-fn
@@ -346,9 +375,6 @@
          (fn [value]
            (st/emit! (dc/update-colorpicker-gradient-opacity (/ value 100)))))
 
-        render-wasm?
-        (features/use-feature "render-wasm/v1")
-
         tabs
         (mf/with-memo []
           [{:aria-label (tr "workspace.libraries.colors.rgba")
@@ -427,7 +453,7 @@
                              :title (tr "workspace.colorpicker.color-tokens")
                              :id "opt-token-color"}]])]
 
-       (when (and (not= selected-mode :image)
+       (when (and (not (contains? #{:image :shader} selected-mode))
                   (= color-style :direct-color))
          [:button {:class (stl/css-case :picker-btn true
                                         :selected picking-color?)
@@ -457,7 +483,11 @@
              :on-reverse-stops handle-reverse-stops
              :on-reorder-stops handle-reorder-stops}])
 
-         (if (= selected-mode :image)
+         (cond
+           (= selected-mode :shader)
+           [:> shader-panel* {:shader (:shader current-color)}]
+
+           (= selected-mode :image)
            (let [uri (cfg/resolve-file-media (:image current-color))
                  keep-aspect-ratio? (-> current-color :image :keep-aspect-ratio)]
              [:div {:class (stl/css :select-image)}
@@ -490,6 +520,7 @@
                  :ref fill-image-ref
                  :on-selected on-fill-image-selected}]]])
 
+           :else
            [:*
             [:div {:class (stl/css :colorpicker-tabs)}
              [:> tab-switcher* {:tabs tabs
@@ -722,6 +753,7 @@
            disable-gradient
            disable-opacity
            disable-image
+           disable-shader
            active-tokens
            on-change
            origin
@@ -791,6 +823,7 @@
                       :disable-gradient disable-gradient
                       :disable-opacity disable-opacity
                       :disable-image disable-image
+                      :disable-shader disable-shader
                       :on-token-change on-token-change
                       :applied-token applied-token
                       :on-change on-change'

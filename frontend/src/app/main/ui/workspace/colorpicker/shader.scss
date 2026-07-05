@@ -1,0 +1,85 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+.shader-panel {
+  display: flex;
+  flex-direction: column;
+  gap: deprecated.$s-8;
+}
+
+.preset-row {
+  display: flex;
+}
+
+.preset-select {
+  @include deprecated.bodySmallTypography;
+  width: 100%;
+  padding: deprecated.$s-4 deprecated.$s-8;
+  border-radius: deprecated.$br-8;
+  border: 1px solid var(--menu-background-color-hover);
+  background-color: var(--input-background-color);
+  color: var(--input-foreground-color);
+}
+
+.source-editor {
+  @include deprecated.bodySmallTypography;
+  font-family: monospace;
+  width: 100%;
+  min-height: deprecated.$s-200;
+  resize: vertical;
+  padding: deprecated.$s-8;
+  border-radius: deprecated.$br-8;
+  border: 1px solid var(--menu-background-color-hover);
+  background-color: var(--input-background-color);
+  color: var(--input-foreground-color);
+  white-space: pre;
+  overflow-x: auto;
+
+  &:focus {
+    outline: none;
+    border: 1px solid var(--input-border-color-focus);
+  }
+}
+
+.error {
+  @include deprecated.bodySmallTypography;
+  color: var(--status-color-error-500);
+  max-height: deprecated.$s-80;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.uniform-row {
+  display: flex;
+  gap: deprecated.$s-8;
+}
+
+.color-input {
+  width: deprecated.$s-32;
+  height: deprecated.$s-24;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.param-input {
+  @include deprecated.bodySmallTypography;
+  width: deprecated.$s-52;
+  padding: deprecated.$s-4;
+  border-radius: deprecated.$br-8;
+  border: 1px solid var(--menu-background-color-hover);
+  background-color: var(--input-background-color);
+  color: var(--input-foreground-color);
+}
+
+.help {
+  @include deprecated.bodySmallTypography;
+  color: var(--color-foreground-secondary);
+  white-space: pre-wrap;
+}

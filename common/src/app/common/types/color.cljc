@@ -26,7 +26,7 @@
 (def ^:private required-color-attrs
   "A set used for proper check if color should contain only one of the
   attrs listed in this set."
-  #{:image :gradient :color})
+  #{:image :gradient :color :shader})
 
 (defn has-valid-color-attrs?
   "Check if color has correct color attrs"
@@ -115,6 +115,29 @@
   [:map {:title "GradientColorAttrs"}
    [:gradient schema:gradient]])
 
+(def ^:const MAX-SHADER-SOURCE-LENGTH 10000)
+(def ^:const MAX-SHADER-COLORS 4)
+(def ^:const MAX-SHADER-PARAMS 4)
+
+(def schema:shader
+  "A SkSL runtime shader fill (rendered by the wasm renderer). The `id`
+  identifies the compiled shader in the wasm shader cache and MUST be
+  regenerated every time the source changes."
+  [:map {:title "Shader" :closed true}
+   [:id ::sm/uuid]
+   [:source [:string {:max MAX-SHADER-SOURCE-LENGTH}]]
+   [:preset {:optional true} ::sm/text]
+   [:colors {:optional true} [:vector {:max MAX-SHADER-COLORS} schema:hex-color]]
+   [:params {:optional true} [:vector {:max MAX-SHADER-PARAMS} ::sm/safe-number]]])
+
+(def shader-attrs
+  "A set of attrs that corresponds to shader data type"
+  (sm/keys schema:shader))
+
+(def schema:shader-color
+  [:map {:title "ShaderColorAttrs"}
+   [:shader schema:shader]])
+
 (def schema:color-attrs
   [:map {:title "GenericColorAttrs" :closed true}
    [:opacity {:optional true} [::sm/number {:min 0 :max 1}]]
@@ -128,7 +151,8 @@
     schema:color-attrs
     (sm/optional-keys schema:plain-color)
     (sm/optional-keys schema:gradient-color)
-    (sm/optional-keys schema:image-color)]
+    (sm/optional-keys schema:image-color)
+    (sm/optional-keys schema:shader-color)]
    [:fn has-valid-color-attrs?]])
 
 (def color-attrs
@@ -152,7 +176,8 @@
     schema:library-color-attrs
     (sm/optional-keys schema:plain-color)
     (sm/optional-keys schema:gradient-color)
-    (sm/optional-keys schema:image-color)]
+    (sm/optional-keys schema:image-color)
+    (sm/optional-keys schema:shader-color)]
    [:fn has-valid-color-attrs?]])
 
 (def library-color-attrs
@@ -350,7 +375,7 @@
   "Converts a library color data structure to a plain color data structure"
   [lcolor file-id]
   (-> lcolor
-      (select-keys [:image :gradient :color :opacity])
+      (select-keys [:image :gradient :color :shader :opacity])
       (assoc :ref-id (get lcolor :id))
       (assoc :ref-file file-id)
       (vary-meta assoc

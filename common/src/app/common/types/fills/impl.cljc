@@ -24,11 +24,16 @@
 (def ^:const GRADIENT-U8-SIZE 156)
 (def ^:const SOLID-U8-SIZE 4)
 (def ^:const IMAGE-U8-SIZE 36)
+(def ^:const SHADER-U8-SIZE 52)
 (def ^:const METADATA-U8-SIZE 36)
 (def ^:const FILL-U8-SIZE
   (+ 4 (mth/max GRADIENT-U8-SIZE
                 IMAGE-U8-SIZE
-                SOLID-U8-SIZE)))
+                SOLID-U8-SIZE
+                SHADER-U8-SIZE)))
+
+(def ^:const MAX-SHADER-COLORS 4)
+(def ^:const MAX-SHADER-PARAMS 4)
 
 (def ^:private xf:take-stops
   (take MAX-GRADIENT-STOPS))
@@ -41,7 +46,8 @@
   (-get-byte-size [_] "get byte size"))
 
 (defprotocol IBinaryFills
-  (-get-image-ids [_] "get referenced image ids"))
+  (-get-image-ids [_] "get referenced image ids")
+  (-get-shaders [_] "get referenced shader definitions"))
 
 (defn- hex->rgb
   "Encode an hex string as rgb (int32)"
@@ -117,6 +123,25 @@
                  (+ offset' GRADIENT-STOP-U8-SIZE)))
         (+ offset FILL-U8-SIZE)))))
 
+(defn write-shader-fill
+  [offset buffer opacity shader]
+  (let [shader-id (get shader :id)
+        alpha     (mth/floor (* opacity 0xff))
+        colors    (get shader :colors [])
+        params    (get shader :params [])]
+    (buf/write-byte  buffer (+ offset  0) 0x04)
+    (buf/write-uuid  buffer (+ offset  4) shader-id)
+    (buf/write-byte  buffer (+ offset 20) alpha)
+    (buf/write-byte  buffer (+ offset 21) 0x00) ;; flags (reserved)
+    (buf/write-short buffer (+ offset 22) 0)    ;; 2-byte padding (reserved)
+    (doseq [[index color] (map-indexed vector (take MAX-SHADER-COLORS colors))]
+      (buf/write-int buffer (+ offset 24 (* index 4))
+                     (-> (hex->rgb color)
+                         (rgb->rgba 1))))
+    (doseq [[index param] (map-indexed vector (take MAX-SHADER-PARAMS params))]
+      (buf/write-float buffer (+ offset 40 (* index 4)) param))
+    (+ offset FILL-U8-SIZE)))
+
 (defn write-image-fill
   [offset buffer opacity image]
   (let [image-id     (get image :id)
@@ -167,8 +192,10 @@
      :offset (mth/precision soff 2)}))
 
 (defn- read-fill
-  "Read segment from binary buffer at specified index"
-  [dbuffer mbuffer index]
+  "Read segment from binary buffer at specified index. The `xdata`
+  parameter holds out-of-band fill data that does not fit in the fixed
+  size binary records (currently the shader definitions, keyed by id)."
+  [dbuffer mbuffer xdata index]
   (let [doffset (+ 4 (* index FILL-U8-SIZE))
         moffset (* index METADATA-U8-SIZE)
         type    (buf/read-byte dbuffer doffset)
@@ -229,7 +256,15 @@
                                   :mtype mtype
                                   :keep-aspect-ratio ratio
                                   ;; FIXME: we are not encodign the name, looks useless
-                                  :name "sample"}}))]
+                                  :name "sample"}})
+
+                  4 ;; shader fill
+                  (let [id      (buf/read-uuid dbuffer (+ doffset 4))
+                        alpha   (buf/read-unsigned-byte dbuffer (+ doffset 20))
+                        opacity (mth/precision (/ alpha 0xff) 2)
+                        shader  (get xdata id {:id id :source ""})]
+                    {:fill-opacity opacity
+                     :fill-shader shader}))]
 
     (if refs?
       (let [ref-file (buf/read-uuid mbuffer (+ moffset 4))
@@ -242,7 +277,7 @@
 (declare from-plain)
 
 #?(:clj
-   (deftype Fills [size dbuffer mbuffer ^:unsynchronized-mutable hash]
+   (deftype Fills [size dbuffer mbuffer xdata ^:unsynchronized-mutable hash]
      Object
      (equals [_ other]
        (if (instance? Fills other)
@@ -266,7 +301,7 @@
        (when (pos? size)
          ((fn next-seq [i]
             (when (< i size)
-              (cons (read-fill dbuffer mbuffer i)
+              (cons (read-fill dbuffer mbuffer xdata i)
                     (lazy-seq (next-seq (inc i))))))
           0)))
 
@@ -275,7 +310,7 @@
        (loop [index  0
               result start]
          (if (< index size)
-           (let [result (f result (read-fill dbuffer mbuffer index))]
+           (let [result (f result (read-fill dbuffer mbuffer xdata index))]
              (if (reduced? result)
                @result
                (recur (inc index) result)))
@@ -284,12 +319,12 @@
      clojure.lang.Indexed
      (nth [_ i]
        (if (d/in-range? size i)
-         (read-fill dbuffer mbuffer i)
+         (read-fill dbuffer mbuffer xdata i)
          nil))
 
      (nth [_ i default]
        (if (d/in-range? size i)
-         (read-fill dbuffer mbuffer i)
+         (read-fill dbuffer mbuffer xdata i)
          default))
 
      clojure.lang.Counted
@@ -297,7 +332,7 @@
 
    :cljs
    #_:clj-kondo/ignore
-   (deftype Fills [size dbuffer mbuffer image-ids cache ^:mutable __hash]
+   (deftype Fills [size dbuffer mbuffer image-ids xdata cache ^:mutable __hash]
 
      IHeapWritable
      (-get-byte-size [_]
@@ -316,6 +351,9 @@
      IBinaryFills
      (-get-image-ids [_]
        image-ids)
+
+     (-get-shaders [_]
+       (vals xdata))
 
      cljs.core/ISequential
      cljs.core/IEquiv
@@ -347,10 +385,10 @@
      (-reduce [_ f]
        (loop [index  1
               result (if (pos? size)
-                       (read-fill dbuffer mbuffer 0)
+                       (read-fill dbuffer mbuffer xdata 0)
                        nil)]
          (if (< index size)
-           (let [result (f result (read-fill dbuffer mbuffer index))]
+           (let [result (f result (read-fill dbuffer mbuffer xdata index))]
              (if (reduced? result)
                @result
                (recur (inc index) result)))
@@ -360,7 +398,7 @@
        (loop [index  0
               result start]
          (if (< index size)
-           (let [result (f result (read-fill dbuffer mbuffer index))]
+           (let [result (f result (read-fill dbuffer mbuffer xdata index))]
              (if (reduced? result)
                @result
                (recur (inc index) result)))
@@ -376,12 +414,12 @@
      cljs.core/IIndexed
      (-nth [_ i]
        (if (d/in-range? size i)
-         (read-fill dbuffer mbuffer i)
+         (read-fill dbuffer mbuffer xdata i)
          nil))
 
      (-nth [_ i default]
        (if (d/in-range? i size)
-         (read-fill dbuffer mbuffer i)
+         (read-fill dbuffer mbuffer xdata i)
          default))
 
      cljs.core/ISeqable
@@ -389,7 +427,7 @@
        (when (pos? size)
          ((fn next-seq [i]
             (when (< i size)
-              (cons (read-fill dbuffer mbuffer i)
+              (cons (read-fill dbuffer mbuffer xdata i)
                     (lazy-seq (next-seq (inc i))))))
           0)))
 
@@ -422,7 +460,8 @@
     (buf/write-byte dbuffer 0 total)
 
     (loop [index     0
-           image-ids #{}]
+           image-ids #{}
+           shaders   {}]
       (if (< index total)
         (let [fill     (nth fills index)
               doffset  (+ 4 (* index FILL-U8-SIZE))
@@ -433,24 +472,32 @@
             (do
               (write-solid-fill doffset dbuffer opacity color)
               (write-metadata moffset mbuffer fill)
-              (recur (inc index) image-ids))
+              (recur (inc index) image-ids shaders))
             (if-let [gradient (get fill :fill-color-gradient)]
               (do
                 (write-gradient-fill doffset dbuffer opacity gradient)
                 (write-metadata moffset mbuffer fill)
-                (recur (inc index) image-ids))
+                (recur (inc index) image-ids shaders))
               (if-let [image (get fill :fill-image)]
                 (do
                   (write-image-fill doffset dbuffer opacity image)
                   (write-metadata moffset mbuffer fill)
                   (recur (inc index)
-                         (conj image-ids (get image :id))))
-                (ex/raise :type :internal
-                          :code :invalid-fill
-                          :hint "found invalid fill on encoding fills to binary format")))))
+                         (conj image-ids (get image :id))
+                         shaders))
+                (if-let [shader (get fill :fill-shader)]
+                  (do
+                    (write-shader-fill doffset dbuffer opacity shader)
+                    (write-metadata moffset mbuffer fill)
+                    (recur (inc index)
+                           image-ids
+                           (assoc shaders (get shader :id) shader)))
+                  (ex/raise :type :internal
+                            :code :invalid-fill
+                            :hint "found invalid fill on encoding fills to binary format"))))))
 
-        #?(:cljs (Fills. total dbuffer mbuffer image-ids (weak/weak-value-map) nil)
-           :clj  (Fills. total dbuffer mbuffer nil))))))
+        #?(:cljs (Fills. total dbuffer mbuffer image-ids shaders (weak/weak-value-map) nil)
+           :clj  (Fills. total dbuffer mbuffer shaders nil))))))
 
 (defn fills?
   [o]

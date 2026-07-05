@@ -6,6 +6,7 @@ mod gpu_state;
 pub mod grid_layout;
 mod images;
 mod options;
+pub mod shaders;
 mod shadows;
 mod strokes;
 mod surfaces;
@@ -270,6 +271,7 @@ pub(crate) struct RenderState {
     pub viewbox: Viewbox,
     pub cached_viewbox: Viewbox,
     pub images: ImageStore,
+    pub shaders: shaders::ShaderStore,
     pub background_color: skia::Color,
     // Identifier of the current requestAnimationFrame call, if any.
     pub render_request_id: Option<i32>,
@@ -294,6 +296,15 @@ pub(crate) struct RenderState {
     pub show_grid: Option<Uuid>,
     pub focus_mode: FocusMode,
     pub touched_ids: HashSet<Uuid>,
+    // Shapes with animated shader fills rendered during the current pass.
+    // While non-empty, the animation frame loop keeps re-rendering their
+    // tiles with an updated `u_time` uniform.
+    pub animated_shape_ids: HashSet<Uuid>,
+    // Timestamp shared by every tile of the frame being rendered, so that
+    // animated shaders don't tear across tile boundaries.
+    current_timestamp: i32,
+    // Timestamp of the first rendered frame; `u_time` is relative to it.
+    time_origin: Option<i32>,
     /// Temporary flag used for off-screen passes (drop-shadow masks, filter surfaces, etc.)
     /// where we must render shapes without inheriting ancestor layer blurs. Toggle it through
     /// `with_nested_blurs_suppressed` to ensure it's always restored.
@@ -350,6 +361,7 @@ impl RenderState {
             viewbox,
             cached_viewbox: Viewbox::new(0., 0.),
             images: ImageStore::new(gpu_state.context.clone()),
+            shaders: shaders::ShaderStore::new(),
             background_color: skia::Color::TRANSPARENT,
             render_request_id: None,
             render_in_progress: false,
@@ -370,6 +382,9 @@ impl RenderState {
             show_grid: None,
             focus_mode: FocusMode::new(),
             touched_ids: HashSet::default(),
+            animated_shape_ids: HashSet::default(),
+            current_timestamp: 0,
+            time_origin: None,
             ignore_nested_blurs: false,
             preview_mode: false,
         }
@@ -646,6 +661,8 @@ impl RenderState {
         parent_shadows: Option<Vec<skia_safe::Paint>>,
         outset: Option<f32>,
     ) {
+        self.track_animated_shape(shape);
+
         let surface_ids = fills_surface_id as u32
             | strokes_surface_id as u32
             | innershadows_surface_id as u32
@@ -1303,6 +1320,12 @@ impl RenderState {
         // FIXME - review debug
         // debug::render_debug_tiles_for_viewbox(self);
 
+        self.current_timestamp = timestamp;
+        if self.time_origin.is_none() {
+            self.time_origin = Some(timestamp);
+        }
+        self.animated_shape_ids.clear();
+
         let _tile_start = performance::begin_timed_log!("tile_cache_update");
         performance::begin_measure!("tile_cache");
         self.pending_tiles
@@ -1355,10 +1378,48 @@ impl RenderState {
                 self.render_request_id = Some(wapi::request_animation_frame!());
             } else {
                 performance::end_measure!("render");
+                // Keep the loop alive while animated shader fills are
+                // visible: the next tick re-renders their tiles with an
+                // updated time uniform (see State::process_animation_frame).
+                if !self.animated_shape_ids.is_empty() {
+                    self.cancel_animation_frame();
+                    self.render_request_id = Some(wapi::request_animation_frame!());
+                }
             }
         }
         performance::end_measure!("process_animation_frame");
         Ok(())
+    }
+
+    /// Time in seconds passed to animated shaders as the `u_time` uniform.
+    pub fn shader_time(&self) -> f32 {
+        let origin = self.time_origin.unwrap_or(self.current_timestamp);
+        (self.current_timestamp.wrapping_sub(origin)) as f32 / 1000.0
+    }
+
+    pub fn has_animated_shapes(&self) -> bool {
+        !self.animated_shape_ids.is_empty()
+    }
+
+    pub fn take_animated_shape_ids(&mut self) -> HashSet<Uuid> {
+        std::mem::take(&mut self.animated_shape_ids)
+    }
+
+    /// Registers the shape as animated when any of its fills is a shader
+    /// fill whose compiled effect declares a `u_time` uniform.
+    fn track_animated_shape(&mut self, shape: &Shape) {
+        let animated = shape.fills.iter().any(|fill| {
+            if let Fill::Shader(shader_fill) = fill {
+                self.shaders
+                    .get(&shader_fill.id())
+                    .is_some_and(|shader| shader.animated)
+            } else {
+                false
+            }
+        });
+        if animated {
+            self.animated_shape_ids.insert(shape.id);
+        }
     }
 
     pub fn render_shape_tree_sync(

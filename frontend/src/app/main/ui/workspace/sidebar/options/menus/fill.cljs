@@ -234,6 +234,9 @@
                                :key index
                                :index index
                                :title (tr "workspace.options.fill")
+                               ;; Shader fills are supported on shape fills
+                               ;; only (not on text content fills)
+                               :disable-shader (contains? #{:text :multiple} type)
                                :on-change on-change
                                :on-reorder on-reorder
                                :on-detach on-detach

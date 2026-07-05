@@ -79,6 +79,12 @@
        (contains? fill-data :fill-color)
        (obj/set! attrs "fill" (:fill-color fill-data))
 
+       ;; Shader fills can only be rendered by the wasm renderer; the
+       ;; SVG renderer falls back to a solid color (the first shader
+       ;; color when present)
+       (contains? fill-data :fill-shader)
+       (obj/set! attrs "fill" (or (-> fill-data :fill-shader :colors first) "#808080"))
+
        :else
        (obj/set! attrs "fill" fill-default))
 

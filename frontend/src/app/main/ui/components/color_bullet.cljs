@@ -32,6 +32,9 @@
         (some? image)
         (str/ffmt "% (%)" path-and-name (tr "media.image"))
 
+        (some? (:shader color-item))
+        (str/ffmt "% (%)" path-and-name (tr "media.shader"))
+
         :else
         path-and-name)
 
@@ -43,7 +46,10 @@
         (uc/gradient-type->string (:type gradient))
 
         (some? image)
-        (tr "media.image")))))
+        (tr "media.image")
+
+        (some? (:shader color-item))
+        (tr "media.shader")))))
 
 (defn- breakable-color-title
   [title]
@@ -95,6 +101,10 @@
            (let [uri (cfg/resolve-file-media image)]
              [:div {:class (stl/css :color-bullet-wrapper)
                     :style {:background-image (str/ffmt "url(%)" uri)}}])
+
+           (some? (:shader color))
+           [:div {:class (stl/css :color-bullet-wrapper)
+                  :style {:background-image "conic-gradient(from 45deg, #7c3aed, #0ea5e9, #4ade80, #facc15, #7c3aed)"}}]
 
            :else
            [:div {:class (stl/css :color-bullet-wrapper)}

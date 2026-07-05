@@ -133,6 +133,33 @@ Gradient stops are serialized as a sequence of `16` chunks with the following la
 | 0      | 4              | `u32`     | ARGB Color  |
 | 4      | 4              | `f32`     | Stop offset |
 
+### Shader fills
+
+Shader fills reference a SkSL runtime shader stored out-of-band in the
+wasm shader cache (see `store_shader`), keyed by UUID. The record only
+carries the UUID plus a small set of fixed uniform values. The SkSL
+source itself is uploaded separately with the layout: 16 bytes shape
+UUID + 16 bytes shader UUID + UTF-8 source. A new source must always
+be stored under a fresh UUID (the cache has no invalidation).
+
+| Offset | Length (bytes) | Data Type | Field                    |
+| ------ | -------------- | --------- | ------------------------ |
+| 0      | 1              | `0x04`    | Fill type                |
+| 1      | 3              | ?         | Reserved                 |
+| 4      | 4              | `u32`     | `a` (ID)                 |
+| 8      | 4              | `u32`     | `b` (ID)                 |
+| 12     | 4              | `u32`     | `c` (ID)                 |
+| 16     | 4              | `u32`     | `d` (ID)                 |
+| 20     | 1              | `u8`      | Opacity                  |
+| 21     | 1              | `u8`      | Flags (reserved)         |
+| 22     | 2              | ?         | Reserved                 |
+| 24     | 16             | `u32[4]`  | ARGB colors (u_color1-4) |
+| 40     | 16             | `f32[4]`  | Params (u_param1-4)      |
+
+The invariant `RAW_FILL_DATA_SIZE == FILL-U8-SIZE == 160` must hold
+between `render-wasm/src/wasm/fills.rs` and
+`common/src/app/common/types/fills/impl.cljc`.
+
 ## Stroke Caps
 
 Stroke caps are serialized as `u8`:

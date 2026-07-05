@@ -32,6 +32,7 @@ export const RawFillData = {
   "linear": 1,
   "radial": 2,
   "image": 3,
+  "shader": 4,
 };
 
 export const RawFontStyle = {

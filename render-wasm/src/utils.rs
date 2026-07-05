@@ -28,6 +28,18 @@ pub fn get_image(image_id: &Uuid) -> Option<&Image> {
     with_state_mut!(state, { state.render_state_mut().images.get(image_id) })
 }
 
+pub fn get_shader(shader_id: &Uuid) -> Option<crate::render::shaders::CompiledShader> {
+    with_state_mut!(state, {
+        state.render_state().shaders.get(shader_id).cloned()
+    })
+}
+
+/// Time in seconds since the render state started rendering animated
+/// content. All tiles of a single frame share the same value.
+pub fn get_shader_time() -> f32 {
+    with_state_mut!(state, { state.render_state().shader_time() })
+}
+
 // FIXME: move to a different place ?
 pub fn get_fallback_fonts() -> &'static HashSet<String> {
     with_state_mut!(state, { state.render_state().fonts().get_fallback() })

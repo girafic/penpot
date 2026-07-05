@@ -31,7 +31,8 @@
    [:fill-opacity {:optional true} [::sm/number {:min 0 :max 1}]]
    [:fill-color {:optional true} types.color/schema:hex-color]
    [:fill-color-gradient {:optional true} types.color/schema:gradient]
-   [:fill-image {:optional true} types.color/schema:image]])
+   [:fill-image {:optional true} types.color/schema:image]
+   [:fill-shader {:optional true} types.color/schema:shader]])
 
 (def fill-attrs
   "A set of attrs that corresponds to fill data type"
@@ -40,7 +41,7 @@
 (def valid-fill-attrs
   "A set used for proper check if color should contain only one of the
   attrs listed in this set."
-  #{:fill-image :fill-color :fill-color-gradient})
+  #{:fill-image :fill-color :fill-color-gradient :fill-shader})
 
 (defn has-valid-fill-attrs?
   "Check if color has correct color attrs"
@@ -106,6 +107,14 @@
           fills)
     (impl/-get-image-ids fills)))
 
+(defn get-shaders
+  "Get the shader definitions referenced by the fills; returns a
+  collection of shader maps (each one with `:id` and `:source`)"
+  [fills]
+  (if (vector? fills)
+    (into [] (keep :fill-shader) fills)
+    (impl/-get-shaders fills)))
+
 (defn get-byte-size
   [fills]
   (impl/-get-byte-size fills))
@@ -160,5 +169,6 @@
     :opacity (:fill-opacity fill)
     :gradient (:fill-color-gradient fill)
     :image (:fill-image fill)
+    :shader (:fill-shader fill)
     :ref-id (:fill-color-ref-id fill)
     :ref-file (:fill-color-ref-file fill)}))
