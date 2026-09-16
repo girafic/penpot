@@ -14,6 +14,7 @@
   run identically in the browser and under Node. Setters that need host-specific
   data sources (fonts, image bytes, SVG static markup) stay in `app.render-wasm.api`."
   (:require
+   [app.common.data :as d]
    [app.common.math :as mth]
    [app.common.render-wasm.helpers :as h]
    [app.common.render-wasm.mem :as mem]
@@ -127,6 +128,20 @@
     (if (some? background-blur)
       (h/call wasm/internal-module "_set_shape_blur" type (boolean (:hidden background-blur)) (:value background-blur))
       (h/call wasm/internal-module "_clear_shape_blur" type))))
+
+(defn set-shape-glass
+  [glass]
+  (if (some? glass)
+    (h/call wasm/internal-module "_set_shape_glass"
+            (boolean (:hidden glass))
+            (d/nilv (:light-angle glass) 0)
+            (d/nilv (:light-intensity glass) 0)
+            (d/nilv (:refraction glass) 0)
+            (d/nilv (:depth glass) 0)
+            (d/nilv (:dispersion glass) 0)
+            (d/nilv (:frost glass) 0)
+            (d/nilv (:splay glass) 0))
+    (h/call wasm/internal-module "_clear_shape_glass")))
 
 (defn set-shape-shadows
   [shadows]

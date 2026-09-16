@@ -2,6 +2,7 @@ mod debug;
 mod fills;
 pub mod filters;
 mod fonts;
+mod glass;
 pub mod gpu_state;
 pub mod grid_layout;
 mod images;
@@ -891,6 +892,53 @@ impl RenderState {
         canvas.restore();
     }
 
+    /// Renders the glass effect directly to the given target surface. Like
+    /// background blur, it must run BEFORE the shape's own save_layer so it
+    /// reads the pixels behind the shape.
+    fn render_glass(
+        &mut self,
+        shape: &Shape,
+        clip_bounds: Option<&ClipStack>,
+        target_surface: SurfaceId,
+    ) {
+        if self.options.is_fast_mode() {
+            return;
+        }
+        let Some(glass) = shape.visible_glass() else {
+            return;
+        };
+
+        let scale = self.get_scale();
+        // Keep every backdrop sample inside the tile margin to avoid seams.
+        // During export there's no tiling, so skip the limit.
+        let max_reach = if self.export_context.is_some() {
+            None
+        } else {
+            Some(self.surfaces.margins().width as f32)
+        };
+
+        let translation = self
+            .surfaces
+            .get_render_context_translation(self.render_area, scale);
+
+        // Current/Export have no render context transform (identity canvas).
+        let mut local_to_device = Matrix::scale((scale, scale));
+        local_to_device.pre_translate(translation);
+        local_to_device.pre_concat(&shape.centered_transform());
+
+        self.surfaces.canvas(target_surface).save();
+
+        if let Some(clips) = clip_bounds {
+            let antialias = shape.should_use_antialias(scale, self.options.antialias_threshold);
+            self.clip_target_surface_to_stack(clips, target_surface, scale, antialias);
+        }
+
+        let canvas = self.surfaces.canvas(target_surface);
+        canvas.set_matrix(&skia::M44::from(&local_to_device));
+        glass::render_glass_backdrop(canvas, shape, &glass, &local_to_device, scale, max_reach);
+        canvas.restore();
+    }
+
     /// Runs `f` with `ignore_nested_blurs` temporarily forced to `true`.
     /// Certain off-screen passes (e.g. shadow masks) must render shapes without
     /// inheriting ancestor blur. This helper guarantees the flag is restored.
@@ -1422,7 +1470,7 @@ impl RenderState {
             && !shape.has_visible_strokes()
             && shape.shadows.is_empty()
             && shape.blur.is_none()
-            && shape.background_blur.is_none()
+            && !shape.has_backdrop_effect()
             && !has_inherited_blur
             && parent_shadows.is_none()
         {
@@ -1466,7 +1514,7 @@ impl RenderState {
             && !shape.has_frame_clip_layer_blur()
             && !matches!(shape.shape_type, Type::Group(g) if g.masked)
             && shape.blur.is_none()
-            && shape.background_blur.is_none()
+            && !shape.has_backdrop_effect()
             && !has_inherited_blur
             && !shadows_need_layered
             && (is_direct_geometry || is_direct_text)
@@ -3274,6 +3322,7 @@ impl RenderState {
         plain_shape_mut.clear_shadows();
         plain_shape_mut.blur = None;
         plain_shape_mut.background_blur = None;
+        plain_shape_mut.glass = None;
 
         // Shadow rendering uses a single render_shape call with no render_shape_exit,
         // so strokes must be drawn here. Disable clip_content to avoid skip_strokes
@@ -3828,6 +3877,7 @@ impl RenderState {
                 // the backdrop independently of the shape's opacity.
                 if !node_render_state.is_root() && self.focus_mode.is_active() {
                     self.render_background_blur(element, clip_bounds.as_ref(), target_surface);
+                    self.render_glass(element, clip_bounds.as_ref(), target_surface);
                 }
 
                 self.render_shape_enter(element, mask, clip_bounds.as_ref(), target_surface);
@@ -4115,7 +4165,7 @@ impl RenderState {
                 // which must contain the shapes behind it.
                 let tile_has_bg_blur = ids.iter().any(|id| {
                     tree.get(id)
-                        .is_some_and(|s| s.visible_background_blur().is_some())
+                        .is_some_and(|s| s.has_visible_backdrop_effect())
                 });
 
                 // We only need first level shapes, in the same order as the parent node.

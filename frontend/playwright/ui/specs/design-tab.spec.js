@@ -407,6 +407,105 @@ test.describe("Background blur", () => {
   });
 });
 
+test.describe("Glass", () => {
+  const openBlurFile = async (workspace) => {
+    await workspace.setupEmptyFile();
+    await workspace.mockGetFile("render-wasm/get-file-background-blur.json");
+    await workspace.goToWorkspace({
+      fileId: "93bfc923-66b2-813c-8007-b2725507ba08",
+      pageId: "93bfc923-66b2-813c-8007-b2725507ba09",
+    });
+  };
+
+  test("Glass is not offered when the glass flag is not active", async ({
+    page,
+  }) => {
+    const workspace = new WasmWorkspacePage(page);
+    await workspace.mockConfigFlags([tokenInputFlag]);
+    await openBlurFile(workspace);
+
+    await workspace.clickLeafLayer("Rectangle");
+    const blurSection = workspace.page.getByRole("region", {
+      name: "Blur effects",
+    });
+    await expect(blurSection).toBeVisible();
+
+    await blurSection
+      .getByRole("combobox", { name: "Blur type select" })
+      .click();
+    await expect(
+      blurSection.getByRole("option", { name: "Background blur" }),
+    ).toBeVisible();
+    await expect(blurSection.getByRole("option", { name: "Glass" })).toHaveCount(
+      0,
+    );
+  });
+
+  test("Changes a background blur into glass and edits its options", async ({
+    page,
+  }) => {
+    const workspace = new WasmWorkspacePage(page);
+    await workspace.mockConfigFlags([tokenInputFlag, "enable-glass"]);
+    await openBlurFile(workspace);
+
+    await workspace.clickLeafLayer("Rectangle");
+    const effectsSection = workspace.page.getByRole("region", {
+      name: "Effects",
+    });
+    await expect(effectsSection).toBeVisible();
+
+    const typeSelect = effectsSection.getByRole("combobox", {
+      name: "Blur type select",
+    });
+    await typeSelect.click();
+    await effectsSection.getByRole("option", { name: "Glass" }).click();
+    await expect(typeSelect).toContainText("Glass");
+
+    await effectsSection
+      .getByRole("button", { name: "Show/hide more options" })
+      .click();
+
+    const glassOptions = effectsSection.getByTestId("glass-options");
+    await expect(glassOptions).toBeVisible();
+    await expect(
+      glassOptions.getByRole("slider", { name: "Light angle" }),
+    ).toBeVisible();
+
+    const refraction = glassOptions.getByRole("textbox", {
+      name: "Refraction",
+    });
+    await expect(refraction).toHaveValue("80");
+    await refraction.fill("35");
+    await refraction.press("Enter");
+    await expect(
+      glassOptions.getByRole("slider", { name: "Refraction" }),
+    ).toHaveValue("35");
+  });
+
+  test("Adds glass as the third effect of a shape", async ({ page }) => {
+    const workspace = new WasmWorkspacePage(page);
+    await workspace.mockConfigFlags([tokenInputFlag, "enable-glass"]);
+    await openBlurFile(workspace);
+
+    await workspace.clickLeafLayer("Rectangle");
+    const effectsSection = workspace.page.getByRole("region", {
+      name: "Effects",
+    });
+    const addButton = effectsSection.getByRole("button", { name: "Add blur" });
+
+    // The rectangle has a background blur: add layer blur, then glass.
+    await addButton.click();
+    await addButton.click();
+
+    const typeSelects = effectsSection.getByRole("combobox", {
+      name: "Blur type select",
+    });
+    await expect(typeSelects).toHaveCount(3);
+    await expect(effectsSection.getByText("Glass")).toBeVisible();
+    await expect(addButton).not.toBeVisible();
+  });
+});
+
 test("BUG 9543 - Layout padding inputs not showing 'mixed' when needed", async ({
   page,
 }) => {

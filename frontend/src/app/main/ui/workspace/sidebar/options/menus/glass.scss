@@ -1,0 +1,170 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS SUBSIDIARY SL
+
+@use "ds/_borders.scss" as *;
+@use "ds/typography.scss" as t;
+@use "ds/_sizes.scss" as *;
+@use "ds/_utils.scss" as *;
+@use "../../../sidebar/common/sidebar.scss" as sidebar;
+
+.glass-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+  inline-size: var(--options-width);
+  padding-block: var(--sp-xs);
+}
+
+.label {
+  @include t.use-typography("body-small");
+
+  grid-column: span 2;
+  display: flex;
+  align-items: center;
+  color: var(--color-foreground-secondary);
+}
+
+.light-row {
+  @include sidebar.option-grid-structure;
+
+  align-items: start;
+}
+
+.light-pad {
+  --light-pad-color: var(--color-foreground-secondary);
+
+  position: relative;
+  grid-column: span 2;
+  block-size: px2rem(72);
+  border-radius: $br-8;
+  background-color: var(--color-background-tertiary);
+  cursor: crosshair;
+  touch-action: none;
+
+  &:hover {
+    --light-pad-color: var(--color-foreground-primary);
+  }
+
+  &:focus-visible {
+    outline: $b-1 solid var(--color-accent-primary);
+  }
+}
+
+.light-pad-disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.light-pad-target {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  inline-size: $sz-12;
+  block-size: $sz-12;
+  border: $b-1 solid var(--color-foreground-secondary);
+  border-radius: $br-4;
+  transform: translate(-50%, -50%);
+}
+
+.light-pad-light {
+  position: absolute;
+  inline-size: $sz-12;
+  block-size: $sz-12;
+  border-radius: $br-circle;
+  background-color: var(--color-accent-primary);
+  box-shadow: 0 0 0 $b-2 var(--color-background-tertiary);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.light-inputs {
+  grid-column: span 4;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.light-input {
+  inline-size: 100%;
+}
+
+.sliders {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.slider-row {
+  @include sidebar.option-grid-structure;
+
+  align-items: center;
+}
+
+.slider {
+  --slider-track: var(--color-background-quaternary);
+  --slider-fill: var(--color-accent-primary);
+
+  grid-column: span 4;
+  appearance: none;
+  inline-size: 100%;
+  block-size: $sz-32;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+
+  &::-webkit-slider-runnable-track {
+    block-size: $b-2 * 2;
+    border-radius: $br-4;
+    background: linear-gradient(
+      to right,
+      var(--slider-fill) var(--slider-progress),
+      var(--slider-track) var(--slider-progress)
+    );
+  }
+
+  &::-moz-range-track {
+    block-size: $b-2 * 2;
+    border-radius: $br-4;
+    background: linear-gradient(
+      to right,
+      var(--slider-fill) var(--slider-progress),
+      var(--slider-track) var(--slider-progress)
+    );
+  }
+
+  &::-webkit-slider-thumb {
+    appearance: none;
+    inline-size: $sz-12;
+    block-size: $sz-12;
+    margin-block-start: calc(($b-2 * 2 - $sz-12) / 2);
+    border: $b-1 solid var(--color-background-quaternary);
+    border-radius: $br-circle;
+    background-color: var(--color-foreground-primary);
+  }
+
+  &::-moz-range-thumb {
+    inline-size: $sz-12;
+    block-size: $sz-12;
+    border: $b-1 solid var(--color-background-quaternary);
+    border-radius: $br-circle;
+    background-color: var(--color-foreground-primary);
+  }
+
+  &:focus-visible {
+    outline: $b-1 solid var(--color-accent-primary);
+    border-radius: $br-4;
+  }
+
+  &:disabled {
+    --slider-fill: var(--color-foreground-secondary);
+
+    cursor: default;
+  }
+}
+
+.slider-input {
+  grid-column: span 2;
+}

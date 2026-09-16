@@ -189,6 +189,9 @@
         :background-blur
         (api/set-shape-background-blur v)
 
+        :glass
+        (api/set-shape-glass v)
+
         :shadow
         (api/set-shape-shadows v)
 
@@ -233,6 +236,7 @@
           (api/set-shape-fills id (:fills shape) false)
           (api/set-shape-blur (:blur shape))
           (api/set-shape-background-blur (:background-blur shape))
+          (api/set-shape-glass (:glass shape))
           (api/set-shape-shadows (:shadow shape)))
 
         :masked-group

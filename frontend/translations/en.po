@@ -7858,6 +7858,10 @@ msgstr ""
 "Background blur is only supported in the new render. Switch to the new "
 "render in the Preferences menu to use this effect"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:152, src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:170
+msgid "workspace.options.blur-options.glass"
+msgstr "Glass"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:98, src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:112
 msgid "workspace.options.blur-options.layer-blur"
 msgstr "Layer blur"
@@ -8093,6 +8097,18 @@ msgstr "Create typography style"
 msgid "workspace.options.design"
 msgstr "Design"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:317, src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:334
+msgid "workspace.options.effects-options.title"
+msgstr "Effects"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:316
+msgid "workspace.options.effects-options.title.group"
+msgstr "Group effects"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:315
+msgid "workspace.options.effects-options.title.multiple"
+msgstr "Selection effects"
+
 #: src/app/main/ui/inspect/exports.cljs:162
 msgid "workspace.options.export"
 msgstr "Export"
@@ -8192,6 +8208,44 @@ msgstr "Flow starts"
 #, unused
 msgid "workspace.options.flows.remove-flow"
 msgstr "Remove flow"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:203
+msgid "workspace.options.glass-options.depth"
+msgstr "Depth"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:212
+msgid "workspace.options.glass-options.disabled-label"
+msgstr ""
+"Glass is only supported in the new render. Switch to the new render in the "
+"Preferences menu to use this effect"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:205
+msgid "workspace.options.glass-options.dispersion"
+msgstr "Dispersion"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:207
+msgid "workspace.options.glass-options.frost"
+msgstr "Frost"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:215
+msgid "workspace.options.glass-options.light"
+msgstr "Light"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:105, src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:224
+msgid "workspace.options.glass-options.light-angle"
+msgstr "Light angle"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:234
+msgid "workspace.options.glass-options.light-intensity"
+msgstr "Light intensity"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:201
+msgid "workspace.options.glass-options.refraction"
+msgstr "Refraction"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:209
+msgid "workspace.options.glass-options.splay"
+msgstr "Splay"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs:34
 msgid "workspace.options.grid.auto"

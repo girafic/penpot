@@ -20,10 +20,21 @@
    [app.main.ui.ds.controls.select :refer [select*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.ds.tooltip.tooltip :refer [tooltip*]]
+   [app.main.ui.workspace.sidebar.options.menus.glass :refer [create-glass glass-options*]]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
 
-(def blur-attrs [:blur :background-blur])
+(def blur-attrs [:blur :background-blur :glass])
+
+(def ^:private type->key
+  {:layer-blur :blur
+   :background-blur :background-blur
+   :glass :glass})
+
+(def ^:private key->type
+  {:blur :layer-blur
+   :background-blur :background-blur
+   :glass :glass})
 
 (defn create-blur [type]
   (let [id (uuid/next)]
@@ -32,15 +43,52 @@
      :value 4
      :hidden false}))
 
+(defn- create-effect
+  [key]
+  (if (= key :glass)
+    (create-glass)
+    (create-blur (key->type key))))
+
+(defn- convert-effect
+  "Turns the effect `value` into one of `type`. The blur amount carries over
+  as the glass frost and back."
+  [value type]
+  (cond
+    (= type :glass)
+    (cond-> (create-glass)
+      (some? (:value value)) (assoc :frost (:value value))
+      (some? (:hidden value)) (assoc :hidden (:hidden value)))
+
+    (= (:type value) :glass)
+    (cond-> (create-blur type)
+      (some? (:frost value)) (assoc :value (:frost value))
+      (some? (:hidden value)) (assoc :hidden (:hidden value)))
+
+    :else
+    (assoc value :type type)))
+
+(defn- use-available-keys
+  "Effect keys the user can add with the current renderer and flags."
+  []
+  (let [render-wasm? (features/use-feature "render-wasm/v1")
+        bg-blur?     (and render-wasm? (contains? cf/flags :background-blur))
+        glass?       (and render-wasm? (contains? cf/flags :glass))]
+    (mf/with-memo [bg-blur? glass?]
+      (cond-> [:blur]
+        bg-blur? (conj :background-blur)
+        glass?   (conj :glass)))))
+
 (mf/defc blur-menu-content*
-  [{:keys [blur-key value change-fn blur-values]}]
-  (let [render-wasm?        (features/use-feature "render-wasm/v1")
-        bg-blur?            (and render-wasm?
-                                 (contains? cf/flags :background-blur))
-        is-hidden           (get value :hidden)
+  [{:keys [blur-key value change-fn blur-values available-keys]}]
+  (let [is-hidden           (get value :hidden)
         show-more-options*  (mf/use-state false)
         show-more-options   (deref show-more-options*)
         toggle-more-options (mf/use-fn #(swap! show-more-options* not))
+
+        ;; The effect exists but can't be rendered/edited with the current
+        ;; renderer (e.g. background blur or glass without render-wasm).
+        unsupported?        (not (contains? (set available-keys) blur-key))
+        selectable?         (> (count available-keys) 1)
 
         handle-delete
         (mf/use-fn
@@ -60,55 +108,68 @@
          (fn [value]
            (change-fn #(assoc-in % [blur-key :value] value))))
 
+        handle-glass-change
+        (mf/use-fn
+         (mf/deps change-fn blur-key)
+         (fn [attr value]
+           (change-fn #(assoc-in % [blur-key attr] value))))
+
         handle-type-change
         (mf/use-fn
-         (mf/deps change-fn value blur-key)
+         (mf/deps change-fn blur-key)
          (fn [type]
            (let [type-kw    (keyword type)
-                 target-key (if (= type-kw :layer-blur) :blur :background-blur)]
+                 target-key (get type->key type-kw)]
              (change-fn
               (fn [shape]
                 (cond
-                  ;; mismo tipo
+                  ;; same type
                   (= blur-key target-key)
                   shape
 
-                  ;; ya existe un blur del tipo destino
+                  ;; an effect of the target type already exists
                   (contains? shape target-key)
                   shape
 
-                  ;; blur origen no existe
+                  ;; the source effect doesn't exist
                   (not (contains? shape blur-key))
                   shape
 
                   :else
-                  (let [blur (get shape blur-key)]
+                  (let [effect (get shape blur-key)]
                     (-> shape
                         (dissoc blur-key)
-                        (assoc target-key
-                               (assoc blur :type type-kw))))))))))
+                        (assoc target-key (convert-effect effect type-kw))))))))))
 
-        bb-disabled? (and (= 2 (count blur-values))
-                          (not= blur-key :background-blur))
-        lb-disabled? (and (= 2 (count blur-values))
-                          (not= blur-key :blur))
-        label-ref (mf/use-ref nil)
+        used-keys
+        (mf/with-memo [blur-values]
+          (into #{} (map :key) blur-values))
 
         type-options
-        [{:value "layer-blur"  :disabled lb-disabled? :id "layer-blur" :label (tr "workspace.options.blur-options.layer-blur")}
-         {:value "background-blur" :disabled bb-disabled?  :id "background-blur" :label (tr "workspace.options.blur-options.background-blur")}]
+        (mf/with-memo [available-keys used-keys blur-key]
+          (let [labels {:blur (tr "workspace.options.blur-options.layer-blur")
+                        :background-blur (tr "workspace.options.blur-options.background-blur")
+                        :glass (tr "workspace.options.blur-options.glass")}]
+            (mapv (fn [key]
+                    (let [type (d/name (key->type key))]
+                      {:value type
+                       :id type
+                       :label (get labels key)
+                       :disabled (and (not= key blur-key)
+                                      (contains? used-keys key))}))
+                  available-keys)))
 
-
-        background-blur-disabled?
-        (and (= blur-key :background-blur)
-             (not bg-blur?))
+        label-ref (mf/use-ref nil)
 
         label-text
         (cond
           (= blur-key :background-blur)
           (tr "workspace.options.blur-options.background-blur")
 
-          bg-blur?
+          (= blur-key :glass)
+          (tr "workspace.options.blur-options.glass")
+
+          selectable?
           (tr "workspace.options.blur-options.layer-blur")
 
           :else
@@ -118,7 +179,7 @@
         (mf/html [:span {:aria-labelledby "background-blur-disabled-label"
                          :ref label-ref
                          :class (stl/css-case :label true
-                                              :disabled-label background-blur-disabled?)}
+                                              :disabled-label unsupported?)}
                   label-text])]
 
     [:*
@@ -131,13 +192,10 @@
                          :on-click toggle-more-options
                          :selected show-more-options
                          :variant "ghost"
-                         :disabled (or
-                                    is-hidden
-                                    (and (= blur-key :background-blur)
-                                         (= false bg-blur?)))
+                         :disabled (or is-hidden unsupported?)
                          :aria-label (tr "workspace.options.blur-options.toggle-more-options")
                          :icon i/menu}]
-       (cond bg-blur?
+       (cond (and selectable? (not unsupported?))
              [:> select*
               {:class (stl/css :blur-type-select)
                :default-selected (d/name (:type value))
@@ -145,12 +203,14 @@
                :options type-options
                :disabled is-hidden
                :on-change handle-type-change}]
-             background-blur-disabled?
+             unsupported?
              [:> tooltip*
               {:trigger-ref label-ref
                :id "background-blur-disabled-label"
                :class (stl/css :disabled-label-tooltip)
-               :content (tr "workspace.options.blur-options.disabled-blur-label")}
+               :content (if (= blur-key :glass)
+                          (tr "workspace.options.glass-options.disabled-label")
+                          (tr "workspace.options.blur-options.disabled-blur-label"))}
               label]
              :else
              label)]
@@ -159,12 +219,9 @@
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.options.blur-options.toggle-blur")
                          :on-click handle-toggle-visibility
-                         :disabled (and (= blur-key :background-blur)
-                                        (= false bg-blur?))
+                         :disabled unsupported?
                          :tooltip-placement "top-left"
-                         :icon (if (or is-hidden
-                                       (and (= blur-key :background-blur)
-                                            (= false bg-blur?))) i/hide i/shown)}]
+                         :icon (if (or is-hidden unsupported?) i/hide i/shown)}]
        [:> icon-button* {:variant "ghost"
                          :aria-label (tr "workspace.options.blur-options.remove-blur")
                          :on-click handle-delete
@@ -172,25 +229,26 @@
                          :icon i/remove}]]]
 
      (when show-more-options
-       [:div {:class (stl/css :second-row)}
-        [:> numeric-input*
-         {:class (stl/css :numeric-input)
-          :placeholder "--"
-          :min 0
-          :text-icon "value"
-          :on-change handle-change
-          :name "blur-value"
-          :value (:value value)}]])]))
+       (if (= blur-key :glass)
+         [:> glass-options* {:value value
+                             :disabled is-hidden
+                             :on-change handle-glass-change}]
+         [:div {:class (stl/css :second-row)}
+          [:> numeric-input*
+           {:class (stl/css :numeric-input)
+            :placeholder "--"
+            :min 0
+            :text-icon "value"
+            :on-change handle-change
+            :name "blur-value"
+            :value (:value value)}]]))]))
 
 (defn get-blurs [values]
-  (cond-> []
-    (:blur values)
-    (conj {:key :blur
-           :value (:blur values)})
-
-    (:background-blur values)
-    (conj {:key :background-blur
-           :value (:background-blur values)})))
+  (into []
+        (keep (fn [key]
+                (when-let [value (get values key)]
+                  {:key key :value value})))
+        blur-attrs))
 
 (defn- check-blur-menu-props
   [old-props new-props]
@@ -203,16 +261,18 @@
          (identical? (get old-values :blur)
                      (get new-values :blur))
          (identical? (get old-values :background-blur)
-                     (get new-values :background-blur)))))
+                     (get new-values :background-blur))
+         (identical? (get old-values :glass)
+                     (get new-values :glass)))))
 
 (mf/defc blur-menu*
   {::mf/wrap [#(mf/memo' % check-blur-menu-props)]}
   [{:keys [ids type values]}]
-  (let [render-wasm?        (features/use-feature "render-wasm/v1")
-        bg-blur?            (and render-wasm?
-                                 (contains? cf/flags :background-blur))
+  (let [available-keys (use-available-keys)
+        multi-type?    (> (count available-keys) 1)
+        glass?         (contains? (set available-keys) :glass)
 
-        blur-values          (get-blurs values)
+        blur-values    (get-blurs values)
 
         mixed-state (and (or (= :group type)
                              (= :multiple type))
@@ -236,52 +296,55 @@
         (mf/use-fn
          (mf/deps change!)
          (fn []
-           (change! #(dissoc % :blur :background-blur))))
+           (change! #(apply dissoc % blur-attrs))))
+
+        next-key
+        (d/seek #(nil? (get values %)) available-keys)
 
         handle-add
         (mf/use-fn
-         (mf/deps change! blur-values)
+         (mf/deps change! next-key)
          (fn []
-           (cond
-             (= 1 (count blur-values))
-             (let [existing-key (:key (first blur-values))
-                   new-key      (if (= existing-key :blur)
-                                  :background-blur
-                                  :blur)]
-               (change! #(assoc % new-key (create-blur (if (= :blur new-key)
-                                                         :layer-blur
-                                                         :background-blur)))))
-             (= 0 (count blur-values))
-             (change! #(assoc % :blur (create-blur :layer-blur))))
-           :else
-           blur-values))]
+           (when (some? next-key)
+             (change! #(assoc % next-key (create-effect next-key))))))
+
+        title
+        (cond
+          glass?
+          (case type
+            :multiple (tr "workspace.options.effects-options.title.multiple")
+            :group (tr "workspace.options.effects-options.title.group")
+            (tr "workspace.options.effects-options.title"))
+
+          multi-type?
+          (case type
+            :multiple (tr "workspace.options.blur-effects-options.title.multiple")
+            :group (tr "workspace.options.blur-effects-options.title.group")
+            (tr "labels.blur-effects"))
+
+          :else
+          (case type
+            :multiple (tr "workspace.options.blur-options.title.multiple")
+            :group (tr "workspace.options.blur-options.title.group")
+            (tr "labels.blur")))]
 
     [:section {:class (stl/css :element-set)
                :hidden (not open?)
-               :aria-label (if bg-blur?
-                             (tr "labels.blur-effects")
-                             (tr "labels.blur"))}
+               :aria-label (cond
+                             glass? (tr "workspace.options.effects-options.title")
+                             multi-type? (tr "labels.blur-effects")
+                             :else (tr "labels.blur"))}
      [:div {:class (stl/css :element-title)}
       [:> title-bar* {:collapsable  (seq blur-values)
                       :collapsed    (not open?)
                       :on-collapsed toggle-content
                       :aria-expanded open?
                       :aria-controls "blur-content"
-                      :title        (if bg-blur?
-                                      (cond
-                                        (= type :multiple) (tr "workspace.options.blur-effects-options.title.multiple")
-                                        (= type :group) (tr "workspace.options.blur-effects-options.title.group")
-                                        :else (tr "labels.blur-effects"))
-                                      (cond
-                                        (= type :multiple) (tr "workspace.options.blur-options.title.multiple")
-                                        (= type :group) (tr "workspace.options.blur-options.title.group")
-                                        :else (tr "labels.blur")))
+                      :title        title
                       :class        (stl/css-case :title-spacing-blur (not (seq blur-values))
                                                   :long-title true)}
        (when (and (not mixed-state)
-                  (if bg-blur?
-                    (< (count blur-values) 2)
-                    (nil? (:blur values))))
+                  (some? next-key))
          [:> icon-button*
           {:variant "ghost"
            :aria-label (tr "workspace.options.blur-options.add-blur")
@@ -309,4 +372,5 @@
               :blur-key key
               :value value
               :blur-values blur-values
+              :available-keys available-keys
               :change-fn change!}]))])]))

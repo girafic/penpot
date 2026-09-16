@@ -72,7 +72,8 @@
 
 (defn- has-blur? [shape]
   (or (:blur shape)
-      (:background-blur shape)))
+      (:background-blur shape)
+      (:glass shape)))
 
 (defn- has-text? [shape]
   (:content shape))

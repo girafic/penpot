@@ -14,12 +14,14 @@
    [app.main.ui.components.title-bar :refer [inspect-title-bar*]]
    [app.util.code-gen.style-css :as css]
    [app.util.code-gen.style-css-formats :refer [format-blur]]
+   [app.util.code-gen.style-css-values :as cssv]
    [app.util.i18n :refer [tr]]
    [rumext.v2 :as mf]))
 
 (defn- has-blur? [shape]
   (or (:blur shape)
-      (:background-blur shape)))
+      (:background-blur shape)
+      (:glass shape)))
 
 (mf/defc blur-panel*
   [{:keys [shapes]}]
@@ -42,9 +44,9 @@
                 blue-value-raw (get-in (first shapes) [:blur :value])
                 blur-property-value (css/format-css-property [blur-property blue-value-raw] {})
 
-                background-blur (:background-blur (first shapes))
                 background-blur-property :backdrop-filter
-                background-blur-value-raw (get-in (first shapes) [:background-blur :value])
+                background-blur-value-raw (cssv/backdrop-blur-value (first shapes))
+                background-blur (some? background-blur-value-raw)
                 background-blur-property-value (css/format-css-property [background-blur-property background-blur-value-raw] {})]
             (when background-blur
               [:> copy-button* {:data  (dm/str background-blur-property-value)
@@ -61,9 +63,9 @@
                 blur-property-value (css/format-css-property [blur-property blue-value-raw] {})
                 blur-value-detail (format-blur blue-value-raw)
 
-                background-blur (:background-blur (first shapes))
                 background-blur-property :backdrop-filter
-                background-blur-value-raw (get-in (first shapes) [:background-blur :value])
+                background-blur-value-raw (cssv/backdrop-blur-value (first shapes))
+                background-blur (some? background-blur-value-raw)
                 background-blur-property-value (css/format-css-property [background-blur-property background-blur-value-raw] {})
                 background-blur-value-detail (format-blur background-blur-value-raw)]
             [:*

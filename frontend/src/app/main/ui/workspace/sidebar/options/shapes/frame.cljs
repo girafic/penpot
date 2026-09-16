@@ -160,7 +160,7 @@
                                 :libraries libraries}]
      [:> shadow-menu* {:ids ids :values (get shape :shadow)}]
      [:> blur-menu* {:ids ids
-                     :values (select-keys shape [:blur :background-blur])}]
+                     :values (select-keys shape [:blur :background-blur :glass])}]
      [:> frame-grid* {:grids (:grids shape)
                       :id (:id shape)
                       :frame-width (:width shape)

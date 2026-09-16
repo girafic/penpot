@@ -50,6 +50,7 @@
     :shadow           :shape
     :blur             :shape
     :background-blur  :shape
+    :glass            :shape
     :stroke           :shape
     :text             :children
     :exports          :shape
@@ -64,6 +65,7 @@
     :shadow           :shape
     :blur             :shape
     :background-blur  :shape
+    :glass            :shape
     :stroke           :children
     :text             :children
     :exports          :shape
@@ -78,6 +80,7 @@
     :shadow           :shape
     :blur             :shape
     :background-blur  :shape
+    :glass            :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -92,6 +95,7 @@
     :shadow           :shape
     :blur             :shape
     :background-blur  :shape
+    :glass            :shape
     :stroke           :shape
     :text             :text
     :exports          :shape
@@ -106,6 +110,7 @@
     :shadow           :shape
     :blur             :shape
     :background-blur  :shape
+    :glass            :shape
     :stroke           :ignore
     :text             :ignore
     :exports          :shape
@@ -120,6 +125,7 @@
     :shadow           :shape
     :blur             :shape
     :background-blur  :shape
+    :glass            :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -134,6 +140,7 @@
     :shadow           :shape
     :blur             :shape
     :background-blur  :shape
+    :glass            :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -148,6 +155,7 @@
     :shadow           :shape
     :blur             :shape
     :background-blur  :shape
+    :glass            :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -162,6 +170,7 @@
     :shadow           :shape
     :blur             :shape
     :background-blur  :shape
+    :glass            :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -197,7 +206,9 @@
   [v]
   (mapv #(select-keys % shadow-keys) v))
 
-(def blur-keys [:type :value :hidden])
+(def blur-keys
+  [:type :value :hidden
+   :light-angle :light-intensity :refraction :depth :dispersion :frost :splay])
 
 (defn blur-eq
   "Checks if two blurs are equivalent for the multiple selection"

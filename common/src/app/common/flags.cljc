@@ -177,6 +177,8 @@
 
     :mcp
     :background-blur
+    ;; Glass backdrop effect, only available with render-wasm
+    :glass
     :available-viewer-wasm
     :stroke-path
     :stroke-per-side

@@ -296,10 +296,23 @@
   (when-not (cgc/svg-markup? shape)
     (get-in shape [:blur :value])))
 
+(defn backdrop-blur-value
+  "Blur radius for the CSS `backdrop-filter`. CSS has no glass effect, so a
+  visible glass falls back to its frost."
+  [shape]
+  (or (get-in shape [:background-blur :value])
+      (let [glass (:glass shape)
+            frost (:frost glass)]
+        (when (and (some? glass)
+                   (not (:hidden glass))
+                   (d/num? frost)
+                   (pos? frost))
+          frost))))
+
 (defn- get-backdrop-filter
   [shape]
   (when-not (cgc/svg-markup? shape)
-    (get-in shape [:background-blur :value])))
+    (backdrop-blur-value shape)))
 
 (defn- get-display
   [shape]

@@ -208,10 +208,33 @@ Bool operations (`bool-type`) are serialized as `u8`:
 
 Blur types are serialized as `u8`:
 
-| Value | Field |
-| ----- | ----- |
-| 1     | Layer |
-| \_    | None  |
+| Value | Field      |
+| ----- | ---------- |
+| 0     | Layer      |
+| 1     | Background |
+
+## Glass
+
+`set_shape_glass(hidden, light_angle, light_intensity, refraction, depth, dispersion, frost, splay)`
+takes the values as separate arguments. `clear_shape_glass()` removes the
+effect.
+
+In the shape batch upload (`set_shapes_batch`), the `GLASS` section
+(`1 << 11`) follows `BLUR_BG` and uses 32 bytes:
+
+| Offset | Length | Type | Field           | Unit      |
+| ------ | ------ | ---- | --------------- | --------- |
+| 0      | 1      | u8   | hidden          | 0 / 1     |
+| 1      | 3      | —    | padding         |           |
+| 4      | 4      | f32  | light-angle     | degrees   |
+| 8      | 4      | f32  | light-intensity | 0..100    |
+| 12     | 4      | f32  | refraction      | 0..100    |
+| 16     | 4      | f32  | depth           | px        |
+| 20     | 4      | f32  | dispersion      | 0..100    |
+| 24     | 4      | f32  | frost           | px radius |
+| 28     | 4      | f32  | splay           | 0..100    |
+
+When the bit is absent, the shape's glass is cleared.
 
 ## Shadow Styles
 

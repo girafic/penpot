@@ -194,3 +194,36 @@
       (is (str/includes? markup "root-0")
           "the text nodes must expose their $id as a class for the CSS to apply")
       (is (str/includes? markup "root-0-paragraph-set-0-paragraph-0")))))
+
+;; --- Backdrop filter -----------------------------------------------------
+
+(def ^:private sample-glass
+  {:id (uuid/next) :type :glass :hidden false
+   :light-angle -45 :light-intensity 80 :refraction 80
+   :depth 20 :dispersion 50 :frost 4 :splay 0})
+
+(deftest glass-exports-its-frost-as-backdrop-filter
+  (testing "a visible glass uses its frost as the backdrop blur"
+    (let [pid (uuid/next)
+          cid (uuid/next)
+          c   (child cid pid :glass sample-glass)
+          objs (objects (frame pid) c)]
+      (is (= "blur(4px)" (css/get-css-value objs c :backdrop-filter)))))
+
+  (testing "a hidden glass or a glass without frost exports nothing"
+    (let [pid (uuid/next)
+          cid (uuid/next)
+          hidden (child cid pid :glass (assoc sample-glass :hidden true))
+          clear  (child cid pid :glass (assoc sample-glass :frost 0))]
+      (is (nil? (css/get-css-value (objects (frame pid) hidden) hidden :backdrop-filter)))
+      (is (nil? (css/get-css-value (objects (frame pid) clear) clear :backdrop-filter)))))
+
+  (testing "a background blur takes precedence over the glass"
+    (let [pid (uuid/next)
+          cid (uuid/next)
+          c   (child cid pid
+                     :glass sample-glass
+                     :background-blur {:id (uuid/next) :type :background-blur
+                                       :value 12 :hidden false})
+          objs (objects (frame pid) c)]
+      (is (= "blur(12px)" (css/get-css-value objs c :backdrop-filter))))))

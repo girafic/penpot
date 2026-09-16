@@ -11,6 +11,8 @@
 //!     CHILDREN:    [u32 n][n × 16 uuid]
 //!     BLUR_LAYER:  [u8 hidden][u8;3 pad][f32 value]
 //!     BLUR_BG:     same
+//!     GLASS:       [u8 hidden][u8;3 pad][7 × f32]  (angle, intensity, refraction,
+//!                  depth, dispersion, frost, splay)
 //!     SHADOWS:     [u32 n][n × 24]
 //!     MASKED:      [u8 value][u8;3 pad]
 //!     BOOL_TYPE:   [u8 value][u8;3 pad]
@@ -27,7 +29,7 @@
 use skia_safe as skia;
 
 use crate::mem;
-use crate::shapes::{Blur, BlurType, Shadow, ShadowStyle, Stroke, Type};
+use crate::shapes::{Blur, BlurType, Glass, Shadow, ShadowStyle, Stroke, Type};
 use crate::utils::{decode_optional_f32, uuid_from_u32_quartet};
 use crate::uuid::Uuid;
 use crate::wasm::fills::{read_fills_from_bytes, RawFillData, RAW_FILL_DATA_SIZE};
@@ -58,6 +60,7 @@ const SECTION_LAYOUT_ITEM: u32 = 1 << 7;
 const SECTION_FLEX: u32 = 1 << 8;
 const SECTION_FILLS: u32 = 1 << 9;
 const SECTION_STROKES: u32 = 1 << 10;
+const SECTION_GLASS: u32 = 1 << 11;
 
 const STROKE_ALIGN_INNER: u8 = 1;
 const STROKE_ALIGN_OUTER: u8 = 2;
@@ -147,6 +150,28 @@ fn clear_blur(layer: bool) {
             shape.set_background_blur(None);
         }
     });
+}
+
+fn parse_glass(cur: &mut Cursor<'_>) -> Result<Glass> {
+    let hidden = cur.u8()? != 0;
+    let _ = cur.take(3)?;
+    let light_angle = cur.f32()?;
+    let light_intensity = cur.f32()?;
+    let refraction = cur.f32()?;
+    let depth = cur.f32()?;
+    let dispersion = cur.f32()?;
+    let frost = cur.f32()?;
+    let splay = cur.f32()?;
+    Ok(Glass::new(
+        hidden,
+        light_angle,
+        light_intensity,
+        refraction,
+        depth,
+        dispersion,
+        frost,
+        splay,
+    ))
 }
 
 fn apply_shadows(cur: &mut Cursor<'_>) -> Result<()> {
@@ -290,6 +315,17 @@ fn apply_shape_payload(payload: &[u8]) -> Result<()> {
         apply_blur(false, hidden, value);
     } else {
         clear_blur(false);
+    }
+
+    if mask & SECTION_GLASS != 0 {
+        let glass = parse_glass(&mut cur)?;
+        with_current_shape_mut!(state, |shape: &mut Shape| {
+            shape.set_glass(Some(glass));
+        });
+    } else {
+        with_current_shape_mut!(state, |shape: &mut Shape| {
+            shape.set_glass(None);
+        });
     }
 
     if mask & SECTION_SHADOWS != 0 {
@@ -470,4 +506,34 @@ pub extern "C" fn set_shapes_batch() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_glass_reads_the_32_byte_section() {
+        let mut bytes = vec![1u8, 0, 0, 0];
+        for value in [-45.0f32, 80.0, 70.0, 20.0, 50.0, 4.0, 10.0] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&[0xAA; 4]);
+
+        let mut cur = Cursor::new(&bytes);
+        let glass = parse_glass(&mut cur).unwrap();
+
+        assert_eq!(
+            glass,
+            Glass::new(true, -45.0, 80.0, 70.0, 20.0, 50.0, 4.0, 10.0)
+        );
+        assert_eq!(cur.remaining(), 4);
+    }
+
+    #[test]
+    fn parse_glass_fails_on_truncated_input() {
+        let bytes = [0u8; 12];
+        let mut cur = Cursor::new(&bytes);
+        assert!(parse_glass(&mut cur).is_err());
+    }
 }

@@ -292,7 +292,7 @@
                    (grc/fix-aspect-ratio aspect-ratio))
 
         ;; Bounds without shadows/blur will be the bounds of the thumbnail
-        bounds2 (gsb/get-object-bounds objects (dissoc frame :shadow :blur :background-blur))
+        bounds2 (gsb/get-object-bounds objects (dissoc frame :shadow :blur :background-blur :glass))
 
         delta-bounds (gpt/point (:x bounds) (:y bounds))
         vector (gpt/negate delta-bounds)

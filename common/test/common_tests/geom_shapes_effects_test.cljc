@@ -72,3 +72,16 @@
     (let [shape {:blur {:value 10 :type :blur}}
           scaled (gef/update-blur-scale shape 0)]
       (t/is (= 0 (get-in scaled [:blur :value]))))))
+
+(t/deftest update-glass-scale-test
+  (t/testing "Scale glass lengths by 2"
+    (let [shape  {:glass {:type :glass :depth 20 :frost 4 :refraction 80 :light-intensity 80}}
+          scaled (gef/update-glass-scale shape 2)]
+      (t/is (= 40 (get-in scaled [:glass :depth])))
+      (t/is (= 8 (get-in scaled [:glass :frost])))))
+
+  (t/testing "Percent values are not scaled"
+    (let [shape  {:glass {:type :glass :depth 20 :frost 4 :refraction 80 :light-intensity 80}}
+          scaled (gef/update-glass-scale shape 3)]
+      (t/is (= 80 (get-in scaled [:glass :refraction])))
+      (t/is (= 80 (get-in scaled [:glass :light-intensity]))))))

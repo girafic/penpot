@@ -3,11 +3,12 @@ use skia_safe::{self as skia, Canvas, Paint, RRect};
 use crate::error::Result;
 use crate::shapes::{
     circle_segments_local, merge_fills, radius_to_sigma, rect_segments_local, stroke_to_path,
-    BlurType, Fill, Frame, Path, Rect, Shape, Stroke, StrokeKind, StrokeStyle, Type,
+    BlurType, Fill, Frame, Glass, Path, Rect, Shape, Stroke, StrokeKind, StrokeStyle, Type,
 };
 use crate::state::ShapesPoolRef;
 use crate::uuid::Uuid;
 
+use super::glass;
 use super::shape_renderer::ShapeRenderer;
 use super::text;
 use super::RenderResources;
@@ -502,10 +503,24 @@ fn render_tree_inner(
         if let Some(blur) = element.visible_background_blur() {
             if blur.value > 0.0 {
                 if opts.embed_bg_blur {
-                    render_background_blur_image(shared, canvas, element, tree, scale, opts)?;
+                    let sigma = radius_to_sigma(blur.value * scale);
+                    if let Some(filter) =
+                        skia::image_filters::blur((sigma, sigma), skia::TileMode::Clamp, None, None)
+                    {
+                        render_backdrop_image(shared, canvas, element, tree, scale, opts, &filter)?;
+                    }
                 } else {
                     render_background_blur_backdrop(canvas, element, blur.value * scale);
                 }
+            }
+        }
+
+        // Glass reads the backdrop the same way, after any background blur.
+        if let Some(glass) = element.visible_glass() {
+            if opts.embed_bg_blur {
+                render_glass_image(shared, canvas, element, &glass, tree, scale, opts)?;
+            } else {
+                render_glass_direct(canvas, element, &glass, scale);
             }
         }
     }
@@ -619,21 +634,23 @@ fn render_background_blur_backdrop(canvas: &Canvas, shape: &Shape, sigma_radius:
     canvas.restore(); // pop the clip + transform
 }
 
-/// Background blur for a PDF canvas (backdrop filters unsupported): render the
-/// backdrop — the whole page minus this shape's own subtree — onto an offscreen
-/// raster surface, blur it, and embed the result as an image clipped to the
-/// shape. The rest of the page stays vector.
+/// Backdrop effect (background blur or glass) for a PDF canvas, which ignores
+/// backdrop filters: render the backdrop — the whole page minus this shape's
+/// own subtree — onto an offscreen raster surface, apply `filter` to it, and
+/// embed the result as an image clipped to the shape. The rest of the page
+/// stays vector. `filter` works in the page's device space.
 ///
 /// LIMITATION: the backdrop omits only this shape's subtree, not shapes painted
 /// *after* it. For content stacked on top of the blur shape the foreground would
 /// bleed into the blur; correct for the common case (nothing above the panel).
-fn render_background_blur_image(
+fn render_backdrop_image(
     shared: &mut RenderResources,
     canvas: &Canvas,
     shape: &Shape,
     tree: ShapesPoolRef,
     scale: f32,
     opts: &TreeOpts,
+    filter: &skia::ImageFilter,
 ) -> Result<()> {
     let bounds = opts.page;
     let width = (bounds.width() * scale).ceil() as i32;
@@ -666,7 +683,6 @@ fn render_background_blur_image(
     // at draw time (same limitation as backdrop filters), so we must blur on a
     // raster surface — where filters work — and embed the pre-blurred result.
     let is_text = matches!(shape.shape_type, Type::Text(_));
-    let sigma = radius_to_sigma(shape.visible_background_blur().map_or(0.0, |b| b.value) * scale);
     let blurred = {
         let Some(mut blur_surface) = skia::surfaces::raster_n32_premul((width, height)) else {
             return Ok(());
@@ -674,11 +690,7 @@ fn render_background_blur_image(
         let bc = blur_surface.canvas();
         bc.clear(skia::Color::TRANSPARENT);
         let mut paint = Paint::default();
-        if let Some(filter) =
-            skia::image_filters::blur((sigma, sigma), skia::TileMode::Clamp, None, None)
-        {
-            paint.set_image_filter(filter);
-        }
+        paint.set_image_filter(filter.clone());
         bc.draw_image(&image, (0.0, 0.0), Some(&paint));
 
         if is_text {
@@ -730,6 +742,40 @@ fn render_background_blur_image(
     canvas.draw_image(&blurred, (0.0, 0.0), None);
     canvas.restore();
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Glass
+// ---------------------------------------------------------------------------
+
+/// Glass on a canvas that supports Skia backdrop filters (raster).
+fn render_glass_direct(canvas: &Canvas, shape: &Shape, glass: &Glass, scale: f32) {
+    canvas.save();
+    canvas.concat(&shape.centered_transform());
+    let local_to_device = canvas.local_to_device().to_m33();
+    glass::render_glass_backdrop(canvas, shape, glass, &local_to_device, scale, None);
+    canvas.restore();
+}
+
+/// Glass on a PDF canvas: the glass filter runs on a rasterised backdrop
+/// (see [`render_backdrop_image`]), in the page's device space.
+fn render_glass_image(
+    shared: &mut RenderResources,
+    canvas: &Canvas,
+    shape: &Shape,
+    glass: &Glass,
+    tree: ShapesPoolRef,
+    scale: f32,
+    opts: &TreeOpts,
+) -> Result<()> {
+    let mut local_to_device = skia::Matrix::scale((scale, scale));
+    local_to_device.pre_translate((-opts.page.left(), -opts.page.top()));
+    local_to_device.pre_concat(&shape.centered_transform());
+
+    match glass::build_filter(shape, glass, &local_to_device, scale, None) {
+        Some(filter) => render_backdrop_image(shared, canvas, shape, tree, scale, opts, &filter),
+        None => Ok(()),
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@
    [app.main.ui.inspect.styles.rows.properties-row :refer [properties-row*]]
    [app.util.code-gen.style-css :as css]
    [app.util.code-gen.style-css-formats :refer [format-blur]]
+   [app.util.code-gen.style-css-values :as cssv]
    [rumext.v2 :as mf]))
 
 (mf/defc blur-panel*
@@ -26,7 +27,7 @@
             blur-property-value (css/format-css-property [blur-property blue-value-raw] {})
 
             background-blur-property :backdrop-filter
-            background-blur-value-raw (get-in shape [:background-blur :value])
+            background-blur-value-raw (cssv/backdrop-blur-value shape)
             background-blur-value-detail (format-blur background-blur-value-raw)
             background-blur-property-name (cmm/get-css-rule-humanized background-blur-property)
             background-blur-property-value (css/format-css-property [background-blur-property background-blur-value-raw] {})]

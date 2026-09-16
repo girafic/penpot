@@ -135,7 +135,7 @@
      [:> shadow-menu* {:ids ids :values (get shape :shadow)}]
 
      [:> blur-menu* {:ids ids
-                     :values (select-keys shape [:blur :background-blur])}]
+                     :values (select-keys shape [:blur :background-blur :glass])}]
 
      [:> svg-attrs-menu* {:ids ids
                           :values (select-keys shape [:svg-attrs])}]

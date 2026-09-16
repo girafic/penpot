@@ -33,6 +33,7 @@
 
             :blur
             :background-blur
+            :glass
 
             :fills
             :fill-color
@@ -110,6 +111,7 @@
 
             :blur
             :background-blur
+            :glass
 
             :exports
 
@@ -169,6 +171,7 @@
 
            :blur
            :background-blur
+           :glass
 
            :exports
 
@@ -227,6 +230,7 @@
 
              :blur
              :background-blur
+             :glass
 
              :exports
 
@@ -285,6 +289,7 @@
 
            :blur
            :background-blur
+           :glass
 
            :exports
 
@@ -342,6 +347,7 @@
 
            :blur
            :background-blur
+           :glass
 
            :typography-ref-id
            :typography-ref-file
@@ -405,6 +411,7 @@
 
             :blur
             :background-blur
+            :glass
 
             :exports
 
@@ -464,6 +471,7 @@
 
               :blur
               :background-blur
+              :glass
 
               :exports
 
@@ -522,6 +530,7 @@
 
            :blur
            :background-blur
+           :glass
 
            :exports
 

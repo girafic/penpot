@@ -39,6 +39,7 @@
 (def ^:const SECTION-FLEX 0x100)
 (def ^:const SECTION-FILLS 0x200)
 (def ^:const SECTION-STROKES 0x400)
+(def ^:const SECTION-GLASS 0x800)
 
 ;; Stroke header before RawFillData (must match upload_batch.rs).
 (def ^:const STROKE-HEADER-U8-SIZE 36)
@@ -122,6 +123,21 @@
   (buf/write-u8 dview offset (if (get blur :hidden) 1 0))
   (buf/write-f32 dview (+ offset 4) (get blur :value 0))
   (+ offset 8))
+
+(def ^:const GLASS-SECTION-SIZE 32)
+
+(defn- write-glass!
+  "Write the 32-byte glass section: [u8 hidden][3 pad][7 x f32]."
+  [dview offset glass]
+  (buf/write-u8 dview offset (if (get glass :hidden) 1 0))
+  (buf/write-f32 dview (+ offset 4) (get glass :light-angle 0))
+  (buf/write-f32 dview (+ offset 8) (get glass :light-intensity 0))
+  (buf/write-f32 dview (+ offset 12) (get glass :refraction 0))
+  (buf/write-f32 dview (+ offset 16) (get glass :depth 0))
+  (buf/write-f32 dview (+ offset 20) (get glass :dispersion 0))
+  (buf/write-f32 dview (+ offset 24) (get glass :frost 0))
+  (buf/write-f32 dview (+ offset 28) (get glass :splay 0))
+  (+ offset GLASS-SECTION-SIZE))
 
 (defn- write-shadow!
   [dview offset shadow]
@@ -297,6 +313,7 @@
         children   (into [] (filter uuid?) (get shape :shapes))
         blur       (get shape :blur)
         bg-blur    (get shape :background-blur)
+        glass      (get shape :glass)
         shadows    (or (get shape :shadow) [])
         masked?    (and (= shape-type :group) (boolean (get shape :masked-group)))
         bool-type  (when (= shape-type :bool) (get shape :bool-type))
@@ -309,6 +326,7 @@
                true (bit-or SECTION-CHILDREN)
                (some? blur) (bit-or SECTION-BLUR-LAYER)
                (some? bg-blur) (bit-or SECTION-BLUR-BG)
+               (some? glass) (bit-or SECTION-GLASS)
                (seq shadows) (bit-or SECTION-SHADOWS)
                (= shape-type :group) (bit-or SECTION-MASKED)
                (some? bool-type) (bit-or SECTION-BOOL-TYPE)
@@ -335,6 +353,10 @@
         offset (cond-> offset
                  (some? bg-blur)
                  (as-> o (write-blur! dview o bg-blur)))
+
+        offset (cond-> offset
+                 (some? glass)
+                 (as-> o (write-glass! dview o glass)))
 
         offset (cond-> offset
                  (seq shadows)
@@ -389,6 +411,7 @@
         shape-type (dm/get-prop shape :type)
         blur       (get shape :blur)
         bg-blur    (get shape :background-blur)
+        glass      (get shape :glass)
         flex?      (and include-layout? (ctl/flex-layout? shape))
         fills-size (if include-fills-strokes?
                      (types.fills/get-byte-size (types.fills/coerce (or (get shape :fills) [])))
@@ -403,6 +426,7 @@
        (+ 4 (* 16 (count children)))
        (if (some? blur) 8 0)
        (if (some? bg-blur) 8 0)
+       (if (some? glass) GLASS-SECTION-SIZE 0)
        (if (seq shadows) (+ 4 (* 24 (count shadows))) 0)
        (if (= shape-type :group) 4 0)
        (if (and (= shape-type :bool) (some? (get shape :bool-type))) 4 0)
