@@ -28,6 +28,27 @@
   (testing "the top-left corner is -45 degrees"
     (is (= -45 (glass/point->angle -10 -10)))))
 
+(deftest angle->position-places-the-light-marker
+  (testing "the style is a JS object, so React applies it"
+    (is (object? (glass/angle->position 0))))
+
+  (testing "0 degrees is above the center"
+    (let [style (glass/angle->position 0)]
+      (is (= "50%" (.-left style)))
+      (is (= "14%" (.-top style)))))
+
+  (testing "90 degrees is right of the center"
+    (let [style (glass/angle->position 90)]
+      (is (= "86%" (.-left style)))
+      (is (< (abs (- 50 (js/parseFloat (.-top style)))) 0.001))))
+
+  (testing "-45 degrees is top-left"
+    (let [style (glass/angle->position -45)
+          left  (js/parseFloat (.-left style))
+          top   (js/parseFloat (.-top style))]
+      (is (< 24 left 25))
+      (is (< 24 top 25)))))
+
 (deftest create-glass-uses-the-defaults
   (let [a (glass/create-glass)
         b (glass/create-glass)]

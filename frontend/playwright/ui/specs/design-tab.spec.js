@@ -467,9 +467,18 @@ test.describe("Glass", () => {
 
     const glassOptions = effectsSection.getByTestId("glass-options");
     await expect(glassOptions).toBeVisible();
+
+    // Clicking right of the pad center points the light at 90 degrees.
+    const lightPad = glassOptions.getByRole("slider", { name: "Light angle" });
+    await expect(lightPad).toBeVisible();
+    const padBox = await lightPad.boundingBox();
+    await lightPad.click({
+      position: { x: padBox.width - 4, y: padBox.height / 2 },
+    });
+    await expect(lightPad).toHaveAttribute("aria-valuenow", "90");
     await expect(
-      glassOptions.getByRole("slider", { name: "Light angle" }),
-    ).toBeVisible();
+      glassOptions.getByRole("textbox", { name: "Light angle" }),
+    ).toHaveValue("90");
 
     const refraction = glassOptions.getByRole("textbox", {
       name: "Refraction",

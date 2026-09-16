@@ -35,12 +35,13 @@
   [x y]
   (normalize-angle (mth/round (mth/degrees (mth/atan2 x (- y))))))
 
-(defn- angle->position
-  "Position of the light marker, in percent of the pad size."
+(defn angle->position
+  "Inline style placing the light marker, in percent of the pad size. It
+  must be a JS object: a runtime `:style` value reaches React unconverted."
   [angle]
   (let [rad (mth/radians angle)]
-    {:left (str (+ 50 (* 36 (mth/sin rad))) "%")
-     :top  (str (- 50 (* 36 (mth/cos rad))) "%")}))
+    #js {:left (str (+ 50 (* 36 (mth/sin rad))) "%")
+         :top  (str (- 50 (* 36 (mth/cos rad))) "%")}))
 
 (defn- event->angle
   [event node]

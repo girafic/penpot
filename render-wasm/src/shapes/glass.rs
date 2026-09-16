@@ -1,4 +1,6 @@
-use super::blurs::radius_to_sigma;
+/// Blur sigma per frost unit. Frost is stronger than a blur of the same
+/// value, so low values already give a clear frosted look.
+const FROST_SIGMA_PER_UNIT: f32 = 1.5;
 
 /// Glass backdrop effect. It refracts, disperses and frosts the content
 /// behind the shape and adds a light highlight along its edges.
@@ -51,7 +53,7 @@ impl Glass {
     /// Blur sigma for the frost at the given zoom scale.
     #[inline]
     pub fn frost_sigma(&self, scale: f32) -> f32 {
-        radius_to_sigma(self.frost * scale)
+        self.frost * FROST_SIGMA_PER_UNIT * scale
     }
 
     /// True when the effect changes nothing (no bend, no frost, no light).
@@ -111,7 +113,7 @@ mod tests {
     #[test]
     fn frost_sigma_uses_zoom_scale() {
         let glass = Glass::new(false, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 0.0);
-        assert_eq!(glass.frost_sigma(2.0), radius_to_sigma(8.0));
+        assert_eq!(glass.frost_sigma(2.0), 12.0);
         let no_frost = Glass::new(false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
         assert_eq!(no_frost.frost_sigma(2.0), 0.0);
     }
