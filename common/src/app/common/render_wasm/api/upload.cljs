@@ -18,6 +18,7 @@
    [app.common.render-wasm.mem :as mem]
    [app.common.render-wasm.serializers :as sr]
    [app.common.render-wasm.serializers.color :as sr-clr]
+   [app.common.render-wasm.serializers.glass :as sr-glass]
    [app.common.render-wasm.wasm :as wasm]
    [app.common.types.fills :as types.fills]
    [app.common.types.fills.impl :as types.fills.impl]
@@ -124,20 +125,7 @@
   (buf/write-f32 dview (+ offset 4) (get blur :value 0))
   (+ offset 8))
 
-(def ^:const GLASS-SECTION-SIZE 32)
-
-(defn- write-glass!
-  "Write the 32-byte glass section: [u8 hidden][3 pad][7 x f32]."
-  [dview offset glass]
-  (buf/write-u8 dview offset (if (get glass :hidden) 1 0))
-  (buf/write-f32 dview (+ offset 4) (get glass :light-angle 0))
-  (buf/write-f32 dview (+ offset 8) (get glass :light-intensity 0))
-  (buf/write-f32 dview (+ offset 12) (get glass :refraction 0))
-  (buf/write-f32 dview (+ offset 16) (get glass :depth 0))
-  (buf/write-f32 dview (+ offset 20) (get glass :dispersion 0))
-  (buf/write-f32 dview (+ offset 24) (get glass :frost 0))
-  (buf/write-f32 dview (+ offset 28) (get glass :splay 0))
-  (+ offset GLASS-SECTION-SIZE))
+(def GLASS-SECTION-SIZE sr-glass/GLASS-U8-SIZE)
 
 (defn- write-shadow!
   [dview offset shadow]
@@ -356,7 +344,7 @@
 
         offset (cond-> offset
                  (some? glass)
-                 (as-> o (write-glass! dview o glass)))
+                 (as-> o (sr-glass/write-glass! dview o glass)))
 
         offset (cond-> offset
                  (seq shadows)

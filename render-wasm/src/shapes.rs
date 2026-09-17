@@ -38,7 +38,7 @@ pub use corners::*;
 pub use fills::*;
 pub use fonts::*;
 pub use frames::*;
-pub use glass::Glass;
+pub use glass::{Glass, GlassTexture};
 pub use groups::*;
 pub use layouts::*;
 pub use modifiers::*;

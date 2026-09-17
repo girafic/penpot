@@ -138,6 +138,12 @@
         default (unchecked-get values "layer-blur")]
     (d/nilv (unchecked-get values (d/name blur-type)) default)))
 
+(defn translate-glass-texture
+  [texture]
+  (let [values (unchecked-get wasm/serializers "glass-texture")
+        default (unchecked-get values "none")]
+    (d/nilv (unchecked-get values (d/name texture)) default)))
+
 (defn translate-raster-format
   "Export image format keyword (:png/:jpeg/:webp) -> `RasterFormat` code.
   Unlike the other translators this one has NO default: falling back to png

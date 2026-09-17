@@ -215,26 +215,45 @@ Blur types are serialized as `u8`:
 
 ## Glass
 
-`set_shape_glass(hidden, light_angle, light_intensity, refraction, depth, dispersion, frost, splay)`
-takes the values as separate arguments. `clear_shape_glass()` removes the
-effect.
+`set_shape_glass()` reads a 60-byte glass buffer written with
+`_alloc_bytes`. `clear_shape_glass()` removes the effect.
 
 In the shape batch upload (`set_shapes_batch`), the `GLASS` section
-(`1 << 11`) follows `BLUR_BG` and uses 32 bytes:
+(`1 << 11`) follows `BLUR_BG` and uses the same 60 bytes. When the bit is
+absent, the shape's glass is cleared.
 
-| Offset | Length | Type | Field           | Unit      |
-| ------ | ------ | ---- | --------------- | --------- |
-| 0      | 1      | u8   | hidden          | 0 / 1     |
-| 1      | 3      | —    | padding         |           |
-| 4      | 4      | f32  | light-angle     | degrees   |
-| 8      | 4      | f32  | light-intensity | 0..100    |
-| 12     | 4      | f32  | refraction      | 0..100    |
-| 16     | 4      | f32  | depth           | px        |
-| 20     | 4      | f32  | dispersion      | 0..100    |
-| 24     | 4      | f32  | frost           | px radius |
-| 28     | 4      | f32  | splay           | 0..100    |
+| Offset | Length | Type | Field           | Unit / values                       |
+| ------ | ------ | ---- | --------------- | ----------------------------------- |
+| 0      | 1      | u8   | hidden          | 0 / 1                               |
+| 1      | 1      | u8   | texture         | see Glass Texture                   |
+| 2      | 2      | —    | padding         |                                     |
+| 4      | 4      | f32  | light-angle     | degrees                             |
+| 8      | 4      | f32  | light-intensity | 0..100                              |
+| 12     | 4      | f32  | refraction      | 0..100                              |
+| 16     | 4      | f32  | depth           | px                                  |
+| 20     | 4      | f32  | dispersion      | 0..100                              |
+| 24     | 4      | f32  | frost           | px                                  |
+| 28     | 4      | f32  | splay           | 0..100                              |
+| 32     | 4      | f32  | saturation      | 0..200 (100 = unchanged)            |
+| 36     | 4      | f32  | brightness      | 0..200 (100 = unchanged)            |
+| 40     | 4      | f32  | highlight-width | px                                  |
+| 44     | 4      | f32  | texture-amount  | 0..100                              |
+| 48     | 4      | f32  | texture-scale   | px (flute width)                    |
+| 52     | 4      | f32  | texture-angle   | degrees (0 = vertical flutes)       |
+| 56     | 4      | u32  | light color     | ARGB; alpha is ignored              |
 
-When the bit is absent, the shape's glass is cleared.
+Keys missing in the file data are written with their defaults
+(saturation 100, brightness 100, highlight-width 2, texture none,
+texture-amount 30, texture-scale 8, texture-angle 0, white light), so
+older files render unchanged.
+
+### Glass Texture
+
+| Value | Field  |
+| ----- | ------ |
+| 0     | None   |
+| 1     | Reeded |
+| \_    | None   |
 
 ## Shadow Styles
 

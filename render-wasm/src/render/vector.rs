@@ -539,7 +539,7 @@ fn render_tree_inner(
         | Type::Bool(_)
         | Type::Text(_)
         | Type::SVGRaw(_) => {
-            render_leaf(shared, canvas, element, scale)?;
+            render_leaf(shared, canvas, element, scale, opts.embed_bg_blur)?;
         }
     }
 
@@ -778,6 +778,51 @@ fn render_glass_image(
     }
 }
 
+/// Glass edge light, drawn over the shape's own fills. The canvas matrix must
+/// include the shape's `centered_transform`. On a PDF canvas (`embed`) the
+/// light is rasterized and screen-blended as an image.
+fn render_glass_light_export(canvas: &Canvas, shape: &Shape, scale: f32, embed: bool) {
+    let Some(glass) = shape.visible_glass() else {
+        return;
+    };
+    if glass.is_dark() || matches!(shape.shape_type, Type::SVGRaw(_)) {
+        return;
+    }
+    let local_to_device = canvas.local_to_device().to_m33();
+    if !embed {
+        glass::render_glass_light(canvas, shape, &glass, &local_to_device, scale);
+        return;
+    }
+
+    let bounds = local_to_device.map_rect(glass::glass_bounds(shape)).0;
+    let (left, top) = (bounds.left.floor(), bounds.top.floor());
+    let width = (bounds.right.ceil() - left) as i32;
+    let height = (bounds.bottom.ceil() - top) as i32;
+    if width <= 0 || height <= 0 {
+        return;
+    }
+    let Some(mut surface) = skia::surfaces::raster_n32_premul((width, height)) else {
+        return;
+    };
+
+    let mut light_matrix = skia::Matrix::translate((-left, -top));
+    light_matrix.pre_concat(&local_to_device);
+    {
+        let light_canvas = surface.canvas();
+        light_canvas.clear(skia::Color::TRANSPARENT);
+        light_canvas.set_matrix(&skia::M44::from(&light_matrix));
+        glass::render_glass_light(light_canvas, shape, &glass, &light_matrix, scale);
+    }
+    let image = surface.image_snapshot();
+
+    let mut paint = Paint::default();
+    paint.set_blend_mode(skia::BlendMode::Screen);
+    canvas.save();
+    canvas.reset_matrix();
+    canvas.draw_image(&image, (left, top), Some(&paint));
+    canvas.restore();
+}
+
 // ---------------------------------------------------------------------------
 // Groups
 // ---------------------------------------------------------------------------
@@ -822,6 +867,14 @@ fn render_group(
             .bounds(&layer_bounds)
             .paint(&paint);
         canvas.save_layer(&layer_rec);
+    }
+
+    // Glass light under the children.
+    if element.visible_glass().is_some() {
+        canvas.save();
+        canvas.concat(&element.centered_transform());
+        render_glass_light_export(canvas, element, scale, opts.embed_bg_blur);
+        canvas.restore();
     }
 
     let children: Vec<Uuid> = element.children_ids_iter_forward(false).copied().collect();
@@ -939,6 +992,16 @@ fn render_frame(
         canvas.restore();
     }
 
+    // Glass light over the background, under the children. All strokes come
+    // after it here; on screen, a board without clip draws its center and
+    // outer strokes before the light.
+    if element.visible_glass().is_some() {
+        canvas.save();
+        canvas.concat(&matrix);
+        render_glass_light_export(canvas, element, scale, opts.embed_bg_blur);
+        canvas.restore();
+    }
+
     // Children (absolute coords, no frame transform).
     let children: Vec<Uuid> = element.children_ids_iter_forward(false).copied().collect();
     for child_id in &children {
@@ -1012,6 +1075,7 @@ fn render_leaf(
     canvas: &Canvas,
     element: &Shape,
     scale: f32,
+    embed_glass_light: bool,
 ) -> Result<()> {
     let needs_layer = element.needs_layer();
 
@@ -1047,6 +1111,8 @@ fn render_leaf(
     if blur_layer {
         renderer.restore_blur_layer();
     }
+
+    render_glass_light_export(canvas, element, scale, embed_glass_light);
 
     if needs_layer {
         canvas.restore();

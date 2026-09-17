@@ -10,6 +10,7 @@
 (def ^:private serializer-exports
   [["raster-format" "RasterFormat"]
    ["blur-type" "RawBlurType"]
+   ["glass-texture" "RawGlassTexture"]
    ["blend-mode" "RawBlendMode"]
    ["bool-type" "RawBoolType"]
    ["font-style" "RawFontStyle"]

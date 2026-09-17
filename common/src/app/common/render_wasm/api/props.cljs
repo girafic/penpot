@@ -14,12 +14,12 @@
   run identically in the browser and under Node. Setters that need host-specific
   data sources (fonts, image bytes, SVG static markup) stay in `app.render-wasm.api`."
   (:require
-   [app.common.data :as d]
    [app.common.math :as mth]
    [app.common.render-wasm.helpers :as h]
    [app.common.render-wasm.mem :as mem]
    [app.common.render-wasm.serializers :as sr]
    [app.common.render-wasm.serializers.color :as sr-clr]
+   [app.common.render-wasm.serializers.glass :as sr-glass]
    [app.common.render-wasm.wasm :as wasm]
    [app.common.types.fills :as types.fills]
    [app.common.types.fills.impl :as types.fills.impl]
@@ -132,15 +132,9 @@
 (defn set-shape-glass
   [glass]
   (if (some? glass)
-    (h/call wasm/internal-module "_set_shape_glass"
-            (boolean (:hidden glass))
-            (d/nilv (:light-angle glass) 0)
-            (d/nilv (:light-intensity glass) 0)
-            (d/nilv (:refraction glass) 0)
-            (d/nilv (:depth glass) 0)
-            (d/nilv (:dispersion glass) 0)
-            (d/nilv (:frost glass) 0)
-            (d/nilv (:splay glass) 0))
+    (let [offset (mem/alloc sr-glass/GLASS-U8-SIZE)]
+      (sr-glass/write-glass! (mem/get-data-view) offset glass)
+      (h/call wasm/internal-module "_set_shape_glass"))
     (h/call wasm/internal-module "_clear_shape_glass")))
 
 (defn set-shape-shadows

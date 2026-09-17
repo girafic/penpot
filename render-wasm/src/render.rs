@@ -892,7 +892,19 @@ impl RenderState {
         canvas.restore();
     }
 
-    /// Renders the glass effect directly to the given target surface. Like
+    /// Maps a shape's local coordinates to the pixels of the Current/Export
+    /// surface (both have an identity canvas matrix).
+    fn glass_local_to_device(&mut self, shape: &Shape, scale: f32) -> Matrix {
+        let translation = self
+            .surfaces
+            .get_render_context_translation(self.render_area, scale);
+        let mut local_to_device = Matrix::scale((scale, scale));
+        local_to_device.pre_translate(translation);
+        local_to_device.pre_concat(&shape.centered_transform());
+        local_to_device
+    }
+
+    /// Renders the glass backdrop directly to the given target surface. Like
     /// background blur, it must run BEFORE the shape's own save_layer so it
     /// reads the pixels behind the shape.
     fn render_glass(
@@ -916,15 +928,7 @@ impl RenderState {
         } else {
             Some(self.surfaces.margins().width as f32)
         };
-
-        let translation = self
-            .surfaces
-            .get_render_context_translation(self.render_area, scale);
-
-        // Current/Export have no render context transform (identity canvas).
-        let mut local_to_device = Matrix::scale((scale, scale));
-        local_to_device.pre_translate(translation);
-        local_to_device.pre_concat(&shape.centered_transform());
+        let local_to_device = self.glass_local_to_device(shape, scale);
 
         self.surfaces.canvas(target_surface).save();
 
@@ -936,6 +940,38 @@ impl RenderState {
         let canvas = self.surfaces.canvas(target_surface);
         canvas.set_matrix(&skia::M44::from(&local_to_device));
         glass::render_glass_backdrop(canvas, shape, &glass, &local_to_device, scale, max_reach);
+        canvas.restore();
+    }
+
+    /// Renders the glass edge light. It runs AFTER the shape's fills and
+    /// strokes (still inside the shape's own layer) and before its children,
+    /// so a tinted fill does not dim the light.
+    fn render_glass_light(
+        &mut self,
+        shape: &Shape,
+        clip_bounds: Option<&ClipStack>,
+        target_surface: SurfaceId,
+    ) {
+        if self.options.is_fast_mode() {
+            return;
+        }
+        let Some(glass) = shape.visible_glass() else {
+            return;
+        };
+
+        let scale = self.get_scale();
+        let local_to_device = self.glass_local_to_device(shape, scale);
+
+        self.surfaces.canvas(target_surface).save();
+
+        if let Some(clips) = clip_bounds {
+            let antialias = shape.should_use_antialias(scale, self.options.antialias_threshold);
+            self.clip_target_surface_to_stack(clips, target_surface, scale, antialias);
+        }
+
+        let canvas = self.surfaces.canvas(target_surface);
+        canvas.set_matrix(&skia::M44::from(&local_to_device));
+        glass::render_glass_light(canvas, shape, &glass, &local_to_device, scale);
         canvas.restore();
     }
 
@@ -3957,6 +3993,12 @@ impl RenderState {
                     target_surface,
                     text_layout_cache_rotation_only,
                 )?;
+
+                // The glass light goes over the shape's fills, under its
+                // children. A mask shape only provides alpha, so it gets none.
+                if !mask {
+                    self.render_glass_light(element, clip_bounds.as_ref(), target_surface);
+                }
 
                 self.surfaces
                     .canvas(SurfaceId::DropShadows)

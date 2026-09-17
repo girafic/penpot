@@ -11,8 +11,8 @@
 //!     CHILDREN:    [u32 n][n × 16 uuid]
 //!     BLUR_LAYER:  [u8 hidden][u8;3 pad][f32 value]
 //!     BLUR_BG:     same
-//!     GLASS:       [u8 hidden][u8;3 pad][7 × f32]  (angle, intensity, refraction,
-//!                  depth, dispersion, frost, splay)
+//!     GLASS:       [u8 hidden][u8 texture][u8;2 pad][13 × f32][u32 light ARGB]
+//!                  (60 bytes, see `wasm/glass.rs`)
 //!     SHADOWS:     [u32 n][n × 24]
 //!     MASKED:      [u8 value][u8;3 pad]
 //!     BOOL_TYPE:   [u8 value][u8;3 pad]
@@ -33,6 +33,7 @@ use crate::shapes::{Blur, BlurType, Glass, Shadow, ShadowStyle, Stroke, Type};
 use crate::utils::{decode_optional_f32, uuid_from_u32_quartet};
 use crate::uuid::Uuid;
 use crate::wasm::fills::{read_fills_from_bytes, RawFillData, RAW_FILL_DATA_SIZE};
+use crate::wasm::glass::{glass_from_bytes, RAW_GLASS_DATA_SIZE};
 use crate::wasm::layouts::{
     RawAlignContent, RawAlignItems, RawAlignSelf, RawFlexDirection, RawJustifyContent,
     RawJustifyItems, RawSizing, RawWrapType,
@@ -153,25 +154,7 @@ fn clear_blur(layer: bool) {
 }
 
 fn parse_glass(cur: &mut Cursor<'_>) -> Result<Glass> {
-    let hidden = cur.u8()? != 0;
-    let _ = cur.take(3)?;
-    let light_angle = cur.f32()?;
-    let light_intensity = cur.f32()?;
-    let refraction = cur.f32()?;
-    let depth = cur.f32()?;
-    let dispersion = cur.f32()?;
-    let frost = cur.f32()?;
-    let splay = cur.f32()?;
-    Ok(Glass::new(
-        hidden,
-        light_angle,
-        light_intensity,
-        refraction,
-        depth,
-        dispersion,
-        frost,
-        splay,
-    ))
+    glass_from_bytes(cur.take(RAW_GLASS_DATA_SIZE)?)
 }
 
 fn apply_shadows(cur: &mut Cursor<'_>) -> Result<()> {
@@ -513,26 +496,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_glass_reads_the_32_byte_section() {
-        let mut bytes = vec![1u8, 0, 0, 0];
-        for value in [-45.0f32, 80.0, 70.0, 20.0, 50.0, 4.0, 10.0] {
-            bytes.extend_from_slice(&value.to_le_bytes());
-        }
+    fn parse_glass_reads_the_60_byte_section() {
+        let floats = [
+            -45.0, 80.0, 70.0, 20.0, 50.0, 4.0, 10.0, 120.0, 90.0, 2.5, 30.0, 8.0, 15.0,
+        ];
+        let mut bytes = crate::wasm::glass::tests::glass_bytes(true, 1, floats, 0xFFFF_0000);
         bytes.extend_from_slice(&[0xAA; 4]);
 
         let mut cur = Cursor::new(&bytes);
         let glass = parse_glass(&mut cur).unwrap();
 
-        assert_eq!(
-            glass,
-            Glass::new(true, -45.0, 80.0, 70.0, 20.0, 50.0, 4.0, 10.0)
-        );
+        assert!(glass.hidden);
+        assert_eq!(glass.texture, crate::shapes::GlassTexture::Reeded);
+        assert_eq!(glass.splay, 10.0);
+        assert_eq!(glass.saturation, 120.0);
+        assert_eq!(glass.texture_angle, 15.0);
+        assert_eq!(glass.light_color, skia::Color::from_rgb(255, 0, 0));
         assert_eq!(cur.remaining(), 4);
     }
 
     #[test]
     fn parse_glass_fails_on_truncated_input() {
-        let bytes = [0u8; 12];
+        let bytes = [0u8; 56];
         let mut cur = Cursor::new(&bytes);
         assert!(parse_glass(&mut cur).is_err());
     }

@@ -1,20 +1,27 @@
 //! Glass backdrop effect.
 //!
-//! The effect is a Skia image-filter graph used as a *backdrop* filter, so it
-//! reads the pixels already drawn behind the shape:
+//! The effect has two parts:
 //!
-//! ```text
-//! map      = shader(glass map)             R,G: unit offset (0.5 = none), B: light
-//! frosted  = blur(frost)                   (the backdrop when frost = 0)
-//! refract  = displacement_map(map, frosted) × 3 scales, merged by channel
-//!            (one pass when there is no dispersion)
-//! result   = screen(refract, white × map.B)
-//! ```
+//! 1. A Skia image-filter graph used as a *backdrop* filter, drawn before the
+//!    shape. It reads the pixels already drawn behind the shape:
+//!
+//!    ```text
+//!    map      = shader(glass map)             R,G: sample offset (0.5 = none)
+//!    frosted  = blur(frost)                   (the backdrop when frost = 0)
+//!    adjusted = color matrix(saturation, brightness) on frosted
+//!    refract  = displacement_map(map, adjusted) × 3 scales, merged by channel
+//!               (one pass when there is no dispersion)
+//!    ```
+//!
+//! 2. The edge light, drawn after the shape's own fills (so a tinted fill
+//!    does not dim it): the glass map's blue channel, tinted with the light
+//!    color, screen-blended onto the canvas.
 //!
 //! The glass map is a runtime shader. Rects, frames and groups get their
 //! bevel from eased edge ramps, circles from an ellipse distance field, and
 //! paths, bools and text from a blurred silhouette mask. The rim of the glass
 //! samples further inside, so it magnifies the backdrop like a lens edge.
+//! A reeded texture adds parallel lens strips over the whole surface.
 //! Skia's displacement filter does the sampling: it may read around a pixel,
 //! which a runtime image filter (sample radius 0 in our bindings) cannot.
 
@@ -22,7 +29,7 @@ use std::cell::OnceCell;
 
 use skia_safe::{
     self as skia, color_filters, image_filters, runtime_effect::ChildPtr, Blender, Canvas,
-    ColorChannel, ImageFilter, Matrix, Paint, RuntimeEffect, Shader,
+    ColorChannel, ColorFilter, ImageFilter, Matrix, Paint, RuntimeEffect, Shader,
 };
 
 use super::text;
@@ -42,8 +49,15 @@ const BAND_PER_DEPTH: f32 = 3.0;
 /// Largest inward sample offset, relative to the band width. At 100%
 /// refraction the edge magnifies as much as it can without mirroring.
 const MAX_OFFSET_PER_BAND: f32 = 0.33;
-/// Width of the highlight line along the outline, in document px.
-const RIM_WIDTH: f32 = 2.0;
+/// At 100% texture amount, each flute shows a backdrop slice this many flute
+/// widths wider than itself.
+const MAX_FLUTE_COMPRESSION: f32 = 2.0;
+/// Flutes narrower than this (device px) are not drawn; they would only
+/// flicker. Between this and `FULL_FLUTE_PX` the texture fades in.
+const MIN_FLUTE_PX: f32 = 2.0;
+const FULL_FLUTE_PX: f32 = 4.0;
+/// Width of the smoothed seam between two flutes, in device px.
+const FLUTE_SEAM_PX: f32 = 1.0;
 
 // The glass map. R,G hold the sample offset (0.5 = none) and B the light.
 //
@@ -53,6 +67,13 @@ const RIM_WIDTH: f32 = 2.0;
 // Masks come from the silhouette blurred twice: a wide blur in green for the
 // bevel and a narrow one in red, whose value is ~linear in the distance to
 // the edge, for the highlight.
+//
+// `flute` gives the reeded texture offset: a lens profile per flute, with
+// smoothed seams, along `texDir`. `u` counts document px across the flutes
+// from the shape's corner, so the texture moves with the shape.
+//
+// The placeholders AMBIENT and BACK are replaced with constants before
+// compiling; no other identifier may contain them.
 const GLASS_MAP_SKSL: &str = r#"
 uniform shader mask;
 uniform float3x3 toLocal;
@@ -66,6 +87,12 @@ uniform float stepSize;
 uniform float profile;
 uniform float3 light;
 uniform float rimWidth;
+uniform float3 texRow;
+uniform float2 texDir;
+uniform float texPeriod;
+uniform float texEdge;
+uniform float texShare;
+uniform float bevelShare;
 
 float easeOut(float u) {
     float v = 1.0 - min(u, 1.0);
@@ -113,6 +140,14 @@ float2 glassField(float2 coord) {
     return float2(field, -sdRRect(p) * scale);
 }
 
+float2 flute(float2 coord) {
+    float s = fract((dot(texRow.xy, coord) + texRow.z) / texPeriod);
+    float x = 2.0 * s - 1.0;
+    float lens = x * (0.65 + 0.35 * x * x);
+    float seam = smoothstep(0.0, texEdge, s) * smoothstep(0.0, texEdge, 1.0 - s);
+    return texDir * (lens * seam);
+}
+
 half4 main(float2 coord) {
     float2 f = glassField(coord);
     float t = saturate(f.x);
@@ -125,7 +160,11 @@ half4 main(float2 coord) {
     // Sample further inside, strongest on the edge: the rim magnifies the
     // backdrop like the curved edge of a lens.
     float bend = pow(1.0 - t, profile);
-    float2 offset = 0.5 + 0.5 * inward * bend;
+    float2 d = bevelShare * inward * bend;
+    if (texShare > 0.0) {
+        d += texShare * flute(coord);
+    }
+    float2 offset = 0.5 + 0.5 * d;
 
     // Thin highlight along the outline.
     float rim = 1.0 - smoothstep(0.0, rimWidth, f.y);
@@ -200,21 +239,35 @@ fn map_kind(shape: &Shape) -> MapKind {
     }
 }
 
+#[inline]
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Values derived from the glass parameters, in device px.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Params {
     /// Width of the refracting band along the outline.
     band: f32,
-    /// Largest inward sample offset (before dispersion).
+    /// Largest inward sample offset of the bevel (before dispersion).
     offset: f32,
+    /// Largest sample offset of the texture (before dispersion).
+    texture: f32,
+    /// Width of one flute.
+    flute: f32,
     /// Share added to red and taken from blue.
     dispersion: f32,
     frost_sigma: f32,
+    /// Whether saturation or brightness change the backdrop.
+    adjusts_color: bool,
     /// Exponent of the bend falloff from the edge to the center.
     profile: f32,
     /// Direction the light comes from (y down).
     light_dir: (f32, f32),
     light: f32,
+    /// Light color, 0..1 per channel.
+    light_rgb: [f32; 3],
     rim_width: f32,
 }
 
@@ -227,38 +280,95 @@ impl Params {
         let mut offset = glass.refraction / 100.0 * MAX_OFFSET_PER_BAND * band;
         let mut frost_sigma = glass.frost_sigma(scale);
 
+        let flute = if glass.has_texture() {
+            glass.texture_scale * scale
+        } else {
+            0.0
+        };
+        let fade = smoothstep(MIN_FLUTE_PX, FULL_FLUTE_PX, flute);
+        let mut texture = glass.texture_amount / 100.0 * MAX_FLUTE_COMPRESSION * flute * 0.5 * fade;
+
         if let Some(reach) = max_reach {
-            // Half of the reach for the offset, half for the blur (≈3σ).
-            offset = offset.min(reach * 0.5 / (1.0 + dispersion));
+            // Half of the reach for the offsets, half for the blur (≈3σ).
+            let cap = reach * 0.5 / (1.0 + dispersion);
+            let total = offset + texture;
+            if total > cap {
+                let factor = cap / total;
+                offset *= factor;
+                texture *= factor;
+            }
             frost_sigma = frost_sigma.min(reach * 0.5 / 3.0);
         }
 
         let angle = glass.light_angle.to_radians();
         let splay = glass.splay / 100.0;
+        let color = glass.light_color;
 
         Params {
             band,
             offset,
+            texture,
+            flute,
             dispersion,
             frost_sigma,
+            adjusts_color: glass.adjusts_color(),
             // Splay spreads the bend from the edge toward the center.
             profile: 1.5 + (0.75 - 1.5) * splay,
             light_dir: (angle.sin(), -angle.cos()),
-            light: glass.light_intensity / 100.0 * MAX_LIGHT,
-            rim_width: (RIM_WIDTH * scale).max(1.0),
+            light: if glass.is_dark() {
+                0.0
+            } else {
+                glass.light_intensity / 100.0 * MAX_LIGHT
+            },
+            light_rgb: [
+                color.r() as f32 / 255.0,
+                color.g() as f32 / 255.0,
+                color.b() as f32 / 255.0,
+            ],
+            // Never wider than the band: outside it the bevel has no
+            // direction to light.
+            rim_width: (glass.highlight_width * scale)
+                .min(band.max(2.0 * scale))
+                .max(1.0),
         }
     }
 
-    fn refracts(&self) -> bool {
+    /// The same values without the texture, for passes that only read the
+    /// light from the map.
+    fn without_texture(self) -> Self {
+        Params {
+            texture: 0.0,
+            flute: 0.0,
+            ..self
+        }
+    }
+
+    fn bends(&self) -> bool {
         self.offset > 0.01 && self.band > 0.01
+    }
+
+    fn textured(&self) -> bool {
+        self.texture > 0.01
+    }
+
+    fn refracts(&self) -> bool {
+        self.bends() || self.textured()
+    }
+
+    /// Largest sample offset of bevel and texture together.
+    fn displacement(&self) -> f32 {
+        let bevel = if self.bends() { self.offset } else { 0.0 };
+        let texture = if self.textured() { self.texture } else { 0.0 };
+        bevel + texture
     }
 
     fn lights(&self) -> bool {
         self.light > 0.001
     }
 
-    fn needs_map(&self) -> bool {
-        self.refracts() || self.lights()
+    /// True when the backdrop filter has anything to do.
+    fn changes_backdrop(&self) -> bool {
+        self.refracts() || self.frost_sigma > 0.0 || self.adjusts_color
     }
 
     /// Blur sigma for the silhouette mask. Its slope on the edge matches the
@@ -305,6 +415,19 @@ fn column_major(m: &Matrix) -> [f32; 9] {
         m.translate_x(),
         m.translate_y(),
         m[8],
+    ]
+}
+
+/// Coefficients of `u(coord) = x·coord.x + y·coord.y + z`: the position
+/// across the flutes in document px, measured from `origin` in the shape.
+/// `to_local` maps device to shape coordinates; 0° gives vertical flutes.
+fn flute_row(to_local: &Matrix, origin: skia::Point, angle_deg: f32) -> [f32; 3] {
+    let (s, c) = angle_deg.to_radians().sin_cos();
+    let m = to_local;
+    [
+        c * m.scale_x() + s * m.skew_y(),
+        c * m.skew_x() + s * m.scale_y(),
+        c * (m.translate_x() - origin.x) + s * (m.translate_y() - origin.y),
     ]
 }
 
@@ -432,9 +555,11 @@ fn silhouette_shader(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn glass_map_shader(
     effect: &RuntimeEffect,
     shape: &Shape,
+    glass: &Glass,
     params: &Params,
     local_to_device: &Matrix,
     scale: f32,
@@ -481,6 +606,43 @@ fn glass_map_shader(
     );
     uniforms.set(effect, "rimWidth", &[params.rim_width]);
 
+    // Split the displacement scale between the bevel and the texture.
+    let total = params.displacement();
+    let share = |part: f32, active: bool| {
+        if active && total > 0.0 {
+            part / total
+        } else {
+            0.0
+        }
+    };
+    uniforms.set(
+        effect,
+        "bevelShare",
+        &[share(params.offset, params.bends())],
+    );
+
+    let origin = skia::Point::new(shape.selrect.left, shape.selrect.top);
+    let row = flute_row(&to_local, origin, glass.texture_angle);
+    let row_len = (row[0] * row[0] + row[1] * row[1]).sqrt();
+    let textured = params.textured() && row_len > 1e-6;
+    uniforms.set(effect, "texShare", &[share(params.texture, textured)]);
+    uniforms.set(effect, "texRow", &row);
+    uniforms.set(
+        effect,
+        "texDir",
+        &if textured {
+            [row[0] / row_len, row[1] / row_len]
+        } else {
+            [0.0, 0.0]
+        },
+    );
+    uniforms.set(effect, "texPeriod", &[glass.texture_scale.max(0.01)]);
+    uniforms.set(
+        effect,
+        "texEdge",
+        &[(FLUTE_SEAM_PX / params.flute.max(0.01)).clamp(0.001, 0.25)],
+    );
+
     effect.make_shader(
         skia::Data::new_copy(&uniforms.data),
         &[ChildPtr::Shader(mask)],
@@ -488,24 +650,25 @@ fn glass_map_shader(
     )
 }
 
-/// White with the map's blue channel as alpha, for the highlight.
-fn light_filter(map: &ImageFilter) -> Option<ImageFilter> {
+/// Saturation and brightness as a color matrix on `input` (the frosted
+/// backdrop, or the backdrop itself when `None`). The saturation weights are
+/// the ones of CSS `saturate()`, so the CSS export matches.
+fn color_adjust(glass: &Glass, input: Option<ImageFilter>) -> Option<ImageFilter> {
+    let s = glass.saturation / 100.0;
+    let b = glass.brightness / 100.0;
     #[rustfmt::skip]
     let matrix = [
-        0.0, 0.0, 0.0, 0.0, 1.0,
-        0.0, 0.0, 0.0, 0.0, 1.0,
-        0.0, 0.0, 0.0, 0.0, 1.0,
-        0.0, 0.0, 1.0, 0.0, 0.0,
+        b * (0.213 + 0.787 * s), b * (0.715 - 0.715 * s), b * (0.072 - 0.072 * s), 0.0, 0.0,
+        b * (0.213 - 0.213 * s), b * (0.715 + 0.285 * s), b * (0.072 - 0.072 * s), 0.0, 0.0,
+        b * (0.213 - 0.213 * s), b * (0.715 - 0.715 * s), b * (0.072 + 0.928 * s), 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0, 0.0,
     ];
-    image_filters::color_filter(
-        color_filters::matrix_row_major(&matrix, None),
-        map.clone(),
-        None,
-    )
+    image_filters::color_filter(color_filters::matrix_row_major(&matrix, None), input, None)
 }
 
 /// Builds the backdrop filter for `glass`. `local_to_device` maps the shape's
-/// local coordinates to the device pixels the filter runs on.
+/// local coordinates to the device pixels the filter runs on. The edge light
+/// is not part of it; see [`render_glass_light`].
 pub fn build_filter(
     shape: &Shape,
     glass: &Glass,
@@ -518,6 +681,9 @@ pub fn build_filter(
     }
 
     let params = Params::new(glass, scale, max_reach);
+    if !params.changes_backdrop() {
+        return None;
+    }
     let stroke_outset = stroke_outset(shape);
 
     let frosted = if params.frost_sigma > 0.0 {
@@ -531,73 +697,67 @@ pub fn build_filter(
         None
     };
 
-    let map = if params.needs_map() {
-        with_effects(|effects| {
-            let effects = effects?;
-            let shader = glass_map_shader(
-                &effects.map,
-                shape,
-                &params,
-                local_to_device,
-                scale,
-                stroke_outset,
-            )?;
-            let map = image_filters::shader(shader, None)?;
-            Some((map, effects.take_red.clone(), effects.take_blue.clone()))
-        })
+    let base = if params.adjusts_color {
+        color_adjust(glass, frosted)
     } else {
-        None
+        frosted
     };
+
+    if !params.refracts() {
+        return base;
+    }
+
+    let map = with_effects(|effects| {
+        let effects = effects?;
+        let shader = glass_map_shader(
+            &effects.map,
+            shape,
+            glass,
+            &params,
+            local_to_device,
+            scale,
+            stroke_outset,
+        )?;
+        let map = image_filters::shader(shader, None)?;
+        Some((map, effects.take_red.clone(), effects.take_blue.clone()))
+    });
 
     let Some((map, take_red, take_blue)) = map else {
-        // Frost only (or the shader is unavailable).
-        return frosted;
+        // The shader is unavailable: keep frost and color.
+        return base;
     };
 
-    let mut result = frosted.clone();
-    let mut applied = frosted.is_some();
+    let scale = params.displacement() * 2.0;
+    let displace = |s: f32| {
+        image_filters::displacement_map(
+            (ColorChannel::R, ColorChannel::G),
+            s,
+            map.clone(),
+            base.clone(),
+            None,
+        )
+    };
 
-    if params.refracts() {
-        let scale = params.offset * 2.0;
-        let displace = |s: f32| {
-            image_filters::displacement_map(
-                (ColorChannel::R, ColorChannel::G),
-                s,
-                map.clone(),
-                frosted.clone(),
-                None,
-            )
-        };
-
-        result = if params.dispersion > 0.001 {
-            let red = displace(scale * (1.0 + params.dispersion))?;
-            let green = displace(scale)?;
-            let blue = displace(scale * (1.0 - params.dispersion))?;
-            let red_green = image_filters::blend(take_red, green, red, None)?;
-            image_filters::blend(take_blue, red_green, blue, None)
-        } else {
-            displace(scale)
-        };
-        applied = result.is_some();
-    }
-
-    if params.lights() {
-        if let Some(light) = light_filter(&map) {
-            result = image_filters::blend(skia::BlendMode::Screen, result, light, None);
-            applied = result.is_some();
-        }
-    }
-
-    if applied {
-        result
+    if params.dispersion > 0.001 {
+        let red = displace(scale * (1.0 + params.dispersion))?;
+        let green = displace(scale)?;
+        let blue = displace(scale * (1.0 - params.dispersion))?;
+        let red_green = image_filters::blend(take_red, green, red, None)?;
+        image_filters::blend(take_blue, red_green, blue, None)
     } else {
-        None
+        displace(scale)
     }
 }
 
 fn stroke_outset(shape: &Shape) -> f32 {
     let is_open = !matches!(shape.shape_type, Type::Text(_)) && shape.is_open();
     Stroke::max_bounds_width(shape.visible_strokes(), is_open)
+}
+
+/// Area of the glass in shape-local coordinates, including the outward
+/// reach of the strokes.
+pub fn glass_bounds(shape: &Shape) -> skia::Rect {
+    glass_rect(shape, stroke_outset(shape))
 }
 
 /// Clips `canvas` to the area covered by the glass (fill plus the outward
@@ -642,7 +802,8 @@ pub fn clip_to_glass(canvas: &Canvas, shape: &Shape) {
     }
 }
 
-/// Draws the glass effect of `shape` over what `canvas` already holds.
+/// Draws the glass backdrop of `shape` over what `canvas` already holds.
+/// Call it before the shape's own fills.
 ///
 /// The canvas matrix must be `local_to_device` when called; it is restored on
 /// return. `max_reach` is the tile margin budget (None when exporting).
@@ -698,14 +859,111 @@ pub fn render_glass_backdrop(
     canvas.restore(); // clip
 }
 
+/// Light color with the map's blue channel as alpha.
+fn light_color_filter([r, g, b]: [f32; 3]) -> ColorFilter {
+    #[rustfmt::skip]
+    let matrix = [
+        0.0, 0.0, 0.0, 0.0, r,
+        0.0, 0.0, 0.0, 0.0, g,
+        0.0, 0.0, 0.0, 0.0, b,
+        0.0, 0.0, 1.0, 0.0, 0.0,
+    ];
+    color_filters::matrix_row_major(&matrix, None)
+}
+
+/// Shader of the edge light in device space: the light color, with the
+/// highlight strength as alpha.
+fn light_shader(
+    shape: &Shape,
+    glass: &Glass,
+    local_to_device: &Matrix,
+    scale: f32,
+) -> Option<Shader> {
+    let params = Params::new(glass, scale, None).without_texture();
+    if !params.lights() {
+        return None;
+    }
+    let map = with_effects(|effects| {
+        glass_map_shader(
+            &effects?.map,
+            shape,
+            glass,
+            &params,
+            local_to_device,
+            scale,
+            stroke_outset(shape),
+        )
+    })?;
+    Some(map.with_color_filter(light_color_filter(params.light_rgb)))
+}
+
+/// Draws the edge light of `shape`. Call it after the shape's own fills and
+/// strokes, before its children, so a tinted fill does not dim the light.
+///
+/// The canvas matrix must be `local_to_device` when called; it is restored on
+/// return.
+pub fn render_glass_light(
+    canvas: &Canvas,
+    shape: &Shape,
+    glass: &Glass,
+    local_to_device: &Matrix,
+    scale: f32,
+) {
+    if matches!(shape.shape_type, Type::SVGRaw(_)) {
+        return;
+    }
+    let Some(shader) = light_shader(shape, glass, local_to_device, scale) else {
+        return;
+    };
+    let mut paint = Paint::default();
+    paint.set_shader(shader);
+
+    canvas.save();
+    clip_to_glass(canvas, shape);
+    // The map works in device space; the clip survives reset_matrix.
+    canvas.reset_matrix();
+
+    if matches!(shape.shape_type, Type::Text(_)) {
+        // Keep the light only on the glyphs, then screen the result.
+        let mut screen = Paint::default();
+        screen.set_blend_mode(skia::BlendMode::Screen);
+        canvas.save_layer(&skia::canvas::SaveLayerRec::default().paint(&screen));
+        canvas.draw_paint(&paint);
+        canvas.set_matrix(&skia::M44::from(local_to_device));
+
+        let mut mask_paint = Paint::default();
+        mask_paint.set_blend_mode(skia::BlendMode::DstIn);
+        canvas.save_layer(&skia::canvas::SaveLayerRec::default().paint(&mask_paint));
+        text::paint_text_mask(canvas, shape);
+        canvas.restore(); // mask layer
+        canvas.restore(); // light layer
+    } else {
+        paint.set_blend_mode(skia::BlendMode::Screen);
+        canvas.draw_paint(&paint);
+    }
+    canvas.restore(); // clip
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shapes::Type;
+    use crate::shapes::{GlassTexture, Type};
     use crate::uuid::Uuid;
 
     fn glass() -> Glass {
-        Glass::new(false, -45.0, 80.0, 80.0, 20.0, 50.0, 4.0, 0.0)
+        Glass::default()
+    }
+
+    /// Glass that changes nothing; tests switch single parts on.
+    fn inert() -> Glass {
+        Glass {
+            light_intensity: 0.0,
+            refraction: 0.0,
+            depth: 0.0,
+            dispersion: 0.0,
+            frost: 0.0,
+            ..Glass::default()
+        }
     }
 
     fn rect_shape() -> Shape {
@@ -715,6 +973,43 @@ mod tests {
         shape
     }
 
+    fn surface(width: i32, height: i32, color: skia::Color) -> skia::Surface {
+        let mut surface = skia::surfaces::raster_n32_premul((width, height)).unwrap();
+        surface.canvas().clear(color);
+        surface
+    }
+
+    fn pixel(surface: &mut skia::Surface, x: i32, y: i32) -> skia::Color {
+        surface
+            .image_snapshot()
+            .peek_pixels()
+            .unwrap()
+            .get_color((x, y))
+    }
+
+    /// Draws the glass map of `shape` at identity scale.
+    fn render_map(shape: &Shape, glass: &Glass, width: i32, height: i32) -> skia::Surface {
+        let params = Params::new(glass, 1.0, None);
+        let matrix = Matrix::new_identity();
+        let map = with_effects(|effects| {
+            glass_map_shader(
+                &effects.unwrap().map,
+                shape,
+                glass,
+                &params,
+                &matrix,
+                1.0,
+                0.0,
+            )
+        })
+        .unwrap();
+        let mut surface = surface(width, height, skia::Color::TRANSPARENT);
+        let mut paint = Paint::default();
+        paint.set_shader(map);
+        surface.canvas().draw_paint(&paint);
+        surface
+    }
+
     #[test]
     fn params_scale_with_zoom() {
         let params = Params::new(&glass(), 2.0, None);
@@ -722,7 +1017,49 @@ mod tests {
         assert!((params.offset - 31.68).abs() < 1e-3);
         assert!((params.dispersion - 0.075).abs() < 1e-6);
         assert_eq!(params.rim_width, 4.0);
+        assert_eq!(params.texture, 0.0);
         assert_eq!(params.frost_sigma, glass().frost_sigma(2.0));
+    }
+
+    #[test]
+    fn params_limit_the_highlight_width() {
+        let wide = Glass {
+            highlight_width: 24.0,
+            depth: 1.0,
+            ..glass()
+        };
+        // Never wider than the band (3 × depth).
+        assert_eq!(Params::new(&wide, 1.0, None).rim_width, 3.0);
+
+        let thin = Glass {
+            highlight_width: 0.5,
+            ..glass()
+        };
+        // At least one device pixel.
+        assert_eq!(Params::new(&thin, 1.0, None).rim_width, 1.0);
+
+        let flat = Glass {
+            highlight_width: 2.0,
+            depth: 0.0,
+            ..glass()
+        };
+        assert_eq!(Params::new(&flat, 2.0, None).rim_width, 4.0);
+    }
+
+    #[test]
+    fn params_texture_scales_and_fades() {
+        let reeded = Glass {
+            texture: GlassTexture::Reeded,
+            texture_scale: 8.0,
+            texture_amount: 50.0,
+            ..glass()
+        };
+        assert_eq!(Params::new(&reeded, 1.0, None).texture, 4.0);
+        // 1.6 px flutes are not drawn.
+        assert_eq!(Params::new(&reeded, 0.2, None).texture, 0.0);
+        // 3.2 px flutes fade in.
+        let fading = Params::new(&reeded, 0.4, None).texture;
+        assert!(fading > 0.0 && fading < 0.5 * 2.0 * 3.2 * 0.5);
     }
 
     #[test]
@@ -730,6 +1067,16 @@ mod tests {
         let params = Params::new(&glass(), 20.0, Some(64.0));
         assert!(params.offset * (1.0 + params.dispersion) <= 32.0 + 1e-4);
         assert!(params.frost_sigma * 3.0 <= 32.0 + 1e-4);
+
+        let reeded = Glass {
+            texture: GlassTexture::Reeded,
+            texture_scale: 64.0,
+            texture_amount: 100.0,
+            ..glass()
+        };
+        let params = Params::new(&reeded, 20.0, Some(64.0));
+        assert!(params.textured() && params.bends());
+        assert!((params.offset + params.texture) * (1.0 + params.dispersion) <= 32.0 + 1e-3);
     }
 
     #[test]
@@ -744,11 +1091,29 @@ mod tests {
     fn splay_softens_the_profile() {
         let sharp = Params::new(&glass(), 1.0, None);
         let soft = Params::new(
-            &Glass::new(false, -45.0, 80.0, 80.0, 20.0, 50.0, 4.0, 100.0),
+            &Glass {
+                splay: 100.0,
+                ..glass()
+            },
             1.0,
             None,
         );
         assert!(soft.profile < sharp.profile);
+    }
+
+    #[test]
+    fn params_take_the_light_color_and_skip_black() {
+        let red = Glass {
+            light_color: skia::Color::from_rgb(255, 0, 0),
+            ..glass()
+        };
+        assert_eq!(Params::new(&red, 1.0, None).light_rgb, [1.0, 0.0, 0.0]);
+
+        let black = Glass {
+            light_color: skia::Color::BLACK,
+            ..glass()
+        };
+        assert!(!Params::new(&black, 1.0, None).lights());
     }
 
     #[test]
@@ -769,15 +1134,91 @@ mod tests {
     }
 
     #[test]
-    fn noop_glass_has_no_filter() {
-        let shape = rect_shape();
-        let glass = Glass::new(false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-        assert!(build_filter(&shape, &glass, &Matrix::new_identity(), 1.0, None).is_none());
+    fn flute_row_measures_across_the_flutes_from_the_origin() {
+        let identity = Matrix::new_identity();
+        let origin = skia::Point::new(10.0, 20.0);
+        // 0°: flutes are vertical, u grows along x.
+        let row = flute_row(&identity, origin, 0.0);
+        assert!((row[0] - 1.0).abs() < 1e-6 && row[1].abs() < 1e-6);
+        assert!((row[2] + 10.0).abs() < 1e-5);
+        // 90°: u grows along y.
+        let row = flute_row(&identity, origin, 90.0);
+        assert!(row[0].abs() < 1e-6 && (row[1] - 1.0).abs() < 1e-6);
+        assert!((row[2] + 20.0).abs() < 1e-5);
     }
 
     #[test]
     fn shaders_compile() {
         with_effects(|effects| assert!(effects.is_some()));
+    }
+
+    #[test]
+    fn map_declares_every_uniform() {
+        with_effects(|effects| {
+            let map = &effects.unwrap().map;
+            for name in [
+                "toLocal",
+                "rect",
+                "radii",
+                "kind",
+                "scale",
+                "band",
+                "rimSigma",
+                "stepSize",
+                "profile",
+                "light",
+                "rimWidth",
+                "texRow",
+                "texDir",
+                "texPeriod",
+                "texEdge",
+                "texShare",
+                "bevelShare",
+            ] {
+                assert!(map.find_uniform(name).is_some(), "missing uniform {name}");
+            }
+        });
+    }
+
+    #[test]
+    fn noop_glass_has_no_filter() {
+        let shape = rect_shape();
+        assert!(build_filter(&shape, &inert(), &Matrix::new_identity(), 1.0, None).is_none());
+    }
+
+    #[test]
+    fn light_only_glass_has_no_backdrop_filter() {
+        let shape = rect_shape();
+        let lit = Glass {
+            light_intensity: 80.0,
+            ..inert()
+        };
+        assert!(!lit.is_noop());
+        assert!(build_filter(&shape, &lit, &Matrix::new_identity(), 1.0, None).is_none());
+    }
+
+    #[test]
+    fn color_or_texture_alone_builds_a_filter() {
+        let shape = rect_shape();
+        let identity = Matrix::new_identity();
+
+        let gray = Glass {
+            saturation: 0.0,
+            ..inert()
+        };
+        assert!(build_filter(&shape, &gray, &identity, 1.0, None).is_some());
+
+        let reeded = Glass {
+            texture: GlassTexture::Reeded,
+            ..inert()
+        };
+        assert!(build_filter(&shape, &reeded, &identity, 1.0, None).is_some());
+
+        let flat = Glass {
+            texture_amount: 0.0,
+            ..reeded
+        };
+        assert!(build_filter(&shape, &flat, &identity, 1.0, None).is_none());
     }
 
     #[test]
@@ -792,20 +1233,19 @@ mod tests {
 
     #[test]
     fn glass_refracts_and_frosts_the_backdrop() {
-        let mut surface = skia::surfaces::raster_n32_premul((96, 96)).unwrap();
-        let canvas = surface.canvas();
+        let mut surface = surface(96, 96, skia::Color::WHITE);
         // Stripes behind the glass so both frost and refraction show.
-        canvas.clear(skia::Color::WHITE);
         let mut paint = Paint::default();
         paint.set_color(skia::Color::BLACK);
         for i in (0..96).step_by(8) {
-            canvas.draw_rect(skia::Rect::from_xywh(i as f32, 0.0, 4.0, 96.0), &paint);
+            let stripe = skia::Rect::from_xywh(i as f32, 0.0, 4.0, 96.0);
+            surface.canvas().draw_rect(stripe, &paint);
         }
         let before = surface.image_snapshot();
 
         let shape = rect_shape();
-        let canvas = surface.canvas();
         let matrix = Matrix::new_identity();
+        let canvas = surface.canvas();
         canvas.set_matrix(&skia::M44::from(&matrix));
         render_glass_backdrop(canvas, &shape, &glass(), &matrix, 1.0, None);
         let after = surface.image_snapshot();
@@ -821,33 +1261,204 @@ mod tests {
         assert!(changed);
     }
 
+    fn render_backdrop_over(color: skia::Color, glass: &Glass) -> skia::Color {
+        let mut surface = surface(96, 96, color);
+        let shape = rect_shape();
+        let matrix = Matrix::new_identity();
+        render_glass_backdrop(surface.canvas(), &shape, glass, &matrix, 1.0, None);
+        pixel(&mut surface, 34, 32)
+    }
+
+    #[test]
+    fn zero_saturation_turns_the_backdrop_gray() {
+        let gray = Glass {
+            saturation: 0.0,
+            ..inert()
+        };
+        let result = render_backdrop_over(skia::Color::from_rgb(255, 0, 0), &gray);
+        assert_eq!(result.r(), result.g());
+        assert_eq!(result.g(), result.b());
+        // CSS weight of red.
+        assert!((result.r() as i32 - 54).abs() <= 2, "{result:?}");
+    }
+
+    #[test]
+    fn half_brightness_halves_the_channels() {
+        let dim = Glass {
+            brightness: 50.0,
+            ..inert()
+        };
+        let result = render_backdrop_over(skia::Color::from_rgb(200, 100, 40), &dim);
+        assert!((result.r() as i32 - 100).abs() <= 2, "{result:?}");
+        assert!((result.g() as i32 - 50).abs() <= 2, "{result:?}");
+        assert!((result.b() as i32 - 20).abs() <= 2, "{result:?}");
+    }
+
+    fn render_light_over_fill(glass: &Glass) -> skia::Surface {
+        let mut surface = surface(96, 96, skia::Color::WHITE);
+        let shape = rect_shape();
+        let mut fill = Paint::default();
+        fill.set_color(skia::Color::from_rgb(32, 32, 32));
+        surface.canvas().draw_rect(shape.selrect, &fill);
+
+        let matrix = Matrix::new_identity();
+        render_glass_light(surface.canvas(), &shape, glass, &matrix, 1.0);
+        surface
+    }
+
+    #[test]
+    fn light_brightens_the_rim_over_an_opaque_fill() {
+        let lit = Glass {
+            light_intensity: 100.0,
+            ..inert()
+        };
+        let mut surface = render_light_over_fill(&lit);
+
+        let rim = pixel(&mut surface, 0, 32);
+        assert!(rim.r() > 90, "rim {rim:?}");
+        // The center and the outside are untouched.
+        assert_eq!(
+            pixel(&mut surface, 34, 32),
+            skia::Color::from_rgb(32, 32, 32)
+        );
+        assert_eq!(pixel(&mut surface, 80, 80), skia::Color::WHITE);
+    }
+
+    #[test]
+    fn light_color_tints_the_rim() {
+        let red = Glass {
+            light_intensity: 100.0,
+            light_color: skia::Color::from_rgb(255, 0, 0),
+            ..inert()
+        };
+        let mut surface = render_light_over_fill(&red);
+        let rim = pixel(&mut surface, 0, 32);
+        assert!(rim.r() > 90, "rim {rim:?}");
+        assert!(rim.g() < 40 && rim.b() < 40, "rim {rim:?}");
+    }
+
+    #[test]
+    fn black_light_draws_nothing() {
+        let black = Glass {
+            light_intensity: 100.0,
+            light_color: skia::Color::BLACK,
+            ..inert()
+        };
+        let mut surface = render_light_over_fill(&black);
+        assert_eq!(
+            pixel(&mut surface, 0, 32),
+            skia::Color::from_rgb(32, 32, 32)
+        );
+    }
+
     #[test]
     fn rect_bevel_has_no_diagonal_seam() {
         let mut shape = rect_shape();
         shape.set_selrect(0.0, 0.0, 200.0, 200.0);
-        let glass = Glass::new(false, -45.0, 80.0, 80.0, 30.0, 0.0, 0.0, 0.0);
-        let params = Params::new(&glass, 1.0, None);
-        let matrix = Matrix::new_identity();
-
-        let map = with_effects(|effects| {
-            glass_map_shader(&effects.unwrap().map, &shape, &params, &matrix, 1.0, 0.0)
-        })
-        .unwrap();
-        let mut surface = skia::surfaces::raster_n32_premul((200, 200)).unwrap();
-        let mut paint = Paint::default();
-        paint.set_shader(map);
-        surface.canvas().draw_paint(&paint);
-        let image = surface.image_snapshot();
-        let pixels = image.peek_pixels().unwrap();
+        let glass = Glass {
+            depth: 30.0,
+            dispersion: 0.0,
+            frost: 0.0,
+            ..glass()
+        };
+        let mut map = render_map(&shape, &glass, 200, 200);
 
         // Both points sit next to the corner diagonal, on either side of it.
         // A mitered bevel bends one sideways and the other up; a smooth one
         // bends both the same way.
-        let a = pixels.get_color((20, 22));
-        let b = pixels.get_color((22, 20));
+        let a = pixel(&mut map, 20, 22);
+        let b = pixel(&mut map, 22, 20);
         assert!(a.r() > 140 && a.g() > 140, "inward offset {a:?}");
         assert!((a.r() as i32 - b.g() as i32).abs() <= 2);
         assert!((a.r() as i32 - b.r() as i32).abs() <= 12, "{a:?} vs {b:?}");
+    }
+
+    fn reeded(angle: f32) -> Glass {
+        Glass {
+            texture: GlassTexture::Reeded,
+            texture_amount: 100.0,
+            texture_scale: 10.0,
+            texture_angle: angle,
+            ..inert()
+        }
+    }
+
+    fn wide_rect() -> Shape {
+        let mut shape = rect_shape();
+        shape.set_selrect(0.0, 0.0, 200.0, 40.0);
+        shape
+    }
+
+    #[test]
+    fn reeded_map_repeats_per_flute() {
+        let mut map = render_map(&wide_rect(), &reeded(0.0), 200, 40);
+        let row: Vec<skia::Color> = (0..200).map(|x| pixel(&mut map, x, 20)).collect();
+
+        for x in 20..170 {
+            assert!(
+                (row[x].r() as i32 - row[x + 10].r() as i32).abs() <= 1,
+                "not periodic at {x}"
+            );
+            assert!(
+                (row[x].g() as i32 - 128).abs() <= 1,
+                "vertical offset at {x}"
+            );
+        }
+        let min = row.iter().map(|c| c.r()).min().unwrap();
+        let max = row.iter().map(|c| c.r()).max().unwrap();
+        assert!(max - min > 100, "flutes too flat: {min}..{max}");
+    }
+
+    #[test]
+    fn texture_angle_turns_the_flutes() {
+        let mut shape = rect_shape();
+        shape.set_selrect(0.0, 0.0, 40.0, 200.0);
+        let mut map = render_map(&shape, &reeded(90.0), 40, 200);
+        let column: Vec<skia::Color> = (0..200).map(|y| pixel(&mut map, 20, y)).collect();
+
+        assert!(column.iter().all(|c| (c.r() as i32 - 128).abs() <= 1));
+        let min = column.iter().map(|c| c.g()).min().unwrap();
+        let max = column.iter().map(|c| c.g()).max().unwrap();
+        assert!(max - min > 100, "flutes too flat: {min}..{max}");
+    }
+
+    #[test]
+    fn texture_moves_with_the_shape() {
+        let mut moved = wide_rect();
+        moved.set_selrect(37.0, 0.0, 237.0, 40.0);
+
+        let mut a = render_map(&wide_rect(), &reeded(0.0), 300, 40);
+        let mut b = render_map(&moved, &reeded(0.0), 300, 40);
+        for x in 20..150 {
+            let expected = pixel(&mut a, x, 20).r() as i32;
+            let actual = pixel(&mut b, x + 37, 20).r() as i32;
+            assert!((expected - actual).abs() <= 1, "flute moved at {x}");
+        }
+    }
+
+    #[test]
+    fn reeded_glass_repeats_the_backdrop() {
+        let mut surface = surface(200, 60, skia::Color::WHITE);
+        let mut bar = Paint::default();
+        bar.set_color(skia::Color::BLACK);
+        surface
+            .canvas()
+            .draw_rect(skia::Rect::from_xywh(100.0, 0.0, 4.0, 60.0), &bar);
+
+        let mut shape = rect_shape();
+        shape.set_selrect(0.0, 0.0, 200.0, 60.0);
+        let glass = Glass {
+            texture_scale: 20.0,
+            ..reeded(0.0)
+        };
+        let matrix = Matrix::new_identity();
+        render_glass_backdrop(surface.canvas(), &shape, &glass, &matrix, 1.0, None);
+
+        let dark_flutes: std::collections::HashSet<i32> = (0..200)
+            .filter(|x| pixel(&mut surface, *x, 30).r() < 128)
+            .map(|x| x / 20)
+            .collect();
+        assert!(dark_flutes.len() >= 2, "bar seen in {dark_flutes:?}");
     }
 
     #[test]
@@ -864,29 +1475,27 @@ mod tests {
         shape.set_selrect(0.0, 0.0, 100.0, 100.0);
 
         let mask = silhouette_shader(&shape, &Matrix::new_identity(), 0.0, 10.0, 1.0).unwrap();
-        let mut surface = skia::surfaces::raster_n32_premul((100, 100)).unwrap();
+        let mut surface = surface(100, 100, skia::Color::TRANSPARENT);
         let mut paint = Paint::default();
         paint.set_shader(mask);
         surface.canvas().draw_paint(&paint);
-        let image = surface.image_snapshot();
-        let pixels = image.peek_pixels().unwrap();
 
         // Deep inside both channels are full, on the edge about half, and
         // outside the shape empty. Row 0 is half a pixel inside the edge,
         // which shows more in the narrow red blur.
-        let inside = pixels.get_color((50, 30));
+        let inside = pixel(&mut surface, 50, 30);
         assert!(inside.g() > 240 && inside.r() > 240, "{inside:?}");
-        let edge = pixels.get_color((50, 0));
+        let edge = pixel(&mut surface, 50, 0);
         assert!((100..160).contains(&edge.g()), "edge {edge:?}");
         assert!((150..200).contains(&edge.r()), "edge {edge:?}");
-        let near = pixels.get_color((50, 4));
+        let near = pixel(&mut surface, 50, 4);
         assert!(near.r() > 250 && near.g() < 200, "near {near:?}");
-        let outside = pixels.get_color((5, 90));
+        let outside = pixel(&mut surface, 5, 90);
         assert_eq!((outside.r(), outside.g()), (0, 0));
     }
 
-    /// Board with black stripes and a glass rect on top.
-    fn glass_scene(with_glass: bool) -> (crate::state::ShapesPool, Uuid) {
+    /// Board with black stripes and a panel on top.
+    fn glass_scene(glass: Option<Glass>, panel: skia::Color) -> (crate::state::ShapesPool, Uuid) {
         use crate::shapes::{Fill, Frame, Rect as RectType, SolidColor};
 
         let board = Uuid::new_v4();
@@ -905,16 +1514,12 @@ mod tests {
         }
 
         let panel_id = Uuid::new_v4();
-        let panel = pool.add_shape(panel_id);
-        panel.set_parent(board);
-        panel.set_shape_type(Type::Rect(RectType::default()));
-        panel.set_selrect(20.0, 20.0, 80.0, 80.0);
-        panel.set_fills(vec![Fill::Solid(SolidColor(skia::Color::from_argb(
-            51, 217, 217, 217,
-        )))]);
-        if with_glass {
-            panel.set_glass(Some(glass()));
-        }
+        let shape = pool.add_shape(panel_id);
+        shape.set_parent(board);
+        shape.set_shape_type(Type::Rect(RectType::default()));
+        shape.set_selrect(20.0, 20.0, 80.0, 80.0);
+        shape.set_fills(vec![Fill::Solid(SolidColor(panel))]);
+        shape.set_glass(glass);
         children.push(panel_id);
 
         let frame = pool.add_shape(board);
@@ -930,11 +1535,15 @@ mod tests {
         (pool, board)
     }
 
-    fn export_pixels(with_glass: bool) -> skia::Image {
-        let (pool, board) = glass_scene(with_glass);
+    fn tint() -> skia::Color {
+        skia::Color::from_argb(51, 217, 217, 217)
+    }
+
+    fn export_pixels(glass: Option<Glass>, panel: skia::Color) -> skia::Image {
+        let (pool, board) = glass_scene(glass, panel);
         let mut resources = super::super::RenderResources::try_new_headless().unwrap();
         let _guard = crate::globals::TestRenderResourcesGuard::install(&mut resources);
-        let mut surface = skia::surfaces::raster_n32_premul((100, 100)).unwrap();
+        let mut surface = surface(100, 100, skia::Color::TRANSPARENT);
         let page = skia::Rect::from_xywh(0.0, 0.0, 100.0, 100.0);
         super::super::vector::render_tree(
             &mut resources,
@@ -950,8 +1559,8 @@ mod tests {
 
     #[test]
     fn raster_export_renders_glass() {
-        let plain = export_pixels(false);
-        let glassy = export_pixels(true);
+        let plain = export_pixels(None, tint());
+        let glassy = export_pixels(Some(glass()), tint());
         let plain_px = plain.peek_pixels().unwrap();
         let glass_px = glassy.peek_pixels().unwrap();
 
@@ -965,20 +1574,44 @@ mod tests {
     }
 
     #[test]
-    fn pdf_export_embeds_the_glass_backdrop() {
-        let render = |with_glass: bool| {
-            let (pool, board) = glass_scene(with_glass);
+    fn export_light_is_drawn_over_the_fill() {
+        let panel = skia::Color::from_rgb(32, 32, 32);
+        let lit = Glass {
+            light_intensity: 100.0,
+            ..inert()
+        };
+        let plain = export_pixels(None, panel);
+        let glassy = export_pixels(Some(lit), panel);
+
+        let rim = glassy.peek_pixels().unwrap().get_color((20, 50));
+        let fill = plain.peek_pixels().unwrap().get_color((20, 50));
+        assert_eq!(fill, panel);
+        assert!(rim.r() > fill.r() + 40, "rim {rim:?}");
+    }
+
+    #[test]
+    fn pdf_export_embeds_the_glass() {
+        let render = |glass: Option<Glass>| {
+            let (pool, board) = glass_scene(glass, tint());
             let mut resources = super::super::RenderResources::try_new_headless().unwrap();
             let _guard = crate::globals::TestRenderResourcesGuard::install(&mut resources);
             super::super::pdf::render_to_pdf(&mut resources, &board, &pool, 1.0).unwrap()
         };
-        let count_images = |pdf: &[u8]| {
-            let text = String::from_utf8_lossy(pdf);
-            text.matches("/Subtype /Image").count()
-        };
+        let count = |pdf: &[u8], needle: &str| String::from_utf8_lossy(pdf).matches(needle).count();
 
-        // PDF has no backdrop filters, so glass is embedded as an image.
-        assert_eq!(count_images(&render(false)), 0);
-        assert!(count_images(&render(true)) > 0);
+        // PDF has no backdrop filters, so the glass backdrop is embedded as
+        // an image, and the light as an image drawn with a Screen blend.
+        let unlit = Glass {
+            light_intensity: 0.0,
+            ..glass()
+        };
+        let none = render(None);
+        let backdrop = render(Some(unlit));
+        let with_light = render(Some(glass()));
+
+        assert_eq!(count(&none, "/Subtype /Image"), 0);
+        assert!(count(&backdrop, "/Subtype /Image") > 0);
+        assert_eq!(count(&backdrop, "/Screen"), 0);
+        assert!(count(&with_light, "/Screen") > 0);
     }
 }

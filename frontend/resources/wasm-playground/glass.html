@@ -26,7 +26,7 @@
     import initWasmModule from '/js/render-wasm.js';
     import {
       init, addShapeSolidFill, assignCanvas, hexToU32ARGB, useShape,
-      setShapeChildren, setupInteraction, draw_star
+      setShapeChildren, setupInteraction, draw_star, allocBytes, getHeapU32
     } from './js/lib.js';
 
     const canvas = document.getElementById("canvas");
@@ -34,10 +34,12 @@
     canvas.height = window.innerHeight;
 
     // Glass values can be tuned from the URL, e.g.
-    // glass.html?angle=-45&intensity=80&refraction=80&depth=20&dispersion=50&frost=4&splay=0
+    // glass.html?angle=-45&intensity=80&refraction=80&depth=20&dispersion=50
+    //   &frost=4&splay=0&saturation=100&brightness=100&highlight=2
+    //   &texture=reeded&textureAmount=30&textureScale=8&textureAngle=0&light=ffffff
     const params = new URLSearchParams(document.location.search);
     const value = (name, fallback) => Number(params.get(name) ?? fallback);
-    const glass = [
+    const glassFloats = [
       value("angle", -45),
       value("intensity", 80),
       value("refraction", 80),
@@ -45,7 +47,26 @@
       value("dispersion", 50),
       value("frost", 4),
       value("splay", 0),
+      value("saturation", 100),
+      value("brightness", 100),
+      value("highlight", 2),
+      value("textureAmount", 30),
+      value("textureScale", 8),
+      value("textureAngle", 0),
     ];
+    const texture = params.get("texture") === "reeded" ? 1 : 0;
+    const lightColor = hexToU32ARGB("#" + (params.get("light") ?? "ffffff"), 1);
+
+    // 60-byte glass buffer, see render-wasm/docs/serialization.md
+    function setShapeGlass(Module) {
+      const ptr = allocBytes(60);
+      const dv = new DataView(getHeapU32().buffer);
+      dv.setUint8(ptr, 0);
+      dv.setUint8(ptr + 1, texture);
+      glassFloats.forEach((v, i) => dv.setFloat32(ptr + 4 + i * 4, v, true));
+      dv.setUint32(ptr + 56, lightColor, true);
+      Module._set_shape_glass();
+    }
 
     const RECT = 3;
     const PATH = 4;
@@ -82,7 +103,7 @@
 
       const withGlass = () => {
         addShapeSolidFill(hexToU32ARGB("#D9D9D9", 0.2));
-        Module._set_shape_glass(false, ...glass);
+        setShapeGlass(Module);
       };
 
       addShape(RECT, 80, 80, 240, 240);
