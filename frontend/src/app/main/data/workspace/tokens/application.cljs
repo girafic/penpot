@@ -911,7 +911,8 @@
                                             :token token
                                             :shape-ids shape-ids
                                             :on-update-shape update-fill})
-                     :shadow  (rx/empty))))))
+                     :shadow  (rx/empty)
+                     :glass   (rx/empty))))))
          (rx/of (dwu/commit-undo-transaction undo-id)))))))
 ;; Map token types to different properties used along the cokde ---------------------------------------------
 

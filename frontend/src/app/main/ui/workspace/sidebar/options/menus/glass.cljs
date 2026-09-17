@@ -13,8 +13,11 @@
    [app.common.uuid :as uuid]
    [app.main.data.workspace.undo :as dwu]
    [app.main.store :as st]
+   [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.ds.controls.numeric-input :refer [numeric-input*]]
+   [app.main.ui.ds.controls.select :refer [select*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.workspace.sidebar.options.rows.color-row :refer [color-row*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -42,6 +45,28 @@
   (let [rad (mth/radians angle)]
     #js {:left (str (+ 50 (* 36 (mth/sin rad))) "%")
          :top  (str (- 50 (* 36 (mth/cos rad))) "%")}))
+
+(defn slider-fill
+  "Start and end of the filled part of a slider track, in percent of the
+  track. The fill goes from `origin` (the minimum when nil) to `value`."
+  [value min max origin]
+  (let [pct  (fn [v] (* 100 (/ (- (mth/clamp v min max) min) (- max min))))
+        from (pct (d/nilv origin min))
+        to   (pct value)]
+    [(mth/min from to) (mth/max from to)]))
+
+(def ^:private advanced-attrs
+  [:saturation :brightness :dispersion :splay
+   :texture :texture-amount :texture-scale :texture-angle])
+
+(defn advanced-modified?
+  "True when a value of the advanced block differs from its default, so
+  the block starts open."
+  [glass]
+  (boolean
+   (some (fn [attr]
+           (not= (ctsg/get-value glass attr) (get ctsg/default-attrs attr)))
+         advanced-attrs)))
 
 (defn- event->angle
   [event node]
@@ -119,11 +144,12 @@
 
 (mf/defc glass-slider*
   {::mf/private true}
-  [{:keys [attr label value min max input-max disabled on-change on-change-start on-change-end]}]
-  (let [id    (str "glass-" (d/name attr))
-        value (d/nilv value 0)
-        pct   (-> (/ (- (mth/clamp value min max) min) (- max min))
-                  (* 100))
+  [{:keys [attr label value default min max input-max step origin disabled
+           on-change on-change-start on-change-end]}]
+  (let [id        (str "glass-" (d/name attr))
+        value     (d/nilv value default)
+        step      (d/nilv step 1)
+        [from to] (slider-fill value min max origin)
 
         on-slide
         (mf/use-fn
@@ -145,10 +171,11 @@
      [:input {:id id
               :type "range"
               :class (stl/css :slider)
-              :style {"--slider-progress" (str pct "%")}
+              :style {"--slider-from" (str from "%")
+                      "--slider-to" (str to "%")}
               :min min
               :max max
-              :step 1
+              :step step
               :value (mth/clamp value min max)
               :disabled disabled
               :on-pointer-down on-change-start
@@ -160,15 +187,54 @@
                          :placeholder "--"
                          :min min
                          :max input-max
+                         :step step
                          :value value
                          :disabled disabled
                          :on-change on-input}]]))
+
+(mf/defc glass-sliders*
+  "Renders one `glass-slider*` per slider definition, see `slider`."
+  {::mf/private true}
+  [{:keys [sliders value disabled on-change on-change-start on-change-end]}]
+  [:*
+   (for [{:keys [attr label default min max input-max step origin]} sliders]
+     [:> glass-slider* {:key (d/name attr)
+                        :attr attr
+                        :label label
+                        :default default
+                        :min min
+                        :max max
+                        :input-max input-max
+                        :step step
+                        :origin origin
+                        :value (get value attr)
+                        :disabled disabled
+                        :on-change on-change
+                        :on-change-start on-change-start
+                        :on-change-end on-change-end}])])
+
+(defn- slider
+  "Slider definition for `attr`; the default comes from the glass defaults."
+  [attr label & {:as opts}]
+  (merge {:attr attr
+          :label label
+          :default (get ctsg/default-attrs attr)
+          :min 0
+          :max 100}
+         opts))
 
 (mf/defc glass-options*
   "Controls for the glass effect values. `on-change` receives the attribute
   and its new value."
   [{:keys [value disabled on-change]}]
-  (let [tx-id (mf/use-memo #(uuid/next))
+  (let [tx-id       (mf/use-memo #(uuid/next))
+        light-tx-id (mf/use-memo #(uuid/next))
+
+        advanced*   (mf/use-state #(advanced-modified? value))
+        advanced    (deref advanced*)
+
+        toggle-advanced
+        (mf/use-fn #(swap! advanced* not))
 
         on-change-start
         (mf/use-fn
@@ -196,18 +262,67 @@
            (when (d/num? intensity)
              (on-change :light-intensity intensity))))
 
-        sliders
+        on-light-color-change
+        (mf/use-fn
+         (mf/deps on-change)
+         (fn [color & _]
+           (when-let [light-color (ctsg/color->light-color color)]
+             (on-change :light-color light-color))))
+
+        on-light-color-detach
+        (mf/use-fn
+         (mf/deps on-change value)
+         (fn [& _]
+           (when-let [light-color (:light-color value)]
+             (on-change :light-color (dissoc light-color :ref-id :ref-file)))))
+
+        on-light-color-open
+        (mf/use-fn
+         (mf/deps light-tx-id)
+         (fn [& _]
+           (st/emit! (dwu/start-undo-transaction light-tx-id))))
+
+        on-light-color-close
+        (mf/use-fn
+         (mf/deps light-tx-id)
+         (fn [& _]
+           (st/emit! (dwu/commit-undo-transaction light-tx-id))))
+
+        on-texture-change
+        (mf/use-fn
+         (mf/deps on-change)
+         (fn [texture]
+           (on-change :texture (keyword texture))))
+
+        main-sliders
         (mf/with-memo []
-          [{:attr :refraction :max 100 :input-max 100
-            :label (tr "workspace.options.glass-options.refraction")}
-           {:attr :depth :max 100
-            :label (tr "workspace.options.glass-options.depth")}
-           {:attr :dispersion :max 100 :input-max 100
-            :label (tr "workspace.options.glass-options.dispersion")}
-           {:attr :frost :max 100
-            :label (tr "workspace.options.glass-options.frost")}
-           {:attr :splay :max 100 :input-max 100
-            :label (tr "workspace.options.glass-options.splay")}])]
+          [(slider :highlight-width (tr "workspace.options.glass-options.highlight-width") :min 0.5 :max 24 :step 0.5)
+           (slider :refraction (tr "workspace.options.glass-options.refraction") :input-max 100)
+           (slider :depth (tr "workspace.options.glass-options.depth"))
+           (slider :frost (tr "workspace.options.glass-options.frost"))])
+
+        advanced-sliders
+        (mf/with-memo []
+          [(slider :saturation (tr "workspace.options.glass-options.saturation") :max 200 :input-max 200 :origin 100)
+           (slider :brightness (tr "workspace.options.glass-options.brightness") :max 200 :input-max 200 :origin 100)
+           (slider :dispersion (tr "workspace.options.glass-options.dispersion") :input-max 100)
+           (slider :splay (tr "workspace.options.glass-options.splay") :input-max 100)])
+
+        texture-sliders
+        (mf/with-memo []
+          [(slider :texture-amount (tr "workspace.options.glass-options.texture-amount") :input-max 100)
+           (slider :texture-scale (tr "workspace.options.glass-options.texture-scale") :min 2 :max 64)
+           (slider :texture-angle (tr "workspace.options.glass-options.texture-angle") :min -90 :max 90
+                   :input-max 180 :origin 0)])
+
+        texture-options
+        (mf/with-memo []
+          [{:id "none"
+            :label (tr "workspace.options.glass-options.texture-none")}
+           {:id "reeded"
+            :label (tr "workspace.options.glass-options.texture-reeded")}])
+
+        texture (d/name (ctsg/get-value value :texture))]
 
     [:div {:class (stl/css :glass-options)
            :data-testid "glass-options"}
@@ -241,16 +356,60 @@
                            :disabled disabled
                            :on-change on-intensity-change}]]]
 
+     [:div {:class (stl/css-case :light-color-row true
+                                 :light-color-disabled disabled)
+            :data-testid "glass-light-color"}
+      [:span {:class (stl/css :label)}
+       (tr "workspace.options.glass-options.light-color")]
+      [:> color-row* {:class (stl/css :light-color)
+                      :color (d/nilv (:light-color value) ctsg/default-light-color)
+                      :disable-gradient true
+                      :disable-opacity true
+                      :disable-image true
+                      :disable-picker disabled
+                      :origin :glass
+                      :on-change on-light-color-change
+                      :on-detach on-light-color-detach
+                      :on-open on-light-color-open
+                      :on-close on-light-color-close}]]
+
      [:div {:class (stl/css :sliders)}
-      (for [{:keys [attr] :as slider} sliders]
-        [:> glass-slider* {:key (d/name attr)
-                           :attr attr
-                           :label (:label slider)
-                           :min 0
-                           :max (:max slider)
-                           :input-max (:input-max slider)
-                           :value (get value attr)
-                           :disabled disabled
-                           :on-change on-change
-                           :on-change-start on-change-start
-                           :on-change-end on-change-end}])]]))
+      [:> glass-sliders* {:sliders main-sliders
+                          :value value
+                          :disabled disabled
+                          :on-change on-change
+                          :on-change-start on-change-start
+                          :on-change-end on-change-end}]]
+
+     [:div {:class (stl/css :advanced)}
+      [:> title-bar* {:collapsable true
+                      :collapsed (not advanced)
+                      :on-collapsed toggle-advanced
+                      :aria-expanded advanced
+                      :title (tr "workspace.options.glass-options.advanced")}]
+      (when advanced
+        [:div {:class (stl/css :sliders)}
+         [:> glass-sliders* {:sliders advanced-sliders
+                             :value value
+                             :disabled disabled
+                             :on-change on-change
+                             :on-change-start on-change-start
+                             :on-change-end on-change-end}]
+         [:div {:class (stl/css :slider-row)}
+          [:span {:class (stl/css :label)}
+           (tr "workspace.options.glass-options.texture")]
+          [:> select* {:key texture
+                       ;; The grid item is the wrapper, not the button.
+                       :wrapper-class (stl/css :texture-select)
+                       :default-selected texture
+                       :aria-label (tr "workspace.options.glass-options.texture")
+                       :options texture-options
+                       :disabled disabled
+                       :on-change on-texture-change}]]
+         (when (= texture "reeded")
+           [:> glass-sliders* {:sliders texture-sliders
+                               :value value
+                               :disabled disabled
+                               :on-change on-change
+                               :on-change-start on-change-start
+                               :on-change-end on-change-end}])])]]))

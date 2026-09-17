@@ -489,6 +489,46 @@ test.describe("Glass", () => {
     await expect(
       glassOptions.getByRole("slider", { name: "Refraction" }),
     ).toHaveValue("35");
+
+    await expect(
+      glassOptions.getByRole("textbox", { name: "Highlight width" }),
+    ).toHaveValue("2");
+    await expect(
+      glassOptions
+        .getByTestId("glass-light-color")
+        .getByRole("textbox", { name: "Color" }),
+    ).toHaveValue("FFFFFF");
+
+    // The advanced block starts closed while its values are the defaults.
+    const saturation = glassOptions.getByRole("textbox", {
+      name: "Saturation",
+    });
+    await expect(saturation).toHaveCount(0);
+    await glassOptions.getByRole("button", { name: "Advanced" }).click();
+    await expect(saturation).toHaveValue("100");
+    await saturation.fill("150");
+    await saturation.press("Enter");
+    await expect(
+      glassOptions.getByRole("slider", { name: "Saturation" }),
+    ).toHaveValue("150");
+
+    // Texture controls only show for the reeded texture.
+    const amount = glassOptions.getByRole("textbox", { name: "Amount" });
+    await expect(amount).toHaveCount(0);
+    const texture = glassOptions.getByRole("combobox", { name: "Texture" });
+    await texture.click();
+    await glassOptions.getByRole("option", { name: "Reeded" }).click();
+    await expect(amount).toHaveValue("30");
+    await expect(
+      glassOptions.getByRole("textbox", { name: "Scale" }),
+    ).toHaveValue("8");
+    await expect(
+      glassOptions.getByRole("textbox", { name: "Angle", exact: true }),
+    ).toHaveValue("0");
+
+    await texture.click();
+    await glassOptions.getByRole("option", { name: "None" }).click();
+    await expect(amount).toHaveCount(0);
   });
 
   test("Adds glass as the third effect of a shape", async ({ page }) => {

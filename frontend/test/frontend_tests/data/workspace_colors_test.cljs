@@ -6,6 +6,7 @@
 
 (ns frontend-tests.data.workspace-colors-test
   (:require
+   [app.common.types.shape.glass :as ctsg]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.colors :as dwc]
    [clojure.test :as t]
@@ -82,3 +83,45 @@
                                    :current-color {:color "#ff0000" :opacity 1}}}
         event (dwc/update-colorpicker-color {} true)]
     (t/is (some? (ptk/watch event valid-state nil)))))
+
+(t/deftest extract-all-colors-lists-the-glass-light
+  (let [shape-id  (uuid/next)
+        file-id   (uuid/next)
+        other-lib (uuid/next)
+        shape     (fn [light-color]
+                    {:id shape-id
+                     :type :rect
+                     :glass (cond-> (assoc ctsg/default-attrs :id (uuid/next))
+                              (some? light-color)
+                              (assoc :light-color light-color))})]
+
+    (t/testing "the default white light is not listed"
+      (t/is (empty? (dwc/extract-all-colors [(shape nil)] file-id {}))))
+
+    (t/testing "a light color is listed as a glass color"
+      (t/is (= [{:attrs {:color "#FF0000" :opacity 1}
+                 :prop :glass
+                 :shape-id shape-id
+                 :index 0}]
+               (dwc/extract-all-colors [(shape {:color "#FF0000" :opacity 1})] file-id {}))))
+
+    (t/testing "a reference to a library that is not available is dropped"
+      (let [[{:keys [attrs]}]
+            (dwc/extract-all-colors
+             [(shape {:color "#FF0000" :opacity 1 :ref-id (uuid/next) :ref-file other-lib})]
+             file-id {})]
+        (t/is (= {:color "#FF0000" :opacity 1} attrs))))
+
+    (t/testing "a reference to the current file is kept"
+      (let [ref-id (uuid/next)
+            [{:keys [attrs]}]
+            (dwc/extract-all-colors
+             [(shape {:color "#FF0000" :opacity 1 :ref-id ref-id :ref-file file-id})]
+             file-id {})]
+        (t/is (= ref-id (:ref-id attrs)))))))
+
+(t/deftest change-color-in-selected-accepts-glass
+  (t/is (ptk/event? (dwc/change-color-in-selected
+                     [{:prop :glass :shape-id uuid/zero :index 0}]
+                     {:color "#00ff00" :opacity 1}
+                     {:color "#ff0000" :opacity 1}))))

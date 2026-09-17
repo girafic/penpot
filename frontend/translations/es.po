@@ -7681,7 +7681,7 @@ msgstr ""
 "motor de renderizado. Actívalo desde el menú de Preferencias para utilizar "
 "este efecto."
 
-#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:152, src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:170
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:154, src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:172
 msgid "workspace.options.blur-options.glass"
 msgstr "Cristal"
 
@@ -7884,15 +7884,15 @@ msgstr "Crear estilo de tipografía"
 msgid "workspace.options.design"
 msgstr "Diseño"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:317, src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:334
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:319, src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:336
 msgid "workspace.options.effects-options.title"
 msgstr "Efectos"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:316
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:318
 msgid "workspace.options.effects-options.title.group"
 msgstr "Efectos del grupo"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:315
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:317
 msgid "workspace.options.effects-options.title.multiple"
 msgstr "Efectos de la selección"
 
@@ -7996,43 +7996,87 @@ msgstr "Inicios de flujo"
 msgid "workspace.options.flows.remove-flow"
 msgstr "Eliminar flujo"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:203
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:374
+msgid "workspace.options.glass-options.advanced"
+msgstr "Avanzado"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:286
+msgid "workspace.options.glass-options.brightness"
+msgstr "Brillo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:280
 msgid "workspace.options.glass-options.depth"
 msgstr "Profundidad"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:212
+#: src/app/main/ui/workspace/sidebar/options/menus/blur.cljs:214
 msgid "workspace.options.glass-options.disabled-label"
 msgstr ""
 "El efecto cristal solo está disponible en el nuevo motor de renderizado. "
 "Actívalo desde el menú de Preferencias para utilizar este efecto."
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:205
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:287
 msgid "workspace.options.glass-options.dispersion"
 msgstr "Dispersión"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:207
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:281
 msgid "workspace.options.glass-options.frost"
 msgstr "Escarcha"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:215
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:278
+msgid "workspace.options.glass-options.highlight-width"
+msgstr "Ancho del brillo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:321
 msgid "workspace.options.glass-options.light"
 msgstr "Luz"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:105, src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:224
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:131, src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:330
 msgid "workspace.options.glass-options.light-angle"
 msgstr "Ángulo de la luz"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:234
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:353
+msgid "workspace.options.glass-options.light-color"
+msgstr "Color de la luz"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:340
 msgid "workspace.options.glass-options.light-intensity"
 msgstr "Intensidad de la luz"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:201
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:279
 msgid "workspace.options.glass-options.refraction"
 msgstr "Refracción"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:209
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:285
+msgid "workspace.options.glass-options.saturation"
+msgstr "Saturación"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:288
 msgid "workspace.options.glass-options.splay"
 msgstr "Expansión"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:380, src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:384
+msgid "workspace.options.glass-options.texture"
+msgstr "Textura"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:292
+msgid "workspace.options.glass-options.texture-amount"
+msgstr "Intensidad"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:294
+msgid "workspace.options.glass-options.texture-angle"
+msgstr "Ángulo"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:300
+msgid "workspace.options.glass-options.texture-none"
+msgstr "Ninguna"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:302
+msgid "workspace.options.glass-options.texture-reeded"
+msgstr "Estriado"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:293
+msgid "workspace.options.glass-options.texture-scale"
+msgstr "Escala"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs:34
 msgid "workspace.options.grid.auto"

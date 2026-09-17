@@ -120,8 +120,10 @@
     border-radius: $br-4;
     background: linear-gradient(
       to right,
-      var(--slider-fill) var(--slider-progress),
-      var(--slider-track) var(--slider-progress)
+      var(--slider-track) var(--slider-from),
+      var(--slider-fill) var(--slider-from),
+      var(--slider-fill) var(--slider-to),
+      var(--slider-track) var(--slider-to)
     );
   }
 
@@ -130,8 +132,10 @@
     border-radius: $br-4;
     background: linear-gradient(
       to right,
-      var(--slider-fill) var(--slider-progress),
-      var(--slider-track) var(--slider-progress)
+      var(--slider-track) var(--slider-from),
+      var(--slider-fill) var(--slider-from),
+      var(--slider-fill) var(--slider-to),
+      var(--slider-track) var(--slider-to)
     );
   }
 
@@ -167,4 +171,29 @@
 
 .slider-input {
   grid-column: span 2;
+}
+
+.light-color-row {
+  @include sidebar.option-grid-structure;
+
+  align-items: center;
+}
+
+.light-color {
+  grid-column: span 6;
+}
+
+.light-color-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.advanced {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.texture-select {
+  grid-column: span 6;
 }

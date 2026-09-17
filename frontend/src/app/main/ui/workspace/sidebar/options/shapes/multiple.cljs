@@ -16,6 +16,7 @@
    [app.common.types.component :as ctk]
    [app.common.types.path :as path]
    [app.common.types.shape.attrs :refer [editable-attrs]]
+   [app.common.types.shape.glass :as ctsg]
    [app.common.types.shape.layout :as ctl]
    [app.common.types.text :as txt]
    [app.common.types.token :as tt]
@@ -208,17 +209,24 @@
 
 (def blur-keys
   [:type :value :hidden
-   :light-angle :light-intensity :refraction :depth :dispersion :frost :splay])
+   :light-angle :light-intensity :light-color :highlight-width
+   :refraction :depth :dispersion :frost :splay
+   :saturation :brightness
+   :texture :texture-amount :texture-scale :texture-angle])
+
+(defn blur-sel
+  "Select interesting keys for multiple selection. A glass without the
+  optional keys is the same as one with their defaults."
+  [v]
+  (when v
+    (cond-> (select-keys v blur-keys)
+      (= :glass (:type v))
+      (->> (merge ctsg/optional-defaults)))))
 
 (defn blur-eq
   "Checks if two blurs are equivalent for the multiple selection"
   [v1 v2]
-  (= (select-keys v1 blur-keys) (select-keys v2 blur-keys)))
-
-(defn blur-sel
-  "Select interesting keys for multiple selection"
-  [v]
-  (when v (select-keys v blur-keys)))
+  (= (blur-sel v1) (blur-sel v2)))
 
 (def layout-padding-attrs [:p1 :p2 :p3 :p4])
 

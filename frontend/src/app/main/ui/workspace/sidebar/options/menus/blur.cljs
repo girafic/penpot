@@ -112,7 +112,9 @@
         (mf/use-fn
          (mf/deps change-fn blur-key)
          (fn [attr value]
-           (change-fn #(assoc-in % [blur-key attr] value))))
+           (change-fn (if (nil? value)
+                        #(d/update-when % blur-key dissoc attr)
+                        #(assoc-in % [blur-key attr] value)))))
 
         handle-type-change
         (mf/use-fn

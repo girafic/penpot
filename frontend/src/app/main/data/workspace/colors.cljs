@@ -15,6 +15,7 @@
    [app.common.types.fills :as types.fills]
    [app.common.types.library :as ctl]
    [app.common.types.shape :as shp]
+   [app.common.types.shape.glass :as ctsg]
    [app.common.types.shape.shadow :as types.shadow]
    [app.common.types.text :as txt]
    [app.main.broadcast :as mbc]
@@ -448,6 +449,22 @@
       (watch [_ _ _]
         (rx/of (dwsh/update-shapes ids update-shadow))))))
 
+(defn change-glass-light-color
+  "Replaces the glass light color of `ids` with `color` (a color picker
+  value). Gradients use their first stop; images are ignored."
+  [ids color]
+  (ptk/reify ::change-glass-light-color
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (if-let [light-color (ctsg/color->light-color color)]
+        (rx/of (dwsh/update-shapes
+                ids
+                (fn [shape]
+                  (cond-> shape
+                    (some? (:glass shape))
+                    (assoc-in [:glass :light-color] light-color)))))
+        (rx/empty)))))
+
 (defn add-shadow
   [ids shadow]
 
@@ -611,7 +628,7 @@
 
 (def ^:private schema:change-color-operation
   [:map
-   [:prop [:enum :fill :stroke :shadow :content]]
+   [:prop [:enum :fill :stroke :shadow :glass :content]]
    [:shape-id ::sm/uuid]
    [:index :int]])
 
@@ -639,6 +656,7 @@
                           :fill    (change-fill [shape-id] new-color index)
                           :stroke  (change-stroke-color [shape-id] new-color index)
                           :shadow  (change-shadow [shape-id] new-color index)
+                          :glass   (change-glass-light-color [shape-id] new-color)
                           :content (dwt/update-text-with-function
                                     shape-id
                                     (partial change-text-color old-color new-color index))))))
@@ -1295,6 +1313,26 @@
        :shape-id (:shape-id fill)
        :index (:index fill)})))
 
+(defn- glass->color-attr
+  "Color attribute map for the glass light color of `shape`, or nil when
+  the glass uses the default light."
+  [shape file-id libraries]
+  (when-let [color (clr/glass->color (:glass shape))]
+    (let [ref-file (get color :ref-file)
+          ref-id   (get color :ref-id)
+          colors   (-> libraries
+                       (get ref-file)
+                       (get :data)
+                       (ctl/get-colors))
+          shared?  (contains? colors ref-id)
+          attrs    (cond-> color
+                     (not (or shared? (= ref-file file-id)))
+                     (dissoc :ref-file :ref-id))]
+      {:attrs attrs
+       :prop :glass
+       :shape-id (:id shape)
+       :index 0})))
+
 (defn extract-all-colors
   "Extracts color information from a list of shapes, including fills, strokes, and shadows.
      If a shape has applied tokens of type :fill or :stroke-color, the first fill or stroke
@@ -1341,10 +1379,12 @@
          (-> result
              (into (keep #(stroke->color-att % file-id libraries)) strokes*)
              (into (map #(shadow->color-attr % file-id libraries)) shadows*)
+             (into (keep #(glass->color-attr % file-id libraries)) [shape])
              (into (extract-text-colors shape file-id libraries)))
          (-> result
              (into (keep #(fill->color-att % file-id libraries)) fills*)
              (into (keep #(stroke->color-att % file-id libraries)) strokes*)
-             (into (map #(shadow->color-attr % file-id libraries)) shadows*)))))
+             (into (map #(shadow->color-attr % file-id libraries)) shadows*)
+             (into (keep #(glass->color-attr % file-id libraries)) [shape])))))
    []
    shapes))

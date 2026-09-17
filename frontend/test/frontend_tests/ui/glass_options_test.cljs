@@ -49,6 +49,23 @@
       (is (< 24 left 25))
       (is (< 24 top 25)))))
 
+(deftest slider-fill-spans-from-the-origin
+  (testing "without origin the fill starts at the minimum"
+    (is (= [0 50] (glass/slider-fill 50 0 100 nil))))
+  (testing "the fill goes from the origin to the value, in either direction"
+    (is (= [50 75] (glass/slider-fill 150 0 200 100)))
+    (is (= [25 50] (glass/slider-fill 50 0 200 100))))
+  (testing "values outside the range are clamped"
+    (is (= [0 100] (glass/slider-fill 400 0 100 nil)))))
+
+(deftest advanced-block-opens-for-modified-values
+  (is (false? (glass/advanced-modified? ctsg/default-attrs)))
+  (is (false? (glass/advanced-modified?
+               (apply dissoc ctsg/default-attrs (keys ctsg/optional-defaults)))))
+  (is (true? (glass/advanced-modified? (assoc ctsg/default-attrs :saturation 120))))
+  (is (true? (glass/advanced-modified? (assoc ctsg/default-attrs :texture :reeded))))
+  (is (true? (glass/advanced-modified? (assoc ctsg/default-attrs :dispersion 0)))))
+
 (deftest create-glass-uses-the-defaults
   (let [a (glass/create-glass)
         b (glass/create-glass)]
