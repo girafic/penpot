@@ -1021,6 +1021,28 @@
   [shape position]
   (d/update-in-when shape [:grids position :params :color] dissoc :ref-id :ref-file))
 
+(defn- set-glass-light-color
+  [shape _position color opacity gradient & _]
+  (d/update-in-when shape [:glass :light-color]
+                    (fn [light-color]
+                      (let [ref (select-keys light-color [:ref-id :ref-file])]
+                        (if-let [new-color (ctsg/color->light-color
+                                            {:color color :opacity opacity :gradient gradient})]
+                          (merge new-color ref)
+                          light-color)))))
+
+(defn- attach-glass-light-color
+  [shape _position ref-id ref-file]
+  (d/update-in-when shape [:glass :light-color]
+                    (fn [color]
+                      (-> color
+                          (assoc :ref-id ref-id)
+                          (assoc :ref-file ref-file)))))
+
+(defn- detach-glass-light-color
+  [shape _position]
+  (d/update-in-when shape [:glass :light-color] dissoc :ref-id :ref-file))
+
 (defn process-shape-colors
   "Execute an update function on all colors of a shape."
   [shape process-fn]
@@ -1048,6 +1070,16 @@
                                      attach-shadow-color
                                      detach-shadow-color))
 
+        process-glass (fn [shape]
+                        (if-let [light-color (clr/glass->color (:glass shape))]
+                          (process-fn shape
+                                      0
+                                      light-color
+                                      set-glass-light-color
+                                      attach-glass-light-color
+                                      detach-glass-light-color)
+                          shape))
+
         process-grid (fn [shape [position grid]]
                        (process-fn shape
                                    position
@@ -1072,6 +1104,7 @@
       (reduce process-fill $ (d/enumerate (:fills $)))
       (reduce process-stroke $ (d/enumerate (:strokes $)))
       (reduce process-shadow $ (d/enumerate (:shadow $)))
+      (process-glass $)
       (reduce process-grid $ (d/enumerate (:grids $)))
       (process-text $))))
 
@@ -1088,6 +1121,7 @@
   (concat (map fill->color (:fills shape))
           (map clr/stroke->color (:strokes shape))
           (map clr/shadow->color (:shadow shape))
+          (some-> (:glass shape) clr/glass->color vector)
           (when (= (:type shape) :frame)
             (map clr/grid->color (:grids shape)))
           (when (= (:type shape) :text)

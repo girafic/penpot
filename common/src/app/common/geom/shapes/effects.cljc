@@ -4,7 +4,9 @@
 ;;
 ;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
-(ns app.common.geom.shapes.effects)
+(ns app.common.geom.shapes.effects
+  (:require
+   [app.common.types.shape.glass :as ctsg]))
 
 (defn update-shadow-scale
   [shadow scale]
@@ -29,7 +31,12 @@
   (update-in shape [:background-blur :value] * scale))
 
 (defn update-glass-scale
+  "Scales the glass lengths. Optional lengths are scaled from their
+  default when missing, the same way the renderer does."
   [shape scale]
-  (-> shape
-      (update-in [:glass :depth] * scale)
-      (update-in [:glass :frost] * scale)))
+  (let [default #(get ctsg/optional-defaults %)]
+    (-> shape
+        (update-in [:glass :depth] * scale)
+        (update-in [:glass :frost] * scale)
+        (update-in [:glass :highlight-width] (fnil * (default :highlight-width)) scale)
+        (update-in [:glass :texture-scale] (fnil * (default :texture-scale)) scale))))

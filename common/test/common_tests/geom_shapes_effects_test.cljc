@@ -81,7 +81,21 @@
       (t/is (= 8 (get-in scaled [:glass :frost])))))
 
   (t/testing "Percent values are not scaled"
-    (let [shape  {:glass {:type :glass :depth 20 :frost 4 :refraction 80 :light-intensity 80}}
+    (let [shape  {:glass {:type :glass :depth 20 :frost 4 :refraction 80 :light-intensity 80
+                          :saturation 50 :texture-amount 40 :texture-angle 30}}
           scaled (gef/update-glass-scale shape 3)]
       (t/is (= 80 (get-in scaled [:glass :refraction])))
-      (t/is (= 80 (get-in scaled [:glass :light-intensity]))))))
+      (t/is (= 80 (get-in scaled [:glass :light-intensity])))
+      (t/is (= 50 (get-in scaled [:glass :saturation])))
+      (t/is (= 40 (get-in scaled [:glass :texture-amount])))
+      (t/is (= 30 (get-in scaled [:glass :texture-angle])))))
+
+  (t/testing "Optional lengths are scaled, from their default when missing"
+    (let [shape  {:glass {:type :glass :depth 20 :frost 4 :highlight-width 3 :texture-scale 10}}
+          scaled (gef/update-glass-scale shape 2)]
+      (t/is (= 6 (get-in scaled [:glass :highlight-width])))
+      (t/is (= 20 (get-in scaled [:glass :texture-scale]))))
+    (let [shape  {:glass {:type :glass :depth 20 :frost 4}}
+          scaled (gef/update-glass-scale shape 2)]
+      (t/is (= 4 (get-in scaled [:glass :highlight-width])))
+      (t/is (= 16 (get-in scaled [:glass :texture-scale]))))))

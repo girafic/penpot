@@ -382,6 +382,11 @@
   [shadow]
   (:color shadow))
 
+(defn glass->color
+  "The light color of a glass effect, or nil when it uses the default."
+  [glass]
+  (:light-color glass))
+
 ;: FIXME: revisit colors...... WTF
 (defn grid->color
   [grid]
