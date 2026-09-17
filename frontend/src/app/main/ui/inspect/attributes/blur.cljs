@@ -13,7 +13,7 @@
    [app.main.ui.components.copy-button :refer [copy-button*]]
    [app.main.ui.components.title-bar :refer [inspect-title-bar*]]
    [app.util.code-gen.style-css :as css]
-   [app.util.code-gen.style-css-formats :refer [format-blur]]
+   [app.util.code-gen.style-css-formats :refer [format-backdrop-filter format-blur]]
    [app.util.code-gen.style-css-values :as cssv]
    [app.util.i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -45,7 +45,7 @@
                 blur-property-value (css/format-css-property [blur-property blue-value-raw] {})
 
                 background-blur-property :backdrop-filter
-                background-blur-value-raw (cssv/backdrop-blur-value (first shapes))
+                background-blur-value-raw (cssv/backdrop-filter-value (first shapes))
                 background-blur (some? background-blur-value-raw)
                 background-blur-property-value (css/format-css-property [background-blur-property background-blur-value-raw] {})]
             (when background-blur
@@ -64,10 +64,10 @@
                 blur-value-detail (format-blur blue-value-raw)
 
                 background-blur-property :backdrop-filter
-                background-blur-value-raw (cssv/backdrop-blur-value (first shapes))
+                background-blur-value-raw (cssv/backdrop-filter-value (first shapes))
                 background-blur (some? background-blur-value-raw)
                 background-blur-property-value (css/format-css-property [background-blur-property background-blur-value-raw] {})
-                background-blur-value-detail (format-blur background-blur-value-raw)]
+                background-blur-value-detail (format-backdrop-filter background-blur-value-raw)]
             [:*
              (when background-blur
                [:div {:class (stl/css :blur-row)

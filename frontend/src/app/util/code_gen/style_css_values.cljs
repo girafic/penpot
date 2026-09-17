@@ -12,6 +12,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.shapes :as gsh]
+   [app.common.types.shape.glass :as ctsg]
    [app.common.types.shape.layout :as ctl]
    [app.main.ui.formats :as fmt]
    [app.util.code-gen.common :as cgc]
@@ -296,23 +297,39 @@
   (when-not (cgc/svg-markup? shape)
     (get-in shape [:blur :value])))
 
-(defn backdrop-blur-value
-  "Blur radius for the CSS `backdrop-filter`. CSS has no glass effect, so a
-  visible glass falls back to its frost."
+(def ^:private frost-blur-factor
+  "Blur sigma per frost unit in the renderer
+  (`render-wasm/src/shapes/glass.rs`). CSS `blur()` takes the sigma."
+  1.5)
+
+(defn backdrop-filter-value
+  "Parts of the CSS `backdrop-filter` as a map with `:blur` (px),
+  `:saturate` and `:brightness` (%), or nil. A background blur takes
+  precedence. CSS has no glass effect, so a visible glass exports its frost
+  (as the blur the renderer uses) and its color adjustments."
   [shape]
-  (or (get-in shape [:background-blur :value])
-      (let [glass (:glass shape)
-            frost (:frost glass)]
-        (when (and (some? glass)
-                   (not (:hidden glass))
-                   (d/num? frost)
-                   (pos? frost))
-          frost))))
+  (if-let [blur (get-in shape [:background-blur :value])]
+    {:blur blur}
+    (let [glass      (:glass shape)
+          frost      (:frost glass)
+          saturation (ctsg/get-value glass :saturation)
+          brightness (ctsg/get-value glass :brightness)]
+      (when (and (some? glass) (not (:hidden glass)))
+        (not-empty
+         (cond-> {}
+           (and (d/num? frost) (pos? frost))
+           (assoc :blur (* frost-blur-factor frost))
+
+           (and (d/num? saturation) (not= saturation 100))
+           (assoc :saturate saturation)
+
+           (and (d/num? brightness) (not= brightness 100))
+           (assoc :brightness brightness)))))))
 
 (defn- get-backdrop-filter
   [shape]
   (when-not (cgc/svg-markup? shape)
-    (backdrop-blur-value shape)))
+    (backdrop-filter-value shape)))
 
 (defn- get-display
   [shape]

@@ -203,12 +203,12 @@
    :depth 20 :dispersion 50 :frost 4 :splay 0})
 
 (deftest glass-exports-its-frost-as-backdrop-filter
-  (testing "a visible glass uses its frost as the backdrop blur"
+  (testing "a visible glass exports the blur the renderer uses (1.5 x frost)"
     (let [pid (uuid/next)
           cid (uuid/next)
           c   (child cid pid :glass sample-glass)
           objs (objects (frame pid) c)]
-      (is (= "blur(4px)" (css/get-css-value objs c :backdrop-filter)))))
+      (is (= "blur(6px)" (css/get-css-value objs c :backdrop-filter)))))
 
   (testing "a hidden glass or a glass without frost exports nothing"
     (let [pid (uuid/next)
@@ -217,6 +217,28 @@
           clear  (child cid pid :glass (assoc sample-glass :frost 0))]
       (is (nil? (css/get-css-value (objects (frame pid) hidden) hidden :backdrop-filter)))
       (is (nil? (css/get-css-value (objects (frame pid) clear) clear :backdrop-filter)))))
+
+  (testing "saturation and brightness follow the blur"
+    (let [pid (uuid/next)
+          cid (uuid/next)
+          c   (child cid pid :glass (assoc sample-glass :saturation 120 :brightness 90))
+          objs (objects (frame pid) c)]
+      (is (= "blur(6px) saturate(120%) brightness(90%)"
+             (css/get-css-value objs c :backdrop-filter)))))
+
+  (testing "color adjustments export without frost"
+    (let [pid (uuid/next)
+          cid (uuid/next)
+          c   (child cid pid :glass (assoc sample-glass :frost 0 :saturation 150))
+          objs (objects (frame pid) c)]
+      (is (= "saturate(150%)" (css/get-css-value objs c :backdrop-filter)))))
+
+  (testing "neutral color values export nothing extra"
+    (let [pid (uuid/next)
+          cid (uuid/next)
+          c   (child cid pid :glass (assoc sample-glass :frost 0 :saturation 100 :brightness 100))
+          objs (objects (frame pid) c)]
+      (is (nil? (css/get-css-value objs c :backdrop-filter)))))
 
   (testing "a background blur takes precedence over the glass"
     (let [pid (uuid/next)

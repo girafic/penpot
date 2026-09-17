@@ -42,7 +42,7 @@
    :border-color              :border-color
    :box-shadow                :shadows
    :filter                    :blur
-   :backdrop-filter           :background-blur
+   :backdrop-filter           :backdrop-filter
    :gap                       :size-array
    :row-gap                   :size-array
    :column-gap                :size-array
@@ -182,6 +182,17 @@
   [value]
   (dm/fmt "blur(%)" (fmt/format-pixels value)))
 
+(defn format-backdrop-filter
+  "Formats a `backdrop-filter` value map (see `backdrop-filter-value`) in
+  the order the renderer applies it."
+  [{:keys [blur saturate brightness]}]
+  (->> [(when (some? blur) (format-blur blur))
+        (when (some? saturate) (dm/fmt "saturate(%)" (fmt/format-percent (/ saturate 100))))
+        (when (some? brightness) (dm/fmt "brightness(%)" (fmt/format-percent (/ brightness 100))))]
+       (remove nil?)
+       (str/join " ")
+       (not-empty)))
+
 (defn-  format-matrix
   [value]
   (fmt/format-matrix value))
@@ -206,6 +217,6 @@
       :tracks (format-tracks value)
       :shadows (format-shadow value options)
       :blur (format-blur value)
-      :background-blur (format-blur value)
+      :backdrop-filter (format-backdrop-filter value)
       :matrix (format-matrix value)
       (if (keyword? value) (d/name value) value))))
