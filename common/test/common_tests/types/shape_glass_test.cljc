@@ -30,8 +30,17 @@
   (t/testing "A glass from before the optional keys is still valid"
     (t/is (ctsg/valid-glass? (apply dissoc (glass) (keys ctsg/optional-defaults)))))
 
-  (t/testing "The light color is a plain color, optionally linked to a library"
+  (t/testing "The light color is a color or a gradient, optionally linked"
     (t/is (ctsg/valid-glass? (glass :light-color {:color "#FFCC00"})))
+    (t/is (ctsg/valid-glass?
+           (glass :light-color {:gradient {:type :linear
+                                           :start-x 0 :start-y 0.5
+                                           :end-x 1 :end-y 0.5
+                                           :width 0
+                                           :stops [{:color "#FFCC00" :offset 0}
+                                                   {:color "#0000FF" :offset 1}]}})))
+    (t/is (not (ctsg/valid-glass? (glass :light-color {:image {:id (uuid/next)
+                                                               :width 1 :height 1}}))))
     (t/is (ctsg/valid-glass? (glass :light-color {:color "#FFCC00" :opacity 1
                                                   :ref-id (uuid/next) :ref-file (uuid/next)})))
     (t/is (not (ctsg/valid-glass? (glass :light-color {:color "red"}))))
@@ -62,12 +71,13 @@
                                          :ref-id ref-id :ref-file ref-file
                                          :id (uuid/next) :name "extra"})))))
 
-  (t/testing "A gradient uses its first stop"
-    (t/is (= {:color "#AA0000" :opacity 1}
-             (ctsg/color->light-color
-              {:gradient {:type :linear
-                          :stops [{:color "#AA0000" :opacity 1 :offset 0}
-                                  {:color "#0000AA" :opacity 1 :offset 1}]}}))))
+  (t/testing "A gradient passes through"
+    (let [gradient {:type :linear
+                    :start-x 0 :start-y 0.5 :end-x 1 :end-y 0.5 :width 0
+                    :stops [{:color "#AA0000" :opacity 1 :offset 0}
+                            {:color "#0000AA" :opacity 1 :offset 1}]}]
+      (t/is (= {:gradient gradient}
+               (ctsg/color->light-color {:gradient gradient :id (uuid/next)})))))
 
   (t/testing "An image gives no light color"
     (t/is (nil? (ctsg/color->light-color {:image {:id (uuid/next) :width 1 :height 1}})))))

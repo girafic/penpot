@@ -511,7 +511,10 @@ mod tests {
         assert_eq!(glass.splay, 10.0);
         assert_eq!(glass.saturation, 120.0);
         assert_eq!(glass.texture_angle, 15.0);
-        assert_eq!(glass.light_color, skia::Color::from_rgb(255, 0, 0));
+        assert_eq!(
+            glass.light,
+            crate::shapes::Fill::Solid(crate::shapes::SolidColor(skia::Color::from_rgb(255, 0, 0)))
+        );
         assert_eq!(cur.remaining(), 4);
     }
 

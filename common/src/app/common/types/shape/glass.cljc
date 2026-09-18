@@ -15,7 +15,8 @@
 ;;
 ;; - light-angle:     direction of the light, in degrees
 ;; - light-intensity: strength of the edge highlight, 0..100
-;; - light-color:     color of the edge highlight (white when absent)
+;; - light-color:     color or gradient of the edge highlight (white when
+;;                    absent)
 ;; - highlight-width: width of the edge highlight, in px
 ;; - refraction:      how much the edge bends the backdrop, 0..100
 ;; - depth:           width of the refracting edge, in px
@@ -37,12 +38,15 @@
 (def textures #{:none :reeded :wavy :prismatic :cross-reeded :hammered})
 
 (def schema:light-color
-  [:merge {:title "GlassLightColor"}
-   ctc/schema:color-attrs
-   ctc/schema:plain-color])
+  [:and
+   [:merge {:title "GlassLightColor"}
+    ctc/schema:color-attrs
+    (sm/optional-keys ctc/schema:plain-color)
+    (sm/optional-keys ctc/schema:gradient-color)]
+   [:fn ctc/has-valid-color-attrs?]])
 
 (def light-color-attrs
-  (sm/keys schema:light-color))
+  (into #{:color :gradient} (sm/keys ctc/schema:color-attrs)))
 
 (def default-light-color
   {:color ctc/white :opacity 1})
@@ -100,12 +104,9 @@
 
 (defn color->light-color
   "Light color from a color picker value, keeping only the allowed keys.
-  A gradient uses its first stop; an image gives nil."
-  [{:keys [gradient] :as color}]
-  (let [color (if-let [stop (get-in gradient [:stops 0])]
-                (merge (select-keys color [:ref-id :ref-file])
-                       (select-keys stop [:color :opacity]))
-                color)]
-    (when (string? (:color color))
-      (-> (select-keys color light-color-attrs)
-          (d/without-nils)))))
+  Solid colors and gradients pass through; an image gives nil."
+  [color]
+  (when (or (string? (:color color))
+            (some? (:gradient color)))
+    (-> (select-keys color light-color-attrs)
+        (d/without-nils))))

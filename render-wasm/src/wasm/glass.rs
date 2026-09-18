@@ -1,14 +1,17 @@
 use macros::{wasm_error, ToJs};
-use skia_safe as skia;
 
 use crate::error::{Error, Result};
 use crate::mem;
 use crate::shapes::{Glass, GlassTexture};
+use crate::wasm::fills::{RawFillData, RAW_FILL_DATA_SIZE};
 use crate::with_current_shape_mut;
 
+/// Offset of the light paint inside a serialized glass effect.
+const LIGHT_OFFSET: usize = 56;
+
 /// Size of a serialized glass effect:
-/// `[u8 hidden][u8 texture][2 pad][13 × f32][u32 light ARGB]`.
-pub const RAW_GLASS_DATA_SIZE: usize = 60;
+/// `[u8 hidden][u8 texture][2 pad][13 × f32][fill: the light paint]`.
+pub const RAW_GLASS_DATA_SIZE: usize = LIGHT_OFFSET + RAW_FILL_DATA_SIZE;
 
 #[derive(Debug, Clone, Copy, PartialEq, ToJs)]
 #[repr(u8)]
@@ -66,7 +69,8 @@ pub fn glass_from_bytes(bytes: &[u8]) -> Result<Glass> {
             bytes[start + 3],
         ])
     };
-    let light = u32::from_le_bytes([bytes[56], bytes[57], bytes[58], bytes[59]]);
+    let light = RawFillData::try_from(&bytes[LIGHT_OFFSET..])
+        .map_err(|cause| Error::CriticalError(format!("glass light: {cause}")))?;
 
     Ok(Glass {
         hidden: bytes[0] != 0,
@@ -84,7 +88,7 @@ pub fn glass_from_bytes(bytes: &[u8]) -> Result<Glass> {
         texture_amount: f32_at(10),
         texture_scale: f32_at(11),
         texture_angle: f32_at(12),
-        light_color: skia::Color::new(light),
+        light: light.into(),
     }
     .sanitized())
 }
@@ -113,14 +117,54 @@ pub extern "C" fn clear_shape_glass() {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use skia_safe as skia;
 
-    /// Bytes as `serializers/glass.cljs` writes them.
+    use crate::shapes::{Fill, SolidColor};
+
+    /// A fill record holding one solid color, as `write-solid-fill` writes it.
+    pub(crate) fn solid_light(argb: u32) -> Vec<u8> {
+        let mut bytes = vec![0u8; RAW_FILL_DATA_SIZE];
+        bytes[4..8].copy_from_slice(&argb.to_le_bytes());
+        bytes
+    }
+
+    /// A fill record holding a linear gradient, as `write-gradient-fill`
+    /// writes it. Stops are `(argb, offset)`.
+    pub(crate) fn gradient_light(stops: &[(u32, f32)]) -> Vec<u8> {
+        let mut bytes = vec![0u8; RAW_FILL_DATA_SIZE];
+        bytes[0] = 0x01;
+        bytes[4..8].copy_from_slice(&0.0f32.to_le_bytes()); // start x
+        bytes[8..12].copy_from_slice(&0.5f32.to_le_bytes()); // start y
+        bytes[12..16].copy_from_slice(&1.0f32.to_le_bytes()); // end x
+        bytes[16..20].copy_from_slice(&0.5f32.to_le_bytes()); // end y
+        bytes[20] = 0xFF; // opacity
+        bytes[24..28].copy_from_slice(&0.0f32.to_le_bytes()); // width
+        bytes[28] = stops.len() as u8;
+        for (index, (color, offset)) in stops.iter().enumerate() {
+            let at = 32 + index * 8;
+            bytes[at..at + 4].copy_from_slice(&color.to_le_bytes());
+            bytes[at + 4..at + 8].copy_from_slice(&offset.to_le_bytes());
+        }
+        bytes
+    }
+
+    /// Bytes as `serializers/glass.cljs` writes them, with a solid light.
     pub(crate) fn glass_bytes(hidden: bool, texture: u8, floats: [f32; 13], light: u32) -> Vec<u8> {
+        glass_bytes_with(hidden, texture, floats, &solid_light(light))
+    }
+
+    /// Bytes of a glass with `light` as its light paint.
+    pub(crate) fn glass_bytes_with(
+        hidden: bool,
+        texture: u8,
+        floats: [f32; 13],
+        light: &[u8],
+    ) -> Vec<u8> {
         let mut bytes = vec![hidden as u8, texture, 0, 0];
         for value in floats {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
-        bytes.extend_from_slice(&light.to_le_bytes());
+        bytes.extend_from_slice(light);
         bytes
     }
 
@@ -174,7 +218,7 @@ pub(crate) mod tests {
                 texture_amount: 40.0,
                 texture_scale: 12.0,
                 texture_angle: 30.0,
-                light_color: skia::Color::from_rgb(0, 255, 0),
+                light: Fill::Solid(SolidColor(skia::Color::from_rgb(0, 255, 0))),
             }
         );
     }
@@ -188,7 +232,40 @@ pub(crate) mod tests {
         let glass = glass_from_bytes(&bytes).unwrap();
         assert_eq!(glass.saturation, 200.0);
         assert_eq!(glass.brightness, 100.0);
-        assert_eq!(glass.light_color, skia::Color::from_rgb(0, 0, 255));
+        assert_eq!(
+            glass.light,
+            Fill::Solid(SolidColor(skia::Color::from_rgb(0, 0, 255)))
+        );
+    }
+
+    #[test]
+    fn glass_from_bytes_reads_a_gradient_light() {
+        let light = gradient_light(&[(0xFFFF_0000, 0.0), (0xFF00_00FF, 1.0)]);
+        let bytes = glass_bytes_with(false, 0, [0.0; 13], &light);
+        let glass = glass_from_bytes(&bytes).unwrap();
+
+        let Fill::LinearGradient(gradient) = glass.light else {
+            panic!("expected a linear gradient, got {:?}", glass.light);
+        };
+        let stops: Vec<(skia::Color, f32)> = gradient.stops().collect();
+        assert_eq!(
+            stops,
+            vec![
+                (skia::Color::from_rgb(255, 0, 0), 0.0),
+                (skia::Color::from_rgb(0, 0, 255), 1.0),
+            ]
+        );
+        assert_eq!(gradient.start(), (0.0, 0.5));
+        assert_eq!(gradient.end(), (1.0, 0.5));
+    }
+
+    #[test]
+    fn an_image_light_reads_as_white() {
+        let mut light = solid_light(0xFF00_FF00);
+        light[0] = 0x03; // image fill
+        let bytes = glass_bytes_with(false, 0, [0.0; 13], &light);
+        let glass = glass_from_bytes(&bytes).unwrap();
+        assert_eq!(glass.light, Fill::Solid(SolidColor(skia::Color::WHITE)));
     }
 
     #[test]

@@ -28,7 +28,17 @@
 (defn- f32 [dview index]
   (.getFloat32 dview (+ 4 4 (* 4 index)) true))
 
-(deftest writes-the-60-byte-layout
+(defn- light-kind
+  "Fill kind of the light: 0 solid, 1 linear, 2 radial."
+  [dview]
+  (.getUint8 dview (+ 4 sr-glass/LIGHT-U8-OFFSET)))
+
+(defn- light-u32
+  "Word `index` of the light record, counted from its own start."
+  [dview index]
+  (.getUint32 dview (+ 4 sr-glass/LIGHT-U8-OFFSET (* 4 index)) true))
+
+(deftest writes-the-glass-layout
   (let [glass (assoc ctsg/default-attrs
                      :hidden true
                      :texture :reeded
@@ -40,7 +50,8 @@
                      :texture-angle 30
                      :light-color {:color "#00ff00" :opacity 0.2})
         [dview end] (write glass)]
-    (is (= (+ 4 60) end))
+    (is (= (+ 4 216) end))
+    (is (= 216 sr-glass/GLASS-U8-SIZE))
     (is (= 1 (.getUint8 dview 4)))
     (is (= 1 (.getUint8 dview 5)))
     (is (= -45 (f32 dview 0)))
@@ -52,8 +63,23 @@
     (is (= 40 (f32 dview 10)))
     (is (= 12 (f32 dview 11)))
     (is (= 30 (f32 dview 12)))
-    (testing "the light is opaque, whatever the color opacity"
-      (is (= 0xFF00FF00 (.getUint32 dview (+ 4 56) true))))))
+    (testing "the light is a solid fill, opaque whatever the color opacity"
+      (is (= 0 (light-kind dview)))
+      (is (= 0xFF00FF00 (light-u32 dview 1))))))
+
+(deftest writes-a-gradient-light
+  (let [gradient {:type :linear
+                  :start-x 0 :start-y 0.5 :end-x 1 :end-y 0.5
+                  :width 0
+                  :stops [{:color "#ff0000" :opacity 1 :offset 0}
+                          {:color "#0000ff" :opacity 0.5 :offset 1}]}
+        [dview _] (write (assoc ctsg/default-attrs :light-color {:gradient gradient}))]
+    (is (= 1 (light-kind dview)) "linear gradient")
+    (is (= 0.5 (.getFloat32 dview (+ 4 sr-glass/LIGHT-U8-OFFSET 8) true)) "start y")
+    (is (= 1.0 (.getFloat32 dview (+ 4 sr-glass/LIGHT-U8-OFFSET 12) true)) "end x")
+    (is (= 2 (.getUint8 dview (+ 4 sr-glass/LIGHT-U8-OFFSET 28))) "stop count")
+    (is (= 0xFFFF0000 (light-u32 dview 8)) "first stop")
+    (is (= 0x7F0000FF (light-u32 dview 10)) "second stop")))
 
 (deftest missing-keys-use-neutral-defaults
   (let [old-glass (apply dissoc ctsg/default-attrs (keys ctsg/optional-defaults))
@@ -62,7 +88,8 @@
     (is (= 100 (f32 dview 7)) "saturation")
     (is (= 100 (f32 dview 8)) "brightness")
     (is (= 2 (f32 dview 9)) "highlight width")
-    (is (= 0xFFFFFFFF (.getUint32 dview (+ 4 56) true)) "white light")))
+    (is (= 0 (light-kind dview)) "solid light")
+    (is (= 0xFFFFFFFF (light-u32 dview 1)) "white light")))
 
 (deftest every-texture-has-its-own-byte
   (doseq [[texture expected] {:none 0 :reeded 1 :wavy 2 :prismatic 3
@@ -72,4 +99,4 @@
 
 (deftest short-hex-light-colors-are-expanded
   (let [[dview _] (write (assoc ctsg/default-attrs :light-color {:color "#f0a"}))]
-    (is (= 0xFFFF00AA (.getUint32 dview (+ 4 56) true)))))
+    (is (= 0xFFFF00AA (light-u32 dview 1)))))

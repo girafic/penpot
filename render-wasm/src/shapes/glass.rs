@@ -1,5 +1,7 @@
 use skia_safe as skia;
 
+use super::fills::{Fill, SolidColor};
+
 /// Blur sigma per frost unit. Frost is stronger than a blur of the same
 /// value, so low values already give a clear frosted look.
 const FROST_SIGMA_PER_UNIT: f32 = 1.5;
@@ -34,12 +36,13 @@ pub enum GlassTexture {
 ///
 /// Build values as a struct literal (`..Glass::default()`) and pass them
 /// through [`Glass::sanitized`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Glass {
     pub hidden: bool,
     pub light_angle: f32,
     pub light_intensity: f32,
-    pub light_color: skia::Color,
+    /// Paint of the edge highlight: a solid color or a gradient.
+    pub light: Fill,
     pub highlight_width: f32,
     pub refraction: f32,
     pub depth: f32,
@@ -61,7 +64,7 @@ impl Default for Glass {
             hidden: false,
             light_angle: -45.0,
             light_intensity: 80.0,
-            light_color: skia::Color::WHITE,
+            light: Fill::Solid(SolidColor(skia::Color::WHITE)),
             highlight_width: 2.0,
             refraction: 80.0,
             depth: 20.0,
@@ -82,12 +85,20 @@ impl Glass {
     /// Clamps every value to its valid range. Non-finite values fall back
     /// to a neutral value.
     pub fn sanitized(self) -> Self {
-        let color = self.light_color;
+        let light = match self.light {
+            // A solid light is always opaque; its strength is the light
+            // intensity. An image cannot light anything, so it reads as white.
+            Fill::Solid(SolidColor(c)) => {
+                Fill::Solid(SolidColor(skia::Color::from_argb(255, c.r(), c.g(), c.b())))
+            }
+            Fill::Image(_) => Fill::Solid(SolidColor(skia::Color::WHITE)),
+            gradient => gradient,
+        };
         Glass {
             hidden: self.hidden,
             light_angle: finite_or(self.light_angle, 0.0),
             light_intensity: percent(self.light_intensity),
-            light_color: skia::Color::from_argb(255, color.r(), color.g(), color.b()),
+            light,
             highlight_width: finite_or(self.highlight_width, 2.0).max(0.0),
             refraction: percent(self.refraction),
             depth: finite_or(self.depth, 0.0).max(0.0),
@@ -126,10 +137,10 @@ impl Glass {
         self.texture != GlassTexture::None && self.texture_amount > 0.0 && self.texture_scale > 0.0
     }
 
-    /// True when the light draws nothing.
+    /// True when the light draws nothing: no intensity, or a paint that
+    /// adds nothing in the screen blend.
     pub fn is_dark(&self) -> bool {
-        let c = self.light_color;
-        self.light_intensity <= 0.0 || (c.r() == 0 && c.g() == 0 && c.b() == 0)
+        self.light_intensity <= 0.0 || fill_is_dark(&self.light)
     }
 
     /// True when the effect changes nothing.
@@ -139,6 +150,21 @@ impl Glass {
             && self.is_dark()
             && !self.adjusts_color()
             && !self.has_texture()
+    }
+}
+
+/// True when a light paint adds nothing in a screen blend: every color it
+/// paints is black or fully transparent.
+fn fill_is_dark(fill: &Fill) -> bool {
+    let dark = |color: &skia::Color| {
+        color.a() == 0 || (color.r() == 0 && color.g() == 0 && color.b() == 0)
+    };
+    match fill {
+        Fill::Solid(SolidColor(color)) => dark(color),
+        Fill::LinearGradient(gradient) | Fill::RadialGradient(gradient) => {
+            gradient.opacity() == 0 || gradient.stops().all(|(color, _)| dark(&color))
+        }
+        Fill::Image(_) => true,
     }
 }
 
@@ -159,6 +185,7 @@ fn percent(value: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shapes::fills::Gradient;
 
     fn glass(f: impl FnOnce(&mut Glass)) -> Glass {
         let mut glass = Glass::default();
@@ -211,8 +238,12 @@ mod tests {
 
     #[test]
     fn sanitized_makes_the_light_color_opaque() {
-        let glass = glass(|g| g.light_color = skia::Color::from_argb(10, 255, 0, 0));
-        assert_eq!(glass.light_color, skia::Color::from_argb(255, 255, 0, 0));
+        let glass =
+            glass(|g| g.light = Fill::Solid(SolidColor(skia::Color::from_argb(10, 255, 0, 0))));
+        assert_eq!(
+            glass.light,
+            Fill::Solid(SolidColor(skia::Color::from_argb(255, 255, 0, 0)))
+        );
     }
 
     #[test]
@@ -264,8 +295,22 @@ mod tests {
         let mut lit = inert();
         lit.light_intensity = 10.0;
         assert!(!lit.is_noop());
-        lit.light_color = skia::Color::BLACK;
+        lit.light = Fill::Solid(SolidColor(skia::Color::BLACK));
         assert!(lit.is_noop(), "a black light draws nothing");
+
+        let mut gradient_lit = inert();
+        gradient_lit.light_intensity = 10.0;
+        gradient_lit.light = Fill::LinearGradient(Gradient::new(
+            (0.0, 0.0),
+            (1.0, 0.0),
+            255,
+            0.0,
+            &[
+                (skia::Color::BLACK, 0.0),
+                (skia::Color::from_rgb(255, 0, 0), 1.0),
+            ],
+        ));
+        assert!(!gradient_lit.is_noop(), "a lit gradient draws something");
 
         let mut saturated = inert();
         saturated.saturation = 50.0;

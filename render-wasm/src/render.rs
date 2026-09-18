@@ -939,7 +939,7 @@ impl RenderState {
 
         let canvas = self.surfaces.canvas(target_surface);
         canvas.set_matrix(&skia::M44::from(&local_to_device));
-        glass::render_glass_backdrop(canvas, shape, &glass, &local_to_device, scale, max_reach);
+        glass::render_glass_backdrop(canvas, shape, glass, &local_to_device, scale, max_reach);
         canvas.restore();
     }
 
@@ -971,7 +971,7 @@ impl RenderState {
 
         let canvas = self.surfaces.canvas(target_surface);
         canvas.set_matrix(&skia::M44::from(&local_to_device));
-        glass::render_glass_light(canvas, shape, &glass, &local_to_device, scale);
+        glass::render_glass_light(canvas, shape, glass, &local_to_device, scale);
         canvas.restore();
     }
 

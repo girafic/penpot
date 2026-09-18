@@ -34,7 +34,7 @@ use skia_safe::{
 
 use super::text;
 use super::RenderState;
-use crate::shapes::{Glass, GlassTexture, Shape, Stroke, Type};
+use crate::shapes::{get_fill_shader, Glass, GlassTexture, Shape, Stroke, Type};
 
 /// Largest share of the refraction added to red and taken from blue.
 const MAX_DISPERSION: f32 = 0.15;
@@ -324,7 +324,6 @@ struct Params {
     light_dir: (f32, f32),
     light: f32,
     /// Light color, 0..1 per channel.
-    light_rgb: [f32; 3],
     rim_width: f32,
 }
 
@@ -359,7 +358,6 @@ impl Params {
 
         let angle = glass.light_angle.to_radians();
         let splay = glass.splay / 100.0;
-        let color = glass.light_color;
 
         Params {
             band,
@@ -377,11 +375,6 @@ impl Params {
             } else {
                 glass.light_intensity / 100.0 * MAX_LIGHT
             },
-            light_rgb: [
-                color.r() as f32 / 255.0,
-                color.g() as f32 / 255.0,
-                color.b() as f32 / 255.0,
-            ],
             // Never wider than the band: outside it the bevel has no
             // direction to light.
             rim_width: (glass.highlight_width * scale)
@@ -942,16 +935,30 @@ pub fn render_glass_backdrop(
     canvas.restore(); // clip
 }
 
-/// Light color with the map's blue channel as alpha.
-fn light_color_filter([r, g, b]: [f32; 3]) -> ColorFilter {
+/// Turns the map into the shape of the light: white, with the map's blue
+/// channel as alpha. The light paint colors it.
+fn light_alpha_filter() -> ColorFilter {
     #[rustfmt::skip]
     let matrix = [
-        0.0, 0.0, 0.0, 0.0, r,
-        0.0, 0.0, 0.0, 0.0, g,
-        0.0, 0.0, 0.0, 0.0, b,
+        0.0, 0.0, 0.0, 0.0, 1.0,
+        0.0, 0.0, 0.0, 0.0, 1.0,
+        0.0, 0.0, 0.0, 0.0, 1.0,
         0.0, 0.0, 1.0, 0.0, 0.0,
     ];
     color_filters::matrix_row_major(&matrix, None)
+}
+
+/// The light paint as a shader in device space. A gradient is built in the
+/// shape's own coordinates, so it turns and scales with the shape.
+fn light_paint_shader(
+    shape: &Shape,
+    glass: &Glass,
+    local_to_device: &Matrix,
+    stroke_outset: f32,
+) -> Option<Shader> {
+    let rect = glass_rect(shape, stroke_outset);
+    let shader = get_fill_shader(&glass.light, &rect)?;
+    Some(shader.with_local_matrix(local_to_device))
 }
 
 /// Shader of the edge light in device space: the light color, with the
@@ -977,7 +984,10 @@ fn light_shader(
             stroke_outset(shape),
         )
     })?;
-    Some(map.with_color_filter(light_color_filter(params.light_rgb)))
+    let alpha = map.with_color_filter(light_alpha_filter());
+    let paint = light_paint_shader(shape, glass, local_to_device, stroke_outset(shape))?;
+    // `SrcIn` keeps the paint's color and the map's alpha.
+    Some(skia::shaders::blend(skia::BlendMode::SrcIn, alpha, paint))
 }
 
 /// Draws the edge light of `shape`. Call it after the shape's own fills and
@@ -1035,6 +1045,10 @@ mod tests {
 
     fn glass() -> Glass {
         Glass::default()
+    }
+
+    fn solid(color: skia::Color) -> crate::shapes::Fill {
+        crate::shapes::Fill::Solid(crate::shapes::SolidColor(color))
     }
 
     /// Glass that changes nothing; tests switch single parts on.
@@ -1185,15 +1199,11 @@ mod tests {
     }
 
     #[test]
-    fn params_take_the_light_color_and_skip_black() {
-        let red = Glass {
-            light_color: skia::Color::from_rgb(255, 0, 0),
-            ..glass()
-        };
-        assert_eq!(Params::new(&red, 1.0, None).light_rgb, [1.0, 0.0, 0.0]);
+    fn params_skip_a_black_light() {
+        assert!(Params::new(&glass(), 1.0, None).lights());
 
         let black = Glass {
-            light_color: skia::Color::BLACK,
+            light: solid(skia::Color::BLACK),
             ..glass()
         };
         assert!(!Params::new(&black, 1.0, None).lights());
@@ -1414,7 +1424,7 @@ mod tests {
     fn light_color_tints_the_rim() {
         let red = Glass {
             light_intensity: 100.0,
-            light_color: skia::Color::from_rgb(255, 0, 0),
+            light: solid(skia::Color::from_rgb(255, 0, 0)),
             ..inert()
         };
         let mut surface = render_light_over_fill(&red);
@@ -1424,10 +1434,37 @@ mod tests {
     }
 
     #[test]
+    fn a_gradient_light_tints_the_rim_along_its_axis() {
+        use crate::shapes::{Fill, Gradient};
+
+        let lit = Glass {
+            light_intensity: 100.0,
+            light: Fill::LinearGradient(Gradient::new(
+                (0.0, 0.5),
+                (1.0, 0.5),
+                255,
+                0.0,
+                &[
+                    (skia::Color::from_rgb(255, 0, 0), 0.0),
+                    (skia::Color::from_rgb(0, 0, 255), 1.0),
+                ],
+            )),
+            ..inert()
+        };
+        let mut surface = render_light_over_fill(&lit);
+
+        // The gradient spans the shape, so the two rims take its ends.
+        let left = pixel(&mut surface, 0, 32);
+        let right = pixel(&mut surface, 67, 32);
+        assert!(left.r() > left.b() + 20, "left rim {left:?}");
+        assert!(right.b() > right.r() + 20, "right rim {right:?}");
+    }
+
+    #[test]
     fn black_light_draws_nothing() {
         let black = Glass {
             light_intensity: 100.0,
-            light_color: skia::Color::BLACK,
+            light: solid(skia::Color::BLACK),
             ..inert()
         };
         let mut surface = render_light_over_fill(&black);

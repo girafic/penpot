@@ -215,11 +215,11 @@ Blur types are serialized as `u8`:
 
 ## Glass
 
-`set_shape_glass()` reads a 60-byte glass buffer written with
+`set_shape_glass()` reads a 216-byte glass buffer written with
 `_alloc_bytes`. `clear_shape_glass()` removes the effect.
 
 In the shape batch upload (`set_shapes_batch`), the `GLASS` section
-(`1 << 11`) follows `BLUR_BG` and uses the same 60 bytes. When the bit is
+(`1 << 11`) follows `BLUR_BG` and uses the same 216 bytes. When the bit is
 absent, the shape's glass is cleared.
 
 | Offset | Length | Type | Field           | Unit / values                       |
@@ -240,7 +240,11 @@ absent, the shape's glass is cleared.
 | 44     | 4      | f32  | texture-amount  | 0..100                              |
 | 48     | 4      | f32  | texture-scale   | px (flute width)                    |
 | 52     | 4      | f32  | texture-angle   | degrees (0 = vertical flutes)       |
-| 56     | 4      | u32  | light color     | ARGB; alpha is ignored              |
+| 56     | 160    | fill | light paint     | see [Fills](#fills); no image fills |
+
+The light paint is one fill record, so the highlight can be a solid color
+or a gradient. A solid color is written opaque; its strength comes from
+the light intensity. An image fill reads as white.
 
 Keys missing in the file data are written with their defaults
 (saturation 100, brightness 100, highlight-width 2, texture none,

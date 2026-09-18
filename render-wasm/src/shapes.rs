@@ -665,8 +665,8 @@ impl Shape {
         self.glass = glass;
     }
 
-    pub fn visible_glass(&self) -> Option<Glass> {
-        self.glass.filter(|glass| !glass.hidden)
+    pub fn visible_glass(&self) -> Option<&Glass> {
+        self.glass.as_ref().filter(|glass| !glass.hidden)
     }
 
     /// True when the shape has an effect that samples the pixels behind it

@@ -8,31 +8,36 @@
   "Byte layout of a glass effect, shared by the single-shape setter and
   the batch upload (must match `render-wasm/src/wasm/glass.rs`):
 
-    [u8 hidden][u8 texture][2 pad][13 x f32][u32 light ARGB] = 60 bytes"
+    [u8 hidden][u8 texture][2 pad][13 x f32][fill light] = 216 bytes
+
+  The light paint uses the same record as a fill, so it can be a solid
+  color or a gradient."
   (:require
    [app.common.buffer :as buf]
    [app.common.render-wasm.serializers :as sr]
-   [app.common.render-wasm.serializers.color :as sr-clr]
    [app.common.types.color :as ctc]
+   [app.common.types.fills.impl :as fills]
    [app.common.types.shape.glass :as ctsg]))
 
-(def ^:const GLASS-U8-SIZE 60)
+(def ^:const LIGHT-U8-OFFSET 56)
+(def ^:const GLASS-U8-SIZE (+ LIGHT-U8-OFFSET fills/FILL-U8-SIZE))
 
 (def ^:private float-attrs
   [:light-angle :light-intensity :refraction :depth :dispersion :frost :splay
    :saturation :brightness :highlight-width
    :texture-amount :texture-scale :texture-angle])
 
-(def ^:const WHITE-ARGB 0xFFFFFFFF)
-
-(defn- light-color->u32
-  "Opaque ARGB of the light color; the light strength comes from the
-  light intensity only."
-  [light-color]
-  (if-let [hex (:color light-color)]
-    (let [hex (-> hex ctc/remove-hash ctc/expand-hex ctc/prepend-hash)]
-      (sr-clr/hex->u32argb hex 1))
-    WHITE-ARGB))
+(defn- write-light!
+  "Writes the light paint as a fill record. A solid color is written
+  opaque: its strength comes from the light intensity."
+  [dview offset light-color]
+  (if-let [gradient (:gradient light-color)]
+    (fills/write-gradient-fill offset dview (get light-color :opacity 1) gradient)
+    (let [hex (-> (get light-color :color ctc/white)
+                  ctc/remove-hash
+                  ctc/expand-hex
+                  ctc/prepend-hash)]
+      (fills/write-solid-fill offset dview 1 hex))))
 
 (defn write-glass!
   "Writes `glass` at `offset` and returns the offset after it. Missing
@@ -47,5 +52,5 @@
             (+ o 4))
           (+ offset 4)
           float-attrs)
-  (buf/write-u32 dview (+ offset 56) (light-color->u32 (get glass :light-color)))
+  (write-light! dview (+ offset LIGHT-U8-OFFSET) (get glass :light-color))
   (+ offset GLASS-U8-SIZE))

@@ -518,9 +518,9 @@ fn render_tree_inner(
         // Glass reads the backdrop the same way, after any background blur.
         if let Some(glass) = element.visible_glass() {
             if opts.embed_bg_blur {
-                render_glass_image(shared, canvas, element, &glass, tree, scale, opts)?;
+                render_glass_image(shared, canvas, element, glass, tree, scale, opts)?;
             } else {
-                render_glass_direct(canvas, element, &glass, scale);
+                render_glass_direct(canvas, element, glass, scale);
             }
         }
     }
@@ -790,7 +790,7 @@ fn render_glass_light_export(canvas: &Canvas, shape: &Shape, scale: f32, embed: 
     }
     let local_to_device = canvas.local_to_device().to_m33();
     if !embed {
-        glass::render_glass_light(canvas, shape, &glass, &local_to_device, scale);
+        glass::render_glass_light(canvas, shape, glass, &local_to_device, scale);
         return;
     }
 
@@ -811,7 +811,7 @@ fn render_glass_light_export(canvas: &Canvas, shape: &Shape, scale: f32, embed: 
         let light_canvas = surface.canvas();
         light_canvas.clear(skia::Color::TRANSPARENT);
         light_canvas.set_matrix(&skia::M44::from(&light_matrix));
-        glass::render_glass_light(light_canvas, shape, &glass, &light_matrix, scale);
+        glass::render_glass_light(light_canvas, shape, glass, &light_matrix, scale);
     }
     let image = surface.image_snapshot();
 

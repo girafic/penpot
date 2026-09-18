@@ -371,7 +371,6 @@
        (tr "workspace.options.glass-options.light-color")]
       [:> color-row* {:class (stl/css :light-color)
                       :color (d/nilv (:light-color value) ctsg/default-light-color)
-                      :disable-gradient true
                       :disable-opacity true
                       :disable-image true
                       :disable-picker disabled

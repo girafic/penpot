@@ -451,7 +451,7 @@
 
 (defn change-glass-light-color
   "Replaces the glass light color of `ids` with `color` (a color picker
-  value). Gradients use their first stop; images are ignored."
+  value). Solid colors and gradients are kept; images are ignored."
   [ids color]
   (ptk/reify ::change-glass-light-color
     ptk/WatchEvent

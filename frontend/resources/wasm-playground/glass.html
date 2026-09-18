@@ -37,7 +37,8 @@
     // glass.html?angle=-45&intensity=80&refraction=80&depth=20&dispersion=50
     //   &frost=4&splay=0&saturation=100&brightness=100&highlight=2
     //   &texture=reeded|wavy|prismatic|cross-reeded|hammered
-    //   &textureAmount=30&textureScale=8&textureAngle=0&light=ffffff
+    //   &textureAmount=30&textureScale=8&textureAngle=0
+    //   &light=ffffff (or two or more stops: light=ff0000,0000ff)
     const params = new URLSearchParams(document.location.search);
     const value = (name, fallback) => Number(params.get(name) ?? fallback);
     const glassFloats = [
@@ -57,16 +58,35 @@
     ];
     const textures = ["none", "reeded", "wavy", "prismatic", "cross-reeded", "hammered"];
     const texture = Math.max(0, textures.indexOf(params.get("texture") ?? "none"));
-    const lightColor = hexToU32ARGB("#" + (params.get("light") ?? "ffffff"), 1);
+    const lightStops = (params.get("light") ?? "ffffff").split(",");
 
-    // 60-byte glass buffer, see render-wasm/docs/serialization.md
+    // The light is a fill record; a gradient runs left to right.
+    function writeLight(dv, at) {
+      if (lightStops.length === 1) {
+        dv.setUint8(at, 0);
+        dv.setUint32(at + 4, hexToU32ARGB("#" + lightStops[0], 1), true);
+        return;
+      }
+      dv.setUint8(at, 1);
+      [0, 0.5, 1, 0.5].forEach((v, i) => dv.setFloat32(at + 4 + i * 4, v, true));
+      dv.setUint8(at + 20, 255);
+      dv.setFloat32(at + 24, 0, true);
+      dv.setUint8(at + 28, lightStops.length);
+      lightStops.forEach((hex, i) => {
+        const stop = at + 32 + i * 8;
+        dv.setUint32(stop, hexToU32ARGB("#" + hex, 1), true);
+        dv.setFloat32(stop + 4, i / (lightStops.length - 1), true);
+      });
+    }
+
+    // 216-byte glass buffer, see render-wasm/docs/serialization.md
     function setShapeGlass(Module) {
-      const ptr = allocBytes(60);
+      const ptr = allocBytes(216);
       const dv = new DataView(getHeapU32().buffer);
       dv.setUint8(ptr, 0);
       dv.setUint8(ptr + 1, texture);
       glassFloats.forEach((v, i) => dv.setFloat32(ptr + 4 + i * 4, v, true));
-      dv.setUint32(ptr + 56, lightColor, true);
+      writeLight(dv, ptr + 56);
       Module._set_shape_glass();
     }
 
