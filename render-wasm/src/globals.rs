@@ -32,6 +32,15 @@ pub(crate) fn get_gpu_state() -> &'static mut GpuState {
     }
 }
 
+/// The GPU state, or `None` on a headless instance (such as the exporter).
+#[inline(always)]
+pub(crate) fn try_get_gpu_state() -> Option<&'static mut GpuState> {
+    unsafe {
+        let gpu_state = GPU_STATE;
+        gpu_state.as_mut()
+    }
+}
+
 #[inline(always)]
 pub(crate) fn get_render_state() -> &'static mut RenderState {
     unsafe {

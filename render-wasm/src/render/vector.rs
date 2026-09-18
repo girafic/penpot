@@ -670,7 +670,7 @@ fn render_backdrop_image(
 
     // Render the backdrop into an offscreen raster surface, in the same
     // coordinate space as the PDF page (see `render/pdf.rs`).
-    let Some(mut surface) = skia::surfaces::raster_n32_premul((width, height)) else {
+    let Some(mut surface) = bake_surface(width, height) else {
         return Ok(());
     };
     {
@@ -689,12 +689,12 @@ fn render_backdrop_image(
     }
     let image = surface.image_snapshot();
 
-    // Bake the blur into a raster bitmap. The PDF backend ignores image filters
-    // at draw time (same limitation as backdrop filters), so we must blur on a
-    // raster surface — where filters work — and embed the pre-blurred result.
+    // Bake the blur into a bitmap. The PDF backend ignores image filters at
+    // draw time (same limitation as backdrop filters), so we must blur on a
+    // GPU or raster surface — where filters work — and embed the result.
     let is_text = matches!(shape.shape_type, Type::Text(_));
     let blurred = {
-        let Some(mut blur_surface) = skia::surfaces::raster_n32_premul((width, height)) else {
+        let Some(mut blur_surface) = bake_surface(width, height) else {
             return Ok(());
         };
         let bc = blur_surface.canvas();
@@ -720,7 +720,10 @@ fn render_backdrop_image(
             bc.restore();
         }
 
-        blur_surface.image_snapshot()
+        let Some(image) = bake_snapshot(&mut blur_surface) else {
+            return Ok(());
+        };
+        image
     };
 
     let matrix = shape.centered_transform();
@@ -753,6 +756,44 @@ fn render_backdrop_image(
     canvas.draw_image(&blurred, origin, None);
     canvas.restore();
     Ok(())
+}
+
+/// Offscreen surface for the raster parts of a PDF page. It lives on the GPU
+/// when the renderer has one (in the browser), so filters such as the glass
+/// run there instead of on the CPU. Headless instances, like the exporter, and
+/// areas larger than a GPU texture get a raster surface.
+fn bake_surface(width: i32, height: i32) -> Option<skia::Surface> {
+    if let Some(gpu) = crate::globals::try_get_gpu_state() {
+        let max = gpu.max_surface_size();
+        if width <= max && height <= max {
+            let info = skia::ImageInfo::new_n32_premul((width, height), None);
+            let surface = skia::gpu::surfaces::render_target(
+                &mut gpu.context,
+                skia::gpu::Budgeted::Yes,
+                &info,
+                None,
+                None,
+                None,
+                false,
+                false,
+            );
+            if surface.is_some() {
+                return surface;
+            }
+        }
+    }
+    skia::surfaces::raster_n32_premul((width, height))
+}
+
+/// Snapshot of a [`bake_surface`] the PDF backend can embed: a GPU image is
+/// read back into memory first.
+fn bake_snapshot(surface: &mut skia::Surface) -> Option<skia::Image> {
+    let image = surface.image_snapshot();
+    if !image.is_texture_backed() {
+        return Some(image);
+    }
+    let gpu = crate::globals::try_get_gpu_state()?;
+    image.make_raster_image(&mut gpu.context, None)
 }
 
 // ---------------------------------------------------------------------------
@@ -851,7 +892,7 @@ fn render_glass_light_export(canvas: &Canvas, shape: &Shape, scale: f32, embed: 
     if width <= 0 || height <= 0 {
         return;
     }
-    let Some(mut surface) = skia::surfaces::raster_n32_premul((width, height)) else {
+    let Some(mut surface) = bake_surface(width, height) else {
         return;
     };
 
@@ -863,7 +904,9 @@ fn render_glass_light_export(canvas: &Canvas, shape: &Shape, scale: f32, embed: 
         light_canvas.set_matrix(&skia::M44::from(&light_matrix));
         glass::render_glass_light(light_canvas, shape, glass, &light_matrix, scale);
     }
-    let image = surface.image_snapshot();
+    let Some(image) = bake_snapshot(&mut surface) else {
+        return;
+    };
 
     let mut paint = Paint::default();
     paint.set_blend_mode(skia::BlendMode::Screen);
