@@ -836,6 +836,14 @@ pub fn glass_bounds(shape: &Shape) -> skia::Rect {
     glass_rect(shape, stroke_outset(shape))
 }
 
+/// Farthest distance, in device px, the glass filter reads from a pixel it
+/// draws: the largest sample offset (dispersion included) plus the reach of
+/// the frost blur. Outside this margin the backdrop never shows in the glass.
+pub fn sample_reach(glass: &Glass, scale: f32) -> f32 {
+    let params = Params::new(glass, scale, None);
+    params.displacement() * (1.0 + params.dispersion) + 3.0 * params.frost_sigma
+}
+
 /// Clips `canvas` to the area covered by the glass (fill plus the outward
 /// reach of the strokes). The canvas matrix must be the shape's
 /// local-to-device matrix.
@@ -1829,6 +1837,103 @@ mod tests {
         let fill = plain.peek_pixels().unwrap().get_color((20, 50));
         assert_eq!(fill, panel);
         assert!(rim.r() > fill.r() + 40, "rim {rim:?}");
+    }
+
+    /// A 300 px board with a grid of stripes and a glass panel in its middle,
+    /// far enough from the edges that the PDF path rasterizes only part of it.
+    fn centered_glass_scene() -> (crate::state::ShapesPool, Uuid) {
+        use crate::shapes::{Fill, Frame, Rect as RectType, SolidColor};
+
+        let board = Uuid::new_v4();
+        let mut pool = crate::state::ShapesPool::new();
+        let mut children = vec![];
+        let mut add = |pool: &mut crate::state::ShapesPool, rect: (f32, f32, f32, f32), color| {
+            let id = Uuid::new_v4();
+            let shape = pool.add_shape(id);
+            shape.set_parent(board);
+            shape.set_shape_type(Type::Rect(RectType::default()));
+            shape.set_selrect(rect.0, rect.1, rect.2, rect.3);
+            shape.set_fills(vec![Fill::Solid(SolidColor(color))]);
+            children.push(id);
+            id
+        };
+        // Irregular stripes: any shift of the backdrop changes what the glass
+        // shows. Frost is off, as a blur would smooth them to one color.
+        for i in 0..40u32 {
+            let x = (7 * i + (i * i) % 5) as f32;
+            let y = (11 * i + (i * i) % 3) as f32 % 300.0;
+            let red = skia::Color::from_rgb(255, (i * 37 % 200) as u8, 60);
+            let blue = skia::Color::from_rgb(30, 60, (i * 53 % 200 + 55) as u8);
+            add(&mut pool, (x, 0.0, x + 3.0, 300.0), red);
+            add(&mut pool, (0.0, y, 300.0, y + 2.0), blue);
+        }
+        let panel = add(&mut pool, (120.0, 120.0, 180.0, 180.0), tint());
+        pool.get_mut(&panel).unwrap().set_glass(Some(Glass {
+            dispersion: 0.0,
+            frost: 0.0,
+            ..glass()
+        }));
+
+        let frame = pool.add_shape(board);
+        frame.set_parent(Uuid::nil());
+        frame.set_shape_type(Type::Frame(Frame::default()));
+        frame.set_selrect(0.0, 0.0, 300.0, 300.0);
+        frame.set_fills(vec![Fill::Solid(SolidColor(skia::Color::WHITE))]);
+        frame.set_clip(true);
+        for child in children {
+            frame.add_child(child);
+        }
+        (pool, board)
+    }
+
+    /// Draws `centered_glass_scene` through the PDF path or the direct path
+    /// onto a raster surface, with the page moved away from the origin.
+    fn draw_scene(pdf_path: bool, scale: f32) -> skia::Image {
+        let (mut pool, board) = centered_glass_scene();
+        let (dx, dy) = (37.0, 21.0);
+        for shape in pool.iter_mut() {
+            let r = shape.selrect;
+            shape.set_selrect(r.left + dx, r.top + dy, r.right + dx, r.bottom + dy);
+        }
+        let page = skia::Rect::from_xywh(dx, dy, 300.0, 300.0);
+        let size = (300.0 * scale) as i32;
+
+        let mut resources = super::super::RenderResources::try_new_headless().unwrap();
+        let _guard = crate::globals::TestRenderResourcesGuard::install(&mut resources);
+        let mut surface = surface(size, size, skia::Color::TRANSPARENT);
+        let canvas = surface.canvas();
+        canvas.scale((scale, scale));
+        canvas.translate((-page.left, -page.top));
+        let draw = if pdf_path {
+            super::super::vector::render_tree_pdf
+        } else {
+            super::super::vector::render_tree
+        };
+        draw(&mut resources, canvas, &board, &pool, scale, page).unwrap();
+        surface.image_snapshot()
+    }
+
+    #[test]
+    fn pdf_glass_matches_the_direct_glass() {
+        // The PDF path rasterizes only the area around the glass. Inside the
+        // panel it must look like the direct backdrop filter.
+        for scale in [1.0, 2.0] {
+            let pdf = draw_scene(true, scale);
+            let direct = draw_scene(false, scale);
+            let (a, b) = (pdf.peek_pixels().unwrap(), direct.peek_pixels().unwrap());
+
+            let mut worst = 0;
+            let (from, to) = ((122.0 * scale) as i32, (178.0 * scale) as i32);
+            for y in from..to {
+                for x in from..to {
+                    let (p, q) = (a.get_color((x, y)), b.get_color((x, y)));
+                    for (u, v) in [(p.r(), q.r()), (p.g(), q.g()), (p.b(), q.b())] {
+                        worst = worst.max((u as i32 - v as i32).abs());
+                    }
+                }
+            }
+            assert!(worst <= 8, "scale {scale}: channels differ by {worst}");
+        }
     }
 
     #[test]

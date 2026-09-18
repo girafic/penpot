@@ -507,7 +507,9 @@ fn render_tree_inner(
                     if let Some(filter) =
                         skia::image_filters::blur((sigma, sigma), skia::TileMode::Clamp, None, None)
                     {
-                        render_backdrop_image(shared, canvas, element, tree, scale, opts, &filter)?;
+                        render_backdrop_image(
+                            shared, canvas, element, tree, scale, opts, &filter, None,
+                        )?;
                     }
                 } else {
                     render_background_blur_backdrop(canvas, element, blur.value * scale);
@@ -638,11 +640,16 @@ fn render_background_blur_backdrop(canvas: &Canvas, shape: &Shape, sigma_radius:
 /// backdrop filters: render the backdrop — the whole page minus this shape's
 /// own subtree — onto an offscreen raster surface, apply `filter` to it, and
 /// embed the result as an image clipped to the shape. The rest of the page
-/// stays vector. `filter` works in the page's device space.
+/// stays vector.
+///
+/// `area` is the part of the page to rasterize, in the page's device pixels;
+/// `None` rasterizes the whole page. `filter` works in the device space of
+/// that area, whose top-left corner is the origin.
 ///
 /// LIMITATION: the backdrop omits only this shape's subtree, not shapes painted
 /// *after* it. For content stacked on top of the blur shape the foreground would
 /// bleed into the blur; correct for the common case (nothing above the panel).
+#[allow(clippy::too_many_arguments)]
 fn render_backdrop_image(
     shared: &mut RenderResources,
     canvas: &Canvas,
@@ -651,13 +658,15 @@ fn render_backdrop_image(
     scale: f32,
     opts: &TreeOpts,
     filter: &skia::ImageFilter,
+    area: Option<skia::IRect>,
 ) -> Result<()> {
     let bounds = opts.page;
-    let width = (bounds.width() * scale).ceil() as i32;
-    let height = (bounds.height() * scale).ceil() as i32;
+    let area = area.unwrap_or_else(|| page_device_rect(opts, scale));
+    let (width, height) = (area.width(), area.height());
     if width <= 0 || height <= 0 {
         return Ok(());
     }
+    let origin = (area.left as f32, area.top as f32);
 
     // Render the backdrop into an offscreen raster surface, in the same
     // coordinate space as the PDF page (see `render/pdf.rs`).
@@ -667,6 +676,7 @@ fn render_backdrop_image(
     {
         let oc = surface.canvas();
         oc.clear(skia::Color::TRANSPARENT);
+        oc.translate((-origin.0, -origin.1));
         oc.scale((scale, scale));
         oc.translate((-bounds.left(), -bounds.top()));
         let sub = TreeOpts {
@@ -702,6 +712,7 @@ fn render_backdrop_image(
             mask_paint.set_blend_mode(skia::BlendMode::DstIn);
             bc.save_layer(&skia::canvas::SaveLayerRec::default().paint(&mask_paint));
             // Same page-space transform used to render the backdrop above.
+            bc.translate((-origin.0, -origin.1));
             bc.scale((scale, scale));
             bc.translate((-bounds.left(), -bounds.top()));
             bc.concat(&shape.centered_transform());
@@ -736,10 +747,10 @@ fn render_backdrop_image(
             clip_to_shape(canvas, shape, true);
         }
     }
-    // Draw the pre-blurred full-page bitmap in device space (1 image px per
-    // device unit) so it aligns with the page regardless of the shape transform.
+    // Draw the pre-blurred bitmap in device space (1 image px per device
+    // unit) so it aligns with the page regardless of the shape transform.
     canvas.reset_matrix();
-    canvas.draw_image(&blurred, (0.0, 0.0), None);
+    canvas.draw_image(&blurred, origin, None);
     canvas.restore();
     Ok(())
 }
@@ -768,14 +779,53 @@ fn render_glass_image(
     scale: f32,
     opts: &TreeOpts,
 ) -> Result<()> {
-    let mut local_to_device = skia::Matrix::scale((scale, scale));
-    local_to_device.pre_translate((-opts.page.left(), -opts.page.top()));
-    local_to_device.pre_concat(&shape.centered_transform());
+    let mut local_to_page = skia::Matrix::scale((scale, scale));
+    local_to_page.pre_translate((-opts.page.left(), -opts.page.top()));
+    local_to_page.pre_concat(&shape.centered_transform());
+
+    // Rasterize only the glass and the backdrop its filter reads. The filter
+    // is slow on the CPU, so running it over the whole page made PDF export
+    // take seconds per glass shape.
+    let reach = glass::sample_reach(glass, scale).ceil() + 2.0;
+    let near = local_to_page
+        .map_rect(glass::glass_bounds(shape))
+        .0
+        .with_outset((reach, reach));
+    let near = skia::IRect::from_ltrb(
+        near.left.floor() as i32,
+        near.top.floor() as i32,
+        near.right.ceil() as i32,
+        near.bottom.ceil() as i32,
+    );
+    let Some(area) = skia::IRect::intersect(&near, &page_device_rect(opts, scale)) else {
+        return Ok(());
+    };
+
+    // The filter works on a surface whose origin is the area's corner.
+    let mut local_to_device = skia::Matrix::translate((-area.left as f32, -area.top as f32));
+    local_to_device.pre_concat(&local_to_page);
 
     match glass::build_filter(shape, glass, &local_to_device, scale, None) {
-        Some(filter) => render_backdrop_image(shared, canvas, shape, tree, scale, opts, &filter),
+        Some(filter) => render_backdrop_image(
+            shared,
+            canvas,
+            shape,
+            tree,
+            scale,
+            opts,
+            &filter,
+            Some(area),
+        ),
         None => Ok(()),
     }
+}
+
+/// The page in its own device pixels: the raster space of `render_backdrop_image`.
+fn page_device_rect(opts: &TreeOpts, scale: f32) -> skia::IRect {
+    skia::IRect::from_wh(
+        (opts.page.width() * scale).ceil() as i32,
+        (opts.page.height() * scale).ceil() as i32,
+    )
 }
 
 /// Glass edge light, drawn over the shape's own fills. The canvas matrix must
