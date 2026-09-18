@@ -11,6 +11,14 @@ pub enum GlassTexture {
     None,
     /// Parallel lens strips (fluted glass).
     Reeded,
+    /// Parallel waves; the profile is smooth, so the strips have no seams.
+    Wavy,
+    /// Parallel prisms: flat facets with a hard seam between them.
+    Prismatic,
+    /// Lens strips on two perpendicular axes.
+    CrossReeded,
+    /// Round dents on a jittered grid (hammered glass).
+    Hammered,
 }
 
 /// Glass backdrop effect. It refracts, disperses and frosts the content

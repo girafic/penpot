@@ -320,7 +320,15 @@
           [{:id "none"
             :label (tr "workspace.options.glass-options.texture-none")}
            {:id "reeded"
-            :label (tr "workspace.options.glass-options.texture-reeded")}])
+            :label (tr "workspace.options.glass-options.texture-reeded")}
+           {:id "wavy"
+            :label (tr "workspace.options.glass-options.texture-wavy")}
+           {:id "prismatic"
+            :label (tr "workspace.options.glass-options.texture-prismatic")}
+           {:id "cross-reeded"
+            :label (tr "workspace.options.glass-options.texture-cross-reeded")}
+           {:id "hammered"
+            :label (tr "workspace.options.glass-options.texture-hammered")}])
 
         texture (d/name (ctsg/get-value value :texture))]
 
@@ -406,7 +414,7 @@
                        :options texture-options
                        :disabled disabled
                        :on-change on-texture-change}]]
-         (when (= texture "reeded")
+         (when (not= texture "none")
            [:> glass-sliders* {:sliders texture-sliders
                                :value value
                                :disabled disabled

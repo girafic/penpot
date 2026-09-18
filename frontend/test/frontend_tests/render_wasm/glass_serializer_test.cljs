@@ -12,7 +12,8 @@
    [cljs.test :refer [deftest is testing] :include-macros true]))
 
 (def ^:private serializers
-  #js {"glass-texture" #js {"none" 0 "reeded" 1}})
+  #js {"glass-texture" #js {"none" 0 "reeded" 1 "wavy" 2 "prismatic" 3
+                            "cross-reeded" 4 "hammered" 5}})
 
 (defn- write
   "Writes `glass` at offset 4 of a fresh buffer and returns the DataView
@@ -62,6 +63,12 @@
     (is (= 100 (f32 dview 8)) "brightness")
     (is (= 2 (f32 dview 9)) "highlight width")
     (is (= 0xFFFFFFFF (.getUint32 dview (+ 4 56) true)) "white light")))
+
+(deftest every-texture-has-its-own-byte
+  (doseq [[texture expected] {:none 0 :reeded 1 :wavy 2 :prismatic 3
+                              :cross-reeded 4 :hammered 5}]
+    (let [[dview _] (write (assoc ctsg/default-attrs :texture texture))]
+      (is (= expected (.getUint8 dview 5)) (str texture)))))
 
 (deftest short-hex-light-colors-are-expanded
   (let [[dview _] (write (assoc ctsg/default-attrs :light-color {:color "#f0a"}))]

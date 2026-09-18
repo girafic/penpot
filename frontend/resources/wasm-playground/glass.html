@@ -36,7 +36,8 @@
     // Glass values can be tuned from the URL, e.g.
     // glass.html?angle=-45&intensity=80&refraction=80&depth=20&dispersion=50
     //   &frost=4&splay=0&saturation=100&brightness=100&highlight=2
-    //   &texture=reeded&textureAmount=30&textureScale=8&textureAngle=0&light=ffffff
+    //   &texture=reeded|wavy|prismatic|cross-reeded|hammered
+    //   &textureAmount=30&textureScale=8&textureAngle=0&light=ffffff
     const params = new URLSearchParams(document.location.search);
     const value = (name, fallback) => Number(params.get(name) ?? fallback);
     const glassFloats = [
@@ -54,7 +55,8 @@
       value("textureScale", 8),
       value("textureAngle", 0),
     ];
-    const texture = params.get("texture") === "reeded" ? 1 : 0;
+    const textures = ["none", "reeded", "wavy", "prismatic", "cross-reeded", "hammered"];
+    const texture = Math.max(0, textures.indexOf(params.get("texture") ?? "none"));
     const lightColor = hexToU32ARGB("#" + (params.get("light") ?? "ffffff"), 1);
 
     // 60-byte glass buffer, see render-wasm/docs/serialization.md

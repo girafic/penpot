@@ -8209,15 +8209,15 @@ msgstr "Flow starts"
 msgid "workspace.options.flows.remove-flow"
 msgstr "Remove flow"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:374
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:397
 msgid "workspace.options.glass-options.advanced"
 msgstr "Advanced"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:286
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:307
 msgid "workspace.options.glass-options.brightness"
 msgstr "Brightness"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:280
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:301
 msgid "workspace.options.glass-options.depth"
 msgstr "Depth"
 
@@ -8227,69 +8227,85 @@ msgstr ""
 "Glass is only supported in the new render. Switch to the new render in the "
 "Preferences menu to use this effect"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:287
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:308
 msgid "workspace.options.glass-options.dispersion"
 msgstr "Dispersion"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:281
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:302
 msgid "workspace.options.glass-options.frost"
 msgstr "Frost"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:278
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:299
 msgid "workspace.options.glass-options.highlight-width"
 msgstr "Highlight width"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:321
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:339
 msgid "workspace.options.glass-options.light"
 msgstr "Light"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:131, src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:330
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:131, src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:348
 msgid "workspace.options.glass-options.light-angle"
 msgstr "Light angle"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:353
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:371
 msgid "workspace.options.glass-options.light-color"
 msgstr "Light color"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:340
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:358
 msgid "workspace.options.glass-options.light-intensity"
 msgstr "Light intensity"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:279
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:300
 msgid "workspace.options.glass-options.refraction"
 msgstr "Refraction"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:285
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:306
 msgid "workspace.options.glass-options.saturation"
 msgstr "Saturation"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:288
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:309
 msgid "workspace.options.glass-options.splay"
 msgstr "Splay"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:380, src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:384
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:408, src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:413
 msgid "workspace.options.glass-options.texture"
 msgstr "Texture"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:292
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:313
 msgid "workspace.options.glass-options.texture-amount"
 msgstr "Amount"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:294
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:315
 msgid "workspace.options.glass-options.texture-angle"
 msgstr "Angle"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:300
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:329
+msgid "workspace.options.glass-options.texture-cross-reeded"
+msgstr "Cross reeded"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:331
+msgid "workspace.options.glass-options.texture-hammered"
+msgstr "Hammered"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:321
 msgid "workspace.options.glass-options.texture-none"
 msgstr "None"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:302
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:327
+msgid "workspace.options.glass-options.texture-prismatic"
+msgstr "Prismatic"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:323
 msgid "workspace.options.glass-options.texture-reeded"
 msgstr "Reeded"
 
-#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:293
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:314
 msgid "workspace.options.glass-options.texture-scale"
 msgstr "Scale"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/glass.cljs:325
+msgid "workspace.options.glass-options.texture-wavy"
+msgstr "Wavy"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/frame_grid.cljs:34
 msgid "workspace.options.grid.auto"

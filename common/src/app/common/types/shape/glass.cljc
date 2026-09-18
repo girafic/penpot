@@ -24,15 +24,17 @@
 ;; - splay:           how far the bending spreads to the center, 0..100
 ;; - saturation:      backdrop saturation, 0..200 (100 = unchanged)
 ;; - brightness:      backdrop brightness, 0..200 (100 = unchanged)
-;; - texture:         surface texture, :none or :reeded
+;; - texture:         surface texture, see `textures`
 ;; - texture-amount:  strength of the texture, 0..100
-;; - texture-scale:   width of one flute, in px
-;; - texture-angle:   direction of the flutes, in degrees (0 = vertical)
+;; - texture-scale:   width of one strip, or size of one dent, in px
+;; - texture-angle:   direction of the texture, in degrees (0 = vertical)
 ;;
 ;; The keys added after the first version are optional. A missing key
 ;; means its value in `optional-defaults`, so older files render as before.
 
-(def textures #{:none :reeded})
+;; :reeded lens strips, :wavy seamless waves, :prismatic flat facets,
+;; :cross-reeded lens strips on both axes, :hammered round dents
+(def textures #{:none :reeded :wavy :prismatic :cross-reeded :hammered})
 
 (def schema:light-color
   [:merge {:title "GlassLightColor"}

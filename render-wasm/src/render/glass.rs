@@ -21,7 +21,7 @@
 //! bevel from eased edge ramps, circles from an ellipse distance field, and
 //! paths, bools and text from a blurred silhouette mask. The rim of the glass
 //! samples further inside, so it magnifies the backdrop like a lens edge.
-//! A reeded texture adds parallel lens strips over the whole surface.
+//! A surface texture adds strips or dents over the whole surface.
 //! Skia's displacement filter does the sampling: it may read around a pixel,
 //! which a runtime image filter (sample radius 0 in our bindings) cannot.
 
@@ -34,7 +34,7 @@ use skia_safe::{
 
 use super::text;
 use super::RenderState;
-use crate::shapes::{Glass, Shape, Stroke, Type};
+use crate::shapes::{Glass, GlassTexture, Shape, Stroke, Type};
 
 /// Largest share of the refraction added to red and taken from blue.
 const MAX_DISPERSION: f32 = 0.15;
@@ -49,14 +49,14 @@ const BAND_PER_DEPTH: f32 = 3.0;
 /// Largest inward sample offset, relative to the band width. At 100%
 /// refraction the edge magnifies as much as it can without mirroring.
 const MAX_OFFSET_PER_BAND: f32 = 0.33;
-/// At 100% texture amount, each flute shows a backdrop slice this many flute
-/// widths wider than itself.
+/// At 100% texture amount, each strip (or dent) shows a backdrop slice this
+/// many strip widths wider than itself.
 const MAX_FLUTE_COMPRESSION: f32 = 2.0;
-/// Flutes narrower than this (device px) are not drawn; they would only
+/// Strips narrower than this (device px) are not drawn; they would only
 /// flicker. Between this and `FULL_FLUTE_PX` the texture fades in.
 const MIN_FLUTE_PX: f32 = 2.0;
 const FULL_FLUTE_PX: f32 = 4.0;
-/// Width of the smoothed seam between two flutes, in device px.
+/// Width of the smoothed seam between two strips, in device px.
 const FLUTE_SEAM_PX: f32 = 1.0;
 
 // The glass map. R,G hold the sample offset (0.5 = none) and B the light.
@@ -68,9 +68,13 @@ const FLUTE_SEAM_PX: f32 = 1.0;
 // bevel and a narrow one in red, whose value is ~linear in the distance to
 // the edge, for the highlight.
 //
-// `flute` gives the reeded texture offset: a lens profile per flute, with
-// smoothed seams, along `texDir`. `u` counts document px across the flutes
-// from the shape's corner, so the texture moves with the shape.
+// `flute` gives the surface texture offset. `u` counts document px across
+// the strips from the shape's corner and `v` along them, so the texture
+// moves with the shape. The strip textures offset along `texDir` — a lens
+// profile with smoothed seams (reeded), a seamless sine (wavy) or a flat
+// facet (prismatic). Cross-reeded adds the lens on `texDir2` as well, and
+// hammered puts one round dent per grid cell, jittered inside its cell so
+// neighbouring cells never seam.
 //
 // The placeholders AMBIENT and BACK are replaced with constants before
 // compiling; no other identifier may contain them.
@@ -89,6 +93,9 @@ uniform float3 light;
 uniform float rimWidth;
 uniform float3 texRow;
 uniform float2 texDir;
+uniform float3 texRow2;
+uniform float2 texDir2;
+uniform float texKind;
 uniform float texPeriod;
 uniform float texEdge;
 uniform float texShare;
@@ -140,12 +147,62 @@ float2 glassField(float2 coord) {
     return float2(field, -sdRRect(p) * scale);
 }
 
-float2 flute(float2 coord) {
-    float s = fract((dot(texRow.xy, coord) + texRow.z) / texPeriod);
+float strip(float s) {
     float x = 2.0 * s - 1.0;
-    float lens = x * (0.65 + 0.35 * x * x);
-    float seam = smoothstep(0.0, texEdge, s) * smoothstep(0.0, texEdge, 1.0 - s);
-    return texDir * (lens * seam);
+    if (texKind > 2.5 && texKind < 3.5) {
+        return x;
+    }
+    if (texKind > 1.5 && texKind < 2.5) {
+        return sin(3.14159274 * x);
+    }
+    return x * (0.65 + 0.35 * x * x);
+}
+
+float seamAt(float s) {
+    if (texKind > 1.5 && texKind < 2.5) {
+        return 1.0;
+    }
+    return smoothstep(0.0, texEdge, s) * smoothstep(0.0, texEdge, 1.0 - s);
+}
+
+float2 hash2(float2 p) {
+    float3 q = fract(p.xyx * float3(0.1031, 0.1030, 0.0973));
+    q += dot(q, q.yzx + 33.33);
+    return fract((q.xx + q.yz) * q.zy);
+}
+
+float2 dimple(float2 uv) {
+    float2 cell = floor(uv);
+    float2 h = hash2(cell);
+    float2 g = hash2(cell + float2(11.7, 3.1));
+    float radius = 0.3 + 0.18 * g.x;
+    float2 center = radius + h * (1.0 - 2.0 * radius);
+    float2 q = uv - cell - center;
+    float len = length(q);
+    float r = len / radius;
+    if (r >= 1.0 || len < 0.0001) {
+        return float2(0.0);
+    }
+    float lens = 2.6 * r * (1.0 - r * r);
+    float2 dir = q / len;
+    return (texDir * dir.x + texDir2 * dir.y) * lens;
+}
+
+float2 flute(float2 coord) {
+    float u = (dot(texRow.xy, coord) + texRow.z) / texPeriod;
+    if (texKind > 4.5) {
+        float v = (dot(texRow2.xy, coord) + texRow2.z) / texPeriod;
+        return dimple(float2(u, v));
+    }
+    float s = fract(u);
+    float2 d = texDir * (strip(s) * seamAt(s));
+    if (texKind > 3.5) {
+        float t = fract((dot(texRow2.xy, coord) + texRow2.z) / texPeriod);
+        // Both axes bend at once, so scale them to keep the diagonal within
+        // the offset the other textures use.
+        d = 0.70710678 * (d + texDir2 * (strip(t) * seamAt(t)));
+    }
+    return d;
 }
 
 half4 main(float2 coord) {
@@ -254,7 +311,7 @@ struct Params {
     offset: f32,
     /// Largest sample offset of the texture (before dispersion).
     texture: f32,
-    /// Width of one flute.
+    /// Width of one strip, or the size of one cell of the hammered grid.
     flute: f32,
     /// Share added to red and taken from blue.
     dispersion: f32,
@@ -429,6 +486,19 @@ fn flute_row(to_local: &Matrix, origin: skia::Point, angle_deg: f32) -> [f32; 3]
         c * m.skew_x() + s * m.scale_y(),
         c * (m.translate_x() - origin.x) + s * (m.translate_y() - origin.y),
     ]
+}
+
+/// Code the map shader uses to pick the texture profile, see `flute` in the
+/// SkSL source. It follows the order of the serialized texture values.
+fn texture_kind(texture: GlassTexture) -> f32 {
+    match texture {
+        GlassTexture::None => 0.0,
+        GlassTexture::Reeded => 1.0,
+        GlassTexture::Wavy => 2.0,
+        GlassTexture::Prismatic => 3.0,
+        GlassTexture::CrossReeded => 4.0,
+        GlassTexture::Hammered => 5.0,
+    }
 }
 
 /// Area covered by the glass in shape-local coordinates.
@@ -623,15 +693,28 @@ fn glass_map_shader(
 
     let origin = skia::Point::new(shape.selrect.left, shape.selrect.top);
     let row = flute_row(&to_local, origin, glass.texture_angle);
+    let row2 = flute_row(&to_local, origin, glass.texture_angle + 90.0);
     let row_len = (row[0] * row[0] + row[1] * row[1]).sqrt();
-    let textured = params.textured() && row_len > 1e-6;
+    let row2_len = (row2[0] * row2[0] + row2[1] * row2[1]).sqrt();
+    let textured = params.textured() && row_len > 1e-6 && row2_len > 1e-6;
     uniforms.set(effect, "texShare", &[share(params.texture, textured)]);
+    uniforms.set(effect, "texKind", &[texture_kind(glass.texture)]);
     uniforms.set(effect, "texRow", &row);
     uniforms.set(
         effect,
         "texDir",
         &if textured {
             [row[0] / row_len, row[1] / row_len]
+        } else {
+            [0.0, 0.0]
+        },
+    );
+    uniforms.set(effect, "texRow2", &row2);
+    uniforms.set(
+        effect,
+        "texDir2",
+        &if textured {
+            [row2[0] / row2_len, row2[1] / row2_len]
         } else {
             [0.0, 0.0]
         },
@@ -1170,6 +1253,9 @@ mod tests {
                 "rimWidth",
                 "texRow",
                 "texDir",
+                "texRow2",
+                "texDir2",
+                "texKind",
                 "texPeriod",
                 "texEdge",
                 "texShare",
@@ -1459,6 +1545,125 @@ mod tests {
             .map(|x| x / 20)
             .collect();
         assert!(dark_flutes.len() >= 2, "bar seen in {dark_flutes:?}");
+    }
+
+    fn strips(kind: GlassTexture) -> Glass {
+        Glass {
+            texture: kind,
+            texture_amount: 100.0,
+            texture_scale: 20.0,
+            ..inert()
+        }
+    }
+
+    /// Sideways offsets over one 20 px strip, sampled in the middle of a wide
+    /// rect. 0 means the texture bends nothing there.
+    fn strip_period(kind: GlassTexture) -> Vec<i32> {
+        let mut map = render_map(&wide_rect(), &strips(kind), 200, 40);
+        (100..120)
+            .map(|x| pixel(&mut map, x, 20).r() as i32 - 128)
+            .collect()
+    }
+
+    /// Offset a flat facet would have at `index`, the strip being 20 px wide.
+    fn facet_at(index: usize) -> i32 {
+        (127.5 * ((index as f32 + 0.5) / 10.0 - 1.0)) as i32
+    }
+
+    fn peak_of(row: &[i32]) -> usize {
+        (0..row.len()).max_by_key(|i| row[*i].abs()).unwrap()
+    }
+
+    #[test]
+    fn prismatic_strips_are_flat_facets() {
+        let row = strip_period(GlassTexture::Prismatic);
+        // Away from the seams the offset grows linearly across the facet.
+        for i in 2..18 {
+            assert!(
+                (row[i] - facet_at(i)).abs() <= 4,
+                "not a facet at {i}: {row:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn reeded_strips_bend_like_a_lens() {
+        let row = strip_period(GlassTexture::Reeded);
+        // A lens is flatter than a facet in the middle and steepest next to
+        // the seam, where the smoothing takes over.
+        assert!(row[5].abs() < (facet_at(5).abs() * 4) / 5, "{row:?}");
+        let peak = peak_of(&row);
+        assert!(peak <= 4 || peak >= 15, "peak at {peak}: {row:?}");
+    }
+
+    #[test]
+    fn wavy_strips_bend_most_in_their_middle() {
+        let row = strip_period(GlassTexture::Wavy);
+        let peak = peak_of(&row);
+        assert!(
+            (4..=6).contains(&peak) || (14..=16).contains(&peak),
+            "{row:?}"
+        );
+        // A sine runs through zero at the seam, so it needs no smoothing, and
+        // it bends to both sides inside one strip.
+        assert!(row[0].abs() * 3 < row[peak].abs(), "{row:?}");
+        assert!(row[5] * row[15] < 0, "{row:?}");
+    }
+
+    fn square_shape() -> Shape {
+        let mut shape = rect_shape();
+        shape.set_selrect(0.0, 0.0, 200.0, 200.0);
+        shape
+    }
+
+    #[test]
+    fn cross_reeded_bends_both_axes() {
+        let mut map = render_map(
+            &square_shape(),
+            &strips(GlassTexture::CrossReeded),
+            200,
+            200,
+        );
+        let across: Vec<i32> = (100..120)
+            .map(|x| pixel(&mut map, x, 110).r() as i32 - 128)
+            .collect();
+        let along: Vec<i32> = (100..120)
+            .map(|y| pixel(&mut map, 110, y).g() as i32 - 128)
+            .collect();
+
+        for row in [&across, &along] {
+            let span = row.iter().max().unwrap() - row.iter().min().unwrap();
+            assert!(span > 60, "axis too flat: {row:?}");
+        }
+    }
+
+    #[test]
+    fn hammered_dents_bend_in_every_direction_and_leave_gaps() {
+        let mut map = render_map(&square_shape(), &strips(GlassTexture::Hammered), 200, 200);
+        let image = map.image_snapshot();
+        let pixels = image.peek_pixels().unwrap();
+        let samples: Vec<(i32, i32)> = (40..160)
+            .step_by(2)
+            .flat_map(|y| (40..160).step_by(2).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                let c = pixels.get_color((x, y));
+                (c.r() as i32 - 128, c.g() as i32 - 128)
+            })
+            .collect();
+
+        let span = |f: fn(&(i32, i32)) -> i32| {
+            samples.iter().map(f).max().unwrap() - samples.iter().map(f).min().unwrap()
+        };
+        assert!(span(|s| s.0) > 60, "no sideways bend");
+        assert!(span(|s| s.1) > 60, "no vertical bend");
+
+        // The dents stay inside their grid cell, so the glass between them
+        // shows the backdrop untouched.
+        let flat = samples
+            .iter()
+            .filter(|(dx, dy)| dx.abs() <= 2 && dy.abs() <= 2)
+            .count();
+        assert!(flat * 5 > samples.len(), "dents leave no gaps: {flat}");
     }
 
     #[test]

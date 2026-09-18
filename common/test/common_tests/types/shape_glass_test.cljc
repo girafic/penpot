@@ -38,8 +38,9 @@
     (t/is (not (ctsg/valid-glass? (glass :light-color {:color "#FFCC00" :id (uuid/next)})))))
 
   (t/testing "Only known textures and numeric values are accepted"
-    (t/is (ctsg/valid-glass? (glass :texture :reeded)))
-    (t/is (not (ctsg/valid-glass? (glass :texture :wavy))))
+    (doseq [texture ctsg/textures]
+      (t/is (ctsg/valid-glass? (glass :texture texture))))
+    (t/is (not (ctsg/valid-glass? (glass :texture :etched))))
     (t/is (not (ctsg/valid-glass? (glass :saturation "x"))))))
 
 (t/deftest get-value-test

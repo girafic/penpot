@@ -512,12 +512,22 @@ test.describe("Glass", () => {
       glassOptions.getByRole("slider", { name: "Saturation" }),
     ).toHaveValue("150");
 
-    // Texture controls only show for the reeded texture.
+    // The texture controls only show once a texture is picked.
     const amount = glassOptions.getByRole("textbox", { name: "Amount" });
     await expect(amount).toHaveCount(0);
     const texture = glassOptions.getByRole("combobox", { name: "Texture" });
     await texture.click();
-    await glassOptions.getByRole("option", { name: "Reeded" }).click();
+    await expect(glassOptions.getByRole("option")).toHaveText([
+      "None",
+      "Reeded",
+      "Wavy",
+      "Prismatic",
+      "Cross reeded",
+      "Hammered",
+    ]);
+    await glassOptions
+      .getByRole("option", { name: "Reeded", exact: true })
+      .click();
     await expect(amount).toHaveValue("30");
     await expect(
       glassOptions.getByRole("textbox", { name: "Scale" }),
@@ -525,6 +535,11 @@ test.describe("Glass", () => {
     await expect(
       glassOptions.getByRole("textbox", { name: "Angle", exact: true }),
     ).toHaveValue("0");
+
+    await texture.click();
+    await glassOptions.getByRole("option", { name: "Hammered" }).click();
+    await expect(texture).toContainText("Hammered");
+    await expect(amount).toHaveValue("30");
 
     await texture.click();
     await glassOptions.getByRole("option", { name: "None" }).click();

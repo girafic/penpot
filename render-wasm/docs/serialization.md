@@ -249,11 +249,15 @@ older files render unchanged.
 
 ### Glass Texture
 
-| Value | Field  |
-| ----- | ------ |
-| 0     | None   |
-| 1     | Reeded |
-| \_    | None   |
+| Value | Field       |
+| ----- | ----------- |
+| 0     | None        |
+| 1     | Reeded      |
+| 2     | Wavy        |
+| 3     | Prismatic   |
+| 4     | CrossReeded |
+| 5     | Hammered    |
+| \_    | None        |
 
 ## Shadow Styles
 

@@ -16,12 +16,20 @@ pub const RAW_GLASS_DATA_SIZE: usize = 60;
 pub enum RawGlassTexture {
     None = 0,
     Reeded = 1,
+    Wavy = 2,
+    Prismatic = 3,
+    CrossReeded = 4,
+    Hammered = 5,
 }
 
 impl From<u8> for RawGlassTexture {
     fn from(value: u8) -> Self {
         match value {
             1 => RawGlassTexture::Reeded,
+            2 => RawGlassTexture::Wavy,
+            3 => RawGlassTexture::Prismatic,
+            4 => RawGlassTexture::CrossReeded,
+            5 => RawGlassTexture::Hammered,
             _ => RawGlassTexture::None,
         }
     }
@@ -32,6 +40,10 @@ impl From<RawGlassTexture> for GlassTexture {
         match value {
             RawGlassTexture::None => GlassTexture::None,
             RawGlassTexture::Reeded => GlassTexture::Reeded,
+            RawGlassTexture::Wavy => GlassTexture::Wavy,
+            RawGlassTexture::Prismatic => GlassTexture::Prismatic,
+            RawGlassTexture::CrossReeded => GlassTexture::CrossReeded,
+            RawGlassTexture::Hammered => GlassTexture::Hammered,
         }
     }
 }
@@ -114,9 +126,26 @@ pub(crate) mod tests {
 
     #[test]
     fn unknown_texture_bytes_read_as_none() {
-        assert_eq!(RawGlassTexture::from(1), RawGlassTexture::Reeded);
         assert_eq!(RawGlassTexture::from(0), RawGlassTexture::None);
+        assert_eq!(RawGlassTexture::from(1), RawGlassTexture::Reeded);
+        assert_eq!(RawGlassTexture::from(2), RawGlassTexture::Wavy);
+        assert_eq!(RawGlassTexture::from(3), RawGlassTexture::Prismatic);
+        assert_eq!(RawGlassTexture::from(4), RawGlassTexture::CrossReeded);
+        assert_eq!(RawGlassTexture::from(5), RawGlassTexture::Hammered);
         assert_eq!(RawGlassTexture::from(7), RawGlassTexture::None);
+    }
+
+    #[test]
+    fn every_texture_byte_reaches_the_shape() {
+        for (byte, texture) in [
+            (2u8, GlassTexture::Wavy),
+            (3, GlassTexture::Prismatic),
+            (4, GlassTexture::CrossReeded),
+            (5, GlassTexture::Hammered),
+        ] {
+            let bytes = glass_bytes(false, byte, [0.0; 13], 0xFFFF_FFFF);
+            assert_eq!(glass_from_bytes(&bytes).unwrap().texture, texture);
+        }
     }
 
     #[test]
