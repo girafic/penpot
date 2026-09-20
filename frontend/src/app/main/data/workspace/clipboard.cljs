@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.data.workspace.clipboard
   (:require
@@ -18,9 +18,10 @@
    [app.common.geom.shapes :as gsh]
    [app.common.geom.shapes.grid-layout :as gslg]
    [app.common.logic.libraries :as cll]
+   [app.common.logic.shapes :as cls]
    [app.common.schema :as sm]
    [app.common.transit :as t]
-   [app.common.types.component :as ctc]
+   [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
    [app.common.types.file :as ctf]
    [app.common.types.shape :as cts]
@@ -33,14 +34,18 @@
    [app.config :as cf]
    [app.main.data.changes :as dch]
    [app.main.data.event :as ev]
+   [app.main.data.exports.assets :as de]
+   [app.main.data.exports.wasm :as wasm.exports]
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
-   [app.main.data.persistence :as-alias dps]
+   [app.main.data.persistence :as dps]
    [app.main.data.workspace.media :as dwm]
+   [app.main.data.workspace.path.clipboard :as path-cp]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.texts :as dwtxt]
    [app.main.data.workspace.undo :as dwu]
+   [app.main.data.workspace.wasm-text :as dwwt]
    [app.main.errors]
    [app.main.features :as features]
    [app.main.refs :as refs]
@@ -134,7 +139,7 @@
               (some? images)
               (update :images into images)
 
-              (ctc/is-variant-container? item)
+              (ctk/is-variant-container? item)
               (update :variant-properties merge (collect-variants state item))))
 
           (maybe-translate [shape objects parent-frame-id]
@@ -157,8 +162,10 @@
                                heads))))
 
           (advance-copy [file libraries page objects shape]
-            (if (and (ctc/instance-head? shape) (not (ctc/main-instance? shape)))
-              (let [level-delta (ctn/get-nesting-level-delta (:objects page) shape uuid/zero)]
+            (if (and (ctk/instance-head? shape) (not (ctk/main-instance? shape)))
+              (let [level-delta (if (nil? (ctk/get-swap-slot shape))
+                                  (ctn/get-nesting-level-delta (:objects page) shape uuid/zero)
+                                  0)]
                 (if (pos? level-delta)
                   (reduce (partial advance-shape file libraries page level-delta)
                           objects
@@ -259,7 +266,7 @@
        :allowHTMLPaste (features/active-feature? @st/state "text-editor/v2-html-paste")})
 
 (defn- create-paste-from-blob
-  [in-viewport?]
+  [in-viewport? replace?]
   (fn [blob]
     (let [type (.-type blob)]
       (cond
@@ -280,29 +287,41 @@
              (rx/filter map?)
              (rx/map
               (fn [pdata]
-                (assoc pdata :in-viewport in-viewport?)))
+                (-> pdata
+                    (assoc :in-viewport in-viewport?)
+                    (assoc :replace replace?))))
              (rx/mapcat
               (fn [pdata]
                 (case (:type pdata)
-                  :copied-props  (rx/of (paste-transit-props pdata))
-                  :copied-shapes (rx/of (paste-transit-shapes pdata))
+                  :copied-props        (rx/of (paste-transit-props pdata))
+                  :copied-shapes       (rx/of (paste-transit-shapes pdata))
+                  :copied-path-content (rx/of (path-cp/paste-nodes-as-shape (:content pdata)))
                   (rx/empty)))))
 
         :else
         (->> (rx/from (.text blob))
              (rx/map paste-text))))))
 
-(def default-paste-from-blob (create-paste-from-blob false))
+(defn- on-clipboard-permission-error
+  [cause]
+  (if-let [message (clipboard/error-message cause)]
+    (rx/of (ntf/show {:content message
+                      :type :toast
+                      :level :warning
+                      :timeout 5000}))
+    (rx/throw cause)))
 
 (defn paste-from-clipboard
   "Perform a `paste` operation using the Clipboard API."
-  []
-  (ptk/reify ::paste-from-clipboard
-    ptk/WatchEvent
-    (watch [_ _ _]
-      (->> (clipboard/from-navigator default-options)
-           (rx/mapcat default-paste-from-blob)
-           (rx/take 1)))))
+  ([] (paste-from-clipboard nil))
+  ([{:keys [replace?]}]
+   (ptk/reify ::paste-from-clipboard
+     ptk/WatchEvent
+     (watch [_ _ _]
+       (->> (clipboard/from-navigator default-options)
+            (rx/mapcat (create-paste-from-blob false (boolean replace?)))
+            (rx/take 1)
+            (rx/catch on-clipboard-permission-error))))))
 
 (defn paste-from-event
   "Perform a `paste` operation from user emmited event."
@@ -319,7 +338,7 @@
         (if is-editing?
           (rx/empty)
           (->> (clipboard/from-synthetic-clipboard-event event default-options)
-               (rx/mapcat (create-paste-from-blob in-viewport?))))))))
+               (rx/mapcat (create-paste-from-blob in-viewport? false))))))))
 
 (defn copy-selected-svg
   []
@@ -338,7 +357,11 @@
 
             shapes          (mapv maybe-translate selected)
             svg-formatted   (svg/generate-formatted-markup objects shapes)]
-        (clipboard/to-clipboard svg-formatted)))))
+        (-> (clipboard/to-clipboard-multi
+             {"image/svg+xml" svg-formatted
+              "text/plain"    svg-formatted})
+            (p/catch (fn [cause]
+                       (js/console.error "clipboard error:" cause))))))))
 
 (defn copy-selected-css
   []
@@ -482,11 +505,16 @@
                   (-> entry t/decode-str paste-transit-props))
 
                 (on-error [cause]
-                  (let [data (ex-data cause)]
-                    (if (:not-implemented data)
+                  (if-let [message (clipboard/error-message cause)]
+                    (rx/of (ntf/show {:content message
+                                      :type :toast
+                                      :level :warning
+                                      :timeout 5000}))
+                    (if (:not-implemented (ex-data cause))
                       (rx/of (ntf/warn (tr "errors.clipboard-not-implemented")))
-                      (js/console.error "Clipboard error:" cause))
-                    (rx/empty)))]
+                      (do
+                        (js/console.error "Clipboard error:" cause)
+                        (rx/empty)))))]
 
           (->> (clipboard/from-navigator default-options)
                (rx/mapcat #(.text %))
@@ -516,8 +544,8 @@
 (defn- frame-same-size?
   [paste-obj frame-obj]
   (and
-   (= (:heigth (:selrect (first (vals paste-obj))))
-      (:heigth (:selrect frame-obj)))
+   (= (:height (:selrect (first (vals paste-obj))))
+      (:height (:selrect frame-obj)))
    (= (:width (:selrect (first (vals paste-obj))))
       (:width (:selrect frame-obj)))))
 
@@ -644,22 +672,38 @@
       ptk/WatchEvent
       (watch [_ state _]
         (let [features (get state :features)
-              selected (dsh/lookup-selected state)]
+              objects  (dsh/lookup-page-objects state)
+              selected (dsh/lookup-selected state)
+
+              ;; With WASM, pasted props change the text content but not the
+              ;; selrect, so auto-grow text shapes need an explicit relayout.
+              text-ids (into []
+                             (comp (filter #(cfh/text-shape? (get objects %)))
+                                   (filter #(not= :fixed (:grow-type (get objects %)))))
+                             selected)]
 
           (when (paste-data-valid? pdata)
             (cfeat/check-paste-features! features (:features pdata))
             (case (:type pdata)
               :copied-props
-
-              (rx/concat
-               (->> (rx/of pdata)
-                    (rx/mapcat (partial upload-images (:current-file-id state)))
-                    (rx/map
-                     #(dwsh/update-shapes
-                       selected
-                       (fn [shape objects] (cts/patch-props shape (:props pdata) objects))
-                       {:with-objects? true})))
-               (rx/of (ptk/data-event :layout/update {:ids selected})))
+              ;; Wrap in a single undo transaction so the async wasm text
+              ;; resize is bundled with the props change (one undo step).
+              (let [undo-id       (js/Symbol)
+                    resize-texts? (and (features/active-feature? state "render-wasm/v1")
+                                       (seq text-ids))]
+                (rx/concat
+                 (rx/of (dwu/start-undo-transaction undo-id))
+                 (->> (rx/of pdata)
+                      (rx/mapcat (partial upload-images (:current-file-id state)))
+                      (rx/map
+                       #(dwsh/update-shapes
+                         selected
+                         (fn [shape objects] (cts/patch-props shape (:props pdata) objects))
+                         {:with-objects? true})))
+                 (rx/of (ptk/data-event :layout/update {:ids selected}))
+                 (if resize-texts?
+                   (rx/of (dwwt/resize-wasm-text-all text-ids {:undo-id undo-id}))
+                   (rx/of (dwu/commit-undo-transaction undo-id)))))
               ;;
               (rx/empty))))))))
 
@@ -686,7 +730,8 @@
                   (update :fills translate-fills)
                   (update :strokes translate-strokes)
                   (d/update-when :content #(txt/transform-nodes process-text-node %))
-                  (d/update-when :position-data #(mapv process-text-node %)))))
+                  ;; Removes the position-data so it's regenerated
+                  (dissoc :position-data))))
 
           ;; Analyze the rchange and replace staled media and
           ;; references to the new uploaded media-objects.
@@ -695,7 +740,7 @@
               (update change :obj process-rchange-shape media-idx)
               change))
 
-          (calculate-paste-position [state pobjects selected position]
+          (calculate-paste-position [state pobjects selected position replace-id]
             (let [page-objects         (dsh/lookup-page-objects state)
                   selected-objs        (map (d/getf pobjects) selected)
                   first-selected-obj   (first selected-objs)
@@ -709,9 +754,20 @@
                   tree-root            (get-tree-root-shapes pobjects)
                   only-one-root-shape? (and
                                         (< 1 (count pobjects))
-                                        (= 1 (count tree-root)))]
+                                        (= 1 (count tree-root)))
+                  replaced             (some->> replace-id (get page-objects))]
 
               (cond
+                ;; Paste in place: center pasted content on the replaced shape and
+                ;; reparent to its container. The replaced shape is deleted below
+                ;; so the new content takes its z-index slot.
+                (some? replaced)
+                (let [delta        (gpt/subtract (gsh/shape->center replaced)
+                                                 (grc/rect->center wrapper))
+                      parent-id    (:parent-id replaced)
+                      target-index (cfh/get-position-on-parent page-objects replace-id)]
+                  [parent-id delta target-index])
+
                 ;; Paste next to selected frame, if selected is itself or of the same size as the copied
                 (and (selected-frame? state)
                      (or (any-same-frame-from-selected? state (keys pobjects))
@@ -827,10 +883,17 @@
 
               position     (deref ms/mouse-position)
 
+              ;; Replace mode is only valid with a single selected shape.
+              ;; In that case we drop the pasted content at its position and
+              ;; delete it in the same transaction.
+              page-selected (dsh/lookup-selected state)
+              replace-id    (when (and (:replace pdata) (= 1 (count page-selected)))
+                              (first page-selected))
+
               ;; Calculate position for the pasted elements
               [candidate-parent-id
                delta
-               index]      (calculate-paste-position state objects selected position)
+               index]      (calculate-paste-position state objects selected position replace-id)
 
               page-objects (:objects page)
 
@@ -872,6 +935,10 @@
                                 (map :id)
                                 (pcb/resize-parents changes))
 
+              changes      (if (some? replace-id)
+                             (second (cls/generate-delete-shapes changes #{replace-id} {}))
+                             changes)
+
               orig-shapes  (map (d/getf all-objects) selected)
 
               children-after (-> (pcb/get-objects changes)
@@ -894,10 +961,10 @@
 
               add-component-to-variant? (and
                                          ;; Any of the shapes is a head
-                                         (some ctc/instance-head? orig-shapes)
+                                         (some ctk/instance-head? orig-shapes)
                                          ;; Any ancestor of the destination parent is a variant
                                          (->> (cfh/get-parents-with-self page-objects parent-id)
-                                              (some ctc/is-variant?)))
+                                              (some ctk/is-variant?)))
               undo-id      (js/Symbol)]
 
           (rx/concat
@@ -911,13 +978,13 @@
                             ;; NOTE: we don't emit the create-shape event all the time for
                             ;; avoid send a lot of events (that are not necessary); this
                             ;; decision is made explicitly by the responsible team.
-                            (if (ctc/instance-head? shape)
+                            (if (ctk/instance-head? shape)
                               (ev/event {::ev/name "use-library-component"
                                          ::ev/origin origin
                                          :is-external-library external-lib?
                                          :type (get shape :type)
                                          :parent-type parent-type
-                                         :is-variant (ctc/is-variant? component)})
+                                         :is-variant (ctk/is-variant? component)})
                               (if (cfh/has-layout? objects (:parent-id shape))
                                 (ev/event {::ev/name "layout-add-element"
                                            ::ev/origin origin
@@ -934,7 +1001,7 @@
                   (ptk/data-event :layout/update {:ids [frame-id]})
                   (dwu/commit-undo-transaction undo-id)
                   (when add-component-to-variant?
-                    (ptk/event ::ev/event {::ev/name "add-component-to-variant"})))))))))
+                    (ev/event {::ev/name "add-component-to-variant"})))))))))
 
 (defn- as-content [text]
   (let [paragraphs (->> (str/lines text)
@@ -970,10 +1037,11 @@
             text    (.-textContent root)
             content (tc/dom->cljs root)]
         (when (types.text/valid-content? content)
-          (let [id     (uuid/next)
-                width  (max 8 (min (* 7 (count text)) 700))
-                height 16
+          (let [id            (uuid/next)
+                width         (max 8 (min (* 7 (count text)) 700))
+                height        16
                 {:keys [x y]} (calculate-paste-position state)
+                skip-edition? (features/active-feature? state "text-editor-wasm/v1")
 
                 shape {:id id
                        :type :text
@@ -985,9 +1053,14 @@
                        :grow-type (if (> (count text) 100) :auto-height :auto-width)
                        :content content}
                 undo-id (js/Symbol)]
-            (rx/of (dwu/start-undo-transaction undo-id)
-                   (dwsh/create-and-add-shape :text x y shape)
-                   (dwu/commit-undo-transaction undo-id))))))))
+            (rx/concat
+             (rx/of (dwu/start-undo-transaction undo-id)
+                    (dwsh/create-and-add-shape :text x y shape
+                                               (when skip-edition? {:skip-edition? true})))
+             (if skip-edition?
+               (rx/of (dwwt/resize-wasm-text-debounce id {:undo-group id
+                                                          :undo-id undo-id}))
+               (rx/of (dwu/commit-undo-transaction undo-id))))))))))
 
 (defn- paste-text
   [text]
@@ -995,10 +1068,11 @@
   (ptk/reify ::paste-text
     ptk/WatchEvent
     (watch [_ state _]
-      (let [id (uuid/next)
-            width (max 8 (min (* 7 (count text)) 700))
-            height 16
+      (let [id            (uuid/next)
+            width         (max 8 (min (* 7 (count text)) 700))
+            height        16
             {:keys [x y]} (calculate-paste-position state)
+            skip-edition? (features/active-feature? state "text-editor-wasm/v1")
 
             shape {:id id
                    :type :text
@@ -1011,9 +1085,14 @@
                    :content (as-content text)}
             undo-id (js/Symbol)]
 
-        (rx/of (dwu/start-undo-transaction undo-id)
-               (dwsh/create-and-add-shape :text x y shape)
-               (dwu/commit-undo-transaction undo-id))))))
+        (rx/concat
+         (rx/of (dwu/start-undo-transaction undo-id)
+                (dwsh/create-and-add-shape :text x y shape
+                                           (when skip-edition? {:skip-edition? true})))
+         (if skip-edition?
+           (rx/of (dwwt/resize-wasm-text-debounce id {:undo-group id
+                                                      :undo-id undo-id}))
+           (rx/of (dwu/commit-undo-transaction undo-id))))))))
 
 ;; TODO: why not implement it in terms of upload-media-workspace?
 (defn- paste-svg-text
@@ -1046,6 +1125,15 @@
     (watch [_ _ _]
       (clipboard/to-clipboard (rt/get-current-href)))))
 
+(defn copy-id-to-clipboard
+  [id]
+  (ptk/reify ::copy-id-to-clipboard
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (->> (rx/from (clipboard/to-clipboard id))
+           (rx/map (fn [_]
+                     (ntf/info "The id has been copied to the clipboard")))))))
+
 (defn copy-as-image
   []
   (ptk/reify ::copy-as-image
@@ -1055,45 +1143,55 @@
             page-id  (:current-page-id state)
             selected (first (dsh/lookup-selected state))
 
-            export {:file-id file-id
-                    :page-id page-id
-                    :object-id selected
-                    ;; webp would be preferrable, but PNG is the most supported image MIME type by clipboard APIs.
-                    :type :png
-                    ;; Always use 2 to ensure good enough quality for wireframes.
-                    :scale 2
-                    :suffix ""
-                    :enabled true
-                    :name ""}
+            export (de/normalize-export {:file-id file-id
+                                         :page-id page-id
+                                         :object-id selected
+                                         ;; webp would be preferrable, but PNG is the most supported image MIME type by clipboard APIs.
+                                         :type :png
+                                         ;; Always use 2 to ensure good enough quality for wireframes.
+                                         :scale 2
+                                         :suffix ""
+                                         :enabled true
+                                         :name ""})
 
-            params {:exports [export]
-                    :profile-id (:profile-id state)
-                    :cmd :export-shapes
-                    :wait true}]
+            ;; Create a deferred promise immediately, before any async operations.
+            ;; Registering the clipboard write NOW preserves the user-gesture security
+            ;; context; the actual blob is supplied asynchronously once the export finishes.
+            deferred      (p/deferred)
+            write-promise (clipboard/to-clipboard-promise "image/png" deferred)]
 
         (rx/concat
          ;; Ensure current state persisted before exporting.
-         (rx/of ::dps/force-persist)
-         (->> (rx/from-atom refs/persistence-state {:emit-current-value? true})
-              (rx/filter #(or (nil? %) (= :saved %)))
-              (rx/first)
-              (rx/timeout 400 (rx/empty)))
+         (dps/force-persist-and-wait 400)
 
-         ;; Exporting itself can time its time, better to notify that we are busy.
+         ;; Exporting itself can take its time, better to notify that we are busy.
          (rx/of (ntf/info (tr "workspace.clipboard.copying")))
 
-         ;; Call exporter to get image URI, then fetch and copy blob.
-         (->> (rp/cmd! :export params)
+         ;; Call exporter to get image URI, then fetch blob and resolve the deferred.
+         (->> (if (and (features/active-feature? state "render-wasm/v1")
+                       (contains? cf/flags :wasm-export))
+                (rx/of {:uri (wasm.exports/export-image-uri export)})
+                (rp/cmd! :export
+                         {:exports [export]
+                          :profile-id (:profile-id state)
+                          :cmd :export-shapes
+                          :wait true}))
+
               (rx/mapcat (fn [{:keys [uri]}]
                            (http/send! {:method :get
                                         :uri uri
                                         :response-type :blob})))
               (rx/map :body)
-              (rx/tap (fn [blob]
-                        (clipboard/to-clipboard-promise "image/png" (p/resolved blob))))
+              (rx/mapcat (fn [blob]
+                           ;; Resolve the deferred with the fetched blob; the browser
+                           ;; will now complete the clipboard write it started earlier.
+                           (p/resolve deferred blob)
+                           (rx/from write-promise)))
               (rx/map (fn [_]
                         (ntf/success (tr "workspace.clipboard.image-copied"))))
               (rx/catch (fn [e]
-                          (js/console.error "clipboard blocked:" e)
-                          (ntf/error (tr "workspace.clipboard.image-copy-failed"))
-                          (rx/empty)))))))))
+                          (js/console.error "clipboard error:" e)
+                          ;; Reject the deferred in case the error occurred before the
+                          ;; blob was fetched, so the pending clipboard write is cancelled.
+                          (p/reject deferred e)
+                          (rx/of (ntf/error (tr "workspace.clipboard.image-copy-failed")))))))))))

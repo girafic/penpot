@@ -2,11 +2,12 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.loggers.mattermost
   "A mattermost integration for error reporting."
   (:require
+   [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.logging :as l]
    [app.common.pprint :as pp]
@@ -25,7 +26,7 @@
 (defn- send-mattermost-notification!
   [cfg {:keys [id] :as report}]
   (let [type (get report :type)
-        text (str "#" type " | " (get report :hint) "\n"
+        text (str "#" type " | " (d/escape-markdown (get report :hint)) "\n"
                   (when id
                     (str (u/join (cf/get :public-uri) "/dbg/error/" id) " "))
 
@@ -38,7 +39,7 @@
                   "- tenant: #" (:tenant report) "\n"
                   "- origin: #" (:origin report) "\n"
                   (when-let [href (get report :href)]
-                    (str "- href: `" href "`\n"))
+                    (str "- href: `" (d/escape-markdown href) "`\n"))
                   (when-let [version (get report :frontend-version)]
                     (str "- frontend-version: `" version "`\n"))
                   (when-let [version (get report :backend-version)]
@@ -52,12 +53,12 @@
                          trace
                          "```")))
 
-        resp (http/req! cfg
-                        {:uri (cf/get :error-report-webhook)
-                         :method :post
-                         :headers {"content-type" "application/json"}
-                         :body (json/encode-str {:text text})}
-                        {:sync? true})]
+        resp (http/req cfg
+                       {:uri (cf/get :error-report-webhook)
+                        :method :post
+                        :headers {"content-type" "application/json"}
+                        :body (json/encode-str {:text text})}
+                       {:sync? true})]
 
     (when (not= 200 (:status resp))
       (l/warn :hint "error on sending data"
@@ -83,7 +84,7 @@
      :trace            (ex/format-throwable cause :detail? false :header? false)}))
 
 (defn- audit-event->report
-  [{:keys [::audit/context ::audit/props ::audit/id] :as event}]
+  [{:keys [context props id] :as event}]
   {:id               id
    :type             "exception"
    :origin           "audit-log"
@@ -92,7 +93,7 @@
    :host             (cf/get :host)
    :backend-version  (:full cf/version)
    :frontend-version (:version context)
-   :profile-id       (:audit/profile-id event)
+   :profile-id       (:profile-id event)
    :href             (get props :href)})
 
 (defn- rlimit-event->report
@@ -148,11 +149,11 @@
                              (::l/id item)
                              (handle-event cfg item log-record->report)
 
-                             (::audit/id item)
-                             (handle-event cfg item audit-event->report)
-
                              (::rlimit/id item)
                              (handle-event cfg item rlimit-event->report)
+
+                             (-> item meta ::audit/event)
+                             (handle-event cfg item audit-event->report)
 
                              :else
                              (l/warn :hint "received unexpected item" :item item)))

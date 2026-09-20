@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.common.flags
   "Flags parsing algorithm."
@@ -72,7 +72,11 @@
     :backend-worker
     ;; Only for development
     :component-thumbnails
-    ;; enables the default cors configuration that allows all domains (currently this configuration is only used for development).
+    ;; Enables CORS support for the RPC API. Requires an explicit
+    ;; allowlist of origins via PENPOT_ALLOWED_ORIGINS; if no allowlist
+    ;; is configured the middleware fails closed (a warning is logged
+    ;; and CORS headers are not emitted) to avoid CSRF / data
+    ;; exfiltration via origin reflection.
     :cors
     ;; Enables the templates dialog on Penpot dashboard.
     :dashboard-templates-section
@@ -96,6 +100,10 @@
     :backend-svgo
     ;; If enabled, it makes the Google Fonts available.
     :google-fonts-provider
+    ;; Enables the Ladybug graph subsystem: the `/dbg` graph console and its
+    ;; actions. Off by default. With the flag off, `app.graph.*` never loads,
+    ;; so the Ladybug native library never enters the JVM.
+    :graph
     ;; Only for development.
     :nrepl-server
     ;; Interactive repl. Only for development.
@@ -120,12 +128,16 @@
     :telemetry
     :terms-and-privacy-checkbox
     :tiered-file-data-storage
+
+    ;; Tokens
     :token-base-font-size
     :token-combobox
     :token-color
     :token-shadow
     :token-tokenscript
     :token-import-from-library
+    :token-typography-row
+
     ;; Only for developtment.
     :transit-readable-response
     :user-feedback
@@ -134,9 +146,11 @@
     :webhooks
     ;; TODO: deprecate this flag and consolidate the code
     :render-wasm-dpr
+    ;; Show WASM renderer info label (hidden by default).
+    :render-wasm-info
+    :render-switch
     :hide-release-modal
     :subscriptions
-    :subscriptions-old
     :inspect-styles
     ;; Enable performance logs in devconsole (disabled by default)
     :perf-logs
@@ -153,10 +167,30 @@
     ;; redis for caching data
     :redis-cache
 
-    ;; Activates the nitrate module
-    :nitrate
+    ;; Activates the admin-console module
+    :admin-console
 
-    :mcp})
+    ;; disabled by default. When enabled, allows the admin-console
+    ;; `bulk-create-profiles` method to create batches of already
+    ;; active profiles. Only intended for test environments.
+    :admin-console-bulk-create-profiles
+
+    :mcp
+    :background-blur
+    :available-viewer-wasm
+    :stroke-path
+    :stroke-per-side
+
+    ;; Exporter only: uses render-wasm for export instead of browser
+    ;; renderer.
+    :wasm-export
+    :custom-shortcuts
+    :remote-media-processing
+
+    ;; Enables serving link preview (Open Graph) metadata for shared
+    ;; links; exposes file names and dashboard thumbnails to anyone
+    ;; that knows the file id.
+    :link-preview})
 
 (def all-flags
   (set/union email login varia))
@@ -181,9 +215,17 @@
    :enable-render-wasm-dpr
    :enable-token-color
    :enable-token-shadow
+   :enable-token-typography-row
    :enable-inspect-styles
    :enable-feature-fdata-objects-map
-   :enable-token-import-from-library])
+   :enable-feature-render-wasm
+   :enable-token-import-from-library
+   :enable-render-switch
+   :enable-render-wasm-info
+   :enable-available-viewer-wasm
+   :enable-background-blur
+   :enable-stroke-path
+   :enable-token-combobox])
 
 (defn parse
   [& flags]

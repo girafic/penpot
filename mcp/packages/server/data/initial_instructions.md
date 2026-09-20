@@ -16,6 +16,14 @@ This is the full list of types/interfaces in the Penpot API: $api_types
 You use the `storage` object extensively to store data and utility functions you define across tool calls.
 This allows you to inspect intermediate results while still being able to build on them in subsequent code executions.
 
+## Asynchronous Updates
+
+Changes made to a design may take effect asynchronously. 
+So if you need to read the result of your executions/observe properties affected by a change in the same `execude_code` call, use 
+`await penpot.waitForLayoutUpdate();`
+before trying to observe changes.
+Every `execude_code` call waits for updates before applying your code, so you never need to call `waitForLayoutUpdate` at the beginning of your code.
+
 # The Structure of Penpot Designs
 
 A Penpot design ultimately consists of shapes.
@@ -138,13 +146,23 @@ Boards can have layout systems that automatically control the positioning and sp
 
 # Text Elements
 
-The rendered content of a `Text` element is given by the `characters` property.
-
-To change the size of the text, change the `fontSize` property; applying `resize()` does NOT change the font size,
-it only changes the formal bounding box; if the text does not fit it, it will overflow; use `textBounds` for the actual bounding box of the rendered text.
-The bounding box is sized automatically as long as the `growType` property is set to "auto-width" or "auto-height".
-`resize` always sets `growType` to "fixed", so ALWAYS set it back to "auto-*" if you want automatic sizing!
-The auto-sizing is not immediate; sleep for a short time (100ms) if you want to read the updated bounding box.
+`Text` elements:
+  * The text to be rendered is given by the `characters` property.
+  * To change the size of the text, change the `fontSize` property; applying `resize()` does NOT change the font size,
+    it only changes the formal bounding box; if the text does not fit it, it will overflow; use `textBounds` for the actual bounding box of the rendered text.
+  * Property `bounds` is sized automatically (in one dimension) if the `growType` property is set to "auto-width" or "auto-height".
+    `resize` always sets `growType` to "fixed", so ALWAYS set it back to "auto-width" or "auto-height" if you want automatic sizing!
+    The auto-sizing is asynchronous; use `waitForLayoutUpdate` before reading the updated bounding box.
+  * Method `getRange(start, end): TextRange` to reference a range of characters as a `TextRange` object, which can be styled separately from the rest of the text; `start` index inclusive, `end` exclusive
+  * Other Writable font properties: `fontId`, `fontFamily`, `fontWeight`, `fontVariant`, `fontStyle`
+     - To discover valid values, check available fonts in `penpot.fonts: FontContext`
+         - `FontContext` provides `Font` instances; each font has property `variants: FontVariant[]` 
+         - Example: Determine available weights for a font using `penpot.fonts.findByName("Laila").variants.map(v => v.fontWeight)`
+     - To apply a `Font` to a `Text` instance and set all font properties at once:
+         - `font.applyToText(text: Text, variant?: FontVariant)`
+         - `applyToRange(range: TextRange, variant?: FontVariant)`
+  * Further writable properties: `align`, `verticalAlign`, `lineHeight`, `letterSpacing`, `textTransform`, `textDecoration` (see API info)
+  * Method `applyTypography(typography: LibraryTypography)`
 
 # The `penpot` and `penpotUtils` Objects, Exploring Designs
 
@@ -259,8 +277,9 @@ Using library components:
   * create a new instance of the component on the current page:
     `const instance: Shape = component.instance();`
     This returns a `Shape` (often a `Board` containing child elements).
-    After instantiation, modify the instance's properties as desired.
-  * get the reference to the main component shape:
+      - After instantiation, modify the instance's properties as desired.
+      - Get a reference to the component an instance was created from via `instance.component()`.
+  * get the reference to the main instance (shape that serves as the source for new instances):
     `const mainShape: Shape = component.mainInstance();`
 
 Adding a component to a library:
@@ -282,9 +301,10 @@ Variants are a system for grouping related component versions along named proper
   - check with `isVariantContainer()`
   - property `variants: Variants`.
 * `Variants`: Defines the combinations of property values for which component variants can exist and manages the concrete component variants. 
-  - `properties: string[]` (ordered list of property names); `addProperty()`, `renameProperty(pos, name)`, `currentValues(property)`
+  - `properties: string[]` (ordered list of property names); `addProperty(): void`, `renameProperty(pos, name)`, `currentValues(property)`
   - `variantComponents(): LibraryVariantComponent[]` 
 * `LibraryVariantComponent` (extends `LibraryComponent`): full library component with metadata, for which `isVariant()` returns true.
+  - `variants: Variants`
   - `variantProps: { [property: string]: string }` (this component's value for each property)
   - `variantError` (non-null if e.g. two variants share the same combination of property values)
   - `setVariantProperty(pos, value)`
@@ -292,11 +312,30 @@ Variants are a system for grouping related component versions along named proper
 Properties are often addressed positionally: `pos` parameter in various methods = index in `Variants.properties`.
 
 **Creating a variant group**:
-- `component.transformInVariant(): null`: Converts a standard component into a variant group, creating a `VariantContainer` and a second duplicate variant. 
-  Both start with a default property `Property 1` with values `Value 1` / `Value 2`; there is no name-based auto-parsing.
-- `board.combineAsVariants(ids: string[]): null`: Combines the board (a main component instance) with other main components (referenced via IDs) into a new variant group. 
-  All components end up inside a single new `VariantContainer` on the canvas.
-- In both cases, look for the created `VariantContainer` on the page, and then edit properties using `variants.renameProperty(pos, name)`, `variants.addProperty()`, and `comp.setVariantProperty(pos, value)`.
+
+Use `penpotUtils.createVariantContainer(components)` — it handles the full multi-step workflow in one call:
+```js
+// Given three main components s, m, l (here: the first three main components on the page)
+const [s, m, l] = penpot.currentPage.findAllShapes(sh => sh.isMainComponent()).slice(0, 3);
+// Single property:
+const container = penpotUtils.createVariantContainer([
+  { shape: s, properties: { Size: 'Small' } },
+  { shape: m, properties: { Size: 'Medium' } },
+  { shape: l, properties: { Size: 'Large' } },
+]);
+// Multiple properties:
+const container2 = penpotUtils.createVariantContainer([
+  { shape: s, properties: { Size: 'Small', State: 'Default' } },
+  { shape: m, properties: { Size: 'Medium', State: 'Default' } },
+  { shape: l, properties: { Size: 'Large', State: 'Hover' } },
+]);
+```
+
+If you must use the lower-level API, follow this exact order — skipping or reordering steps leaves the variant broken:
+1. `penpot.createVariantFromComponents(mainInstances: Board[]): VariantContainer` — combines several main component instances into a new variant group. All components end up inside a single new container on the canvas; always creates one property called `"Property 1"`.
+2. `container.variants.renameProperty(0, name)` — rename `Property 1`.
+3. For each extra property: `variants.addProperty()` then `variants.renameProperty(pos, name)`.
+4. For every component × every property: iterate `variants.variantComponents()` and call `comp.setVariantProperty(pos, value)`.
 
 **Adding a variant to an existing group**:
 Use `variantContainer.appendChild(mainInstance)` to move a component's main instance into the container, then set its position manually and assign property values via `setVariantProperty`.
@@ -304,6 +343,7 @@ Use `variantContainer.appendChild(mainInstance)` to move a component's main inst
 **Using Variants**:
 - `compInstance.switchVariant(pos, value)`: On a component instance, switches to the nearest variant that has the given value at property position `pos`, keeping all other property values the same.
 - To instantiate a specific variant, find the right `LibraryVariantComponent` by checking `variantProps`, then call `.instance()`.
+- Given a variant component instance, access the component it was instantiated from via `instance.component()` and the `Variants` instance via `instance.component().variants`.
 
 # Design Tokens
 
@@ -312,18 +352,18 @@ Design tokens are reusable design values (colors, dimensions, typography, etc.) 
 The token library: `penpot.library.local.tokens` (type: `TokenCatalog`)
   * `sets: TokenSet[]` - Token collections (order matters for precedence)
   * `themes: TokenTheme[]` - Presets that activate specific sets
-  * `addSet(name: string): TokenSet` - Create new set
-  * `addTheme(group: string, name: string): TokenTheme` - Create new theme
+  * `addSet({name: string}): TokenSet` - Create new set
+  * `addTheme({group: string, name: string}): TokenTheme` - Create new theme
 
 `TokenSet` contains tokens with unique names:
   * `active: boolean` - Only active sets affect shapes; use `set.toggleActive()` to change: `if (!set.active) set.toggleActive();`
   * `tokens: Token[]` - All tokens in set
-  * `addToken(type: TokenType, name: string, value: TokenValueString): Token` - Creates a token, adding it to the set.
+  * `addToken({type: TokenType, name: string, value: TokenValueString}): Token` - Creates a token, adding it to the set.
      - `TokenType`: "color" | "dimension" | "spacing" | "typography" | "shadow" | "opacity" | "borderRadius" | "borderWidth" | "fontWeights" | "fontSizes" | "fontFamilies" | "letterSpacing" | "textDecoration" | "textCase"
      - `value`: depends on the type of token (inspect `Token` and related types)
      - Examples:
-       const token = set.addToken("color", "color.primary", "#0066FF"); // direct value
-       const token2 = set.addToken("color", "color.accent", "{color.primary}"); // reference to another token
+       const token = set.addToken({type: "color", name: "color.primary", value: "#0066FF"}); // direct value
+       const token2 = set.addToken({type: "color", name: "color.accent", value: "{color.primary}"}); // reference to another token
 
 `Token`: union type encompassing various token types, with common properties:
   * `name: string` - Token name (typically structured, e.g. "color.base.white")
@@ -342,7 +382,7 @@ Applying tokens:
     (if properties is undefined, use a default property based on the token type - not usually recommended).
     `TokenProperty` is a union type; possible values are:
     - "all": applies the token to all properties it can control
-    - TokenBorderRadiusProps: "r1", "r2", "r3", "r4"
+    - TokenBorderRadiusProps: "borderRadiusTopLeft", "borderRadiusTopRight", "borderRadiusBottomRight", "borderRadiusBottomLeft"
     - TokenShadowProps: "shadow"
     - TokenColorProps: "fill", "strokeColor"
     - TokenDimensionProps: "x", "y", "strokeWidth"
@@ -353,19 +393,19 @@ Applying tokens:
     - TokenNumberProps: "rotation"
     - TokenOpacityProps: "opacity"
     - TokenSizingProps: "width", "height", "layoutItemMinW", "layoutItemMaxW", "layoutItemMinH", "layoutItemMaxH"
-    - TokenSpacingProps: "rowGap", "columnGap", "p1", "p2", "p3", "p4", "m1", "m2", "m3", "m4"
+    - TokenSpacingProps: "rowGap", "columnGap", "paddingLeft", "paddingTop", "paddingRight", "paddingBottom", "marginLeft", "marginTop", "marginRight", "marginBottom"
     - TokenBorderWidthProps: "strokeWidth"
     - TokenTextCaseProps: "textCase"
     - TokenTextDecorationProps: "textDecoration"
     - TokenTypographyProps: "typography"
   * `token.applyToShapes(shapes, properties)` - Apply from token
-  * Application is **asynchronous** (wait for ~100ms to see the effects)
+  * Application is **asynchronous** (use `waitForLayoutUpdate`)
   * After application:
      - `shape.tokens` returns a mapping `{ propertyName: "token.name" }` from `TokenProperty` to token name
      - The actual shape properties that the tokens control will reflect the token's resolved value.
 
 Removing tokens:
-  Simply set the respective property directly - token binding is automatically removed, e.g.  
+  Simply set the respective property directly - token binding is automatically removed, e.g.
   shape.fills = [{ fillColor: "#000000", fillOpacity: 1 }]; // Removes fill token
 
 # Visual Inspection of Designs
@@ -377,6 +417,9 @@ For many tasks, it can be critical to visually inspect the design. Remember to u
 * When transferring styles from a Penpot design to code, make sure that you strictly adhere to the design.
   NEVER make assumptions about missing values and don't get overly creative (e.g. don't pick your own colours and stick to
   non-creative defaults such as white/black if you are lacking information).
+* When creating new designs,
+   - ensure a clean internal structure by applying flex and grid layouts when appropriate
+   - ensure proper semantic naming of elements.
 
 # Revising Designs
 

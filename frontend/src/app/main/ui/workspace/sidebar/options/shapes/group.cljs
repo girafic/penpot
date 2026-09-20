@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.workspace.sidebar.options.shapes.group
   (:require-macros [app.main.style :as stl])
@@ -11,19 +11,19 @@
    [app.common.data.macros :as dm]
    [app.common.types.shape.layout :as ctl]
    [app.main.refs :as refs]
-   [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.color-selection :refer [color-selection-menu*]]
-   [app.main.ui.workspace.sidebar.options.menus.constraints :refer [constraints-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.constraints :refer [constraints-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.exports :refer [exports-menu* exports-attrs]]
    [app.main.ui.workspace.sidebar.options.menus.fill :as fill]
    [app.main.ui.workspace.sidebar.options.menus.grid-cell :as grid-cell]
    [app.main.ui.workspace.sidebar.options.menus.layer :refer [layer-menu*]]
-   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [layout-container-flex-attrs layout-container-menu]]
-   [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [layout-container-flex-attrs layout-container-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.measures :refer [measures-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.shadow :refer [shadow-menu*]]
-   [app.main.ui.workspace.sidebar.options.menus.stroke :refer [stroke-menu]]
-   [app.main.ui.workspace.sidebar.options.menus.svg-attrs :refer [svg-attrs-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.stroke :refer [stroke-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.svg-attrs :refer [svg-attrs-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.text :as ot]
    [app.main.ui.workspace.sidebar.options.shapes.multiple :refer [get-attrs]]
    [rumext.v2 :as mf]))
@@ -36,6 +36,9 @@
         type   (dm/get-prop shape :type)
         ids    (mf/with-memo [id] [id])
         shapes (mf/with-memo [shape] [shape])
+
+        typographies
+        (mf/deref refs/workspace-file-typography)
 
         applied-tokens
         (get shape :applied-tokens)
@@ -90,20 +93,38 @@
         [constraint-ids constraint-values]
         (get-attrs shapes objects :constraint)
 
-        [fill-ids fill-values fill-tokens]
-        (get-attrs shapes objects :fill)
-
         [shadow-ids]
         (get-attrs shapes objects :shadow)
 
         [blur-ids blur-values]
         (get-attrs shapes objects :blur)
 
-        [stroke-ids stroke-values stroke-tokens]
-        (get-attrs shapes objects :stroke)
+        transform
+        (mf/deref refs/current-transform)
 
-        [text-ids text-values]
-        (get-attrs shapes objects :text)
+        ;; A transform cannot change the descendants read here.
+        descendant-attrs-ref
+        (mf/use-ref nil)
+
+        descendant-attrs
+        (let [cached (mf/ref-val descendant-attrs-ref)]
+          (if (and (some? transform) (some? cached))
+            cached
+            (let [attrs {:fill   (get-attrs shapes objects :fill)
+                         :stroke (get-attrs shapes objects :stroke)
+                         :text   (get-attrs shapes objects :text)
+                         :colors (vals objects)}]
+              (mf/set-ref-val! descendant-attrs-ref attrs)
+              attrs)))
+
+        [fill-ids fill-values fill-tokens]
+        (get descendant-attrs :fill)
+
+        [stroke-ids stroke-values stroke-tokens]
+        (get descendant-attrs :stroke)
+
+        [text-ids text-values text-tokens]
+        (get descendant-attrs :text)
 
         [layout-item-ids layout-item-values]
         (get-attrs shapes objects :layout-item)]
@@ -119,7 +140,7 @@
                          :values measure-values
                          :shapes shapes}]
 
-     [:& layout-container-menu
+     [:> layout-container-menu*
       {:type type
        :ids [(:id shape)]
        :values layout-container-values
@@ -127,23 +148,24 @@
        :multiple false}]
 
      (when (and (= (count ids) 1) is-layout-child? is-grid-parent?)
-       [:& grid-cell/options
-        {:shape (first parents)
+       [:> grid-cell/options*
+        {:shape-id (-> (first parents)
+                       :id)
          :cell (ctl/get-cell-by-shape-id (first parents) (first ids))}])
 
      (when is-layout-child?
-       [:& layout-item-menu
+       [:> layout-item-menu*
         {:type type
          :ids layout-item-ids
-         :is-layout-child? true
-         :is-layout-container? false
-         :is-flex-parent? is-flex-parent?
-         :is-grid-parent? is-grid-parent?
+         :is-layout-child true
+         :is-layout-container false
+         :is-flex-parent is-flex-parent?
+         :is-grid-parent is-grid-parent?
          :applied-tokens applied-tokens
          :values layout-item-values}])
 
      (when (or (not ^boolean is-layout-child?) ^boolean is-layout-child-absolute?)
-       [:& constraints-menu {:ids constraint-ids :values constraint-values}])
+       [:> constraints-menu* {:ids constraint-ids :values constraint-values}])
 
      (when-not (empty? fill-ids)
        [:> fill/fill-menu*
@@ -153,14 +175,14 @@
          :applied-tokens fill-tokens}])
 
      (when-not (empty? stroke-ids)
-       [:& stroke-menu {:type type
-                        :ids stroke-ids
-                        :values stroke-values
-                        :applied-tokens stroke-tokens}])
+       [:> stroke-menu* {:type type
+                         :ids stroke-ids
+                         :values stroke-values
+                         :applied-tokens stroke-tokens}])
 
      [:> color-selection-menu*
       {:type type
-       :shapes (vals objects)
+       :shapes (get descendant-attrs :colors)
        :file-id file-id
        :libraries libraries}]
 
@@ -168,13 +190,19 @@
        [:> shadow-menu* {:ids ids :values (get shape :shadow) :type type}])
 
      (when-not (empty? blur-ids)
-       [:& blur-menu {:type type :ids blur-ids :values blur-values}])
+       [:> blur-menu* {:type type :ids blur-ids :values blur-values}])
 
      (when-not (empty? text-ids)
-       [:& ot/text-menu {:type type :ids text-ids :values text-values}])
+       [:> ot/text-menu* {:type type
+                          :ids text-ids
+                          :values text-values
+                          :applied-tokens text-tokens
+                          :libraries libraries
+                          :file-id file-id
+                          :typographies typographies}])
 
      (when-not (empty? svg-values)
-       [:& svg-attrs-menu {:ids ids :values svg-values}])
+       [:> svg-attrs-menu* {:ids ids :values svg-values}])
 
      [:> exports-menu* {:type type
                         :ids ids

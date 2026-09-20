@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.workspace.sidebar.options.shapes.multiple
   (:require-macros [app.main.style :as stl])
@@ -12,6 +12,7 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
+   [app.common.math :as mth]
    [app.common.types.component :as ctk]
    [app.common.types.path :as path]
    [app.common.types.shape.attrs :refer [editable-attrs]]
@@ -20,18 +21,18 @@
    [app.common.types.token :as tt]
    [app.common.weak :as weak]
    [app.main.refs :as refs]
-   [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-attrs blur-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-attrs blur-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.color-selection :refer [color-selection-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.component :refer [component-menu*]]
-   [app.main.ui.workspace.sidebar.options.menus.constraints :refer [constraint-attrs constraints-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.constraints :refer [constraint-attrs constraints-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.exports :refer [exports-attrs exports-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.fill :as fill]
    [app.main.ui.workspace.sidebar.options.menus.layer :refer [layer-attrs layer-menu*]]
-   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [layout-container-flex-attrs layout-container-menu]]
-   [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-attrs layout-item-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [layout-container-flex-attrs layout-container-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-attrs layout-item-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.measures :refer [select-measure-keys measure-attrs measures-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.shadow :refer [shadow-attrs shadow-menu*]]
-   [app.main.ui.workspace.sidebar.options.menus.stroke :refer [stroke-attrs stroke-menu]]
+   [app.main.ui.workspace.sidebar.options.menus.stroke :refer [stroke-attrs stroke-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.text :as ot]
    [rumext.v2 :as mf]))
 
@@ -48,6 +49,7 @@
     :fill             :shape
     :shadow           :shape
     :blur             :shape
+    :background-blur  :shape
     :stroke           :shape
     :text             :children
     :exports          :shape
@@ -61,6 +63,7 @@
     :fill             :children
     :shadow           :shape
     :blur             :shape
+    :background-blur  :shape
     :stroke           :children
     :text             :children
     :exports          :shape
@@ -74,6 +77,7 @@
     :fill             :shape
     :shadow           :shape
     :blur             :shape
+    :background-blur  :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -87,6 +91,7 @@
     :fill             :text
     :shadow           :shape
     :blur             :shape
+    :background-blur  :shape
     :stroke           :shape
     :text             :text
     :exports          :shape
@@ -100,6 +105,7 @@
     :fill             :ignore
     :shadow           :shape
     :blur             :shape
+    :background-blur  :shape
     :stroke           :ignore
     :text             :ignore
     :exports          :shape
@@ -113,6 +119,7 @@
     :fill             :shape
     :shadow           :shape
     :blur             :shape
+    :background-blur  :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -126,6 +133,7 @@
     :fill             :shape
     :shadow           :shape
     :blur             :shape
+    :background-blur  :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -139,6 +147,7 @@
     :fill             :shape
     :shadow           :shape
     :blur             :shape
+    :background-blur  :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -152,6 +161,7 @@
     :fill             :shape
     :shadow           :shape
     :blur             :shape
+    :background-blur  :shape
     :stroke           :shape
     :text             :ignore
     :exports          :shape
@@ -199,18 +209,87 @@
   [v]
   (when v (select-keys v blur-keys)))
 
+(def layout-padding-attrs [:p1 :p2 :p3 :p4])
+
+(defn- normalize-layout-padding
+  [value]
+  (if (= value :multiple)
+    (zipmap layout-padding-attrs (repeat :multiple))
+    value))
+
+(defn- merge-layout-padding
+  [values shape-values]
+  (let [current (normalize-layout-padding (get values :layout-padding ::unset))
+        next    (normalize-layout-padding (get shape-values :layout-padding ::unset))]
+    (cond
+      (= current ::unset) next
+      (= next ::unset)    current
+
+      (and (map? current) (map? next))
+      (attrs/get-attrs-multi [current next] layout-padding-attrs)
+
+      (= current next)
+      current
+
+      :else
+      :multiple)))
+
+(defn- same-padding-value?
+  [v1 v2]
+  (if (and (number? v1) (number? v2))
+    (mth/close? v1 v2)
+    (= v1 v2)))
+
+(defn- simple-layout-padding?
+  [{:keys [p1 p2 p3 p4]}]
+  (and (same-padding-value? p1 p3)
+       (same-padding-value? p2 p4)))
+
+(defn- promote-simple-layout-padding-type
+  [{:keys [layout-padding layout-padding-type] :as values}]
+  (cond-> values
+    (and (= layout-padding-type :simple)
+         (map? layout-padding)
+         (not (simple-layout-padding? layout-padding)))
+    (assoc :layout-padding-type :multiple)))
+
+(defn- merge-layout-container-attrs
+  [values shape-values attrs]
+  (let [merged-values (attrs/get-attrs-multi [values shape-values] attrs)
+        merged-values (cond-> merged-values
+                        (or (contains? values :layout-padding)
+                            (contains? shape-values :layout-padding))
+                        (assoc :layout-padding (merge-layout-padding values shape-values)))]
+    (promote-simple-layout-padding-type merged-values)))
+
 (defn get-attrs*
   "Given a group of attributes that we want to extract and the shapes to extract them from
   returns a list of tuples [id, values] with the extracted properties for the shapes that
   applies (some of them ignore some attributes)"
   [shapes objects attr-group]
   (let [attrs (group->attrs attr-group)
+
+        type->editable-attrs
+        (memoize (fn [type]
+                   (if-let [editable? (get editable-attrs type)]
+                     (filterv editable? attrs)
+                     [])))
+
+        type->nil-values
+        (memoize (fn [type] (into {} (map (fn [attr] [attr nil])) (type->editable-attrs type))))
+
+        type->token-attrs
+        (memoize (fn [type]
+                   (into [] (comp (mapcat tt/shape-attr->token-attrs) (distinct))
+                         (type->editable-attrs type))))
+
         merge-attrs
         (fn [v1 v2]
           (cond
-            (= attr-group :shadow) (attrs/get-attrs-multi [v1 v2] attrs shadow-eq shadow-sel)
-            (= attr-group :blur)   (attrs/get-attrs-multi [v1 v2] attrs blur-eq blur-sel)
-            :else                  (attrs/get-attrs-multi [v1 v2] attrs)))
+            (= attr-group :shadow)           (attrs/get-attrs-multi [v1 v2] attrs shadow-eq shadow-sel)
+            (= attr-group :blur)             (attrs/get-attrs-multi [v1 v2] attrs blur-eq blur-sel)
+            (= attr-group :layout-container) (merge-layout-container-attrs v1 v2 attrs)
+            :else                            (attrs/get-attrs-multi [v1 v2] attrs)))
 
         merge-attr
         (fn [acc applied-tokens t-attr]
@@ -225,24 +304,31 @@
               (= existing new-val)     acc
               :else                    (assoc acc t-attr :multiple))))
 
-        merge-shape-attr
-        (fn [acc applied-tokens shape-attr]
-          "Merges all token attributes derived from a single shape attribute
-           into the accumulator map using `merge-attr`."
-          (let [token-attrs (tt/shape-attr->token-attrs shape-attr)]
-            (reduce #(merge-attr %1 applied-tokens %2) acc token-attrs)))
+        ;; Merging an empty `applied-tokens` into an accumulator that a previous
+        ;; empty merge already produced is a fixed point, so long runs of
+        ;; token-less shapes of the same type only pay for the first one.
+        stable-token-acc (volatile! nil)
 
         merge-token-values
-        (fn [acc shape-attrs applied-tokens]
-          "Merges token values across all shape attributes.
-           For each shape attribute, its corresponding token attributes are merged
-           into the accumulator."
-          (reduce #(merge-shape-attr %1 applied-tokens %2) acc shape-attrs))
+        (fn [acc token-attrs applied-tokens]
+          "Merges token values across all token attributes derived from the shape's
+           editable attributes."
+          (let [no-tokens? (empty? applied-tokens)
+                stable     (deref stable-token-acc)]
+            (if (and no-tokens?
+                     (some? stable)
+                     (identical? (nth stable 0) token-attrs)
+                     (identical? (nth stable 1) acc))
+              acc
+              (let [result (reduce #(merge-attr %1 applied-tokens %2) acc token-attrs)]
+                (when no-tokens?
+                  (vreset! stable-token-acc [token-attrs result]))
+                result))))
 
         extract-attrs
         (fn [[ids values token-acc] {:keys [id type applied-tokens] :as shape}]
           (let [read-mode      (get-in type->read-mode [type attr-group])
-                editable-attrs (filter (get editable-attrs (:type shape)) attrs)]
+                editable-attrs (type->editable-attrs type)]
             (case read-mode
               :ignore
               [ids values]
@@ -251,11 +337,14 @@
               (let [;; Get the editable attrs from the shape, ensuring that all attributes
                     ;; are present, with value nil if they are not present in the shape.
                     shape-values (merge
-                                  (into {} (map #(vector % nil)) editable-attrs)
+                                  (type->nil-values type)
                                   (cond
                                     (= attr-group :measure) (select-measure-keys shape)
                                     :else (select-keys shape editable-attrs)))
-                    new-token-acc (merge-token-values token-acc editable-attrs applied-tokens)]
+                    shape-values (cond-> shape-values
+                                   (= attr-group :layer)
+                                   (update :hidden #(if (nil? %) false %)))
+                    new-token-acc (merge-token-values token-acc (type->token-attrs type) applied-tokens)]
                 [(conj ids id)
                  (merge-attrs values shape-values)
                  new-token-acc])
@@ -271,7 +360,7 @@
                         (merge-attrs shape-attrs)
                         (merge-attrs content-attrs))
 
-                    new-token-acc (merge-token-values token-acc content-attrs applied-tokens)]
+                    new-token-acc (merge-token-values token-acc (type->token-attrs type) applied-tokens)]
                 [(conj ids id)
                  new-values
                  new-token-acc])
@@ -326,6 +415,9 @@
   (let [shape-ids
         (mf/with-memo [shapes]
           (into #{} d/xf:map-id shapes))
+
+        typographies
+        (mf/deref refs/workspace-file-typography)
 
         is-layout-child-ref
         (mf/with-memo [shape-ids]
@@ -385,7 +477,7 @@
         [layer-ids layer-values layer-tokens]
         (get-attrs shapes objects :layer)
 
-        [text-ids text-values]
+        [text-ids text-values text-tokens]
         (get-attrs shapes objects :text)
 
         [constraint-ids constraint-values]
@@ -456,7 +548,7 @@
      (when (some? components)
        [:> component-menu* {:shapes components}])
 
-     [:& layout-container-menu
+     [:> layout-container-menu*
       {:type type
        :ids layout-container-ids
        :values layout-container-values
@@ -464,21 +556,28 @@
        :multiple true}]
 
      (when (or is-layout-child? has-flex-layout-container?)
-       [:& layout-item-menu
+       [:> layout-item-menu*
         {:type type
          :ids layout-item-ids
-         :is-layout-child? all-layout-child?
-         :is-layout-container? all-flex-layout-container?
-         :is-flex-parent? is-flex-parent?
-         :is-grid-parent? is-grid-parent?
+         :is-layout-child all-layout-child?
+         :is-layout-container all-flex-layout-container?
+         :is-flex-parent is-flex-parent?
+         :is-grid-parent is-grid-parent?
          :applied-tokens layout-item-tokens
          :values layout-item-values}])
 
      (when-not (or (empty? constraint-ids) ^boolean is-layout-child?)
-       [:& constraints-menu {:ids constraint-ids :values constraint-values}])
+       [:> constraints-menu* {:ids constraint-ids :values constraint-values}])
 
      (when-not (empty? text-ids)
-       [:& ot/text-menu {:type type :ids text-ids :values text-values}])
+       [:> ot/text-menu*
+        {:type type
+         :ids text-ids
+         :values text-values
+         :applied-tokens text-tokens
+         :libraries libraries
+         :file-id file-id
+         :typographies typographies}])
 
      (when-not (empty? fill-ids)
        [:> fill/fill-menu* {:type type
@@ -487,12 +586,12 @@
                             :applied-tokens fill-tokens}])
 
      (when-not (empty? stroke-ids)
-       [:& stroke-menu {:type type
-                        :ids stroke-ids
-                        :show-caps show-caps?
-                        :values stroke-values
-                        :disable-stroke-style has-text?
-                        :applied-tokens stroke-tokens}])
+       [:> stroke-menu* {:type type
+                         :ids stroke-ids
+                         :show-caps show-caps?
+                         :values stroke-values
+                         :disable-stroke-style has-text?
+                         :applied-tokens stroke-tokens}])
 
      (when-not (empty? shapes)
        [:> color-selection-menu*
@@ -507,7 +606,7 @@
                          :values (get shadow-values :shadow)}])
 
      (when-not (empty? blur-ids)
-       [:& blur-menu {:type type :ids blur-ids :values blur-values}])
+       [:> blur-menu* {:type type :ids blur-ids :values blur-values}])
 
      (when-not (empty? exports-ids)
        [:> exports-menu* {:type type

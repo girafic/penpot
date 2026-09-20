@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.workspace.viewport.hooks
   (:require
@@ -25,6 +25,7 @@
    [app.main.features :as features]
    [app.main.store :as st]
    [app.main.streams :as ms]
+   [app.main.ui.css-cursors :as cur]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.workspace.shapes.frame.dynamic-modifiers :as sfd]
    [app.main.ui.workspace.viewport.actions :as actions]
@@ -44,9 +45,12 @@
 
 (defn setup-dom-events
   [zoom disable-paste-ref in-viewport-ref workspace-read-only? drawing-tool drawing-path?]
-  (let [on-key-down       (actions/on-key-down)
+  (let [zoom-ref          (mf/use-ref zoom)
+        _                 (mf/with-effect [zoom]
+                            (mf/set-ref-val! zoom-ref zoom))
+        on-key-down       (actions/on-key-down)
         on-key-up         (actions/on-key-up)
-        on-mouse-wheel    (actions/on-mouse-wheel zoom)
+        on-mouse-wheel    (actions/on-mouse-wheel zoom-ref)
         on-paste          (actions/on-paste disable-paste-ref in-viewport-ref workspace-read-only?)
         on-pointer-down   (mf/use-fn
                            (mf/deps drawing-tool drawing-path?)
@@ -67,7 +71,7 @@
 
         #(events/unlistenByKey key)))
 
-    (mf/with-layout-effect [on-key-down on-key-up on-mouse-wheel on-paste workspace-read-only?]
+    (mf/with-layout-effect [on-key-down on-key-up on-paste workspace-read-only?]
       (let [keys [(events/listen js/document EventType.KEYDOWN on-key-down)
                   (events/listen js/document EventType.KEYUP on-key-up)
                   ;; bind with passive=false to allow the event to be cancelled
@@ -88,9 +92,9 @@
       (when (not= size vport)
         (st/emit! (dw/initialize-viewport (dom/get-client-size prnt)))))))
 
-(defn setup-cursor [cursor alt? mod? space? panning drawing-tool drawing-path? path-editing? z? workspace-read-only?]
+(defn setup-cursor [cursor alt? mod? space? panning drawing-tool drawing-path? path-editing? path-drag-cursor z? workspace-read-only?]
   (mf/use-effect
-   (mf/deps @cursor @alt? @mod? @space? panning drawing-tool drawing-path? path-editing? z? workspace-read-only?)
+   (mf/deps @cursor @alt? @mod? @space? panning drawing-tool drawing-path? path-editing? path-drag-cursor z? workspace-read-only?)
    (fn []
      (let [show-pen? (or (= drawing-tool :path)
                          (and drawing-path?
@@ -105,18 +109,20 @@
            (cond
              (and @mod? @space?)             (utils/get-cursor :zoom)
              (or panning @space?)            (utils/get-cursor :hand)
+             ;; Keep the drag cursor across the viewport.
+             (some? path-drag-cursor)        (cur/get-static path-drag-cursor)
              (= drawing-tool :comments)      (utils/get-cursor :comments)
              (= drawing-tool :frame)         (utils/get-cursor :create-artboard)
              (= drawing-tool :rect)          (utils/get-cursor :create-rectangle)
              (= drawing-tool :circle)        (utils/get-cursor :create-ellipse)
              (and show-zoom? (not @alt?))    (utils/get-cursor :zoom-in)
              (and show-zoom? @alt?)          (utils/get-cursor :zoom-out)
-             show-pen?                       (utils/get-cursor :pen)
+             show-pen?                       (utils/get-cursor :draw-path)
              (= drawing-tool :curve)         (utils/get-cursor :pencil)
              drawing-tool                    (utils/get-cursor :create-shape)
+             path-editing?                   (utils/get-cursor :edit-path)
              (and
               @alt?
-              (not path-editing?)
               (not workspace-read-only?))    (utils/get-cursor :duplicate)
              :else                           (utils/get-cursor :pointer-inner))]
 
@@ -174,14 +180,15 @@
                            (dw/increase-zoom)))))))
 
 (defn setup-hover-shapes
-  [page-id move-stream objects transform selected mod? hover measure-hover hover-ids hover-top-frame-id hover-disabled? focus zoom show-measures?]
+  [page-id move-stream objects selected mod? hover measure-hover hover-ids hover-top-frame-id hover-disabled? focus zoom show-measures? read-only? transform]
   (let [;; We use ref so we don't recreate the stream on a change
         zoom-ref (mf/use-ref zoom)
         mod-ref (mf/use-ref @mod?)
-        transform-ref (mf/use-ref nil)
         selected-ref (mf/use-ref selected)
         hover-disabled-ref (mf/use-ref hover-disabled?)
         focus-ref (mf/use-ref focus)
+        transform-ref (mf/use-ref transform)
+        read-only-ref (mf/use-ref read-only?)
 
         last-point-ref (mf/use-var nil)
         mod-str (mf/use-memo #(rx/subject))
@@ -194,7 +201,7 @@
                  rect (grc/center->rect point (/ 5 zoom))]
 
              (if (mf/ref-val hover-disabled-ref)
-               (rx/of nil)
+               (rx/of [])
                (->> (mw/ask-buffered!
                      {:cmd :index/query-selection
                       :page-id page-id
@@ -219,7 +226,6 @@
 
                 (->> move-stream
                      (rx/tap #(reset! last-point-ref %))
-                     ;; When transforming shapes we stop querying the worker
                      (rx/merge-map query-point)))
 
                (rx/share)))
@@ -228,10 +234,6 @@
         (->> over-shapes-stream (rx/debounce 50))]
 
     ;; Refresh the refs on a value change
-    (mf/use-effect
-     (mf/deps transform)
-     #(mf/set-ref-val! transform-ref transform))
-
     (mf/use-effect
      (mf/deps zoom)
      #(mf/set-ref-val! zoom-ref zoom))
@@ -254,17 +256,25 @@
      (mf/deps focus)
      #(mf/set-ref-val! focus-ref focus))
 
+    (mf/use-effect
+     (mf/deps transform)
+     #(mf/set-ref-val! transform-ref transform))
+
+    (mf/use-effect
+     (mf/deps read-only?)
+     #(mf/set-ref-val! read-only-ref read-only?))
+
     (hooks/use-stream
      over-shapes-stream-debounced
      (mf/deps objects)
      (fn [_]
-       (reset! hover-top-frame-id (ctt/top-nested-frame objects (deref last-point-ref)))))
+       (reset! hover-top-frame-id (ctt/top-nested-frame objects (deref last-point-ref) nil (mf/ref-val read-only-ref)))))
 
     ;; This ref is a cache of sorted ids. Sorting is expensive so we save the list
     (let [sorted-ids-cache (mf/use-ref {})]
       (hooks/use-stream
        over-shapes-stream
-       (mf/deps page-id objects show-measures?)
+       (mf/deps page-id objects show-measures? read-only?)
        (fn [ids]
          (let [selected   (mf/ref-val selected-ref)
                focus      (mf/ref-val focus-ref)
@@ -276,7 +286,7 @@
                  (let [sorted-ids
                        (into (d/ordered-set)
                              (comp (remove (partial cfh/hidden-parent? objects))
-                                   (remove #(dm/get-in objects [% :blocked]))
+                                   (remove #(and (not read-only?) (dm/get-in objects [% :blocked])))
                                    (remove (partial cfh/svg-raw-shape? objects)))
                              (ctt/sort-z-index objects ids {:bottom-frames? mod?}))]
                    (mf/set-ref-val! sorted-ids-cache (assoc cached-ids [mod? ids] sorted-ids))
@@ -314,8 +324,16 @@
                    (filter #(or (root-frame-with-data? %)
                                 (and (cfh/group-shape? objects %)
                                      (not (contains? child-parent? %)))
+                                ;; WASM only: drop text from @hover unless the
+                                ;; cursor is over rendered glyphs, so clicks
+                                ;; pass through empty areas of the text box.
+                                ;; Skip this for shapes already in `selected`:
+                                ;; @hover drives on-click, and the first click
+                                ;; of a double-click would otherwise reselect
+                                ;; a parent/container after the pointer moves.
                                 (and (features/active-feature? @st/state "render-wasm/v1")
                                      (cfh/text-shape? (get objects %))
+                                     (not (contains? selected %))
                                      (not (wasm.api/intersect-position-in-shape % @last-point-ref)))))))
 
                remove-measure-xf
@@ -364,7 +382,9 @@
                       (get objects)))]
            (reset! hover hover-shape)
            (reset! measure-hover measure-hover-shape)
-           (reset! hover-ids ids)))
+           ;; Skip hover-ids update during drag
+           (when (not= :move (mf/ref-val transform-ref))
+             (reset! hover-ids ids))))
 
        (fn []
          ;; Clean the cache
@@ -462,24 +482,31 @@
 
 (defn setup-shortcuts
   [path-editing? drawing-path? text-editing? grid-editing?]
-  (hooks/use-shortcuts ::workspace wsc/shortcuts)
+  (hooks/use-shortcuts ::workspace wsc/shortcuts :workspace)
+
+  (mf/with-effect []
+    (.addEventListener js/window "keydown" wsc/on-display-guides-keydown)
+    (fn []
+      (.removeEventListener js/window "keydown" wsc/on-display-guides-keydown)))
 
   (mf/with-effect [path-editing? drawing-path? grid-editing?]
     (cond
       grid-editing?
       (do
-        (st/emit! (dsc/push-shortcuts ::grid gsc/shortcuts))
+        (st/emit! (dsc/push-shortcuts ::grid gsc/shortcuts :workspace
+                                      :merge-shortcuts :auto))
         (fn []
           (st/emit! (dsc/pop-shortcuts ::grid))))
 
       (or drawing-path? path-editing?)
       (do
-        (st/emit! (dsc/push-shortcuts ::path psc/shortcuts))
+        (st/emit! (dsc/push-shortcuts ::path psc/shortcuts :workspace
+                                      :merge-shortcuts :auto))
         (fn []
           (st/emit! (dsc/pop-shortcuts ::path))))
 
       text-editing?
       (do
-        (st/emit! (dsc/push-shortcuts ::text tsc/shortcuts))
+        (st/emit! (dsc/push-shortcuts ::text tsc/shortcuts :workspace))
         (fn []
           (st/emit! (dsc/pop-shortcuts ::text)))))))

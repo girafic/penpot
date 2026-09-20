@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.workspace.tokens.management.forms.controls.token-parsing
   (:require
@@ -22,6 +22,18 @@
        :end (or (str/index-of value "}" last-open) cursor)
        :partial (subs text-before (inc last-open))})))
 
+(defn token-at-cursor
+  "Returns the full token name at the cursor position if cursor is
+  inside a complete {token-name} reference, nil otherwise."
+  [value cursor]
+  (let [last-open  (str/last-index-of (subs value 0 cursor) "{")
+        last-close (str/index-of value "}" (or last-open 0))]
+    (when (and last-open last-close (> last-close last-open))
+      (let [token-name (subs value (inc last-open) last-close)]
+        (when (and (seq token-name)
+                   (not (str/includes? token-name " ")))
+          token-name)))))
+
 
 (defn active-token [value input-node]
   (let [cursor (dom/selection-start input-node)]
@@ -38,9 +50,12 @@
 (defn select-option-by-id
   [id options-ref input-node value]
   (let [cursor     (dom/selection-start input-node)
+        sel-end    (dom/selection-end input-node)
         options    (mf/ref-val options-ref)
         options    (if (delay? options) @options options)
 
         option     (get-option options id)
         name       (:name option)]
-    (cto/insert-ref value cursor name)))
+    (if (= cursor sel-end)
+      (cto/insert-ref value cursor name)
+      (cto/build-result value cursor sel-end name))))

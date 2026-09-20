@@ -2,17 +2,20 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.data.plugins
   (:require
    [app.common.data.macros :as dm]
+   [app.common.exceptions :as ex]
    [app.common.files.changes-builder :as pcb]
+   [app.common.logging :as log]
    [app.common.time :as ct]
    [app.main.data.changes :as dch]
    [app.main.data.event :as ev]
    [app.main.data.modal :as modal]
    [app.main.data.notifications :as ntf]
+   [app.main.errors :as errors]
    [app.main.store :as st]
    [app.plugins.flags :as pflag]
    [app.plugins.register :as preg]
@@ -20,7 +23,8 @@
    [app.util.http :as http]
    [app.util.i18n :as i18n :refer [tr]]
    [beicon.v2.core :as rx]
-   [potok.v2.core :as ptk]))
+   [potok.v2.core :as ptk]
+   [promesa.core :as p]))
 
 (defn save-plugin-permissions-peek
   [id permissions]
@@ -35,6 +39,7 @@
                     :uri plugin-url
                     :omit-default-headers true
                     :response-type :json})
+       (rx/timeout 15000)
        (rx/map :body)
        (rx/map #(preg/parse-manifest plugin-url %))))
 
@@ -54,46 +59,63 @@
 
 (defn start-plugin!
   [{:keys [plugin-id name version description host code permissions allow-background]} ^js extensions]
-  (.ɵloadPlugin
-   ^js ug/global
-   #js {:pluginId plugin-id
-        :name name
-        :version version
-        :description description
-        :host host
-        :code code
-        :allowBackground (boolean allow-background)
-        :permissions (apply array permissions)}
-   nil
-   extensions))
+  (let [load-plugin (unchecked-get ug/global "ɵloadPlugin")]
+    (if (fn? load-plugin)
+      (-> (load-plugin
+           #js {:pluginId plugin-id
+                :name name
+                :version version
+                :description description
+                :host host
+                :code code
+                :allowBackground (boolean allow-background)
+                :permissions (apply array permissions)}
+           nil
+           extensions)
+
+          (p/catch (fn [cause]
+                     (ex/print-throwable cause :prefix "Plugin Error")
+                     (errors/flash :cause cause :type :handled))))
+
+      (log/warn :hint "Plugin runtime not initialized yet"
+                :plugin-id plugin-id
+                :action "start-plugin!"))))
 
 (defn- load-plugin!
   [{:keys [plugin-id name version description host code icon permissions]}]
-  (try
-    (st/emit! (pflag/clear plugin-id)
-              (save-current-plugin plugin-id))
+  (st/emit! (pflag/initialize plugin-id version)
+            (save-current-plugin plugin-id))
 
-    (.ɵloadPlugin ^js ug/global
-                  #js {:pluginId plugin-id
-                       :name name
-                       :description description
-                       :version version
-                       :host host
-                       :code code
-                       :icon icon
-                       :permissions (apply array permissions)}
-                  (fn []
-                    (st/emit! (remove-current-plugin plugin-id))))
+  (let [load-plugin (unchecked-get ug/global "ɵloadPlugin")]
+    (if (fn? load-plugin)
+      (-> (load-plugin
+           #js {:pluginId plugin-id
+                :name name
+                :description description
+                :version version
+                :host host
+                :code code
+                :icon icon
+                :permissions (apply array permissions)}
+           (fn []
+             (st/emit! (remove-current-plugin plugin-id))))
 
-    (catch :default e
-      (st/emit! (remove-current-plugin plugin-id))
-      (.error js/console "Error" e))))
+          (p/catch (fn [cause]
+                     (st/emit! (remove-current-plugin plugin-id))
+                     (ex/print-throwable cause :prefix "Plugin Error")
+                     (errors/flash :cause cause :type :handled))))
+
+      (do
+        (log/warn :hint "Plugin runtime not initialized yet"
+                  :plugin-id plugin-id
+                  :action "load-plugin!")
+        (st/emit! (remove-current-plugin plugin-id))))))
 
 (defn open-plugin!
   [{:keys [url] :as manifest} user-can-edit?]
   (if url
     ;; If the saved manifest has a URL we fetch the manifest to check
-    ;; for updates
+    ;; for updates and validate integrity
     (->> (fetch-manifest url)
          (rx/subs!
           (fn [new-manifest]
@@ -105,6 +127,8 @@
               (cond
                 (and is-edition-plugin? (not user-can-edit?))
                 (st/emit! (ntf/warn (tr "workspace.plugins.error.need-editor")))
+
+                ;; Permissions changed - show permissions dialog
                 (not= (:permissions new-manifest) (:permissions manifest))
                 (modal/show!
                  :plugin-permissions-update
@@ -114,23 +138,38 @@
                      (preg/install-plugin! new-manifest)
                      (load-plugin! new-manifest))})
 
+                ;; Manifest changed (code, name, etc.) - require re-confirmation
+                ;; This prevents execution of tampered/injected plugins
                 (not= new-manifest manifest)
-                (do (preg/install-plugin! new-manifest)
-                    (load-plugin! manifest))
+                (modal/show!
+                 :plugin-permissions-update
+                 {:plugin new-manifest
+                  :on-accept
+                  #(do
+                     (preg/install-plugin! new-manifest)
+                     (load-plugin! new-manifest))})
+
+                ;; Manifests match exactly - safe to load
                 :else
                 (load-plugin! manifest))))
-          (fn []
-            ;; Error fetching the manifest we'll load the plugin with the
-            ;; old manifest
-            (load-plugin! manifest))))
+          (fn [_err]
+            ;; Error fetching the manifest - can't verify integrity
+            ;; Show error instead of loading potentially tampered code
+            (st/emit! (ntf/warn (tr "workspace.plugins.error.unreachable"))))))
+    ;; Bundled plugins (no URL) - trusted, load directly
     (load-plugin! manifest)))
 
 (defn close-plugin!
   [{:keys [plugin-id]}]
-  (try
-    (.ɵunloadPlugin ^js ug/global plugin-id)
-    (catch :default e
-      (.error js/console "Error" e))))
+  (let [unload-plugin (unchecked-get ug/global "ɵunloadPlugin")]
+    (if (fn? unload-plugin)
+      (try
+        (unload-plugin plugin-id)
+        (catch :default e
+          (.error js/console "Error" e)))
+      (log/warn :hint "Plugin runtime not initialized yet"
+                :plugin-id plugin-id
+                :action "close-plugin!"))))
 
 (defn close-current-plugin
   [& {:keys [close-only-edition-plugins?]}]

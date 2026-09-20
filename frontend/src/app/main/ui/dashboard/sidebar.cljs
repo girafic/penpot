@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.dashboard.sidebar
   (:require-macros [app.main.style :as stl])
@@ -24,13 +24,16 @@
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*
                                                  dropdown-menu-item*]]
-   [app.main.ui.components.link :refer [link]]
+   [app.main.ui.components.link :refer [link*]]
+   [app.main.ui.components.organization-avatar :refer [organization-avatar*]]
+   [app.main.ui.dashboard.check-updates :as dcu]
    [app.main.ui.dashboard.comments :refer [comments-icon* comments-section]]
    [app.main.ui.dashboard.inline-edition :refer [inline-edition]]
    [app.main.ui.dashboard.project-menu :refer [project-menu*]]
    [app.main.ui.dashboard.subscription :refer [dashboard-cta*
                                                get-subscription-type
                                                menu-team-icon*
+                                               nitrate-current-plan*
                                                nitrate-sidebar*
                                                show-subscription-dashboard-banner?
                                                subscription-sidebar*]]
@@ -38,6 +41,7 @@
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.ds.foundations.assets.raw-svg :refer [raw-svg*]]
+   [app.main.ui.hooks :as hooks :refer [use-focus-timer-ref]]
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.nitrate.nitrate-form]
    [app.util.dom :as dom]
@@ -48,7 +52,6 @@
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
    [goog.functions :as f]
-   [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
 (def ^:private clear-search-icon
@@ -72,19 +75,34 @@
 (def ^:private menu-icon
   (deprecated-icon/icon-xref :menu (stl/css :menu-icon)))
 
+(def ^:private organization-menu-icon
+  (deprecated-icon/icon-xref :menu (stl/css :organization-menu-icon)))
+
+(def ^:private organization-menu-icon-open
+  (deprecated-icon/icon-xref :menu (stl/css :organization-menu-icon-open)))
+
 (def ^:private pin-icon
   (deprecated-icon/icon-xref :pin (stl/css :pin-icon)))
 
 (def ^:private exit-icon
   (deprecated-icon/icon-xref :exit (stl/css :exit-icon)))
 
-(def ^:private add-org-icon
-  (deprecated-icon/icon-xref :add (stl/css :add-org-icon)))
+(def ^:private add-organization-icon
+  (deprecated-icon/icon-xref :add (stl/css :add-organization-icon)))
 
 (def ^:private arrow-up-right-icon
   (deprecated-icon/icon-xref :arrow-up-right (stl/css :arrow-up-right-icon)))
 
 (def ^:private ^:svg-id penpot-logo-icon "penpot-logo-icon")
+(def ^:private ^:svg-id penpot-logo-icon-subtle "penpot-logo-subtle")
+
+(defn schedule-focus-by-id!
+  [ref element-id]
+  (when-let [h (mf/ref-val ref)]
+    (ts/dispose! h))
+  (mf/set-ref-val! ref
+                   (ts/schedule
+                    #(dom/focus-and-untabbable! (dom/get-element element-id)))))
 
 (mf/defc sidebar-project*
   {::mf/private true}
@@ -104,6 +122,8 @@
 
         project-id       (get item :id)
 
+        focus-timer-ref  (use-focus-timer-ref)
+
         on-click
         (mf/use-fn
          (mf/deps project-id)
@@ -115,14 +135,9 @@
          (mf/deps project-id)
          (fn [event]
            (when (kbd/enter? event)
-             (st/emit!
-              (dcm/go-to-dashboard-files :project-id project-id))
-             (ts/schedule
-              (fn []
-                (when-let [title (dom/get-element (str project-id))]
-                  (dom/set-attribute! title "tabindex" "0")
-                  (dom/focus! title)
-                  (dom/set-attribute! title "tabindex" "-1")))))))
+             (schedule-focus-by-id! focus-timer-ref (str project-id))
+             (st/emit! (dcm/go-to-dashboard-files :project-id project-id)))))
+
 
         on-menu-click
         (mf/use-fn
@@ -220,6 +235,8 @@
         focused?    (mf/use-state false)
         emit!       (mf/use-memo #(f/debounce st/emit! 500))
 
+        focus-timer-ref  (use-focus-timer-ref)
+
         on-search-blur
         (mf/use-fn
          (fn [_]
@@ -246,13 +263,7 @@
         (mf/use-fn
          (fn [e]
            (when (kbd/enter? e)
-             (ts/schedule
-              (fn []
-                (let [search-title (dom/get-element (str "dashboard-search-title"))]
-                  (when search-title
-                    (dom/set-attribute! search-title "tabindex" "0")
-                    (dom/focus! search-title)
-                    (dom/set-attribute! search-title "tabindex" "-1")))))
+             (schedule-focus-by-id! focus-timer-ref "dashboard-search-title")
              (dom/prevent-default e)
              (dom/stop-propagation e))))
 
@@ -294,7 +305,15 @@
 (mf/defc organizations-selector-dropdown*
   {::mf/private true}
   [{:keys [organization organizations profile] :rest props}]
-  (let [on-org-click
+  (let [teams (mf/deref refs/teams)
+
+        subscription-type (get-subscription-type (-> profile :props :subscription))
+
+        team-count (count teams)
+
+        account-age-days (dnt/account-age-days profile)
+
+        on-organization-click
         (mf/use-fn
          (fn [event]
            (let [team-id (-> (dom/get-current-target event)
@@ -302,62 +321,88 @@
                              (uuid/parse))]
              (st/emit! (dcm/go-to-dashboard-recent :team-id team-id)))))
 
-        on-create-org-click
+        on-create-organization-click
         (mf/use-fn
-         (mf/deps profile)
+         (mf/deps account-age-days profile subscription-type team-count)
          (fn []
-           (if (dnt/is-valid-license? profile)
-             (dnt/go-to-nitrate-cc)
-             (st/emit! (dnt/show-nitrate-popup :nitrate-form)))))
+           (if (and (not= subscription-type "unlimited")
+                    (dnt/is-valid-license? profile))
+             (dnt/go-to-nitrate-ac-create-organization
+              "dashboard:organization-switcher")
+             (st/emit!
+              (ev/event
+               (cond-> {::ev/name "open-subscription-modal"
+                        ::ev/origin "dashboard:organization-switcher"
+                        :product "nitrate:enterprise"
+                        :source "frontend"
+                        :has-teams (pos? team-count)
+                        :team-count team-count}
+                 (some? account-age-days)
+                 (assoc :account-age-days account-age-days)))
+              (dnt/show-nitrate-popup
+               :nitrate-form
+               (cond-> {:subscription-start-origin "dashboard:organization-switcher"}
+                 (= subscription-type "unlimited")
+                 (assoc :show-contact-sales-option true)))))))
 
         on-go-to-cc-click
         (mf/use-fn
-         (mf/deps organization)
+         (mf/deps organization profile)
          (fn []
-           (dnt/go-to-nitrate-cc organization)))
+           ;; Navigate to active organization if user owns it, otherwise to last visited organization
+           (if (and (:id organization)
+                    (= (:id profile) (:owner-id organization)))
+             (dnt/go-to-nitrate-ac {:organization-id (:id organization)
+                                    :organization-slug (:slug organization)})
+             (dnt/go-to-nitrate-ac))))
 
-        default-team-id (or (->> organizations
-                                 vals
-                                 (filter :is-default)
-                                 first
-                                 :id)
+        empty-organization (d/seek #(nil? (:id %)) organizations)
+        default-team-id (or (:default-team-id empty-organization)
                             (:default-team-id profile))
-        organizations (dissoc organizations default-team-id)]
+
+        organizations (filter :id organizations)
+
+        is-valid-license? (dnt/is-valid-license? profile)]
 
     [:> dropdown-menu* props
 
-     [:> dropdown-menu-item* {:on-click    on-org-click
+     [:> dropdown-menu-item* {:on-click    on-organization-click
                               :data-value  default-team-id
-                              :class       (stl/css :org-dropdown-item)}
-      [:span {:class (stl/css :nitrate-org-icon)}
-       [:> raw-svg* {:id penpot-logo-icon}]]
-      "Penpot"
-      (when (= default-team-id (:id organization))
+                              :class       (stl/css :organization-dropdown-item)}
+      [:span {:class (stl/css :my-teams-icon)}
+       [:> raw-svg* {:id penpot-logo-icon-subtle}]]
+      [:span {:class (stl/css :team-text)
+              :title (tr "dashboard.other-teams")}
+       (tr "dashboard.other-teams")]
+      (when (= default-team-id (:default-team-id organization))
         tick-icon)]
+     (when (seq organizations)
+       [:*
+        [:hr {:role "separator" :class (stl/css :team-separator)}]
+        [:li {:role "presentation" :class (stl/css :organization-section-label)}
+         (tr "dashboard.section.organizations")]])
 
-     (for [org-item (remove :is-default (vals organizations))]
-       [:> dropdown-menu-item* {:on-click    on-org-click
-                                :data-value  (:id org-item)
-                                :class       (stl/css :org-dropdown-item)
-                                :key         (str (:id org-item))}
-        ;; TODO org pictures
-        [:img {:src (cf/resolve-team-photo-url org-item)
-               :class (stl/css :team-picture)
-               :alt (:name org-item)}]
+     (for [organization-item organizations]
+       [:> dropdown-menu-item* {:on-click    on-organization-click
+                                :data-value  (:default-team-id organization-item)
+                                :class       (stl/css :organization-dropdown-item)
+                                :key         (str (:default-team-id organization-item))}
+        [:> organization-avatar* {:organization organization-item :size "xxl"}]
         [:span {:class (stl/css :team-text)
-                :title (:name org-item)} (:name org-item)]
-        (when (= (:id org-item) (:id organization))
+                :title (:name organization-item)} (:name organization-item)]
+        (when (= (:default-team-id organization-item) (:default-team-id organization))
           tick-icon)])
 
      [:hr {:role "separator" :class (stl/css :team-separator)}]
-     [:> dropdown-menu-item* {:on-click    on-create-org-click
-                              :class       (stl/css :org-dropdown-item :action)}
-      [:span {:class (stl/css :icon-wrapper)} add-org-icon]
-      [:span {:class (stl/css :team-text)} (tr "dashboard.create-new-org")]]
-     [:> dropdown-menu-item* {:on-click    on-go-to-cc-click
-                              :class       (stl/css :org-dropdown-item :action)}
-      [:span {:class (stl/css :icon-wrapper)} arrow-up-right-icon]
-      [:span {:class (stl/css :team-text)} (tr "dashboard.go-to-control-center")]]]))
+     [:> dropdown-menu-item* {:on-click    on-create-organization-click
+                              :class       (stl/css :organization-dropdown-item :action)}
+      [:span {:class (stl/css :icon-wrapper)} add-organization-icon]
+      [:span {:class (stl/css :team-text)} (tr "dashboard.create-new-organization")]]
+     (when is-valid-license?
+       [:> dropdown-menu-item* {:on-click    on-go-to-cc-click
+                                :class       (stl/css :organization-dropdown-item :action)}
+        [:span {:class (stl/css :icon-wrapper)} arrow-up-right-icon]
+        [:span {:class (stl/css :team-text)} (tr "dashboard.go-to-admin-console")]])]))
 
 (mf/defc teams-selector-dropdown*
   {::mf/private true}
@@ -371,7 +416,12 @@
 
         teams (dissoc teams default-team-id)
         on-create-team-click
-        (mf/use-fn #(st/emit! (modal/show :team-form {})))
+        (mf/use-fn
+         (mf/deps team)
+         (fn []
+           (if (contains? cf/flags :admin-console)
+             (st/emit! (dtm/check-and-create-team (:id team)))
+             (st/emit! (modal/show :team-form {})))))
 
         on-team-click
         (mf/use-fn
@@ -383,13 +433,22 @@
 
     [:> dropdown-menu* props
      [:> dropdown-menu-item* {:on-click    on-team-click
-                              :data-value  (:default-team-id profile)
-                              :class       (stl/css :team-dropdown-item)}
-      [:span {:class (stl/css :penpot-icon)} deprecated-icon/logo-icon]
+                              :data-value  default-team-id
+                              :class       (stl/css-case :team-dropdown-item true
+                                                         :team-dropdown-item-no-logo (contains? cf/flags :admin-console))}
+      (when-not (contains? cf/flags :admin-console)
+        [:span {:class (stl/css :penpot-icon)} deprecated-icon/logo-icon])
 
-      [:span {:class (stl/css :team-text)} (tr "dashboard.your-penpot")]
-      (when (= (:default-team-id profile) (:id team))
+      [:span {:class (stl/css :team-text)} (tr "dashboard.personal-projects")]
+      (when (= default-team-id (:id team))
         tick-icon)]
+
+     (when (and (contains? cf/flags :admin-console)
+                (seq (remove :is-default (vals teams))))
+       [:*
+        [:hr {:role "separator" :class (stl/css :team-separator)}]
+        [:li {:role "presentation" :class (stl/css :organization-section-label)}
+         (tr "dashboard.section.teams")]])
 
      (for [team-item (remove :is-default (vals teams))]
        [:> dropdown-menu-item* {:on-click    on-team-click
@@ -438,18 +497,22 @@
                    (modal/hide))))
 
         on-error
-        (fn [{:keys [code] :as error}]
-          (condp = code
-            :no-enough-members-for-leave
-            (rx/of (ntf/error (tr "errors.team-leave.insufficient-members")))
+        (fn [error]
+          (let [code (-> error ex-data :code)]
+            (condp = code
+              :only-owner-can-delete-team
+              (rx/of (ntf/error (tr "errors.team-leave.only-owner-can-delete")))
 
-            :member-does-not-exist
-            (rx/of (ntf/error (tr "errors.team-leave.member-does-not-exists")))
+              :no-enough-members-for-leave
+              (rx/of (ntf/error (tr "errors.team-leave.insufficient-members")))
 
-            :owner-cant-leave-team
-            (rx/of (ntf/error (tr "errors.team-leave.owner-cant-leave")))
+              :member-does-not-exist
+              (rx/of (ntf/error (tr "errors.team-leave.member-does-not-exists")))
 
-            (rx/throw error)))
+              :owner-cant-leave-team
+              (rx/of (ntf/error (tr "errors.team-leave.owner-cant-leave")))
+
+              (rx/throw error))))
 
         leave-fn
         (mf/use-fn
@@ -505,14 +568,11 @@
 
         on-delete-clicked
         (mf/use-fn
-         (mf/deps delete-fn)
-         #(st/emit!
-           (modal/show
-            {:type :confirm
-             :title (tr "modals.delete-team-confirm.title")
-             :message (tr "modals.delete-team-confirm.message")
-             :accept-label (tr "modals.delete-team-confirm.accept")
-             :on-accept delete-fn})))]
+         (mf/deps team delete-fn)
+         (fn []
+           ;; Fetch fresh team data to check current permission, then show appropriate modal
+           (st/emit! (dtm/check-and-delete-team {:team-id (:id team)
+                                                 :delete-fn delete-fn}))))]
     [:> dropdown-menu* props
 
      [:> dropdown-menu-item* {:on-click    go-members
@@ -565,42 +625,169 @@
                                 :data-testid "delete-team"}
         (tr "dashboard.delete-team")])]))
 
+(mf/defc organization-options-dropdown*
+  {::mf/private true}
+  [{:keys [organization profile teams] :rest props}]
+  (let [default-team-id       (mf/with-memo [teams]
+                                (->> teams
+                                     (filter :is-default)
+                                     first
+                                     :id))
+        non-default-teams     (mf/with-memo [teams]
+                                (remove :is-default teams))
+        owned-teams           (mf/with-memo [non-default-teams]
+                                (filter #(dm/get-in % [:permissions :is-owner]) non-default-teams))
+        not-owned-teams       (mf/with-memo [non-default-teams]
+                                (remove #(dm/get-in % [:permissions :is-owner]) non-default-teams))
+        owned-teams-members-loaded?
+        (mf/with-memo [owned-teams]
+          (every? #(contains? % :members) owned-teams))
+        teams-to-transfer     (mf/with-memo [owned-teams]
+                                (filter #(> (count (:members %)) 1) owned-teams))
 
-(defn- team->org [team]
-  (assoc (dm/select-keys team [:id :organization-id :organization-slug])
-         :name (:organization-name team)))
+        on-error
+        (mf/use-fn
+         (fn [error]
+           (let [code (-> error ex-data :code)
+                 ;; Map error codes to their translation keys
+                 error-map {:not-valid-teams             "errors.organization-leave.no-valid-teams"
+                            :organization-owner-cannot-leave      "errors.organization-leave.organization-owner-cannot-leave"
+                            :only-owner-can-delete-team  "errors.team-leave.only-owner-can-delete"
+                            :no-enough-members-for-leave "errors.team-leave.insufficient-members"
+                            :member-does-not-exist       "errors.team-leave.member-does-not-exists"
+                            :owner-cant-leave-team       "errors.team-leave.owner-cant-leave"}]
 
-(mf/defc sidebar-org-switch*
+             (if-let [tr-key (get error-map code)]
+               (rx/of (dtm/fetch-teams)
+                      (modal/hide)
+                      (ntf/error (tr tr-key)))
+               (rx/throw error)))))
+
+        leave-fn
+        (mf/use-fn
+         (mf/deps on-error organization default-team-id not-owned-teams owned-teams)
+         (fn [{:keys [teams-to-transfer
+                      member-added-at
+                      organization-member-count-before]}]
+           (let [teams-to-leave (cond->> not-owned-teams
+                                  :always
+                                  (map #(select-keys % [:id]))
+                                  (seq teams-to-transfer)
+                                  (concat teams-to-transfer))
+                 teams-to-delete (->> owned-teams
+                                      (filter #(= (count (:members %)) 1))
+                                      (map :id))]
+
+
+             (st/emit! (dnt/leave-organization {:id (:id organization)
+                                                :name (:name organization)
+                                                :default-team-id default-team-id
+                                                :teams-to-delete teams-to-delete
+                                                :teams-to-leave teams-to-leave
+                                                :member-added-at member-added-at
+                                                :organization-member-count-before
+                                                organization-member-count-before
+                                                :on-error on-error})))))
+
+        on-leave-clicked
+        (mf/use-fn
+         (mf/deps leave-fn profile organization default-team-id teams-to-transfer on-error owned-teams-members-loaded?)
+         (fn []
+           (when owned-teams-members-loaded?
+             (st/emit! (dnt/show-leave-organization-modal {:organization organization
+                                                           :profile profile
+                                                           :default-team-id default-team-id
+                                                           :leave-fn leave-fn
+                                                           :teams-to-transfer teams-to-transfer
+                                                           :on-error on-error})))))]
+    (mf/use-effect
+     (mf/deps owned-teams)
+     (fn []
+       ;; Fetch members for any owned team that doesn't have them yet.
+       (doseq [team owned-teams
+               :when (not (contains? team :members))]
+         (st/emit! (dtm/fetch-members (:id team))))))
+    [:> dropdown-menu* props
+
+     [:> dropdown-menu-item* {:on-click on-leave-clicked
+                              :class    (stl/css :team-options-item)}
+      (tr "dashboard.leave-organization")]]))
+
+
+(mf/defc sidebar-organization-switch*
   [{:keys [team profile]}]
   (let [teams (mf/deref refs/teams)
 
-        ;; Find the "your-penpot" teams, and transform them in orgs
-        orgs  (mf/with-memo [teams]
-                (->> teams
-                     vals
-                     (filter :is-default)
-                     (map team->org)
-                     (d/index-by :id)))
+        subscription-type (get-subscription-type (-> profile :props :subscription))
 
-        no-orgs? (= (count orgs) 0)
+        team-count (count teams)
 
-        current-org (team->org team)
+        account-age-days (dnt/account-age-days profile)
 
-        default-org? (= (:default-team-id profile) (:id current-org))
+        current-organization (dtm/team->organization team)
 
-        show-orgs-menu*
+        ;; Find the "personal-projects" teams, and transform them in organizations. When
+        ;; the selected team is directly accessible but not listed in
+        ;; membership teams, include only its organization so the organization selector can
+        ;; show the current selection without leaking the team into the
+        ;; teams dropdown.
+        organizations  (mf/with-memo [teams current-organization]
+                         (cond-> (->> teams
+                                      vals
+                                      (filter :is-default)
+                                      (map dtm/team->organization)
+                                      (d/index-by :id))
+                           (:id current-organization)
+                           (assoc (:id current-organization) current-organization)))
+
+        show-dropdown? (or (dnt/is-valid-license? profile)
+                           (> (count organizations) 1))
+
+        organization-teams (mf/with-memo [teams current-organization]
+                             (->> teams
+                                  vals
+                                  (filter #(= (dm/get-in % [:organization :id]) (:id current-organization)))))
+
+        default-organization? (nil? (:id current-organization))
+
+        show-options? (and (not default-organization?)
+                           (not= (:id profile) (:owner-id current-organization)))
+
+        show-organizations-menu*
         (mf/use-state false)
 
-        show-orgs-menu?
-        (deref show-orgs-menu*)
+        show-organizations-menu?
+        (deref show-organizations-menu*)
 
-        on-show-orgs-click
+        organizations-rect*
+        (mf/use-state nil)
+
+        organizations-portal-container
+        (hooks/use-portal-container :popup)
+
+        show-organization-options-menu*
+        (mf/use-state false)
+
+        show-organization-options-menu?
+        (deref show-organization-options-menu*)
+
+        on-show-options-click
         (mf/use-fn
          (fn [event]
            (dom/stop-propagation event)
-           (swap! show-orgs-menu* not)))
+           (swap! show-organization-options-menu* not)))
 
-        on-show-orgs-keydown
+        close-organization-options-menu
+        (mf/use-fn #(reset! show-organization-options-menu* false))
+
+        on-show-organizations-click
+        (mf/use-fn
+         (fn [event]
+           (dom/stop-propagation event)
+           (reset! organizations-rect* (dom/get-bounding-rect (dom/get-current-target event)))
+           (swap! show-organizations-menu* not)))
+
+        on-show-organizations-keydown
         (mf/use-fn
          (fn [event]
            (when (or (kbd/space? event)
@@ -609,66 +796,107 @@
              (dom/stop-propagation event)
              (some-> (dom/get-current-target event)
                      (dom/click)))))
-        close-orgs-menu
-        (mf/use-fn #(reset! show-orgs-menu* false))
+        close-organizations-menu
+        (mf/use-fn #(reset! show-organizations-menu* false))
 
-        on-create-org-click
+        on-create-organization-click
         (mf/use-fn
-         (mf/deps profile)
+         (mf/deps account-age-days profile subscription-type team-count)
          (fn []
-           (if (dnt/is-valid-license? profile)
-             (dnt/go-to-nitrate-cc)
-             (st/emit! (dnt/show-nitrate-popup :nitrate-form)))))]
-    (if no-orgs?
-      [:div {:class (stl/css :nitrate-selected-org)}
-       [:span {:class (stl/css :nitrate-penpot-icon)}
+           (if (and (not= subscription-type "unlimited")
+                    (dnt/is-valid-license? profile))
+             (dnt/go-to-nitrate-ac-create-organization
+              "dashboard:organization-switcher")
+             (st/emit!
+              (ev/event
+               (cond-> {::ev/name "open-subscription-modal"
+                        ::ev/origin "dashboard:create-organization-button"
+                        :product "nitrate:enterprise"
+                        :source "frontend"
+                        :has-teams (pos? team-count)
+                        :team-count team-count}
+                 (some? account-age-days)
+                 (assoc :account-age-days account-age-days)))
+              (dnt/show-nitrate-popup
+               :nitrate-form
+               (cond-> {:subscription-start-origin "dashboard:create-organization-button"}
+                 (= subscription-type "unlimited")
+                 (assoc :show-contact-sales-option true)))))))]
+    (if show-dropdown?
+      [:div {:class (stl/css :sidebar-organization-switch)}
+       [:div {:class (stl/css :organization-switch-content)}
+        [:button {:class (stl/css-case :current-organization true :current-organization-no-options (not show-options?))
+                  :on-click on-show-organizations-click
+                  :on-key-down on-show-organizations-keydown
+                  :aria-expanded show-organizations-menu?
+                  :aria-haspopup "menu"}
+         [:div {:class (stl/css :team-name)}
+          (if default-organization?
+            [:*
+             [:span {:class (stl/css :my-teams-icon-xxxl)}
+              [:> raw-svg* {:id penpot-logo-icon-subtle}]]
+             [:span {:class (stl/css :team-text)}
+              (tr "dashboard.other-teams")]]
+            [:*
+             [:> organization-avatar* {:organization current-organization :size "xxxl"}]
+             [:span {:class (stl/css :team-text)}
+              (:name current-organization)]])]
+         arrow-icon]
+        (when show-options?
+          [:> button* {:variant "ghost"
+                       :type "button"
+                       :class (stl/css :organization-options-btn)
+                       :on-click on-show-options-click}
+           (if show-organization-options-menu? organization-menu-icon-open organization-menu-icon)])]
+
+
+       ;; Organizations dropdown
+       (when show-organizations-menu?
+         (let [rect (deref organizations-rect*)]
+           (mf/portal
+            (mf/html
+             [:div {:style {:position "fixed"
+                            :top (dm/str (:top rect) "px")
+                            :left (dm/str (:left rect) "px")
+                            :width (dm/str (:width rect) "px")}}
+              [:> organizations-selector-dropdown* {:show true
+                                                    :on-close close-organizations-menu
+                                                    :id "organizations-list"
+                                                    :class (stl/css :dropdown :teams-dropdown)
+                                                    :organization current-organization
+                                                    :profile profile
+                                                    :organizations (->> (vals organizations)
+                                                                        (sort-by (juxt (fn [o] (str/lower (:name o "")))
+                                                                                       :id)))}]])
+
+
+
+            organizations-portal-container)))
+       ;; Organization options
+       [:> organization-options-dropdown* {:show show-organization-options-menu?
+                                           :on-close close-organization-options-menu
+                                           :id "team-options"
+                                           :class (stl/css :dropdown :options-dropdown)
+                                           :organization current-organization
+                                           :profile profile
+                                           :teams organization-teams}]]
+      [:div {:class (stl/css :selected-organization)}
+       [:span {:class (stl/css :organization-penpot-icon)}
         [:> raw-svg* {:id penpot-logo-icon}]]
        "Penpot"
        [:> button* {:variant "ghost"
                     :type "button"
-                    :class (stl/css :nitrate-create-org)
-                    :on-click on-create-org-click} (tr "dashboard.plus-create-new-org")]]
-
-      [:div {:class (stl/css :sidebar-org-switch)}
-
-       [:button {:class (stl/css :current-org)
-                 :on-click on-show-orgs-click
-                 :on-key-down on-show-orgs-keydown
-                 :aria-expanded show-orgs-menu?
-                 :aria-haspopup "menu"}
-        [:div {:class (stl/css :team-name)}
-         (if default-org?
-           [:*
-            [:span {:class (stl/css :nitrate-penpot-icon)}
-             [:> raw-svg* {:id penpot-logo-icon}]]
-            [:span {:class (stl/css :team-text)}
-             "Penpot"]]
-           [:*
-            [:span {:class (stl/css :nitrate-penpot-icon)}
-             ;; TODO org pictures
-             [:img {:src (cf/resolve-team-photo-url current-org)
-                    :class (stl/css :team-picture)
-                    :alt (:name current-org)}]]
-            [:span {:class (stl/css :team-text)}
-             (:name current-org)]])]
-        arrow-icon]
-
-       ;; Orgs Dropdown
-       [:> organizations-selector-dropdown* {:show show-orgs-menu?
-                                             :on-close close-orgs-menu
-                                             :id "organizations-list"
-                                             :class (stl/css :dropdown :teams-dropdown)
-                                             :organization current-org
-                                             :profile profile
-                                             :organizations orgs}]])))
+                    :class (stl/css :create-organization)
+                    :on-click on-create-organization-click} (tr "dashboard.plus-create-new-organization")]])))
 
 (mf/defc sidebar-team-switch*
   [{:keys [team profile]}]
-  (let [nitrate?     (contains? cf/flags :nitrate)
-        org-id (when nitrate? (:organization-id team))
+  (let [nitrate?     (contains? cf/flags :admin-console)
+        organization          (:organization team)
+        organization-id (when nitrate? (:id organization))
         teams (cond->> (mf/deref refs/teams)
                 nitrate?
-                (filter #(= (-> % val :organization-id) org-id))
+                (filter #(= (dm/get-in (val %) [:organization :id]) organization-id))
                 nitrate?
                 (into {}))
 
@@ -741,9 +969,11 @@
                 :aria-haspopup "menu"}
        (cond
          is-default?
-         [:div {:class (stl/css :team-name)}
-          [:span {:class (stl/css :penpot-icon)} deprecated-icon/logo-icon]
-          [:span {:class (stl/css :team-text)} (tr "dashboard.default-team-name")]]
+         [:div {:class (stl/css-case :team-name true
+                                     :team-name-no-logo nitrate?)}
+          (when-not nitrate?
+            [:span {:class (stl/css :penpot-icon)} deprecated-icon/logo-icon])
+          [:span {:class (stl/css :team-text)} (tr "dashboard.personal-projects")]]
 
          (and (contains? cf/flags :subscriptions)
               (not is-default?)
@@ -810,7 +1040,9 @@
         overflow*   (mf/use-state false)
         overflow?   (deref overflow*)
 
-        nitrate?    (contains? cf/flags :nitrate)
+        nitrate?    (contains? cf/flags :admin-console)
+
+        focus-timer-ref  (use-focus-timer-ref)
 
         go-projects
         (mf/use-fn #(st/emit! (dcm/go-to-dashboard-recent)))
@@ -821,12 +1053,7 @@
          (fn []
            (st/emit!
             (dcm/go-to-dashboard-recent :team-id team-id))
-           (ts/schedule
-            (fn []
-              (when-let [projects-title (dom/get-element "dashboard-projects-title")]
-                (dom/set-attribute! projects-title "tabindex" "0")
-                (dom/focus! projects-title)
-                (dom/set-attribute! projects-title "tabindex" "-1"))))))
+           (schedule-focus-by-id! focus-timer-ref "dashboard-projects-title")))
 
         go-fonts
         (mf/use-fn
@@ -839,13 +1066,7 @@
          (fn []
            (st/emit!
             (dcm/go-to-dashboard-fonts :team-id team-id))
-           (ts/schedule
-            (fn []
-              (let [font-title (dom/get-element "dashboard-fonts-title")]
-                (when font-title
-                  (dom/set-attribute! font-title "tabindex" "0")
-                  (dom/focus! font-title)
-                  (dom/set-attribute! font-title "tabindex" "-1")))))))
+           (schedule-focus-by-id! focus-timer-ref "dashboard-fonts-title")))
 
         go-drafts
         (mf/use-fn
@@ -858,12 +1079,7 @@
          (mf/deps team-id default-project-id)
          (fn []
            (st/emit! (dcm/go-to-dashboard-files :team-id team-id :project-id default-project-id))
-           (ts/schedule
-            (fn []
-              (when-let [title (dom/get-element "dashboard-drafts-title")]
-                (dom/set-attribute! title "tabindex" "0")
-                (dom/focus! title)
-                (dom/set-attribute! title "tabindex" "-1"))))))
+           (schedule-focus-by-id! focus-timer-ref "dashboard-drafts-title")))
 
         go-libs
         (mf/use-fn
@@ -876,13 +1092,7 @@
          (fn []
            (st/emit!
             (dcm/go-to-dashboard-libraries :team-id team-id))
-           (ts/schedule
-            (fn []
-              (let [libs-title (dom/get-element "dashboard-libraries-title")]
-                (when libs-title
-                  (dom/set-attribute! libs-title "tabindex" "0")
-                  (dom/focus! libs-title)
-                  (dom/set-attribute! libs-title "tabindex" "-1")))))))
+           (schedule-focus-by-id! focus-timer-ref "dashboard-libraries-title")))
 
         pinned-projects
         (mf/with-memo [projects]
@@ -900,11 +1110,12 @@
         (reset! overflow* (> scroll-height client-height))))
 
     [:*
-     [:div {:ref container}
+     [:div {:class (stl/css :sidebar-content-wrapper)}
       (when nitrate?
-        [:div {:class (stl/css :nitrate-orgs-container)}
-         [:> sidebar-org-switch* {:team team :profile profile}]])
-      [:div {:class (stl/css-case :sidebar-content true :sidebar-content-nitrate nitrate?)}
+        [:div {:class (stl/css :organizations-container)}
+         [:> sidebar-organization-switch* {:team team :profile profile}]])
+      [:div {:ref container
+             :class (stl/css-case :sidebar-content true :sidebar-content-nitrate nitrate?)}
        [:> sidebar-team-switch* {:team team :profile profile}]
 
        [:> sidebar-search* {:search-term search-term
@@ -915,16 +1126,16 @@
          [:li {:class (stl/css-case :recent-projects true
                                     :sidebar-nav-item true
                                     :current projects?)}
-          [:& link {:action go-projects
-                    :class (stl/css :sidebar-link)
-                    :keyboard-action go-projects-with-key}
+          [:> link* {:action go-projects
+                     :class (stl/css :sidebar-link)
+                     :keyboard-action go-projects-with-key}
            [:span {:class (stl/css :element-title)} (tr "labels.projects")]]]
 
          [:li {:class (stl/css-case :current drafts?
                                     :sidebar-nav-item true)}
-          [:& link {:action go-drafts
-                    :class (stl/css :sidebar-link)
-                    :keyboard-action go-drafts-with-key}
+          [:> link* {:action go-drafts
+                     :class (stl/css :sidebar-link)
+                     :keyboard-action go-drafts-with-key}
            [:span {:class (stl/css :element-title)} (tr "labels.drafts")]]]]]
 
 
@@ -934,17 +1145,17 @@
         [:ul {:class (stl/css :sidebar-nav)}
          [:li {:class (stl/css-case :sidebar-nav-item true
                                     :current fonts?)}
-          [:& link {:action go-fonts
-                    :class (stl/css :sidebar-link)
-                    :keyboard-action go-fonts-with-key
-                    :data-testid "fonts"}
+          [:> link* {:action go-fonts
+                     :class (stl/css :sidebar-link)
+                     :keyboard-action go-fonts-with-key
+                     :data-testid "fonts"}
            [:span {:class (stl/css :element-title)} (tr "labels.fonts")]]]
          [:li {:class (stl/css-case :current libs?
                                     :sidebar-nav-item true)}
-          [:& link {:action go-libs
-                    :data-testid "libs-link-sidebar"
-                    :class (stl/css :sidebar-link)
-                    :keyboard-action go-libs-with-key}
+          [:> link* {:action go-libs
+                     :data-testid "libs-link-sidebar"
+                     :class (stl/css :sidebar-link)
+                     :keyboard-action go-libs-with-key}
            [:span {:class (stl/css :element-title)} (tr "labels.shared-libraries")]]]]]
 
 
@@ -967,9 +1178,8 @@
       [:div {:class (stl/css-case :separator true :overflow-separator overflow?)}]]]))
 
 (mf/defc help-learning-menu*
-  {::mf/props :obj
-   ::mf/private true}
-  [{:keys [on-close on-click]}]
+  {::mf/private true}
+  [{:keys [on-close on-click on-pointer-enter on-pointer-leave]}]
   (let [handle-click-url
         (mf/use-fn
          (fn [event]
@@ -977,8 +1187,8 @@
                                (dom/get-data "url"))
                  eventname (-> (dom/get-current-target event)
                                (dom/get-data "eventname"))]
-             (st/emit! (ptk/event ::ev/event {::ev/name eventname
-                                              ::ev/origin "menu:in-app"}))
+             (st/emit! (ev/event {::ev/name eventname
+                                  ::ev/origin "menu:in-app"}))
              (dom/open-new-window url))))
 
         handle-feedback-click
@@ -986,7 +1196,9 @@
 
     [:> dropdown-menu* {:show true
                         :class (stl/css :sub-menu :help-learning)
-                        :on-close on-close}
+                        :on-close on-close
+                        :on-pointer-enter on-pointer-enter
+                        :on-pointer-leave on-pointer-leave}
 
      [:> dropdown-menu-item* {:class (stl/css :submenu-item)
                               :data-url "https://help.penpot.app"
@@ -1012,9 +1224,8 @@
         (tr "labels.give-feedback")])]))
 
 (mf/defc community-contributions-menu*
-  {::mf/props :obj
-   ::mf/private true}
-  [{:keys [on-close]}]
+  {::mf/private true}
+  [{:keys [on-close on-pointer-enter on-pointer-leave]}]
   (let [handle-click-url
         (mf/use-fn
          (fn [event]
@@ -1022,13 +1233,15 @@
                                (dom/get-data "url"))
                  eventname (-> (dom/get-current-target event)
                                (dom/get-data "eventname"))]
-             (st/emit! (ptk/event ::ev/event {::ev/name eventname
-                                              ::ev/origin "menu:in-app"}))
+             (st/emit! (ev/event {::ev/name eventname
+                                  ::ev/origin "menu:in-app"}))
              (dom/open-new-window url))))]
 
     [:> dropdown-menu* {:show true
                         :class (stl/css :sub-menu :community)
-                        :on-close on-close}
+                        :on-close on-close
+                        :on-pointer-enter on-pointer-enter
+                        :on-pointer-leave on-pointer-leave}
 
      [:> dropdown-menu-item* {:class (stl/css :submenu-item)
                               :data-url "https://github.com/penpot/penpot"
@@ -1043,14 +1256,16 @@
       (tr "labels.community")]]))
 
 (mf/defc about-penpot-menu*
-  {::mf/props :obj
-   ::mf/private true}
-  [{:keys [on-close]}]
-  (let [version cf/version
+  {::mf/private true}
+  [{:keys [on-close on-close-profile on-pointer-enter on-pointer-leave]}]
+  (let [version     cf/version
+        checking*   (mf/use-state false)
+        checking?   (deref checking*)
+
         show-release-notes
         (mf/use-fn
          (fn [event]
-           (st/emit! (ptk/event ::ev/event {::ev/name "show-release-notes" :version (:main version)}))
+           (st/emit! (ev/event {::ev/name "show-release-notes" :version (:main version)}))
            (if (and (kbd/alt? event) (kbd/mod? event))
              (st/emit! (modal/show {:type :onboarding}))
              (st/emit! (modal/show {:type :release-notes :version (:main version)})))))
@@ -1062,13 +1277,30 @@
                                (dom/get-data "url"))
                  eventname (-> (dom/get-current-target event)
                                (dom/get-data "eventname"))]
-             (st/emit! (ptk/event ::ev/event {::ev/name eventname
-                                              ::ev/origin "menu:in-app"}))
-             (dom/open-new-window url))))]
+             (st/emit! (ev/event {::ev/name eventname
+                                  ::ev/origin "menu:in-app"}))
+             (dom/open-new-window url))))
+
+        check-for-updates
+        (mf/use-fn
+         (mf/deps on-close-profile version)
+         (fn [event]
+           (dom/stop-propagation event)
+           (when-not @checking*
+             (st/emit! (ev/event {::ev/name "check-for-updates"
+                                  ::ev/origin "menu:in-app"
+                                  :version (:base version)}))
+             (dcu/check-for-updates!
+              (:base version)
+              {:on-start  #(reset! checking* true)
+               :on-finish #(do (reset! checking* false)
+                               (on-close-profile))}))))]
 
     [:> dropdown-menu* {:show true
                         :class (stl/css :sub-menu :about)
-                        :on-close on-close}
+                        :on-close on-close
+                        :on-pointer-enter on-pointer-enter
+                        :on-pointer-leave on-pointer-leave}
 
      [:> dropdown-menu-item* {:class (stl/css :submenu-item)
                               :on-click show-release-notes}
@@ -1084,7 +1316,22 @@
                               :data-url "https://penpot.app/terms"
                               :on-click handle-click-url
                               :data-eventname "explore-terms-service-click"}
-      (tr "auth.terms-of-service")]]))
+      (tr "auth.terms-of-service")]
+     (when-not (contains? cf/flags :air-gapped-conf)
+       [:*
+        [:hr {:role "separator" :class (stl/css :submenu-separator)}]
+        [:> dropdown-menu-item* {:class (stl/css-case :submenu-item true
+                                                      :checking checking?)
+                                 :aria-disabled checking?
+                                 :can-focus (not checking?)
+                                 :on-click check-for-updates}
+         (if checking?
+           (tr "labels.checking-for-updates")
+           (tr "labels.check-for-updates"))
+         (when checking?
+           [:> icon* {:icon-id i/reload
+                      :class (stl/css :checking-icon)
+                      :size "s"}])]])]))
 
 (mf/defc profile-section*
   [{:keys [profile team]}]
@@ -1093,6 +1340,11 @@
         show-profile-menu? (deref show-profile-menu*)
         sub-menu*      (mf/use-state false)
         sub-menu       (deref sub-menu*)
+
+        ;; Tracks whether the pointer is over an expandable option or
+        ;; its floating submenu, so the submenu survives the gap
+        ;; between them while the pointer travels across.
+        hovering?*     (mf/use-ref false)
         version        (:base cf/version)
 
         close-sub-menu
@@ -1158,30 +1410,43 @@
                           (keyword))]
              (reset! sub-menu* menu))))
 
-        on-power-up-click
+        on-menu-pointer-enter
         (mf/use-fn
-         (fn []
-           (st/emit! (ptk/event ::ev/event {::ev/name "explore-pricing-click" ::ev/origin "dashboard" :section "sidebar"}))
-           (dom/open-new-window "https://penpot.app/pricing")))]
+         (fn [event]
+           (mf/set-ref-val! hovering?* true)
+           (on-menu-click event)))
+
+        on-menu-pointer-leave
+        (mf/use-fn
+         (fn [_]
+           (mf/set-ref-val! hovering?* false)
+           (ts/schedule 200 #(when-not (mf/ref-val hovering?*)
+                               (reset! sub-menu* nil)))))
+
+        on-sub-menu-pointer-enter
+        (mf/use-fn
+         (fn [_]
+           (mf/set-ref-val! hovering?* true)))]
+
+    (mf/with-effect [teams]
+      (when (and (contains? cf/flags :admin-console)
+                 (empty? teams))
+        (st/emit! (dtm/fetch-teams))))
+
+    (mf/with-effect [show-profile-menu?]
+      (when-not show-profile-menu?
+        (reset! sub-menu* nil)))
 
     [:*
-     (if (contains? cf/flags :nitrate)
-       [:> nitrate-sidebar* {:profile profile :teams teams}]
+     (if (contains? cf/flags :admin-console)
+       [:*
+        [:> nitrate-sidebar* {:profile profile :teams teams}]
+        [:> nitrate-current-plan* {:profile profile}]]
        (when (contains? cf/flags :subscriptions)
          (if (show-subscription-dashboard-banner? profile)
            [:> dashboard-cta* {:profile profile}]
            [:> subscription-sidebar* {:profile profile}])))
 
-     ;; TODO remove this block when subscriptions is full implemented
-     (when (contains? cf/flags :subscriptions-old)
-       [:button {:class (stl/css :upgrade-plan-section)
-                 :on-click on-power-up-click}
-        [:div {:class (stl/css :penpot-free)}
-         [:span (tr "dashboard.upgrade-plan.penpot-free")]
-         [:span {:class (stl/css :no-limits)}
-          (tr "dashboard.upgrade-plan.no-limits")]]
-        [:div {:class (stl/css :power-up)}
-         (tr "subscription.dashboard.upgrade-plan.power-up")]])
 
      (when (and team profile)
        [:& comments-section
@@ -1219,7 +1484,8 @@
                                 :on-key-down (fn [event]
                                                (when (kbd/enter? event)
                                                  (on-menu-click event)))
-                                :on-pointer-enter on-menu-click
+                                :on-pointer-enter on-menu-pointer-enter
+                                :on-pointer-leave on-menu-pointer-leave
                                 :data-testid "help-learning"
                                 :id          "help-learning"}
         [:span {:class (stl/css :item-name)} (tr "labels.help-learning")]
@@ -1230,7 +1496,8 @@
                                 :on-key-down (fn [event]
                                                (when (kbd/enter? event)
                                                  (on-menu-click event)))
-                                :on-pointer-enter on-menu-click
+                                :on-pointer-enter on-menu-pointer-enter
+                                :on-pointer-leave on-menu-pointer-leave
                                 :data-testid "community-contributions"
                                 :id          "community-contributions"}
         [:span {:class (stl/css :item-name)} (tr "labels.community-contributions")]
@@ -1241,7 +1508,8 @@
                                 :on-key-down (fn [event]
                                                (when (kbd/enter? event)
                                                  (on-menu-click event)))
-                                :on-pointer-enter on-menu-click
+                                :on-pointer-enter on-menu-pointer-enter
+                                :on-pointer-leave on-menu-pointer-leave
                                 :data-testid "about-penpot"
                                 :id          "about-penpot"}
 
@@ -1266,22 +1534,28 @@
      (when show-profile-menu?
        (case sub-menu
          :help-learning
-         [:> help-learning-menu* {:on-close close-sub-menu :on-click on-click}]
+         [:> help-learning-menu* {:on-close close-sub-menu
+                                  :on-click on-click
+                                  :on-pointer-enter on-sub-menu-pointer-enter
+                                  :on-pointer-leave on-menu-pointer-leave}]
 
          :community-contributions
-         [:> community-contributions-menu* {:on-close close-sub-menu}]
+         [:> community-contributions-menu* {:on-close close-sub-menu
+                                            :on-pointer-enter on-sub-menu-pointer-enter
+                                            :on-pointer-leave on-menu-pointer-leave}]
 
          :about-penpot
-         [:> about-penpot-menu* {:on-close close-sub-menu}]
+         [:> about-penpot-menu* {:on-close close-sub-menu
+                                 :on-close-profile on-close
+                                 :on-pointer-enter on-sub-menu-pointer-enter
+                                 :on-pointer-leave on-menu-pointer-leave}]
          nil))]))
 
 (mf/defc sidebar*
-  {::mf/props :obj
-   ::mf/wrap [mf/memo]}
+  {::mf/wrap [mf/memo]}
   [{:keys [team profile] :as props}]
   [:nav {:class (stl/css :dashboard-sidebar) :data-testid "dashboard-sidebar"}
    [:> sidebar-content* props]
    [:> profile-section*
     {:profile profile
      :team team}]])
-

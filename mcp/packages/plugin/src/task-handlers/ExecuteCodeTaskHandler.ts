@@ -195,18 +195,14 @@ export class ExecuteCodeTaskHandler extends TaskHandler<ExecuteCodeTaskParams> {
         const context = this.context;
         const code = task.params.code;
 
-        // set the penpot.flags.naturalChildOrdering to true during code execution.
-        // NOTE: This significantly simplifies API usage (see )
-        // TODO: Remove ts-ignore once Penpot types have been updated
-        let originalNaturalChildOrdering: any;
-        // @ts-ignore
+        // set the flags naturalChildOrdering and throwValidationErrors to true during code execution.
+        let originalNaturalChildOrdering: any, originalThrowValidationErrors: any;
         if (penpot.flags) {
-            // @ts-ignore
             originalNaturalChildOrdering = penpot.flags.naturalChildOrdering;
-            // @ts-ignore
             penpot.flags.naturalChildOrdering = true;
+            originalThrowValidationErrors = penpot.flags.throwValidationErrors;
+            penpot.flags.throwValidationErrors = true;
         } else {
-            // TODO: This can be removed once `flags` has been merged to PROD
             throw new Error(
                 "You are using a version of the Penpot MCP server which is incompatible " +
                     "with the connected Penpot version. " +
@@ -218,18 +214,36 @@ export class ExecuteCodeTaskHandler extends TaskHandler<ExecuteCodeTaskParams> {
 
         let result: any;
         try {
+            // wait for layout updates prior to executing the supplied code (if method is available)
+            try {
+                // @ts-ignore - TODO Penpot.waitForLayoutUpdate is not yet in the released types
+                if (penpot.waitForLayoutUpdate) {
+                    // @ts-ignore
+                    await penpot.waitForLayoutUpdate();
+                }
+            } catch (e) {
+                console.error("Error waiting for layout update:", e);
+            }
+
             // execute the code in an async function with the context variables as parameters
             result = await (async (ctx) => {
                 const fn = new Function(...Object.keys(ctx), `return (async () => { ${code} })();`);
                 return fn(...Object.values(ctx));
             })(context);
         } finally {
-            // restore the original value of penpot.flags.naturalChildOrdering
-            // @ts-ignore
+            // restore the original value of the flags
             penpot.flags.naturalChildOrdering = originalNaturalChildOrdering;
+            penpot.flags.throwValidationErrors = originalThrowValidationErrors;
         }
 
         console.log("Code execution result:", result);
+
+        // transform a top-level Uint8Array result into a compact base64 envelope to avoid the
+        // ~10x JSON expansion that occurs when JSON.stringify serializes typed arrays as objects
+        // with numeric string keys (see penpot/penpot#9420)
+        if (result instanceof Uint8Array) {
+            result = ExecuteCodeTaskHandler.encodeBytesAsBase64Envelope(result);
+        }
 
         // return result and captured log
         let resultData: ExecuteCodeTaskResultData<any> = {
@@ -237,5 +251,24 @@ export class ExecuteCodeTaskHandler extends TaskHandler<ExecuteCodeTaskParams> {
             log: this.context.console.getLog(),
         };
         task.sendSuccess(resultData);
+    }
+
+    /**
+     * Base64-encodes the given bytes and wraps the result in a tagged envelope that the
+     * server side recognizes (see `ImageContent.byteData`).
+     *
+     * @param bytes - the raw binary data to encode
+     * @returns an envelope of the form `{ __type: "base64", data: <base64 string> }`
+     */
+    private static encodeBytesAsBase64Envelope(bytes: Uint8Array): { __type: "base64"; data: string } {
+        // build the binary string in chunks; calling `String.fromCharCode(...bytes)` directly
+        // would overflow the call stack for large arrays
+        const chunkSize = 0x8000;
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+        }
+        return { __type: "base64", data: btoa(binary) };
     }
 }

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.common.exceptions
   "A helpers for work with exceptions."
@@ -245,8 +245,10 @@
    (defn format-throwable
      [cause & {:as opts}]
      (with-out-str
+       (println "====================")
        (when-let [exdata (ex-data cause)]
-         (when-let [hint (get exdata :hint)]
+         (when-let [hint (or (get exdata :hint)
+                             (ex-message cause))]
            (when (str/index-of hint "\n")
              (println "Hint:")
              (println "--------------------")
@@ -273,7 +275,9 @@
        (when-let [trace (.-stack cause)]
          (println "Trace:")
          (println "--------------------")
-         (println (.-stack cause))))))
+         (println (.-stack cause)))
+
+       (println "===================="))))
 
 (defn first-line
   [s]
@@ -297,6 +301,11 @@
        (js/console.group title)
        (try
          (js/console.log (format-throwable cause))
+         (loop [cause (ex-cause cause)]
+           (when cause
+             (js/console.log "\nCaused by:")
+             (js/console.log (format-throwable cause))
+             (recur (ex-cause cause))))
          (finally
            (js/console.groupEnd))))))
 

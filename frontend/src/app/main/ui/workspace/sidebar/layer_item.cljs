@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.workspace.sidebar.layer-item
   (:require-macros [app.main.style :as stl])
@@ -31,6 +31,7 @@
    [app.util.shape-icon :as usi]
    [app.util.timers :as ts]
    [beicon.v2.core :as rx]
+   [clojure.set :as set]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -44,7 +45,15 @@
   (when (compare-and-set! sidebar-hover-pending? false true)
     (ts/raf
      (fn []
-       (let [{:keys [enter leave]} (swap! sidebar-hover-queue (constantly {:enter #{} :leave #{}}))]
+       (let [{:keys [enter leave]} @sidebar-hover-queue
+
+             enter (set/difference enter leave)
+             leave (set/difference leave enter)
+             search-match (get-in @st/state [:workspace-local :search-match-highlight])
+             leave (cond-> leave
+                     (some? search-match) (disj search-match))]
+
+         (reset! sidebar-hover-queue {:enter #{} :leave #{}})
          (reset! sidebar-hover-pending? false)
          (when (seq leave)
            (apply st/emit! (map dw/dehighlight-shape leave)))
@@ -268,11 +277,19 @@
 
         toggle-collapse
         (mf/use-fn
-         (mf/deps is-expanded)
+         (mf/deps is-expanded id objects)
          (fn [event]
            (dom/stop-propagation event)
-           (if (and is-expanded (kbd/shift? event))
+           (cond
+             ;; Shift+click while expanded collapses every layer in the sidebar
+             (and is-expanded (kbd/shift? event))
              (st/emit! (dwc/collapse-all))
+
+             ;; Alt+click while collapsed expands the entire subtree rooted at this id
+             (and (not is-expanded) (kbd/alt? event))
+             (st/emit! (dwc/expand-subtree id objects))
+
+             :else
              (st/emit! (dwc/toggle-collapse id)))))
 
         toggle-blocking
@@ -319,20 +336,22 @@
         (mf/use-fn
          (mf/deps id)
          (fn [_]
-           (swap! sidebar-hover-queue (fn [{:keys [enter leave] :as q}]
-                                        (-> q
-                                            (assoc :enter (conj enter id))
-                                            (assoc :leave (disj leave id)))))
+           (swap! sidebar-hover-queue
+                  (fn [q]
+                    (-> q
+                        (update :enter (fnil conj #{}) id)
+                        (update :leave (fnil disj #{}) id))))
            (schedule-sidebar-hover-flush)))
 
         on-pointer-leave
         (mf/use-fn
          (mf/deps id)
          (fn [_]
-           (swap! sidebar-hover-queue (fn [{:keys [enter leave] :as q}]
-                                        (-> q
-                                            (assoc :enter (disj enter id))
-                                            (assoc :leave (conj leave id)))))
+           (swap! sidebar-hover-queue
+                  (fn [q]
+                    (-> q
+                        (update :enter (fnil disj #{}) id)
+                        (update :leave (fnil conj #{}) id))))
            (schedule-sidebar-hover-flush)))
 
         on-context-menu
@@ -471,8 +490,7 @@
                 selected-child-render-idx
                 (when (> total default-chunk-size)
                   (some (fn [sel-id]
-                          (let [idx (.indexOf shapes sel-id)]
-                            (when (>= idx 0) idx)))
+                          (d/index-of-pred shapes #(= (get % :id) sel-id)))
                         selected))
 
                 ;; Load at least enough to include the selected child plus extra
@@ -490,12 +508,7 @@
 
             (reset! children-count* new-count))
 
-          (reset! children-count* 0))
-
-        (fn []
-          (when-let [obs (mf/ref-val observer-ref)]
-            (.disconnect obs)
-            (mf/set-ref-val! obs nil)))))
+          (reset! children-count* 0))))
 
     ;; Re-observe sentinel whenever children-count changes (sentinel moves)
     ;; and (shapes item) to reconnect observer after shape changes
@@ -504,11 +517,6 @@
             name-node   (mf/ref-val name-node-ref)
             scroll-node (dom/get-parent-with-data name-node "scroll-container")
             lazy-node   (mf/ref-val lazy-ref)]
-
-        ;; Disconnect previous observer
-        (when-let [obs (mf/ref-val observer-ref)]
-          (.disconnect obs)
-          (mf/set-ref-val! observer-ref nil))
 
         ;; Setup new observer if there are more children to load
         (when (and ^boolean is-expanded
@@ -523,7 +531,13 @@
                          (reset! children-count* next-count))))
                 observer (js/IntersectionObserver. cb #js {:root scroll-node})]
             (.observe observer lazy-node)
-            (mf/set-ref-val! observer-ref observer)))))
+            (mf/set-ref-val! observer-ref observer)))
+
+        ;; Disconnect on deps change or unmount; this effect owns the observer
+        (fn []
+          (when-let [obs (mf/ref-val observer-ref)]
+            (.disconnect obs)
+            (mf/set-ref-val! observer-ref nil)))))
 
     [:> layer-item-inner*
      {:ref dref

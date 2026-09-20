@@ -2,10 +2,10 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.common.schema
-  (:refer-clojure :exclude [deref merge parse-uuid parse-long parse-double parse-boolean type keys])
+  (:refer-clojure :exclude [deref merge parse-uuid parse-long parse-double parse-boolean type keys select-keys])
   #?(:cljs (:require-macros [app.common.schema :refer [ignoring]]))
   (:require
    #?(:clj [malli.dev.pretty :as mdp])
@@ -93,6 +93,11 @@
   [& items]
   (apply mu/merge (map schema items)))
 
+(defn select-keys
+  [s keys & {:as opts}]
+  (let [s (schema s)]
+    (mu/select-keys s keys opts)))
+
 (defn assoc-key
   "Add a key & value to a schema of type [:map]. If the first level node of the schema
    is not a map, will do a depth search to find the first map node and add the key there."
@@ -138,10 +143,10 @@
    (mu/optional-keys schema keys default-options)))
 
 (defn required-keys
-  ([schema]
-   (mu/required-keys schema nil default-options))
-  ([schema keys]
-   (mu/required-keys schema keys default-options)))
+  ([s]
+   (mu/required-keys (schema s) nil default-options))
+  ([s keys]
+   (mu/required-keys (schema s) keys default-options)))
 
 (defn transformer
   [& transformers]
@@ -443,18 +448,22 @@
    ::oapi/type "string"
    ::oapi/format "uuid"}})
 
-(def email-re #"[a-zA-Z0-9_.+-\\\\]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
+;; Strict email regex aligned with app.common.spec/email-re.
+;; Local part: valid RFC chars, no leading/trailing dot, no consecutive dots.
+;; Domain: labels can't start/end with hyphen, no empty labels.
+;; TLD: at least 2 alphabetic chars.
+(def email-re
+  #"[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+(\.[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,63}")
 
 (defn parse-email
   [s]
-  (if (string? s)
-    (first (re-seq email-re s))
-    nil))
+  (when (and (string? s) (re-matches email-re s))
+    s))
 
 (defn email-string?
   [s]
   (and (string? s)
-       (re-seq email-re s)))
+       (some? (re-matches email-re s))))
 
 (register!
  {:type ::email
@@ -646,7 +655,7 @@
        {:title "set"
         :description "Set of Strings"
         :error/message "should be a set of strings"
-        :gen/gen (-> kind sg/generator sg/set)
+        :gen/gen (sg/mcat (fn [_] (sg/generator kind)) sg/int)
         :decode/string decode
         :decode/json decode
         :encode/string encode-string

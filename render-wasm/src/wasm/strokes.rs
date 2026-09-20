@@ -2,8 +2,8 @@ use macros::ToJs;
 
 use crate::mem;
 use crate::shapes::{self, StrokeCap, StrokeStyle};
+use crate::utils::decode_optional_f32;
 use crate::with_current_shape_mut;
-use crate::STATE;
 
 #[derive(Debug, Clone, PartialEq, Copy, ToJs)]
 #[repr(u8)]
@@ -70,7 +70,14 @@ impl TryFrom<RawStrokeCap> for StrokeCap {
 }
 
 #[no_mangle]
-pub extern "C" fn add_shape_center_stroke(width: f32, style: u8, cap_start: u8, cap_end: u8) {
+pub extern "C" fn add_shape_center_stroke(
+    width: f32,
+    style: u8,
+    cap_start: u8,
+    cap_end: u8,
+    dash: f32,
+    gap: f32,
+) {
     let stroke_style = RawStrokeStyle::from(style);
     let cap_start = RawStrokeCap::from(cap_start);
     let cap_end = RawStrokeCap::from(cap_end);
@@ -81,12 +88,21 @@ pub extern "C" fn add_shape_center_stroke(width: f32, style: u8, cap_start: u8, 
             stroke_style.into(),
             cap_start.try_into().ok(),
             cap_end.try_into().ok(),
+            decode_optional_f32(dash),
+            decode_optional_f32(gap),
         ));
     });
 }
 
 #[no_mangle]
-pub extern "C" fn add_shape_inner_stroke(width: f32, style: u8, cap_start: u8, cap_end: u8) {
+pub extern "C" fn add_shape_inner_stroke(
+    width: f32,
+    style: u8,
+    cap_start: u8,
+    cap_end: u8,
+    dash: f32,
+    gap: f32,
+) {
     let stroke_style = RawStrokeStyle::from(style);
     let cap_start = RawStrokeCap::from(cap_start);
     let cap_end = RawStrokeCap::from(cap_end);
@@ -97,12 +113,21 @@ pub extern "C" fn add_shape_inner_stroke(width: f32, style: u8, cap_start: u8, c
             stroke_style.into(),
             cap_start.try_into().ok(),
             cap_end.try_into().ok(),
+            decode_optional_f32(dash),
+            decode_optional_f32(gap),
         ));
     });
 }
 
 #[no_mangle]
-pub extern "C" fn add_shape_outer_stroke(width: f32, style: u8, cap_start: u8, cap_end: u8) {
+pub extern "C" fn add_shape_outer_stroke(
+    width: f32,
+    style: u8,
+    cap_start: u8,
+    cap_end: u8,
+    dash: f32,
+    gap: f32,
+) {
     let stroke_style = RawStrokeStyle::from(style);
     let cap_start = RawStrokeCap::from(cap_start);
     let cap_end = RawStrokeCap::from(cap_end);
@@ -113,7 +138,18 @@ pub extern "C" fn add_shape_outer_stroke(width: f32, style: u8, cap_start: u8, c
             stroke_style.into(),
             cap_start.try_into().ok(),
             cap_end.try_into().ok(),
+            decode_optional_f32(dash),
+            decode_optional_f32(gap),
         ));
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn set_shape_stroke_sides(top: f32, right: f32, bottom: f32, left: f32) {
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        shape
+            .set_last_stroke_widths([top, right, bottom, left])
+            .expect("could not set stroke side widths");
     });
 }
 

@@ -2,12 +2,13 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.rpc.commands.auth
   (:require
    [app.auth :as auth]
    [app.auth.oidc :as oidc]
+   [app.auth.passwords :as passwords]
    [app.common.data :as d]
    [app.common.exceptions :as ex]
    [app.common.features :as cfeat]
@@ -32,11 +33,9 @@
    [app.rpc.doc :as-alias doc]
    [app.rpc.helpers :as rph]
    [app.setup :as-alias setup]
-   [app.setup.welcome-file :refer [create-welcome-file]]
    [app.storage :as sto]
    [app.tokens :as tokens]
    [app.util.services :as sv]
-   [app.worker :as wrk]
    [cuerdas.core :as str]))
 
 (def schema:password
@@ -182,6 +181,7 @@
               (db/update! conn :profile {:password pwd :is-active true} {:id profile-id})
               nil))]
 
+    (passwords/validate-password password)
     (->> (validate-token token)
          (update-password conn))
 
@@ -240,6 +240,9 @@
               :code :email-as-password
               :hint "you can't use your email as password"))
 
+  ;; Validate password strength against common password dictionary
+  (passwords/validate-password (:password params))
+
   (when (eml/has-bounce-reports? cfg (:email params))
     (ex/raise :type :restriction
               :code :email-has-permanent-bounces
@@ -253,34 +256,57 @@
               :hint "email has complaint reports")))
 
 (defn prepare-register
-  [{:keys [::db/pool] :as cfg} {:keys [fullname email accept-newsletter-updates] :as params}]
+  [{:keys [::db/pool] :as cfg} {:keys [fullname email] :as params}]
 
   (validate-register-attempt! cfg params)
 
   (let [email   (profile/clean-email email)
         profile (profile/get-profile-by-email pool email)
-        params  {:email email
-                 :fullname fullname
-                 :password (:password params)
-                 :invitation-token (:invitation-token params)
-                 :backend "penpot"
-                 :iss :prepared-register
-                 :profile-id (:id profile)
-                 :exp (ct/in-future {:days 7})
-                 :props {:newsletter-updates (or accept-newsletter-updates false)}}
+        fullname (d/normalize-string fullname)]
 
-        params (d/without-nils params)
-        token  (tokens/generate cfg params)]
+    ;; SECURITY: refuse to issue a prepared-register token when an active
+    ;; profile already exists for this email.
+    ;;
+    ;; Active accounts must use the standard login flow; existing-but-
+    ;; not-yet-active profiles fall through to the duplicate-detection branch in
+    ;; `register-profile`, which never creates a session.
+    (when (and (some? profile)
+               (true? (:is-active profile)))
+      (ex/raise :type :validation
+                :code :email-already-exists
+                :hint "email already exists"))
 
-    (with-meta {:token token}
-      {::audit/profile-id uuid/zero})))
+    (let [props  (-> (audit/extract-utm-params params)
+                     (cond-> (:accept-newsletter-updates params)
+                       (assoc :newsletter-updates true)))
+          ;; SECURITY: do NOT embed `:profile-id` of an existing
+          ;; profile into the prepared-register JWE. Doing so would
+          ;; let an anonymous caller, in possession of a valid
+          ;; team-invitation JWE, ask `register-profile` to load that
+          ;; profile by id and mint a session for it without password
+          ;; verification. `register-profile` independently re-detects
+          ;; duplicates by email and handles them in the
+          ;; "repeated-registry" branch.
+          params {:email email
+                  :fullname fullname
+                  :password (:password params)
+                  :invitation-token (:invitation-token params)
+                  :backend "penpot"
+                  :iss :prepared-register
+                  :exp (ct/in-future {:days 7})
+                  :props props}
+          params (d/without-nils params)
+          token  (tokens/generate cfg params)]
+
+      (-> {:token token}
+          (with-meta {::audit/profile-id uuid/zero})))))
 
 (def schema:prepare-register-profile
   [:map {:title "prepare-register-profile"}
    [:fullname ::sm/text]
    [:email ::sm/email]
    [:password schema:password]
-   [:create-welcome-file {:optional true} :boolean]
+   [:accept-newsletter-updates {:optional true} :boolean]
    [:invitation-token {:optional true} schema:token]])
 
 (sv/defmethod ::prepare-register-profile
@@ -297,7 +323,7 @@
   (try
     (let [storage (sto/resolve cfg)
           input   (media/download-image cfg uri)
-          input   (media/run {:cmd :info :input input})
+          input   (media/run cfg {:cmd :info :input input})
           hash    (sto/calculate-hash (:path input))
           content (-> (sto/content (:path input) (:size input))
                       (sto/wrap-with-hash hash))
@@ -317,8 +343,7 @@
   attrs (all the other attrs are filled with default values)."
   [{:keys [::db/conn] :as cfg} {:keys [email] :as params}]
   (let [id        (or (:id params) (uuid/next))
-        props     (-> (audit/extract-utm-params params)
-                      (merge (:props params))
+        props     (-> (:props params)
                       (merge {:viewed-tutorial? false
                               :viewed-walkthrough? false
                               :nudge {:big 10 :small 1}
@@ -337,6 +362,9 @@
         is-active (:is-active params false)
         theme     (:theme params nil)
         email     (str/lower email)
+        fullname  (d/normalize-string (:fullname params))
+        locale    (d/normalize-string locale)
+        theme     (some-> theme d/normalize-string not-empty)
 
         photo-id  (some->> (or (:oidc/picture props)
                                (:google/picture props)
@@ -345,7 +373,7 @@
                            (import-profile-picture cfg))
 
         params    {:id id
-                   :fullname (:fullname params)
+                   :fullname fullname
                    :email email
                    :auth-backend backend
                    :lang locale
@@ -369,11 +397,12 @@
                     :cause cause)
           (throw cause))))))
 
-
 (defn create-profile-rels
-  [conn {:keys [id] :as profile}]
+  [{:keys [::db/conn] :as cfg} {:keys [id] :as profile}]
+  (assert (db/connection-map? cfg)
+          "expected cfg with valid connection")
   (let [features (cfeat/get-enabled-features cf/flags)
-        team     (teams/create-team conn
+        team     (teams/create-team cfg
                                     {:profile-id id
                                      :name "Default"
                                      :features features
@@ -386,48 +415,50 @@
         (profile/decode-row))))
 
 (defn send-email-verification!
-  [{:keys [::db/conn] :as cfg} profile]
-  (let [vtoken (tokens/generate cfg
-                                {:iss :verify-email
-                                 :exp (ct/in-future "72h")
-                                 :profile-id (:id profile)
-                                 :email (:email profile)})
-        ;; NOTE: this token is mainly used for possible complains
-        ;; identification on the sns webhook
-        ptoken (tokens/generate cfg
-                                {:iss :profile-identity
-                                 :profile-id (:id profile)
-                                 :exp (ct/in-future {:days 30})})]
-    (eml/send! {::eml/conn conn
-                ::eml/factory eml/register
-                :public-uri (cf/get :public-uri)
-                :to (:email profile)
-                :name (:fullname profile)
-                :token vtoken
-                :extra-data ptoken})))
+  ([cfg profile] (send-email-verification! cfg profile nil))
+  ([{:keys [::db/conn] :as cfg} profile invitation-token]
+   (let [vclaims (cond-> {:iss :verify-email
+                          :exp (ct/in-future "72h")
+                          :profile-id (:id profile)
+                          :email (:email profile)}
+                   ;; If the user registered through a team-invitation flow but
+                   ;; their profile is not yet active, we carry the invitation
+                   ;; token inside the verify-email JWE so the team-invitation
+                   ;; flow can resume after the user clicks the email link.
+                   (some? invitation-token)
+                   (assoc :invitation-token invitation-token))
+         vtoken  (tokens/generate cfg vclaims)
+         ;; NOTE: this token is mainly used for possible complains
+         ;; identification on the sns webhook
+         ptoken  (tokens/generate cfg
+                                  {:iss :profile-identity
+                                   :profile-id (:id profile)
+                                   :exp (ct/in-future {:days 30})})]
+     (eml/send! {::eml/conn conn
+                 ::eml/factory eml/register
+                 :public-uri (cf/get :public-uri)
+                 :to (:email profile)
+                 :name (:fullname profile)
+                 :token vtoken
+                 :extra-data ptoken}))))
 
 (defn register-profile
-  [{:keys [::db/conn ::wrk/executor] :as cfg} {:keys [token] :as params}]
+  [{:keys [::db/conn] :as cfg} {:keys [token] :as params}]
   (let [claims     (tokens/verify cfg {:token token :iss :prepared-register})
-        params     (into claims params)
+        params     (cond-> claims
+                     (:accept-newsletter-updates params)
+                     (update :props assoc :newsletter-updates true))
 
-        profile    (if-let [profile-id (:profile-id claims)]
-                     (profile/get-profile conn profile-id)
-                     ;; NOTE: we first try to match existing profile
-                     ;; by email, that in normal circumstances will
-                     ;; not return anything, but when a user tries to
-                     ;; reuse the same token multiple times, we need
-                     ;; to detect if the profile is already registered
-                     (or (profile/get-profile-by-email conn (:email claims))
-                         (let [is-active (or (boolean (:is-active claims))
-                                             (boolean (:email-verified claims))
-                                             (not (contains? cf/flags :email-verification)))
-                               params    (-> params
-                                             (assoc :is-active is-active)
-                                             (update :password auth/derive-password))
-                               profile   (->> (create-profile cfg params)
-                                              (create-profile-rels conn))]
-                           (vary-meta profile assoc :created true))))
+        profile    (or (profile/get-profile-by-email conn (:email claims))
+                       (let [is-active (or (boolean (:is-active claims))
+                                           (boolean (:email-verified claims))
+                                           (not (contains? cf/flags :email-verification)))
+                             params    (-> params
+                                           (assoc :is-active is-active)
+                                           (update :password auth/derive-password))
+                             profile   (->> (create-profile cfg params)
+                                            (create-profile-rels cfg))]
+                         (vary-meta profile assoc :created true)))
 
         created?   (-> profile meta :created true?)
 
@@ -435,14 +466,8 @@
                      (tokens/verify cfg {:token token :iss :team-invitation}))
 
         props      (-> (audit/profile->props profile)
-                       (assoc :from-invitation (some? invitation)))
+                       (assoc :from-invitation (some? invitation)))]
 
-
-        create-welcome-file-when-needed
-        (fn []
-          (when (:create-welcome-file params)
-            (let [cfg (dissoc cfg ::db/conn)]
-              (wrk/submit! executor (create-welcome-file cfg profile)))))]
     (cond
       ;; When profile is blocked, we just ignore it and return plain data
       (:is-blocked profile)
@@ -450,51 +475,77 @@
         (l/wrn :hint "register attempt for already blocked profile"
                :profile-id (str  (:id profile))
                :profile-email (:email profile))
-        (rph/with-meta {:email (:email profile)}
+        (rph/with-meta {:id (:id profile)
+                        :email (:email profile)}
           {::audit/replace-props props
            ::audit/context {:action "ignore-because-blocked"}
            ::audit/profile-id (:id profile)
            ::audit/name "register-profile-retry"}))
 
-      ;; If invitation token comes in params, this is because the user
-      ;; comes from team-invitation process; in this case, regenerate
-      ;; token and send back to the user a new invitation token (and
-      ;; mark current session as logged). This happens only if the
-      ;; invitation email matches with the register email.
-      (and (some? invitation)
-           (= (:email profile)
-              (:member-email invitation)))
-      (let [invitation (assoc invitation :member-id  (:id profile))
-            token      (tokens/generate cfg invitation)]
-        (-> {:invitation-token token}
-            (rph/with-transform (session/create-fn cfg profile claims))
-            (rph/with-meta {::audit/replace-props props
-                            ::audit/context {:action "accept-invitation"}
-                            ::audit/profile-id (:id profile)})))
-
-      ;; When a new user is created and it is already activated by
-      ;; configuration or specified by OIDC, we just mark the profile
-      ;; as logged-in
+      ;; A profile was just created in this call. Invitation handling is a
+      ;; sub-case of "newly created profile": we never honor invitations for
+      ;; pre-existing profiles via this anonymous RPC. The split below mirrors
+      ;; the non-invitation branches but threads the invitation through the
+      ;; appropriate path:
+      ;;
+      ;;   - active     + matching invitation → mint session and
+      ;;     return :invitation-token. The frontend redirects to
+      ;;     :auth-verify-token, which immediately accepts the
+      ;;     invitation.
+      ;;   - active     + no/mismatched invitation → mint session
+      ;;     ("login" action). New profile, no further action.
+      ;;   - not-active + matching invitation → send the
+      ;;     verify-email mail with the invitation token EMBEDDED
+      ;;     into the verify-email JWE. No session yet. When the
+      ;;     user clicks the link, verify-token activates the
+      ;;     profile, mints a session, and propagates the
+      ;;     invitation token to the frontend so it can complete
+      ;;     the team-invitation flow.
+      ;;   - not-active + no/mismatched invitation → standard
+      ;;     "check your email" verification flow.
       created?
-      (if (:is-active profile)
-        (-> (profile/strip-private-attrs profile)
-            (rph/with-transform (session/create-fn cfg profile claims))
-            (rph/with-defer create-welcome-file-when-needed)
-            (rph/with-meta
-              {::audit/replace-props props
-               ::audit/context {:action "login"}
-               ::audit/profile-id (:id profile)}))
+      (let [accept-invitation? (and (some? invitation)
+                                    (= (:email profile)
+                                       (:member-email invitation)))]
+        (cond
+          (and (:is-active profile) accept-invitation?)
+          (let [invitation (assoc invitation :member-id (:id profile))
+                token      (tokens/generate cfg invitation)]
+            (-> {:id (:id profile)
+                 :email (:email profile)
+                 :invitation-token token}
+                (rph/with-transform (session/create-fn cfg profile claims))
+                (rph/with-meta {::audit/replace-props props
+                                ::audit/context {:action "accept-invitation"}
+                                ::audit/profile-id (:id profile)})))
 
-        (do
-          (when-not (eml/has-reports? conn (:email profile))
-            (send-email-verification! cfg profile))
-
-          (-> {:email (:email profile)}
-              (rph/with-defer create-welcome-file-when-needed)
+          (:is-active profile)
+          (-> (profile/strip-private-attrs profile)
+              (rph/with-transform (session/create-fn cfg profile claims))
               (rph/with-meta
                 {::audit/replace-props props
-                 ::audit/context {:action "email-verification"}
-                 ::audit/profile-id (:id profile)}))))
+                 ::audit/context {:action "login"}
+                 ::audit/profile-id (:id profile)}))
+
+          :else
+          (do
+            (when-not (eml/has-reports? conn (:email profile))
+              (send-email-verification! cfg profile
+                                        (when accept-invitation?
+                                          (:invitation-token params))))
+
+            (-> {:id (:id profile)
+                 :email (:email profile)}
+                (rph/with-meta
+                  {::audit/replace-props props
+                   ::audit/context {:action "email-verification"}
+                   ::audit/profile-id (:id profile)})))))
+
+      ;; When email verification is disabled and an inactive profile already
+      ;; exists, reject the registration — the email is already taken.
+      (not (contains? cf/flags :email-verification))
+      (ex/raise :type :validation
+                :code :email-already-exists)
 
       :else
       (let [elapsed? (elapsed-verify-threshold? profile)
@@ -516,7 +567,8 @@
                       {:id (:id profile)})
           (send-email-verification! cfg profile))
 
-        (rph/with-meta {:email (:email profile)}
+        (rph/with-meta {:email (:email profile)
+                        :id (:id profile)}
           {::audit/replace-props (audit/profile->props profile)
            ::audit/context {:action action}
            ::audit/profile-id (:id profile)
@@ -524,7 +576,8 @@
 
 (def schema:register-profile
   [:map {:title "register-profile"}
-   [:token schema:token]])
+   [:token schema:token]
+   [:accept-newsletter-updates {:optional true} :boolean]])
 
 (sv/defmethod ::register-profile
   {::rpc/auth false

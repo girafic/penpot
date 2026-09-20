@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.common.types.path.shape-to-path
   (:require
@@ -32,7 +32,7 @@
   (d/without-keys shape dissoc-attrs))
 
 (defn- make-corner-arc
-  "Creates a curvle corner for border radius"
+  "Creates a curve corner for border radius"
   [from to corner radius]
   (let [x (case corner
             :top-left (:x from)

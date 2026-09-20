@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.workspace.sidebar.assets.file-library
   (:require-macros [app.main.style :as stl])
@@ -32,7 +32,6 @@
    [app.util.keyboard :as kbd]
    [cuerdas.core :as str]
    [okulary.core :as l]
-   [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -80,10 +79,10 @@
   [{:keys [is-open is-local file-id page-id file-name]}]
   (let [router     (mf/deref refs/router)
         team-id    (mf/use-ctx ctx/current-team-id)
-        url        (rt/resolve router :workspace
-                               {:team-id team-id
-                                :file-id file-id
-                                :page-id page-id})
+        url        (rt/resolve-uri router :workspace
+                                   {:team-id team-id
+                                    :file-id file-id
+                                    :page-id page-id})
         toggle-open
         (mf/use-fn
          (mf/deps file-id is-open)
@@ -94,14 +93,13 @@
         (mf/use-fn
          (fn [ev]
            (dom/stop-propagation ev)
-           (st/emit! (ptk/data-event ::ev/event {::ev/name "navigate-to-library-file"}))))]
+           (st/emit! (ev/event {::ev/name "navigate-to-library-file"}))))]
 
     [:div {:class (stl/css-case
                    :library-title true
                    :open is-open)}
      [:> title-bar* {:collapsable    true
                      :collapsed      (not is-open)
-                     :all-clickable  true
                      :on-collapsed   toggle-open
                      :title          (if is-local
                                        (mf/html [:div {:class (stl/css :special-title)}
@@ -112,7 +110,7 @@
       (when-not ^boolean is-local
         [:span {:title (tr "workspace.assets.open-library")}
          [:a {:class (stl/css :file-link)
-              :href (str "#" url)
+              :href url
               :target "_blank"
               :on-click on-click}
           deprecated-icon/open-link]])]]))

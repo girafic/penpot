@@ -5,12 +5,12 @@ test.beforeEach(async ({ page }) => {
   await DashboardPage.init(page);
 });
 
-test("Dashboad page has title ", async ({ page }) => {
+test("Dashboard page has title ", async ({ page }) => {
   const dashboardPage = new DashboardPage(page);
 
   await dashboardPage.goToDashboard();
 
-  await expect(dashboardPage.page).toHaveURL(/dashboard/);
+  await expect(dashboardPage.page).toHaveURL(/screen=dashboard/);
   await expect(dashboardPage.mainHeading).toBeVisible();
 });
 

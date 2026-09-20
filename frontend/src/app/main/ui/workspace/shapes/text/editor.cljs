@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.workspace.shapes.text.editor
   (:require
@@ -61,7 +61,7 @@
       nil)))
 
 (defn- styles-fn [shape styles content]
-  (let [data (if (= (.getText ^js content) "")
+  (let [data (if (and content (= (.getText ^js content) ""))
                (-> ^js (.getData content)
                    (.toJS)
                    (js->clj :keywordize-keys true))
@@ -221,13 +221,19 @@
 
         handle-pasted-text
         (fn [text _ _]
-          (let [current-block-styles (ted/get-editor-current-block-data state)
-                inline-styles        (ted/get-editor-current-inline-styles state)
-                style                (merge current-block-styles inline-styles)
-                state                (-> (ted/insert-text state text style)
-                                         (handle-change))]
-            (st/emit! (dwt/update-editor-state shape state)))
-          "handled")]
+          (when (seq text)
+            (let [current-block-styles (ted/get-editor-current-block-data state)
+                  inline-styles        (ted/get-editor-current-inline-styles state)
+                  style                (merge current-block-styles inline-styles)
+                  state                (-> (ted/insert-text state text style)
+                                           (handle-change))]
+              (st/emit! (dwt/update-editor-state shape state))))
+          "handled")
+
+        handle-drop
+        (fn [_ _ drag-type]
+          (when (= drag-type "internal")
+            "handled"))]
 
     (mf/use-layout-effect on-mount)
 
@@ -252,6 +258,7 @@
        :handle-return handle-return
        :strip-pasted-styles true
        :handle-pasted-text handle-pasted-text
+       :handle-drop handle-drop
        :custom-style-fn (partial styles-fn shape)
        :block-renderer-fn #(render-block % shape)
        :ref on-editor

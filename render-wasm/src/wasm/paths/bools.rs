@@ -5,7 +5,7 @@ use crate::math;
 use crate::shapes::BoolType;
 use crate::uuid::Uuid;
 use crate::{mem, SerializableResult};
-use crate::{with_current_shape_mut, with_state, STATE};
+use crate::{with_current_shape_mut, with_state};
 use std::mem::size_of;
 
 #[allow(unused_imports)]
@@ -18,7 +18,7 @@ pub enum RawBoolType {
     Union = 0,
     Difference = 1,
     Intersection = 2,
-    Exclusion = 3,
+    Exclude = 3,
 }
 
 impl From<u8> for RawBoolType {
@@ -33,7 +33,7 @@ impl From<RawBoolType> for BoolType {
             RawBoolType::Union => BoolType::Union,
             RawBoolType::Difference => BoolType::Difference,
             RawBoolType::Intersection => BoolType::Intersection,
-            RawBoolType::Exclusion => BoolType::Exclusion,
+            RawBoolType::Exclude => BoolType::Exclusion,
         }
     }
 }

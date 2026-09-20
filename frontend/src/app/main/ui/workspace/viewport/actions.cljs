@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.workspace.viewport.actions
   (:require
@@ -23,7 +23,6 @@
    [app.main.store :as st]
    [app.main.ui.workspace.sidebar.assets.components :as wsac]
    [app.main.ui.workspace.viewport.viewport-ref :as uwvv]
-   [app.render-wasm.api :as wasm.api]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
    [app.util.dom.normalize-wheel :as nw]
@@ -197,10 +196,10 @@
              (st/emit! (dw/increase-zoom pt)))))))))
 
 (defn on-double-click
-  [hover hover-ids hover-top-frame-id drawing-path? objects edition drawing-tool z? read-only?]
+  [hover hover-ids selected hover-top-frame-id drawing-path? objects edition drawing-tool z? read-only?]
 
   (mf/use-callback
-   (mf/deps @hover @hover-ids @hover-top-frame-id drawing-path? edition drawing-tool @z? read-only?)
+   (mf/deps @hover @hover-ids selected @hover-top-frame-id drawing-path? edition drawing-tool @z? read-only?)
    (fn [event]
      (dom/stop-propagation event)
      (when-not @z?
@@ -209,7 +208,16 @@
              alt? (kbd/alt? event)
              meta? (kbd/meta? event)
 
-             {:keys [id type] :as shape} (or @hover (get objects (first @hover-ids)))
+             selected-id-under-cursor
+             (->> @hover-ids
+                  (filter selected)
+                  last)
+
+             {:keys [id type] :as shape}
+             (or (when selected-id-under-cursor
+                   (get objects selected-id-under-cursor))
+                 @hover
+                 (get objects (first @hover-ids)))
 
              editable? (contains? #{:text :rect :path :image :circle} type)
 
@@ -280,7 +288,6 @@
        (.releasePointerCapture target (.-pointerId event)))
 
      (let [native-event (dom/event->native-event event)
-           off-pt (dom/get-offset-position native-event)
            ctrl? (kbd/ctrl? native-event)
            shift? (kbd/shift? native-event)
            alt? (kbd/alt? native-event)
@@ -290,10 +297,7 @@
            middle-click? (= 2 (.-which native-event))]
 
        (when left-click?
-         (st/emit! (mse/->MouseEvent :up ctrl? shift? alt? meta?))
-
-         (when (wasm.api/text-editor-is-active?)
-           (wasm.api/text-editor-pointer-up (.-x off-pt) (.-y off-pt))))
+         (st/emit! (mse/->MouseEvent :up ctrl? shift? alt? meta?)))
 
        (when middle-click?
          (dom/prevent-default native-event)
@@ -328,7 +332,8 @@
            editing? (or (txu/some-text-editor-content? target)
                         (= "rich-text" (obj/get target "className"))
                         (= "INPUT" (obj/get target "tagName"))
-                        (= "TEXTAREA" (obj/get target "tagName")))]
+                        (= "TEXTAREA" (obj/get target "tagName"))
+                        (true? (.-isContentEditable target)))]
 
        (when-not (.-repeat bevent)
          (st/emit! (kbd/->KeyboardEvent :down key shift? ctrl? alt? meta? mod? editing? event)))))))
@@ -347,16 +352,15 @@
            editing? (or (txu/some-text-editor-content? target)
                         (= "rich-text" (obj/get target "className"))
                         (= "INPUT" (obj/get target "tagName"))
-                        (= "TEXTAREA" (obj/get target "tagName")))]
+                        (= "TEXTAREA" (obj/get target "tagName"))
+                        (true? (.-isContentEditable target)))]
        (st/emit! (kbd/->KeyboardEvent :up key shift? ctrl? alt? meta? mod? editing? event))))))
 
 (defn on-pointer-move [move-stream]
   (let [last-position (mf/use-var nil)]
     (mf/use-fn
      (fn [event]
-       (let [native-event (unchecked-get event "nativeEvent")
-             off-pt   (dom/get-offset-position native-event)
-             raw-pt   (dom/get-client-position event)
+       (let [raw-pt   (dom/get-client-position event)
              pt       (uwvv/point->viewport raw-pt)
 
              ;; We calculate the delta because Safari's MouseEvent.movementX/Y drop
@@ -365,65 +369,105 @@
                      (gpt/subtract raw-pt @last-position)
                      (gpt/point 0 0))]
 
-         ;; IMPORTANT! This function, right now it's called on EVERY pointermove. I think
-         ;; in the future (when we handle the UI in the render) should be better to
-         ;; have a "wasm.api/pointer-move" function that works as an entry point for
-         ;; all the pointer-move events.
-         (wasm.api/text-editor-pointer-move (.-x off-pt) (.-y off-pt))
-
          (rx/push! move-stream pt)
          (reset! last-position raw-pt)
-         (st/emit! (mse/->PointerEvent :delta delta
-                                       (kbd/ctrl? event)
-                                       (kbd/shift? event)
-                                       (kbd/alt? event)
-                                       (kbd/meta? event)))
+         ;; Single store emit per move: viewport `pt` + `movement` (old :delta `pt`) avoids
+         ;; doubling Potok + `st/stream` work on every pointermove.
          (st/emit! (mse/->PointerEvent :viewport pt
                                        (kbd/ctrl? event)
                                        (kbd/shift? event)
                                        (kbd/alt? event)
-                                       (kbd/meta? event))))))))
+                                       (kbd/meta? event)
+                                       delta)))))))
 
-(defn on-mouse-wheel [zoom]
-  (mf/use-callback
-   (mf/deps zoom)
-   (fn [event]
-     (let [event      (.getBrowserEvent ^js event)
+(defn- schedule-zoom!
+  "Accumulate a compound zoom scale and a cursor point into `state`, scheduling
+  a single requestAnimationFrame flush if one is not already pending.  On the
+  next frame the accumulated scale is applied via `dw/set-zoom` and the state
+  is reset to its idle values."
+  [^js state scale pt]
+  (let [pending? (pos? (.-zoomRafId state))]
+    (set! (.-scale state) (* (.-scale state) scale))
+    (set! (.-zoomPt state) pt)
+    (when-not pending?
+      (set! (.-zoomRafId state)
+            (ts/raf
+             (fn []
+               (let [s  (.-scale state)
+                     zp (.-zoomPt state)]
+                 (set! (.-scale state) 1)
+                 (set! (.-zoomPt state) nil)
+                 (set! (.-zoomRafId state) 0)
+                 (st/emit! (dw/set-zoom zp s)))))))))
 
-           target     (dom/get-target event)
-           mod?       (kbd/mod? event)
-           ctrl?      (kbd/ctrl? event)
+(defn- schedule-scroll!
+  "Accumulate scroll deltas into `state`, scheduling a single
+  requestAnimationFrame flush if one is not already pending.  On the next
+  frame the accumulated dx/dy are applied via `dw/update-viewport-position`
+  and the state is reset to its idle values."
+  [^js state zoom event delta-x delta-y]
+  (let [pending? (pos? (.-rafId state))]
+    (if (and (not (cfg/check-platform? :macos)) (kbd/shift? event))
+      ;; macOS sends delta-x automatically, so on other platforms we
+      ;; remap shift+scroll-y to horizontal panning.
+      (set! (.-dx state) (+ (.-dx state) (/ delta-y zoom)))
+      (do
+        (set! (.-dx state) (+ (.-dx state) (/ delta-x zoom)))
+        (set! (.-dy state) (+ (.-dy state) (/ delta-y zoom)))))
+    (when-not pending?
+      (set! (.-rafId state)
+            (ts/raf
+             (fn []
+               (let [dx (.-dx state)
+                     dy (.-dy state)]
+                 (set! (.-dx state) 0)
+                 (set! (.-dy state) 0)
+                 (set! (.-rafId state) 0)
+                 (st/emit! (dw/update-viewport-position
+                            {:x #(+ % dx)
+                             :y #(+ % dy)})))))))))
 
-           picking-color?   (= "pixel-overlay" (.-id target))
-           comments-layer?  (dom/is-child? (dom/get-element "comments") target)
+(defn on-mouse-wheel [zoom-ref]
+  (let [;; Mutable accumulator for scroll/zoom deltas, throttled to one
+        ;; state update per animation frame. This prevents rapid wheel
+        ;; events from causing cascading synchronous React re-renders
+        ;; that can exceed the maximum update depth.
+        scroll-state (mf/use-ref #js {:dx 0 :dy 0 :rafId 0
+                                      :scale 1 :zoomPt nil :zoomRafId 0})]
+    (mf/use-callback
+     (fn [event]
+       (let [event      (.getBrowserEvent ^js event)
 
-           raw-pt     (dom/get-client-position event)
-           pt         (uwvv/point->viewport raw-pt)
+             target     (dom/get-target event)
+             mod?       (kbd/mod? event)
+             ctrl?      (kbd/ctrl? event)
 
-           norm-event ^js (nw/normalize-wheel event)
+             picking-color?   (= "pixel-overlay" (.-id target))
+             comments-layer?  (dom/is-child? (dom/get-element "comments") target)
 
-           delta-y    (.-pixelY norm-event)
-           delta-x    (.-pixelX norm-event)
-           delta-zoom (+ delta-y delta-x)
+             raw-pt     (dom/get-client-position event)
+             pt         (uwvv/point->viewport raw-pt)
 
-           scale      (+ 1 (mth/abs (* scale-per-pixel delta-zoom)))
-           scale      (if (pos? delta-zoom) (/ 1 scale) scale)]
+             norm-event ^js (nw/normalize-wheel event)
 
-       (when (or (uwvv/inside-viewport? target) picking-color?)
-         (dom/prevent-default event)
-         (dom/stop-propagation event)
-         (if (or ctrl? mod?)
-           (st/emit! (dw/set-zoom pt scale))
-           (if (and (not (cfg/check-platform? :macos)) (kbd/shift? event))
-             ;; macos sends delta-x automatically, don't need to do it
-             (st/emit! (dw/update-viewport-position {:x #(+ % (/ delta-y zoom))}))
-             (st/emit! (dw/update-viewport-position {:x #(+ % (/ delta-x zoom))
-                                                     :y #(+ % (/ delta-y zoom))})))))
+             delta-y    (.-pixelY norm-event)
+             delta-x    (.-pixelX norm-event)
+             delta-zoom (+ delta-y delta-x)
 
-       (when (and comments-layer? (or ctrl? mod?))
-         (dom/prevent-default event)
-         (dom/stop-propagation event)
-         (st/emit! (dw/set-zoom pt scale)))))))
+             scale      (+ 1 (mth/abs (* scale-per-pixel delta-zoom)))
+             scale      (if (pos? delta-zoom) (/ 1 scale) scale)]
+
+         (when (or (uwvv/inside-viewport? target) picking-color?)
+           (dom/prevent-default event)
+           (dom/stop-propagation event)
+           (if (or ctrl? mod?)
+             (schedule-zoom! (mf/ref-val scroll-state) scale pt)
+             (schedule-scroll! (mf/ref-val scroll-state) (mf/ref-val zoom-ref) event delta-x delta-y)))
+
+         (when (and comments-layer? (or ctrl? mod?))
+           (dom/prevent-default event)
+           (dom/stop-propagation event)
+           (schedule-zoom! (mf/ref-val scroll-state) scale pt)))))))
 
 (defn on-drag-enter
   [comp-inst-ref]

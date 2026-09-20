@@ -1,4 +1,4 @@
-name: "MCP CI"
+name: "CI: MCP"
 
 on:
   pull_request:
@@ -10,6 +10,7 @@ on:
     types:
       - opened
       - synchronize
+      - ready_for_review
 
     paths:
       - 'mcp/**'
@@ -24,14 +25,15 @@ on:
       - 'mcp/**'
 
 jobs:
-  test:
-    name: "Test"
-    runs-on: penpot-runner-02
+  test-mcp:
+    if: ${{ !github.event.pull_request.draft }}
+    name: "Test MCP"
+    runs-on: penpot-extended-runner
     container: penpotapp/devenv:latest
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup
         working-directory: ./mcp
@@ -43,3 +45,8 @@ jobs:
           pnpm run fmt:check;
           pnpm -r run build;
           pnpm -r run types:check;
+
+      - name: Tests
+        working-directory: ./mcp
+        run: |
+          pnpm run test;

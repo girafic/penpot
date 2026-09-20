@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 (ns frontend-tests.logic.components-and-tokens
   (:require
    [app.common.geom.point :as geom]
@@ -23,11 +23,15 @@
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.pages :as thp]
    [frontend-tests.helpers.state :as ths]
+   [frontend-tests.helpers.wasm :as thw]
    [frontend-tests.tokens.helpers.state :as tohs]
    [frontend-tests.tokens.helpers.tokens :as toht]))
 
 (t/use-fixtures :each
-  {:before thp/reset-idmap!})
+  {:before (fn []
+             (thp/reset-idmap!)
+             (thw/setup-wasm-mocks!))
+   :after  thw/teardown-wasm-mocks!})
 
 (defn- setup-base-file
   []
@@ -141,7 +145,7 @@
           events [(dwta/apply-token {:shape-ids [(cthi/id :frame1)]
                                      :attributes #{:r1 :r2 :r3 :r4}
                                      :token (toht/get-token file "test-token-2")
-                                     :on-update-shape dwta/update-shape-radius-all})]
+                                     :on-update-shape dwta/update-shape-radius})]
 
           step2 (fn [_]
                   (let [events2 [(dwl/sync-file (:id file) (:id file))]]
@@ -165,7 +169,7 @@
                          (t/is (= (get c-frame1' :r4) 50)))))))]
 
       (tohs/run-store-async
-       store step2 events identity))))
+       store (constantly nil) events step2))))
 
 (t/deftest remove-token-in-main
   (t/async
@@ -249,11 +253,11 @@
           events [(dwta/apply-token {:shape-ids [(cthi/id :c-frame1)]
                                      :attributes #{:r1 :r2 :r3 :r4}
                                      :token (toht/get-token file "test-token-2")
-                                     :on-update-shape dwta/update-shape-radius-all})
+                                     :on-update-shape dwta/update-shape-radius})
                   (dwta/apply-token {:shape-ids [(cthi/id :frame1)]
                                      :attributes #{:r1 :r2 :r3 :r4}
                                      :token (toht/get-token file "test-token-3")
-                                     :on-update-shape dwta/update-shape-radius-all})]
+                                     :on-update-shape dwta/update-shape-radius})]
 
           step2 (fn [_]
                   (let [events2 [(dwl/sync-file (:id file) (:id file))]]
@@ -293,7 +297,7 @@
                   (dwta/apply-token {:shape-ids [(cthi/id :frame1)]
                                      :attributes #{:r1 :r2 :r3 :r4}
                                      :token (toht/get-token file "test-token-3")
-                                     :on-update-shape dwta/update-shape-radius-all})]
+                                     :on-update-shape dwta/update-shape-radius})]
 
           step2 (fn [_]
                   (let [events2 [(dwl/sync-file (:id file) (:id file))]]

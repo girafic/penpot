@@ -1,8 +1,8 @@
+use crate::get_resources;
 use crate::skia::textlayout::FontCollection;
 use crate::skia::Image;
 use crate::uuid::Uuid;
-use crate::with_state_mut;
-use crate::STATE;
+use crate::with_state;
 use std::collections::HashSet;
 
 pub fn uuid_from_u32_quartet(a: u32, b: u32, c: u32, d: u32) -> Uuid {
@@ -25,16 +25,29 @@ pub fn uuid_from_u32(id: [u32; 4]) -> Uuid {
 }
 
 pub fn get_image(image_id: &Uuid) -> Option<&Image> {
-    with_state_mut!(state, { state.render_state_mut().images.get(image_id) })
+    get_resources().images.get(image_id)
 }
 
 // FIXME: move to a different place ?
 pub fn get_fallback_fonts() -> &'static HashSet<String> {
-    with_state_mut!(state, { state.render_state().fonts().get_fallback() })
+    get_resources().fonts.get_fallback()
 }
 
 pub fn get_font_collection() -> &'static FontCollection {
-    with_state_mut!(state, { state.font_collection() })
+    if crate::globals::has_render_resources() {
+        get_resources().fonts.font_collection()
+    } else {
+        with_state!(state, { state.font_collection() })
+    }
+}
+
+/// A negative f32 means "unset" — the renderer falls back to its default.
+pub fn decode_optional_f32(value: f32) -> Option<f32> {
+    if value.is_finite() && value >= 0.0 {
+        Some(value)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.rpc.commands.webhooks
   (:require
@@ -23,11 +23,9 @@
    [cuerdas.core :as str]))
 
 (defn get-webhooks-permissions
-  [conn profile-id team-id creator-id]
+  [conn profile-id team-id]
   (let [permissions (t/get-permissions conn profile-id team-id)
-
-        can-edit (boolean (or (:can-edit permissions)
-                              (= profile-id creator-id)))]
+        can-edit (boolean (:can-edit permissions))]
     (assoc permissions :can-edit can-edit)))
 
 (def has-webhook-edit-permissions?
@@ -50,24 +48,27 @@
 (defn- validate-webhook!
   [cfg whook params]
   (when (not= (:uri whook) (:uri params))
-    (let [response (ex/try!
-                    (http/req! cfg
+    (try
+      (let [response (http/req cfg
                                {:method :head
                                 :uri (str (:uri params))
-                                :timeout (ct/duration "3s")}
-                               {:sync? true}))]
-      (if (ex/exception? response)
-        (if-let [hint (webhooks/interpret-exception response)]
-          (ex/raise :type :validation
-                    :code :webhook-validation
-                    :hint hint)
-          (ex/raise :type :internal
-                    :code :webhook-validation
-                    :cause response))
+                                :timeout (ct/duration "3s")})]
         (when-let [hint (webhooks/interpret-response response)]
           (ex/raise :type :validation
                     :code :webhook-validation
-                    :hint hint))))))
+                    :hint hint)))
+
+      (catch Throwable cause
+        (if-let [hint (webhooks/interpret-exception cause)]
+          (ex/raise :type :validation
+                    :code :webhook-validation
+                    :hint hint
+                    :webhook-uri (str (:uri params))
+                    :cause cause)
+          (ex/raise :type :internal
+                    :code :webhook-validation
+                    :webhook-uri (str (:uri params))
+                    :cause cause))))))
 
 (defn- validate-quotes!
   [{:keys [::db/pool]} {:keys [team-id]}]
@@ -117,7 +118,7 @@
   {::doc/added "1.17"
    ::sm/params schema:create-webhook}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id team-id] :as params}]
-  (check-webhook-edition-permissions! pool profile-id team-id profile-id)
+  (t/check-edition-permissions! pool profile-id team-id)
   (validate-quotes! cfg params)
   (validate-webhook! cfg nil params)
   (insert-webhook! cfg params))
@@ -134,7 +135,7 @@
    ::sm/params schema:update-webhook}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id id] :as params}]
   (let [whook (-> (db/get pool :webhook {:id id}) (decode-row))]
-    (check-webhook-edition-permissions! pool profile-id (:team-id whook) (:profile-id whook))
+    (check-webhook-edition-permissions! pool profile-id (:team-id whook))
     (validate-webhook! cfg whook params)
     (update-webhook! cfg whook params)))
 
@@ -148,7 +149,7 @@
    ::db/transaction true}
   [{:keys [::db/conn]} {:keys [::rpc/profile-id id]}]
   (let [whook (-> (db/get conn :webhook {:id id}) decode-row)]
-    (check-webhook-edition-permissions! conn profile-id (:team-id whook) (:profile-id whook))
+    (check-webhook-edition-permissions! conn profile-id (:team-id whook))
     (db/delete! conn :webhook {:id id})
     nil))
 
@@ -169,6 +170,6 @@
    ::sm/params schema:get-webhooks}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id team-id]}]
   (dm/with-open [conn (db/open pool)]
-    (check-read-permissions! conn profile-id team-id)
+    (check-read-permissions! cfg profile-id team-id)
     (->> (db/exec! conn [sql:get-webhooks team-id])
          (mapv decode-row))))

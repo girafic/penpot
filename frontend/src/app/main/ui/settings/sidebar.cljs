@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.settings.sidebar
   (:require-macros [app.main.style :as stl])
@@ -18,7 +18,6 @@
    [app.main.ui.icons :as deprecated-icon]
    [app.util.i18n :as i18n :refer [tr]]
    [app.util.keyboard :as kbd]
-   [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
 (def ^:private arrow-icon
@@ -49,17 +48,19 @@
 (def ^:private go-settings-notifications
   #(st/emit! (rt/nav :settings-notifications)))
 
+(def ^:private go-settings-shortcuts
+  #(st/emit! (rt/nav :settings-shortcuts)))
+
 (defn- show-release-notes
   [event]
   (let [version (:main cf/version)]
-    (st/emit! (ptk/event ::ev/event {::ev/name "show-release-notes" :version version}))
+    (st/emit! (ev/event {::ev/name "show-release-notes" :version version}))
 
     (if (and (kbd/alt? event) (kbd/mod? event))
       (st/emit! (modal/show {:type :onboarding}))
       (st/emit! (modal/show {:type :release-notes :version version})))))
 
-(mf/defc sidebar-content
-  {::mf/props :obj}
+(mf/defc sidebar-content*
   [{:keys [profile section]}]
   (let [profile?       (= section :settings-profile)
         password?      (= section :settings-password)
@@ -68,6 +69,7 @@
         subscription?  (= section :settings-subscription)
         integrations?  (= section :settings-integrations)
         notifications? (= section :settings-notifications)
+        shortcuts?     (= section :settings-shortcuts)
         team-id        (or (dtm/get-last-team-id)
                            (:default-team-id profile))
 
@@ -85,7 +87,8 @@
 
      [:hr {:class (stl/css :sidebar-separator)}]
 
-     [:div {:class (stl/css :sidebar-content-section)}
+     [:nav {:class (stl/css :sidebar-content-section)
+            :aria-label (tr "labels.settings")}
       [:ul {:class (stl/css :sidebar-nav-settings)}
        [:li {:class (stl/css-case :current profile?
                                   :settings-item true)
@@ -102,13 +105,20 @@
              :on-click go-settings-notifications}
         [:span {:class (stl/css :element-title)} (tr "labels.notifications")]]
 
+       (when (contains? cf/flags :custom-shortcuts)
+         [:li {:class (stl/css-case :current shortcuts?
+                                    :settings-item true)
+               :on-click go-settings-shortcuts}
+          [:span {:class (stl/css :element-title)} (tr "label.shortcuts")]])
+
        [:li {:class (stl/css-case :current options?
                                   :settings-item true)
              :on-click go-settings-options
              :data-testid "settings-profile"}
         [:span {:class (stl/css :element-title)} (tr "labels.settings")]]
 
-       (when (contains? cf/flags :subscriptions)
+       (when (or (contains? cf/flags :subscriptions)
+                 (contains? cf/flags :admin-console))
          [:li {:class (stl/css-case :current subscription?
                                     :settings-item true)
                :on-click go-settings-subscription
@@ -136,12 +146,10 @@
           feedback-icon
           [:span {:class (stl/css :element-title)} (tr "labels.contact-us")]])]]]))
 
-(mf/defc sidebar
-  {::mf/wrap [mf/memo]
-   ::mf/props :obj}
+(mf/defc sidebar*
+  {::mf/wrap [mf/memo]}
   [{:keys [profile section]}]
-  [:div {:class (stl/css :dashboard-sidebar :settings)}
-   [:& sidebar-content {:profile profile
-                        :section section}]
+  [:aside {:class (stl/css :dashboard-sidebar :settings)}
+   [:> sidebar-content* {:profile profile
+                         :section section}]
    [:> profile-section* {:profile profile}]])
-

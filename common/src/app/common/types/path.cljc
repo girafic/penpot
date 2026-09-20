@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.common.types.path
   (:require
@@ -18,12 +18,13 @@
    [app.common.types.path.helpers :as helpers]
    [app.common.types.path.impl :as impl]
    [app.common.types.path.segment :as segment]
+   [app.common.types.path.selection :as selection]
    [app.common.types.path.shape-to-path :as stp]
    [app.common.types.path.subpath :as subpath]))
 
 #?(:clj (set! *warn-on-reflection* true))
 
-(def ^:cosnt bool-group-style-properties bool/group-style-properties)
+(def ^:const bool-group-style-properties bool/group-style-properties)
 (def ^:const bool-style-properties bool/style-properties)
 
 (defn get-default-bool-fills
@@ -79,9 +80,22 @@
 (defn close-subpaths
   "Given a content, searches a path for possible subpaths that can
   create closed loops and merge them; then return the transformed path
-  conten as PathData instance"
+  content as PathData instance"
   [content]
   (-> (subpath/close-subpaths content)
+      (impl/from-plain)))
+
+(defn merge-touching-subpaths
+  "Given a content, fold consecutive subpaths whose endpoints coincide
+  into a single continuous subpath, returning a PathData instance.
+
+  Conservative counterpart of `close-subpaths`: only adjacent subpaths
+  are merged and none are reversed, so fill rules and stroke-dasharray
+  semantics are preserved. Used at SVG-import time on stroke-only paths
+  to recover the `stroke-linejoin` rendering when authoring tools split
+  a continuous polyline into adjacent `M..L M..L` subpaths."
+  [content]
+  (-> (subpath/merge-touching-subpaths content)
       (impl/from-plain)))
 
 (defn apply-content-modifiers
@@ -190,16 +204,325 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn get-points
-  "Returns points for the given segment, faster version of
-  the `content->points`."
+  "Returns points for the given content. Accepts PathData instances or
+  plain segment vectors."
   [content]
-  (some-> content segment/get-points))
+  (let [content (impl/path-data content)]
+    (segment/get-points content)))
+
+(defn segment-entries
+  "Selectable path segments with their command index and endpoints."
+  [content]
+  (let [content (impl/path-data content)]
+    (segment/segment-entries content)))
+
+(defn single-line?
+  "True when the content is a single straight segment: a move-to
+  followed by exactly one line-to."
+  [content]
+  (and (some? content)
+       (= 2 (count content))
+       (= :move-to (:command (nth content 0)))
+       (= :line-to (:command (nth content 1)))))
+
+(defn close-loops
+  "Closes subpaths whose endpoints meet and returns PathData."
+  [content]
+  (-> (subpath/close-loops content)
+      (impl/from-plain)))
+
+(defn extract-content
+  "Extracts selected segments and segments between selected nodes into new
+  subpaths."
+  [content {:keys [nodes segments]}]
+  (let [content   (impl/path-data content)
+        nodes     (or nodes #{})
+        segments  (or segments #{})
+        selected? (fn [{:keys [index from-index to-index]}]
+                    (or (contains? segments index)
+                        (and (contains? nodes from-index)
+                             (contains? nodes to-index))))
+        entries   (filterv selected? (segment/segment-entries content))
+        plain     (loop [entries (seq entries)
+                         prev    nil
+                         result  (transient [])]
+                    (if-let [{:keys [from from-index to segment] :as entry} (first entries)]
+                      (let [result (cond-> result
+                                     (not= from-index (:to-index prev))
+                                     (conj! {:command :move-to
+                                             :params {:x (:x from) :y (:y from)}}))
+                            result (conj! result
+                                          (if (= :close-path (:command segment))
+                                            {:command :line-to
+                                             :params {:x (:x to) :y (:y to)}}
+                                            segment))]
+                        (recur (next entries) entry result))
+                      (persistent! result)))]
+    (-> (close-subpaths (impl/path-data plain))
+        (close-loops))))
+
+(defn splice-content
+  "Appends sub-content as new subpaths."
+  [content sub-content]
+  (impl/path-data (into (vec content) (vec sub-content))))
+
+(defn- move-segment-end
+  "Moves a segment endpoint and its incoming handle by `delta`."
+  [segment {dx :x dy :y}]
+  (cond-> (-> segment
+              (update-in [:params :x] + dx)
+              (update-in [:params :y] + dy))
+    (= :curve-to (:command segment))
+    (-> (update-in [:params :c2x] + dx)
+        (update-in [:params :c2y] + dy))))
+
+(defn- segment->end
+  "Returns the command arriving at an entry's end node as a drawable segment."
+  [{:keys [to segment]}]
+  (if (= :close-path (:command segment))
+    {:command :line-to :params {:x (:x to) :y (:y to)}}
+    segment))
+
+(defn- reverse-segment
+  "Reverses a segment toward `from`, swapping curve handles."
+  [segment {fx :x fy :y}]
+  (if (= :curve-to (:command segment))
+    (let [{:keys [c1x c1y c2x c2y]} (:params segment)]
+      {:command :curve-to
+       :params {:x fx :y fy :c1x c2x :c1y c2y :c2x c1x :c2y c1y}})
+    {:command :line-to :params {:x fx :y fy}}))
+
+(defn duplicate-node-content
+  "Copies a node and its incident segments, keeping their far ends attached.
+  Returns copied content and the relative indices of the new node."
+  [content index node-offset]
+  (let [content  (impl/path-data content)
+        entries  (segment-entries content)
+        incident (filterv #(or (= index (:to-index %))
+                               (= index (:from-index %)))
+                          entries)]
+    (if (seq incident)
+      (reduce (fn [{:keys [content selected]} {:keys [from to to-index segment] :as entry}]
+                (let [incoming? (= index to-index)
+                      start     (if incoming? from to)
+                      end       (if incoming?
+                                  (segment->end entry)
+                                  (reverse-segment segment from))
+                      end       (cond-> end
+                                  (some? node-offset) (move-segment-end node-offset))]
+                  {:content  (conj content
+                                   {:command :move-to
+                                    :params {:x (:x start) :y (:y start)}}
+                                   end)
+                   :selected (conj selected (inc (count content)))}))
+              {:content [] :selected #{}}
+              incident)
+      (when-let [{:keys [x y]} (:params (nth content index nil))]
+        {:content [{:command :move-to
+                    :params (if (some? node-offset)
+                              {:x (+ x (:x node-offset)) :y (+ y (:y node-offset))}
+                              {:x x :y y})}]
+         :selected #{0}}))))
 
 (defn calc-selrect
   "Calculate selrect from a content. The content can be in a PathData
   instance or plain vector of segments."
   [content]
-  (segment/content->selrect content))
+  (let [content (impl/path-data content)]
+    (segment/content->selrect content)))
+
+(defn get-handlers
+  "Retrieve a map where for every point will retrieve a list of the
+  handlers that are associated with that point.
+  point -> [[index, prefix]]"
+  [content]
+  (let [content (impl/path-data content)]
+    (segment/get-handlers content)))
+
+(defn get-handler-point
+  "Given a content, segment index and prefix, get a handler point."
+  [content index prefix]
+  (let [content (impl/path-data content)]
+    (segment/get-handler-point content index prefix)))
+
+(defn get-handler
+  "Given a segment (command map) and a prefix, returns the handler
+  coordinate map {:x ... :y ...} from its params, or nil when absent."
+  [command prefix]
+  (segment/get-handler command prefix))
+
+(defn handler->node
+  "Given a content, index and prefix, returns the path node (anchor
+  point) that the handler belongs to."
+  [content index prefix]
+  (let [content (impl/path-data content)]
+    (segment/handler->node content index prefix)))
+
+(defn opposite-index
+  "Calculates the opposite handler index given a content, index and
+  prefix."
+  [content index prefix]
+  (let [content (impl/path-data content)]
+    (segment/opposite-index content index prefix)))
+
+(defn point-indices
+  "Returns the indices of all segments whose endpoint matches point."
+  [content point]
+  (let [content (impl/path-data content)]
+    (segment/point-indices content point)))
+
+(defn handler-indices
+  "Returns [[index prefix] ...] of all handlers associated with point."
+  [content point]
+  (let [content (impl/path-data content)]
+    (segment/handler-indices content point)))
+
+(defn next-node
+  "Calculates the next node segment to be inserted when drawing."
+  [content position prev-point prev-handler]
+  (let [content (impl/path-data content)]
+    (segment/next-node content position prev-point prev-handler)))
+
+(defn append-segment
+  "Appends a segment to content, accepting PathData or plain vector."
+  [content segment]
+  (let [content (impl/path-data content)]
+    (segment/append-segment content segment)))
+
+(defn points->content
+  "Given a vector of points generate a path content."
+  [points & {:keys [close]}]
+  (segment/points->content points :close close))
+
+(defn smooth-points->content
+  "Fits smooth path content through `points`."
+  [points tolerance]
+  (segment/smooth-points->content points tolerance))
+
+(defn closest-point
+  "Returns the closest point in the path to position, at a given precision."
+  [content position precision]
+  (let [content (impl/path-data content)]
+    (when (pos? (count content))
+      (segment/closest-point content position precision))))
+
+(defn make-corner-point
+  "Changes the content to make a point a corner."
+  [content point]
+  (let [content (impl/path-data content)]
+    (segment/make-corner-point content point)))
+
+(defn make-curve-point
+  "Changes the content to make a point a curve."
+  [content point]
+  (let [content (impl/path-data content)]
+    (segment/make-curve-point content point)))
+
+(defn split-segments
+  "Given a content, splits segments between points with new segments."
+  [content points value]
+  (let [content (impl/path-data content)]
+    (segment/split-segments content points value)))
+
+(defn is-curve-point?
+  "True when a node has at least one visible handler."
+  [content point]
+  (let [content (impl/path-data content)]
+    (boolean (segment/is-curve? content point))))
+
+(defn collapse-handler
+  "Collapses a handler onto its node and simplifies flat curves to lines."
+  [content index prefix]
+  (let [content (impl/path-data content)]
+    (segment/collapse-handler content index prefix)))
+
+(defn toggle-segment-curve
+  "Toggles a segment between a line and a curve."
+  [content index]
+  (let [content (impl/path-data content)]
+    (segment/toggle-segment-curve content index)))
+
+(defn remove-segments
+  "Removes segments, opening their subpaths and dropping empty ones."
+  [content indices]
+  (let [content (impl/path-data content)]
+    (segment/remove-segments content indices)))
+
+(defn remove-nodes
+  "Removes the given points from content, reconstructing paths as needed."
+  [content points]
+  (let [content (impl/path-data content)]
+    (segment/remove-nodes content points)))
+
+(defn merge-nodes
+  "Reduces contiguous segments at the given points to a single point."
+  [content points]
+  (let [content (impl/path-data content)]
+    (segment/merge-nodes content points)))
+
+(defn merge-coincident-nodes
+  "Collapses the nodes sharing a position into one node.
+
+  Without `points` every position held by more than one command is merged."
+  ([content]
+   (let [content (impl/path-data content)]
+     (-> (segment/merge-coincident-nodes content)
+         (impl/from-plain))))
+  ([content points]
+   (let [content (impl/path-data content)]
+     (-> (segment/merge-coincident-nodes content points)
+         (impl/from-plain)))))
+
+(defn join-nodes
+  "Creates new segments between points that weren't previously connected."
+  [content points]
+  (let [content (impl/path-data content)]
+    (segment/join-nodes content points)))
+
+(defn separate-nodes
+  "Removes segments between points or splits one node into offset open ends."
+  ([content points]
+   (let [content (impl/path-data content)]
+     (segment/separate-nodes content points)))
+  ([content points offset]
+   (let [content (impl/path-data content)]
+     (segment/separate-nodes content points offset))))
+
+(defn flip-content
+  "Flips selected nodes and handles across their bounding box."
+  [content indices axis]
+  (let [content (impl/path-data content)]
+    (selection/flip-content content indices axis)))
+
+(defn align-content
+  "Aligns selected nodes and handles within their bounding box."
+  [content indices axis]
+  (let [content (impl/path-data content)]
+    (selection/align-content content indices axis)))
+
+(defn distribute-content
+  "Distributes selected nodes evenly along `axis`."
+  [content indices axis]
+  (let [content (impl/path-data content)]
+    (selection/distribute-content content indices axis)))
+
+(defn set-nodes-coordinate
+  "Sets one coordinate of selected nodes and their handles."
+  [content indices axis value]
+  (let [content (impl/path-data content)]
+    (selection/set-nodes-coordinate content indices axis value)))
+
+(defn set-handler-points
+  "Moves each handler in `pts` to its target point."
+  [content pts]
+  (let [content (impl/path-data content)]
+    (selection/set-handler-points content pts)))
+
+(defn translate-selected-nodes
+  "Moves selected nodes and their handles by `delta`."
+  [content indices delta]
+  (let [content (impl/path-data content)]
+    (selection/translate-selected-nodes content indices delta)))
 
 (defn- calc-bool-content*
   "Calculate the boolean content from shape and objects. Returns plain
@@ -265,7 +588,9 @@
   ([shape]
    (convert-to-path shape {}))
   ([shape objects]
-   (-> (stp/convert-to-path shape objects)
-       (update :content impl/path-data))))
+   (let [shape' (stp/convert-to-path shape objects)]
+     (if (identical? shape shape')
+       shape'
+       (update shape' :content impl/path-data)))))
 
 (dm/export impl/decode-segments)

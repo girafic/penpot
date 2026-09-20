@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { MockWebSocketHelper } from "../../helpers/MockWebSocketHelper";
 import { BaseWebSocketPage } from "./BaseWebSocketPage";
 import { Transit } from "../../helpers/Transit";
 
@@ -53,19 +54,18 @@ export class WorkspacePage extends BaseWebSocketPage {
       for (let i = 0; i < amount; i++) {
         await this.page.keyboard.press("ArrowLeft");
       }
-      await this.waitForIdle();
+      await this.waitForIdle({ timeout: 100 });
     }
 
     async moveToRight(amount = 0) {
       for (let i = 0; i < amount; i++) {
         await this.page.keyboard.press("ArrowRight");
       }
-      await this.waitForIdle();
+      await this.waitForIdle({ timeout: 100 });
     }
 
     async moveFromStart(offset = 0) {
       await this.page.keyboard.press("Home");
-      await this.waitForIdle();
       await this.moveToRight(offset);
     }
 
@@ -107,8 +107,10 @@ export class WorkspacePage extends BaseWebSocketPage {
       return this.changeNumericInput(this.letterSpacing, newValue);
     }
 
-    async waitForIdle() {
-      await this.page.evaluate(() => new Promise((resolve) => globalThis.requestIdleCallback(resolve)));
+    async waitForIdle(options) {
+      await this.page.evaluate(
+        (options) => new Promise(
+          (resolve) => globalThis.requestIdleCallback(resolve, options)), options);
     }
   };
 
@@ -171,8 +173,10 @@ export class WorkspacePage extends BaseWebSocketPage {
     this.toolbarOptions = page.getByTestId("toolbar-options");
     this.rectShapeButton = page.getByRole("button", { name: "Rectangle (R)" });
     this.ellipseShapeButton = page.getByRole("button", { name: "Ellipse (E)" });
+    this.textShapeButton = page.getByRole("button", { name: "Text (T)" });
     this.moveButton = page.getByRole("button", { name: "Move (V)" });
     this.boardButton = page.getByRole("button", { name: "Board (B)" });
+    this.pathButton = page.getByRole("button", { name: "Path (P)" });
     this.toggleToolbarButton = page.getByRole("button", {
       name: "Toggle toolbar",
     });
@@ -190,6 +194,7 @@ export class WorkspacePage extends BaseWebSocketPage {
     this.tokensUpdateCreateModal = page.getByTestId(
       "token-update-create-modal",
     );
+    this.tokenRenameNodeModal = page.getByTestId("token-rename-node-modal");
     this.tokenThemeUpdateCreateModal = page.getByTestId(
       "token-theme-update-create-modal",
     );
@@ -212,19 +217,46 @@ export class WorkspacePage extends BaseWebSocketPage {
   async goToWorkspace({
     fileId = this.fileId ?? WorkspacePage.anyFileId,
     pageId = this.pageId ?? WorkspacePage.anyPageId,
+    pageName = "Page 1",
   } = {}) {
-    await this.page.goto(
-      `/#/workspace?team-id=${WorkspacePage.anyTeamId}&file-id=${fileId}&page-id=${pageId}`,
-    );
+    // Helpers often call setup (and this) several times per test with the
+    // same file. Re-navigating would reload the document and wipe the
+    // in-memory file state (e.g. tokens created by previous steps), so
+    // only navigate when the target file actually changes. Extra query
+    // params the app adds itself (e.g. layout=tokens) are ignored, and
+    // navigating away and back still reloads as before.
+    const currentParams = new URL(this.page.url()).searchParams;
+    const sameFile =
+      currentParams.get("screen") === "workspace" &&
+      currentParams.get("team-id") === WorkspacePage.anyTeamId &&
+      currentParams.get("file-id") === fileId &&
+      currentParams.get("page-id") === pageId;
+    if (!sameFile) {
+      // Drop mocks from any previous document: page.goto reloads the app,
+      // so entries registered by the old document would otherwise resolve
+      // waitForNotificationsWebSocket immediately with a stale mock that
+      // no longer exists in the new document.
+      MockWebSocketHelper.clear();
+      await this.page.goto(
+        `/?screen=workspace&team-id=${WorkspacePage.anyTeamId}&file-id=${fileId}&page-id=${pageId}`,
+      );
+    }
 
     this.#ws = await this.waitForNotificationsWebSocket();
     await this.#ws.mockOpen();
-    await this.#waitForWebSocketReadiness();
+    if (!sameFile) {
+      await this.#waitForWebSocketReadiness(pageName);
+    } else {
+      // Already on the target file (e.g. Tokens tab open, where the
+      // sitemap page name is not rendered): just ensure the canvas is
+      // present instead of waiting for the page name.
+      await expect(this.viewport).toBeVisible({ timeout: 30000 });
+    }
   }
 
-  async #waitForWebSocketReadiness() {
+  async #waitForWebSocketReadiness(pageName) {
     // TODO: find a better event to settle whether the app is ready to receive notifications via ws
-    await expect(this.pageName).toHaveText("Page 1", { timeout: 30000 })
+    await expect(this.pageName).toHaveText(pageName, { timeout: 30000 })
   }
 
   async sendPresenceMessage(fixture) {
@@ -251,11 +283,13 @@ export class WorkspacePage extends BaseWebSocketPage {
       "get-font-variants?team-id=*": "workspace/get-font-variants-empty.json",
       "get-file-fragment?file-id=*": "workspace/get-file-fragment-blank.json",
       "get-file-libraries?file-id=*": "workspace/get-file-libraries-empty.json",
+      // Any shape mutation schedules a persistence flush. An unmocked
+      // update-file answers 404, which the persistence task rethrows as an
+      // unhandled error and the workspace is replaced by the Internal Error
+      // page. Tests that need a specific response mock this again afterwards;
+      // the last matching route wins.
+      "update-file?id=*": "workspace/update-file-empty.json",
     });
-
-    if (this.textEditor) {
-      await this.mockRPC("update-file?id=*", "text-editor/update-file.json");
-    }
 
     // by default we mock the blank file.
     await this.mockGetFile("workspace/get-file-blank.json");
@@ -309,7 +343,7 @@ export class WorkspacePage extends BaseWebSocketPage {
   async clickWithDragViewportAt(x, y, width, height) {
     await this.page.waitForTimeout(100);
     const box = await this.viewport.boundingBox();
-    if (!box) throw new Error('Viewport not visible');
+    if (!box) throw new Error("Viewport not visible");
 
     const startX = box.x + x;
     const startY = box.y + y;
@@ -362,8 +396,33 @@ export class WorkspacePage extends BaseWebSocketPage {
     await this.page.keyboard.press("T");
     await this.page.waitForTimeout(timeToWait);
 
-    const layersCountBefore = await this.layers.getByTestId("layer-row").count();
+    const layersCountBefore = await this.layers
+      .getByTestId("layer-row")
+      .count();
     await this.clickAndMove(x1, y1, x2, y2);
+
+    if (initialText) {
+      await this.waitForSelectedShapeName("Text");
+      await this.page.keyboard.type(initialText);
+    }
+  }
+
+  /**
+   * Creates a new auto-width Text Shape by single-clicking at the given
+   * coordinates (as opposed to dragging a fixed-size box) and, optionally,
+   * types an initial text.
+   *
+   * @param {number} x
+   * @param {number} y
+   * @param {string} [initialText]
+   * @param {*} [options]
+   */
+  async createAutoWidthTextShape(x, y, initialText, options) {
+    const timeToWait = options?.timeToWait ?? 100;
+    await this.page.keyboard.press("T");
+    await this.page.waitForTimeout(timeToWait);
+
+    await this.clickAt(x, y);
 
     if (initialText) {
       await this.waitForSelectedShapeName("Text");
@@ -385,10 +444,13 @@ export class WorkspacePage extends BaseWebSocketPage {
       await this.page.keyboard.press("ControlOrMeta+C");
     }
     // wait for the clipboard to be updated
-    await this.page.waitForFunction(async () => {
-      const content = await navigator.clipboard.readText()
-      return content !== "";
-    }, { timeout: 1000 });
+    await this.page.waitForFunction(
+      async () => {
+        const content = await navigator.clipboard.readText();
+        return content !== "";
+      },
+      { timeout: 1000 },
+    );
   }
 
   async cut(kind = "keyboard", locator = undefined) {
@@ -399,13 +461,15 @@ export class WorkspacePage extends BaseWebSocketPage {
       await this.page.keyboard.press("ControlOrMeta+X");
     }
     // wait for the clipboard to be updated
-    await this.page.waitForFunction(async () => {
-      const content = await navigator.clipboard.readText()
-      return content !== "";
-    }, { timeout: 1000 });
+    await this.page.waitForFunction(
+      async () => {
+        const content = await navigator.clipboard.readText();
+        return content !== "";
+      },
+      { timeout: 1000 },
+    );
 
     await this.page.waitForTimeout(3000);
-
   }
 
   /**
@@ -434,6 +498,33 @@ export class WorkspacePage extends BaseWebSocketPage {
   async togglePages() {
     const pagesToggle = this.page.getByText("Pages");
     await pagesToggle.click();
+  }
+
+  async selectToolbarTool(workspacePage, toolName) {
+    await workspacePage.page
+      .getByRole("button", { name: toolName })
+      .first()
+      .click();
+  }
+
+  async selectToolFromFlyout(
+    workspacePage,
+    { triggerToolName, targetToolName },
+  ) {
+    const trigger = workspacePage.page
+      .getByRole("button", { name: triggerToolName })
+      .first();
+
+    const option = workspacePage.page
+      .getByRole("menuitemradio", { name: targetToolName })
+      .first();
+
+    await trigger.hover();
+    // Flyout opening is delayed by 350ms in the toolbar component.
+    await workspacePage.page.waitForTimeout(450);
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await option.waitFor({ state: "visible" });
+    await option.click();
   }
 
   async moveSelectionToShape(name) {
@@ -537,6 +628,12 @@ export class WorkspacePage extends BaseWebSocketPage {
     await this.page
       .getByRole("button", { name: "Comments (C)" })
       .click(clickOptions);
+  }
+
+  async toggleCommentsVisibilityFromMenu(clickOptions = {}) {
+    await this.page.getByRole("button", { name: "Main menu" }).click();
+    await this.page.getByText("view").last().click();
+    await this.page.locator("#file-menu-comments").click(clickOptions);
   }
 }
 

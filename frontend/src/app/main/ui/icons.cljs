@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.icons
   (:refer-clojure :exclude [import mask])
@@ -19,6 +19,8 @@
 (def ^:icon logo-error-screen (icon-xref :logo-error-screen))
 (def ^:icon logo-subscription (icon-xref :logo-subscription))
 (def ^:icon logo-subscription-light (icon-xref :logo-subscription-light))
+(def ^:icon nitrate-welcome (icon-xref :nitrate-welcome))
+(def ^:icon nitrate-welcome-light (icon-xref :nitrate-welcome-light))
 
 (def ^:icon brand-openid (icon-xref :brand-openid))
 (def ^:icon brand-github (icon-xref :brand-github))
@@ -113,7 +115,7 @@
 (def ^:icon easing-ease (icon-xref :easing-ease))
 (def ^:icon easing-linear (icon-xref :easing-linear))
 (def ^:icon effects (icon-xref :effects))
-(def ^:icon elipse (icon-xref :elipse))
+(def ^:icon ellipse (icon-xref :ellipse))
 (def ^:icon exit (icon-xref :exit))
 (def ^:icon expand (icon-xref :expand))
 (def ^:icon external-link (icon-xref :external-link))
@@ -142,6 +144,9 @@
 (def ^:icon group (icon-xref :group))
 (def ^:icon gutter-horizontal (icon-xref :gutter-horizontal))
 (def ^:icon gutter-vertical (icon-xref :gutter-vertical))
+(def ^:icon handlers-equal (icon-xref :handlers-equal))
+(def ^:icon handlers-independent (icon-xref :handlers-independent))
+(def ^:icon handlers-mirror (icon-xref :handlers-mirror))
 (def ^:icon help (icon-xref :help))
 (def ^:icon hide (icon-xref :hide))
 (def ^:icon history (icon-xref :history))
@@ -217,6 +222,7 @@
 (def ^:icon shown (icon-xref :shown))
 (def ^:icon size-horizontal (icon-xref :size-horizontal))
 (def ^:icon size-vertical (icon-xref :size-vertical))
+(def ^:icon snap (icon-xref :snap))
 (def ^:icon snap-nodes (icon-xref :snap-nodes))
 (def ^:icon status-alert (icon-xref :status-alert))
 (def ^:icon status-tick (icon-xref :status-tick))

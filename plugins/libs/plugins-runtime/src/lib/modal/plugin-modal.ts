@@ -6,7 +6,8 @@ import { dragHandler } from '../drag-handler.js';
 import modalCss from './plugin.modal.css?inline';
 import { resizeModal } from '../create-modal.js';
 
-const MIN_Z_INDEX = 3;
+const MIN_Z_INDEX = 300;
+const Z_INDEX_VAR = '--z-index-set';
 
 export class PluginModalElement extends HTMLElement {
   constructor() {
@@ -17,6 +18,7 @@ export class PluginModalElement extends HTMLElement {
   wrapper = document.createElement('div');
   #inner = document.createElement('div');
   #dragEvents: ReturnType<typeof dragHandler> | null = null;
+  #iframe: HTMLIFrameElement | null = null;
 
   setTheme(theme: Theme) {
     if (this.wrapper) {
@@ -43,7 +45,19 @@ export class PluginModalElement extends HTMLElement {
         return Number(modal.style.zIndex);
       });
 
-    const maxZIndex = Math.max(...zIndexModals, MIN_Z_INDEX);
+    // Read the application z-index scale via the inherited CSS custom property
+    // `--z-index-set` (defined on :root). Custom properties pierce shadow DOM
+    // boundaries, so the value is available even though the modal uses a Shadow
+    // root. Falls back to MIN_Z_INDEX when the variable is unset or unparseable
+    // (e.g. when the runtime is used outside the Penpot app shell).
+    const declared = getComputedStyle(this)
+      .getPropertyValue(Z_INDEX_VAR)
+      .trim();
+    const parsed = Number(declared);
+    const baseZIndex =
+      Number.isFinite(parsed) && parsed > 0 ? parsed : MIN_Z_INDEX;
+
+    const maxZIndex = Math.max(...zIndexModals, baseZIndex);
 
     this.style.zIndex = (maxZIndex + 1).toString();
   }
@@ -52,6 +66,10 @@ export class PluginModalElement extends HTMLElement {
     const title = this.getAttribute('title');
     const iframeSrc = this.getAttribute('iframe-src');
     const allowDownloads = this.getAttribute('allow-downloads') || false;
+    const allowClipboardRead =
+      this.getAttribute('allow-clipboard-read') || false;
+    const allowClipboardWrite =
+      this.getAttribute('allow-clipboard-write') || false;
 
     if (!title || !iframeSrc) {
       throw new Error('title and iframe-src attributes are required');
@@ -66,11 +84,6 @@ export class PluginModalElement extends HTMLElement {
     this.wrapper.classList.add('wrapper');
     this.wrapper.style.maxInlineSize = '90vw';
     this.wrapper.style.maxBlockSize = '90vh';
-
-    // move modal to the top
-    this.#dragEvents = dragHandler(this.#inner, this.wrapper, () => {
-      this.calculateZIndex();
-    });
 
     const header = document.createElement('div');
     header.classList.add('header');
@@ -98,10 +111,15 @@ export class PluginModalElement extends HTMLElement {
 
     header.appendChild(closeButton);
 
-    const iframe = document.createElement('iframe');
-    iframe.src = iframeSrc;
-    iframe.allow = '';
-    iframe.sandbox.add(
+    this.#iframe = document.createElement('iframe');
+    this.#iframe.src = iframeSrc;
+
+    const allowList: string[] = [];
+    if (allowClipboardRead) allowList.push('clipboard-read');
+    if (allowClipboardWrite) allowList.push('clipboard-write');
+    this.#iframe.allow = allowList.join('; ');
+
+    this.#iframe.sandbox.add(
       'allow-scripts',
       'allow-forms',
       'allow-modals',
@@ -112,10 +130,10 @@ export class PluginModalElement extends HTMLElement {
     );
 
     if (allowDownloads) {
-      iframe.sandbox.add('allow-downloads');
+      this.#iframe.sandbox.add('allow-downloads');
     }
 
-    iframe.addEventListener('load', () => {
+    this.#iframe.addEventListener('load', () => {
       this.shadowRoot?.dispatchEvent(
         new CustomEvent('load', {
           composed: true,
@@ -124,13 +142,30 @@ export class PluginModalElement extends HTMLElement {
       );
     });
 
+    // move modal to the top
+    this.#dragEvents = dragHandler(
+      header,
+      this.wrapper,
+      () => {
+        this.calculateZIndex();
+      },
+      {
+        start: () => {
+          this.wrapper.classList.add('is-dragging');
+        },
+        end: () => {
+          this.wrapper.classList.remove('is-dragging');
+        },
+      },
+    );
+
     this.addEventListener('message', (e: Event) => {
-      if (!iframe.contentWindow) {
+      if (!this.#iframe?.contentWindow) {
         return;
       }
 
       try {
-        iframe.contentWindow.postMessage((e as CustomEvent).detail, '*');
+        this.#iframe.contentWindow.postMessage((e as CustomEvent).detail, '*');
       } catch (err) {
         console.error(
           'plugin modal: failed to send message to iframe via postMessage.',
@@ -143,7 +178,7 @@ export class PluginModalElement extends HTMLElement {
 
     this.wrapper.appendChild(this.#inner);
     this.#inner.appendChild(header);
-    this.#inner.appendChild(iframe);
+    this.#inner.appendChild(this.#iframe);
 
     const style = document.createElement('style');
     style.textContent = modalCss;
@@ -151,6 +186,10 @@ export class PluginModalElement extends HTMLElement {
     this.shadowRoot.appendChild(style);
 
     this.calculateZIndex();
+  }
+
+  getIframeContentWindow(): Window | null {
+    return this.#iframe?.contentWindow ?? null;
   }
 
   size() {

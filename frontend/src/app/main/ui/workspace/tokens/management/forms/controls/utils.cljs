@@ -9,7 +9,8 @@
   [token]
   {:id (str (get token :id))
    :type :token
-   :resolved-value (get token :value)
+   :value (get token :value)
+   :resolved-value (get token :resolved-value)
    :name (get token :name)})
 
 (defn- generate-dropdown-options
@@ -38,22 +39,29 @@
            (not-empty)))))
 
 (defn- extract-partial-brace-text
+  "Returns the substring after the last '{' in s. If the resulting
+  substring ends with '}', that trailing brace is removed.
+  Returns nil if no '{' is found or s is nil."
   [s]
   (when-let [start (str/last-index-of s "{")]
-    (subs s (inc start))))
+    (let [partial (subs s (inc start))]
+      (if (and (seq partial)
+               (> (count partial) 0)
+               (= "}" (subs partial (dec (count partial)))))
+        (subs partial 0 (dec (count partial)))
+        partial))))
 
 (defn- filter-token-groups-by-name
   [tokens filter-text]
-  (let [lc-filter (str/lower filter-text)]
-    (into {}
-          (keep (fn [[group tokens]]
-                  (let [filtered (filter #(str/includes? (str/lower (:name %)) lc-filter) tokens)]
-                    (when (seq filtered)
-                      [group filtered]))))
-          tokens)))
+  (into {}
+        (keep (fn [[group tokens]]
+                (let [filtered (filter #(str/includes? (:name %) filter-text) tokens)]
+                  (when (seq filtered)
+                    [group filtered]))))
+        tokens))
 
 (defn- sort-groups-and-tokens
-  "Sorts both the groups and the tokens inside them alphabetically.
+  "Sorts the tokens inside the groups alphabetically.
 
    Input:
    A map where:
@@ -65,18 +73,18 @@
     :colors    [{:name \"azul\"} {:name \"rojo\"}]}
 
    Output:
-   A sorted map where:
-   - groups are ordered alphabetically by key
+   A map which:
    - tokens inside each group are sorted alphabetically by :name
 
    Example output:
-   {:colors    [{:name \"azul\"} {:name \"rojo\"}]
-    :dimensions [{:name \"quini\"} {:name \"tres\"}]}"
+   {:dimensions [{:name \"quini\"} {:name \"tres\"}]
+    :colors    [{:name \"azul\"} {:name \"rojo\"}]}"
 
   [groups->tokens]
-  (into (sorted-map) ;; ensure groups are ordered alphabetically by their key
-        (for [[group tokens] groups->tokens]
-          [group (sort-by :name tokens)])))
+  (reduce (fn [acc [group tokens]]
+            (assoc acc group (sort-by :name tokens)))
+          {}
+          groups->tokens))
 
 (defn get-token-dropdown-options
   [tokens filter-term]
@@ -94,9 +102,26 @@
 (defn filter-tokens-for-input
   [raw-tokens input-type]
   (delay
-    (-> (deref raw-tokens)
-        (select-keys (get cto/tokens-by-input input-type))
-        (not-empty))))
+    (let [raw-tokens (deref raw-tokens)
+          key-order  (case input-type
+                       :color-selection
+                       (concat
+                        (get cto/tokens-by-input :fill)
+                        (get cto/tokens-by-input :stroke-color))
+
+                       (get cto/tokens-by-input input-type))]
+      (-> (reduce (fn [acc k]
+                    (if (contains? raw-tokens k)
+                      (assoc acc k (get raw-tokens k))
+                      acc))
+                  (array-map)
+                  key-order)
+          (not-empty)))))
 
 (defn focusable-options [options]
   (filter #(= (:type %) :token) options))
+
+(defn group-name-conflict-error?
+  [error token-name]
+  (let [translated-string (tr "errors.tokens.name-collision" token-name)]
+    (= error translated-string)))

@@ -5,7 +5,7 @@
  * functions by https://github.com/fontello/svgpath used as reference
  * implementation for tests
  *
- * @author KALEIDOS INC
+ * @author KALEIDOS SUBSIDIARY SL
  * @license MIT License <https://opensource.org/licenses/MIT>
  */
 

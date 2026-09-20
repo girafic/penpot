@@ -19,13 +19,13 @@ with <code class="language-bash">PENPOT_</code>. **Flags** use the format
 
 Flags are used to enable/disable a feature or behaviour (registration, feedback),
 while environment variables are used to configure the settings (auth, smtp, etc).
-Flags and evironment variables are also used together; for example:
+Flags and environment variables are also used together; for example:
 
 ```bash
 # This flag enables the use of SMTP email
 PENPOT_FLAGS: [...] enable-smtp
 
-# These environment variables configure the specific SMPT service
+# These environment variables configure the specific SMTP service
 # Backend
 PENPOT_SMTP_HOST: <host>
 PENPOT_SMTP_PORT: 587
@@ -171,13 +171,14 @@ PENPOT_OIDC_CLIENT_ID: <client-id>
 
 # Mainly used for auto discovery the openid endpoints
 PENPOT_OIDC_BASE_URI: <uri>
-PENPOT_OIDC_CLIENT_SECRET: <client-id>
+PENPOT_OIDC_CLIENT_SECRET: <client-secret>
 
 # Optional backend variables, used mainly if you want override; they are
 # autodiscovered using the standard openid-connect mechanism.
 PENPOT_OIDC_AUTH_URI: <uri>
 PENPOT_OIDC_TOKEN_URI: <uri>
 PENPOT_OIDC_USER_URI: <uri>
+PENPOT_OIDC_JWKS_URI: <uri>
 
 # Optional list of roles that users are required to have. If no role
 # is provided, roles checking  disabled.
@@ -187,6 +188,27 @@ PENPOT_OIDC_ROLES: "role1 role2"
 # not provided, the roles checking will be disabled.
 PENPOT_OIDC_ROLES_ATTR:
 ```
+
+<p class="advice">
+For self-hosted and containerized deployments, the autodiscovered OIDC endpoints are
+not always enough. Some providers expose browser-facing endpoints through a public
+hostname while the Penpot backend must reach the same provider through an
+internal/container-resolvable hostname. In that case, explicitly set the OIDC endpoint
+overrides above so the browser can use the public authorization endpoint while the
+backend uses reachable token, userinfo, and JWKS endpoints.
+</p>
+
+If the backend needs to contact the OIDC provider through a hostname not already allowed
+by SSRF protection, add it to:
+
+```bash
+# Backend
+# Space separated list of allowed hosts
+PENPOT_SSRF_ALLOWED_HOSTS: "<internal-provider-host> <public-provider-host>"
+```
+
+This is commonly required when the provider is reachable from the browser via a public
+URL but from the backend via a different internal hostname.
 <br />
 
 __Since version 1.6.0__
@@ -195,7 +217,7 @@ Added the ability to specify custom OIDC scopes.
 
 ```bash
 # This settings allow overwrite the required scopes, use with caution
-# because Penpot requres at least `name` and `email` attrs found on the
+# because Penpot requires at least `name` and `email` attrs found on the
 # user info. Optional, defaults to `openid profile`.
 PENPOT_OIDC_SCOPES: "scope1 scope2"
 ```
@@ -208,11 +230,11 @@ the userinfo object for the profile creation.
 
 ```bash
 # Attribute to use for lookup the name on the user object. Optional,
-# if not perovided, the `name` prop will be used.
+# if not provided, the `name` prop will be used.
 PENPOT_OIDC_NAME_ATTR:
 
 # Attribute to use for lookup the email on the user object. Optional,
-# if not perovided, the `email` prop will be used.
+# if not provided, the `email` prop will be used.
 PENPOT_OIDC_EMAIL_ATTR:
 ```
 <br />
@@ -241,6 +263,16 @@ register with another method.
 ```bash
 PENPOT_FLAGS: [...] enable-oidc-registration
 ```
+
+__Since version 2.16.0__
+
+Allows customising the label shown on the OIDC login button (defaults to "OpenID").
+
+```bash
+# Frontend
+PENPOT_OIDC_NAME: <provider-name>
+```
+<br />
 
 #### Azure Active Directory using OpenID Connect
 
@@ -311,9 +343,9 @@ By default, <code class="language-bash">smtp</code> flag is disabled, the email 
 printed to the console, which means that the emails will be shown in the stdout.
 
 Note that if you plan to invite members to a team, it is recommended that you enable SMTP
-as they will need to login to their account after recieving the invite link sent an in email.
+as they will need to login to their account after receiving the invite link sent an in email.
 It is currently not possible to just add someone to a team without them accepting an
-invatation email.
+invitation email.
 
 If you have an SMTP service, uncomment the appropriate settings section in
 <code class="language-bash">docker-compose.yml</code> and configure those
@@ -401,6 +433,147 @@ PENPOT_FLAGS: [...] enable-air-gapped-conf
 When Penpot starts, it will leave out the Nginx configuration related to external requests. This means that,
 with this flag enabled, the Penpot configuration will disable as well the libraries and templates dashboard and the use of Google fonts.
 
+## Security headers
+
+The frontend container always emits `X-Content-Type-Options`, `Referrer-Policy`,
+`Permissions-Policy` and `X-Frame-Options`. Two additional headers are configurable.
+
+### Content Security Policy
+
+Penpot ships a Content Security Policy in **report-only** mode by default. In this mode
+browsers report violations to the developer console but do not block anything, which makes
+it safe to enable everywhere while the policy is being tuned.
+
+```bash
+PENPOT_CSP_MODE: report-only    # report-only (default) | enforce | disabled
+```
+
+The default policy is same-origin except for what the application genuinely requires:
+`'wasm-unsafe-eval'` for the render engine, `'unsafe-inline'` styles for the inline style
+attributes emitted by the UI, and `blob:`/`data:` for thumbnails, exports and fonts. The
+external Google Fonts and GitHub templates endpoints do not need entries of their own
+because they are reverse proxied by the frontend container.
+
+The inline scripts of the pages served by the container are covered by sha256 hashes
+generated during the frontend build, so they need no exception of their own.
+
+One known source of violations remains, and it is the reason `enforce` is not yet the
+default. The plugin runtime initialises on every page load, whether or not a plugin is
+opened, and its sandbox needs `eval` to evaluate plugin code. Under the default policy
+those calls are blocked: the application still loads, but the plugin system is degraded,
+and opening a plugin additionally needs its remote host reachable from `connect-src` and
+`frame-src`.
+
+OIDC single sign-on needs no exception: the provider is reached by navigating away from
+Penpot, which no directive of this policy governs, the response returns as a redirect, and
+both discovery and the token exchange happen on the backend rather than in the browser.
+
+#### Extending the policy
+
+Most deployments need to add an origin rather than rewrite the policy: a plugin host, an
+analytics endpoint, a corporate font server. Declare only the addition and the rest of the
+default policy, hashes included, stays in place:
+
+```bash
+PENPOT_CSP_CONNECT_SRC_EXTRA: "https://analytics.example.com"
+```
+
+The extensible directives are `script-src`, `style-src`, `img-src`, `font-src`,
+`connect-src` and `frame-src`. `base-uri`, `form-action`, `object-src` and
+`frame-ancestors` are not extensible, since relaxing them removes the protection they
+provide and no ordinary deployment needs to.
+
+`PENPOT_CSP_REPORT_URI` adds a `report-uri` directive, which is how a deployment collects
+violations from real traffic while the policy is still in report-only mode.
+
+#### Running plugins under an enforcing policy
+
+Plugins need four directives, and under enforcing mode a missing one fails quietly rather
+than reporting an error. The symptoms are worth knowing: the sandbox refuses to start
+without `script-src`, installing a plugin fails with a network error without
+`connect-src`, its icon does not appear without `img-src`, and its interface stays blank
+without `frame-src`.
+
+```bash
+PENPOT_CSP_SCRIPT_SRC_EXTRA: "'unsafe-eval'"
+PENPOT_CSP_CONNECT_SRC_EXTRA: "https://plugins.example.com"
+PENPOT_CSP_IMG_SRC_EXTRA: "https://plugins.example.com"
+PENPOT_CSP_FRAME_SRC_EXTRA: "https://plugins.example.com"
+```
+
+`'unsafe-eval'` is required because the plugin sandbox evaluates plugin code, and it
+applies to the whole application rather than to plugins alone. Note also that the plugin
+runtime initialises on every page load whether or not a plugin is opened, so without it
+the sandbox reports violations even on a deployment where nobody uses plugins.
+
+Listing the origins explicitly restricts which plugins can run, which the browser then
+enforces. A deployment that cannot know in advance where its users install plugins from
+needs the permissive form instead:
+
+```bash
+PENPOT_CSP_SCRIPT_SRC_EXTRA: "'unsafe-eval'"
+PENPOT_CSP_CONNECT_SRC_EXTRA: "https:"
+PENPOT_CSP_IMG_SRC_EXTRA: "https:"
+PENPOT_CSP_FRAME_SRC_EXTRA: "https:"
+```
+
+#### Replacing the policy
+
+`PENPOT_CSP_POLICY` defines the whole policy and takes precedence, in which case the
+variables above are ignored and a warning is logged at startup.
+
+Be aware that this also replaces the generated hashes, which change on every build. A
+deployment that pins the whole policy has to recompute them at each release or the
+application stops loading, so prefer the extension variables unless you really need to
+remove a directive or add one the variables above do not cover.
+
+`upgrade-insecure-requests` is an example of the latter. To add it, read the policy the
+container is currently serving and use it as the starting point:
+
+```bash
+curl -sI https://penpot.example.com/ | grep -i content-security-policy
+```
+
+Then set the whole thing, with the hashes taken from that output:
+
+```bash
+PENPOT_CSP_POLICY: "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; manifest-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-...' 'sha256-...'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: data:; frame-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; upgrade-insecure-requests"
+```
+
+Remember to repeat that step on every upgrade, since the hashes will have changed.
+
+<p class="advice">
+  Because of the above, <code class="language-bash">enforce</code> with the default policy
+  suits deployments that do not use plugins. Anywhere else it needs a policy of your own.
+</p>
+
+### HTTP Strict Transport Security
+
+HSTS is enabled automatically when `PENPOT_PUBLIC_URI` uses the `https` scheme, and
+disabled otherwise. Override the header value directly to customise it, or set it to an
+empty value to disable it:
+
+```bash
+PENPOT_HSTS_VALUE: "max-age=63072000; includeSubDomains; preload"
+```
+
+Note that `includeSubDomains` and `preload` affect every host under your domain and are
+hard to roll back, so they are not enabled by default.
+
+## High availability
+
+The mechanisms for installing Penpot in HA depend largely on how each infrastructure is managed.
+In this section, we mention the key factors to consider when replicating a Penpot installation:
+
+The components that can be replicated are the `frontend`, the `backend`, the `exporter` and the `mcp`.
+Replication management depends on the infrastructure, whether it's a load balancer or a Kubernetes deployment with HPA.
+
+In a high-availability (HA) scenario, managing the state outside of replicas is crucial. This affects the following components:
+
+- Database: Penpot typically operates with a single database instance. This database can also have a replica in case the primary instance fails.
+- Valkey: Penpot only needs one Valkey instance to function correctly. Due to the nature of the data it manages, replication isn't even essential.
+- User media storage: This should not be configured with local storage but rather with centralized storage, such as Kubernetes PVC or S3.
+
 ## Backend
 
 This section enumerates the backend only configuration variables.
@@ -454,7 +627,7 @@ POSTGRES_PASSWORD: penpot
 
 Storage refers to storing the user uploaded different objects in Penpot (assets, file data,...).
 
-Objects storage is implemented using "plugable" backends. Currently there are two
+Objects storage is implemented using "pluggable" backends. Currently there are two
 backends available: <code class="language-bash">fs</code> and <code class="language-bash">s3</code> (for AWS S3).
 
 __Since version 2.11.0__
@@ -536,10 +709,46 @@ PENPOT_FLAGS: [...] enable-auto-file-snapshot               # Enable automatic v
 
 # Backend
 PENPOT_AUTO_FILE_SNAPSHOT_EVERY: 5             # How many save operations trigger the auto-save-version?
-PENPOT_AUTO_FILE_SNAPSHOT_TIIMEOUT: "1h"       # How often is an automatic save forced even if the `every` trigger is not met?
+PENPOT_AUTO_FILE_SNAPSHOT_TIMEOUT: "1h"       # How often is an automatic save forced even if the `every` trigger is not met?
 ```
 
 Setting custom values for auto-file-snapshot does not change the behaviour for manual versions.
+
+### ImageMagick Resource Limits
+
+Penpot uses ImageMagick for image processing (thumbnail generation, MIME detection, dimension extraction).
+You can configure resource limits for ImageMagick child processes to prevent a single image operation
+from consuming unbounded server resources.
+
+These environment variables override the default resource limits passed to ImageMagick via `MAGICK_*`
+environment variables. They can make limits tighter than the Docker `policy.xml` but never looser.
+
+```bash
+# Backend
+PENPOT_IMAGEMAGICK_THREAD_LIMIT: 2
+PENPOT_IMAGEMAGICK_MEMORY_LIMIT: 256MiB
+PENPOT_IMAGEMAGICK_MAP_LIMIT: 512MiB
+PENPOT_IMAGEMAGICK_AREA_LIMIT: 128MP
+PENPOT_IMAGEMAGICK_DISK_LIMIT: 1GiB
+PENPOT_IMAGEMAGICK_TIME_LIMIT: 30
+PENPOT_IMAGEMAGICK_WIDTH_LIMIT:
+PENPOT_IMAGEMAGICK_HEIGHT_LIMIT:
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PENPOT_IMAGEMAGICK_THREAD_LIMIT` | `2` | Max threads per ImageMagick process |
+| `PENPOT_IMAGEMAGICK_MEMORY_LIMIT` | `256MiB` | Max heap memory per process |
+| `PENPOT_IMAGEMAGICK_MAP_LIMIT` | `512MiB` | Max memory-mapped area (disk-backed pixel cache) |
+| `PENPOT_IMAGEMAGICK_AREA_LIMIT` | `128MP` | Max total pixels (128 megapixels ≈ 11584×11096) |
+| `PENPOT_IMAGEMAGICK_DISK_LIMIT` | `1GiB` | Max pixel cache on disk |
+| `PENPOT_IMAGEMAGICK_TIME_LIMIT` | `30` | Max seconds per ImageMagick operation |
+| `PENPOT_IMAGEMAGICK_WIDTH_LIMIT` | *(not set)* | Max width in pixels |
+| `PENPOT_IMAGEMAGICK_HEIGHT_LIMIT` | *(not set)* | Max height in pixels |
+
+The Docker image also includes a `policy.xml` that acts as a hard ceiling — these env vars
+cannot exceed the limits set in `policy.xml`. The policy also blocks dangerous coders (PS,
+EPS, PDF, XPS) that invoke Ghostscript.
 
 ## Frontend
 
@@ -563,6 +772,63 @@ PENPOT_EXPORTER_URI: http://your-penpot-exporter:6061
 
 These variables are used for generate correct nginx.conf file on container startup.
 
+### Exporter
+
+The exporter uses this variable:
+
+```bash
+# Exporter
+PENPOT_INTERNAL_URI: http://penpot-frontend:8080
+```
+
+- `PENPOT_INTERNAL_URI`: The URI used by the exporter's headless browser to
+  communicate with the frontend (internal Docker network). Defaults to
+  `PENPOT_PUBLIC_URI` if not set. The default value
+  `http://penpot-frontend:8080` used in the docker-compose is a good default and
+  it is recommended to keep it unchanged.
+
+### MCP
+
+The MCP server lets AI agents read and edit Penpot files. It runs as a separate
+`penpot-mcp` container, and the frontend proxies the requests to it. Enable it with
+the corresponding flag:
+
+```bash
+PENPOT_FLAGS: [...] enable-mcp
+```
+
+With the flag enabled, the frontend container uses these variables to locate the MCP
+server:
+
+```bash
+# Frontend
+PENPOT_MCP_URI: http://penpot-mcp:4401
+PENPOT_MCP_URI_WS: http://penpot-mcp:4402
+```
+
+- `PENPOT_MCP_URI`: The URI of the MCP server, used for the streamable HTTP and SSE
+  endpoints.
+- `PENPOT_MCP_URI_WS`: The URI of the MCP server used for the websocket connection.
+
+The defaults match the service name used in the official `docker-compose.yaml`. Change
+them only if your MCP service has a different name or listens on other ports. Both
+variables are ignored when the `enable-mcp` flag is not set.
+
+### Internal resolver
+
+The frontend container resolves the backend, exporter and MCP service names with the
+DNS servers listed in its `/etc/resolv.conf`. If that autodetection does not work for
+your setup, set the resolver explicitly:
+
+```bash
+# Frontend
+PENPOT_INTERNAL_RESOLVER: 127.0.0.11
+```
+
+- `PENPOT_INTERNAL_RESOLVER`: The DNS server nginx uses to resolve the internal service
+  names. Defaults to the nameservers found in `/etc/resolv.conf`. `127.0.0.11` is the
+  embedded Docker DNS server; use the address of your own resolver on other setups.
+
 ## Other flags
 
 There are other flags that are useful for a more customized Penpot experience. This section has the list of the flags meant
@@ -573,6 +839,9 @@ for the user:
 - <code class="language-bash">enable-backend-api-doc</code>: Enables the <code class="language-bash">/api/doc</code>
   endpoint that lists all rpc methods available on backend
 - <code class="language-bash">disable-login-with-password</code>: allows disable password based login form
+- <code class="language-bash">enable-mcp</code>: Enables the MCP server integration, so AI agents can
+  read and edit Penpot files. It also makes the frontend proxy the MCP endpoints to the
+  <code class="language-bash">penpot-mcp</code> service. Check the [MCP section][8] to get more detail.
 - <code class="language-bash">enable-prepl-server</code>: enables PREPL server, used by manage.py and other additional
   tools to communicate internally with Penpot backend. Check the [CLI section][5] to get more detail.
 
@@ -588,6 +857,9 @@ __Since version 2.0.0__
 - <code class="language-bash">enable-webhooks</code>: enables webhooks. More detail about this configuration in [webhooks section][6].
 - <code class="language-bash">enable-access-tokens</code>: enables access tokens. More detail about this configuration in [access tokens section][7].
 - <code class="language-bash">disable-google-fonts-provider</code>: disables the google fonts provider.
+- <code class="language-bash">enable-link-preview</code>: enables Open Graph link previews for shared links.
+  File names and dashboard thumbnails become readable by anyone holding the link, so only enable
+  it if you accept that trade-off. More detail in the [link previews page][9].
 
 [1]: /technical-guide/getting-started#configure-penpot-with-elestio
 [2]: /technical-guide/getting-started#configure-penpot-with-docker
@@ -596,3 +868,5 @@ __Since version 2.0.0__
 [5]: /technical-guide/getting-started/docker#using-the-cli-for-administrative-tasks
 [6]: /technical-guide/integration/#webhooks
 [7]: /technical-guide/integration/#access-tokens
+[8]: /mcp/
+[9]: /technical-guide/developer/subsystems/link-preview/

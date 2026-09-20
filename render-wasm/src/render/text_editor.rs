@@ -1,15 +1,20 @@
-use crate::shapes::{Shape, TextContent, Type, VerticalAlign};
+use crate::render::options::RenderOptions;
+use crate::shapes::{vertical_align_offset, Shape, TextContent, Type};
 use crate::state::{TextEditorState, TextSelection};
+use crate::view::Viewbox;
 use skia_safe::textlayout::{RectHeightStyle, RectWidthStyle};
-use skia_safe::{BlendMode, Canvas, Matrix, Paint, Rect};
+use skia_safe::{BlendMode, Canvas, Color, Paint, Rect};
 
 pub fn render_overlay(
     canvas: &Canvas,
+    viewbox: &Viewbox,
+    options: &RenderOptions,
     editor_state: &TextEditorState,
     shape: &Shape,
-    transform: &Matrix,
 ) {
-    if !editor_state.is_active {
+    let has_selection = editor_state.selection.is_selection();
+
+    if !editor_state.has_focus && !has_selection {
         return;
     }
 
@@ -18,14 +23,17 @@ pub fn render_overlay(
     };
 
     canvas.save();
-    canvas.concat(transform);
+    let zoom = viewbox.zoom * options.dpr;
+    canvas.scale((zoom, zoom));
+    canvas.translate((-viewbox.area.left, -viewbox.area.top));
 
-    if editor_state.selection.is_selection() {
+    if has_selection {
+        // With an active selection there is no blinking caret (the caret is one
+        // end of the selection); drawing it would make it toggle on top of the
+        // highlight while the selection is held.
         render_selection(canvas, editor_state, text_content, shape);
-    }
-
-    if editor_state.cursor_visible {
-        render_cursor(canvas, editor_state, text_content, shape);
+    } else if editor_state.has_focus && editor_state.cursor_visible {
+        render_cursor(canvas, zoom, options.dpr, editor_state, text_content, shape);
     }
 
     canvas.restore();
@@ -33,6 +41,8 @@ pub fn render_overlay(
 
 fn render_cursor(
     canvas: &Canvas,
+    zoom: f32,
+    dpr: f32,
     editor_state: &TextEditorState,
     text_content: &TextContent,
     shape: &Shape,
@@ -41,14 +51,37 @@ fn render_cursor(
         return;
     };
 
+    let mut cursor_rect = Rect::new_empty();
+    cursor_rect.set_xywh(
+        rect.x(),
+        rect.y(),
+        if editor_state.is_overtype_mode {
+            rect.width()
+        } else {
+            editor_state.theme.cursor_width / zoom * dpr
+        },
+        rect.height(),
+    );
+
     let mut paint = Paint::default();
-    paint.set_color(editor_state.theme.cursor_color);
-    paint.set_anti_alias(true);
+    paint.set_anti_alias(false);
+    if editor_state.is_overtype_mode {
+        paint.set_blend_mode(BlendMode::Exclusion);
+        paint.set_color(Color::WHITE);
+    } else if editor_state.theme.cursor_invert {
+        // Default (no solid fill to match): a white caret with a Difference
+        // blend renders the inverted color of whatever is behind it.
+        paint.set_blend_mode(BlendMode::Difference);
+        paint.set_color(editor_state.theme.cursor_color);
+    } else {
+        paint.set_blend_mode(BlendMode::SrcOver);
+        paint.set_color(editor_state.theme.cursor_color);
+    }
 
     let shape_matrix = shape.get_matrix();
     canvas.save();
     canvas.concat(&shape_matrix);
-    canvas.draw_rect(rect, &paint);
+    canvas.draw_rect(cursor_rect, &paint);
     canvas.restore();
 }
 
@@ -79,16 +112,16 @@ fn render_selection(
     canvas.restore();
 }
 
-fn vertical_align_offset(
+fn paragraphs_vertical_offset(
     shape: &Shape,
     layout_paragraphs: &[&skia_safe::textlayout::Paragraph],
 ) -> f32 {
     let total_height: f32 = layout_paragraphs.iter().map(|p| p.height()).sum();
-    match shape.vertical_align() {
-        VerticalAlign::Center => (shape.selrect().height() - total_height) / 2.0,
-        VerticalAlign::Bottom => shape.selrect().height() - total_height,
-        _ => 0.0,
-    }
+    vertical_align_offset(
+        shape.selrect().height(),
+        total_height,
+        shape.vertical_align(),
+    )
 }
 
 fn calculate_cursor_rect(
@@ -108,7 +141,7 @@ fn calculate_cursor_rect(
         return None;
     }
 
-    let mut y_offset = vertical_align_offset(shape, &layout_paragraphs);
+    let mut y_offset = paragraphs_vertical_offset(shape, &layout_paragraphs);
     for (idx, laid_out_para) in layout_paragraphs.iter().enumerate() {
         if idx == cursor.paragraph {
             let char_pos = cursor.offset;
@@ -123,50 +156,64 @@ fn calculate_cursor_rect(
                 .map(|span| span.text.chars().count())
                 .sum();
 
-            let (cursor_x, cursor_height) = if para_char_count == 0 {
+            // Skia ranges are UTF-16 code units, not characters.
+            let (cursor_x, cursor_y, cursor_width, cursor_height) = if para_char_count == 0 {
                 // Empty paragraph - use default height
-                (0.0, laid_out_para.height())
+                (0.0, 0.0, 1.0, laid_out_para.height())
             } else if char_pos == 0 {
                 let rects = laid_out_para.get_rects_for_range(
-                    0..1,
+                    0..para.char_utf16_len_at(0),
                     RectHeightStyle::Max,
                     RectWidthStyle::Tight,
                 );
                 if !rects.is_empty() {
-                    (rects[0].rect.left(), rects[0].rect.height())
+                    let r = &rects[0].rect;
+                    (r.left(), r.top(), r.width(), r.height())
                 } else {
-                    (0.0, laid_out_para.height())
+                    (0.0, 0.0, 1.0, laid_out_para.height())
                 }
             } else if char_pos >= para_char_count {
+                let last_char = para_char_count.saturating_sub(1);
+                let last_start = para.char_offset_to_utf16(last_char);
                 let rects = laid_out_para.get_rects_for_range(
-                    para_char_count.saturating_sub(1)..para_char_count,
+                    last_start..last_start + para.char_utf16_len_at(last_char),
                     RectHeightStyle::Max,
                     RectWidthStyle::Tight,
                 );
                 if !rects.is_empty() {
-                    (rects[0].rect.right(), rects[0].rect.height())
+                    let r = &rects[0].rect;
+                    (r.right(), r.top(), r.width(), r.height())
+                } else if let Some(line) = laid_out_para.get_line_metrics().last() {
+                    (
+                        line.left as f32 + line.width as f32,
+                        0.0,
+                        1.0,
+                        laid_out_para.height(),
+                    )
                 } else {
-                    (laid_out_para.longest_line(), laid_out_para.height())
+                    (0.0, 0.0, 1.0, laid_out_para.height())
                 }
             } else {
+                let utf16_pos = para.char_offset_to_utf16(char_pos);
                 let rects = laid_out_para.get_rects_for_range(
-                    char_pos..char_pos + 1,
+                    utf16_pos..utf16_pos + para.char_utf16_len_at(char_pos),
                     RectHeightStyle::Max,
                     RectWidthStyle::Tight,
                 );
                 if !rects.is_empty() {
-                    (rects[0].rect.left(), rects[0].rect.height())
+                    let r = &rects[0].rect;
+                    (r.left(), r.top(), r.width(), r.height())
                 } else {
                     // Fallback: use glyph position
                     let pos = laid_out_para.get_glyph_position_at_coordinate((0.0, 0.0));
-                    (pos.position as f32, laid_out_para.height())
+                    (pos.position as f32, 0.0, 1.0, laid_out_para.height())
                 }
             };
 
             return Some(Rect::from_xywh(
                 cursor_x,
-                y_offset,
-                editor_state.theme.cursor_width,
+                y_offset + cursor_y,
+                cursor_width, // cursor_width
                 cursor_height,
             ));
         }
@@ -189,7 +236,7 @@ fn calculate_selection_rects(
     let paragraphs = text_content.paragraphs();
     let layout_paragraphs: Vec<_> = text_content.layout.paragraphs.iter().flatten().collect();
 
-    let mut y_offset = vertical_align_offset(shape, &layout_paragraphs);
+    let mut y_offset = paragraphs_vertical_offset(shape, &layout_paragraphs);
 
     for (para_idx, laid_out_para) in layout_paragraphs.iter().enumerate() {
         let para_height = laid_out_para.height();
@@ -223,7 +270,7 @@ fn calculate_selection_rects(
         if range_start < range_end {
             use skia_safe::textlayout::{RectHeightStyle, RectWidthStyle};
             let text_boxes = laid_out_para.get_rects_for_range(
-                range_start..range_end,
+                para.char_offset_to_utf16(range_start)..para.char_offset_to_utf16(range_end),
                 RectHeightStyle::Max,
                 RectWidthStyle::Tight,
             );

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns common-tests.types.tokens-lib-test
   (:require
@@ -11,7 +11,6 @@
    #?(:clj [app.common.test-helpers.tokens :as tht])
    #?(:clj [clojure.datafy :refer [datafy]])
    [app.common.data :as d]
-   [app.common.path-names :as cpn]
    [app.common.test-helpers.ids-map :as thi]
    [app.common.time :as ct]
    [app.common.transit :as tr]
@@ -1350,6 +1349,50 @@
          (t/is (some? (ctob/get-token-by-name lib "single_set" "color.red.100")))))))
 
 #?(:clj
+   (t/deftest parse-dtcg-group-type-inheritance
+     ;; Per DTCG spec: $type on a group is inherited by every nested token
+     ;; that does not declare its own $type. Tokens are identified by the
+     ;; presence of $value, not by the presence of $type.
+     (let [json {"colors" {"$type"  "color"
+                           "red"    {"$value" "#ff0000"}
+                           "blue"   {"$value" "#0000ff"
+                                     "$description" "Brand blue"}
+                           "danger" {"$type"  "color"
+                                     "$value" "#cc0000"}}
+                 "space"  {"$type" "dimension"
+                           "small" {"$value" "4px"}
+                           "large" {"$value" "16px"
+                                    "$type"  "dimension"}}}
+           lib  (ctob/parse-decoded-json json "set")]
+       (t/testing "group `$type` is inherited by tokens without their own `$type`"
+         (t/is (tht/token-data-eq? (ctob/get-token-by-name lib "set" "colors.red")
+                                   {:name "colors.red"
+                                    :type :color
+                                    :value "#ff0000"
+                                    :description ""}))
+         (t/is (tht/token-data-eq? (ctob/get-token-by-name lib "set" "colors.blue")
+                                   {:name "colors.blue"
+                                    :type :color
+                                    :value "#0000ff"
+                                    :description "Brand blue"}))
+         (t/is (tht/token-data-eq? (ctob/get-token-by-name lib "set" "space.small")
+                                   {:name "space.small"
+                                    :type :dimensions
+                                    :value "4px"
+                                    :description ""})))
+       (t/testing "token `$type` overrides the inherited group `$type`"
+         (t/is (tht/token-data-eq? (ctob/get-token-by-name lib "set" "colors.danger")
+                                   {:name "colors.danger"
+                                    :type :color
+                                    :value "#cc0000"
+                                    :description ""}))
+         (t/is (tht/token-data-eq? (ctob/get-token-by-name lib "set" "space.large")
+                                   {:name "space.large"
+                                    :type :dimensions
+                                    :value "16px"
+                                    :description ""}))))))
+
+#?(:clj
    (t/deftest parse-multi-set-legacy-json
      (let [json (-> (slurp "test/common_tests/types/data/tokens-multi-set-legacy-example.json")
                     (json/decode {:key-fn identity}))
@@ -1931,7 +1974,7 @@
          (let [token (ctob/get-token-by-name lib "shadow-test" "test.shadow-with-type")]
            (t/is (some? token))
            (t/is (= :shadow (:type token)))
-           (t/is (= [{:offset-x "0", :offset-y "4px", :blur "8px", :spread "0", :color "rgba(0,0,0,0.2)", :inset false}]
+           (t/is (= [{:offset-x "0", :offset-y "4px", :blur "8px", :spread "0", :color "rgba(0,0,0,0.2)", :inset true}]
                     (:value token)))))
 
        (t/testing "shadow token with description"
@@ -2034,3 +2077,31 @@
   (t/is (true? (ctob/token-name-path-exists? "border-radius.sm.x" {"border-radius" {:name "sm"}})))
   (t/is (false? (ctob/token-name-path-exists? "other" {"border-radius" {:name "sm"}})))
   (t/is (false? (ctob/token-name-path-exists? "dark.border-radius.md" {"dark" {"border-radius" {"sm" {:name "sm"}}}}))))
+
+#?(:clj
+   (t/deftest token-set-encode-decode-roundtrip-with-invalid-set-name
+     (binding [ct/*clock* (ct/tick-millis-clock)]
+       (let [tokens-lib
+             (-> (ctob/make-tokens-lib)
+                 (ctob/add-set
+                  (ctob/map->token-set
+                   {:id (thi/new-id! :test-token-set)
+                    :name "foo / bar"
+                    :modified-at (ct/now)
+                    :description ""}))
+                 (ctob/add-token
+                  (thi/id :test-token-set)
+                  (ctob/make-token :name "test-token-1"
+                                   :type :boolean
+                                   :value true)))
+
+             encoded-tokens-lib
+             (fres/encode tokens-lib)
+
+             decoded-tokens-lib
+             (fres/decode encoded-tokens-lib)]
+
+         (let [tset-a (ctob/get-set tokens-lib (thi/id :test-token-set))
+               tset-b (ctob/get-set decoded-tokens-lib (thi/id :test-token-set))]
+           (t/is (= (ctob/get-name tset-a) "foo / bar"))
+           (t/is (= (ctob/get-name tset-b) "foo/bar")))))))

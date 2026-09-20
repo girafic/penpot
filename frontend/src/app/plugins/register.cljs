@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.plugins.register
   (:require
@@ -15,11 +15,27 @@
    [app.main.repo :as rp]
    [app.main.store :as st]
    [app.util.object :as obj]
-   [beicon.v2.core :as rx]))
+   [beicon.v2.core :as rx]
+   [promesa.core :as p]))
 
 ;; Needs to be here because moving it to `app.main.data.workspace.mcp` will
 ;; cause a circular dependency
 (def mcp-plugin-id "96dfa740-005d-8020-8007-55ede24a2bae")
+
+;; Promise that resolves when plugins runtime is initialized.
+;; Lives here to avoid circular dependency: workspace.mcp -> app.plugins -> app.plugins.api -> workspace
+(defonce ^:private runtime-ready-promise (p/deferred))
+
+(defn wait-for-runtime
+  "Returns a promise that resolves when plugins runtime is initialized."
+  []
+  runtime-ready-promise)
+
+(defn signal-runtime-ready
+  "Signals that plugins runtime has been initialized. Called by app.plugins/init-plugins-runtime."
+  []
+  (when (p/pending? runtime-ready-promise)
+    (p/resolve runtime-ready-promise true)))
 
 ;; Stores the installed plugins information
 (defonce ^:private registry (atom {}))
@@ -54,7 +70,10 @@
           (conj "library:read")
 
           (contains? permissions "comment:write")
-          (conj "comment:read"))
+          (conj "comment:read")
+
+          (contains? permissions "clipboard:write")
+          (conj "clipboard:read"))
 
         plugin-url
         (u/uri plugin-url)
@@ -93,13 +112,6 @@
       manifest
       (.error js/console (clj->js (sm/explain ctp/schema:registry-entry manifest))))))
 
-(defn save-to-store
-  []
-  ;; TODO: need this for the transition to the new schema. We can remove eventually
-  (let [registry (update @registry :data d/update-vals d/without-nils)]
-    (->> (rp/cmd! :update-profile-props {:props {:plugins registry}})
-         (rx/subs! identity))))
-
 (defn load-from-store
   []
   (reset! registry (get-in @st/state [:profile :props :plugins] {})))
@@ -107,6 +119,8 @@
 (defn init
   []
   (load-from-store))
+
+(declare remove-plugin!)
 
 (defn install-plugin!
   [plugin]
@@ -117,17 +131,27 @@
     (swap! registry #(-> %
                          (update :ids update-ids)
                          (update :data assoc (:plugin-id plugin) plugin)))
-    (save-to-store)))
+    (->> (rp/cmd! :add-profile-plugin {:plugin plugin})
+         (rx/subs! identity
+                   (fn [err]
+                     (remove-plugin! plugin)
+                     (.error js/console "Failed to install plugin:" err))))))
 
 (defn remove-plugin!
   [{:keys [plugin-id]}]
-  (letfn [(update-ids [ids]
-            (->> ids
-                 (remove #(= % plugin-id))))]
-    (swap! registry #(-> %
-                         (update :ids update-ids)
-                         (update :data dissoc plugin-id)))
-    (save-to-store)))
+  (let [plugin (get-plugin plugin-id)]
+    (letfn [(update-ids [ids]
+              (->> ids
+                   (remove #(= % plugin-id))))]
+      (swap! registry #(-> %
+                           (update :ids update-ids)
+                           (update :data dissoc plugin-id)))
+      (->> (rp/cmd! :remove-profile-plugin {:plugin-id plugin-id})
+           (rx/subs! identity
+                     (fn [err]
+                       (when plugin
+                         (install-plugin! plugin))
+                       (.error js/console "Failed to remove plugin:" err)))))))
 
 (defn check-permission
   [plugin-id permission]
@@ -135,3 +159,7 @@
       (= plugin-id mcp-plugin-id)
       (let [{:keys [permissions]} (dm/get-in @registry [:data plugin-id])]
         (contains? permissions permission))))
+
+(defn get-plugin-data
+  [state plugin-id]
+  (get-in state [:profile :props :plugins :data plugin-id]))

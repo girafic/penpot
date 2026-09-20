@@ -1,6 +1,6 @@
-use skia_safe::{self as skia, Matrix};
-
 use crate::math;
+use crate::shapes::svg_attrs::{FillRule, SvgAttrs};
+use skia_safe::{self as skia, Matrix};
 
 mod subpaths;
 
@@ -68,34 +68,59 @@ impl Path {
     pub fn from_skia_path(path: skia::Path) -> Self {
         let verbs = path.verbs();
         let points = path.points();
+        let fill_type = path.fill_type();
 
         let mut segments = Vec::new();
-
         let mut current_point = 0;
+        let mut last_point = skia::Point::new(0.0, 0.0);
+
         for verb in verbs {
             match verb {
                 skia::PathVerb::Move => {
                     let p = points[current_point];
                     segments.push(Segment::MoveTo((p.x, p.y)));
+                    last_point = p;
                     current_point += 1;
                 }
                 skia::PathVerb::Line => {
                     let p = points[current_point];
                     segments.push(Segment::LineTo((p.x, p.y)));
+                    last_point = p;
                     current_point += 1;
                 }
                 skia::PathVerb::Quad => {
-                    let p1 = points[current_point];
-                    let p2 = points[current_point + 1];
-                    segments.push(Segment::CurveTo(((p1.x, p1.y), (p1.x, p1.y), (p2.x, p2.y))));
+                    // Elevate quadratic to cubic: CP1 = P0 + 2/3*(Pctrl-P0), CP2 = P2 + 2/3*(Pctrl-P2)
+                    let ctrl = points[current_point];
+                    let end = points[current_point + 1];
+                    let cp1x = last_point.x + (2.0 / 3.0) * (ctrl.x - last_point.x);
+                    let cp1y = last_point.y + (2.0 / 3.0) * (ctrl.y - last_point.y);
+                    let cp2x = end.x + (2.0 / 3.0) * (ctrl.x - end.x);
+                    let cp2y = end.y + (2.0 / 3.0) * (ctrl.y - end.y);
+                    segments.push(Segment::CurveTo((
+                        (cp1x, cp1y),
+                        (cp2x, cp2y),
+                        (end.x, end.y),
+                    )));
+                    last_point = end;
                     current_point += 2;
                 }
                 skia::PathVerb::Conic => {
-                    // TODO: There is no way currently to access the conic weight
-                    // to transform this correctly
-                    let p1 = points[current_point];
-                    let p2 = points[current_point + 1];
-                    segments.push(Segment::CurveTo(((p1.x, p1.y), (p1.x, p1.y), (p2.x, p2.y))));
+                    // Approximate conic (rational quadratic) as cubic via degree elevation.
+                    // This ignores the conic weight and treats it as a regular quadratic —
+                    // accurate enough for the typical w≈1 font glyphs that use this path.
+                    // For higher-fidelity conversion use from_skia_path_accurate instead.
+                    let ctrl = points[current_point];
+                    let end = points[current_point + 1];
+                    let cp1x = last_point.x + (2.0 / 3.0) * (ctrl.x - last_point.x);
+                    let cp1y = last_point.y + (2.0 / 3.0) * (ctrl.y - last_point.y);
+                    let cp2x = end.x + (2.0 / 3.0) * (ctrl.x - end.x);
+                    let cp2y = end.y + (2.0 / 3.0) * (ctrl.y - end.y);
+                    segments.push(Segment::CurveTo((
+                        (cp1x, cp1y),
+                        (cp2x, cp2y),
+                        (end.x, end.y),
+                    )));
+                    last_point = end;
                     current_point += 2;
                 }
                 skia::PathVerb::Cubic => {
@@ -103,6 +128,7 @@ impl Path {
                     let p2 = points[current_point + 1];
                     let p3 = points[current_point + 2];
                     segments.push(Segment::CurveTo(((p1.x, p1.y), (p2.x, p2.y), (p3.x, p3.y))));
+                    last_point = p3;
                     current_point += 3;
                 }
                 skia::PathVerb::Close => {
@@ -111,15 +137,160 @@ impl Path {
             }
         }
 
-        Path::new(segments)
+        let mut result = Path::new(segments);
+        result.skia_path.set_fill_type(fill_type);
+        result
     }
 
-    pub fn to_skia_path(&self) -> skia::Path {
-        self.skia_path.snapshot()
+    /// Like `from_skia_path` but properly converts conics to cubic beziers
+    /// (using Skia's conic-to-quad + quad-to-cubic elevation). Use this when
+    /// accurate curve conversion matters (e.g. stroke-to-path on circles,
+    /// text glyph paths which contain many conic segments).
+    pub fn from_skia_path_accurate(path: skia::Path) -> Self {
+        let verbs = path.verbs();
+        let points = path.points();
+        let conic_weights = path.conic_weights();
+        let fill_type = path.fill_type();
+
+        let mut segments = Vec::new();
+        let mut current_point = 0;
+        let mut current_conic = 0;
+        let mut last_point = skia::Point::new(0.0, 0.0);
+        let mut subpath_start = skia::Point::new(0.0, 0.0);
+
+        for verb in verbs {
+            match verb {
+                skia::PathVerb::Move => {
+                    let p = points[current_point];
+                    segments.push(Segment::MoveTo((p.x, p.y)));
+                    last_point = p;
+                    subpath_start = p;
+                    current_point += 1;
+                }
+                skia::PathVerb::Line => {
+                    let p = points[current_point];
+                    if p != last_point {
+                        segments.push(Segment::LineTo((p.x, p.y)));
+                        last_point = p;
+                    }
+                    current_point += 1;
+                }
+                skia::PathVerb::Quad => {
+                    let ctrl = points[current_point];
+                    let end = points[current_point + 1];
+                    let cp1x = last_point.x + (2.0 / 3.0) * (ctrl.x - last_point.x);
+                    let cp1y = last_point.y + (2.0 / 3.0) * (ctrl.y - last_point.y);
+                    let cp2x = end.x + (2.0 / 3.0) * (ctrl.x - end.x);
+                    let cp2y = end.y + (2.0 / 3.0) * (ctrl.y - end.y);
+                    segments.push(Segment::CurveTo((
+                        (cp1x, cp1y),
+                        (cp2x, cp2y),
+                        (end.x, end.y),
+                    )));
+                    last_point = end;
+                    current_point += 2;
+                }
+                skia::PathVerb::Conic => {
+                    let ctrl = points[current_point];
+                    let end = points[current_point + 1];
+                    let w = conic_weights[current_conic];
+                    current_conic += 1;
+
+                    // pow2=2: 4 quads per conic, so a circle (4 conics)
+                    // becomes 16 cubics and stays within ~0.03% of the real
+                    // radius. One quad per conic is off by ~6% at the arc
+                    // midpoint, which makes round caps and circle markers
+                    // look like squircles once converted to a path.
+                    const POW2: usize = 2;
+                    let quad_count = 1 << POW2;
+                    let pts_count = 1 + 2 * quad_count;
+                    let mut quad_pts = vec![skia::Point::default(); pts_count];
+                    if skia::Path::convert_conic_to_quads(
+                        last_point,
+                        ctrl,
+                        end,
+                        w,
+                        &mut quad_pts,
+                        POW2,
+                    )
+                    .is_some()
+                    {
+                        let mut qp = last_point;
+                        for i in 0..quad_count {
+                            let qctrl = quad_pts[1 + i * 2];
+                            let qend = quad_pts[2 + i * 2];
+                            let cp1x = qp.x + (2.0 / 3.0) * (qctrl.x - qp.x);
+                            let cp1y = qp.y + (2.0 / 3.0) * (qctrl.y - qp.y);
+                            let cp2x = qend.x + (2.0 / 3.0) * (qctrl.x - qend.x);
+                            let cp2y = qend.y + (2.0 / 3.0) * (qctrl.y - qend.y);
+                            segments.push(Segment::CurveTo((
+                                (cp1x, cp1y),
+                                (cp2x, cp2y),
+                                (qend.x, qend.y),
+                            )));
+                            qp = qend;
+                        }
+                        last_point = qp;
+                    } else {
+                        segments.push(Segment::LineTo((end.x, end.y)));
+                        last_point = end;
+                    }
+                    current_point += 2;
+                }
+                skia::PathVerb::Cubic => {
+                    let p1 = points[current_point];
+                    let p2 = points[current_point + 1];
+                    let p3 = points[current_point + 2];
+                    segments.push(Segment::CurveTo(((p1.x, p1.y), (p2.x, p2.y), (p3.x, p3.y))));
+                    last_point = p3;
+                    current_point += 3;
+                }
+                skia::PathVerb::Close => {
+                    if let Some(Segment::LineTo(p)) = segments.last() {
+                        if (p.0 - subpath_start.x).abs() < 1e-5
+                            && (p.1 - subpath_start.y).abs() < 1e-5
+                        {
+                            segments.pop();
+                        }
+                    }
+                    segments.push(Segment::Close);
+                }
+            }
+        }
+
+        let mut result = Path::new(segments);
+        result.skia_path.set_fill_type(fill_type);
+        result
+    }
+
+    pub fn to_skia_path(&self, svg_attrs: Option<&SvgAttrs>) -> skia::Path {
+        let mut path = self.skia_path.snapshot();
+        if self.is_even_odd() {
+            path.set_fill_type(skia::PathFillType::EvenOdd);
+        }
+        if let Some(attrs) = svg_attrs {
+            if attrs.fill_rule == FillRule::Evenodd {
+                path.set_fill_type(skia::PathFillType::EvenOdd);
+            }
+        }
+        path
     }
 
     pub fn contains(&self, p: skia::Point) -> bool {
         self.skia_path.contains(p)
+    }
+
+    pub fn is_even_odd(&self) -> bool {
+        self.skia_path.fill_type() == skia::PathFillType::EvenOdd
+    }
+
+    // Builder method: set even-odd fill on this path and return it.
+    // Use as `Path::new(segments).with_even_odd(is_even_odd)`.
+    pub fn with_even_odd(mut self, is_even_odd: bool) -> Self {
+        if is_even_odd {
+            self.skia_path.set_fill_type(skia::PathFillType::EvenOdd);
+        }
+        self
     }
 
     pub fn is_open(&self) -> bool {
@@ -127,6 +298,28 @@ impl Path {
     }
 
     pub fn transform(&mut self, mtx: &Matrix) {
+        if math::is_move_only_matrix(mtx) {
+            let tx = mtx.translate_x();
+            let ty = mtx.translate_y();
+            self.segments.iter_mut().for_each(|s| match s {
+                Segment::MoveTo(p) | Segment::LineTo(p) => {
+                    p.0 += tx;
+                    p.1 += ty;
+                }
+                Segment::CurveTo((c1, c2, p)) => {
+                    c1.0 += tx;
+                    c1.1 += ty;
+                    c2.0 += tx;
+                    c2.1 += ty;
+                    p.0 += tx;
+                    p.1 += ty;
+                }
+                _ => {}
+            });
+            self.skia_path = self.skia_path.with_offset((tx, ty));
+            return;
+        }
+
         self.segments.iter_mut().for_each(|s| match s {
             Segment::MoveTo(p) => {
                 let np = mtx.map_point(skia::Point::new(p.0, p.1));
@@ -163,5 +356,38 @@ impl Path {
 
     pub fn bounds(&self) -> math::Bounds {
         math::Bounds::from_rect(self.skia_path.bounds())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Samples a converted circle and returns its largest radius error.
+    fn circle_conversion_error(radius: f32) -> f32 {
+        let center = skia::Point::new(0., 0.);
+        let converted = Path::from_skia_path_accurate(skia::Path::circle(center, radius, None))
+            .to_skia_path(None);
+
+        let mut measure = skia::PathMeasure::new(&converted, false, None);
+        let length = measure.length();
+        (0..64)
+            .filter_map(|i| measure.pos_tan(length * i as f32 / 64.))
+            .map(|(p, _)| (p.length() - radius).abs())
+            .fold(0., f32::max)
+    }
+
+    #[test]
+    fn converts_conics_to_accurate_circles() {
+        // Regression: one quad per conic left circles about 6% off the real
+        // radius at the arc midpoints, which showed up as squircle stroke caps.
+        for radius in [2., 40., 500.] {
+            let error = circle_conversion_error(radius);
+            assert!(
+                error < radius * 0.001,
+                "radius {radius}: off by {error}, expected under {}",
+                radius * 0.001
+            );
+        }
     }
 }

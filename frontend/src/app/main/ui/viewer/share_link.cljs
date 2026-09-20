@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.viewer.share-link
   (:require-macros [app.main.style :as stl])
@@ -11,7 +11,6 @@
    [app.common.data.macros :as dm]
    [app.common.logging :as log]
    [app.common.uuid :as uuid]
-   [app.config :as cf]
    [app.main.data.common :as dc]
    [app.main.data.event :as ev]
    [app.main.data.modal :as modal]
@@ -24,7 +23,6 @@
    [app.util.clipboard :as clipboard]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
-   [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
 (log/set-level! :warn)
@@ -79,8 +77,8 @@
                               (dissoc params :zoom)
                               (assoc params :zoom zoom-type))
 
-                    href    (rt/resolve router :viewer params)]
-                (dm/str (assoc cf/public-uri :fragment href))))))
+                    href    (rt/resolve-uri router :viewer params)]
+                href))))
 
         on-close
         (fn [event]
@@ -126,10 +124,10 @@
           (let [params (prepare-params options)
                 params (assoc params :file-id (:id file))]
             (st/emit! (dc/create-share-link params)
-                      (ptk/event ::ev/event {::ev/name "create-share-link"
-                                             ::ev/origin "viewer"
-                                             :can-comment (:who-comment params)
-                                             :can-inspect-code (:who-inspect params)}))))
+                      (ev/event {::ev/name "create-share-link"
+                                 ::ev/origin "viewer"
+                                 :can-comment (:who-comment params)
+                                 :can-inspect-code (:who-inspect params)}))))
 
         copy-link
         (fn [_]
@@ -138,8 +136,8 @@
                                :type :toast
                                :content (tr "common.share-link.link-copied-success")
                                :timeout 1000})
-                    (ptk/event ::ev/event {::ev/name "copy-share-link"
-                                           ::ev/origin "viewer"})))
+                    (ev/event {::ev/name "copy-share-link"
+                               ::ev/origin "viewer"})))
 
         try-delete-link
         (fn [_]

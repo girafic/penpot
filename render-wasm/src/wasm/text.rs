@@ -7,9 +7,11 @@ use crate::shapes::{
     self, GrowType, Shape, TextAlign, TextDecoration, TextDirection, TextTransform, Type,
 };
 use crate::utils::{uuid_from_u32, uuid_from_u32_quartet};
-use crate::{with_current_shape, with_current_shape_mut, with_state, with_state_mut, STATE};
+use crate::{with_current_shape, with_current_shape_mut, with_state};
 
 use crate::error::Error;
+
+pub mod helpers;
 
 const RAW_SPAN_DATA_SIZE: usize = std::mem::size_of::<RawTextSpan>();
 const RAW_PARAGRAPH_DATA_SIZE: usize = std::mem::size_of::<RawParagraphData>();
@@ -290,9 +292,10 @@ pub extern "C" fn clear_shape_text() {
 #[wasm_error]
 pub extern "C" fn set_shape_text_content() -> crate::error::Result<()> {
     let bytes = mem::bytes();
-    with_current_shape_mut!(state, |shape: &mut Shape| {
-        let raw_text_data = RawParagraph::try_from(&bytes).unwrap();
+    let raw_text_data = RawParagraph::try_from(&bytes)
+        .map_err(|_| Error::CriticalError("Invalid text data".to_string()))?;
 
+    with_current_shape_mut!(state, |shape: &mut Shape| {
         shape.add_paragraph(raw_text_data.into()).map_err(|_| {
             Error::RecoverableError(format!(
                 "Error with set_shape_text_content on {:?}",
@@ -311,9 +314,9 @@ pub extern "C" fn set_shape_grow_type(grow_type: u8) {
     with_current_shape_mut!(state, |shape: &mut Shape| {
         if let Type::Text(text_content) = &mut shape.shape_type {
             text_content.set_grow_type(GrowType::from(grow_type));
-        } else {
-            panic!("Trying to update grow type in a shape that it's not a text shape");
         }
+        // Don't throw error if the object is not text.
+        // On swap component opperations is convenient.
     });
 }
 
@@ -367,9 +370,13 @@ pub extern "C" fn intersect_position_in_shape(
     false
 }
 
-fn update_text_layout(shape: &mut Shape) {
+fn update_text_layout(shape: &mut Shape, force: bool) {
     if let Type::Text(text_content) = &mut shape.shape_type {
+        if force {
+            text_content.force_next_layout_update();
+        }
         text_content.update_layout(shape.selrect);
+        shape.apply_deferred_batch_paint();
         shape.invalidate_extrect();
     }
 }
@@ -377,16 +384,27 @@ fn update_text_layout(shape: &mut Shape) {
 #[no_mangle]
 pub extern "C" fn update_shape_text_layout() {
     with_current_shape_mut!(state, |shape: &mut Shape| {
-        update_text_layout(shape);
+        update_text_layout(shape, false);
     });
 }
 
 #[no_mangle]
 pub extern "C" fn update_shape_text_layout_for(a: u32, b: u32, c: u32, d: u32) {
-    with_state_mut!(state, {
+    with_state!(state, {
         let shape_id = uuid_from_u32_quartet(a, b, c, d);
         if let Some(shape) = state.shapes.get_mut(&shape_id) {
-            update_text_layout(shape);
+            update_text_layout(shape, false);
+        }
+        state.touch_shape(shape_id);
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn force_update_shape_text_layout_for(a: u32, b: u32, c: u32, d: u32) {
+    with_state!(state, {
+        let shape_id = uuid_from_u32_quartet(a, b, c, d);
+        if let Some(shape) = state.shapes.get_mut(&shape_id) {
+            update_text_layout(shape, true);
         }
         state.touch_shape(shape_id);
     });

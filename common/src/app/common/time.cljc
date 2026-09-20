@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 #_{:clj-kondo/ignore [:unused-namespace]}
 (ns app.common.time
@@ -90,12 +90,21 @@
      (Clock/fixed ^Instant (inst instant)
                   ^ZoneId (ZoneId/of "Z"))))
 
-
-
 (defn now
   []
   #?(:clj (Instant/now *clock*)
      :cljs (new js/Date)))
+
+#?(:clj
+   (defn tick-millis-clock
+     "Alternate clock with a resolution of milliseconds instead of the default nanoseconds of the Java clock.
+      This may be useful if the instant is going to be serialized to DB with fressian (that does not have
+      resolution enough to store all precission) and need to compare the deserialized value for equality.
+
+      You can replace the global clock (for example in unit tests) with
+        (alter-var-root #'ct/*clock* (constantly (ct/tick-millis-clock)))"
+     []
+     (Clock/tickMillis (ZoneId/of "Z"))))
 
 ;; --- DURATION
 
@@ -166,8 +175,14 @@
 
 #?(:clj
    (defn parse-duration
+     "Parse a value into a Duration. Total: returns the input unchanged
+     when it cannot be parsed, so schema decoding never throws and
+     invalid values fail validation with a clean params error instead."
      [s]
-     (duration s)))
+     (try
+       (duration s)
+       (catch Exception _
+         s))))
 
 #?(:clj
    (defn format-duration
@@ -191,6 +206,24 @@
     (cond
       (neg? result)   true
       (zero? result)  false
+      :else false)))
+
+(defn is-after-or-equal?
+  "Analgous to: da >= db"
+  [da db]
+  (let [result (compare da db)]
+    (cond
+      (neg? result) false
+      (zero? result) true
+      :else true)))
+
+(defn is-before-or-equal?
+  "Analgous to: da <= db"
+  [da db]
+  (let [result (compare da db)]
+    (cond
+      (neg? result)   true
+      (zero? result)  true
       :else false)))
 
 (defn inst?

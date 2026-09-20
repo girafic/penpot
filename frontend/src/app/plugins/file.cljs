@@ -2,12 +2,13 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.plugins.file
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.validate :as cfv]
    [app.common.time :as ct]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -22,6 +23,7 @@
    [app.plugins.page :as page]
    [app.plugins.parser :as parser]
    [app.plugins.register :as r]
+   [app.plugins.system-events :as se]
    [app.plugins.user :as user]
    [app.plugins.utils :as u]
    [app.util.http :as http]
@@ -45,25 +47,26 @@
        (fn [value]
          (cond
            (not (r/check-permission plugin-id "content:write"))
-           (u/display-not-valid :label "Plugin doesn't have 'content:write' permission")
+           (u/not-valid plugin-id :label "Plugin doesn't have 'content:write' permission")
 
            (or (not (string? value)) (empty? value))
-           (u/display-not-valid :label value)
+           (u/not-valid plugin-id :label value)
 
            :else
            (do (swap! data assoc :label value :created-by "user")
                (->> (rp/cmd! :update-file-snapshot {:id (:id @data) :label value})
                     (rx/take 1)
-                    (rx/subs! identity)))))}
+                    (rx/subs! #(st/emit! (se/event plugin-id "rename-version" :file-id file-id)))))))}
 
       :createdBy
       {:get
        (fn []
-         (when-let [user-data (get users (:profile-id @data))]
-           (user/user-proxy plugin-id user-data)))}
+         (when (r/check-permission plugin-id "user:read")
+           (when-let [user-data (get users (:profile-id @data))]
+             (user/user-proxy plugin-id user-data))))}
 
       :createdAt
-      {:get #(.toJSDate ^js (:created-at @data))}
+      {:get #(:created-at @data)}
 
       :isAutosave
       {:get #(= "system" (:created-by @data))}
@@ -78,7 +81,9 @@
 
              :else
              (let [version-id (get @data :id)]
-               (st/emit! (dwv/restore-version-from-plugin file-id version-id resolve reject)))))))
+               (st/emit!
+                (dwv/restore-version-from-plugin file-id version-id resolve reject)
+                (se/event plugin-id "restore-version" :file-id file-id)))))))
 
       :remove
       (fn []
@@ -110,10 +115,12 @@
                             :label (ct/format-inst (:created-at @data) :localized-date)}]
                (->> (rx/zip (rp/cmd! :get-team-users {:file-id file-id})
                             (rp/cmd! :update-file-snapshot params))
-                    (rx/subs! (fn [[users data]]
-                                (let [users (d/index-by :id users)]
-                                  (resolve (file-version-proxy plugin-id file-id users @data))))
-                              reject))))))))))
+                    (rx/subs!
+                     (fn [[users data]]
+                       (let [users (d/index-by :id users)]
+                         (st/emit! (se/event plugin-id "pin-version" :file-id file-id))
+                         (resolve (file-version-proxy plugin-id file-id users @data))))
+                     reject))))))))))
 
 (defn file-proxy? [p]
   (obj/type-of? p "FileProxy"))
@@ -131,6 +138,9 @@
     :name
     {:get #(-> (u/locate-file id) :name)}
 
+    :revn
+    {:get #(-> (u/locate-file id) :revn)}
+
     :pages
     {:this true
      :get #(.getPages ^js %)}
@@ -140,12 +150,33 @@
       (let [file (u/locate-file id)]
         (apply array (sequence (map #(page/page-proxy plugin-id id %)) (dm/get-in file [:data :pages])))))
 
+    ;; Run referential-integrity validation on the file and return the errors
+    ;; found (an empty array means the file is valid). Each error carries the
+    ;; validation `code`, a `hint`, and the offending `shapeId`/`pageId`.
+    :validate
+    (fn []
+      (let [file      (u/locate-file id)
+            libraries (get @st/state :files)]
+        (try
+          (->> (cfv/validate-file file libraries)
+               (map (fn [{:keys [code hint shape-id page-id]}]
+                      #js {:code    (name code)
+                           :hint    hint
+                           :shapeId (some-> shape-id str)
+                           :pageId  (some-> page-id str)}))
+               (apply array))
+          (catch :default cause
+            #js [#js {:code "validation-error"
+                      :hint (ex-message cause)
+                      :shapeId nil
+                      :pageId nil}]))))
+
     ;; Plugin data
     :getPluginData
     (fn [key]
       (cond
         (not (string? key))
-        (u/display-not-valid :getPluginData-key key)
+        (u/not-valid plugin-id :getPluginData-key key)
 
         :else
         (let [file (u/locate-file id)]
@@ -155,13 +186,13 @@
     (fn [key value]
       (cond
         (or (not (string? key)) (empty? key))
-        (u/display-not-valid :setPluginData-key key)
+        (u/not-valid plugin-id :setPluginData-key key)
 
         (not (string? value))
-        (u/display-not-valid :setPluginData-value value)
+        (u/not-valid plugin-id :setPluginData-value value)
 
         (not (r/check-permission plugin-id "content:write"))
-        (u/display-not-valid :setPluginData "Plugin doesn't have 'content:write' permission")
+        (u/not-valid plugin-id :setPluginData "Plugin doesn't have 'content:write' permission")
 
         :else
         (st/emit! (dp/set-plugin-data id :file (keyword "plugin" (str plugin-id)) key value))))
@@ -175,10 +206,10 @@
     (fn [namespace key]
       (cond
         (not (string? namespace))
-        (u/display-not-valid :getSharedPluginData-namespace namespace)
+        (u/not-valid plugin-id :getSharedPluginData-namespace namespace)
 
         (not (string? key))
-        (u/display-not-valid :getSharedPluginData-key key)
+        (u/not-valid plugin-id :getSharedPluginData-key key)
 
         :else
         (let [file (u/locate-file id)]
@@ -188,16 +219,16 @@
     (fn [namespace key value]
       (cond
         (or (not (string? namespace)) (empty? namespace))
-        (u/display-not-valid :setSharedPluginData-namespace namespace)
+        (u/not-valid plugin-id :setSharedPluginData-namespace namespace)
 
         (or (not (string? key)) (empty? key))
-        (u/display-not-valid :setSharedPluginData-key key)
+        (u/not-valid plugin-id :setSharedPluginData-key key)
 
         (not (string? value))
-        (u/display-not-valid :setSharedPluginData-value value)
+        (u/not-valid plugin-id :setSharedPluginData-value value)
 
         (not (r/check-permission plugin-id "content:write"))
-        (u/display-not-valid :setSharedPluginData "Plugin doesn't have 'content:write' permission")
+        (u/not-valid plugin-id :setSharedPluginData "Plugin doesn't have 'content:write' permission")
 
         :else
         (st/emit! (dp/set-plugin-data id :file (keyword "shared" namespace) key value))))
@@ -206,7 +237,7 @@
     (fn [namespace]
       (cond
         (not (string? namespace))
-        (u/display-not-valid :getSharedPluginDataKeys namespace)
+        (u/not-valid plugin-id :getSharedPluginDataKeys namespace)
 
         :else
         (let [file (u/locate-file id)]
@@ -216,18 +247,25 @@
     (fn []
       (cond
         (not (r/check-permission plugin-id "content:write"))
-        (u/display-not-valid :createPage "Plugin doesn't have 'content:write' permission")
+        (u/not-valid plugin-id :createPage "Plugin doesn't have 'content:write' permission")
 
         :else
         (let [page-id (uuid/next)]
-          (st/emit! (dw/create-page {:page-id page-id :file-id id}))
+          (st/emit! (-> (dw/create-page {:page-id page-id :file-id id})
+                        (se/add-event plugin-id)))
           (page/page-proxy plugin-id id page-id))))
 
     :export
     (fn [format type]
       (js/Promise.
        (fn [resolve reject]
-         (let [type (or (parser/parse-keyword type) :all)]
+         (let [type (or (parser/parse-keyword type) :all)
+               ;; Backward compatibility: convert old values to new
+               type (case type
+                      :all :include-libraries
+                      :merge :merge-libraries
+                      :detach :detach-libraries
+                      type)]
            (cond
              (and (some? format) (not (contains? #{"penpot" "zip"} format)))
              (u/reject-not-valid reject :format (dm/str "Invalid format: " format))
@@ -269,6 +307,7 @@
                                       :response-type :buffer}))))
                     (rx/take 1)
                     (rx/map #(js/Uint8Array. (:body %)))
+                    (rx/tap #(st/emit! (se/event plugin-id "export-binary-files" :format format :type type)))
                     (rx/subs! resolve reject))))))))
     :findVersions
     (fn [criteria]
@@ -312,10 +351,12 @@
              (fn [resolve reject]
                (cond
                  (not (r/check-permission plugin-id "content:write"))
-                 (u/reject-not-valid reject :findVersions "Plugin doesn't have 'content:write' permission")
+                 (u/reject-not-valid reject :saveVersion "Plugin doesn't have 'content:write' permission")
 
                  :else
-                 (st/emit! (dwv/create-version-from-plugins id label resolve reject)))))]
+                 (st/emit!
+                  (dwv/create-version-from-plugins id label resolve reject)
+                  (se/event plugin-id "create-version" :file-id id)))))]
         (-> (js/Promise.all #js [users-promise create-version-promise])
             (.then
              (fn [[users data]]

@@ -3,13 +3,12 @@ use macros::{wasm_error, ToJs};
 use crate::mem;
 use crate::shapes;
 use crate::with_current_shape_mut;
-use crate::STATE;
 
 mod gradient;
 mod image;
 mod solid;
 
-const RAW_FILL_DATA_SIZE: usize = std::mem::size_of::<RawFillData>();
+pub(crate) const RAW_FILL_DATA_SIZE: usize = std::mem::size_of::<RawFillData>();
 
 #[repr(C, u8, align(4))]
 #[derive(Debug, PartialEq, Clone, Copy, ToJs)]
@@ -36,9 +35,41 @@ impl From<RawFillData> for shapes::Fill {
     }
 }
 
+impl TryFrom<&shapes::Fill> for RawFillData {
+    type Error = String;
+
+    fn try_from(fill: &shapes::Fill) -> Result<Self, Self::Error> {
+        match fill {
+            shapes::Fill::Solid(shapes::SolidColor(color)) => {
+                Ok(RawFillData::Solid(solid::RawSolidData {
+                    color: ((color.a() as u32) << 24)
+                        | ((color.r() as u32) << 16)
+                        | ((color.g() as u32) << 8)
+                        | (color.b() as u32),
+                }))
+            }
+            shapes::Fill::LinearGradient(linear_gradient) => Ok(RawFillData::Linear(
+                gradient::RawGradientData::from(linear_gradient),
+            )),
+            shapes::Fill::RadialGradient(radial_gradient) => Ok(RawFillData::Radial(
+                gradient::RawGradientData::from(radial_gradient),
+            )),
+            shapes::Fill::Image(image_fill) => Ok(RawFillData::Image(
+                image::RawImageFillData::from(image_fill),
+            )),
+        }
+    }
+}
+
 impl From<[u8; RAW_FILL_DATA_SIZE]> for RawFillData {
     fn from(bytes: [u8; RAW_FILL_DATA_SIZE]) -> Self {
         unsafe { std::mem::transmute(bytes) }
+    }
+}
+
+impl From<RawFillData> for [u8; RAW_FILL_DATA_SIZE] {
+    fn from(fill_data: RawFillData) -> Self {
+        unsafe { std::mem::transmute(fill_data) }
     }
 }
 
@@ -54,7 +85,7 @@ impl TryFrom<&[u8]> for RawFillData {
 }
 
 // FIXME: return Result
-pub fn parse_fills_from_bytes(buffer: &[u8], num_fills: usize) -> Vec<shapes::Fill> {
+pub fn read_fills_from_bytes(buffer: &[u8], num_fills: usize) -> Vec<shapes::Fill> {
     buffer
         .chunks_exact(RAW_FILL_DATA_SIZE)
         .take(num_fills)
@@ -74,7 +105,7 @@ pub extern "C" fn set_shape_fills() -> Result<()> {
         // The first byte contains the actual number of fills
         let num_fills = bytes.first().copied().unwrap_or(0) as usize;
         // Skip the first 4 bytes (header with fill count) and parse only the actual fills
-        let fills = parse_fills_from_bytes(&bytes[4..], num_fills);
+        let fills = read_fills_from_bytes(&bytes[4..], num_fills);
         shape.set_fills(fills);
         mem::free_bytes()?;
     });
@@ -123,5 +154,63 @@ mod tests {
             raw_fill.unwrap(),
             RawFillData::Solid(solid::RawSolidData { color: 0xfffabada })
         );
+    }
+
+    #[test]
+    fn test_gradient_fill_round_trip() {
+        let gradient = shapes::Gradient::new(
+            (0.0, 0.5),
+            (1.0, 0.5),
+            0x80,
+            0.25,
+            &[
+                (shapes::Color::from(0xfffabada), 0.0),
+                (shapes::Color::from(0xff00ff00), 1.0),
+            ],
+        );
+
+        let fill = shapes::Fill::LinearGradient(gradient.clone());
+        let raw_fill = RawFillData::try_from(&fill).expect("gradient must be serializable");
+        let bytes = <[u8; RAW_FILL_DATA_SIZE]>::from(raw_fill);
+
+        assert_eq!(bytes[0], 0x01);
+        assert_eq!(shapes::Fill::from(RawFillData::from(bytes)), fill);
+    }
+
+    #[test]
+    fn test_image_fill_round_trip() {
+        let image_fill = shapes::ImageFill::new(crate::uuid::Uuid::nil(), 0x80, 300, 200, true);
+        let fill = shapes::Fill::Image(image_fill);
+        let raw_fill = RawFillData::try_from(&fill).expect("image fill must be serializable");
+        let bytes = <[u8; RAW_FILL_DATA_SIZE]>::from(raw_fill);
+
+        assert_eq!(bytes[0], 0x03);
+        assert_eq!(shapes::Fill::from(RawFillData::from(bytes)), fill);
+    }
+
+    #[test]
+    fn test_image_fill_with_transform_round_trip() {
+        let transform = shapes::ImageFillTransform {
+            x: 0.1,
+            y: -0.2,
+            width: 1.5,
+            height: 2.0,
+        };
+        let image_fill = shapes::ImageFill::new_with_transform(
+            crate::uuid::Uuid::nil(),
+            0xcc,
+            400,
+            300,
+            false,
+            Some(transform),
+        );
+        let fill = shapes::Fill::Image(image_fill);
+        let raw_fill =
+            RawFillData::try_from(&fill).expect("image fill with transform must be serializable");
+        let bytes = <[u8; RAW_FILL_DATA_SIZE]>::from(raw_fill);
+
+        assert_eq!(bytes[0], 0x03);
+        let deserialized = shapes::Fill::from(RawFillData::from(bytes));
+        assert_eq!(deserialized, fill);
     }
 }

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.data.workspace.tokens.application
   (:require
@@ -49,14 +49,14 @@
 
 ;; (note that dwsh/update-shapes function returns an event)
 
-(defn update-shape-radius-all
-  ([value shape-ids attributes] (update-shape-radius-all value shape-ids attributes nil))
-  ([value shape-ids _attributes page-id] ; The attributes param is needed to have the same arity that other update functions
+(defn update-shape-radius
+  ([value shape-ids attributes] (update-shape-radius value shape-ids attributes nil))
+  ([value shape-ids attributes page-id]
    (when (number? value)
      (let [value (max 0 value)]
        (dwsh/update-shapes shape-ids
                            (fn [shape]
-                             (ctsr/set-radius-to-all-corners shape value))
+                             (ctsr/set-radius-for-corners shape attributes value))
                            {:reg-objects? true
                             :ignore-touched true
                             :page-id page-id
@@ -98,7 +98,8 @@
           (udw/trigger-bounding-box-cloaking shape-ids)
           (udw/increase-rotation shape-ids value nil
                                  {:page-id page-id
-                                  :ignore-touched true})))))))
+                                  :ignore-touched true
+                                  :no-wasm? true})))))))
 
 (defn update-stroke-width
   ([value shape-ids attributes] (update-stroke-width value shape-ids attributes nil))
@@ -254,7 +255,8 @@
            (->> (rx/from shape-ids)
                 (rx/map #(dwtr/update-position % (zipmap attributes (repeat value))
                                                {:ignore-touched true
-                                                :page-id page-id})))))))))
+                                                :page-id page-id
+                                                :no-wasm? true})))))))))
 
 (defn update-layout-gap
   [value shape-ids attributes page-id]
@@ -493,8 +495,8 @@
      (watch [_ _ _]
        (when (number? value)
          (rx/of
-          (when (:width attributes) (dwtr/update-dimensions shape-ids :width value {:ignore-touched true :page-id page-id}))
-          (when (:height attributes) (dwtr/update-dimensions shape-ids :height value {:ignore-touched true :page-id page-id}))))))))
+          (when (:width attributes) (dwtr/update-dimensions shape-ids :width value {:ignore-touched true :page-id page-id :no-wasm? true}))
+          (when (:height attributes) (dwtr/update-dimensions shape-ids :height value {:ignore-touched true :page-id page-id :no-wasm? true}))))))))
 
 (defn- attributes->actions
   [{:keys [value shape-ids attributes page-id]}]
@@ -531,7 +533,7 @@
 
     (some attributes #{:r1 :r2 :r3 :r4})
     (conj #(if (= attributes #{:r1 :r2 :r3 :r4})
-             (update-shape-radius-all value shape-ids attributes page-id)
+             (update-shape-radius value shape-ids attributes page-id)
              (update-shape-radius-for-corners
               value shape-ids
               (set (filter attributes #{:r1 :r2 :r3 :r4}))
@@ -656,20 +658,19 @@
   this is useful for applying a single attribute from an attributes set
   while removing other applied tokens from this set."
   [{:keys [attributes attributes-to-remove token shape-ids on-update-shape]}]
+  (assert (ctob/token? token) "apply-token event requires a valid token")
   (ptk/reify ::apply-token
     ptk/WatchEvent
-    (watch [_ state _]
+    (watch [it state _]
       ;; We do not allow to apply tokens while text editor is open.
-      ;; The classic text editor sets :workspace-editor-state; the WASM text editor
-      ;; does not, so we also check :workspace-local :edition for text shapes.
       (let [edition       (get-in state [:workspace-local :edition])
             objects       (dsh/lookup-page-objects state)
             text-editing? (and (some? edition)
                                (= :text (:type (get objects edition))))]
-        (if (and (empty? (get state :workspace-editor-state))
+        (if (and (some? token)
                  (not text-editing?))
           (let [attributes-to-remove
-                ;; Remove atomic typography tokens when applying composite and vice-verca
+                ;; Remove atomic typography tokens when applying composite and vice-versa
                 (cond
                   (ctt/typography-token-keys (:type token)) (set/union attributes-to-remove ctt/typography-keys)
                   (ctt/typography-keys (:type token)) (set/union attributes-to-remove ctt/typography-token-keys)
@@ -696,7 +697,7 @@
                             shape-ids (d/nilv (keys shapes)  [])
                             any-variant? (->> shapes vals (some ctk/is-variant?) boolean)
 
-                            resolved-value (get-in resolved-tokens [(cfo/token-identifier token) :resolved-value])
+                            resolved-value (get-in resolved-tokens [(:name token) :resolved-value])
                             resolved-value (if (contains? cf/flags :tokenscript)
                                              (ts/tokenscript-symbols->penpot-unit resolved-value)
                                              resolved-value)
@@ -704,10 +705,12 @@
                             type (:type token)]
                         (rx/concat
                          (rx/of
-                          (st/emit! (ev/event {::ev/name "apply-tokens"
-                                               :type type
-                                               :applied-to attributes
-                                               :applied-to-variant any-variant?}))
+                          (st/emit! (ev/event
+                                     (-> {::ev/name "apply-tokens"
+                                          :type type
+                                          :applied-to attributes
+                                          :applied-to-variant any-variant?}
+                                         (merge (meta it)))))
                           (dwu/start-undo-transaction undo-id)
                           (dwsh/update-shapes shape-ids (fn [shape]
                                                           (cond-> shape
@@ -723,20 +726,21 @@
                                (rx/of res))))
                          (rx/of (dwu/commit-undo-transaction undo-id)))))))))
 
-          (rx/of (ntf/show {:content (tr "workspace.tokens.error-text-edition")
-                            :type :toast
-                            :level :warning
-                            :timeout 3000})))))))
+          (when text-editing?
+            (rx/of (ntf/show {:content (tr "workspace.tokens.error-text-edition")
+                              :type :toast
+                              :level :warning
+                              :timeout 3000}))))))))
 
 (defn apply-spacing-token-separated
   "Handles edge-case for spacing token when applying token via toggle button.
-  Splits out `shape-ids` into seperate default actions:
+  Splits out `shape-ids` into separate default actions:
   - Layouts take the `default` update function
   - Shapes inside layout will only take margin"
   [{:keys [token shapes attr]}]
   (ptk/reify ::apply-spacing-token-separated
     ptk/WatchEvent
-    (watch [_ state _]
+    (watch [it state _]
       (let [objects (dsh/lookup-page-objects state)
 
             {:keys [attributes on-update-shape]}
@@ -746,14 +750,17 @@
             (group-by #(if (ctsl/any-layout-immediate-child? objects %) :frame-children :other) shapes)]
 
         (rx/of
-         (apply-token {:attributes (or attr attributes)
-                       :token token
-                       :shape-ids (map :id other)
-                       :on-update-shape on-update-shape})
-         (apply-token {:attributes ctt/spacing-margin-keys
-                       :token token
-                       :shape-ids (map :id frame-children)
-                       :on-update-shape update-layout-item-margin}))))))
+         (-> (apply-token {:attributes (or attr attributes)
+                           :token token
+                           :shape-ids (map :id other)
+                           :on-update-shape on-update-shape})
+             (with-meta (meta it)))
+
+         (-> (apply-token {:attributes ctt/spacing-margin-keys
+                           :token token
+                           :shape-ids (map :id frame-children)
+                           :on-update-shape update-layout-item-margin})
+             (with-meta (meta it))))))))
 
 (defn unapply-token
   "Removes `attributes` that match `token` for `shape-ids`.
@@ -770,12 +777,25 @@
           (fn [shape]
             (update shape :applied-tokens remove-token))))))))
 
+(defn unapply-multiple-tokens
+  "Removes `attributes` for `shape-ids` without knowing the token, used when a token is deleted."
+  [{:keys [attributes shape-ids] :as _props}]
+
+  (ptk/reify ::unapply-multiple-tokens
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of
+       (dwsh/update-shapes
+        shape-ids
+        (fn [shape]
+          (update shape :applied-tokens #(when % (apply dissoc % attributes)))))))))
+
 
 (defn toggle-token
   [{:keys [token attrs shape-ids expand-with-children]}]
   (ptk/reify ::on-toggle-token
     ptk/WatchEvent
-    (watch [_ state _]
+    (watch [it state _]
       (let [objects (dsh/lookup-page-objects state)
             shapes (into [] (keep (d/getf objects)) shape-ids)
 
@@ -812,19 +832,62 @@
            (cond
              (and (= (:type token) :spacing)
                   (nil? attrs))
-             (apply-spacing-token-separated {:token token
-                                             :attr attrs
-                                             :shapes shapes})
+             (-> (apply-spacing-token-separated {:token token
+                                                 :attr attrs
+                                                 :shapes shapes})
+                 (with-meta (meta it)))
 
              :else
-             (apply-token {:attributes (if (empty? attrs) attributes attrs)
-                           :token token
-                           :shape-ids shape-ids
-                           :on-update-shape on-update-shape}))))))))
+             (-> (apply-token {:attributes (if (empty? attrs) attributes attrs)
+                               :token token
+                               :shape-ids shape-ids
+                               :on-update-shape on-update-shape})
+                 (with-meta (meta it))))))))))
 
-(defn apply-token-on-selected
+(defn apply-token-from-input
+  [{:keys [token attrs shape-ids expand-with-children]}]
+  (ptk/reify ::apply-token-from-input
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [objects (dsh/lookup-page-objects state)
+            shapes (into [] (keep (d/getf objects)) shape-ids)
+
+            shapes
+            (if expand-with-children
+              (into []
+                    (mapcat (fn [shape]
+                              (if (= (:type shape) :group)
+                                (keep objects (:shapes shape))
+                                [shape])))
+                    shapes)
+              shapes)
+
+            {:keys [attributes _ on-update-shape]}
+            (get token-properties (:type token))
+
+            on-update-shape
+            (if (seq attrs)
+              (or (get attr->shape-update (first attrs)) on-update-shape)
+              on-update-shape)]
+
+        (rx/of
+         (cond
+           (and (= (:type token) :spacing)
+                (nil? attrs))
+           (apply-spacing-token-separated {:token token
+                                           :attr attrs
+                                           :shapes shapes})
+
+           :else
+           (apply-token {:attributes (if (empty? attrs) attributes attrs)
+                         :token token
+                         :shape-ids shape-ids
+                         :on-update-shape on-update-shape})))))))
+
+
+(defn apply-token-on-color-selected
   [color-operations token]
-  (ptk/reify ::apply-token-on-selected
+  (ptk/reify ::apply-token-on-color-selected
     ptk/WatchEvent
     (watch [_ _ _]
       (let [undo-id (js/Symbol)]
@@ -862,7 +925,7 @@
    :border-radius
    {:title "Border Radius"
     :attributes ctt/border-radius-keys
-    :on-update-shape update-shape-radius-all
+    :on-update-shape update-shape-radius
     :modal {:key :tokens/border-radius
             :fields [{:label "Border Radius"
                       :key :border-radius}]}}

@@ -96,7 +96,6 @@ test("Update an already created text shape by prepending text", async ({
   await workspace.clickLeafLayer("Lorem ipsum");
   await workspace.textEditor.startEditing();
   await workspace.textEditor.moveFromStart(0);
-  await page.evaluate(() => new Promise((resolve) => globalThis.requestIdleCallback(resolve)));
   await page.keyboard.type("Dolor sit amet ");
   await workspace.textEditor.stopEditing();
   await workspace.waitForSelectedShapeName("Dolor sit amet Lorem ipsum");
@@ -315,4 +314,50 @@ test("BUG 11552 - Apply styles to the current caret", async ({ page }) => {
   // display Mixed placeholder
   await expect(fontSizeInput).toHaveValue("");
   await expect(fontSizeInput).toHaveAttribute("placeholder", "Mixed");
+});
+
+// This is to prevent QA tests from failing due to playwright
+// considering 0-width text boxes as invisible
+test("BUG 14098 - Fix text editor having 0 width or height", async ({ page }) => {
+  const workspace = new WasmWorkspacePage(page);
+
+  await workspace.setupEmptyFile();
+  await workspace.mockRPC("update-file?id=*", "text-editor/update-file.json");
+  await workspace.goToWorkspace();
+
+  await workspace.textShapeButton.click();
+  await workspace.clickAt(200, 200);
+
+  const textEditor = workspace.page.locator(`div[class*="viewport"]`).first().getByRole('textbox').first();
+  await expect(textEditor).toBeVisible();
+});
+
+test("Preserves empty fill after editing text without changes", async ({ page }) => {
+  const initialText = "Hello";
+  const workspace = new WasmWorkspacePage(page, {
+    textEditor: true,
+  });
+
+  await workspace.setupEmptyFile();
+  await workspace.mockRPC("update-file?id=*", "text-editor/update-file.json");
+  await workspace.goToWorkspace();
+
+  await workspace.createTextShape(190, 150, 300, 200, initialText);
+  await workspace.textEditor.stopEditing();
+
+  const fillColorButton = workspace.page.getByRole("button", {
+    name: "#000000",
+  });
+  await expect(fillColorButton).toBeVisible();
+  await workspace.page.getByRole("button", { name: "Remove color" }).click();
+  await expect(fillColorButton).toHaveCount(0);
+
+  await workspace.doubleClickLeafLayer(initialText);
+  await workspace.textEditor.waitForEditor();
+  await workspace.moveButton.click();
+  await workspace.clickAt(100, 100);
+
+  await workspace.clickLeafLayer(initialText);
+  await expect(fillColorButton).toHaveCount(0);
+  await expect(workspace.page.getByTestId("add-fill")).toBeVisible();
 });

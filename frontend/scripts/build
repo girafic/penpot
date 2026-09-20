@@ -26,17 +26,18 @@ rm -rf target/dist;
 rm -rf resources/public;
 
 mkdir -p resources/public;
+mkdir -p resources/public/css;
 mkdir -p target/dist;
 
 # Build render wasm binary
 pushd ../render-wasm;
-./build
+./build frontend
 popd
 
 pushd ../mcp;
 rm -rf node_modules;
 ./scripts/setup
-WS_URI="/mcp/ws" pnpm run --filter "mcp-plugin" build:multi-user
+WS_URI="/mcp/ws" pnpm run --filter "mcp-plugin" build
 popd;
 
 pushd ../plugins
@@ -45,6 +46,10 @@ rm -rf dist/apps/;
 corepack install;
 pnpm -r install;
 pnpm run build:plugins;
+popd
+
+pushd ./packages/ui
+pnpm run build
 popd
 
 pnpm run build:app:main $EXTRA_PARAMS;

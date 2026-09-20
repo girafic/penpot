@@ -1,4 +1,5 @@
 import proc from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import ph from "node:path";
 import os from "node:os";
@@ -14,6 +15,8 @@ import mustache from "mustache";
 import pLimit from "p-limit";
 import ppt from "pretty-time";
 import wpool from "workerpool";
+
+import { buildFontsPreviewSprite } from "./build-fonts-preview.js";
 
 function getCoreCount() {
   return os.cpus().length;
@@ -48,8 +51,9 @@ async function findFiles(basePath, predicate, options = {}) {
   return files;
 }
 
-function syncDirs(originPath, destPath) {
-  const command = `rsync -ar --delete ${originPath} ${destPath}`;
+function syncDirs(originPath, destPath, excludes = []) {
+  const excludeArgs = excludes.map((p) => `--exclude=${p}`).join(" ");
+  const command = `rsync -ar --delete ${excludeArgs} ${originPath} ${destPath}`;
 
   return new Promise((resolve, reject) => {
     proc.exec(command, (cause, stdout) => {
@@ -207,9 +211,9 @@ async function generateManifest() {
     rasterizer_main: "./js/rasterizer.js",
 
     config: "./js/config.js?version=" + VERSION_TAG,
+    config_render: "./js/config-render.js?version=" + VERSION_TAG,
     polyfills: "./js/polyfills.js?version=" + VERSION_TAG,
     libs: "./js/libs.js?version=" + VERSION_TAG,
-    worker_main: "./js/worker/main.js?version=" + VERSION_TAG,
     default_translations: "./js/translation.en.js?version=" + VERSION_TAG,
 
     importmap: JSON.stringify({
@@ -409,11 +413,38 @@ async function generateSvgSprites() {
   );
 }
 
+// Collect the CSP hashes of the inline scripts of a rendered template into
+// the given set. The hash covers the exact bytes between the script tags, so
+// it has to be computed on the rendered output and never on the mustache
+// source. Scripts carrying a src attribute are external and are covered by
+// 'self' instead; the whitespace in the lookahead is what keeps data-src and
+// similar attributes from being mistaken for one, which would leave an inline
+// script without a hash and blocked under enforcing mode.
+function collectCspHashes(html, hashes) {
+  const pattern = /<script\b(?![^>]*\ssrc\s*=)[^>]*>([\s\S]*?)<\/script>/gi;
+
+  for (const match of html.matchAll(pattern)) {
+    const digest = crypto
+      .createHash("sha256")
+      .update(match[1], "utf8")
+      .digest("base64");
+    hashes.add(`'sha256-${digest}'`);
+  }
+
+  return hashes;
+}
+
 async function generateTemplates() {
   await fs.mkdir("./resources/public/", { recursive: true });
 
   const manifest = await generateManifest();
   let content;
+
+  // Every template written into resources/public/ is served by the frontend
+  // container under the same Content Security Policy, so all of them have to
+  // contribute their hashes. The storybook previews are excluded because they
+  // are not served by that container.
+  const cspHashes = new Set();
 
   const iconsSprite = await fs.readFile(
     "resources/public/images/sprites/symbol/icons.svg",
@@ -444,6 +475,7 @@ async function generateTemplates() {
   );
 
   await fs.writeFile("./resources/public/index.html", content);
+  collectCspHashes(content, cspHashes);
 
   content = await renderTemplate(
     "resources/templates/challenge.mustache",
@@ -451,6 +483,7 @@ async function generateTemplates() {
     partials,
   );
   await fs.writeFile("./resources/public/challenge.html", content);
+  collectCspHashes(content, cspHashes);
 
   content = await renderTemplate(
     "resources/templates/preview-body.mustache",
@@ -472,6 +505,7 @@ async function generateTemplates() {
   );
 
   await fs.writeFile("./resources/public/render.html", content);
+  collectCspHashes(content, cspHashes);
 
   content = await renderTemplate(
     "resources/templates/rasterizer.mustache",
@@ -479,6 +513,12 @@ async function generateTemplates() {
   );
 
   await fs.writeFile("./resources/public/rasterizer.html", content);
+  collectCspHashes(content, cspHashes);
+
+  await fs.writeFile(
+    "./resources/public/csp-script-hashes.txt",
+    [...cspHashes].join(" ") + "\n",
+  );
 }
 
 export async function compileStorybookStyles() {
@@ -540,6 +580,36 @@ export async function compileSvgSprites() {
   }
 }
 
+export async function compileFontsPreviewSprite() {
+  const start = process.hrtime();
+  log.info("init: compile fonts preview sprite");
+  let error = false;
+  let result;
+
+  try {
+    result = await buildFontsPreviewSprite();
+  } catch (cause) {
+    error = cause;
+  }
+
+  const end = process.hrtime(start);
+
+  if (error) {
+    log.error("error: compile fonts preview sprite", `(${ppt(end)})`);
+    console.error(error);
+  } else if (result.skipped) {
+    log.info(
+      "done: compile fonts preview sprite (up-to-date, skipped)",
+      `(${ppt(end)})`,
+    );
+  } else {
+    log.info(
+      `done: compile fonts preview sprite (${result.ok} ok, ${result.failed} fallback)`,
+      `(${ppt(end)})`,
+    );
+  }
+}
+
 export async function compileTemplates() {
   const start = process.hrtime();
   let error = false;
@@ -584,7 +654,11 @@ export async function copyAssets() {
   log.info("init: copy assets");
 
   await syncDirs("resources/images/", "resources/public/images/");
-  await syncDirs("resources/fonts/", "resources/public/fonts/");
+  // The font preview sprite is generated into public/fonts/ (not committed), so
+  // exclude it from --delete to keep it across builds (see compileFontsPreviewSprite).
+  await syncDirs("resources/fonts/", "resources/public/fonts/", [
+    "fonts-preview-sprite.svg",
+  ]);
 
   const end = process.hrtime(start);
   log.info("done: copy assets", `(${ppt(end)})`);

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.binfile.common
   "A binfile related file processing common code, used for different
@@ -27,7 +27,6 @@
    [app.features.file-migrations :as fmigr]
    [app.loggers.audit :as-alias audit]
    [app.loggers.webhooks :as-alias webhooks]
-   [app.storage :as sto]
    [app.util.blob :as blob]
    [app.util.pointer-map :as pmap]
    [app.worker :as-alias wrk]
@@ -315,8 +314,8 @@
 (defn get-file
   "Get file, resolve all features and apply migrations.
 
-  Usefull when you have plan to apply massive or not cirurgical
-  operations on file, because it removes the ovehead of lazy fetching
+  Useful when you have plan to apply massive or not surgical
+  operations on file, because it removes the overhead of lazy fetching
   and decoding."
   [cfg file-id & {:as opts}]
   (db/run! cfg get-file* file-id opts))
@@ -440,10 +439,27 @@
 
   (db/run! cfg (fn [{:keys [::db/conn]}]
                  (let [ids (db/create-array conn "uuid" ids)
-                       sql (str "SELECT flr.* FROM file_library_rel AS flr "
-                                "  JOIN file AS l ON (flr.library_file_id = l.id) "
-                                " WHERE flr.file_id = ANY(?) AND l.deleted_at IS NULL")]
+                       sql (str "SELECT flr.*,"
+                                "	   fls.synced_at"
+                                "  FROM file_library_rel AS flr"
+                                "  JOIN file AS l"
+                                "    ON flr.library_file_id = l.id"
+                                "  LEFT JOIN file_library_sync AS fls"
+                                "    ON fls.file_id = flr.file_id"
+                                "   AND fls.library_file_id = flr.library_file_id"
+                                " WHERE flr.file_id = ANY(?)"
+                                "   AND l.deleted_at IS NULL;")]
                    (db/exec! conn [sql ids])))))
+
+(def ^:private sql:upsert-file-library-sync
+  "INSERT INTO file_library_sync (file_id, library_file_id, synced_at)
+   VALUES (?::uuid, ?::uuid, ?::timestamptz)
+   ON CONFLICT (file_id, library_file_id)
+   DO UPDATE SET synced_at = EXCLUDED.synced_at;")
+
+(defn upsert-file-library-sync!
+  [conn {:keys [file-id library-file-id synced-at]}]
+  (db/exec-one! conn [sql:upsert-file-library-sync file-id library-file-id synced-at]))
 
 (def ^:private sql:get-libraries
   "WITH RECURSIVE libs AS (
@@ -637,27 +653,6 @@
     (db/exec-one! conn ["SET LOCAL idle_in_transaction_session_timeout = 0"])
     (db/exec-one! conn ["SET CONSTRAINTS ALL DEFERRED"])))
 
-(defn invalidate-thumbnails
-  [cfg file-id]
-  (let [storage (sto/resolve cfg)
-
-        sql-1
-        (str "update file_tagged_object_thumbnail "
-             "   set deleted_at = now() "
-             " where file_id=? returning media_id")
-
-        sql-2
-        (str "update file_thumbnail "
-             "   set deleted_at = now() "
-             " where file_id=? returning media_id")]
-
-    (run! #(sto/touch-object! storage %)
-          (sequence
-           (keep :media-id)
-           (concat
-            (db/exec! cfg [sql-1 file-id])
-            (db/exec! cfg [sql-2 file-id]))))))
-
 (defn process-file
   [cfg {:keys [id] :as file}]
   (let [libs (delay (get-resolved-file-libraries cfg file))]
@@ -706,6 +701,7 @@
   (-> (select-keys file file-attrs)
       (assoc :data nil)
       (dissoc :team-id)
+      (dissoc :metadata)
       (dissoc :migrations)))
 
 (defn- file->file-data-params
@@ -731,9 +727,17 @@
     (fmigr/upsert-migrations! conn file))
 
   (let [file (encode-file cfg file)]
-    (db/insert! conn :file
-                (file->params file)
-                (assoc opts ::db/return-keys false))
+    (try
+      (db/insert! conn :file
+                  (file->params file)
+                  (assoc opts ::db/return-keys false))
+      (catch org.postgresql.util.PSQLException cause
+        (if (db/duplicate-key-error? cause)
+          (ex/raise :type :not-found
+                    :code :object-not-found
+                    :hint "file already exists"
+                    :cause cause)
+          (throw cause))))
 
     (->> (file->file-data-params file)
          (fdata/upsert! cfg))
@@ -799,48 +803,58 @@
 
 (def ^:private sql:get-file-libraries
   "WITH RECURSIVE libs AS (
-     SELECT fl.*, flr.synced_at
-       FROM file AS fl
-       JOIN file_library_rel AS flr ON (flr.library_file_id = fl.id)
-      WHERE flr.file_id = ?::uuid
-    UNION
-     SELECT fl.*, flr.synced_at
-       FROM file AS fl
-       JOIN file_library_rel AS flr ON (flr.library_file_id = fl.id)
-       JOIN libs AS l ON (flr.file_id = l.id)
-   )
-   SELECT l.id,
-          l.features,
-          l.project_id,
-          p.team_id,
-          l.created_at,
-          l.modified_at,
-          l.deleted_at,
-          l.name,
-          l.revn,
-          l.vern,
-          l.synced_at,
-          l.is_shared,
-          l.version
-     FROM libs AS l
-    INNER JOIN project AS p ON (p.id = l.project_id)
-    WHERE l.deleted_at IS NULL;")
+		SELECT fl.*
+		FROM file AS fl
+		JOIN file_library_rel AS flr
+		  ON flr.library_file_id = fl.id
+		WHERE flr.file_id = ?::uuid
+
+		UNION
+
+		SELECT fl.*
+		FROM file AS fl
+		JOIN file_library_rel AS flr
+		  ON flr.library_file_id = fl.id
+		JOIN libs AS l
+		  ON flr.file_id = l.id
+	)
+	SELECT l.id,
+		   l.features,
+		   l.project_id,
+		   p.team_id,
+		   l.created_at,
+		   l.modified_at,
+		   l.deleted_at,
+		   l.name,
+		   l.revn,
+		   l.vern,
+		   l.is_shared,
+		   l.version,
+		   fls.synced_at,
+		   NOT EXISTS (
+		     SELECT 1 FROM file_library_rel AS direct
+		      WHERE direct.file_id = ?::uuid
+		        AND direct.library_file_id = l.id
+		   ) AS is_indirect
+	FROM libs AS l
+	JOIN project AS p
+	  ON p.id = l.project_id
+	LEFT JOIN file_library_sync AS fls
+	  ON fls.file_id = ?::uuid
+	 AND fls.library_file_id = l.id
+	WHERE l.deleted_at IS NULL;")
 
 (defn get-file-libraries
   [conn file-id]
   (into []
-        (comp
-         ;; FIXME: :is-indirect set to false to all rows looks
-         ;; completly useless
-         (map #(assoc % :is-indirect false))
-         (map decode-row-features))
-        (db/exec! conn [sql:get-file-libraries file-id])))
+        (map decode-row-features)
+        (db/exec! conn [sql:get-file-libraries file-id file-id file-id])))
 
 (defn get-resolved-file-libraries
   "Get all file libraries including itself. Returns an instance of
   LoadableWeakValueMap that allows do not have strong references to
-  the loaded libraries and reduce possible memory pressure on having
-  all this libraries loaded at same time on processing file validation
+  the loaded libraries and reduce memory pressure on having
+  all this libraries at the same time on processing file validation
   or file migration.
 
   This still requires at least one library at time to be loaded while
@@ -852,3 +866,47 @@
                          (cons (:id file)))
         load-fn     #(get-file cfg % :migrate? false)]
     (weak/loadable-weak-value-map library-ids load-fn {id file})))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; EXTERNAL LIBRARY RESOLUTION HELPERS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn slugify-name
+  "Slugify a library name for cross-environment matching.
+  Lowercases, replaces non-alphanumeric runs with '-', strips
+  leading/trailing '-'."
+  [name]
+  (str/slug name))
+
+(def ^:private sql:get-files-names
+  "SELECT id, name FROM file WHERE id = ANY(?)")
+
+(defn get-files-names
+  "Return [{:id uuid :name string}] for the given file ids."
+  [cfg ids]
+  (db/run! cfg
+           (fn [{:keys [::db/conn]}]
+             (let [ids-arr (db/create-array conn "uuid" ids)]
+               (db/exec! conn [sql:get-files-names ids-arr])))))
+
+(def ^:private sql:get-shared-files-for-team
+  "SELECT f.id, f.name, f.project_id
+     FROM file AS f
+     JOIN project AS p ON (p.id = f.project_id)
+    WHERE p.team_id = ?
+      AND f.is_shared = true
+      AND f.deleted_at IS NULL
+      AND p.deleted_at IS NULL")
+
+(defn get-shared-files-for-team
+  "Return [{:id uuid :name string}] for all shared files in a team."
+  [cfg team-id]
+  (db/run! cfg
+           (fn [{:keys [::db/conn]}]
+             (db/exec! conn [sql:get-shared-files-for-team team-id]))))
+
+(defn find-shared-files-by-slug
+  "Return all shared files in `team-id` whose slugified name equals `slug`."
+  [cfg team-id slug]
+  (->> (get-shared-files-for-team cfg team-id)
+       (filter #(= slug (slugify-name (:name %))))))

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.workspace.tokens.themes.create-modal
   (:require-macros [app.main.style :as stl])
@@ -33,7 +33,6 @@
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as k]
    [cuerdas.core :as str]
-   [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
 
 ;; Form Component --------------------------------------------------------------
@@ -114,8 +113,7 @@
                   :class (stl/css :theme-row)}
              [:div {:class (stl/css :theme-switch-row)}
 
-              [:> switch* {:id name
-                           :label name
+              [:> switch* {:label name
                            :on-change on-switch-theme
                            :default-checked selected?}]]
 
@@ -412,7 +410,7 @@
         on-save
         (mf/use-fn
          (fn [theme]
-           (st/emit! (ptk/event ::ev/event {::ev/name "create-tokens-theme"})
+           (st/emit! (ev/event {::ev/name "create-tokens-theme"})
                      (dwtl/create-token-theme theme))))
         has-prev-view (has-prev-view (:prev-type state))]
 

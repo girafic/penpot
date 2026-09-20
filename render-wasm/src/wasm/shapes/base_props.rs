@@ -1,18 +1,18 @@
-use crate::mem;
 use crate::shapes::{BlendMode, ConstraintH, ConstraintV};
 use crate::utils::uuid_from_u32_quartet;
 use crate::uuid::Uuid;
 use crate::wasm::blend::RawBlendMode;
 use crate::wasm::layouts::constraints::{RawConstraintH, RawConstraintV};
-use crate::{with_state_mut, STATE};
+use crate::with_state;
+
+use crate::error::Result;
 
 use super::RawShapeType;
 
 const FLAG_CLIP_CONTENT: u8 = 0b0000_0001;
 const FLAG_HIDDEN: u8 = 0b0000_0010;
-const CONSTRAINT_NONE: u8 = 0xFF;
 
-const RAW_BASE_PROPS_SIZE: usize = std::mem::size_of::<RawBasePropsData>();
+pub(crate) const RAW_BASE_PROPS_SIZE: usize = std::mem::size_of::<RawBasePropsData>();
 
 /// Binary layout for batched shape base properties.
 ///
@@ -21,7 +21,7 @@ const RAW_BASE_PROPS_SIZE: usize = std::mem::size_of::<RawBasePropsData>();
 #[repr(C)]
 #[repr(align(4))]
 #[derive(Debug, Clone, Copy)]
-pub struct RawBasePropsData {
+pub(crate) struct RawBasePropsData {
     // UUID id (16 bytes)
     id_a: u32,
     id_b: u32,
@@ -83,19 +83,11 @@ impl RawBasePropsData {
     }
 
     fn constraint_h(&self) -> Option<ConstraintH> {
-        if self.constraint_h == CONSTRAINT_NONE {
-            None
-        } else {
-            Some(RawConstraintH::from(self.constraint_h).into())
-        }
+        RawConstraintH::from(self.constraint_h).into()
     }
 
     fn constraint_v(&self) -> Option<ConstraintV> {
-        if self.constraint_v == CONSTRAINT_NONE {
-            None
-        } else {
-            Some(RawConstraintV::from(self.constraint_v).into())
-        }
+        RawConstraintV::from(self.constraint_v).into()
     }
 }
 
@@ -105,22 +97,13 @@ impl From<[u8; RAW_BASE_PROPS_SIZE]> for RawBasePropsData {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn set_shape_base_props() {
-    let bytes = mem::bytes();
-
-    if bytes.len() < RAW_BASE_PROPS_SIZE {
-        return;
-    }
-
-    let data: [u8; RAW_BASE_PROPS_SIZE] = bytes[..RAW_BASE_PROPS_SIZE].try_into().unwrap();
-    let raw = RawBasePropsData::from(data);
-
+/// Apply base props from a parsed record (selects the shape and sets core attrs).
+pub(crate) fn apply_base_props(raw: &RawBasePropsData) -> Result<()> {
     let id = raw.id();
     let parent_id = raw.parent_id();
     let shape_type = RawShapeType::from(raw.shape_type);
 
-    with_state_mut!(state, {
+    with_state!(state, {
         state.use_shape(id);
         state.set_parent_for_current_shape(parent_id);
         state.touch_current();
@@ -151,6 +134,7 @@ pub extern "C" fn set_shape_base_props() {
             shape.set_corners((raw.corner_r1, raw.corner_r2, raw.corner_r3, raw.corner_r4));
         }
     });
+    Ok(())
 }
 
 #[cfg(test)]
@@ -210,10 +194,10 @@ mod tests {
         bytes[33] = FLAG_CLIP_CONTENT | FLAG_HIDDEN;
         // blend_mode = Overlay (15)
         bytes[34] = 15;
-        // constraint_h = Center (3)
-        bytes[35] = 3;
-        // constraint_v = Scale (4)
-        bytes[36] = 4;
+        // constraint_h = Center (4)
+        bytes[35] = 4;
+        // constraint_v = Scale (5)
+        bytes[36] = 5;
         // opacity
         bytes[40..44].copy_from_slice(&0.5_f32.to_le_bytes());
         // rotation

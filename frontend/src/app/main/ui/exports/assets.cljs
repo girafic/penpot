@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 ;; FIXME: rename
 (ns app.main.ui.exports.assets
@@ -36,7 +36,7 @@
 
 (mf/defc export-multiple-dialog*
   {::mf/private true}
-  [{:keys [exports title cmd no-selection origin]}]
+  [{:keys [exports title cmd no-selection origin name]}]
   (let [lstate          (mf/deref refs/export)
         in-progress?    (:in-progress lstate)
         exports         (mf/use-state exports)
@@ -59,7 +59,7 @@
         (fn [event]
           (dom/prevent-default event)
           (st/emit! (modal/hide)
-                    (de/request-multiple-export {:exports enabled-exports :cmd cmd})
+                    (de/request-multiple-export {:exports enabled-exports :cmd cmd :name name})
                     (de/export-shapes-event enabled-exports origin)))
 
         on-toggle-enabled
@@ -185,25 +185,27 @@
 (mf/defc export-shapes-dialog
   {::mf/register modal/components
    ::mf/register-as :export-shapes}
-  [{:keys [exports origin]}]
+  [{:keys [exports origin name]}]
   (let [title (tr "dashboard.export-shapes.title")]
     [:> export-multiple-dialog*
      {:exports exports
       :title title
       :cmd :export-shapes
       :no-selection shapes-no-selection
-      :origin origin}]))
+      :origin origin
+      :name name}]))
 
 (mf/defc export-frames
   {::mf/register modal/components
    ::mf/register-as :export-frames}
-  [{:keys [exports origin]}]
+  [{:keys [exports origin name]}]
   (let [title (tr "dashboard.export-frames.title")]
     [:> export-multiple-dialog*
      {:exports exports
       :title title
       :cmd :export-frames
-      :origin origin}]))
+      :origin origin
+      :name name}]))
 
 ;; FIXME: deprecated, should be refactored in two components and use
 ;; the generic progress reporter
@@ -216,11 +218,25 @@
         theme             (or (:theme profile) theme/default)
         is-default-theme? (= theme/default theme)
         error?            (:error state)
+        ;; The exporter is at capacity: worth its own wording, so the user
+        ;; knows retrying later is the thing to do.
+        busy?             (= :queue-full (:error-code state))
         healthy?          (:healthy? state)
         detail-visible?   (:detail-visible state)
         widget-visible?   (:widget-visible state)
         progress          (:progress state)
         items             (:exports state)
+        job-id            (:job-id state)
+        status            (:status state)
+        queued?           (and (some? job-id) (= "queued" status))
+        cancelling?       (and (some? job-id) (= "cancelling" status))
+        cancelled?        (and (some? job-id) (= "cancelled" status))
+        ;; Only the wasm backend can actually stop: a browser render holds its
+        ;; pool slot until playwright gives up.
+        cancellable?      (and (some? job-id)
+                               (= "wasm" (:backend state))
+                               (:in-progress state)
+                               (not cancelling?))
         total             (or (:total state) (count items))
         complete?         (= progress total)
         circ              (* 2 Math/PI 12)
@@ -234,6 +250,8 @@
         color
         (cond
           error?         clr/new-danger
+          (or cancelling?
+              cancelled?) clr/new-warning
           healthy?       (if is-default-theme?
                            clr/new-primary
                            clr/new-primary-light)
@@ -246,10 +264,19 @@
 
         title
         (cond
+          busy?          (tr "workspace.options.exporting-busy")
           error?         (tr "workspace.options.exporting-object-error")
+          cancelling?    (tr "workspace.options.exporting-cancelling")
+          cancelled?     (tr "workspace.options.exporting-cancelled")
+          queued?        (tr "workspace.options.exporting-queued")
           complete?      (tr "workspace.options.exporting-complete")
           healthy?       (tr "workspace.options.exporting-object")
           (not healthy?) (tr "workspace.options.exporting-object-slow"))
+
+        cancel-export
+        (mf/use-fn
+         (fn []
+           (st/emit! (de/cancel-export))))
 
         retry-last-operation
         (mf/use-fn
@@ -292,11 +319,25 @@
 
         [:div {:class (stl/css :export-progress-title)}
          [:div {:class (stl/css :title-text)} title]
-         (if error?
+         (cond
+           error?
            [:button {:class (stl/css :retry-btn)
                      :on-click retry-last-operation}
             (tr "workspace.options.retry")]
 
+           cancellable?
+           [:*
+            [:button {:class (stl/css :retry-btn)
+                      :on-click cancel-export}
+             (tr "workspace.options.cancel-export")]
+            [:span {:class (stl/css :progress)}
+             (dm/str progress " / " total)]]
+
+           ;; A counter for work that is being abandoned says nothing useful.
+           (or cancelling? cancelled?)
+           nil
+
+           :else
            [:span {:class (stl/css :progress)}
             (dm/str progress " / " total)])]
 

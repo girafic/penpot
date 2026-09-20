@@ -2,14 +2,15 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main
   (:require
    [app.common.data.macros :as dm]
    [app.common.logging :as log]
+   [app.common.time :as ct]
+   [app.common.transit :as t]
    [app.common.types.objects-map]
-   [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.auth :as da]
    [app.main.data.event :as ev]
@@ -43,7 +44,8 @@
   (log/inf :version (:full cf/version)
            :asserts *assert*
            :build-date cf/build-date
-           :public-uri (dm/str cf/public-uri))
+           :public-uri (dm/str cf/public-uri)
+           :session-id (str cf/session-id))
   (log/inf :hint "enabled flags" :flags (str/join " " (map name cf/flags))))
 
 (declare reinit)
@@ -56,21 +58,26 @@
   []
   (mf/render! app-root (mf/element ui/app)))
 
+(defn- initialize-rasterizer
+  []
+  (ptk/reify ::initialize-rasterizer
+    ptk/EffectEvent
+    (effect [_ _ _]
+      ;; The rasterizer is used for the dashboard thumbnails
+      (thr/init!))))
+
 (defn initialize
   []
   (ptk/reify ::initialize
     ptk/UpdateEvent
     (update [_ state]
-      (assoc state :session-id (uuid/next)))
+      (assoc state :session-id cf/session-id))
 
     ptk/WatchEvent
     (watch [_ _ stream]
       (rx/merge
-       (if (contains? cf/flags :audit-log)
-         (rx/of (ev/initialize))
-         (rx/empty))
-
-       (rx/of (dp/refresh-profile))
+       (rx/of (ev/initialize)
+              (dp/refresh-profile))
 
        ;; Watch for profile deletion events
        (->> stream
@@ -91,25 +98,41 @@
             (rx/map deref)
             (rx/filter dp/is-authenticated?)
             (rx/take 1)
-            (rx/map #(ws/initialize)))))
+            (rx/map #(ws/initialize)))
 
-    ptk/EffectEvent
-    (effect [_ state _]
-      (when-not (feat/active-feature? state "render-wasm/v1")
-        (thr/init!)))))
+       (->> stream
+            (rx/filter (ptk/type? ::feat/initialize))
+            (rx/take 1)
+            (rx/map #(initialize-rasterizer)))))))
 
 (defn ^:export init
   [options]
-  (some-> (unchecked-get options "defaultTranslations")
-          (i18n/set-default-translations))
+  ;; WORKAROUND: we set this really not useful property for signal a
+  ;; side effect and prevent GCC remove it. We need it because we need
+  ;; to populate the Date prototype with transit related properties
+  ;; before SES hardening is applied on loading MCP plugin
+  (unchecked-set js/globalThis "penpotStartDate"
+                 (-> (ct/now)
+                     (t/encode-str)
+                     (t/decode-str)))
 
-  (mw/init!)
-  (i18n/init)
-  (cur/init-styles)
+  ;; Before initializing anything, check if the browser has loaded
+  ;; stale JS from a previous deployment. If so, do a hard reload so
+  ;; the browser fetches fresh assets matching the current index.html.
+  (if (cf/stale-build?)
+    (cf/throttled-reload
+     :reason (dm/str "stale JS: compiled=" cf/compiled-version-tag
+                     " expected=" cf/version-tag))
+    (do
+      (some-> (unchecked-get options "defaultTranslations")
+              (i18n/set-default-translations))
+      (mw/init!)
+      (i18n/init)
+      (cur/init-styles)
 
-  (init-ui)
-  (st/emit! (plugins/initialize)
-            (initialize)))
+      (init-ui)
+      (st/emit! (plugins/initialize)
+                (initialize)))))
 
 (defn ^:export reinit
   ([]

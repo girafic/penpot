@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) KALEIDOS INC
+// Copyright (c) KALEIDOS SUBSIDIARY SL
 
 @use "refactor/common-refactor.scss" as deprecated;
 @use "ds/typography.scss" as t;
@@ -12,22 +12,31 @@
 @use "ds/_utils.scss" as *;
 
 .modal-overlay {
-  @extend .modal-overlay-base;
+  @extend %modal-overlay-base;
+
   z-index: var(--z-index-notifications);
 }
 
 .modal-dialog {
-  @extend .modal-container-base;
+  @extend %modal-container-base;
+
   max-block-size: initial;
-  min-inline-size: px2rem(648);
+  min-inline-size: px2rem(1021);
+  padding: px2rem(80);
+
+  @media (width <= 1024px) {
+    min-inline-size: px2rem(712);
+    padding: var(--sp-xxxl);
+  }
 }
 
 .close-btn {
-  @extend .modal-close-btn-base;
+  @extend %modal-close-btn-base;
 }
 
 .modal-title {
   @include t.use-typography("title-large");
+
   margin-block-end: var(--sp-xxxl);
   color: var(--modal-title-foreground-color);
   display: flex;
@@ -46,8 +55,22 @@
   @include t.use-typography("body-small");
 }
 
+.price-value {
+  @include t.use-typography("title-medium");
+
+  color: var(--color-foreground-primary);
+  font-weight: 500;
+}
+
+.price-text {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-s);
+  margin-block-end: var(--sp-xxxl);
+}
+
 .modal-info {
-  margin-block-start: var(--sp-s);
+  margin-block: var(--sp-s) var(--sp-l);
   width: 40%;
 }
 
@@ -66,33 +89,58 @@
 .modal-start {
   display: flex;
   justify-content: center;
-  max-inline-size: $sz-224;
+  min-inline-size: $sz-284;
 
-  svg {
-    inline-size: 100%;
-    block-size: auto;
+  @media (width <= 992px) {
+    display: none;
   }
+}
 
-  @media (max-inline-size: 992px) {
+.modal-start svg {
+  inline-size: 100%;
+  block-size: auto;
+}
+
+.welcome-illustration-light {
+  display: none;
+
+  :global(.light) & {
+    display: block;
+  }
+}
+
+.welcome-illustration-dark {
+  display: block;
+
+  :global(.light) & {
     display: none;
   }
 }
 
 .radio-btns {
-  label {
-    @include t.use-typography("body-large");
-    padding: 0;
-    display: flex;
-    align-items: center;
-  }
-
   display: flex;
   flex-direction: column;
   padding: var(--sp-l) 0 0 0;
   gap: 0;
 }
 
+.radio-btns label {
+  @include t.use-typography("body-large");
+
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+
 .contact {
-  margin-block-start: $sz-96;
+  margin-block-start: $sz-48;
   color: var(--color-foreground-primary);
+}
+
+.activation-code {
+  margin-block-start: var(--sp-xxxl);
+}
+
+.link {
+  color: var(--color-accent-primary);
 }

@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.common.types.shape-tree
   (:require
@@ -16,8 +16,6 @@
    [app.common.types.shape.layout :as ctl]
    [app.common.uuid :as uuid]))
 
-
-;; FIXME: the order of arguments seems arbitrary, container should be a first artgument
 (defn add-shape
   "Insert a shape in the tree, at the given index below the given parent or frame.
   Update the parent as needed."
@@ -274,6 +272,20 @@
               -1))))
       items))))
 
+(defn- clipped-by-ancestor?
+  "Checks whether position falls outside the visible (clipped) bounds of
+  some ancestor frame with clip content enabled. Used so that a nested
+  frame that extends beyond a clipping ancestor's own bounds is never
+  considered hit/reachable in the invisible, clipped-away region."
+  [objects shape position]
+  (->> (cfh/get-parent-ids objects (dm/get-prop shape :id))
+       (keep (d/getf objects))
+       (some (fn [ancestor]
+               (and (not= (dm/get-prop ancestor :id) uuid/zero)
+                    ^boolean (cfh/frame-shape? ancestor)
+                    (not (:show-content ancestor))
+                    (not ^boolean (gsh/has-point? ancestor position)))))))
+
 (defn get-frame-by-position
   ([objects position]
    (get-frame-by-position objects position nil))
@@ -289,6 +301,7 @@
          validator (or (get options :validator) #(-> true))]
      (or (d/seek #(and ^boolean (some? position)
                        ^boolean (gsh/has-point? % position)
+                       ^boolean (not (clipped-by-ancestor? objects % position))
                        ^boolean (validator %))
                  frames)
          (get objects uuid/zero)))))
@@ -304,7 +317,8 @@
   ([objects position options]
    (->> (get-frames objects options)
         (filter #(and ^boolean (some? position)
-                      ^boolean (gsh/has-point? % position)))
+                      ^boolean (gsh/has-point? % position)
+                      ^boolean (not (clipped-by-ancestor? objects % position))))
         (sort-z-index-objects objects))))
 
 (defn top-nested-frame
@@ -315,6 +329,9 @@
    (top-nested-frame objects position nil))
 
   ([objects position excluded]
+   (top-nested-frame objects position excluded false))
+
+  ([objects position excluded read-only?]
    (assert (or (nil? excluded) (set? excluded)))
 
    (let [frames (cond->> (get-frames-by-position objects position)
@@ -325,7 +342,8 @@
 
                   :always
                   (remove #(or ^boolean (true? (:hidden %))
-                               ^boolean (true? (:blocked %)))))
+                               ^boolean (and (true? (:blocked %))
+                                             (not read-only?)))))
 
          frame-set (into #{} (map #(dm/get-prop % :id)) frames)]
 

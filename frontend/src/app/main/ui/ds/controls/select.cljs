@@ -2,18 +2,22 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.ds.controls.select
   (:require-macros
    [app.main.style :as stl])
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.main.ui.ds.controls.shared.options-dropdown :refer [options-dropdown* schema:option]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
+   [app.main.ui.ds.tooltip.tooltip :refer [tooltip*]]
+   [app.main.ui.hooks :as hooks]
    [app.util.dom :as dom]
    [app.util.keyboard :as kbd]
    [app.util.object :as obj]
+   [app.util.timers :as timers]
    [clojure.string :as str]
    [rumext.v2 :as mf]
    [rumext.v2.util :as mfu]))
@@ -50,15 +54,18 @@
   [:map
    [:options [:vector {:min 1} schema:option]]
    [:class {:optional true} :string]
+   [:wrapper-class {:optional true} :string]
    [:disabled {:optional true} :boolean]
    [:default-selected {:optional true} :string]
    [:empty-to-end {:optional true} [:maybe :boolean]]
    [:on-change {:optional true} fn?]
-   [:variant {:optional true} [:maybe [:enum "default" "ghost"]]]])
+   [:dropdown-alignment {:optional true} [:maybe [:enum :left :right]]]
+   [:variant {:optional true} [:maybe [:enum "default" "ghost" "icon-only"]]]
+   [:has-portal {:optional true} :boolean]])
 
 (mf/defc select*
   {::mf/schema schema:select}
-  [{:keys [options class disabled default-selected empty-to-end on-change variant] :rest props}]
+  [{:keys [options class disabled default-selected empty-to-end on-change variant wrapper-class dropdown-alignment has-portal] :rest props}]
   (let [;; NOTE: we use mfu/bean here for transparently handle
         ;; options provide as clojure data structures or javascript
         ;; plain objects and lists.
@@ -83,6 +90,9 @@
         nodes-ref    (mf/use-ref nil)
         options-ref  (mf/use-ref nil)
         select-ref   (mf/use-ref nil)
+
+        container    (hooks/use-portal-container :popup)
+        dropdown-wrapper-ref (mf/use-ref nil)
 
         empty-selected-id?
         (str/blank? selected-id)
@@ -192,26 +202,97 @@
         (some? icon)
 
         dimmed?
-        (:dimmed selected-option)]
+        (:dimmed selected-option)
+
+        icon-ref (mf/use-ref nil)
+        icon-id (mf/use-id)]
 
     (mf/with-effect [options]
       (mf/set-ref-val! options-ref options))
 
-    [:div {:class (stl/css :select-wrapper)
+    (mf/with-effect [default-selected options]
+      (reset! selected-id*
+              (get-selected-option-id options default-selected)))
+
+    ;; Portal mode: click-outside + floating positioning
+    (mf/with-effect [is-open has-portal]
+      (when (and is-open has-portal)
+        (let [handler
+              (fn [event]
+                (let [wrapper-node  (mf/ref-val select-ref)
+                      dropdown-node (mf/ref-val dropdown-wrapper-ref)
+                      target        (dom/get-target event)]
+                  (when (and wrapper-node dropdown-node
+                             (not (dom/child? target wrapper-node))
+                             (not (dom/child? target dropdown-node)))
+                    (reset! is-open* false)
+                    (reset! focused-id* nil))))
+
+              calculate
+              (fn []
+                (timers/raf
+                 (fn []
+                   (when-let [select-node (mf/ref-val select-ref)]
+                     (when-let [dropdown-node (mf/ref-val dropdown-wrapper-ref)]
+                       (let [select-rect   (dom/get-bounding-rect select-node)
+                             dropdown-rect (dom/get-bounding-rect dropdown-node)
+                             window-height (.-innerHeight js/window)
+                             space-below   (- window-height (:bottom select-rect))
+                             open-up?      (> (:height dropdown-rect) space-below)]
+                         (if open-up?
+                           (let [bottom (+ (- window-height (:top select-rect)) 4)]
+                             (dom/set-css-property! dropdown-node "top" "unset")
+                             (dom/set-css-property! dropdown-node "bottom" (str bottom "px")))
+                           (let [top (+ (:bottom select-rect) 4)]
+                             (dom/set-css-property! dropdown-node "bottom" "unset")
+                             (dom/set-css-property! dropdown-node "top" (str top "px"))))
+                         (dom/set-css-property! dropdown-node "left" (str (:left select-rect) "px"))
+                         (dom/set-css-property! dropdown-node "width" (str (:width select-rect) "px"))
+                         (dom/set-css-property! dropdown-node "position" "fixed")))))))]
+
+          (.addEventListener js/document "mousedown" handler)
+
+          (let [ro (js/ResizeObserver. (fn [_] (calculate)))]
+            (when-let [node (mf/ref-val select-ref)]
+              (.observe ro node))
+
+            (.addEventListener js/window "resize" calculate)
+            (.addEventListener js/window "scroll" calculate true)
+
+            (calculate)
+
+            (fn []
+              (.removeEventListener js/document "mousedown" handler)
+              (.disconnect ro)
+              (.removeEventListener js/window "resize" calculate)
+              (.removeEventListener js/window "scroll" calculate true))))))
+
+    [:div {:class [wrapper-class (stl/css :select-wrapper)]
            :on-click on-click
            :ref select-ref
-           :on-blur on-blur}
+           :on-blur (when-not has-portal on-blur)}
 
      [:> :button props
       [:span {:class (stl/css-case :select-header true
-                                   :header-icon has-icon?)}
+                                   :header-icon has-icon?
+                                   :header-icon-only (= variant "icon-only"))}
        (when ^boolean has-icon?
-         [:> icon* {:icon-id icon
-                    :size "s"
-                    :aria-hidden true}])
-       [:span {:class (stl/css-case :header-label true
-                                    :header-label-dimmed (or empty-selected-id? dimmed?))}
-        (if ^boolean empty-selected-id? "--" label)]]
+         (if (= variant "icon-only")
+           [:> tooltip* {:content label
+                         :trigger-ref icon-ref
+                         :id (dm/str icon-id "-name")
+                         :class (stl/css :option-text)}
+            [:> icon* {:icon-id icon
+                       :ref icon-ref
+                       :aria-labelledby (dm/str icon-id "-name")}]]
+           [:> icon* {:icon-id icon
+                      :size "s"
+                      :aria-hidden true}]))
+
+       (when-not ^boolean (= variant "icon-only")
+         [:span {:class (stl/css-case :header-label true
+                                      :header-label-dimmed (or empty-selected-id? dimmed?))}
+          (if ^boolean empty-selected-id? "--" label)])]
 
       [:> icon* {:icon-id i/arrow-down
                  :class (stl/css :arrow)
@@ -219,10 +300,24 @@
                  :aria-hidden true}]]
 
      (when ^boolean is-open
-       [:> options-dropdown* {:on-click on-option-click
-                              :id listbox-id
-                              :options options
-                              :selected selected-id
-                              :focused focused-id
-                              :empty-to-end empty-to-end
-                              :ref set-option-ref}])]))
+       (if has-portal
+         (mf/portal
+          (mf/html
+           [:> options-dropdown* {:on-click on-option-click
+                                  :id listbox-id
+                                  :options options
+                                  :selected selected-id
+                                  :focused focused-id
+                                  :align dropdown-alignment
+                                  :empty-to-end empty-to-end
+                                  :ref set-option-ref
+                                  :wrapper-ref dropdown-wrapper-ref}])
+          container)
+         [:> options-dropdown* {:on-click on-option-click
+                                :id listbox-id
+                                :options options
+                                :selected selected-id
+                                :focused focused-id
+                                :align dropdown-alignment
+                                :empty-to-end empty-to-end
+                                :ref set-option-ref}]))]))

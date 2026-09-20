@@ -7,6 +7,7 @@ import { openUIApi } from './api/openUI.api.js';
 import { OpenUIOptions } from './models/open-ui-options.model.js';
 import { RegisterListener } from './models/plugin.model.js';
 import { openUISchema } from './models/open-ui-options.schema.js';
+import { validateUIUrl } from './validate-url.js';
 
 export async function createPluginManager(
   context: Context,
@@ -21,9 +22,18 @@ export async function createPluginManager(
   let modal: PluginModalElement | null = null;
   let uiMessagesCallbacks: ((message: unknown) => void)[] = [];
   const timeouts = new Set<ReturnType<typeof setTimeout>>();
+  const intervals = new Set<ReturnType<typeof setInterval>>();
 
   const allowDownloads = !!manifest.permissions.find(
     (s) => s === 'allow:downloads',
+  );
+
+  const allowClipboardRead = !!manifest.permissions.find(
+    (s) => s === 'clipboard:read',
+  );
+
+  const allowClipboardWrite = !!manifest.permissions.find(
+    (s) => s === 'clipboard:write',
   );
 
   const themeChangeId = context.addListener('themechange', (theme: Theme) => {
@@ -55,6 +65,9 @@ export async function createPluginManager(
     timeouts.forEach(clearTimeout);
     timeouts.clear();
 
+    intervals.forEach(clearInterval);
+    intervals.clear();
+
     if (modal) {
       modal.removeEventListener('close', closePlugin);
       modal.remove();
@@ -82,12 +95,21 @@ export async function createPluginManager(
   const openModal = (name: string, url: string, options?: OpenUIOptions) => {
     const theme = context.theme as Theme;
     const modalUrl = prepareUrl(manifest, url, { theme });
+    validateUIUrl(modalUrl, manifest.host);
 
     if (modal?.getAttribute('iframe-src') === modalUrl) {
       return;
     }
 
-    modal = openUIApi(name, modalUrl, theme, options, allowDownloads);
+    modal = openUIApi(
+      name,
+      modalUrl,
+      theme,
+      options,
+      allowDownloads,
+      allowClipboardRead,
+      allowClipboardWrite,
+    );
 
     modal.setTheme(theme);
 
@@ -137,6 +159,9 @@ export async function createPluginManager(
       }
     },
     getModal: () => modal,
+    get iframeWindow(): Window | null {
+      return modal?.getIframeContentWindow() ?? null;
+    },
     registerListener,
     registerMessageCallback,
     sendMessage: (message: unknown) => {
@@ -150,6 +175,9 @@ export async function createPluginManager(
     },
     get timeouts() {
       return timeouts;
+    },
+    get intervals() {
+      return intervals;
     },
     get code() {
       return code;

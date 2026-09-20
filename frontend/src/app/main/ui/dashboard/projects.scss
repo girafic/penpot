@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
-// Copyright (c) KALEIDOS INC
+// Copyright (c) KALEIDOS SUBSIDIARY SL
 
 @use "common/refactor/common-dashboard";
 @use "ds/typography.scss" as t;
@@ -19,16 +19,15 @@
   margin-inline-end: var(--sp-l);
   border-block-start: $b-1 solid var(--panel-border-color);
   overflow-y: auto;
-  padding-block-end: var(--sp-xxxl);
 }
 
 .dashboard-projects {
   user-select: none;
-  block-size: calc(100vh - px2rem(64));
+  block-size: calc(100vh - px2rem(80));
 }
 
 .with-team-hero {
-  block-size: calc(100vh - px2rem(280));
+  block-size: calc(100vh - px2rem(360));
 }
 
 .dashboard-shared {
@@ -42,6 +41,7 @@
 
 .dashboard-project-row {
   --actions-opacity: 0;
+
   margin-block-end: var(--sp-xxl);
   position: relative;
 
@@ -84,26 +84,32 @@
 }
 
 .project-name {
-  @include textEllipsis;
+  @include text-ellipsis;
   @include t.use-typography("body-large");
+
   color: var(--title-foreground-color-hover);
   cursor: pointer;
   block-size: $sz-16;
   line-height: 0.8;
   margin-inline-end: var(--sp-m);
+  flex: 0 1 auto;
+  min-inline-size: 0;
 }
 
 .info-wrapper {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: var(--sp-s);
 }
 
 .info,
 .recent-files-row-title-info {
   @include t.use-typography("body-medium");
+
   color: var(--title-foreground-color);
-  @media (max-width: 760px) {
+
+  @media (width <= 760px) {
     display: none;
   }
 }
@@ -116,7 +122,8 @@
 
 .add-file-btn,
 .options-btn {
-  @extend .button-tertiary;
+  @extend %button-tertiary;
+
   block-size: $sz-32;
   inline-size: $sz-32;
   margin: 0 var(--sp-s);
@@ -125,7 +132,8 @@
 
 .add-icon,
 .menu-icon {
-  @extend .button-icon;
+  @extend %button-icon;
+
   stroke: var(--icon-foreground);
 }
 
@@ -140,18 +148,20 @@
 
 .show-more {
   --show-more-color: var(--button-secondary-foreground-color-rest);
+
   @include t.use-typography("body-medium");
+
+  flex: 0 0 auto;
+  margin-inline-start: auto;
   border: none;
   background: none;
   cursor: pointer;
-  position: absolute;
-  inset-block-start: var(--sp-s);
-  inset-inline-end: px2rem(52);
   display: flex;
   align-items: center;
   justify-content: space-between;
   column-gap: var(--sp-m);
   color: var(--show-more-color);
+  white-space: nowrap;
 
   &:hover {
     --show-more-color: var(--button-secondary-foreground-color-active);
@@ -179,7 +189,7 @@
     border-radius: $br-4;
     inline-size: auto;
 
-    @media (max-width: 1200px) {
+    @media (width <= 1200px) {
       display: none;
       inline-size: 0;
     }
@@ -202,18 +212,22 @@
 .info {
   flex: 1;
   font-size: $sz-16;
+
   span {
     color: var(--color-foreground-secondary);
     display: block;
   }
+
   a {
     color: var(--color-accent-primary);
   }
+
   padding: var(--sp-s) 0;
 }
 
 .close {
   --close-icon-foreground-color: var(--icon-foreground);
+
   position: absolute;
   top: var(--sp-xl);
   inset-inline-end: var(--sp-xxl);
@@ -221,19 +235,16 @@
   background-color: transparent;
   border: none;
   cursor: pointer;
+
   &:hover {
     --close-icon-foreground-color: var(--button-icon-foreground-color-selected);
   }
 }
 
 .close-icon {
-  @extend .button-icon;
-  stroke: var(--close-icon-foreground-color);
-}
+  @extend %button-icon;
 
-.invite {
-  block-size: $sz-32;
-  inline-size: px2rem(180);
+  stroke: var(--close-icon-foreground-color);
 }
 
 .img-wrapper {
@@ -244,7 +255,8 @@
   block-size: var(--sp-xl) 0;
   overflow: hidden;
   border-radius: $br-4;
-  @media (max-width: 1200px) {
+
+  @media (width <= 1200px) {
     display: none;
     inline-size: 0;
   }

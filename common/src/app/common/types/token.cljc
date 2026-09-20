@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.common.types.token
   (:require
@@ -20,7 +20,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- schema-keys
-  "Converts registed map schema into set of keys."
+  "Converts registered map schema into set of keys."
   [schema]
   (->> schema
        (sm/schema)
@@ -42,7 +42,7 @@
 
 (defn token-value-self-reference?
   "Check if the token is self referencing with its `token-name` in `token-value`.
-  Simple 1 level check, doesn't account for circular self refernces across multiple tokens."
+  Simple 1 level check, doesn't account for circular self references across multiple tokens."
   [token-name token-value]
   (let [token-references (find-token-value-references token-value)
         self-reference? (get token-references token-name)]
@@ -136,6 +136,9 @@
 (def token-name-validation-regex
   #"^[a-zA-Z0-9_-][a-zA-Z0-9$_-]*(\.[a-zA-Z0-9$_-]+)*$")
 
+(def token-node-name-validation-regex
+  #"^[a-zA-Z0-9_-][a-zA-Z0-9$_-]*(\.[a-zA-Z0-9$_-]+)*$")
+
 (def schema:token-name
   "A token name can contains letters, numbers, underscores the character $ and dots, but
    not start with $ or end with a dot. The $ character does not have any special meaning,
@@ -152,6 +155,14 @@
   [:re {:title "TokenRef"
         :gen/gen sg/text}
    token-ref-validation-regex])
+
+(def schema:token-node-name
+  "A token node name can contains letters, numbers, underscores and the character $, but
+   not start with $ or a dot, or end with a dot. The $ character does not have any special meaning,
+   but dots separate token groups (e.g. color.primary.background)."
+  [:re {:title "TokenNodeName"
+        :gen/gen sg/text}
+   token-node-name-validation-regex])
 
 (def schema:token-type
   [::sm/one-of {:decode/json (fn [type]
@@ -223,6 +234,8 @@
   [:map {:title "SpacingGapTokenAttrs"}
    [:row-gap {:optional true} schema:token-name]
    [:column-gap {:optional true} schema:token-name]])
+
+(def spacing-gap-keys (schema-keys schema:spacing-gap))
 
 (def ^:private schema:spacing-padding
   [:map {:title "SpacingPaddingTokenAttrs"}
@@ -346,7 +359,6 @@
 (def typography-keys (set/union font-family-keys
                                 font-size-keys
                                 font-weight-keys
-                                font-weight-keys
                                 letter-spacing-keys
                                 line-height-keys
                                 text-case-keys
@@ -411,11 +423,8 @@
     :stroke-width :strokes
     token-attr))
 
-(defn shape-attr->token-attrs
-  "Returns the token-attr affected when a given attribute in a shape is changed.
-   The sub-attr is for attributes that may have multiple values, like strokes
-   (may be width or color) and layout padding & margin (may have 4 edges)."
-  ([shape-attr] (shape-attr->token-attrs shape-attr nil))
+(defn- shape-attr->token-attrs*
+  ([shape-attr] (shape-attr->token-attrs* shape-attr nil))
   ([shape-attr changed-sub-attr]
    (cond
      (= :fills shape-attr)
@@ -455,6 +464,20 @@
      (rotation-keys shape-attr) #{shape-attr}
      (number-keys shape-attr) #{shape-attr}
      (axis-keys shape-attr) #{shape-attr})))
+
+(def ^:private shape-attr->token-attrs-1
+  (memoize shape-attr->token-attrs*))
+
+(defn shape-attr->token-attrs
+  "Returns the token-attr affected when a given attribute in a shape is changed.
+   The sub-attr is for attributes that may have multiple values, like strokes
+   (may be width or color) and layout padding & margin (may have 4 edges)."
+  ([shape-attr]
+   (shape-attr->token-attrs-1 shape-attr))
+  ([shape-attr changed-sub-attr]
+   (if (nil? changed-sub-attr)
+     (shape-attr->token-attrs-1 shape-attr)
+     (shape-attr->token-attrs* shape-attr changed-sub-attr))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; HELPERS for token attributes by shape type
@@ -522,31 +545,39 @@
 
 (def tokens-by-input
   "A map from input name to applicable token for that input."
-  {:width #{:sizing :dimensions}
-   :height #{:sizing :dimensions}
-   :max-width #{:sizing :dimensions}
-   :max-height #{:sizing :dimensions}
-   :min-width #{:sizing :dimensions}
-   :min-height #{:sizing :dimensions}
-   :x #{:dimensions}
-   :y #{:dimensions}
-   :rotation #{:number :rotation}
-   :border-radius #{:border-radius :dimensions}
-   :row-gap #{:spacing :dimensions}
-   :column-gap #{:spacing :dimensions}
-   :horizontal-padding #{:spacing :dimensions}
-   :vertical-padding #{:spacing :dimensions}
-   :sided-paddings #{:spacing :dimensions}
-   :horizontal-margin #{:spacing :dimensions}
-   :vertical-margin #{:spacing :dimensions}
-   :sided-margins #{:spacing :dimensions}
-   :line-height #{:line-height :number}
-   :opacity #{:opacity}
-   :stroke-width #{:stroke-width :dimensions}
-   :font-size #{:font-size}
-   :letter-spacing #{:letter-spacing}
-   :fill #{:color}
-   :stroke-color #{:color}})
+  {:width              [:sizing :dimensions]
+   :height             [:sizing :dimensions]
+   :max-width          [:sizing :dimensions]
+   :max-height         [:sizing :dimensions]
+   :min-width          [:sizing :dimensions]
+   :min-height         [:sizing :dimensions]
+   :x                  [:dimensions]
+   :y                  [:dimensions]
+   :rotation           [:rotation :number]
+   :border-radius      [:border-radius :dimensions]
+   :row-gap            [:spacing :dimensions]
+   :column-gap         [:spacing :dimensions]
+   :horizontal-padding [:spacing :dimensions]
+   :vertical-padding   [:spacing :dimensions]
+   :sided-paddings     [:spacing :dimensions]
+   :horizontal-margin  [:spacing :dimensions]
+   :vertical-margin    [:spacing :dimensions]
+   :sided-margins      [:spacing :dimensions]
+   :line-height        [:line-height :number]
+   :opacity            [:opacity]
+   :stroke-width       [:stroke-width :dimensions]
+   :font-size          [:font-size]
+   :font-weight        [:font-weight]
+   :text-decoration    [:text-decoration]
+   :text-case          [:text-case]
+   :letter-spacing     [:letter-spacing]
+   :dimensions         [:dimensions]
+   :fill               [:color]
+   :stroke-color       [:color]
+   :typography         [:typography]
+   :number             [:number]
+   :sizing             [:sizing :dimensions]
+   :spacing            [:spacing :dimensions]})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; HELPERS for tokens application
@@ -703,7 +734,7 @@
           (or (nil? last-space-left)   (> (dm/number open-pos) (dm/number last-space-left)))
           (or (nil? first-space-right) (< (dm/number close-pos) (dm/number first-space-right)))))))
 
-(defn- build-result
+(defn build-result
   "Builds the result map for `insert-ref` by replacing the substring of `value`
    between `prefix-end` and `suffix-start` with a formatted reference `{name}`.
    Returns a map with:

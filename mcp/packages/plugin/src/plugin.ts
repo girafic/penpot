@@ -1,5 +1,23 @@
 import { ExecuteCodeTaskHandler } from "./task-handlers/ExecuteCodeTaskHandler";
 import { Task, TaskHandler } from "./TaskHandler";
+import { formatTaskError } from "./ErrorUtils";
+
+/**
+ * indicates whether the plugin is running in an environment with the Penpot-integrated remote MCP server
+ * enabled (as opposed to a local server used with the explicitly loaded plugin)
+ */
+const isIntegratedRemoteMcp = !!mcp;
+
+/**
+ * Extracts the major.minor.patch prefix from a version string.
+ *
+ * @param version - a version string starting with major.minor.patch
+ * @returns the major.minor.patch prefix, or the original string if it does not match
+ */
+function extractVersionPrefix(version: string): string {
+    const match = version.match(/^(\d+\.\d+\.\d+)/);
+    return match ? match[1] : version;
+}
 
 mcp?.setMcpStatus("connecting");
 
@@ -8,29 +26,45 @@ mcp?.setMcpStatus("connecting");
  */
 const taskHandlers: TaskHandler[] = [new ExecuteCodeTaskHandler()];
 
-// Determine whether multi-user mode is enabled based on build-time configuration
-declare const IS_MULTI_USER_MODE: boolean;
-const isMultiUserMode = typeof IS_MULTI_USER_MODE !== "undefined" ? IS_MULTI_USER_MODE : false;
-
 // Open the plugin UI (main.ts)
-penpot.ui.open("Penpot MCP Plugin", `?theme=${penpot.theme}&multiUser=${isMultiUserMode}`, {
-    width: 158,
-    height: 200,
-    hidden: !!mcp,
+penpot.ui.open("Penpot MCP Plugin", `?theme=${penpot.theme}`, {
+    width: 236,
+    height: 210,
+    hidden: isIntegratedRemoteMcp,
 } as any);
 
-// Handle messages
+// Register message handlers
 penpot.ui.onMessage<string | { id: string; type?: string; status?: string; task: string; params: any }>((message) => {
-    // Handle plugin task requests
-    if (mcp && typeof message === "object" && message.type === "ui-initialized") {
+    if (typeof message === "object" && message.type === "ui-initialized") {
+        // Inform the UI about the operating mode
         penpot.ui.sendMessage({
-            type: "start-server",
-            url: mcp?.getServerUrl(),
-            token: mcp?.getToken(),
+            type: "mcp-mode",
+            integratedRemoteMcp: isIntegratedRemoteMcp,
         });
+        // Check Penpot version compatibility
+        const penpotVersionPrefix = penpot.version ? extractVersionPrefix(penpot.version) : "<2.15"; // pre-2.15 versions don't have version info
+        const mcpVersionPrefix = extractVersionPrefix(PENPOT_MCP_VERSION);
+        console.log(`Penpot version: ${penpotVersionPrefix}, MCP version: ${mcpVersionPrefix}`);
+        const isLocalPenpotVersion = penpotVersionPrefix == "0.0.0";
+        if (penpotVersionPrefix !== mcpVersionPrefix && !isLocalPenpotVersion) {
+            penpot.ui.sendMessage({
+                type: "version-mismatch",
+                mcpVersion: mcpVersionPrefix,
+                penpotVersion: penpotVersionPrefix,
+            });
+        }
+        // Initiate connection to remote MCP server (if enabled)
+        if (isIntegratedRemoteMcp) {
+            penpot.ui.sendMessage({
+                type: "start-server",
+                url: mcp?.getServerUrl(),
+                token: mcp?.getToken(),
+            });
+        }
     } else if (typeof message === "object" && message.type === "update-connection-status") {
         mcp?.setMcpStatus(message.status || "unknown");
     } else if (typeof message === "object" && message.task && message.id) {
+        // Handle plugin tasks submitted by the MCP server
         handlePluginTaskRequest(message).catch((error) => {
             console.error("Error in handlePluginTaskRequest:", error);
         });
@@ -64,8 +98,7 @@ async function handlePluginTaskRequest(request: { id: string; task: string; para
             console.log("Task handled successfully:", task);
         } catch (error) {
             console.error("Error handling task:", error);
-            const errorMessage = error instanceof Error ? error.message : "Unknown error";
-            task.sendError(`Error handling task: ${errorMessage}`);
+            task.sendError(`Error handling task: ${formatTaskError(error)}`);
         }
     } else {
         console.error("Unknown plugin task:", request.task);

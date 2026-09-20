@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.common.files.helpers
   (:require
@@ -355,7 +355,8 @@
         prt (get objects pid)
         shapes (:shapes prt)
         pos (d/index-of shapes id)]
-    (if (= 0 pos) nil (nth shapes (dec pos)))))
+    (when (and (some? pos) (pos? pos))
+      (nth shapes (dec pos)))))
 
 (defn get-immediate-children
   "Retrieve resolved shape objects that are immediate children

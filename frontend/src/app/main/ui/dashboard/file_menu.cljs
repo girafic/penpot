@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.dashboard.file-menu
   (:require
@@ -37,7 +37,7 @@
 (defn- get-team-name
   [team]
   (if (:is-default team)
-    (tr "dashboard.your-penpot")
+    (tr "dashboard.personal-projects")
     (:name team)))
 
 (defn- group-by-team
@@ -78,7 +78,8 @@
 
         current-team     (get teams current-team-id)
         other-teams      (remove #(= (:id %) current-team-id) (vals teams))
-        current-projects (remove #(= (:id %) (:project-id file))
+        file-project-ids (into #{} (map :project-id) files)
+        current-projects (remove #(contains? file-project-ids (:id %))
                                  (:projects current-team))
 
         on-new-tab

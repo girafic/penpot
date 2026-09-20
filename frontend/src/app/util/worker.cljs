@@ -2,7 +2,7 @@
 ;; License, v. 2.0. If a copy of the MPL was not distributed with this
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ;;
-;; Copyright (c) KALEIDOS INC
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.util.worker
   "A lightweight layer on top of webworkers api."
@@ -90,8 +90,8 @@
   "Return a initialized webworker instance."
   [path on-error]
   (let [instance (js/Worker. path)
-        bus     (rx/subject)
-        worker  (Worker. instance (rx/to-observable bus))
+        bus      (rx/subject)
+        worker   (Worker. instance (rx/to-observable bus))
 
         handle-message
         (fn [event]

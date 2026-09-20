@@ -48,6 +48,13 @@ import type { Shape } from '@penpot/plugin-types';
         <button
           type="button"
           data-appearance="secondary"
+          (click)="throwValidation()"
+        >
+          Throw validation error
+        </button>
+        <button
+          type="button"
+          data-appearance="secondary"
           (click)="loremIpsum()"
         >
           Lorem Ipsum
@@ -304,6 +311,10 @@ export class AppComponent {
     this.#sendMessage({ content: 'resize-h', data: { id } });
   }
 
+  throwValidation() {
+    this.#sendMessage({ content: 'throw-validation' });
+  }
+
   loremIpsum() {
     this.#sendMessage({ content: 'lorem-ipsum' });
   }
@@ -393,7 +404,7 @@ export class AppComponent {
   }
 
   #startDownload(name: string, data: Uint8Array) {
-    const blob = new Blob([data], { type: 'application/octet-stream' });
+    const blob = new Blob([data as any], { type: 'application/octet-stream' });
 
     // We need to start a download with this URL
     const downloadURL = URL.createObjectURL(blob);
