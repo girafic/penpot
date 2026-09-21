@@ -356,7 +356,7 @@
         selected   (mf/deref refs/selected-shapes)
 
         ;; The dock targets the board (top-level frame) of the selection.
-        board-id   (when-let [sid (:id (first selected))]
+        board-id   (when-let [sid (first selected)]
                      (cfh/get-shape-id-root-frame objects sid))
         board-name (get-in objects [board-id :name])
         timeline   (get timelines board-id)
