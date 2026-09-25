@@ -13,6 +13,7 @@
    [app.common.schema :as sm]
    [app.common.schema.generators :as sg]
    [app.common.schema.test :as smt]
+   [app.common.types.animation :as cta]
    [app.common.types.file :as ctf]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
@@ -857,6 +858,89 @@
               (nil? (get-in result2 [:pages-index page-id :flows])))))
 
      {:num 1000})))
+
+(t/deftest timeline-changes-json-encode-decode
+  (doseq [schema [ch/schema:set-timeline-track-change
+                  ch/schema:update-timeline-change]]
+    (let [encode (sm/encoder schema (sm/json-transformer))
+          decode (sm/decoder schema (sm/json-transformer))]
+      (smt/check!
+       (smt/for [data (sg/generator schema)]
+         (= data (-> data encode json-roundtrip decode)))
+       {:num 200}))))
+
+(defn- timeline-page
+  "File data with a board timeline animating two layers, `a` and `b`."
+  [page-id board-id a b]
+  (let [data     (make-file-data (uuid/custom 2 2) page-id)
+        timeline (-> (cta/make-timeline {:board-id board-id :duration 1000})
+                     (cta/add-keyframe a {:time 0 :property :x :value 0})
+                     (cta/add-keyframe b {:time 0 :property :opacity :value 1}))]
+    (ch/process-changes data [{:type :set-timeline :page-id page-id :id board-id :params timeline}])))
+
+(defn- timeline-changes
+  "The changes of one user that turn the timeline into `(f timeline)`."
+  [data page-id board-id f]
+  (let [page (get-in data [:pages-index page-id])]
+    (-> (pcb/empty-changes)
+        (pcb/with-page page)
+        (pcb/change-timeline board-id (f (get-in page [:timelines board-id]))))))
+
+(t/deftest timeline-edits-of-different-layers-merge
+  (let [page-id  (uuid/custom 1 1)
+        board-id (uuid/next)
+        a        (uuid/next)
+        b        (uuid/next)
+        data     (timeline-page page-id board-id a b)
+        ;; two users edit the same timeline at once, from the same version
+        user-1   (timeline-changes data page-id board-id
+                                   #(cta/add-keyframe % a {:time 500 :property :x :value 100}))
+        user-2   (timeline-changes data page-id board-id
+                                   #(-> %
+                                        (cta/add-keyframe b {:time 500 :property :opacity :value 0})
+                                        (assoc :duration 2000)))
+        result   (-> data
+                     (ch/process-changes (:redo-changes user-1))
+                     (ch/process-changes (:redo-changes user-2)))
+        timeline (get-in result [:pages-index page-id :timelines board-id])]
+    (t/is (every? #(= :set-timeline-track (:type %)) (:redo-changes user-1)))
+    (t/is (= 1 (count (:redo-changes user-1))))
+    (t/is (= [0 500] (mapv :time (cta/property-keyframes timeline a :x))))
+    (t/is (= [0 500] (mapv :time (cta/property-keyframes timeline b :opacity))))
+    (t/is (= 2000 (:duration timeline)))
+    (t/is (cta/valid-timeline? timeline))))
+
+(t/deftest timeline-changes-undo
+  (let [page-id  (uuid/custom 1 1)
+        board-id (uuid/next)
+        a        (uuid/next)
+        b        (uuid/next)
+        data     (timeline-page page-id board-id a b)
+        before   (get-in data [:pages-index page-id :timelines board-id])
+        changes  (timeline-changes data page-id board-id
+                                   #(-> %
+                                        (cta/remove-track a)
+                                        (assoc :duration 3000 :playback :loop)))
+        result   (ch/process-changes data (:redo-changes changes))
+        undone   (ch/process-changes result (:undo-changes changes))]
+    (t/is (nil? (get-in result [:pages-index page-id :timelines board-id :tracks a])))
+    (t/is (= :loop (get-in result [:pages-index page-id :timelines board-id :playback])))
+    (t/is (= before (get-in undone [:pages-index page-id :timelines board-id])))))
+
+(t/deftest timeline-track-change-needs-the-timeline
+  ;; another user may have deleted the timeline meanwhile
+  (let [page-id (uuid/custom 1 1)
+        data    (make-file-data (uuid/custom 2 2) page-id)
+        result  (ch/process-changes data [{:type :set-timeline-track
+                                           :page-id page-id
+                                           :id (uuid/next)
+                                           :shape-id (uuid/next)
+                                           :params nil}
+                                          {:type :update-timeline
+                                           :page-id page-id
+                                           :id (uuid/next)
+                                           :attrs {:duration 10}}])]
+    (t/is (nil? (get-in result [:pages-index page-id :timelines])))))
 
 (t/deftest set-default-grid-json-encode-decode
   (let [schema ch/schema:set-default-grid-change

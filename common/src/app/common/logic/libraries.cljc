@@ -19,6 +19,7 @@
    [app.common.geom.shapes.common :as gco]
    [app.common.logging :as log]
    [app.common.logic.shapes :as cls]
+   [app.common.logic.timelines :as cltl]
    [app.common.logic.variant-properties :as clvp]
    [app.common.math :as mth]
    [app.common.path-names :as cpn]
@@ -3113,7 +3114,7 @@
 (defn generate-duplicate-changes
   "Prepare objects to duplicate: generate new id, give them unique names,
   move to the desired position, and recalculate parents and frames as needed."
-  [changes all-objects page ids delta libraries library-data file-id & {:keys [variant-props alt-duplication?]}]
+  [changes all-objects page ids delta libraries library-data file-id & {:keys [variant-props alt-duplication? motion]}]
   (let [shapes         (map (d/getf all-objects) ids)
         unames         (volatile! (cfh/get-used-names (:objects page)))
         update-unames! (fn [new-name] (vswap! unames conj new-name))
@@ -3169,7 +3170,12 @@
 
     (-> changes
         (generate-duplicate-flows shapes page ids-map)
-        (generate-duplicate-guides shapes page ids-map delta))))
+        (generate-duplicate-guides shapes page ids-map delta)
+        ;; `motion` (see `cltl/animation-sources`) comes with pasted shapes,
+        ;; which may come from another page
+        (cltl/generate-copy-timelines page ids-map
+                                      (or motion (cltl/animation-sources page all-objects all-ids))
+                                      :keep-board? alt-duplication?))))
 
 (defn generate-duplicate-changes-update-indices
   "Updates the changes to correctly set the indexes of the duplicated objects,

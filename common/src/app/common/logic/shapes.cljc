@@ -11,6 +11,7 @@
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
+   [app.common.logic.timelines :as cltl]
    [app.common.logic.variant-properties :as clvp]
    [app.common.types.animation :as cta]
    [app.common.types.component :as ctk]
@@ -436,8 +437,8 @@
                                changes
                                (-> changes
                                    (pcb/with-page page)
-                                   (pcb/set-timeline board-id
-                                                     (when (seq (:tracks pruned)) pruned)))))))
+                                   (pcb/change-timeline board-id
+                                                        (when (seq (:tracks pruned)) pruned)))))))
                        changes))
 
          changes (reduce (fn [changes component-id]
@@ -467,6 +468,16 @@
                                                                  interactions))))))]
      [all-parents changes])))
 
+
+(defn- move-timelines
+  "Keep the animation of the shapes of `ids`, moved from `objects`, with
+  them (see `cltl/generate-move-timelines`)."
+  [changes objects ids]
+  (let [page (or (pcb/get-page changes)
+                 (ctpl/get-page (pcb/get-library-data changes) (pcb/get-page-id changes)))]
+    (cond-> changes
+      (seq (:timelines page))
+      (cltl/generate-move-timelines page objects ids))))
 
 (defn generate-relocate
   [changes parent-id to-index ids & {:keys [cell ignore-parents?]}]
@@ -692,7 +703,10 @@
 
         ;; Remove parents when are a variant-container that becomes empty
         (cond-> (seq empty-variant-cont)
-          (#(second (generate-delete-shapes % empty-variant-cont {})))))))
+          (#(second (generate-delete-shapes % empty-variant-cont {}))))
+
+        ;; Their animation goes with them to their new board
+        (move-timelines objects ids))))
 
 (defn change-show-in-viewer
   [shape hide?]

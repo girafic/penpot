@@ -405,6 +405,81 @@
                                                 :params old-val}))]
     (apply-changes-local changes)))
 
+(defn set-timeline-track
+  "Set (or, when `track` is nil, delete) the track of `shape-id` in the
+  timeline of the board `id`, leaving its other tracks as they are."
+  [changes id shape-id track]
+  (assert-page-id! changes)
+  (assert-page! changes)
+  (let [page-id (::page-id (meta changes))
+        page    (::page (meta changes))
+        old-val (dm/get-in page [:timelines id :tracks shape-id])
+
+        changes (-> changes
+                    (update :redo-changes conj {:type :set-timeline-track
+                                                :page-id page-id
+                                                :id id
+                                                :shape-id shape-id
+                                                :params track})
+                    (update :undo-changes conj {:type :set-timeline-track
+                                                :page-id page-id
+                                                :id id
+                                                :shape-id shape-id
+                                                :params old-val}))]
+    (apply-changes-local changes)))
+
+(defn update-timeline
+  "Change settings (name, duration, playback...) of the timeline of the
+  board `id`. A nil value removes an optional one."
+  [changes id attrs]
+  (assert-page-id! changes)
+  (assert-page! changes)
+  (let [page-id (::page-id (meta changes))
+        page    (::page (meta changes))
+        old     (dm/get-in page [:timelines id])
+
+        changes (-> changes
+                    (update :redo-changes conj {:type :update-timeline
+                                                :page-id page-id
+                                                :id id
+                                                :attrs attrs})
+                    (update :undo-changes conj {:type :update-timeline
+                                                :page-id page-id
+                                                :id id
+                                                :attrs (into {}
+                                                             (map (fn [attr] [attr (get old attr)]))
+                                                             (keys attrs))}))]
+    (apply-changes-local changes)))
+
+(defn change-timeline
+  "Turn the timeline of the board `id` into `timeline` with the smallest
+  changes: its settings and the tracks that differ. So edits of other
+  layers made at the same time by other users are kept. A new or deleted
+  timeline is set whole."
+  [changes id timeline]
+  (let [old (dm/get-in (::page (meta changes)) [:timelines id])]
+    (if (or (nil? old) (nil? timeline))
+      (set-timeline changes id timeline)
+      (let [settings  #(dissoc % :board-id :tracks)
+            new-attrs (settings timeline)
+            old-attrs (settings old)
+            attrs     (into {}
+                            (keep (fn [attr]
+                                    (let [value (get new-attrs attr)]
+                                      (when (not= value (get old-attrs attr))
+                                        [attr value]))))
+                            (into (set (keys new-attrs)) (keys old-attrs)))
+            tracks    (:tracks timeline)
+            old-tracks (:tracks old)]
+        (reduce (fn [changes shape-id]
+                  (let [track (get tracks shape-id)]
+                    (cond-> changes
+                      (not= track (get old-tracks shape-id))
+                      (set-timeline-track id shape-id track))))
+                (cond-> changes
+                  (seq attrs) (update-timeline id attrs))
+                (into (set (keys tracks)) (keys old-tracks)))))))
+
 (defn set-comment-thread-position
   [changes {:keys [id frame-id position] :as thread}]
   (assert-page-id! changes)

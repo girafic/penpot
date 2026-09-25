@@ -154,6 +154,31 @@
 
     (sm/update-properties schema assoc :gen/gen gen)))
 
+(def schema:set-timeline-track-change
+  ;; The track of one layer, so edits of different layers by different
+  ;; users merge instead of the last timeline winning.
+  (let [schema [:map {:title "SetTimelineTrackChange"}
+                [:type [:= :set-timeline-track]]
+                [:page-id ::sm/uuid]
+                [:id ::sm/uuid]
+                [:shape-id ::sm/uuid]
+                [:params [:maybe cta/schema:track]]]
+
+        gen    (->> (sg/generator schema)
+                    (sg/fmap (fn [change]
+                               (if (some? (:params change))
+                                 (update change :params assoc :shape-id (:shape-id change))
+                                 change))))]
+
+    (sm/update-properties schema assoc :gen/gen gen)))
+
+(def schema:update-timeline-change
+  [:map {:title "UpdateTimelineChange"}
+   [:type [:= :update-timeline]]
+   [:page-id ::sm/uuid]
+   [:id ::sm/uuid]
+   [:attrs cta/schema:timeline-attrs]])
+
 (def schema:set-plugin-data-change
   (let [types  #{:file :page :shape :color :typography :component}
 
@@ -235,6 +260,8 @@
    [:set-guide schema:set-guide-change]
    [:set-flow schema:set-flow-change]
    [:set-timeline schema:set-timeline-change]
+   [:set-timeline-track schema:set-timeline-track-change]
+   [:update-timeline schema:update-timeline-change]
    [:set-default-grid schema:set-default-grid-change]
 
    [:fix-obj
@@ -587,6 +614,28 @@
 
     (let [params (assoc params :board-id id)]
       (d/update-in-when data [:pages-index page-id] update :timelines assoc id params))))
+
+;; Both only change a timeline that is there: another user may have
+;; deleted it meanwhile.
+
+(defmethod process-change :set-timeline-track
+  [data {:keys [page-id id shape-id params]}]
+  (d/update-in-when data [:pages-index page-id :timelines id :tracks]
+                    (fn [tracks]
+                      (if (nil? params)
+                        (dissoc tracks shape-id)
+                        (assoc tracks shape-id (assoc params :shape-id shape-id))))))
+
+(defmethod process-change :update-timeline
+  [data {:keys [page-id id attrs]}]
+  (d/update-in-when data [:pages-index page-id :timelines id]
+                    (fn [timeline]
+                      (reduce-kv (fn [timeline attr value]
+                                   (if (nil? value)
+                                     (dissoc timeline attr)
+                                     (assoc timeline attr value)))
+                                 timeline
+                                 attrs))))
 
 ;; --- Grids
 
