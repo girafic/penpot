@@ -579,6 +579,15 @@ pub extern "C" fn set_shape_opacity(opacity: f32) -> Result<()> {
 
 #[no_mangle]
 #[wasm_error]
+pub extern "C" fn set_shape_trim(start: f32, end: f32, offset: f32) -> Result<()> {
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        shape.set_trim(start, end, offset);
+    });
+    Ok(())
+}
+
+#[no_mangle]
+#[wasm_error]
 pub extern "C" fn set_shape_hidden(hidden: bool) -> Result<()> {
     with_current_shape_mut!(state, |shape: &mut Shape| {
         shape.set_hidden(hidden);

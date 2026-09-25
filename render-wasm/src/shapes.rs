@@ -204,6 +204,8 @@ pub struct Shape {
     deferred_batch_fills: Option<Vec<Fill>>,
     /// Strokes from a cold-load batch, applied together with deferred fills.
     deferred_batch_strokes: Option<Vec<Stroke>>,
+    // Path trim of the strokes (start, end, offset), see `Stroke::trim`.
+    pub trim: Option<(f32, f32, f32)>,
 }
 
 // Returns all ancestor shapes of this shape, traversing up the parent hierarchy
@@ -308,6 +310,7 @@ impl Shape {
             deleted: false,
             deferred_batch_fills: None,
             deferred_batch_strokes: None,
+            trim: None,
         }
     }
 
@@ -430,6 +433,16 @@ impl Shape {
 
     pub fn set_opacity(&mut self, opacity: f32) {
         self.opacity = opacity;
+    }
+
+    /// Draw the strokes only from `start` to `end` of the outline, moved
+    /// along by `offset` (fractions of it). The whole outline is no trim.
+    pub fn set_trim(&mut self, start: f32, end: f32, offset: f32) {
+        self.trim = if start <= 0.0 && end >= 1.0 {
+            None
+        } else {
+            Some((start, end, offset))
+        };
     }
 
     pub fn set_vertical_align(&mut self, align: VerticalAlign) {

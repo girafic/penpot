@@ -634,6 +634,18 @@ pub fn render(
         return Ok(());
     }
 
+    // A path trim of the shape draws each stroke along part of the outline.
+    let trimmed: Vec<Stroke> = match shape.trim {
+        Some(trim) => strokes.iter().map(|s| s.with_trim(trim)).collect(),
+        None => Vec::new(),
+    };
+    let trimmed_refs: Vec<&Stroke> = trimmed.iter().collect();
+    let strokes: &[&Stroke] = if trimmed.is_empty() {
+        strokes
+    } else {
+        &trimmed_refs
+    };
+
     let has_image_fills = strokes.iter().any(|s| matches!(s.fill, Fill::Image(_)));
     let can_merge = !has_image_fills && strokes.len() > 1 && strokes_share_geometry(strokes);
 
@@ -900,10 +912,11 @@ pub fn render_single(
     antialias: bool,
     outset: Option<f32>,
 ) -> Result<()> {
+    let trimmed = shape.trim.map(|trim| stroke.with_trim(trim));
     render_single_internal(
         render_state,
         shape,
-        stroke,
+        trimmed.as_ref().unwrap_or(stroke),
         surface_id,
         shadow,
         antialias,

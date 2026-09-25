@@ -56,6 +56,31 @@ pub struct Stroke {
     // Per-side widths [top, right, bottom, left] for rects and frames.
     // `None` means the uniform `width` applies to all sides.
     pub widths: Option<[f32; 4]>,
+    // Path trim (start, end, offset), fractions of the outline: only the
+    // part from `start` to `end`, moved along by `offset`, is drawn. Set
+    // from the shape at render time (see `Shape::trim`).
+    pub trim: Option<(f32, f32, f32)>,
+}
+
+/// The path effect drawing only the trimmed part of an outline, or `None`
+/// when all of it is drawn. Past the end of the outline it goes on from
+/// its start.
+fn trim_effect((start, end, offset): (f32, f32, f32)) -> Option<skia::PathEffect> {
+    let start = start.clamp(0.0, 1.0);
+    let end = end.clamp(0.0, 1.0);
+    if end - start >= 1.0 {
+        return None;
+    }
+    if end <= start {
+        return skia::PathEffect::trim(0.0, 0.0, None);
+    }
+    let from = (start + offset).rem_euclid(1.0);
+    let to = from + (end - start);
+    if to <= 1.0 {
+        skia::PathEffect::trim(from, to, None)
+    } else {
+        skia::PathEffect::trim(to - 1.0, from, skia::trim_path_effect::Mode::Inverted)
+    }
 }
 
 impl Stroke {
@@ -179,6 +204,7 @@ impl Stroke {
             dash,
             gap,
             widths: None,
+            trim: None,
         }
     }
 
@@ -200,6 +226,7 @@ impl Stroke {
             dash,
             gap,
             widths: None,
+            trim: None,
         }
     }
 
@@ -221,7 +248,15 @@ impl Stroke {
             dash,
             gap,
             widths: None,
+            trim: None,
         }
+    }
+
+    /// This stroke drawn only along the trimmed part of the outline.
+    pub fn with_trim(&self, trim: (f32, f32, f32)) -> Stroke {
+        let mut stroke = self.clone();
+        stroke.trim = Some(trim);
+        stroke
     }
 
     pub fn scale_content(&mut self, value: f32) {
@@ -354,8 +389,9 @@ impl Stroke {
             }
         }
 
-        if self.style != StrokeStyle::Solid {
-            let path_effect = match self.style {
+        let trim = self.trim.and_then(trim_effect);
+        if self.style != StrokeStyle::Solid || trim.is_some() {
+            let dash = match self.style {
                 StrokeStyle::Dotted => {
                     let width = match self.kind {
                         StrokeKind::Inner => self.width,
@@ -390,6 +426,11 @@ impl Stroke {
                     0.,
                 ),
                 _ => None,
+            };
+            // The pattern runs along the trimmed outline.
+            let path_effect = match (dash, trim) {
+                (Some(dash), Some(trim)) => Some(skia::PathEffect::compose(dash, trim)),
+                (dash, trim) => dash.or(trim),
             };
             paint.set_path_effect(path_effect);
         }
@@ -559,6 +600,32 @@ mod tests {
         stroke.scale_content(2.0);
         assert_eq!(stroke.widths, Some([2.0, 4.0, 6.0, 8.0]));
         assert_eq!(stroke.width, 4.0);
+    }
+
+    #[test]
+    fn trim_leaves_a_whole_outline_alone() {
+        assert!(trim_effect((0.0, 1.0, 0.0)).is_none());
+        assert!(trim_effect((0.0, 1.0, 0.3)).is_none());
+    }
+
+    #[test]
+    fn trim_draws_part_of_the_outline() {
+        assert!(trim_effect((0.2, 0.5, 0.0)).is_some());
+        // past the end it goes on from the start
+        assert!(trim_effect((0.6, 0.9, 0.3)).is_some());
+        // nothing left to draw
+        assert!(trim_effect((0.5, 0.5, 0.0)).is_some());
+    }
+
+    #[test]
+    fn trimmed_stroke_paint_has_a_path_effect() {
+        let stroke = solid_center(2.0).with_trim((0.0, 0.5, 0.0));
+        let rect = Rect::from_xywh(0.0, 0.0, 10.0, 10.0);
+        assert!(stroke.to_paint(&rect, None, true).path_effect().is_some());
+        assert!(solid_center(2.0)
+            .to_paint(&rect, None, true)
+            .path_effect()
+            .is_none());
     }
 
     fn solid_center(width: f32) -> Stroke {
