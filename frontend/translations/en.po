@@ -7414,6 +7414,12 @@ msgstr "Rewind to start"
 msgid "workspace.animation.loop"
 msgstr "Loop"
 
+msgid "workspace.animation.play-once"
+msgstr "Play once"
+
+msgid "workspace.animation.ping-pong"
+msgstr "Ping-pong"
+
 msgid "workspace.animation.duration"
 msgstr "Duration"
 
@@ -7441,20 +7447,243 @@ msgstr "Auto-record keyframes"
 msgid "workspace.animation.rec"
 msgstr "REC"
 
-msgid "workspace.animation.empty"
-msgstr "No animation yet."
-
-msgid "workspace.animation.empty-board"
-msgstr "No animation for “%s” yet."
-
 msgid "workspace.animation.select-board"
 msgstr "Select a board to animate."
 
-msgid "workspace.animation.create"
-msgstr "Create animation"
-
 msgid "workspace.animation.tracks-hint"
 msgstr "Select a shape and add a keyframe to start animating."
+
+msgid "workspace.animation.origin"
+msgstr "Origin"
+
+msgid "workspace.animation.origin-x"
+msgstr "Origin X"
+
+msgid "workspace.animation.origin-y"
+msgstr "Origin Y"
+
+msgid "workspace.animation.scale"
+msgstr "Scale"
+
+msgid "workspace.animation.zoom"
+msgstr "Zoom"
+
+msgid "workspace.animation.prev-keyframe"
+msgstr "Previous keyframe"
+
+msgid "workspace.animation.next-keyframe"
+msgstr "Next keyframe"
+
+msgid "workspace.animation.remove-keyframe"
+msgstr "Remove keyframe"
+
+msgid "workspace.animation.value-needs-keyframe"
+msgstr "Add a keyframe at the playhead to edit this value"
+
+msgid "workspace.animation.loop-track"
+msgstr "Loop track"
+
+msgid "workspace.animation.delete-track"
+msgstr "Delete track"
+
+msgid "workspace.animation.fill"
+msgstr "Fill %s"
+
+msgid "workspace.animation.fill-opacity"
+msgstr "Fill %s opacity"
+
+msgid "workspace.animation.stroke"
+msgstr "Stroke %s"
+
+msgid "workspace.animation.stroke-opacity"
+msgstr "Stroke %s opacity"
+
+msgid "workspace.animation.stroke-width"
+msgstr "Stroke %s width"
+
+msgid "workspace.animation.shadow-x"
+msgstr "Shadow %s X"
+
+msgid "workspace.animation.shadow-y"
+msgstr "Shadow %s Y"
+
+msgid "workspace.animation.shadow-blur"
+msgstr "Shadow %s blur"
+
+msgid "workspace.animation.shadow-spread"
+msgstr "Shadow %s spread"
+
+msgid "workspace.animation.shadow-color"
+msgstr "Shadow %s color"
+
+msgid "workspace.animation.shadow-opacity"
+msgstr "Shadow %s opacity"
+
+msgid "workspace.animation.blur"
+msgstr "Layer blur"
+
+msgid "workspace.animation.background-blur"
+msgstr "Background blur"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.path-trim"
+msgstr "Path trim"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs, src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.trim-start"
+msgstr "Trim start"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs, src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.trim-end"
+msgstr "Trim end"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs, src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.trim-offset"
+msgstr "Trim offset"
+
+msgid "workspace.animation.animations"
+msgstr "Animations"
+
+msgid "workspace.animation.add-animation"
+msgstr "Add animation"
+
+msgid "workspace.animation.remove-animation"
+msgstr "Remove animation"
+
+msgid "workspace.animation.styles"
+msgstr "Styles"
+
+msgid "workspace.animation.preset.fade"
+msgstr "Fade"
+
+msgid "workspace.animation.preset.move"
+msgstr "Move"
+
+msgid "workspace.animation.preset.scale"
+msgstr "Scale"
+
+msgid "workspace.animation.preset.rotate"
+msgstr "Rotate"
+
+msgid "workspace.animation.preset.slide-up"
+msgstr "Slide up"
+
+msgid "workspace.animation.preset.slide-down"
+msgstr "Slide down"
+
+msgid "workspace.animation.preset.slide-left"
+msgstr "Slide left"
+
+msgid "workspace.animation.preset.slide-right"
+msgstr "Slide right"
+
+msgid "workspace.animation.preset.pop"
+msgstr "Pop"
+
+msgid "workspace.animation.preset.zoom"
+msgstr "Zoom"
+
+msgid "workspace.animation.preset.spin"
+msgstr "Spin"
+
+msgid "workspace.animation.fade-in"
+msgstr "Fade in"
+
+msgid "workspace.animation.fade-out"
+msgstr "Fade out"
+
+msgid "workspace.animation.move-in"
+msgstr "Move in"
+
+msgid "workspace.animation.move-out"
+msgstr "Move out"
+
+msgid "workspace.animation.scale-in"
+msgstr "Scale in"
+
+msgid "workspace.animation.scale-out"
+msgstr "Scale out"
+
+msgid "workspace.animation.rotate-in"
+msgstr "Rotate in"
+
+msgid "workspace.animation.rotate-out"
+msgstr "Rotate out"
+
+msgid "workspace.animation.type"
+msgstr "Type"
+
+msgid "workspace.animation.direction"
+msgstr "Direction"
+
+msgid "workspace.animation.start"
+msgstr "Start"
+
+msgid "workspace.animation.offset"
+msgstr "Offset"
+
+msgid "workspace.animation.offset-x"
+msgstr "Offset X"
+
+msgid "workspace.animation.offset-y"
+msgstr "Offset Y"
+
+msgid "workspace.animation.easing-auto"
+msgstr "Auto"
+
+msgid "workspace.animation.easing-overshoot"
+msgstr "Overshoot"
+
+msgid "workspace.animation.easing-custom"
+msgstr "Custom"
+
+msgid "workspace.animation.easing-curve"
+msgstr "Curve"
+
+msgid "workspace.animation.easing-spring"
+msgstr "Spring"
+
+msgid "workspace.animation.easing-hold"
+msgstr "Hold"
+
+msgid "workspace.animation.easing-ease-in-back"
+msgstr "Ease in back"
+
+msgid "workspace.animation.easing-ease-out-back"
+msgstr "Ease out back"
+
+msgid "workspace.animation.easing-ease-in-out-back"
+msgstr "Ease in and out back"
+
+msgid "workspace.animation.easing-custom-bezier"
+msgstr "Custom bezier"
+
+msgid "workspace.animation.easing-values"
+msgstr "Bezier control points"
+
+msgid "workspace.animation.easing-reverse"
+msgstr "Reverse curve"
+
+msgid "workspace.animation.spring-gentle"
+msgstr "Gentle"
+
+msgid "workspace.animation.spring-quick"
+msgstr "Quick"
+
+msgid "workspace.animation.spring-bouncy"
+msgstr "Bouncy"
+
+msgid "workspace.animation.spring-slow"
+msgstr "Slow"
+
+msgid "workspace.animation.spring-custom"
+msgstr "Custom spring"
+
+msgid "workspace.animation.spring-bounce"
+msgstr "Bounce"
+
+msgid "workspace.options.transform"
+msgstr "Transform"
 
 #: src/app/main/ui/workspace/main_menu.cljs:440
 msgid "workspace.header.menu.hide-palette"
@@ -8174,6 +8403,54 @@ msgstr "Remove export"
 #: src/app/main/ui/inspect/exports.cljs:201, src/app/main/ui/workspace/sidebar/options/menus/exports.cljs:255
 msgid "workspace.options.export.suffix"
 msgstr "Suffix"
+
+msgid "workspace.options.export.static"
+msgstr "Static"
+
+msgid "workspace.options.export.animated"
+msgstr "Animated"
+
+msgid "workspace.options.export.format"
+msgstr "Format"
+
+msgid "workspace.options.export.size"
+msgstr "Size"
+
+msgid "workspace.options.export.quality"
+msgstr "Quality"
+
+msgid "workspace.options.export.quality-low"
+msgstr "Low"
+
+msgid "workspace.options.export.quality-medium"
+msgstr "Medium"
+
+msgid "workspace.options.export.quality-high"
+msgstr "High"
+
+msgid "workspace.options.export.framerate"
+msgstr "Frame rate"
+
+msgid "workspace.options.export.export-format"
+msgstr "Export %s"
+
+msgid "workspace.options.export.dimensions"
+msgstr "Dimensions"
+
+msgid "workspace.options.export.file-size"
+msgstr "File size"
+
+msgid "workspace.options.export.too-many-frames"
+msgstr "Too many frames. Lower the frame rate or shorten the timeline."
+
+msgid "workspace.options.export.codec-unavailable"
+msgstr "This format is not available in this browser. Try WebM or GIF."
+
+msgid "workspace.options.export.no-timeline"
+msgstr "This board has no animation yet."
+
+msgid "workspace.options.export.progress"
+msgstr "Export frame %s of %s"
 
 #: src/app/main/ui/exports/assets.cljs:267
 msgid "workspace.options.exporting-busy"
@@ -10537,6 +10814,9 @@ msgstr "Connect here"
 #: src/app/main/ui/workspace/top_toolbar.cljs:342
 msgid "workspace.toolbar.mcp-connected"
 msgstr "MCP connected"
+
+msgid "workspace.toolbar.motion-mode"
+msgstr "Motion mode"
 
 #: src/app/main/ui/workspace/top_toolbar.cljs:65, src/app/main/ui/workspace/top_toolbar.cljs:425
 msgid "workspace.toolbar.move"

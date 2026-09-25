@@ -6,20 +6,29 @@
 
 (ns app.main.data.workspace.animation
   "Events for the keyframe based timeline animation feature (Penpot
-  Motion). Persistent edits go through the `:set-timeline` change so they
-  are undoable & synced; playhead / playback state is transient and lives
-  under `:workspace-animation`."
+  Motion). Persistent edits go through the timeline changes (see
+  `commit-timeline`) so they are undoable & synced; playhead / playback
+  state is transient and lives under `:workspace-animation`."
   (:require
+   [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.modifiers :as gm]
+   [app.common.geom.shapes :as gsh]
+   [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
    [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.modifiers :as dwm]
+   [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
+   [app.main.streams :as ms]
+   [app.main.worker :as mw]
    [app.util.dom :as dom]
+   [app.util.mouse :as mse]
    [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
    [clojure.string :as str]
@@ -37,70 +46,210 @@
   [state]
   (get (dsh/lookup-page state) :timelines))
 
-(defn active-board-id
-  "The board (top-level frame) the timeline dock currently targets,
-  derived from the selection: the selected board itself, or the root
-  frame containing the selected shapes. `nil` when nothing is selected."
+(defn- selection-board-id
+  "The board (top-level frame) of the current selection: the selected
+  board itself, or the root frame containing the selected shapes. `nil`
+  when nothing is selected."
   [state]
   (let [objects  (dsh/lookup-page-objects state)
         selected (dsh/lookup-selected state)]
     (when-let [shape-id (first selected)]
       (cfh/get-shape-id-root-frame objects shape-id))))
 
+(defn active-board-id
+  "The board the timeline dock currently targets: the board of the
+  selection or, when nothing is selected, the last targeted one (see
+  `set-active-board`), so the timeline stays visible and playable."
+  [state]
+  (or (selection-board-id state)
+      (dm/get-in state [:workspace-animation :board-id])))
+
 (defn current-timeline
   "The timeline of the active board (timelines are keyed by board-id)."
   [state]
   (get (get-timelines state) (active-board-id state)))
 
+(defn board-timeline
+  "The timeline of `board` or, while the board has none, a new empty one
+  named after it. The first edit stores the new one, so the timeline of
+  any board can be shown and edited right away."
+  [timelines board]
+  (when-let [board-id (:id board)]
+    (or (get timelines board-id)
+        (cta/make-timeline {:board-id board-id :name (:name board)}))))
+
+(defn- current-or-new-timeline
+  "The timeline of the active board, a new one when it has none yet (see
+  `board-timeline`)."
+  [state]
+  (let [objects (dsh/lookup-page-objects state)]
+    (board-timeline (get-timelines state) (get objects (active-board-id state)))))
+
 (defn playhead
   [state]
   (dm/get-in state [:workspace-animation :playhead] 0))
 
+(defn- item-at
+  [items index]
+  (get (if (vector? items) items (vec items)) index))
+
 (defn- shape-property-value
   "Capture the current value of an animatable property of `shape` so it
-  can be stored as a keyframe. Scale defaults to 1 (authored by editing
-  the keyframe value)."
-  [shape property]
-  (case property
-    :x        (-> shape :selrect :x)
-    :y        (-> shape :selrect :y)
-    :rotation (or (:rotation shape) 0)
-    :opacity  (or (:opacity shape) 1)
-    :scale-x  1
-    :scale-y  1
-    nil))
+  can be stored as a keyframe; positions relative to `origin` (see
+  `cta/position-origin`). Scale defaults to 1 (authored by editing the
+  keyframe value)."
+  ([shape property origin]
+   (shape-property-value shape property origin nil))
+  ([shape property origin index]
+   (case property
+     :x        (- (-> shape :selrect :x) (:x origin))
+     :y        (- (-> shape :selrect :y) (:y origin))
+     :rotation (or (:rotation shape) 0)
+     :opacity  (or (:opacity shape) 1)
+     :width    (or (-> shape :selrect :width) 0)
+     :height   (or (-> shape :selrect :height) 0)
+     :scale-x  1
+     :scale-y  1
+     :r1       (or (:r1 shape) 0)
+     :r2       (or (:r2 shape) 0)
+     :r3       (or (:r3 shape) 0)
+     :r4       (or (:r4 shape) 0)
+     :fill-color     (:fill-color (item-at (:fills shape) index))
+     :fill-opacity   (or (:fill-opacity (item-at (:fills shape) index)) 1)
+     :stroke-color   (:stroke-color (item-at (:strokes shape) index))
+     :stroke-opacity (or (:stroke-opacity (item-at (:strokes shape) index)) 1)
+     :stroke-width   (or (:stroke-width (item-at (:strokes shape) index)) 0)
+     :shadow-offset-x (or (:offset-x (item-at (:shadow shape) index)) 0)
+     :shadow-offset-y (or (:offset-y (item-at (:shadow shape) index)) 0)
+     :shadow-blur     (or (:blur (item-at (:shadow shape) index)) 0)
+     :shadow-spread   (or (:spread (item-at (:shadow shape) index)) 0)
+     :shadow-color    (get-in (item-at (:shadow shape) index) [:color :color])
+     :shadow-opacity  (or (get-in (item-at (:shadow shape) index) [:color :opacity]) 1)
+     :blur            (or (get-in shape [:blur :value]) 0)
+     :background-blur (or (get-in shape [:background-blur :value]) 0)
+     (get cta/trim-properties property))))
 
-(declare apply-preview)
+(def transform-properties
+  [:x :y :width :height :scale-x :scale-y :rotation])
+
+(def appearance-properties
+  [:fill-color :fill-opacity
+   :stroke-color :stroke-opacity :stroke-width
+   :shadow-offset-x :shadow-offset-y :shadow-blur
+   :shadow-spread :shadow-color :shadow-opacity
+   :blur :background-blur
+   :trim-start :trim-end :trim-offset])
+
+(def animatable-properties
+  (into transform-properties (cons :opacity appearance-properties)))
+
+(defn- store-value
+  [m property index v]
+  (if (some? index)
+    (assoc-in m [property index] v)
+    (assoc m property v)))
+
+(defn shape-values-at
+  "The value each animatable property of `shape` shows at `time`:
+  interpolated from its keyframes when animated, otherwise its own.
+  Indexed properties nest as `{index value}`."
+  [timeline objects shape time]
+  (let [origin   (cta/position-origin timeline objects (:id shape))
+        animated (-> (cta/resolve-animations timeline objects)
+                     (cta/values-at time)
+                     (get (:id shape)))
+        values   (into {}
+                       (map (fn [property]
+                              [property (get animated property
+                                             (shape-property-value shape property origin))]))
+                       (into transform-properties
+                             (concat [:opacity :r1 :r2 :r3 :r4 :blur :background-blur]
+                                     (keys cta/trim-properties))))]
+    (reduce
+     (fn [values {:keys [index properties]}]
+       (reduce (fn [values property]
+                 (store-value values property index
+                              (or (cta/value-of animated property index)
+                                  (shape-property-value shape property origin index))))
+               values
+               properties))
+     values
+     (cta/appearance-slots shape))))
+
+(defn shape-at
+  "`shape` as the animation shows it at `time`: moved, scaled and rotated,
+  with its animated opacity, fills, strokes, shadows and blur."
+  [timeline objects shape time]
+  (let [shape-id  (:id shape)
+        modifiers (-> (update timeline :tracks select-keys [shape-id])
+                      (cta/timeline->modif-tree objects time)
+                      (dm/get-in [shape-id :modifiers]))]
+    (gsh/transform-shape shape modifiers)))
+
+(defn value->display
+  "The value of `property` as shown to the user: scale and opacity as
+  percentages (positions are already relative to the board)."
+  [property value]
+  (case property
+    (:scale-x :scale-y :opacity :fill-opacity :stroke-opacity :shadow-opacity
+              :trim-start :trim-end :trim-offset)
+    (* value 100)
+    value))
+
+(defn display->value
+  "Inverse of `value->display`."
+  [property display]
+  (case property
+    (:scale-x :scale-y :opacity :fill-opacity :stroke-opacity :shadow-opacity
+              :trim-start :trim-end :trim-offset)
+    (/ display 100)
+    display))
+
+(defn keyframe-at
+  "The keyframe of `property` of `shape-id` placed exactly at `time`."
+  ([timeline shape-id property time]
+   (keyframe-at timeline shape-id property time nil))
+  ([timeline shape-id property time index]
+   (d/seek #(and (cta/same-slot? % property index) (= (:time %) time))
+           (dm/get-in timeline [:tracks shape-id :keyframes]))))
+
+(defn keyframe-times
+  "Sorted, distinct times of the keyframes of `properties` of `shape-id`."
+  ([timeline shape-id properties]
+   (keyframe-times timeline shape-id properties nil))
+  ([timeline shape-id properties index]
+   (let [properties (set properties)]
+     (->> (dm/get-in timeline [:tracks shape-id :keyframes])
+          (filter #(and (contains? properties (:property %))
+                        (= (:index %) index)))
+          (map :time)
+          (distinct)
+          (sort)))))
+
+(declare apply-preview select-keyframe set-playhead set-keyframe-value)
 
 (defn- commit-timeline
-  "Build a change that sets (or, when `timeline` is nil, deletes) the
-  timeline keyed by `board-id` on the current page."
-  [it state board-id timeline]
-  (let [page (dsh/lookup-page state)]
-    (dch/commit-changes
-     (-> (pcb/empty-changes it)
-         (pcb/with-page page)
-         (pcb/set-timeline board-id timeline)))))
+  "Commit `timeline` (or, when nil, delete it) as the timeline keyed by
+  `board-id` on the current page, optionally in the `undo-group` of
+  another change (so both undo together). Only what changed is sent (see
+  `pcb/change-timeline`), so edits other users make meanwhile to other
+  layers are kept; nothing, when nothing changed."
+  ([it state board-id timeline]
+   (commit-timeline it state board-id timeline nil))
+  ([it state board-id timeline undo-group]
+   (let [page    (dsh/lookup-page state)
+         changes (-> (pcb/empty-changes it)
+                     (pcb/with-page page)
+                     (pcb/change-timeline board-id timeline))]
+     (if (empty? (:redo-changes changes))
+       (ptk/data-event ::timeline-unchanged {})
+       (dch/commit-changes
+        (cond-> changes
+          (some? undo-group) (assoc :undo-group undo-group)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TIMELINE CRUD
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn create-timeline
-  "Create a timeline for the active board (the board of the current
-  selection). No-op when there is no active board."
-  ([] (create-timeline nil))
-  ([opts]
-   (ptk/reify ::create-timeline
-     ptk/WatchEvent
-     (watch [it state _]
-       (if-let [board-id (active-board-id state)]
-         (let [objects  (dsh/lookup-page-objects state)
-               name     (or (:name opts) (:name (get objects board-id)) "Animation")
-               timeline (cta/make-timeline (merge opts {:board-id board-id :name name}))]
-           (rx/of (commit-timeline it state board-id timeline)
-                  (layout/toggle-layout-flag :animation-timeline :force? true)))
-         (rx/empty))))))
 
 (defn delete-timeline
   [board-id]
@@ -111,12 +260,13 @@
              (dwm/clear-local-transform)))))
 
 (defn- update-current-timeline
-  "Apply `f` to the current timeline and commit the result."
+  "Apply `f` to the current timeline (a new one when the active board has
+  none yet) and commit the result."
   [f]
   (ptk/reify ::update-current-timeline
     ptk/WatchEvent
     (watch [it state _]
-      (if-let [tl (current-timeline state)]
+      (if-let [tl (current-or-new-timeline state)]
         (let [tl' (f tl)]
           (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview)))
@@ -130,40 +280,121 @@
   [name]
   (update-current-timeline #(assoc % :name name)))
 
-(defn set-loop
-  [loop?]
-  (update-current-timeline #(assoc % :loop (boolean loop?))))
+(defn set-playback-mode
+  "Set what playback does at the end of the timeline, one of
+  `cta/playback-modes`."
+  [mode]
+  (update-current-timeline #(-> % (assoc :playback mode) (dissoc :loop))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; KEYFRAME CRUD
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn add-keyframe
-  "Add a keyframe at the playhead for `property` on every selected shape,
-  capturing each shape's current value."
-  [property]
-  (ptk/reify ::add-keyframe
+(defn- row-values
+  "`shape-values-at`, with the rows of `properties` (and optional `index`)
+  of `shape` played even while hidden, so a keyframe added to one of them
+  keeps its animation."
+  [tl objects shape properties index time]
+  (let [shape-id (:id shape)
+        tl       (reduce (fn [tl property]
+                           (cond-> tl
+                             (cta/slot-flag? tl shape-id :hidden property index)
+                             (cta/toggle-slot-flag shape-id :hidden property index)))
+                         tl
+                         properties)]
+    (shape-values-at tl objects shape time)))
+
+(defn- inserted-keyframe
+  "A keyframe of `property` (and optional `index`) of `shape-id` at `time`
+  that leaves the animation as it is: the value `values` (see
+  `row-values`) gives there, with the timing of the segment it splits
+  (see `cta/split-timing`)."
+  [tl values shape-id property index time]
+  (cond-> (merge {:time time
+                  :property property
+                  :value (cta/value-of values property index)}
+                 (cta/split-timing tl shape-id property index time))
+    (some? index) (assoc :index index)))
+
+(defn toggle-keyframes
+  "Toggle the keyframes of `properties` of `shape-id` at the playhead:
+  remove the ones placed there or, when there are none, add them with
+  the value each property shows there, so the animation is unchanged.
+  Locked properties keep their keyframes."
+  ([shape-id properties]
+   (toggle-keyframes shape-id properties nil))
+  ([shape-id properties index]
+   (ptk/reify ::toggle-keyframes
+     ptk/WatchEvent
+     (watch [it state _]
+       (let [objects    (dsh/lookup-page-objects state)
+             existing   (current-timeline state)
+             tl         (or existing
+                            (when (get objects shape-id)
+                              (current-or-new-timeline state)))
+             properties (remove #(cta/slot-flag? tl shape-id :locked % index) properties)]
+         (if (and (some? tl) (seq properties))
+           (let [time     (playhead state)
+                 shape    (get objects shape-id)
+                 values   (row-values tl objects shape properties index time)
+                 placed   (keep #(keyframe-at tl shape-id % time index) properties)
+                 tl'      (if (seq placed)
+                            (reduce #(cta/remove-keyframe %1 shape-id (:id %2)) tl placed)
+                            (reduce (fn [tl property]
+                                      (cta/add-keyframe tl shape-id
+                                                        (inserted-keyframe tl values shape-id property index time)))
+                                    tl
+                                    properties))
+                 events   (cond-> [(commit-timeline it state (:board-id tl') tl')
+                                   (apply-preview)]
+                            (nil? existing)
+                            (conj (layout/toggle-layout-flag :animation-timeline :force? true)))]
+             (apply rx/of events))
+           (rx/empty)))))))
+
+(defn add-keyframe-at
+  "Add a keyframe of `property` (and optional `index`) of `shape-id` at
+  `time` that leaves the animation as it is (see `inserted-keyframe`),
+  select it and move the playhead to it, so its value can be changed
+  right away. A locked property takes none."
+  [shape-id property index time]
+  (ptk/reify ::add-keyframe-at
     ptk/WatchEvent
     (watch [it state _]
-      (if-let [tl (current-timeline state)]
-        (let [objects  (dsh/lookup-page-objects state)
-              selected (dsh/lookup-selected state)
-              time     (playhead state)
-              tl'      (reduce
-                        (fn [tl shape-id]
-                          (let [shape (get objects shape-id)
-                                value (shape-property-value shape property)]
-                            (cond-> tl
-                              (some? value)
-                              (cta/add-keyframe shape-id
-                                                {:time time
-                                                 :property property
-                                                 :value value
-                                                 :easing :ease}))))
-                        tl
-                        selected)]
-          (rx/of (commit-timeline it state (:board-id tl') tl')))
-        (rx/empty)))))
+      (let [tl      (current-timeline state)
+            objects (dsh/lookup-page-objects state)
+            shape   (get objects shape-id)
+            time    (max 0 (int time))]
+        (if (and (some? tl)
+                 (some? shape)
+                 (not (cta/slot-flag? tl shape-id :locked property index)))
+          (let [id     (uuid/next)
+                values (row-values tl objects shape [property] index time)
+                tl'    (cta/add-keyframe tl shape-id
+                                         (-> (inserted-keyframe tl values shape-id property index time)
+                                             (assoc :id id)))]
+            (rx/of (commit-timeline it state (:board-id tl') tl')
+                   (select-keyframe shape-id id)
+                   (set-playhead time)))
+          (rx/empty))))))
+
+(defn set-value-at-playhead
+  "Set `property` of `shape-id` to `value` at the playhead: the value of
+  the keyframe there, or a new keyframe. For the properties a shape has
+  none of its own of (see `cta/trim-properties`), which can not be
+  recorded from an edit of the shape."
+  [shape-id property value]
+  (ptk/reify ::set-value-at-playhead
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [tl   (current-or-new-timeline state)
+            time (playhead state)]
+        (if-let [keyframe (keyframe-at tl shape-id property time)]
+          (rx/of (set-keyframe-value shape-id (:id keyframe) value))
+          (rx/of (update-current-timeline
+                  #(cta/add-keyframe % shape-id
+                                     (merge {:time time :property property :value value}
+                                            (cta/split-timing % shape-id property nil time))))))))))
 
 (defn move-keyframe
   [shape-id keyframe-id time]
@@ -173,6 +404,29 @@
       (if-let [tl (current-timeline state)]
         (let [tl' (cta/update-keyframe tl shape-id keyframe-id
                                        #(assoc % :time (max 0 (int time))))]
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (apply-preview)))
+        (rx/empty)))))
+
+(defn retime-keyframes
+  "Commit `base` (the timeline as it was when a drag started) with the
+  keyframes of `shape-ids` retimed from the span `from` to `to`."
+  [base shape-ids from to]
+  (ptk/reify ::retime-keyframes
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl' (cta/retime-keyframes base shape-ids from to)]
+        (rx/of (commit-timeline it state (:board-id tl') tl')
+               (apply-preview))))))
+
+(defn set-track-origin
+  "Set the scale/rotation pivot of `shape-id` (normalized 0–1)."
+  [shape-id ox oy]
+  (ptk/reify ::set-track-origin
+    ptk/WatchEvent
+    (watch [it state _]
+      (if-let [tl (current-timeline state)]
+        (let [tl' (cta/set-track-origin tl shape-id ox oy)]
           (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview)))
         (rx/empty)))))
@@ -190,13 +444,20 @@
         (rx/empty)))))
 
 (defn set-keyframe-easing
+  "Set the easing of the segment that starts at a keyframe. `:hold` keeps
+  its value until the next keyframe instead."
   [shape-id keyframe-id easing]
   (ptk/reify ::set-keyframe-easing
     ptk/WatchEvent
     (watch [it state _]
       (if-let [tl (current-timeline state)]
         (let [tl' (cta/update-keyframe tl shape-id keyframe-id
-                                       #(assoc % :easing easing))]
+                                       (fn [keyframe]
+                                         (if (= easing :hold)
+                                           (assoc keyframe :interpolation :step)
+                                           (-> keyframe
+                                               (assoc :easing easing)
+                                               (dissoc :interpolation)))))]
           (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview)))
         (rx/empty)))))
@@ -212,16 +473,379 @@
                  (apply-preview)))
         (rx/empty)))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; MOTION PATHS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^:private path-samples
+  "Points a motion path is drawn with between two keyframes."
+  24)
+
+(defn motion-path
+  "The motion path of `shape-id`, the way its center moves, in canvas
+  coordinates: `:points` along it, and `:keyframes` where both its `:x`
+  and `:y` have a keyframe, with their `:point`, their handles (`:out`
+  towards the next one, `:in` from the previous one, `[dx dy]`) and
+  whether there is a `:next` and a `:prev` one. Nil when its position
+  does not move."
+  [timeline objects shape-id]
+  (let [xs    (cta/property-keyframes timeline shape-id :x)
+        ys    (cta/property-keyframes timeline shape-id :y)
+        times (into (sorted-set) (map :time) (concat xs ys))]
+    (when-let [shape (and (> (count times) 1) (get objects shape-id))]
+      (let [origin   (cta/position-origin timeline objects shape-id)
+            selrect  (:selrect shape)
+            cx       (+ (:x origin) (/ (:width selrect 0) 2))
+            cy       (+ (:y origin) (/ (:height selrect 0) 2))
+            base-x   (- (:x selrect 0) (:x origin))
+            base-y   (- (:y selrect 0) (:y origin))
+            resolved (-> (cta/resolve-animations timeline objects)
+                         (update :tracks select-keys [shape-id]))
+            point    (fn [time]
+                       (let [values (get (cta/values-at resolved time) shape-id)]
+                         [(+ cx (get values :x base-x))
+                          (+ cy (get values :y base-y))]))
+            start    (first times)
+            end      (last times)
+            span     (- end start)
+            points   (into []
+                           (map #(point (+ start (* span (/ % (* path-samples (dec (count times))))))))
+                           (range (inc (* path-samples (dec (count times))))))
+            pairs    (into []
+                           (keep (fn [time]
+                                   (let [x (d/seek #(= time (:time %)) xs)
+                                         y (d/seek #(= time (:time %)) ys)]
+                                     (when (and x y) [time x y]))))
+                           times)
+            at       (fn [[_ x y]]
+                       [(+ cx (:value x)) (+ cy (:value y))])]
+        {:points points
+         :keyframes
+         (into []
+               (map-indexed
+                (fn [i [time x y :as pair]]
+                  {:time time
+                   :point (at pair)
+                   :out [(:path-out x 0) (:path-out y 0)]
+                   :in [(:path-in x 0) (:path-in y 0)]
+                   :prev (some-> (get pairs (dec i)) at)
+                   :next (some-> (get pairs (inc i)) at)}))
+               pairs)}))))
+
+(defn- set-path-keyframe
+  "`keyframe` with the handle components `out` and `in` of its axis; a
+  zero one is left out."
+  [keyframe out in]
+  (cond-> (dissoc keyframe :path-in :path-out)
+    (and (some? out) (not (mth/almost-zero? out))) (assoc :path-out out)
+    (and (some? in) (not (mth/almost-zero? in))) (assoc :path-in in)))
+
+(defn set-path-handles
+  "Set the handles of the motion path at the position keyframes of
+  `shape-id` at `time`: `out` towards the next keyframe and `in` from the
+  previous one, both `[dx dy]`; nil ones make it straight there."
+  [shape-id time out in]
+  (update-current-timeline
+   (fn [tl]
+     (reduce (fn [tl [property axis]]
+               (if-let [keyframe (keyframe-at tl shape-id property time)]
+                 (cta/update-keyframe tl shape-id (:id keyframe)
+                                      #(set-path-keyframe % (get out axis) (get in axis)))
+                 tl))
+             tl
+             [[:x 0] [:y 1]]))))
+
+(defn toggle-path-smooth
+  "Curve the motion path through the position keyframes of `shape-id` at
+  `time` along its neighbours, or make it straight there again."
+  [shape-id time]
+  (ptk/reify ::toggle-path-smooth
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [tl      (current-timeline state)
+            objects (dsh/lookup-page-objects state)
+            {:keys [point prev next out in]}
+            (some->> (motion-path tl objects shape-id)
+                     :keyframes
+                     (d/seek #(= time (:time %))))]
+        (cond
+          (nil? point)
+          (rx/empty)
+
+          (or (not= [0 0] out) (not= [0 0] in))
+          (rx/of (set-path-handles shape-id time nil nil))
+
+          :else
+          ;; Along the line from the previous keyframe to the next one,
+          ;; a third of the way to each.
+          (let [from    (or prev point)
+                to      (or next point)
+                tangent (mapv #(/ (- %2 %1) 6) from to)]
+            (rx/of (set-path-handles shape-id time tangent (mapv - tangent)))))))))
+
+(defn start-path-handle-drag
+  "Drag the `side` (`:out` or `:in`) handle of the motion path at the
+  position keyframes of `shape-id` at `time`. The other one turns with
+  it, unless Alt is held."
+  [shape-id time side]
+  (ptk/reify ::start-path-handle-drag
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [tl       (current-timeline state)
+            objects  (dsh/lookup-page-objects state)
+            keyframe (some->> (motion-path tl objects shape-id)
+                              :keyframes
+                              (d/seek #(= time (:time %))))]
+        (if (nil? keyframe)
+          (rx/empty)
+          (let [[px py]  (:point keyframe)
+                undo-id  (js/Symbol)
+                stopper  (mse/drag-stopper stream)]
+            (rx/concat
+             (rx/of (dwu/start-undo-transaction undo-id))
+             (->> ms/mouse-position
+                  (rx/filter some?)
+                  (rx/with-latest-from ms/mouse-position-alt)
+                  (rx/map (fn [[position alt?]]
+                            (let [handle [(- (:x position) px) (- (:y position) py)]
+                                  other  (mapv - handle)]
+                              (if (= side :out)
+                                (set-path-handles shape-id time handle (if alt? (:in keyframe) other))
+                                (set-path-handles shape-id time (if alt? (:out keyframe) other) handle)))))
+                  (rx/take-until stopper))
+             (rx/of (dwu/commit-undo-transaction undo-id)))))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; TRACK ACTIONS (timeline context menu)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn copy-keyframes
+  "Copy the keyframes of `properties` of `shape-id`, with their loop
+  flags, to the animation clipboard."
+  ([shape-id properties]
+   (copy-keyframes shape-id properties nil))
+  ([shape-id properties index]
+   (ptk/reify ::copy-keyframes
+     ptk/UpdateEvent
+     (update [_ state]
+       (if-let [tl (current-timeline state)]
+         (let [properties (set properties)
+               keyframes  (filterv #(and (contains? properties (:property %))
+                                         (or (nil? index) (= (:index %) index)))
+                                   (dm/get-in tl [:tracks shape-id :keyframes]))
+               loops      (into #{}
+                                (keep (fn [property]
+                                        (when (cta/looping? tl shape-id property index)
+                                          (if (some? index) [property index] property))))
+                                properties)]
+           (assoc-in state [:workspace-animation :clipboard]
+                     {:keyframes keyframes
+                      :loops     loops}))
+         state)))))
+
+(defn paste-keyframes
+  "Paste the animation clipboard onto `shape-id`, starting at the
+  playhead."
+  [shape-id]
+  (ptk/reify ::paste-keyframes
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl (current-timeline state)
+            {:keys [keyframes loops]} (dm/get-in state [:workspace-animation :clipboard])]
+        (if (and (some? tl) (seq keyframes))
+          (let [tl' (cta/paste-keyframes tl shape-id keyframes loops (playhead state))]
+            (rx/of (commit-timeline it state (:board-id tl') tl')
+                   (apply-preview)))
+          (rx/empty))))))
+
+(defn toggle-track-loop
+  ([shape-id property]
+   (toggle-track-loop shape-id property nil))
+  ([shape-id property index]
+   (update-current-timeline #(cta/toggle-loop % shape-id property index))))
+
+(defn- commit-flag
+  "Commit `tl'`, with a flag of one of its rows toggled. Showing or hiding
+  a row drops the preview first: its shape may not be animated anymore."
+  [it state tl' flag]
+  (apply rx/of
+         (cond-> [(commit-timeline it state (:board-id tl') tl')]
+           (= flag :hidden) (conj (dwm/clear-local-transform))
+           :always          (conj (apply-preview)))))
+
+(defn toggle-track-flag
+  "Hide or show (`:hidden`), lock or unlock (`:locked`) the keyframes of
+  `property` (and optional `index`) of `shape-id`. Hidden keyframes are
+  left out of playback and exports; locked ones are kept from edits."
+  ([shape-id flag property]
+   (toggle-track-flag shape-id flag property nil))
+  ([shape-id flag property index]
+   (ptk/reify ::toggle-track-flag
+     ptk/WatchEvent
+     (watch [it state _]
+       (if-let [tl (current-timeline state)]
+         (commit-flag it state (cta/toggle-slot-flag tl shape-id flag property index) flag)
+         (rx/empty))))))
+
+(defn delete-track
+  "Delete the keyframes of `property` of `shape-id`, or its whole track
+  when `property` is nil."
+  ([shape-id property]
+   (delete-track shape-id property nil))
+  ([shape-id property index]
+   (ptk/reify ::delete-track
+     ptk/WatchEvent
+     (watch [it state _]
+       (if-let [tl (current-timeline state)]
+         (let [tl' (if (some? property)
+                     (cta/remove-property tl shape-id property index)
+                     (cta/remove-track tl shape-id))]
+           ;; Drop the preview first: the shape may not be animated anymore.
+           (rx/of (commit-timeline it state (:board-id tl') tl')
+                  (dwm/clear-local-transform)
+                  (apply-preview)))
+         (rx/empty))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; PRESET ANIMATIONS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- preset-animations
+  "The animations `preset` adds: an animation type, or the several of an
+  animation style (see `cta/animation-styles`)."
+  [preset]
+  (if (contains? cta/animation-types preset)
+    [{:type preset}]
+    (get cta/animation-styles preset)))
+
+(defn add-animation-preset
+  "Add the animations of `preset` to the shapes of `shape-ids` that are in
+  the active board, starting at the playhead."
+  [shape-ids preset]
+  (ptk/reify ::add-animation-preset
+    ptk/WatchEvent
+    (watch [it state _]
+      (if-let [tl (current-or-new-timeline state)]
+        (let [objects  (dsh/lookup-page-objects state)
+              board-id (:board-id tl)
+              time     (playhead state)
+              targets  (filter #(= board-id (cfh/get-shape-id-root-frame objects %)) shape-ids)
+              tl'      (reduce (fn [tl [shape-id animation]]
+                                 (cta/add-animation tl shape-id (assoc animation :start time)))
+                               tl
+                               (for [shape-id targets
+                                     animation (preset-animations preset)]
+                                 [shape-id animation]))]
+          (if (= tl tl')
+            (rx/empty)
+            (rx/of (commit-timeline it state board-id tl')
+                   (apply-preview))))
+        (rx/empty)))))
+
+(defn update-animation
+  "Merge `attrs` into the animation `animation-id` of `shape-id`. A nil
+  setting goes back to the default of the animation type."
+  [shape-id animation-id attrs]
+  (update-current-timeline
+   #(cta/update-animation % shape-id animation-id (fn [animation] (merge animation attrs)))))
+
+(defn retime-animation
+  "Commit `base` (the timeline as it was when a drag started) with the
+  animation `animation-id` of `shape-id` over `start` and `duration`."
+  [base shape-id animation-id start duration]
+  (ptk/reify ::retime-animation
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl' (cta/update-animation base shape-id animation-id
+                                      #(assoc % :start start :duration duration))]
+        (rx/of (commit-timeline it state (:board-id tl') tl')
+               (apply-preview))))))
+
+(defn toggle-animation-flag
+  "Hide or show (`:hidden`), lock or unlock (`:locked`) the animation
+  `animation-id` of `shape-id`, see `toggle-track-flag`."
+  [shape-id animation-id flag]
+  (ptk/reify ::toggle-animation-flag
+    ptk/WatchEvent
+    (watch [it state _]
+      (if-let [tl (current-timeline state)]
+        (commit-flag it state (cta/toggle-animation-flag tl shape-id animation-id flag) flag)
+        (rx/empty)))))
+
+(defn remove-animation
+  [shape-id animation-id]
+  (ptk/reify ::remove-animation
+    ptk/WatchEvent
+    (watch [it state _]
+      (if-let [tl (current-timeline state)]
+        (let [tl' (cta/remove-animation tl shape-id animation-id)]
+          ;; Drop the preview first: the shape may not be animated anymore.
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (dwm/clear-local-transform)
+                 (apply-preview)))
+        (rx/empty)))))
+
+(defn- store-keyframe-selection
+  [state selected]
+  (update state :workspace-animation assoc
+          :selected-kfs selected
+          :selected-kf (when (= 1 (count selected)) (first selected))))
+
 (defn select-keyframe
-  "Mark a keyframe as selected (for the easing editor). `nil` clears it."
-  [shape-id keyframe-id]
-  (ptk/reify ::select-keyframe
+  "Select a keyframe or, with `toggle?`, add it to (or remove it from) the
+  selection; a nil `keyframe-id` clears it. `:selected-kf` holds the
+  keyframe while it is the only one selected (for the easing editor)."
+  ([shape-id keyframe-id]
+   (select-keyframe shape-id keyframe-id false))
+  ([shape-id keyframe-id toggle?]
+   (ptk/reify ::select-keyframe
+     ptk/UpdateEvent
+     (update [_ state]
+       (let [keyframe {:shape-id shape-id :keyframe-id keyframe-id}
+             selected (dm/get-in state [:workspace-animation :selected-kfs] #{})
+             selected (cond
+                        (nil? keyframe-id)            #{}
+                        (not toggle?)                 #{keyframe}
+                        (contains? selected keyframe) (disj selected keyframe)
+                        :else                         (conj selected keyframe))]
+         (store-keyframe-selection state selected))))))
+
+(defn select-keyframes
+  "Replace the keyframe selection. An empty collection clears it."
+  [keyframes]
+  (ptk/reify ::select-keyframes
     ptk/UpdateEvent
     (update [_ state]
-      (if (and shape-id keyframe-id)
-        (assoc-in state [:workspace-animation :selected-kf]
-                  {:shape-id shape-id :keyframe-id keyframe-id})
-        (update state :workspace-animation dissoc :selected-kf)))))
+      (store-keyframe-selection state (set keyframes)))))
+
+(defn delete-selected-keyframes
+  []
+  (ptk/reify ::delete-selected-keyframes
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl       (current-timeline state)
+            selected (dm/get-in state [:workspace-animation :selected-kfs])]
+        (if (and (some? tl) (seq selected))
+          (let [tl' (reduce (fn [tl {:keys [shape-id keyframe-id]}]
+                              (cta/remove-keyframe tl shape-id keyframe-id))
+                            tl
+                            selected)]
+            (if (= tl tl')
+              (rx/of (select-keyframe nil nil))
+              ;; Drop the preview first: a shape may not be animated anymore.
+              (rx/of (commit-timeline it state (:board-id tl') tl')
+                     (select-keyframe nil nil)
+                     (dwm/clear-local-transform)
+                     (apply-preview))))
+          (rx/empty))))))
+
+(defn set-active-board
+  "Remember the board the timeline dock targets (see `active-board-id`)."
+  [board-id]
+  (ptk/reify ::set-active-board
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-animation :board-id] board-id))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PLAYBACK & PREVIEW
@@ -246,10 +870,55 @@
         (let [objects    (dsh/lookup-page-objects state)
               time       (playhead state)
               modif-tree (cta/timeline->modif-tree tl objects time)]
+          ;; The selection frame follows the selected shapes (see the
+          ;; viewport), not every shape the preview moves.
           (if ^boolean (features/active-feature? state "render-wasm/v1")
-            (rx/of (dwm/set-wasm-modifiers modif-tree))
+            (rx/of (dwm/set-wasm-modifiers modif-tree :skip-selrect? true))
             (rx/of (dwm/set-modifiers modif-tree))))
         (rx/of (dwm/clear-local-transform))))))
+
+(defn preview-shapes
+  "The shapes the animation moves at `time`, by id, as the canvas shows
+  them: with the children they carry along."
+  [timeline objects time]
+  (let [modif-tree (cta/timeline->modif-tree timeline objects time)]
+    (when (seq modif-tree)
+      (into {}
+            (keep (fn [[id {:keys [modifiers]}]]
+                    (when-let [shape (get objects id)]
+                      [id (gsh/transform-shape shape modifiers)])))
+            (gm/set-objects-modifiers modif-tree objects)))))
+
+(defn index-preview
+  "Let hovering and clicking on the canvas find the shapes where the
+  animation shows them at the playhead. Only while paused: playback
+  moves on too fast for it."
+  []
+  (ptk/reify ::index-preview
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [page-id (:current-page-id state)
+            tl      (current-timeline state)
+            objects (dsh/lookup-page-objects state)
+            preview (when (and (some? tl)
+                               (not (dm/get-in state [:workspace-animation :playing?])))
+                      (preview-shapes tl objects (playhead state)))]
+        (if (some? page-id)
+          (->> (mw/ask! {:cmd :index/set-preview
+                         :page-id page-id
+                         :objects preview})
+               (rx/ignore))
+          (rx/empty))))))
+
+(defn clear-index-preview
+  "Hovering and clicking on the canvas find the shapes where they are
+  again, on every page (see `index-preview`)."
+  []
+  (ptk/reify ::clear-index-preview
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (->> (mw/ask! {:cmd :index/clear-previews})
+           (rx/ignore)))))
 
 (defn set-playhead
   [time]
@@ -264,6 +933,39 @@
 
 (declare pause)
 
+(defn- show-frame
+  "Move the playhead to `time`, playing on in `direction` (see
+  `cta/advance-playback`)."
+  [time direction]
+  (ptk/reify ::show-frame
+    ptk/UpdateEvent
+    (update [_ state]
+      (update state :workspace-animation assoc
+              :playhead (max 0 (int time))
+              :direction direction))
+
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (apply-preview)))))
+
+(defn- playback-step
+  "Play one frame on from the playhead, with the timeline as it is now: a
+  change made while playing (duration, playback mode, keyframes) or a
+  move of the playhead shows right away. At the end of a timeline played
+  once, pause."
+  []
+  (ptk/reify ::playback-step
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if-let [tl (current-or-new-timeline state)]
+        (let [direction (dm/get-in state [:workspace-animation :direction] 1)
+              {:keys [time direction ended?]}
+              (cta/advance-playback tl (playhead state) direction frame-step)]
+          (if ended?
+            (rx/of (show-frame time direction) (pause))
+            (rx/of (show-frame time direction))))
+        (rx/of (pause))))))
+
 (defn play
   []
   (ptk/reify ::play
@@ -273,21 +975,19 @@
 
     ptk/WatchEvent
     (watch [_ state stream]
-      (let [tl       (current-timeline state)
+      (let [tl       (current-or-new-timeline state)
             duration (or (:duration tl) 0)
-            loop?    (boolean (:loop tl))
-            start    (let [p (playhead state)] (if (>= p duration) 0 p))
             stopper  (rx/filter (ptk/type? ::pause) stream)]
         (if (or (nil? tl) (<= duration 0))
-          (rx/empty)
+          (rx/of (pause))
           (rx/concat
+           ;; Played to the end, it starts over.
+           (if (>= (playhead state) duration)
+             (rx/of (show-frame 0 1))
+             (rx/empty))
            (->> (rx/interval frame-step)
-                (rx/map (fn [i] (+ start (* (inc i) frame-step))))
-                (rx/map (fn [t] (if loop? (mod t duration) t)))
-                (rx/take-while (fn [t] (or loop? (<= t duration))))
-                (rx/take-until stopper)
-                (rx/map set-playhead))
-           (rx/of (pause)))))))) ;; auto-pause when reaching the end
+                (rx/map (fn [_] (playback-step)))
+                (rx/take-until stopper))))))))
 
 (defn pause
   []
@@ -313,22 +1013,236 @@
     (watch [_ _ _]
       (rx/of (pause) (set-playhead 0)))))
 
+(defn clear-preview
+  "Stop playback and drop the preview modifiers from the canvas."
+  []
+  (ptk/reify ::clear-preview
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (pause)
+             (dwm/clear-local-transform)))))
+
 (defn close-timeline
-  "Hide the timeline dock and clear any preview modifiers."
+  "Leave motion mode. The timeline dock clears the preview when it
+  unmounts."
   []
   (ptk/reify ::close-timeline
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (pause)
-             (dwm/clear-local-transform)
-             (layout/remove-layout-flag :animation-timeline)))))
+      (rx/of (layout/remove-layout-flag :animation-timeline)))))
 
-(defn toggle-auto-keyframe
+(defn toggle-motion-mode
+  "Enter or leave motion mode: the timeline dock, plus the motion panel
+  in place of the design panel."
   []
-  (ptk/reify ::toggle-auto-keyframe
-    ptk/UpdateEvent
-    (update [_ state]
-      (update-in state [:workspace-animation :auto-key?] not))))
+  (ptk/reify ::toggle-motion-mode
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (contains? (:workspace-layout state) :animation-timeline)
+        (rx/of (close-timeline))
+        (rx/of (layout/toggle-layout-flag :animation-timeline :force? true)
+               (layout/set-options-mode :design))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; CANVAS KEYFRAMES (motion mode)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^:private canvas-properties
+  "Properties an edit on the canvas records as keyframes. Scale stays a
+  timeline value; width and height follow a resize."
+  [:x :y :width :height :rotation :opacity :r1 :r2 :r3 :r4])
+
+(defn- close-value?
+  [property old new]
+  (cond
+    (or (nil? old) (nil? new)) true
+    (cta/color-property? property) (= old new)
+    :else (mth/close? old new)))
+
+(defn- appearance-slot-values
+  "The current fill, stroke, shadow and blur values of `shape` as
+  `{[property index] value}` (index is nil for blur)."
+  [shape]
+  (let [put (fn [m property index value]
+              (cond-> m (some? value) (assoc [property index] value)))]
+    (as-> {} $
+      (reduce-kv
+       (fn [m index fill]
+         (if (cta/solid-color-fill? fill)
+           (-> m
+               (put :fill-color index (:fill-color fill))
+               (put :fill-opacity index (or (:fill-opacity fill) 1)))
+           m))
+       $
+       (vec (:fills shape)))
+      (reduce-kv
+       (fn [m index stroke]
+         (if (cta/solid-color-stroke? stroke)
+           (-> m
+               (put :stroke-color index (:stroke-color stroke))
+               (put :stroke-opacity index (or (:stroke-opacity stroke) 1))
+               (put :stroke-width index (or (:stroke-width stroke) 0)))
+           m))
+       $
+       (vec (:strokes shape)))
+      (reduce-kv
+       (fn [m index shadow]
+         (-> m
+             (put :shadow-offset-x index (or (:offset-x shadow) 0))
+             (put :shadow-offset-y index (or (:offset-y shadow) 0))
+             (put :shadow-blur index (or (:blur shadow) 0))
+             (put :shadow-spread index (or (:spread shadow) 0))
+             (put :shadow-color index (get-in shadow [:color :color]))
+             (put :shadow-opacity index (or (get-in shadow [:color :opacity]) 1))))
+       $
+       (vec (:shadow shape)))
+      (cond-> $
+        (:blur shape)
+        (put :blur nil (or (get-in shape [:blur :value]) 0))
+        (:background-blur shape)
+        (put :background-blur nil (or (get-in shape [:background-blur :value]) 0))))))
+
+(defn- set-attrs
+  "`{shape-id {attr value}}` of the attributes set by `:mod-obj` changes."
+  [changes]
+  (reduce (fn [result {:keys [type id operations]}]
+            (if (= type :mod-obj)
+              (reduce (fn [result {:keys [type attr val]}]
+                        (cond-> result
+                          (= type :set) (assoc-in [id attr] val)))
+                      result
+                      operations)
+              result))
+          {}
+          changes))
+
+(defn- record-canvas-edit
+  "Record the edit a commit made on the canvas to the animated properties
+  of the timeline's shapes as keyframes at the playhead: the value shown
+  there plus the change (for opacity, the new value). They join the undo
+  group of the edit, so both undo together."
+  [{:keys [redo-changes undo-changes undo-group]}]
+  (ptk/reify ::record-canvas-edit
+    ptk/WatchEvent
+    (watch [it state _]
+      (if-let [tl (current-timeline state)]
+        (let [objects  (dsh/lookup-page-objects state)
+              board-id (:board-id tl)
+              time     (playhead state)
+              shown    (cta/values-at (cta/resolve-animations tl objects) time)
+              before   (set-attrs undo-changes)
+              after    (set-attrs redo-changes)
+
+              attr
+              (fn [attrs id k]
+                (get-in attrs [id k] (dm/get-in objects [id k])))
+
+              ;; Positions relative to the board before / after the edit, so
+              ;; moving the board itself records nothing for its children.
+              value
+              (fn [attrs id property]
+                (let [position (fn [id axis] (get (attr attrs id :selrect) axis))
+                      relative (fn [axis]
+                                 (let [own   (position id axis)
+                                       board (if (= id board-id) 0 (position board-id axis))]
+                                   (when (and (some? own) (some? board))
+                                     (- own board))))]
+                  (case property
+                    :x        (relative :x)
+                    :y        (relative :y)
+                    :width    (:width (attr attrs id :selrect))
+                    :height   (:height (attr attrs id :selrect))
+                    :rotation (or (attr attrs id :rotation) 0)
+                    :opacity  (or (attr attrs id :opacity) 1)
+                    :r1       (or (attr attrs id :r1) 0)
+                    :r2       (or (attr attrs id :r2) 0)
+                    :r3       (or (attr attrs id :r3) 0)
+                    :r4       (or (attr attrs id :r4) 0))))
+
+              record
+              (fn [tl shape-id property]
+                (let [old (value before shape-id property)
+                      new (value after shape-id property)]
+                  (if (or (nil? old) (nil? new) (mth/close? old new))
+                    tl
+                    (cta/add-keyframe tl shape-id
+                                      {:time time
+                                       :property property
+                                       :value (if (contains? #{:opacity :width :height :r1 :r2 :r3 :r4} property)
+                                                new
+                                                (+ (get-in shown [shape-id property]) (- new old)))
+                                       :easing (:easing (keyframe-at tl shape-id property time) :ease)}))))
+
+              record-slot
+              (fn [tl shape-id property index old new]
+                (if (close-value? property old new)
+                  tl
+                  (cta/add-keyframe tl shape-id
+                                    (cond-> {:time time
+                                             :property property
+                                             :value new
+                                             :easing (:easing (keyframe-at tl shape-id property time index) :ease)}
+                                      (some? index) (assoc :index index)))))
+
+              shape-with
+              (fn [id attrs]
+                (merge (get objects id) (get attrs id)))
+
+              tl'
+              (reduce-kv
+               (fn [tl shape-id track]
+                 ;; Hidden properties show the shape as it is, so the edit
+                 ;; stays on the shape; locked ones keep their keyframes.
+                 (let [muted    (into (get track :hidden #{}) (get track :locked))
+                       recorded (remove #(contains? muted (cta/slot-key (:property %) (:index %)))
+                                        (:keyframes track))
+                       animated (into #{} (map :property) recorded)
+                       slots    (into #{} (map (juxt :property :index)) recorded)
+                       tl       (->> canvas-properties
+                                     (filter animated)
+                                     (reduce #(record %1 shape-id %2) tl))
+                       before-v (appearance-slot-values (shape-with shape-id before))
+                       after-v  (appearance-slot-values (shape-with shape-id after))]
+                   (reduce
+                    (fn [tl [property index]]
+                      (record-slot tl shape-id property index
+                                   (get before-v [property index])
+                                   (get after-v [property index])))
+                    tl
+                    (filter slots (keys after-v)))))
+               tl
+               (:tracks tl))]
+
+          (if (= tl tl')
+            (rx/empty)
+            (rx/of (commit-timeline it state board-id tl' undo-group)
+                   (apply-preview))))
+        (rx/empty)))))
+
+(defn start-canvas-keyframes
+  "While motion mode is on, turn the local edits on the canvas (not
+  undo/redo nor other users' changes) into keyframes, see
+  `record-canvas-edit`."
+  []
+  (ptk/reify ::start-canvas-keyframes
+    ptk/WatchEvent
+    (watch [_ _ stream]
+      (let [stopper (rx/filter (ptk/type? ::stop-canvas-keyframes) stream)]
+        (->> stream
+             (rx/filter dch/commit?)
+             (rx/map deref)
+             (rx/filter (fn [{:keys [source save-undo? redo-changes]}]
+                          (and (= source :local)
+                               save-undo?
+                               (some #(= :mod-obj (:type %)) redo-changes))))
+             ;; once the commit is applied
+             (rx/observe-on :async)
+             (rx/map record-canvas-edit)
+             (rx/take-until stopper))))))
+
+(defn stop-canvas-keyframes
+  []
+  (ptk/data-event ::stop-canvas-keyframes {}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; EXPORT

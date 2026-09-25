@@ -1111,6 +1111,12 @@
   [opacity]
   (h/call wasm/internal-module "_set_shape_opacity" (or opacity 1)))
 
+(defn set-shape-trim
+  "Draw the strokes only from `start` to `end` of the outline, moved along
+  by `offset` (fractions of it), see `cta/trim-properties`."
+  [start end offset]
+  (h/call wasm/internal-module "_set_shape_trim" (or start 0) (or end 1) (or offset 0)))
+
 (defn set-constraints-h
   [constraint]
   (when constraint
@@ -2272,7 +2278,7 @@
     (h/call wasm/internal-module "_set_modifiers_end")))
 
 (defn set-modifiers
-  [modifiers]
+  [modifiers & {:keys [request-render?] :or {request-render? true}}]
   (when (initialized?)
     ;; Assert only when we would touch WASM; callers may still build
     ;; modifiers while the context is unavailable.
@@ -2293,7 +2299,8 @@
 
           (h/call wasm/internal-module "_set_modifiers")
 
-          (request-render "set-modifiers"))))))
+          (when request-render?
+            (request-render "set-modifiers")))))))
 
 (defn initialize-viewport
   [base-objects zoom vbox &

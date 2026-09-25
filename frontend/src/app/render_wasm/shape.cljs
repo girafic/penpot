@@ -177,6 +177,9 @@
         :opacity
         (api/set-shape-opacity v)
 
+        (:trim-start :trim-end :trim-offset)
+        (api/set-shape-trim (:trim-start shape) (:trim-end shape) (:trim-offset shape))
+
         :hidden
         (api/set-shape-hidden v)
 
@@ -330,6 +333,15 @@
              (rx/mapcat (fn [callback] (callback)))
              (rx/reduce conj [])))
       (rx/empty))))
+
+(defn apply-shape-properties!
+  "Push `properties` of `shape` to WASM without scheduling a render."
+  [shape properties]
+  (when (and (api/initialized?) (seq properties)
+             (shape-in-current-page? (dm/get-prop shape :id)))
+    (api/use-shape (dm/get-prop shape :id))
+    (doseq [property properties]
+      (set-wasm-attr! shape property))))
 
 (defn process-shape-changes!
   [objects shape-changes]

@@ -13,6 +13,7 @@
    [app.common.geom.shapes :as gsh]
    [app.common.geom.shapes.bounds :as gsb]
    [app.common.geom.shapes.text :as gst]
+   [app.common.math :as mth]
    [app.common.types.path :as path]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -423,10 +424,24 @@
         props        (attrs/add-fill-props! props shape position render-id)]
     (mf/html [:> type props])))
 
+(defn- trim-dash
+  "`[dasharray dashoffset]` drawing a stroke only along the part of an
+  outline of length 1 its shape is trimmed to (see `cta/trim-properties`),
+  or nil when all of it is drawn. Past the end it goes on from the start,
+  as the pattern repeats."
+  [{:keys [trim-start trim-end trim-offset]}]
+  (let [start  (mth/clamp (or trim-start 0) 0 1)
+        end    (mth/clamp (or trim-end 1) 0 1)
+        length (max 0 (- end start))]
+    (when (< length 1)
+      [(dm/str length " " (- 1 length))
+       (- (mod (+ start (or trim-offset 0)) 1))])))
+
 (defn- build-stroke-element
-  [child value position render-id open-path?]
+  [child value position render-id open-path? trim]
   (let [props (obj/get child "props")
         type  (obj/get child "type")
+        dash  (trim-dash trim)
 
         style (-> (obj/get props "style")
                   (obj/clone)
@@ -438,10 +453,17 @@
                 (obj/set! style "stroke" (dm/fmt "url(#stroke-fill-%-%)" render-id position))
                 style)
 
+        ;; A trimmed stroke replaces its own dash pattern.
+        style (cond-> style
+                (some? dash)
+                (-> (obj/set! "strokeDasharray" (first dash))
+                    (obj/set! "strokeDashoffset" (second dash))))
+
         props (-> (obj/clone props)
                   (obj/unset! "fill")
                   (obj/unset! "fillOpacity")
-                  (obj/set! "style" style))]
+                  (obj/set! "style" style)
+                  (cond-> (some? dash) (obj/set! "pathLength" 1)))]
 
     (mf/html [:> type props])))
 
@@ -517,7 +539,7 @@
                                   :stroke value
                                   :index index
                                   :key (dm/str index "-" stroke-id)}
-          (build-stroke-element child value index render-id open-path?)])])))
+          (build-stroke-element child value index render-id open-path? shape)])])))
 
 (mf/defc shape-custom-strokes
   {::mf/wrap-props false}

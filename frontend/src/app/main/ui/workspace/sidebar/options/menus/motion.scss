@@ -1,0 +1,165 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "ds/_borders.scss" as *;
+@use "ds/_sizes.scss" as *;
+@use "ds/_utils.scss" as *;
+@use "ds/typography.scss" as t;
+@use "../../../sidebar/common/sidebar.scss" as sidebar;
+
+.keyframe-toggle {
+  display: grid;
+  place-items: center;
+  inline-size: px2rem(24);
+  block-size: px2rem(32);
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+
+  .diamond {
+    inline-size: px2rem(9);
+    block-size: px2rem(9);
+    border: 1px solid var(--color-foreground-secondary);
+    transform: rotate(45deg);
+  }
+
+  &:hover .diamond {
+    border-color: var(--color-accent-primary);
+  }
+
+  &.active .diamond {
+    border-color: var(--color-accent-primary);
+    background-color: var(--color-accent-primary);
+  }
+
+  // Locked in the timeline.
+  &:disabled {
+    cursor: default;
+
+    .diamond {
+      border-color: var(--color-foreground-secondary);
+      opacity: 0.5;
+    }
+  }
+
+  &.active:disabled .diamond {
+    background-color: var(--color-foreground-secondary);
+  }
+}
+
+// Preset animations
+
+.animations-menu {
+  @include sidebar.option-grid-structure;
+
+  row-gap: var(--sp-xs);
+}
+
+.animations-title {
+  position: relative;
+  grid-column: 1 / -1;
+}
+
+.presets-menu {
+  position: absolute;
+  inset-block-start: $sz-32;
+  inset-inline-end: 0;
+  z-index: var(--z-index-dropdown);
+  min-inline-size: px2rem(160);
+  margin: 0;
+  padding: var(--sp-xs);
+  border: $b-1 solid var(--panel-border-color);
+  border-radius: $br-8;
+  background-color: var(--menu-background-color);
+  box-shadow: 0 0 $sz-12 0 var(--color-shadow-dark);
+}
+
+.presets-menu-item {
+  @include t.use-typography("body-small");
+
+  display: flex;
+  align-items: center;
+  padding: var(--sp-s) var(--sp-m);
+  border-radius: $br-6;
+  color: var(--menu-foreground-color);
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    outline: none;
+    background-color: var(--menu-background-color-hover);
+    color: var(--menu-foreground-color-hover);
+  }
+}
+
+.presets-menu-title {
+  @include t.use-typography("body-small");
+
+  margin-block-start: var(--sp-xs);
+  padding: var(--sp-s) var(--sp-m) var(--sp-xs);
+  border-block-start: $b-1 solid var(--panel-border-color);
+  color: var(--color-foreground-secondary);
+}
+
+.animations-list {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+}
+
+.animation-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.animation-row {
+  @include sidebar.option-grid-structure;
+}
+
+.animation-row-name {
+  @include t.use-typography("body-small");
+
+  grid-column: span 3;
+  display: flex;
+  align-items: center;
+  color: var(--color-foreground-secondary);
+}
+
+.animation-row-control {
+  grid-column: span 5;
+  min-inline-size: 0;
+}
+
+.animation-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-xs);
+}
+
+// Path trim
+
+.trim-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  margin-block-start: var(--sp-s);
+}
+
+.trim-label {
+  @include t.use-typography("body-small");
+
+  color: var(--color-foreground-secondary);
+}
+
+.trim-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  align-items: center;
+  gap: var(--sp-xs);
+}

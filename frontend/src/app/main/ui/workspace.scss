@@ -11,13 +11,27 @@
 .workspace {
   @include custom-scrollbar($include-selection: false, $include-placeholder: false);
 
+  // Height available to the sidebars and the viewport. Sidebar panels
+  // size themselves from it, so they end above the bottom dock.
+  --workspace-height: 100vh;
+
   inline-size: 100vw;
   block-size: 100vh;
   max-block-size: 100vh;
   user-select: none;
   display: grid;
-  grid-template: "left-sidebar viewport right-sidebar" 1fr / auto 1fr auto;
+  grid-template:
+    "left-sidebar viewport right-sidebar" minmax(0, 1fr)
+    "bottom-dock bottom-dock bottom-dock" auto
+    / auto 1fr auto;
   overflow: hidden;
+
+  // A full-width panel docked under the sidebars and the viewport
+  // (the animation timeline).
+  &.with-bottom-dock {
+    --workspace-bottom-dock-height: #{px2rem(240)};
+    --workspace-height: calc(100vh - var(--workspace-bottom-dock-height));
+  }
 }
 
 .workspace-loader {

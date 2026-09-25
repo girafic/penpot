@@ -8,11 +8,13 @@
    [app.main.features :as features]
    [app.main.store :as st]
    [app.main.ui.components.numeric-input :as deprecated-input]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.workspace.sidebar.options.common :as soc]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.util.i18n :as i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]
@@ -50,6 +52,8 @@
   [{:keys [class ids values applied-tokens]}]
   (let [token-numeric-inputs
         (features/use-feature "tokens/numeric-input")
+
+        motion-id (mf/use-ctx ctx/motion-shape-id)
 
         all-values-equal? (all-equal? values)
         all-token-equal? (and (seq applied-tokens) (all-equal? applied-tokens))
@@ -168,35 +172,38 @@
       [:section {:class (dm/str class " " (stl/css :radius-token))
                  :aria-label (tr "workspace.options.radius.radius-section")}
        [:div {:class (stl/css :radius-first-row)}
-        [:> numeric-input-wrapper*
-         {:on-change on-all-radius-change
-          :on-detach on-detach-all
-          :icon i/corner-radius
-          :min 0
-          :attr :border-radius
-          :nillable true
-          :property (tr "workspace.options.radius")
-          :applied-token (cond
-                           (not (seq applied-tokens))
-                           nil
+        [:div {:class (stl/css :fused-radius)}
+         [:> numeric-input-wrapper*
+          {:on-change on-all-radius-change
+           :on-detach on-detach-all
+           :icon i/corner-radius
+           :min 0
+           :attr :border-radius
+           :nillable true
+           :property (tr "workspace.options.radius")
+           :applied-token (cond
+                            (not (seq applied-tokens))
+                            nil
 
-                           (or (not all-values-equal?) (not all-token-equal?))
-                           :multiple
+                            (or (not all-values-equal?) (not all-token-equal?))
+                            :multiple
 
-                           :else
-                           (get applied-tokens :r1))
-          :align :right
-          :placeholder (cond
-                         (or (not all-values-equal?)
-                             (not all-token-equal?))
-                         (tr "settings.multiple")
-                         :else
-                         "--")
-          :value (if all-values-equal?
-                   (if (nil? (:r1 values))
-                     0
-                     (:r1 values))
-                   nil)}]
+                            :else
+                            (get applied-tokens :r1))
+           :align :right
+           :placeholder (cond
+                          (or (not all-values-equal?)
+                              (not all-token-equal?))
+                          (tr "settings.multiple")
+                          :else
+                          "--")
+           :value (if all-values-equal?
+                    (if (nil? (:r1 values))
+                      0
+                      (:r1 values))
+                    nil)}]
+         (when motion-id
+           [:> keyframe-diamond* {:properties [:r1 :r2 :r3 :r4]}])]
         [:> icon-button* {:class (stl/css-case :selected radius-expanded)
                           :variant "ghost"
                           :tooltip-placement "top-left"
@@ -208,81 +215,93 @@
 
        (when radius-expanded
          [:div {:class (stl/css :radius-4-token)}
-          [:> numeric-input-wrapper*
-           {:on-change on-radius-r1-change
-            :on-detach on-detach-r1
-            :min 0
-            :attr :border-radius
-            :property (tr "workspace.options.radius-top-left")
-            :applied-token (get applied-tokens :r1)
-            :align :right
-            :placeholder (cond
-                           (or (= :multiple (get applied-tokens :r1))
-                               (= :multiple (get values :r1)))
-                           (tr "settings.multiple")
-                           :else
-                           "--")
-            :class (stl/css :dropdown-offset)
-            :inner-class (stl/css :no-icon-input)
-            :value  (:r1 values)}]
+          [:div {:class (stl/css :fused-radius)}
+           [:> numeric-input-wrapper*
+            {:on-change on-radius-r1-change
+             :on-detach on-detach-r1
+             :min 0
+             :attr :border-radius
+             :property (tr "workspace.options.radius-top-left")
+             :applied-token (get applied-tokens :r1)
+             :align :right
+             :placeholder (cond
+                            (or (= :multiple (get applied-tokens :r1))
+                                (= :multiple (get values :r1)))
+                            (tr "settings.multiple")
+                            :else
+                            "--")
+             :class (stl/css :dropdown-offset)
+             :inner-class (stl/css :no-icon-input)
+             :value  (:r1 values)}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:r1]}])]
 
-          [:> numeric-input-wrapper*
-           {:on-change on-radius-r2-change
-            :on-detach on-detach-r2
-            :min 0
-            :attr :border-radius
-            :nillable true
-            :property (tr "workspace.options.radius-top-right")
-            :applied-token (get applied-tokens :r2)
-            :align :right
-            :tooltip-placement "top-left"
-            :inner-class (stl/css :no-icon-input)
-            :placeholder (cond
-                           (or (= :multiple (get applied-tokens :r2))
-                               (= :multiple (get values :r2)))
-                           (tr "settings.multiple")
-                           :else
-                           "--")
-            :value (:r2 values)}]
+          [:div {:class (stl/css :fused-radius)}
+           [:> numeric-input-wrapper*
+            {:on-change on-radius-r2-change
+             :on-detach on-detach-r2
+             :min 0
+             :attr :border-radius
+             :nillable true
+             :property (tr "workspace.options.radius-top-right")
+             :applied-token (get applied-tokens :r2)
+             :align :right
+             :tooltip-placement "top-left"
+             :inner-class (stl/css :no-icon-input)
+             :placeholder (cond
+                            (or (= :multiple (get applied-tokens :r2))
+                                (= :multiple (get values :r2)))
+                            (tr "settings.multiple")
+                            :else
+                            "--")
+             :value (:r2 values)}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:r2]}])]
 
-          [:> numeric-input-wrapper*
-           {:on-change on-radius-r4-change
-            :on-detach on-detach-r4
-            :min 0
-            :attr :border-radius
-            :nillable true
-            :property (tr "workspace.options.radius-bottom-left")
-            :applied-token (get applied-tokens :r4)
-            :class (stl/css :dropdown-offset)
-            :inner-class (stl/css :no-icon-input)
-            :placeholder (cond
-                           (or (= :multiple (get applied-tokens :r4))
-                               (= :multiple (get values :r4)))
-                           (tr "settings.multiple")
-                           :else
-                           "--")
-            :align :right
-            :value (:r4 values)}]
+          [:div {:class (stl/css :fused-radius)}
+           [:> numeric-input-wrapper*
+            {:on-change on-radius-r4-change
+             :on-detach on-detach-r4
+             :min 0
+             :attr :border-radius
+             :nillable true
+             :property (tr "workspace.options.radius-bottom-left")
+             :applied-token (get applied-tokens :r4)
+             :class (stl/css :dropdown-offset)
+             :inner-class (stl/css :no-icon-input)
+             :placeholder (cond
+                            (or (= :multiple (get applied-tokens :r4))
+                                (= :multiple (get values :r4)))
+                            (tr "settings.multiple")
+                            :else
+                            "--")
+             :align :right
+             :value (:r4 values)}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:r4]}])]
 
-          [:> numeric-input-wrapper*
-           {:on-change on-radius-r3-change
-            :on-detach on-detach-r3
-            :min 0
-            :attr :border-radius
-            :nillable true
-            :property (tr "workspace.options.radius-bottom-right")
-            :applied-token (get applied-tokens :r3)
-            :placeholder (cond
-                           (or (= :multiple (get applied-tokens :r3))
-                               (= :multiple (get values :r3)))
-                           (tr "settings.multiple")
-                           :else
-                           "--")
-            :align :right
-            :class (stl/css :radius-wrapper)
-            :tooltip-placement "top-left"
-            :inner-class (stl/css :no-icon-input)
-            :value (:r3 values)}]])]
+          [:div {:class (stl/css :fused-radius)}
+           [:> numeric-input-wrapper*
+            {:on-change on-radius-r3-change
+             :on-detach on-detach-r3
+             :min 0
+             :attr :border-radius
+             :nillable true
+             :property (tr "workspace.options.radius-bottom-right")
+             :applied-token (get applied-tokens :r3)
+             :placeholder (cond
+                            (or (= :multiple (get applied-tokens :r3))
+                                (= :multiple (get values :r3)))
+                            (tr "settings.multiple")
+                            :else
+                            "--")
+             :align :right
+             :class (stl/css :radius-wrapper)
+             :tooltip-placement "top-left"
+             :inner-class (stl/css :no-icon-input)
+             :value (:r3 values)}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:r3]}])]])]
       [:section {:class (dm/str class " " (stl/css :radius))
                  :aria-label (tr "workspace.options.radius.radius-section")}
        (if (not radius-expanded)
@@ -306,7 +325,9 @@
                      (if (nil? (:r1 values))
                        0
                        (:r1 values))
-                     nil)}]]
+                     nil)}]
+          (when motion-id
+            [:> keyframe-diamond* {:properties [:r1 :r2 :r3 :r4]}])]
          [:div {:class (stl/css :radius-4)}
           [:div {:class (stl/css :small-input)}
            [:> deprecated-input/numeric-input*
@@ -314,7 +335,9 @@
              :title (tr "workspace.options.radius-top-left")
              :min 0
              :on-change on-radius-r1-change
-             :value (:r1 values)}]]
+             :value (:r1 values)}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:r1]}])]
 
           [:div {:class (stl/css :small-input)}
            [:> deprecated-input/numeric-input*
@@ -322,7 +345,9 @@
              :title (tr "workspace.options.radius-top-right")
              :min 0
              :on-change on-radius-r2-change
-             :value (:r2 values)}]]
+             :value (:r2 values)}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:r2]}])]
 
           [:div {:class (stl/css :small-input)}
            [:> deprecated-input/numeric-input*
@@ -330,7 +355,9 @@
              :title (tr "workspace.options.radius-bottom-left")
              :min 0
              :on-change on-radius-r4-change
-             :value (:r4 values)}]]
+             :value (:r4 values)}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:r4]}])]
 
           [:div {:class (stl/css :small-input)}
            [:> deprecated-input/numeric-input*
@@ -338,7 +365,9 @@
              :title (tr "workspace.options.radius-bottom-right")
              :min 0
              :on-change on-radius-r3-change
-             :value (:r3 values)}]]])
+             :value (:r3 values)}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:r3]}])]])
        [:> icon-button* {:class (stl/css-case :selected radius-expanded)
                          :variant "ghost"
                          :on-click toggle-radius-mode

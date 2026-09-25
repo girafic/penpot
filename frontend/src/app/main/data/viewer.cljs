@@ -14,6 +14,7 @@
    [app.common.geom.point :as gpt]
    [app.common.schema :as sm]
    [app.common.transit :as t]
+   [app.common.types.animation :as cta]
    [app.common.types.shape-tree :as ctt]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.uuid :as uuid]
@@ -961,7 +962,6 @@
       (let [page     (viewer-current-page state)
             timeline (dm/get-in page [:timelines timeline-id])
             duration (or (:duration timeline) 0)
-            loop?    (boolean (:loop timeline))
             start    (let [p (dm/get-in state [:viewer-local :timeline :time] 0)]
                        (if (>= p duration) 0 p))
             stopper  (rx/filter (ptk/type? ::pause-timeline) stream)]
@@ -970,8 +970,8 @@
           (rx/concat
            (->> (rx/interval timeline-frame-step)
                 (rx/map (fn [i] (+ start (* (inc i) timeline-frame-step))))
-                (rx/map (fn [t] (if loop? (mod t duration) t)))
-                (rx/take-while (fn [t] (or loop? (<= t duration))))
+                (rx/take-while (fn [t] (not (cta/playback-ended? timeline t))))
+                (rx/map (fn [t] (cta/playback-time timeline t)))
                 (rx/take-until stopper)
                 (rx/map seek-timeline))
            (rx/of (pause-timeline))))))))
@@ -991,6 +991,29 @@
       (if (dm/get-in state [:viewer-local :timeline :playing?])
         (rx/of (pause-timeline))
         (rx/of (play-timeline timeline-id))))))
+
+(defn- viewer-frame
+  "The board currently shown in the viewer."
+  [state]
+  (let [params (rt/get-params state)
+        page   (viewer-current-page state)
+        frames (:frames page)
+        index  (or (some-> (rt/get-query-param params :index) parse-long) 0)]
+    (when (and (seq frames) (< index (count frames)))
+      (nth frames index))))
+
+(defn toggle-timeline-or-next-frame
+  "Space plays the timeline of the board on screen. Without one, it
+  still moves to the next frame."
+  []
+  (ptk/reify ::toggle-timeline-or-next-frame
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [page     (viewer-current-page state)
+            frame-id (:id (viewer-frame state))]
+        (if (and (some? frame-id) (contains? (:timelines page) frame-id))
+          (rx/of (toggle-play-timeline frame-id))
+          (rx/of select-next-frame))))))
 
 (defn stop-timeline
   []

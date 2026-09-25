@@ -11,6 +11,7 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
+   [app.common.types.animation :as cta]
    [app.common.types.shape-tree :as ctst]
    [app.config :as cfg]
    [app.main.data.event :as ev]
@@ -26,6 +27,7 @@
    [app.util.clipboard :as clipboard]
    [app.util.code-beautify :as cb]
    [app.util.code-gen :as cg]
+   [app.util.code-gen.common :as cgc]
    [app.util.dom :as dom]
    [app.util.http :as http]
    [beicon.v2.core :as rx]
@@ -61,6 +63,30 @@
       (let [objects (refs/get-viewer-objects state page-id)]
         objects))
     st/state =)))
+
+(defn- use-timelines
+  "The animation timelines of the page, by board."
+  [from]
+  (let [timelines-ref
+        (mf/with-memo [from]
+          (if (= from :workspace)
+            (l/derived :timelines refs/workspace-page)
+            (let [page-id (:page-id (:query-params (deref refs/route)))]
+              (l/derived #(dm/get-in % [:viewer :pages page-id :timelines]) st/state =))))]
+    (mf/deref timelines-ref)))
+
+(defn- animation-css
+  "CSS animating the shapes of `ids`, with the selectors of the code of
+  the shapes, from the timelines of their boards."
+  [timelines objects ids]
+  (let [boards (into #{} (keep #(cfh/get-shape-id-root-frame objects %)) ids)]
+    (->> boards
+         (keep #(get timelines %))
+         (map #(cta/timeline->css % objects {:ids ids
+                                             :selector (fn [shape]
+                                                         (dm/str "." (cgc/shape->selector shape)))}))
+         (remove str/blank?)
+         (str/join "\n\n"))))
 
 (defn- use-objects [from]
   (let [page-objects-ref
@@ -114,6 +140,7 @@
         collapsed-markup? (contains? @collapsed* :markup)
 
         objects        (use-objects from)
+        timelines      (use-timelines from)
 
         shapes
         (mf/with-memo [shapes frame]
@@ -137,14 +164,23 @@
         (mf/with-memo [all-children]
           (shapes->images all-children))
 
+        ;; The animation of the shapes, with the same selectors, so it
+        ;; plays in the copied code.
+        anim-code
+        (mf/with-memo [timelines objects all-children]
+          (when (seq timelines)
+            (animation-css timelines objects (into #{} (map :id) all-children))))
+
         style-code
         (mf/use-memo
-         (mf/deps fontfaces-css style-type shapes all-children cg/generate-style-code)
+         (mf/deps fontfaces-css style-type shapes all-children anim-code cg/generate-style-code)
          (fn []
            (dm/str
             fontfaces-css "\n"
             (-> (cg/generate-style-code objects style-type shapes all-children)
-                (cb/format-code style-type)))))
+                (cb/format-code style-type))
+            (when-not (str/blank? anim-code)
+              (dm/str "\n\n/* Animation */\n" anim-code)))))
 
         markup-code
         (mf/use-memo

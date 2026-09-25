@@ -52,6 +52,14 @@
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
+(defn- use-timeline-visible?
+  "Whether the animation timeline is docked under the workspace."
+  [layout]
+  (let [animation? (features/use-feature "animation/v1")]
+    (and animation?
+         (contains? layout :animation-timeline)
+         (not (contains? layout :hide-ui)))))
+
 (mf/defc workspace-content*
   {::mf/private true}
   [{:keys [file layout page wglobal]}]
@@ -73,8 +81,7 @@
         colorpalette?  (:colorpalette layout)
         textpalette?   (:textpalette layout)
         hide-ui?       (:hide-ui layout)
-        animation?     (features/use-feature "animation/v1")
-        timeline?      (and animation? (:animation-timeline layout))
+        timeline?      (use-timeline-visible? layout)
 
         on-resize
         (mf/use-fn
@@ -119,7 +126,7 @@
          (when (and (or colorpalette? textpalette?) (not hide-ui?))
            @palete-size)}]]]
 
-     (when (and timeline? (not hide-ui?))
+     (when ^boolean timeline?
        [:> timeline*])
 
      (when-not hide-ui?
@@ -205,6 +212,7 @@
 
   (let [layout           (mf/deref refs/workspace-layout)
         wglobal          (mf/deref refs/workspace-global)
+        timeline?        (use-timeline-visible? layout)
 
         team-ref         (mf/with-memo [team-id]
                            (make-team-ref team-id))
@@ -273,7 +281,8 @@
         [:> (mf/provider ctx/workspace-read-only?) {:value read-only?}
          [:> modal-container*]
          [:> components-debugger*]
-         [:section {:class (stl/css :workspace)
+         [:section {:class (stl/css-case :workspace true
+                                         :with-bottom-dock timeline?)
                     :style {:background-color background-color
                             :touch-action "none"
                             :position "relative"}}

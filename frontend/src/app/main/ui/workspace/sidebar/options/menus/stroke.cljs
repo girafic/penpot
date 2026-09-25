@@ -21,6 +21,7 @@
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.hooks :as h]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [trim-row*]]
    [app.main.ui.workspace.sidebar.options.rows.stroke-row :refer [stroke-row*]]
    [app.util.i18n :as i18n :refer [tr]]
    [cuerdas.core :as str]
@@ -305,4 +306,8 @@
                               :on-detach-token on-detach-token
                               :disable-stroke-style disable-stroke-style
                               :select-on-focus (not @disable-drag)
-                              :ids ids}])])])]))
+                              :ids ids}])])
+
+        ;; In motion mode: how much of the outline the strokes draw
+        (when (and (seq strokes) (not= :multiple strokes))
+          [:> trim-row* {}])])]))

@@ -228,9 +228,44 @@
         masking-child?
         (with-meta {:masking-child? true})))))
 
+(defn merge-pending-transform
+  "Fold a newer modifier frame onto one that has not been painted yet.
+  Removals accumulate, so a shape that leaves between paints is still
+  restored. A shape that is back in the latest frame is not removed.
+  The latest transforms win."
+  [pending {:keys [base-node shapes removed transforms modifiers]}]
+  (let [live-ids (into #{} (map :id) shapes)
+        removed  (->> (into (vec (:removed pending)) removed)
+                      (remove #(contains? live-ids (:id %)))
+                      (vec))]
+    {:base-node base-node
+     :shapes shapes
+     :removed removed
+     :transforms transforms
+     :modifiers modifiers}))
+
 (defn use-dynamic-modifiers
   [objects node modifiers]
-  (let [transforms
+  (let [;; One paint for a burst of modifier updates. Cancelling the
+        ;; scheduled frame on every change drops the paint: playback
+        ;; emits a new tree every 16ms, which is faster than the browser
+        ;; runs the previous frame, so the shapes never move.
+        pending-ref (mf/use-ref nil)
+        raf-ref     (mf/use-ref nil)
+
+        flush-transforms
+        (mf/use-fn
+         (fn []
+           (mf/set-ref-val! raf-ref nil)
+           (when-let [{:keys [base-node shapes removed transforms modifiers]}
+                      (mf/ref-val pending-ref)]
+             (mf/set-ref-val! pending-ref (dissoc (mf/ref-val pending-ref) :removed))
+             (when (and (some? base-node) (d/not-empty? shapes))
+               (update-transform! base-node shapes transforms modifiers))
+             (when (and (some? base-node) (d/not-empty? removed))
+               (remove-transform! base-node removed)))))
+
+        transforms
         (mf/with-memo [modifiers]
           (when (some? modifiers)
             (d/mapm (fn [id {current-modifiers :modifiers}]
@@ -299,34 +334,30 @@
           (js/cancelAnimationFrame raf-id1)
           (js/cancelAnimationFrame raf-id2))))
 
+    ;; Saving the previous transform is cheap and must happen before the
+    ;; paint. The paint itself is coalesced: a newer frame replaces the
+    ;; pending one instead of cancelling it.
     (mf/with-effect [transforms]
       (let [curr-shapes-set (into #{} (map :id) shapes)
             prev-shapes-set (into #{} (map :id) @prev-shapes)
-
             new-shapes      (->> shapes (remove #(contains? prev-shapes-set (:id %))))
-            removed-shapes  (->> @prev-shapes (remove #(contains? curr-shapes-set (:id %))))
-
-            ;; NOTE: we schedule the dom modifications to be executed
-            ;; asynchronously for avoid component flickering when react18
-            ;; is used.
-
-            raf-id1
-            (when (d/not-empty? new-shapes)
-              (ts/raf #(start-transform! node new-shapes)))
-
-            raf-id2
-            (when (d/not-empty? shapes)
-              (ts/raf #(update-transform! node shapes transforms modifiers)))
-
-            raf-id3
-            (when (d/not-empty? removed-shapes)
-              (ts/raf #(remove-transform! node removed-shapes)))]
-
+            removed-shapes  (->> @prev-shapes (remove #(contains? curr-shapes-set (:id %))))]
+        (when (d/not-empty? new-shapes)
+          (start-transform! node new-shapes))
+        (mf/set-ref-val! pending-ref
+                         (merge-pending-transform
+                          (mf/ref-val pending-ref)
+                          {:base-node node
+                           :shapes shapes
+                           :removed removed-shapes
+                           :transforms transforms
+                           :modifiers modifiers}))
+        (when-not (mf/ref-val raf-ref)
+          (mf/set-ref-val! raf-ref (ts/raf flush-transforms)))
         (reset! prev-modifiers modifiers)
         (reset! prev-transforms transforms)
-        (reset! prev-shapes shapes)
+        (reset! prev-shapes shapes)))
 
-        (fn []
-          (when raf-id1 (js/cancelAnimationFrame raf-id1))
-          (when raf-id2 (js/cancelAnimationFrame raf-id2))
-          (when raf-id3 (js/cancelAnimationFrame raf-id3)))))))
+    (mf/with-effect []
+      #(when-let [frame-id (mf/ref-val raf-ref)]
+         (ts/cancel-af! frame-id)))))

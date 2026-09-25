@@ -18,6 +18,18 @@
 .small-input {
   @extend %input-element;
   @include t.use-typography("body-small");
+
+  padding-inline-end: 0;
+
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(28);
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+  }
 }
 
 .radius-4 {
@@ -59,4 +71,32 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--sp-xs);
+}
+
+// The token input keeps its content; this shell is the visible field,
+// with the keyframe diamond at its end.
+.fused-radius {
+  @extend %input-element;
+  @include t.use-typography("body-small");
+
+  min-inline-size: 0;
+  padding-inline-end: 0;
+
+  > :first-child {
+    flex: 1;
+    min-inline-size: 0;
+    border: none;
+    background: transparent;
+    block-size: 100%;
+  }
+
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(28);
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+  }
 }

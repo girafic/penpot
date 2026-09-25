@@ -18,6 +18,7 @@
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.hooks :as h]
    [app.main.ui.workspace.sidebar.options.common :refer [advanced-options*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.main.ui.workspace.sidebar.options.rows.color-row :refer [color-row*]]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -174,7 +175,9 @@
            [:> deprecated-input/numeric-input* {:no-validate true
                                                 :placeholder "--"
                                                 :on-change on-update-offset-x
-                                                :value (:offset-x shadow)}]]
+                                                :value (:offset-x shadow)}]
+           [:> keyframe-diamond* {:properties [:shadow-offset-x]
+                                  :index index}]]
 
           [:div {:class (stl/css :shadow-advanced-blur)
                  :title (tr "workspace.options.shadow-options.blur")}
@@ -184,7 +187,9 @@
                                                 :placeholder "--"
                                                 :on-change on-update-blur
                                                 :min 0
-                                                :value (:blur shadow)}]]
+                                                :value (:blur shadow)}]
+           [:> keyframe-diamond* {:properties [:shadow-blur]
+                                  :index index}]]
 
           [:div {:class (stl/css :shadow-advanced-spread)
                  :title (tr "workspace.options.shadow-options.spread")}
@@ -193,7 +198,9 @@
            [:> deprecated-input/numeric-input* {:no-validate true
                                                 :placeholder "--"
                                                 :on-change on-update-spread
-                                                :value (:spread shadow)}]]]
+                                                :value (:spread shadow)}]
+           [:> keyframe-diamond* {:properties [:shadow-spread]
+                                  :index index}]]]
 
          [:div {:class (stl/css :shadow-advanced-row)}
           [:div {:class (stl/css :shadow-advanced-offset-y)
@@ -203,7 +210,9 @@
            [:> deprecated-input/numeric-input* {:no-validate true
                                                 :placeholder "--"
                                                 :on-change on-update-offset-y
-                                                :value (:offset-y shadow)}]]
+                                                :value (:offset-y shadow)}]
+           [:> keyframe-diamond* {:properties [:shadow-offset-y]
+                                  :index index}]]
 
           [:> color-row* {:class (stl/css :shadow-advanced-color)
                           :color (:color shadow)
@@ -211,6 +220,7 @@
                           :disable-gradient true
                           :disable-image true
                           :origin :shadow
+                          :index index
                           :on-change on-update-color
                           :on-detach on-detach-color
                           :on-open on-open-row

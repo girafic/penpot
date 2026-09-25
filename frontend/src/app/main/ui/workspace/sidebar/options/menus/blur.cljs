@@ -20,6 +20,7 @@
    [app.main.ui.ds.controls.select :refer [select*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.ds.tooltip.tooltip :refer [tooltip*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
 
@@ -153,7 +154,10 @@
                :content (tr "workspace.options.blur-options.disabled-blur-label")}
               label]
              :else
-             label)]
+             label)
+       [:> keyframe-diamond* {:properties [(if (= blur-key :background-blur)
+                                             :background-blur
+                                             :blur)]}]]
 
       [:div {:class (stl/css :actions)}
        [:> icon-button* {:variant "ghost"

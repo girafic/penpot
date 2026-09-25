@@ -35,6 +35,42 @@
           (log/dbg :hint "page indexed" :id (:id page) :elapsed elapsed ::log/sync? true))))
     nil))
 
+(defn- with-preview
+  "`page` with the shapes of the animation preview of its page (see
+  `:index/set-preview`) in place of its own, as the canvas shows them."
+  [page]
+  (let [preview (dm/get-in @state [::preview (:id page)])]
+    (cond-> page
+      (seq preview)
+      (update :objects
+              (fn [objects]
+                (reduce-kv (fn [objects id shape]
+                             (cond-> objects
+                               (contains? objects id) (assoc id shape)))
+                           objects
+                           preview))))))
+
+(defmethod impl/handler :index/set-preview
+  ;; `objects` are shapes as the animation shows them at the playhead, by
+  ;; id, so hovering and clicking find them there; nil drops them.
+  [{:keys [page-id objects]}]
+  (when-let [page (dm/get-in @state [:pages-index page-id])]
+    (let [old-page (with-preview page)]
+      (swap! state update ::preview
+             (fn [previews]
+               (if (seq objects)
+                 (assoc previews page-id objects)
+                 (dissoc previews page-id))))
+      (swap! state update ::selection selection/update-page old-page (with-preview page))))
+  nil)
+
+(defmethod impl/handler :index/clear-previews
+  ;; Leaving motion mode: every shape is found where it is again.
+  [_]
+  (doseq [page-id (keys (get @state ::preview))]
+    (impl/handler {:cmd :index/set-preview :page-id page-id :objects nil}))
+  nil)
+
 (defmethod impl/handler :index/update
   [{:keys [page-id changes] :as message}]
   (let [tpoint (ct/tpoint-ms)]
@@ -55,7 +91,10 @@
              text-rects)]
 
         (swap! state update ::snap snap/update-page old-page new-page)
-        (swap! state update ::selection selection/update-page old-page new-page))
+        ;; Shapes of the animation preview stay where the canvas shows
+        ;; them until the next preview.
+        (swap! state update ::selection selection/update-page
+               (with-preview old-page) (with-preview new-page)))
       (catch :default cause
         (log/error :hint "error updating page index" :id page-id :cause cause))
       (finally

@@ -12,9 +12,12 @@
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.logic.shapes :as cls]
+   [app.common.math :as mth]
+   [app.common.types.animation :as cta]
    [app.common.types.shape.layout :as ctl]
    [app.main.constants :refer [size-presets]]
    [app.main.data.workspace :as udw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.interactions :as dwi]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.tokens.application :as dwta]
@@ -27,15 +30,18 @@
    [app.main.ui.components.numeric-input :as deprecated-input]
    [app.main.ui.components.radio-buttons :refer [radio-button radio-buttons]]
    [app.main.ui.components.search-bar :refer [search-bar*]]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.workspace.sidebar.options.menus.border-radius :refer  [border-radius-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [clojure.set :as set]
    [cuerdas.core :as str]
+   [okulary.core :as l]
    [rumext.v2 :as mf]))
 
 (def measure-attrs
@@ -199,11 +205,166 @@
                                           :class (stl/css :numeric-input)
                                           :value (:y values)}]]]])
 
+(def ^:private ref:playhead
+  (l/derived dwa/playhead st/state))
+
+(def ^:private ref:timeline
+  (l/derived dwa/current-timeline st/state))
+
+(def ^:private ref:objects
+  (l/derived :objects refs/workspace-page))
+
+(defn- origin-selected?
+  [origin x y]
+  (and (mth/close? (:x origin) x) (mth/close? (:y origin) y)))
+
+(mf/defc origin-fields*
+  "Transform-origin picker: 3×3 snap grid plus X/Y percent."
+  {::mf/private true}
+  [{:keys [shape-id]}]
+  (let [timeline (mf/deref ref:timeline)
+        origin   (cta/track-origin (cta/get-track timeline shape-id))
+        open*    (mf/use-state false)
+        open?    (deref open*)
+        box-ref  (mf/use-ref nil)
+
+        toggle
+        (mf/use-fn
+         (fn []
+           (swap! open* not)))
+
+        close
+        (mf/use-fn
+         (fn []
+           (reset! open* false)))
+
+        on-cell
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn [event]
+           (let [target (dom/get-current-target event)
+                 ox     (d/parse-double (dom/get-data target "ox"))
+                 oy     (d/parse-double (dom/get-data target "oy"))]
+             (when (and ox oy)
+               (st/emit! (dwa/set-track-origin shape-id ox oy))))))
+
+        on-x
+        (mf/use-fn
+         (mf/deps shape-id origin)
+         (fn [value]
+           (when (number? value)
+             (st/emit! (dwa/set-track-origin shape-id (/ value 100.0) (:y origin))))))
+
+        on-y
+        (mf/use-fn
+         (mf/deps shape-id origin)
+         (fn [value]
+           (when (number? value)
+             (st/emit! (dwa/set-track-origin shape-id (:x origin) (/ value 100.0))))))]
+    [:div {:class (stl/css :transform-header)
+           :ref box-ref}
+     [:span {:class (stl/css :transform-title)}
+      (tr "workspace.options.transform")]
+     [:> icon-button*
+      {:variant "ghost"
+       :aria-label (tr "workspace.animation.origin")
+       :aria-expanded open?
+       :aria-haspopup "dialog"
+       :on-click toggle
+       :icon i/locate}]
+     [:& dropdown {:show open?
+                   :on-close close
+                   :container box-ref}
+      [:div {:class (stl/css :origin-popover)
+             :role "dialog"
+             :aria-label (tr "workspace.animation.origin")}
+       [:div {:class (stl/css :origin-grid)}
+        (for [[ox oy] cta/origin-cells]
+          [:button {:key (str ox "-" oy)
+                    :type "button"
+                    :class (stl/css-case :origin-cell true
+                                         :selected (origin-selected? origin ox oy))
+                    :data-ox (str ox)
+                    :data-oy (str oy)
+                    :aria-label (tr "workspace.animation.origin")
+                    :aria-pressed (origin-selected? origin ox oy)
+                    :on-click on-cell}])]
+       [:div {:class (stl/css :origin-pcts)}
+        [:div {:class (stl/css :origin-pct)
+               :title (tr "workspace.animation.origin-x")}
+         [:span {:class (stl/css :icon-text)} "X"]
+         [:> deprecated-input/numeric-input*
+          {:no-validate true
+           :min 0
+           :max 100
+           :on-change on-x
+           :class (stl/css :numeric-input)
+           :value (* 100.0 (:x origin))}]
+         [:span {:class (stl/css :origin-unit)} "%"]]
+        [:div {:class (stl/css :origin-pct)
+               :title (tr "workspace.animation.origin-y")}
+         [:span {:class (stl/css :icon-text)} "Y"]
+         [:> deprecated-input/numeric-input*
+          {:no-validate true
+           :min 0
+           :max 100
+           :on-change on-y
+           :class (stl/css :numeric-input)
+           :value (* 100.0 (:y origin))}]
+         [:span {:class (stl/css :origin-unit)} "%"]]]]]]))
+
+(mf/defc scale-fields*
+  "Scale is an animation value, drawn with the same inputs as position."
+  {::mf/private true}
+  [{:keys [shape-id]}]
+  (let [playhead (mf/deref ref:playhead)
+        timeline (mf/deref ref:timeline)
+        objects  (mf/deref ref:objects)
+        shape    (get objects shape-id)
+        values   (when (and timeline shape)
+                   (dwa/shape-values-at timeline objects shape playhead))
+        sx       (or (:scale-x values) 1)
+        sy       (or (:scale-y values) 1)
+        kf-x     (when timeline (dwa/keyframe-at timeline shape-id :scale-x playhead))
+        kf-y     (when timeline (dwa/keyframe-at timeline shape-id :scale-y playhead))
+
+        on-scale
+        (mf/use-fn
+         (mf/deps shape-id kf-x kf-y)
+         (fn [property keyframe display]
+           (when keyframe
+             (st/emit! (dwa/set-keyframe-value shape-id (:id keyframe)
+                                               (dwa/display->value property display))))))]
+    [:div {:class (stl/css :position)}
+     [:div {:class (stl/css-case :x-position true
+                                 :disabled (nil? kf-x))
+            :title (tr "workspace.animation.scale")}
+      [:span {:class (stl/css :icon-text)} "↔"]
+      [:> deprecated-input/numeric-input* {:no-validate true
+                                           :is-disabled (nil? kf-x)
+                                           :on-change #(on-scale :scale-x kf-x %)
+                                           :class (stl/css :numeric-input)
+                                           :value (dwa/value->display :scale-x sx)}]]
+     [:div {:class (stl/css-case :y-position true
+                                 :with-keyframe true
+                                 :disabled (nil? kf-y))
+            :title (tr "workspace.animation.scale")}
+      [:span {:class (stl/css :icon-text)} "↕"]
+      [:> deprecated-input/numeric-input* {:no-validate true
+                                           :is-disabled (nil? kf-y)
+                                           :on-change #(on-scale :scale-y kf-y %)
+                                           :class (stl/css :numeric-input)
+                                           :value (dwa/value->display :scale-y sy)}]
+      [:> keyframe-diamond* {:properties [:scale-x :scale-y]}]]]))
+
 (mf/defc measures-menu*
   {::mf/wrap [#(mf/memo' % check-measures-menu-props)]}
   [{:keys [ids values applied-tokens type shapes]}]
   (let [token-numeric-inputs
         (features/use-feature "tokens/numeric-input")
+
+        motion-id
+        (mf/use-ctx ctx/motion-shape-id)
 
         all-types
         (mf/with-memo [type shapes]
@@ -410,15 +571,39 @@
            (let [new-lock (if (= proportion-lock :multiple) true (not proportion-lock))]
              (run! #(st/emit! (udw/set-shape-proportion-lock % new-lock)) ids))))
 
+        ;; In motion mode the fields show the shape at the playhead (see
+        ;; `single-shape-options*`), but an edit changes the shape itself,
+        ;; and that change is added to the animation there as a keyframe
+        ;; (see `dwa/record-canvas-edit`). So a position or rotation typed
+        ;; for the shape at the playhead becomes the same change of the
+        ;; shape itself.
+        motion-target
+        (mf/use-fn
+         (mf/deps motion-id values)
+         (fn [attr value]
+           (let [objects (deref refs/workspace-page-objects)
+                 base    (get objects motion-id)
+                 number  (if (string? value) (d/parse-double value) value)
+                 shown   (get values attr)]
+             (if (and (some? base) (number? number) (number? shown))
+               (let [current (if (= attr :rotation)
+                               (get base :rotation 0)
+                               (-> (gsh/translate-to-frame base (get objects (:frame-id base)))
+                                   (get :points)
+                                   (grc/points->rect)
+                                   (get attr)))]
+                 (+ current (- number shown)))
+               value))))
+
         ;; POSITION
         on-position-change
         (mf/use-fn
-         (mf/deps ids)
+         (mf/deps ids motion-target)
          (fn [value attr]
            (if (or (string? value) (number? value))
              (do
                (st/emit! (udw/trigger-bounding-box-cloaking ids))
-               (st/emit! (udw/update-positions ids {attr value})))
+               (st/emit! (udw/update-positions ids {attr (motion-target attr value)})))
              (st/emit! (udw/trigger-bounding-box-cloaking ids)
                        (dwta/apply-token-from-input {:token (first value)
                                                      :attrs #{attr}
@@ -426,10 +611,10 @@
 
         on-rotation-change
         (mf/use-fn
-         (mf/deps ids)
+         (mf/deps ids motion-target)
          (fn [value]
            (if (or (string? value) (number? value))
-             (let [value (fixed-decimal-value value)]
+             (let [value (motion-target :rotation (fixed-decimal-value value))]
                (st/emit! (udw/trigger-bounding-box-cloaking ids))
                (st/emit! (udw/increase-rotation-coalesced ids value)))
              (st/emit! (udw/trigger-bounding-box-cloaking ids)
@@ -488,7 +673,8 @@
          (fn []
            (st/emit! (dwt/selected-fit-content))))]
 
-    [:section {:class (stl/css :element-set)
+    [:section {:class (stl/css-case :element-set true
+                                    :with-size-keyframe (some? motion-id))
                :aria-label "shape-measures-section"}
      (when (and (options :presets)
                 (or (nil? all-types) (= (count all-types) 1)))
@@ -572,17 +758,22 @@
                             (tr "settings.multiple") "--")
              :value (get values :width)}]
 
-           [:> numeric-input-wrapper*
-            {:disabled disabled-height-sizing?
-             :on-change on-height-change
-             :on-detach on-detach-token
-             :min 0.01
-             :icon i/character-h
-             :attr :height
-             :align :right
-             :property (tr "workspace.options.height")
-             :applied-token (get applied-tokens :height)
-             :value (get values :height)}]]
+           [:div {:class (stl/css-case :height true
+                                       :with-keyframe (some? motion-id)
+                                       :disabled disabled-height-sizing?)}
+            [:> numeric-input-wrapper*
+             {:disabled disabled-height-sizing?
+              :on-change on-height-change
+              :on-detach on-detach-token
+              :min 0.01
+              :icon i/character-h
+              :attr :height
+              :align :right
+              :property (tr "workspace.options.height")
+              :applied-token (get applied-tokens :height)
+              :value (get values :height)}]
+            (when motion-id
+              [:> keyframe-diamond* {:properties [:width :height]}])]]
 
           [:*
            [:div {:class (stl/css-case :width true
@@ -598,6 +789,7 @@
               :class (stl/css :numeric-input)
               :value (:width values)}]]
            [:div {:class (stl/css-case :height true
+                                       :with-keyframe (some? motion-id)
                                        :disabled disabled-height-sizing?)
                   :title (tr "workspace.options.height")}
             [:span {:class (stl/css :icon-text)} "H"]
@@ -607,7 +799,9 @@
                                                  :on-change on-height-change
                                                  :is-disabled disabled-height-sizing?
                                                  :class (stl/css :numeric-input)
-                                                 :value (:height values)}]]])
+                                                 :value (:height values)}]
+            (when motion-id
+              [:> keyframe-diamond* {:properties [:width :height]}])]])
 
         [:> icon-button* {:variant "ghost"
                           :tooltip-placement "top-left"
@@ -616,6 +810,9 @@
                           :disabled (= proportion-lock :multiple)
                           :aria-label (if proportion-lock (tr "workspace.options.size.unlock") (tr "workspace.options.size.lock"))
                           :on-click on-proportion-lock-change}]])
+
+     (when motion-id
+       [:> origin-fields* {:shape-id motion-id}])
 
      (when (options :position)
        [:div {:class (stl/css :position)}
@@ -633,19 +830,24 @@
                                   (= :multiple (get values :x)))
                             (tr "settings.multiple") "--")
              :value (get values :x)}]
-           [:> numeric-input-wrapper*
-            {:disabled disabled-position?
-             :on-change on-pos-y-change
-             :on-detach on-detach-token
-             :icon i/character-y
-             :attr :y
-             :align :right
-             :property (tr "workspace.options.y")
-             :applied-token (get applied-tokens :y)
-             :placeholder (if (or (= :multiple (get applied-tokens :y))
-                                  (= :multiple (get values :y)))
-                            (tr "settings.multiple") "--")
-             :value (get values :y)}]]
+           [:div {:class (stl/css-case :y-position true
+                                       :with-keyframe (some? motion-id)
+                                       :disabled disabled-position?)}
+            [:> numeric-input-wrapper*
+             {:disabled disabled-position?
+              :on-change on-pos-y-change
+              :on-detach on-detach-token
+              :icon i/character-y
+              :attr :y
+              :align :right
+              :property (tr "workspace.options.y")
+              :applied-token (get applied-tokens :y)
+              :placeholder (if (or (= :multiple (get applied-tokens :y))
+                                   (= :multiple (get values :y)))
+                             (tr "settings.multiple") "--")
+              :value (get values :y)}]
+            (when motion-id
+              [:> keyframe-diamond* {:properties [:x :y]}])]]
 
           [:*
            [:div {:class (stl/css-case :x-position true
@@ -660,6 +862,7 @@
                                                  :value (:x values)}]]
 
            [:div {:class (stl/css-case :y-position true
+                                       :with-keyframe (some? motion-id)
                                        :disabled disabled-position?)
                   :title (tr "workspace.options.y")}
             [:span {:class (stl/css :icon-text)} "Y"]
@@ -668,29 +871,38 @@
                                                  :disabled disabled-position?
                                                  :on-change on-pos-y-change
                                                  :class (stl/css :numeric-input)
-                                                 :value (:y values)}]]])])
+                                                 :value (:y values)}]
+            (when motion-id
+              [:> keyframe-diamond* {:properties [:x :y]}])]])])
+
+     (when motion-id
+       [:> scale-fields* {:shape-id motion-id}])
 
      (when (or (options :rotation) (options :radius))
        [:div {:class (stl/css :rotation-radius)}
         (when (options :rotation)
           (if token-numeric-inputs
-            [:> numeric-input-wrapper*
-             {:on-change on-rotation-change
-              :on-detach on-detach-token
-              :icon i/rotation
-              :min -359
-              :max 359
-              :attr :rotation
-              :property (tr "workspace.options.rotation")
-              :applied-token (get applied-tokens :rotation)
-              :placeholder (if (or (= :multiple (get applied-tokens :rotation))
-                                   (= :multiple (get values :rotation)))
-                             (tr "settings.multiple") "--")
-              :value (get values :rotation)}]
-
-            [:div {:class (stl/css :rotation)
+            [:div {:class (stl/css-case :rotation true
+                                        :with-keyframe (some? motion-id))}
+             [:> numeric-input-wrapper*
+              {:on-change on-rotation-change
+               :on-detach on-detach-token
+               :icon i/rotation
+               :min -359
+               :max 359
+               :attr :rotation
+               :property (tr "workspace.options.rotation")
+               :applied-token (get applied-tokens :rotation)
+               :placeholder (if (or (= :multiple (get applied-tokens :rotation))
+                                    (= :multiple (get values :rotation)))
+                              (tr "settings.multiple") "--")
+               :value (get values :rotation)}]
+             (when motion-id
+               [:> keyframe-diamond* {:properties [:rotation]}])]
+            [:div {:class (stl/css-case :rotation true
+                                        :with-keyframe (some? motion-id))
                    :title (tr "workspace.options.rotation")}
-             [:span {:class (stl/css :icon)}  deprecated-icon/rotation]
+             [:span {:class (stl/css :icon)} deprecated-icon/rotation]
              [:> deprecated-input/numeric-input*
               {:no-validate true
                :min -359
@@ -699,7 +911,9 @@
                :placeholder (if (= :multiple (:rotation values)) (tr "settings.multiple") "--")
                :on-change on-rotation-change
                :class (stl/css :numeric-input)
-               :value (:rotation values)}]]))
+               :value (:rotation values)}]
+             (when motion-id
+               [:> keyframe-diamond* {:properties [:rotation]}])]))
 
         (when (options :radius)
           [:> border-radius-menu* {:class (stl/css :border-radius)

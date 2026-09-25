@@ -60,7 +60,17 @@
   @extend %input-element;
   @include t.use-typography("body-small");
 
-  padding-inline-start: var(--sp-xs);
+  padding-inline: var(--sp-xs) 0;
+
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(28);
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+  }
 }
 
 .stroke-alignment-select {

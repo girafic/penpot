@@ -14,6 +14,7 @@
    [app.common.types.shape.layout :as ctl]
    [app.main.data.helpers :as dsh]
    [app.main.data.workspace :as udw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.path.helpers :as path.helpers]
    [app.main.data.workspace.path.state :as path.state]
@@ -31,6 +32,7 @@
    [app.main.ui.workspace.sidebar.options.menus.grid-cell :as grid-cell]
    [app.main.ui.workspace.sidebar.options.menus.interactions :refer [interactions-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.layout-container :as layout-container]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu*]]
    [app.main.ui.workspace.sidebar.options.page :as page]
    [app.main.ui.workspace.sidebar.options.shapes.bool :as bool]
    [app.main.ui.workspace.sidebar.options.shapes.circle :as circle]
@@ -48,6 +50,12 @@
 
 ;; --- Options
 
+(def ^:private ref:motion-timeline
+  (l/derived dwa/current-timeline st/state))
+
+(def ^:private ref:playhead
+  (l/derived dwa/playhead st/state))
+
 (mf/defc single-shape-options*
   {::mf/private true}
   [{:keys [shape page-id file-id libraries] :rest props}]
@@ -57,10 +65,24 @@
         wasm-modifiers (mf/deref refs/workspace-wasm-modifiers)
         modifiers  (mf/deref refs/workspace-modifiers)
 
+        motion-id  (mf/use-ctx ctx/motion-shape-id)
+        timeline   (mf/deref ref:motion-timeline)
+        playhead   (mf/deref ref:playhead)
+        transform  (mf/deref refs/current-transform)
+        objects    (mf/deref refs/workspace-page-objects)
+
         shape
-        (if (features/active-feature? @st/state "render-wasm/v1")
+        (cond
+          ;; In motion mode the design tab shows the shape as it is at the
+          ;; playhead, except while it is being transformed on the canvas.
+          (and (= motion-id shape-id) (some? timeline) (nil? transform))
+          (dwa/shape-at timeline objects shape playhead)
+
+          (features/active-feature? @st/state "render-wasm/v1")
           (let [wasm-modifiers (into {} wasm-modifiers)]
             (gsh/apply-transform shape (get wasm-modifiers shape-id)))
+
+          :else
           (gsh/transform-shape shape (dm/get-in modifiers [shape-id :modifiers])))
 
         props      (mf/spread-props props {:shape shape :file-id file-id :page-id page-id :libraries libraries})]
@@ -102,7 +124,7 @@
 
 (mf/defc design-menu*
   {::mf/private true}
-  [{:keys [selected objects page-id file-id shapes]}]
+  [{:keys [selected objects page-id file-id shapes is-motion]}]
   (let [sp-panel (mf/deref refs/specialized-panel)
         drawing  (mf/deref refs/workspace-drawing)
         edition  (mf/deref refs/selected-edition)
@@ -181,6 +203,12 @@
        [:> bool-options* {:total-selected total-selected
                           :shapes shapes
                           :shapes-with-children shapes-with-children}])
+
+     (when (and ^boolean is-motion
+                (pos? total-selected)
+                (not path-editing?)
+                (not edit-grid?))
+       [:> animations-menu* {:ids selected}])
 
      (cond
        ;; Show path-specific options during node editing.
@@ -263,6 +291,14 @@
         options-mode
         (mf/deref refs/options-mode-global)
 
+        ;; In motion mode the design tab shows the animatable properties.
+        layout
+        (mf/deref refs/workspace-layout)
+
+        motion?
+        (and (features/use-feature "animation/v1")
+             (contains? layout :animation-timeline))
+
         ;; dbg/state is an okulary atom; deref'ing it makes this component
         ;; re-render when debug options change (e.g. :shape-panel toggle)
         ;; so the tabs list is regenerated reactively without a page reload.
@@ -272,6 +308,10 @@
         shapes
         (mf/with-memo [selected objects]
           (sequence (keep (d/getf objects)) selected))
+
+        motion-shape-id
+        (when (and motion? (= 1 (count shapes)))
+          (:id (first shapes)))
 
         options-tabs
         (generate-options-tabs)]
@@ -308,11 +348,13 @@
                              :on-expand on-expand}]]
 
           :design
-          [:> design-menu* {:selected selected
-                            :objects objects
-                            :page-id page-id
-                            :file-id file-id
-                            :shapes shapes}]
+          [:& (mf/provider ctx/motion-shape-id) {:value motion-shape-id}
+           [:> design-menu* {:selected selected
+                             :objects objects
+                             :page-id page-id
+                             :file-id file-id
+                             :shapes shapes
+                             :is-motion motion?}]]
 
           :debug
           [:> debug-shape-info*])]

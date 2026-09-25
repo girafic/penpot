@@ -8,15 +8,26 @@
 @use "ds/z-index.scss" as *;
 @use "refactor/common-refactor.scss" as deprecated;
 
-$track-label-width: 160px;
-$dock-height: 240px;
+$track-label-width: 300px;
 
+// Gaps around the time axis. The start gap keeps a keyframe and the
+// playhead pin at 0s clear of the label column; the end gap does the
+// same at the last frame.
+$axis-start-gap: deprecated.$s-12;
+$axis-end-gap: deprecated.$s-8;
+
+// Docked full-width under the sidebars and the viewport; the workspace
+// grid (workspace.scss) reserves the `bottom-dock` row and its height.
 .timeline-dock {
-  position: absolute;
-  left: var(--left-sidebar-width, 318px);
-  right: var(--right-sidebar-width, 318px);
-  bottom: 0;
-  height: $dock-height;
+  // Unselected bars and blocks: a tint of the secondary text colour, so
+  // they stand out on any row background, hovered or not, in both themes.
+  --timeline-bar-color: color-mix(in hsl, var(--color-foreground-secondary) 25%, transparent);
+
+  grid-area: bottom-dock;
+  position: relative;
+  block-size: var(--workspace-bottom-dock-height);
+  min-block-size: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background-color: var(--color-background-primary);
@@ -24,6 +35,25 @@ $dock-height: 240px;
   z-index: deprecated.$z-index-2;
   font-size: deprecated.$fs-12;
   color: var(--color-foreground-secondary);
+
+  // Focused by any click in it, so it gets the keyframe shortcuts.
+  &:focus {
+    outline: none;
+  }
+}
+
+// Drag handle on the top edge of the dock.
+.resize-area {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  block-size: deprecated.$s-6;
+  cursor: ns-resize;
+  z-index: deprecated.$z-index-3;
+
+  &:hover {
+    box-shadow: inset 0 2px 0 var(--color-accent-primary);
+  }
 }
 
 .toolbar {
@@ -35,15 +65,6 @@ $dock-height: 240px;
   border-bottom: 1px solid var(--panel-border-color);
 }
 
-.board-name {
-  font-weight: 600;
-  color: var(--color-foreground-primary);
-  max-width: 140px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 .playback-controls {
   display: flex;
   align-items: center;
@@ -52,28 +73,26 @@ $dock-height: 240px;
 
 .play-btn,
 .ctrl-btn,
-.close-btn,
-.prop-btn,
-.create-btn {
+.close-btn {
   display: inline-flex;
   align-items: center;
-  gap: deprecated.$s-4;
-  height: 28px;
-  padding: 0 deprecated.$s-8;
-  border: 1px solid transparent;
+  justify-content: center;
+  inline-size: 32px;
+  block-size: 32px;
+  padding: 0;
+  border: none;
   border-radius: deprecated.$br-8;
-  background-color: var(--color-background-tertiary);
+  background-color: transparent;
   color: var(--color-foreground-secondary);
   cursor: pointer;
 
   &:hover {
-    background-color: var(--color-background-quaternary);
+    background-color: var(--color-background-tertiary);
+    color: var(--color-accent-primary);
   }
 
   &.active {
-    background-color: var(--color-accent-primary-muted);
     color: var(--color-accent-primary);
-    border-color: var(--color-accent-primary);
   }
 
   &:disabled {
@@ -89,15 +108,24 @@ $dock-height: 240px;
   border-right: 3px solid currentcolor;
 }
 
+.current-time {
+  min-inline-size: 56px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-foreground-primary);
+}
+
 .duration-field {
   display: flex;
   align-items: center;
   gap: deprecated.$s-4;
 
+  // Undo the global input margin, which pushes it off the toolbar centre.
   input {
     width: 72px;
     height: 28px;
+    margin: 0;
     padding: 0 deprecated.$s-8;
+    font-size: inherit;
     border: 1px solid var(--panel-border-color);
     border-radius: deprecated.$br-8;
     background-color: var(--color-background-tertiary);
@@ -105,19 +133,12 @@ $dock-height: 240px;
   }
 }
 
-.add-keyframe-group {
+// Right end of the toolbar: timeline zoom and close.
+.toolbar-end {
   display: flex;
   align-items: center;
-  gap: deprecated.$s-4;
-  flex-wrap: wrap;
-
-  .group-label {
-    margin-right: deprecated.$s-4;
-  }
-}
-
-.close-btn {
-  margin-left: auto;
+  gap: deprecated.$s-8;
+  margin-inline-start: auto;
 }
 
 .timeline-body {
@@ -134,48 +155,183 @@ $dock-height: 240px;
   overflow: hidden;
 }
 
+// Scrolls both ways; the ruler row and the label column stay in view.
+.timeline-scroll {
+  flex: 1;
+  min-block-size: 0;
+  overflow: auto;
+}
+
+// As wide as the view at zoom 1; the time axis grows with the zoom.
+.timeline-content {
+  --timeline-zoom: 1;
+  --axis-inset: calc(#{$track-label-width} + #{$axis-start-gap} + #{$axis-end-gap});
+
+  display: flex;
+  flex-direction: column;
+  min-block-size: 100%;
+  inline-size: max(100%, calc(var(--axis-inset) + (100% - var(--axis-inset)) * var(--timeline-zoom)));
+}
+
+.ruler-row {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: deprecated.$z-index-3;
+  display: flex;
+  flex: none;
+  background-color: var(--color-background-primary);
+}
+
+// Above the label column; covers the ruler scrolled under it.
+.ruler-corner {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: deprecated.$z-index-2;
+  inline-size: $track-label-width;
+  flex: none;
+  background-color: var(--color-background-primary);
+  border-bottom: 1px solid var(--panel-border-color);
+}
+
+@mixin zoom-thumb {
+  inline-size: 14px;
+  block-size: 14px;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--color-static-white);
+  box-shadow:
+    0 0 0 1px var(--color-background-quaternary),
+    0 1px 3px rgb(0 0 0 / 0.25);
+}
+
+// The global input reset (`appearance: none`) hides the native track, so
+// draw it: filled with the accent colour up to the thumb.
+.zoom-slider {
+  --zoom-fill: 0%;
+
+  appearance: none;
+  inline-size: 120px;
+  block-size: 4px;
+  margin: 0;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent-primary) var(--zoom-fill),
+    var(--color-background-quaternary) var(--zoom-fill)
+  );
+  cursor: pointer;
+
+  &::-webkit-slider-thumb {
+    @include zoom-thumb;
+
+    appearance: none;
+  }
+
+  &::-moz-range-thumb {
+    @include zoom-thumb;
+  }
+
+  &::-moz-range-track {
+    background: transparent;
+  }
+}
+
 .ruler {
   position: relative;
+  flex: 1;
   height: 24px;
-  margin-left: $track-label-width;
+  margin-inline: $axis-start-gap $axis-end-gap;
   border-bottom: 1px solid var(--panel-border-color);
   cursor: ew-resize;
   user-select: none;
+}
 
-  .ruler-time {
-    position: absolute;
-    right: deprecated.$s-8;
-    top: 4px;
-    font-size: deprecated.$fs-10;
-    color: var(--color-foreground-secondary);
-    pointer-events: none;
+// Ticks hang from the top edge of the ruler; the labelled (major) ones
+// are longer and carry their time to the right.
+.tick {
+  position: absolute;
+  inset-block-start: 0;
+  block-size: 4px;
+  border-inline-start: 1px solid var(--panel-border-color);
+  pointer-events: none;
+  z-index: deprecated.$z-index-1;
+
+  &.major {
+    block-size: 7px;
+    border-inline-start-color: var(--color-foreground-secondary);
   }
+}
+
+.tick-label {
+  position: absolute;
+  inset-block-start: 7px;
+  inset-inline-start: deprecated.$s-4;
+  font-size: deprecated.$fs-10;
+  white-space: nowrap;
+  color: var(--color-foreground-secondary);
+}
+
+.duration-shade {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  background-color: var(--color-background-tertiary);
+  pointer-events: none;
 }
 
 .playhead {
   position: absolute;
-  top: 0;
+  inset-block: 0;
   width: 0;
-  height: 100%;
-  border-left: 2px solid var(--color-accent-primary);
-  transform: translateX(-1px);
+  border-inline-start: 1px solid var(--color-accent-primary);
+  pointer-events: none;
+  z-index: deprecated.$z-index-1;
+}
+
+// Pin on top of the playhead line, pointing down; centred on the 1px
+// line (offsets start after the line's border).
+.playhead-handle {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: -7px;
+  inline-size: 13px;
+  block-size: 13px;
+  border-radius: 3px 3px 0 0;
+  background-color: var(--color-accent-primary);
+  clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
 }
 
 .tracks {
   position: relative;
   flex: 1;
-  overflow-y: auto;
+  user-select: none;
+}
+
+// Shown while dragging a box selection (see `show-marquee!`).
+.marquee {
+  display: none;
+  position: absolute;
+  pointer-events: none;
+  z-index: deprecated.$z-index-3;
+  border: 1px solid var(--color-accent-primary);
+  background-color: var(--color-accent-primary-muted);
+}
+
+// Spans the lanes' time axis, so the playhead line lines up with the
+// ruler and the keyframes.
+.playhead-axis {
+  position: absolute;
+  inset-block: 0;
+  inset-inline: calc(#{$track-label-width} + #{$axis-start-gap}) $axis-end-gap;
+  pointer-events: none;
+  z-index: deprecated.$z-index-1;
 }
 
 .playhead-line {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  margin-left: $track-label-width;
+  inset-block: 0;
   width: 0;
   border-left: 1px solid var(--color-accent-primary);
-  pointer-events: none;
-  z-index: deprecated.$z-index-1;
 }
 
 .tracks-hint {
@@ -183,50 +339,299 @@ $dock-height: 240px;
   color: var(--color-foreground-secondary);
 }
 
-.track {
-  border-bottom: 1px solid var(--panel-border-color);
-}
-
-.track-header {
+// One row per layer and per animated property: a label sticky on the
+// left, then the lane on the time axis.
+.row {
   display: flex;
-  align-items: center;
-  height: 28px;
-  width: $track-label-width;
-  padding: 0 deprecated.$s-8;
+  block-size: 28px;
+  background-color: var(--color-background-primary);
 
-  .track-name {
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    color: var(--color-foreground-primary);
+  &:hover {
+    background-color: var(--color-background-secondary);
+  }
+
+  &.selected {
+    background-color: var(--color-accent-primary-muted);
   }
 }
 
-.track-lanes {
-  display: flex;
-  flex-direction: column;
-}
-
-.lane-row {
+.row-label {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: deprecated.$z-index-2;
   display: flex;
   align-items: center;
-  height: 24px;
+  gap: deprecated.$s-4;
+  inline-size: $track-label-width;
+  flex: none;
+  padding-inline-end: deprecated.$s-8;
+  background-color: inherit;
+  box-shadow: inset -1px 0 0 var(--panel-border-color);
+  color: var(--color-foreground-secondary);
 }
 
-.lane-label {
-  width: $track-label-width;
-  padding: 0 deprecated.$s-8;
+.layer-row .row-label {
+  color: var(--color-foreground-primary);
+  cursor: pointer;
+}
+
+.row-lane {
+  position: relative;
+  z-index: deprecated.$z-index-2;
+  flex: 1;
+  margin-inline: $axis-start-gap $axis-end-gap;
+  cursor: crosshair;
+}
+
+.chevron {
+  display: grid;
+  place-items: center;
+  inline-size: 16px;
+  block-size: 16px;
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.layer-icon {
   flex: none;
   color: var(--color-foreground-secondary);
 }
 
-.property-lane {
-  position: relative;
-  height: 100%;
+// Show / hide and lock / unlock, like the layers panel: shown under the
+// pointer and on selected layers; a hidden or locked row keeps its button.
+// Property and animation rows keep room for them, so their other controls
+// stay in place.
+.row-toggles {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.row-toggle {
+  display: none;
+  place-items: center;
+  inline-size: 24px;
+  block-size: 24px;
+  padding: 0;
+  border: none;
+  border-radius: deprecated.$br-4;
+  background: none;
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+
+  .has-state &,
+  .property-row &,
+  .animation-row & {
+    display: grid;
+    opacity: 0;
+  }
+
+  &.active,
+  &:focus-visible {
+    display: grid;
+    opacity: 1;
+  }
+
+  .row:hover &,
+  .layer-row.selected & {
+    display: grid;
+    opacity: 1;
+    color: var(--color-accent-primary);
+  }
+}
+
+.hidden-layer {
+  .layer-icon,
+  .layer-name {
+    opacity: 0.5;
+  }
+}
+
+// A hidden property or animation, left out of playback and exports.
+.muted {
+  .property-name,
+  .row-controls,
+  .row-value,
+  .row-color,
+  .row-lane {
+    opacity: 0.5;
+  }
+}
+
+.layer-name,
+.property-name {
   flex: 1;
-  margin-right: deprecated.$s-8;
-  background-color: var(--color-background-tertiary);
-  border-radius: deprecated.$br-8;
+  min-inline-size: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.property-name {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+}
+
+// The corner joining a property to its layer.
+.tree-line {
+  align-self: flex-start;
+  inline-size: 10px;
+  block-size: 50%;
+  flex: none;
+  margin-inline-start: 7px;
+  border-inline-start: 1px solid var(--panel-border-color);
+  border-block-end: 1px solid var(--panel-border-color);
+}
+
+// Marks a property whose keyframes repeat ("Loop track").
+.loop-icon {
+  color: var(--color-accent-primary);
+}
+
+.row-controls {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.nav-btn,
+.diamond-btn {
+  display: grid;
+  place-items: center;
+  inline-size: 18px;
+  block-size: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: var(--color-foreground-primary);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+}
+
+.diamond {
+  inline-size: 8px;
+  block-size: 8px;
+  border: 1px solid currentcolor;
+  transform: rotate(45deg);
+}
+
+.diamond-btn.active {
+  color: var(--color-accent-primary);
+
+  .diamond {
+    background-color: currentcolor;
+  }
+}
+
+.row-color {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+  min-inline-size: 0;
+
+  &.disabled {
+    pointer-events: none;
+  }
+
+  .row-value {
+    inline-size: 56px;
+  }
+}
+
+.row-value {
+  inline-size: 52px;
+  block-size: 20px;
+  flex: none;
+  margin: 0;
+  padding: 0 deprecated.$s-4;
+  border: 1px solid transparent;
+  border-radius: deprecated.$br-4;
+  background: none;
+  font-size: inherit;
+  color: var(--color-foreground-primary);
+  text-align: end;
+
+  &:hover:not(:disabled),
+  &:focus {
+    border-color: var(--panel-border-color);
+  }
+
+  &:disabled {
+    color: var(--color-foreground-secondary);
+  }
+}
+
+// The keyframes of one property, joined by lines; accent coloured while
+// the layer is selected.
+.property-lane {
+  position: absolute;
+  inset: 0;
+  color: var(--color-foreground-secondary);
+
+  &.active {
+    color: var(--color-accent-primary);
+  }
+}
+
+// The line between two keyframes; hovering it shows its easing button.
+.segment {
+  position: absolute;
+  inset-block: 0;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    inset-block-start: 50%;
+    border-block-start: 1px solid currentcolor;
+  }
+
+  &:hover .easing-btn {
+    opacity: 1;
+  }
+}
+
+.easing-btn {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  display: grid;
+  place-items: center;
+  inline-size: 20px;
+  block-size: 20px;
+  padding: 0;
+  border: 1px solid currentcolor;
+  border-radius: deprecated.$br-4;
+  background-color: var(--color-background-primary);
+  color: inherit;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+
+  &.open {
+    opacity: 1;
+  }
+
+  &:disabled {
+    cursor: default;
+  }
 }
 
 .keyframe {
@@ -236,81 +641,130 @@ $dock-height: 240px;
   height: 10px;
   margin-left: -5px;
   transform: translateY(-50%) rotate(45deg);
-  background-color: var(--color-accent-primary);
-  border: 1px solid var(--color-background-primary);
+  border: 1px solid currentcolor;
+  background-color: transparent;
   cursor: pointer;
 
   &:hover {
-    background-color: var(--color-accent-secondary);
+    box-shadow: 0 0 0 2px var(--color-accent-primary-muted);
   }
 
   &.selected {
-    background-color: var(--color-accent-secondary);
-    border-color: var(--color-accent-primary);
+    background-color: currentcolor;
   }
-}
 
-.easing-panel {
-  display: flex;
-  flex-direction: column;
-  gap: deprecated.$s-8;
-  width: 160px;
-  flex: none;
-  padding: deprecated.$s-8;
-  border-left: 1px solid var(--panel-border-color);
-}
-
-.easing-title {
-  color: var(--color-foreground-primary);
-}
-
-.easing-editor {
-  display: flex;
-  flex-direction: column;
-  gap: deprecated.$s-8;
-}
-
-.easing-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: deprecated.$s-4;
-
-  .preset-btn {
-    height: 22px;
-    padding: 0 deprecated.$s-8;
-    border: 1px solid var(--panel-border-color);
-    border-radius: deprecated.$br-8;
-    background-color: var(--color-background-tertiary);
-    color: var(--color-foreground-secondary);
-    cursor: pointer;
+  // Kept from edits: it only moves the playhead.
+  &.locked {
+    cursor: default;
 
     &:hover {
-      background-color: var(--color-background-quaternary);
+      box-shadow: none;
     }
   }
 }
 
-.easing-svg {
-  background-color: var(--color-background-tertiary);
-  border: 1px solid var(--panel-border-color);
-  border-radius: deprecated.$br-8;
-  touch-action: none;
-}
-
-.easing-curve {
-  fill: none;
-  stroke: var(--color-accent-primary);
-  stroke-width: 2;
-}
-
-.easing-handle-line {
-  stroke: var(--color-foreground-secondary);
-  stroke-width: 1;
-}
-
-.easing-handle {
-  fill: var(--color-accent-primary);
+// The span of a layer's keyframes (and its children's): drag it to move
+// them, drag its ends to stretch them.
+.layer-bar {
+  position: absolute;
+  inset-block: 5px;
+  min-inline-size: 12px;
+  border-radius: deprecated.$br-6;
+  background-color: var(--timeline-bar-color);
+  color: var(--color-foreground-secondary);
   cursor: grab;
+
+  &.active {
+    background-color: var(--color-accent-primary);
+    color: var(--color-static-white);
+  }
+}
+
+// A preset animation over its span: drag it to move it, drag its ends to
+// change its start or its end.
+.animation-block {
+  position: absolute;
+  inset-block: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 12px;
+  padding-inline: deprecated.$s-16;
+  border-radius: deprecated.$br-6;
+  background-color: var(--timeline-bar-color);
+  color: var(--color-foreground-primary);
+  cursor: grab;
+
+  &.active {
+    background-color: var(--color-accent-primary);
+    color: var(--color-static-white);
+  }
+
+  // Kept from edits: it cannot be moved nor resized.
+  &.locked {
+    cursor: default;
+
+    .bar-handle {
+      display: none;
+    }
+  }
+}
+
+.animation-block-name {
+  @include deprecated.body-small-typography;
+
+  min-inline-size: 0;
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+// The ends of a bar or block: grabbed from just outside the edge to past
+// the grip, which sits 6px inside it and brightens under the pointer.
+.bar-handle {
+  position: absolute;
+  inset-block: 0;
+  inline-size: 14px;
+  cursor: ew-resize;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset-block: 30%;
+    inline-size: 2px;
+    border-radius: 1px;
+    background-color: currentcolor;
+    opacity: 0.6;
+  }
+}
+
+.bar-start {
+  inset-inline-start: -4px;
+
+  &::after {
+    inset-inline-start: 10px;
+  }
+}
+
+.bar-end {
+  inset-inline-end: -4px;
+
+  &::after {
+    inset-inline-end: 10px;
+  }
+}
+
+.layer-bar:hover,
+.animation-block:hover {
+  .bar-handle::after {
+    opacity: 1;
+  }
+}
+
+.easing-title {
+  color: var(--color-foreground-primary);
 }
 
 .empty-state {
@@ -320,4 +774,27 @@ $dock-height: 240px;
   justify-content: center;
   gap: deprecated.$s-12;
   height: 100%;
+}
+
+// Easing editor of a segment. The timeline is at the bottom of the window,
+// so it opens above the button.
+.easing-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-set);
+}
+
+.easing-popover {
+  position: fixed;
+  z-index: var(--z-index-set);
+  display: flex;
+  flex-direction: column;
+  gap: deprecated.$s-8;
+  padding: deprecated.$s-12;
+  border: 1px solid var(--panel-border-color);
+  border-radius: deprecated.$br-8;
+  background-color: var(--color-background-primary);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+  transform: translate(-50%, calc(-100% - 8px));
+  outline: none;
 }

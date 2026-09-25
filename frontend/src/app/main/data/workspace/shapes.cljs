@@ -12,6 +12,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.files.shapes-helpers :as cfsh]
    [app.common.logic.shapes :as cls]
+   [app.common.logic.timelines :as cltl]
    [app.common.schema :as sm]
    [app.common.types.component :as ctc]
    [app.common.types.container :as ctn]
@@ -337,7 +338,12 @@
             changes (-> (pcb/empty-changes it page-id)
                         (pcb/with-objects objects))
 
-            changes (cfsh/prepare-move-shapes-into-frame changes frame-id shapes objects true)]
+            changes (cfsh/prepare-move-shapes-into-frame changes frame-id shapes objects true)
+
+            ;; Their animation goes with them to their new board.
+            changes (some-> changes
+                            (cltl/generate-move-timelines (dsh/lookup-page state page-id)
+                                                          objects shapes))]
 
         (if (some? changes)
           (rx/of (dch/commit-changes changes))
@@ -443,6 +449,11 @@
                                                           false
                                                           nil
                                                           delta)
+
+             ;; Their animation goes with them to their new board.
+             changes (some-> changes
+                             (cltl/generate-move-timelines (dsh/lookup-page state page-id)
+                                                           objects shapes))
 
              undo-id  (js/Symbol)]
 

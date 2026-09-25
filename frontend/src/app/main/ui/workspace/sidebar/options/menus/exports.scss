@@ -88,3 +88,70 @@
   grid-column: 1 / span 9;
   height: deprecated.$s-32;
 }
+
+// Penpot tabs. Nested in the sidebar tabs, they would inherit their nav
+// padding, so it is reset to line up with the rows.
+.export-type {
+  --tabs-nav-padding-inline-start: 0;
+  --tabs-nav-padding-inline-end: 0;
+  --tabs-nav-padding-block-start: 0;
+  --tabs-nav-padding-block-end: 0;
+
+  grid-column: 1 / span 9;
+  margin-block-end: var(--sp-s);
+}
+
+// Settings, output info and the export button, each group apart.
+.animated-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-l);
+  padding-block-start: var(--sp-m);
+}
+
+.animated-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+}
+
+.animated-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-s);
+}
+
+.row-label {
+  @include deprecated.body-small-typography;
+
+  color: var(--color-foreground-secondary);
+}
+
+.row-control {
+  flex: 0 0 50%;
+  min-width: 0;
+}
+
+.row-value {
+  @include deprecated.body-small-typography;
+
+  color: var(--color-foreground-primary);
+}
+
+.animated-export-btn {
+  width: 100%;
+}
+
+.animated-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+.hint {
+  @include deprecated.body-small-typography;
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}

@@ -26,6 +26,7 @@
    [app.main.ui.ds.utilities.swatch :refer [swatch*]]
    [app.main.ui.formats :as fmt]
    [app.main.ui.hooks :as h]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.main.ui.workspace.tokens.management.forms.controls.utils :as csu]
    [app.util.color :as uc]
    [app.util.dom :as dom]
@@ -43,14 +44,17 @@
 
 (mf/defc color-info-wrapper*
   {::mf/private true}
-  [{:keys [color class handle-click-color children select-on-focus opacity on-focus on-blur on-opacity-change]}]
+  [{:keys [color class handle-click-color children select-on-focus opacity on-focus on-blur on-opacity-change color-property opacity-property keyframe-index]}]
   [:div {:class (stl/css :color-info)}
    [:div {:class class}
     [:div {:class (stl/css :color-bullet-wrapper)}
      [:> swatch* {:background color
                   :on-click handle-click-color
                   :size "small"}]]
-    children]
+    children
+    (when color-property
+      [:> keyframe-diamond* {:properties [color-property]
+                             :index keyframe-index}])]
    (when opacity
      [:div {:class (stl/css :opacity-element-wrapper)}
       [:span {:class (stl/css :icon-text)} "%"]
@@ -64,7 +68,10 @@
                                            :data-testid "opacity-input"
                                            :default 100
                                            :min 0
-                                           :max 100}]])])
+                                           :max 100}]
+      (when opacity-property
+        [:> keyframe-diamond* {:properties [opacity-property]
+                               :index keyframe-index}])])])
 
 (mf/defc color-token-row*
   {::mf/private true}
@@ -459,7 +466,10 @@
                                 :select-on-focus select-on-focus
                                 :on-focus on-focus'
                                 :on-blur on-blur'
-                                :on-opacity-change on-opacity-change}
+                                :on-opacity-change on-opacity-change
+                                :color-property (when (= origin :shadow) :shadow-color)
+                                :opacity-property (when (= origin :shadow) :shadow-opacity)
+                                :keyframe-index index}
 
         [:span {:class (stl/css :color-input-wrapper)}
          [:> color-input* {:value (if ^boolean has-multiple-colors
@@ -471,6 +481,13 @@
                            :on-focus on-focus'
                            :on-blur on-blur'
                            :on-change on-color-change}]]])
+
+     (when (and (= origin :fill)
+                (some? (:color color))
+                (nil? (:gradient color))
+                (nil? (:image color)))
+       [:> keyframe-diamond* {:properties [:fill-color :fill-opacity]
+                              :index index}])
 
      (when (some? on-remove)
        [:> icon-button* {:variant "ghost"

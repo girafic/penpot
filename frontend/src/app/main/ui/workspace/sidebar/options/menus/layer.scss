@@ -29,6 +29,21 @@
     @include t.use-typography("body-small");
 
     grid-column: span 2;
+    min-inline-size: 0;
+  }
+
+  .with-keyframe {
+    padding-inline-end: 0;
+
+    > button {
+      flex: none;
+      align-self: stretch;
+      inline-size: px2rem(28);
+      block-size: auto;
+      margin: 0;
+      border-start-end-radius: inherit;
+      border-end-end-radius: inherit;
+    }
   }
 
   .actions {
@@ -78,7 +93,26 @@
 
   block-size: $sz-32;
   margin-block-end: var(--sp-s);
-  grid-template-columns: var(--grid-exception-input-width) var(--grid-exception-input-width-small) auto auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+
+  .fused-input {
+    display: flex;
+    align-items: center;
+    min-inline-size: 0;
+
+    > :first-child {
+      flex: 1;
+      min-inline-size: 0;
+    }
+  }
+
+  .with-keyframe > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(28);
+    block-size: auto;
+    margin: 0;
+  }
 }
 
 .hidden-select {

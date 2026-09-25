@@ -131,6 +131,8 @@
   },
   "dependencies": {
     "@penpot/ui": "link:packages/ui",
+    "gifenc": "^1.0.3",
+    "mediabunny": "^1.59.0",
     "react-aria-components": "^1.20.0"
   }
 }

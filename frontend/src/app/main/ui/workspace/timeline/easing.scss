@@ -1,0 +1,196 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "ds/_borders.scss" as *;
+@use "ds/_sizes.scss" as *;
+@use "ds/_utils.scss" as *;
+@use "ds/typography.scss" as t;
+@use "refactor/common-refactor.scss" as deprecated;
+
+// Curve and spring, as Penpot tabs. Nested tabs inherit the nav padding of
+// the ones around them, so it is reset.
+.mode-tabs {
+  --tabs-nav-padding-inline-start: 0;
+  --tabs-nav-padding-inline-end: 0;
+  --tabs-nav-padding-block-start: 0;
+  --tabs-nav-padding-block-end: 0;
+
+  inline-size: px2rem(216);
+}
+
+.easing-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+  padding-block-start: var(--sp-s);
+}
+
+.curve-icon {
+  flex: none;
+  inline-size: px2rem(16);
+  block-size: px2rem(16);
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+// Named easings
+
+.preset-menu {
+  position: relative;
+}
+
+.preset-button {
+  @include t.use-typography("body-small");
+
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
+  inline-size: 100%;
+  block-size: $sz-32;
+  padding: 0 var(--sp-s);
+  border: none;
+  border-radius: $br-8;
+  background-color: var(--color-background-tertiary);
+  color: var(--color-foreground-primary);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-quaternary);
+  }
+}
+
+.preset-name {
+  flex: 1;
+  text-align: start;
+}
+
+.preset-arrow {
+  color: var(--color-foreground-secondary);
+}
+
+.preset-list {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: calc(#{$sz-32} + var(--sp-xs));
+  z-index: var(--z-index-dropdown);
+  max-block-size: px2rem(320);
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--sp-xs);
+  border: $b-1 solid var(--panel-border-color);
+  border-radius: $br-8;
+  background-color: var(--menu-background-color);
+  box-shadow: 0 0 $sz-12 0 var(--color-shadow-dark);
+}
+
+.preset-item {
+  @include t.use-typography("body-small");
+
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
+  padding: var(--sp-s);
+  border-radius: $br-6;
+  color: var(--menu-foreground-color);
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    outline: none;
+    background-color: var(--menu-background-color-hover);
+    color: var(--menu-foreground-color-hover);
+  }
+
+  &.selected {
+    color: var(--color-accent-primary);
+  }
+}
+
+// Graph
+
+.graph {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  border-radius: $br-8;
+  background-color: var(--color-background-tertiary);
+  touch-action: none;
+}
+
+.graph-guide {
+  stroke: var(--color-foreground-secondary);
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+}
+
+.graph-curve {
+  fill: none;
+  stroke: var(--color-foreground-primary);
+  stroke-width: 2;
+}
+
+.graph-handle-line {
+  stroke: var(--color-accent-primary);
+  stroke-width: 1.5;
+}
+
+.graph-handle {
+  fill: var(--color-background-tertiary);
+  stroke: var(--color-accent-primary);
+  stroke-width: 2;
+  cursor: grab;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+// Dragged sideways: the sooner the overshoot, the more the spring bounces.
+.spring-handle {
+  cursor: ew-resize;
+
+  &:active {
+    cursor: ew-resize;
+  }
+}
+
+// Values
+
+.values-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+}
+
+.values-input {
+  @extend %input-element;
+  @include t.use-typography("body-small");
+
+  flex: 1;
+  min-inline-size: 0;
+  padding: 0 var(--sp-s);
+  outline: none;
+
+  &:focus {
+    border-color: var(--input-border-color-focus);
+  }
+}
+
+.spring-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) px2rem(104);
+  align-items: center;
+  gap: var(--sp-s);
+}
+
+.spring-label {
+  @include t.use-typography("body-small");
+
+  color: var(--color-foreground-secondary);
+}

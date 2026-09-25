@@ -7912,6 +7912,51 @@ msgstr "Eliminar exportación"
 msgid "workspace.options.export.suffix"
 msgstr "Sufijo"
 
+msgid "workspace.options.export.static"
+msgstr "Estático"
+
+msgid "workspace.options.export.animated"
+msgstr "Animado"
+
+msgid "workspace.options.export.format"
+msgstr "Formato"
+
+msgid "workspace.options.export.quality"
+msgstr "Calidad"
+
+msgid "workspace.options.export.quality-low"
+msgstr "Baja"
+
+msgid "workspace.options.export.quality-medium"
+msgstr "Media"
+
+msgid "workspace.options.export.quality-high"
+msgstr "Alta"
+
+msgid "workspace.options.export.framerate"
+msgstr "Fotogramas"
+
+msgid "workspace.options.export.export-format"
+msgstr "Exportar %s"
+
+msgid "workspace.options.export.dimensions"
+msgstr "Dimensiones"
+
+msgid "workspace.options.export.file-size"
+msgstr "Tamaño de archivo"
+
+msgid "workspace.options.export.too-many-frames"
+msgstr "Demasiados fotogramas. Baja la cadencia o acorta la línea de tiempo."
+
+msgid "workspace.options.export.codec-unavailable"
+msgstr "Este formato no está disponible en este navegador. Prueba WebM o GIF."
+
+msgid "workspace.options.export.no-timeline"
+msgstr "Este tablero aún no tiene animación."
+
+msgid "workspace.options.export.progress"
+msgstr "Exportar fotograma %s de %s"
+
 #: src/app/main/ui/exports/assets.cljs:267
 msgid "workspace.options.exporting-busy"
 msgstr "La cola de exportación está llena, inténtalo de nuevo en unos momentos"

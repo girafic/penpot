@@ -16,6 +16,10 @@
   []
   (reset! interactive-transform-active? false))
 
+(defn active?
+  []
+  @interactive-transform-active?)
+
 (defn try-begin-interactive-transform!
   "Returns true iff we transitioned inactive → active and native `_set_modifiers_start`
   must run."

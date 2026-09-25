@@ -5,7 +5,7 @@
 ;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.main.ui.ds.foundations.assets.icon
-  (:refer-clojure :exclude [mask drop filter remove])
+  (:refer-clojure :exclude [mask drop filter remove loop])
   (:require-macros
    [app.common.data.macros :as dm]
    [app.main.style :as stl]
@@ -192,6 +192,8 @@
 (def ^:icon-id library "library")
 (def ^:icon-id locate "locate")
 (def ^:icon-id lock "lock")
+(def ^:icon-id loop "loop")
+(def ^:icon-id loop-off "loop-off")
 (def ^:icon-id margin "margin")
 (def ^:icon-id margin-bottom "margin-bottom")
 (def ^:icon-id margin-left "margin-left")
@@ -203,6 +205,7 @@
 (def ^:icon-id masked "masked")
 (def ^:icon-id menu "menu")
 (def ^:icon-id merge-nodes "merge-nodes")
+(def ^:icon-id motion "motion")
 (def ^:icon-id move "move")
 (def ^:icon-id msg-error "msg-error")
 (def ^:icon-id msg-neutral "msg-neutral")
@@ -220,6 +223,7 @@
 (def ^:icon-id path "path")
 (def ^:icon-id pentool "pentool")
 (def ^:icon-id percentage "percentage")
+(def ^:icon-id ping-pong "ping-pong")
 (def ^:icon-id picker "picker")
 (def ^:icon-id pin "pin")
 (def ^:icon-id play "play")

@@ -17,7 +17,7 @@
 
   // TODO: Fix this once we start implementing the DS.
   //       We should not be doing these hardcoded calc's.
-  block-size: calc(100vh - #{px2rem(60)});
+  block-size: calc(var(--workspace-height, 100vh) - #{px2rem(60)});
 }
 
 .search-field {

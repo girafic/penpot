@@ -8,6 +8,7 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
+   [app.common.types.animation :as cta]
    [app.common.types.color :as ctc]
    [app.main.data.workspace.colors :as dc]
    [app.main.data.workspace.tokens.application :as dwta]
@@ -22,6 +23,7 @@
    [app.main.ui.hooks :as h]
    [app.main.ui.workspace.sidebar.options.common :as soc]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.main.ui.workspace.sidebar.options.rows.color-row :refer [color-row*]]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -319,6 +321,10 @@
                       :select-on-focus select-on-focus
                       :on-blur on-blur}]
 
+      (when (cta/solid-color-stroke? stroke)
+        [:> keyframe-diamond* {:properties [:stroke-color :stroke-opacity]
+                               :index index}])
+
       (when (some? on-toggle-visibility)
         [:> icon-button* {:variant "ghost"
                           :aria-label (tr "workspace.options.stroke.toggle-stroke")
@@ -392,7 +398,9 @@
                                               :on-change on-width-change
                                               :on-focus on-focus
                                               :select-on-focus select-on-focus
-                                              :on-blur on-blur}]]
+                                              :on-blur on-blur}]
+         [:> keyframe-diamond* {:properties [:stroke-width]
+                                :index index}]]
         [:div {:class (stl/css :stroke-alignment-select)
                :data-testid "stroke.alignment"}
          [:& select {:default-value stroke-alignment

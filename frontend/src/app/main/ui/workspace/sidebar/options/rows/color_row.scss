@@ -188,6 +188,19 @@
   border-radius: $br-8;
 }
 
+.color-name-wrapper,
+.opacity-element-wrapper {
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(24);
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+  }
+}
+
 .opacity-element-wrapper {
   --opacity-input-background-color: var(--color-background-tertiary);
   --opacity-input-boder-color: var(--color-background-tertiary);
@@ -202,6 +215,11 @@
   border-radius: 0 $br-8 $br-8 0;
   border: $b-1 solid var(--opacity-input-boder-color);
   background-color: var(--opacity-input-background-color);
+
+  &:has(button) {
+    inline-size: auto;
+    min-inline-size: px2rem(84);
+  }
 
   &:hover {
     --opacity-input-background-color: var(--color-background-quaternary);

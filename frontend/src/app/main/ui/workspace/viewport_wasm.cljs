@@ -17,6 +17,7 @@
    [app.common.types.shape.layout :as ctl]
    [app.main.data.modal :as modal]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.transforms :as dwt]
    [app.main.data.workspace.variants :as dwv]
    [app.main.features :as features]
@@ -42,6 +43,7 @@
    [app.main.ui.workspace.viewport.guides :as guides]
    [app.main.ui.workspace.viewport.hooks :as hooks]
    [app.main.ui.workspace.viewport.interactions :as interactions]
+   [app.main.ui.workspace.viewport.motion-path :refer [motion-path*]]
    [app.main.ui.workspace.viewport.outline :as outline]
    [app.main.ui.workspace.viewport.path-state :as path-state]
    [app.main.ui.workspace.viewport.pixel-overlay :as pixel-overlay]
@@ -64,6 +66,7 @@
    [app.util.timers :as ts]
    [app.util.webapi :as webapi]
    [beicon.v2.core :as rx]
+   [okulary.core :as l]
    [promesa.core :as p]
    [rumext.v2 :as mf]))
 
@@ -82,6 +85,21 @@
 (defn apply-modifiers-to-selected
   [selected objects modifiers]
   (apply-modifiers-to-objects objects (select-keys modifiers selected)))
+
+(def ^:private ref:motion-timeline
+  (l/derived dwa/current-timeline st/state))
+
+(defn- preview-selected
+  "`objects` with the `selected` shapes where the animation shows them at
+  `time`."
+  [selected objects timeline time]
+  (let [shown (dwa/preview-shapes timeline objects time)]
+    (reduce (fn [objects id]
+              (if-let [shape (get shown id)]
+                (assoc objects id shape)
+                objects))
+            objects
+            selected)))
 
 (defn- apply-wasm-modifiers-to-ids
   "Like `apply-modifiers-to-objects`, but only updates ids in `id-set`. During WASM
@@ -196,10 +214,24 @@
 
         base-objects      (ui-hooks/with-focus-objects objects focus)
 
+        motion-timeline   (mf/deref ref:motion-timeline)
+        animation         (mf/deref refs/workspace-animation)
+
+        ;; In motion mode, while paused, the selection shows the selected
+        ;; shapes where the animation puts them, like hovering and clicking
+        ;; (see `dwa/index-preview`), but while they are transformed.
+        motion-preview?   (and (contains? layout :animation-timeline)
+                               (some? motion-timeline)
+                               (not (:playing? animation))
+                               (nil? transform))
+        playhead          (get animation :playhead 0)
+
         objects-modified
         (mf/with-memo
-          [base-objects wasm-modifiers]
-          (apply-modifiers-to-selected selected base-objects wasm-modifiers))
+          [base-objects wasm-modifiers selected motion-preview? motion-timeline playhead]
+          (if motion-preview?
+            (preview-selected selected base-objects motion-timeline playhead)
+            (apply-modifiers-to-selected selected base-objects wasm-modifiers)))
 
         selected-shapes   (->> selected
                                (into [] (keep (d/getf objects-modified)))
@@ -993,6 +1025,14 @@
                   :shapes selected-shapes
                   :zoom zoom
                   :disabled (or drawing-tool @space?)}])))
+
+          ;; In motion mode, the way the selected layer moves
+          (when (and (contains? layout :animation-timeline)
+                     (= 1 (count selected))
+                     (nil? transform)
+                     (not text-editing?))
+            [:> motion-path* {:shape-id (first selected)
+                              :zoom zoom}])
 
           (when show-prototypes?
             [:> interactions/interactions*

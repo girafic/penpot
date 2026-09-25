@@ -110,8 +110,8 @@
   max-inline-size: var(--left-sidebar-width-max);
   inline-size: var(--left-sidebar-width);
   background-color: var(--color-background-primary);
-  block-size: 100vh;
-  max-block-size: 100vh;
+  block-size: var(--workspace-height, 100vh);
+  max-block-size: var(--workspace-height, 100vh);
   z-index: var(--z-index-panels);
 }
 
@@ -150,7 +150,7 @@
   grid-area: right-sidebar;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  block-size: 100vh;
+  block-size: var(--workspace-height, 100vh);
   inline-size: var(--right-sidebar-width);
   background-color: var(--color-background-primary);
   z-index: var(--z-index-panels);
@@ -168,7 +168,7 @@
   display: grid;
   grid-template-columns: 100%;
   grid-template-rows: 100%;
-  block-size: calc(100vh - px2rem(52));
+  block-size: calc(var(--workspace-height, 100vh) - px2rem(52));
   overflow: hidden;
 }
 
@@ -181,5 +181,5 @@
 .versions-tab {
   inline-size: 100%;
   overflow: hidden;
-  block-size: calc(100vh - $sz-88);
+  block-size: calc(var(--workspace-height, 100vh) - $sz-88);
 }

@@ -10,7 +10,9 @@
    [frontend-tests.copy-as-svg-test]
    [frontend-tests.data.comments-filters-test]
    [frontend-tests.data.dashboard-test]
+   [frontend-tests.data.exports-animation-test]
    [frontend-tests.data.exports-assets-test]
+   [frontend-tests.data.exports-avif-test]
    [frontend-tests.data.nitrate-test]
    [frontend-tests.data.persistence-test]
    [frontend-tests.data.profile-test]
@@ -90,12 +92,15 @@
    [frontend-tests.ui.comments-clustering-test]
    [frontend-tests.ui.comments-position-modifier-test]
    [frontend-tests.ui.ds-controls-numeric-input-test]
+   [frontend-tests.ui.dynamic-modifiers-test]
+   [frontend-tests.ui.exports-menu-test]
    [frontend-tests.ui.gradient-handlers-test]
    [frontend-tests.ui.layout-container-multiple-test]
    [frontend-tests.ui.measures-menu-props-test]
    [frontend-tests.ui.routes-test]
    [frontend-tests.ui.settings-password-schema-test]
    [frontend-tests.ui.settings-shortcuts-test]
+   [frontend-tests.ui.timeline-selection-test]
    [frontend-tests.util-clipboard-test]
    [frontend-tests.util-object-test]
    [frontend-tests.util-range-tree-test]
@@ -131,6 +136,8 @@
    'frontend-tests.data.repo-test
    'frontend-tests.data.store-test
    'frontend-tests.data.exports-assets-test
+   'frontend-tests.data.exports-animation-test
+   'frontend-tests.data.exports-avif-test
    'frontend-tests.data.uploads-test
    'frontend-tests.data.viewer-test
    'frontend-tests.data.workspace-colors-test
@@ -203,6 +210,8 @@
    'frontend-tests.ui.comments-clustering-test
    'frontend-tests.ui.comments-position-modifier-test
    'frontend-tests.ui.ds-controls-numeric-input-test
+   'frontend-tests.ui.dynamic-modifiers-test
+   'frontend-tests.ui.exports-menu-test
    'frontend-tests.ui.gradient-handlers-test
    'frontend-tests.ui.layout-container-multiple-test
    'frontend-tests.ui.measures-menu-props-test
@@ -211,6 +220,7 @@
    'frontend-tests.text-editor-paste-guard-test
    'frontend-tests.ui.settings-password-schema-test
    'frontend-tests.ui.settings-shortcuts-test
+   'frontend-tests.ui.timeline-selection-test
    'frontend-tests.util-clipboard-test
    'frontend-tests.util-object-test
    'frontend-tests.util-range-tree-test

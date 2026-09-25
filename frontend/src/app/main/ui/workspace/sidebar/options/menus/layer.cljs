@@ -16,9 +16,11 @@
    [app.main.store :as st]
    [app.main.ui.components.numeric-input :as deprecated-input]
    [app.main.ui.components.select :refer [select]]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.render-wasm.api :as wasm.api]
    [app.util.i18n :as i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -65,6 +67,9 @@
   [{:keys [ids values applied-tokens]}]
   (let [token-numeric-inputs
         (features/use-feature "tokens/numeric-input")
+
+        motion-id
+        (mf/use-ctx ctx/motion-shape-id)
 
         hidden?             (get values :hidden)
         blocked?            (get values :blocked)
@@ -230,25 +235,29 @@
          :on-pointer-enter-option handle-blend-mode-enter
          :on-pointer-leave-option handle-blend-mode-leave}]
 
-       [:> numeric-input-wrapper*
-        {:on-change on-opacity-change
-         :on-detach on-detach-token
-         :icon i/percentage
-         :min 0
-         :max 100
-         :attr :opacity
-         :property (tr "workspace.options.opacity")
-         :applied-token (get applied-tokens :opacity)
-         :placeholder (if (or (= :multiple (get applied-tokens :opacity))
-                              (= :multiple (or (get values :opacity) 1)))
-                        (tr "settings.multiple")
-                        "--")
-         :align :right
-         :disabled (if (or (= :multiple hidden?) hidden?) true false)
-         :class (stl/css :numeric-input-wrapper)
-         :value (if (= :multiple opacity)
-                  opacity
-                  (* 100 (d/nilv opacity 1)))}]
+       [:div {:class (stl/css-case :fused-input true
+                                   :with-keyframe (some? motion-id))}
+        [:> numeric-input-wrapper*
+         {:on-change on-opacity-change
+          :on-detach on-detach-token
+          :icon i/percentage
+          :min 0
+          :max 100
+          :attr :opacity
+          :property (tr "workspace.options.opacity")
+          :applied-token (get applied-tokens :opacity)
+          :placeholder (if (or (= :multiple (get applied-tokens :opacity))
+                               (= :multiple (or (get values :opacity) 1)))
+                         (tr "settings.multiple")
+                         "--")
+          :align :right
+          :disabled (if (or (= :multiple hidden?) hidden?) true false)
+          :class (stl/css :numeric-input-wrapper)
+          :value (if (= :multiple opacity)
+                   opacity
+                   (* 100 (d/nilv opacity 1)))}]
+        (when motion-id
+          [:> keyframe-diamond* {:properties [:opacity]}])]
 
        (cond
          (or (= :multiple hidden?) (not hidden?))
@@ -293,7 +302,8 @@
           :on-pointer-enter-option handle-blend-mode-enter
           :on-pointer-leave-option handle-blend-mode-leave}]]
 
-       [:div {:class (stl/css :input)
+       [:div {:class (stl/css-case :input true
+                                   :with-keyframe (some? motion-id))
               :title (tr "workspace.options.opacity")}
         [:span {:class (stl/css :icon)} "%"]
         [:> deprecated-input/numeric-input*
@@ -302,7 +312,9 @@
           :on-change handle-opacity-change
           :min 0
           :max 100
-          :class (stl/css :numeric-input)}]]
+          :class (stl/css :numeric-input)}]
+        (when motion-id
+          [:> keyframe-diamond* {:properties [:opacity]}])]
 
        [:div {:class (stl/css :actions)}
         (cond

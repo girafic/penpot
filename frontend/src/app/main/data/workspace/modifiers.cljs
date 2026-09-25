@@ -705,8 +705,11 @@
 
 #_:clj-kondo/ignore
 (defn set-wasm-modifiers
+  "Preview `modif-tree` on the canvas. With `skip-selrect?` the selection
+  rect is left as it is (the animation preview moves shapes that may not
+  be selected)."
   [modif-tree & {:keys [ignore-constraints ignore-snap-pixel snap-ignore-axis
-                        subtree-ids-by-id selection-rect-cache]
+                        subtree-ids-by-id selection-rect-cache skip-selrect?]
                  :or {ignore-constraints false ignore-snap-pixel false snap-ignore-axis nil}
                  :as params}]
   (let [modif-tree (without-nil-ids modif-tree)]
@@ -762,13 +765,15 @@
                     (if (seq propagated) propagated root-modifiers)))]
             (when wasm-ready?
               (wasm.api/set-modifiers modifiers))
-            (let [ids     (into [] xf:map-key geometry-entries)
-                  selrect (when wasm-ready?
-                            (if (and translation? (not snap-pixel?) selection-rect-cache (seq modifiers))
-                              (cached-translation-selrect ids (second (first modifiers)) selection-rect-cache)
-                              (wasm.api/get-selection-rect ids)))]
-              (rx/of (set-temporary-selrect selrect)
-                     (set-temporary-modifiers modifiers)))))))))
+            (if skip-selrect?
+              (rx/of (set-temporary-modifiers modifiers))
+              (let [ids     (into [] xf:map-key geometry-entries)
+                    selrect (when wasm-ready?
+                              (if (and translation? (not snap-pixel?) selection-rect-cache (seq modifiers))
+                                (cached-translation-selrect ids (second (first modifiers)) selection-rect-cache)
+                                (wasm.api/get-selection-rect ids)))]
+                (rx/of (set-temporary-selrect selrect)
+                       (set-temporary-modifiers modifiers))))))))))
 
 (defn propagate-structure-modifiers
   [modif-tree objects]

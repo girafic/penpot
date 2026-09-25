@@ -19,6 +19,7 @@
    [app.common.geom.shapes.grid-layout :as gslg]
    [app.common.logic.libraries :as cll]
    [app.common.logic.shapes :as cls]
+   [app.common.logic.timelines :as cltl]
    [app.common.schema :as sm]
    [app.common.transit :as t]
    [app.common.types.component :as ctk]
@@ -207,16 +208,21 @@
                   file     (dsh/lookup-file state file-id)
                   version  (get file :version)
 
-                  initial  {:type :copied-shapes
-                            :features features
-                            :version version
-                            :file-id file-id
-                            :selected selected
-                            :objects {}
-                            :images #{}}
+                  shape-ids (cfh/selected-with-children objects selected)
 
-                  shapes   (->> (cfh/selected-with-children objects selected)
-                                (keep (d/getf objects)))]
+                  ;; Their animation, read now: a cut deletes it with them.
+                  motion   (cltl/animation-sources (dsh/lookup-page state) objects shape-ids)
+
+                  initial  (cond-> {:type :copied-shapes
+                                    :features features
+                                    :version version
+                                    :file-id file-id
+                                    :selected selected
+                                    :objects {}
+                                    :images #{}}
+                             (seq (:tracks motion)) (assoc :motion motion))
+
+                  shapes   (keep (d/getf objects) shape-ids)]
 
               ;; The clipboard API doesn't handle well asynchronous calls because it expects to use
               ;; the clipboard in an user interaction. If you do an async call the callback is outside
@@ -924,7 +930,10 @@
 
               changes      (-> (pcb/empty-changes it)
                                (cll/generate-duplicate-changes all-objects page selected delta
-                                                               libraries ldata file-id {:variant-props variant-props})
+                                                               libraries ldata file-id
+                                                               {:variant-props variant-props
+                                                                ;; only what was copied
+                                                                :motion (or (:motion pdata) {})})
                                (pcb/amend-changes (partial process-rchange media-idx))
                                (pcb/amend-changes (partial change-add-obj-index objects selected index)))
 

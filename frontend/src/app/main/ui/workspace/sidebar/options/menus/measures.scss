@@ -17,6 +17,11 @@
 
   gap: var(--sp-xs);
   margin-bottom: var(--sp-s);
+
+  // Inputs shrink so the keyframe diamond fits inside the field.
+  &.with-size-keyframe {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--sp-xxxl);
+  }
 }
 
 .presets {
@@ -153,6 +158,85 @@
   }
 }
 
+.transform-header {
+  position: relative;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-block-size: var(--sp-xxxl);
+}
+
+.transform-title {
+  @include deprecated.body-small-typography;
+
+  color: var(--title-foreground-color);
+}
+
+.origin-popover {
+  @extend %dropdown-wrapper;
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+  inset-inline-end: 0;
+  min-inline-size: px2rem(188);
+  padding: var(--sp-s);
+}
+
+.origin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-s);
+  padding: var(--sp-m);
+  border-radius: deprecated.$br-8;
+  background: var(--input-background-color);
+}
+
+.origin-cell {
+  @include deprecated.flex-center;
+
+  block-size: px2rem(16);
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+
+  &::after {
+    content: "";
+    display: block;
+    inline-size: px2rem(4);
+    block-size: px2rem(4);
+    border-radius: 50%;
+    background: var(--icon-foreground);
+  }
+
+  &.selected::after {
+    inline-size: px2rem(8);
+    block-size: px2rem(8);
+    border-radius: deprecated.$br-2;
+    background: var(--button-primary-background-color-rest);
+  }
+}
+
+.origin-pcts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-xs);
+}
+
+.origin-pct {
+  @extend %input-element;
+  @include deprecated.body-small-typography;
+
+  min-inline-size: 0;
+}
+
+.origin-unit {
+  padding-inline-end: var(--sp-s);
+  color: var(--input-foreground-color);
+}
+
 .size,
 .position,
 .rotation-radius {
@@ -169,6 +253,8 @@
   @extend %input-element;
   @include deprecated.body-small-typography;
 
+  min-inline-size: 0;
+
   .icon-text {
     padding-top: deprecated.$s-1;
   }
@@ -178,8 +264,37 @@
   }
 }
 
+// The diamond is the trailing part of the field, one control with the input.
+.with-keyframe {
+  padding-inline-end: 0;
+
+  input {
+    min-inline-size: 0;
+    inline-size: auto;
+    flex: 1;
+  }
+
+  > div {
+    flex: 1;
+    min-inline-size: 0;
+    border: none;
+    background: transparent;
+    block-size: 100%;
+  }
+
+  > button {
+    flex: none;
+    align-self: stretch;
+    inline-size: px2rem(28);
+    block-size: auto;
+    margin: 0;
+    border-start-end-radius: inherit;
+    border-end-end-radius: inherit;
+  }
+}
+
 .border-radius {
-  grid-column: 2/-1;
+  grid-column: 2 / -1;
 }
 
 .lock-size-btn {

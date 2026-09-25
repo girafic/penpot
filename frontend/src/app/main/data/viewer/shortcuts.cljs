@@ -67,7 +67,11 @@
                         :command ["right" "down" "enter" "pagedown" "space"]
                         :subsections [:generic]
                         :section [:viewer]
-                        :fn #(st/emit! dv/select-next-frame)}
+                        :fn (fn [event]
+                              (st/emit!
+                               (if (= " " (some-> event .-key))
+                                 (dv/toggle-timeline-or-next-frame)
+                                 dv/select-next-frame)))}
 
    :open-inspect       {:tooltip "G I"
                         :command "g i"

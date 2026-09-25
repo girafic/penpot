@@ -51,3 +51,8 @@
   right sidebar menu options components."
   (mf/create-context nil))
 
+(def motion-shape-id
+  "Shape whose design rows show a keyframe diamond. Nil outside motion
+  mode, or when more than one shape is selected."
+  (mf/create-context nil))
+

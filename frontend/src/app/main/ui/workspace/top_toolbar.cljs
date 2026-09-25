@@ -13,6 +13,7 @@
    [app.main.data.event :as ev]
    [app.main.data.modal :as modal]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.drawing.common :as dwdc]
    [app.main.data.workspace.mcp :as mcp]
@@ -354,6 +355,7 @@
         mcp                   (mf/deref refs/mcp)
 
         plugins-enabled? (features/active-feature? @st/state "plugins/runtime")
+        motion-enabled?  (features/use-feature "animation/v1")
         read-only?       (mf/use-ctx ctx/workspace-read-only?)
 
         mcp-conn-status  (get mcp :connection-status)
@@ -365,7 +367,7 @@
                               mcp-enabled?
                               mcp-valid-token?)
 
-        separator?       (or plugins-enabled? *assert* mcp-show?)
+        separator?       (or plugins-enabled? motion-enabled? *assert* mcp-show?)
 
         on-display-plugins-manager
         (mf/use-fn
@@ -384,6 +386,9 @@
              (st/emit! (dw/remove-layout-flag :shortcuts)
                        (-> (dw/toggle-layout-flag :debug-panel)
                            (vary-meta assoc ::ev/origin "workspace-left-toolbar"))))))
+
+        on-toggle-motion-mode
+        (mf/use-fn #(st/emit! (dwa/toggle-motion-mode)))
 
         on-interrupt
         (mf/use-fn
@@ -468,6 +473,15 @@
                              :icon i/puzzle
                              :on-click on-display-plugins-manager
                              :data-tool "plugins"}]])
+
+        (when motion-enabled?
+          [:li {:class (stl/css :toolbar-option)}
+           [:> icon-button* {:variant "ghost"
+                             :tooltip-placement "bottom"
+                             :aria-pressed (contains? layout :animation-timeline)
+                             :aria-label (tr "workspace.toolbar.motion-mode")
+                             :icon i/motion
+                             :on-click on-toggle-motion-mode}]])
 
         (when *assert*
           [:li {:class (stl/css :toolbar-option)}

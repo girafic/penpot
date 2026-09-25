@@ -31,6 +31,7 @@
 (defonce ^:private viewer-snapshot
   (atom {:os-canvas nil
          :page-key  nil
+         :objects   nil
          :canvas-w  0
          :canvas-h  0
          :dpr       1}))
@@ -39,6 +40,7 @@
   (reset! viewer-snapshot
           {:os-canvas nil
            :page-key nil
+           :objects nil
            :canvas-w 0
            :canvas-h 0
            :dpr 1}))
@@ -175,7 +177,14 @@
              (when-not same-size?
                (wasm.api/resize-offscreen-canvas! os vis-w vis-h)
                (swap! viewer-snapshot assoc :canvas-w vis-w :canvas-h vis-h :dpr dpr))
-             (do-render! os))
+             ;; The page id stays put while a timeline plays, so the
+             ;; snapshot would otherwise keep drawing the first frame.
+             ;; Re-upload the shapes, then draw them.
+             (if (identical? page-objects (:objects snap))
+               (do-render! os)
+               (do
+                 (swap! viewer-snapshot assoc :objects page-objects)
+                 (wasm.api/set-objects page-objects #(do-render! os) nil true))))
            (let [os-canvas (js/OffscreenCanvas. vis-w vis-h)]
              (when (wasm.api/initialized?)
                (wasm.api/clear-canvas {:lose-browser-context? false}))
@@ -184,6 +193,7 @@
                  (reset! viewer-snapshot
                          {:os-canvas os-canvas
                           :page-key  page-key
+                          :objects   page-objects
                           :canvas-w  vis-w
                           :canvas-h  vis-h
                           :dpr       dpr})

@@ -163,9 +163,13 @@
   (l/derived :workspace-tokens st/state))
 
 (def workspace-animation
-  "Transient timeline-animation state (current timeline, playhead,
-  playing?, auto-key?)."
+  "Transient timeline-animation state (playhead, playing?, selected
+  keyframe, targeted board)."
   (l/derived :workspace-animation st/state))
+
+(def export-animation
+  "Transient animation export progress."
+  (l/derived :export-animation st/state))
 
 (def workspace-selrect
   (let [a (atom nil)]

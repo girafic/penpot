@@ -11,6 +11,7 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
+   [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
    [app.common.types.component :as ctk]
    [app.common.types.shape :as cts]
@@ -44,6 +45,7 @@
    [app.main.ui.workspace.viewport.guides :as guides]
    [app.main.ui.workspace.viewport.hooks :as hooks]
    [app.main.ui.workspace.viewport.interactions :as interactions]
+   [app.main.ui.workspace.viewport.motion-path :refer [motion-path*]]
    [app.main.ui.workspace.viewport.outline :as outline]
    [app.main.ui.workspace.viewport.path-state :as path-state]
    [app.main.ui.workspace.viewport.pixel-overlay :as pixel-overlay]
@@ -258,8 +260,8 @@
                                       (or drawing-obj transform)
                                       (not path-editing?))
 
-        render-objects           (mf/with-memo [base-objects path-editing? edition]
-                                   (cond-> base-objects
+        render-objects           (mf/with-memo [base-objects path-editing? edition modifiers]
+                                   (cond-> (cta/apply-appearance-modifiers base-objects modifiers)
                                      path-editing?
                                      (assoc-in [edition :hidden] true)))
         show-selrect?            (and selrect (or (empty? drawing) path-editing?) (not text-editing?))
@@ -715,6 +717,14 @@
                   :shapes selected-shapes
                   :zoom zoom
                   :disabled (or drawing-tool @space?)}])))
+
+          ;; In motion mode, the way the selected layer moves
+          (when (and (contains? layout :animation-timeline)
+                     (= 1 (count selected))
+                     (nil? transform)
+                     (not text-editing?))
+            [:> motion-path* {:shape-id (first selected)
+                              :zoom zoom}])
 
           (when show-prototypes?
             [:> interactions/interactions*
