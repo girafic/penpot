@@ -353,6 +353,33 @@ export interface Board extends ShapeBase {
   removeRulerGuide(guide: RulerGuide): void;
 
   /**
+   * The keyframe animation of the board (Penpot Motion), or `null` when it
+   * has none. Only a board at the top of the page has one: it animates the
+   * board and the layers inside it.
+   *
+   * @example
+   * ```js
+   * const timeline = board.timeline ?? board.addTimeline({ duration: 1500 });
+   * ```
+   */
+  readonly timeline: Timeline | null;
+
+  /**
+   * Gives the board a keyframe animation (Penpot Motion), or the one it has
+   * the settings of `options`, and returns it. Only a board at the top of
+   * the page has one. Needs the Motion feature (`animation/v1`) and the
+   * `content:write` permission.
+   * @param options The name, the duration in milliseconds and what playback
+   * does at the end.
+   *
+   * @example
+   * ```js
+   * const timeline = board.addTimeline({ duration: 2000, playback: 'loop' });
+   * ```
+   */
+  addTimeline(options?: TimelineOptions): Timeline;
+
+  /**
    * @return Returns true when the current board is a VariantContainer
    */
   isVariantContainer(): boolean;
@@ -3169,6 +3196,12 @@ export interface Page extends PluginData {
   readonly rulerGuides: RulerGuide[];
 
   /**
+   * The keyframe animations (Penpot Motion) of the boards of the page, one
+   * per animated board.
+   */
+  readonly timelines: Timeline[];
+
+  /**
    * The root shape of the current page. Will be the parent shape of all the shapes inside the document.
    * Requires `content:read` permission.
    */
@@ -3611,6 +3644,412 @@ export interface RulerGuide {
  * The possible orientations for a ruler guide: 'horizontal' or 'vertical'.
  */
 export type RulerGuideOrientation = 'horizontal' | 'vertical';
+
+/**
+ * The keyframe animation of a board (Penpot Motion). The board and the
+ * layers inside it animate over `duration` milliseconds in two ways:
+ * - Keyframes: the value of a property of a layer at a time; between two
+ *   keyframes the value goes from one to the other, eased as the first one
+ *   says.
+ * - Preset animations: an effect (fade, move, scale or rotate) over a span
+ *   of time that stays editable, like an entrance or an exit.
+ *
+ * Changing it needs the Motion feature (`animation/v1`) and the
+ * `content:write` permission. Every change can be undone.
+ *
+ * @example
+ * ```js
+ * const board = penpot.selection[0];
+ * const [title, button] = board.children;
+ * const timeline = board.addTimeline({ duration: 1200 });
+ * timeline.addKeyframe(title, { property: 'x', time: 0, value: -200 });
+ * timeline.addKeyframe(title, { property: 'x', time: 800, value: 40, easing: 'ease-out' });
+ * timeline.addAnimation(button, { type: 'fade', start: 600, duration: 400 });
+ * ```
+ */
+export interface Timeline {
+  /**
+   * The board the timeline animates.
+   */
+  readonly board: Board;
+
+  /**
+   * The name of the animation.
+   */
+  name: string;
+
+  /**
+   * How long the animation plays, in milliseconds. Adding a keyframe or a
+   * preset animation past it makes it longer.
+   */
+  duration: number;
+
+  /**
+   * What playback does at the end: stop there (`once`), start over (`loop`)
+   * or play backwards and on (`ping-pong`).
+   */
+  playback: TimelinePlayback;
+
+  /**
+   * The keyframes of the board and the layers inside it, by time.
+   */
+  readonly keyframes: Keyframe[];
+
+  /**
+   * The preset animations of the board and the layers inside it, by start.
+   */
+  readonly animations: PresetAnimation[];
+
+  /**
+   * Adds a keyframe of `shape`, the board or a layer inside it. A keyframe
+   * of the same property at the same time takes its place.
+   * @param shape The board or a layer inside it.
+   * @param keyframe The property, time, value and easing of the keyframe.
+   *
+   * @example
+   * ```js
+   * timeline.addKeyframe(shape, { property: 'opacity', time: 0, value: 0 });
+   * timeline.addKeyframe(shape, { property: 'opacity', time: 500, value: 1 });
+   * timeline.addKeyframe(shape, { property: 'fillColor', time: 500, value: '#ff6600', index: 0 });
+   * ```
+   */
+  addKeyframe(shape: Shape, keyframe: KeyframeProps): Keyframe;
+
+  /**
+   * Adds a preset animation of `shape`, the board or a layer inside it.
+   * @param shape The board or a layer inside it.
+   * @param animation The type, timing and settings of the animation.
+   *
+   * @example
+   * ```js
+   * timeline.addAnimation(shape, { type: 'move', start: 0, duration: 400, offsetY: 40 });
+   * timeline.addAnimation(shape, { type: 'fade', direction: 'out', start: 1600, duration: 300 });
+   * ```
+   */
+  addAnimation(shape: Shape, animation: PresetAnimationProps): PresetAnimation;
+
+  /**
+   * Adds the preset animations of an animation style to `shape`, starting
+   * at `start` milliseconds (0 by default), and returns them.
+   * @param shape The board or a layer inside it.
+   * @param style The style, like `slide-up` (a fade and a move up) or `pop`.
+   * @param start When they start, in milliseconds.
+   */
+  addAnimationStyle(
+    shape: Shape,
+    style: AnimationStyle,
+    start?: number,
+  ): PresetAnimation[];
+
+  /**
+   * The value the animation gives `property` of `shape` at `time`, or `null`
+   * when it does not animate it.
+   * @param shape The board or a layer inside it.
+   * @param property The property.
+   * @param time The time, in milliseconds.
+   * @param index For fills, strokes and shadows: which one (0 by default).
+   */
+  valueAt(
+    shape: Shape,
+    property: AnimatableProperty,
+    time: number,
+    index?: number,
+  ): number | string | null;
+
+  /**
+   * Removes the keyframes and preset animations of `shape`.
+   */
+  clear(shape: Shape): void;
+
+  /**
+   * The animation as CSS: `@keyframes` and the `animation` rules of the
+   * layers.
+   */
+  toCSS(): string;
+
+  /**
+   * Removes the animation of the board.
+   */
+  remove(): void;
+}
+
+/**
+ * The settings of a new timeline, see `Board.addTimeline`.
+ */
+export interface TimelineOptions {
+  /**
+   * The name of the animation.
+   */
+  name?: string;
+  /**
+   * How long it plays, in milliseconds (1000 by default).
+   */
+  duration?: number;
+  /**
+   * What playback does at the end (`once` by default).
+   */
+  playback?: TimelinePlayback;
+}
+
+/**
+ * What playback of a timeline does at its end: stop there (`once`), start
+ * over (`loop`) or play backwards and on (`ping-pong`).
+ */
+export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
+
+/**
+ * A property a keyframe can animate, and what its value is:
+ * - `x`, `y`: the position of the layer itself (its top left corner before
+ *   it is turned) relative to the board, in pixels; the board's own is
+ *   relative to the canvas.
+ * - `width`, `height`, `strokeWidth`, `blur`, `backgroundBlur`,
+ *   `shadowOffsetX`, `shadowOffsetY`, `shadowBlur`, `shadowSpread` and the
+ *   `borderRadius…` corners: pixels.
+ * - `rotation`: degrees.
+ * - `scaleX`, `scaleY`: a factor, 1 is the layer's own size.
+ * - `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1.
+ * - `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
+ *   `#ff6600`.
+ * - `trimStart`, `trimEnd`, `trimOffset`: a fraction of the outline (0 to
+ *   1) the strokes are drawn along, to draw a line on.
+ *
+ * The fill, stroke and shadow properties take the `index` of the fill,
+ * stroke or shadow of the layer.
+ */
+export type AnimatableProperty =
+  | 'x'
+  | 'y'
+  | 'width'
+  | 'height'
+  | 'rotation'
+  | 'scaleX'
+  | 'scaleY'
+  | 'opacity'
+  | 'borderRadiusTopLeft'
+  | 'borderRadiusTopRight'
+  | 'borderRadiusBottomRight'
+  | 'borderRadiusBottomLeft'
+  | 'fillColor'
+  | 'fillOpacity'
+  | 'strokeColor'
+  | 'strokeOpacity'
+  | 'strokeWidth'
+  | 'shadowOffsetX'
+  | 'shadowOffsetY'
+  | 'shadowBlur'
+  | 'shadowSpread'
+  | 'shadowColor'
+  | 'shadowOpacity'
+  | 'blur'
+  | 'backgroundBlur'
+  | 'trimStart'
+  | 'trimEnd'
+  | 'trimOffset';
+
+/**
+ * How a value goes from a keyframe to the next one, or how a preset
+ * animation plays:
+ * - A preset curve: `linear`, `ease`, `ease-in`, `ease-out` or
+ *   `ease-in-out`, like in CSS.
+ * - `hold`: the value stays until the next keyframe (keyframes only).
+ * - A cubic bezier curve, like the CSS `cubic-bezier()`:
+ *   `{ type: 'bezier', curve: [x1, y1, x2, y2] }`.
+ * - A spring that settles at the next keyframe:
+ *   `{ type: 'spring', stiffness: 170, damping: 26, mass: 1 }`.
+ */
+export type MotionEasing =
+  | 'linear'
+  | 'ease'
+  | 'ease-in'
+  | 'ease-out'
+  | 'ease-in-out'
+  | 'hold'
+  | { type: 'bezier'; curve: [number, number, number, number] }
+  | { type: 'spring'; stiffness: number; damping: number; mass: number };
+
+/**
+ * A keyframe to add, see `Timeline.addKeyframe`.
+ */
+export interface KeyframeProps {
+  /**
+   * The property it sets, see `AnimatableProperty` for its values.
+   */
+  property: AnimatableProperty;
+  /**
+   * When, in milliseconds from the start of the animation.
+   */
+  time: number;
+  /**
+   * The value of the property then: a number, or a hexadecimal color for
+   * the colors.
+   */
+  value: number | string;
+  /**
+   * How the value goes on from here to the next keyframe (`ease` by
+   * default).
+   */
+  easing?: MotionEasing;
+  /**
+   * For fills, strokes and shadows: which one of the layer (0 by default).
+   */
+  index?: number;
+}
+
+/**
+ * The value of a property of a layer at a time, in a `Timeline`.
+ */
+export interface Keyframe {
+  /**
+   * The id of the keyframe.
+   */
+  readonly id: string;
+  /**
+   * The board or layer it animates.
+   */
+  readonly shape: Shape;
+  /**
+   * The property it sets.
+   */
+  readonly property: AnimatableProperty;
+  /**
+   * For fills, strokes and shadows: which one of the layer.
+   */
+  readonly index?: number;
+  /**
+   * When, in milliseconds from the start of the animation.
+   */
+  time: number;
+  /**
+   * The value of the property then, see `AnimatableProperty`.
+   */
+  value: number | string;
+  /**
+   * How the value goes on from here to the next keyframe.
+   */
+  easing: MotionEasing;
+  /**
+   * Removes the keyframe.
+   */
+  remove(): void;
+}
+
+/**
+ * The effect of a preset animation:
+ * - `fade`: the opacity, from `amount` (0 by default) to the layer's own.
+ * - `move`: the position, from `offsetX` and `offsetY` pixels away.
+ * - `scale`: the size, from `amount` times it (0.5 by default).
+ * - `rotate`: the rotation, from `amount` degrees turned (-90 by default).
+ */
+export type PresetAnimationType = 'fade' | 'move' | 'scale' | 'rotate';
+
+/**
+ * A preset animation to add, see `Timeline.addAnimation`.
+ */
+export interface PresetAnimationProps {
+  /**
+   * The effect.
+   */
+  type: PresetAnimationType;
+  /**
+   * `in` plays from the effect to the layer as it is (an entrance), `out`
+   * from the layer to the effect (an exit). `in` by default.
+   */
+  direction?: 'in' | 'out';
+  /**
+   * When it starts, in milliseconds (0 by default).
+   */
+  start?: number;
+  /**
+   * How long it plays, in milliseconds.
+   */
+  duration?: number;
+  /**
+   * How it plays (`ease-out` for an entrance and `ease-in` for an exit by
+   * default). It cannot hold.
+   */
+  easing?: MotionEasing;
+  /**
+   * For `fade`, `scale` and `rotate`: where the effect starts or ends, see
+   * `PresetAnimationType`.
+   */
+  amount?: number;
+  /**
+   * For `move`: the horizontal offset, in pixels.
+   */
+  offsetX?: number;
+  /**
+   * For `move`: the vertical offset, in pixels.
+   */
+  offsetY?: number;
+}
+
+/**
+ * An effect over a span of time of a layer, in a `Timeline`. Within its
+ * span it takes over the keyframes of the properties it animates.
+ */
+export interface PresetAnimation {
+  /**
+   * The id of the animation.
+   */
+  readonly id: string;
+  /**
+   * The board or layer it animates.
+   */
+  readonly shape: Shape;
+  /**
+   * The effect.
+   */
+  readonly type: PresetAnimationType;
+  /**
+   * `in` (an entrance) or `out` (an exit).
+   */
+  direction: 'in' | 'out';
+  /**
+   * When it starts, in milliseconds.
+   */
+  start: number;
+  /**
+   * How long it plays, in milliseconds.
+   */
+  duration: number;
+  /**
+   * How it plays.
+   */
+  easing: MotionEasing;
+  /**
+   * For `fade`, `scale` and `rotate`, see `PresetAnimationType`.
+   */
+  amount?: number;
+  /**
+   * For `move`: the horizontal offset, in pixels.
+   */
+  offsetX?: number;
+  /**
+   * For `move`: the vertical offset, in pixels.
+   */
+  offsetY?: number;
+  /**
+   * Removes the animation.
+   */
+  remove(): void;
+}
+
+/**
+ * Animation styles, several preset animations at once:
+ * - `slide-up`, `slide-down`, `slide-left`, `slide-right`: a fade and a
+ *   move of 40 pixels.
+ * - `pop`: a fade and a scale from half the size that overshoots.
+ * - `zoom`: a fade and a scale from 1.5 times the size.
+ * - `spin`: a fade, a scale and half a turn.
+ */
+export type AnimationStyle =
+  | 'slide-up'
+  | 'slide-down'
+  | 'slide-left'
+  | 'slide-right'
+  | 'pop'
+  | 'zoom'
+  | 'spin';
 
 /**
  * Represents shadow properties in Penpot.

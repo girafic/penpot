@@ -16,6 +16,7 @@
    [app.plugins.format :as format]
    [app.plugins.grid :as grid]
    [app.plugins.library :as library]
+   [app.plugins.motion :as motion]
    [app.plugins.public-utils]
    [app.plugins.register :as preg]
    [app.plugins.ruler-guides :as rg]
@@ -50,6 +51,8 @@
 (set! format/shape-proxy shape/shape-proxy)
 (set! rg/shape-proxy shape/shape-proxy)
 (set! rg/shape-proxy? shape/shape-proxy?)
+(set! motion/shape-proxy shape/shape-proxy)
+(set! motion/shape-proxy? shape/shape-proxy?)
 
 (set! shape/lib-typography-proxy? library/lib-typography-proxy?)
 (set! shape/lib-component-proxy library/lib-component-proxy)

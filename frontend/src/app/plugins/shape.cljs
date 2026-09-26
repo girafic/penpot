@@ -56,6 +56,7 @@
    [app.plugins.flex :as flex]
    [app.plugins.format :as format]
    [app.plugins.grid :as grid]
+   [app.plugins.motion :as motion]
    [app.plugins.parser :as parser]
    [app.plugins.reflow :as wrfp]
    [app.plugins.register :as r]
@@ -1659,6 +1660,20 @@
                 (dwi/remove-interaction {:id id} (obj/get interaction "$index"))
                 (se/event plugin-id "remove-interaction"))))
 
+           ;; Motion
+           :addTimeline
+           (fn [options]
+             (let [shape (u/locate-shape file-id page-id id)]
+               (cond
+                 (not (cfh/root-frame? shape))
+                 (u/not-valid plugin-id :addTimeline "Only a board at the top of the page has an animation")
+
+                 (and (some? options) (not (object? options)))
+                 (u/not-valid plugin-id :addTimeline options)
+
+                 :else
+                 (motion/add-timeline! plugin-id file-id page-id id options))))
+
            ;; Ruler guides
            :addRulerGuide
            (fn [orientation value]
@@ -1932,6 +1947,12 @@
 
                             :else
                             (st/emit! (dwsh/update-shapes [id] #(assoc % :grids value))))))}
+
+                {:name "timeline"
+                 :get
+                 (fn [_]
+                   (when (contains? (:timelines (u/locate-page file-id page-id)) id)
+                     (motion/timeline-proxy plugin-id file-id page-id id)))}
 
                 {:name "rulerGuides"
                  :get

@@ -25,6 +25,7 @@
    [app.main.store :as st]
    [app.plugins.comments :as pc]
    [app.plugins.format :as format]
+   [app.plugins.motion :as motion]
    [app.plugins.parser :as parser]
    [app.plugins.register :as r]
    [app.plugins.ruler-guides :as rg]
@@ -172,6 +173,13 @@
        (let [flows (d/nilv (-> (u/proxy->page self) :flows) [])]
          (->> (vals flows)
               (format/format-array #(flow-proxy plugin-id file-id id (:id %))))))}
+
+    :timelines
+    {:this true
+     :get
+     (fn [self]
+       (->> (keys (:timelines (u/proxy->page self)))
+            (format/format-array #(motion/timeline-proxy plugin-id file-id id %))))}
 
     :rulerGuides
     {:this true

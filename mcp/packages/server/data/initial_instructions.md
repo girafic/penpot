@@ -408,6 +408,56 @@ Removing tokens:
   Simply set the respective property directly - token binding is automatically removed, e.g.
   shape.fills = [{ fillColor: "#000000", fillOpacity: 1 }]; // Removes fill token
 
+# Motion (Keyframe Animation)
+
+A board at the top of a page can animate (Penpot Motion): the board and the layers inside it change over time,
+as its timeline says. Changing animations needs the Motion feature (`animation/v1`); without it, the calls throw.
+
+The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it has none); all of a page: `page.timelines`.
+  * `board.addTimeline({duration?: number, playback?: "once" | "loop" | "ping-pong", name?: string}): Timeline` - Gives the
+    board its timeline (or changes the settings of the one it has). Only for a board whose parent is the root.
+  * `duration: number` (ms), `playback`, `name` - Settings; adding a keyframe or animation past the end makes it longer
+  * `keyframes: Keyframe[]`, `animations: PresetAnimation[]` - What animates in the board
+  * `addKeyframe(shape, {property, time, value, easing?, index?}): Keyframe` - The value of a property of the board or a
+    layer inside it at `time` (ms). A keyframe of the same property and time is replaced. Each animated property needs
+    two keyframes or more: between two, the value goes from one to the other.
+  * `addAnimation(shape, {type, start?, duration?, direction?, easing?, amount?, offsetX?, offsetY?}): PresetAnimation` -
+    An effect over a span of time: `type` "fade" | "move" | "scale" | "rotate"; `direction` "in" (an entrance, from the
+    effect to the layer as it is; default) or "out" (an exit)
+  * `addAnimationStyle(shape, style, start?): PresetAnimation[]` - Several effects at once:
+    "slide-up" | "slide-down" | "slide-left" | "slide-right" | "pop" | "zoom" | "spin"
+  * `valueAt(shape, property, time, index?)` - The value the animation gives then (`null` when it does not animate it)
+  * `clear(shape)` - Removes the keyframes and animations of a layer; `remove()` - removes the timeline
+  * `toCSS(): string` - The animation as CSS `@keyframes` and `animation` rules
+  * `Keyframe` and `PresetAnimation` objects have writable settings (`time`, `value`, `easing`, `start`, ...) and `remove()`
+
+Keyframe values by property (`AnimatableProperty`):
+  * "x", "y": the position of the layer itself (its top left corner before it is turned) relative to the board, in px
+    (for an unrotated layer, where it is now is `shape.boardX` / `shape.boardY`); the board's own is relative to the canvas
+  * "width", "height", "strokeWidth", "blur", "backgroundBlur", "shadowOffsetX", "shadowOffsetY", "shadowBlur",
+    "shadowSpread", "borderRadiusTopLeft" (and the other corners): px
+  * "rotation": degrees; "scaleX", "scaleY": a factor (1 is the layer's own size)
+  * "opacity", "fillOpacity", "strokeOpacity", "shadowOpacity": 0 to 1
+  * "fillColor", "strokeColor", "shadowColor": a hex color like "#ff6600"
+  * "trimStart", "trimEnd", "trimOffset": the part of the outline (0 to 1) the strokes are drawn along; animate "trimEnd"
+    from 0 to 1 to draw a line or an outline on
+  * Fill, stroke and shadow properties take `index`: which fill, stroke or shadow of the layer (0 by default)
+
+Easing (`MotionEasing`); the one of a keyframe applies from it to the next one:
+"linear" | "ease" (default) | "ease-in" | "ease-out" | "ease-in-out" | "hold" (stays until the next keyframe) |
+`{type: "bezier", curve: [x1, y1, x2, y2]}` | `{type: "spring", stiffness: 170, damping: 26, mass: 1}`
+
+Example:
+```
+const board = penpotUtils.findShape(s => s.name === "Hero");
+const title = penpotUtils.findShape(s => s.name === "Title", board);
+const timeline = board.timeline ?? board.addTimeline({duration: 1500});
+timeline.addKeyframe(title, {property: "y", time: 0, value: title.boardY + 40, easing: "ease-out"});
+timeline.addKeyframe(title, {property: "y", time: 600, value: title.boardY});
+timeline.addAnimation(title, {type: "fade", start: 0, duration: 600});
+timeline.addAnimationStyle(penpotUtils.findShape(s => s.name === "Button", board), "pop", 500);
+```
+
 # Visual Inspection of Designs
 
 For many tasks, it can be critical to visually inspect the design. Remember to use the `export_shape` tool for this purpose!
