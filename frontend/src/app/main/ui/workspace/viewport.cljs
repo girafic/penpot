@@ -325,7 +325,9 @@
                               hover-ids hover-top-frame-id @hover-disabled? focus zoom show-measures? read-only? transform)
     (hooks/setup-viewport-modifiers modifiers base-objects)
     (hooks/setup-shortcuts path-editing? path-drawing? text-editing? grid-editing?)
-    (hooks/setup-active-frames base-objects hover-ids selected active-frames zoom transform vbox)
+    (hooks/setup-active-frames base-objects hover-ids selected active-frames zoom transform vbox
+                               (when (contains? layout :animation-timeline)
+                                 (-> page :timelines keys set)))
 
     [:div {:class (stl/css :viewport) :style {"--zoom" zoom} :data-testid "viewport"}
      (cond

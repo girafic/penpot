@@ -163,20 +163,22 @@
      (into [] (filter filter-fn) (vals objects)))))
 
 (defn lookup-animation-preview
-  "`{:timeline :time}` of the animation the canvas shows in motion mode
-  (see `app.main.data.workspace.animation/apply-preview`), or nil."
+  "`{:timelines :board-id :time}` of the animations the canvas shows in
+  motion mode, the timelines of the page by board, with the board edits
+  are recorded to (see `app.main.data.workspace.animation/apply-preview`),
+  or nil."
   [state]
   (when (contains? (:workspace-layout state) :animation-timeline)
     (when-let [{:keys [board-id time]} (dm/get-in state [:workspace-animation :preview])]
-      (when-let [timeline (dm/get-in (lookup-page state) [:timelines board-id])]
-        {:timeline timeline :time time}))))
+      (when-let [timelines (not-empty (:timelines (lookup-page state)))]
+        {:timelines timelines :board-id board-id :time time}))))
 
 (defn lookup-shown-shapes
-  "In motion mode, the shapes the animation moves, by id, as the canvas
+  "In motion mode, the shapes the animations move, by id, as the canvas
   shows them (see `cltl/shown-shapes`)."
   [state]
-  (when-let [{:keys [timeline time]} (lookup-animation-preview state)]
-    (cltl/shown-shapes timeline (lookup-page-objects state) time)))
+  (when-let [{:keys [timelines time]} (lookup-animation-preview state)]
+    (cltl/shown-shapes timelines (lookup-page-objects state) time)))
 
 (defn select-bool-children
   [state parent-id]

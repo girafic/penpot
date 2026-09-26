@@ -18,7 +18,6 @@
    [app.common.types.shape.layout :as ctl]
    [app.main.data.modal :as modal]
    [app.main.data.workspace :as dw]
-   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.transforms :as dwt]
    [app.main.data.workspace.variants :as dwv]
    [app.main.features :as features]
@@ -67,7 +66,6 @@
    [app.util.timers :as ts]
    [app.util.webapi :as webapi]
    [beicon.v2.core :as rx]
-   [okulary.core :as l]
    [promesa.core :as p]
    [rumext.v2 :as mf]))
 
@@ -87,14 +85,11 @@
   [selected objects modifiers]
   (apply-modifiers-to-objects objects (select-keys modifiers selected)))
 
-(def ^:private ref:motion-timeline
-  (l/derived dwa/current-timeline st/state))
-
 (defn- preview-selected
-  "`objects` with the `selected` shapes where the animation shows them at
-  `time`."
-  [selected objects timeline time]
-  (let [shown (cltl/shown-shapes timeline objects time)]
+  "`objects` with the `selected` shapes where the animations of
+  `timelines` show them at `time`."
+  [selected objects timelines time]
+  (let [shown (cltl/shown-shapes timelines objects time)]
     (reduce (fn [objects id]
               (if-let [shape (get shown id)]
                 (assoc objects id shape)
@@ -215,23 +210,23 @@
 
         base-objects      (ui-hooks/with-focus-objects objects focus)
 
-        motion-timeline   (mf/deref ref:motion-timeline)
+        timelines         (get page :timelines)
         animation         (mf/deref refs/workspace-animation)
 
         ;; In motion mode, while paused, the selection shows the selected
         ;; shapes where the animation puts them, like hovering and clicking
         ;; (see `dwa/index-preview`), but while they are transformed.
         motion-preview?   (and (contains? layout :animation-timeline)
-                               (some? motion-timeline)
+                               (seq timelines)
                                (not (:playing? animation))
                                (nil? transform))
         playhead          (get animation :playhead 0)
 
         objects-modified
         (mf/with-memo
-          [base-objects wasm-modifiers selected motion-preview? motion-timeline playhead]
+          [base-objects wasm-modifiers selected motion-preview? timelines playhead]
           (if motion-preview?
-            (preview-selected selected base-objects motion-timeline playhead)
+            (preview-selected selected base-objects timelines playhead)
             (apply-modifiers-to-selected selected base-objects wasm-modifiers)))
 
         selected-shapes   (->> selected
@@ -668,7 +663,8 @@
     (hooks/setup-hover-shapes page-id move-stream base-objects selected mod? hover measure-hover
                               hover-ids hover-top-frame-id @hover-disabled? focus zoom show-measures? read-only? transform)
     (hooks/setup-shortcuts path-editing? path-drawing? text-editing? grid-editing?)
-    (hooks/setup-active-frames base-objects hover-ids selected active-frames zoom transform vbox)
+    ;; The renderer draws every board, animated or not
+    (hooks/setup-active-frames base-objects hover-ids selected active-frames zoom transform vbox nil)
 
     (mf/with-effect [path-editing? edition @initialized?]
       (when (and path-editing? edition @initialized?)

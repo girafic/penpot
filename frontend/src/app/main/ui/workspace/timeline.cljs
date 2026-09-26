@@ -14,6 +14,8 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.rect :as grc]
+   [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
@@ -559,21 +561,41 @@
                :on-click on-next}
       [:> i/icon* {:icon-id i/arrow-right :size "s"}]]]))
 
+(defn- position-offsets
+  "`{shape-id {:x offset :y offset}}`: how much the animated positions
+  are ahead of X and Y as the design tab shows them at `time`. The design
+  tab gives the top left corner of the box around the shape in its board;
+  a keyframe keeps the position of the shape itself, which turning it
+  leaves alone, so it moves on a straight line while it turns."
+  [timeline objects time values]
+  (into {}
+        (keep (fn [[shape-id {:keys [x y]}]]
+                (when-let [shape (and (or (some? x) (some? y)) (get objects shape-id))]
+                  (let [shown (dwa/shape-at timeline objects shape time)
+                        box   (-> (gsh/translate-to-frame shown (get objects (:frame-id shape)))
+                                  (get :points)
+                                  (grc/points->rect))]
+                    [shape-id {:x (some-> x (- (:x box)))
+                               :y (some-> y (- (:y box)))}]))))
+        values))
+
 (mf/defc property-value*
   "The value of the property at the playhead, editable on a keyframe
-  placed there unless it is locked."
+  placed there unless it is locked. A position shows `offset` less (see
+  `position-offsets`)."
   {::mf/private true}
-  [{:keys [shape-id property value keyframe locked?]}]
+  [{:keys [shape-id property value offset keyframe locked?]}]
   (let [kf-id     (:id keyframe)
         disabled? (or locked? (nil? keyframe))
         hint      (when (and (nil? keyframe) (not locked?))
                     (tr "workspace.animation.value-needs-keyframe"))
+        offset    (or offset 0)
 
         on-number
         (mf/use-fn
-         (mf/deps shape-id kf-id property)
+         (mf/deps shape-id kf-id property offset)
          (fn [display]
-           (st/emit! (dwa/set-keyframe-value shape-id kf-id (dwa/display->value property display)))))
+           (st/emit! (dwa/set-keyframe-value shape-id kf-id (+ offset (dwa/display->value property display))))))
 
         on-color
         (mf/use-fn
@@ -592,7 +614,7 @@
                          :disabled disabled?
                          :on-change on-color}]]
       [:> deprecated-input/numeric-input* {:class (stl/css :row-value)
-                                           :value (dwa/value->display property value)
+                                           :value (some-> value (- offset) (->> (dwa/value->display property)))
                                            :is-disabled disabled?
                                            :title hint
                                            :on-change on-number}])))
@@ -791,7 +813,7 @@
   playback and exports; a locked one is kept from edits."
   {::mf/private true}
   [{:keys [timeline shape-id property index depth keyframes looping? hidden? locked?
-           value playhead duration active? selected-kfs on-context-menu
+           value offset playhead duration active? selected-kfs on-context-menu
            easing-kf-id on-edit-easing on-select-layer]}]
   (let [on-label-click
         (mf/use-fn
@@ -836,6 +858,7 @@
       [:> property-value* {:shape-id shape-id
                            :property property
                            :value value
+                           :offset offset
                            :keyframe (dwa/keyframe-at timeline shape-id property playhead index)
                            :locked? locked?}]
       [:> row-toggles* {:hidden? hidden?
@@ -1072,6 +1095,10 @@
                      (when (some? timeline)
                        (-> (cta/resolve-animations timeline objects)
                            (cta/values-at playhead))))
+
+        position-offsets
+        (mf/with-memo [timeline objects playhead values]
+          (position-offsets timeline objects playhead values))
 
         on-toggle-layer
         (mf/use-fn
@@ -1571,6 +1598,8 @@
                                        :hidden? (cta/slot-flag? timeline id :hidden property index)
                                        :locked? (cta/slot-flag? timeline id :locked property index)
                                        :value (cta/value-of (get values id) property index)
+                                       :offset (when (nil? index)
+                                                 (get-in position-offsets [id property]))
                                        :playhead playhead
                                        :duration span
                                        :active? (contains? selected id)

@@ -861,33 +861,35 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn apply-preview
-  "Recompute and apply the transient modifiers for the current timeline at
-  the playhead (editor scrubbing/playback preview). The modif-tree covers
-  transforms AND opacity (as a change-property modifier).
+  "Recompute and apply the transient modifiers for the timelines of the
+  page at the playhead (editor scrubbing/playback preview). The modif-tree
+  covers transforms AND opacity (as a change-property modifier).
 
   Renderer-aware: with the WASM renderer (`render-wasm/v1`) the modifiers
   are pushed to the WASM canvas via `set-wasm-modifiers` (transforms for
   every shape, the other attributes as shape properties); with the
   classic SVG renderer they go through `set-modifiers` (the transforms
   move the shape nodes, see `use-dynamic-modifiers`, and the shapes paint
-  the other attributes, see `cta/appearance-changes`). When there is no
-  active timeline, any stale preview is cleared."
+  the other attributes, see `cta/appearance-changes`). When the page has
+  no timeline, any stale preview is cleared."
   []
   (ptk/reify ::apply-preview
     ptk/UpdateEvent
     (update [_ state]
       ;; What the canvas shows, for an edit on it to show over it (see
       ;; `dsh/lookup-animation-preview`).
-      (if-let [tl (current-timeline state)]
-        (assoc-in state [:workspace-animation :preview] {:board-id (:board-id tl) :time (playhead state)})
+      (if (seq (get-timelines state))
+        (assoc-in state [:workspace-animation :preview] {:board-id (active-board-id state) :time (playhead state)})
         (update state :workspace-animation dissoc :preview)))
 
     ptk/WatchEvent
     (watch [_ state _]
-      (if-let [tl (current-timeline state)]
+      (if-let [timelines (not-empty (get-timelines state))]
+        ;; Every board shows its animation at the playhead, as it plays
+        ;; (see `cltl/animation-tree`), the one the timeline shows and
+        ;; the others alike.
         (let [objects    (dsh/lookup-page-objects state)
-              time       (playhead state)
-              modif-tree (cta/timeline->modif-tree tl objects time)]
+              modif-tree (cltl/animation-tree timelines objects (playhead state))]
           ;; The selection frame follows the selected shapes (see the
           ;; viewport), not every shape the preview moves.
           (if ^boolean (features/active-feature? state "render-wasm/v1")
@@ -903,12 +905,12 @@
   (ptk/reify ::index-preview
     ptk/WatchEvent
     (watch [_ state _]
-      (let [page-id (:current-page-id state)
-            tl      (current-timeline state)
-            objects (dsh/lookup-page-objects state)
-            preview (when (and (some? tl)
-                               (not (dm/get-in state [:workspace-animation :playing?])))
-                      (cltl/shown-shapes tl objects (playhead state)))]
+      (let [page-id   (:current-page-id state)
+            timelines (get-timelines state)
+            objects   (dsh/lookup-page-objects state)
+            preview   (when (and (seq timelines)
+                                 (not (dm/get-in state [:workspace-animation :playing?])))
+                        (cltl/shown-shapes timelines objects (playhead state)))]
         (if (some? page-id)
           (->> (mw/ask! {:cmd :index/set-preview
                          :page-id page-id
@@ -1106,7 +1108,7 @@
   (ptk/reify ::restore-preview
     ptk/WatchEvent
     (watch [_ state _]
-      (if (some? (current-timeline state))
+      (if (seq (get-timelines state))
         (rx/of (apply-preview))
         (rx/empty)))))
 

@@ -404,7 +404,10 @@
     (and (some? frame) (gsh/overlaps? frame vbox))))
 
 (defn setup-active-frames
-  [objects hover-ids selected active-frames zoom transform vbox]
+  "Keep live the boards shown with their shapes rather than a thumbnail.
+  `animated` are the boards whose animation motion mode shows: a
+  thumbnail would show them at rest."
+  [objects hover-ids selected active-frames zoom transform vbox animated]
 
   (let [all-frames             (mf/use-memo (mf/deps objects) #(ctt/get-root-frames-ids objects))
         selected-frames        (mf/use-memo (mf/deps selected) #(->> all-frames (filter selected)))
@@ -424,7 +427,7 @@
          (reset! last-hover-ids (set @hover-ids)))))
 
     (mf/use-effect
-     (mf/deps objects @hover-ids selected zoom transform vbox)
+     (mf/deps objects @hover-ids selected zoom transform vbox animated)
      (fn []
 
        ;; Rules for active frame:
@@ -452,7 +455,10 @@
                 (= id active-selection)
 
                 ;; Or contains a selected shape
-                (contains? selected-shapes-frames id)))
+                (contains? selected-shapes-frames id)
+
+                ;; Or shows its animation in motion mode
+                (contains? animated id)))
 
              new-active-frames
              (into #{}

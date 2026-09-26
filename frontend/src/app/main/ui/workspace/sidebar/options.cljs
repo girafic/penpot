@@ -32,7 +32,6 @@
    [app.main.ui.workspace.sidebar.options.menus.grid-cell :as grid-cell]
    [app.main.ui.workspace.sidebar.options.menus.interactions :refer [interactions-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.layout-container :as layout-container]
-   [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu*]]
    [app.main.ui.workspace.sidebar.options.page :as page]
    [app.main.ui.workspace.sidebar.options.shapes.bool :as bool]
    [app.main.ui.workspace.sidebar.options.shapes.circle :as circle]
@@ -124,7 +123,7 @@
 
 (mf/defc design-menu*
   {::mf/private true}
-  [{:keys [selected objects page-id file-id shapes is-motion]}]
+  [{:keys [selected objects page-id file-id shapes]}]
   (let [sp-panel (mf/deref refs/specialized-panel)
         drawing  (mf/deref refs/workspace-drawing)
         edition  (mf/deref refs/selected-edition)
@@ -203,12 +202,6 @@
        [:> bool-options* {:total-selected total-selected
                           :shapes shapes
                           :shapes-with-children shapes-with-children}])
-
-     (when (and ^boolean is-motion
-                (pos? total-selected)
-                (not path-editing?)
-                (not edit-grid?))
-       [:> animations-menu* {:ids selected}])
 
      (cond
        ;; Show path-specific options during node editing.
@@ -349,12 +342,12 @@
 
           :design
           [:& (mf/provider ctx/motion-shape-id) {:value motion-shape-id}
-           [:> design-menu* {:selected selected
-                             :objects objects
-                             :page-id page-id
-                             :file-id file-id
-                             :shapes shapes
-                             :is-motion motion?}]]
+           [:& (mf/provider ctx/motion-mode?) {:value motion?}
+            [:> design-menu* {:selected selected
+                              :objects objects
+                              :page-id page-id
+                              :file-id file-id
+                              :shapes shapes}]]]
 
           :debug
           [:> debug-shape-info*])]

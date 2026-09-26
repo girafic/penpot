@@ -167,7 +167,8 @@
                       (cta/make-timeline {:board-id bid :duration 1000})
                       [a b])]
     {:objects {bid (assoc board :shapes [(:id a) (:id b)]) (:id a) a (:id b) b}
-     :timeline tl
+     :timelines {bid tl}
+     :board bid
      :a (:id a)
      :b (:id b)}))
 
@@ -177,21 +178,38 @@
   (gsh/transform-shape (get objects id) (get-in tree [id :modifiers])))
 
 (t/deftest edit-preview-shows-a-move-where-it-ends-up
-  (let [{:keys [objects timeline a b]} (motion-scene)
-        shown   (cltl/shown-shapes timeline objects 500)
-        tree    (cltl/edit-preview timeline objects 500 {a {:modifiers (ctm/move-modifiers (gpt/point 30 0))}})]
+  (let [{:keys [objects timelines board a b]} (motion-scene)
+        shown   (cltl/shown-shapes timelines objects 500)
+        tree    (cltl/edit-preview timelines board objects 500 {a {:modifiers (ctm/move-modifiers (gpt/point 30 0))}})]
     ;; A where the animation shows it, 30 further right
     (t/is (mth/close? (+ 30 (get-in shown [a :selrect :x])) (get-in (shown-by tree objects a) [:selrect :x])))
     ;; B, left alone, where the animation shows it
     (t/is (mth/close? (get-in shown [b :selrect :x]) (get-in (shown-by tree objects b) [:selrect :x])))))
 
 (t/deftest edit-preview-turns-a-shape-where-it-is-shown
-  (let [{:keys [objects timeline a]} (motion-scene)
+  (let [{:keys [objects timelines board a]} (motion-scene)
         shape   (get objects a)
-        shown   (cltl/shown-shapes timeline objects 500)
-        tree    (cltl/edit-preview timeline objects 500
+        shown   (cltl/shown-shapes timelines objects 500)
+        tree    (cltl/edit-preview timelines board objects 500
                                    {a {:modifiers (ctm/rotation-modifiers shape (gsh/shape->center shape) 30)}})
         turned  (shown-by tree objects a)]
     (t/is (mth/close? 30 (:rotation turned)))
     ;; around its center as shown, not the one it has at rest
     (t/is (gpt/close? (gsh/shape->center (get shown a)) (gsh/shape->center turned)))))
+
+(t/deftest every-board-shows-its-animation-as-it-plays
+  (let [{:keys [objects timelines a]} (motion-scene)
+        board   (cts/setup-shape {:type :frame :x 2000 :y 0 :width 1000 :height 600})
+        bid     (:id board)
+        c       (-> (cts/setup-shape {:type :rect :x 2100 :y 100 :width 100 :height 50})
+                    (assoc :frame-id bid :parent-id bid))
+        objects (assoc objects bid (assoc board :shapes [(:id c)]) (:id c) c)
+        ;; C moves 400 to the right in 400 ms, over and over
+        looping (-> (cta/make-timeline {:board-id bid :duration 400 :playback :loop})
+                    (cta/add-keyframe (:id c) {:time 0 :property :x :value 100 :easing :linear})
+                    (cta/add-keyframe (:id c) {:time 400 :property :x :value 500}))
+        shown   (cltl/shown-shapes (assoc timelines bid looping) objects 500)]
+    ;; A at 500 ms of its timeline, C at 100 ms of its second loop
+    (t/is (= (get-in (cltl/shown-shapes timelines objects 500) [a :selrect :x])
+             (get-in shown [a :selrect :x])))
+    (t/is (mth/close? (+ 2000 200) (get-in shown [(:id c) :selrect :x])))))

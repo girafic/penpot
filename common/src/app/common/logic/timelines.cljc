@@ -185,11 +185,20 @@
       (not= result timelines)
       (commit-timelines page result))))
 
+(defn animation-tree
+  "The modif-tree showing the animations of `timelines` (by board) at
+  `time`: every board as it plays then (see `cta/playback-time`)."
+  [timelines objects time]
+  (reduce-kv (fn [tree _ timeline]
+               (into tree (cta/timeline->modif-tree timeline objects (cta/playback-time timeline time))))
+             {}
+             timelines))
+
 (defn shown-shapes
-  "The shapes the animation of `timeline` moves at `time`, by id, as the
+  "The shapes the animations of `timelines` move at `time`, by id, as the
   canvas shows them: with the children they carry along."
-  [timeline objects time]
-  (let [modif-tree (cta/timeline->modif-tree timeline objects time)]
+  [timelines objects time]
+  (let [modif-tree (animation-tree timelines objects time)]
     (when (seq modif-tree)
       (into {}
             (keep (fn [[id {:keys [modifiers]}]]
@@ -199,19 +208,19 @@
 
 (defn edit-preview
   "The modif-tree showing `edit`, a modif-tree that changes shapes of
-  `objects`, over the animation of `timeline` at `time` in motion mode:
-  the shapes as the edit leaves them and then, with the edit recorded
-  (see `cta/record-edit`), as the timeline shows them there. So during a
+  `objects`, over the animations of `timelines` at `time` in motion
+  mode: the shapes as the edit leaves them and then, with the edit
+  recorded in the timeline of the board `board-id` (see
+  `cta/record-edit`), as the animations show them there. So during a
   drag the canvas shows what it will show once the shapes are dropped,
   and the animated shapes the edit leaves alone stay where they are."
-  [timeline objects time edit]
-  (let [after   (reduce-kv (fn [objects id {:keys [modifiers]}]
-                             (d/update-when objects id gsh/transform-shape modifiers))
-                           objects
-                           (gm/set-objects-modifiers edit objects))
-        shown   (-> (cta/record-edit timeline objects after time)
-                    (cta/timeline->modif-tree after time))]
+  [timelines board-id objects time edit]
+  (let [after     (reduce-kv (fn [objects id {:keys [modifiers]}]
+                               (d/update-when objects id gsh/transform-shape modifiers))
+                             objects
+                             (gm/set-objects-modifiers edit objects))
+        timelines (d/update-when timelines board-id cta/record-edit objects after time)]
     (merge-with (fn [edit shown]
                   (update edit :modifiers ctm/add-modifiers (:modifiers shown)))
                 edit
-                shown)))
+                (animation-tree timelines after time))))

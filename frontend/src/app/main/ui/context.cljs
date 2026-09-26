@@ -56,3 +56,8 @@
   mode, or when more than one shape is selected."
   (mf/create-context nil))
 
+(def motion-mode?
+  "Whether the design tab shows the animations of the selected shapes,
+  which it does in motion mode."
+  (mf/create-context false))
+

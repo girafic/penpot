@@ -36,7 +36,7 @@
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.workspace.sidebar.options.menus.border-radius :refer  [border-radius-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
-   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* keyframe-diamond*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [clojure.set :as set]
@@ -357,8 +357,9 @@
                                            :value (dwa/value->display :scale-y sy)}]
       [:> keyframe-diamond* {:properties [:scale-x :scale-y]}]]]))
 
-(mf/defc measures-menu*
-  {::mf/wrap [#(mf/memo' % check-measures-menu-props)]}
+(mf/defc measures-section*
+  {::mf/private true
+   ::mf/wrap [#(mf/memo' % check-measures-menu-props)]}
   [{:keys [ids values applied-tokens type shapes]}]
   (let [token-numeric-inputs
         (features/use-feature "tokens/numeric-input")
@@ -959,3 +960,14 @@
                     :class (stl/css-case  :clip-content-label true
                                           :selected (not (:hide-in-viewer values)))}
             [:> icon* {:icon-id i/play}]]])])]))
+
+(mf/defc measures-menu*
+  "The measures of the selected shapes and, in motion mode, their
+  animations: after the measures, as the headed sections come, so the
+  rows above keep reading as the shape's own."
+  [{:keys [ids] :as props}]
+  (let [motion-mode? (mf/use-ctx ctx/motion-mode?)]
+    [:*
+     [:> measures-section* props]
+     (when ^boolean motion-mode?
+       [:> animations-menu* {:ids ids}])]))
