@@ -52,7 +52,8 @@
 
 (defmethod impl/handler :index/set-preview
   ;; `objects` are shapes as the animation shows them at the playhead, by
-  ;; id, so hovering and clicking find them there; nil drops them.
+  ;; id, so hovering, clicking and snapping find them there; nil drops
+  ;; them.
   [{:keys [page-id objects]}]
   (when-let [page (dm/get-in @state [:pages-index page-id])]
     (let [old-page (with-preview page)]
@@ -61,7 +62,8 @@
                (if (seq objects)
                  (assoc previews page-id objects)
                  (dissoc previews page-id))))
-      (swap! state update ::selection selection/update-page old-page (with-preview page))))
+      (swap! state update ::selection selection/update-page old-page (with-preview page))
+      (swap! state update ::snap snap/update-page old-page (with-preview page))))
   nil)
 
 (defmethod impl/handler :index/clear-previews
@@ -90,9 +92,10 @@
              new-page
              text-rects)]
 
-        (swap! state update ::snap snap/update-page old-page new-page)
         ;; Shapes of the animation preview stay where the canvas shows
         ;; them until the next preview.
+        (swap! state update ::snap snap/update-page
+               (with-preview old-page) (with-preview new-page))
         (swap! state update ::selection selection/update-page
                (with-preview old-page) (with-preview new-page)))
       (catch :default cause

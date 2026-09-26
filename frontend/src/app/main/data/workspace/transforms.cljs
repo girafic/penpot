@@ -934,6 +934,14 @@
              position (->> ms/mouse-position
                            (rx/map #(gpt/to-vec from-position %)))
 
+             ;; In motion mode the shapes, and the ones they snap to, are
+             ;; where the animation shows them (see `dsh/lookup-shown-shapes`)
+             [snap-shapes snap-objects]
+             (if-let [shown (not-empty (dsh/lookup-shown-shapes state))]
+               [(mapv #(get shown (:id %) %) shapes)
+                (reduce-kv assoc objects shown)]
+               [shapes objects])
+
              snap-delta
              (rx/concat
               ;; We send the nil first so the stream is not waiting for the first value
@@ -943,7 +951,7 @@
                    (rx/throttle 20)
                    (rx/switch-map
                     (fn [pos]
-                      (->> (snap/closest-snap-move page-id shapes objects layout zoom focus pos)
+                      (->> (snap/closest-snap-move page-id snap-shapes snap-objects layout zoom focus pos)
                            (rx/map #(array pos %)))))))]
          (if (empty? shapes)
            (rx/of (finish-transform))
