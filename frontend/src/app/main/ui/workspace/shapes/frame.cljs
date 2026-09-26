@@ -185,7 +185,11 @@
           (when-let [task (mf/ref-val task-ref)]
             (d/close! task)))
 
-        (fdm/use-dynamic-modifiers objects (mf/ref-val content-ref) modifiers)
+        ;; The content of a board shown as a thumbnail is not there to
+        ;; transform. Once it is (the board became active), the modifiers
+        ;; apply to its new nodes: the animation preview of motion mode
+        ;; keeps them while the board is being selected.
+        (fdm/use-dynamic-modifiers objects content-ref (when ^boolean content-visible? modifiers))
         [:& shape-container {:shape shape}
          [:g.frame-container
           {:id (dm/str "frame-container-" frame-id)

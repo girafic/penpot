@@ -244,7 +244,16 @@
      :transforms transforms
      :modifiers modifiers}))
 
+(defn- resolve-node
+  "`node`, or the node a ref holds by now."
+  [node]
+  (if (and (some? node) (.hasOwnProperty ^js node "current"))
+    (mf/ref-val node)
+    node))
+
 (defn use-dynamic-modifiers
+  "Transform the nodes of the shapes under `node` (a node or a ref to
+  one) by their `modifiers`."
   [objects node modifiers]
   (let [;; One paint for a burst of modifier updates. Cancelling the
         ;; scheduled frame on every change drops the paint: playback
@@ -338,7 +347,8 @@
     ;; paint. The paint itself is coalesced: a newer frame replaces the
     ;; pending one instead of cancelling it.
     (mf/with-effect [transforms]
-      (let [curr-shapes-set (into #{} (map :id) shapes)
+      (let [node            (resolve-node node)
+            curr-shapes-set (into #{} (map :id) shapes)
             prev-shapes-set (into #{} (map :id) @prev-shapes)
             ;; A shape back before its removal was painted still has its
             ;; transform saved and the one of its modifiers set: saving
