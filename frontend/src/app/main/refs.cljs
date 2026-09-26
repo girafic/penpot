@@ -10,6 +10,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cph]
+   [app.common.types.animation :as cta]
    [app.common.types.shape-tree :as ctt]
    [app.common.types.shape.layout :as ctl]
    [app.common.types.tokens-lib :as ctob]
@@ -441,6 +442,12 @@
 (defn workspace-modifiers-by-frame-id
   [frame-id]
   (l/derived #(get % frame-id) workspace-frame-modifiers =))
+
+(defn workspace-appearance-by-id
+  "How the modifiers of the shape `id` change the way it looks, as the
+  animation preview does (see `cta/appearance-changes`)."
+  [id]
+  (l/derived #(cta/appearance-changes (dm/get-in % [id :modifiers])) workspace-modifiers =))
 
 (def workspace-clipboard-style
   (l/derived :clipboard-style workspace-global))

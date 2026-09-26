@@ -340,7 +340,15 @@
     (mf/with-effect [transforms]
       (let [curr-shapes-set (into #{} (map :id) shapes)
             prev-shapes-set (into #{} (map :id) @prev-shapes)
-            new-shapes      (->> shapes (remove #(contains? prev-shapes-set (:id %))))
+            ;; A shape back before its removal was painted still has its
+            ;; transform saved and the one of its modifiers set: saving
+            ;; it again would take that one for its own, and apply the
+            ;; modifiers twice. It happens in motion mode, where an edit
+            ;; on the canvas ends its modifiers and the animation preview
+            ;; sets them again right away.
+            unpainted-ids   (into #{} (map :id) (:removed (mf/ref-val pending-ref)))
+            new-shapes      (->> shapes (remove #(or (contains? prev-shapes-set (:id %))
+                                                     (contains? unpainted-ids (:id %)))))
             removed-shapes  (->> @prev-shapes (remove #(contains? curr-shapes-set (:id %))))]
         (when (d/not-empty? new-shapes)
           (start-transform! node new-shapes))

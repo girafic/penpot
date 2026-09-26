@@ -1147,6 +1147,27 @@
     (t/is (= 0 (:trim-start (at 500))))
     (t/is (= 0 (:trim-offset (at 500))))))
 
+(t/deftest appearance-changes-leave-geometry-and-layout-out
+  (let [shape     (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
+        sid       (:id shape)
+        tl        (-> (mk-timeline)
+                      (cta/add-keyframe sid {:time 0 :property :trim-end :value 0})
+                      (cta/add-keyframe sid {:time 1000 :property :trim-end :value 1})
+                      (cta/add-keyframe sid {:time 0 :property :rotation :value 0})
+                      (cta/add-keyframe sid {:time 1000 :property :rotation :value 90}))
+        ;; with an edit of the layout at the same time
+        modifiers (-> (get-in (cta/timeline->modif-tree tl {sid shape} 500) [sid :modifiers])
+                      (ctm/change-property :layout-item-h-sizing :fix))
+        changes   (cta/appearance-changes modifiers)
+        objects   (cta/apply-appearance-modifiers {sid shape} {sid {:modifiers modifiers}})]
+    (t/is (= #{:trim-start :trim-end :trim-offset} (set (keys changes))))
+    (t/is (close? 0.5 (:trim-end changes)))
+    (t/is (close? 0.5 (get-in objects [sid :trim-end])))
+    ;; the rotation takes the transform path
+    (t/is (= (:rotation shape) (get-in objects [sid :rotation])))
+    (t/is (nil? (get-in objects [sid :layout-item-h-sizing])))
+    (t/is (nil? (cta/appearance-changes (ctm/move (ctm/empty) (gpt/point 10 0)))))))
+
 (t/deftest playback-mode-defaults-to-once
   (t/is (= :once (cta/playback-mode (mk-timeline)))))
 

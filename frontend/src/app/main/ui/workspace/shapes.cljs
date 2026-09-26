@@ -18,6 +18,7 @@
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.uuid :as uuid]
+   [app.main.refs :as refs]
    [app.main.ui.context :as ctx]
    [app.main.ui.shapes.circle :as circle]
    [app.main.ui.shapes.image :as image]
@@ -136,9 +137,17 @@
   {::mf/wrap [#(mf/memo' % common/check-shape-props)]
    ::mf/wrap-props false}
   [props]
-  (let [shape (unchecked-get props "shape")]
+  (let [shape      (unchecked-get props "shape")
+        shape-id   (dm/get-prop shape :id)
+        ;; The animation preview moves a shape through the transform of
+        ;; its node, but its other animated attributes, like the fills or
+        ;; a path trim, have to be painted.
+        appearance (mf/deref (mf/with-memo [shape-id]
+                               (refs/workspace-appearance-by-id shape-id)))
+        shape      (mf/with-memo [shape appearance]
+                     (cond-> shape (some? appearance) (merge appearance)))]
     (if ^boolean (cfh/root-frame? shape)
-      [:> root-frame-shape-wrapper props]
+      [:> root-frame-shape-wrapper #js {:shape shape}]
       (render-shape-content shape false))))
 
 (def group-wrapper (group/group-wrapper-factory shape-wrapper))

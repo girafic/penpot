@@ -1360,15 +1360,35 @@
   [items]
   (if (vector? items) items (vec items)))
 
+(def appearance-attrs
+  "The attributes of a shape the animation changes with `:change-property`
+  modifiers (see `shape->modifiers`): how it looks. Its geometry takes the
+  transform path."
+  #{:opacity :r1 :r2 :r3 :r4 :fills :strokes :shadow :blur :background-blur
+    :trim-start :trim-end :trim-offset})
+
+(defn appearance-changes
+  "`{attr value}` of the `appearance-attrs` that `modifiers` change, or nil.
+  Other structure changes, like those of the layout during an edit, are
+  left out."
+  [modifiers]
+  (not-empty
+   (reduce (fn [changes {:keys [type property value]}]
+             (cond-> changes
+               (and (= :change-property type) (contains? appearance-attrs property))
+               (assoc property value)))
+           {}
+           (:structure-parent modifiers))))
+
 (defn apply-appearance-modifiers
-  "Apply the structure (appearance) half of `modifiers` to `objects`, so
-  SVG can paint the animated fills, strokes, shadows and blurs. Geometry
-  stays on the transform path."
+  "Apply the appearance half of `modifiers` to `objects`, so SVG can paint
+  the animated fills, strokes, shadows, blurs and trims. Geometry stays on
+  the transform path."
   [objects modifiers]
   (reduce-kv
    (fn [objects id {:keys [modifiers]}]
-     (if-let [shape (get objects id)]
-       (assoc objects id (ctm/apply-structure-modifiers shape modifiers))
+     (if-let [changes (appearance-changes modifiers)]
+       (d/update-when objects id merge changes)
        objects))
    objects
    modifiers))

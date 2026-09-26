@@ -858,10 +858,11 @@
 
   Renderer-aware: with the WASM renderer (`render-wasm/v1`) the modifiers
   are pushed to the WASM canvas via `set-wasm-modifiers` (transforms for
-  every shape + opacity via `set-shape-opacity`); with the classic SVG
-  renderer they go through `set-modifiers` (transforms preview live via
-  `use-dynamic-modifiers`; opacity preview is not shown by that legacy
-  path). When there is no active timeline, any stale preview is cleared."
+  every shape, the other attributes as shape properties); with the
+  classic SVG renderer they go through `set-modifiers` (the transforms
+  move the shape nodes, see `use-dynamic-modifiers`, and the shapes paint
+  the other attributes, see `cta/appearance-changes`). When there is no
+  active timeline, any stale preview is cleared."
   []
   (ptk/reify ::apply-preview
     ptk/WatchEvent
