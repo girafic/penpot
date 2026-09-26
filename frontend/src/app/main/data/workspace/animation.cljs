@@ -1052,6 +1052,13 @@
   timeline value; width and height follow a resize."
   [:x :y :width :height :rotation :opacity :r1 :r2 :r3 :r4])
 
+(defn- angle-delta
+  "The turn from `from` to `to` degrees the short way round: a shape
+  keeps its rotation within 0-360, so 350 to 10 is a turn of 20."
+  [from to]
+  (let [delta (mod (- to from) 360)]
+    (if (> delta 180) (- delta 360) delta)))
+
 (defn- close-value?
   [property old new]
   (cond
@@ -1168,8 +1175,14 @@
                     (cta/add-keyframe tl shape-id
                                       {:time time
                                        :property property
-                                       :value (if (contains? #{:opacity :width :height :r1 :r2 :r3 :r4} property)
+                                       :value (cond
+                                                (contains? #{:opacity :width :height :r1 :r2 :r3 :r4} property)
                                                 new
+
+                                                (= property :rotation)
+                                                (+ (get-in shown [shape-id property]) (angle-delta old new))
+
+                                                :else
                                                 (+ (get-in shown [shape-id property]) (- new old)))
                                        :easing (:easing (keyframe-at tl shape-id property time) :ease)}))))
 

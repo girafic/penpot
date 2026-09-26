@@ -611,12 +611,19 @@
 
         on-rotation-change
         (mf/use-fn
-         (mf/deps ids motion-target)
+         (mf/deps ids motion-id motion-target)
          (fn [value]
            (if (or (string? value) (number? value))
-             (let [value (motion-target :rotation (fixed-decimal-value value))]
-               (st/emit! (udw/trigger-bounding-box-cloaking ids))
-               (st/emit! (udw/increase-rotation-coalesced ids value)))
+             (let [value (fixed-decimal-value value)]
+               ;; An animated rotation takes the value at the playhead as it
+               ;; is: going through the rotation of the shape, kept within
+               ;; 0-360, would wrap it.
+               (if (and (some? motion-id)
+                        (seq (cta/property-keyframes (deref ref:timeline) motion-id :rotation)))
+                 (st/emit! (dwa/set-value-at-playhead motion-id :rotation value))
+                 (do
+                   (st/emit! (udw/trigger-bounding-box-cloaking ids))
+                   (st/emit! (udw/increase-rotation-coalesced ids (motion-target :rotation value))))))
              (st/emit! (udw/trigger-bounding-box-cloaking ids)
                        (dwta/apply-token-from-input {:token (first value)
                                                      :attrs #{:rotation}
