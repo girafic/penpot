@@ -309,5 +309,5 @@
                               :ids ids}])])
 
         ;; In motion mode: how much of the outline the strokes draw
-        (when (and (seq strokes) (not= :multiple strokes))
+        (when (and (not= :multiple strokes) (seq strokes))
           [:> trim-row* {}])])]))

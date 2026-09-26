@@ -50,7 +50,7 @@
              :pointer-events "none"}]
      [:circle {:cx hx :cy hy
                :r (/ 4 zoom)
-               :fill (if unset? "var(--color-background-primary)" color)
+               :fill (if unset? "white" color)
                :stroke color
                :stroke-width (/ 1 zoom)
                :style {:cursor "move"}
