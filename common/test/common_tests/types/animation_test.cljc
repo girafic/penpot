@@ -1297,3 +1297,85 @@
   (t/is (= [:a] (cta/ping-pong-frames [:a] true)))
   (t/is (= [:a :b] (cta/ping-pong-frames [:a :b] true)))
   (t/is (= [:a :b :a] (cta/ping-pong-frames [:a :b] false))))
+
+(defn- moved
+  "`objects` with the shapes of `ids` moved by `dx`, `dy`."
+  [objects ids dx dy]
+  (reduce #(update %1 %2 gsh/transform-shape (ctm/move-modifiers (gpt/point dx dy)))
+          objects
+          ids))
+
+(defn- turned
+  "`objects` with the shape `id` turned by `angle` around its center."
+  [objects id angle]
+  (let [shape (get objects id)]
+    (update objects id gsh/transform-shape
+            (ctm/rotation-modifiers shape (gsh/shape->center shape) angle))))
+
+(defn- edit-timeline
+  "A timeline of the board of `board-and-rect` with keyframes of `property`
+  of its rect at 0 and 1000."
+  [{:keys [board rect]} property from to]
+  (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+      (cta/add-keyframe (:id rect) {:time 0 :property property :value from})
+      (cta/add-keyframe (:id rect) {:time 1000 :property property :value to})))
+
+(defn- recorded
+  [timeline shape-id property time]
+  (:value (d/seek #(= time (:time %)) (cta/property-keyframes timeline shape-id property))))
+
+(t/deftest record-edit-adds-the-change-to-the-value-shown
+  (let [{:keys [rect objects] :as scene} (board-and-rect)
+        rid   (:id rect)
+        tl    (edit-timeline scene :x 0 200)
+        shown (get-in (values-at tl objects 500) [rid :x])
+        tl'   (cta/record-edit tl objects (moved objects [rid] 30 40) 500)]
+    (t/is (close? (+ shown 30) (recorded tl' rid :x 500)))
+    ;; y is not animated: the move stays on the shape
+    (t/is (empty? (cta/property-keyframes tl' rid :y)))
+    (t/is (cta/valid-timeline? tl'))))
+
+(t/deftest record-edit-turns-the-short-way
+  (let [{:keys [rect objects] :as scene} (board-and-rect)
+        rid   (:id rect)
+        tl    (edit-timeline scene :rotation 0 90)
+        shown (get-in (values-at tl objects 500) [rid :rotation])
+        ;; the shape keeps its rotation within 0-360: -20 turns 0 into 340
+        after (turned objects rid -20)]
+    (t/is (close? 340 (get-in after [rid :rotation])))
+    (t/is (close? (- shown 20) (recorded (cta/record-edit tl objects after 500) rid :rotation 500)))))
+
+(t/deftest record-edit-takes-opacity-as-it-ends-up
+  (let [{:keys [rect objects] :as scene} (board-and-rect)
+        rid (:id rect)
+        tl  (edit-timeline scene :opacity 0 1)
+        tl' (cta/record-edit tl objects (assoc-in objects [rid :opacity] 0.3) 500)]
+    (t/is (close? 0.3 (recorded tl' rid :opacity 500)))))
+
+(t/deftest record-edit-leaves-hidden-and-locked-rows
+  (let [{:keys [rect objects] :as scene} (board-and-rect)
+        rid   (:id rect)
+        tl    (edit-timeline scene :x 0 200)
+        after (moved objects [rid] 30 0)]
+    (t/is (nil? (recorded (cta/record-edit (cta/toggle-slot-flag tl rid :hidden :x nil) objects after 500) rid :x 500)))
+    (t/is (nil? (recorded (cta/record-edit (cta/toggle-slot-flag tl rid :locked :x nil) objects after 500) rid :x 500)))))
+
+(t/deftest record-edit-of-the-board-leaves-its-layers
+  (let [{:keys [board rect objects] :as scene} (board-and-rect)
+        rid (:id rect)
+        tl  (edit-timeline scene :x 0 200)
+        ;; the board moves and takes the rect along
+        tl' (cta/record-edit tl objects (moved objects [(:id board) rid] 30 0) 500)]
+    (t/is (= tl tl'))))
+
+(t/deftest record-edit-records-an-animated-fill
+  (let [{:keys [rect objects]} (board-and-rect)
+        rid     (:id rect)
+        objects (assoc-in objects [rid :fills] [{:fill-color "#000000" :fill-opacity 1}])
+        tl      (-> (cta/make-timeline {:board-id (:parent-id (get objects rid)) :duration 1000})
+                    (cta/add-keyframe rid {:time 0 :property :fill-color :index 0 :value "#000000"})
+                    (cta/add-keyframe rid {:time 1000 :property :fill-color :index 0 :value "#ffffff"}))
+        after   (assoc-in objects [rid :fills 0 :fill-color] "#ff0000")
+        tl'     (cta/record-edit tl objects after 500)]
+    (t/is (= "#ff0000" (:value (d/seek #(= 500 (:time %))
+                                       (cta/property-keyframes tl' rid :fill-color 0)))))))

@@ -11,6 +11,7 @@
   (:require
    [app.common.data.macros :as dm]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.transforms :as dwt]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.util.dom :as dom]
@@ -65,6 +66,15 @@
   (let [{:keys [time point out in prev next]} keyframe
         [x y] point
 
+        ;; A keyframe marks where the shape is at that time, often right
+        ;; on it: grabbing it moves the shape, as grabbing the shape does.
+        on-pointer-down
+        (mf/use-fn
+         (fn [event]
+           (dom/stop-propagation event)
+           (when (dom/left-mouse? event)
+             (st/emit! (dwt/start-move-selected)))))
+
         on-double-click
         (mf/use-fn
          (mf/deps shape-id time)
@@ -100,7 +110,7 @@
              :transform (dm/str "rotate(45 " x " " y ")")
              :fill color
              :pointer-events "visible"
-             :on-pointer-down dom/stop-propagation
+             :on-pointer-down on-pointer-down
              :on-double-click on-double-click}]]))
 
 (mf/defc motion-path*

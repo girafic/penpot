@@ -16,6 +16,7 @@
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.logging :as log]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
@@ -328,6 +329,38 @@
               objects))]
     (wasm.shape/process-shape-changes! objects-changed shape-changes)))
 
+(defn- edit-preview-tree
+  "In motion mode, the modif-tree showing the edit `modif-tree` over the
+  animation the canvas shows (see `cltl/edit-preview`), or nil."
+  [state modif-tree]
+  (when-let [{:keys [timeline time]} (dsh/lookup-animation-preview state)]
+    (cltl/edit-preview timeline (dsh/lookup-page-objects state) time modif-tree)))
+
+(defn- with-edit-modifiers
+  "`state` showing the modifiers `edit`, or in motion mode the modifiers
+  `shown` that show them over the animation: `apply-modifiers` applies
+  only the edit (see `applied-modifiers`). The animation itself shows
+  with no edit."
+  [state edit shown]
+  (if (some? shown)
+    (-> state
+        (assoc :workspace-modifiers shown)
+        (assoc ::edit-modifiers {:shown shown :edit edit}))
+    (-> state
+        (assoc :workspace-modifiers edit)
+        (dissoc ::edit-modifiers))))
+
+(defn- applied-modifiers
+  "The modifiers of the edit shown: in motion mode the canvas shows more
+  (see `with-edit-modifiers`), unless the modifiers were set since in
+  another way."
+  [state]
+  (let [current (get state :workspace-modifiers)
+        edit    (get state ::edit-modifiers)]
+    (if (and (some? edit) (identical? (:shown edit) current))
+      (:edit edit)
+      current)))
+
 (defn clear-local-transform []
   (ptk/reify ::clear-local-transform
     ptk/EffectEvent
@@ -345,7 +378,7 @@
     ptk/UpdateEvent
     (update [_ state]
       (-> state
-          (dissoc :workspace-modifiers :wasm-props :prev-wasm-props)
+          (dissoc :workspace-modifiers ::edit-modifiers :wasm-props :prev-wasm-props)
           (dissoc :app.main.data.workspace.transforms/current-move-selected)))))
 
 (defn create-modif-tree
@@ -561,7 +594,14 @@
    (ptk/reify ::update-modifiers
      ptk/UpdateEvent
      (update [_ state]
-       (update state :workspace-modifiers calculate-update-modifiers state ignore-constraints ignore-snap-pixel modif-tree)))))
+       (let [shown (get state :workspace-modifiers)
+             edit  (get state ::edit-modifiers)
+             shown (calculate-update-modifiers shown state ignore-constraints ignore-snap-pixel modif-tree)]
+         (if (and (some? edit) (identical? (:shown edit) (get state :workspace-modifiers)))
+           (with-edit-modifiers state
+             (calculate-update-modifiers (:edit edit) state ignore-constraints ignore-snap-pixel modif-tree)
+             shown)
+           (assoc state :workspace-modifiers shown)))))))
 
 
 (defn set-modifiers
@@ -579,8 +619,13 @@
      ptk/UpdateEvent
      (update [_ state]
        (let [page-id   (:current-page-id state)
-             modifiers (calculate-modifiers state ignore-constraints ignore-snap-pixel modif-tree page-id params)]
-         (assoc state :workspace-modifiers modifiers))))))
+             modifiers (calculate-modifiers state ignore-constraints ignore-snap-pixel modif-tree page-id params)
+             shown     (when-not (:animation-preview? params)
+                         (when-let [tree (edit-preview-tree state modif-tree)]
+                           (calculate-modifiers state ignore-constraints ignore-snap-pixel tree page-id params)))]
+         (if (:animation-preview? params)
+           (with-edit-modifiers state nil modifiers)
+           (with-edit-modifiers state modifiers shown)))))))
 
 (defn- without-nil-ids
   "Drop nil-keyed entries from a modif-tree. A nil shape id (possible in
@@ -707,16 +752,25 @@
 (defn set-wasm-modifiers
   "Preview `modif-tree` on the canvas. With `skip-selrect?` the selection
   rect is left as it is (the animation preview moves shapes that may not
-  be selected)."
+  be selected). In motion mode an edit shows over the animation (see
+  `cltl/edit-preview`); `animation-preview?` is the animation itself."
   [modif-tree & {:keys [ignore-constraints ignore-snap-pixel snap-ignore-axis
-                        subtree-ids-by-id selection-rect-cache skip-selrect?]
+                        subtree-ids-by-id selection-rect-cache skip-selrect?
+                        animation-preview?]
                  :or {ignore-constraints false ignore-snap-pixel false snap-ignore-axis nil}
                  :as params}]
-  (let [modif-tree (without-nil-ids modif-tree)]
+  (let [edit-tree  (without-nil-ids modif-tree)
+        shown-tree (volatile! nil)
+        shown      (fn [state]
+                     (or @shown-tree
+                         (vreset! shown-tree
+                                  (or (when-not animation-preview?
+                                        (edit-preview-tree state edit-tree))
+                                      edit-tree))))]
     (ptk/reify ::set-wasm-modifiers
       ptk/UpdateEvent
       (update [_ state]
-        (let [property-changes (extract-property-changes modif-tree)]
+        (let [property-changes (extract-property-changes (shown state))]
           (if (d/not-empty? property-changes)
             (-> state
                 (assoc :prev-wasm-props (:wasm-props state))
@@ -731,7 +785,9 @@
         ;; thread is not blocked. The pair is closed in
         ;; `clear-local-transform`.
         (ensure-interactive-transform-start!)
-        (let [snap-pixel?  (and (not ignore-snap-pixel) (contains? (:workspace-layout state) :snap-pixel-grid))
+        (let [modif-tree   (shown state)
+              over-motion? (not (identical? modif-tree edit-tree))
+              snap-pixel?  (and (not ignore-snap-pixel) (contains? (:workspace-layout state) :snap-pixel-grid))
               translation? (every? #(ctm/only-move? (:modifiers %)) (vals modif-tree))]
 
           (if translation?
@@ -767,9 +823,12 @@
               (wasm.api/set-modifiers modifiers))
             (if skip-selrect?
               (rx/of (set-temporary-modifiers modifiers))
-              (let [ids     (into [] xf:map-key geometry-entries)
+              ;; The selection of the edit, not the animated shapes shown
+              ;; with it.
+              (let [ids     (into [] xf:map-key (parse-geometry-modifiers edit-tree))
                     selrect (when wasm-ready?
-                              (if (and translation? (not snap-pixel?) selection-rect-cache (seq modifiers))
+                              (if (and translation? (not snap-pixel?) (not over-motion?)
+                                       selection-rect-cache (seq modifiers))
                                 (cached-translation-selrect ids (second (first modifiers)) selection-rect-cache)
                                 (wasm.api/get-selection-rect ids)))]
                 (rx/of (set-temporary-selrect selrect)
@@ -982,10 +1041,12 @@
                (ctm/rotation-modifiers shape center angle))
 
              modif-tree
-             (-> (build-modif-tree ids objects get-modifier)
-                 (gm/set-objects-modifiers objects))]
+             (build-modif-tree ids objects get-modifier)]
 
-         (assoc state :workspace-modifiers modif-tree))))))
+         (with-edit-modifiers state
+           (gm/set-objects-modifiers modif-tree objects)
+           (some-> (edit-preview-tree state modif-tree)
+                   (gm/set-objects-modifiers objects))))))))
 
 ;; This function is similar to set-rotation-modifiers but:
 ;; - It consideres the center for everyshape instead of the center of the total selrect
@@ -1076,7 +1137,7 @@
              object-modifiers
              (if (some? modifiers)
                (calculate-modifiers state ignore-constraints ignore-snap-pixel modifiers page-id)
-               (get state :workspace-modifiers))
+               (applied-modifiers state))
 
              undo-id
              (js/Symbol)]

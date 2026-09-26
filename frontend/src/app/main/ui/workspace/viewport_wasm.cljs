@@ -11,6 +11,7 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
+   [app.common.logic.timelines :as cltl]
    [app.common.types.color :as clr]
    [app.common.types.component :as ctk]
    [app.common.types.shape :as cts]
@@ -93,7 +94,7 @@
   "`objects` with the `selected` shapes where the animation shows them at
   `time`."
   [selected objects timeline time]
-  (let [shown (dwa/preview-shapes timeline objects time)]
+  (let [shown (cltl/shown-shapes timeline objects time)]
     (reduce (fn [objects id]
               (if-let [shape (get shown id)]
                 (assoc objects id shape)

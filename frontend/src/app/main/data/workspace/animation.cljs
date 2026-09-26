@@ -14,8 +14,8 @@
    [app.common.data.macros :as dm]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
-   [app.common.geom.modifiers :as gm]
    [app.common.geom.shapes :as gsh]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.uuid :as uuid]
@@ -840,12 +840,21 @@
           (rx/empty))))))
 
 (defn set-active-board
-  "Remember the board the timeline dock targets (see `active-board-id`)."
+  "Remember the board the timeline dock targets (see `active-board-id`).
+  The canvas shows the animation of that board, the one edits on the
+  canvas are recorded to."
   [board-id]
   (ptk/reify ::set-active-board
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-animation :board-id] board-id))))
+      (assoc-in state [:workspace-animation :board-id] board-id))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (and (contains? (:workspace-layout state) :animation-timeline)
+               (not= board-id (dm/get-in state [:workspace-animation :preview :board-id])))
+        (rx/of (apply-preview))
+        (rx/empty)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PLAYBACK & PREVIEW
@@ -865,6 +874,14 @@
   active timeline, any stale preview is cleared."
   []
   (ptk/reify ::apply-preview
+    ptk/UpdateEvent
+    (update [_ state]
+      ;; What the canvas shows, for an edit on it to show over it (see
+      ;; `dsh/lookup-animation-preview`).
+      (if-let [tl (current-timeline state)]
+        (assoc-in state [:workspace-animation :preview] {:board-id (:board-id tl) :time (playhead state)})
+        (update state :workspace-animation dissoc :preview)))
+
     ptk/WatchEvent
     (watch [_ state _]
       (if-let [tl (current-timeline state)]
@@ -874,21 +891,9 @@
           ;; The selection frame follows the selected shapes (see the
           ;; viewport), not every shape the preview moves.
           (if ^boolean (features/active-feature? state "render-wasm/v1")
-            (rx/of (dwm/set-wasm-modifiers modif-tree :skip-selrect? true))
-            (rx/of (dwm/set-modifiers modif-tree))))
+            (rx/of (dwm/set-wasm-modifiers modif-tree :skip-selrect? true :animation-preview? true))
+            (rx/of (dwm/set-modifiers modif-tree false false {:animation-preview? true}))))
         (rx/of (dwm/clear-local-transform))))))
-
-(defn preview-shapes
-  "The shapes the animation moves at `time`, by id, as the canvas shows
-  them: with the children they carry along."
-  [timeline objects time]
-  (let [modif-tree (cta/timeline->modif-tree timeline objects time)]
-    (when (seq modif-tree)
-      (into {}
-            (keep (fn [[id {:keys [modifiers]}]]
-                    (when-let [shape (get objects id)]
-                      [id (gsh/transform-shape shape modifiers)])))
-            (gm/set-objects-modifiers modif-tree objects)))))
 
 (defn index-preview
   "Let hovering and clicking on the canvas find the shapes where the
@@ -903,7 +908,7 @@
             objects (dsh/lookup-page-objects state)
             preview (when (and (some? tl)
                                (not (dm/get-in state [:workspace-animation :playing?])))
-                      (preview-shapes tl objects (playhead state)))]
+                      (cltl/shown-shapes tl objects (playhead state)))]
         (if (some? page-id)
           (->> (mw/ask! {:cmd :index/set-preview
                          :page-id page-id
@@ -1018,6 +1023,10 @@
   "Stop playback and drop the preview modifiers from the canvas."
   []
   (ptk/reify ::clear-preview
+    ptk/UpdateEvent
+    (update [_ state]
+      (update state :workspace-animation dissoc :preview))
+
     ptk/WatchEvent
     (watch [_ _ _]
       (rx/of (pause)
@@ -1048,68 +1057,6 @@
 ;; CANVAS KEYFRAMES (motion mode)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def ^:private canvas-properties
-  "Properties an edit on the canvas records as keyframes. Scale stays a
-  timeline value; width and height follow a resize."
-  [:x :y :width :height :rotation :opacity :r1 :r2 :r3 :r4])
-
-(defn- angle-delta
-  "The turn from `from` to `to` degrees the short way round: a shape
-  keeps its rotation within 0-360, so 350 to 10 is a turn of 20."
-  [from to]
-  (let [delta (mod (- to from) 360)]
-    (if (> delta 180) (- delta 360) delta)))
-
-(defn- close-value?
-  [property old new]
-  (cond
-    (or (nil? old) (nil? new)) true
-    (cta/color-property? property) (= old new)
-    :else (mth/close? old new)))
-
-(defn- appearance-slot-values
-  "The current fill, stroke, shadow and blur values of `shape` as
-  `{[property index] value}` (index is nil for blur)."
-  [shape]
-  (let [put (fn [m property index value]
-              (cond-> m (some? value) (assoc [property index] value)))]
-    (as-> {} $
-      (reduce-kv
-       (fn [m index fill]
-         (if (cta/solid-color-fill? fill)
-           (-> m
-               (put :fill-color index (:fill-color fill))
-               (put :fill-opacity index (or (:fill-opacity fill) 1)))
-           m))
-       $
-       (vec (:fills shape)))
-      (reduce-kv
-       (fn [m index stroke]
-         (if (cta/solid-color-stroke? stroke)
-           (-> m
-               (put :stroke-color index (:stroke-color stroke))
-               (put :stroke-opacity index (or (:stroke-opacity stroke) 1))
-               (put :stroke-width index (or (:stroke-width stroke) 0)))
-           m))
-       $
-       (vec (:strokes shape)))
-      (reduce-kv
-       (fn [m index shadow]
-         (-> m
-             (put :shadow-offset-x index (or (:offset-x shadow) 0))
-             (put :shadow-offset-y index (or (:offset-y shadow) 0))
-             (put :shadow-blur index (or (:blur shadow) 0))
-             (put :shadow-spread index (or (:spread shadow) 0))
-             (put :shadow-color index (get-in shadow [:color :color]))
-             (put :shadow-opacity index (or (get-in shadow [:color :opacity]) 1))))
-       $
-       (vec (:shadow shape)))
-      (cond-> $
-        (:blur shape)
-        (put :blur nil (or (get-in shape [:blur :value]) 0))
-        (:background-blur shape)
-        (put :background-blur nil (or (get-in shape [:background-blur :value]) 0))))))
-
 (defn- set-attrs
   "`{shape-id {attr value}}` of the attributes set by `:mod-obj` changes."
   [changes]
@@ -1124,113 +1071,43 @@
           {}
           changes))
 
+(defn- with-attrs
+  "`objects` with the attributes `changes` set."
+  [objects changes]
+  (reduce-kv (fn [objects id attrs]
+               (d/update-when objects id merge attrs))
+             objects
+             (set-attrs changes)))
+
 (defn- record-canvas-edit
-  "Record the edit a commit made on the canvas to the animated properties
-  of the timeline's shapes as keyframes at the playhead: the value shown
-  there plus the change (for opacity, the new value). They join the undo
-  group of the edit, so both undo together."
+  "Record the edit a commit made on the canvas as keyframes at the
+  playhead (see `cta/record-edit`). They join the undo group of the edit,
+  so both undo together. The preview shows the shapes as the edit left
+  them either way."
   [{:keys [redo-changes undo-changes undo-group]}]
   (ptk/reify ::record-canvas-edit
     ptk/WatchEvent
     (watch [it state _]
       (if-let [tl (current-timeline state)]
-        (let [objects  (dsh/lookup-page-objects state)
-              board-id (:board-id tl)
-              time     (playhead state)
-              shown    (cta/values-at (cta/resolve-animations tl objects) time)
-              before   (set-attrs undo-changes)
-              after    (set-attrs redo-changes)
-
-              attr
-              (fn [attrs id k]
-                (get-in attrs [id k] (dm/get-in objects [id k])))
-
-              ;; Positions relative to the board before / after the edit, so
-              ;; moving the board itself records nothing for its children.
-              value
-              (fn [attrs id property]
-                (let [position (fn [id axis] (get (attr attrs id :selrect) axis))
-                      relative (fn [axis]
-                                 (let [own   (position id axis)
-                                       board (if (= id board-id) 0 (position board-id axis))]
-                                   (when (and (some? own) (some? board))
-                                     (- own board))))]
-                  (case property
-                    :x        (relative :x)
-                    :y        (relative :y)
-                    :width    (:width (attr attrs id :selrect))
-                    :height   (:height (attr attrs id :selrect))
-                    :rotation (or (attr attrs id :rotation) 0)
-                    :opacity  (or (attr attrs id :opacity) 1)
-                    :r1       (or (attr attrs id :r1) 0)
-                    :r2       (or (attr attrs id :r2) 0)
-                    :r3       (or (attr attrs id :r3) 0)
-                    :r4       (or (attr attrs id :r4) 0))))
-
-              record
-              (fn [tl shape-id property]
-                (let [old (value before shape-id property)
-                      new (value after shape-id property)]
-                  (if (or (nil? old) (nil? new) (mth/close? old new))
-                    tl
-                    (cta/add-keyframe tl shape-id
-                                      {:time time
-                                       :property property
-                                       :value (cond
-                                                (contains? #{:opacity :width :height :r1 :r2 :r3 :r4} property)
-                                                new
-
-                                                (= property :rotation)
-                                                (+ (get-in shown [shape-id property]) (angle-delta old new))
-
-                                                :else
-                                                (+ (get-in shown [shape-id property]) (- new old)))
-                                       :easing (:easing (keyframe-at tl shape-id property time) :ease)}))))
-
-              record-slot
-              (fn [tl shape-id property index old new]
-                (if (close-value? property old new)
-                  tl
-                  (cta/add-keyframe tl shape-id
-                                    (cond-> {:time time
-                                             :property property
-                                             :value new
-                                             :easing (:easing (keyframe-at tl shape-id property time index) :ease)}
-                                      (some? index) (assoc :index index)))))
-
-              shape-with
-              (fn [id attrs]
-                (merge (get objects id) (get attrs id)))
-
-              tl'
-              (reduce-kv
-               (fn [tl shape-id track]
-                 ;; Hidden properties show the shape as it is, so the edit
-                 ;; stays on the shape; locked ones keep their keyframes.
-                 (let [muted    (into (get track :hidden #{}) (get track :locked))
-                       recorded (remove #(contains? muted (cta/slot-key (:property %) (:index %)))
-                                        (:keyframes track))
-                       animated (into #{} (map :property) recorded)
-                       slots    (into #{} (map (juxt :property :index)) recorded)
-                       tl       (->> canvas-properties
-                                     (filter animated)
-                                     (reduce #(record %1 shape-id %2) tl))
-                       before-v (appearance-slot-values (shape-with shape-id before))
-                       after-v  (appearance-slot-values (shape-with shape-id after))]
-                   (reduce
-                    (fn [tl [property index]]
-                      (record-slot tl shape-id property index
-                                   (get before-v [property index])
-                                   (get after-v [property index])))
-                    tl
-                    (filter slots (keys after-v)))))
-               tl
-               (:tracks tl))]
-
+        (let [objects (dsh/lookup-page-objects state)
+              tl'     (cta/record-edit tl
+                                       (with-attrs objects undo-changes)
+                                       (with-attrs objects redo-changes)
+                                       (playhead state))]
           (if (= tl tl')
-            (rx/empty)
-            (rx/of (commit-timeline it state board-id tl' undo-group)
+            (rx/of (apply-preview))
+            (rx/of (commit-timeline it state (:board-id tl) tl' undo-group)
                    (apply-preview))))
+        (rx/empty)))))
+
+(defn- restore-preview
+  "Show the animation again once an edit drops its modifiers."
+  []
+  (ptk/reify ::restore-preview
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (some? (current-timeline state))
+        (rx/of (apply-preview))
         (rx/empty)))))
 
 (defn start-canvas-keyframes
@@ -1242,16 +1119,27 @@
     ptk/WatchEvent
     (watch [_ _ stream]
       (let [stopper (rx/filter (ptk/type? ::stop-canvas-keyframes) stream)]
-        (->> stream
-             (rx/filter dch/commit?)
-             (rx/map deref)
-             (rx/filter (fn [{:keys [source save-undo? redo-changes]}]
-                          (and (= source :local)
-                               save-undo?
-                               (some #(= :mod-obj (:type %)) redo-changes))))
-             ;; once the commit is applied
-             (rx/observe-on :async)
-             (rx/map record-canvas-edit)
+        (->> (rx/merge
+              (->> stream
+                   (rx/filter dch/commit?)
+                   (rx/map deref)
+                   ;; The store gets an event before the stream does, so
+                   ;; the changes of the commit are applied by now.
+                   ;; Recording right away shows the result in the frame
+                   ;; the edit ends in, with no flash of the shape at rest.
+                   ;; Any other change (a duplicate, an undo, another
+                   ;; user's edit) may change what the animation shows.
+                   (rx/map (fn [{:keys [source save-undo? redo-changes] :as commit}]
+                             (if (and (= source :local)
+                                      save-undo?
+                                      (some #(= :mod-obj (:type %)) redo-changes))
+                               (record-canvas-edit commit)
+                               (restore-preview)))))
+              ;; An edit ends by dropping its modifiers, the animation
+              ;; shown with them.
+              (->> stream
+                   (rx/filter (ptk/type? ::dwm/clear-local-transform))
+                   (rx/map restore-preview)))
              (rx/take-until stopper))))))
 
 (defn stop-canvas-keyframes

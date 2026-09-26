@@ -172,8 +172,10 @@
             state
             (let [page-id (:current-page-id state)
                   objects (dsh/lookup-page-objects state page-id)
+                  ;; In motion mode, where the animation shows them
+                  shown   (dsh/lookup-shown-shapes state)
                   srect   (->> selected
-                               (map #(get objects %))
+                               (map #(or (get shown %) (get objects %)))
                                (gsh/shapes->rect))]
               (update state :workspace-local
                       (fn [{:keys [vport] :as local}]

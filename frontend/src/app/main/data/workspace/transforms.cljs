@@ -25,6 +25,7 @@
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
    [app.common.types.path.helpers :as path.helpers]
+   [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
    [app.common.types.shape.attrs :refer [editable-attrs]]
    [app.common.types.shape.layout :as ctl]
@@ -153,6 +154,66 @@
   [shape]
   (boolean (or (some :fill-image (:fills shape))
                (:fill-image shape))))
+
+(defn- points-map
+  "The affine map taking the corners `from` of a shape (top left, top
+  right, bottom right and bottom left) onto the corners `to`."
+  [from to]
+  (let [[p0 p1 _ p3] from
+        [q0 q1 _ q3] to
+        ux  (- (:x p1) (:x p0))
+        uy  (- (:y p1) (:y p0))
+        vx  (- (:x p3) (:x p0))
+        vy  (- (:y p3) (:y p0))
+        det (- (* ux vy) (* uy vx))]
+    (if (mth/almost-zero? det)
+      identity
+      (fn [point]
+        (when (some? point)
+          (let [dx (- (:x point) (:x p0))
+                dy (- (:y point) (:y p0))
+                a  (/ (- (* dx vy) (* dy vx)) det)
+                b  (/ (- (* ux dy) (* uy dx)) det)]
+            (gpt/point (+ (:x q0) (* a (- (:x q1) (:x q0))) (* b (- (:x q3) (:x q0))))
+                       (+ (:y q0) (* a (- (:y q1) (:y q0))) (* b (- (:y q3) (:y q0)))))))))))
+
+(defn- motion-base
+  "In motion mode the handles are where the animation shows the shapes,
+  but an edit changes the shapes themselves (see
+  `dsh/lookup-animation-preview`): `[shape to-shape]`, the shape the
+  handles of `shape` stand for and the map taking the points of the
+  gesture onto it, or nil."
+  [state objects shape ids]
+  (when (some? (dsh/lookup-animation-preview state))
+    (let [base (if (= :multiple (:type shape))
+                 (-> (into [] (keep (d/getf objects)) ids)
+                     (gsh/shapes->rect)
+                     (assoc :type :multiple)
+                     (cts/setup-shape))
+                 (get objects (:id shape)))]
+      (when (and (some? base) (not= (:points base) (:points shape)))
+        [base (points-map (:points shape) (:points base))]))))
+
+(defn- shown-resize->base
+  "The resize `modifiers` of `shown`, a shape where the animation shows
+  it, as the same change of the shape itself (`base`): its size changing
+  as much and its center moving as much, which is how an edit on the
+  canvas is recorded at the playhead (see `cta/record-edit`). So the
+  shape turned by the animation grows along its sides as shown."
+  [modifiers shown base]
+  (let [after (gsh/transform-shape shown modifiers)
+        size  (fn [shape axis] (dm/get-in shape [:selrect axis]))]
+    (if (or (mth/almost-zero? (size shown :width)) (mth/almost-zero? (size shown :height)))
+      modifiers
+      (-> modifiers
+          ;; the structure changes of the resize, with its geometry redone
+          (assoc :geometry-child [] :geometry-parent [])
+          (ctm/resize (gpt/point (/ (size after :width) (size shown :width))
+                                 (/ (size after :height) (size shown :height)))
+                      (gsh/shape->center base)
+                      (:transform base)
+                      (:transform-inverse base))
+          (ctm/move (gpt/subtract (gsh/shape->center after) (gsh/shape->center shown)))))))
 
 (defn start-resize
   "Enter mouse resize mode, until mouse button is released."
@@ -363,6 +424,17 @@
               (rx/empty)
               (let [shapes (map (d/getf objects) shape-ids)
 
+                    ;; In motion mode a single shape resizes as shown and
+                    ;; the change goes to the shape itself; a selection of
+                    ;; several resizes where the shapes are (see
+                    ;; `motion-base`).
+                    [target to-target from-shown]
+                    (let [[base to-base :as motion] (motion-base state objects shape shape-ids)]
+                      (cond
+                        (nil? motion)               [shape identity identity]
+                        (= :multiple (:type shape)) [base to-base identity]
+                        :else                       [shape identity #(shown-resize->base % shape base)]))
+
                     resize-events-stream
                     (->> ms/mouse-position
                          (rx/filter some?)
@@ -372,7 +444,9 @@
                           (fn [[point _ _ _ :as current]]
                             (->> (snap/closest-snap-point page-id shapes objects layout zoom focus point)
                                  (rx/map #(conj current %)))))
-                         (rx/map #(resize shape initial-position layout objects %))
+                         (rx/map (fn [[point lock? center? bounds-resize? point-snap]]
+                                   [(to-target point) lock? center? bounds-resize? (to-target point-snap)]))
+                         (rx/map #(from-shown (resize target (to-target initial-position) layout objects %)))
                          (rx/share))
 
                     modifiers-stream
@@ -633,6 +707,16 @@
             group-center    (grc/rect->center group)
             initial-angle   (gpt/angle @ms/mouse-position group-center)
 
+            ;; The angle turns around the handles. In motion mode they are
+            ;; where the animation shows the shapes, but the shapes
+            ;; themselves turn where they are (see `motion-base`).
+            [shapes center]
+            (if (some? (dsh/lookup-animation-preview state))
+              (let [objects (dsh/lookup-page-objects state)
+                    shapes  (into [] (keep #(get objects (:id %))) shapes)]
+                [shapes (grc/rect->center (gsh/shapes->rect shapes))])
+              [shapes group-center])
+
             calculate-angle
             (fn [pos mod? shift?]
               (let [angle (- (gpt/angle pos group-center) initial-angle)
@@ -661,19 +745,19 @@
            (rx/merge
             (->> angle-stream
                  (rx/sample mconst/rotation-sample-time)
-                 (rx/map #(dwm/set-wasm-modifiers (rotation-modifiers % shapes group-center)
+                 (rx/map #(dwm/set-wasm-modifiers (rotation-modifiers % shapes center)
                                                   :ignore-snap-pixel true))
                  (rx/take-until stopper))
             (->> angle-stream
                  (rx/take-until stopper)
                  (rx/last)
-                 (rx/map #(dwm/apply-wasm-modifiers (rotation-modifiers % shapes group-center)
+                 (rx/map #(dwm/apply-wasm-modifiers (rotation-modifiers % shapes center)
                                                     :ignore-snap-pixel true))))
 
            (rx/of (finish-transform)))
 
           (let [emit-modifiers
-                (fn [angle] (dwm/set-rotation-modifiers angle shapes group-center))]
+                (fn [angle] (dwm/set-rotation-modifiers angle shapes center))]
             ;; Throttle the live preview to limit re-renders; the trailing
             ;; rx/last applies the exact final frame.
             (rx/concat

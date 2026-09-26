@@ -12,6 +12,7 @@
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
+   [app.common.logic.timelines :as cltl]
    [app.common.types.path :as path]))
 
 (defn lookup-profile
@@ -160,6 +161,22 @@
   ([state page-id filter-fn]
    (let [objects (lookup-page-objects state page-id)]
      (into [] (filter filter-fn) (vals objects)))))
+
+(defn lookup-animation-preview
+  "`{:timeline :time}` of the animation the canvas shows in motion mode
+  (see `app.main.data.workspace.animation/apply-preview`), or nil."
+  [state]
+  (when (contains? (:workspace-layout state) :animation-timeline)
+    (when-let [{:keys [board-id time]} (dm/get-in state [:workspace-animation :preview])]
+      (when-let [timeline (dm/get-in (lookup-page state) [:timelines board-id])]
+        {:timeline timeline :time time}))))
+
+(defn lookup-shown-shapes
+  "In motion mode, the shapes the animation moves, by id, as the canvas
+  shows them (see `cltl/shown-shapes`)."
+  [state]
+  (when-let [{:keys [timeline time]} (lookup-animation-preview state)]
+    (cltl/shown-shapes timeline (lookup-page-objects state) time)))
 
 (defn select-bool-children
   [state parent-id]

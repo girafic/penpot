@@ -1762,6 +1762,172 @@
    (values-at timeline time)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; EDITS ON THE CANVAS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^:private edit-properties
+  "Properties an edit of a shape records as keyframes. Scale stays a
+  timeline value; width and height follow a resize."
+  [:x :y :width :height :rotation :opacity :r1 :r2 :r3 :r4])
+
+(def ^:private edit-absolute-properties
+  "Properties an edit records as they end up, not as a change of the
+  value shown."
+  #{:opacity :width :height :r1 :r2 :r3 :r4})
+
+(defn- angle-delta
+  "The turn from `from` to `to` degrees the short way round: a shape
+  keeps its rotation within 0-360, so 350 to 10 is a turn of 20."
+  [from to]
+  (let [delta (mod (- to from) 360)]
+    (if (> delta 180) (- delta 360) delta)))
+
+(defn- close-value?
+  [property old new]
+  (cond
+    (or (nil? old) (nil? new)) true
+    (color-property? property) (= old new)
+    :else (mth/close? old new)))
+
+(defn- appearance-slot-values
+  "The current fill, stroke, shadow and blur values of `shape` as
+  `{[property index] value}` (index is nil for blur)."
+  [shape]
+  (let [put (fn [m property index value]
+              (cond-> m (some? value) (assoc [property index] value)))]
+    (as-> {} $
+      (reduce-kv
+       (fn [m index fill]
+         (if (solid-color-fill? fill)
+           (-> m
+               (put :fill-color index (:fill-color fill))
+               (put :fill-opacity index (or (:fill-opacity fill) 1)))
+           m))
+       $
+       (as-vec (:fills shape)))
+      (reduce-kv
+       (fn [m index stroke]
+         (if (solid-color-stroke? stroke)
+           (-> m
+               (put :stroke-color index (:stroke-color stroke))
+               (put :stroke-opacity index (or (:stroke-opacity stroke) 1))
+               (put :stroke-width index (or (:stroke-width stroke) 0)))
+           m))
+       $
+       (as-vec (:strokes shape)))
+      (reduce-kv
+       (fn [m index shadow]
+         (-> m
+             (put :shadow-offset-x index (or (:offset-x shadow) 0))
+             (put :shadow-offset-y index (or (:offset-y shadow) 0))
+             (put :shadow-blur index (or (:blur shadow) 0))
+             (put :shadow-spread index (or (:spread shadow) 0))
+             (put :shadow-color index (get-in shadow [:color :color]))
+             (put :shadow-opacity index (or (get-in shadow [:color :opacity]) 1))))
+       $
+       (as-vec (:shadow shape)))
+      (cond-> $
+        (:blur shape)
+        (put :blur nil (or (get-in shape [:blur :value]) 0))
+        (:background-blur shape)
+        (put :background-blur nil (or (get-in shape [:background-blur :value]) 0))))))
+
+(defn- edit-value
+  "The value of `property` of the shape `shape-id` of `objects`, with
+  positions relative to the board of the timeline, so moving the board
+  itself records nothing for its layers."
+  [objects board-id shape-id property]
+  (let [shape    (get objects shape-id)
+        relative (fn [axis]
+                   (let [own   (dm/get-in shape [:selrect axis])
+                         board (if (= shape-id board-id) 0 (dm/get-in objects [board-id :selrect axis]))]
+                     (when (and (some? own) (some? board))
+                       (- own board))))]
+    (case property
+      :x        (relative :x)
+      :y        (relative :y)
+      :width    (dm/get-in shape [:selrect :width])
+      :height   (dm/get-in shape [:selrect :height])
+      :rotation (or (:rotation shape) 0)
+      :opacity  (or (:opacity shape) 1)
+      :r1       (or (:r1 shape) 0)
+      :r2       (or (:r2 shape) 0)
+      :r3       (or (:r3 shape) 0)
+      :r4       (or (:r4 shape) 0))))
+
+(defn- keyframe-easing-at
+  "The easing of the keyframe of the slot of `property` and `index` of
+  `shape-id` at `time`, for a keyframe that takes its place."
+  [timeline shape-id property index time]
+  (or (:easing (d/seek #(and (same-slot? % property index) (= (:time %) time))
+                       (dm/get-in timeline [:tracks shape-id :keyframes])))
+      :ease))
+
+(defn record-edit
+  "`timeline` with an edit of its shapes recorded at `time`, as motion
+  mode does for an edit on the canvas: every animated property the edit
+  changes gets a keyframe there. `before` and `after` are the objects
+  before and after the edit. The keyframe takes the value shown at `time`
+  plus the change (for opacity, sizes, radii and the appearance, the new
+  value). Hidden and locked rows record nothing: the edit stays on the
+  shape."
+  [timeline before after time]
+  (let [board-id (:board-id timeline)
+        shown    (values-at (resolve-animations timeline before) time)
+
+        record
+        (fn [timeline shape-id property]
+          (let [old (edit-value before board-id shape-id property)
+                new (edit-value after board-id shape-id property)]
+            (if (or (nil? old) (nil? new) (mth/close? old new))
+              timeline
+              (add-keyframe timeline shape-id
+                            {:time time
+                             :property property
+                             :value (cond
+                                      (contains? edit-absolute-properties property)
+                                      new
+
+                                      (= property :rotation)
+                                      (+ (get-in shown [shape-id property]) (angle-delta old new))
+
+                                      :else
+                                      (+ (get-in shown [shape-id property]) (- new old)))
+                             :easing (keyframe-easing-at timeline shape-id property nil time)}))))
+
+        record-slot
+        (fn [timeline shape-id property index old new]
+          (if (close-value? property old new)
+            timeline
+            (add-keyframe timeline shape-id
+                          (cond-> {:time time
+                                   :property property
+                                   :value new
+                                   :easing (keyframe-easing-at timeline shape-id property index time)}
+                            (some? index) (assoc :index index)))))]
+
+    (reduce-kv
+     (fn [timeline shape-id track]
+       (let [muted    (into (get track :hidden #{}) (get track :locked))
+             recorded (remove #(contains? muted (slot-key (:property %) (:index %)))
+                              (:keyframes track))
+             animated (into #{} (map :property) recorded)
+             slots    (into #{} (map (juxt :property :index)) recorded)
+             timeline (->> edit-properties
+                           (filter animated)
+                           (reduce #(record %1 shape-id %2) timeline))
+             old      (appearance-slot-values (get before shape-id))
+             new      (appearance-slot-values (get after shape-id))]
+         (reduce (fn [timeline [property index]]
+                   (record-slot timeline shape-id property index
+                                (get old [property index])
+                                (get new [property index])))
+                 timeline
+                 (filter slots (keys new)))))
+     timeline
+     (:tracks timeline))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; MAINTENANCE
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

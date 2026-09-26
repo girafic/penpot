@@ -16,7 +16,10 @@
    [app.common.data.macros :as dm]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.modifiers :as gm]
+   [app.common.geom.shapes :as gsh]
    [app.common.types.animation :as cta]
+   [app.common.types.modifiers :as ctm]
    [app.common.uuid :as uuid]))
 
 (defn- in-board
@@ -181,3 +184,34 @@
     (cond-> changes
       (not= result timelines)
       (commit-timelines page result))))
+
+(defn shown-shapes
+  "The shapes the animation of `timeline` moves at `time`, by id, as the
+  canvas shows them: with the children they carry along."
+  [timeline objects time]
+  (let [modif-tree (cta/timeline->modif-tree timeline objects time)]
+    (when (seq modif-tree)
+      (into {}
+            (keep (fn [[id {:keys [modifiers]}]]
+                    (when-let [shape (get objects id)]
+                      [id (gsh/transform-shape shape modifiers)])))
+            (gm/set-objects-modifiers modif-tree objects)))))
+
+(defn edit-preview
+  "The modif-tree showing `edit`, a modif-tree that changes shapes of
+  `objects`, over the animation of `timeline` at `time` in motion mode:
+  the shapes as the edit leaves them and then, with the edit recorded
+  (see `cta/record-edit`), as the timeline shows them there. So during a
+  drag the canvas shows what it will show once the shapes are dropped,
+  and the animated shapes the edit leaves alone stay where they are."
+  [timeline objects time edit]
+  (let [after   (reduce-kv (fn [objects id {:keys [modifiers]}]
+                             (d/update-when objects id gsh/transform-shape modifiers))
+                           objects
+                           (gm/set-objects-modifiers edit objects))
+        shown   (-> (cta/record-edit timeline objects after time)
+                    (cta/timeline->modif-tree after time))]
+    (merge-with (fn [edit shown]
+                  (update edit :modifiers ctm/add-modifiers (:modifiers shown)))
+                edit
+                shown)))
