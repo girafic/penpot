@@ -334,6 +334,14 @@ $axis-end-gap: deprecated.$s-8;
   border-left: 1px solid var(--color-accent-primary);
 }
 
+// Where a drag in the timeline snaps to.
+.snap-line {
+  position: absolute;
+  inset-block: 0;
+  width: 0;
+  border-left: 1px dashed var(--color-accent-warning);
+}
+
 .tracks-hint {
   padding: deprecated.$s-16;
   color: var(--color-foreground-secondary);

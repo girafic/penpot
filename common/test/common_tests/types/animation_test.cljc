@@ -1379,3 +1379,42 @@
         tl'     (cta/record-edit tl objects after 500)]
     (t/is (= "#ff0000" (:value (d/seek #(= 500 (:time %))
                                        (cta/property-keyframes tl' rid :fill-color 0)))))))
+
+(t/deftest shift-keyframes-moves-them-together
+  (let [sid (uuid/next)
+        tl  (-> (mk-timeline)
+                (cta/add-keyframe sid {:time 100 :property :x :value 0})
+                (cta/add-keyframe sid {:time 400 :property :x :value 10})
+                (cta/add-keyframe sid {:time 700 :property :y :value 0}))
+        ids (mapv (fn [{:keys [id]}] {:shape-id sid :keyframe-id id})
+                  (take 2 (get-in tl [:tracks sid :keyframes])))
+        times #(mapv :time (get-in % [:tracks sid :keyframes]))]
+    (t/is (= [150 450 700] (times (cta/shift-keyframes tl ids 50))))
+    (t/testing "none goes before the start"
+      (t/is (= [0 300 700] (times (cta/shift-keyframes tl ids -250)))))
+    (t/testing "the duration grows to hold them"
+      (t/is (= 1400 (:duration (cta/shift-keyframes tl ids 1000)))))
+    (t/testing "one landing on another of its property takes its place"
+      (let [kfs  #(mapv (juxt :time :property :value) (get-in % [:tracks sid :keyframes]))
+            y-id (-> tl (get-in [:tracks sid :keyframes]) last :id)]
+        (t/is (= [[400 :x 0] [700 :y 0]] (kfs (cta/shift-keyframes tl (take 1 ids) 300))))
+        (t/is (= [[100 :x 0] [400 :x 10] [400 :y 0]]
+                 (kfs (cta/shift-keyframes tl [{:shape-id sid :keyframe-id y-id}] -300))))))
+    (t/testing "a locked one stays"
+      (let [tl (cta/toggle-slot-flag tl sid :locked :x nil)]
+        (t/is (= tl (cta/shift-keyframes tl ids 50)))))))
+
+(t/deftest snap-times-leave-out-what-is-dragged
+  (let [sid (uuid/next)
+        tl  (-> (mk-timeline)
+                (cta/add-keyframe sid {:time 100 :property :x :value 0})
+                (cta/add-keyframe sid {:time 400 :property :x :value 10})
+                (cta/add-animation sid {:type :fade :start 500 :duration 200}))
+        kf  (-> tl (get-in [:tracks sid :keyframes]) first :id)
+        an  (-> tl (get-in [:tracks sid :animations]) first :id)]
+    (t/is (= [0 100 400 500 700 1000] (vec (cta/snap-times tl))))
+    (t/is (= [0 400 1000] (vec (cta/snap-times tl :keyframe-ids #{kf} :animation-ids #{an}))))
+    (t/testing "the nearest within the threshold"
+      (t/is (= 400 (cta/snap-time (cta/snap-times tl) 395 10)))
+      (t/is (= 500 (cta/snap-time (cta/snap-times tl) 460 45)))
+      (t/is (nil? (cta/snap-time (cta/snap-times tl) 250 10))))))

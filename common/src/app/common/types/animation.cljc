@@ -541,6 +541,50 @@
       (store-track timeline shape-id
                    (update track :keyframes (partial filterv #(not= (:id %) keyframe-id)))))))
 
+(defn- find-keyframe
+  [timeline {:keys [shape-id keyframe-id]}]
+  (d/seek #(= keyframe-id (:id %))
+          (dm/get-in timeline [:tracks shape-id :keyframes])))
+
+(defn- drop-landed-on
+  "`keyframes` without the ones a keyframe of `moved-ids` landed on: the
+  same property (and index) at the same time."
+  [keyframes moved-ids]
+  (let [slot-time (juxt :property :index :time)
+        landed    (into #{}
+                        (comp (filter #(contains? moved-ids (:id %)))
+                              (map slot-time))
+                        keyframes)]
+    (filterv #(or (contains? moved-ids (:id %))
+                  (not (contains? landed (slot-time %))))
+             keyframes)))
+
+(defn shift-keyframes
+  "`timeline` with the keyframes of `keyframes` (`{:shape-id
+  :keyframe-id}` each) moved `dt` ms along, all of them as far and none
+  before the start. Locked ones stay where they are. One that lands on
+  another keyframe of its property takes its place, as a keyframe added
+  there does (see `add-keyframe`). The duration grows to hold them."
+  [timeline keyframes dt]
+  (let [moving (filterv (fn [{:keys [shape-id] :as ref}]
+                          (when-let [keyframe (find-keyframe timeline ref)]
+                            (not (locked-keyframe? timeline shape-id keyframe))))
+                        keyframes)
+        times  (mapv #(:time (find-keyframe timeline %)) moving)
+        dt     (if (seq times) (max dt (- (reduce min times))) 0)]
+    (if (zero? dt)
+      timeline
+      (let [moved-ids (into #{} (map :keyframe-id) moving)
+            shifted   (reduce (fn [timeline {:keys [shape-id keyframe-id]}]
+                                (update-keyframe timeline shape-id keyframe-id #(update % :time + dt)))
+                              timeline
+                              moving)]
+        (-> (reduce (fn [timeline shape-id]
+                      (update-in timeline [:tracks shape-id :keyframes] drop-landed-on moved-ids))
+                    shifted
+                    (into #{} (map :shape-id) moving))
+            (update :duration max (+ (reduce max times) dt)))))))
+
 (defn property-keyframes
   "The (time-sorted) keyframes of `property` in the track of `shape-id`.
   When `index` is given, only that slot (fill, stroke or shadow)."
@@ -780,6 +824,37 @@
                      (if (empty? animations)
                        (dissoc track :animations)
                        (assoc track :animations animations)))))))
+
+(defn snap-times
+  "The times a drag on `timeline` snaps to: its start and end, its
+  keyframes and the starts and ends of its preset animations, but for the
+  keyframes of `keyframe-ids` and the animations of `animation-ids`, the
+  ones being dragged."
+  [timeline & {:keys [keyframe-ids animation-ids]}]
+  (let [tracks (vals (:tracks timeline))]
+    (into (sorted-set 0 (:duration timeline))
+          (concat
+           (for [track    tracks
+                 keyframe (:keyframes track)
+                 :when (not (contains? keyframe-ids (:id keyframe)))]
+             (:time keyframe))
+           (for [track     tracks
+                 animation (:animations track)
+                 :when (not (contains? animation-ids (:id animation)))
+                 time      [(:start animation) (animation-end animation)]]
+             time)))))
+
+(defn snap-time
+  "The one of `times` nearest to `time`, within `threshold` of it, or nil."
+  [times time threshold]
+  (reduce (fn [best t]
+            (let [distance (mth/abs (- t time))]
+              (if (and (<= distance threshold)
+                       (or (nil? best) (< distance (mth/abs (- best time)))))
+                t
+                best)))
+          nil
+          times))
 
 (defn toggle-animation-flag
   "Set or clear `flag` of an animation: `:hidden` (left out of playback

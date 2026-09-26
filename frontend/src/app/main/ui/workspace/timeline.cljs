@@ -212,6 +212,15 @@
   "Pixels the pointer must move before a lane click becomes a box select."
   4)
 
+(def ^:private snap-distance
+  "Pixels within which a drag in the timeline snaps (see `snap-target`)."
+  6)
+
+(def ^:private snap-context
+  "What a drag in a lane snaps with: `{:timeline :target :show}`, see
+  `timeline*`."
+  (mf/create-context nil))
+
 (defn rect-from-points
   "Axis-aligned rect covering two pointer positions."
   [x0 y0 x1 y1]
@@ -390,15 +399,17 @@
 
 (mf/defc keyframe*
   {::mf/private true}
-  [{:keys [keyframe shape-id duration lane-node-ref selected? locked? on-select-layer]}]
+  [{:keys [keyframe shape-id duration lane-node-ref selected? selected-kfs locked? on-select-layer]}]
   (let [time        (:time keyframe)
         kf-id       (:id keyframe)
-        ;; The undo transaction of the drag in progress.
+        snap        (mf/use-ctx snap-context)
+        ;; The drag in progress: its undo transaction, the timeline as it
+        ;; was when it started and the keyframes it moves.
         dragging-ref (mf/use-ref nil)
 
         on-pointer-down
         (mf/use-fn
-         (mf/deps locked?)
+         (mf/deps locked? selected? selected-kfs shape-id kf-id time snap)
          (fn [event]
            ;; Only the left button drags; the right one opens the row menu.
            ;; A locked keyframe stays where it is.
@@ -406,24 +417,35 @@
              (let [undo-id (js/Symbol)]
                (dom/stop-propagation event)
                (dom/capture-pointer event)
-               (mf/set-ref-val! dragging-ref undo-id)
+               (mf/set-ref-val! dragging-ref
+                                {:undo-id undo-id
+                                 :base ((:timeline snap))
+                                 :from time
+                                 ;; a selected keyframe takes the others along
+                                 :moving (if (and selected? (> (count selected-kfs) 1))
+                                           selected-kfs
+                                           #{{:shape-id shape-id :keyframe-id kf-id}})})
                (st/emit! (dwu/start-undo-transaction undo-id))))))
 
         on-pointer-move
         (mf/use-fn
-         (mf/deps shape-id kf-id duration)
+         (mf/deps duration snap)
          (fn [event]
-           (when (mf/ref-val dragging-ref)
+           (when-let [{:keys [base from moving]} (mf/ref-val dragging-ref)]
              (when-let [node (mf/ref-val lane-node-ref)]
-               (let [t (pointer->time event node duration)]
-                 (st/emit! (dwa/move-keyframe shape-id kf-id t)))))))
+               (let [t      (pointer->time event node duration)
+                     target ((:target snap) t event {:keyframe-ids (into #{} (map :keyframe-id) moving)})]
+                 ((:show snap) target)
+                 (st/emit! (dwa/shift-keyframes-from base moving (- (or target t) from))))))))
 
         on-pointer-up
         (mf/use-fn
+         (mf/deps snap)
          (fn [event]
-           (when-let [undo-id (mf/ref-val dragging-ref)]
+           (when-let [{:keys [undo-id]} (mf/ref-val dragging-ref)]
              (dom/release-pointer event)
              (mf/set-ref-val! dragging-ref nil)
+             ((:show snap) nil)
              (st/emit! (dwu/commit-undo-transaction undo-id)))))
 
         on-double-click
@@ -511,6 +533,7 @@
                       :shape-id shape-id
                       :duration duration
                       :selected? (contains? selected-kfs {:shape-id shape-id :keyframe-id (:id kf)})
+                      :selected-kfs selected-kfs
                       :locked? locked?
                       :on-select-layer on-select-layer
                       :lane-node-ref node-ref}])]))
@@ -1057,6 +1080,56 @@
         tick       (tick-step span ruler-width)
         ticks      (range 0 (inc span) (/ tick 2))
 
+        ;; Drags snap to the playhead, the keyframes and the ends of the
+        ;; animations and of the timeline, unless Ctrl/Cmd is held; a line
+        ;; shows where. What they snap to is read when they move, so the
+        ;; functions stay the same while the timeline changes.
+        snap-state-ref (mf/use-ref nil)
+        _              (mf/set-ref-val! snap-state-ref {:timeline timeline
+                                                        :playhead playhead
+                                                        :span span
+                                                        :ruler-width ruler-width})
+        snap-line*     (mf/use-state nil)
+        snap-line      (deref snap-line*)
+
+        snap-target
+        (mf/use-fn
+         (fn [time event {:keys [playhead?] :or {playhead? true} :as except}]
+           (let [{:keys [timeline playhead span ruler-width]} (mf/ref-val snap-state-ref)]
+             (when-not (kbd/mod? event)
+               (cta/snap-time (cond-> (cta/snap-times timeline except)
+                                playhead? (conj playhead))
+                              time
+                              (* snap-distance (/ span (max 1 ruler-width))))))))
+
+        show-snap
+        (mf/use-fn
+         (fn [time]
+           (reset! snap-line* time)))
+
+        snap-span
+        (mf/use-fn
+         ;; `[start end]` moved so that the end nearer to what it snaps to
+         ;; lands on it
+         (fn [[start end] event except]
+           (let [ts (snap-target start event except)
+                 te (snap-target end event except)
+                 ds (some-> ts (- start))
+                 de (some-> te (- end))
+                 d  (cond
+                      (nil? ds) de
+                      (nil? de) ds
+                      (<= (mth/abs ds) (mth/abs de)) ds
+                      :else de)]
+             (show-snap (cond (nil? d) nil (= d ds) ts :else te))
+             (if (some? d) [(+ start d) (+ end d)] [start end]))))
+
+        snap
+        (mf/with-memo []
+          {:timeline #(:timeline (mf/ref-val snap-state-ref))
+           :target snap-target
+           :show show-snap})
+
         scroll-ref (mf/use-ref nil)
         ;; Scroll position to apply once the new zoom is laid out.
         anchor-ref (mf/use-ref nil)
@@ -1121,13 +1194,25 @@
          (fn [event]
            (when-let [{:keys [base ids range mode x0]} (mf/ref-val bar-drag-ref)]
              (let [[start end] range
-                   dx (- (:x (dom/get-client-position event)) x0)
-                   dt (mth/round (* dx (/ span (max 1 ruler-width))))
-                   to (case mode
-                        :start [(mth/clamp (+ start dt) 0 (dec end)) end]
-                        :end   [start (max (inc start) (+ end dt))]
-                        (let [dt (max dt (- start))]
-                          [(+ start dt) (+ end dt)]))]
+                   dx     (- (:x (dom/get-client-position event)) x0)
+                   dt     (mth/round (* dx (/ span (max 1 ruler-width))))
+                   ;; the keyframes of the bar move, they snap to the others
+                   except {:keyframe-ids (into #{}
+                                               (comp (mapcat #(dm/get-in base [:tracks % :keyframes]))
+                                                     (map :id))
+                                               ids)}
+                   to     (case mode
+                            :start (let [t (mth/clamp (+ start dt) 0 (dec end))
+                                         s (snap-target t event except)]
+                                     (show-snap s)
+                                     [(mth/clamp (or s t) 0 (dec end)) end])
+                            :end   (let [t (max (inc start) (+ end dt))
+                                         s (snap-target t event except)]
+                                     (show-snap s)
+                                     [start (max (inc start) (or s t))])
+                            (let [dt (max dt (- start))
+                                  [s e] (snap-span [(+ start dt) (+ end dt)] event except)]
+                              (if (neg? s) [0 (- e s)] [s e])))]
                (st/emit! (dwa/retime-keyframes base ids range to))))))
 
         on-bar-up
@@ -1135,6 +1220,7 @@
          (fn [_event]
            (when-let [{:keys [undo-id listen-keys]} (mf/ref-val bar-drag-ref)]
              (mf/set-ref-val! bar-drag-ref nil)
+             (show-snap nil)
              (doseq [key listen-keys]
                (events/unlistenByKey key))
              (st/emit! (dwu/commit-undo-transaction undo-id)))))
@@ -1173,16 +1259,24 @@
          (mf/deps span ruler-width)
          (fn [event]
            (when-let [{:keys [base shape-id animation mode x0]} (mf/ref-val animation-drag-ref)]
-             (let [start (:start animation)
-                   end   (cta/animation-end animation)
-                   dx    (- (:x (dom/get-client-position event)) x0)
-                   dt    (mth/round (* dx (/ span (max 1 ruler-width))))
+             (let [start  (:start animation)
+                   end    (cta/animation-end animation)
+                   dx     (- (:x (dom/get-client-position event)) x0)
+                   dt     (mth/round (* dx (/ span (max 1 ruler-width))))
+                   except {:animation-ids #{(:id animation)}}
                    [start end]
                    (case mode
-                     :start [(mth/clamp (+ start dt) 0 (dec end)) end]
-                     :end   [start (max (inc start) (+ end dt))]
-                     (let [dt (max dt (- start))]
-                       [(+ start dt) (+ end dt)]))]
+                     :start (let [t (mth/clamp (+ start dt) 0 (dec end))
+                                  s (snap-target t event except)]
+                              (show-snap s)
+                              [(mth/clamp (or s t) 0 (dec end)) end])
+                     :end   (let [t (max (inc start) (+ end dt))
+                                  s (snap-target t event except)]
+                              (show-snap s)
+                              [start (max (inc start) (or s t))])
+                     (let [dt (max dt (- start))
+                           [s e] (snap-span [(+ start dt) (+ end dt)] event except)]
+                       (if (neg? s) [0 (- e s)] [s e])))]
                (st/emit! (dwa/retime-animation base shape-id (:id animation) start (- end start)))))))
 
         on-animation-up
@@ -1190,6 +1284,7 @@
          (fn [_event]
            (when-let [{:keys [undo-id listen-keys]} (mf/ref-val animation-drag-ref)]
              (mf/set-ref-val! animation-drag-ref nil)
+             (show-snap nil)
              (doseq [key listen-keys]
                (events/unlistenByKey key))
              (st/emit! (dwu/commit-undo-transaction undo-id)))))
@@ -1230,9 +1325,11 @@
         (mf/use-fn
          (mf/deps span)
          (fn [event]
-           (let [node (mf/ref-val ruler-ref)
-                 t    (pointer->time event node span)]
-             (st/emit! (dwa/set-playhead t)))))
+           (let [node   (mf/ref-val ruler-ref)
+                 t      (pointer->time event node span)
+                 target (snap-target t event {:playhead? false})]
+             (show-snap target)
+             (st/emit! (dwa/set-playhead (or target t))))))
 
         on-ruler-down
         (mf/use-fn
@@ -1253,7 +1350,8 @@
         (mf/use-fn
          (fn [event]
            (dom/release-pointer event)
-           (mf/set-ref-val! drag-ref false)))
+           (mf/set-ref-val! drag-ref false)
+           (show-snap nil)))
 
         ;; Box selection of keyframes. Positions are kept in the tracks, so
         ;; the box and its keyframes stay together when the timeline
@@ -1365,16 +1463,29 @@
         (mf/use-fn #(reset! menu* nil))
 
         ;; A click in the dock focuses it; then Delete/Backspace delete the
-        ;; selected keyframes instead of reaching the workspace shortcut
-        ;; that deletes the selected shapes.
+        ;; selected keyframes and the arrows move them (10 ms, 100 ms with
+        ;; Shift), instead of reaching the workspace shortcuts that delete
+        ;; or move the selected shapes.
         on-key-down
         (mf/use-fn
+         (mf/deps selected-kfs)
          (fn [event]
-           (when (and (or (kbd/delete? event) (kbd/backspace? event))
-                      (not (editing-text? event)))
-             (dom/prevent-default event)
-             (dom/stop-propagation event)
-             (st/emit! (dwa/delete-selected-keyframes)))))
+           (cond
+             (editing-text? event)
+             nil
+
+             (or (kbd/delete? event) (kbd/backspace? event))
+             (do (dom/prevent-default event)
+                 (dom/stop-propagation event)
+                 (st/emit! (dwa/delete-selected-keyframes)))
+
+             (and (seq selected-kfs)
+                  (or (kbd/left-arrow? event) (kbd/right-arrow? event)))
+             (do (dom/prevent-default event)
+                 (dom/stop-propagation event)
+                 (st/emit! (dwa/shift-selected-keyframes
+                            (* (if (kbd/left-arrow? event) -1 1)
+                               (if (kbd/shift? event) 100 10))))))))
 
         ;; A locked property or animation keeps its keyframes, loop and span.
         menu-locked?
@@ -1555,60 +1666,64 @@
                  [:div {:class (stl/css :duration-shade)
                         :style #js {"left" (time->pct duration span)}}])
                [:div {:class (stl/css :playhead-line)
-                      :style #js {"left" (time->pct playhead span)}}]]
+                      :style #js {"left" (time->pct playhead span)}}]
+               (when (some? snap-line)
+                 [:div {:class (stl/css :snap-line)
+                        :style #js {"left" (time->pct snap-line span)}}])]
 
-              (for [{:keys [type id depth] :as row} rows]
-                (case type
-                  :layer
-                  [:> layer-row* {:key (dm/str id)
-                                  :shape (:shape row)
-                                  :depth depth
-                                  :expandable? (:expandable? row)
-                                  :expanded? (:expanded? row)
-                                  :selected? (contains? selected id)
-                                  :range (:range row)
-                                  :duration span
-                                  :on-toggle on-toggle-layer
-                                  :on-select on-select-layer
-                                  :on-context-menu on-context-menu
-                                  :on-bar-down on-bar-down}]
+              [:& (mf/provider snap-context) {:value snap}
+               (for [{:keys [type id depth] :as row} rows]
+                 (case type
+                   :layer
+                   [:> layer-row* {:key (dm/str id)
+                                   :shape (:shape row)
+                                   :depth depth
+                                   :expandable? (:expandable? row)
+                                   :expanded? (:expanded? row)
+                                   :selected? (contains? selected id)
+                                   :range (:range row)
+                                   :duration span
+                                   :on-toggle on-toggle-layer
+                                   :on-select on-select-layer
+                                   :on-context-menu on-context-menu
+                                   :on-bar-down on-bar-down}]
 
-                  :animation
-                  (let [animation (:animation row)]
-                    [:> animation-row* {:key (dm/str id "-" (:id animation))
+                   :animation
+                   (let [animation (:animation row)]
+                     [:> animation-row* {:key (dm/str id "-" (:id animation))
+                                         :shape-id id
+                                         :animation animation
+                                         :depth depth
+                                         :duration span
+                                         :selected? (contains? selected id)
+                                         :on-select on-select-layer
+                                         :on-context-menu on-context-menu
+                                         :on-animation-down on-animation-down}])
+
+                   (let [property (:property row)
+                         index    (:index row)]
+                     [:> property-row* {:key (dm/str id "-" (name property) "-" index)
+                                        :timeline timeline
                                         :shape-id id
-                                        :animation animation
+                                        :property property
+                                        :index index
                                         :depth depth
+                                        :keyframes (cta/property-keyframes timeline id property index)
+                                        :looping? (cta/looping? timeline id property index)
+                                        :hidden? (cta/slot-flag? timeline id :hidden property index)
+                                        :locked? (cta/slot-flag? timeline id :locked property index)
+                                        :value (cta/value-of (get values id) property index)
+                                        :offset (when (nil? index)
+                                                  (get-in position-offsets [id property]))
+                                        :playhead playhead
                                         :duration span
-                                        :selected? (contains? selected id)
-                                        :on-select on-select-layer
+                                        :active? (contains? selected id)
+                                        :selected-kfs selected-kfs
                                         :on-context-menu on-context-menu
-                                        :on-animation-down on-animation-down}])
-
-                  (let [property (:property row)
-                        index    (:index row)]
-                    [:> property-row* {:key (dm/str id "-" (name property) "-" index)
-                                       :timeline timeline
-                                       :shape-id id
-                                       :property property
-                                       :index index
-                                       :depth depth
-                                       :keyframes (cta/property-keyframes timeline id property index)
-                                       :looping? (cta/looping? timeline id property index)
-                                       :hidden? (cta/slot-flag? timeline id :hidden property index)
-                                       :locked? (cta/slot-flag? timeline id :locked property index)
-                                       :value (cta/value-of (get values id) property index)
-                                       :offset (when (nil? index)
-                                                 (get-in position-offsets [id property]))
-                                       :playhead playhead
-                                       :duration span
-                                       :active? (contains? selected id)
-                                       :selected-kfs selected-kfs
-                                       :on-context-menu on-context-menu
-                                       :easing-kf-id (when (= (:shape-id easing) id)
-                                                       (:keyframe-id easing))
-                                       :on-edit-easing on-edit-easing
-                                       :on-select-layer on-select-keyframe-layer}])))
+                                        :easing-kf-id (when (= (:shape-id easing) id)
+                                                        (:keyframe-id easing))
+                                        :on-edit-easing on-edit-easing
+                                        :on-select-layer on-select-keyframe-layer}])))]
 
               [:div {:class (stl/css :marquee)
                      :ref marquee-ref}]

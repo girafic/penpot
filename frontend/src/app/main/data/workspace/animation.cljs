@@ -396,18 +396,6 @@
                                      (merge {:time time :property property :value value}
                                             (cta/split-timing % shape-id property nil time))))))))))
 
-(defn move-keyframe
-  [shape-id keyframe-id time]
-  (ptk/reify ::move-keyframe
-    ptk/WatchEvent
-    (watch [it state _]
-      (if-let [tl (current-timeline state)]
-        (let [tl' (cta/update-keyframe tl shape-id keyframe-id
-                                       #(assoc % :time (max 0 (int time))))]
-          (rx/of (commit-timeline it state (:board-id tl') tl')
-                 (apply-preview)))
-        (rx/empty)))))
-
 (defn retime-keyframes
   "Commit `base` (the timeline as it was when a drag started) with the
   keyframes of `shape-ids` retimed from the span `from` to `to`."
@@ -418,6 +406,45 @@
       (let [tl' (cta/retime-keyframes base shape-ids from to)]
         (rx/of (commit-timeline it state (:board-id tl') tl')
                (apply-preview))))))
+
+(defn shift-keyframes-from
+  "Commit `base` (the timeline as it was when a drag started) with the
+  keyframes of `keyframes` moved `dt` ms along (see `cta/shift-keyframes`)."
+  [base keyframes dt]
+  (ptk/reify ::shift-keyframes-from
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl' (cta/shift-keyframes base keyframes dt)]
+        (rx/of (commit-timeline it state (:board-id tl') tl')
+               (apply-preview))))))
+
+(defn shift-selected-keyframes
+  "Move the selected keyframes `dt` ms along, as the arrow keys do. The
+  playhead goes along when it is on one of them, so the value field keeps
+  showing that keyframe."
+  [dt]
+  (ptk/reify ::shift-selected-keyframes
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl       (current-timeline state)
+            selected (dm/get-in state [:workspace-animation :selected-kfs])]
+        (if (and (some? tl) (seq selected))
+          (let [tl'     (cta/shift-keyframes tl selected dt)
+                time-of (fn [tl {:keys [shape-id keyframe-id]}]
+                          (:time (d/seek #(= keyframe-id (:id %))
+                                         (dm/get-in tl [:tracks shape-id :keyframes]))))
+                ;; how far they went (a locked one stays)
+                moved   (or (some #(let [from (time-of tl %) to (time-of tl' %)]
+                                     (when (not= from to) (- to from)))
+                                  selected)
+                            0)
+                on?     (some #(= (playhead state) (time-of tl %)) selected)]
+            (rx/concat
+             (rx/of (commit-timeline it state (:board-id tl') tl'))
+             (if (and on? (not (zero? moved)))
+               (rx/of (set-playhead (+ (playhead state) moved)))
+               (rx/of (apply-preview)))))
+          (rx/empty))))))
 
 (defn set-track-origin
   "Set the scale/rotation pivot of `shape-id` (normalized 0–1)."
