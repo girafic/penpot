@@ -3701,6 +3701,13 @@ export interface Timeline {
   readonly animations: PresetAnimation[];
 
   /**
+   * The markers of the timeline, by time: named moments that drags snap to
+   * and the playhead jumps between. A Lottie export names the stretch from
+   * each to the next one (or to the end), so a player can play it by name.
+   */
+  readonly markers: Marker[];
+
+  /**
    * Adds a keyframe of `shape`, the board or a layer inside it. A keyframe
    * of the same property at the same time takes its place.
    * @param shape The board or a layer inside it.
@@ -3742,6 +3749,39 @@ export interface Timeline {
   ): PresetAnimation[];
 
   /**
+   * Adds a marker. The timeline grows to hold it.
+   * @param marker Its time and name (`Marker N` by default).
+   *
+   * @example
+   * ```js
+   * timeline.addMarker({ time: 0, name: 'intro' });
+   * timeline.addMarker({ time: 800, name: 'loop' });
+   * ```
+   */
+  addMarker(marker: MarkerProps): Marker;
+
+  /**
+   * Runs `callback` and records what it changes of `shapes` as keyframes at
+   * `time`, as motion mode does with auto-keyframe (REC) on. A property
+   * that is animated gets a keyframe there; one that is not yet also gets
+   * one at 0 with the value it had before, so the change plays. The changes
+   * stay on the shapes. Only `shapes` are recorded: moving a group also
+   * moves its layers, and those follow the group.
+   * @param time When the changes happen, in milliseconds.
+   * @param shapes The board or layers inside it that `callback` changes.
+   * @param callback Changes `shapes`, like `shape.x = 100`.
+   *
+   * @example
+   * ```js
+   * timeline.record(600, [card], () => {
+   *   card.y = card.y - 40;
+   *   card.opacity = 1;
+   * });
+   * ```
+   */
+  record(time: number, shapes: Shape[], callback: () => void): void;
+
+  /**
    * The value the animation gives `property` of `shape` at `time`, or `null`
    * when it does not animate it.
    * @param shape The board or a layer inside it.
@@ -3771,6 +3811,46 @@ export interface Timeline {
    * Removes the animation of the board.
    */
   remove(): void;
+}
+
+/**
+ * A named moment of a timeline, see `Timeline.markers`.
+ */
+export interface Marker {
+  /**
+   * The id of the marker.
+   */
+  readonly id: string;
+
+  /**
+   * The name of the marker.
+   */
+  name: string;
+
+  /**
+   * When it is, in milliseconds. The timeline grows to hold it.
+   */
+  time: number;
+
+  /**
+   * Removes the marker.
+   */
+  remove(): void;
+}
+
+/**
+ * The time and name of a new marker, see `Timeline.addMarker`.
+ */
+export interface MarkerProps {
+  /**
+   * When it is, in milliseconds from the start.
+   */
+  time: number;
+
+  /**
+   * Its name, `Marker N` by default.
+   */
+  name?: string;
 }
 
 /**

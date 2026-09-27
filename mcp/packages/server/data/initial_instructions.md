@@ -426,6 +426,13 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
     effect to the layer as it is; default) or "out" (an exit)
   * `addAnimationStyle(shape, style, start?): PresetAnimation[]` - Several effects at once:
     "slide-up" | "slide-down" | "slide-left" | "slide-right" | "pop" | "zoom" | "spin"
+  * `record(time, shapes, callback)` - Auto-keyframe (like the REC button): runs `callback`, which changes `shapes`
+    (e.g. `shape.x = 100`), and records the changes as keyframes at `time`. A property that is not animated yet also
+    gets a keyframe at 0 with its value before, so one call makes the change play. The changes stay on the shapes;
+    only `shapes` are recorded (the layers of a moved group follow it). The easiest way to animate to a new state.
+  * `markers: Marker[]`, `addMarker({time, name?}): Marker` - Named moments (`name`, `time`, `remove()`): drags snap
+    to them, the playhead jumps between them, and a Lottie export names the stretch from each to the next one, so an
+    app can play parts of one animation by name (e.g. "intro", "loop", "outro")
   * `valueAt(shape, property, time, index?)` - The value the animation gives then (`null` when it does not animate it)
   * `clear(shape)` - Removes the keyframes and animations of a layer; `remove()` - removes the timeline
   * `toCSS(): string` - The animation as CSS `@keyframes` and `animation` rules
@@ -456,6 +463,10 @@ timeline.addKeyframe(title, {property: "y", time: 0, value: title.boardY + 40, e
 timeline.addKeyframe(title, {property: "y", time: 600, value: title.boardY});
 timeline.addAnimation(title, {type: "fade", start: 0, duration: 600});
 timeline.addAnimationStyle(penpotUtils.findShape(s => s.name === "Button", board), "pop", 500);
+const card = penpotUtils.findShape(s => s.name === "Card", board);
+timeline.record(900, [card], () => { card.y = card.y - 24; card.opacity = 1; });
+timeline.addMarker({time: 0, name: "intro"});
+timeline.addMarker({time: 900, name: "idle"});
 ```
 
 # Visual Inspection of Designs

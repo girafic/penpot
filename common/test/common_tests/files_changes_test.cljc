@@ -927,6 +927,18 @@
     (t/is (= :loop (get-in result [:pages-index page-id :timelines board-id :playback])))
     (t/is (= before (get-in undone [:pages-index page-id :timelines board-id])))))
 
+(t/deftest timeline-markers-change-with-the-settings
+  (let [page-id  (uuid/custom 1 1)
+        board-id (uuid/next)
+        data     (timeline-page page-id board-id (uuid/next) (uuid/next))
+        changes  (timeline-changes data page-id board-id
+                                   #(cta/add-marker % {:time 300 :name "intro"}))
+        result   (ch/process-changes data (:redo-changes changes))
+        undone   (ch/process-changes result (:undo-changes changes))]
+    (t/is (= [:update-timeline] (mapv :type (:redo-changes changes))))
+    (t/is (= ["intro"] (mapv :name (get-in result [:pages-index page-id :timelines board-id :markers]))))
+    (t/is (nil? (get-in undone [:pages-index page-id :timelines board-id :markers])))))
+
 (t/deftest timeline-track-change-needs-the-timeline
   ;; another user may have deleted the timeline meanwhile
   (let [page-id (uuid/custom 1 1)

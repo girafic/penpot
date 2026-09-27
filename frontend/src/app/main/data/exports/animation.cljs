@@ -560,9 +560,10 @@
                         layer-id))))
 
 (defn collect-layer-images
-  "Rasterize each export layer at rest. Children that are themselves
-  layers are hidden so they are not baked into the parent."
-  [objects timeline {:keys [bridge] :or {bridge (default-bridge)}}]
+  "Rasterize each export layer at rest, but for those whose id `skip?` is
+  true of. Children that are themselves layers are hidden so they are not
+  baked into the parent."
+  [objects timeline {:keys [bridge skip?] :or {bridge (default-bridge)}}]
   (let [ids  (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline))
         idset (set ids)
         board (get objects (:board-id timeline))
@@ -587,7 +588,8 @@
                       :h (mth/round (or (:height sr) 0))
                       :p href
                       :e 1}]))))
-          ids)))
+          (cond->> ids
+            (some? skip?) (remove skip?)))))
 
 (defn- decode-png
   [bytes]
@@ -735,7 +737,11 @@
         board   (get objects (:board-id tl))
         bridge  (or bridge (default-bridge))
         _       (begin-full-quality! bridge)
-        images  (collect-layer-images objects tl {:bridge bridge})]
+        ;; Lottie draws the layers it can as vectors
+        layers  (set (cta/export-layer-ids objects (:board-id tl) (:tracks tl)))
+        images  (collect-layer-images objects tl {:bridge bridge
+                                                  :skip? (when (= format :lottie)
+                                                           #(cta/lottie-vector-layer? objects layers %))})]
     (try
       (case format
         :svg

@@ -29,7 +29,8 @@
    [app.plugins.system-events :as se]
    [app.plugins.utils :as u]
    [app.util.object :as obj]
-   [clojure.set :as set]))
+   [clojure.set :as set]
+   [cuerdas.core :as str]))
 
 ;; Set in `app.plugins`: the shapes need the timelines and the other way
 ;; round.
@@ -89,6 +90,11 @@
   [file-id page-id board-id shape-id keyframe-id]
   (d/seek #(= keyframe-id (:id %))
           (dm/get-in (locate-timeline file-id page-id board-id) [:tracks shape-id :keyframes])))
+
+(defn- locate-marker
+  [file-id page-id board-id marker-id]
+  (d/seek #(= marker-id (:id %))
+          (:markers (locate-timeline file-id page-id board-id))))
 
 (defn- locate-animation
   [file-id page-id board-id shape-id animation-id]
@@ -154,22 +160,27 @@
          (or (= shape-id board-id)
              (= board-id (cfh/get-shape-id-root-frame objects shape-id))))))
 
+(defn- write-error
+  "Why the plugin may not change the timelines of the page `page-id`, or
+  nil."
+  [plugin-id page-id]
+  (cond
+    (not (enabled?))
+    "Motion (the animation/v1 feature) is not enabled"
+
+    (not (r/check-permission plugin-id "content:write"))
+    "Plugin doesn't have 'content:write' permission"
+
+    (not (u/page-active? page-id))
+    "Cannot modify a page that is not currently active"))
+
 (defn- write-timeline!
   "Change the timeline of the board `board-id` with `f` (a new one when it
   has none; nil removes it) and commit it. Nil, reported as `code`, when
   the plugin may not."
   [plugin-id file-id page-id board-id code f]
-  (cond
-    (not (enabled?))
-    (u/not-valid plugin-id code "Motion (the animation/v1 feature) is not enabled")
-
-    (not (r/check-permission plugin-id "content:write"))
-    (u/not-valid plugin-id code "Plugin doesn't have 'content:write' permission")
-
-    (not (u/page-active? page-id))
-    (u/not-valid plugin-id code "Cannot modify a page that is not currently active")
-
-    :else
+  (if-let [error (write-error plugin-id page-id)]
+    (u/not-valid plugin-id code error)
     (let [page     (u/locate-page file-id page-id)
           board    (dm/get-in page [:objects board-id])
           timeline (or (dm/get-in page [:timelines board-id])
@@ -257,6 +268,55 @@
           (u/not-valid plugin-id :remove "The keyframe is locked")
           (write-timeline! plugin-id file-id page-id board-id :remove
                            #(cta/remove-keyframe % shape-id id)))))))
+
+(defn- valid-name?
+  [value]
+  (and (string? value) (not (str/blank? value))))
+
+(defn marker-proxy? [p]
+  (obj/type-of? p "MarkerProxy"))
+
+(defn marker-proxy
+  [plugin-id file-id page-id board-id id]
+  (let [locate
+        #(locate-marker file-id page-id board-id id)
+
+        update!
+        (fn [code f]
+          (write-timeline! plugin-id file-id page-id board-id code
+                           #(cta/update-marker % id f)))]
+
+    (obj/reify {:name "MarkerProxy" :on-error (u/handle-error plugin-id)}
+      :$plugin {:enumerable false :get (constantly plugin-id)}
+      :$file {:enumerable false :get (constantly file-id)}
+      :$page {:enumerable false :get (constantly page-id)}
+      :$board {:enumerable false :get (constantly board-id)}
+      :$id {:enumerable false :get (constantly id)}
+
+      :id
+      {:get #(dm/str id)}
+
+      :name
+      {:get #(:name (locate))
+       :set
+       (fn [value]
+         (if (not (valid-name? value))
+           (u/not-valid plugin-id :name value)
+           (update! :name #(assoc % :name value))))}
+
+      :time
+      {:get #(:time (locate))
+       :set
+       (fn [value]
+         (if (not (valid-time? value))
+           (u/not-valid plugin-id :time value)
+           ;; the timeline grows to hold the marker
+           (update! :time #(assoc % :time (mth/round value)))))}
+
+      :remove
+      (fn []
+        (write-timeline! plugin-id file-id page-id board-id :remove
+                         #(cta/remove-marker % id))))))
 
 (defn preset-animation-proxy? [p]
   (obj/type-of? p "PresetAnimationProxy"))
@@ -557,6 +617,63 @@
                   (format/format-array
                    #(preset-animation-proxy plugin-id file-id page-id board-id shape-id (:id %))
                    animations)))))))
+
+      :markers
+      {:get
+       #(format/format-array
+         (fn [{:keys [id]}]
+           (marker-proxy plugin-id file-id page-id board-id id))
+         (:markers (locate)))}
+
+      :addMarker
+      (fn [props]
+        (let [time (when (object? props) (obj/get props "time"))
+              name (when (object? props) (obj/get props "name"))]
+          (cond
+            (not (valid-time? time))
+            (u/not-valid plugin-id :addMarker "The time should be a number of milliseconds from 0")
+
+            (and (some? name) (not (valid-name? name)))
+            (u/not-valid plugin-id :addMarker "The name should be a text")
+
+            :else
+            (let [id (uuid/next)]
+              (when (write! :addMarker #(cta/add-marker % {:id id :time (mth/round time) :name name}))
+                (marker-proxy plugin-id file-id page-id board-id id))))))
+
+      ;; As motion mode with auto-keyframe on: `callback` changes `shapes`,
+      ;; and the changes are recorded as keyframes at `time`. Only those
+      ;; of `shapes`: changing a group changes its layers too.
+      :record
+      (fn [time shapes callback]
+        (let [ids (when (array? shapes)
+                    (mapv #(when (shape-proxy? %) (obj/get % "$id")) shapes))]
+          (cond
+            (not (valid-time? time))
+            (u/not-valid plugin-id :record "The time should be a number of milliseconds from 0")
+
+            (or (nil? ids) (some nil? ids))
+            (u/not-valid plugin-id :record "The shapes should be an array of shapes")
+
+            (not-every? #(in-board? file-id page-id board-id %) ids)
+            (u/not-valid plugin-id :record "A shape is not the board nor inside it")
+
+            (not (fn? callback))
+            (u/not-valid plugin-id :record "The callback should be a function")
+
+            ;; before the callback changes anything
+            (some? (write-error plugin-id page-id))
+            (u/not-valid plugin-id :record (write-error plugin-id page-id))
+
+            :else
+            (let [before (u/locate-objects file-id page-id)
+                  _      (callback)
+                  after  (merge before (select-keys (u/locate-objects file-id page-id) ids))
+                  time   (mth/round time)]
+              (write! :record #(-> %
+                                   (cta/record-edit before after time)
+                                   (cta/record-unanimated before after ids time)))
+              nil))))
 
       :valueAt
       (fn [shape property time index]

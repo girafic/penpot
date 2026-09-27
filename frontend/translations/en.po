@@ -7447,6 +7447,48 @@ msgstr "Auto-record keyframes"
 msgid "workspace.animation.rec"
 msgstr "REC"
 
+msgid "workspace.animation.show-seconds"
+msgstr "Show times in seconds"
+
+msgid "workspace.animation.show-milliseconds"
+msgstr "Show times in milliseconds"
+
+msgid "workspace.animation.collapse-all"
+msgstr "Collapse all layers"
+
+msgid "workspace.animation.expand-all"
+msgstr "Expand all layers"
+
+msgid "workspace.animation.drag-duration"
+msgstr "Drag to change the duration"
+
+msgid "workspace.animation.stagger"
+msgstr "Stagger"
+
+msgid "workspace.animation.markers"
+msgstr "Markers"
+
+msgid "workspace.animation.marker-name"
+msgstr "Marker %s"
+
+msgid "workspace.animation.add-marker"
+msgstr "Add marker at the playhead (M)"
+
+msgid "workspace.animation.prev-marker"
+msgstr "Previous marker (Alt+←)"
+
+msgid "workspace.animation.next-marker"
+msgstr "Next marker (Alt+→)"
+
+msgid "workspace.animation.marker-lane-hint"
+msgstr "Double-click to add a marker"
+
+msgid "workspace.animation.rename-marker"
+msgstr "Rename marker"
+
+msgid "workspace.animation.remove-marker"
+msgstr "Delete marker"
+
 msgid "workspace.animation.select-board"
 msgstr "Select a board to animate."
 

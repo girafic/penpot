@@ -29,6 +29,7 @@
    [app.main.worker :as mw]
    [app.util.dom :as dom]
    [app.util.mouse :as mse]
+   [app.util.storage :as storage]
    [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
    [clojure.string :as str]
@@ -88,6 +89,26 @@
 (defn playhead
   [state]
   (dm/get-in state [:workspace-animation :playhead] 0))
+
+(defn time-unit
+  "How the timeline shows times, `:ms` or `:s`, as the user last chose;
+  `anim` is the `:workspace-animation` state."
+  [anim]
+  (or (:time-unit anim) (get storage/user ::time-unit :ms)))
+
+(defn toggle-time-unit
+  "Show the times of the timeline in seconds instead of milliseconds, or
+  back. The choice is kept for the next time."
+  []
+  (ptk/reify ::toggle-time-unit
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [unit (if (= :s (time-unit (:workspace-animation state))) :ms :s)]
+        (assoc-in state [:workspace-animation :time-unit] unit)))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (swap! storage/user assoc ::time-unit (dm/get-in state [:workspace-animation :time-unit])))))
 
 (defn- item-at
   [items index]
@@ -226,7 +247,7 @@
           (distinct)
           (sort)))))
 
-(declare apply-preview select-keyframe set-playhead set-keyframe-value)
+(declare apply-preview select-keyframe set-playhead set-keyframe-value store-keyframe-selection)
 
 (defn- commit-timeline
   "Commit `timeline` (or, when nil, delete it) as the timeline keyed by
@@ -667,8 +688,75 @@
                                 properties)]
            (assoc-in state [:workspace-animation :clipboard]
                      {:keyframes keyframes
+                      :shapes    {shape-id keyframes}
                       :loops     loops}))
          state)))))
+
+(defn copy-selected-keyframes
+  "Copy the selected keyframes to the animation clipboard, by layer."
+  []
+  (ptk/reify ::copy-selected-keyframes
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [tl       (current-timeline state)
+            selected (dm/get-in state [:workspace-animation :selected-kfs])
+            shapes   (reduce (fn [shapes {:keys [shape-id keyframe-id]}]
+                               (if-let [keyframe (d/seek #(= keyframe-id (:id %))
+                                                         (dm/get-in tl [:tracks shape-id :keyframes]))]
+                                 (update shapes shape-id (fnil conj []) keyframe)
+                                 shapes))
+                             {}
+                             selected)]
+        (if (seq shapes)
+          (assoc-in state [:workspace-animation :clipboard]
+                    {:keyframes (into [] (mapcat val) shapes)
+                     :shapes    shapes
+                     :loops     #{}})
+          state)))))
+
+(defn paste-keyframes-at-playhead
+  "Paste the animation clipboard with its earliest keyframe at the
+  playhead, the others keeping their timing: onto the layers it was
+  copied from or, when it holds those of one layer, onto the selected
+  layer. The pasted keyframes end up selected."
+  []
+  (ptk/reify ::paste-keyframes-at-playhead
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [{:keys [shapes loops]} (dm/get-in state [:workspace-animation :clipboard])
+            tl (current-or-new-timeline state)]
+        (if (and (some? tl) (seq shapes))
+          (let [objects   (dsh/lookup-page-objects state)
+                board-id  (:board-id tl)
+                in-board? #(or (= % board-id)
+                               (= board-id (cfh/get-shape-id-root-frame objects %)))
+                selected  (d/seek in-board? (dsh/lookup-selected state))
+                targets   (if (and (= 1 (count shapes)) (some? selected))
+                            {selected (val (first shapes))}
+                            (into {} (filter (comp in-board? key)) shapes))
+                earliest  (fn [keyframes] (reduce min (map :time keyframes)))
+                start     (earliest (mapcat val targets))
+                time      (playhead state)
+                tl'       (reduce-kv (fn [tl shape-id keyframes]
+                                       (cta/paste-keyframes tl shape-id keyframes loops
+                                                            (+ time (- (earliest keyframes) start))))
+                                     tl
+                                     targets)
+                ids-of    (fn [tl shape-id]
+                            (into #{} (map :id) (dm/get-in tl [:tracks shape-id :keyframes])))
+                pasted    (into #{}
+                                (mapcat (fn [shape-id]
+                                          (let [before (ids-of tl shape-id)]
+                                            (for [id (ids-of tl' shape-id)
+                                                  :when (not (contains? before id))]
+                                              {:shape-id shape-id :keyframe-id id}))))
+                                (keys targets))]
+            (if (= tl tl')
+              (rx/empty)
+              (rx/of (commit-timeline it state (:board-id tl') tl')
+                     #(store-keyframe-selection % pasted)
+                     (apply-preview))))
+          (rx/empty))))))
 
 (defn paste-keyframes
   "Paste the animation clipboard onto `shape-id`, starting at the
@@ -734,6 +822,59 @@
          (rx/empty))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; MARKERS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn add-marker
+  "Add a marker named `name` at `time`, or at the playhead (see
+  `cta/add-marker`)."
+  ([name]
+   (add-marker name nil))
+  ([name time]
+   (ptk/reify ::add-marker
+     ptk/WatchEvent
+     (watch [it state _]
+       (if-let [tl (current-or-new-timeline state)]
+         (let [tl' (cta/add-marker tl {:time (or time (playhead state)) :name name})]
+           (rx/of (commit-timeline it state (:board-id tl') tl')))
+         (rx/empty))))))
+
+(defn move-marker-from
+  "Commit `base` (the timeline as it was when a drag started) with the
+  marker `marker-id` at `time`."
+  [base marker-id time]
+  (ptk/reify ::move-marker-from
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl' (cta/update-marker base marker-id #(assoc % :time time))]
+        (rx/of (commit-timeline it state (:board-id tl') tl'))))))
+
+(defn rename-marker
+  [marker-id name]
+  (update-current-timeline #(cta/update-marker % marker-id (fn [marker] (assoc marker :name name)))))
+
+(defn remove-marker
+  [marker-id]
+  (update-current-timeline #(cta/remove-marker % marker-id)))
+
+(defn jump-to-marker
+  "Move the playhead to the next marker (`direction` 1) or to the one
+  before (-1)."
+  [direction]
+  (ptk/reify ::jump-to-marker
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [tl     (current-timeline state)
+            time   (playhead state)
+            marker (when (some? tl)
+                     (if (pos? direction)
+                       (cta/marker-after tl time)
+                       (cta/marker-before tl time)))]
+        (if (some? marker)
+          (rx/of (set-playhead (:time marker)))
+          (rx/empty))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PRESET ANIMATIONS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -745,9 +886,35 @@
     [{:type preset}]
     (get cta/animation-styles preset)))
 
+(def ^:private default-stagger
+  "Milliseconds between the starts of a preset added to several layers."
+  100)
+
+(defn stagger
+  "The milliseconds between the starts of a preset added to several
+  layers, as last set."
+  [state]
+  (dm/get-in state [:workspace-animation :stagger] default-stagger))
+
+(defn set-stagger
+  [ms]
+  (ptk/reify ::set-stagger
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-animation :stagger] (max 0 (int ms))))))
+
+(defn- layer-order
+  "The layers of `board-id`, top-most first as the layers panel and the
+  timeline list them."
+  [objects board-id]
+  (letfn [(walk [id]
+            (cons id (mapcat walk (reverse (dm/get-in objects [id :shapes])))))]
+    (walk board-id)))
+
 (defn add-animation-preset
   "Add the animations of `preset` to the shapes of `shape-ids` that are in
-  the active board, starting at the playhead."
+  the active board, starting at the playhead, one after the other by the
+  `stagger` in the order of the layers, top-most first."
   [shape-ids preset]
   (ptk/reify ::add-animation-preset
     ptk/WatchEvent
@@ -756,13 +923,17 @@
         (let [objects  (dsh/lookup-page-objects state)
               board-id (:board-id tl)
               time     (playhead state)
-              targets  (filter #(= board-id (cfh/get-shape-id-root-frame objects %)) shape-ids)
-              tl'      (reduce (fn [tl [shape-id animation]]
-                                 (cta/add-animation tl shape-id (assoc animation :start time)))
+              step     (stagger state)
+              order    (into {} (map-indexed (fn [index id] [id index])) (layer-order objects board-id))
+              targets  (->> shape-ids
+                            (filter #(= board-id (cfh/get-shape-id-root-frame objects %)))
+                            (sort-by order))
+              tl'      (reduce (fn [tl [shape-id start animation]]
+                                 (cta/add-animation tl shape-id (assoc animation :start start)))
                                tl
-                               (for [shape-id targets
-                                     animation (preset-animations preset)]
-                                 [shape-id animation]))]
+                               (for [[index shape-id] (map-indexed vector targets)
+                                     animation        (preset-animations preset)]
+                                 [shape-id (+ time (* index step)) animation]))]
           (if (= tl tl')
             (rx/empty)
             (rx/of (commit-timeline it state board-id tl')
@@ -1108,26 +1279,60 @@
              objects
              (set-attrs changes)))
 
+(defn auto-keyframe?
+  [state]
+  (dm/get-in state [:workspace-animation :auto-keyframe?] false))
+
+(defn toggle-auto-keyframe
+  "Turn auto-keyframe on or off: while it is on, an edit in motion mode
+  also records the properties it changes that are not animated yet (see
+  `record-canvas-edit`)."
+  []
+  (ptk/reify ::toggle-auto-keyframe
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:workspace-animation :auto-keyframe?] not))))
+
+(defn- auto-keyframe-ids
+  "The shapes an edit records with auto-keyframe on: the selected ones it
+  changed in the board of `timeline`. Not the ones it changes along with
+  them, like the layers of a moved group or of a resized board, which
+  follow the animation of the selected ones."
+  [state timeline changes]
+  (let [objects  (dsh/lookup-page-objects state)
+        board-id (:board-id timeline)
+        changed  (set-attrs changes)]
+    (filterv #(and (contains? changed %)
+                   (or (= % board-id)
+                       (= board-id (cfh/get-shape-id-root-frame objects %))))
+             (dsh/lookup-selected state))))
+
 (defn- record-canvas-edit
   "Record the edit a commit made on the canvas as keyframes at the
-  playhead (see `cta/record-edit`). They join the undo group of the edit,
-  so both undo together. The preview shows the shapes as the edit left
-  them either way."
+  playhead (see `cta/record-edit`), with auto-keyframe on also in the
+  properties it changes that are not animated yet (see
+  `cta/record-unanimated`), which gives a board without animation its
+  timeline. They join the undo group of the edit, so both undo together.
+  The preview shows the shapes as the edit left them either way."
   [{:keys [redo-changes undo-changes undo-group]}]
   (ptk/reify ::record-canvas-edit
     ptk/WatchEvent
     (watch [it state _]
-      (if-let [tl (current-timeline state)]
-        (let [objects (dsh/lookup-page-objects state)
-              tl'     (cta/record-edit tl
-                                       (with-attrs objects undo-changes)
-                                       (with-attrs objects redo-changes)
-                                       (playhead state))]
-          (if (= tl tl')
-            (rx/of (apply-preview))
-            (rx/of (commit-timeline it state (:board-id tl) tl' undo-group)
-                   (apply-preview))))
-        (rx/empty)))))
+      (let [auto? (auto-keyframe? state)]
+        (if-let [tl (if auto? (current-or-new-timeline state) (current-timeline state))]
+          (let [objects (dsh/lookup-page-objects state)
+                before  (with-attrs objects undo-changes)
+                after   (with-attrs objects redo-changes)
+                time    (playhead state)
+                tl'     (cond-> (cta/record-edit tl before after time)
+                          auto? (cta/record-unanimated before after
+                                                       (auto-keyframe-ids state tl redo-changes)
+                                                       time))]
+            (if (= tl tl')
+              (rx/of (apply-preview))
+              (rx/of (commit-timeline it state (:board-id tl) tl' undo-group)
+                     (apply-preview))))
+          (rx/empty))))))
 
 (defn- restore-preview
   "Show the animation again once an edit drops its modifiers."

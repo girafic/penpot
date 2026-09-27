@@ -184,6 +184,73 @@
           (.remove fade)
           (t/is (= 2 (count (:animations (stored-track store context board rect))))))))))
 
+(t/deftest markers-name-moments
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            [^js board _]       (board-with-rect context)
+            ^js timeline        (.addTimeline board #js {:duration 1000})
+            ^js outro           (.addMarker timeline #js {:time 800 :name "outro"})
+            ^js intro           (.addMarker timeline #js {:time 0})
+            names               #(mapv (fn [^js marker] (.-name marker)) (.-markers timeline))]
+
+        (t/testing "they are by time, named by their number when not given a name"
+          (t/is (= ["Marker 2" "outro"] (names)))
+          (t/is (= [0 800] (mapv (fn [^js marker] (.-time marker)) (.-markers timeline)))))
+
+        (t/testing "they change"
+          (set! (.-name intro) "intro")
+          (set! (.-time outro) 1500)
+          (t/is (= [["intro" 0] ["outro" 1500]]
+                   (mapv (juxt :name :time) (:markers (get (stored-timelines store context) (aget board "$id"))))))
+          (t/is (= 1500 (.-duration timeline)) "the timeline grows to hold them")
+          (t/is (thrown? js/Error (set! (.-name intro) " ")))
+          (t/is (thrown? js/Error (set! (.-time intro) -1))))
+
+        (t/testing "what is not valid is refused"
+          (t/is (thrown? js/Error (.addMarker timeline #js {:name "no time"})))
+          (t/is (thrown? js/Error (.addMarker timeline #js {:time 10 :name 3}))))
+
+        (t/testing "they go away"
+          (.remove intro)
+          (t/is (= ["outro"] (names))))))))
+
+(t/deftest record-keeps-changes-as-keyframes
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js other            (.createRectangle context)
+            _                    (.appendChild board other)
+            ^js timeline         (.addTimeline board #js {:duration 1000})
+            opacity              #(mapv (juxt :time :value)
+                                        (filter (fn [kf] (= :opacity (:property kf)))
+                                                (:keyframes (stored-track store context board %))))]
+        (.record timeline 500 #js [rect]
+                 (fn []
+                   (set! (.-opacity rect) 0.5)
+                   (set! (.-opacity other) 0.2)))
+
+        (t/testing "the value before at 0, the new one at the time"
+          (t/is (= [[0 1] [500 0.5]] (opacity rect))))
+
+        (t/testing "the changes stay on the shapes, only those given are recorded"
+          (t/is (= 0.5 (.-opacity rect)))
+          (t/is (= 0.2 (.-opacity other)))
+          (t/is (nil? (stored-track store context board other))))
+
+        (t/testing "an animated property gets a keyframe at the time"
+          (.record timeline 800 #js [rect] #(set! (.-opacity rect) 0.8))
+          (t/is (= [[0 1] [500 0.5] [800 0.8]] (opacity rect))))
+
+        (t/testing "what is not valid is refused, before the callback runs"
+          (let [ran? (atom false)]
+            (t/is (thrown? js/Error (.record timeline -1 #js [rect] #(reset! ran? true))))
+            (t/is (thrown? js/Error (.record timeline 100 rect #(reset! ran? true))))
+            (t/is (thrown? js/Error (.record timeline 100 #js [(.createRectangle context)] #(reset! ran? true))))
+            (t/is (thrown? js/Error (.record timeline 100 #js [rect] "not a function")))
+            (t/is (false? @ran?))))))))
+
 (t/deftest motion-needs-its-feature
   (thw/with-wasm-mocks*
     (fn []

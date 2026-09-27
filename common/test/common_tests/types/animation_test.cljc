@@ -15,6 +15,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
+   [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [clojure.test :as t]
@@ -198,7 +199,9 @@
     (t/is (re-find #"translate\(100px, 0px\)" css))
     (t/is (re-find #"opacity: 0;" css))
     (t/is (re-find #"animation-timing-function: ease-in;" css))
-    (t/is (re-find #"linear infinite;" css))))
+    (t/is (re-find #"linear infinite;" css))
+    (t/testing "with reduced motion, the shape stays as designed"
+      (t/is (re-find #"@media \(prefers-reduced-motion: reduce\) \{\s+\.penpot-shape-\S+ \{\s+animation: none;" css)))))
 
 (t/deftest timeline->css-writes-fill-stroke-shadow-blur
   (let [shape (cts/setup-shape
@@ -540,7 +543,10 @@
 (t/deftest timeline->lottie-with-assets-uses-image-layers
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 800 :height 600})
         bid   (:id board)
-        shape (cts/setup-shape {:type :rect :x 100 :y 100 :width 200 :height 100})
+        ;; an image fill has no vectors
+        shape (cts/setup-shape {:type :rect :x 100 :y 100 :width 200 :height 100
+                                :fills [{:fill-image {:id (uuid/next) :width 10 :height 10
+                                                      :mtype "image/png"}}]})
         sid   (:id shape)
         bx    (-> shape :selrect :x)
         tl    (-> (cta/make-timeline {:board-id bid :name "Anim" :duration 1000})
@@ -679,6 +685,221 @@
 (defn- values-at
   [timeline objects time]
   (cta/values-at (cta/resolve-animations timeline objects) time))
+
+(defn- close-all?
+  "Whether the numbers of `actual` are close to those of `expected`,
+  nested alike."
+  [expected actual]
+  (and (= (count expected) (count actual))
+       (every? true? (map (fn [e a]
+                            (if (sequential? e) (close-all? e a) (close? e a)))
+                          expected actual))))
+
+(defn- lottie-of
+  "The Lottie document of `shape` in `board`, with the keyframes `kfs`
+  (an opacity one without any: a layer is an animated shape)."
+  [board shape kfs & [assets]]
+  (let [bid (:id board)
+        sid (:id shape)
+        tl  (reduce #(cta/add-keyframe %1 sid %2)
+                    (cta/make-timeline {:board-id bid :duration 1000})
+                    (or (seq kfs) [{:time 0 :property :opacity :value 1}]))]
+    (cta/timeline->lottie tl {bid (assoc board :shapes [sid])
+                              sid (assoc shape :parent-id bid :frame-id bid)}
+                          assets)))
+
+(defn- lottie-item
+  [items ty]
+  (d/seek #(= ty (:ty %)) items))
+
+(t/deftest lottie-draws-a-rect-as-vectors
+  (let [board (cts/setup-shape {:type :frame :x 100 :y 100 :width 400 :height 300})
+        shape (cts/setup-shape {:type :rect :x 150 :y 200 :width 100 :height 50
+                                :r1 8 :r2 8 :r3 8 :r4 8
+                                :fills [{:fill-color "#ff0000" :fill-opacity 1}]
+                                :strokes [{:stroke-color "#0000ff" :stroke-opacity 1
+                                           :stroke-width 2 :stroke-style :dashed}]})
+        L     (lottie-of board shape [{:time 0 :property :width :value 100}
+                                      {:time 1000 :property :width :value 200}])
+        items (get-in L [:layers 0 :shapes 0 :it])
+        rc    (lottie-item items "rc")]
+    (t/is (= ["rc" "st" "fl" "tr"] (mapv :ty items)) "the stroke over the fill")
+    (t/testing "the size follows the width, from the top left corner, in the board"
+      (t/is (close-all? [[100 50] [200 50]] (mapv :s (get-in rc [:s :k]))))
+      (t/is (close-all? [[100 125] [150 125]] (mapv :s (get-in rc [:p :k])))))
+    (t/is (close? 8 (get-in rc [:r :k])))
+    (t/is (= "d" (get-in (lottie-item items "st") [:d 0 :n])) "dashed")
+    (t/is (close-all? [1 0 0 1] (get-in (lottie-item items "fl") [:c :k])))
+    (t/testing "with an image of it, still vectors"
+      (let [L (lottie-of board shape [] {(:id shape) {:id "img_0" :w 100 :h 50 :p "data:," :e 1}})]
+        (t/is (= 4 (get-in L [:layers 0 :ty])))))))
+
+(defn- in-board
+  "`objects` of `board` and `shapes` inside it, in stacking order (the
+  last on top), and `children` (`{parent-id [shape ...]}`) inside them."
+  [board shapes & [children]]
+  (let [bid    (:id board)
+        inside (fn [objects parent-id shapes]
+                 (reduce (fn [objects shape]
+                           (assoc objects (:id shape) (assoc shape :parent-id parent-id :frame-id bid)))
+                         (assoc-in objects [parent-id :shapes] (mapv :id shapes))
+                         shapes))]
+    (reduce-kv inside
+               (inside {bid board} bid shapes)
+               (or children {}))))
+
+(defn- lottie-with
+  "The Lottie document of the board of `objects`, with an opacity
+  keyframe of each of `animated`."
+  [board objects animated]
+  (let [tl (reduce #(cta/add-keyframe %1 (:id %2) {:time 0 :property :opacity :value 1})
+                   (cta/make-timeline {:board-id (:id board) :duration 1000})
+                   animated)]
+    (cta/timeline->lottie tl objects)))
+
+(t/deftest lottie-lists-the-top-most-layer-first
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bottom (cts/setup-shape {:type :rect :name "bottom" :x 0 :y 0 :width 40 :height 40})
+        top    (cts/setup-shape {:type :rect :name "top" :x 20 :y 20 :width 40 :height 40})
+        L      (lottie-with board (in-board board [bottom top]) [bottom top])]
+    (t/is (= ["top" "bottom"] (mapv :nm (:layers L))))))
+
+(t/deftest lottie-draws-a-group-with-its-layers
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        group   (cts/setup-shape {:type :group :name "G" :x 10 :y 10 :width 100 :height 50})
+        a       (cts/setup-shape {:type :rect :name "a" :x 10 :y 10 :width 40 :height 50
+                                  :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        b       (cts/setup-shape {:type :circle :name "b" :x 60 :y 10 :width 50 :height 50 :opacity 0.5
+                                  :fills [{:fill-color "#0000ff" :fill-opacity 1}]})
+        objects (in-board board [group] {(:id group) [a b]})
+        layer   (first (:layers (lottie-with board objects [group])))
+        [top bottom] (:shapes layer)]
+    (t/is (= 1 (count (:layers (lottie-with board objects [group])))) "its layers draw in it")
+    (t/is (= ["b" "a"] [(:nm top) (:nm bottom)]) "the top-most first")
+    (t/is (close? 50 (get-in (peek (:it top)) [:o :k])) "with their opacity")
+    (t/is (= "sh" (get-in top [:it 0 :it 0 :ty])) "as paths")
+    (t/is (close-all? [0 0 1 1] (get-in top [:it 0 :it 1 :c :k])))))
+
+(t/deftest lottie-keeps-a-board-to-its-outline
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        inner   (cts/setup-shape {:type :frame :name "inner" :x 20 :y 20 :width 100 :height 100
+                                  :fills [{:fill-color "#eeeeee" :fill-opacity 1}]})
+        child   (cts/setup-shape {:type :rect :name "child" :x 80 :y 80 :width 100 :height 100
+                                  :fills [{:fill-color "#000000" :fill-opacity 1}]})
+        objects (in-board board [inner] {(:id inner) [child]})
+        layer   (first (:layers (lottie-with board objects [inner])))]
+    (t/is (true? (:hasMask layer)))
+    (t/is (close-all? [[20 20] [120 20] [120 120] [20 120]]
+                      (get-in layer [:masksProperties 0 :pt :k :v])))
+    (t/is (true? (get-in layer [:masksProperties 0 :pt :k :c])) "back on its start, it closes")
+    (t/is (= ["child" "shape"] (mapv :nm (:shapes layer))) "its layers over its own shape")))
+
+(t/deftest lottie-draws-drop-shadows-as-effects
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shadow {:id (uuid/next) :style :drop-shadow :offset-x 0 :offset-y 4 :blur 6 :spread 0
+                :hidden false :color {:color "#000000" :opacity 0.5}}
+        shape  (cts/setup-shape {:type :rect :x 0 :y 0 :width 40 :height 40 :shadow [shadow]
+                                 :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        layer  (first (:layers (lottie-with board (in-board board [shape]) [shape])))
+        ef     (first (:ef layer))
+        value  #(get-in (d/seek (fn [e] (= % (:nm e))) (:ef ef)) [:v :k])]
+    (t/is (= 25 (:ty ef)))
+    (t/is (close? 180 (value "Direction")) "down")
+    (t/is (close? 4 (value "Distance")))
+    (t/is (close? 12 (value "Softness")))
+    (t/is (close? 127.5 (value "Opacity")))
+    (t/testing "an inner shadow, or a text inside, draws no vectors"
+      (let [inner   (assoc shadow :style :inner-shadow)
+            objects (in-board board [(assoc shape :shadow [inner])])]
+        (t/is (not (cta/lottie-vector-layer? objects #{(:id shape)} (:id shape))))))))
+
+(t/deftest lottie-writes-one-keyframe-as-a-value
+  ;; players draw no layer with an animated value of one keyframe
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 40 :height 20
+                                :fills [{:fill-color "#000000" :fill-opacity 1}]})
+        layer (get-in (lottie-of board shape [{:time 200 :property :opacity :value 0.5}
+                                              {:time 200 :property :fill-color :index 0 :value "#ff0000"}
+                                              {:time 200 :property :width :value 80}])
+                      [:layers 0])
+        items (get-in layer [:shapes 0 :it])]
+    (t/is (= {:a 0 :k 50.0} (get-in layer [:ks :o])))
+    (t/is (= 0 (get-in (lottie-item items "fl") [:c :a])))
+    (t/is (close-all? [1 0 0 1] (get-in (lottie-item items "fl") [:c :k])))
+    (t/is (close-all? [80 20] (get-in (lottie-item items "rc") [:s :k])))))
+
+(t/deftest lottie-draws-an-ellipse
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape (cts/setup-shape {:type :circle :x 0 :y 0 :width 40 :height 20
+                                :fills [{:fill-color "#00ff00" :fill-opacity 0.5}]})
+        items (get-in (lottie-of board shape []) [:layers 0 :shapes 0 :it])
+        el    (lottie-item items "el")]
+    (t/is (= ["el" "fl" "tr"] (mapv :ty items)))
+    (t/is (close-all? [40 20] (get-in el [:s :k])))
+    (t/is (close-all? [20 10] (get-in el [:p :k])))
+    (t/is (close? 50 (get-in (lottie-item items "fl") [:o :k])))))
+
+(def ^:private test-path
+  [{:command :move-to :params {:x 110 :y 110}}
+   {:command :line-to :params {:x 150 :y 110}}
+   {:command :curve-to :params {:x 150 :y 150 :c1x 160 :c1y 120 :c2x 160 :c2y 140}}
+   {:command :line-to :params {:x 110 :y 110}}
+   {:command :close-path :params {}}])
+
+(defn- path-shape
+  [attrs]
+  (cts/setup-shape (merge {:type :path
+                           :content (path/content test-path)
+                           :fills [{:fill-color "#000000" :fill-opacity 1}]}
+                          attrs)))
+
+(t/deftest lottie-draws-a-path-by-its-vertices
+  (let [board (cts/setup-shape {:type :frame :x 100 :y 100 :width 400 :height 300})
+        shape (path-shape {})
+        items (get-in (lottie-of board shape []) [:layers 0 :shapes 0 :it])
+        k     (get-in (lottie-item items "sh") [:ks :k])]
+    (t/is (true? (:c k)))
+    (t/testing "in the board, the way back to the first vertex joining it"
+      (t/is (close-all? [[10 10] [50 10] [50 50]] (:v k))))
+    (t/testing "the tangents of the curve, from their vertex"
+      (t/is (close-all? [[0 0] [10 10] [0 0]] (:o k)))
+      (t/is (close-all? [[0 0] [0 0] [10 -10]] (:i k))))))
+
+(t/deftest lottie-draws-a-path-before-it-turns
+  (let [board   (cts/setup-shape {:type :frame :x 100 :y 100 :width 400 :height 300})
+        shape    (path-shape {})
+        turned   (gsh/transform-shape shape (ctm/rotation-modifiers shape (gsh/shape->center shape) 90))
+        vertices #(get-in (lottie-of board % []) [:layers 0 :shapes 0 :it 0 :ks :k :v])]
+    (t/is (close? 90 (:rotation turned)))
+    ;; the layer turns it
+    (t/is (close-all? (vertices shape) (vertices turned)))))
+
+(t/deftest lottie-trims-the-strokes-only
+  (let [board  (cts/setup-shape {:type :frame :x 100 :y 100 :width 400 :height 300})
+        shape  (path-shape {:strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 4}]})
+        groups (get-in (lottie-of board shape [{:time 0 :property :trim-end :value 0}
+                                               {:time 1000 :property :trim-end :value 1}])
+                       [:layers 0 :shapes])
+        [strokes fills] groups]
+    (t/is (= ["strokes" "fills"] (mapv :nm groups)))
+    (t/is (= ["sh" "tm" "st" "tr"] (mapv :ty (:it strokes))))
+    (t/is (= ["sh" "fl" "tr"] (mapv :ty (:it fills))))
+    (t/is (close-all? [[0] [100]] (mapv :s (get-in (lottie-item (:it strokes) "tm") [:e :k]))))))
+
+(t/deftest lottie-draws-a-gradient
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 50
+                                :fills [{:fill-opacity 1
+                                         :fill-color-gradient
+                                         {:type :linear :start-x 0 :start-y 0.5 :end-x 1 :end-y 0.5 :width 1
+                                          :stops [{:color "#000000" :offset 0}
+                                                  {:color "#ffffff" :opacity 0.5 :offset 1}]}}]})
+        gf    (lottie-item (get-in (lottie-of board shape []) [:layers 0 :shapes 0 :it]) "gf")]
+    (t/is (= 1 (:t gf)))
+    (t/is (close-all? [0 25] (get-in gf [:s :k])))
+    (t/is (close-all? [100 25] (get-in gf [:e :k])))
+    (t/is (= 2 (get-in gf [:g :p])))
+    (t/is (close-all? [0 0 0 0 1 1 1 1 0 1 1 0.5] (get-in gf [:g :k :k])))))
 
 (t/deftest make-animation-takes-type-defaults
   (let [animation (cta/make-animation {:type :move :start -5 :duration 0 :easing nil})]
@@ -1236,7 +1457,10 @@
 (t/deftest timeline->css-plays-once
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10})
         css   (cta/timeline->css (fade-timeline shape :once) {(:id shape) shape})]
-    (t/is (re-find #"linear 1;" css))))
+    ;; keeping the last frame
+    (t/is (re-find #"linear 1 both;" css))
+    (t/testing "no shape, no CSS"
+      (t/is (= "" (cta/timeline->css (fade-timeline shape :once) {}))))))
 
 (t/deftest timeline->css-alternates-in-ping-pong
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10})
@@ -1380,6 +1604,116 @@
     (t/is (= "#ff0000" (:value (d/seek #(= 500 (:time %))
                                        (cta/property-keyframes tl' rid :fill-color 0)))))))
 
+(defn- times-and-values
+  [timeline shape-id property & [index]]
+  (mapv (juxt :time :value) (cta/property-keyframes timeline shape-id property index)))
+
+(defn- keyframes-are?
+  "Whether `kfs` (`[time value]` pairs) are at `times` with `values`."
+  [kfs times values]
+  (and (= times (mapv first kfs))
+       (every? true? (map close? values (map second kfs)))))
+
+(t/deftest record-unanimated-plays-the-change
+  (let [{:keys [board rect objects]} (board-and-rect)
+        rid   (:id rect)
+        tl    (cta/make-timeline {:board-id (:id board) :duration 1000})
+        ;; the rect is at 50 in the board
+        after (moved objects [rid] 30 0)
+        tl'   (cta/record-unanimated tl objects after [rid] 500)]
+    (t/testing "the value before at the start, the new one at the time"
+      (t/is (keyframes-are? (times-and-values tl' rid :x) [0 500] [50 80]))
+      (t/is (cta/valid-timeline? tl')))
+    (t/testing "what does not change records nothing"
+      (t/is (empty? (cta/property-keyframes tl' rid :y))))
+    (t/testing "at the start, only the new value"
+      (t/is (keyframes-are? (times-and-values (cta/record-unanimated tl objects after [rid] 0) rid :x)
+                            [0] [80])))
+    (t/testing "only the shapes given"
+      (t/is (= tl (cta/record-unanimated tl objects after [] 500))))))
+
+(t/deftest record-unanimated-leaves-the-animated-properties
+  (let [{:keys [rect objects] :as scene} (board-and-rect)
+        rid (:id rect)
+        tl  (edit-timeline scene :x 0 200)
+        ;; the rect is at 100 in the board
+        tl' (cta/record-unanimated tl objects (moved objects [rid] 30 40) [rid] 500)]
+    (t/is (= (cta/property-keyframes tl rid :x) (cta/property-keyframes tl' rid :x)))
+    (t/is (keyframes-are? (times-and-values tl' rid :y) [0 500] [100 140]))))
+
+(t/deftest record-unanimated-takes-opacity-and-turns
+  (let [{:keys [board rect objects]} (board-and-rect)
+        rid (:id rect)
+        tl  (cta/make-timeline {:board-id (:id board) :duration 1000})]
+    (t/is (keyframes-are? (times-and-values (cta/record-unanimated tl objects (assoc-in objects [rid :opacity] 0.3) [rid] 500)
+                                            rid :opacity)
+                          [0 500] [1 0.3]))
+    (t/testing "the short way"
+      (t/is (keyframes-are? (times-and-values (cta/record-unanimated tl objects (turned objects rid -20) [rid] 500)
+                                              rid :rotation)
+                            [0 500] [0 -20])))))
+
+(t/deftest record-unanimated-records-a-fill-not-one-added
+  (let [{:keys [board rect objects]} (board-and-rect)
+        rid     (:id rect)
+        objects (assoc-in objects [rid :fills] [{:fill-color "#000000" :fill-opacity 1}])
+        tl      (cta/make-timeline {:board-id (:id board) :duration 1000})
+        colors  #(times-and-values % rid :fill-color 0)]
+    (t/is (= [[0 "#000000"] [500 "#ff0000"]]
+             (colors (cta/record-unanimated tl objects (assoc-in objects [rid :fills 0 :fill-color] "#ff0000") [rid] 500))))
+    (t/testing "a fill added on top moves the others down, no color changes"
+      (t/is (= tl (cta/record-unanimated tl objects
+                                         (update-in objects [rid :fills] #(into [{:fill-color "#ff0000" :fill-opacity 1}] %))
+                                         [rid] 500))))))
+
+(t/deftest record-unanimated-leaves-an-edited-path
+  (let [{:keys [board rect objects]} (board-and-rect)
+        rid   (:id rect)
+        tl    (cta/make-timeline {:board-id (:id board) :duration 1000})
+        after (-> (moved objects [rid] 30 0)
+                  (assoc-in [rid :content] [:edited]))]
+    (t/is (= tl (cta/record-unanimated tl objects after [rid] 500)))))
+
+(t/deftest markers-name-moments
+  (let [tl      (-> (mk-timeline)
+                    (cta/add-marker {:time 600 :name "outro"})
+                    (cta/add-marker {:time 200 :name "intro"})
+                    (cta/add-marker {:time 1500}))
+        [a b _] (:markers tl)
+        names   #(mapv :name (:markers %))]
+    (t/is (= ["intro" "outro" "Marker 3"] (names tl)) "in time order, named by their number")
+    (t/is (= 1500 (:duration tl)) "the duration grows to hold them")
+    (t/is (cta/valid-timeline? tl))
+    (t/testing "moving one keeps them in order, none before the start"
+      (t/is (= ["outro" "intro" "Marker 3"] (names (cta/update-marker tl (:id a) #(assoc % :time 900)))))
+      (t/is (= 0 (-> (cta/update-marker tl (:id b) #(assoc % :time -50)) :markers first :time))))
+    (t/testing "the playhead jumps between them"
+      (t/is (= "outro" (:name (cta/marker-after tl 200))))
+      (t/is (= "intro" (:name (cta/marker-before tl 600))))
+      (t/is (nil? (cta/marker-before tl 200))))
+    (t/testing "drags snap to them, but for the one dragged"
+      (t/is (contains? (cta/snap-times tl) 600))
+      (t/is (not (contains? (cta/snap-times tl :marker-ids #{(:id b)}) 600))))
+    (t/testing "they go away"
+      (t/is (not (contains? (reduce #(cta/remove-marker %1 (:id %2)) tl (:markers tl)) :markers))))))
+
+(t/deftest lottie-plays-the-markers-by-name
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 40 :height 20})
+        bid   (:id board)
+        sid   (:id shape)
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000 :playback :ping-pong})
+                  (cta/add-keyframe sid {:time 0 :property :opacity :value 0})
+                  (cta/add-keyframe sid {:time 1000 :property :opacity :value 1})
+                  (cta/add-marker {:time 500 :name "loop"})
+                  (cta/add-marker {:time 0 :name "intro"}))
+        L     (cta/timeline->lottie tl {bid board sid shape})]
+    ;; each up to the next, the last to the end and not past it on the way back
+    (t/is (= ["intro" "loop"] (mapv :cm (:markers L))))
+    (t/is (close-all? [[0 30] [30 30]] (mapv (juxt :tm :dr) (:markers L))))
+    (t/testing "no markers, none in the document"
+      (t/is (not (contains? (cta/timeline->lottie (dissoc tl :markers) {bid board sid shape}) :markers))))))
+
 (t/deftest shift-keyframes-moves-them-together
   (let [sid (uuid/next)
         tl  (-> (mk-timeline)
@@ -1414,6 +1748,8 @@
         an  (-> tl (get-in [:tracks sid :animations]) first :id)]
     (t/is (= [0 100 400 500 700 1000] (vec (cta/snap-times tl))))
     (t/is (= [0 400 1000] (vec (cta/snap-times tl :keyframe-ids #{kf} :animation-ids #{an}))))
+    (t/testing "without the end, when the end is dragged"
+      (t/is (= [0 100 400 500 700] (vec (cta/snap-times tl :end? false)))))
     (t/testing "the nearest within the threshold"
       (t/is (= 400 (cta/snap-time (cta/snap-times tl) 395 10)))
       (t/is (= 500 (cta/snap-time (cta/snap-times tl) 460 45)))

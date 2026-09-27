@@ -16100,6 +16100,7 @@ Timeline:
         playback: TimelinePlayback;
         keyframes: Keyframe[];
         animations: PresetAnimation[];
+        markers: Marker[];
         addKeyframe(shape: Shape, keyframe: KeyframeProps): Keyframe;
         addAnimation(
             shape: Shape,
@@ -16110,6 +16111,8 @@ Timeline:
             style: AnimationStyle,
             start?: number,
         ): PresetAnimation[];
+        addMarker(marker: MarkerProps): Marker;
+        record(time: number, shapes: Shape[], callback: () => void): void;
         valueAt(
             shape: Shape,
             property: AnimatableProperty,
@@ -16163,6 +16166,14 @@ Timeline:
         ```
 
         The preset animations of the board and the layers inside it, by start.
+      markers: |-
+        ```
+        readonly markers: Marker[]
+        ```
+
+        The markers of the timeline, by time: named moments that drags snap to
+        and the playhead jumps between. A Lottie export names the stretch from
+        each to the next one (or to the end), so a player can play it by name.
     Methods:
       addKeyframe: |-
         ```
@@ -16234,6 +16245,55 @@ Timeline:
           When they start, in milliseconds.
 
         Returns PresetAnimation[]
+      addMarker: |-
+        ```
+        addMarker(marker: MarkerProps): Marker
+        ```
+
+        Adds a marker. The timeline grows to hold it.
+
+        Parameters
+
+        * marker: MarkerProps
+
+          Its time and name (`Marker N` by default).
+
+        Returns Marker
+
+        Example
+        ```
+        timeline.addMarker({ time: 0, name: 'intro' });timeline.addMarker({ time: 800, name: 'loop' });
+        ```
+      record: |-
+        ```
+        record(time: number, shapes: Shape[], callback: () => void): void
+        ```
+
+        Runs `callback` and records what it changes of `shapes` as keyframes at
+        `time`, as motion mode does with auto-keyframe (REC) on. A property
+        that is animated gets a keyframe there; one that is not yet also gets
+        one at 0 with the value it had before, so the change plays. The changes
+        stay on the shapes. Only `shapes` are recorded: moving a group also
+        moves its layers, and those follow the group.
+
+        Parameters
+
+        * time: number
+
+          When the changes happen, in milliseconds.
+        * shapes: Shape[]
+
+          The board or layers inside it that `callback` changes.
+        * callback: () => void
+
+          Changes `shapes`, like `shape.x = 100`.
+
+        Returns void
+
+        Example
+        ```
+        timeline.record(600, [card], () => {  card.y = card.y - 40;  card.opacity = 1;});
+        ```
       valueAt: |-
         ```
         valueAt(
@@ -16292,6 +16352,81 @@ Timeline:
         Removes the animation of the board.
 
         Returns void
+Marker:
+  overview: |-
+    Interface Marker
+    ================
+
+    A named moment of a timeline, see `Timeline.markers`.
+
+    ```
+    interface Marker {
+        id: string;
+        name: string;
+        time: number;
+        remove(): void;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      id: |-
+        ```
+        readonly id: string
+        ```
+
+        The id of the marker.
+      name: |-
+        ```
+        name: string
+        ```
+
+        The name of the marker.
+      time: |-
+        ```
+        time: number
+        ```
+
+        When it is, in milliseconds. The timeline grows to hold it.
+    Methods:
+      remove: |-
+        ```
+        remove(): void
+        ```
+
+        Removes the marker.
+
+        Returns void
+MarkerProps:
+  overview: |-
+    Interface MarkerProps
+    =====================
+
+    The time and name of a new marker, see `Timeline.addMarker`.
+
+    ```
+    interface MarkerProps {
+        time: number;
+        name?: string;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      time: |-
+        ```
+        time: number
+        ```
+
+        When it is, in milliseconds from the start.
+      name: |-
+        ```
+        name?: string
+        ```
+
+        Its name, `Marker N` by default.
 TimelineOptions:
   overview: |-
     Interface TimelineOptions

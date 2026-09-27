@@ -22,6 +22,7 @@ $axis-end-gap: deprecated.$s-8;
   // Unselected bars and blocks: a tint of the secondary text colour, so
   // they stand out on any row background, hovered or not, in both themes.
   --timeline-bar-color: color-mix(in hsl, var(--color-foreground-secondary) 25%, transparent);
+  --timeline-playhead-color: var(--color-accent-primary);
 
   grid-area: bottom-dock;
   position: relative;
@@ -39,6 +40,16 @@ $axis-end-gap: deprecated.$s-8;
   // Focused by any click in it, so it gets the keyframe shortcuts.
   &:focus {
     outline: none;
+  }
+
+  // Auto-keyframe on: every edit records keyframes, the playhead and a bar
+  // across the top of the timeline show it in red.
+  &.recording {
+    --timeline-playhead-color: var(--color-accent-error);
+
+    .toolbar {
+      box-shadow: inset 0 -2px 0 var(--color-accent-error);
+    }
   }
 }
 
@@ -101,6 +112,40 @@ $axis-end-gap: deprecated.$s-8;
   }
 }
 
+// Auto-keyframe: a dot like a record button, red while it is on.
+.rec-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: deprecated.$s-6;
+  block-size: 32px;
+  padding: 0 deprecated.$s-8;
+  border: none;
+  border-radius: deprecated.$br-8;
+  background-color: transparent;
+  color: var(--color-foreground-secondary);
+  font-size: deprecated.$fs-11;
+  font-weight: deprecated.$fw700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-tertiary);
+    color: var(--color-foreground-primary);
+  }
+
+  &.active {
+    background-color: color-mix(in hsl, var(--color-accent-error) 15%, transparent);
+    color: var(--color-accent-error);
+  }
+}
+
+.rec-dot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background-color: currentcolor;
+}
+
 .pause-icon {
   width: 10px;
   height: 12px;
@@ -130,6 +175,22 @@ $axis-end-gap: deprecated.$s-8;
     border-radius: deprecated.$br-8;
     background-color: var(--color-background-tertiary);
     color: var(--color-foreground-primary);
+  }
+}
+
+// The unit after the duration: a click shows times in the other one.
+.unit-btn {
+  padding: 0 deprecated.$s-4;
+  border: none;
+  border-radius: deprecated.$br-4;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-tertiary);
+    color: var(--color-accent-primary);
   }
 }
 
@@ -182,11 +243,14 @@ $axis-end-gap: deprecated.$s-8;
   background-color: var(--color-background-primary);
 }
 
-// Above the label column; covers the ruler scrolled under it.
+// Above the label column; covers the ruler scrolled under it. Its
+// chevron folds or opens all the layers, above theirs.
 .ruler-corner {
   position: sticky;
   inset-inline-start: 0;
   z-index: deprecated.$z-index-2;
+  display: flex;
+  align-items: center;
   inline-size: $track-label-width;
   flex: none;
   background-color: var(--color-background-primary);
@@ -283,9 +347,33 @@ $axis-end-gap: deprecated.$s-8;
   position: absolute;
   inset-block: 0;
   width: 0;
-  border-inline-start: 1px solid var(--color-accent-primary);
+  border-inline-start: 1px solid var(--timeline-playhead-color);
   pointer-events: none;
   z-index: deprecated.$z-index-1;
+}
+
+// End of the timeline on the ruler: dragging it changes the duration.
+.duration-handle {
+  position: absolute;
+  inset-block: 0;
+  inline-size: 9px;
+  margin-inline-start: -4px;
+  cursor: ew-resize;
+  z-index: deprecated.$z-index-2;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset-block: 5px;
+    inset-inline-start: 3px;
+    inline-size: 3px;
+    border-radius: 2px;
+    background-color: var(--color-foreground-secondary);
+  }
+
+  &:hover::after {
+    background-color: var(--color-accent-primary);
+  }
 }
 
 // Pin on top of the playhead line, pointing down; centred on the 1px
@@ -297,7 +385,7 @@ $axis-end-gap: deprecated.$s-8;
   inline-size: 13px;
   block-size: 13px;
   border-radius: 3px 3px 0 0;
-  background-color: var(--color-accent-primary);
+  background-color: var(--timeline-playhead-color);
   clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
 }
 
@@ -331,7 +419,75 @@ $axis-end-gap: deprecated.$s-8;
   position: absolute;
   inset-block: 0;
   width: 0;
-  border-left: 1px solid var(--color-accent-primary);
+  border-left: 1px solid var(--timeline-playhead-color);
+}
+
+// Where the markers are, across the layers.
+.marker-line {
+  position: absolute;
+  inset-block: 0;
+  width: 0;
+  border-left: 1px dashed var(--color-accent-info);
+  opacity: 0.6;
+}
+
+// The markers above the layers, kept under the ruler as they scroll.
+.marker-row {
+  position: sticky;
+  inset-block-start: 24px;
+  z-index: deprecated.$z-index-3;
+  border-bottom: 1px solid var(--panel-border-color);
+
+  .row-label {
+    padding-inline-start: deprecated.$s-8;
+  }
+}
+
+.marker-lane {
+  cursor: default;
+}
+
+// A marker: a pin at its time and its name.
+.marker {
+  position: absolute;
+  inset-block: 0;
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+  margin-inline-start: -5px;
+  color: var(--color-accent-info);
+  cursor: pointer;
+  user-select: none;
+  z-index: deprecated.$z-index-1;
+}
+
+.marker-pin {
+  flex: none;
+  inline-size: 10px;
+  block-size: 12px;
+  background-color: currentcolor;
+  clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
+}
+
+.marker-name {
+  max-inline-size: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: deprecated.$fs-11;
+  color: var(--color-foreground-primary);
+}
+
+.marker-input {
+  inline-size: 100px;
+  block-size: 20px;
+  margin: 0;
+  padding: 0 deprecated.$s-4;
+  border: 1px solid var(--color-accent-info);
+  border-radius: deprecated.$br-4;
+  background-color: var(--color-background-tertiary);
+  color: var(--color-foreground-primary);
+  font-size: deprecated.$fs-11;
 }
 
 // Where a drag in the timeline snaps to.

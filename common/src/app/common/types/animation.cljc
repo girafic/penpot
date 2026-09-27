@@ -20,11 +20,13 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
+   [app.common.types.path :as path]
    [app.common.types.shape.interactions :as cti]
    [app.common.uuid :as uuid]
    [clojure.string :as str]))
@@ -177,6 +179,13 @@
 ;; A timeline is scoped to a board (top-level frame). The page-level
 ;; `:timelines` map is keyed by `:board-id`, so each board owns at most
 ;; one timeline (like Figma Motion).
+(def schema:marker
+  "A named moment of a timeline, see `add-marker`."
+  [:map {:title "AnimationMarker"}
+   [:id ::sm/uuid]
+   [:time ::sm/safe-int]
+   [:name :string]])
+
 (def schema:timeline
   [:map {:title "AnimationTimeline"}
    [:board-id ::sm/uuid]
@@ -186,6 +195,7 @@
    ;; Timelines saved before `:playback` only say whether they loop.
    [:loop {:optional true} :boolean]
    [:loop-count {:optional true} [:maybe ::sm/safe-int]]
+   [:markers {:optional true} [:vector {:gen/max 3} schema:marker]]
    [:tracks [:map-of {:gen/max 3} ::sm/uuid schema:track]]])
 
 (def schema:timeline-attrs
@@ -196,7 +206,8 @@
    [:duration {:optional true} ::sm/safe-int]
    [:playback {:optional true} [:maybe [::sm/one-of playback-modes]]]
    [:loop {:optional true} [:maybe :boolean]]
-   [:loop-count {:optional true} [:maybe ::sm/safe-int]]])
+   [:loop-count {:optional true} [:maybe ::sm/safe-int]]
+   [:markers {:optional true} [:maybe [:vector {:gen/max 3} schema:marker]]]])
 
 (def schema:timelines
   [:map-of {:gen/max 2} ::sm/uuid schema:timeline])
@@ -827,13 +838,18 @@
 
 (defn snap-times
   "The times a drag on `timeline` snaps to: its start and end, its
-  keyframes and the starts and ends of its preset animations, but for the
-  keyframes of `keyframe-ids` and the animations of `animation-ids`, the
-  ones being dragged."
-  [timeline & {:keys [keyframe-ids animation-ids]}]
+  markers, its keyframes and the starts and ends of its preset
+  animations, but for the keyframes of `keyframe-ids`, the animations of
+  `animation-ids` and the markers of `marker-ids`, the ones being
+  dragged, and for its end with `end?` false, when the end is what is
+  dragged."
+  [timeline & {:keys [keyframe-ids animation-ids marker-ids end?] :or {end? true}}]
   (let [tracks (vals (:tracks timeline))]
-    (into (sorted-set 0 (:duration timeline))
+    (into (cond-> (sorted-set 0) end? (conj (:duration timeline)))
           (concat
+           (for [marker (:markers timeline)
+                 :when (not (contains? marker-ids (:id marker)))]
+             (:time marker))
            (for [track    tracks
                  keyframe (:keyframes track)
                  :when (not (contains? keyframe-ids (:id keyframe)))]
@@ -855,6 +871,53 @@
                 best)))
           nil
           times))
+
+(defn add-marker
+  "`timeline` with a new marker at `time`, named `name` (`Marker N` when
+  not given). Markers name moments of an animation: drags snap to them,
+  the playhead jumps between them, and a Lottie player plays the stretch
+  from one to the next by its name. The duration grows to hold it."
+  [timeline {:keys [id time name]}]
+  (let [time (max 0 (int time))
+        name (or name (str "Marker " (inc (count (:markers timeline)))))]
+    (-> timeline
+        (update :markers (fn [markers]
+                           (->> {:id (or id (uuid/next)) :time time :name name}
+                                (conj (vec markers))
+                                (sort-by :time)
+                                (vec))))
+        (update :duration max time))))
+
+(defn update-marker
+  "`timeline` with `f` applied to its marker `marker-id`, kept at or past
+  the start and in time order. The duration grows to hold it."
+  [timeline marker-id f]
+  (let [markers (mapv (fn [marker]
+                        (if (= marker-id (:id marker))
+                          (update (f marker) :time #(max 0 (int %)))
+                          marker))
+                      (:markers timeline))]
+    (cond-> timeline
+      (seq markers)
+      (-> (assoc :markers (vec (sort-by :time markers)))
+          (update :duration max (reduce max (map :time markers)))))))
+
+(defn remove-marker
+  [timeline marker-id]
+  (let [markers (filterv #(not= marker-id (:id %)) (:markers timeline))]
+    (if (empty? markers)
+      (dissoc timeline :markers)
+      (assoc timeline :markers markers))))
+
+(defn marker-after
+  "The first marker of `timeline` past `time`, or nil."
+  [timeline time]
+  (d/seek #(> (:time %) time) (:markers timeline)))
+
+(defn marker-before
+  "The last marker of `timeline` before `time`, or nil."
+  [timeline time]
+  (d/seek #(< (:time %) time) (rseq (vec (:markers timeline)))))
 
 (defn toggle-animation-flag
   "Set or clear `flag` of an animation: `:hidden` (left out of playback
@@ -2002,6 +2065,73 @@
      timeline
      (:tracks timeline))))
 
+(defn- same-paint-layers?
+  "Whether `a` and `b` have as many fills, strokes and shadows, so an
+  index names the same one in both."
+  [a b]
+  (every? #(= (count (get a %)) (count (get b %))) [:fills :strokes :shadow]))
+
+(defn record-unanimated
+  "`timeline` with an edit of the shapes `shape-ids` recorded at `time`
+  in the properties it changes that are not animated yet, as motion mode
+  does with auto-keyframe on (`record-edit` takes the animated ones).
+  Each gets a keyframe with its new value there and, past the start, one
+  with the value before at 0, so the change plays. `before` and `after`
+  are the objects before and after the edit. A shape whose path or text
+  changes records nothing, nor do fills, strokes and shadows added or
+  removed."
+  [timeline before after shape-ids time]
+  (let [board-id (:board-id timeline)
+
+        record
+        (fn [timeline shape-id property index old new]
+          (let [keyframe (cond-> {:property property}
+                           (some? index) (assoc :index index))]
+            (cond-> (add-keyframe timeline shape-id (assoc keyframe :time time :value new))
+              (pos? time)
+              (add-keyframe shape-id (assoc keyframe :time 0 :value old)))))]
+
+    (reduce
+     (fn [timeline shape-id]
+       (let [old-shape (get before shape-id)
+             new-shape (get after shape-id)
+             animated  (into #{}
+                             (map (juxt :property :index))
+                             (dm/get-in timeline [:tracks shape-id :keyframes]))]
+         (if (or (nil? old-shape) (nil? new-shape)
+                 (not= (:content old-shape) (:content new-shape)))
+           timeline
+           (let [timeline
+                 (reduce (fn [timeline property]
+                           (let [old (edit-value before board-id shape-id property)
+                                 new (edit-value after board-id shape-id property)]
+                             (cond
+                               (or (contains? animated [property nil])
+                                   (close-value? property old new))
+                               timeline
+
+                               ;; it turns the short way, as it does on the canvas
+                               (= property :rotation)
+                               (record timeline shape-id property nil old (+ old (angle-delta old new)))
+
+                               :else
+                               (record timeline shape-id property nil old new))))
+                         timeline
+                         edit-properties)
+                 old (appearance-slot-values old-shape)
+                 new (appearance-slot-values new-shape)]
+             (if (same-paint-layers? old-shape new-shape)
+               (reduce (fn [timeline [property index :as slot]]
+                         (if (or (contains? animated slot)
+                                 (close-value? property (get old slot) (get new slot)))
+                           timeline
+                           (record timeline shape-id property index (get old slot) (get new slot))))
+                       timeline
+                       (keys new))
+               timeline)))))
+     timeline
+     shape-ids)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; MAINTENANCE
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2173,8 +2303,10 @@
 (defn timeline->css
   "Generate a CSS string (`@keyframes` blocks + per-shape `animation`
   rules) for `timeline`, using the base geometry from `objects`. Pure.
-  Options: `:ids`, the shapes to write (all by default), and `:selector`,
-  the CSS selector of a shape (`shape-css-class` by default)."
+  Played once, a shape keeps the last frame. With reduced motion asked
+  for, the shapes stay as designed. Options: `:ids`, the shapes to write
+  (all by default), and `:selector`, the CSS selector of a shape
+  (`shape-css-class` by default)."
   ([timeline objects]
    (timeline->css timeline objects nil))
   ([timeline objects {:keys [ids selector]}]
@@ -2183,23 +2315,30 @@
          iter     (case (playback-mode timeline)
                     :loop      "infinite"
                     :ping-pong "infinite alternate"
-                    "1")
-         selector (or selector #(str "." (shape-css-class (:id %))))]
-     (->> (:tracks timeline)
-          (keep (fn [[sid track]]
-                  (when-let [shape (and (or (nil? ids) (contains? ids sid))
-                                        (get objects sid))]
-                    (let [kf-name  (str "penpot-anim-" (short-id sid))
-                          selector (selector shape)
-                          comment  (str "/* " (or (:name shape) (str sid)) " */")]
-                      (str comment "\n"
-                           (track->keyframes-css timeline shape track kf-name
-                                                 (position-origin timeline objects sid)) "\n\n"
-                           selector " {\n  animation: " kf-name " "
-                           duration "ms linear " iter ";\n"
-                           "  transform-origin: "
-                           (origin-css (track-origin track)) ";\n}")))))
-          (str/join "\n\n")))))
+                    "1 both")
+         selector (or selector #(str "." (shape-css-class (:id %))))
+         rules    (into []
+                        (keep (fn [[sid track]]
+                                (when-let [shape (and (or (nil? ids) (contains? ids sid))
+                                                      (get objects sid))]
+                                  (let [kf-name  (str "penpot-anim-" (short-id sid))
+                                        selector (selector shape)
+                                        comment  (str "/* " (or (:name shape) (str sid)) " */")]
+                                    [selector
+                                     (str comment "\n"
+                                          (track->keyframes-css timeline shape track kf-name
+                                                                (position-origin timeline objects sid)) "\n\n"
+                                          selector " {\n  animation: " kf-name " "
+                                          duration "ms linear " iter ";\n"
+                                          "  transform-origin: "
+                                          (origin-css (track-origin track)) ";\n}")]))))
+                        (:tracks timeline))]
+     (if (empty? rules)
+       ""
+       (str (str/join "\n\n" (map second rules))
+            "\n\n@media (prefers-reduced-motion: reduce) {\n  "
+            (str/join ",\n  " (map first rules))
+            " {\n    animation: none;\n  }\n}")))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2210,9 +2349,11 @@
 ;; JSON-encoded). The board (the timeline's `:board-id`) is the
 ;; composition; each tracked shape becomes a shape layer whose transform
 ;; (position/scale/rotation/opacity) is animated with native Lottie
-;; keyframes + cubic-bezier easing handles. Shape geometry is exported as
-;; a placeholder rectangle of the shape's bounds and first fill colour
-;; (full vector fidelity -- paths/strokes/text -- is a follow-up).
+;; keyframes + cubic-bezier easing handles. Rectangles, ellipses, paths
+;; and booleans, and groups and boards of them, are exported as vectors,
+;; with their fills, strokes, trim, drop shadows and blur (see
+;; `lottie-vector-layer?`); other shapes as images or, without them, as a
+;; rectangle of their bounds in their first fill colour.
 
 (def ^:private lottie-fps 60)
 
@@ -2267,30 +2408,35 @@
 
 (defn- lottie-prop-1d
   "A 1D Lottie property (split position x/y, rotation, opacity). Static
-  values are scalars; animated values use keyframes with `s` of `[v]`."
+  values are scalars, as is a single keyframe: Lottie players draw no
+  layer with an animated value of one keyframe. Animated values use
+  keyframes with `s` of `[v]`."
   [kfs scalar-fn default-scalar]
-  (if (empty? kfs)
-    {:a 0 :k default-scalar}
+  (case (count kfs)
+    0 {:a 0 :k default-scalar}
+    1 {:a 0 :k (scalar-fn (:value (first kfs)))}
     {:a 1 :k (lottie-keyframes kfs (fn [v] [(scalar-fn v)]))}))
 
-(defn- lottie-scale-prop
-  "Combine the (separate) scale-x and scale-y tracks into one 2D Lottie
-  scale property (percentages)."
-  [sx-kfs sy-kfs]
-  (if (and (empty? sx-kfs) (empty? sy-kfs))
-    {:a 0 :k [100 100 100]}
-    (let [sx    (sort-keyframes sx-kfs)
-          sy    (sort-keyframes sy-kfs)
-          times (->> (concat sx sy) (map :time) distinct sort vec)
-          n     (count times)
-          at    (fn [kfs t] (some #(when (= (:time %) t) %) kfs))]
+(defn- lottie-pair-prop
+  "One 2D Lottie property from two (separate) 1D tracks, `a-kfs` and
+  `b-kfs`; `val-fn` gives the Lottie value of their values, `a` and `b`
+  when a track has none."
+  [a-kfs b-kfs a b val-fn]
+  (let [ak    (sort-keyframes a-kfs)
+        bk    (sort-keyframes b-kfs)
+        times (->> (concat ak bk) (map :time) distinct sort vec)
+        n     (count times)
+        at    (fn [kfs t] (some #(when (= (:time %) t) %) kfs))]
+    (if (< n 2)
+      ;; static for no keyframe or one instant (see `lottie-prop-1d`)
+      {:a 0 :k (val-fn (or (:value (first ak)) a) (or (:value (first bk)) b))}
       {:a 1
        :k (vec (map-indexed
                 (fn [i t]
-                  (let [vx   (or (property-value-at sx t) 1)
-                        vy   (or (property-value-at sy t) 1)
-                        kf   (or (at sx t) (at sy t))
-                        base {:t (ms->frames t) :s [(* 100.0 vx) (* 100.0 vy) 100]}]
+                  (let [va   (or (property-value-at ak t) a)
+                        vb   (or (property-value-at bk t) b)
+                        kf   (or (at ak t) (at bk t))
+                        base {:t (ms->frames t) :s (val-fn va vb)}]
                     (cond
                       (= i (dec n))
                       base
@@ -2303,35 +2449,132 @@
                         (assoc base :o {:x [x1] :y [y1]} :i {:x [x2] :y [y2]})))))
                 times))})))
 
+(defn- lottie-scale-prop
+  "Combine the (separate) scale-x and scale-y tracks into one 2D Lottie
+  scale property (percentages)."
+  [sx-kfs sy-kfs]
+  (lottie-pair-prop sx-kfs sy-kfs 1 1 (fn [x y] [(* 100.0 x) (* 100.0 y) 100])))
+
 (defn- slot-kfs
   "Keyframes of `property` at `index` (nil = the unindexed property)."
   [by-prop property index]
   (filterv #(= (:index %) index) (by-prop property)))
 
 (defn- lottie-color-prop
+  "A Lottie colour: static for no keyframe or one (see `lottie-prop-1d`)."
   [kfs default-rgb]
-  (if (empty? kfs)
-    {:a 0 :k (conj (vec default-rgb) 1)}
-    {:a 1 :k (lottie-keyframes kfs (fn [v]
-                                     (let [[r g b] (hex->rgb01 v)]
-                                       [r g b 1])))}))
+  (let [rgba (fn [v]
+               (let [[r g b] (hex->rgb01 v)]
+                 [r g b 1]))]
+    (case (count kfs)
+      0 {:a 0 :k (conj (vec default-rgb) 1)}
+      1 {:a 0 :k (rgba (:value (first kfs)))}
+      {:a 1 :k (lottie-keyframes kfs rgba)})))
 
-(defn- lottie-stroke-item
+(defn- lottie-dashes
+  "The dash pattern of a stroke of `style` and `width`, as the canvas
+  draws it."
+  [{:keys [stroke-style stroke-width stroke-dash stroke-gap]}]
+  (let [w       (or stroke-width 1)
+        pattern (case stroke-style
+                  :dotted [0 (+ w 5)]
+                  :dashed [(or stroke-dash (+ w 10)) (or stroke-gap (+ w 10))]
+                  :mixed  [(+ w 5) (+ w 5) (+ w 1) (+ w 5)]
+                  nil)]
+    (when (seq pattern)
+      (conj (vec (map-indexed (fn [i length]
+                                (if (even? i)
+                                  {:n "d" :nm "dash" :v {:a 0 :k length}}
+                                  {:n "g" :nm "gap" :v {:a 0 :k length}}))
+                              pattern))
+            {:n "o" :nm "offset" :v {:a 0 :k 0}}))))
+
+(defn- lottie-stroke-items
+  "The Lottie strokes of `shape`, top-most first, each with the keyframes
+  of its index. Lottie draws them centered on the outline."
   [shape by-prop]
-  (let [stroke   (d/seek solid-color-stroke? (as-vec (:strokes shape)))
-        color-kfs (slot-kfs by-prop :stroke-color 0)
-        opac-kfs  (slot-kfs by-prop :stroke-opacity 0)
-        width-kfs (slot-kfs by-prop :stroke-width 0)]
-    (when (or stroke (seq color-kfs) (seq opac-kfs) (seq width-kfs))
-      (let [[r g b] (hex->rgb01 (or (:stroke-color stroke)
-                                    (:value (first color-kfs))
-                                    "#000000"))]
-        {:ty "st" :nm "stroke"
-         :c (lottie-color-prop color-kfs [r g b])
-         :o (lottie-prop-1d opac-kfs (fn [v] (* 100.0 v))
-                            (* 100.0 (or (:stroke-opacity stroke) 1)))
-         :w (lottie-prop-1d width-kfs identity (or (:stroke-width stroke) 1))
-         :lc 1 :lj 1 :ml 4}))))
+  (->> (as-vec (:strokes shape))
+       (map-indexed
+        (fn [index stroke]
+          (let [color-kfs (slot-kfs by-prop :stroke-color index)
+                opac-kfs  (slot-kfs by-prop :stroke-opacity index)
+                width-kfs (slot-kfs by-prop :stroke-width index)]
+            (when (or (solid-color-stroke? stroke) (seq color-kfs))
+              (let [cap    (:stroke-cap-start stroke)
+                    dashes (lottie-dashes stroke)]
+                (cond-> {:ty "st" :nm (str "stroke " index)
+                         :c (lottie-color-prop color-kfs (hex->rgb01 (or (:stroke-color stroke)
+                                                                         (:value (first color-kfs))
+                                                                         "#000000")))
+                         :o (lottie-prop-1d opac-kfs (fn [v] (* 100.0 v))
+                                            (* 100.0 (or (:stroke-opacity stroke) 1)))
+                         :w (lottie-prop-1d width-kfs identity (or (:stroke-width stroke) 1))
+                         :lc (cond
+                               (= :dotted (:stroke-style stroke))           2
+                               (not= cap (:stroke-cap-end stroke))          1
+                               :else (case cap :round 2 :square 3 1))
+                         :lj 1 :ml 4}
+                  (seq dashes) (assoc :d dashes)))))))
+       (remove nil?)
+       (vec)))
+
+(defn- fill-rule
+  "Lottie fill rule of `shape`: 2 (even-odd) when it says so, else 1."
+  [shape]
+  (if (= "evenodd" (or (dm/get-in shape [:svg-attrs :fill-rule])
+                       (dm/get-in shape [:svg-attrs :fillRule])))
+    2
+    1))
+
+(defn- lottie-gradient-fill
+  "A Lottie gradient fill of `gradient` over the box `[x y width height]`,
+  where the gradient points are fractions of the box."
+  [{:keys [type start-x start-y end-x end-y stops]} opacity rule [x y width height]]
+  (let [stops (sort-by :offset stops)
+        point (fn [px py] [(+ x (* px width)) (+ y (* py height))])]
+    {:ty "gf" :nm "gradient" :r rule
+     :t (if (= type :radial) 2 1)
+     :s {:a 0 :k (point start-x start-y)}
+     :e {:a 0 :k (point end-x end-y)}
+     :g {:p (count stops)
+         :k {:a 0 :k (vec (concat (mapcat (fn [{:keys [offset color]}]
+                                            (cons offset (hex->rgb01 color)))
+                                          stops)
+                                  (mapcat (fn [{:keys [offset opacity]}]
+                                            [offset (or opacity 1)])
+                                          stops)))}}
+     :o {:a 0 :k (* 100.0 (or opacity 1))}}))
+
+(defn- lottie-fill-items
+  "The Lottie fills of `shape`, top-most first: flat colours with the
+  keyframes of their index, and gradients over `box` (see
+  `lottie-gradient-fill`)."
+  [shape by-prop box]
+  (let [rule (fill-rule shape)]
+    (->> (as-vec (:fills shape))
+         (map-indexed
+          (fn [index fill]
+            (cond
+              (solid-color-fill? fill)
+              {:ty "fl" :nm (str "fill " index) :r rule
+               :c (lottie-color-prop (slot-kfs by-prop :fill-color index) (hex->rgb01 (:fill-color fill)))
+               :o (lottie-prop-1d (slot-kfs by-prop :fill-opacity index) (fn [v] (* 100.0 v))
+                                  (* 100.0 (or (:fill-opacity fill) 1)))}
+
+              (some? (:fill-color-gradient fill))
+              (lottie-gradient-fill (:fill-color-gradient fill) (:fill-opacity fill) rule box))))
+         (remove nil?)
+         (vec))))
+
+(defn- lottie-trim-item
+  "Lottie trim paths of the trim keyframes, or nil without any: start and
+  end in percent, the offset in degrees (a whole turn is the outline)."
+  [by-prop]
+  (when (some #(seq (by-prop %)) (keys trim-properties))
+    {:ty "tm" :nm "trim" :m 1
+     :s (lottie-prop-1d (by-prop :trim-start) (fn [v] (* 100.0 v)) 0)
+     :e (lottie-prop-1d (by-prop :trim-end) (fn [v] (* 100.0 v)) 100)
+     :o (lottie-prop-1d (by-prop :trim-offset) (fn [v] (* 360.0 v)) 0)}))
 
 (defn- lottie-blur-effect
   [shape by-prop]
@@ -2342,6 +2585,46 @@
         :en 1
         :ef [{:ty 0 :nm "Sigma"
               :v (lottie-prop-1d kfs identity (or (get-in shape [:blur :value]) 0))}]}])))
+
+(defn- lottie-pair-1d
+  "A 1D Lottie property of two 1D tracks (see `lottie-pair-prop`), `val-fn`
+  giving its value of theirs."
+  [a-kfs b-kfs a b val-fn]
+  (let [prop (lottie-pair-prop a-kfs b-kfs a b (fn [va vb] [(val-fn va vb)]))]
+    (cond-> prop
+      (zero? (:a prop)) (update :k first))))
+
+(defn- drop-shadow?
+  [shadow]
+  (and (= :drop-shadow (:style shadow)) (not (:hidden shadow))))
+
+(defn- lottie-shadow-effects
+  "Lottie drop shadows of the drop shadows of `shape`, each with the
+  keyframes of its index. Lottie has no spread."
+  [shape by-prop]
+  (->> (as-vec (:shadow shape))
+       (map-indexed
+        (fn [index shadow]
+          (when (drop-shadow? shadow)
+            (let [kfs      #(slot-kfs by-prop % index)
+                  x        (or (:offset-x shadow) 0)
+                  y        (or (:offset-y shadow) 0)
+                  offset   #(lottie-pair-1d (kfs :shadow-offset-x) (kfs :shadow-offset-y) x y %)]
+              {:ty 25 :nm "Drop Shadow" :en 1 :np 8
+               :ef [{:ty 2 :nm "Shadow Color"
+                     :v (lottie-color-prop (kfs :shadow-color)
+                                           (hex->rgb01 (or (dm/get-in shadow [:color :color]) "#000000")))}
+                    {:ty 0 :nm "Opacity"
+                     :v (lottie-prop-1d (kfs :shadow-opacity) (fn [v] (* 255.0 v))
+                                        (* 255.0 (or (dm/get-in shadow [:color :opacity]) 1)))}
+                    ;; 0 is up, 90 to the right
+                    {:ty 0 :nm "Direction" :v (offset (fn [dx dy] (mth/degrees (mth/atan2 dx (- dy)))))}
+                    {:ty 0 :nm "Distance" :v (offset mth/hypot)}
+                    {:ty 0 :nm "Softness"
+                     :v (lottie-prop-1d (kfs :shadow-blur) (fn [v] (* 2.0 v)) (* 2.0 (or (:blur shadow) 0)))}
+                    {:ty 7 :nm "Shadow Only" :v {:a 0 :k 0}}]}))))
+       (remove nil?)
+       (vec)))
 
 (defn- lottie-anchor
   "Layer-space point of the track origin on `shape`."
@@ -2387,40 +2670,283 @@
    :st 0
    :bm 0})
 
+(def ^:private lottie-group-transform
+  {:ty "tr" :nm "transform"
+   :p {:a 0 :k [0 0]}
+   :a {:a 0 :k [0 0]}
+   :s {:a 0 :k [100 100]}
+   :r {:a 0 :k 0}
+   :o {:a 0 :k 100}})
+
+(defn- lottie-group
+  [name items]
+  (let [items (conj (vec items) lottie-group-transform)]
+    {:ty "gr" :nm name :np (count items) :it items}))
+
+(defn- lottie-paints?
+  "Whether the fills and strokes of `shape` are Lottie paints: flat or
+  gradient fills, flat strokes."
+  [shape]
+  (and (every? #(or (solid-color-fill? %) (some? (:fill-color-gradient %)))
+               (as-vec (:fills shape)))
+       (every? solid-color-stroke? (as-vec (:strokes shape)))))
+
+(declare lottie-content?)
+
+(defn- lottie-outline?
+  "Whether the kind of `shape` draws as Lottie vectors, the layers of a
+  group or board as `lottie-content?` says, but for those in `layer-ids`,
+  which draw on their own."
+  [objects layer-ids shape]
+  (case (:type shape)
+    (:rect :circle) true
+    (:path :bool)   (some? (:content shape))
+    :group          (and (not (:masked-group shape))
+                         (every? #(or (contains? layer-ids %)
+                                      (lottie-content? objects layer-ids (get objects %)))
+                                 (:shapes shape)))
+    :frame          (every? #(or (contains? layer-ids %)
+                                 (lottie-content? objects layer-ids (get objects %)))
+                            (:shapes shape))
+    false))
+
+(defn- lottie-content?
+  "Whether `shape`, drawn inside a layer, draws as Lottie vectors (a hidden
+  one draws nothing). Effects go with a whole layer, so no shadow nor blur,
+  and no board clipping its content."
+  [objects layer-ids shape]
+  (or (true? (:hidden shape))
+      (and (some? shape)
+           (lottie-paints? shape)
+           (empty? (as-vec (:shadow shape)))
+           (nil? (:blur shape))
+           (or (not= :frame (:type shape)) (true? (:show-content shape)))
+           (lottie-outline? objects layer-ids shape))))
+
+(defn lottie-vector-layer?
+  "Whether the layer `id` of a Lottie export draws as vectors (`layer-ids`
+  are all the layers of the export): a rectangle, ellipse, path or
+  boolean, or a group or board of such, with flat or gradient fills, flat
+  strokes, and drop shadows and blur of its own at most. Anything else
+  draws as an image (see `timeline->lottie`)."
+  [objects layer-ids id]
+  (let [shape (get objects id)]
+    (and (some? shape)
+         (lottie-paints? shape)
+         (every? #(or (drop-shadow? %) (:hidden %)) (as-vec (:shadow shape)))
+         (lottie-outline? objects layer-ids shape))))
+
+(defn- lottie-path-shapes
+  "Lottie paths (`sh`) of path `content`, one per subpath, moved by
+  `dx`, `dy`. Tangents are relative to their vertex."
+  [content dx dy]
+  (let [point  (fn [x y] [(+ x dx) (+ y dy)])
+        vertex (fn [[x y]] {:v [x y] :i [0 0] :o [0 0]})
+        item   (fn [vertices closed?]
+                 (let [first-v  (first vertices)
+                       last-v   (peek vertices)
+                       back?    (and (> (count vertices) 2)
+                                     (mth/close? ((:v first-v) 0) ((:v last-v) 0))
+                                     (mth/close? ((:v first-v) 1) ((:v last-v) 1)))
+                       ;; an outline back on its first vertex closes on it,
+                       ;; as the ones `path/convert-to-path` gives do
+                       closed?  (or closed? back?)
+                       vertices (if back?
+                                  (assoc (pop vertices) 0 (assoc first-v :i (:i last-v)))
+                                  vertices)]
+                   {:ty "sh" :nm "path"
+                    :ks {:a 0 :k {:c closed?
+                                  :v (mapv :v vertices)
+                                  :i (mapv :i vertices)
+                                  :o (mapv :o vertices)}}}))
+        done   (fn [items vertices closed?]
+                 (cond-> items (> (count vertices) 1) (conj (item vertices closed?))))]
+    (loop [segments (seq (vec content))
+           vertices []
+           items    []]
+      (if-let [{:keys [command params]} (first segments)]
+        (let [{:keys [x y c1x c1y c2x c2y]} params
+              p (when (some? x) (point x y))]
+          (case command
+            :move-to
+            (recur (rest segments) [(vertex p)] (done items vertices false))
+
+            :line-to
+            (recur (rest segments) (conj vertices (vertex p)) items)
+
+            :curve-to
+            (let [[px py] (:v (or (peek vertices) (vertex p)))
+                  [ax ay] (point c1x c1y)
+                  [bx by] (point c2x c2y)
+                  prev    (if (seq vertices)
+                            (assoc-in vertices [(dec (count vertices)) :o] [(- ax px) (- ay py)])
+                            [(vertex [px py])])]
+              (recur (rest segments)
+                     (conj prev {:v p :i [(- bx (p 0)) (- by (p 1))] :o [0 0]})
+                     items))
+
+            :close-path
+            ;; what follows without a move starts where this one did
+            (recur (rest segments)
+                   (if (seq vertices) [(vertex (:v (first vertices)))] [])
+                   (done items vertices true))
+
+            (recur (rest segments) vertices items)))
+        (done items vertices false)))))
+
+(defn- lottie-outline
+  "The outline of `shape` as Lottie items, in board coordinates (the
+  board at `ox`, `oy`) and before it turns: the layer turns it. An
+  ellipse and a rectangle with one radius take their size (and radius)
+  from the keyframes, growing from the top left corner."
+  [shape by-prop ox oy]
+  (let [{:keys [x y width height]} (:selrect shape)
+        left   (- x ox)
+        top    (- y oy)
+        size   (lottie-pair-prop (by-prop :width) (by-prop :height) width height
+                                 (fn [w h] [w h]))
+        center (lottie-pair-prop (by-prop :width) (by-prop :height) width height
+                                 (fn [w h] [(+ left (/ w 2)) (+ top (/ h 2))]))
+        rotation (or (:rotation shape) 0)]
+    (cond
+      (= :circle (:type shape))
+      [{:ty "el" :nm "ellipse" :d 1 :s size :p center}]
+
+      (and (contains? #{:rect :frame} (:type shape))
+           (= (:r1 shape) (:r2 shape) (:r3 shape) (:r4 shape)))
+      [{:ty "rc" :nm "rect" :d 1 :s size :p center
+        :r (lottie-prop-1d (by-prop :r1) identity (or (:r1 shape) 0))}]
+
+      (contains? #{:rect :frame} (:type shape))
+      (-> (assoc shape :type :rect)
+          (dissoc :transform :transform-inverse :flip-x :flip-y)
+          (path/convert-to-path)
+          (:content)
+          (lottie-path-shapes (- ox) (- oy)))
+
+      :else
+      (-> (cond-> (:content shape)
+            (not (mth/almost-zero? rotation))
+            (path/transform-content (gmt/rotate-matrix (- rotation)
+                                                       (gpt/point (+ x (/ width 2)) (+ y (/ height 2))))))
+          (lottie-path-shapes (- ox) (- oy))))))
+
+(defn- lottie-vector-groups
+  "The Lottie groups drawing `shape` as vectors: its outline with its
+  strokes over its fills. A trim trims the strokes only, as the canvas
+  does: they get a trimmed copy of the outline."
+  [shape by-prop ox oy]
+  (let [{:keys [x y width height]} (:selrect shape)
+        outline (lottie-outline shape by-prop ox oy)
+        strokes (lottie-stroke-items shape by-prop)
+        fills   (lottie-fill-items shape by-prop [(- x ox) (- y oy) width height])
+        trim    (lottie-trim-item by-prop)]
+    (if (and (some? trim) (seq strokes))
+      [(lottie-group "strokes" (concat outline [trim] strokes))
+       (lottie-group "fills" (concat outline fills))]
+      [(lottie-group "shape" (concat outline strokes fills))])))
+
+(defn- lottie-turned-back
+  "`content`, the outline of a shape where it is on the canvas, turned
+  back by `rotation` around `center` (the layer turns it) and as Lottie
+  paths in the board at `ox`, `oy`."
+  [content rotation center ox oy]
+  (-> (cond-> content
+        (not (mth/almost-zero? rotation))
+        (path/transform-content (gmt/rotate-matrix (- rotation) center)))
+      (lottie-path-shapes (- ox) (- oy))))
+
+(defn- canvas-outline
+  "The outline of `shape` where it is on the canvas, as path content."
+  [shape]
+  (if (contains? #{:path :bool} (:type shape))
+    (:content shape)
+    (:content (path/convert-to-path (cond-> shape (= :frame (:type shape)) (assoc :type :rect))))))
+
+(defn- lottie-content-group
+  "A Lottie group drawing `shape`, a layer of a group or board drawn in
+  one layer that turns by `rotation` around `center`: its outline turned
+  back with its strokes over its fills or, for a group or board, the ones
+  of its layers (but for those in `layer-ids`, which draw on their own),
+  the top-most first, over the board's own. None for a hidden one."
+  [objects layer-ids shape rotation center ox oy]
+  (when-not (true? (:hidden shape))
+    (let [children (when (contains? #{:group :frame} (:type shape))
+                     (->> (reverse (:shapes shape))
+                          (remove #(contains? layer-ids %))
+                          (keep #(lottie-content-group objects layer-ids (get objects %)
+                                                       rotation center ox oy))))
+          {:keys [x y width height]} (:selrect shape)
+          paint    (when (not= :group (:type shape))
+                     (concat (lottie-stroke-items shape {})
+                             (lottie-fill-items shape {} [(- x ox) (- y oy) width height])))
+          items    (cond-> (vec children)
+                     (seq paint)
+                     (conj (lottie-group "shape" (concat (lottie-turned-back (canvas-outline shape)
+                                                                             rotation center ox oy)
+                                                         paint))))]
+      (when (seq items)
+        (-> (lottie-group (or (:name shape) "layer") items)
+            (update :it (fn [it]
+                          (assoc-in it [(dec (count it)) :o :k] (* 100.0 (or (:opacity shape) 1))))))))))
+
+(defn- lottie-clip-mask
+  "A Lottie mask keeping a layer to the outline of the board `shape`."
+  [shape ox oy]
+  (let [{:keys [x y width height]} (:selrect shape)
+        center (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
+        path   (first (lottie-turned-back (canvas-outline shape) (or (:rotation shape) 0) center ox oy))]
+    {:inv false :mode "a" :nm "clip" :pt (:ks path) :o {:a 0 :k 100} :x {:a 0 :k 0}}))
+
+(defn- lottie-layer-groups
+  "The Lottie groups drawing the layer `shape` as vectors: its own shape
+  with the keyframes of its track (see `lottie-vector-groups`) or, for a
+  group, its layers, and for a board, its layers over its own shape."
+  [objects layer-ids shape by-prop ox oy]
+  (let [{:keys [x y width height]} (:selrect shape)
+        center   (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
+        rotation (or (:rotation shape) 0)
+        children #(->> (reverse (:shapes shape))
+                       (remove (fn [id] (contains? layer-ids id)))
+                       (keep (fn [id] (lottie-content-group objects layer-ids (get objects id)
+                                                            rotation center ox oy))))]
+    (case (:type shape)
+      :group (vec (children))
+      :frame (into (vec (children)) (lottie-vector-groups shape by-prop ox oy))
+      (lottie-vector-groups shape by-prop ox oy))))
+
+(defn- lottie-placeholder-group
+  "A rectangle of the bounds of `shape` in its first fill colour, for a
+  shape drawn neither as vectors nor as an image."
+  [shape by-prop ox oy]
+  (let [{:keys [x y width height]} (:selrect shape)
+        fill (d/seek solid-color-fill? (as-vec (:fills shape)))]
+    (lottie-group
+     "shape"
+     (concat [{:ty "rc" :d 1 :nm "rect"
+               :s {:a 0 :k [width height]}
+               :p {:a 0 :k [(+ (- x ox) (/ width 2.0)) (+ (- y oy) (/ height 2.0))]}
+               :r {:a 0 :k 0}}]
+             (lottie-stroke-items shape by-prop)
+             [{:ty "fl" :nm "fill" :r 1
+               :c (lottie-color-prop (slot-kfs by-prop :fill-color 0)
+                                     (hex->rgb01 (or (:fill-color fill)
+                                                     (-> shape :fills first :fill-color))))
+               :o (lottie-prop-1d (slot-kfs by-prop :fill-opacity 0)
+                                  (fn [v] (* 100.0 v))
+                                  (* 100.0 (or (:fill-opacity fill) 1)))}]))))
+
 (defn- shape->lottie-layer
-  "Build a Lottie shape layer for `shape`/`track`. `ox`/`oy` is the board
-  origin so coordinates are relative to the composition; keyframe
-  positions are relative to `origin`."
-  [ind shape track ox oy origin]
-  (let [by-prop  (group-by :property (:keyframes track))
-        selrect  (:selrect shape)
-        sw       (double (:width selrect))
-        sh       (double (:height selrect))
-        cx       (+ (- (:x selrect) ox) (/ sw 2.0))
-        cy       (+ (- (:y selrect) oy) (/ sh 2.0))
-        fill     (d/seek solid-color-fill? (as-vec (:fills shape)))
-        fill-rgb (hex->rgb01 (or (:fill-color fill)
-                                 (-> shape :fills first :fill-color)))
-        fill-c   (lottie-color-prop (slot-kfs by-prop :fill-color 0) fill-rgb)
-        fill-o   (lottie-prop-1d (slot-kfs by-prop :fill-opacity 0)
-                                 (fn [v] (* 100.0 v))
-                                 (* 100.0 (or (:fill-opacity fill) 1)))
-        stroke   (lottie-stroke-item shape by-prop)
-        blur-ef  (lottie-blur-effect shape by-prop)
-        items    (cond-> [{:ty "rc" :d 1 :nm "rect"
-                           :s {:a 0 :k [sw sh]}
-                           :p {:a 0 :k [cx cy]}
-                           :r {:a 0 :k 0}}
-                          {:ty "fl" :nm "fill" :r 1
-                           :c fill-c
-                           :o fill-o}]
-                   (some? stroke) (conj stroke)
-                   :always (conj {:ty "tr" :nm "transform"
-                                  :p {:a 0 :k [0 0]}
-                                  :a {:a 0 :k [0 0]}
-                                  :s {:a 0 :k [100 100]}
-                                  :r {:a 0 :k 0}
-                                  :o {:a 0 :k 100}}))]
+  "Build a Lottie shape layer for `shape`/`track`, as vectors when it can
+  be (see `lottie-vector-layer?`, `layer-ids` all the layers), with its
+  drop shadows and blur as effects and a board kept to its outline.
+  `ox`/`oy` is the board origin so coordinates are relative to the
+  composition; keyframe positions are relative to `origin`."
+  [ind objects layer-ids shape track ox oy origin]
+  (let [by-prop (group-by :property (:keyframes track))
+        vector? (lottie-vector-layer? objects layer-ids (:id shape))
+        effects (concat (when vector? (lottie-shadow-effects shape by-prop))
+                        (lottie-blur-effect shape by-prop))]
     (cond-> {:ddd 0
              :ind (inc ind)
              :ty 4
@@ -2428,15 +2954,31 @@
              :sr 1
              :ks (lottie-ks shape track ox oy origin)
              :ao 0
-             :shapes [{:ty "gr"
-                       :nm "shape"
-                       :np (count items)
-                       :it items}]
+             :shapes (if vector?
+                       (lottie-layer-groups objects layer-ids shape by-prop ox oy)
+                       [(lottie-placeholder-group shape by-prop ox oy)])
              :ip 0
              :op (ms->frames (max 1 (:duration track 0)))
              :st 0
              :bm 0}
-      (seq blur-ef) (assoc :ef blur-ef))))
+      (seq effects)
+      (assoc :ef (vec effects))
+
+      (and vector? (= :frame (:type shape)) (not (true? (:show-content shape))))
+      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy)]))))
+
+(defn- lottie-markers
+  "The Lottie markers of the markers of `timeline`: each names the stretch
+  up to the next one, or to the end, so a player plays it by its name."
+  [timeline]
+  (let [markers (sort-by :time (:markers timeline))
+        ends    (concat (map :time (rest markers)) [(:duration timeline)])]
+    (mapv (fn [{:keys [time name]} end]
+            {:tm (ms->frames time)
+             :cm name
+             :dr (ms->frames (max 0 (- end time)))})
+          markers
+          ends)))
 
 (defn- lottie-document
   [timeline objects layers assets]
@@ -2455,20 +2997,34 @@
      :assets (vec assets)
      :layers (vec layers)}))
 
+(defn- lottie-layer-order
+  "`ids`, layers of the board `board-id`, as Lottie lists layers: the
+  top-most first, and any not in its tree after them."
+  [objects board-id ids]
+  (let [ids   (set ids)
+        order (->> (tree-seq (fn [id] (seq (dm/get-in objects [id :shapes])))
+                             (fn [id] (dm/get-in objects [id :shapes]))
+                             board-id)
+                   (filter ids)
+                   (reverse)
+                   (vec))]
+    (into order (remove (set order)) ids)))
+
 (defn- lottie-layers-from-tracks
   [timeline objects]
-  (let [duration (max 1 (:duration timeline))
-        board    (get objects (:board-id timeline))
-        bsr      (:selrect board)
-        ox       (or (:x bsr) 0)
-        oy       (or (:y bsr) 0)]
-    (->> (:tracks timeline)
-         (keep (fn [[sid track]]
-                 (when-let [shape (get objects sid)]
-                   [(assoc track :duration duration) shape])))
+  (let [duration  (max 1 (:duration timeline))
+        board-id  (:board-id timeline)
+        bsr       (:selrect (get objects board-id))
+        ox        (or (:x bsr) 0)
+        oy        (or (:y bsr) 0)
+        layer-ids (set (keys (:tracks timeline)))]
+    (->> (lottie-layer-order objects board-id layer-ids)
+         (keep (fn [id]
+                 (when-let [shape (get objects id)]
+                   [(assoc (get-in timeline [:tracks id]) :duration duration) shape])))
          (map-indexed (fn [i [track shape]]
-                        (shape->lottie-layer i shape track ox oy
-                                             (position-origin timeline objects (:shape-id track)))))
+                        (shape->lottie-layer i objects layer-ids shape track ox oy
+                                             (position-origin timeline objects (:id shape)))))
          vec)))
 
 (defn- lottie-layers-from-assets
@@ -2478,7 +3034,8 @@
         bsr       (:selrect board)
         ox        (or (:x bsr) 0)
         oy        (or (:y bsr) 0)
-        layer-ids (export-layer-ids objects (:board-id timeline) (:tracks timeline))]
+        layer-ids (export-layer-ids objects (:board-id timeline) (:tracks timeline))
+        idset     (set layer-ids)]
     (into []
           (comp
            (keep (fn [id]
@@ -2491,10 +3048,11 @@
                     track  (assoc track :duration duration)
                     origin (position-origin timeline objects id)
                     asset  (get assets id)]
-                (if asset
+                (if (and (some? asset) (not (lottie-vector-layer? objects idset id)))
                   (shape->lottie-image-layer i shape track ox oy origin asset duration)
-                  (shape->lottie-layer i shape track ox oy origin))))))
-          layer-ids)))
+                  (shape->lottie-layer i objects idset shape track ox oy origin))))))
+          ;; Lottie lists the top-most layer first
+          (rseq layer-ids))))
 
 (defn timeline->lottie
   "Generate a Lottie (bodymovin) animation document (a plain map ready for
@@ -2502,27 +3060,31 @@
   (`:board-id`) is the composition. Pure.
 
   When `assets` is a non-empty map of `{shape-id {:id :w :h :p :e}}`,
-  those shapes become image layers (`ty` 2). Without assets the
-  placeholder rectangle path is used."
+  those shapes become image layers (`ty` 2), unless they export as
+  vectors (see `lottie-vector-layer?`). Without assets the layers are
+  vectors or rectangles of their bounds. The markers become Lottie
+  markers (see `lottie-markers`)."
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]
-   ;; Lottie has no ping-pong, so the way back is part of the document.
-   (let [timeline (-> timeline (resolve-animations objects) expand-loops expand-paths expand-springs expand-ping-pong)]
-     (if (seq assets)
-       (lottie-document timeline objects
-                        (lottie-layers-from-assets timeline objects assets)
-                        (map (fn [[_ asset]]
-                               {:id (:id asset)
-                                :w (:w asset)
-                                :h (:h asset)
-                                :u ""
-                                :p (:p asset)
-                                :e (or (:e asset) 1)})
-                             assets))
-       (lottie-document timeline objects
-                        (lottie-layers-from-tracks timeline objects)
-                        [])))))
+   (let [markers  (lottie-markers timeline)
+         ;; Lottie has no ping-pong, so the way back is part of the document.
+         timeline (-> timeline (resolve-animations objects) expand-loops expand-paths expand-springs expand-ping-pong)]
+     (cond-> (if (seq assets)
+               (lottie-document timeline objects
+                                (lottie-layers-from-assets timeline objects assets)
+                                (map (fn [[_ asset]]
+                                       {:id (:id asset)
+                                        :w (:w asset)
+                                        :h (:h asset)
+                                        :u ""
+                                        :p (:p asset)
+                                        :e (or (:e asset) 1)})
+                                     assets))
+               (lottie-document timeline objects
+                                (lottie-layers-from-tracks timeline objects)
+                                []))
+       (seq markers) (assoc :markers markers)))))
 
 (defn- svg-escape
   [s]

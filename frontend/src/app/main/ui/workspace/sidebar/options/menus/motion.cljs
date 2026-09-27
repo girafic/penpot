@@ -363,12 +363,17 @@
 
           nil)])]))
 
+(def ^:private ref:stagger
+  (l/derived dwa/stagger st/state))
+
 (mf/defc animations-menu*
   "The preset animations of the selection, in motion mode: add one from
   the menu, then open it to change its settings. The list shows for a
-  single layer; a preset goes to every selected layer."
+  single layer; a preset goes to every selected layer, one after the
+  other by the stagger."
   [{:keys [ids]}]
   (let [timeline   (mf/deref ref:timeline)
+        stagger    (mf/deref ref:stagger)
         shape-id   (when (= 1 (count ids)) (first ids))
         animations (when shape-id
                      (dm/get-in timeline [:tracks shape-id :animations]))
@@ -384,6 +389,9 @@
 
         on-close-menu
         (mf/use-fn #(reset! open* false))
+
+        on-stagger
+        (mf/use-fn (number-handler #(st/emit! (dwa/set-stagger %))))
 
         on-add
         (mf/use-fn
@@ -423,6 +431,15 @@
                                   :data-preset (name preset)
                                   :on-click on-add}
           (preset-label preset)])]]
+
+     (when (> (count ids) 1)
+       [:> animation-row* {:label (tr "workspace.animation.stagger")}
+        [:> numeric-input* {:text-icon "ms"
+                            :property (tr "workspace.animation.stagger")
+                            :min 0
+                            :step 10
+                            :value stagger
+                            :on-change on-stagger}]])
 
      (when (seq animations)
        [:div {:class (stl/css :animations-list)}
