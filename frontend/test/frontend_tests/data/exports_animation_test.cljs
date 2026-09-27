@@ -323,3 +323,43 @@
       (t/is (contains? images cid))
       (t/is (str/starts-with? (get-in images [cid :href]) "data:image/png;base64,"))
       (t/is (some? (get-in images [cid :id]))))))
+
+(t/deftest collect-layer-images-renders-the-layers-as-designed
+  ;; The preview at the playhead faded the layer out: it is rasterized
+  ;; with its own opacity.
+  (let [{:keys [objects bid cid]} (test-objects)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe cid {:time 0 :property :opacity :value 0})
+                   (cta/add-keyframe cid {:time 1000 :property :opacity :value 1}))
+        calls  (atom [])
+        bridge {:clean-modifiers (fn [])
+                :use-shape (fn [_])
+                :set-shape-hidden (fn [_])
+                :apply-shape-properties (fn [shape props] (log calls :props shape (vec props)))
+                :render-shape-pixels (fn [id _ _]
+                                       (log calls :render id)
+                                       (js/Uint8Array. #js [137 80 78 71]))}]
+    (dea/collect-layer-images objects tl {:bridge bridge :time 0})
+    (let [calls  @calls
+          props  (fn [calls] (filter #(and (= :props (first %)) (= cid (:id (second %)))) calls))
+          render (first (keep-indexed #(when (= [:render cid] %2) %1) calls))
+          [_ rest-shape rest-props] (first (props calls))]
+      (t/is (= (get objects cid) rest-shape) "its own properties")
+      (t/is (= [:opacity] rest-props))
+      (t/is (= 1 (:opacity (second (last (props (take render calls)))))) "rasterized opaque")
+      (t/is (= (get objects cid) (second (first (props (drop render calls)))))
+            "and given its opacity back"))))
+
+(t/deftest export-formats-follow-the-renderer
+  (let [{:keys [objects bid cid]} (test-objects)
+        tl        (cta/add-keyframe (cta/make-timeline {:board-id bid :duration 1000})
+                                    cid {:time 0 :property :opacity :value 1})
+        text      (cts/setup-shape {:type :text :x 40 :y 40 :width 20 :height 10})
+        with-text (-> objects
+                      (assoc (:id text) (assoc text :parent-id bid :frame-id bid))
+                      (update-in [bid :shapes] conj (:id text)))]
+    (t/is (= [:mp4 :webm :gif :avif :svg :lottie] (dea/export-formats with-text tl true)))
+    (t/testing "without WASM, Lottie when all its layers draw as vectors"
+      (t/is (= [:lottie] (dea/export-formats objects tl false)))
+      (t/is (= [] (dea/export-formats with-text tl false))))
+    (t/is (= [] (dea/export-formats objects nil true)))))

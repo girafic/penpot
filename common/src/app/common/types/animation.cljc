@@ -28,6 +28,7 @@
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
    [app.common.types.shape.interactions :as cti]
+   [app.common.types.shape.layout :as ctl]
    [app.common.uuid :as uuid]
    [clojure.string :as str]))
 
@@ -288,9 +289,22 @@
                 (max 1 (int frame-count))
                 0.35)))
 
+(defn- painted-children
+  "The ids of the children of `id` in the order the canvas paints them,
+  the bottom-most first: as `:shapes` lists them, but a flex or grid
+  board sorts them by z-index and paints its first one on top."
+  [objects id]
+  (let [shape (get objects id)
+        ids   (get shape :shapes [])]
+    (if (ctl/any-layout? shape)
+      (mapv :id (ctl/sort-layout-children-z-index (keep #(get objects %) ids)
+                                                  (and (ctl/flex-layout? shape) (ctl/reverse? shape))))
+      (vec ids))))
+
 (defn export-layer-ids
   "Shape ids that become their own export layer: every tracked shape
-  plus its siblings, in tree order (board children, then descendants)."
+  plus its siblings, in paint order (see `painted-children`), each
+  before its descendants."
   [objects board-id tracks]
   (let [tracked (set (keys tracks))
         parents (into #{} (keep #(get-in objects [% :parent-id]) tracked))
@@ -298,7 +312,7 @@
                       (mapcat #(get-in objects [% :shapes] []))
                       parents)]
     (->> (tree-seq (fn [id] (seq (get-in objects [id :shapes])))
-                   (fn [id] (get-in objects [id :shapes] []))
+                   (fn [id] (painted-children objects id))
                    board-id)
          (remove #{board-id})
          (filter layer?)
@@ -2191,14 +2205,11 @@
 
     :else "linear"))
 
-(defn- short-id
-  [id]
-  (subs (str id) 0 8))
-
 (defn shape-css-class
-  "CSS class used by `timeline->css` for `id`."
+  "CSS class used by `timeline->css` for `id`. The whole id: the ids of
+  the shapes of a file begin alike."
   [id]
-  (str "penpot-shape-" (short-id id)))
+  (str "penpot-shape-" id))
 
 (defn- css-color
   [hex opacity]
@@ -2305,11 +2316,13 @@
   rules) for `timeline`, using the base geometry from `objects`. Pure.
   Played once, a shape keeps the last frame. With reduced motion asked
   for, the shapes stay as designed. Options: `:ids`, the shapes to write
-  (all by default), and `:selector`, the CSS selector of a shape
-  (`shape-css-class` by default)."
+  (all by default), `:selector`, the CSS selector of a shape
+  (`shape-css-class` by default), and `:origin`, the `transform-origin`
+  of a shape and its track (`origin-css` of the track origin, a share of
+  the shape's box, by default)."
   ([timeline objects]
    (timeline->css timeline objects nil))
-  ([timeline objects {:keys [ids selector]}]
+  ([timeline objects {:keys [ids selector origin]}]
    (let [timeline (-> timeline (resolve-animations objects) expand-loops expand-paths)
          duration (max 1 (:duration timeline))
          iter     (case (playback-mode timeline)
@@ -2317,11 +2330,12 @@
                     :ping-pong "infinite alternate"
                     "1 both")
          selector (or selector #(str "." (shape-css-class (:id %))))
+         origin   (or origin (fn [_ track] (origin-css (track-origin track))))
          rules    (into []
                         (keep (fn [[sid track]]
                                 (when-let [shape (and (or (nil? ids) (contains? ids sid))
                                                       (get objects sid))]
-                                  (let [kf-name  (str "penpot-anim-" (short-id sid))
+                                  (let [kf-name  (str "penpot-anim-" sid)
                                         selector (selector shape)
                                         comment  (str "/* " (or (:name shape) (str sid)) " */")]
                                     [selector
@@ -2331,7 +2345,7 @@
                                           selector " {\n  animation: " kf-name " "
                                           duration "ms linear " iter ";\n"
                                           "  transform-origin: "
-                                          (origin-css (track-origin track)) ";\n}")]))))
+                                          (origin shape track) ";\n}")]))))
                         (:tracks timeline))]
      (if (empty? rules)
        ""
@@ -2647,7 +2661,7 @@
         sw      (double (or (:width (:selrect shape)) 0))
         sh      (double (or (:height (:selrect shape)) 0))
         base-r  (or (:rotation shape) 0)]
-    {:o (lottie-prop-1d (by-prop :opacity) (fn [v] (* 100.0 v)) 100)
+    {:o (lottie-prop-1d (by-prop :opacity) (fn [v] (* 100.0 v)) (* 100.0 (or (:opacity shape) 1)))
      :r (lottie-prop-1d (by-prop :rotation) identity base-r)
      :p {:s true
          :x (lottie-prop-1d (by-prop :x) (fn [v] (+ (- (+ (:x origin) v) ox) (* sw nx))) ax)
@@ -2656,6 +2670,9 @@
      :s (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y))}))
 
 (defn- shape->lottie-image-layer
+  "An image layer of `shape`, whose image is rasterized opaque: the layer
+  has its opacity. The image begins at the layer's origin: the anchor is
+  the track origin on it, not on the composition."
   [ind shape track ox oy origin asset duration]
   {:ddd 0
    :ind (inc ind)
@@ -2663,7 +2680,10 @@
    :nm (or (:name shape) (str "layer-" (inc ind)))
    :refId (:id asset)
    :sr 1
-   :ks (lottie-ks shape track ox oy origin)
+   :ks (assoc (lottie-ks shape track ox oy origin)
+              :a {:a 0 :k (conj (lottie-anchor (update shape :selrect assoc :x 0 :y 0) 0 0
+                                               (track-origin track))
+                                0)})
    :ao 0
    :ip 0
    :op (ms->frames (max 1 duration))
@@ -2872,7 +2892,7 @@
   [objects layer-ids shape rotation center ox oy]
   (when-not (true? (:hidden shape))
     (let [children (when (contains? #{:group :frame} (:type shape))
-                     (->> (reverse (:shapes shape))
+                     (->> (rseq (painted-children objects (:id shape)))
                           (remove #(contains? layer-ids %))
                           (keep #(lottie-content-group objects layer-ids (get objects %)
                                                        rotation center ox oy))))
@@ -2906,7 +2926,7 @@
   (let [{:keys [x y width height]} (:selrect shape)
         center   (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
         rotation (or (:rotation shape) 0)
-        children #(->> (reverse (:shapes shape))
+        children #(->> (rseq (painted-children objects (:id shape)))
                        (remove (fn [id] (contains? layer-ids id)))
                        (keep (fn [id] (lottie-content-group objects layer-ids (get objects id)
                                                             rotation center ox oy))))]
@@ -2941,12 +2961,14 @@
   be (see `lottie-vector-layer?`, `layer-ids` all the layers), with its
   drop shadows and blur as effects and a board kept to its outline.
   `ox`/`oy` is the board origin so coordinates are relative to the
-  composition; keyframe positions are relative to `origin`."
-  [ind objects layer-ids shape track ox oy origin]
+  composition; keyframe positions are relative to `origin`. Without
+  `effects?` or `mask?`, those are left to the precomp holding it."
+  [ind objects layer-ids shape track ox oy origin & {:keys [effects? mask?] :or {effects? true mask? true}}]
   (let [by-prop (group-by :property (:keyframes track))
         vector? (lottie-vector-layer? objects layer-ids (:id shape))
-        effects (concat (when vector? (lottie-shadow-effects shape by-prop))
-                        (lottie-blur-effect shape by-prop))]
+        effects (when effects?
+                  (concat (when vector? (lottie-shadow-effects shape by-prop))
+                          (lottie-blur-effect shape by-prop)))]
     (cond-> {:ddd 0
              :ind (inc ind)
              :ty 4
@@ -2964,7 +2986,7 @@
       (seq effects)
       (assoc :ef (vec effects))
 
-      (and vector? (= :frame (:type shape)) (not (true? (:show-content shape))))
+      (and mask? vector? (= :frame (:type shape)) (not (true? (:show-content shape))))
       (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy)]))))
 
 (defn- lottie-markers
@@ -2997,62 +3019,167 @@
      :assets (vec assets)
      :layers (vec layers)}))
 
-(defn- lottie-layer-order
-  "`ids`, layers of the board `board-id`, as Lottie lists layers: the
-  top-most first, and any not in its tree after them."
-  [objects board-id ids]
-  (let [ids   (set ids)
-        order (->> (tree-seq (fn [id] (seq (dm/get-in objects [id :shapes])))
-                             (fn [id] (dm/get-in objects [id :shapes]))
-                             board-id)
-                   (filter ids)
-                   (reverse)
-                   (vec))]
-    (into order (remove (set order)) ids)))
+(defn- clipping-board?
+  [shape]
+  (and (= :frame (:type shape)) (not (true? (:show-content shape)))))
 
-(defn- lottie-layers-from-tracks
-  [timeline objects]
-  (let [duration  (max 1 (:duration timeline))
-        board-id  (:board-id timeline)
-        bsr       (:selrect (get objects board-id))
-        ox        (or (:x bsr) 0)
-        oy        (or (:y bsr) 0)
-        layer-ids (set (keys (:tracks timeline)))]
-    (->> (lottie-layer-order objects board-id layer-ids)
-         (keep (fn [id]
-                 (when-let [shape (get objects id)]
-                   [(assoc (get-in timeline [:tracks id]) :duration duration) shape])))
-         (map-indexed (fn [i [track shape]]
-                        (shape->lottie-layer i objects layer-ids shape track ox oy
-                                             (position-origin timeline objects (:id shape)))))
-         vec)))
+(defn- layer-nodes
+  "The layers inside `id` as the Lottie and SVG exports nest them, the
+  bottom-most first: a layer is `{:id id}`, with `:inner` nodes when
+  layers sit inside it, so they follow it; a board that clips layers but
+  is none itself is `{:id id :clip? true :inner nodes}`; any other shape
+  gives the layers inside it in its place."
+  [objects layer-ids id]
+  (into []
+        (mapcat (fn [cid]
+                  (let [inner (layer-nodes objects layer-ids cid)]
+                    (cond
+                      (contains? layer-ids cid)
+                      [(cond-> {:id cid} (seq inner) (assoc :inner inner))]
 
-(defn- lottie-layers-from-assets
-  [timeline objects assets]
-  (let [duration  (max 1 (:duration timeline))
-        board     (get objects (:board-id timeline))
-        bsr       (:selrect board)
-        ox        (or (:x bsr) 0)
-        oy        (or (:y bsr) 0)
-        layer-ids (export-layer-ids objects (:board-id timeline) (:tracks timeline))
-        idset     (set layer-ids)]
-    (into []
-          (comp
-           (keep (fn [id]
-                   (when-let [shape (get objects id)]
-                     [id shape])))
-           (map-indexed
-            (fn [i [id shape]]
-              (let [track  (or (get-in timeline [:tracks id])
-                               {:shape-id id :keyframes [] :duration duration})
-                    track  (assoc track :duration duration)
-                    origin (position-origin timeline objects id)
-                    asset  (get assets id)]
-                (if (and (some? asset) (not (lottie-vector-layer? objects idset id)))
-                  (shape->lottie-image-layer i shape track ox oy origin asset duration)
-                  (shape->lottie-layer i objects idset shape track ox oy origin))))))
-          ;; Lottie lists the top-most layer first
-          (rseq layer-ids))))
+                      (and (seq inner) (clipping-board? (get objects cid)))
+                      [{:id cid :clip? true :inner inner}]
+
+                      :else inner))))
+        (painted-children objects id)))
+
+(def ^:private lottie-layer-properties
+  "What a layer does as a whole: a precomp does it to all its layers."
+  #{:x :y :rotation :scale-x :scale-y :opacity})
+
+(defn- lottie-track
+  [{:keys [timeline duration]} id]
+  (-> (or (get-in timeline [:tracks id]) {:shape-id id :keyframes []})
+      (assoc :duration duration)))
+
+(defn- lottie-numbered
+  [layers]
+  (into [] (map-indexed (fn [i layer] (assoc layer :ind (inc i)))) layers))
+
+(defn- lottie-shape-layer
+  "A layer drawing `shape` with `track`: as vectors when it can be, else
+  as its image or a placeholder (see `shape->lottie-layer`)."
+  [{:keys [objects layer-ids assets timeline duration ox oy]} shape track
+   & {:keys [effects? mask?] :or {effects? true mask? true}}]
+  (let [id     (:id shape)
+        origin (position-origin timeline objects id)
+        asset  (get assets id)]
+    (if (and (some? asset) (not (lottie-vector-layer? objects layer-ids id)))
+      (shape->lottie-image-layer 0 shape track ox oy origin asset duration)
+      (shape->lottie-layer 0 objects layer-ids shape track ox oy origin
+                           :effects? effects? :mask? mask?))))
+
+(defn- lottie-content-layer
+  "The layer drawing `shape` itself and the shapes inside it that are no
+  layers, for the precomp (or the composition) that moves, fades and
+  clips it."
+  [ctx shape]
+  (let [track (update (lottie-track ctx (:id shape)) :keyframes
+                      #(into [] (remove (comp lottie-layer-properties :property)) %))]
+    (lottie-shape-layer ctx (assoc shape :opacity 1) track :effects? false :mask? false)))
+
+(defn- lottie-draws?
+  "Whether the content layer of `shape` draws anything: paint of its own
+  or shapes inside it that are no layers."
+  [objects layer-ids shape]
+  (boolean
+   (or (seq (:fills shape))
+       (seq (:strokes shape))
+       (some #(and (not (contains? layer-ids %))
+                   (not (true? (dm/get-in objects [% :hidden]))))
+             (:shapes shape)))))
+
+(declare lottie-node-layers)
+
+(defn- lottie-precomp-layer
+  "A precomp layer of the node `id` (see `layer-nodes`): it moves, fades
+  and clips its layers, with the shape's own drawing at the bottom. The
+  precomp itself goes to `comps`."
+  [{:keys [objects layer-ids timeline duration width height ox oy comps] :as ctx}
+   {:keys [id inner clip?]}]
+  (let [shape   (get objects id)
+        track   (if clip?
+                  {:shape-id id :keyframes [] :duration duration}
+                  (lottie-track ctx id))
+        content (when (and (not clip?)
+                           (or (contains? (:assets ctx) id)
+                               (lottie-draws? objects layer-ids shape)))
+                  (lottie-content-layer ctx shape))
+        ref     (str "comp_" id)
+        ;; before adding this precomp: the ones inside it add themselves
+        layers  (lottie-numbered (cond-> (lottie-node-layers ctx inner)
+                                   (some? content) (conj content)))
+        by-prop (group-by :property (:keyframes track))
+        effects (when-not clip?
+                  (concat (when (lottie-vector-layer? objects layer-ids id)
+                            (lottie-shadow-effects shape by-prop))
+                          (lottie-blur-effect shape by-prop)))]
+    (vswap! comps conj {:id ref :nm (or (:name shape) ref) :layers layers})
+    (cond-> {:ddd 0
+             :ty 0
+             :nm (or (:name shape) ref)
+             :refId ref
+             :sr 1
+             :ks (lottie-ks shape track ox oy (position-origin timeline objects id))
+             :ao 0
+             :w width
+             :h height
+             :ip 0
+             :op (ms->frames duration)
+             :st 0
+             :bm 0}
+      (seq effects)
+      (assoc :ef (vec effects))
+
+      (clipping-board? shape)
+      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy)]))))
+
+(defn- lottie-node-layers
+  "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first."
+  [ctx nodes]
+  (into []
+        (keep (fn [{:keys [id inner] :as node}]
+                (when-let [shape (get (:objects ctx) id)]
+                  (if (seq inner)
+                    (lottie-precomp-layer ctx node)
+                    (lottie-shape-layer ctx shape (lottie-track ctx id))))))
+        (rseq nodes)))
+
+(defn- lottie-layers
+  "The layers of the composition of `timeline`, the top-most first, and
+  the precomps they use: a layer with layers inside it, or a board that
+  clips some, becomes a precomp (see `lottie-precomp-layer`). Layers not
+  in the tree of the board go below the others, and the board draws
+  itself, and what is no layer, at the bottom."
+  [timeline objects layer-ids assets]
+  (let [board-id (:board-id timeline)
+        board    (get objects board-id)
+        bsr      (:selrect board)
+        ctx      {:objects objects
+                  :layer-ids layer-ids
+                  :assets assets
+                  :timeline timeline
+                  :duration (max 1 (:duration timeline))
+                  :ox (or (:x bsr) 0)
+                  :oy (or (:y bsr) 0)
+                  :width (mth/round (or (:width bsr) 100))
+                  :height (mth/round (or (:height bsr) 100))
+                  :comps (volatile! [])}
+        tree     (layer-nodes objects layer-ids board-id)
+        treed    (into #{} (comp (mapcat #(tree-seq :inner :inner %)) (map :id)) tree)
+        untreed  (into [] (comp (remove treed)
+                                (remove #{board-id})
+                                (filter #(contains? objects %))
+                                (map (fn [id] {:id id})))
+                       layer-ids)
+        layers   (lottie-node-layers ctx (into untreed tree))
+        board    (cond-> board (true? (:hide-fill-on-export board)) (assoc :fills []))
+        content  (when (and (some? board)
+                            (or (contains? assets board-id)
+                                (lottie-draws? objects layer-ids board)))
+                   (lottie-content-layer ctx board))]
+    {:layers (lottie-numbered (cond-> layers (some? content) (conj content)))
+     :comps  @(:comps ctx)}))
 
 (defn timeline->lottie
   "Generate a Lottie (bodymovin) animation document (a plain map ready for
@@ -3060,30 +3187,33 @@
   (`:board-id`) is the composition. Pure.
 
   When `assets` is a non-empty map of `{shape-id {:id :w :h :p :e}}`,
-  those shapes become image layers (`ty` 2), unless they export as
-  vectors (see `lottie-vector-layer?`). Without assets the layers are
-  vectors or rectangles of their bounds. The markers become Lottie
-  markers (see `lottie-markers`)."
+  the export layers (see `export-layer-ids`) are those shapes, which
+  become image layers (`ty` 2) unless they export as vectors (see
+  `lottie-vector-layer?`); the board's own asset draws it. Without
+  assets the animated shapes are the layers, as vectors or rectangles of
+  their bounds. Layers holding layers become precomps (see
+  `lottie-layers`). The markers become Lottie markers (see
+  `lottie-markers`)."
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]
-   (let [markers  (lottie-markers timeline)
+   (let [markers   (lottie-markers timeline)
          ;; Lottie has no ping-pong, so the way back is part of the document.
-         timeline (-> timeline (resolve-animations objects) expand-loops expand-paths expand-springs expand-ping-pong)]
-     (cond-> (if (seq assets)
-               (lottie-document timeline objects
-                                (lottie-layers-from-assets timeline objects assets)
-                                (map (fn [[_ asset]]
-                                       {:id (:id asset)
-                                        :w (:w asset)
-                                        :h (:h asset)
-                                        :u ""
-                                        :p (:p asset)
-                                        :e (or (:e asset) 1)})
-                                     assets))
-               (lottie-document timeline objects
-                                (lottie-layers-from-tracks timeline objects)
-                                []))
+         timeline  (-> timeline (resolve-animations objects) expand-loops expand-paths expand-springs expand-ping-pong)
+         board-id  (:board-id timeline)
+         layer-ids (if (seq assets)
+                     (set (export-layer-ids objects board-id (:tracks timeline)))
+                     (disj (set (keys (:tracks timeline))) board-id))
+         {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets)
+         images    (map (fn [[_ asset]]
+                          {:id (:id asset)
+                           :w (:w asset)
+                           :h (:h asset)
+                           :u ""
+                           :p (:p asset)
+                           :e (or (:e asset) 1)})
+                        assets)]
+     (cond-> (lottie-document timeline objects layers (concat images comps))
        (seq markers) (assoc :markers markers)))))
 
 (defn- svg-escape
@@ -3093,57 +3223,83 @@
       (str/replace "\"" "&quot;")
       (str/replace "<" "&lt;")))
 
-(defn- svg-layer-children
-  [objects id idset]
-  (filterv idset (get-in objects [id :shapes] [])))
+(defn- svg-clip-id
+  [id]
+  (str "penpot-clip-" id))
 
-(defn- emit-svg-group
-  "Emit a layer group. `ox`/`oy` is the parent origin so nested layers
-  sit in parent space and inherit parent CSS transforms."
-  [objects images id ox oy idset]
+(defn- svg-clip-paths
+  "The clip paths of the boards among `nodes` (see `layer-nodes`) that
+  clip layers, where they are in the SVG, whose origin is `ox`/`oy`."
+  [objects ox oy nodes]
+  (->> (rest (tree-seq :inner :inner {:inner nodes}))
+       (filter #(and (seq (:inner %)) (clipping-board? (get objects (:id %)))))
+       (map (fn [{:keys [id]}]
+              (str "<clipPath id=\"" (svg-escape (svg-clip-id id)) "\">"
+                   "<path transform=\"translate(" (fmt (- ox)) " " (fmt (- oy)) ")\" d=\""
+                   (path/content (canvas-outline (get objects id))) "\"/>"
+                   "</clipPath>")))
+       (str/join "")))
+
+(defn- emit-svg-node
+  "The SVG of a node of `layer-nodes`: a layer is a group its CSS class
+  animates, holding its image and the layers inside it, which so follow
+  it; a board that clips keeps those to its outline. All images sit
+  where they are in the SVG, whose origin is `ox`/`oy`."
+  [objects images ox oy {:keys [id inner clip?]}]
   (when-let [shape (get objects id)]
-    (let [img  (get images id)
-          sr   (:selrect shape)
-          href (or (:href img) "")
-          x    (- (or (:x sr) 0) ox)
-          y    (- (or (:y sr) 0) oy)
-          w    (or (:width img) (:width sr) 0)
-          h    (or (:height img) (:height sr) 0)
-          kids (svg-layer-children objects id idset)
-          cox  (or (:x sr) 0)
-          coy  (or (:y sr) 0)]
-      (str "<g class=\"" (svg-escape (shape-css-class id)) "\">"
-           "<image href=\"" (svg-escape href)
-           "\" x=\"" x "\" y=\"" y
-           "\" width=\"" w "\" height=\"" h "\"/>"
-           (str/join ""
-                     (keep #(emit-svg-group objects images % cox coy idset)
-                           kids))
-           "</g>"))))
+    (let [inner   (str/join "" (keep #(emit-svg-node objects images ox oy %) inner))
+          clipped #(if (and (seq inner) (clipping-board? shape))
+                     (str "<g clip-path=\"url(#" (svg-escape (svg-clip-id id)) ")\">" % "</g>")
+                     %)]
+      (if clip?
+        (clipped inner)
+        (let [img     (get images id)
+              sr      (:selrect shape)
+              ;; the image is opaque; an animated opacity overrides this
+              opacity (or (:opacity shape) 1)]
+          (str "<g class=\"" (svg-escape (shape-css-class id)) "\""
+               (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
+               ">"
+               (clipped
+                (str "<image href=\"" (svg-escape (or (:href img) ""))
+                     "\" x=\"" (fmt (- (or (:x sr) 0) ox))
+                     "\" y=\"" (fmt (- (or (:y sr) 0) oy))
+                     "\" width=\"" (fmt (or (:width img) (:width sr) 0))
+                     "\" height=\"" (fmt (or (:height img) (:height sr) 0)) "\"/>"
+                     inner))
+               "</g>"))))))
 
 (defn timeline->svg
   "Build an animated SVG: rest-pose `<image>` per export layer plus the
-  CSS from `timeline->css`. Groups nest like the shape tree so a child
-  follows its parent. `images` is `{shape-id {:href :x :y :width
-  :height}}`."
+  CSS from `timeline->css`. The layers nest as `layer-nodes` says, so a
+  layer follows the one it sits in and a board clips them; each turns
+  and scales around its pivot in the SVG. `images` is `{shape-id {:href
+  :x :y :width :height}}`; the board's own image, when there, goes below
+  them."
   [timeline objects images]
   (let [timeline (-> timeline (resolve-animations objects) expand-loops)
-        css      (timeline->css timeline objects)
-        board    (get objects (:board-id timeline))
-        bsr      (:selrect board)
+        board-id (:board-id timeline)
+        bsr      (:selrect (get objects board-id))
         width    (mth/round (or (:width bsr) 100))
         height   (mth/round (or (:height bsr) 100))
         ox       (or (:x bsr) 0)
         oy       (or (:y bsr) 0)
-        ids      (export-layer-ids objects (:board-id timeline) (:tracks timeline))
-        idset    (set ids)
-        roots    (filter (fn [id]
-                           (not (contains? idset (get-in objects [id :parent-id]))))
-                         ids)
-        groups   (keep #(emit-svg-group objects images % ox oy idset) roots)]
+        ;; SVG takes a share of `transform-origin` of the whole drawing
+        css      (timeline->css timeline objects
+                                {:origin (fn [shape track]
+                                           (let [[x y] (lottie-anchor shape ox oy (track-origin track))]
+                                             (str (fmt x) "px " (fmt y) "px")))})
+        ids      (export-layer-ids objects board-id (:tracks timeline))
+        nodes    (layer-nodes objects (set ids) board-id)
+        clips    (svg-clip-paths objects ox oy nodes)
+        backdrop (when-let [img (get images board-id)]
+                   (str "<image href=\"" (svg-escape (:href img))
+                        "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>"))]
     (str "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" width
          "\" height=\"" height "\" viewBox=\"0 0 " width " " height
          "\" overflow=\"hidden\">"
-         "<style>" css "</style>"
-         (str/join "" groups)
+         (when (seq clips) (str "<defs>" clips "</defs>"))
+         "<style>g { transform-box: view-box; }\n" css "</style>"
+         backdrop
+         (str/join "" (keep #(emit-svg-node objects images ox oy %) nodes))
          "</svg>")))

@@ -18,6 +18,7 @@
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
+   [clojure.string :as str]
    [clojure.test :as t]
    [common-tests.types.shape-decode-encode-test :refer [json-roundtrip]]))
 
@@ -202,6 +203,19 @@
     (t/is (re-find #"linear infinite;" css))
     (t/testing "with reduced motion, the shape stays as designed"
       (t/is (re-find #"@media \(prefers-reduced-motion: reduce\) \{\s+\.penpot-shape-\S+ \{\s+animation: none;" css)))))
+
+(t/deftest timeline->css-names-every-shape-apart
+  ;; The ids of the shapes of a file begin alike.
+  (let [a   (cts/setup-shape {:id #uuid "e7bdc995-7266-8021-8008-b4418c7390cd"
+                              :type :rect :x 0 :y 0 :width 10 :height 10})
+        b   (cts/setup-shape {:id #uuid "e7bdc995-7266-8021-8008-b442136429e5"
+                              :type :rect :x 0 :y 0 :width 10 :height 10})
+        tl  (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                (cta/add-keyframe (:id a) {:time 0 :property :opacity :value 0})
+                (cta/add-keyframe (:id b) {:time 0 :property :opacity :value 0}))
+        css (cta/timeline->css tl {(:id a) a (:id b) b})]
+    (t/is (not= (cta/shape-css-class (:id a)) (cta/shape-css-class (:id b))))
+    (t/is (= 2 (count (set (re-seq #"@keyframes (\S+)" css)))))))
 
 (t/deftest timeline->css-writes-fill-stroke-shadow-blur
   (let [shape (cts/setup-shape
@@ -563,7 +577,37 @@
     (t/is (= "img_0" (:refId layer)))
     (t/is (= 1 (get-in layer [:ks :p :x :a])))
     (t/is (= 1 (get-in layer [:ks :o :a])))
-    (t/is (= "img_0" (get-in L [:assets 0 :id])))))
+    (t/is (= "img_0" (get-in L [:assets 0 :id])))
+    (t/testing "the image, from the layer's origin, sits on the shape"
+      (t/is (= [100.0 50.0 0] (get-in layer [:ks :a :k])))
+      (t/is (= 200.0 (double (get-in layer [:ks :p :x :k 0 :s 0]))))
+      (t/is (= 150.0 (double (get-in layer [:ks :p :y :k])))))))
+
+(t/deftest lottie-image-layer-has-the-opacity-of-the-shape
+  ;; its image is rasterized opaque
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        shape   (cts/setup-shape {:type :text :x 10 :y 10 :width 50 :height 20 :opacity 0.5})
+        [bid sid] (map :id [board shape])
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe sid {:time 0 :property :x :value 10})
+                    (cta/add-keyframe sid {:time 1000 :property :x :value 50}))
+        L       (cta/timeline->lottie tl objects {sid {:id "img_0" :w 50 :h 20 :p "data:," :e 1}})
+        layer   (first (:layers L))]
+    (t/is (= 2 (:ty layer)))
+    (t/is (= 50.0 (double (get-in layer [:ks :o :k]))))))
+
+(t/deftest timeline->svg-gives-a-layer-its-opacity
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        shape   (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20 :opacity 0.5})
+        [bid sid] (map :id [board shape])
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 500})
+                    (cta/add-keyframe sid {:time 0 :property :x :value 10}))]
+    (t/is (re-find (re-pattern (str "class=\"" (cta/shape-css-class sid) "\" opacity=\"0.5\""))
+                   (cta/timeline->svg tl objects {})))))
 
 (t/deftest timeline->svg-wraps-images-and-css
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
@@ -604,7 +648,61 @@
         parent-class (cta/shape-css-class aid)
         child-class  (cta/shape-css-class cid)]
     (t/is (re-find (re-pattern (str parent-class "\".*" child-class)) svg))
-    (t/is (re-find #"x=\"2\" y=\"2\"" svg))))
+    (t/is (re-find #"x=\"12\" y=\"12\"" svg) "where it is in the SVG")))
+
+(t/deftest timeline->svg-nests-and-clips-layers
+  ;; A layer inside a board that is none follows the layer holding that
+  ;; board, and both boards keep it to their outlines.
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 200})
+        card    (cts/setup-shape {:type :frame :x 10 :y 10 :width 100 :height 100})
+        holder  (cts/setup-shape {:type :frame :x 20 :y 20 :width 50 :height 50})
+        dot     (cts/setup-shape {:type :rect :x 30 :y 30 :width 10 :height 10})
+        [bid cid hid did] (map :id [board card holder dot])
+        objects {bid (assoc board :shapes [cid])
+                 cid (assoc card :parent-id bid :frame-id bid :shapes [hid])
+                 hid (assoc holder :parent-id cid :frame-id cid :shapes [did])
+                 did (assoc dot :parent-id hid :frame-id hid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 500})
+                    (cta/add-keyframe cid {:time 0 :property :opacity :value 0})
+                    (cta/add-keyframe did {:time 0 :property :x :value 30}))
+        svg     (cta/timeline->svg tl objects {})
+        clip    #(str "clip-path=\"url\\(#penpot-clip-" % "\\)\"")]
+    (t/is (re-find (re-pattern (str (cta/shape-css-class cid) "\".*" (clip cid) ".*" (clip hid)
+                                    ".*" (cta/shape-css-class did)))
+                   svg))
+    (t/is (re-find (re-pattern (str "<clipPath id=\"penpot-clip-" cid "\">")) svg))
+    (t/is (re-find (re-pattern (str "<clipPath id=\"penpot-clip-" hid "\">")) svg))
+    (t/is (re-find #"x=\"30\" y=\"30\"" svg))))
+
+(t/deftest timeline->svg-turns-layers-around-their-pivot
+  ;; A share of an SVG transform-origin is of the whole drawing.
+  (let [board   (cts/setup-shape {:type :frame :x 50 :y 50 :width 200 :height 200})
+        shape   (cts/setup-shape {:type :rect :x 100 :y 100 :width 40 :height 20})
+        [bid sid] (map :id [board shape])
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 500})
+                    (cta/add-keyframe sid {:time 0 :property :rotation :value 0})
+                    (cta/add-keyframe sid {:time 500 :property :rotation :value 90}))]
+    (t/is (re-find #"transform-origin: 70px 60px;" (cta/timeline->svg tl objects {})))
+    (t/is (re-find #"transform-origin: 50% 50%;" (cta/timeline->css tl objects)) "unlike CSS")))
+
+(t/deftest timeline->svg-paints-the-layers-of-a-layout-as-it-does
+  ;; A flex board paints its first layer on top: in SVG, last.
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100
+                                  :layout :flex :layout-flex-dir :column})
+        one     (cts/setup-shape {:type :rect :x 0 :y 0 :width 40 :height 40})
+        two     (cts/setup-shape {:type :rect :x 0 :y 40 :width 40 :height 40})
+        bid     (:id board)
+        objects {bid (assoc board :shapes [(:id one) (:id two)])
+                 (:id one) (assoc one :parent-id bid :frame-id bid)
+                 (:id two) (assoc two :parent-id bid :frame-id bid)}
+        tl      (reduce #(cta/add-keyframe %1 (:id %2) {:time 0 :property :opacity :value 1})
+                        (cta/make-timeline {:board-id bid :duration 500})
+                        [one two])
+        svg     (cta/timeline->svg tl objects {})
+        drawn   (fn [shape] (str/index-of svg (str "class=\"" (cta/shape-css-class (:id shape)) "\"")))]
+    (t/is (< (drawn two) (drawn one)))))
 
 (t/deftest track-origin-defaults-to-center
   (t/is (= {:x 0.5 :y 0.5} (cta/track-origin nil)))
@@ -762,7 +860,34 @@
         bottom (cts/setup-shape {:type :rect :name "bottom" :x 0 :y 0 :width 40 :height 40})
         top    (cts/setup-shape {:type :rect :name "top" :x 20 :y 20 :width 40 :height 40})
         L      (lottie-with board (in-board board [bottom top]) [bottom top])]
-    (t/is (= ["top" "bottom"] (mapv :nm (:layers L))))))
+    (t/is (= ["top" "bottom" "Board"] (mapv :nm (:layers L))) "the board's own at the bottom")))
+
+(t/deftest lottie-lists-the-layers-of-a-layout-as-it-paints-them
+  ;; A flex or grid board paints its first layer on top, a reversed flex
+  ;; its last, and a z-index goes before either.
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300
+                                :layout :flex :layout-flex-dir :column})
+        one   (cts/setup-shape {:type :rect :name "one" :x 0 :y 0 :width 40 :height 40})
+        two   (cts/setup-shape {:type :rect :name "two" :x 0 :y 40 :width 40 :height 40})
+        names (fn [board one two]
+                (mapv :nm (:layers (lottie-with board (in-board board [one two]) [one two]))))]
+    (t/is (= ["one" "two" "Board"] (names board one two)))
+    (t/is (= ["one" "two" "Board"] (names (assoc board :layout :grid) one two)))
+    (t/is (= ["two" "one" "Board"] (names (assoc board :layout-flex-dir :column-reverse) one two)))
+    (t/is (= ["two" "one" "Board"] (names board one (assoc two :layout-item-z-index 1))))))
+
+(t/deftest lottie-draws-the-layers-of-a-layout-in-its-layer-as-it-paints-them
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        flex    (cts/setup-shape {:type :frame :name "flex" :x 20 :y 20 :width 100 :height 100
+                                  :layout :flex :layout-flex-dir :row
+                                  :fills [{:fill-color "#eeeeee" :fill-opacity 1}]})
+        one     (cts/setup-shape {:type :rect :name "one" :x 20 :y 20 :width 40 :height 40
+                                  :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        two     (cts/setup-shape {:type :rect :name "two" :x 40 :y 40 :width 40 :height 40
+                                  :fills [{:fill-color "#0000ff" :fill-opacity 1}]})
+        objects (in-board board [flex] {(:id flex) [one two]})
+        layer   (first (:layers (lottie-with board objects [flex])))]
+    (t/is (= ["one" "two" "shape"] (mapv :nm (:shapes layer))))))
 
 (t/deftest lottie-draws-a-group-with-its-layers
   (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
@@ -774,7 +899,7 @@
         objects (in-board board [group] {(:id group) [a b]})
         layer   (first (:layers (lottie-with board objects [group])))
         [top bottom] (:shapes layer)]
-    (t/is (= 1 (count (:layers (lottie-with board objects [group])))) "its layers draw in it")
+    (t/is (= ["G" "Board"] (mapv :nm (:layers (lottie-with board objects [group])))) "its layers draw in it")
     (t/is (= ["b" "a"] [(:nm top) (:nm bottom)]) "the top-most first")
     (t/is (close? 50 (get-in (peek (:it top)) [:o :k])) "with their opacity")
     (t/is (= "sh" (get-in top [:it 0 :it 0 :ty])) "as paths")
@@ -793,6 +918,89 @@
                       (get-in layer [:masksProperties 0 :pt :k :v])))
     (t/is (true? (get-in layer [:masksProperties 0 :pt :k :c])) "back on its start, it closes")
     (t/is (= ["child" "shape"] (mapv :nm (:shapes layer))) "its layers over its own shape")))
+
+(t/deftest lottie-draws-the-board-at-the-bottom
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300
+                                  :fills [{:fill-color "#336699" :fill-opacity 1}]})
+        shape   (cts/setup-shape {:type :rect :name "shape" :x 10 :y 10 :width 40 :height 40})
+        layers  (fn [board] (:layers (lottie-with board (in-board board [shape]) [shape])))
+        bottom  (peek (layers board))
+        fill    (lottie-item (get-in bottom [:shapes 0 :it]) "fl")]
+    (t/is (= ["shape" "Board"] (mapv :nm (layers board))))
+    (t/is (close-all? [0.2 0.4 0.6 1] (get-in fill [:c :k])))
+    (t/is (nil? (:hasMask bottom)) "the composition clips it already")
+    (t/testing "but not its fill when it is not to be exported"
+      (t/is (= ["shape"] (mapv :nm (layers (assoc board :hide-fill-on-export true))))))
+    (t/testing "nor when it draws nothing"
+      (t/is (= ["shape"] (mapv :nm (layers (assoc board :fills []))))))))
+
+(t/deftest lottie-puts-the-layers-inside-a-layer-in-a-precomp
+  ;; so they move, fade and are clipped with it
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :fills []})
+        card    (cts/setup-shape {:type :frame :name "card" :x 20 :y 20 :width 100 :height 100
+                                  :opacity 0.5
+                                  :fills [{:fill-color "#eeeeee" :fill-opacity 1}]})
+        moving  (cts/setup-shape {:type :rect :name "moving" :x 30 :y 30 :width 20 :height 20})
+        still   (cts/setup-shape {:type :rect :name "still" :x 60 :y 60 :width 20 :height 20
+                                  :fills [{:fill-color "#000000" :fill-opacity 1}]})
+        objects (in-board board [card] {(:id card) [still moving]})
+        tl      (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                    (cta/add-keyframe (:id card) {:time 0 :property :y :value 60})
+                    (cta/add-keyframe (:id card) {:time 1000 :property :y :value 20})
+                    (cta/add-keyframe (:id moving) {:time 0 :property :x :value 30})
+                    (cta/add-keyframe (:id moving) {:time 1000 :property :x :value 60}))
+        L       (cta/timeline->lottie tl objects)
+        [layer] (:layers L)
+        comp    (d/seek #(= (:refId layer) (:id %)) (:assets L))
+        [top content] (:layers comp)]
+    (t/is (= 1 (count (:layers L))))
+    (t/is (= 0 (:ty layer)) "a precomp")
+    (t/is (= 1 (get-in layer [:ks :p :y :a])) "that moves with the card")
+    (t/is (close? 50 (get-in layer [:ks :o :k])) "fades with it")
+    (t/is (true? (:hasMask layer)) "and keeps to it")
+    (t/is (= ["moving" "card"] [(:nm top) (:nm content)]) "the card itself at the bottom")
+    (t/is (= 1 (get-in top [:ks :p :x :a])))
+    (t/is (= 0 (get-in content [:ks :p :y :a])) "which the precomp moves")
+    (t/is (close? 100 (get-in content [:ks :o :k])))
+    (t/is (nil? (:hasMask content)))
+    (t/is (= ["still" "shape"] (mapv :nm (:shapes content))) "with what is no layer")))
+
+(t/deftest lottie-nests-precomps
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :fills []})
+        outer   (cts/setup-shape {:type :frame :name "outer" :x 0 :y 0 :width 200 :height 200})
+        inner   (cts/setup-shape {:type :frame :name "inner" :x 10 :y 10 :width 100 :height 100})
+        leaf    (cts/setup-shape {:type :rect :name "leaf" :x 20 :y 20 :width 10 :height 10})
+        objects (in-board board [outer] {(:id outer) [inner] (:id inner) [leaf]})
+        L       (lottie-with board objects [outer inner leaf])
+        comps   (into {} (comp (filter :layers) (map (juxt :id identity))) (:assets L))
+        refs    (fn refs [layers]
+                  (mapcat #(when-let [ref (:refId %)]
+                             (cons ref (refs (:layers (get comps ref)))))
+                          layers))]
+    (t/is (= 2 (count comps)))
+    (t/is (= 2 (count (refs (:layers L)))))
+    (t/is (every? #(contains? comps %) (refs (:layers L))) "each one there")))
+
+(t/deftest lottie-clips-the-layers-of-a-board-that-is-no-layer
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :fills []})
+        frame   (cts/setup-shape {:type :frame :name "frame" :x 20 :y 20 :width 100 :height 100})
+        moving  (cts/setup-shape {:type :rect :name "moving" :x 30 :y 30 :width 20 :height 20})
+        objects (in-board board [frame] {(:id frame) [moving]})
+        [layer] (:layers (lottie-with board objects [moving]))]
+    (t/is (= 0 (:ty layer)))
+    (t/is (true? (:hasMask layer)))
+    (t/is (= 0 (get-in layer [:ks :o :a])) "it does not move")
+    (t/testing "unless it shows its content"
+      (let [objects (assoc-in objects [(:id frame) :show-content] true)]
+        (t/is (= ["moving" "Board"] (mapv :nm (:layers (lottie-with board objects [moving]))))
+              "the frame drawn with the board")))))
+
+(t/deftest lottie-layer-keeps-its-opacity
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 40 :opacity 0.25})
+        L     (lottie-of board shape [{:time 0 :property :x :value 10}
+                                      {:time 1000 :property :x :value 50}])]
+    (t/is (close? 25 (get-in L [:layers 0 :ks :o :k])))))
 
 (t/deftest lottie-draws-drop-shadows-as-effects
   (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})

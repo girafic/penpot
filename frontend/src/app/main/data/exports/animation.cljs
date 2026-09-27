@@ -91,18 +91,27 @@
   ((:render-shape-pixels bridge) shape-id scale :png))
 
 (defn render-shape-at-rest
-  "Rasterize `shape-id` in rest pose, hiding `hide-ids` for the shot."
+  "Rasterize `shape-id` in rest pose, hiding `hide-ids` for the shot. It
+  is rasterized opaque: the layer of the export has its opacity, which
+  its animation may change."
   [objects shape-id hide-ids {:keys [bridge] :or {bridge (default-bridge)}}]
   (let [{:keys [use-shape set-shape-hidden clean-modifiers
-                render-shape-pixels apply-shape-properties]} bridge]
+                render-shape-pixels apply-shape-properties]} bridge
+        shape (get objects shape-id)]
     (try
       (when clean-modifiers
         (clean-modifiers))
       (doseq [id hide-ids]
         (use-shape id)
         (set-shape-hidden true))
+      ;; after hiding its layers: a change of the shape itself before
+      ;; would keep them in the picture of it
+      (when (and apply-shape-properties shape)
+        (apply-shape-properties (assoc shape :opacity 1) [:opacity]))
       (render-shape-pixels shape-id 1 :png)
       (finally
+        (when (and apply-shape-properties shape)
+          (apply-shape-properties shape [:opacity]))
         (doseq [id hide-ids]
           (let [shape (get objects id)]
             (if apply-shape-properties
@@ -311,6 +320,21 @@
              (.catch (fn [_] false)))))
 
      (js/Promise.resolve false))))
+
+(defn export-formats
+  "The formats `timeline` can be exported as, in menu order. Without the
+  WASM renderer only Lottie, and only when every layer draws as vectors:
+  the other formats rasterize through it."
+  [objects timeline render-wasm?]
+  (cond
+    (nil? timeline) []
+    render-wasm?    [:mp4 :webm :gif :avif :svg :lottie]
+    :else
+    (let [ids   (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline))
+          idset (set ids)]
+      (if (every? #(cta/lottie-vector-layer? objects idset %) ids)
+        [:lottie]
+        []))))
 
 (defn encode-video
   "Encode decoded frames with Mediabunny. Returns a promise of
@@ -559,16 +583,28 @@
                         (fn [id] (get-in objects [id :shapes] []))
                         layer-id))))
 
+(defn- restore-rest-properties!
+  "Give the shapes whose properties the animation preview at `time`
+  changed their own ones back."
+  [objects timeline time {:keys [apply-shape-properties]}]
+  (doseq [[id ops] (property-ops (cta/timeline->modif-tree timeline objects time))]
+    (when-let [shape (get objects id)]
+      (apply-shape-properties shape (map (comp :property second) ops)))))
+
 (defn collect-layer-images
   "Rasterize each export layer at rest, but for those whose id `skip?` is
   true of. Children that are themselves layers are hidden so they are not
-  baked into the parent."
-  [objects timeline {:keys [bridge skip?] :or {bridge (default-bridge)}}]
-  (let [ids  (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline))
+  baked into the parent; the board itself is rasterized without them.
+  The animation shown at `time` is undone first, else a layer that fades
+  in would be rasterized invisible."
+  [objects timeline {:keys [bridge skip? time] :or {bridge (default-bridge) time 0}}]
+  (let [ids  (conj (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline))
+                   (:board-id timeline))
         idset (set ids)
         board (get objects (:board-id timeline))
         ox    (or (:x (:selrect board)) 0)
         oy    (or (:y (:selrect board)) 0)]
+    (restore-rest-properties! objects timeline time bridge)
     (into {}
           (keep
            (fn [id]
@@ -583,7 +619,7 @@
                       :width (or (:width sr) 0)
                       :height (or (:height sr) 0)
                       :bytes bytes
-                      :id (str "img_" (subs (str id) 0 8))
+                      :id (str "img_" id)
                       :w (mth/round (or (:width sr) 0))
                       :h (mth/round (or (:height sr) 0))
                       :p href
@@ -740,6 +776,7 @@
         ;; Lottie draws the layers it can as vectors
         layers  (set (cta/export-layer-ids objects (:board-id tl) (:tracks tl)))
         images  (collect-layer-images objects tl {:bridge bridge
+                                                  :time (dwa/playhead state)
                                                   :skip? (when (= format :lottie)
                                                            #(cta/lottie-vector-layer? objects layers %))})]
     (try

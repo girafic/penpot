@@ -13,6 +13,7 @@
    [app.main.data.exports.animation :as dea]
    [app.main.data.exports.assets :as de]
    [app.main.data.workspace.shapes :as dwsh]
+   [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.select :refer [select]]
@@ -79,7 +80,7 @@
 
 (mf/defc animated-exports*
   {::mf/private true}
-  [{:keys [board]}]
+  [{:keys [board formats]}]
   (let [timelines (mf/deref ref:timelines)
         progress  (mf/deref refs/export-animation)
         timeline  (get timelines (:id board))
@@ -87,8 +88,9 @@
         width     (mth/round (or (:width selrect) 0))
         height    (mth/round (or (:height selrect) 0))
 
-        format*   (mf/use-state :mp4)
-        format    (deref format*)
+        format*   (mf/use-state (first formats))
+        format    (let [format (deref format*)]
+                    (if (some #{format} formats) format (first formats)))
         quality*  (mf/use-state :high)
         quality   (deref quality*)
         fps*      (mf/use-state 30)
@@ -118,12 +120,13 @@
                                          (cta/cycle-duration timeline) fps)))
 
         format-options
-        [{:value "mp4" :label "MP4" :disabled (not (:mp4 support))}
-         {:value "webm" :label "WebM" :disabled (not (:webm support))}
-         {:value "gif" :label "GIF"}
-         {:value "avif" :label "AVIF" :disabled (not (:avif support))}
-         {:value "svg" :label "SVG"}
-         {:value "lottie" :label "Lottie"}]
+        (filterv #(some #{(keyword (:value %))} formats)
+                 [{:value "mp4" :label "MP4" :disabled (not (:mp4 support))}
+                  {:value "webm" :label "WebM" :disabled (not (:webm support))}
+                  {:value "gif" :label "GIF"}
+                  {:value "avif" :label "AVIF" :disabled (not (:avif support))}
+                  {:value "svg" :label "SVG"}
+                  {:value "lottie" :label "Lottie"}])
 
         quality-options
         [{:value "low" :label (tr "workspace.options.export.quality-low")}
@@ -426,8 +429,23 @@
 
         timelines (mf/deref ref:timelines)
 
+        render-wasm? (features/use-feature "render-wasm/v1")
+
+        timeline
+        (some->> (animation-export-board type ids shapes timelines) :id (get timelines))
+
+        ;; Most formats rasterize through WASM: without it the tab offers
+        ;; what is left, and is gone when nothing is.
+        formats-ref
+        (mf/with-memo [timeline render-wasm?]
+          (l/derived #(dea/export-formats % timeline render-wasm?)
+                     refs/workspace-page-objects =))
+
+        formats (mf/deref formats-ref)
+
         animated-board
-        (animation-export-board type ids shapes timelines)
+        (when (seq formats)
+          (animation-export-board type ids shapes timelines))
 
         tab* (mf/use-state "static")
         tab  (deref tab*)
@@ -459,7 +477,7 @@
                              :selected (str "export-" tab)
                              :on-change on-tab}
            (when (= tab "animated")
-             [:> animated-exports* {:board animated-board}])])
+             [:> animated-exports* {:board animated-board :formats formats}])])
 
         (when (or (nil? animated-board) (= tab "static"))
           [:*
