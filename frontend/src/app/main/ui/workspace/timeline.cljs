@@ -22,6 +22,7 @@
    [app.common.types.color :as clr]
    [app.common.types.component :as ctk]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
@@ -2110,11 +2111,14 @@
                  (dwa/clear-preview)
                  (dwa/clear-index-preview)))
 
-    ;; Once the playhead rests, hovering and clicking on the canvas find
-    ;; the shapes where the animation shows them.
+    ;; Once the playhead rests, the canvas shows the animation there in
+    ;; full quality (playing and scrubbing render it fast), and hovering
+    ;; and clicking on it find the shapes where it shows them.
     (mf/with-effect [playhead timeline objects playing?]
       (when-not playing?
-        (let [timer (js/setTimeout #(st/emit! (dwa/index-preview)) 150)]
+        (let [timer (js/setTimeout #(st/emit! (dwm/settle-local-transform)
+                                              (dwa/index-preview))
+                                   150)]
           #(js/clearTimeout timer))))
 
     ;; Space plays and pauses, the same way the play button does. Capture

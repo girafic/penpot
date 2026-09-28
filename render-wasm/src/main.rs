@@ -314,7 +314,12 @@ pub extern "C" fn set_view_end() -> Result<()> {
     with_state!(state, {
         performance::begin_measure!("set_view_end");
         let render_state = get_render_state();
-        render_state.options.set_fast_mode(false);
+        // A view interaction can end during an interactive transform (a
+        // drag, or the animation preview playing, e.g. when the timeline
+        // opening resizes the canvas): its fast mode stays on until
+        // `set_modifiers_end`.
+        let interactive = render_state.options.is_interactive_transform();
+        render_state.options.set_fast_mode(interactive);
         render_state.tile_viewbox.update(&render_state.viewbox);
 
         if render_state.options.is_profile_rebuild_tiles() {

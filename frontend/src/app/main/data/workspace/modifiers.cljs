@@ -64,6 +64,19 @@
   (when (wasm-gesture/try-end-interactive-transform!)
     (wasm.api/set-modifiers-end)))
 
+(defn settle-local-transform
+  "Leave the interactive transform but keep the modifiers, so what they
+  show renders in full quality: the animation preview once the playhead
+  rests, which playing and scrubbing render fast."
+  []
+  (ptk/reify ::settle-local-transform
+    ptk/EffectEvent
+    (effect [_ state _]
+      (when (and (features/active-feature? state "render-wasm/v1")
+                 (wasm-gesture/active?))
+        (ensure-interactive-transform-end!)
+        (wasm.api/request-render "settle-local-transform")))))
+
 (def ^:private transform-attrs
   #{:selrect
     :points
