@@ -2509,6 +2509,15 @@ impl RenderState {
 
         performance::end_timed_log!("tile_cache_update", _tile_start);
 
+        if self.should_render_viewport_pass(base_object, sync_render) {
+            if let Some(frame_type) = self.render_viewport_pass(tree, timestamp)? {
+                performance::end_measure!("render");
+                performance::end_measure!("start_render_loop");
+                performance::end_timed_log!("start_render_loop", _start);
+                return Ok(frame_type);
+            }
+        }
+
         self.draw_shape_surface_stack_into(None, SurfaceId::Current);
 
         #[allow(unused)]
@@ -2542,6 +2551,100 @@ impl RenderState {
         performance::end_measure!("start_render_loop");
         performance::end_timed_log!("start_render_loop", _start);
         Ok(frame_type)
+    }
+
+    /// Whether this frame renders the visible area in one pass instead of by
+    /// tiles (see `render_viewport_pass`): during an interactive transform in
+    /// fast mode (the animation preview playing, a drag) that left at least
+    /// half of the visible tiles to render again. Tiles draw each shape once
+    /// per tile it touches, so when most of them change, as when a whole
+    /// board animates, one pass does the same work only once; a drag that
+    /// touches a tile or two keeps the tiles.
+    fn should_render_viewport_pass(&self, base_object: Option<&Uuid>, sync_render: bool) -> bool {
+        let uncached = self.pending_tiles.visible_uncached.len();
+        let visible = uncached + self.pending_tiles.visible_cached.len();
+        !sync_render
+            && base_object.is_none()
+            && self.options.is_interactive_transform()
+            && self.options.is_fast_mode()
+            && !self.viewer_masked_pass()
+            && self.include_filter.is_none()
+            && visible >= 2
+            && uncached * 2 >= visible
+    }
+
+    /// Render the visible area in one pass, every shape once, into
+    /// viewport-sized stand-ins for the tile surfaces (see
+    /// `Surfaces::begin_viewport_pass`), then present it. The tile cache is
+    /// left as it is: the tiles this frame changed stay to render again,
+    /// which the next tiled render does. Nil when the surfaces cannot be
+    /// made; the frame then renders by tiles.
+    fn render_viewport_pass(
+        &mut self,
+        tree: ShapesPoolRef,
+        timestamp: i32,
+    ) -> Result<Option<FrameType>> {
+        let scale = self.get_scale();
+        let area = self.viewbox.area;
+        let width = (area.width() * scale).ceil() as i32;
+        let height = (area.height() * scale).ceil() as i32;
+        let Some(root) = tree.get(&Uuid::nil()) else {
+            return Ok(None);
+        };
+        let root_ids = root.children_ids(false);
+        if width <= 0 || height <= 0 || !self.surfaces.begin_viewport_pass(width, height) {
+            return Ok(None);
+        }
+        performance::begin_measure!("render_viewport_pass");
+
+        let saved_tile = self.current_tile.take();
+        let margins = self.surfaces.margins;
+        let margin_w = margins.width as f32 / scale;
+        let margin_h = margins.height as f32 / scale;
+        self.render_area = area;
+        self.render_area_with_margins = skia::Rect::from_ltrb(
+            area.left - margin_w,
+            area.top - margin_h,
+            area.right + margin_w,
+            area.bottom + margin_h,
+        );
+        self.surfaces.update_render_context(area, scale);
+        self.surfaces
+            .canvas(SurfaceId::Current)
+            .clear(self.background_color);
+        self.tile_atlas_flushed = false;
+        self.drop_shadows_ops_warmed = false;
+        self.pending_nodes
+            .extend(root_ids.into_iter().map(|id| NodeRenderState {
+                id,
+                visited_children: false,
+                clip_bounds: None,
+                visited_mask: false,
+                mask: false,
+                flattened: false,
+            }));
+
+        let rendered = self.render_shape_tree_partial_uncached(tree, timestamp, false, false);
+        if rendered.is_ok() {
+            // The pass covers the whole viewport: it replaces the backbuffer.
+            self.surfaces
+                .canvas(SurfaceId::Backbuffer)
+                .clear(self.background_color);
+            let viewport = skia::Rect::from_wh(width as f32, height as f32);
+            self.surfaces.draw_current_tile_into_backbuffer(
+                &viewport,
+                self.background_color,
+                surfaces::DrawOnCache::Yes,
+            );
+        }
+        self.surfaces.end_viewport_pass();
+        self.current_tile = saved_tile;
+        self.pending_nodes.clear();
+        rendered?;
+
+        self.present_frame(tree);
+        performance::end_measure!("render_viewport_pass");
+        Ok(Some(FrameType::Full))
     }
 
     fn compute_document_bounds(
@@ -4822,6 +4925,7 @@ impl RenderState {
     pub fn prepare_context_loss_cleanup(&mut self) {
         // Drop cached GPU-backed snapshots before dropping the render state.
         self.backbuffer_crop_cache.clear();
+        self.surfaces.release_viewport_pass();
         self.surfaces.invalidate_tile_cache();
         // Mark context as abandoned so resource destructors avoid issuing
         // GL commands when the browser has already lost/restored the context.

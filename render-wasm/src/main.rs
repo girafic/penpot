@@ -376,6 +376,8 @@ pub extern "C" fn set_modifiers_end() -> Result<()> {
     let render_state = get_render_state();
     render_state.options.set_fast_mode(false);
     render_state.options.set_interactive_transform(false);
+    // The viewport pass renders only during interactive transforms.
+    render_state.surfaces.release_viewport_pass();
     performance::end_measure!("set_modifiers_end");
     Ok(())
 }

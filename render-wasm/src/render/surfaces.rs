@@ -472,6 +472,15 @@ impl DocAtlas {
     }
 }
 
+/// The surfaces a viewport pass renders with, in place of the tile-sized
+/// `current`, `shape_fills` and `shape_strokes` (see
+/// `Surfaces::begin_viewport_pass`).
+struct ViewportPassSurfaces {
+    current: skia::Surface,
+    fills: skia::Surface,
+    strokes: skia::Surface,
+}
+
 pub struct Surfaces {
     // is the final destination surface, the one that it is represented in the canvas element.
     target: skia::Surface,
@@ -503,6 +512,9 @@ pub struct Surfaces {
 
     tiles: TileTextureCache,
     pub atlas: DocAtlas,
+    // Viewport-sized stand-ins for `current`, `shape_fills` and
+    // `shape_strokes` during a viewport pass (see `begin_viewport_pass`).
+    viewport_pass: Option<ViewportPassSurfaces>,
     sampling_options: skia::SamplingOptions,
     atlas_sampling_options: skia::SamplingOptions,
     pub margins: skia::ISize,
@@ -578,6 +590,7 @@ impl Surfaces {
             tile_atlas_image: None,
             tiles,
             atlas,
+            viewport_pass: None,
             sampling_options,
             atlas_sampling_options: skia::SamplingOptions::new(
                 skia::FilterMode::Nearest,
@@ -741,6 +754,59 @@ impl Surfaces {
 
     pub fn margins(&self) -> skia::ISize {
         self.margins
+    }
+
+    /// Swap in surfaces for a viewport pass of `width` × `height` pixels:
+    /// `Current`, `Fills` and `Strokes` as big as the viewport plus the
+    /// margins, where the tile-sized ones only fit a tile. They are made on
+    /// first use and made again when the viewport outgrows them. False when
+    /// they cannot be made, then nothing is swapped.
+    pub fn begin_viewport_pass(&mut self, width: i32, height: i32) -> bool {
+        let dims = (
+            width + TILE_SIZE_MULTIPLIER * self.margins.width,
+            height + TILE_SIZE_MULTIPLIER * self.margins.height,
+        );
+        let fits = self
+            .viewport_pass
+            .as_ref()
+            .is_some_and(|pass| pass.current.width() >= dims.0 && pass.current.height() >= dims.1);
+
+        if !fits {
+            self.viewport_pass = None;
+            let current = self.current.new_surface_with_dimensions(dims);
+            let fills = self.shape_fills.new_surface_with_dimensions(dims);
+            let strokes = self.shape_strokes.new_surface_with_dimensions(dims);
+            let (Some(current), Some(fills), Some(strokes)) = (current, fills, strokes) else {
+                return false;
+            };
+            self.viewport_pass = Some(ViewportPassSurfaces {
+                current,
+                fills,
+                strokes,
+            });
+        }
+
+        self.swap_viewport_pass();
+        true
+    }
+
+    /// Swap the tile-sized surfaces back after a viewport pass.
+    pub fn end_viewport_pass(&mut self) {
+        self.swap_viewport_pass();
+    }
+
+    /// Free the surfaces of the viewport pass, once the interactive
+    /// transform that needed them is over.
+    pub fn release_viewport_pass(&mut self) {
+        self.viewport_pass = None;
+    }
+
+    fn swap_viewport_pass(&mut self) {
+        if let Some(pass) = self.viewport_pass.as_mut() {
+            std::mem::swap(&mut self.current, &mut pass.current);
+            std::mem::swap(&mut self.shape_fills, &mut pass.fills);
+            std::mem::swap(&mut self.shape_strokes, &mut pass.strokes);
+        }
     }
 
     pub fn resize(&mut self, new_width: i32, new_height: i32) -> Result<()> {
