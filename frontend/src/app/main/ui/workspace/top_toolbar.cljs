@@ -74,6 +74,7 @@
     :image   (tr "workspace.toolbar.image"   (sc/get-tooltip :insert-image))
     :curve   (tr "workspace.toolbar.curve"   (sc/get-tooltip :draw-curve))
     :plugins (tr "workspace.toolbar.plugins" (sc/get-tooltip :plugins))
+    :motion  (tr "workspace.toolbar.motion-mode" (sc/get-tooltip :toggle-motion-mode))
     :debug   "Debugging tool"
     (name tool)))
 
@@ -479,7 +480,7 @@
            [:> icon-button* {:variant "ghost"
                              :tooltip-placement "bottom"
                              :aria-pressed (contains? layout :animation-timeline)
-                             :aria-label (tr "workspace.toolbar.motion-mode")
+                             :aria-label (tool-label :motion)
                              :icon i/motion
                              :on-click on-toggle-motion-mode}]])
 

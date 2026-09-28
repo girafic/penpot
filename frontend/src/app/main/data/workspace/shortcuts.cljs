@@ -15,6 +15,7 @@
    [app.main.data.profile :as du]
    [app.main.data.shortcuts :as ds]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.colors :as mdc]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.data.workspace.drawing :as dwd]
@@ -722,6 +723,14 @@
                           :fn #(st/emit! (with-meta (du/toggle-theme)
                                            {::ev/origin "workspace:shortcut"}))}
 
+
+   ;; MOTION
+   :toggle-motion-mode    {:tooltip (ds/shift "M")
+                           :command "shift+m"
+                           :subsections [:generic :basics]
+                           :section [:workspace :basics]
+                           :fn #(when (features/active-feature? @st/state "animation/v1")
+                                  (st/emit! (dwa/toggle-motion-mode)))}
 
    ;; PLUGINS
    :plugins               {:tooltip (ds/meta (ds/alt "P"))

@@ -163,15 +163,15 @@
      (into [] (filter filter-fn) (vals objects)))))
 
 (defn lookup-animation-preview
-  "`{:timelines :board-id :time}` of the animations the canvas shows in
-  motion mode, the timelines of the page by board, with the board edits
-  are recorded to (see `app.main.data.workspace.animation/apply-preview`),
+  "`{:timelines :board-id :time}` of the animation the canvas shows in
+  motion mode: the timeline of the board it plays, by board, the one
+  edits are recorded to (see `app.main.data.workspace.animation/apply-preview`),
   or nil."
   [state]
   (when (contains? (:workspace-layout state) :animation-timeline)
     (when-let [{:keys [board-id time]} (dm/get-in state [:workspace-animation :preview])]
-      (when-let [timelines (not-empty (:timelines (lookup-page state)))]
-        {:timelines timelines :board-id board-id :time time}))))
+      (when-let [timeline (dm/get-in (lookup-page state) [:timelines board-id])]
+        {:timelines {board-id timeline} :board-id board-id :time time}))))
 
 (defn lookup-shown-shapes
   "In motion mode, the shapes the animations move, by id, as the canvas

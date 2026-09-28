@@ -10,6 +10,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.point :as gpt]
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.common :as dcm]
@@ -24,6 +25,7 @@
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.lottie :as dwlt]
    [app.main.data.workspace.mcp :as mcp]
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.data.workspace.undo :as dwu]
@@ -595,6 +597,7 @@
 
         perms        (mf/use-ctx ctx/permissions)
         can-edit     (:can-edit perms)
+        motion?      (features/use-feature "animation/v1")
 
         on-remove-shared
         (mf/use-fn
@@ -653,6 +656,31 @@
          (fn [event]
            (when (kbd/enter? event)
              (on-pin-version event))))
+
+        ;; A board with the animation and its timeline, in the middle of
+        ;; the view, for each picked file.
+        on-import-lottie
+        (mf/use-fn
+         (fn [_]
+           (let [^js input (dom/create-element "input")]
+             (set! (.-type input) "file")
+             (set! (.-accept input) dwlt/accept)
+             (set! (.-multiple input) true)
+             (.addEventListener input "change"
+                                (fn [_]
+                                  (let [vbox     (deref refs/vbox)
+                                        position (gpt/point (+ (:x vbox) (/ (:width vbox) 2))
+                                                            (+ (:y vbox) (/ (:height vbox) 2)))]
+                                    (doseq [blob (array-seq (.-files input))]
+                                      (st/emit! (dwlt/import-lottie blob position))))))
+             (dom/click input))))
+
+        on-import-lottie-key-down
+        (mf/use-fn
+         (mf/deps on-import-lottie)
+         (fn [event]
+           (when (kbd/enter? event)
+             (on-import-lottie event))))
 
         on-export-shapes
         (mf/use-fn
@@ -732,7 +760,17 @@
           (tr "dashboard.show-version-history")]
          [:> shortcuts* {:id :toggle-history}]]
 
-        [:div {:class (stl/css :separator)}]])
+        [:div {:class (stl/css :separator)}]
+
+        (when motion?
+          [:*
+           [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
+                                    :on-click    on-import-lottie
+                                    :on-key-down on-import-lottie-key-down
+                                    :id          "file-menu-import-lottie"}
+            [:span {:class (stl/css :item-name)}
+             (tr "workspace.lottie.import")]]
+           [:div {:class (stl/css :separator)}]])])
 
      [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
                               :on-click    on-export-shapes

@@ -100,36 +100,52 @@
 
 ;; DRAWING
 
-(defn- sampled-path
-  "SVG path of the progress of `easing` over time, `(to-x t)` and
-  `(to-y progress)` giving the coordinates, through at least `least`
-  points (more for a spring that swings many times). A hold jumps at the
-  end."
-  [easing hold? to-x to-y least]
+(defn- curve-points
+  "`[t progress]` points along `easing`, at least `least` of them (more
+  for a spring that swings many times). A hold jumps at the end."
+  [easing hold? least]
   (if hold?
-    (dm/str "M" (to-x 0) "," (to-y 0) " H" (to-x 1) " V" (to-y 1))
+    [[0 0] [1 0] [1 1]]
     (let [samples (if (= :spring (:type easing))
                     (cta/spring-samples easing least)
                     least)]
-      (->> (range (inc samples))
-           (map (fn [i]
-                  (let [t (/ i samples)]
-                    (dm/str (if (zero? i) "M" " L")
-                            (to-x t) "," (to-y (cta/easing-progress easing t))))))
-           (apply str)))))
+      (map (fn [i]
+             (let [t (/ i samples)]
+               [t (cta/easing-progress easing t)]))
+           (range (inc samples))))))
+
+(defn- sampled-path
+  "SVG path of the progress of `easing` over time (see `curve-points`),
+  `(to-x t)` and `(to-y progress)` giving the coordinates."
+  [easing hold? to-x to-y least]
+  (->> (curve-points easing hold? least)
+       (map-indexed (fn [i [t v]]
+                      (dm/str (if (zero? i) "M" " L") (to-x t) "," (to-y v))))
+       (apply str)))
 
 (defn- icon-x [t] (+ 2 (* t 12)))
 (defn- icon-y [v] (+ 2 (* (- 1.2 (mth/clamp v -0.2 1.2)) (/ 12 1.4))))
 
+(def ^:private icon-samples 24)
+
+(defn icon-points
+  "The `[x y]` points `curve-icon*` draws `easing` through in its 16px
+  box, for the lanes of the timeline, which draw it on a canvas."
+  [easing hold?]
+  (map (fn [[t v]] [(icon-x t) (icon-y v)])
+       (curve-points easing hold? icon-samples)))
+
 (mf/defc curve-icon*
   "A small drawing of an easing. `is-hold` jumps at the end."
   [{:keys [easing is-hold class]}]
-  [:svg {:class [class (stl/css :curve-icon)]
-         :width 16
-         :height 16
-         :view-box "0 0 16 16"
-         :aria-hidden true}
-   [:path {:d (sampled-path easing is-hold icon-x icon-y 24)}]])
+  (let [d (mf/with-memo [easing is-hold]
+            (sampled-path easing is-hold icon-x icon-y icon-samples))]
+    [:svg {:class [class (stl/css :curve-icon)]
+           :width 16
+           :height 16
+           :view-box "0 0 16 16"
+           :aria-hidden true}
+     [:path {:d d}]]))
 
 ;; Curves show progress from -0.6 to 1.6, so the back curves fit; springs,
 ;; like Figma, from -0.15 to 2.15 with the target in the middle, so the

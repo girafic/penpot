@@ -16,9 +16,11 @@
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.drawing :as dd]
    [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.lottie :as dwlt]
    [app.main.data.workspace.media :as dwm]
    [app.main.data.workspace.path :as dwdp]
    [app.main.data.workspace.specialized-panel :as-alias dwsp]
+   [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.workspace.sidebar.assets.components :as wsac]
@@ -521,6 +523,21 @@
          (on-pointer-move e)
          (dom/prevent-default e))))))
 
+(defn- upload-files
+  "Add dropped `files` at `position`: with Motion on, Lottie animations as
+  boards with their timeline; the rest as images and SVGs."
+  [file-id files position]
+  (let [motion? (features/active-feature? @st/state "animation/v1")
+        lottie? #(and motion? (dwlt/lottie-file? %))
+        files   (seq files)
+        others  (remove lottie? files)]
+    (doseq [blob (filter lottie? files)]
+      (st/emit! (dwlt/import-lottie blob position)))
+    (when (seq others)
+      (st/emit! (dwm/upload-media-workspace {:file-id file-id
+                                             :position position
+                                             :blobs others})))))
+
 (defn on-drop
   [file comp-inst-ref]
   (mf/use-fn
@@ -551,11 +568,7 @@
          ;; to the viewport (firefox and chrome do it a bit different
          ;; depending on the origin)
          (dnd/has-type? event "Files")
-         (let [files  (dnd/get-files event)
-               params {:file-id (:id file)
-                       :position viewport-coord
-                       :blobs (seq files)}]
-           (st/emit! (dwm/upload-media-workspace params)))
+         (upload-files (:id file) (dnd/get-files event) viewport-coord)
 
          ;; Will trigger when the user drags an image (usually rendered as datauri) from a
          ;; browser to the viewport (mainly on firefox, all depending on the origin of the
@@ -576,11 +589,7 @@
          ;; Or the user pastes an image
          ;; Or the user uploads an image using the image tool
          :else
-         (let [files  (dnd/get-files event)
-               params {:file-id (:id file)
-                       :position viewport-coord
-                       :blobs (seq files)}]
-           (st/emit! (dwm/upload-media-workspace params))))))))
+         (upload-files (:id file) (dnd/get-files event) viewport-coord))))))
 
 (def ^:private invalid-paste-targets
   #{"INPUT" "TEXTAREA"})

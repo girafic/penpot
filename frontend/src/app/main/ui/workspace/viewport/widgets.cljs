@@ -17,6 +17,8 @@
    [app.common.uuid :as uuid]
    [app.main.data.common :as dcm]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
+   [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.streams :as ms]
@@ -27,10 +29,28 @@
    [app.main.ui.workspace.viewport.utils :as vwu]
    [app.util.debug :as dbg]
    [app.util.dom :as dom]
+   [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
    [app.util.timers :as ts]
    [cuerdas.core :as str]
+   [okulary.core :as l]
    [rumext.v2 :as mf]))
+
+(def ^:private ref:animated-boards
+  "Ids of the boards of the page with an animation (Penpot Motion)."
+  (l/derived (fn [page]
+               (into #{}
+                     (keep (fn [[id timeline]]
+                             (when (seq (:tracks timeline)) id)))
+                     (:timelines page)))
+             refs/workspace-page =))
+
+(def ^:private ref:playing-board
+  "The board whose animation plays on the canvas, if any."
+  (l/derived (fn [anim]
+               (when (:playing? anim)
+                 (dm/get-in anim [:preview :board-id])))
+             refs/workspace-animation =))
 
 (mf/defc pixel-grid*
   [{:keys [vbox zoom clip-rulers] :or {clip-rulers false}}]
@@ -98,8 +118,8 @@
   {::mf/wrap [mf/memo
               #(mf/deferred % ts/raf)]
    ::mf/forward-ref true}
-  [{:keys [frame zoom is-selected is-show-artboard-names is-show-id is-grid-edition
-           on-frame-enter on-frame-leave on-frame-select]} external-ref]
+  [{:keys [frame zoom is-selected is-show-artboard-names is-show-id is-grid-edition is-animated
+           is-playing on-frame-enter on-frame-leave on-frame-select]} external-ref]
   (let [workspace-read-only? (mf/use-ctx ctx/workspace-read-only?)
 
         ;; Note that we don't use mf/deref to avoid a repaint dependency here
@@ -155,6 +175,21 @@
         show-icon?       (and (or (:use-for-thumbnail frame) is-grid-edition main-instance? is-variant?)
                               (not (<= text-width 15)))
         text-pos-x       (if show-icon? 15 0)
+        ;; An animated board shows so at the right end of its title,
+        ;; where, while it is selected or plays, a button plays and stops
+        ;; its animation (see `dwa/toggle-board-play`).
+        show-motion?     (and is-animated (> text-width 40))
+        show-play?       (and show-motion? (or is-selected is-playing))
+        text-end         (if show-motion? (- text-width 20) text-width)
+
+        on-play-pointer-down
+        (mf/use-fn
+         (mf/deps (:id frame))
+         (fn [event]
+           (when (dom/left-mouse? event)
+             (dom/prevent-default event)
+             (dom/stop-propagation event)
+             (st/emit! (dwa/toggle-board-play (:id frame))))))
 
         edition*         (mf/use-state false)
         edition?         (deref edition*)
@@ -219,11 +254,34 @@
             main-instance?             [:use {:href "#icon-component"}]
             is-variant?                [:use {:href "#icon-component"}])])
 
+       (when show-motion?
+         [:svg {:x (- text-width 16)
+                :y -12
+                :width 16
+                :height 16
+                :viewBox "0 0 16 16"
+                :class (stl/css-case :frame-title-motion true
+                                     :frame-title-play show-play?)
+                :style {:stroke color
+                        :fill "none"}
+                :visibility (if is-show-artboard-names "visible" "hidden")
+                :on-pointer-down (if show-play? on-play-pointer-down on-pointer-down)}
+          [:title (cond
+                    is-playing (tr "workspace.animation.stop-animation")
+                    show-play? (tr "workspace.animation.play-animation")
+                    :else      (tr "workspace.animation.animated-board"))]
+          ;; the whole square takes the pointer, not only the strokes
+          [:rect {:width 16 :height 16 :fill "transparent" :stroke "none"}]
+          (cond
+            is-playing [:rect {:x 4 :y 4 :width 8 :height 8 :rx 1 :fill color}]
+            show-play? [:use {:href "#icon-play"}]
+            :else      [:use {:href "#icon-motion"}])])
+
        (if ^boolean edition?
          ;; Case when edition? is true
          [:foreignObject {:x text-pos-x
                           :y -15
-                          :width (max 0 (- text-width text-pos-x))
+                          :width (max 0 (- text-end text-pos-x))
                           :height 22
                           :class (stl/css :frame-title-wrapper)
                           :style {:fill color}
@@ -240,7 +298,7 @@
          ;; Case when edition? is false
          [:foreignObject {:x text-pos-x
                           :y -11
-                          :width (max 0 (- text-width text-pos-x))
+                          :width (max 0 (- text-end text-pos-x))
                           :height 20
                           :class (stl/css :frame-title-wrapper)
                           :style {:fill color}
@@ -270,7 +328,11 @@
                          shapes)
 
         edition        (mf/deref refs/selected-edition)
-        grid-edition?  (ctl/grid-layout? objects edition)]
+        grid-edition?  (ctl/grid-layout? objects edition)
+
+        motion?        (features/use-feature "animation/v1")
+        animated       (mf/deref ref:animated-boards)
+        playing        (mf/deref ref:playing-board)]
 
     [:g.frame-titles.blurrable
      (for [{:keys [id parent-id] :as shape} shapes]
@@ -285,6 +347,8 @@
                            :is-show-artboard-names is-show-artboard-names
                            :is-show-id (dbg/enabled? :shape-titles)
                            :is-grid-edition (and (= id edition) grid-edition?)
+                           :is-animated (and motion? (contains? animated id))
+                           :is-playing (= id playing)
                            :on-frame-enter on-frame-enter
                            :on-frame-leave on-frame-leave
                            :on-frame-select on-frame-select}]))]))

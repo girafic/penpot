@@ -187,6 +187,19 @@
    [:time ::sm/safe-int]
    [:name :string]])
 
+(def export-formats
+  #{:mp4 :webm :gif :avif :svg :lottie})
+
+(def schema:export
+  "How the board of a timeline is exported as an animation, as last set
+  in the export panel, which offers it again."
+  [:map {:title "AnimationExport"}
+   [:format {:optional true} [::sm/one-of export-formats]]
+   [:quality {:optional true} [::sm/one-of #{:low :medium :high}]]
+   [:fps {:optional true} ::sm/safe-int]
+   [:size {:optional true} :string]
+   [:loop {:optional true} :boolean]])
+
 (def schema:timeline
   [:map {:title "AnimationTimeline"}
    [:board-id ::sm/uuid]
@@ -197,6 +210,7 @@
    [:loop {:optional true} :boolean]
    [:loop-count {:optional true} [:maybe ::sm/safe-int]]
    [:markers {:optional true} [:vector {:gen/max 3} schema:marker]]
+   [:export {:optional true} schema:export]
    [:tracks [:map-of {:gen/max 3} ::sm/uuid schema:track]]])
 
 (def schema:timeline-attrs
@@ -208,7 +222,8 @@
    [:playback {:optional true} [:maybe [::sm/one-of playback-modes]]]
    [:loop {:optional true} [:maybe :boolean]]
    [:loop-count {:optional true} [:maybe ::sm/safe-int]]
-   [:markers {:optional true} [:maybe [:vector {:gen/max 3} schema:marker]]]])
+   [:markers {:optional true} [:maybe [:vector {:gen/max 3} schema:marker]]]
+   [:export {:optional true} [:maybe schema:export]]])
 
 (def schema:timelines
   [:map-of {:gen/max 2} ::sm/uuid schema:timeline])

@@ -12,6 +12,7 @@
    [app.common.types.animation :as cta]
    [app.main.data.exports.animation :as dea]
    [app.main.data.exports.assets :as de]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.features :as features]
    [app.main.refs :as refs]
@@ -88,17 +89,16 @@
         width     (mth/round (or (:width selrect) 0))
         height    (mth/round (or (:height selrect) 0))
 
-        format*   (mf/use-state (first formats))
-        format    (let [format (deref format*)]
+        ;; As last set for the board, kept with its timeline (see
+        ;; `dwa/set-export`).
+        board-id  (:id board)
+        export    (:export timeline)
+        format    (let [format (:format export)]
                     (if (some #{format} formats) format (first formats)))
-        quality*  (mf/use-state :high)
-        quality   (deref quality*)
-        fps*      (mf/use-state 30)
-        fps       (deref fps*)
-        size*     (mf/use-state "1")
-        size      (deref size*)
-        loop*     (mf/use-state true)
-        loop?     (deref loop*)
+        quality   (get export :quality :high)
+        fps       (get export :fps 30)
+        size      (get export :size "1")
+        loop?     (get export :loop true)
         support*  (mf/use-state {:mp4 true :webm true :avif true})
         support   (deref support*)
 
@@ -151,25 +151,30 @@
          {:value "h1440" :label "1440h"}
          {:value "h2160" :label "2160h"}]
 
+        set-export
+        (mf/use-fn
+         (mf/deps board-id)
+         #(st/emit! (dwa/set-export board-id %)))
+
         on-format
         (mf/use-fn
+         (mf/deps set-export)
          (fn [value]
            (let [format (keyword value)]
-             (reset! format* format)
-             (when (= format :gif)
-               (reset! fps* 15)))))
+             (set-export (cond-> {:format format}
+                           (= format :gif) (assoc :fps 15))))))
 
         on-quality
-        (mf/use-fn #(reset! quality* (keyword %)))
+        (mf/use-fn (mf/deps set-export) #(set-export {:quality (keyword %)}))
 
         on-fps
-        (mf/use-fn #(reset! fps* (d/parse-integer %)))
+        (mf/use-fn (mf/deps set-export) #(set-export {:fps (d/parse-integer %)}))
 
         on-size
-        (mf/use-fn #(reset! size* %))
+        (mf/use-fn (mf/deps set-export) #(set-export {:size %}))
 
         on-loop
-        (mf/use-fn #(reset! loop* %))
+        (mf/use-fn (mf/deps set-export) #(set-export {:loop %}))
 
         on-export
         (mf/use-fn
@@ -447,15 +452,30 @@
         (when (seq formats)
           (animation-export-board type ids shapes timelines))
 
-        tab* (mf/use-state "static")
-        tab  (deref tab*)
+        animated-id (:id animated-board)
+
+        ;; A board exported as an animation opens on that tab: choosing
+        ;; it keeps the settings of the board (see `dwa/set-export`).
+        tab* (mf/use-state nil)
+        tab  (or (deref tab*)
+                 (if (some? (:export timeline)) "animated" "static"))
 
         on-tab
-        (mf/use-fn #(reset! tab* (if (= % "export-animated") "animated" "static")))
+        (mf/use-fn
+         (mf/deps animated-id)
+         (fn [id]
+           (let [animated? (= id "export-animated")]
+             (reset! tab* (if animated? "animated" "static"))
+             (when (and animated? (some? animated-id))
+               (st/emit! (dwa/set-export animated-id {}))))))
 
         export-tabs
         [{:id "export-static" :label (tr "workspace.options.export.static")}
          {:id "export-animated" :label (tr "workspace.options.export.animated")}]]
+
+    ;; Another board opens on its own tab.
+    (mf/with-effect [animated-id]
+      (reset! tab* nil))
 
     [:div {:class (stl/css :element-set)}
      [:div {:class (stl/css :element-title)}
@@ -477,7 +497,9 @@
                              :selected (str "export-" tab)
                              :on-change on-tab}
            (when (= tab "animated")
-             [:> animated-exports* {:board animated-board :formats formats}])])
+             [:> animated-exports* {:key (str animated-id)
+                                    :board animated-board
+                                    :formats formats}])])
 
         (when (or (nil? animated-board) (= tab "static"))
           [:*

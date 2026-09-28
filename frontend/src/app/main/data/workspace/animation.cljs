@@ -30,14 +30,26 @@
    [app.util.dom :as dom]
    [app.util.mouse :as mse]
    [app.util.storage :as storage]
+   [app.util.timers :as ts]
    [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
    [clojure.string :as str]
    [potok.v2.core :as ptk]))
 
-(def ^:private frame-step
-  "Playback tick in ms (~60fps)."
-  16)
+(def ^:private max-frame-gap
+  "The most playback moves on in one frame, in ms: back in a hidden tab,
+  it goes on where it was instead of jumping."
+  500)
+
+(defn frame-step
+  "How far playback moves on in a frame `dt` ms after the one before, with
+  `carry` ms left over by the frames before: `[step carry]`, the step in
+  whole ms. Playback so keeps to the time that passes, however long the
+  frames take, and the steps add up to it."
+  [carry dt]
+  (let [total (+ carry (min (max 0 dt) max-frame-gap))
+        step  (mth/floor total)]
+    [step (- total step)]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; STATE HELPERS
@@ -70,6 +82,13 @@
   [state]
   (get (get-timelines state) (active-board-id state)))
 
+(defn- shown-timelines
+  "The timelines the canvas shows at the playhead, by board: only the one
+  of the active board plays, the other boards stay as they are."
+  [state]
+  (let [board-id (active-board-id state)]
+    (select-keys (get-timelines state) [board-id])))
+
 (defn board-timeline
   "The timeline of `board` or, while the board has none, a new empty one
   named after it. The first edit stores the new one, so the timeline of
@@ -89,6 +108,23 @@
 (defn playhead
   [state]
   (dm/get-in state [:workspace-animation :playhead] 0))
+
+(defn shown-playhead
+  "The playhead the panels show values at: while playing, the one
+  playback started from, so they do not render again each frame."
+  [state]
+  (let [anim (:workspace-animation state)]
+    (if (:playing? anim)
+      (get anim :play-start 0)
+      (get anim :playhead 0))))
+
+(defn dock-state
+  "The animation state `anim` as the timeline dock shows it: while it
+  plays, at the playhead playback started from, and without what changes
+  each frame, so the dock does not render again each frame."
+  [anim]
+  (cond-> (dissoc anim :preview :direction)
+    (:playing? anim) (assoc :playhead (get anim :play-start 0))))
 
 (defn time-unit
   "How the timeline shows times, `:ms` or `:s`, as the user last chose;
@@ -296,6 +332,18 @@
 (defn set-duration
   [duration]
   (update-current-timeline #(assoc % :duration (max 1 (int duration)))))
+
+(defn set-export
+  "Keep with the timeline of the board `board-id` how it is exported as
+  an animation (see `cta/schema:export`), which the export panel offers
+  again."
+  [board-id export]
+  (ptk/reify ::set-export
+    ptk/WatchEvent
+    (watch [it state _]
+      (if-let [tl (get (get-timelines state) board-id)]
+        (rx/of (commit-timeline it state board-id (update tl :export merge export)))
+        (rx/empty)))))
 
 (defn rename-timeline
   [name]
@@ -1016,6 +1064,26 @@
     (update [_ state]
       (store-keyframe-selection state (set keyframes)))))
 
+(defn select-slot-keyframes
+  "Select the keyframes of `property` (and optional `index`) of `shape-id`,
+  what a click on its row in the timeline picks; with `add?` add them to
+  the selection. The keyframes of a locked property cannot be selected."
+  [shape-id property index add?]
+  (ptk/reify ::select-slot-keyframes
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [tl (current-timeline state)]
+        (if (or (nil? tl) (cta/slot-flag? tl shape-id :locked property index))
+          state
+          (let [picked (into #{}
+                             (map (fn [kf] {:shape-id shape-id :keyframe-id (:id kf)}))
+                             (cta/property-keyframes tl shape-id property index))]
+            (store-keyframe-selection
+             state
+             (if add?
+               (into (dm/get-in state [:workspace-animation :selected-kfs] #{}) picked)
+               picked))))))))
+
 (defn delete-selected-keyframes
   []
   (ptk/reify ::delete-selected-keyframes
@@ -1051,7 +1119,9 @@
     (watch [_ state _]
       (if (and (contains? (:workspace-layout state) :animation-timeline)
                (not= board-id (dm/get-in state [:workspace-animation :preview :board-id])))
-        (rx/of (apply-preview))
+        ;; The board shown before goes back to how it is.
+        (rx/of (dwm/clear-local-transform)
+               (apply-preview))
         (rx/empty)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1059,33 +1129,31 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn apply-preview
-  "Recompute and apply the transient modifiers for the timelines of the
-  page at the playhead (editor scrubbing/playback preview). The modif-tree
-  covers transforms AND opacity (as a change-property modifier).
+  "Recompute and apply the transient modifiers for the timeline of the
+  active board at the playhead (editor scrubbing/playback preview), see
+  `shown-timelines`. The modif-tree covers transforms AND opacity (as a
+  change-property modifier).
 
   Renderer-aware: with the WASM renderer (`render-wasm/v1`) the modifiers
   are pushed to the WASM canvas via `set-wasm-modifiers` (transforms for
   every shape, the other attributes as shape properties); with the
   classic SVG renderer they go through `set-modifiers` (the transforms
   move the shape nodes, see `use-dynamic-modifiers`, and the shapes paint
-  the other attributes, see `cta/appearance-changes`). When the page has
-  no timeline, any stale preview is cleared."
+  the other attributes, see `cta/appearance-changes`). When the active
+  board has no timeline, any stale preview is cleared."
   []
   (ptk/reify ::apply-preview
     ptk/UpdateEvent
     (update [_ state]
       ;; What the canvas shows, for an edit on it to show over it (see
       ;; `dsh/lookup-animation-preview`).
-      (if (seq (get-timelines state))
+      (if (seq (shown-timelines state))
         (assoc-in state [:workspace-animation :preview] {:board-id (active-board-id state) :time (playhead state)})
         (update state :workspace-animation dissoc :preview)))
 
     ptk/WatchEvent
     (watch [_ state _]
-      (if-let [timelines (not-empty (get-timelines state))]
-        ;; Every board shows its animation at the playhead, as it plays
-        ;; (see `cltl/animation-tree`), the one the timeline shows and
-        ;; the others alike.
+      (if-let [timelines (not-empty (shown-timelines state))]
         (let [objects    (dsh/lookup-page-objects state)
               modif-tree (cltl/animation-tree timelines objects (playhead state))]
           ;; The selection frame follows the selected shapes (see the
@@ -1104,7 +1172,7 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [page-id   (:current-page-id state)
-            timelines (get-timelines state)
+            timelines (shown-timelines state)
             objects   (dsh/lookup-page-objects state)
             preview   (when (and (seq timelines)
                                  (not (dm/get-in state [:workspace-animation :playing?])))
@@ -1139,6 +1207,22 @@
 
 (declare pause)
 
+(defn- motion-mode?
+  [state]
+  (contains? (:workspace-layout state) :animation-timeline))
+
+(defn- selected-elsewhere?
+  "Out of motion mode, where the title of a board plays its animation
+  (see `toggle-board-play`), whether something else than that board is
+  selected: playback stops then, before it gets in the way of editing."
+  [state]
+  (and (not (motion-mode? state))
+       (let [selected (dsh/get-selected-ids state)
+             board-id (dm/get-in state [:workspace-animation :board-id])]
+         (and (seq selected)
+              (not (and (= 1 (count selected))
+                        (contains? selected board-id)))))))
+
 (defn- show-frame
   "Move the playhead to `time`, playing on in `direction` (see
   `cta/advance-playback`)."
@@ -1154,30 +1238,77 @@
     (watch [_ _ _]
       (rx/of (apply-preview)))))
 
+(defn- frame-steps
+  "How far playback moves on at each animation frame (see `frame-step`),
+  from the frame after the first on."
+  []
+  (rx/create
+   (fn [subs]
+     (let [frame  (volatile! nil)
+           before (volatile! nil)
+           carry  (volatile! 0)
+           tick   (fn tick [_]
+                    (let [now (js/performance.now)]
+                      (when-let [then @before]
+                        (let [[step left] (frame-step @carry (- now then))]
+                          (vreset! carry left)
+                          (when (pos? step)
+                            (rx/push! subs step))))
+                      (vreset! before now)
+                      (vreset! frame (ts/raf tick))))]
+       (vreset! frame (ts/raf tick))
+       #(ts/cancel-af! @frame)))))
+
 (defn- playback-step
-  "Play one frame on from the playhead, with the timeline as it is now: a
+  "Play `dt` ms on from the playhead, with the timeline as it is now: a
   change made while playing (duration, playback mode, keyframes) or a
   move of the playhead shows right away. At the end of a timeline played
-  once, pause."
-  []
+  once, pause, and when something else gets selected out of motion mode
+  (see `selected-elsewhere?`)."
+  [dt]
   (ptk/reify ::playback-step
     ptk/WatchEvent
     (watch [_ state _]
-      (if-let [tl (current-or-new-timeline state)]
-        (let [direction (dm/get-in state [:workspace-animation :direction] 1)
-              {:keys [time direction ended?]}
-              (cta/advance-playback tl (playhead state) direction frame-step)]
-          (if ended?
-            (rx/of (show-frame time direction) (pause))
-            (rx/of (show-frame time direction))))
-        (rx/of (pause))))))
+      (let [tl (current-or-new-timeline state)]
+        (if (and (some? tl) (not (selected-elsewhere? state)))
+          (let [direction (dm/get-in state [:workspace-animation :direction] 1)
+                {:keys [time direction ended?]}
+                (cta/advance-playback tl (playhead state) direction dt)]
+            (if ended?
+              (rx/of (show-frame time direction) (pause))
+              (rx/of (show-frame time direction))))
+          (rx/of (pause)))))))
+
+(defn- playback-ended
+  "Out of motion mode, where the title of a board plays its animation
+  (see `toggle-board-play`), the board shows as it is again once it
+  stops, and plays from the start the next time."
+  []
+  (ptk/reify ::playback-ended
+    ptk/UpdateEvent
+    (update [_ state]
+      (cond-> state
+        (not (motion-mode? state))
+        (update :workspace-animation #(-> % (dissoc :preview) (assoc :playhead 0)))))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (motion-mode? state)
+        (rx/empty)
+        (rx/of (dwm/clear-local-transform))))))
 
 (defn play
   []
   (ptk/reify ::play
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-animation :playing?] true))
+      ;; Where it starts from, which the timeline dock shows while it
+      ;; plays (see `app.main.ui.workspace.timeline`).
+      (let [tl   (current-or-new-timeline state)
+            from (playhead state)]
+        (update state :workspace-animation assoc
+                :playing? true
+                :play-start (if (>= from (or (:duration tl) 0)) 0 from))))
 
     ptk/WatchEvent
     (watch [_ state stream]
@@ -1191,9 +1322,12 @@
            (if (>= (playhead state) duration)
              (rx/of (show-frame 0 1))
              (rx/empty))
-           (->> (rx/interval frame-step)
-                (rx/map (fn [_] (playback-step)))
-                (rx/take-until stopper))))))))
+           ;; Each frame moves on by the time that passed since the last
+           ;; one: a slow frame skips ahead instead of slowing it down.
+           (->> (frame-steps)
+                (rx/map playback-step)
+                (rx/take-until stopper))
+           (rx/of (playback-ended))))))))
 
 (defn pause
   []
@@ -1210,6 +1344,27 @@
       (if (dm/get-in state [:workspace-animation :playing?])
         (rx/of (pause))
         (rx/of (play))))))
+
+(defn toggle-board-play
+  "Play the animation of the board `board-id` on the canvas, or stop it,
+  from the title of the board (see `viewport.widgets/frame-title*`). In
+  motion mode it plays and pauses as in the timeline; out of it, without
+  the timeline, it plays from the start until it ends, is stopped or
+  something else is selected, then the board shows as it is again (see
+  `playback-ended`)."
+  [board-id]
+  (ptk/reify ::toggle-board-play
+    ptk/WatchEvent
+    (watch [_ state _]
+      (cond
+        (dm/get-in state [:workspace-animation :playing?])
+        (rx/of (pause))
+
+        (motion-mode? state)
+        (rx/of (set-active-board board-id) (play))
+
+        :else
+        (rx/of (set-active-board board-id) (set-playhead 0) (play))))))
 
 (defn stop
   "Stop playback and rewind to the start."
@@ -1340,7 +1495,7 @@
   (ptk/reify ::restore-preview
     ptk/WatchEvent
     (watch [_ state _]
-      (if (seq (get-timelines state))
+      (if (seq (shown-timelines state))
         (rx/of (apply-preview))
         (rx/empty)))))
 

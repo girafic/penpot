@@ -55,6 +55,16 @@
   pointer-events: all;
 }
 
+// At the right end of the title of an animated board: its mark or, while
+// it is selected or plays, the button that plays and stops it.
+.frame-title-motion {
+  pointer-events: all;
+}
+
+.frame-title-play {
+  cursor: pointer;
+}
+
 .frame-title-input {
   @include t.use-typography("body-small");
 

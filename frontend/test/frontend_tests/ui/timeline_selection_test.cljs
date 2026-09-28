@@ -6,6 +6,7 @@
 
 (ns frontend-tests.ui.timeline-selection-test
   (:require
+   [app.common.types.animation :as cta]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.animation :as dwa]
    [app.main.ui.workspace.timeline :as timeline]
@@ -67,10 +68,6 @@
                {:shape-id shape-a :keyframe-id kf-b}}
              (timeline/keyframes-in-rect hits marquee)))))
 
-(t/deftest marquee-style-gives-position-and-size
-  (t/is (= {:left 20 :top 20 :width 60 :height 40}
-           (timeline/marquee-style {:left 20 :top 20 :right 80 :bottom 60}))))
-
 (t/deftest marquee-drag-ignores-small-moves
   (t/is (false? (timeline/marquee-drag? 0 0 2 3))))
 
@@ -98,3 +95,53 @@
         next (ptk/update (dwa/select-keyframes [k1 k2]) {})]
     (t/is (= #{k1 k2} (selected next)))
     (t/is (nil? (selected-one next)))))
+
+(t/deftest a-selected-layer-opens-its-parents
+  (let [board    (uuid/next)
+        group    (uuid/next)
+        rect     (uuid/next)
+        other    (uuid/next)
+        objects  {uuid/zero {:id uuid/zero :parent-id uuid/zero :shapes [board other]}
+                  board     {:id board :parent-id uuid/zero :shapes [group]}
+                  group     {:id group :parent-id board :shapes [rect]}
+                  rect      {:id rect :parent-id group}
+                  other     {:id other :parent-id uuid/zero}}
+        still    (cta/make-timeline {:board-id board})
+        animated (cta/add-keyframe still rect {:time 0 :property :x :value 0})
+        expanded {}]
+    (t/is (= {board true group true} (timeline/expand-to {} objects board still #{rect})))
+    (t/is (identical? expanded (timeline/expand-to expanded objects board animated #{rect}))
+          "animated layers start open")
+    (t/is (= {group true} (timeline/expand-to {group false} objects board animated #{rect}))
+          "one the user folded opens")
+    (t/is (identical? expanded (timeline/expand-to expanded objects board still #{board other}))
+          "the board and layers out of it")))
+
+(t/deftest a-click-on-a-property-picks-its-keyframes
+  (let [file-id  (uuid/next)
+        page-id  (uuid/next)
+        board-id (uuid/next)
+        w1       (uuid/next)
+        w2       (uuid/next)
+        h1       (uuid/next)
+        timeline (-> (cta/make-timeline {:board-id board-id})
+                     (cta/add-keyframe shape-a {:id w1 :time 0 :property :width :value 10})
+                     (cta/add-keyframe shape-a {:id w2 :time 500 :property :width :value 20})
+                     (cta/add-keyframe shape-a {:id h1 :time 0 :property :height :value 10}))
+        state    {:current-file-id file-id
+                  :current-page-id page-id
+                  :workspace-animation {:board-id board-id
+                                        :selected-kfs #{{:shape-id shape-a :keyframe-id kf-a}}}
+                  :files {file-id {:data {:pages-index {page-id {:objects {}
+                                                                 :timelines {board-id timeline}}}}}}}
+        pick     (fn [state property add?]
+                   (ptk/update (dwa/select-slot-keyframes shape-a property nil add?) state))
+        width    #{{:shape-id shape-a :keyframe-id w1} {:shape-id shape-a :keyframe-id w2}}]
+    (t/is (= width (selected (pick state :width false))) "in place of the ones selected")
+    (t/is (= (conj width {:shape-id shape-a :keyframe-id h1})
+             (selected (pick (pick state :width false) :height true)))
+          "Shift adds them")
+    (let [locked (update-in state [:files file-id :data :pages-index page-id :timelines board-id]
+                            cta/toggle-slot-flag shape-a :locked :width)]
+      (t/is (= #{{:shape-id shape-a :keyframe-id kf-a}} (selected (pick locked :width false)))
+            "a locked property keeps its keyframes out of it"))))

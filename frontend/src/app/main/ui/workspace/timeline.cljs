@@ -19,7 +19,6 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
-   [app.common.uuid :as uuid]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shapes :as dwsh]
@@ -33,12 +32,15 @@
    [app.main.ui.ds.utilities.swatch :refer [swatch*]]
    [app.main.ui.hooks.resize :as r]
    [app.main.ui.workspace.sidebar.options.menus.motion :as motion]
-   [app.main.ui.workspace.timeline.easing :refer [curve-icon* easing-editor*]]
+   [app.main.ui.workspace.timeline.easing :refer [easing-editor*]]
+   [app.main.ui.workspace.timeline.lanes :as lanes]
    [app.util.dom :as dom]
+   [app.util.dom.normalize-wheel :as nw]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
    [app.util.shape-icon :as usi]
    [app.util.text.ui :as txu]
+   [app.util.theme :as theme]
    [cuerdas.core :as str]
    [goog.events :as events]
    [okulary.core :as l]
@@ -46,6 +48,14 @@
 
 (def ^:private ref:timelines
   (l/derived #(get % :timelines) refs/workspace-page))
+
+(def ^:private ref:dock-animation
+  "The animation state the dock shows (see `dwa/dock-state`); what
+  follows the playhead as it plays reads `ref:playhead`."
+  (l/derived dwa/dock-state refs/workspace-animation =))
+
+(def ^:private ref:playhead
+  (l/derived #(get % :playhead 0) refs/workspace-animation))
 
 (def ^:private property-order
   (into {} (map-indexed (fn [i p] [p i]) dwa/animatable-properties)))
@@ -144,6 +154,11 @@
   "Largest horizontal zoom of the time axis (1 fits the duration)."
   20)
 
+(def ^:private zoom-per-pixel
+  "How much a pixel of Ctrl/Cmd + wheel zooms, as much as on the canvas
+  (see `app.main.ui.workspace.viewport.actions/scale-per-pixel`)."
+  0.0057)
+
 ;; The zoom slider is logarithmic, so each step zooms by the same factor.
 (defn- slider->zoom
   [value]
@@ -214,11 +229,10 @@
          (not (kbd/mod? event)))))
 
 (defn- pointer->time
-  "Translate a pointer event over `node` into a time value (ms) clamped to
-  [0, duration]."
-  [event node duration]
-  (let [rect     (dom/get-bounding-rect node)
-        x        (:x (dom/get-client-position event))
+  "Translate a pointer event over a time axis at the client `rect` into a
+  time value (ms) clamped to [0, duration]."
+  [event rect duration]
+  (let [x        (:x (dom/get-client-position event))
         fraction (/ (- x (:left rect)) (max 1 (:width rect)))
         fraction (-> fraction (max 0.0) (min 1.0))]
     (int (* fraction duration))))
@@ -232,9 +246,22 @@
   "Pixels the pointer must move before a lane click becomes a box select."
   4)
 
+(def ^:private drag-threshold
+  "Pixels the pointer must move before a pressed keyframe is dragged."
+  3)
+
 (def ^:private snap-distance
   "Pixels within which a drag in the timeline snaps (see `snap-target`)."
   6)
+
+(def ^:private row-overscan
+  "Rows whose labels are rendered past the ones in view, so the next ones
+  are there as the rows scroll."
+  8)
+
+(def ^:private hint-height
+  "Room under the rows for the hint of a timeline without tracks."
+  48)
 
 (def ^:private snap-context
   "What a drag in a lane snaps with, `{:timeline :target :show}`, and the
@@ -265,109 +292,37 @@
               (map #(select-keys % [:shape-id :keyframe-id])))
         hits))
 
-(defn marquee-style
-  "Position and size of the box of `marquee`, a rect in the tracks."
-  [{:keys [left top right bottom]}]
-  {:left   left
-   :top    top
-   :width  (- right left)
-   :height (- bottom top)})
-
 (defn marquee-drag?
   "True once the pointer has moved far enough to count as a box, not a click."
   [x0 y0 x y]
   (>= (max (mth/abs (- x x0)) (mth/abs (- y y0))) marquee-threshold))
 
-(defn- closest
-  [node selector]
-  (when (some? node)
-    (let [el (if (instance? js/Element node) node (.-parentElement node))]
-      (when (some? el)
-        (.closest ^js el selector)))))
+(defn- release-pointer
+  "Let go of the pointer of `event` if its target still holds it."
+  [^js event]
+  (let [node (dom/get-target event)
+        id   (.-pointerId event)]
+    (when (and (some? id) (.hasPointerCapture ^js node id))
+      (.releasePointerCapture ^js node id))))
 
-(defn- marquee-origin?
-  "Whether a box selection starts where `event` presses: on an empty spot
-  of a lane or below the rows, not on a keyframe, bar, block or button."
-  [event tracks]
-  (let [target (dom/get-target event)]
-    (and (or (identical? target tracks)
-             (some? (closest target (str "." (stl/css :row-lane)))))
-         (nil? (closest target "button"))
-         (nil? (closest target (str "." (stl/css :layer-bar))))
-         (nil? (closest target (str "." (stl/css :animation-block))))
-         (nil? (closest target (str "." (stl/css :keyframe)))))))
+(defn- hover-key
+  "What of a `lanes/hit` shows under the pointer: the lanes draw again
+  when it changes."
+  [target]
+  [(:type target) (:row target) (:mode target)
+   (:id (:keyframe target)) (:id (:from target))])
 
-(defn- lane-at
-  "The property lane under the pointer of `event`, off its keyframes and
-  easing buttons, as `[node shape-id property index]`. Looked up by
-  position: the tracks capture the pointer to draw the box selection,
-  which can make them the target of the click."
-  [event]
-  (let [{:keys [x y]} (dom/get-client-position event)
-        target (.elementFromPoint js/document x y)
-        node   (closest target (str "." (stl/css :property-lane)))]
-    (when (and (some? node)
-               (nil? (closest target "button"))
-               (nil? (closest target (str "." (stl/css :keyframe)))))
-      (when-let [shape-id (uuid/parse* (dom/get-data node "shape-id"))]
-        [node
-         shape-id
-         (keyword (dom/get-data node "property"))
-         (some-> (dom/get-data node "index") (d/parse-integer))]))))
-
-(defn- in-tracks
-  "Client `rect` in the coordinates of the tracks, whose client rect is
-  `origin`: they stay put when the timeline scrolls."
-  [{:keys [left top right bottom] :as rect} origin]
-  (assoc rect
-         :left   (- left (:left origin))
-         :top    (- top (:top origin))
-         :right  (- right (:left origin))
-         :bottom (- bottom (:top origin))))
-
-(defn- collect-keyframe-hits
-  "The boxes of the keyframes that can be selected, in the tracks (see
-  `in-tracks`)."
-  [tracks-node origin]
-  (when (some? tracks-node)
-    (into []
-          (keep (fn [node]
-                  (when-let [sid (uuid/parse* (dom/get-data node "shape-id"))]
-                    (when-let [kid (uuid/parse* (dom/get-data node "keyframe-id"))]
-                      (-> (dom/get-bounding-rect node)
-                          (in-tracks origin)
-                          (assoc :shape-id sid
-                                 :keyframe-id kid))))))
-          ;; Locked keyframes cannot be selected.
-          (array-seq (.querySelectorAll tracks-node (str "." (stl/css :keyframe)
-                                                         ":not(." (stl/css :locked) ")"))))))
-
-(defn- show-marquee!
-  "Draw the box of `marquee` (a rect in the tracks), or hide it when nil.
-  Set on the node, so dragging does not render the timeline again."
-  [node marquee]
-  (if (some? marquee)
-    (let [{:keys [left top width height]} (marquee-style marquee)]
-      (doto node
-        (dom/set-css-property! "left" (dm/str left "px"))
-        (dom/set-css-property! "top" (dm/str top "px"))
-        (dom/set-css-property! "width" (dm/str width "px"))
-        (dom/set-css-property! "height" (dm/str height "px"))
-        (dom/set-css-property! "display" "block")))
-    (dom/unset-css-property! node "display")))
-
-(defn- capture-current-target
-  [event]
-  (when-let [node (dom/get-current-target event)]
-    (.setPointerCapture ^js node (.-pointerId event))))
-
-(defn- release-current-target
-  [event]
-  (when-let [node (dom/get-current-target event)]
-    (when (.-pointerId event)
-      (try
-        (.releasePointerCapture ^js node (.-pointerId event))
-        (catch :default _ nil)))))
+(defn- lanes-cursor
+  [{:keys [type mode locked? animation]}]
+  (case type
+    (:ruler :duration)       "ew-resize"
+    :bar                     (if (= :move mode) "grab" "ew-resize")
+    :animation               (cond (:locked animation) "default"
+                                   (= :move mode)      "grab"
+                                   :else               "ew-resize")
+    (:keyframe :easing)      (if locked? "default" "pointer")
+    (:segment :lane :row)    "crosshair"
+    "default"))
 
 (defn- animated-ids
   "Ids of the layers of `board-id` (itself included) that have keyframes,
@@ -413,150 +368,28 @@
                            (mapcat #(walk % (inc depth)) children)))))))]
       (vec (walk board-id 0)))))
 
+(defn expand-to
+  "`expanded` (see `timeline-rows`) with the closed parents of the layers
+  `ids` opened up to `board-id`, so that their rows show. The same map
+  when they are open already; layers out of the board are left out."
+  [expanded objects board-id timeline ids]
+  (let [animated (animated-ids objects board-id timeline)]
+    (reduce (fn [expanded id]
+              (let [parents (cfh/get-parent-ids objects id)]
+                (if (some #(= board-id %) parents)
+                  (reduce (fn [expanded parent]
+                            (cond-> expanded
+                              (not (get expanded parent (contains? animated parent)))
+                              (assoc parent true)))
+                          expanded
+                          (concat (take-while #(not= board-id %) parents) [board-id]))
+                  expanded)))
+            expanded
+            ids)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SUB COMPONENTS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(mf/defc keyframe*
-  {::mf/private true}
-  [{:keys [keyframe shape-id duration lane-node-ref selected? selected-kfs locked? on-select-layer]}]
-  (let [time        (:time keyframe)
-        kf-id       (:id keyframe)
-        snap        (mf/use-ctx snap-context)
-        ;; The drag in progress: its undo transaction, the timeline as it
-        ;; was when it started and the keyframes it moves.
-        dragging-ref (mf/use-ref nil)
-
-        on-pointer-down
-        (mf/use-fn
-         (mf/deps locked? selected? selected-kfs shape-id kf-id time snap)
-         (fn [event]
-           ;; Only the left button drags; the right one opens the row menu.
-           ;; A locked keyframe stays where it is.
-           (when (and (dom/left-mouse? event) (not locked?))
-             (let [undo-id (js/Symbol)]
-               (dom/stop-propagation event)
-               (dom/capture-pointer event)
-               (mf/set-ref-val! dragging-ref
-                                {:undo-id undo-id
-                                 :base ((:timeline snap))
-                                 :from time
-                                 ;; a selected keyframe takes the others along
-                                 :moving (if (and selected? (> (count selected-kfs) 1))
-                                           selected-kfs
-                                           #{{:shape-id shape-id :keyframe-id kf-id}})})
-               (st/emit! (dwu/start-undo-transaction undo-id))))))
-
-        on-pointer-move
-        (mf/use-fn
-         (mf/deps duration snap)
-         (fn [event]
-           (when-let [{:keys [base from moving]} (mf/ref-val dragging-ref)]
-             (when-let [node (mf/ref-val lane-node-ref)]
-               (let [t      (pointer->time event node duration)
-                     target ((:target snap) t event {:keyframe-ids (into #{} (map :keyframe-id) moving)})]
-                 ((:show snap) target)
-                 (st/emit! (dwa/shift-keyframes-from base moving (- (or target t) from))))))))
-
-        on-pointer-up
-        (mf/use-fn
-         (mf/deps snap)
-         (fn [event]
-           (when-let [{:keys [undo-id]} (mf/ref-val dragging-ref)]
-             (dom/release-pointer event)
-             (mf/set-ref-val! dragging-ref nil)
-             ((:show snap) nil)
-             (st/emit! (dwu/commit-undo-transaction undo-id)))))
-
-        on-double-click
-        (mf/use-fn
-         (mf/deps shape-id kf-id locked?)
-         (fn [event]
-           (dom/stop-propagation event)
-           (when-not locked?
-             (st/emit! (dwa/delete-keyframe shape-id kf-id)
-                       (dwa/select-keyframe nil nil)))))
-
-        ;; A locked keyframe only moves the playhead to it (and selects
-        ;; its layer).
-        on-click
-        (mf/use-fn
-         (mf/deps shape-id kf-id time locked? on-select-layer)
-         (fn [event]
-           (dom/stop-propagation event)
-           (on-select-layer event shape-id)
-           (if locked?
-             (st/emit! (dwa/set-playhead time))
-             (st/emit! (dwa/select-keyframe shape-id kf-id (kbd/shift? event))
-                       (dwa/set-playhead time)))))]
-
-    [:div {:class (stl/css-case :keyframe true :selected selected? :locked locked?)
-           :data-shape-id (dm/str shape-id)
-           :data-keyframe-id (dm/str kf-id)
-           :style #js {"left" (time->pct time duration)}
-           :title (format-time time (:unit snap))
-           :on-pointer-down on-pointer-down
-           :on-pointer-move on-pointer-move
-           :on-pointer-up on-pointer-up
-           :on-click on-click
-           :on-double-click on-double-click}]))
-
-(mf/defc segment*
-  "The line between two keyframes. Hovering it shows a button with its
-  easing (the one of the keyframe it starts at), which opens the easing
-  editor."
-  {::mf/private true}
-  [{:keys [shape-id from to duration open? locked? on-edit-easing]}]
-  (let [from-id (:id from)
-
-        on-click
-        (mf/use-fn
-         (mf/deps shape-id from-id on-edit-easing)
-         (fn [event]
-           (dom/stop-propagation event)
-           (on-edit-easing event shape-id from-id)))]
-
-    [:div {:class (stl/css :segment)
-           :style #js {"left" (dm/str "calc(" (time->pct (:time from) duration) " + 7px)")
-                       "width" (dm/str "calc(" (time->pct (- (:time to) (:time from)) duration) " - 14px)")}}
-     [:button {:class (stl/css-case :easing-btn true :open open?)
-               :title (tr "workspace.animation.easing")
-               :disabled locked?
-               :on-click on-click}
-      [:> curve-icon* {:easing (:easing from)
-                       :is-hold (= :step (:interpolation from))}]]]))
-
-(mf/defc property-lane*
-  "The keyframes of one property, joined by lines. A double click on it
-  adds a keyframe (see `lane-at`)."
-  {::mf/private true}
-  [{:keys [shape-id property index keyframes duration selected-kfs active? locked?
-           easing-kf-id on-edit-easing on-select-layer]}]
-  (let [node-ref (mf/use-ref nil)]
-    [:div {:class (stl/css-case :property-lane true :active active?)
-           :ref node-ref
-           :data-shape-id (dm/str shape-id)
-           :data-property (name property)
-           :data-index (when (some? index) (dm/str index))}
-     (for [[from to] (partition 2 1 keyframes)]
-       [:> segment* {:key (dm/str (:id from) "-" (:id to))
-                     :shape-id shape-id
-                     :from from
-                     :to to
-                     :duration duration
-                     :open? (= (:id from) easing-kf-id)
-                     :locked? locked?
-                     :on-edit-easing on-edit-easing}])
-     (for [kf keyframes]
-       [:> keyframe* {:key (dm/str (:id kf))
-                      :keyframe kf
-                      :shape-id shape-id
-                      :duration duration
-                      :selected? (contains? selected-kfs {:shape-id shape-id :keyframe-id (:id kf)})
-                      :selected-kfs selected-kfs
-                      :locked? locked?
-                      :on-select-layer on-select-layer
-                      :lane-node-ref node-ref}])]))
 
 (mf/defc row-controls*
   "Jump to the previous / next keyframe of the property, and toggle its
@@ -687,17 +520,32 @@
                :on-click on-toggle-lock}
       [:> i/icon* {:icon-id (if locked? i/lock i/unlock) :size "s"}]]]))
 
+(defn- use-row-hover
+  "Pointer enter and leave handlers of the label of the row at `row-index`,
+  telling `on-hover` whether it is under the pointer: its lane shows it
+  too."
+  [row-index on-hover]
+  [(mf/use-fn (mf/deps row-index on-hover) #(on-hover row-index))
+   (mf/use-fn (mf/deps on-hover) #(on-hover nil))])
+
+(defn- row-style
+  "Where the label of the row at `row-index` is, among the labels."
+  [row-index]
+  #js {"top" (dm/str (* row-index lanes/row-height) "px")})
+
 (mf/defc layer-row*
-  "A layer of the board: tree label on the left and, when animated, a bar
-  over the span of its keyframes (and its children's). Dragging the bar
-  moves them; dragging its ends stretches them."
+  "The label of a layer of the board, in a tree like the layers panel. Its
+  lane (see `lanes/draw!`) has, when it is animated, a bar over the span of
+  its keyframes and its children's."
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [shape depth expandable? expanded? selected? range duration
-           on-toggle on-select on-context-menu on-bar-down]}]
+  [{:keys [row-index shape depth expandable? expanded? selected? hovered?
+           on-toggle on-select on-context-menu on-hover]}]
   (let [shape-id (:id shape)
         hidden?  (true? (:hidden shape))
         blocked? (true? (:blocked shape))
+
+        [on-pointer-enter on-pointer-leave] (use-row-hover row-index on-hover)
 
         on-toggle-click
         (mf/use-fn
@@ -731,21 +579,16 @@
         (mf/use-fn
          (mf/deps shape-id on-context-menu)
          (fn [event]
-           (on-context-menu event shape-id nil)))
-
-        on-bar-pointer-down
-        (mf/use-fn
-         (mf/deps shape-id on-bar-down)
-         (fn [event]
-           (let [mode (-> (dom/get-current-target event)
-                          (dom/get-data "mode")
-                          (keyword))]
-             (on-bar-down event shape-id mode))))]
+           (on-context-menu event shape-id nil)))]
 
     [:div {:class (stl/css-case :row true
                                 :layer-row true
                                 :selected selected?
+                                :hovered hovered?
                                 :hidden-layer hidden?)
+           :style (row-style row-index)
+           :on-pointer-enter on-pointer-enter
+           :on-pointer-leave on-pointer-leave
            :on-context-menu on-row-context-menu}
      [:div {:class (stl/css :row-label)
             :style #js {"paddingInlineStart" (dm/str (* depth 12) "px")}
@@ -762,36 +605,21 @@
       [:> row-toggles* {:hidden? hidden?
                         :locked? blocked?
                         :on-toggle-visibility on-toggle-visibility
-                        :on-toggle-lock on-toggle-blocking}]]
-
-     [:div {:class (stl/css :row-lane)}
-      (when-let [[start end] range]
-        [:div {:class (stl/css-case :layer-bar true :active selected?)
-               :style #js {"left" (time->pct start duration)
-                           "width" (time->pct (- end start) duration)}
-               :data-mode "move"
-               :on-pointer-down on-bar-pointer-down}
-         [:span {:class (stl/css :bar-handle :bar-start)
-                 :data-mode "start"
-                 :on-pointer-down on-bar-pointer-down}]
-         [:span {:class (stl/css :bar-handle :bar-end)
-                 :data-mode "end"
-                 :on-pointer-down on-bar-pointer-down}]])]]))
+                        :on-toggle-lock on-toggle-blocking}]]]))
 
 (mf/defc animation-row*
-  "A preset animation of a layer: its name on the left and a block over
-  its span on the right. Dragging the block moves it; dragging its ends
-  changes its start or its end. A hidden one is left out of playback and
-  exports; a locked one is kept from edits."
+  "The label of a preset animation of a layer; its lane has a block over
+  its span. A hidden one is left out of playback and exports; a locked one
+  is kept from edits."
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [shape-id animation depth duration selected?
-           on-select on-context-menu on-animation-down]}]
+  [{:keys [row-index shape-id animation depth hovered?
+           on-select on-context-menu on-hover]}]
   (let [animation-id (:id animation)
-        start        (:start animation)
         hidden?      (true? (:hidden animation))
         locked?      (true? (:locked animation))
-        label        (motion/animation-label animation)
+
+        [on-pointer-enter on-pointer-leave] (use-row-hover row-index on-hover)
 
         on-toggle-visibility
         (mf/use-fn
@@ -813,56 +641,42 @@
         (mf/use-fn
          (mf/deps shape-id animation-id on-context-menu)
          (fn [event]
-           (on-context-menu event shape-id nil nil animation-id)))
+           (on-context-menu event shape-id nil nil animation-id)))]
 
-        on-block-pointer-down
-        (mf/use-fn
-         (mf/deps shape-id animation on-animation-down)
-         (fn [event]
-           (let [mode (-> (dom/get-current-target event)
-                          (dom/get-data "mode")
-                          (keyword))]
-             (on-animation-down event shape-id animation mode))))]
-
-    [:div {:class (stl/css-case :row true :animation-row true :muted hidden?)
+    [:div {:class (stl/css-case :row true :animation-row true :hovered hovered? :muted hidden?)
+           :style (row-style row-index)
+           :on-pointer-enter on-pointer-enter
+           :on-pointer-leave on-pointer-leave
            :on-context-menu on-row-context-menu}
      [:div {:class (stl/css :row-label)
             :style #js {"paddingInlineStart" (dm/str (* depth 12) "px")}
             :on-click on-label-click}
       [:span {:class (stl/css :tree-line)}]
-      [:span {:class (stl/css :property-name)} label]
+      [:span {:class (stl/css :property-name)} (motion/animation-label animation)]
       [:> row-toggles* {:hidden? hidden?
                         :locked? locked?
                         :on-toggle-visibility on-toggle-visibility
-                        :on-toggle-lock on-toggle-lock}]]
-     [:div {:class (stl/css :row-lane)}
-      [:div {:class (stl/css-case :animation-block true :active selected? :locked locked?)
-             :style #js {"left" (time->pct start duration)
-                         "width" (time->pct (:duration animation) duration)}
-             :title label
-             :data-mode "move"
-             :on-pointer-down on-block-pointer-down}
-       [:span {:class (stl/css :bar-handle :bar-start)
-               :data-mode "start"
-               :on-pointer-down on-block-pointer-down}]
-       [:span {:class (stl/css :animation-block-name)} label]
-       [:span {:class (stl/css :bar-handle :bar-end)
-               :data-mode "end"
-               :on-pointer-down on-block-pointer-down}]]]]))
+                        :on-toggle-lock on-toggle-lock}]]]))
 
 (mf/defc property-row*
-  "An animated property of a layer: label, keyframe controls and value on
-  the left, its keyframes on the right. A hidden one is left out of
+  "The label of an animated property of a layer, with its keyframe controls
+  and its value; its lane has the keyframes. A hidden one is left out of
   playback and exports; a locked one is kept from edits."
-  {::mf/private true}
-  [{:keys [timeline shape-id property index depth keyframes looping? hidden? locked?
-           value offset playhead duration active? selected-kfs on-context-menu
-           easing-kf-id on-edit-easing on-select-layer]}]
-  (let [on-label-click
+  {::mf/private true
+   ::mf/wrap [mf/memo]}
+  [{:keys [row-index timeline shape-id property index depth looping? hidden? locked?
+           value offset playhead hovered? on-context-menu on-select-layer on-hover]}]
+  (let [[on-pointer-enter on-pointer-leave] (use-row-hover row-index on-hover)
+
+        ;; A click on the property picks its keyframes (Shift adds them to
+        ;; the selection); one on its buttons or value field does not.
+        on-label-click
         (mf/use-fn
-         (mf/deps shape-id on-select-layer)
+         (mf/deps shape-id property index on-select-layer)
          (fn [event]
-           (on-select-layer event shape-id)))
+           (on-select-layer event shape-id)
+           (when-not (some-> ^js (dom/get-target event) (.closest "button, input"))
+             (st/emit! (dwa/select-slot-keyframes shape-id property index (kbd/shift? event))))))
 
         on-row-context-menu
         (mf/use-fn
@@ -880,7 +694,10 @@
          (mf/deps shape-id property index)
          #(st/emit! (dwa/toggle-track-flag shape-id :locked property index)))]
 
-    [:div {:class (stl/css-case :row true :property-row true :muted hidden?)
+    [:div {:class (stl/css-case :row true :property-row true :hovered hovered? :muted hidden?)
+           :style (row-style row-index)
+           :on-pointer-enter on-pointer-enter
+           :on-pointer-leave on-pointer-leave
            :on-context-menu on-row-context-menu}
      [:div {:class (stl/css :row-label)
             :style #js {"paddingInlineStart" (dm/str (* depth 12) "px")}
@@ -907,19 +724,7 @@
       [:> row-toggles* {:hidden? hidden?
                         :locked? locked?
                         :on-toggle-visibility on-toggle-visibility
-                        :on-toggle-lock on-toggle-lock}]]
-     [:div {:class (stl/css :row-lane)}
-      [:> property-lane* {:shape-id shape-id
-                          :property property
-                          :index index
-                          :keyframes keyframes
-                          :duration duration
-                          :selected-kfs selected-kfs
-                          :active? active?
-                          :locked? locked?
-                          :easing-kf-id easing-kf-id
-                          :on-edit-easing on-edit-easing
-                          :on-select-layer on-select-layer}]]]))
+                        :on-toggle-lock on-toggle-lock}]]]))
 
 (mf/defc marker-name-input*
   "Renames a marker: Enter or leaving the field keeps the name, Escape
@@ -994,7 +799,7 @@
                    moved? (or (:moved? drag) (> (mth/abs (- x x0)) 3))]
                (mf/set-ref-val! drag-ref (assoc drag :moved? moved?))
                (when-let [node (and moved? (mf/ref-val lane-ref))]
-                 (let [t      (pointer->time event node duration)
+                 (let [t      (pointer->time event (dom/get-bounding-rect node) duration)
                        target ((:target snap) t event {:marker-ids #{id}})]
                    ((:show snap) target)
                    (st/emit! (dwa/move-marker-from base id (or target t)))))))))
@@ -1038,15 +843,24 @@
        [:> marker-name-input* {:marker marker :on-done on-edit}]
        [:span {:class (stl/css :marker-name)} name])]))
 
+(mf/defc marker-playhead*
+  "The playhead across the row of the markers, over them: the lanes draw
+  it across the rows (see `lanes/draw!`)."
+  {::mf/private true}
+  [{:keys [span]}]
+  (let [playhead (mf/deref ref:playhead)]
+    [:div {:class (stl/css :marker-playhead)
+           :style #js {"left" (time->pct playhead span)}}]))
+
 (mf/defc marker-row*
   "The markers of the timeline, above the layers: named moments the drags
   snap to and the playhead jumps between. A double click on the lane adds
   one there; the controls go to the one before or after the playhead, or
-  add one at it."
+  add one at it. The lane, `axis-width` wide, is at `lane-ref`: it moves
+  as the timeline scrolls (see `sync-scroll!`)."
   {::mf/private true}
-  [{:keys [markers playhead duration editing on-edit on-context-menu]}]
+  [{:keys [markers playhead duration axis-width editing lane-ref on-edit on-context-menu]}]
   (let [snap     (mf/use-ctx snap-context)
-        lane-ref (mf/use-ref nil)
         prev     (d/seek #(< (:time %) playhead) (reverse markers))
         next     (d/seek #(> (:time %) playhead) markers)
         new-name (tr "workspace.animation.marker-name" (inc (count markers)))
@@ -1066,17 +880,13 @@
          (mf/deps next)
          #(st/emit! (dwa/set-playhead (:time next))))
 
-        ;; kept from the box selection and the double click of the lanes
-        on-lane-pointer-down
-        (mf/use-fn dom/stop-propagation)
-
         on-lane-double-click
         (mf/use-fn
          (mf/deps new-name duration snap)
          (fn [event]
            (dom/stop-propagation event)
            (when-let [node (mf/ref-val lane-ref)]
-             (let [t (pointer->time event node duration)]
+             (let [t (pointer->time event (dom/get-bounding-rect node) duration)]
                (st/emit! (dwa/add-marker new-name (or ((:target snap) t event {}) t)))))))]
 
     [:div {:class (stl/css :row :marker-row)}
@@ -1097,19 +907,48 @@
                  :disabled (nil? next)
                  :on-click on-next}
         [:> i/icon* {:icon-id i/arrow-right :size "s"}]]]]
-     [:div {:class (stl/css :row-lane :marker-lane)
-            :ref lane-ref
-            :title (tr "workspace.animation.marker-lane-hint")
-            :on-pointer-down on-lane-pointer-down
-            :on-double-click on-lane-double-click}
-      (for [marker markers]
-        [:> marker* {:key (dm/str (:id marker))
-                     :marker marker
-                     :duration duration
-                     :lane-ref lane-ref
-                     :editing? (= editing (:id marker))
-                     :on-edit on-edit
-                     :on-context-menu on-context-menu}])]]))
+     [:div {:class (stl/css :marker-clip)}
+      [:div {:class (stl/css :marker-lane)
+             :ref lane-ref
+             :style #js {"width" (dm/str axis-width "px")}
+             :title (tr "workspace.animation.marker-lane-hint")
+             :on-double-click on-lane-double-click}
+       (for [marker markers]
+         [:> marker* {:key (dm/str (:id marker))
+                      :marker marker
+                      :duration duration
+                      :lane-ref lane-ref
+                      :editing? (= editing (:id marker))
+                      :on-edit on-edit
+                      :on-context-menu on-context-menu}])
+       [:> marker-playhead* {:span duration}]]]]))
+
+;; The parts of the dock that follow the playhead as it plays: the rest of
+;; it shows the time playback started from (see `ref:dock-animation`), the
+;; lanes draw it on their own (see `draw-lanes`).
+
+(mf/defc current-time*
+  {::mf/private true}
+  [{:keys [unit]}]
+  (let [playhead (mf/deref ref:playhead)]
+    [:span {:class (stl/css :current-time)} (format-time playhead unit)]))
+
+(mf/defc playhead-follower*
+  "While a zoomed timeline plays, pages the view to keep the playhead
+  in sight. `geo-ref` places the lanes (see `lanes/draw!`)."
+  {::mf/private true}
+  [{:keys [scroll-ref geo-ref zoom span playing?]}]
+  (let [playhead (mf/deref ref:playhead)]
+    (mf/with-layout-effect [playhead zoom span playing?]
+      (when (and playing? (> zoom 1))
+        (when-let [^js node (mf/ref-val scroll-ref)]
+          (let [{:keys [width axis-width]} (mf/ref-val geo-ref)
+                x    (+ lanes/start-gap (* (/ playhead (max 1 span)) axis-width))
+                left (.-scrollLeft node)]
+            (when (or (< x (+ left lanes/start-gap))
+                      (> x (+ left width)))
+              (set! (.-scrollLeft node) (- x lanes/start-gap)))))))
+    nil))
 
 (def ^:private next-playback-mode
   {:once :loop
@@ -1129,8 +968,9 @@
     (tr "workspace.animation.play-once")))
 
 (mf/defc toolbar*
-  {::mf/private true}
-  [{:keys [timeline playing? recording? playhead unit zoom on-zoom-change]}]
+  {::mf/private true
+   ::mf/wrap [mf/memo]}
+  [{:keys [timeline playing? recording? unit zoom on-zoom-change]}]
   (let [duration (:duration timeline)
         playback (cta/playback-mode timeline)
         seconds? (= unit :s)
@@ -1192,7 +1032,7 @@
       [:span {:class (stl/css :rec-dot)}]
       (tr "workspace.animation.rec")]
 
-     [:span {:class (stl/css :current-time)} (format-time playhead unit)]
+     [:> current-time* {:unit unit}]
 
      [:div {:class (stl/css :duration-field)}
       [:label (tr "workspace.animation.duration")]
@@ -1242,9 +1082,19 @@
   [:div {:class (stl/css :empty-state)}
    [:p (tr "workspace.animation.select-board")]])
 
+(defn- lanes-title
+  "The tooltip of what a `lanes/hit` is on, with times in `unit`."
+  [{:keys [type keyframe animation]} unit]
+  (case type
+    :keyframe  (format-time (:time keyframe) unit)
+    :easing    (tr "workspace.animation.easing")
+    :animation (motion/animation-label animation)
+    :duration  (tr "workspace.animation.drag-duration")
+    nil))
+
 (mf/defc timeline*
   []
-  (let [anim       (mf/deref refs/workspace-animation)
+  (let [anim       (mf/deref ref:dock-animation)
         timelines  (mf/deref ref:timelines)
         objects    (mf/deref refs/workspace-page-objects)
         selected   (mf/deref refs/selected-shapes)
@@ -1268,7 +1118,7 @@
         selected-kfs (get anim :selected-kfs #{})
 
         ;; Easing editor of the segment starting at a keyframe, opened from
-        ;; the button of the segment.
+        ;; the button of the segment and placed at its client `rect`.
         easing*     (mf/use-state nil)
         easing      (deref easing*)
         easing-kf   (when (some? easing)
@@ -1278,12 +1128,11 @@
 
         on-edit-easing
         (mf/use-fn
-         (fn [event shape-id keyframe-id]
-           (let [rect (dom/get-bounding-rect (dom/get-current-target event))]
-             (reset! easing* {:shape-id shape-id
-                              :keyframe-id keyframe-id
-                              :top (:top rect)
-                              :left (+ (:left rect) (/ (:width rect) 2))}))))
+         (fn [rect shape-id keyframe-id]
+           (reset! easing* {:shape-id shape-id
+                            :keyframe-id keyframe-id
+                            :top (:top rect)
+                            :left (+ (:left rect) (/ (:width rect) 2))})))
 
         on-close-easing
         (mf/use-fn #(reset! easing* nil))
@@ -1296,23 +1145,28 @@
              (dom/stop-propagation event)
              (on-close-easing))))
 
-        ruler-ref  (mf/use-ref nil)
+        ;; The view of the rows and the time axis, which it fills at zoom 1.
+        view-size*  (mf/use-state nil)
+        view-size   (deref view-size*)
+        view-width  (get view-size :width 0)
+        view-height (get view-size :height 0)
 
-        ;; The tick spacing depends on the ruler width.
-        ruler-width* (mf/use-state 0)
-        observe-ruler
-        (r/use-resize-observer #(reset! ruler-width* (:width %2)))
+        observe-view
+        (r/use-resize-observer
+         (fn [_ {:keys [width height]}]
+           (let [size {:width width :height height}]
+             (swap! view-size* #(if (= % size) % size)))))
 
-        on-ruler-node
+        scroll-ref (mf/use-ref nil)
+
+        on-scroll-node
         (mf/use-fn
-         (mf/deps observe-ruler)
+         (mf/deps observe-view)
          (fn [node]
-           (mf/set-ref-val! ruler-ref node)
-           (observe-ruler node)))
+           (mf/set-ref-val! scroll-ref node)
+           (observe-view node)))
 
-        ruler-width (deref ruler-width*)
-
-        ;; Horizontal zoom of the time axis; ruler and lanes scroll together.
+        ;; Horizontal zoom of the time axis.
         zoom*      (mf/use-state 1)
         zoom       (deref zoom*)
         latest     (mf/with-memo [timeline]
@@ -1327,8 +1181,14 @@
         axis-zoom  (if (some? axis-lock)
                      (:zoom axis-lock)
                      (content-zoom duration zoom span))
-        tick       (tick-step span ruler-width)
-        ticks      (range 0 (inc span) (/ tick 2))
+        axis-width (lanes/axis-width view-width axis-zoom)
+        tick       (tick-step span axis-width)
+
+        tick-label
+        (mf/use-fn
+         (mf/deps tick unit)
+         (fn [time]
+           (format-tick time tick unit)))
 
         ;; Drags snap to the playhead, the keyframes and the ends of the
         ;; animations and of the timeline, unless Ctrl/Cmd is held; a line
@@ -1338,19 +1198,19 @@
         _              (mf/set-ref-val! snap-state-ref {:timeline timeline
                                                         :playhead playhead
                                                         :span span
-                                                        :ruler-width ruler-width})
+                                                        :axis-width axis-width})
         snap-line*     (mf/use-state nil)
         snap-line      (deref snap-line*)
 
         snap-target
         (mf/use-fn
          (fn [time event {:keys [playhead?] :or {playhead? true} :as except}]
-           (let [{:keys [timeline playhead span ruler-width]} (mf/ref-val snap-state-ref)]
+           (let [{:keys [timeline playhead span axis-width]} (mf/ref-val snap-state-ref)]
              (when-not (kbd/mod? event)
                (cta/snap-time (cond-> (cta/snap-times timeline except)
                                 playhead? (conj playhead))
                               time
-                              (* snap-distance (/ span (max 1 ruler-width))))))))
+                              (* snap-distance (/ span (max 1 axis-width))))))))
 
         show-snap
         (mf/use-fn
@@ -1381,23 +1241,28 @@
            :show show-snap
            :unit unit})
 
-        scroll-ref (mf/use-ref nil)
         ;; Scroll position to apply once the new zoom is laid out.
         anchor-ref (mf/use-ref nil)
 
         set-zoom
         (mf/use-fn
-         (mf/deps zoom playhead span duration ruler-width)
+         (mf/deps zoom span duration latest axis-width)
          (fn [new-zoom]
            (let [new-zoom (mth/clamp new-zoom min-zoom max-zoom)
                  from     (content-zoom duration zoom span)
-                 to       (content-zoom duration new-zoom (axis-span duration new-zoom latest))]
+                 to       (content-zoom duration new-zoom (axis-span duration new-zoom latest))
+                 playhead (dwa/playhead @st/state)]
              ;; Keep the playhead at the same place on screen.
              (when-let [^js node (mf/ref-val scroll-ref)]
-               (let [x (* (/ playhead (max 1 span)) ruler-width)]
+               (let [x (* (/ playhead (max 1 span)) axis-width)]
                  (mf/set-ref-val! anchor-ref (+ (.-scrollLeft node)
                                                 (* x (- (/ to from) 1))))))
              (reset! zoom* new-zoom))))
+
+        ;; The zoom of the last render, for the wheel, which zooms from it
+        ;; once per frame.
+        zoom-state-ref (mf/use-ref nil)
+        _              (mf/set-ref-val! zoom-state-ref {:zoom zoom :set-zoom set-zoom})
 
         on-zoom-change
         (mf/use-fn
@@ -1415,9 +1280,39 @@
         rows       (mf/with-memo [objects board-id timeline expanded]
                      (when (some? timeline)
                        (timeline-rows objects board-id timeline expanded)))
-        values     (mf/with-memo [timeline objects playhead]
+
+        ;; The selection of the last render and the layers newly selected,
+        ;; which the rows scroll to once they show (see the effects).
+        selected-ref (mf/use-ref nil)
+        reveal-ref   (mf/use-ref nil)
+
+        ;; The rows the view shows: only their labels are rendered (and a
+        ;; few more, see `sync-scroll!`), the lanes draw only them.
+        row-count   (count rows)
+        row-window* (mf/use-state [0 0])
+        row-window  (deref row-window*)
+        row-start   (min (first row-window) row-count)
+        row-end     (min (second row-window) row-count)
+        ;; What the view scrolls over: the rows under the ruler and the
+        ;; markers, and a hint while the timeline has no tracks.
+        hint?       (empty? (:tracks timeline))
+        content-height (+ lanes/header-height
+                          (* row-count lanes/row-height)
+                          (if hint? hint-height 0))
+
+        ;; The values at the playhead of the properties with a label, so
+        ;; scrubbing does not work them out for the whole board.
+        resolved   (mf/with-memo [timeline objects]
                      (when (some? timeline)
-                       (-> (cta/resolve-animations timeline objects)
+                       (cta/resolve-animations timeline objects)))
+        shown-ids  (mf/with-memo [rows row-start row-end]
+                     (into #{}
+                           (comp (filter #(= :property (:type %)))
+                                 (map :id))
+                           (subvec (or rows []) row-start row-end)))
+        values     (mf/with-memo [resolved shown-ids playhead]
+                     (when (some? resolved)
+                       (-> (update resolved :tracks select-keys shown-ids)
                            (cta/values-at playhead))))
 
         position-offsets
@@ -1457,12 +1352,12 @@
 
         on-bar-move
         (mf/use-fn
-         (mf/deps span ruler-width)
+         (mf/deps span axis-width)
          (fn [event]
            (when-let [{:keys [base ids range mode x0]} (mf/ref-val bar-drag-ref)]
              (let [[start end] range
                    dx     (- (:x (dom/get-client-position event)) x0)
-                   dt     (mth/round (* dx (/ span (max 1 ruler-width))))
+                   dt     (mth/round (* dx (/ span (max 1 axis-width))))
                    ;; the keyframes of the bar move, they snap to the others
                    except {:keyframe-ids (into #{}
                                                (comp (mapcat #(dm/get-in base [:tracks % :keyframes]))
@@ -1523,13 +1418,13 @@
 
         on-animation-move
         (mf/use-fn
-         (mf/deps span ruler-width)
+         (mf/deps span axis-width)
          (fn [event]
            (when-let [{:keys [base shape-id animation mode x0]} (mf/ref-val animation-drag-ref)]
              (let [start  (:start animation)
                    end    (cta/animation-end animation)
                    dx     (- (:x (dom/get-client-position event)) x0)
-                   dt     (mth/round (* dx (/ span (max 1 ruler-width))))
+                   dt     (mth/round (* dx (/ span (max 1 axis-width))))
                    except {:animation-ids #{(:id animation)}}
                    [start end]
                    (case mode
@@ -1578,7 +1473,6 @@
                                                       :undo-id undo-id})
                  (st/emit! (dwu/start-undo-transaction undo-id)))))))
 
-        drag-ref   (mf/use-ref false)
         dock-ref   (mf/use-ref nil)
 
         ;; Dragging the top edge resizes the dock up to half of the window.
@@ -1588,37 +1482,34 @@
          dock-height     :size}
         (r/use-resize-hook :timeline-dock 240 120 "0.5" :y true :bottom)
 
+        ;; Where the lanes are (see `lanes/draw!`). The scroll is kept here
+        ;; as the view scrolls (see `sync-scroll!`), which does not render
+        ;; the timeline again.
+        geo-ref    (mf/use-ref {:scroll-x 0 :scroll-y 0})
+        _          (mf/set-ref-val! geo-ref (assoc (mf/ref-val geo-ref)
+                                                   :width (max 0 (- view-width lanes/label-width))
+                                                   :height view-height
+                                                   :span span
+                                                   :axis-width axis-width))
+        canvas-ref (mf/use-ref nil)
+
+        ;; The client rect of the time axis, which may reach past the view.
+        axis-rect
+        (mf/use-fn
+         (fn []
+           (let [left (:left (dom/get-bounding-rect (mf/ref-val canvas-ref)))
+                 {:keys [axis-width scroll-x]} (mf/ref-val geo-ref)
+                 x0   (- (+ left lanes/start-gap) scroll-x)]
+             {:left x0 :width axis-width :right (+ x0 axis-width)})))
+
         on-scrub
         (mf/use-fn
-         (mf/deps span)
+         (mf/deps span axis-rect)
          (fn [event]
-           (let [node   (mf/ref-val ruler-ref)
-                 t      (pointer->time event node span)
+           (let [t      (pointer->time event (axis-rect) span)
                  target (snap-target t event {:playhead? false})]
              (show-snap target)
              (st/emit! (dwa/set-playhead (or target t))))))
-
-        on-ruler-down
-        (mf/use-fn
-         (mf/deps span)
-         (fn [event]
-           (dom/capture-pointer event)
-           (mf/set-ref-val! drag-ref true)
-           (on-scrub event)))
-
-        on-ruler-move
-        (mf/use-fn
-         (mf/deps span)
-         (fn [event]
-           (when (mf/ref-val drag-ref)
-             (on-scrub event))))
-
-        on-ruler-up
-        (mf/use-fn
-         (fn [event]
-           (dom/release-pointer event)
-           (mf/set-ref-val! drag-ref false)
-           (show-snap nil)))
 
         ;; Dragging the end of the timeline changes its duration, as one
         ;; undo step. The end follows the pointer, snapping like the other
@@ -1629,10 +1520,10 @@
 
         grow-duration
         (mf/use-fn
+         (mf/deps axis-rect)
          (fn grow []
            (when-let [{:keys [x] :as drag} (mf/ref-val duration-drag-ref)]
-             (let [rect (dom/get-bounding-rect (mf/ref-val ruler-ref))
-                   over (- x (:right rect))]
+             (let [over (- x (:right (axis-rect)))]
                (if (pos? over)
                  (let [{:keys [timeline span]} (mf/ref-val snap-state-ref)]
                    (st/emit! (dwa/set-duration (+ (:duration timeline)
@@ -1642,11 +1533,11 @@
 
         on-duration-move
         (mf/use-fn
-         (mf/deps grow-duration)
+         (mf/deps grow-duration axis-rect)
          (fn [event]
            (when-let [{:keys [x0] :as drag} (mf/ref-val duration-drag-ref)]
              (let [x      (:x (dom/get-client-position event))
-                   rect   (dom/get-bounding-rect (mf/ref-val ruler-ref))
+                   rect   (axis-rect)
                    moved? (or (:moved? drag) (> (mth/abs (- x x0)) 3))]
                (mf/set-ref-val! duration-drag-ref (assoc drag :x x :moved? moved?))
                (cond
@@ -1695,75 +1586,6 @@
                                                    :x0 (:x (dom/get-client-position event))})
                (st/emit! (dwu/start-undo-transaction undo-id))))))
 
-        ;; Box selection of keyframes. Positions are kept in the tracks, so
-        ;; the box and its keyframes stay together when the timeline
-        ;; scrolls while dragging.
-        tracks-ref       (mf/use-ref nil)
-        marquee-ref      (mf/use-ref nil)
-        marquee-drag-ref (mf/use-ref nil)
-
-        pointer-in-tracks
-        (mf/use-fn
-         (fn [event]
-           (let [tracks (mf/ref-val tracks-ref)
-                 origin (dom/get-bounding-rect tracks)
-                 label  (.querySelector ^js tracks (str "." (stl/css :row-label)))
-                 ;; The box stays in the tracks, right of the labels: they
-                 ;; cover the keyframes scrolled under them.
-                 min-x  (if (some? label)
-                          (- (:right (dom/get-bounding-rect label)) (:left origin))
-                          0)
-                 {:keys [x y]} (dom/get-client-position event)]
-             [(mth/clamp (- x (:left origin)) min-x (:width origin))
-              (mth/clamp (- y (:top origin)) 0 (:height origin))])))
-
-        on-marquee-down
-        (mf/use-fn
-         (mf/deps selected-kfs pointer-in-tracks)
-         (fn [event]
-           (let [tracks (mf/ref-val tracks-ref)]
-             (when (and (some? tracks)
-                        (dom/left-mouse? event)
-                        (marquee-origin? event tracks))
-               (capture-current-target event)
-               (mf/set-ref-val! marquee-drag-ref
-                                {:start (pointer-in-tracks event)
-                                 :additive? (kbd/shift? event)
-                                 :base selected-kfs
-                                 :hits (or (collect-keyframe-hits tracks (dom/get-bounding-rect tracks)) [])
-                                 :moved? false
-                                 :emitted nil})))))
-
-        on-marquee-move
-        (mf/use-fn
-         (mf/deps pointer-in-tracks)
-         (fn [event]
-           (when-let [{:keys [start additive? base hits moved? emitted] :as drag}
-                      (mf/ref-val marquee-drag-ref)]
-             (let [[x0 y0] start
-                   [x y]   (pointer-in-tracks event)]
-               ;; Once a box, it follows the pointer even back to its start.
-               (when (or moved? (marquee-drag? x0 y0 x y))
-                 (let [rect     (rect-from-points x0 y0 x y)
-                       picked   (keyframes-in-rect hits rect)
-                       selected (if additive? (into base picked) picked)]
-                   (show-marquee! (mf/ref-val marquee-ref) rect)
-                   (mf/set-ref-val! marquee-drag-ref
-                                    (assoc drag :moved? true :emitted selected))
-                   (when (not= selected emitted)
-                     (st/emit! (dwa/select-keyframes selected)))))))))
-
-        on-marquee-up
-        (mf/use-fn
-         (fn [event]
-           (when-let [{:keys [moved? additive?]} (mf/ref-val marquee-drag-ref)]
-             (mf/set-ref-val! marquee-drag-ref nil)
-             (release-current-target event)
-             (show-marquee! (mf/ref-val marquee-ref) nil)
-             (when-not moved?
-               (when-not additive?
-                 (st/emit! (dwa/select-keyframes [])))))))
-
         ;; A keyframe or a property selects its layer, so the design tab
         ;; changes that layer and not the one selected before.
         on-select-keyframe-layer
@@ -1771,16 +1593,6 @@
          (mf/deps selected)
          (fn [event shape-id]
            (select-layer event shape-id selected)))
-
-        ;; A double click on the lane of a property adds a keyframe there.
-        on-tracks-double-click
-        (mf/use-fn
-         (mf/deps span on-select-keyframe-layer)
-         (fn [event]
-           (when-let [[node shape-id property index] (lane-at event)]
-             (on-select-keyframe-layer event shape-id)
-             (st/emit! (dwa/add-keyframe-at shape-id property index
-                                            (pointer->time event node span))))))
 
         ;; Right-click menu of a whole track (`property` nil) or of one
         ;; property lane.
@@ -1819,6 +1631,320 @@
            (let [{:keys [x y]} (dom/get-client-position event)]
              (reset! menu* {:top y :left x :marker-id marker-id}))))
 
+        ;; The row under the pointer, on its label or its lane.
+        hover-row*     (mf/use-state nil)
+        hover-row      (deref hover-row*)
+        hover-row-ref  (mf/use-ref nil)
+        ;; What of the lanes is under the pointer (see `lanes/hit`).
+        hover-ref      (mf/use-ref nil)
+        ;; The press on the lanes being dragged: a keyframe, the playhead
+        ;; on the ruler, a box selection or an easing button.
+        press-ref      (mf/use-ref nil)
+
+        ;; The colours of the lanes (see `lanes/read-palette`), the labels
+        ;; of the rows and the lane of the markers, which move by the scroll.
+        palette-ref     (mf/use-ref nil)
+        strip-ref       (mf/use-ref nil)
+        marker-lane-ref (mf/use-ref nil)
+
+        ;; What the lanes show, read as they draw: they draw again on their
+        ;; own as the view scrolls and as the playhead plays.
+        scene-ref (mf/use-ref nil)
+        _         (mf/set-ref-val! scene-ref {:rows rows
+                                              :timeline timeline
+                                              :selected selected
+                                              :selected-kfs selected-kfs
+                                              :duration duration
+                                              :span span
+                                              :tick tick
+                                              :tick-label tick-label
+                                              :animation-label motion/animation-label
+                                              :markers (:markers timeline)
+                                              :snap-line snap-line
+                                              :easing easing})
+
+        draw-lanes
+        (mf/use-fn
+         (fn []
+           (let [canvas  (mf/ref-val canvas-ref)
+                 palette (mf/ref-val palette-ref)
+                 geo     (mf/ref-val geo-ref)]
+             (when (and (some? canvas) (some? palette)
+                        (pos? (:width geo)) (pos? (:height geo)))
+               (let [press (mf/ref-val press-ref)]
+                 (lanes/draw! canvas geo
+                              (assoc (mf/ref-val scene-ref)
+                                     :playhead (deref ref:playhead)
+                                     :hover (mf/ref-val hover-ref)
+                                     :hover-row (mf/ref-val hover-row-ref)
+                                     :marquee (when (= :marquee (:kind press)) (:rect press)))
+                              (lanes/read-palette palette)
+                              (.-fontFamily (js/getComputedStyle palette))))))))
+
+        ;; The view stays put as the timeline scrolls: the labels, the
+        ;; markers and the lanes move in it by the scroll, and the labels of
+        ;; the rows that come into view are rendered.
+        sync-scroll!
+        (mf/use-fn
+         (fn []
+           (when-let [^js node (mf/ref-val scroll-ref)]
+             (let [scroll-x (.-scrollLeft node)
+                   scroll-y (.-scrollTop node)
+                   geo      (assoc (mf/ref-val geo-ref) :scroll-x scroll-x :scroll-y scroll-y)
+                   window   (lanes/visible-rows geo row-overscan)]
+               (mf/set-ref-val! geo-ref geo)
+               (some-> (mf/ref-val strip-ref)
+                       (dom/set-css-property! "transform" (dm/str "translateY(" (- scroll-y) "px)")))
+               (some-> (mf/ref-val marker-lane-ref)
+                       (dom/set-css-property! "transform" (dm/str "translateX(" (- scroll-x) "px)")))
+               (swap! row-window* #(if (= % window) % window))))))
+
+        on-scroll
+        (mf/use-fn
+         (mf/deps sync-scroll! draw-lanes)
+         (fn [_]
+           (sync-scroll!)
+           (draw-lanes)))
+
+        set-hover-row
+        (mf/use-fn
+         (fn [row-index]
+           (when (not= row-index (mf/ref-val hover-row-ref))
+             (mf/set-ref-val! hover-row-ref row-index)
+             (reset! hover-row* row-index))))
+
+        on-label-hover
+        (mf/use-fn
+         (mf/deps set-hover-row draw-lanes)
+         (fn [row-index]
+           (set-hover-row row-index)
+           (draw-lanes)))
+
+        update-hover!
+        (mf/use-fn
+         (mf/deps unit set-hover-row draw-lanes)
+         (fn [target]
+           (when (not= (hover-key target) (hover-key (mf/ref-val hover-ref)))
+             (mf/set-ref-val! hover-ref target)
+             (when-let [^js canvas (mf/ref-val canvas-ref)]
+               (set! (.. canvas -style -cursor) (lanes-cursor target))
+               (set! (.-title canvas) (or (lanes-title target unit) "")))
+             (set-hover-row (:row target))
+             (draw-lanes))))
+
+        canvas-point
+        (mf/use-fn
+         (fn [event]
+           (let [{:keys [left top]} (dom/get-bounding-rect (mf/ref-val canvas-ref))
+                 {:keys [x y]}      (dom/get-client-position event)]
+             [(- x left) (- y top)])))
+
+        on-lanes-down
+        (mf/use-fn
+         (mf/deps canvas-point on-duration-down on-bar-down on-animation-down on-scrub)
+         (fn [event]
+           (let [[x y]  (canvas-point event)
+                 geo    (mf/ref-val geo-ref)
+                 scene  (mf/ref-val scene-ref)
+                 target (lanes/hit geo scene x y)
+                 left?  (dom/left-mouse? event)]
+             (case (:type target)
+               :duration
+               (on-duration-down event)
+
+               :bar
+               (on-bar-down event (:shape-id target) (:mode target))
+
+               :animation
+               (on-animation-down event (:shape-id target) (:animation target) (:mode target))
+
+               :ruler
+               (when left?
+                 (dom/capture-pointer event)
+                 (mf/set-ref-val! press-ref {:kind :scrub})
+                 (on-scrub event))
+
+               :keyframe
+               (when left?
+                 (let [{:keys [shape-id keyframe locked?]} target
+                       selected-kfs (:selected-kfs scene)
+                       kf-ref       {:shape-id shape-id :keyframe-id (:id keyframe)}
+                       selected?    (contains? selected-kfs kf-ref)]
+                   (dom/capture-pointer event)
+                   (if locked?
+                     ;; A locked keyframe stays where it is.
+                     (mf/set-ref-val! press-ref {:kind :keyframe :target target})
+                     (let [undo-id (js/Symbol)]
+                       (mf/set-ref-val! press-ref
+                                        {:kind :keyframe
+                                         :target target
+                                         :x0 x
+                                         :undo-id undo-id
+                                         :base (:timeline scene)
+                                         :selected? selected?
+                                         ;; a selected keyframe takes the others along
+                                         :moving (if (and selected? (> (count selected-kfs) 1))
+                                                   selected-kfs
+                                                   #{kf-ref})})
+                       (st/emit! (dwu/start-undo-transaction undo-id))))))
+
+               :easing
+               (when left?
+                 (dom/capture-pointer event)
+                 (mf/set-ref-val! press-ref {:kind :easing :target target}))
+
+               ;; Box selection of keyframes. Positions are kept on what the
+               ;; view scrolls over, so the box and its keyframes stay
+               ;; together when the timeline scrolls while dragging.
+               (:segment :lane :row :empty)
+               (when left?
+                 (dom/capture-pointer event)
+                 (mf/set-ref-val! press-ref {:kind :marquee
+                                             :start (lanes/content-point geo x y)
+                                             :additive? (kbd/shift? event)
+                                             :base (:selected-kfs scene)
+                                             :hits (lanes/keyframe-boxes geo scene)
+                                             :moved? false}))
+
+               nil))))
+
+        on-lanes-move
+        (mf/use-fn
+         (mf/deps canvas-point span axis-rect on-scrub update-hover!)
+         (fn [event]
+           (let [[x y] (canvas-point event)
+                 press (mf/ref-val press-ref)]
+             (case (:kind press)
+               :scrub
+               (on-scrub event)
+
+               :keyframe
+               (when (and (some? (:undo-id press))
+                          (or (:moved? press) (> (mth/abs (- x (:x0 press))) drag-threshold)))
+                 (let [{:keys [base moving target]} press
+                       t    (pointer->time event (axis-rect) span)
+                       to   (snap-target t event {:keyframe-ids (into #{} (map :keyframe-id) moving)})
+                       from (:time (:keyframe target))]
+                   (mf/set-ref-val! press-ref (assoc press :moved? true))
+                   (show-snap to)
+                   (st/emit! (dwa/shift-keyframes-from base moving (- (or to t) from)))))
+
+               :marquee
+               (let [{:keys [start additive? base hits moved? emitted]} press
+                     [x0 y0] start
+                     [x y]   (lanes/content-point (mf/ref-val geo-ref) x y)]
+                 ;; Once a box, it follows the pointer even back to its start.
+                 (when (or moved? (marquee-drag? x0 y0 x y))
+                   (let [rect     (rect-from-points x0 y0 x y)
+                         picked   (keyframes-in-rect hits rect)
+                         selected (if additive? (into base picked) picked)]
+                     (mf/set-ref-val! press-ref (assoc press :moved? true :emitted selected :rect rect))
+                     (draw-lanes)
+                     (when (not= selected emitted)
+                       (st/emit! (dwa/select-keyframes selected))))))
+
+               ;; What is under the pointer, unless it drags a bar, a block
+               ;; or the end of the timeline.
+               (when (zero? (.-buttons ^js event))
+                 (update-hover! (lanes/hit (mf/ref-val geo-ref) (mf/ref-val scene-ref) x y)))))))
+
+        on-lanes-up
+        (mf/use-fn
+         (mf/deps canvas-point on-edit-easing draw-lanes)
+         (fn [event]
+           (when-let [press (mf/ref-val press-ref)]
+             (mf/set-ref-val! press-ref nil)
+             (release-pointer event)
+             (case (:kind press)
+               :scrub
+               (show-snap nil)
+
+               ;; A click selects the keyframe (and its layer) and moves the
+               ;; playhead to it, a locked one only the playhead. A dragged
+               ;; one keeps the ones it took along.
+               :keyframe
+               (let [{:keys [target undo-id moved? selected?]} press
+                     {:keys [shape-id keyframe locked?]} target
+                     kf-id (:id keyframe)
+                     time  (or (->> (dm/get-in (dwa/current-timeline @st/state)
+                                               [:tracks shape-id :keyframes])
+                                    (d/seek #(= kf-id (:id %)))
+                                    (:time))
+                               (:time keyframe))]
+                 (show-snap nil)
+                 (select-layer event shape-id (:selected (mf/ref-val scene-ref)))
+                 (if (or locked? (and moved? selected?))
+                   (st/emit! (dwa/set-playhead time))
+                   (st/emit! (dwa/select-keyframe shape-id kf-id (and (not moved?) (kbd/shift? event)))
+                             (dwa/set-playhead time)))
+                 (when (some? undo-id)
+                   (st/emit! (dwu/commit-undo-transaction undo-id))))
+
+               :easing
+               (let [{:keys [target]} press
+                     [x y] (canvas-point event)]
+                 (when (and (not (:locked? target))
+                            (lanes/in-rect? (:rect target) x y))
+                   (let [{:keys [left top]} (dom/get-bounding-rect (mf/ref-val canvas-ref))
+                         rect (:rect target)]
+                     (on-edit-easing {:left (+ left (:x rect))
+                                      :top (+ top (:y rect))
+                                      :width (:width rect)}
+                                     (:shape-id target)
+                                     (:id (:from target))))))
+
+               ;; A click on nothing clears the keyframe selection.
+               :marquee
+               (when-not (or (:moved? press) (:additive? press))
+                 (st/emit! (dwa/select-keyframes [])))
+
+               nil)
+             (draw-lanes))))
+
+        on-lanes-leave
+        (mf/use-fn
+         (mf/deps update-hover!)
+         (fn [_]
+           (when (nil? (mf/ref-val press-ref))
+             (update-hover! nil))))
+
+        ;; A double click on a keyframe deletes it; on the lane of a
+        ;; property it adds a keyframe there.
+        on-lanes-double-click
+        (mf/use-fn
+         (mf/deps canvas-point axis-rect span on-select-keyframe-layer)
+         (fn [event]
+           (let [[x y]  (canvas-point event)
+                 target (lanes/hit (mf/ref-val geo-ref) (mf/ref-val scene-ref) x y)
+                 {:keys [type shape-id keyframe locked?]} target]
+             (case type
+               :keyframe
+               (when-not locked?
+                 (st/emit! (dwa/delete-keyframe shape-id (:id keyframe))
+                           (dwa/select-keyframe nil nil)))
+
+               (:segment :lane)
+               (do (on-select-keyframe-layer event shape-id)
+                   (st/emit! (dwa/add-keyframe-at shape-id (:property target) (:index target)
+                                                  (pointer->time event (axis-rect) span))))
+
+               nil))))
+
+        on-lanes-context-menu
+        (mf/use-fn
+         (mf/deps canvas-point on-context-menu)
+         (fn [event]
+           (dom/prevent-default event)
+           (let [[x y] (canvas-point event)
+                 geo   (mf/ref-val geo-ref)
+                 row   (some->> (lanes/row-index geo y)
+                                (get (:rows (mf/ref-val scene-ref))))]
+             (when (and (some? row) (<= 0 x (:width geo)))
+               (case (:type row)
+                 :layer     (on-context-menu event (:id row) nil)
+                 :animation (on-context-menu event (:id row) nil nil (:id (:animation row)))
+                 :property  (on-context-menu event (:id row) (:property row) (:index row)))))))
+
         ;; A click in the dock focuses it; then Delete/Backspace delete the
         ;; selected keyframes, the arrows move them (10 ms, 100 ms with
         ;; Shift) and Cmd/Ctrl+C, X and V copy, cut and paste them at the
@@ -1833,7 +1959,8 @@
              (editing-text? event)
              nil
 
-             (and (m-key? event) (not (kbd/mod? event)) (not (kbd/alt? event)))
+             ;; Shift+M leaves motion mode (see the workspace shortcuts)
+             (and (m-key? event) (not (kbd/mod? event)) (not (kbd/alt? event)) (not (kbd/shift? event)))
              (do (dom/prevent-default event)
                  (dom/stop-propagation event)
                  (st/emit! (dwa/add-marker (tr "workspace.animation.marker-name"
@@ -1973,30 +2100,84 @@
         (when-let [^js node (mf/ref-val scroll-ref)]
           (set! (.-scrollLeft node) left))))
 
-    ;; Ctrl/Cmd + wheel zooms the time axis. The listener is not passive,
-    ;; so it can stop the browser zoom.
-    (mf/with-effect [set-zoom zoom (some? timeline)]
-      (when-let [node (mf/ref-val scroll-ref)]
-        (let [on-wheel
-              (fn [^js event]
-                (when (or (.-ctrlKey event) (.-metaKey event))
-                  (.preventDefault event)
-                  (set-zoom (* zoom (if (pos? (.-deltaY event)) 0.9 1.1)))))
-              key (events/listen node "wheel" on-wheel #js {:passive false})]
-          #(events/unlistenByKey key))))
+    ;; Layers selected on the canvas or in the layers panel show in the
+    ;; timeline: their parents open and, once their rows are there, the
+    ;; rows scroll to the first unless one of their rows is in view (as
+    ;; the one clicked in the timeline is).
+    (mf/with-layout-effect [selected]
+      (let [prev  (mf/ref-val selected-ref)
+            added (into #{} (remove #(contains? prev %)) selected)]
+        (mf/set-ref-val! selected-ref selected)
+        (when (seq added)
+          (let [open (expand-to expanded objects board-id timeline added)]
+            (mf/set-ref-val! reveal-ref {:ids added :expanded open})
+            (when-not (identical? open expanded)
+              (reset! expanded* open))))))
 
-    ;; While playing a zoomed timeline, page the view to keep the playhead
-    ;; visible.
-    (mf/with-layout-effect [playhead zoom span]
-      (when (and playing? (> zoom 1))
-        (when-let [^js node (mf/ref-val scroll-ref)]
-          (when-let [^js ruler (mf/ref-val ruler-ref)]
-            (let [label (.-offsetLeft ruler)
-                  x     (+ label (* (/ playhead (max 1 span)) (.-clientWidth ruler)))
-                  left  (.-scrollLeft node)]
-              (when (or (< x (+ left label))
-                        (> x (+ left (.-clientWidth node))))
-                (set! (.-scrollLeft node) (- x label))))))))
+    (mf/with-layout-effect [selected expanded]
+      (when-let [{:keys [ids] :as reveal} (mf/ref-val reveal-ref)]
+        (when (identical? expanded (:expanded reveal))
+          (mf/set-ref-val! reveal-ref nil)
+          (when-let [^js node (mf/ref-val scroll-ref)]
+            (let [geo      (assoc (mf/ref-val geo-ref) :scroll-y (.-scrollTop node))
+                  indices  (keep-indexed (fn [index row]
+                                           (when (contains? ids (:id row)) index))
+                                         rows)
+                  scroll-y (lanes/scroll-to-rows geo indices)]
+              (when (some? scroll-y)
+                (set! (.-scrollTop node) scroll-y)))))))
+
+    ;; The labels, the markers and the lanes where the timeline is
+    ;; scrolled to, after each render.
+    (mf/with-layout-effect nil
+      (sync-scroll!)
+      (draw-lanes))
+
+    ;; While it plays the dock does not render again (see
+    ;; `ref:dock-animation`): the lanes follow the playhead on their own.
+    (mf/with-effect [draw-lanes]
+      (add-watch ref:playhead ::lanes
+                 (fn [_ _ old new]
+                   (when (not= old new)
+                     (draw-lanes))))
+      #(remove-watch ref:playhead ::lanes))
+
+    ;; The lanes take their colours from the theme (see `lanes/palette`).
+    (mf/with-effect [draw-lanes]
+      (theme/add-color-scheme-listener! draw-lanes))
+
+    ;; Ctrl/Cmd + wheel, and a pinch on a trackpad, zoom the time axis
+    ;; like the canvas: out when scrolled down, by the pixels scrolled,
+    ;; once per frame. The listener is not passive, so it can stop the
+    ;; browser zoom.
+    (mf/with-effect [(some? timeline)]
+      (when-let [node (mf/ref-val scroll-ref)]
+        (let [scale (volatile! 1)
+              frame (volatile! nil)
+
+              zoom!
+              (fn []
+                (let [{:keys [zoom set-zoom]} (mf/ref-val zoom-state-ref)]
+                  (vreset! frame nil)
+                  (set-zoom (* zoom @scale))
+                  (vreset! scale 1)))
+
+              on-wheel
+              (fn [^js event]
+                ;; the wheel fields are on the native event only
+                (let [event (.getBrowserEvent event)]
+                  (when (or (kbd/ctrl? event) (kbd/meta? event))
+                    (dom/prevent-default event)
+                    (let [wheel ^js (nw/normalize-wheel event)
+                          delta (+ (.-pixelX wheel) (.-pixelY wheel))
+                          step  (+ 1 (mth/abs (* zoom-per-pixel delta)))]
+                      (vswap! scale * (if (pos? delta) (/ 1 step) step))
+                      (when (nil? @frame)
+                        (vreset! frame (js/requestAnimationFrame zoom!)))))))
+
+              key (events/listen node "wheel" on-wheel #js {:passive false})]
+          #(do (events/unlistenByKey key)
+               (some-> @frame js/cancelAnimationFrame)))))
 
     ;; The dock sits in its own row of the workspace grid. Its height is
     ;; shared with the sidebars through a CSS variable on the workspace
@@ -2022,18 +2203,43 @@
          [:> toolbar* {:timeline timeline
                        :playing? playing?
                        :recording? recording?
-                       :playhead playhead
                        :unit unit
                        :zoom zoom
                        :on-zoom-change on-zoom-change}]
+         [:> playhead-follower* {:scroll-ref scroll-ref
+                                 :geo-ref geo-ref
+                                 :zoom zoom
+                                 :span span
+                                 :playing? playing?}]
 
          [:div {:class (stl/css :timeline-body)}
           [:div {:class (stl/css :timeline-main)}
            [:div {:class (stl/css :timeline-scroll)
-                  :ref scroll-ref}
+                  :ref on-scroll-node
+                  :on-scroll on-scroll}
             [:div {:class (stl/css :timeline-content)
-                   :style #js {"--timeline-zoom" axis-zoom}}
-             [:div {:class (stl/css :ruler-row)}
+                   :style #js {"width" (dm/str (lanes/content-width axis-width) "px")
+                               "height" (dm/str content-height "px")}}
+             [:div {:class (stl/css :timeline-view)
+                    :style #js {"width" (dm/str view-width "px")
+                                "height" (dm/str view-height "px")}}
+              [:canvas {:class (stl/css :lanes)
+                        :ref canvas-ref
+                        :on-pointer-down on-lanes-down
+                        :on-pointer-move on-lanes-move
+                        :on-pointer-up on-lanes-up
+                        :on-lost-pointer-capture on-lanes-up
+                        :on-pointer-leave on-lanes-leave
+                        :on-double-click on-lanes-double-click
+                        :on-context-menu on-lanes-context-menu}]
+              [:div {:class (stl/css :palette)
+                     :ref palette-ref
+                     :aria-hidden true}
+               (for [[color css] lanes/palette]
+                 [:span {:key (name color)
+                         :data-color (name color)
+                         :style #js {"color" css}}])]
+
               [:div {:class (stl/css :ruler-corner)}
                [:button {:type "button"
                          :class (stl/css :chevron)
@@ -2042,117 +2248,75 @@
                                   (tr "workspace.animation.collapse-all"))
                          :on-click on-toggle-all-layers}
                 [:> i/icon* {:icon-id (if collapsed? i/arrow-right i/arrow-down) :size "s"}]]]
-              [:div {:class (stl/css :ruler)
-                     :ref on-ruler-node
-                     :on-pointer-down on-ruler-down
-                     :on-pointer-move on-ruler-move
-                     :on-pointer-up on-ruler-up}
-               (for [t ticks
-                     :let [major? (zero? (mod t tick))]]
-                 [:div {:key (dm/str t)
-                        :class (stl/css-case :tick true :major major?)
-                        :style #js {"left" (time->pct t span)}}
-                  (when (and major? (< t span))
-                    [:span {:class (stl/css :tick-label)} (format-tick t tick unit)])])
-               (when (> span duration)
-                 [:div {:class (stl/css :duration-shade)
-                        :style #js {"left" (time->pct duration span)}}])
-               [:div {:class (stl/css :duration-handle)
-                      :style #js {"left" (time->pct duration span)}
-                      :title (tr "workspace.animation.drag-duration")
-                      :on-pointer-down on-duration-down}]
-               [:div {:class (stl/css :playhead)
-                      :style #js {"left" (time->pct playhead span)}}
-                [:div {:class (stl/css :playhead-handle)}]]]]
-
-             [:div {:class (stl/css :tracks)
-                    :ref tracks-ref
-                    :on-pointer-down on-marquee-down
-                    :on-pointer-move on-marquee-move
-                    :on-pointer-up on-marquee-up
-                    :on-lost-pointer-capture on-marquee-up
-                    :on-double-click on-tracks-double-click}
-              ;; playhead line spanning the tracks area
-              [:div {:class (stl/css :playhead-axis)}
-               (when (> span duration)
-                 [:div {:class (stl/css :duration-shade)
-                        :style #js {"left" (time->pct duration span)}}])
-               [:div {:class (stl/css :playhead-line)
-                      :style #js {"left" (time->pct playhead span)}}]
-               (for [marker (:markers timeline)]
-                 [:div {:key (dm/str (:id marker))
-                        :class (stl/css :marker-line)
-                        :style #js {"left" (time->pct (:time marker) span)}}])
-               (when (some? snap-line)
-                 [:div {:class (stl/css :snap-line)
-                        :style #js {"left" (time->pct snap-line span)}}])]
 
               [:& (mf/provider snap-context) {:value snap}
                [:> marker-row* {:markers (:markers timeline)
                                 :playhead playhead
                                 :duration span
+                                :axis-width axis-width
                                 :editing marker-edit
+                                :lane-ref marker-lane-ref
                                 :on-edit on-edit-marker
-                                :on-context-menu on-marker-context-menu}]
-               (for [{:keys [type id depth] :as row} rows]
-                 (case type
-                   :layer
-                   [:> layer-row* {:key (dm/str id)
-                                   :shape (:shape row)
-                                   :depth depth
-                                   :expandable? (:expandable? row)
-                                   :expanded? (:expanded? row)
-                                   :selected? (contains? selected id)
-                                   :range (:range row)
-                                   :duration span
-                                   :on-toggle on-toggle-layer
-                                   :on-select on-select-layer
-                                   :on-context-menu on-context-menu
-                                   :on-bar-down on-bar-down}]
+                                :on-context-menu on-marker-context-menu}]]
 
-                   :animation
-                   (let [animation (:animation row)]
-                     [:> animation-row* {:key (dm/str id "-" (:id animation))
+              [:div {:class (stl/css :row-labels)}
+               [:div {:class (stl/css :row-strip)
+                      :ref strip-ref}
+                (for [row-index (range row-start row-end)
+                      :let [{:keys [type id depth] :as row} (get rows row-index)
+                            hovered? (= row-index hover-row)]]
+                  (case type
+                    :layer
+                    [:> layer-row* {:key (dm/str id)
+                                    :row-index row-index
+                                    :shape (:shape row)
+                                    :depth depth
+                                    :expandable? (:expandable? row)
+                                    :expanded? (:expanded? row)
+                                    :selected? (contains? selected id)
+                                    :hovered? hovered?
+                                    :on-toggle on-toggle-layer
+                                    :on-select on-select-layer
+                                    :on-context-menu on-context-menu
+                                    :on-hover on-label-hover}]
+
+                    :animation
+                    (let [animation (:animation row)]
+                      [:> animation-row* {:key (dm/str id "-" (:id animation))
+                                          :row-index row-index
+                                          :shape-id id
+                                          :animation animation
+                                          :depth depth
+                                          :hovered? hovered?
+                                          :on-select on-select-layer
+                                          :on-context-menu on-context-menu
+                                          :on-hover on-label-hover}])
+
+                    (let [property (:property row)
+                          index    (:index row)]
+                      [:> property-row* {:key (dm/str id "-" (name property) "-" index)
+                                         :row-index row-index
+                                         :timeline timeline
                                          :shape-id id
-                                         :animation animation
+                                         :property property
+                                         :index index
                                          :depth depth
-                                         :duration span
-                                         :selected? (contains? selected id)
-                                         :on-select on-select-layer
+                                         :looping? (cta/looping? timeline id property index)
+                                         :hidden? (cta/slot-flag? timeline id :hidden property index)
+                                         :locked? (cta/slot-flag? timeline id :locked property index)
+                                         :value (cta/value-of (get values id) property index)
+                                         :offset (when (nil? index)
+                                                   (get-in position-offsets [id property]))
+                                         :playhead playhead
+                                         :hovered? hovered?
                                          :on-context-menu on-context-menu
-                                         :on-animation-down on-animation-down}])
+                                         :on-select-layer on-select-keyframe-layer
+                                         :on-hover on-label-hover}])))
 
-                   (let [property (:property row)
-                         index    (:index row)]
-                     [:> property-row* {:key (dm/str id "-" (name property) "-" index)
-                                        :timeline timeline
-                                        :shape-id id
-                                        :property property
-                                        :index index
-                                        :depth depth
-                                        :keyframes (cta/property-keyframes timeline id property index)
-                                        :looping? (cta/looping? timeline id property index)
-                                        :hidden? (cta/slot-flag? timeline id :hidden property index)
-                                        :locked? (cta/slot-flag? timeline id :locked property index)
-                                        :value (cta/value-of (get values id) property index)
-                                        :offset (when (nil? index)
-                                                  (get-in position-offsets [id property]))
-                                        :playhead playhead
-                                        :duration span
-                                        :active? (contains? selected id)
-                                        :selected-kfs selected-kfs
-                                        :on-context-menu on-context-menu
-                                        :easing-kf-id (when (= (:shape-id easing) id)
-                                                        (:keyframe-id easing))
-                                        :on-edit-easing on-edit-easing
-                                        :on-select-layer on-select-keyframe-layer}])))]
-
-              [:div {:class (stl/css :marquee)
-                     :ref marquee-ref}]
-
-              (when (empty? (:tracks timeline))
-                [:div {:class (stl/css :tracks-hint)}
-                 (tr "workspace.animation.tracks-hint")])]]]]]])]
+                (when hint?
+                  [:div {:class (stl/css :tracks-hint)
+                         :style #js {"top" (dm/str (* row-count lanes/row-height) "px")}}
+                   (tr "workspace.animation.tracks-hint")])]]]]]]]])]
 
      ;; Above the dock, so it is placed outside of it.
      (when (some? easing-kf)

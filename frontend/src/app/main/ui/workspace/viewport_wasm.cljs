@@ -66,8 +66,20 @@
    [app.util.timers :as ts]
    [app.util.webapi :as webapi]
    [beicon.v2.core :as rx]
+   [okulary.core :as l]
    [promesa.core :as p]
    [rumext.v2 :as mf]))
+
+(def ^:private ref:motion-rest
+  "Whether the animation plays, the board it plays and, while it rests,
+  its playhead: all the viewport reads of it, so playback does not render
+  it again each frame."
+  (l/derived (fn [anim]
+               (let [playing? (boolean (:playing? anim))]
+                 {:playing? playing?
+                  :board-id (get-in anim [:preview :board-id])
+                  :playhead (when-not playing? (get anim :playhead 0))}))
+             refs/workspace-animation =))
 
 ;; --- Viewport
 
@@ -89,13 +101,15 @@
   "`objects` with the `selected` shapes where the animations of
   `timelines` show them at `time`."
   [selected objects timelines time]
-  (let [shown (cltl/shown-shapes timelines objects time)]
-    (reduce (fn [objects id]
-              (if-let [shape (get shown id)]
-                (assoc objects id shape)
-                objects))
-            objects
-            selected)))
+  (if (empty? selected)
+    objects
+    (let [shown (cltl/shown-shapes timelines objects time)]
+      (reduce (fn [objects id]
+                (if-let [shape (get shown id)]
+                  (assoc objects id shape)
+                  objects))
+              objects
+              selected))))
 
 (defn- apply-wasm-modifiers-to-ids
   "Like `apply-modifiers-to-objects`, but only updates ids in `id-set`. During WASM
@@ -210,8 +224,11 @@
 
         base-objects      (ui-hooks/with-focus-objects objects focus)
 
-        timelines         (get page :timelines)
-        animation         (mf/deref refs/workspace-animation)
+        animation         (mf/deref ref:motion-rest)
+        page-timelines    (get page :timelines)
+        ;; only the board the timeline plays shows its animation
+        timelines         (mf/with-memo [page-timelines (:board-id animation)]
+                            (select-keys page-timelines [(:board-id animation)]))
 
         ;; In motion mode, while paused, the selection shows the selected
         ;; shapes where the animation puts them, like hovering and clicking
@@ -220,7 +237,7 @@
                                (seq timelines)
                                (not (:playing? animation))
                                (nil? transform))
-        playhead          (get animation :playhead 0)
+        playhead          (or (:playhead animation) 0)
 
         objects-modified
         (mf/with-memo

@@ -30,7 +30,7 @@
    [rumext.v2 :as mf]))
 
 (def ^:private ref:playhead
-  (l/derived dwa/playhead st/state))
+  (l/derived dwa/shown-playhead st/state))
 
 (def ^:private ref:timeline
   (l/derived dwa/current-timeline st/state))

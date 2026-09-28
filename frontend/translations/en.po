@@ -6202,6 +6202,9 @@ msgstr "Toggle history"
 msgid "shortcuts.toggle-layers"
 msgstr "Toggle layers"
 
+msgid "shortcuts.toggle-motion-mode"
+msgstr "Toggle motion mode"
+
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:193
 #, unused
 msgid "shortcuts.toggle-layout-flex"
@@ -7586,6 +7589,15 @@ msgstr "Trim offset"
 msgid "workspace.animation.animations"
 msgstr "Animations"
 
+msgid "workspace.animation.animated-board"
+msgstr "Animated board"
+
+msgid "workspace.animation.play-animation"
+msgstr "Play animation"
+
+msgid "workspace.animation.stop-animation"
+msgstr "Stop animation"
+
 msgid "workspace.animation.add-animation"
 msgstr "Add animation"
 
@@ -7723,6 +7735,90 @@ msgstr "Custom spring"
 
 msgid "workspace.animation.spring-bounce"
 msgstr "Bounce"
+
+msgid "workspace.lottie.import"
+msgstr "Import Lottie…"
+
+msgid "workspace.lottie.import-error"
+msgstr "The Lottie animation could not be read."
+
+msgid "workspace.lottie.imported-without"
+msgstr "Lottie imported without: %s"
+
+msgid "workspace.lottie.feature.animated-effect"
+msgstr "animated effects"
+
+msgid "workspace.lottie.feature.audio"
+msgstr "audio layers"
+
+msgid "workspace.lottie.feature.camera"
+msgstr "cameras"
+
+msgid "workspace.lottie.feature.complex-mask"
+msgstr "masks other than one added mask"
+
+msgid "workspace.lottie.feature.data"
+msgstr "data layers"
+
+msgid "workspace.lottie.feature.effect"
+msgstr "effects other than drop shadow and blur"
+
+msgid "workspace.lottie.feature.gradient-stroke"
+msgstr "gradient strokes"
+
+msgid "workspace.lottie.feature.matte"
+msgstr "track mattes"
+
+msgid "workspace.lottie.feature.merge-paths"
+msgstr "merged paths"
+
+msgid "workspace.lottie.feature.missing-image"
+msgstr "images it could not read"
+
+msgid "workspace.lottie.feature.missing-precomp"
+msgstr "missing precompositions"
+
+msgid "workspace.lottie.feature.offset-path"
+msgstr "offset paths"
+
+msgid "workspace.lottie.feature.path-morph"
+msgstr "shape morphing"
+
+msgid "workspace.lottie.feature.polystar"
+msgstr "stars and polygons"
+
+msgid "workspace.lottie.feature.pucker-bloat"
+msgstr "pucker and bloat"
+
+msgid "workspace.lottie.feature.repeater"
+msgstr "repeaters"
+
+msgid "workspace.lottie.feature.round-corners"
+msgstr "rounded corners"
+
+msgid "workspace.lottie.feature.static-trim"
+msgstr "fixed trim paths"
+
+msgid "workspace.lottie.feature.text"
+msgstr "text layers"
+
+msgid "workspace.lottie.feature.three-d"
+msgstr "3D layers"
+
+msgid "workspace.lottie.feature.time-remap"
+msgstr "time remapping"
+
+msgid "workspace.lottie.feature.time-stretch"
+msgstr "time stretch"
+
+msgid "workspace.lottie.feature.twist"
+msgstr "twist"
+
+msgid "workspace.lottie.feature.video-placeholder"
+msgstr "video layers"
+
+msgid "workspace.lottie.feature.zig-zag"
+msgstr "zig zag"
 
 msgid "workspace.options.transform"
 msgstr "Transform"
@@ -10858,7 +10954,7 @@ msgid "workspace.toolbar.mcp-connected"
 msgstr "MCP connected"
 
 msgid "workspace.toolbar.motion-mode"
-msgstr "Motion mode"
+msgstr "Motion mode (%s)"
 
 #: src/app/main/ui/workspace/top_toolbar.cljs:65, src/app/main/ui/workspace/top_toolbar.cljs:425
 msgid "workspace.toolbar.move"

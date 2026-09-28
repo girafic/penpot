@@ -8,6 +8,7 @@
    [frontend-tests.code-gen-style-test]
    [frontend-tests.composable-tests.comp.sync-test]
    [frontend-tests.copy-as-svg-test]
+   [frontend-tests.data.animation-playback-test]
    [frontend-tests.data.comments-filters-test]
    [frontend-tests.data.dashboard-test]
    [frontend-tests.data.exports-animation-test]
@@ -101,6 +102,7 @@
    [frontend-tests.ui.routes-test]
    [frontend-tests.ui.settings-password-schema-test]
    [frontend-tests.ui.settings-shortcuts-test]
+   [frontend-tests.ui.timeline-lanes-test]
    [frontend-tests.ui.timeline-selection-test]
    [frontend-tests.util-clipboard-test]
    [frontend-tests.util-object-test]
@@ -138,6 +140,7 @@
    'frontend-tests.data.store-test
    'frontend-tests.data.exports-assets-test
    'frontend-tests.data.exports-animation-test
+   'frontend-tests.data.animation-playback-test
    'frontend-tests.data.exports-avif-test
    'frontend-tests.data.uploads-test
    'frontend-tests.data.viewer-test
@@ -222,6 +225,7 @@
    'frontend-tests.text-editor-paste-guard-test
    'frontend-tests.ui.settings-password-schema-test
    'frontend-tests.ui.settings-shortcuts-test
+   'frontend-tests.ui.timeline-lanes-test
    'frontend-tests.ui.timeline-selection-test
    'frontend-tests.util-clipboard-test
    'frontend-tests.util-object-test

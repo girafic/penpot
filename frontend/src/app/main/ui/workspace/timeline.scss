@@ -16,6 +16,12 @@ $track-label-width: 300px;
 $axis-start-gap: deprecated.$s-12;
 $axis-end-gap: deprecated.$s-8;
 
+// The ruler and, under it, the row of the markers, above the rows. In
+// step with `app.main.ui.workspace.timeline.lanes`.
+$ruler-height: 24px;
+$row-height: 28px;
+$header-height: $ruler-height + $row-height;
+
 // Docked full-width under the sidebars and the viewport; the workspace
 // grid (workspace.scss) reserves the `bottom-dock` row and its height.
 .timeline-dock {
@@ -216,43 +222,54 @@ $axis-end-gap: deprecated.$s-8;
   overflow: hidden;
 }
 
-// Scrolls both ways; the ruler row and the label column stay in view.
+// Scrolls both ways over the rows and the time axis. The view in it stays
+// put: the labels, the markers and the lanes move in it by the scroll
+// (see `sync-scroll!`).
 .timeline-scroll {
   flex: 1;
   min-block-size: 0;
   overflow: auto;
 }
 
-// As wide as the view at zoom 1; the time axis grows with the zoom.
+// What the view scrolls over, as big as the rows and the time axis (set
+// on it).
 .timeline-content {
-  --timeline-zoom: 1;
-  --axis-inset: calc(#{$track-label-width} + #{$axis-start-gap} + #{$axis-end-gap});
-
-  display: flex;
-  flex-direction: column;
-  min-block-size: 100%;
-  inline-size: max(100%, calc(var(--axis-inset) + (100% - var(--axis-inset)) * var(--timeline-zoom)));
+  position: relative;
 }
 
-.ruler-row {
+.timeline-view {
   position: sticky;
   inset-block-start: 0;
-  z-index: deprecated.$z-index-3;
-  display: flex;
-  flex: none;
-  background-color: var(--color-background-primary);
+  inset-inline-start: 0;
+  overflow: hidden;
+  user-select: none;
 }
 
-// Above the label column; covers the ruler scrolled under it. Its
-// chevron folds or opens all the layers, above theirs.
+// The ruler and the lanes of the rows, right of the labels, drawn on a
+// canvas (see `lanes/draw!`). The row of the markers covers it between
+// them.
+.lanes {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: $track-label-width;
+  display: block;
+}
+
+// Where the lanes read their colours from (see `lanes/read-palette`).
+.palette {
+  display: none;
+}
+
+// Left of the ruler, above the labels. Its chevron folds or opens all
+// the layers.
 .ruler-corner {
-  position: sticky;
+  position: absolute;
+  inset-block-start: 0;
   inset-inline-start: 0;
-  z-index: deprecated.$z-index-2;
   display: flex;
   align-items: center;
   inline-size: $track-label-width;
-  flex: none;
+  block-size: $ruler-height;
   background-color: var(--color-background-primary);
   border-bottom: 1px solid var(--panel-border-color);
 }
@@ -300,142 +317,11 @@ $axis-end-gap: deprecated.$s-8;
   }
 }
 
-.ruler {
-  position: relative;
-  flex: 1;
-  height: 24px;
-  margin-inline: $axis-start-gap $axis-end-gap;
-  border-bottom: 1px solid var(--panel-border-color);
-  cursor: ew-resize;
-  user-select: none;
-}
-
-// Ticks hang from the top edge of the ruler; the labelled (major) ones
-// are longer and carry their time to the right.
-.tick {
-  position: absolute;
-  inset-block-start: 0;
-  block-size: 4px;
-  border-inline-start: 1px solid var(--panel-border-color);
-  pointer-events: none;
-  z-index: deprecated.$z-index-1;
-
-  &.major {
-    block-size: 7px;
-    border-inline-start-color: var(--color-foreground-secondary);
-  }
-}
-
-.tick-label {
-  position: absolute;
-  inset-block-start: 7px;
-  inset-inline-start: deprecated.$s-4;
-  font-size: deprecated.$fs-10;
-  white-space: nowrap;
-  color: var(--color-foreground-secondary);
-}
-
-.duration-shade {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-end: 0;
-  background-color: var(--color-background-tertiary);
-  pointer-events: none;
-}
-
-.playhead {
-  position: absolute;
-  inset-block: 0;
-  width: 0;
-  border-inline-start: 1px solid var(--timeline-playhead-color);
-  pointer-events: none;
-  z-index: deprecated.$z-index-1;
-}
-
-// End of the timeline on the ruler: dragging it changes the duration.
-.duration-handle {
-  position: absolute;
-  inset-block: 0;
-  inline-size: 9px;
-  margin-inline-start: -4px;
-  cursor: ew-resize;
-  z-index: deprecated.$z-index-2;
-
-  &::after {
-    content: "";
-    position: absolute;
-    inset-block: 5px;
-    inset-inline-start: 3px;
-    inline-size: 3px;
-    border-radius: 2px;
-    background-color: var(--color-foreground-secondary);
-  }
-
-  &:hover::after {
-    background-color: var(--color-accent-primary);
-  }
-}
-
-// Pin on top of the playhead line, pointing down; centred on the 1px
-// line (offsets start after the line's border).
-.playhead-handle {
-  position: absolute;
-  inset-block-start: 0;
-  inset-inline-start: -7px;
-  inline-size: 13px;
-  block-size: 13px;
-  border-radius: 3px 3px 0 0;
-  background-color: var(--timeline-playhead-color);
-  clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
-}
-
-.tracks {
-  position: relative;
-  flex: 1;
-  user-select: none;
-}
-
-// Shown while dragging a box selection (see `show-marquee!`).
-.marquee {
-  display: none;
-  position: absolute;
-  pointer-events: none;
-  z-index: deprecated.$z-index-3;
-  border: 1px solid var(--color-accent-primary);
-  background-color: var(--color-accent-primary-muted);
-}
-
-// Spans the lanes' time axis, so the playhead line lines up with the
-// ruler and the keyframes.
-.playhead-axis {
-  position: absolute;
-  inset-block: 0;
-  inset-inline: calc(#{$track-label-width} + #{$axis-start-gap}) $axis-end-gap;
-  pointer-events: none;
-  z-index: deprecated.$z-index-1;
-}
-
-.playhead-line {
-  position: absolute;
-  inset-block: 0;
-  width: 0;
-  border-left: 1px solid var(--timeline-playhead-color);
-}
-
-// Where the markers are, across the layers.
-.marker-line {
-  position: absolute;
-  inset-block: 0;
-  width: 0;
-  border-left: 1px dashed var(--color-accent-info);
-  opacity: 0.6;
-}
-
-// The markers above the layers, kept under the ruler as they scroll.
-.marker-row {
-  position: sticky;
-  inset-block-start: 24px;
-  z-index: deprecated.$z-index-3;
+// The markers above the layers, under the ruler, across the view.
+.row.marker-row {
+  inset-block-start: $ruler-height;
+  inset-inline: 0;
+  inline-size: auto;
   border-bottom: 1px solid var(--panel-border-color);
 
   .row-label {
@@ -443,8 +329,18 @@ $axis-end-gap: deprecated.$s-8;
   }
 }
 
+.marker-clip {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+// The time axis of the markers, as wide as the one of the lanes (set on
+// it) and moved with it as the timeline scrolls.
 .marker-lane {
-  cursor: default;
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: $axis-start-gap;
 }
 
 // A marker: a pin at its time and its name.
@@ -459,6 +355,16 @@ $axis-end-gap: deprecated.$s-8;
   cursor: pointer;
   user-select: none;
   z-index: deprecated.$z-index-1;
+}
+
+// The playhead across the row of the markers, over them.
+.marker-playhead {
+  position: absolute;
+  inset-block: 0;
+  inline-size: 0;
+  border-inline-start: 1px solid var(--timeline-playhead-color);
+  pointer-events: none;
+  z-index: deprecated.$z-index-2;
 }
 
 .marker-pin {
@@ -490,27 +396,41 @@ $axis-end-gap: deprecated.$s-8;
   font-size: deprecated.$fs-11;
 }
 
-// Where a drag in the timeline snaps to.
-.snap-line {
-  position: absolute;
-  inset-block: 0;
-  width: 0;
-  border-left: 1px dashed var(--color-accent-warning);
-}
-
+// Under the rows of a timeline without tracks.
 .tracks-hint {
+  position: absolute;
+  inset-inline: 0;
   padding: deprecated.$s-16;
   color: var(--color-foreground-secondary);
 }
 
-// One row per layer and per animated property: a label sticky on the
-// left, then the lane on the time axis.
-.row {
-  display: flex;
-  block-size: 28px;
-  background-color: var(--color-background-primary);
+// The labels of the rows in view, under the markers. They move as the
+// rows scroll (see `sync-scroll!`); the lanes right of them are drawn.
+.row-labels {
+  position: absolute;
+  inset: $header-height 0 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 
-  &:hover {
+.row-strip {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+}
+
+// The label of a layer or of an animated property (placed on it) and of
+// the markers. Its lane (see `lanes/draw!`) shows the same background.
+.row {
+  position: absolute;
+  display: flex;
+  inline-size: $track-label-width;
+  block-size: $row-height;
+  background-color: var(--color-background-primary);
+  pointer-events: auto;
+
+  &:hover,
+  &.hovered {
     background-color: var(--color-background-secondary);
   }
 
@@ -520,9 +440,6 @@ $axis-end-gap: deprecated.$s-8;
 }
 
 .row-label {
-  position: sticky;
-  inset-inline-start: 0;
-  z-index: deprecated.$z-index-2;
   display: flex;
   align-items: center;
   gap: deprecated.$s-4;
@@ -537,14 +454,6 @@ $axis-end-gap: deprecated.$s-8;
 .layer-row .row-label {
   color: var(--color-foreground-primary);
   cursor: pointer;
-}
-
-.row-lane {
-  position: relative;
-  z-index: deprecated.$z-index-2;
-  flex: 1;
-  margin-inline: $axis-start-gap $axis-end-gap;
-  cursor: crosshair;
 }
 
 .chevron {
@@ -605,6 +514,7 @@ $axis-end-gap: deprecated.$s-8;
   }
 
   .row:hover &,
+  .row.hovered &,
   .layer-row.selected & {
     display: grid;
     opacity: 1;
@@ -624,8 +534,7 @@ $axis-end-gap: deprecated.$s-8;
   .property-name,
   .row-controls,
   .row-value,
-  .row-color,
-  .row-lane {
+  .row-color {
     opacity: 0.5;
   }
 }
@@ -739,191 +648,6 @@ $axis-end-gap: deprecated.$s-8;
 
   &:disabled {
     color: var(--color-foreground-secondary);
-  }
-}
-
-// The keyframes of one property, joined by lines; accent coloured while
-// the layer is selected.
-.property-lane {
-  position: absolute;
-  inset: 0;
-  color: var(--color-foreground-secondary);
-
-  &.active {
-    color: var(--color-accent-primary);
-  }
-}
-
-// The line between two keyframes; hovering it shows its easing button.
-.segment {
-  position: absolute;
-  inset-block: 0;
-
-  &::before {
-    content: "";
-    position: absolute;
-    inset-inline: 0;
-    inset-block-start: 50%;
-    border-block-start: 1px solid currentcolor;
-  }
-
-  &:hover .easing-btn {
-    opacity: 1;
-  }
-}
-
-.easing-btn {
-  position: absolute;
-  inset-block-start: 50%;
-  inset-inline-start: 50%;
-  display: grid;
-  place-items: center;
-  inline-size: 20px;
-  block-size: 20px;
-  padding: 0;
-  border: 1px solid currentcolor;
-  border-radius: deprecated.$br-4;
-  background-color: var(--color-background-primary);
-  color: inherit;
-  opacity: 0;
-  transform: translate(-50%, -50%);
-  cursor: pointer;
-
-  &.open {
-    opacity: 1;
-  }
-
-  &:disabled {
-    cursor: default;
-  }
-}
-
-.keyframe {
-  position: absolute;
-  top: 50%;
-  width: 10px;
-  height: 10px;
-  margin-left: -5px;
-  transform: translateY(-50%) rotate(45deg);
-  border: 1px solid currentcolor;
-  background-color: transparent;
-  cursor: pointer;
-
-  &:hover {
-    box-shadow: 0 0 0 2px var(--color-accent-primary-muted);
-  }
-
-  &.selected {
-    background-color: currentcolor;
-  }
-
-  // Kept from edits: it only moves the playhead.
-  &.locked {
-    cursor: default;
-
-    &:hover {
-      box-shadow: none;
-    }
-  }
-}
-
-// The span of a layer's keyframes (and its children's): drag it to move
-// them, drag its ends to stretch them.
-.layer-bar {
-  position: absolute;
-  inset-block: 5px;
-  min-inline-size: 12px;
-  border-radius: deprecated.$br-6;
-  background-color: var(--timeline-bar-color);
-  color: var(--color-foreground-secondary);
-  cursor: grab;
-
-  &.active {
-    background-color: var(--color-accent-primary);
-    color: var(--color-static-white);
-  }
-}
-
-// A preset animation over its span: drag it to move it, drag its ends to
-// change its start or its end.
-.animation-block {
-  position: absolute;
-  inset-block: 5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-inline-size: 12px;
-  padding-inline: deprecated.$s-16;
-  border-radius: deprecated.$br-6;
-  background-color: var(--timeline-bar-color);
-  color: var(--color-foreground-primary);
-  cursor: grab;
-
-  &.active {
-    background-color: var(--color-accent-primary);
-    color: var(--color-static-white);
-  }
-
-  // Kept from edits: it cannot be moved nor resized.
-  &.locked {
-    cursor: default;
-
-    .bar-handle {
-      display: none;
-    }
-  }
-}
-
-.animation-block-name {
-  @include deprecated.body-small-typography;
-
-  min-inline-size: 0;
-  text-align: center;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  pointer-events: none;
-}
-
-// The ends of a bar or block: grabbed from just outside the edge to past
-// the grip, which sits 6px inside it and brightens under the pointer.
-.bar-handle {
-  position: absolute;
-  inset-block: 0;
-  inline-size: 14px;
-  cursor: ew-resize;
-
-  &::after {
-    content: "";
-    position: absolute;
-    inset-block: 30%;
-    inline-size: 2px;
-    border-radius: 1px;
-    background-color: currentcolor;
-    opacity: 0.6;
-  }
-}
-
-.bar-start {
-  inset-inline-start: -4px;
-
-  &::after {
-    inset-inline-start: 10px;
-  }
-}
-
-.bar-end {
-  inset-inline-end: -4px;
-
-  &::after {
-    inset-inline-end: 10px;
-  }
-}
-
-.layer-bar:hover,
-.animation-block:hover {
-  .bar-handle::after {
-    opacity: 1;
   }
 }
 
