@@ -19,6 +19,7 @@
    [app.common.geom.modifiers :as gm]
    [app.common.geom.shapes :as gsh]
    [app.common.types.animation :as cta]
+   [app.common.types.component :as ctk]
    [app.common.types.modifiers :as ctm]
    [app.common.uuid :as uuid]))
 
@@ -184,6 +185,95 @@
     (cond-> changes
       (not= result timelines)
       (commit-timelines page result))))
+
+(defn- copy-roots
+  "Ids of the top copies of components in the board `board-id`, itself
+  included."
+  [objects board-id]
+  (filter (fn [id]
+            (let [shape (get objects id)]
+              (and (ctk/instance-root? shape)
+                   (not (ctk/main-instance? shape)))))
+          (cfh/get-children-ids-with-self objects board-id)))
+
+(defn instance-timelines
+  "The timelines playing, in the board `board-id` of `objects`, the
+  animation of the component copies in it as their mains play it: the
+  tracks of the shapes the copies refer to (`:shape-ref`) in the page of
+  the main of their component, which `main-page` gives for a copy as
+  `{:objects :timelines}`, moved to where the copies are in the board.
+  One by copy, keyed `[:copy id]`, with the settings of the timeline of
+  its main, so that it plays on its own clock (see `cta/playback-time`).
+  A shape `timeline`, the one of the board, animates itself keeps that
+  animation."
+  [objects board-id timeline main-page]
+  (let [own (:tracks timeline)]
+    (reduce
+     (fn [result root-id]
+       (if-let [{main-objects :objects main-timelines :timelines} (main-page (get objects root-id))]
+         (let [[main tracks]
+               (reduce (fn [[main tracks] id]
+                         (let [ref-id (dm/get-in objects [id :shape-ref])
+                               [main-board track]
+                               (when (and (some? ref-id) (not (contains? own id)))
+                                 (find-track main-timelines ref-id))]
+                           (if (some? track)
+                             [(or main (get main-timelines main-board))
+                              (assoc tracks id
+                                     (moved-track track id
+                                                  (offset (in-board main-objects ref-id main-board)
+                                                          (in-board objects id board-id))
+                                                  false))]
+                             [main tracks])))
+                       [nil {}]
+                       (cfh/get-children-ids-with-self objects root-id))]
+           (cond-> result
+             (seq tracks)
+             (assoc [:copy root-id] (assoc (settings main) :board-id board-id :tracks tracks))))
+         result))
+     {}
+     (copy-roots objects board-id))))
+
+(defn with-copies-clock
+  "`timeline`, of a board, keeping time with the animations of the
+  component copies in it, `copies` (see `instance-timelines`), while it
+  has no tracks itself: as long as the longest of them, or as the board
+  when it is `stored?` (its timeline was saved, with the duration set on
+  it) and longer, looping when one of them does."
+  [timeline copies stored?]
+  (if (or (seq (:tracks timeline)) (empty? copies))
+    timeline
+    (let [longest (reduce max 1 (map cta/cycle-duration copies))]
+      (assoc timeline
+             :duration (if stored? (max longest (:duration timeline)) longest)
+             :playback (if (every? #(= :once (cta/playback-mode %)) copies) :once :loop)))))
+
+(defn with-instance-tracks
+  "`timeline`, of a board, with the animations of the component copies
+  in it, `copies` (see `instance-timelines`), for the exports, which read
+  one timeline: each as it plays on its own clock, over and over when it
+  loops (see `cta/loop-track`). A shape `timeline` animates itself keeps
+  that animation."
+  [timeline copies objects]
+  (reduce
+   (fn [timeline copy]
+     (let [copy   (-> copy (cta/resolve-animations objects) cta/expand-loops)
+           ;; ping-pong turns into a loop of there and back
+           copy   (cond-> copy
+                    (= :ping-pong (cta/playback-mode copy))
+                    (-> cta/expand-paths cta/expand-springs cta/expand-ping-pong))
+           loop?  (= :loop (cta/playback-mode copy))
+           period (:duration copy)]
+       (update timeline :tracks
+               (fn [tracks]
+                 (reduce-kv (fn [tracks id track]
+                              (cond-> tracks
+                                (not (contains? tracks id))
+                                (assoc id (cond-> track loop? (cta/loop-track period)))))
+                            tracks
+                            (:tracks copy))))))
+   timeline
+   copies))
 
 (defn animation-tree
   "The modif-tree showing the animations of `timelines` (by board) at

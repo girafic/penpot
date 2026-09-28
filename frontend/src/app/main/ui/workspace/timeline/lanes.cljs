@@ -194,7 +194,8 @@
     `:ruler`;
   - in a row (`:row` its index, `:shape-id` its layer), a layer `:bar` or
     an `:animation` block, `:mode` telling which part (see `bar-part`),
-    or else the rest of the `:row`; in the row of a property (`:locked?`
+    the bar of a component `:copy`, or else the rest of the `:row`; in
+    the row of a property (`:locked?`
     when it is), a `:keyframe`, the `:easing` button of a segment (with
     its `:rect`) or the rest of a `:segment` (both with the keyframe it
     starts `:from`), or else the rest of its `:lane`;
@@ -223,10 +224,20 @@
           (case (:type row)
             :layer
             (let [[start end] (:range row)
+                  [_ copy-end] (:copy row)
                   part        (when (and bar? (some? start))
                                 (bar-part (time->x geo start) (time->x geo end) x true))]
-              (if (some? part)
+              (cond
+                (some? part)
                 (assoc base :type :bar :mode part)
+
+                ;; the bar of a component copy: it selects the copy
+                (and bar? (some? copy-end)
+                     (<= (time->x geo 0) x (max (time->x geo copy-end)
+                                                (+ (time->x geo 0) min-bar-width))))
+                (assoc base :type :copy)
+
+                :else
                 (assoc base :type :row)))
 
             :animation
@@ -287,7 +298,10 @@
    :snap         "var(--color-accent-warning)"
    ;; the selection box of the canvas (see `selection-rect*`)
    :select       "var(--color-accent-tertiary)"
-   :select-fill  "var(--color-accent-tertiary-muted)"})
+   :select-fill  "var(--color-accent-tertiary-muted)"
+   ;; a component copy playing the animation of its main
+   :component    "var(--color-accent-secondary)"
+   :component-muted "color-mix(in srgb, var(--color-accent-secondary) 30%, transparent)"})
 
 (defn read-palette
   "The colours of `palette` as the browser resolves them on the children of
@@ -478,12 +492,19 @@
         active? (contains? (:selected scene) (:id row))]
     (case (:type row)
       :layer
-      (when-let [[start end] (:range row)]
-        (draw-bar! ctx geo y start end
-                   (if active? (:accent palette) (:bar palette))
-                   (if active? (:on-accent palette) (:fg palette))
-                   (= :bar (:type hover))
-                   true))
+      (do
+        ;; the animation of the main of a component copy, which the
+        ;; copy plays as it is
+        (when-let [[start end] (:copy row)]
+          (draw-bar! ctx geo y start end
+                     (if active? (:component palette) (:component-muted palette))
+                     nil false false))
+        (when-let [[start end] (:range row)]
+          (draw-bar! ctx geo y start end
+                     (if active? (:accent palette) (:bar palette))
+                     (if active? (:on-accent palette) (:fg palette))
+                     (= :bar (:type hover))
+                     true)))
 
       :animation
       (let [animation (:animation row)

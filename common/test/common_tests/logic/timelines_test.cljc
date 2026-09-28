@@ -13,6 +13,7 @@
    [app.common.logic.shapes :as cls]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
+   [app.common.test-helpers.components :as thc]
    [app.common.test-helpers.compositions :as tho]
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
@@ -213,3 +214,82 @@
     (t/is (= (get-in (cltl/shown-shapes timelines objects 500) [a :selrect :x])
              (get-in shown [a :selrect :x])))
     (t/is (mth/close? (+ 2000 200) (get-in shown [(:id c) :selrect :x])))))
+
+(defn- component-scene
+  "An animated component: its main, a board at 0,0 whose rect moves from
+  10 to 60 in 1 s, over and over. A copy of it in board B at 1000,100."
+  []
+  (let [file     (-> (thf/sample-file :file1)
+                     (tho/add-simple-component :anim :main :main-rect
+                                               :root-params {:x 0 :y 0 :width 200 :height 200}
+                                               :child-params {:x 10 :y 20 :width 50 :height 50})
+                     (tho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
+                     (thc/instantiate-component :anim :copy :parent-label :board-b))
+        main     (thi/id :main)
+        tl       (-> (cta/make-timeline {:board-id main :duration 1000 :playback :loop})
+                     (cta/add-keyframe (thi/id :main-rect) {:time 0 :property :x :value 10 :easing :linear})
+                     (cta/add-keyframe (thi/id :main-rect) {:time 1000 :property :x :value 60}))
+        file     (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                             (pcb/with-page (thf/current-page file))
+                                             (pcb/set-timeline main tl)))
+        page     (thf/current-page file)
+        objects  (:objects page)
+        copy     (thi/id :copy)]
+    {:objects   objects
+     :timelines (:timelines page)
+     :board     (thi/id :board-b)
+     :copy      copy
+     :copy-rect (first (get-in objects [copy :shapes]))
+     :main-page (constantly {:objects objects :timelines (:timelines page)})}))
+
+(t/deftest copies-play-the-animation-of-their-main
+  (let [{:keys [objects board copy copy-rect main-page]} (component-scene)
+        at        #(- (get-in objects [%1 :selrect :x]) (get-in objects [%2 :selrect :x]))
+        ;; where the rect of the copy is in B, less where the one of the
+        ;; main is in the main
+        dx        (- (at copy-rect board) (at (thi/id :main-rect) (thi/id :main)))
+        timelines (cltl/instance-timelines objects board nil main-page)
+        timeline  (get timelines [:copy copy])]
+    (t/is (= [[:copy copy]] (keys timelines)))
+    (t/is (= board (:board-id timeline)))
+    (t/is (= [1000 :loop] [(:duration timeline) (:playback timeline)]) "the clock of its main")
+    (t/is (= [(+ 10 dx) (+ 60 dx)] (x-values timeline copy-rect)))
+    ;; at 250 ms the copy shows as the main does then
+    (t/is (mth/close? (+ (get-in objects [board :selrect :x]) 10 dx 12.5)
+                      (get-in (cltl/shown-shapes timelines objects 250) [copy-rect :selrect :x])))))
+
+(t/deftest a-copy-animated-in-its-board-keeps-that-animation
+  (let [{:keys [objects board copy-rect main-page]} (component-scene)
+        own (-> (cta/make-timeline {:board-id board})
+                (cta/add-keyframe copy-rect {:time 0 :property :opacity :value 1}))]
+    (t/is (empty? (cltl/instance-timelines objects board own main-page)))
+    (t/is (empty? (cltl/instance-timelines objects (thi/id :main) nil main-page))
+          "a main plays its own timeline")))
+
+(t/deftest exports-play-the-copies-in-a-board
+  (let [{:keys [objects board copy-rect main-page]} (component-scene)
+        at     #(- (get-in objects [%1 :selrect :x]) (get-in objects [%2 :selrect :x]))
+        dx     (- (at copy-rect board) (at (thi/id :main-rect) (thi/id :main)))
+        copies (vals (cltl/instance-timelines objects board nil main-page))
+        host   (-> (cta/make-timeline {:board-id board})
+                   (cltl/with-copies-clock copies false))
+        tl     (cltl/with-instance-tracks host copies objects)
+        x-at   #(get-in (cta/values-at (cta/expand-loops tl) %) [copy-rect :x])]
+    (t/is (= [1000 :loop] [(:duration host) (:playback host)])
+          "a board without tracks keeps time with its copies")
+    (t/is (mth/close? (+ 10 dx 12.5) (x-at 250)))
+    (let [longer (cltl/with-instance-tracks (assoc host :duration 3000) copies objects)]
+      ;; in a board that plays 3 s, the copy plays its second second as
+      ;; its first (unrolled, each round starts 1 ms late)
+      (t/is (mth/close? (+ 10 dx 12.5)
+                        (get-in (cta/values-at (cta/expand-loops longer) 1250) [copy-rect :x])
+                        0.1)))
+    (t/is (= [3000 :once] (-> (cta/make-timeline {:board-id board :duration 3000})
+                              (cta/add-keyframe board {:time 0 :property :opacity :value 1})
+                              (cltl/with-copies-clock copies true)
+                              ((juxt :duration cta/playback-mode))))
+          "one with tracks keeps its own")
+    (t/is (= 2500 (-> (cta/make-timeline {:board-id board :duration 2500})
+                      (cltl/with-copies-clock copies true)
+                      :duration))
+          "a longer duration set on it")))

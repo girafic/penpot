@@ -1346,6 +1346,31 @@
                                             (expand-property-loop duration))))
                                 (sort-keyframes)))))))))
 
+(defn loop-track
+  "`track` repeating every `period` ms from the start: the keyframes of
+  each property up to `period`, closed at 0 and at `period` by the values
+  they hold there, looping (see `expand-loops`). So the animation of a
+  component copy that loops on its own clock plays in the timeline of
+  the board it is in (see `app.common.logic.timelines/with-instance-tracks`)."
+  [track period]
+  (let [by-slot (group-by keyframe-slot (:keyframes track))]
+    (assoc track
+           :keyframes
+           (->> by-slot
+                (mapcat (fn [[[property index] keyframes]]
+                          (let [keyframes (sort-keyframes keyframes)
+                                at        #(make-keyframe {:time %
+                                                           :property property
+                                                           :index index
+                                                           :value (property-value-at keyframes %)})
+                                kept      (filterv #(<= (:time %) period) keyframes)
+                                kept      (if (zero? (:time (first kept) -1)) kept (into [(at 0)] kept))]
+                            (cond-> kept
+                              (< (:time (peek kept)) period) (conj (at period))))))
+                (sort-keyframes))
+           :loops
+           (into #{} (map (fn [[property index]] (slot-key property index))) (keys by-slot)))))
+
 (def ^:private path-steps
   "Straight steps a curved segment of a motion path is drawn with."
   24)

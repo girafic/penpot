@@ -16,9 +16,11 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
+   [app.common.types.component :as ctk]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shapes :as dwsh]
@@ -321,42 +323,55 @@
                                    (= :move mode)      "grab"
                                    :else               "ew-resize")
     (:keyframe :easing)      (if locked? "default" "pointer")
+    :copy                    "pointer"
     (:segment :lane :row)    "crosshair"
     "default"))
 
 (defn- animated-ids
   "Ids of the layers of `board-id` (itself included) that have keyframes,
-  preset animations or animated children."
-  [objects board-id timeline]
-  (letfn [(walk [id]
-            (let [child-ids (mapcat walk (dm/get-in objects [id :shapes]))]
-              (if (or (seq (dm/get-in timeline [:tracks id :keyframes]))
-                      (seq (dm/get-in timeline [:tracks id :animations]))
-                      (seq child-ids))
-                (cons id child-ids)
-                child-ids)))]
-    (set (walk board-id))))
+  preset animations or animated children, or that are component copies
+  playing the animation of their mains (`copy-ends`, see `timeline-rows`)."
+  ([objects board-id timeline]
+   (animated-ids objects board-id timeline {}))
+  ([objects board-id timeline copy-ends]
+   (letfn [(walk [id]
+             (let [child-ids (mapcat walk (dm/get-in objects [id :shapes]))]
+               (if (or (seq (dm/get-in timeline [:tracks id :keyframes]))
+                       (seq (dm/get-in timeline [:tracks id :animations]))
+                       (contains? copy-ends id)
+                       (seq child-ids))
+                 (cons id child-ids)
+                 child-ids)))]
+     (set (walk board-id)))))
 
 (defn- timeline-rows
   "Flatten the layers of `board-id` (top-most first, like the layers
   panel) into rows: one per layer followed, while it is expanded, by one
   per preset animation, one per animated property and its children.
   Animated layers start expanded; `expanded` holds the ones the user
-  toggled."
-  [objects board-id timeline expanded]
-  (let [animated (animated-ids objects board-id timeline)]
+  toggled. A component copy playing the animation of its main, which
+  ends at the time `copy-ends` gives for it, has a bar over it, `:copy`,
+  and keeps its layers folded away unless the board animates them."
+  [objects board-id timeline expanded copy-ends]
+  (let [animated (animated-ids objects board-id timeline)
+        playing  (animated-ids objects board-id timeline copy-ends)]
     (letfn [(walk [id depth]
               (when-let [shape (get objects id)]
-                (let [children   (reverse (:shapes shape))
+                (let [copy-end   (get copy-ends id)
+                      ;; A copy shows its own animation, in the board,
+                      ;; unfolded; the one of its main, as a bar.
+                      folded?    (and (some? copy-end) (not (contains? animated id)))
+                      children   (when-not folded? (reverse (:shapes shape)))
                       animations (dm/get-in timeline [:tracks id :animations])
                       slots      (track-slots (dm/get-in timeline [:tracks id :keyframes]))
-                      expanded?  (get expanded id (contains? animated id))]
+                      expanded?  (and (not folded?) (get expanded id (contains? playing id)))]
                   (cons {:type :layer
                          :id id
                          :depth depth
                          :shape shape
                          :expandable? (boolean (or (seq children) (seq animations) (seq slots)))
                          :expanded? expanded?
+                         :copy (when (some? copy-end) [0 copy-end])
                          :range (when (contains? animated id)
                                   (cta/keyframes-range timeline (cons id (cfh/get-children-ids objects id))))}
                         (when expanded?
@@ -542,6 +557,8 @@
   [{:keys [row-index shape depth expandable? expanded? selected? hovered?
            on-toggle on-select on-context-menu on-hover]}]
   (let [shape-id (:id shape)
+        ;; in the colour of components, as in the layers panel
+        component? (ctk/instance-head? shape)
         hidden?  (true? (:hidden shape))
         blocked? (true? (:blocked shape))
 
@@ -583,6 +600,7 @@
 
     [:div {:class (stl/css-case :row true
                                 :layer-row true
+                                :component-row component?
                                 :selected selected?
                                 :hovered hovered?
                                 :hidden-layer hidden?)
@@ -1109,11 +1127,23 @@
         ;; first edit stores it.
         timeline   (mf/with-memo [timelines board]
                      (dwa/board-timeline timelines board))
+        ;; The component copies in the board that play the animation of
+        ;; their mains, and when each ends; the board keeps time with
+        ;; them while it has no tracks itself.
+        files      (mf/deref refs/files)
+        copies     (mf/with-memo [objects timelines files board-id]
+                     (when (some? board-id)
+                       (dwa/copy-timelines objects timelines files board-id)))
+        copy-ends  (mf/with-memo [copies]
+                     (into {} (map (fn [[[_ id] tl]] [id (cta/cycle-duration tl)])) copies))
+        clock      (mf/with-memo [timeline copies timelines board-id]
+                     (some-> timeline
+                             (cltl/with-copies-clock (vals copies) (contains? timelines board-id))))
         playhead   (get anim :playhead 0)
         playing?   (get anim :playing? false)
         unit       (dwa/time-unit anim)
         recording? (get anim :auto-keyframe? false)
-        duration   (get timeline :duration 1000)
+        duration   (get clock :duration 1000)
 
         selected-kfs (get anim :selected-kfs #{})
 
@@ -1169,8 +1199,9 @@
         ;; Horizontal zoom of the time axis.
         zoom*      (mf/use-state 1)
         zoom       (deref zoom*)
-        latest     (mf/with-memo [timeline]
-                     (apply max 0 (map :time (mapcat :keyframes (vals (:tracks timeline))))))
+        latest     (mf/with-memo [timeline copy-ends]
+                     (apply max 0 (concat (map :time (mapcat :keyframes (vals (:tracks timeline))))
+                                          (vals copy-ends))))
         ;; While the end of the timeline is dragged the axis stays as it
         ;; was, unless the duration outgrows it (see `on-duration-down`).
         axis-lock* (mf/use-state nil)
@@ -1277,9 +1308,9 @@
         ;; Layer tree of the board, like the layers panel.
         expanded*  (mf/use-state {})
         expanded   (deref expanded*)
-        rows       (mf/with-memo [objects board-id timeline expanded]
+        rows       (mf/with-memo [objects board-id timeline expanded copy-ends]
                      (when (some? timeline)
-                       (timeline-rows objects board-id timeline expanded)))
+                       (timeline-rows objects board-id timeline expanded copy-ends)))
 
         ;; The selection of the last render and the layers newly selected,
         ;; which the rows scroll to once they show (see the effects).
@@ -1295,7 +1326,7 @@
         row-end     (min (second row-window) row-count)
         ;; What the view scrolls over: the rows under the ruler and the
         ;; markers, and a hint while the timeline has no tracks.
-        hint?       (empty? (:tracks timeline))
+        hint?       (and (empty? (:tracks timeline)) (empty? copies))
         content-height (+ lanes/header-height
                           (* row-count lanes/row-height)
                           (if hint? hint-height 0))
@@ -1758,6 +1789,12 @@
                :animation
                (on-animation-down event (:shape-id target) (:animation target) (:mode target))
 
+               ;; The animation of a component copy is the one of its
+               ;; main, edited there: its bar only picks the copy.
+               :copy
+               (when left?
+                 (select-on-press event (:shape-id target) (:selected scene)))
+
                :ruler
                (when left?
                  (dom/capture-pointer event)
@@ -2120,6 +2157,11 @@
           (mf/set-ref-val! reveal-ref nil)
           (when-let [^js node (mf/ref-val scroll-ref)]
             (let [geo      (assoc (mf/ref-val geo-ref) :scroll-y (.-scrollTop node))
+                  ;; a layer folded away in a component copy shows as it
+                  row-ids  (into #{} (map :id) rows)
+                  ids      (into #{}
+                                 (keep #(d/seek row-ids (cons % (cfh/get-parent-ids objects %))))
+                                 ids)
                   indices  (keep-indexed (fn [index row]
                                            (when (contains? ids (:id row)) index))
                                          rows)

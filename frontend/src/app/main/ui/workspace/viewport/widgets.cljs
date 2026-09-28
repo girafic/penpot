@@ -16,6 +16,7 @@
    [app.common.types.shape.layout :as ctl]
    [app.common.uuid :as uuid]
    [app.main.data.common :as dcm]
+   [app.main.data.helpers :as dsh]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
    [app.main.features :as features]
@@ -37,13 +38,20 @@
    [rumext.v2 :as mf]))
 
 (def ^:private ref:animated-boards
-  "Ids of the boards of the page with an animation (Penpot Motion)."
-  (l/derived (fn [page]
-               (into #{}
-                     (keep (fn [[id timeline]]
-                             (when (seq (:tracks timeline)) id)))
-                     (:timelines page)))
-             refs/workspace-page =))
+  "Ids of the boards of the page that play an animation, theirs or the
+  one of component copies in them (see `dwa/animated-board-ids`), worked
+  out again only when the page or the files change."
+  (let [last (volatile! nil)]
+    (l/derived (fn [state]
+                 (let [page  (dsh/lookup-page state)
+                       files (dsh/lookup-libraries state)
+                       [page' files' ids] @last]
+                   (if (and (identical? page page') (identical? files files'))
+                     ids
+                     (let [ids (dwa/animated-board-ids page files)]
+                       (vreset! last [page files ids])
+                       ids))))
+               st/state =)))
 
 (def ^:private ref:playing-board
   "The board whose animation plays on the canvas, if any."

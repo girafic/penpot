@@ -529,6 +529,15 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
+// A component, in the colour of components as in the layers panel. Its
+// bar has the same colour (see `lanes/palette`).
+.component-row {
+  .layer-icon,
+  .layer-name {
+    color: var(--color-accent-secondary);
+  }
+}
+
 // A hidden property or animation, left out of playback and exports.
 .muted {
   .property-name,

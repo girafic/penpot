@@ -699,7 +699,7 @@
 
 (defn- export-raster!
   [state {:keys [format quality fps scale loop? bridge decode yield]}]
-  (let [tl       (dwa/current-timeline state)
+  (let [tl       (dwa/export-timeline state)
         objects  (dsh/lookup-page-objects state)
         board-id (:board-id tl)
         board    (get objects board-id)
@@ -768,7 +768,7 @@
 
 (defn- export-markup!
   [state format {:keys [bridge]}]
-  (let [tl      (dwa/current-timeline state)
+  (let [tl      (dwa/export-timeline state)
         objects (dsh/lookup-page-objects state)
         board   (get objects (:board-id tl))
         bridge  (or bridge (default-bridge))
@@ -800,8 +800,9 @@
         (st/emit! (dwa/apply-preview))))))
 
 (defn export-animation
-  "Export the current board timeline as `format` (`:mp4` `:webm` `:gif`
-  `:avif` `:svg` `:lottie`)."
+  "Export the animation of the active board, with the one of the
+  component copies in it (see `dwa/export-timeline`), as `format`
+  (`:mp4` `:webm` `:gif` `:avif` `:svg` `:lottie`)."
   [{:keys [format] :as params}]
   (ptk/reify ::export-animation
     ptk/UpdateEvent
@@ -814,7 +815,7 @@
 
     ptk/WatchEvent
     (watch [_ state _]
-      (let [tl (dwa/current-timeline state)]
+      (let [tl (dwa/export-timeline state)]
         (if (nil? tl)
           (rx/of (finish-export-state))
           (rx/concat

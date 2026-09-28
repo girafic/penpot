@@ -31,9 +31,6 @@
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
-(def ^:private ref:timelines
-  (l/derived :timelines refs/workspace-page))
-
 (def exports-attrs
   "Shape attrs that corresponds to exports. Used in other namespaces."
   [:exports])
@@ -71,8 +68,10 @@
     :else 1.0))
 
 (defn animation-export-board
-  "The selected board when it already has a timeline, else nil. The
-  Animated export tab is shown only in that case."
+  "The selected board when it has a timeline to export, its own or the
+  one of the component copies in it (`timelines` holds them by board, see
+  `dwa/board-export-timeline`), else nil. The Animated export tab is
+  shown only in that case."
   [type ids shapes timelines]
   (when (and (= type :frame) (= 1 (count ids)))
     (let [shape (first shapes)]
@@ -81,10 +80,8 @@
 
 (mf/defc animated-exports*
   {::mf/private true}
-  [{:keys [board formats]}]
-  (let [timelines (mf/deref ref:timelines)
-        progress  (mf/deref refs/export-animation)
-        timeline  (get timelines (:id board))
+  [{:keys [board timeline formats]}]
+  (let [progress  (mf/deref refs/export-animation)
         selrect   (:selrect board)
         width     (mth/round (or (:width selrect) 0))
         height    (mth/round (or (:height selrect) 0))
@@ -432,12 +429,19 @@
                         {:value "svg" :label "SVG"}
                         {:value "pdf" :label "PDF"}]
 
-        timelines (mf/deref ref:timelines)
-
         render-wasm? (features/use-feature "render-wasm/v1")
 
-        timeline
-        (some->> (animation-export-board type ids shapes timelines) :id (get timelines))
+        ;; What the selected board exports as an animation: its timeline
+        ;; with the animations of the component copies in it.
+        page      (mf/deref refs/workspace-page)
+        files     (mf/deref refs/files)
+        board-id  (when (and (= type :frame) (= 1 (count ids)))
+                    (:id (first shapes)))
+        timeline  (mf/with-memo [page files board-id]
+                    (when (some? board-id)
+                      (dwa/board-export-timeline page files board-id)))
+        timelines (when (some? timeline)
+                    {board-id timeline})
 
         ;; Most formats rasterize through WASM: without it the tab offers
         ;; what is left, and is gone when nothing is.
@@ -499,6 +503,7 @@
            (when (= tab "animated")
              [:> animated-exports* {:key (str animated-id)
                                     :board animated-board
+                                    :timeline timeline
                                     :formats formats}])])
 
         (when (or (nil? animated-board) (= tab "static"))

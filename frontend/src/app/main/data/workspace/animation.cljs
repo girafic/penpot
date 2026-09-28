@@ -18,6 +18,8 @@
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.components-list :as ctkl]
+   [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
@@ -82,12 +84,53 @@
   [state]
   (get (get-timelines state) (active-board-id state)))
 
+(defn- main-page-of
+  "For a component copy, `{:objects :timelines}` of the page of the main
+  of its component, one of `files` (by id), see
+  `cltl/instance-timelines`."
+  [files]
+  (fn [copy]
+    (let [fdata (dm/get-in files [(:component-file copy) :data])]
+      (when-let [component (ctkl/get-component fdata (:component-id copy))]
+        (when-let [page (dm/get-in fdata [:pages-index (:main-instance-page component)])]
+          {:objects (:objects page) :timelines (:timelines page)})))))
+
+(defn copy-timelines
+  "The timelines playing the animations of the component copies in the
+  board `board-id` of `objects`, by `[:copy id]` (see
+  `cltl/instance-timelines`); `files` holds the files of the components,
+  by id."
+  [objects timelines files board-id]
+  (cltl/instance-timelines objects board-id (get timelines board-id) (main-page-of files)))
+
 (defn- shown-timelines
-  "The timelines the canvas shows at the playhead, by board: only the one
-  of the active board plays, the other boards stay as they are."
+  "The timelines the canvas shows at the playhead: only the one of the
+  active board plays, with the ones of the component copies in it, which
+  play the animation of their mains (see `cltl/instance-timelines`); the
+  other boards stay as they are."
   [state]
-  (let [board-id (active-board-id state)]
-    (select-keys (get-timelines state) [board-id])))
+  (let [board-id  (active-board-id state)
+        timelines (get-timelines state)]
+    (if (some? board-id)
+      (merge (select-keys timelines [board-id])
+             (copy-timelines (dsh/lookup-page-objects state) timelines
+                             (dsh/lookup-libraries state) board-id))
+      {})))
+
+(defn animated-board-ids
+  "Ids of the boards of `page` that play an animation: their own, or the
+  one of component copies in them (see `shown-timelines`); `files` holds
+  the files of the components, by id."
+  [page files]
+  (let [objects   (:objects page)
+        timelines (:timelines page)
+        main-page (main-page-of files)]
+    (into #{}
+          (filter (fn [id]
+                    (let [timeline (get timelines id)]
+                      (or (seq (:tracks timeline))
+                          (seq (cltl/instance-timelines objects id timeline main-page))))))
+          (ctst/get-root-frames-ids objects))))
 
 (defn board-timeline
   "The timeline of `board` or, while the board has none, a new empty one
@@ -104,6 +147,41 @@
   [state]
   (let [objects (dsh/lookup-page-objects state)]
     (board-timeline (get-timelines state) (get objects (active-board-id state)))))
+
+(defn- playback-timeline
+  "The timeline playback of the active board keeps time with: its own
+  or, while that has no tracks, the one of the animations of the
+  component copies in the board (see `cltl/with-copies-clock`)."
+  [state]
+  (when-let [tl (current-or-new-timeline state)]
+    (cltl/with-copies-clock tl
+      (vals (dissoc (shown-timelines state) (:board-id tl)))
+      (contains? (get-timelines state) (:board-id tl)))))
+
+(defn board-export-timeline
+  "The timeline the exports of the board `board-id` of `page` read: its
+  own, with the animations of the component copies in it (see
+  `cltl/with-instance-tracks`) and, while it has no tracks, keeping time
+  with them. Nil when the board has no timeline and no animated copies.
+  `files` holds the files of the components, by id."
+  [page files board-id]
+  (let [objects   (:objects page)
+        timelines (:timelines page)
+        stored?   (contains? timelines board-id)
+        copies    (vals (copy-timelines objects timelines files board-id))]
+    (when-let [own (when (or stored? (seq copies))
+                     (board-timeline timelines (get objects board-id)))]
+      (-> own
+          (cltl/with-copies-clock copies stored?)
+          (cltl/with-instance-tracks copies objects)))))
+
+(defn export-timeline
+  "The timeline the exports of the active board read (see
+  `board-export-timeline`)."
+  [state]
+  (board-export-timeline (dsh/lookup-page state)
+                         (dsh/lookup-libraries state)
+                         (active-board-id state)))
 
 (defn playhead
   [state]
@@ -341,9 +419,17 @@
   (ptk/reify ::set-export
     ptk/WatchEvent
     (watch [it state _]
-      (if-let [tl (get (get-timelines state) board-id)]
-        (rx/of (commit-timeline it state board-id (update tl :export merge export)))
-        (rx/empty)))))
+      ;; A board that only has animated copies gets a timeline for it,
+      ;; as long as they play (see `cltl/with-copies-clock`).
+      (let [objects   (dsh/lookup-page-objects state)
+            timelines (get-timelines state)
+            stored?   (contains? timelines board-id)]
+        (if-let [tl (board-timeline timelines (get objects board-id))]
+          (let [copies (vals (copy-timelines objects timelines (dsh/lookup-libraries state) board-id))
+                tl     (cond-> tl
+                         (not stored?) (cltl/with-copies-clock copies false))]
+            (rx/of (commit-timeline it state board-id (update tl :export merge export))))
+          (rx/empty))))))
 
 (defn rename-timeline
   [name]
@@ -1269,7 +1355,7 @@
   (ptk/reify ::playback-step
     ptk/WatchEvent
     (watch [_ state _]
-      (let [tl (current-or-new-timeline state)]
+      (let [tl (playback-timeline state)]
         (if (and (some? tl) (not (selected-elsewhere? state)))
           (let [direction (dm/get-in state [:workspace-animation :direction] 1)
                 {:keys [time direction ended?]}
@@ -1304,7 +1390,7 @@
     (update [_ state]
       ;; Where it starts from, which the timeline dock shows while it
       ;; plays (see `app.main.ui.workspace.timeline`).
-      (let [tl   (current-or-new-timeline state)
+      (let [tl   (playback-timeline state)
             from (playhead state)]
         (update state :workspace-animation assoc
                 :playing? true
@@ -1312,7 +1398,7 @@
 
     ptk/WatchEvent
     (watch [_ state stream]
-      (let [tl       (current-or-new-timeline state)
+      (let [tl       (playback-timeline state)
             duration (or (:duration tl) 0)
             stopper  (rx/filter (ptk/type? ::pause) stream)]
         (if (or (nil? tl) (<= duration 0))
@@ -1551,7 +1637,7 @@
   (ptk/reify ::export-css
     ptk/EffectEvent
     (effect [_ state _]
-      (when-let [tl (current-timeline state)]
+      (when-let [tl (export-timeline state)]
         (let [objects (dsh/lookup-page-objects state)
               css     (cta/timeline->css tl objects)
               blob    (wapi/create-blob css "text/css")]
@@ -1564,7 +1650,7 @@
   (ptk/reify ::export-lottie
     ptk/EffectEvent
     (effect [_ state _]
-      (when-let [tl (current-timeline state)]
+      (when-let [tl (export-timeline state)]
         (let [objects (dsh/lookup-page-objects state)
               data    (cta/timeline->lottie tl objects)
               json    (js/JSON.stringify (clj->js data) nil 2)

@@ -1962,3 +1962,24 @@
       (t/is (= 400 (cta/snap-time (cta/snap-times tl) 395 10)))
       (t/is (= 500 (cta/snap-time (cta/snap-times tl) 460 45)))
       (t/is (nil? (cta/snap-time (cta/snap-times tl) 250 10))))))
+
+(t/deftest loop-track-repeats-a-track-every-period
+  (let [id     (uuid/next)
+        track  (-> (cta/make-timeline {:board-id (uuid/next) :duration 3000})
+                   (cta/add-keyframe id {:time 200 :property :x :value 0 :easing :linear})
+                   (cta/add-keyframe id {:time 600 :property :x :value 100})
+                   (cta/get-track id))
+        looped (cta/loop-track track 1000)
+        tl     (-> (cta/make-timeline {:board-id (uuid/next) :duration 3000})
+                   (assoc-in [:tracks id] looped))]
+    (t/is (= #{:x} (:loops looped)))
+    ;; closed at the start and at the end of the period by the values
+    ;; held there
+    (t/is (= [0 200 600 1000] (mapv :time (:keyframes looped))))
+    (t/is (= [0 0 100 100] (mapv :value (:keyframes looped))))
+    ;; 1400 ms is 400 ms into the second round
+    (t/is (mth/close? 50 (get-in (cta/values-at tl 1400) [id :x])))
+    (let [longer (update track :keyframes conj
+                         (cta/make-keyframe {:time 1500 :property :x :value 300}))]
+      (t/is (= 1000 (:time (last (:keyframes (cta/loop-track longer 1000)))))
+            "cut at the period"))))
