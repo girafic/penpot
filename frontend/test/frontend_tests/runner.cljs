@@ -10,6 +10,7 @@
    [frontend-tests.copy-as-svg-test]
    [frontend-tests.data.animation-playback-test]
    [frontend-tests.data.comments-filters-test]
+   [frontend-tests.data.comments-moments-test]
    [frontend-tests.data.dashboard-test]
    [frontend-tests.data.exports-animation-test]
    [frontend-tests.data.exports-assets-test]
@@ -132,6 +133,7 @@
    'frontend-tests.composable-tests.comp.sync-test
    'frontend-tests.copy-as-svg-test
    'frontend-tests.data.comments-filters-test
+   'frontend-tests.data.comments-moments-test
    'frontend-tests.data.dashboard-test
    'frontend-tests.data.nitrate-test
    'frontend-tests.data.persistence-test

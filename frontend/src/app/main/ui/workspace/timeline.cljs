@@ -21,7 +21,10 @@
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
    [app.common.types.component :as ctk]
+   [app.config :as cfg]
+   [app.main.data.comments :as dcm]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.comments :as dwcm]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shapes :as dwsh]
@@ -126,18 +129,6 @@
     (or (d/seek #(>= (* % px-per-ms) min-tick-spacing) tick-steps)
         (peek tick-steps))))
 
-(defn- format-seconds
-  "`time` (ms) in seconds, to the millisecond: `1.25`."
-  [time]
-  (dm/str (mth/precision (/ time 1000) 3)))
-
-(defn- format-time
-  "`time` (ms) in the time `unit` of the timeline: `1250 ms` or `1.25 s`."
-  [time unit]
-  (if (= unit :s)
-    (dm/str (format-seconds time) " s")
-    (dm/str time " ms")))
-
 (defn- format-tick
   "Like Figma: whole seconds as `1s` and, below one-second steps, the
   milliseconds into the current second (`1s 100ms 200ms …`), or in
@@ -145,7 +136,7 @@
   [time step unit]
   (cond
     (zero? (mod time 1000)) (dm/str (quot time 1000) "s")
-    (= unit :s)             (dm/str (format-seconds time) "s")
+    (= unit :s)             (dm/str (dwa/format-seconds time) "s")
     (< step 1000)           (dm/str (mod time 1000) "ms")
     :else                   (dm/str (/ time 1000.0) "s")))
 
@@ -851,7 +842,7 @@
     [:div {:class (stl/css :marker)
            :data-marker-id (dm/str id)
            :style #js {"left" (time->pct time duration)}
-           :title (dm/str name " · " (format-time time (:unit snap)))
+           :title (dm/str name " · " (dwa/format-time time (:unit snap)))
            :on-pointer-down on-pointer-down
            :on-pointer-move on-pointer-move
            :on-pointer-up on-pointer-up
@@ -870,6 +861,70 @@
   (let [playhead (mf/deref ref:playhead)]
     [:div {:class (stl/css :marker-playhead)
            :style #js {"left" (time->pct playhead span)}}]))
+
+(mf/defc comment-pin*
+  "A comment thread about a moment of the animation, as the avatar of its
+  author at the moment: a click opens it and shows the moment."
+  {::mf/private true}
+  [{:keys [thread duration unit open?]}]
+  (let [time  (:animation-time thread)
+        owner (dcm/get-owner thread)
+
+        on-click
+        (mf/use-fn
+         (mf/deps thread)
+         (fn [event]
+           (dom/stop-propagation event)
+           (st/emit! (dwcm/open-thread-moment thread))))]
+
+    [:button {:type "button"
+              :class (stl/css-case :comment-pin true
+                                   :comment-pin-open open?
+                                   :comment-pin-unread (pos? (:count-unread-comments thread))
+                                   :comment-pin-resolved (:is-resolved thread))
+              :data-testid (dm/str "timeline-comment-" (:seqn thread))
+              :style #js {"left" (time->pct time duration)}
+              :title (dm/str (tr "labels.comment") " #" (:seqn thread)
+                             " · " (dwa/format-time time unit))
+              :on-pointer-down dom/stop-propagation
+              :on-double-click dom/stop-propagation
+              :on-click on-click}
+     [:img {:class (stl/css :comment-pin-avatar)
+            :src (cfg/resolve-profile-photo-url owner)
+            :alt ""}]]))
+
+(mf/defc comment-pins*
+  "The comment threads about moments of the animation of the board
+  `board-id` of `objects`, on the ruler at their moments, while the
+  comments show on the canvas and as their filters let them (see
+  `dcm/apply-filters`)."
+  {::mf/private true}
+  [{:keys [board-id objects duration unit]}]
+  (let [threads-map (mf/deref refs/threads)
+        local       (mf/deref refs/comments-local)
+        profile     (mf/deref refs/profile)
+        page-id     (mf/deref refs/current-page-id)
+        layout      (mf/deref refs/workspace-layout)
+        drawing     (mf/deref refs/workspace-drawing)
+        shown?      (or (= :comments (:tool drawing))
+                        (contains? layout :display-comments))
+
+        threads
+        (mf/with-memo [threads-map local profile page-id objects board-id]
+          (->> (vals threads-map)
+               (filter #(and (= page-id (:page-id %))
+                             (some? (:animation-time %))
+                             (= board-id (dwcm/thread-board-id objects %))))
+               (dcm/apply-filters local profile)
+               (sort-by :seqn)))]
+
+    (when shown?
+      (for [thread threads]
+        [:> comment-pin* {:key (dm/str (:id thread))
+                          :thread thread
+                          :duration duration
+                          :unit unit
+                          :open? (= (:id thread) (:open local))}]))))
 
 (mf/defc marker-row*
   "The markers of the timeline, above the layers: named moments the drags
@@ -950,7 +1005,7 @@
   {::mf/private true}
   [{:keys [unit]}]
   (let [playhead (mf/deref ref:playhead)]
-    [:span {:class (stl/css :current-time)} (format-time playhead unit)]))
+    [:span {:class (stl/css :current-time)} (dwa/format-time playhead unit)]))
 
 (mf/defc playhead-follower*
   "While a zoomed timeline plays, pages the view to keep the playhead
@@ -1116,7 +1171,7 @@
   "The tooltip of what a `lanes/hit` is on, with times in `unit`."
   [{:keys [type keyframe animation]} unit]
   (case type
-    :keyframe  (format-time (:time keyframe) unit)
+    :keyframe  (dwa/format-time (:time keyframe) unit)
     :easing    (tr "workspace.animation.easing")
     :animation (motion/animation-label animation)
     :duration  (tr "workspace.animation.drag-duration")
@@ -1692,6 +1747,7 @@
         palette-ref     (mf/use-ref nil)
         strip-ref       (mf/use-ref nil)
         marker-lane-ref (mf/use-ref nil)
+        ruler-lane-ref  (mf/use-ref nil)
 
         ;; What the lanes show, read as they draw: they draw again on their
         ;; own as the view scrolls and as the playhead plays.
@@ -1742,6 +1798,8 @@
                (some-> (mf/ref-val strip-ref)
                        (dom/set-css-property! "transform" (dm/str "translateY(" (- scroll-y) "px)")))
                (some-> (mf/ref-val marker-lane-ref)
+                       (dom/set-css-property! "transform" (dm/str "translateX(" (- scroll-x) "px)")))
+               (some-> (mf/ref-val ruler-lane-ref)
                        (dom/set-css-property! "transform" (dm/str "translateX(" (- scroll-x) "px)")))
                (swap! row-window* #(if (= % window) % window))))))
 
@@ -2300,6 +2358,17 @@
                  [:span {:key (name color)
                          :data-color (name color)
                          :style #js {"color" css}}])]
+
+              ;; The comments about moments of the animation, on the ruler at
+              ;; their moments; the lane moves as the timeline scrolls.
+              [:div {:class (stl/css :ruler-comments)}
+               [:div {:class (stl/css :ruler-comment-lane)
+                      :ref ruler-lane-ref
+                      :style #js {"width" (dm/str axis-width "px")}}
+                [:> comment-pins* {:board-id board-id
+                                   :objects objects
+                                   :duration span
+                                   :unit unit}]]]
 
               [:div {:class (stl/css :ruler-corner)}
                [:button {:type "button"

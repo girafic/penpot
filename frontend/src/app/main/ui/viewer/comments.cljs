@@ -15,6 +15,7 @@
    [app.common.geom.shapes :as gsh]
    [app.main.data.comments :as dcm]
    [app.main.data.event :as ev]
+   [app.main.data.viewer :as dv]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -213,6 +214,17 @@
                              :file-id (:id file)}]
                (st/emit! (dcm/create-draft params))))))
 
+        ;; A click on the moment of the animation a thread is about, or on
+        ;; a timestamp in it, shows the board at that moment.
+        on-show-time
+        (mf/use-fn
+         (mf/deps frame-id)
+         (fn [time]
+           (st/emit! (dv/show-moment frame-id time))))
+
+        open-thread  (get threads-map open-thread-id)
+        open-time    (:animation-time open-thread)
+
         on-draft-cancel
         (mf/use-fn #(st/emit! (dcm/close-thread)))
 
@@ -227,6 +239,12 @@
     ;; Any zoom change collapses an expanded cluster back, matching the workspace.
     (mf/with-effect [zoom]
       (st/emit! (dcm/collapse-comment-group)))
+
+    ;; Opening a thread about a moment of the animation shows the board at
+    ;; that moment.
+    (mf/with-effect [open-thread-id open-time]
+      (when (and (some? open-time) (= (:frame-id open-thread) frame-id))
+        (st/emit! (dv/show-moment frame-id open-time))))
 
     [:div {:class (stl/css :comments-section)
            :on-click on-click}
@@ -273,10 +291,11 @@
                :origin :viewer
                :key (:seqn thread)}])))
 
-       (when-let [thread (get threads-map open-thread-id)]
+       (when-let [thread open-thread]
          [:> cmt/comment-floating-thread*
           {:thread thread
            :position-modifier modifier1
+           :on-show-time on-show-time
            :origin :viewer
            :viewport {:offset-x 0 :offset-y 0 :width (:width vsize) :height (:height vsize)}
            :zoom zoom}])

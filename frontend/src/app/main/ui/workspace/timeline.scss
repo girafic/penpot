@@ -262,6 +262,23 @@ $header-height: $ruler-height + $row-height;
 
 // Left of the ruler, above the labels. Its chevron folds or opens all
 // the layers.
+// Over the ruler, right of its corner: the comments at their moments. Only
+// they take the pointer, the rest of the ruler scrubs.
+.ruler-comments {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: $track-label-width 0;
+  block-size: $ruler-height;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ruler-comment-lane {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: $axis-start-gap;
+}
+
 .ruler-corner {
   position: absolute;
   inset-block-start: 0;
@@ -373,6 +390,51 @@ $header-height: $ruler-height + $row-height;
   block-size: 12px;
   background-color: currentcolor;
   clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
+}
+
+// A comment thread about a moment of the animation: the avatar of its
+// author at the moment, on the ruler.
+.comment-pin {
+  position: absolute;
+  inset-block-start: 50%;
+  display: flex;
+  padding: 0;
+  pointer-events: auto;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+
+  // over the playhead
+  z-index: deprecated.$z-index-3;
+
+  &:focus-visible {
+    outline: 1px solid var(--color-accent-primary);
+  }
+}
+
+.comment-pin-avatar {
+  display: block;
+  box-sizing: border-box;
+  inline-size: 16px;
+  block-size: 16px;
+  border: 2px solid var(--color-background-quaternary);
+  border-radius: 50%;
+  background-color: var(--color-background-quaternary);
+}
+
+.comment-pin-unread .comment-pin-avatar {
+  border-color: var(--color-accent-primary);
+}
+
+.comment-pin-resolved {
+  opacity: 0.5;
+}
+
+.comment-pin:hover .comment-pin-avatar,
+.comment-pin-open .comment-pin-avatar {
+  border-color: var(--color-foreground-primary);
 }
 
 .marker-name {

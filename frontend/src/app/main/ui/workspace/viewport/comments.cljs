@@ -62,11 +62,27 @@
 (mf/defc comment-floating-thread-wrapper*
   {::mf/private true}
   [{:keys [thread viewport zoom]}]
-  (let [position-modifier (use-frame-position-modifier (:frame-id thread))]
+  (let [position-modifier (use-frame-position-modifier (:frame-id thread))
+
+        ;; A click on the moment of the animation the thread is about, or
+        ;; on a timestamp in it, shows it, in motion mode.
+        on-show-time
+        (mf/use-fn
+         (mf/deps thread)
+         (fn [time]
+           (st/emit! (dwcm/show-moment thread time))))]
+
+    ;; Opening a thread about a moment of the animation shows it, while
+    ;; in motion mode.
+    (mf/with-effect [(:id thread)]
+      (when-let [time (:animation-time thread)]
+        (st/emit! (dwcm/show-moment thread time false))))
+
     [:> cmt/comment-floating-thread*
      {:thread thread
       :viewport viewport
       :position-modifier position-modifier
+      :on-show-time on-show-time
       :zoom zoom}]))
 
 (mf/defc comments-layer*

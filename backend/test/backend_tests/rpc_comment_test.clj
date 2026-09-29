@@ -286,6 +286,51 @@
           (let [threads (th/db-query :comment-thread {:file-id (:id file-1)})]
             (t/is (= 0 (count threads)))))))))
 
+(t/deftest comment-thread-about-a-moment-of-an-animation
+  (let [profile (th/create-profile* 1 {:is-active true})
+        project (th/create-project* 1 {:team-id (:default-team-id profile)
+                                       :profile-id (:id profile)})
+        file    (th/create-file* 1 {:profile-id (:id profile)
+                                    :project-id (:id project)})
+        page-id (get-in file [:data :pages 0])
+        create  (fn [params]
+                  (th/command! (merge {::th/type :create-comment-thread
+                                       ::rpc/profile-id (:id profile)
+                                       :file-id (:id file)
+                                       :page-id page-id
+                                       :position (gpt/point 0)
+                                       :content "hello world"
+                                       :frame-id uuid/zero}
+                                      params)))]
+
+    (t/testing "a thread keeps the moment it is about"
+      (let [out (create {:animation-time 1250})]
+        (t/is (th/success? out))
+        (t/is (= 1250 (-> out :result :animation-time)))
+        (let [out (th/command! {::th/type :get-comment-thread
+                                ::rpc/profile-id (:id profile)
+                                :file-id (:id file)
+                                :id (-> out :result :id)})]
+          (t/is (th/success? out))
+          (t/is (= 1250 (-> out :result :animation-time))))))
+
+    (t/testing "a thread without one is about no moment"
+      (let [out (create {})]
+        (t/is (th/success? out))
+        (t/is (nil? (-> out :result :animation-time)))))
+
+    (t/testing "a moment before the start is refused"
+      (let [out (create {:animation-time -1})]
+        (t/is (not (th/success? out)))
+        (t/is (= :validation (th/ex-type (:error out))))))
+
+    (t/testing "the threads of the file tell their moments"
+      (let [out (th/command! {::th/type :get-comment-threads
+                              ::rpc/profile-id (:id profile)
+                              :file-id (:id file)})]
+        (t/is (th/success? out))
+        (t/is (= #{1250 nil} (into #{} (map :animation-time) (:result out))))))))
+
 (t/deftest share-link-who-comment-team-cannot-comment
   (let [owner    (th/create-profile* 1 {:is-active true})
         outsider (th/create-profile* 2 {:is-active true})

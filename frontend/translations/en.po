@@ -216,9 +216,21 @@ msgstr "...branding, illustrations, marketing pieces, etc."
 msgid "color-token.empty-state"
 msgstr "No available color tokens. Check active sets/themes or add new tokens."
 
+msgid "comments.insert-timestamp"
+msgstr "Insert timeline timestamp"
+
 #: src/app/main/ui/comments.cljs:549
 msgid "comments.mentions.not-found"
 msgstr "No people found for @%s"
+
+msgid "comments.moment"
+msgstr "Moment of the animation this comment is about"
+
+msgid "comments.remove-moment"
+msgstr "Not about this moment of the animation"
+
+msgid "comments.show-moment"
+msgstr "Show this moment of the animation"
 
 #: src/app/main/ui/workspace/libraries.cljs:349
 msgid "common.publish"

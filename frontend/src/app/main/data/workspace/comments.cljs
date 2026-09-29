@@ -9,8 +9,10 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.changes-builder :as pcb]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.schema :as sm]
    [app.common.types.shape-tree :as ctst]
@@ -20,10 +22,12 @@
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.common :as dwco]
    [app.main.data.workspace.drawing :as dwd]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.layout :as dwlo]
+   [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.viewport-wasm :as dwvw]
    [app.main.data.workspace.zoom :as dwz]
    [app.main.repo :as rp]
@@ -89,6 +93,28 @@
           comments-mode?    (rx/of (dwe/clear-edition-mode))
           :else             (rx/empty))))))
 
+(defn thread-board-id
+  "The board (top-level frame) of `objects` a comment `thread` is on, the
+  one whose animation a thread about a moment of it is about."
+  [objects thread]
+  (cfh/get-shape-id-root-frame objects (:frame-id thread)))
+
+(defn moment-at
+  "The moment of the animation a comment placed at `position` is about,
+  like in Figma: in motion mode, the one at the playhead, when the
+  comment is on the board the timeline shows and the board plays an
+  animation."
+  [state position]
+  (when (dwa/motion-mode? state)
+    (let [page     (dsh/lookup-page state)
+          objects  (:objects page)
+          frame-id (ctst/get-frame-id-by-position objects position)
+          board-id (cfh/get-shape-id-root-frame objects frame-id)]
+      (when (and (some? board-id)
+                 (= board-id (dwa/active-board-id state))
+                 (dwa/animated-board? page (dsh/lookup-libraries state) board-id))
+        (dwa/playhead state)))))
+
 ;; Event responsible of the what should be executed when user clicked
 ;; on the comments layer. An option can be create a new draft thread,
 ;; an other option is close previously open thread or cancel the
@@ -116,10 +142,48 @@
           :else
           (let [page-id (:current-page-id state)
                 file-id (:current-file-id state)
-                params  {:position position
-                         :page-id page-id
-                         :file-id file-id}]
-            (rx/of (dcmt/create-draft params))))))))
+                time    (moment-at state position)
+                params  (cond-> {:position position
+                                 :page-id page-id
+                                 :file-id file-id}
+                          (some? time)
+                          (assoc :animation-time time))]
+            ;; The animation stays at the moment the comment is about.
+            (rx/concat
+             (if (some? time) (rx/of (dwa/pause)) (rx/empty))
+             (rx/of (dcmt/create-draft params)))))))))
+
+(defn show-moment
+  "Show the moment `time` (ms) of the animation of the board a comment
+  `thread` is on: in motion mode, the timeline goes to that board and
+  its playhead to the moment, paused. Out of motion mode it enters it
+  first, unless `enter?` is false: then it does nothing."
+  ([thread time]
+   (show-moment thread time true))
+  ([thread time enter?]
+   (ptk/reify ::show-moment
+     ptk/WatchEvent
+     (watch [_ state _]
+       (let [page-id  (:page-id thread)
+             objects  (dsh/lookup-page-objects state page-id)
+             board-id (thread-board-id objects thread)
+             motion?  (dwa/motion-mode? state)]
+         (if (and (some? board-id)
+                  (some? time)
+                  (= page-id (:current-page-id state))
+                  (or motion? enter?))
+           (rx/concat
+            (if motion? (rx/empty) (rx/of (dwa/toggle-motion-mode)))
+            ;; A selection on another board would keep the timeline on
+            ;; that one (see `dwa/active-board-id`).
+            (if (and (seq (dsh/lookup-selected state))
+                     (not= board-id (dwa/active-board-id state)))
+              (rx/of (dws/select-shapes (d/ordered-set)))
+              (rx/empty))
+            (rx/of (dwa/pause)
+                   (dwa/set-active-board board-id)
+                   (dwa/set-playhead time)))
+           (rx/empty)))))))
 
 (defn center-to-comment-thread
   [{:keys [position] :as thread}]
@@ -143,6 +207,26 @@
     ptk/EffectEvent
     (effect [_ state _]
       (dwvw/maybe-sync-workspace-local-viewport! state))))
+
+(defn open-thread-moment
+  "Open a comment `thread` about a moment of the animation from the
+  timeline: the moment shows, and the canvas moves to the thread when it
+  is out of view."
+  [thread]
+  (dm/assert!
+   "expected valid comment thread"
+   (dcmt/check-comment-thread! thread))
+
+  (ptk/reify ::open-thread-moment
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [vbox (dm/get-in state [:workspace-local :vbox])]
+        (rx/concat
+         (if (and (some? vbox) (not (grc/contains-point? vbox (:position thread))))
+           (rx/of (center-to-comment-thread thread))
+           (rx/empty))
+         (rx/of (with-meta (dcmt/open-thread thread) {::ev/origin "timeline"})
+                (show-moment thread (:animation-time thread))))))))
 
 (defn- set-comment-thread
   "Stores the comment thread in the workspace state so its bubble re-renders."

@@ -173,9 +173,27 @@
 }
 
 .floating-preview-avatar {
+  position: relative;
   display: flex;
   block-size: $sz-32;
   inline-size: $sz-32;
+}
+
+// The clock on the bubble of a thread about a moment of the animation.
+.floating-preview-moment {
+  position: absolute;
+  inset-inline-end: calc(-1 * var(--sp-xs));
+  inset-block-end: calc(-1 * var(--sp-xs));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  block-size: $sz-16;
+  inline-size: $sz-16;
+  border-radius: $br-circle;
+  border: $b-1 solid var(--color-background-quaternary);
+  background-color: var(--color-background-primary);
+  color: var(--color-foreground-primary);
+  pointer-events: none;
 }
 
 .floating-preview-expanded {
@@ -297,6 +315,9 @@
 .floating-thread-header-left {
   @include use-typography("body-small");
 
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
   color: var(--color-foreground-primary);
 }
 
@@ -406,6 +427,58 @@
   margin-block-start: var(--sp-s);
 }
 
+.form-tools {
+  display: flex;
+  align-items: center;
+}
+
+// With the timestamp tool (motion mode) the row is tighter and its tools
+// narrower, so it keeps to the width of the thread with the longer labels
+// of the buttons.
+.form-buttons-compact {
+  gap: var(--sp-xs);
+
+  .form-tools button {
+    --button-width: #{$sz-24};
+  }
+}
+
+// The moment of the animation a thread is about.
+.thread-moment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xxs);
+  flex-shrink: 0;
+}
+
+.thread-moment-time {
+  @include use-typography("body-small");
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  block-size: $sz-24;
+  padding: 0 var(--sp-s);
+  border: none;
+  border-radius: $br-6;
+  background-color: var(--color-background-tertiary);
+  color: var(--color-foreground-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.thread-moment-button {
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-accent-primary);
+  }
+
+  &:focus-visible {
+    outline: $b-1 solid var(--color-accent-primary);
+  }
+}
+
 .open-mentions-button {
   color: var(--color-foreground-secondary);
 }
@@ -490,7 +563,8 @@
     outline: none;
   }
 
-  [data-type="mention"] {
+  [data-type="mention"],
+  [data-type="timestamp"] {
     color: var(--color-accent-primary);
   }
 
@@ -505,6 +579,22 @@
 
 .comment-mention {
   color: var(--color-accent-primary);
+}
+
+// A timestamp of the animation in the text of a comment.
+.comment-timestamp {
+  color: var(--color-accent-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.comment-timestamp-button {
+  @include use-typography("body-small");
+
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .comment-link {

@@ -17,7 +17,9 @@
    [app.config :as cfg]
    [app.main.data.comments :as dcm]
    [app.main.data.modal :as modal]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.comments :as dwcm]
+   [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
@@ -59,17 +61,22 @@
     [element]))
 
 (defn- parse-comment
-  "Parse a comment into its elements (texts, mentions and urls)"
+  "Parse a comment into its elements (texts, mentions, timestamps of the
+  animation and urls)"
   [comment]
   (->> (d/interleave-all
         (->> (str/split comment r-mentions-split)
              (map #(hash-map :type :text :content %)))
 
         (->> (re-seq r-mentions comment)
-             (map (fn [[_ user id]]
-                    {:type :mention
-                     :content user
-                     :data {:id id}}))))
+             (map (fn [[_ label target]]
+                    (if-let [time (dcm/timestamp-time target)]
+                      {:type :timestamp
+                       :content label
+                       :data {:time time}}
+                      {:type :mention
+                       :content label
+                       :data {:id target}})))))
        (mapcat parse-urls)))
 
 (defn- parse-nodes
@@ -81,6 +88,9 @@
           (cond
             (and (instance? js/HTMLElement node) (dom/get-data node "user-id"))
             (str/ffmt "@[%](%)" (.-textContent node) (dom/get-data node "user-id"))
+
+            (and (instance? js/HTMLElement node) (dom/get-data node "time"))
+            (dcm/timestamp-token (dom/get-data node "time") (.-textContent node))
 
             :else
             (.-textContent node))))
@@ -103,6 +113,25 @@
       (dom/set-data! "user-id" (dm/str id))
       (dom/set-data! "fullname" fullname)
       (obj/set! "textContent" fullname)))
+
+(defn- create-timestamp-node
+  "Creates the node of a timestamp of the animation, the moment `time`
+  (ms) shown as `label`"
+  [time label]
+  (-> (dom/create-element "span")
+      (dom/set-data! "type" "timestamp")
+      (dom/set-data! "time" (dm/str time))
+      (dom/set-data! "label" label)
+      (obj/set! "textContent" label)))
+
+(def ^:private token-types
+  "The nodes of the input that are edited as a whole."
+  #{"mention" "timestamp"})
+
+(def ^:private ref:time-unit
+  "The time unit the timeline shows the moments of the animation in (see
+  `dwa/time-unit`): it does not change as the animation plays."
+  (l/derived dwa/time-unit refs/workspace-animation =))
 
 (defn- current-text-node*
   "Retrieves the text node and the offset that the cursor is positioned on"
@@ -152,19 +181,91 @@
         (and (= (count content) 1)
              (= (first content) zero-width-space)))))
 
+(mf/defc comment-timestamp*
+  "A timestamp of the animation in the text of a comment, in the time
+  unit of the timeline: given `on-show-time`, a click shows its moment."
+  {::mf/private true}
+  [{:keys [time on-show-time]}]
+  (let [unit  (mf/deref ref:time-unit)
+        label (dwa/format-time time unit)
+
+        on-click
+        (mf/use-fn
+         (mf/deps time on-show-time)
+         (fn [event]
+           (dom/stop-propagation event)
+           (on-show-time time)))]
+
+    (if (fn? on-show-time)
+      [:button {:type "button"
+                :class (stl/css :comment-timestamp :comment-timestamp-button)
+                :title (tr "comments.show-moment")
+                :on-click on-click}
+       label]
+      [:span {:class (stl/css :comment-timestamp)} label])))
+
+(mf/defc thread-moment*
+  "The moment of the animation a comment thread is about, in the time
+  unit of the timeline: given `on-show-time`, a click shows it; given
+  `on-remove`, the moment can be dropped (from a new thread)."
+  {::mf/private true}
+  [{:keys [time on-show-time on-remove]}]
+  (let [unit  (mf/deref ref:time-unit)
+        label (dwa/format-time time unit)
+
+        on-click
+        (mf/use-fn
+         (mf/deps time on-show-time)
+         (fn [event]
+           (dom/stop-propagation event)
+           (on-show-time time)))
+
+        on-remove*
+        (mf/use-fn
+         (mf/deps on-remove)
+         (fn [event]
+           (dom/stop-propagation event)
+           (on-remove)))]
+
+    [:span {:class (stl/css :thread-moment)
+            :data-testid "comment-thread-moment"}
+     (if (fn? on-show-time)
+       [:button {:type "button"
+                 :class (stl/css :thread-moment-time :thread-moment-button)
+                 :title (tr "comments.show-moment")
+                 :on-click on-click}
+        [:> icon* {:icon-id i/clock :size "s"}]
+        label]
+       [:span {:class (stl/css :thread-moment-time)
+               :title (tr "comments.moment")}
+        [:> icon* {:icon-id i/clock :size "s"}]
+        label])
+     (when (fn? on-remove)
+       [:> icon-button* {:variant "ghost"
+                         :aria-label (tr "comments.remove-moment")
+                         :on-click on-remove*
+                         :icon i/close}])]))
+
 ;; Component that renders the component content
 (mf/defc comment-content*
   {::mf/private true}
-  [{:keys [content]}]
+  [{:keys [content on-show-time]}]
   (let [comment-elements (mf/use-memo (mf/deps content) #(parse-comment content))]
-    (for [[idx {:keys [type content]}] (d/enumerate comment-elements)]
-      (if (= type :url)
+    (for [[idx {:keys [type content data]}] (d/enumerate comment-elements)]
+      (case type
+        :url
         [:a {:key idx
              :href content
              :target "_blank"
              :rel "noopener noreferrer"
              :class (stl/css :comment-link)}
          content]
+
+        :timestamp
+        [:> comment-timestamp* {:key idx
+                                :time (:time data)
+                                :on-show-time on-show-time}]
+
         [:span
          {:key idx
           :class (stl/css-case
@@ -194,9 +295,10 @@
            (when node
              (doseq [{:keys [type content data]} (parse-comment value)]
                (case type
-                 :text     (dom/append-child! node (create-text-node content))
-                 :url      (dom/append-child! node (create-text-node content))
-                 :mention  (dom/append-child! node (create-mention-node (:id data) content))
+                 :text      (dom/append-child! node (create-text-node content))
+                 :url       (dom/append-child! node (create-text-node content))
+                 :mention   (dom/append-child! node (create-mention-node (:id data) content))
+                 :timestamp (dom/append-child! node (create-timestamp-node (:time data) content))
                  nil)))))
 
         handle-input
@@ -219,6 +321,12 @@
                ;; Remove mentions that have been modified
                (when (and (= (dom/get-data child-node "type") "mention")
                           (not= (dom/get-data child-node "fullname")
+                                (dom/get-text child-node)))
+                 (.remove child-node))
+
+               ;; And timestamps
+               (when (and (= (dom/get-data child-node "type") "timestamp")
+                          (not= (dom/get-data child-node "label")
                                 (dom/get-text child-node)))
                  (.remove child-node)))
 
@@ -261,7 +369,7 @@
 
                      (mf/set-ref-val! prev-selection-ref #js [span-node offset])
 
-                     (when (= (dom/get-data span-node "type") "mention")
+                     (when (contains? token-types (dom/get-data span-node "type"))
                        (let [from-offset (absolute-offset node prev-span prev-offset)
                              to-offset   (absolute-offset node span-node offset)
 
@@ -352,6 +460,40 @@
                  (dom/set-html! span-node (str/concat (dom/escape-html node-text) at-symbol))
                  (wapi/set-cursor-after! span-node))))))
 
+        ;; A timestamp of the animation goes where the caret is or, without
+        ;; it in the input, at the end, apart from the words around it.
+        handle-insert-timestamp
+        (mf/use-fn
+         (mf/deps on-change)
+         (fn [{:keys [time label]}]
+           (when-let [node (mf/ref-val local-ref)]
+             (when-let [[span-node offset]
+                        (or (current-text-node node)
+                            (when-let [last-node (last (seq (dom/get-children node)))]
+                              [last-node (count (dom/get-text last-node))]))]
+               (let [stamp     (create-timestamp-node time label)
+                     text?     (= "text" (dom/get-data span-node "type"))
+                     node-text (if text? (dom/get-text span-node) "")
+                     prefix    (-> (subs node-text 0 (min offset (count node-text)))
+                                   (str/replace zero-width-space ""))
+                     suffix    (-> (subs node-text (min offset (count node-text)))
+                                   (str/replace zero-width-space ""))
+                     prefix    (if (or (and text? (empty? prefix)) (re-find #"\s$" prefix))
+                                 prefix
+                                 (dm/str prefix " "))
+                     after     (create-text-node (if (re-find #"^\s" suffix) suffix (dm/str " " suffix)))
+                     ;; after a mention, the words go in a text node of their own
+                     before    (if text? span-node (create-text-node prefix))]
+                 (if text?
+                   (dom/set-html! span-node (if (empty? prefix) zero-width-space (dom/escape-html prefix)))
+                   (dom/insert-after! node span-node before))
+                 (dom/insert-after! node before stamp)
+                 (dom/insert-after! node stamp after)
+                 (wapi/set-cursor! after 1)
+
+                 (when (fn? on-change)
+                   (on-change (parse-nodes node))))))))
+
         handle-key-down
         (mf/use-fn
          (mf/deps on-esc on-ctrl-enter handle-select handle-input)
@@ -404,7 +546,7 @@
                  (kbd/backspace? event)
                  (let [prev-node (get-prev-node node span-node)]
                    (when (and (some? prev-node)
-                              (= "mention" (dom/get-data prev-node "type"))
+                              (contains? token-types (dom/get-data prev-node "type"))
                               (= offset 1))
                      (dom/prevent-default event)
                      (dom/stop-propagation event)
@@ -431,6 +573,8 @@
                   (handle-insert-mention data)
                   :insert-at-symbol
                   (handle-insert-at-symbol)
+                  :insert-timestamp
+                  (handle-insert-timestamp data)
 
                   nil))))))
 
@@ -603,6 +747,43 @@
                                 :is-toggled @display-mentions*)
       :icon i/at}]))
 
+(mf/defc timestamp-button*
+  "Inserts a timestamp of the animation, the moment at the playhead, in
+  the comment being written, like \"Insert timeline timestamp\" in
+  Figma."
+  {::mf/private true}
+  []
+  (let [mentions-s (mf/use-ctx mentions-context)
+        unit       (mf/deref ref:time-unit)
+
+        handle-pointer-down
+        (mf/use-fn
+         (mf/deps unit)
+         (fn [event]
+           ;; the caret stays in the input
+           (dom/prevent-default event)
+           (dom/stop-propagation event)
+           (let [time (dwa/playhead @st/state)]
+             (rx/push! mentions-s {:type :insert-timestamp
+                                   :data {:time time
+                                          :label (dwa/format-time time unit)}}))))
+
+        handle-key-down
+        (mf/use-fn
+         (mf/deps handle-pointer-down)
+         (fn [event]
+           (when (or (kbd/enter? event) (kbd/space? event))
+             (handle-pointer-down event))))]
+
+    [:> icon-button*
+     {:variant "ghost"
+      :aria-label (tr "comments.insert-timestamp")
+      :data-testid "comment-insert-timestamp"
+      :on-pointer-down handle-pointer-down
+      :on-key-down handle-key-down
+      :icon-class (stl/css :open-mentions-button)
+      :icon i/clock}]))
+
 (def ^:private schema:comment-avatar
   [:map
    [:class {:optional true} :string]
@@ -641,7 +822,9 @@
     [:div {:class (stl/css :author-identity)}
      [:div {:class (stl/css :author-fullname)} (:fullname profile)]
      [:div {:class (stl/css :author-timeago)}
-      (ct/timeago (:modified-at item))]]]
+      (ct/timeago (:modified-at item))]]
+    (when-let [time (:animation-time item)]
+      [:> thread-moment* {:time time}])]
 
    [:div {:class (stl/css :item)}
     [:> comment-content* {:content (:content item)}]]
@@ -667,7 +850,12 @@
 (mf/defc comment-form-buttons*
   {::mf/private true}
   [{:keys [on-submit on-cancel is-disabled]}]
-  (let [handle-cancel
+  (let [layout  (mf/deref refs/workspace-layout)
+        ;; In motion mode, a timestamp of the animation can be inserted.
+        motion? (and (features/use-feature "animation/v1")
+                     (contains? layout :animation-timeline))
+
+        handle-cancel
         (mf/use-fn
          (mf/deps on-cancel)
          (fn [event]
@@ -681,8 +869,12 @@
            (when (kbd/enter? event)
              (on-submit))))]
 
-    [:div {:class (stl/css :form-buttons-wrapper)}
-     [:> mentions-button*]
+    [:div {:class (stl/css-case :form-buttons-wrapper true
+                                :form-buttons-compact motion?)}
+     [:div {:class (stl/css :form-tools)}
+      [:> mentions-button*]
+      (when motion?
+        [:> timestamp-button*])]
      (when (some? on-cancel)
        [:> button* {:variant "ghost"
                     :type "button"
@@ -835,6 +1027,12 @@
          (fn [content]
            (st/emit! (dcm/update-draft-thread {:content content}))))
 
+        ;; A new thread in motion mode is about the moment at the playhead
+        ;; (see `dwcm/handle-comment-layer-click`), unless dropped.
+        on-remove-moment
+        (mf/use-fn
+         #(st/emit! (dcm/update-draft-thread {:animation-time nil})))
+
         on-submit*
         (mf/use-fn
          (mf/deps draft)
@@ -858,6 +1056,9 @@
                     :left (str pos-x "px")}
             :on-click dom/stop-propagation}
       [:div {:class (stl/css :form)}
+       (when-let [time (:animation-time draft)]
+         [:> thread-moment* {:time time
+                             :on-remove on-remove-moment}])
        [:> comment-input*
         {:placeholder (tr "labels.write-new-comment")
          :value (or content "")
@@ -875,7 +1076,7 @@
 
 (mf/defc comment-floating-thread-header*
   {::mf/private true}
-  [{:keys [thread origin]}]
+  [{:keys [thread origin on-show-time]}]
   (let [owner    (dcm/get-owner thread)
         profile  (mf/deref refs/profile)
         options  (mf/deref ref:comments-local-options)
@@ -922,7 +1123,10 @@
 
     [:*
      [:div {:class (stl/css :floating-thread-header-left)}
-      (tr "labels.comment") " " [:span {:class (stl/css :grayed-text)} "#" (:seqn thread)]]
+      [:span (tr "labels.comment") " " [:span {:class (stl/css :grayed-text)} "#" (:seqn thread)]]
+      (when-let [time (:animation-time thread)]
+        [:> thread-moment* {:time time
+                            :on-show-time on-show-time}])]
      [:div {:class (stl/css :floating-thread-header-right)}
       (when (some? thread)
         [:> checkbox* {:class (stl/css :checkbox-wrapper)
@@ -942,7 +1146,7 @@
 
 (mf/defc comment-floating-thread-item*
   {::mf/private true}
-  [{:keys [comment thread]}]
+  [{:keys [comment thread on-show-time]}]
   (let [owner    (dcm/get-owner comment)
         profile  (mf/deref refs/profile)
         options  (mf/deref ref:comments-local-options)
@@ -1005,7 +1209,8 @@
                                  :on-submit on-submit
                                  :on-cancel on-cancel}]
          [:span {:class (stl/css :text)}
-          [:> comment-content* {:content (:content comment)}]])]]
+          [:> comment-content* {:content (:content comment)
+                                :on-show-time on-show-time}]])]]
 
      [:& dropdown {:show (= options (:id comment))
                    :on-close on-hide-options}
@@ -1025,8 +1230,11 @@
 
 
 (mf/defc comment-floating-thread*
+  "An open comment thread. Given `on-show-time`, a click on the moment
+  of the animation it is about, or on a timestamp in its comments, calls
+  it with that moment (ms)."
   {::mf/wrap [mf/memo]}
-  [{:keys [thread zoom origin position-modifier viewport]}]
+  [{:keys [thread zoom origin position-modifier viewport on-show-time]}]
   (let [ref           (mf/use-ref)
         mentions-s    (mf/use-memo #(rx/subject))
         thread-id     (:id thread)
@@ -1099,14 +1307,17 @@
 
         [:div {:class (stl/css :floating-thread-header)}
          [:> comment-floating-thread-header* {:thread thread
-                                              :origin origin}]]
+                                              :origin origin
+                                              :on-show-time on-show-time}]]
 
         [:div {:class (stl/css :floating-thread-main)}
          [:> comment-floating-thread-item* {:comment first-comment
-                                            :thread thread}]
+                                            :thread thread
+                                            :on-show-time on-show-time}]
          (for [item (rest comments)]
            [:* {:key (dm/str (:id item))}
-            [:> comment-floating-thread-item* {:comment item}]])]
+            [:> comment-floating-thread-item* {:comment item
+                                               :on-show-time on-show-time}]])]
 
         [:> comment-reply-form* {:on-submit on-submit
                                  :on-cancel (when (= origin :viewer) on-cancel)}]
@@ -1396,7 +1607,11 @@
         :variant (cond
                    (:is-resolved thread) "solved"
                    (pos? (:count-unread-comments thread)) "unread"
-                   :else "read")}]]
+                   :else "read")}]
+      ;; A thread about a moment of the animation
+      (when (some? (:animation-time thread))
+        [:span {:class (stl/css :floating-preview-moment)}
+         [:> icon* {:icon-id i/clock :size "s"}]])]
 
      (when (:is-hover @state)
        [:div {:class (stl/css :floating-thread-wrapper

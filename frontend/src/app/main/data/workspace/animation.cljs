@@ -105,6 +105,12 @@
                              (dsh/lookup-libraries state) board-id))
       {})))
 
+(defn- plays-animation?
+  [objects timelines main-page board-id]
+  (let [timeline (get timelines board-id)]
+    (boolean (or (seq (:tracks timeline))
+                 (seq (cltl/instance-timelines objects board-id timeline main-page))))))
+
 (defn animated-board-ids
   "Ids of the boards of `page` that play an animation: their own, or the
   one of component copies in them (see `shown-timelines`); `files` holds
@@ -114,11 +120,14 @@
         timelines (:timelines page)
         main-page (cltl/main-page-of files)]
     (into #{}
-          (filter (fn [id]
-                    (let [timeline (get timelines id)]
-                      (or (seq (:tracks timeline))
-                          (seq (cltl/instance-timelines objects id timeline main-page))))))
+          (filter (partial plays-animation? objects timelines main-page))
           (ctst/get-root-frames-ids objects))))
+
+(defn animated-board?
+  "Whether the board `board-id` of `page` plays an animation (see
+  `animated-board-ids`)."
+  [page files board-id]
+  (plays-animation? (:objects page) (:timelines page) (cltl/main-page-of files) board-id))
 
 (defn board-timeline
   "The timeline of `board` or, while the board has none, a new empty one
@@ -197,6 +206,19 @@
   `anim` is the `:workspace-animation` state."
   [anim]
   (or (:time-unit anim) (get storage/user ::time-unit :ms)))
+
+(defn format-seconds
+  "`time` (ms) in seconds, to the millisecond: `1.25`."
+  [time]
+  (dm/str (mth/precision (/ time 1000) 3)))
+
+(defn format-time
+  "`time` (ms) in the time `unit` of the timeline (see `time-unit`):
+  `1250 ms` or `1.25 s`."
+  [time unit]
+  (if (= unit :s)
+    (dm/str (format-seconds time) " s")
+    (dm/str time " ms")))
 
 (defn toggle-time-unit
   "Show the times of the timeline in seconds instead of milliseconds, or
@@ -1306,7 +1328,8 @@
 
 (declare pause)
 
-(defn- motion-mode?
+(defn motion-mode?
+  "Whether the workspace is in motion mode, with the timeline dock."
   [state]
   (contains? (:workspace-layout state) :animation-timeline))
 

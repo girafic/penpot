@@ -1035,3 +1035,16 @@
     ptk/WatchEvent
     (watch [_ _ _]
       (rx/of (pause-timeline) (seek-timeline 0)))))
+
+(defn show-moment
+  "Show the board `board-id` at the moment `time` (ms) of its animation,
+  paused: the one a comment thread is about."
+  [board-id time]
+  (ptk/reify ::show-moment
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:viewer-local :timeline] assoc :timeline-id board-id))
+
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (pause-timeline) (seek-timeline time)))))

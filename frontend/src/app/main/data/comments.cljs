@@ -40,6 +40,8 @@
    [:created-at ::ct/inst]
    [:modified-at ::ct/inst]
    [:position ::gpt/point]
+   ;; The moment (ms) of the animation of its board the thread is about
+   [:animation-time {:optional true} [:maybe :int]]
    [:count-unread-comments {:optional true} :int]
    [:count-comments {:optional true} :int]])
 
@@ -67,11 +69,26 @@
 
 (def r-mentions #"@\[([^\]]*)\]\(([^\)]*)\)")
 
+(defn timestamp-token
+  "The markup of a timestamp of the animation in the content of a
+  comment, the moment `time` (ms) shown as `label`. It is written like a
+  mention, `@[label](time:ms)`, so it reads as its label where
+  timestamps are not known, as in the emails."
+  [time label]
+  (dm/str "@[" label "](time:" time ")"))
+
+(defn timestamp-time
+  "The moment (ms) the target of a mention in the content of a comment
+  stands for, when the mention is a timestamp (see `timestamp-token`)."
+  [target]
+  (when-let [[_ time] (re-matches #"time:(\d+)" target)]
+    (d/parse-integer time)))
+
 (defn extract-mentions
   "Retrieves the mentions in the content as an array of uuids"
   [content]
   (->> (re-seq r-mentions content)
-       (mapv (fn [[_ _ id]] (uuid/parse id)))))
+       (into [] (keep (fn [[_ _ id]] (uuid/parse* id))))))
 
 (defn update-mentions
   "Updates the params object with the mentiosn"

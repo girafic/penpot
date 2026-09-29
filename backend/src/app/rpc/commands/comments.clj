@@ -449,7 +449,9 @@
    [:page-id ::sm/uuid]
    [:frame-id ::sm/uuid]
    [:share-id {:optional true} [:maybe ::sm/uuid]]
-   [:mentions {:optional true} [::sm/set ::sm/uuid]]])
+   [:mentions {:optional true} [::sm/set ::sm/uuid]]
+   ;; The moment (ms) of the animation of the board the thread is about
+   [:animation-time {:optional true} [:maybe [::sm/int {:min 0}]]]])
 
 (defn- update-thread-seqn
   [conn file-id seqn]
@@ -467,6 +469,7 @@
 
 (sv/defmethod ::create-comment-thread
   {::doc/added "1.15"
+   ::doc/changes [["2.19" "Add :animation-time param for threads about a moment of an animation"]]
    ::webhooks/event? true
    ::rtry/enabled true
    ::rtry/when rtry/conflict-exception?
@@ -490,7 +493,7 @@
 
 (defn- create-comment-thread
   [{:keys [::db/conn] :as cfg}
-   {:keys [::rpc/profile-id ::rpc/request-at ::file position content mentions frame-id] :as params}]
+   {:keys [::rpc/profile-id ::rpc/request-at ::file position content mentions frame-id animation-time] :as params}]
 
   (let [;; NOTE: we take the next seq number from a separate query
         ;; because we need to lock the file for avoid race conditions
@@ -518,6 +521,7 @@
                                    :modified-at request-at
                                    :seqn seqn
                                    :frame-id frame-id
+                                   :animation-time animation-time
                                    :position (db/pgpoint position)
                                    :mentions (db/encode-pgarray mentions conn "uuid")})
                       (decode-row))
