@@ -11,6 +11,8 @@
    [app.common.exceptions :as ex]
    [app.common.render-wasm.wasm :as wasm]
    [app.render-wasm.api :as wasm.api]
+   [app.render-wasm.modifiers :as wasm.modifiers]
+   [app.render-wasm.shape :as wasm.shape]
    [app.util.dom :as dom]
    [app.util.timers :as ts]
    [app.util.webapi :as webapi]
@@ -32,6 +34,7 @@
   (atom {:os-canvas nil
          :page-key  nil
          :objects   nil
+         :props     []
          :canvas-w  0
          :canvas-h  0
          :dpr       1}))
@@ -41,9 +44,39 @@
           {:os-canvas nil
            :page-key nil
            :objects nil
+           :props []
            :canvas-w 0
            :canvas-h 0
            :dpr 1}))
+
+(defn- show-animation!
+  "Show over the shapes loaded in WASM from `objects` the animation
+  `modif-tree` at a time (see `cltl/animation-tree`), as the workspace
+  does (see `dwm/set-wasm-modifiers`): its transforms as modifiers, the
+  other attributes it animates (opacity, colours...) as shape
+  properties, with the ones the frame before set (`prev`) back first. A
+  nil `modif-tree` shows the shapes as they are. The attribute changes
+  it made."
+  [objects prev modif-tree]
+  (let [changes (if (some? modif-tree)
+                  (vec (wasm.modifiers/extract-property-changes modif-tree))
+                  [])]
+    (when (or (seq prev) (seq changes))
+      (let [[changed shape-changes] (wasm.modifiers/property-changes objects prev changes)]
+        (doseq [[id properties] shape-changes]
+          (wasm.shape/set-shape-properties! (get changed id) properties))))
+    (wasm.api/clean-modifiers)
+    (when (seq modif-tree)
+      (let [structure (wasm.modifiers/parse-structure-modifiers modif-tree)
+            geometry  (wasm.modifiers/parse-geometry-modifiers modif-tree)]
+        (when (seq structure)
+          (wasm.api/set-structure-modifiers structure))
+        (when (seq geometry)
+          (let [propagated (wasm.api/propagate-modifiers geometry false nil)
+                roots      (into [] (map (fn [[id data]] [id (:transform data)])) geometry)]
+            (wasm.api/set-modifiers (if (seq propagated) propagated roots)
+                                    :request-render? false)))))
+    changes))
 
 (defn- draw-bitmap!
   "Blit the rendered OffscreenCanvas onto the visible 2D `canvas`. Firefox+NVIDIA
@@ -72,6 +105,20 @@
                       :hint "Viewer canvas failed"
                       :cause e)))))))
 
+(defn- present-bitmap!
+  "Show what was rendered into the OffscreenCanvas `os-canvas` on the
+  visible `canvas` at once and without a copy: the frame moves over as an
+  ImageBitmap (`transferToImageBitmap`) into the `bitmaprenderer` context
+  of `canvas`, so an animation plays without waiting for a copy and a
+  frame. A canvas that already draws in 2D goes on with `draw-bitmap!`."
+  [canvas os-canvas object-id vis-w vis-h finish]
+  (if-let [ctx (.getContext canvas "bitmaprenderer")]
+    (do
+      (.transferFromImageBitmap ^js ctx (.transferToImageBitmap ^js os-canvas))
+      (dom/set-attribute! canvas "id" (str "screenshot-" object-id))
+      (finish))
+    (draw-bitmap! canvas os-canvas object-id vis-w vis-h finish)))
+
 (defn- viewer-disable-wasm-ui-overlay!
   "Workspace WASM UI (rulers + rounded viewport frame) is composited in
   `present_frame`; the viewer must not show that chrome."
@@ -96,14 +143,20 @@
     (wasm.api/set-shape-fills id (get-in page-objects [id :fills] []) false)))
 
 (defn- viewer-do-render!
+  "Render the board `object-id` into `os-canvas` and blit it onto
+  `canvas`. `again?` when it rendered last with the same view and shapes,
+  so only what changed since (an animation) draws again."
   [page-objects canvas os-canvas object-id vis-w vis-h scale size
-   include-ids clear-fills-ids finish]
+   include-ids clear-fills-ids again? finish]
   (viewer-disable-wasm-ui-overlay!)
   (viewer-apply-layer-mask! include-ids clear-fills-ids)
-  (wasm.api/set-viewer-viewport! scale size)
-  (wasm.api/render-sync-shape object-id)
+  (if again?
+    (wasm.api/render-sync-shape-again object-id)
+    (do
+      (wasm.api/set-viewer-viewport! scale size)
+      (wasm.api/render-sync-shape object-id)))
   (viewer-restore-layer-mask! page-objects clear-fills-ids)
-  (draw-bitmap! canvas os-canvas object-id vis-w vis-h finish))
+  (present-bitmap! canvas os-canvas object-id vis-w vis-h finish))
 
 (defn- render-to-canvas*
   [objects canvas bounds scale object-id on-render]
@@ -146,8 +199,13 @@
      (render-to-canvas* objects canvas bounds scale object-id on-render))))
 
 (defn- render-viewer-frame*
+  "Render the board `object-id` of `page-objects` into `canvas`. The
+  shapes load into WASM once per page; `modifiers`, an animation at a
+  time (a delay of its modif-tree), shows over them (see
+  `show-animation!`), so playing it does not load them again at each
+  frame."
   [page-key page-objects canvas size scale object-id on-render
-   {:keys [include-ids clear-fills-ids] :or {clear-fills-ids #{}}}]
+   {:keys [include-ids clear-fills-ids modifiers] :or {clear-fills-ids #{}}}]
   (p/create
    (fn [resolve _reject]
      (let [prev-disable @wasm/disable-request-render?
@@ -164,10 +222,20 @@
                              (= vis-h (:canvas-h snap))
                              (= dpr (:dpr snap)))
            os           (:os-canvas snap)
-           do-render!   (fn [os-canvas]
-                          (viewer-do-render! page-objects canvas os-canvas object-id
-                                             vis-w vis-h scale size include-ids
-                                             clear-fills-ids finish))]
+           ;; What the tile cache holds after a render: the next one with
+           ;; the same can draw only what changed (see `viewer-do-render!`).
+           ;; The passes of a board with fixed layers render other shapes
+           ;; each, so they render all.
+           render-key   (when (and (empty? include-ids) (empty? clear-fills-ids))
+                          [object-id scale size vis-w vis-h dpr])
+           do-render!   (fn [os-canvas prev-props]
+                          (let [props  (show-animation! page-objects prev-props (force modifiers))
+                                again? (and (some? render-key)
+                                            (= render-key (:render-key @viewer-snapshot)))]
+                            (swap! viewer-snapshot assoc :props props :render-key render-key)
+                            (viewer-do-render! page-objects canvas os-canvas object-id
+                                               vis-w vis-h scale size include-ids
+                                               clear-fills-ids again? finish)))]
 
        (reset! wasm/disable-request-render? true)
 
@@ -177,14 +245,13 @@
              (when-not same-size?
                (wasm.api/resize-offscreen-canvas! os vis-w vis-h)
                (swap! viewer-snapshot assoc :canvas-w vis-w :canvas-h vis-h :dpr dpr))
-             ;; The page id stays put while a timeline plays, so the
-             ;; snapshot would otherwise keep drawing the first frame.
-             ;; Re-upload the shapes, then draw them.
+             ;; While an animation plays the shapes stay loaded: only its
+             ;; modifiers change (see `show-animation!`).
              (if (identical? page-objects (:objects snap))
-               (do-render! os)
+               (do-render! os (:props snap))
                (do
-                 (swap! viewer-snapshot assoc :objects page-objects)
-                 (wasm.api/set-objects page-objects #(do-render! os) nil true))))
+                 (swap! viewer-snapshot assoc :objects page-objects :props [] :render-key nil)
+                 (wasm.api/set-objects page-objects #(do-render! os []) nil true))))
            (let [os-canvas (js/OffscreenCanvas. vis-w vis-h)]
              (when (wasm.api/initialized?)
                (wasm.api/clear-canvas {:lose-browser-context? false}))
@@ -194,6 +261,8 @@
                          {:os-canvas os-canvas
                           :page-key  page-key
                           :objects   page-objects
+                          :props     []
+                          :render-key nil
                           :canvas-w  vis-w
                           :canvas-h  vis-h
                           :dpr       dpr})
@@ -201,7 +270,7 @@
                   page-objects scale size
                   :background-opacity 0
                   :force-sync true
-                  :on-render #(do-render! os-canvas)))
+                  :on-render #(do-render! os-canvas [])))
                (finish))))
          (catch :default e
            (js/console.error "viewer-snapshot: render error" e)
@@ -239,58 +308,87 @@
 
 (defn- use-viewer-wasm-layers!
   [page-id page-objects size scale frame-id not-fixed-ref fixed-ref
-   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta dpr-key]
+   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta dpr-key
+   modifiers-ref]
   ;; The hot-areas SVG shifts every object by `-(size + delta)` so the frame
   ;; `selrect` lands flush against the overlay snap side, ignoring the extra
   ;; padding reserved for shadows/blur/strokes. Bake the same `delta` into the
   ;; WASM view origin so the rendered canvas aligns with that SVG (otherwise it
   ;; appears offset by the shadow margin).
-  (let [render-size (-> size
-                        (update :x + (:x delta 0))
-                        (update :y + (:y delta 0)))]
-    (mf/use-layout-effect
-     (mf/deps page-id page-objects render-size scale frame-id dpr-key
-              not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids)
-     (fn []
-       (when (get page-objects frame-id)
-         (->> @wasm.api/module
-              (p/fmap
-               (fn [ready?]
-                 (when ready?
-                   (let [not-fixed-canvas (mf/ref-val not-fixed-ref)
-                         fixed-canvas     (mf/ref-val fixed-ref)
-                         passes
-                         (cond-> []
-                           not-fixed-canvas
-                           (conj {:canvas not-fixed-canvas
-                                  :opts   (cond-> {}
-                                            (seq not-fixed-include-ids)
-                                            (assoc :include-ids not-fixed-include-ids))})
+  (let [render-size (mf/with-memo [size delta]
+                      (-> size
+                          (update :x + (:x delta 0))
+                          (update :y + (:y delta 0))))
+        ;; The render asked last: while an animation plays, frames the
+        ;; renderer did not get to are skipped, not queued.
+        generation-ref (mf/use-ref 0)
 
-                           (and fixed-canvas (seq fixed-include-ids))
-                           (conj {:canvas fixed-canvas
-                                  :opts   (cond-> {:include-ids fixed-include-ids}
-                                            (seq fixed-clear-fills-ids)
-                                            (assoc :clear-fills-ids fixed-clear-fills-ids))}))]
-                     (when (seq passes)
-                       (enqueue-wasm-render!
-                        (fn []
-                          (reduce (fn [chain {:keys [canvas opts]}]
-                                    (p/then chain
-                                            #(render-viewer-frame* page-id page-objects
-                                                                   canvas render-size scale frame-id
-                                                                   nil opts)))
+        ;; Render the layers with `modifiers`, the animation at a time (a
+        ;; delay of its modif-tree), or nil.
+        render!
+        (mf/use-fn
+         (mf/deps page-id page-objects render-size scale frame-id
+                  not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids)
+         (fn [modifiers]
+           (when (get page-objects frame-id)
+             (let [generation (inc (mf/ref-val generation-ref))]
+               (mf/set-ref-val! generation-ref generation)
+               (->> @wasm.api/module
+                    (p/fmap
+                     (fn [ready?]
+                       (when ready?
+                         (let [not-fixed-canvas (mf/ref-val not-fixed-ref)
+                               fixed-canvas     (mf/ref-val fixed-ref)
+                               passes
+                               (cond-> []
+                                 not-fixed-canvas
+                                 (conj {:canvas not-fixed-canvas
+                                        :opts   (cond-> {:modifiers modifiers}
+                                                  (seq not-fixed-include-ids)
+                                                  (assoc :include-ids not-fixed-include-ids))})
+
+                                 (and fixed-canvas (seq fixed-include-ids))
+                                 (conj {:canvas fixed-canvas
+                                        :opts   (cond-> {:include-ids fixed-include-ids
+                                                         :modifiers modifiers}
+                                                  (seq fixed-clear-fills-ids)
+                                                  (assoc :clear-fills-ids fixed-clear-fills-ids))}))]
+                           (when (seq passes)
+                             (enqueue-wasm-render!
+                              (fn []
+                                (if (not= generation (mf/ref-val generation-ref))
+                                  ;; a later frame is on its way
                                   (p/resolved nil)
-                                  passes))))))))))))))
+                                  (reduce (fn [chain {:keys [canvas opts]}]
+                                            (p/then chain
+                                                    #(render-viewer-frame* page-id page-objects
+                                                                           canvas render-size scale frame-id
+                                                                           nil opts)))
+                                          (p/resolved nil)
+                                          passes))))))))))))))]
+
+    (mf/with-layout-effect [render! dpr-key modifiers-ref]
+      (render! (some-> modifiers-ref deref)))
+
+    ;; Each frame of the animation renders the layers from here, as the
+    ;; workspace does, without the components rendering again.
+    (mf/with-effect [render! modifiers-ref]
+      (when (some? modifiers-ref)
+        (let [key (js/Symbol "viewer-wasm-layers")]
+          (add-watch modifiers-ref key (fn [_ _ _ modifiers] (render! modifiers)))
+          #(remove-watch modifiers-ref key))))))
 
 (defn use-viewer-wasm-viewport!
-  "WASM render passes and fixed-scroll DOM sync for the viewer viewport."
+  "WASM render passes and fixed-scroll DOM sync for the viewer viewport.
+  `modifiers-ref`, when given, is a ref of the animation it plays at a
+  time (a delay of its modif-tree, see `show-animation!`): it renders
+  again at each of its frames."
   [page-id page-objects size scale frame-id
    not-fixed-ref fixed-ref fixed-scroll-layer-ref
-   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta]
+   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta modifiers-ref]
   (use-fixed-scroll-sync! (some? fixed-scroll-layer-ref) fixed-scroll-layer-ref)
   (let [dpr-key (use-viewer-dpr-key)]
     (use-viewer-wasm-layers! page-id page-objects size scale frame-id
                              not-fixed-ref fixed-ref
                              not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids
-                             delta dpr-key)))
+                             delta dpr-key modifiers-ref)))

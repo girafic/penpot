@@ -343,6 +343,17 @@
     (doseq [property properties]
       (set-wasm-attr! shape property))))
 
+(defn set-shape-properties!
+  "Push `properties` of `shape` to WASM at once, whatever page it is on:
+  the view mode shows shapes it loads itself (see
+  `app.main.render-viewer-wasm`). What loads later (fonts, images) is
+  not waited for."
+  [shape properties]
+  (when (and (api/initialized?) (some? shape) (seq properties))
+    (api/use-shape (dm/get-prop shape :id))
+    (doseq [property properties]
+      (set-wasm-attr! shape property))))
+
 (defn process-shape-changes!
   [objects shape-changes]
   (when (api/initialized?)

@@ -10,6 +10,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
+   [app.common.geom.shapes :as gsh]
    [app.common.types.page :as ctp]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -126,9 +127,32 @@
                 :fill "none"}
           [:& wrapper-not-fixed {:shape frame :view-box vbox}]]])]]))
 
+(mf/defc animated-viewport-svg*
+  "`viewport-svg*` with the shapes of `page` where the animation in
+  `modifiers-ref` has them at the playback time (see `viewport*`): it
+  renders again at each of its frames."
+  {::mf/private true}
+  [{:keys [page frame base offset size is-fixed delta modifiers-ref]}]
+  (let [modifiers (force (mf/deref modifiers-ref))
+        page      (mf/with-memo [page modifiers]
+                    (cond-> page
+                      (seq modifiers)
+                      (update :objects gsh/apply-objects-modifiers modifiers)))]
+    [:> viewport-svg* {:page page
+                       :frame frame
+                       :base base
+                       :offset offset
+                       :size size
+                       :delta delta
+                       :is-fixed is-fixed}]))
+
 (mf/defc viewport*
+  "The board `frame` of `page`. `modifiers-ref`, when given, holds the
+  animation it plays: a ref of the modif-tree at the playback time (a
+  delay). The WASM renderer takes each of its frames on its own, the SVG
+  one renders again with the shapes where it has them."
   {::mf/wrap [mf/memo]}
-  [{:keys [interactions-mode frame-offset size delta page frame base-frame is-fixed]}]
+  [{:keys [interactions-mode frame-offset size delta page frame base-frame is-fixed modifiers-ref]}]
   (let [;; NOTE: with `use-equal-memo` hook we ensure that all values
         ;; conserves the reference identity for avoid unnecessary
         ;; dummy rerenders.
@@ -174,14 +198,28 @@
           (events/unlistenByKey key2)
           (events/unlistenByKey key3))))
 
-    (if ^boolean render-wasm?
+    (cond
+      ^boolean render-wasm?
       [:> viewport.wasm/viewport-wasm* {:page page
                                         :frame frame
                                         :base base
                                         :offset offset
                                         :size size
                                         :delta delta
-                                        :is-fixed is-fixed}]
+                                        :is-fixed is-fixed
+                                        :modifiers-ref modifiers-ref}]
+
+      (some? modifiers-ref)
+      [:> animated-viewport-svg* {:page page
+                                  :frame frame
+                                  :base base
+                                  :offset offset
+                                  :size size
+                                  :delta delta
+                                  :is-fixed is-fixed
+                                  :modifiers-ref modifiers-ref}]
+
+      :else
       [:> viewport-svg* {:page page
                          :frame frame
                          :base base

@@ -21,6 +21,7 @@
    [frontend-tests.data.repo-test]
    [frontend-tests.data.store-test]
    [frontend-tests.data.uploads-test]
+   [frontend-tests.data.viewer-playback-test]
    [frontend-tests.data.viewer-test]
    [frontend-tests.data.workspace-colors-test]
    [frontend-tests.data.workspace-comments-test]
@@ -145,6 +146,7 @@
    'frontend-tests.data.animation-playback-test
    'frontend-tests.data.exports-avif-test
    'frontend-tests.data.uploads-test
+   'frontend-tests.data.viewer-playback-test
    'frontend-tests.data.viewer-test
    'frontend-tests.data.workspace-colors-test
    'frontend-tests.data.workspace-comments-test

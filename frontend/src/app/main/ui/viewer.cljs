@@ -12,7 +12,6 @@
    [app.common.exceptions :as ex]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
-   [app.common.geom.shapes :as gsh]
    [app.common.geom.shapes.bounds :as gsb]
    [app.common.logic.timelines :as cltl]
    [app.common.types.shape.interactions :as ctsi]
@@ -24,6 +23,7 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
+   [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.ds.product.loader :refer [loader*]]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.icons :as deprecated-icon]
@@ -56,24 +56,25 @@
 (def ^:private viewer-timeline-ref
   (l/derived #(dm/get-in % [:viewer-local :timeline]) st/state))
 
-(defn- animate-page
-  "When a timeline is active, return `page` with its objects recomputed at
+(def ^:private viewer-local-ref
+  "The local state of the view mode but the playback of the animation
+  (see `viewer-timeline-ref`), which changes at each of its frames."
+  (l/derived #(dissoc % :timeline) refs/viewer-local =))
+
+(defn- animation-modifiers
+  "When a timeline is active, the modif-tree of the shapes of `page` at
   the current playback time: the timeline of the board and the ones of
   the component copies in it, which play the animation of their mains
   (see `cltl/copy-timelines`; `files` holds the files of the components).
-  The modif-tree covers transforms and opacity (the latter as a
-  change-property modifier applied by `transform-shape`). Otherwise
-  return `page` unchanged."
+  It covers transforms and the other animated attributes (as
+  change-property modifiers). Otherwise nil."
   [page files {:keys [timeline-id time] :as _viewer-timeline}]
   (let [objects   (:objects page)
         timelines (when (some? timeline-id)
                     (merge (select-keys (:timelines page) [timeline-id])
                            (cltl/copy-timelines objects (:timelines page) files timeline-id)))]
-    (if (empty? timelines)
-      page
-      (let [modif-tree (cltl/animation-tree timelines objects (or time 0))
-            objects'   (gsh/apply-objects-modifiers objects modif-tree)]
-        (assoc page :objects objects')))))
+    (when (seq timelines)
+      (cltl/animation-tree timelines objects (or time 0)))))
 
 (defn- calculate-size
   "Calculate the total size we must reserve for the frame, including possible paddings
@@ -116,8 +117,44 @@
              :height (* height zoom)
              :vbox   (str "0 0 " width " " height)})))
 
+(def ^:private ref:timeline-playing?
+  (l/derived #(boolean (dm/get-in % [:viewer-local :timeline :playing?])) st/state))
+
+(mf/defc timeline-controls*
+  "Play, pause and stop the animation of the board `board-id` (Penpot
+  Motion): its timeline, or the animations of the component copies in
+  it (see `dv/board-clock`)."
+  {::mf/private true}
+  [{:keys [board-id]}]
+  (let [playing? (mf/deref ref:timeline-playing?)
+
+        on-toggle
+        (mf/use-fn
+         (mf/deps board-id)
+         #(st/emit! (dv/toggle-play-timeline board-id)))
+
+        on-stop
+        (mf/use-fn #(st/emit! (dv/stop-timeline)))]
+
+    ;; A click here is not one on the view (see `on-click` of the viewer).
+    [:div {:class (stl/css :timeline-controls)
+           :on-click dom/stop-propagation}
+     [:button {:type "button"
+               :class (stl/css :timeline-button)
+               :title (tr "workspace.animation.play")
+               :aria-pressed playing?
+               :on-click on-toggle}
+      (if playing?
+        [:span {:class (stl/css :pause-icon)}]
+        [:> icon* {:icon-id i/play :size "s"}])]
+     [:button {:type "button"
+               :class (stl/css :timeline-button)
+               :title (tr "workspace.animation.rewind")
+               :on-click on-stop}
+      [:span {:class (stl/css :stop-icon)}]]]))
+
 (mf/defc viewer-pagination
-  [{:keys [index num-frames left-bar right-bar comment-sidebar] :as props}]
+  [{:keys [index num-frames left-bar right-bar comment-sidebar animated board-id] :as props}]
   (let [go-prev-frame  (mf/use-fn #(st/emit! dv/select-prev-frame))
         go-next-frame  (mf/use-fn #(st/emit! dv/select-next-frame))
         go-first-frame (mf/use-fn #(st/emit! dv/select-first-frame))]
@@ -140,20 +177,25 @@
       [:button {:on-click go-first-frame
                 :class (stl/css :reset-button)}
        deprecated-icon/reload]
-      [:span {:class (stl/css :counter)}
-       (str/join " / " [(+ index 1) num-frames])]
+      [:div {:class (stl/css :bottom-center)}
+       [:span {:class (stl/css :counter)}
+        (str/join " / " [(+ index 1) num-frames])]
+       (when animated
+         [:> timeline-controls* {:board-id board-id}])]
       [:span]]]))
 
 (mf/defc viewer-pagination-and-sidebar
   {::mf/wrap [mf/memo]}
-  [{:keys [section index users frame page]}]
+  [{:keys [section index users frame page animated]}]
   (let [comments-local  (mf/deref refs/comments-local)
         show-sidebar?   (and (= section :comments) (:show-sidebar? comments-local))]
     [:*
      [:& viewer-pagination
       {:index index
        :num-frames (count (:frames page))
-       :comment-sidebar show-sidebar?}]
+       :comment-sidebar show-sidebar?
+       :animated animated
+       :board-id (:id frame)}]
 
      (when show-sidebar?
        [:> comments-sidebar*
@@ -234,10 +276,31 @@
           :page page
           :interactions-mode interactions-mode}]])]))
 
+(mf/defc animated-viewport*
+  "The viewport of the board `frame` of `page`, which plays the animation
+  of the view mode (see `animation-modifiers`) on its own: it takes the
+  modif-tree at the playback time from a ref, so neither this nor the
+  rest of the view mode renders again at each frame."
+  {::mf/private true}
+  [{:keys [page frame size interactions-mode]}]
+  (let [files         (mf/deref refs/files)
+        ;; A delay: a frame the viewport does not get to is not worked out.
+        modifiers-ref (mf/with-memo [page files]
+                        (l/derived #(delay (animation-modifiers page files %))
+                                   viewer-timeline-ref))]
+    [:> interactions/viewport*
+     {:frame frame
+      :base-frame frame
+      :frame-offset (gpt/point 0 0)
+      :size size
+      :page page
+      :modifiers-ref modifiers-ref
+      :interactions-mode interactions-mode}]))
+
 (mf/defc viewer-wrapper
   {::mf/wrap-props false}
   [{:keys [wrapper-size orig-frame orig-viewport-ref orig-size page file users current-viewport-ref
-           size frame interactions-mode overlays zoom section index]}]
+           size frame interactions-mode overlays zoom section index animated]}]
 
   [:*
    [:& viewer-pagination-and-sidebar
@@ -246,6 +309,7 @@
      :page page
      :users users
      :frame frame
+     :animated animated
      :interactions-mode interactions-mode}]
 
    [:div {:class (stl/css :viewer-wrapper)
@@ -275,10 +339,8 @@
                     :height (:height size)
                     :position "relative"}}
 
-      [:> interactions/viewport*
+      [:> animated-viewport*
        {:frame frame
-        :base-frame frame
-        :frame-offset (gpt/point 0 0)
         :size size
         :page page
         :interactions-mode interactions-mode}]
@@ -315,7 +377,7 @@
                           (and (true? (:is-logged permissions))
                                (= (:who-inspect permissions) "all")))))
 
-        local (mf/deref refs/viewer-local)
+        local (mf/deref viewer-local-ref)
 
         nav-scroll (:nav-scroll local)
         orig-viewport-ref    (mf/use-ref nil)
@@ -323,7 +385,6 @@
         viewer-section-ref   (mf/use-ref nil)
 
         current-animations (mf/deref current-animations-ref)
-        viewer-timeline    (mf/deref viewer-timeline-ref)
 
         page-id (or page-id (-> file :data :pages first))
 
@@ -332,11 +393,11 @@
                    (fn []
                      (get-in data [:pages page-id])))
 
-        ;; When a timeline is playing/scrubbed, render shapes recomputed at
-        ;; the current time; otherwise render the page as-is.
+        ;; The page as it is: only the viewport of the board plays its
+        ;; animation (see `animated-viewport*`), so the header, the
+        ;; thumbnails and the rest do not render again at each frame.
         files (mf/deref refs/files)
-        page  (mf/with-memo [base-page files viewer-timeline]
-                (animate-page base-page files viewer-timeline))
+        page  base-page
 
         text-shapes
         (hooks/use-equal-memo
@@ -604,29 +665,6 @@
                                                      :fullscreen fullscreen?)
                                 :on-click click-on-screen}
 
-       ;; Floating timeline-animation playback control (Penpot Motion).
-       ;; Timelines are board-scoped, so we play the timeline of the board
-       ;; (frame) currently being viewed.
-       (let [board-id (:id frame)]
-         (when (and (not= section :inspect) (some? clock))
-           (let [tl-id    board-id
-                 playing? (:playing? viewer-timeline)]
-             [:div {:style #js {"position" "absolute" "bottom" "16px" "left" "50%"
-                                "transform" "translateX(-50%)" "zIndex" 10
-                                "display" "flex" "gap" "8px" "padding" "6px 10px"
-                                "borderRadius" "8px"
-                                "background" "var(--color-background-primary)"
-                                "border" "1px solid var(--panel-border-color)"}
-                    :on-click dom/stop-propagation}
-              [:button {:style #js {"cursor" "pointer" "minWidth" "28px"}
-                        :title (tr "workspace.animation.play")
-                        :on-click #(st/emit! (dv/toggle-play-timeline tl-id))}
-               (if playing? "❚❚" "►")]
-              [:button {:style #js {"cursor" "pointer" "minWidth" "28px"}
-                        :title (tr "workspace.animation.rewind")
-                        :on-click #(st/emit! (dv/stop-timeline))}
-               "■"]])))
-
        (cond
          (empty? frames)
          [:section {:class (stl/css :empty-state)}
@@ -667,7 +705,8 @@
               :overlays overlays
               :zoom zoom
               :section section
-              :index index}]]))]]
+              :index index
+              :animated (some? clock)}]]))]]
 
      [:& header/header {:project project
                         :index index

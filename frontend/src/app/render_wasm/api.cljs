@@ -558,6 +558,20 @@
               (aget buffer 3))
       (set! wasm/internal-frame-id nil))))
 
+(defn render-sync-shape-again
+  "`render-sync-shape` of the same shape and view keeping the tile cache:
+  only the tiles of what changed since (the modifiers and properties of
+  an animation) draw again."
+  [id]
+  (when (initialized?)
+    (let [buffer (uuid/get-u32 id)]
+      (h/call wasm/internal-module "_render_sync_shape_again"
+              (aget buffer 0)
+              (aget buffer 1)
+              (aget buffer 2)
+              (aget buffer 3))
+      (set! wasm/internal-frame-id nil))))
+
 (defn render-preview!
   "Render a lightweight preview without tile caching.
    Used during progressive loading for fast feedback."

@@ -30,6 +30,7 @@
    [app.main.router :as rt]
    [app.render-wasm.api :as wasm.api]
    [app.util.globals :as ug]
+   [app.util.timers :as ts]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
@@ -933,7 +934,29 @@
 ;; `app.common.types.animation`; the rendered shapes are recomputed from
 ;; geometry (not WAAPI) in `app.main.ui.viewer`.
 
-(def ^:private timeline-frame-step 16)
+(def ^:private max-frame-gap
+  "The most playback moves on in one frame, in ms: back in a hidden tab,
+  it goes on where it was instead of jumping."
+  500)
+
+(defn frame-times
+  "The time played from `start` (ms) at each animation frame: it keeps to
+  the time that passes, however long the frames take, so a slow frame is
+  skipped rather than the animation slowed down."
+  [start]
+  (rx/create
+   (fn [subs]
+     (let [frame  (volatile! nil)
+           before (volatile! nil)
+           time   (volatile! start)
+           tick   (fn tick [now]
+                    (when-let [then @before]
+                      (vswap! time + (min (max 0 (- now then)) max-frame-gap))
+                      (rx/push! subs @time))
+                    (vreset! before now)
+                    (vreset! frame (ts/raf tick)))]
+       (vreset! frame (ts/raf tick))
+       #(ts/cancel-af! @frame)))))
 
 (defn- viewer-current-page
   [state]
@@ -982,8 +1005,7 @@
         (if (or (nil? timeline) (<= duration 0))
           (rx/empty)
           (rx/concat
-           (->> (rx/interval timeline-frame-step)
-                (rx/map (fn [i] (+ start (* (inc i) timeline-frame-step))))
+           (->> (frame-times start)
                 (rx/take-while (fn [t] (not (cta/playback-ended? timeline t))))
                 (rx/map (fn [t] (cta/playback-time timeline t)))
                 (rx/take-until stopper)

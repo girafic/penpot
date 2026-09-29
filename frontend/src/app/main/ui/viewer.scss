@@ -143,6 +143,49 @@
   }
 }
 
+// The counter of the boards and, when the board on screen plays an
+// animation, its controls.
+.bottom-center {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-8;
+}
+
+.timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+  pointer-events: all;
+}
+
+.timeline-button {
+  @extend %button-secondary;
+  @include deprecated.flex-center;
+
+  height: deprecated.$s-32;
+  width: deprecated.$s-32;
+  background-color: var(--viewer-controls-background-color);
+  color: var(--icon-foreground);
+
+  &[aria-pressed="true"] {
+    color: var(--color-accent-primary);
+  }
+}
+
+.pause-icon {
+  width: 10px;
+  height: 12px;
+  border-left: 3px solid currentcolor;
+  border-right: 3px solid currentcolor;
+}
+
+.stop-icon {
+  width: 10px;
+  height: 10px;
+  border-radius: 1px;
+  background-color: currentcolor;
+}
+
 .counter {
   @include deprecated.flex-center;
   @include deprecated.body-small-typography;

@@ -138,6 +138,11 @@
         (assoc :frame-id (:frame-id data)))
     thread))
 
+;; Only the size: the rest of the local state of the view mode changes at
+;; each frame of an animation playing.
+(def ^:private ref:viewport-size
+  (l/derived #(dm/get-in % [:viewer-local :viewport-size]) st/state))
+
 (mf/defc comments-layer
   {::mf/props :obj}
   [{:keys [zoom file frame page]}]
@@ -150,8 +155,7 @@
         page-id        (:id page)
         file-id        (:id file)
         frame-id       (:id frame)
-        vsize          (-> (mf/deref refs/viewer-local)
-                           :viewport-size)
+        vsize          (mf/deref ref:viewport-size)
 
         tpos-ref     (mf/with-memo [page-id]
                        (-> (l/in [:pages page-id :comment-thread-positions])

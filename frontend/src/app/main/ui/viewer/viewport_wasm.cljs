@@ -84,9 +84,13 @@
      :fixed-clear-fills-ids fixed-clear-fills-ids}))
 
 (mf/defc viewport-wasm*
+  "The board `frame` of `page` rendered by WASM. `modifiers-ref` holds
+  the animation it plays, which shows over its shapes as they are loaded
+  (see `rwv/use-viewer-wasm-viewport!`)."
   {::mf/wrap [mf/memo]}
-  [{:keys [page frame base offset size delta is-fixed]}]
-  (let [delta     (or delta (gpt/point 0 0))
+  [{:keys [page frame base offset size delta is-fixed modifiers-ref]}]
+  (let [;; the same point each render, or the layers would render again
+        delta     (mf/with-memo [delta] (or delta (gpt/point 0 0)))
         vbox      (:vbox size)
         is-fixed  (true? is-fixed)
 
@@ -151,7 +155,7 @@
      not-fixed-wasm-ref fixed-wasm-ref
      (when has-fixed? fixed-layer-ref)
      not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids
-     delta)
+     delta modifiers-ref)
 
     [:& (mf/provider shapes/base-frame-ctx) {:value (get prepared-all (:id base))}
      [:& (mf/provider shapes/frame-offset-ctx) {:value offset}
