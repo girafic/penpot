@@ -15,6 +15,7 @@
    [app.common.data.macros :as dm]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
@@ -22,6 +23,7 @@
    [app.common.types.shape.interactions :as cti]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.features :as features]
    [app.main.store :as st]
    [app.plugins.format :as format]
@@ -77,6 +79,61 @@
 
 (def ^:private style-names
   (into #{} (map name) (keys cta/animation-styles)))
+
+(def ^:private export-qualities
+  #{"low" "medium" "high"})
+
+(def ^:private export-sizes
+  #{"0.5" "1" "2" "w1920" "h720" "h1080" "h1440" "h2160"})
+
+(def ^:private export-defaults
+  "The export settings a board has until they are set, as the export
+  panel offers them."
+  {:format :mp4 :quality :high :fps 30 :size "1" :loop true})
+
+(defn- format-export
+  "The export settings of a timeline (`cta/schema:export`) as the plugin
+  API gives them."
+  [export]
+  (let [export (merge export-defaults export)]
+    #js {:format (name (:format export))
+         :quality (name (:quality export))
+         :fps (:fps export)
+         :size (:size export)
+         :loop (:loop export)}))
+
+(defn- parse-export
+  "The export settings the object `value` of `Timeline.exportSettings`
+  sets, or a string saying what is wrong with them."
+  [value]
+  (let [file-format (obj/get value "format")
+        quality     (obj/get value "quality")
+        fps         (obj/get value "fps")
+        size        (obj/get value "size")
+        loops?      (obj/get value "loop")]
+    (cond
+      (and (some? file-format) (not (contains? cta/export-formats (keyword file-format))))
+      (dm/str "The format should be one of " (pr-str (sort (map name cta/export-formats))))
+
+      (and (some? quality) (not (contains? export-qualities quality)))
+      "The quality should be 'low', 'medium' or 'high'"
+
+      (and (some? fps) (not (and (sm/valid-safe-int? fps) (<= 1 fps 120))))
+      "The frame rate should be a whole number from 1 to 120"
+
+      (and (some? size) (not (contains? export-sizes size)))
+      (dm/str "The size should be one of " (pr-str (sort export-sizes)))
+
+      (and (some? loops?) (not (boolean? loops?)))
+      "Whether it loops should be true or false"
+
+      :else
+      (cond-> {}
+        (some? file-format) (assoc :format (keyword file-format))
+        (some? quality)     (assoc :quality (keyword quality))
+        (some? fps)         (assoc :fps fps)
+        (some? size)        (assoc :size size)
+        (some? loops?)      (assoc :loop loops?)))))
 
 (defn- enabled?
   []
@@ -625,6 +682,17 @@
            (marker-proxy plugin-id file-id page-id board-id id))
          (:markers (locate)))}
 
+      ;; As the export panel sets them and offers them again; a partial
+      ;; object changes only what it has.
+      :exportSettings
+      {:get #(format-export (:export (locate)))
+       :set
+       (fn [value]
+         (let [export (if (object? value) (parse-export value) "No settings given")]
+           (if (string? export)
+             (u/not-valid plugin-id :exportSettings export)
+             (write! :exportSettings #(update % :export merge export)))))}
+
       :addMarker
       (fn [props]
         (let [time (when (object? props) (obj/get props "time"))
@@ -699,14 +767,35 @@
         (when-let [shape-id (layer :clear shape)]
           (write! :clear #(cta/remove-track % shape-id))))
 
+      ;; With the animations of the component copies in the board, as the
+      ;; exports of the app (see `dwa/board-export-timeline`).
       :toCSS
       (fn []
-        (when-let [timeline (locate)]
-          (cta/timeline->css timeline (u/locate-objects file-id page-id))))
+        (when (some? (locate))
+          (let [page (u/locate-page file-id page-id)]
+            (some-> (dwa/board-export-timeline page (:files @st/state) board-id)
+                    (cta/timeline->css (:objects page))))))
 
       :remove
       (fn []
         (write! :remove (constantly nil))))))
+
+(defn animated-copies
+  "The component copies in the board `board-id` that play the animation
+  of their mains, as `Board.animatedCopies` gives them: the copy, how long
+  a round of it takes and whether it plays once or loops (see
+  `cltl/copy-timelines`)."
+  [plugin-id file-id page-id board-id]
+  (let [page   (u/locate-page file-id page-id)
+        copies (cltl/copy-timelines (:objects page) (:timelines page) (:files @st/state) board-id)]
+    (->> (group-by (fn [[[_ copy-id]]] copy-id) copies)
+         (sort-by key)
+         (format/format-array
+          (fn [[copy-id entries]]
+            (let [timelines (map val entries)]
+              #js {:copy (shape-proxy plugin-id file-id page-id copy-id)
+                   :duration (reduce max 0 (map cta/cycle-duration timelines))
+                   :playback (if (every? #(= :once (cta/playback-mode %)) timelines) "once" "loop")}))))))
 
 (defn timeline-options
   "The settings the object `options` of `Board.addTimeline` gives a

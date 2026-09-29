@@ -1954,6 +1954,11 @@
                    (when (contains? (:timelines (u/locate-page file-id page-id)) id)
                      (motion/timeline-proxy plugin-id file-id page-id id)))}
 
+                {:name "animatedCopies"
+                 :get
+                 (fn [_]
+                   (motion/animated-copies plugin-id file-id page-id id))}
+
                 {:name "rulerGuides"
                  :get
                  (fn [_]

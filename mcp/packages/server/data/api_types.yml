@@ -1077,6 +1077,7 @@ Board:
         removeRulerGuide(guide: RulerGuide): void;
         timeline: Timeline | null;
         addTimeline(options?: TimelineOptions): Timeline;
+        animatedCopies: AnimatedCopy[];
         isVariantContainer(): boolean;
         getPluginData(key: string): string;
         setPluginData(key: string, value: string): void;
@@ -1313,11 +1314,27 @@ Board:
 
         The keyframe animation of the board (Penpot Motion), or `null` when it
         has none. Only a board at the top of the page has one: it animates the
-        board and the layers inside it.
+        board and the layers inside it. The component copies in the board play
+        the animation of their mains even without one, see `animatedCopies`.
 
         Example
         ```
         const timeline = board.timeline ?? board.addTimeline({ duration: 1500 });
+        ```
+      animatedCopies: |-
+        ```
+        readonly animatedCopies: AnimatedCopy[]
+        ```
+
+        The component copies in the board that play the animation of their
+        mains: an animated component animates every copy of it, in any board,
+        and a component inside a component plays the animation of its own
+        main. Each plays on its own clock, where the copy is and as big as it
+        is. A layer the timeline of the board animates keeps that animation.
+
+        Example
+        ```
+        for (const { copy, duration, playback } of board.animatedCopies) {  console.log(copy.name, duration, playback);}
         ```
       id: |-
         ```
@@ -2289,6 +2306,7 @@ VariantContainer:
         removeRulerGuide(guide: RulerGuide): void;
         timeline: Timeline | null;
         addTimeline(options?: TimelineOptions): Timeline;
+        animatedCopies: AnimatedCopy[];
         isVariantContainer(): boolean;
         variants: Variants | null;
         getPluginData(key: string): string;
@@ -2523,11 +2541,27 @@ VariantContainer:
 
         The keyframe animation of the board (Penpot Motion), or `null` when it
         has none. Only a board at the top of the page has one: it animates the
-        board and the layers inside it.
+        board and the layers inside it. The component copies in the board play
+        the animation of their mains even without one, see `animatedCopies`.
 
         Example
         ```
         const timeline = board.timeline ?? board.addTimeline({ duration: 1500 });
+        ```
+      animatedCopies: |-
+        ```
+        readonly animatedCopies: AnimatedCopy[]
+        ```
+
+        The component copies in the board that play the animation of their
+        mains: an animated component animates every copy of it, in any board,
+        and a component inside a component plays the animation of its own
+        main. Each plays on its own clock, where the copy is and as big as it
+        is. A layer the timeline of the board animates keeps that animation.
+
+        Example
+        ```
+        for (const { copy, duration, playback } of board.animatedCopies) {  console.log(copy.name, duration, playback);}
         ```
       variants: |-
         ```
@@ -16111,6 +16145,7 @@ Timeline:
             style: AnimationStyle,
             start?: number,
         ): PresetAnimation[];
+        exportSettings: TimelineExportSettings;
         addMarker(marker: MarkerProps): Marker;
         record(time: number, shapes: Shape[], callback: () => void): void;
         valueAt(
@@ -16174,6 +16209,19 @@ Timeline:
         The markers of the timeline, by time: named moments that drags snap to
         and the playhead jumps between. A Lottie export names the stretch from
         each to the next one (or to the end), so a player can play it by name.
+      exportSettings: |-
+        ```
+        exportSettings: TimelineExportSettings
+        ```
+
+        How the board is exported as an animation, as the export panel sets
+        it and offers it again. Reading it gives all the settings; setting it
+        changes the ones given.
+
+        Example
+        ```
+        timeline.exportSettings = { format: 'gif', fps: 15, size: 'w1920' };
+        ```
     Methods:
       addKeyframe: |-
         ```
@@ -16341,7 +16389,7 @@ Timeline:
         ```
 
         The animation as CSS: `@keyframes` and the `animation` rules of the
-        layers.
+        layers, those of the animated component copies in the board included.
 
         Returns string
       remove: |-
@@ -16352,6 +16400,100 @@ Timeline:
         Removes the animation of the board.
 
         Returns void
+TimelineExportSettings:
+  overview: |-
+    Interface TimelineExportSettings
+    ================================
+
+    How a board is exported as an animation, see `Timeline.exportSettings`.
+    Reading it gives all of them; setting it changes the ones given.
+
+    ```
+    interface TimelineExportSettings {
+        format?: TimelineExportFormat;
+        quality?: "low" | "medium" | "high";
+        fps?: number;
+        size?: TimelineExportSize;
+        loop?: boolean;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      format: |-
+        ```
+        format?: TimelineExportFormat
+        ```
+
+        The file: a video (`mp4`, `webm`), an animated image (`gif`, `avif`),
+        an animated `svg` or a `lottie` animation. `mp4` by default.
+      quality: |-
+        ```
+        quality?: "low" | "medium" | "high"
+        ```
+
+        How good a video or an animated image looks, and so how big its file
+        is. `high` by default.
+      fps: |-
+        ```
+        fps?: number
+        ```
+
+        Frames per second of a video or an animated image, 1 to 120. 30 by
+        default.
+      size: |-
+        ```
+        size?: TimelineExportSize
+        ```
+
+        How big it is: a factor of the board (`0.5`, `1`, `2`) or a width or
+        height in pixels (`w1920`, `h720`, `h1080`, `h1440`, `h2160`). `1` by
+        default.
+      loop: |-
+        ```
+        loop?: boolean
+        ```
+
+        Whether a GIF or AVIF plays over and over. `true` by default.
+AnimatedCopy:
+  overview: |-
+    Interface AnimatedCopy
+    ======================
+
+    A component copy in a board that plays the animation of its main, see
+    `Board.animatedCopies`.
+
+    ```
+    interface AnimatedCopy {
+        copy: Shape;
+        duration: number;
+        playback: "once" | "loop";
+    }
+    ```
+
+    Referenced by: Board, VariantContainer
+  members:
+    Properties:
+      copy: |-
+        ```
+        readonly copy: Shape
+        ```
+
+        The copy: the top layer of the component copy.
+      duration: |-
+        ```
+        readonly duration: number
+        ```
+
+        How long a round of its animation takes, in milliseconds (a ping-pong
+        main plays there and back in a round).
+      playback: |-
+        ```
+        readonly playback: "once" | "loop"
+        ```
+
+        Whether it plays once or over and over, on its own clock.
 Marker:
   overview: |-
     Interface Marker
@@ -24165,6 +24307,40 @@ RulerGuideOrientation:
 
     Referenced by: Board, Page, RulerGuide, VariantContainer
   members: {}
+TimelineExportFormat:
+  overview: |-
+    Type Alias TimelineExportFormat
+    ===============================
+
+    ```
+    TimelineExportFormat: "mp4" | "webm" | "gif" | "avif" | "svg" | "lottie"
+    ```
+
+    The file formats of an animation export, see `TimelineExportSettings`.
+
+    Referenced by: TimelineExportSettings
+  members: {}
+TimelineExportSize:
+  overview: |-
+    Type Alias TimelineExportSize
+    =============================
+
+    ```
+    TimelineExportSize:
+        | "0.5"
+        | "1"
+        | "2"
+        | "w1920"
+        | "h720"
+        | "h1080"
+        | "h1440"
+        | "h2160"
+    ```
+
+    The sizes of an animation export, see `TimelineExportSettings`.
+
+    Referenced by: TimelineExportSettings
+  members: {}
 TimelinePlayback:
   overview: |-
     Type Alias TimelinePlayback
@@ -24337,7 +24513,7 @@ Shape:
     let shape: Shape;if (penpot.utils.types.isRectangle(shape)) {  console.log(shape.type);}
     ```
 
-    Referenced by: Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenDimension, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
+    Referenced by: AnimatedCopy, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenDimension, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
   members: {}
 StrokeCap:
   overview: |-

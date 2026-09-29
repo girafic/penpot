@@ -355,7 +355,8 @@ export interface Board extends ShapeBase {
   /**
    * The keyframe animation of the board (Penpot Motion), or `null` when it
    * has none. Only a board at the top of the page has one: it animates the
-   * board and the layers inside it.
+   * board and the layers inside it. The component copies in the board play
+   * the animation of their mains even without one, see `animatedCopies`.
    *
    * @example
    * ```js
@@ -378,6 +379,22 @@ export interface Board extends ShapeBase {
    * ```
    */
   addTimeline(options?: TimelineOptions): Timeline;
+
+  /**
+   * The component copies in the board that play the animation of their
+   * mains: an animated component animates every copy of it, in any board,
+   * and a component inside a component plays the animation of its own
+   * main. Each plays on its own clock, where the copy is and as big as it
+   * is. A layer the timeline of the board animates keeps that animation.
+   *
+   * @example
+   * ```js
+   * for (const { copy, duration, playback } of board.animatedCopies) {
+   *   console.log(copy.name, duration, playback);
+   * }
+   * ```
+   */
+  readonly animatedCopies: AnimatedCopy[];
 
   /**
    * @return Returns true when the current board is a VariantContainer
@@ -3749,6 +3766,18 @@ export interface Timeline {
   ): PresetAnimation[];
 
   /**
+   * How the board is exported as an animation, as the export panel sets
+   * it and offers it again. Reading it gives all the settings; setting it
+   * changes the ones given.
+   *
+   * @example
+   * ```js
+   * timeline.exportSettings = { format: 'gif', fps: 15, size: 'w1920' };
+   * ```
+   */
+  exportSettings: TimelineExportSettings;
+
+  /**
    * Adds a marker. The timeline grows to hold it.
    * @param marker Its time and name (`Marker N` by default).
    *
@@ -3803,7 +3832,7 @@ export interface Timeline {
 
   /**
    * The animation as CSS: `@keyframes` and the `animation` rules of the
-   * layers.
+   * layers, those of the animated component copies in the board included.
    */
   toCSS(): string;
 
@@ -3811,6 +3840,76 @@ export interface Timeline {
    * Removes the animation of the board.
    */
   remove(): void;
+}
+
+/**
+ * How a board is exported as an animation, see `Timeline.exportSettings`.
+ * Reading it gives all of them; setting it changes the ones given.
+ */
+export interface TimelineExportSettings {
+  /**
+   * The file: a video (`mp4`, `webm`), an animated image (`gif`, `avif`),
+   * an animated `svg` or a `lottie` animation. `mp4` by default.
+   */
+  format?: TimelineExportFormat;
+
+  /**
+   * How good a video or an animated image looks, and so how big its file
+   * is. `high` by default.
+   */
+  quality?: 'low' | 'medium' | 'high';
+
+  /**
+   * Frames per second of a video or an animated image, 1 to 120. 30 by
+   * default.
+   */
+  fps?: number;
+
+  /**
+   * How big it is: a factor of the board (`0.5`, `1`, `2`) or a width or
+   * height in pixels (`w1920`, `h720`, `h1080`, `h1440`, `h2160`). `1` by
+   * default.
+   */
+  size?: TimelineExportSize;
+
+  /**
+   * Whether a GIF or AVIF plays over and over. `true` by default.
+   */
+  loop?: boolean;
+}
+
+/**
+ * The file formats of an animation export, see `TimelineExportSettings`.
+ */
+export type TimelineExportFormat =
+  'mp4' | 'webm' | 'gif' | 'avif' | 'svg' | 'lottie';
+
+/**
+ * The sizes of an animation export, see `TimelineExportSettings`.
+ */
+export type TimelineExportSize =
+  '0.5' | '1' | '2' | 'w1920' | 'h720' | 'h1080' | 'h1440' | 'h2160';
+
+/**
+ * A component copy in a board that plays the animation of its main, see
+ * `Board.animatedCopies`.
+ */
+export interface AnimatedCopy {
+  /**
+   * The copy: the top layer of the component copy.
+   */
+  readonly copy: Shape;
+
+  /**
+   * How long a round of its animation takes, in milliseconds (a ping-pong
+   * main plays there and back in a round).
+   */
+  readonly duration: number;
+
+  /**
+   * Whether it plays once or over and over, on its own clock.
+   */
+  readonly playback: 'once' | 'loop';
 }
 
 /**

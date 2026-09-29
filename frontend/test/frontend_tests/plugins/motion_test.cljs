@@ -6,8 +6,12 @@
 
 (ns frontend-tests.plugins.motion-test
   (:require
+   [app.common.files.changes-builder :as pcb]
    [app.common.math :as mth]
+   [app.common.test-helpers.components :as cthc]
+   [app.common.test-helpers.compositions :as ctho]
    [app.common.test-helpers.files :as cthf]
+   [app.common.test-helpers.ids-map :as cthi]
    [app.common.types.animation :as cta]
    [app.main.store :as st]
    [app.plugins.api :as api]
@@ -258,3 +262,58 @@
             [^js board _]       (board-with-rect context)]
         (t/is (thrown? js/Error (.addTimeline board)))
         (t/is (empty? (stored-timelines store context)))))))
+
+(t/deftest a-timeline-keeps-its-export-settings
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            [^js board _]       (board-with-rect context)
+            ^js timeline        (.addTimeline board)
+            settings            #(js->clj (.-exportSettings timeline) :keywordize-keys true)]
+
+        (t/testing "the export panel's defaults until they are set"
+          (t/is (= {:format "mp4" :quality "high" :fps 30 :size "1" :loop true} (settings))))
+
+        (t/testing "setting some changes only those"
+          (set! (.-exportSettings timeline) #js {:format "gif" :fps 15})
+          (t/is (= {:format "gif" :quality "high" :fps 15 :size "1" :loop true} (settings)))
+          (t/is (= {:format :gif :fps 15}
+                   (get-in (stored-timelines store context) [(aget board "$id") :export]))))
+
+        (t/testing "what is not valid is refused"
+          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:format "mov"})))
+          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:fps 0})))
+          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:size "3"})))
+          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:loop "yes"}))))))))
+
+(t/deftest a-board-lists-the-copies-that-animate
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file        (-> (cthf/sample-file :motion-file :page-label :motion-page)
+                            (ctho/add-simple-component :anim-comp :anim-main :anim-rect
+                                                       :root-params {:x 0 :y 0 :width 200 :height 200}
+                                                       :child-params {:x 10 :y 20 :width 50 :height 50})
+                            (ctho/add-frame :anim-host :x 1000 :y 0 :width 400 :height 400)
+                            (cthc/instantiate-component :anim-comp :anim-copy :parent-label :anim-host))
+            main        (cthi/id :anim-main)
+            timeline    (-> (cta/make-timeline {:board-id main :duration 1200 :playback :loop})
+                            (cta/add-keyframe (cthi/id :anim-rect) {:time 0 :property :x :value 10})
+                            (cta/add-keyframe (cthi/id :anim-rect) {:time 1200 :property :x :value 60}))
+            file        (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                                     (pcb/with-page (cthf/current-page file))
+                                                     (pcb/set-timeline main timeline)))
+            store       (ths/setup-store file)
+            _           (api/create-context plugin-id)
+            _           (set! motion/shape-proxy shape/shape-proxy)
+            _           (set! motion/shape-proxy? shape/shape-proxy?)
+            _           (set! st/state store)
+            _           (ptk/emit! store #(assoc-in % [:plugins :flags plugin-id :throw-validation-errors] true))
+            page-id     (cthf/current-page-id file)
+            proxy       #(shape/shape-proxy plugin-id (:id file) page-id %)
+            ^js copies  (.-animatedCopies (proxy (cthi/id :anim-host)))]
+        (t/is (= 1 (.-length copies)))
+        (let [^js copy (aget copies 0)]
+          (t/is (= (cthi/id :anim-copy) (aget (.-copy copy) "$id")))
+          (t/is (= [1200 "loop"] [(.-duration copy) (.-playback copy)])))
+        (t/is (nil? (.-timeline (proxy (cthi/id :anim-host)))) "without a timeline of its own")
+        (t/is (zero? (.-length (.-animatedCopies (proxy main)))) "the main plays its own")))))
