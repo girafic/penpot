@@ -472,6 +472,8 @@ pub struct InteractiveDragCrop {
     /// Viewbox origin (doc-space) at capture time.
     pub capture_vb_left: f32,
     pub capture_vb_top: f32,
+    /// Render scale at capture time: the crop is in pixels of that zoom.
+    pub capture_scale: f32,
     /// Backbuffer pixel origin used for `snapshot_rect` (so we can do 1:1 blits).
     pub capture_src_left: i32,
     pub capture_src_top: i32,
@@ -521,11 +523,18 @@ fn drag_crop_snapshot_window_px(
     (ox, oy, win_w, win_h)
 }
 
+/// Whether a crop captured at render scale `captured` can be drawn at `scale`
+/// pixel for pixel.
+fn same_scale(captured: f32, scale: f32) -> bool {
+    (captured - scale).abs() <= f32::EPSILON * scale.abs().max(1.0)
+}
+
 impl RenderState {
     /// Decide whether a top-level node can be served from `backbuffer_crop_cache` during an
     /// interactive transform (drag/resize/rotate).
     ///
     /// We only reuse cached pixels when it is safe and visually correct:
+    /// - **Same zoom**: a crop is in pixels of the zoom it was captured at.
     /// - **Top-level only**: cache entries are built for direct children of the root.
     /// - **Moved node**: only allow cache reuse for *pure translations* (no scale/rotate/skew),
     ///   because other transforms would require resampling and can diverge from the live render.
@@ -538,7 +547,14 @@ impl RenderState {
         moved_ids: &[Uuid],
         moved_bounds: Option<Rect>,
     ) -> bool {
-        if !self.backbuffer_crop_cache.contains_key(&node_id) {
+        let Some(crop) = self.backbuffer_crop_cache.get(&node_id) else {
+            return false;
+        };
+        // The crop is in pixels of the zoom it was captured at. Crops are only
+        // captured on full-quality frames, so a zoom during a fast interactive
+        // transform (e.g. a pinch while an animation plays) leaves them at the
+        // old zoom: drawn now, the shape would show at another size and place.
+        if !same_scale(crop.capture_scale, self.get_scale()) {
             return false;
         }
         let Some(raw) = tree.get_raw(&node_id) else {
@@ -2344,6 +2360,7 @@ impl RenderState {
                     src_selrect: selrect,
                     capture_vb_left: vb_left,
                     capture_vb_top: vb_top,
+                    capture_scale: scale,
                     capture_src_left: window_irect.left,
                     capture_src_top: window_irect.top,
                     image,
@@ -4948,6 +4965,14 @@ mod tests {
         shape.set_selrect(10.0, 20.0, 110.0, 120.0);
         shape.clip_content = clip;
         shape
+    }
+
+    #[test]
+    fn a_drag_crop_is_drawn_only_at_the_zoom_it_was_captured_at() {
+        assert!(same_scale(2.0, 2.0));
+        assert!(same_scale(1.123_456_7, 1.123_456_7));
+        assert!(!same_scale(2.0, 2.25));
+        assert!(!same_scale(1.0, 1.001));
     }
 
     #[test]
