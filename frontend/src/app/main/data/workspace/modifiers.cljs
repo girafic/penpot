@@ -35,6 +35,7 @@
    [app.main.streams :as ms]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.gesture :as wasm-gesture]
+   [app.render-wasm.modifiers :as wasm.modifiers]
    [app.render-wasm.shape :as wasm.shape]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -310,36 +311,8 @@
 
 (defn- set-wasm-props!
   [objects prev-wasm-props wasm-props]
-  (let [;; Set old value for previous properties
-        clean-props
-        (->> prev-wasm-props
-             (map (fn [[id {:keys [property] :as change}]]
-                    (let [shape (get objects id)]
-                      [id (assoc change :value (get shape property))]))))
-
-        wasm-props
-        (concat clean-props wasm-props)
-
-        ;; Stores a map shape -> set of properties changed
-        ;; this is the standard format used by process-shape-changes
-        shape-changes
-        (-> (group-by first wasm-props)
-            (update-vals #(into #{} (map (comp :property second)) %)))
-
-        ;; Create a new objects only with the temporary modifications
-        objects-changed
-        (->> wasm-props
-             (group-by first)
-             (reduce
-              (fn [objects [id properties]]
-                (let [shape
-                      (->> properties
-                           (reduce
-                            (fn [shape [_ operation]]
-                              (ctm/apply-modifier shape operation))
-                            (get objects id)))]
-                  (assoc objects id shape)))
-              objects))]
+  (let [[objects-changed shape-changes]
+        (wasm.modifiers/property-changes objects prev-wasm-props wasm-props)]
     (wasm.shape/process-shape-changes! objects-changed shape-changes)))
 
 (defn- edit-preview-tree
@@ -650,79 +623,6 @@
         (dissoc modif-tree nil))
     modif-tree))
 
-(defn- parse-structure-modifiers
-  [modif-tree]
-  (into
-   []
-   (comp
-    (mapcat
-     (fn [[parent-id data]]
-       (when (ctm/has-structure? (:modifiers data))
-         (->> (concat
-               (get-in data [:modifiers :structure-parent])
-               (get-in data [:modifiers :structure-child]))
-              (mapcat
-               (fn [modifier]
-                 (case (:type modifier)
-                   :remove-children
-                   (->> (:value modifier)
-                        (map (fn [child-id]
-                               {:type :remove-children
-                                :parent parent-id
-                                :id child-id
-                                :index 0
-                                :value 0})))
-
-                   :add-children
-                   (->> (:value modifier)
-                        (map (fn [child-id]
-                               {:type :add-children
-                                :parent parent-id
-                                :id child-id
-                                :index (:index modifier)
-                                :value 0})))
-
-                   :scale-content
-                   [{:type :scale-content
-                     :parent parent-id
-                     :id parent-id
-                     :index 0
-                     :value (:value modifier)}]
-                   nil)))))))
-    (filter (fn [{:keys [id parent]}]
-              (and (some? id) (some? parent)))))
-   modif-tree))
-
-
-(def ^:private xf:parse-geometry-modifier
-  (let [default-transform (gmt/matrix)]
-    (keep (fn [[id data]]
-            (cond
-              (or (nil? id) (= id uuid/zero))
-              nil
-
-              (ctm/has-geometry? (:modifiers data))
-              (let [parent (:geometry-parent (:modifiers data))
-                    kind (if (d/not-empty? parent) :parent :child)]
-                (d/vec2 id {:transform (ctm/modifiers->transform (:modifiers data)) :kind kind}))
-
-              ;; Unit matrix is used for reflowing
-              :else
-              (d/vec2 id {:transform default-transform :kind :parent}))))))
-
-(defn- parse-geometry-modifiers
-  [modif-tree]
-  (into [] xf:parse-geometry-modifier modif-tree))
-
-(defn- extract-property-changes
-  [modif-tree]
-  (->> modif-tree
-       (mapcat (fn [[id {:keys [modifiers]}]]
-                 (->> (:structure-parent modifiers)
-                      (map #(vector id %)))))
-       (filter (fn [[_ {:keys [type]}]]
-                 (= type :change-property)))))
-
 (defn set-temporary-selrect
   [selrect]
   (ptk/reify ::set-temporary-selrect
@@ -784,7 +684,7 @@
     (ptk/reify ::set-wasm-modifiers
       ptk/UpdateEvent
       (update [_ state]
-        (let [property-changes (extract-property-changes (shown state))]
+        (let [property-changes (wasm.modifiers/extract-property-changes (shown state))]
           (if (d/not-empty? property-changes)
             (-> state
                 (assoc :prev-wasm-props (:wasm-props state))
@@ -817,9 +717,9 @@
             (let [objects (dsh/lookup-page-objects state)]
               (set-wasm-props! objects (:prev-wasm-props state) (:wasm-props state))
               (wasm.api/clean-modifiers)
-              (wasm.api/set-structure-modifiers (parse-structure-modifiers modif-tree))
+              (wasm.api/set-structure-modifiers (wasm.modifiers/parse-structure-modifiers modif-tree))
               (vreset! wasm-structure-modifiers-active? true)))
-          (let [geometry-entries (parse-geometry-modifiers modif-tree)
+          (let [geometry-entries (wasm.modifiers/parse-geometry-modifiers modif-tree)
                 root-modifiers   (into [] (map (fn [[id data]] [id (:transform data)])) geometry-entries)
                 wasm-ready?      (wasm.api/initialized?)
                 ;; While the GL context is down (lost / mid-reload), keep the
@@ -841,7 +741,7 @@
               (rx/of (set-temporary-modifiers modifiers))
               ;; The selection of the edit, not the animated shapes shown
               ;; with it.
-              (let [ids     (into [] xf:map-key (parse-geometry-modifiers edit-tree))
+              (let [ids     (into [] xf:map-key (wasm.modifiers/parse-geometry-modifiers edit-tree))
                     selrect (when wasm-ready?
                               (if (and translation? (not snap-pixel?) (not over-motion?)
                                        selection-rect-cache (seq modifiers))
@@ -887,11 +787,11 @@
               (every? #(ctm/only-move? (:modifiers %)) (vals modif-tree))]
           (wasm.api/clean-modifiers)
           (when-not translation?
-            (wasm.api/set-structure-modifiers (parse-structure-modifiers modif-tree)))
+            (wasm.api/set-structure-modifiers (wasm.modifiers/parse-structure-modifiers modif-tree)))
 
           ;; Apply property changes (e.g. grow-type) to WASM shapes before
           ;; propagating geometry, so propagate_modifiers sees the updated state.
-          (doseq [[id {:keys [property value]}] (extract-property-changes modif-tree)]
+          (doseq [[id {:keys [property value]}] (wasm.modifiers/extract-property-changes modif-tree)]
             (when (= property :grow-type)
               (wasm.api/use-shape id)
               (wasm.api/set-shape-grow-type value)))
@@ -899,7 +799,7 @@
           (let [objects (dsh/lookup-page-objects state)
 
                 geometry-entries
-                (parse-geometry-modifiers modif-tree)
+                (wasm.modifiers/parse-geometry-modifiers modif-tree)
 
                 snap-pixel?
                 (and (not ignore-snap-pixel) (contains? (:workspace-layout state) :snap-pixel-grid))
