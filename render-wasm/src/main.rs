@@ -180,6 +180,25 @@ pub extern "C" fn render_sync_shape(a: u32, b: u32, c: u32, d: u32) -> Result<()
     Ok(())
 }
 
+/// Render the shape `id` synchronously again after what shows over it
+/// changed, the modifiers and properties of an animation the view mode
+/// plays: unlike `render_sync_shape`, the tile cache stays, so only the
+/// tiles of the shapes that changed render again, as in the workspace,
+/// and when they are most of them the shape renders in one pass. The view
+/// and the shapes must be the ones of the last `render_sync_shape`.
+#[no_mangle]
+#[wasm_error]
+pub extern "C" fn render_sync_shape_again(a: u32, b: u32, c: u32, d: u32) -> Result<()> {
+    with_state!(state, {
+        let id = uuid_from_u32_quartet(a, b, c, d);
+        state.rebuild_touched_tiles();
+        state
+            .render_sync_shape_again(&id, 0)
+            .map_err(|e| Error::RecoverableError(e.to_string()))?;
+    });
+    Ok(())
+}
+
 #[no_mangle]
 #[wasm_error]
 pub extern "C" fn render_from_cache(_: i32) -> Result<()> {

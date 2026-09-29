@@ -91,6 +91,17 @@ impl State {
         render_state.start_render_loop(Some(id), &self.shapes, timestamp, true)
     }
 
+    /// `render_sync_shape` keeping the tile cache: only the tiles
+    /// invalidated since the last render draw again, or the board in one
+    /// pass when that is most of them.
+    pub fn render_sync_shape_again(&mut self, id: &Uuid, timestamp: i32) -> Result<FrameType> {
+        let render_state = get_render_state();
+        render_state.viewer_animation_frame = true;
+        let frame = render_state.start_render_loop(Some(id), &self.shapes, timestamp, true);
+        render_state.viewer_animation_frame = false;
+        frame
+    }
+
     pub fn render_shape_pixels(
         &mut self,
         id: &Uuid,

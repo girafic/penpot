@@ -417,6 +417,10 @@ pub(crate) struct RenderState {
     pub include_filter: Option<HashSet<Uuid>>,
     /// Frame id passed as `base_object` for viewer renders; always traversed.
     pub viewer_render_root: Option<Uuid>,
+    /// While a frame of an animation the view mode plays renders (see
+    /// `State::render_sync_shape_again`): a frame that changed most of the
+    /// board renders in one pass (see `should_render_viewport_pass`).
+    pub viewer_animation_frame: bool,
     pub touched_ids: HashSet<Uuid>,
     /// Pre-edit extrects for old∪new tile eviction (captured on first touch).
     touched_prev_extrects: HashMap<Uuid, Rect>,
@@ -656,6 +660,7 @@ impl RenderState {
             focus_mode: FocusMode::new(),
             include_filter: None,
             viewer_render_root: None,
+            viewer_animation_frame: false,
             touched_ids: HashSet::default(),
             touched_prev_extrects: HashMap::default(),
             ignore_nested_blurs: false,
@@ -2527,7 +2532,7 @@ impl RenderState {
         performance::end_timed_log!("tile_cache_update", _tile_start);
 
         if self.should_render_viewport_pass(base_object, sync_render) {
-            if let Some(frame_type) = self.render_viewport_pass(tree, timestamp)? {
+            if let Some(frame_type) = self.render_viewport_pass(base_object, tree, timestamp)? {
                 performance::end_measure!("render");
                 performance::end_measure!("start_render_loop");
                 performance::end_timed_log!("start_render_loop", _start);
@@ -2572,32 +2577,36 @@ impl RenderState {
 
     /// Whether this frame renders the visible area in one pass instead of by
     /// tiles (see `render_viewport_pass`): during an interactive transform in
-    /// fast mode (the animation preview playing, a drag) that left at least
-    /// half of the visible tiles to render again. Tiles draw each shape once
-    /// per tile it touches, so when most of them change, as when a whole
-    /// board animates, one pass does the same work only once; a drag that
-    /// touches a tile or two keeps the tiles.
+    /// fast mode (the animation preview playing, a drag), or a frame of an
+    /// animation the view mode plays, that left at least half of the visible
+    /// tiles to render again. Tiles draw each shape once per tile it
+    /// touches, so when most of them change, as when a whole board animates,
+    /// one pass does the same work only once; a drag that touches a tile or
+    /// two keeps the tiles.
     fn should_render_viewport_pass(&self, base_object: Option<&Uuid>, sync_render: bool) -> bool {
         let uncached = self.pending_tiles.visible_uncached.len();
         let visible = uncached + self.pending_tiles.visible_cached.len();
-        !sync_render
+        let workspace = !sync_render
             && base_object.is_none()
             && self.options.is_interactive_transform()
-            && self.options.is_fast_mode()
+            && self.options.is_fast_mode();
+        let viewer = sync_render && base_object.is_some() && self.viewer_animation_frame;
+        (workspace || viewer)
             && !self.viewer_masked_pass()
             && self.include_filter.is_none()
             && visible >= 2
             && uncached * 2 >= visible
     }
 
-    /// Render the visible area in one pass, every shape once, into
-    /// viewport-sized stand-ins for the tile surfaces (see
-    /// `Surfaces::begin_viewport_pass`), then present it. The tile cache is
-    /// left as it is: the tiles this frame changed stay to render again,
-    /// which the next tiled render does. Nil when the surfaces cannot be
-    /// made; the frame then renders by tiles.
+    /// Render the visible area in one pass, every shape once (the shapes of
+    /// `base_object` only, when given), into viewport-sized stand-ins for
+    /// the tile surfaces (see `Surfaces::begin_viewport_pass`), then present
+    /// it. The tile cache is left as it is: the tiles this frame changed
+    /// stay to render again, which the next tiled render does. Nil when the
+    /// surfaces cannot be made; the frame then renders by tiles.
     fn render_viewport_pass(
         &mut self,
+        base_object: Option<&Uuid>,
         tree: ShapesPoolRef,
         timestamp: i32,
     ) -> Result<Option<FrameType>> {
@@ -2605,11 +2614,17 @@ impl RenderState {
         let area = self.viewbox.area;
         let width = (area.width() * scale).ceil() as i32;
         let height = (area.height() * scale).ceil() as i32;
-        let Some(root) = tree.get(&Uuid::nil()) else {
-            return Ok(None);
+        let root_ids = if let Some(id) = base_object {
+            vec![*id]
+        } else {
+            let Some(root) = tree.get(&Uuid::nil()) else {
+                return Ok(None);
+            };
+            root.children_ids(false)
         };
-        let root_ids = root.children_ids(false);
-        if width <= 0 || height <= 0 || !self.surfaces.begin_viewport_pass(width, height) {
+        // Fast mode draws no shadows: their surfaces stay tile-sized.
+        let shadows = !self.options.is_fast_mode();
+        if width <= 0 || height <= 0 || !self.surfaces.begin_viewport_pass(width, height, shadows) {
             return Ok(None);
         }
         performance::begin_measure!("render_viewport_pass");
@@ -2641,7 +2656,9 @@ impl RenderState {
                 flattened: false,
             }));
 
+        self.viewer_render_root = base_object.copied();
         let rendered = self.render_shape_tree_partial_uncached(tree, timestamp, false, false);
+        self.viewer_render_root = None;
         if rendered.is_ok() {
             // The pass covers the whole viewport: it replaces the backbuffer.
             self.surfaces
@@ -2659,7 +2676,12 @@ impl RenderState {
         self.pending_nodes.clear();
         rendered?;
 
+        // A board of the view mode shows without the workspace overlays, as
+        // in `render_shape_tree_sync`.
+        let saved_preview_mode = self.preview_mode;
+        self.preview_mode = saved_preview_mode || base_object.is_some();
         self.present_frame(tree);
+        self.preview_mode = saved_preview_mode;
         performance::end_measure!("render_viewport_pass");
         Ok(Some(FrameType::Full))
     }

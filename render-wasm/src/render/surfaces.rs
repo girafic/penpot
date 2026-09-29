@@ -53,7 +53,10 @@ fn draw_surface_src_rect_to_dst(
 }
 
 /// Copy a rendered tile into an atlas slot. Packed slots keep a 1px border so
-/// Linear filtering on compose does not sample the neighboring cell.
+/// Linear filtering on compose does not sample the neighboring cell. The slot
+/// is cleared first: it can still hold the tile it had before, which would
+/// show through where this one is transparent (the view mode renders on a
+/// transparent background).
 fn blit_drawable_into_tile_atlas_slot(
     current: &mut skia::Surface,
     atlas_canvas: &skia::Canvas,
@@ -61,6 +64,11 @@ fn blit_drawable_into_tile_atlas_slot(
     slot: skia::Rect,
     slot_size: i32,
 ) {
+    atlas_canvas.save();
+    atlas_canvas.clip_rect(slot, None, false);
+    atlas_canvas.clear(skia::Color::TRANSPARENT);
+    atlas_canvas.restore();
+
     let nearest = skia::SamplingOptions::new(skia::FilterMode::Nearest, skia::MipmapMode::None);
     let content = tiles::tile_atlas_content_rect(slot, slot_size);
     if content == slot {
@@ -479,6 +487,9 @@ struct ViewportPassSurfaces {
     current: skia::Surface,
     fills: skia::Surface,
     strokes: skia::Surface,
+    // For `drop_shadows`, `inner_shadows` and `text_drop_shadows`, made
+    // for the first pass in full quality: fast mode draws no shadows.
+    shadows: Option<[skia::Surface; 3]>,
 }
 
 pub struct Surfaces {
@@ -512,8 +523,9 @@ pub struct Surfaces {
 
     tiles: TileTextureCache,
     pub atlas: DocAtlas,
-    // Viewport-sized stand-ins for `current`, `shape_fills` and
-    // `shape_strokes` during a viewport pass (see `begin_viewport_pass`).
+    // Viewport-sized stand-ins for `current`, `shape_fills`,
+    // `shape_strokes` and the shadow surfaces during a viewport pass (see
+    // `begin_viewport_pass`).
     viewport_pass: Option<ViewportPassSurfaces>,
     sampling_options: skia::SamplingOptions,
     atlas_sampling_options: skia::SamplingOptions,
@@ -758,10 +770,11 @@ impl Surfaces {
 
     /// Swap in surfaces for a viewport pass of `width` × `height` pixels:
     /// `Current`, `Fills` and `Strokes` as big as the viewport plus the
-    /// margins, where the tile-sized ones only fit a tile. They are made on
-    /// first use and made again when the viewport outgrows them. False when
-    /// they cannot be made, then nothing is swapped.
-    pub fn begin_viewport_pass(&mut self, width: i32, height: i32) -> bool {
+    /// margins, where the tile-sized ones only fit a tile, and with
+    /// `shadows` (a pass in full quality) the shadow surfaces too. They are
+    /// made on first use and made again when the viewport outgrows them.
+    /// False when they cannot be made, then nothing is swapped.
+    pub fn begin_viewport_pass(&mut self, width: i32, height: i32, shadows: bool) -> bool {
         let dims = (
             width + TILE_SIZE_MULTIPLIER * self.margins.width,
             height + TILE_SIZE_MULTIPLIER * self.margins.height,
@@ -783,7 +796,25 @@ impl Surfaces {
                 current,
                 fills,
                 strokes,
+                shadows: None,
             });
+        }
+
+        if shadows {
+            let Some(pass) = self.viewport_pass.as_mut() else {
+                return false;
+            };
+            if pass.shadows.is_none() {
+                // As big as the others, which can be bigger than `dims`.
+                let dims = (pass.current.width(), pass.current.height());
+                let drop = self.drop_shadows.new_surface_with_dimensions(dims);
+                let inner = self.inner_shadows.new_surface_with_dimensions(dims);
+                let text_drop = self.text_drop_shadows.new_surface_with_dimensions(dims);
+                let (Some(drop), Some(inner), Some(text_drop)) = (drop, inner, text_drop) else {
+                    return false;
+                };
+                pass.shadows = Some([drop, inner, text_drop]);
+            }
         }
 
         self.swap_viewport_pass();
@@ -806,6 +837,11 @@ impl Surfaces {
             std::mem::swap(&mut self.current, &mut pass.current);
             std::mem::swap(&mut self.shape_fills, &mut pass.fills);
             std::mem::swap(&mut self.shape_strokes, &mut pass.strokes);
+            if let Some([drop, inner, text_drop]) = pass.shadows.as_mut() {
+                std::mem::swap(&mut self.drop_shadows, drop);
+                std::mem::swap(&mut self.inner_shadows, inner);
+                std::mem::swap(&mut self.text_drop_shadows, text_drop);
+            }
         }
     }
 
