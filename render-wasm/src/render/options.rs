@@ -27,6 +27,10 @@ pub struct RenderOptions {
     /// keeps per-frame flushing enabled (unlike pan/zoom, where
     /// `render_from_cache` drives target presentation).
     interactive_transform: bool,
+    /// Interactive transforms render in full quality (effects,
+    /// antialiasing) instead of in fast mode: the animation preview plays
+    /// so when the user asks for it (see `set_modifiers_full_quality`).
+    transform_full_quality: bool,
     /// Minimum on-screen size (CSS px at 1:1 zoom) above which vector antialiasing is enabled.
     pub antialias_threshold: f32,
     pub viewport_interest_area_threshold: i32,
@@ -47,6 +51,7 @@ impl Default for RenderOptions {
             dpr: 1.0,
             fast_mode: false,
             interactive_transform: false,
+            transform_full_quality: false,
             antialias_threshold: ANTIALIAS_THRESHOLD,
             viewport_interest_area_threshold: VIEWPORT_INTEREST_AREA_THRESHOLD,
             dpr_viewport_interest_area_threshold: VIEWPORT_INTEREST_AREA_THRESHOLD,
@@ -112,6 +117,16 @@ impl RenderOptions {
 
     pub fn set_interactive_transform(&mut self, enabled: bool) {
         self.interactive_transform = enabled;
+    }
+
+    pub fn set_transform_full_quality(&mut self, enabled: bool) {
+        self.transform_full_quality = enabled;
+    }
+
+    /// The fast mode an interactive transform renders in: on, unless it
+    /// was asked for full quality.
+    pub fn transform_fast_mode(&self) -> bool {
+        !self.transform_full_quality
     }
 
     pub fn is_text_editor_v3(&self) -> bool {

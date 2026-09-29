@@ -766,10 +766,11 @@
   "Preview `modif-tree` on the canvas. With `skip-selrect?` the selection
   rect is left as it is (the animation preview moves shapes that may not
   be selected). In motion mode an edit shows over the animation (see
-  `cltl/edit-preview`); `animation-preview?` is the animation itself."
+  `cltl/edit-preview`); `animation-preview?` is the animation itself,
+  which renders in full quality instead of fast with `full-quality?`."
   [modif-tree & {:keys [ignore-constraints ignore-snap-pixel snap-ignore-axis
                         subtree-ids-by-id selection-rect-cache skip-selrect?
-                        animation-preview?]
+                        animation-preview? full-quality?]
                  :or {ignore-constraints false ignore-snap-pixel false snap-ignore-axis nil}
                  :as params}]
   (let [edit-tree  (without-nil-ids modif-tree)
@@ -798,6 +799,8 @@
         ;; thread is not blocked. The pair is closed in
         ;; `clear-local-transform`.
         (ensure-interactive-transform-start!)
+        (when animation-preview?
+          (wasm.api/set-modifiers-full-quality full-quality?))
         (let [modif-tree   (shown state)
               over-motion? (not (identical? modif-tree edit-tree))
               snap-pixel?  (and (not ignore-snap-pixel) (contains? (:workspace-layout state) :snap-pixel-grid))

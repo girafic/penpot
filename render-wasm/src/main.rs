@@ -316,10 +316,11 @@ pub extern "C" fn set_view_end() -> Result<()> {
         let render_state = get_render_state();
         // A view interaction can end during an interactive transform (a
         // drag, or the animation preview playing, e.g. when the timeline
-        // opening resizes the canvas): its fast mode stays on until
-        // `set_modifiers_end`.
-        let interactive = render_state.options.is_interactive_transform();
-        render_state.options.set_fast_mode(interactive);
+        // opening resizes the canvas): the transform keeps its mode, fast
+        // unless it asked for full quality, until `set_modifiers_end`.
+        let fast = render_state.options.is_interactive_transform()
+            && render_state.options.transform_fast_mode();
+        render_state.options.set_fast_mode(fast);
         render_state.tile_viewbox.update(&render_state.viewbox);
 
         if render_state.options.is_profile_rebuild_tiles() {
@@ -359,7 +360,8 @@ pub extern "C" fn set_view_end() -> Result<()> {
 pub extern "C" fn set_modifiers_start() -> Result<()> {
     performance::begin_measure!("set_modifiers_start");
     let render_state = get_render_state();
-    render_state.options.set_fast_mode(true);
+    let fast = render_state.options.transform_fast_mode();
+    render_state.options.set_fast_mode(fast);
     render_state.options.set_interactive_transform(true);
     performance::end_measure!("set_modifiers_start");
     Ok(())
@@ -376,9 +378,25 @@ pub extern "C" fn set_modifiers_end() -> Result<()> {
     let render_state = get_render_state();
     render_state.options.set_fast_mode(false);
     render_state.options.set_interactive_transform(false);
+    render_state.options.set_transform_full_quality(false);
     // The viewport pass renders only during interactive transforms.
     render_state.surfaces.release_viewport_pass();
     performance::end_measure!("set_modifiers_end");
+    Ok(())
+}
+
+/// Render the current interactive transform in full quality (`full`) or
+/// fast: the animation preview plays in full quality when the user asks
+/// for it. `set_modifiers_end` goes back to fast for the next transform.
+#[no_mangle]
+#[wasm_error]
+pub extern "C" fn set_modifiers_full_quality(full: bool) -> Result<()> {
+    let render_state = get_render_state();
+    render_state.options.set_transform_full_quality(full);
+    if render_state.options.is_interactive_transform() {
+        let fast = render_state.options.transform_fast_mode();
+        render_state.options.set_fast_mode(fast);
+    }
     Ok(())
 }
 

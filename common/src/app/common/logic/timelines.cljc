@@ -20,6 +20,7 @@
    [app.common.geom.shapes :as gsh]
    [app.common.types.animation :as cta]
    [app.common.types.component :as ctk]
+   [app.common.types.components-list :as ctkl]
    [app.common.types.modifiers :as ctm]
    [app.common.uuid :as uuid]))
 
@@ -186,53 +187,166 @@
       (not= result timelines)
       (commit-timelines page result))))
 
-(defn- copy-roots
-  "Ids of the top copies of components in the board `board-id`, itself
-  included."
+(defn main-page-of
+  "A function giving, for a component head, `{:objects :timelines}` of the
+  page of the main of its component, one of `files` (by id)."
+  [files]
+  (fn [head]
+    (let [fdata (dm/get-in files [(:component-file head) :data])]
+      (when-let [component (ctkl/get-component fdata (:component-id head))]
+        (when-let [page (dm/get-in fdata [:pages-index (:main-instance-page component)])]
+          {:objects (:objects page) :timelines (:timelines page)})))))
+
+(defn- copy-heads
+  "Ids of the top component copies in the board `board-id`, itself
+  included: the heads that refer to a main, not inside another one."
   [objects board-id]
-  (filter (fn [id]
-            (let [shape (get objects id)]
-              (and (ctk/instance-root? shape)
-                   (not (ctk/main-instance? shape)))))
-          (cfh/get-children-ids-with-self objects board-id)))
+  (letfn [(walk [id]
+            (when-let [shape (get objects id)]
+              (if (and (ctk/instance-head? shape) (some? (:shape-ref shape)))
+                [id]
+                (mapcat walk (:shapes shape)))))]
+    (walk board-id)))
+
+(defn- head-of
+  "The nearest component head at or above `id` in `objects`."
+  [objects id]
+  (loop [id id, depth 0]
+    (when-let [shape (get objects id)]
+      (cond
+        (ctk/instance-head? shape) shape
+        (or (> depth 64) (= id uuid/zero) (= id (:parent-id shape))) nil
+        :else (recur (:parent-id shape) (inc depth))))))
+
+(defn- ratio
+  [a b]
+  (if (and (number? a) (number? b) (pos? b)) (/ a b) 1))
+
+(defn- copy-map
+  "How absolute positions in the main `main` map to its copy `copy`:
+  `{:sx :sy :ox :oy}`, a position `p` going to `o + p × s`, scaled as
+  much as the copy is."
+  [copy main]
+  (let [c  (:selrect copy)
+        m  (:selrect main)
+        sx (ratio (:width c) (:width m))
+        sy (ratio (:height c) (:height m))]
+    {:sx sx
+     :sy sy
+     :ox (- (:x c 0) (* sx (:x m 0)))
+     :oy (- (:y c 0) (* sy (:y m 0)))}))
+
+(defn- then-map
+  "The map (see `copy-map`) applying `inner`, then `outer`."
+  [outer inner]
+  {:sx (* (:sx outer) (:sx inner))
+   :sy (* (:sy outer) (:sy inner))
+   :ox (+ (:ox outer) (* (:sx outer) (:ox inner)))
+   :oy (+ (:oy outer) (* (:sy outer) (:oy inner)))})
+
+(def ^:private identity-map
+  {:sx 1 :sy 1 :ox 0 :oy 0})
+
+(defn- origin
+  "Where the keyframe positions of `shape-id` in the board `board-id`
+  are counted from: the board for its layers, the canvas for itself."
+  [objects shape-id board-id]
+  (if (= shape-id board-id)
+    {:x 0 :y 0}
+    (let [rect (dm/get-in objects [board-id :selrect])]
+      {:x (:x rect 0) :y (:y rect 0)})))
+
+(defn- main-track
+  "What animates the copy `shape` under the copy head `head` from a main:
+  following what it refers to (`:shape-ref`) from main to main, a
+  component in a component included, the first of them that has a track.
+  `{:board :timeline :track :ref-id :objects :map}`, `:map` taking the
+  absolute positions of that main to the copy (see `copy-map`); nil when
+  none of them is animated."
+  [shape head main-page]
+  (loop [shape shape, head head, cmap identity-map, depth 0]
+    (let [page   (when (< depth 8) (main-page head))
+          mobjs  (:objects page)
+          ref-id (:shape-ref shape)
+          main   (get mobjs (:shape-ref head))]
+      (when (and (some? page) (some? ref-id) (some? main))
+        (let [cmap (then-map cmap (copy-map head main))]
+          (if-let [[board track] (find-track (:timelines page) ref-id)]
+            {:board board
+             :timeline (get (:timelines page) board)
+             :track track
+             :ref-id ref-id
+             :objects mobjs
+             :map cmap}
+            (let [ref       (get mobjs ref-id)
+                  next-head (when (some? (:shape-ref ref))
+                              (head-of mobjs ref-id))]
+              (when (some? next-head)
+                (recur ref next-head cmap (inc depth))))))))))
+
+(defn- mapped-track
+  "`track` of `ref-id` (of `main-objects`, in its board `main-board`) for
+  `shape-id` (of `objects`, in the board `board-id`), its positions and
+  sizes taken there by `cmap` (see `main-track`)."
+  [track ref-id main-objects main-board shape-id objects board-id {:keys [sx sy ox oy]}]
+  (let [from (origin main-objects ref-id main-board)
+        to   (origin objects shape-id board-id)
+        bx   (- (+ ox (* sx (:x from))) (:x to))
+        by   (- (+ oy (* sy (:y from))) (:y to))
+        move (fn [keyframe scale offset]
+               (-> keyframe
+                   (update :value #(+ offset (* scale %)))
+                   (d/update-when :path-in * scale)
+                   (d/update-when :path-out * scale)))]
+    (-> track
+        (assoc :shape-id shape-id)
+        (update :keyframes
+                (partial mapv (fn [keyframe]
+                                (case (:property keyframe)
+                                  :x      (move keyframe sx bx)
+                                  :y      (move keyframe sy by)
+                                  :width  (update keyframe :value * sx)
+                                  :height (update keyframe :value * sy)
+                                  keyframe)))))))
 
 (defn instance-timelines
   "The timelines playing, in the board `board-id` of `objects`, the
-  animation of the component copies in it as their mains play it: the
-  tracks of the shapes the copies refer to (`:shape-ref`) in the page of
-  the main of their component, which `main-page` gives for a copy as
-  `{:objects :timelines}`, moved to where the copies are in the board.
-  One by copy, keyed `[:copy id]`, with the settings of the timeline of
-  its main, so that it plays on its own clock (see `cta/playback-time`).
-  A shape `timeline`, the one of the board, animates itself keeps that
-  animation."
+  animations of the component copies in it as their mains play them: the
+  tracks of the shapes the copies refer to (`:shape-ref`) in the pages of
+  their mains, which `main-page` gives for a component head as
+  `{:objects :timelines}`, through a component in a component too (see
+  `main-track`), taken to where the copies are in the board and scaled as
+  much as they are. One by copy and main board, keyed `[:copy id board]`,
+  with the settings of the timeline of that main, so that each plays on
+  its own clock (see `cta/playback-time`). A shape `timeline`, the one of
+  the board, animates itself keeps that animation."
   [objects board-id timeline main-page]
   (let [own (:tracks timeline)]
     (reduce
-     (fn [result root-id]
-       (if-let [{main-objects :objects main-timelines :timelines} (main-page (get objects root-id))]
-         (let [[main tracks]
-               (reduce (fn [[main tracks] id]
-                         (let [ref-id (dm/get-in objects [id :shape-ref])
-                               [main-board track]
-                               (when (and (some? ref-id) (not (contains? own id)))
-                                 (find-track main-timelines ref-id))]
-                           (if (some? track)
-                             [(or main (get main-timelines main-board))
-                              (assoc tracks id
-                                     (moved-track track id
-                                                  (offset (in-board main-objects ref-id main-board)
-                                                          (in-board objects id board-id))
-                                                  false))]
-                             [main tracks])))
-                       [nil {}]
-                       (cfh/get-children-ids-with-self objects root-id))]
-           (cond-> result
-             (seq tracks)
-             (assoc [:copy root-id] (assoc (settings main) :board-id board-id :tracks tracks))))
-         result))
+     (fn [result head-id]
+       (let [head (get objects head-id)]
+         (reduce
+          (fn [result id]
+            (if-let [{:keys [board track ref-id] main :timeline mobjs :objects cmap :map}
+                     (when-not (contains? own id)
+                       (main-track (get objects id) head main-page))]
+              (let [k [:copy head-id board]]
+                (-> result
+                    (update k #(or % (assoc (settings main) :board-id board-id :tracks {})))
+                    (assoc-in [k :tracks id]
+                              (mapped-track track ref-id mobjs board id objects board-id cmap))))
+              result))
+          result
+          (cfh/get-children-ids-with-self objects head-id))))
      {}
-     (copy-roots objects board-id))))
+     (copy-heads objects board-id))))
+
+(defn copy-timelines
+  "The timelines of the component copies in the board `board-id` (see
+  `instance-timelines`), for the pages with `objects` and `timelines`;
+  `files` holds the files of the components, by id."
+  [objects timelines files board-id]
+  (instance-timelines objects board-id (get timelines board-id) (main-page-of files)))
 
 (defn with-copies-clock
   "`timeline`, of a board, keeping time with the animations of the

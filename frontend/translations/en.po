@@ -7592,6 +7592,9 @@ msgstr "Animations"
 msgid "workspace.animation.animated-board"
 msgstr "Animated board"
 
+msgid "workspace.animation.full-quality"
+msgstr "Play in full quality, with shadows and blur"
+
 msgid "workspace.animation.play-animation"
 msgstr "Play animation"
 

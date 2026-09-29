@@ -2277,6 +2277,14 @@
   (when (initialized?)
     (h/call wasm/internal-module "_set_modifiers_end")))
 
+(defn set-modifiers-full-quality
+  "Render the interactive transform in full quality (`full?`) instead of
+   fast mode: the animation preview plays so when the user asks for it.
+   `set-modifiers-end` goes back to fast for the next transform."
+  [full?]
+  (when (initialized?)
+    (h/call wasm/internal-module "_set_modifiers_full_quality" (boolean full?))))
+
 (defn set-modifiers
   [modifiers & {:keys [request-render?] :or {request-render? true}}]
   (when (initialized?)

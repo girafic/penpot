@@ -14,7 +14,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.geom.shapes.bounds :as gsb]
-   [app.common.types.animation :as cta]
+   [app.common.logic.timelines :as cltl]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.types.text :as txt]
    [app.main.data.comments :as dcm]
@@ -58,16 +58,20 @@
 
 (defn- animate-page
   "When a timeline is active, return `page` with its objects recomputed at
-  the current playback time. `timeline->modif-tree` covers transforms and
-  opacity (the latter as a change-property modifier applied by
-  `transform-shape`). Otherwise return `page` unchanged."
-  [page {:keys [timeline-id time] :as _viewer-timeline}]
-  (let [timeline (dm/get-in page [:timelines timeline-id])]
-    (if (nil? timeline)
+  the current playback time: the timeline of the board and the ones of
+  the component copies in it, which play the animation of their mains
+  (see `cltl/copy-timelines`; `files` holds the files of the components).
+  The modif-tree covers transforms and opacity (the latter as a
+  change-property modifier applied by `transform-shape`). Otherwise
+  return `page` unchanged."
+  [page files {:keys [timeline-id time] :as _viewer-timeline}]
+  (let [objects   (:objects page)
+        timelines (when (some? timeline-id)
+                    (merge (select-keys (:timelines page) [timeline-id])
+                           (cltl/copy-timelines objects (:timelines page) files timeline-id)))]
+    (if (empty? timelines)
       page
-      (let [objects    (:objects page)
-            time       (or time 0)
-            modif-tree (cta/timeline->modif-tree timeline objects time)
+      (let [modif-tree (cltl/animation-tree timelines objects (or time 0))
             objects'   (gsh/apply-objects-modifiers objects modif-tree)]
         (assoc page :objects objects')))))
 
@@ -330,8 +334,9 @@
 
         ;; When a timeline is playing/scrubbed, render shapes recomputed at
         ;; the current time; otherwise render the page as-is.
-        page (mf/with-memo [base-page viewer-timeline]
-               (animate-page base-page viewer-timeline))
+        files (mf/deref refs/files)
+        page  (mf/with-memo [base-page files viewer-timeline]
+                (animate-page base-page files viewer-timeline))
 
         text-shapes
         (hooks/use-equal-memo
@@ -344,6 +349,12 @@
 
         frames    (:frames page)
         frame     (get frames index)
+
+        ;; What the board on screen plays on, its timeline or the
+        ;; animations of the component copies in it (see `dv/board-clock`).
+        clock     (mf/with-memo [base-page files (:id frame)]
+                    (when (some? frame)
+                      (dv/board-clock base-page files (:id frame))))
 
         fullscreen? (mf/deref header/fullscreen-ref)
         overlays    (mf/deref current-overlays-ref)
@@ -596,9 +607,8 @@
        ;; Floating timeline-animation playback control (Penpot Motion).
        ;; Timelines are board-scoped, so we play the timeline of the board
        ;; (frame) currently being viewed.
-       (let [timelines (:timelines base-page)
-             board-id  (:id frame)]
-         (when (and (not= section :inspect) (contains? timelines board-id))
+       (let [board-id (:id frame)]
+         (when (and (not= section :inspect) (some? clock))
            (let [tl-id    board-id
                  playing? (:playing? viewer-timeline)]
              [:div {:style #js {"position" "absolute" "bottom" "16px" "left" "50%"

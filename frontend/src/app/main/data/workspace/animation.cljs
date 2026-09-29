@@ -18,7 +18,6 @@
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
-   [app.common.types.components-list :as ctkl]
    [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
@@ -84,24 +83,13 @@
   [state]
   (get (get-timelines state) (active-board-id state)))
 
-(defn- main-page-of
-  "For a component copy, `{:objects :timelines}` of the page of the main
-  of its component, one of `files` (by id), see
-  `cltl/instance-timelines`."
-  [files]
-  (fn [copy]
-    (let [fdata (dm/get-in files [(:component-file copy) :data])]
-      (when-let [component (ctkl/get-component fdata (:component-id copy))]
-        (when-let [page (dm/get-in fdata [:pages-index (:main-instance-page component)])]
-          {:objects (:objects page) :timelines (:timelines page)})))))
-
 (defn copy-timelines
   "The timelines playing the animations of the component copies in the
-  board `board-id` of `objects`, by `[:copy id]` (see
+  board `board-id` of `objects`, by `[:copy id board]` (see
   `cltl/instance-timelines`); `files` holds the files of the components,
   by id."
   [objects timelines files board-id]
-  (cltl/instance-timelines objects board-id (get timelines board-id) (main-page-of files)))
+  (cltl/copy-timelines objects timelines files board-id))
 
 (defn- shown-timelines
   "The timelines the canvas shows at the playhead: only the one of the
@@ -124,7 +112,7 @@
   [page files]
   (let [objects   (:objects page)
         timelines (:timelines page)
-        main-page (main-page-of files)]
+        main-page (cltl/main-page-of files)]
     (into #{}
           (filter (fn [id]
                     (let [timeline (get timelines id)]
@@ -223,6 +211,28 @@
     ptk/EffectEvent
     (effect [_ state _]
       (swap! storage/user assoc ::time-unit (dm/get-in state [:workspace-animation :time-unit])))))
+
+(defn full-quality?
+  "Whether the animation plays in full quality (effects, antialiasing)
+  rather than fast, as the user last chose; `anim` is the
+  `:workspace-animation` state. At rest it always shows in full quality."
+  [anim]
+  (let [value (:full-quality? anim)]
+    (if (some? value) value (get storage/user ::full-quality false))))
+
+(defn toggle-full-quality
+  "Play the animation in full quality instead of fast, or back (see
+  `full-quality?`). The choice is kept for the next time."
+  []
+  (ptk/reify ::toggle-full-quality
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [value (not (full-quality? (:workspace-animation state)))]
+        (assoc-in state [:workspace-animation :full-quality?] value)))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (swap! storage/user assoc ::full-quality (dm/get-in state [:workspace-animation :full-quality?])))))
 
 (defn- item-at
   [items index]
@@ -1245,7 +1255,10 @@
           ;; The selection frame follows the selected shapes (see the
           ;; viewport), not every shape the preview moves.
           (if ^boolean (features/active-feature? state "render-wasm/v1")
-            (rx/of (dwm/set-wasm-modifiers modif-tree :skip-selrect? true :animation-preview? true))
+            (rx/of (dwm/set-wasm-modifiers modif-tree
+                                           :skip-selrect? true
+                                           :animation-preview? true
+                                           :full-quality? (full-quality? (:workspace-animation state))))
             (rx/of (dwm/set-modifiers modif-tree false false {:animation-preview? true}))))
         (rx/of (dwm/clear-local-transform))))))
 

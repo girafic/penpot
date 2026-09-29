@@ -12,6 +12,7 @@
    [app.common.files.changes :as cpc]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
+   [app.common.logic.timelines :as cltl]
    [app.common.schema :as sm]
    [app.common.transit :as t]
    [app.common.types.animation :as cta]
@@ -942,6 +943,19 @@
 
 (declare pause-timeline)
 
+(defn board-clock
+  "The timeline the board `board-id` of `page` plays on: its own, keeping
+  time with the animations of the component copies in it while it has no
+  tracks (see `cltl/with-copies-clock`), or nil when it plays nothing.
+  `files` holds the files of the components, by id."
+  [page files board-id]
+  (let [own    (dm/get-in page [:timelines board-id])
+        copies (vals (cltl/copy-timelines (:objects page) (:timelines page) files board-id))]
+    (when (or (some? own) (seq copies))
+      (cltl/with-copies-clock (or own (cta/make-timeline {:board-id board-id}))
+        copies
+        (some? own)))))
+
 (defn seek-timeline
   [time]
   (ptk/reify ::seek-timeline
@@ -960,7 +974,7 @@
     ptk/WatchEvent
     (watch [_ state stream]
       (let [page     (viewer-current-page state)
-            timeline (dm/get-in page [:timelines timeline-id])
+            timeline (board-clock page (:files state) timeline-id)
             duration (or (:duration timeline) 0)
             start    (let [p (dm/get-in state [:viewer-local :timeline :time] 0)]
                        (if (>= p duration) 0 p))
@@ -1011,7 +1025,7 @@
     (watch [_ state _]
       (let [page     (viewer-current-page state)
             frame-id (:id (viewer-frame state))]
-        (if (and (some? frame-id) (contains? (:timelines page) frame-id))
+        (if (and (some? frame-id) (some? (board-clock page (:files state) frame-id)))
           (rx/of (toggle-play-timeline frame-id))
           (rx/of select-next-frame))))))
 

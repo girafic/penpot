@@ -989,7 +989,7 @@
 (mf/defc toolbar*
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [timeline playing? recording? unit zoom on-zoom-change]}]
+  [{:keys [timeline playing? recording? full-quality? unit zoom on-zoom-change]}]
   (let [duration (:duration timeline)
         playback (cta/playback-mode timeline)
         seconds? (= unit :s)
@@ -1017,6 +1017,9 @@
         on-toggle-unit
         (mf/use-fn #(st/emit! (dwa/toggle-time-unit)))
 
+        on-toggle-quality
+        (mf/use-fn #(st/emit! (dwa/toggle-full-quality)))
+
         on-cycle-playback
         (mf/use-fn
          (mf/deps playback)
@@ -1041,7 +1044,15 @@
       [:button {:class (stl/css-case :ctrl-btn true :active (not= :once playback))
                 :title (playback-mode-label playback)
                 :on-click on-cycle-playback}
-       [:> i/icon* {:icon-id (playback-mode-icons playback)}]]]
+       [:> i/icon* {:icon-id (playback-mode-icons playback)}]]
+      ;; Playing renders fast, without shadows and blur, unless asked
+      ;; for full quality; at rest it is always in full quality.
+      [:button {:type "button"
+                :class (stl/css-case :ctrl-btn true :active full-quality?)
+                :title (tr "workspace.animation.full-quality")
+                :aria-pressed full-quality?
+                :on-click on-toggle-quality}
+       [:> i/icon* {:icon-id i/effects}]]]
 
      [:button {:type "button"
                :class (stl/css-case :rec-btn true :active recording?)
@@ -1136,7 +1147,10 @@
                      (when (some? board-id)
                        (dwa/copy-timelines objects timelines files board-id)))
         copy-ends  (mf/with-memo [copies]
-                     (into {} (map (fn [[[_ id] tl]] [id (cta/cycle-duration tl)])) copies))
+                     (reduce (fn [ends [[_ id] tl]]
+                               (update ends id (fnil max 0) (cta/cycle-duration tl)))
+                             {}
+                             copies))
         clock      (mf/with-memo [timeline copies timelines board-id]
                      (some-> timeline
                              (cltl/with-copies-clock (vals copies) (contains? timelines board-id))))
@@ -2246,9 +2260,10 @@
       (if (nil? timeline)
         [:> empty-state*]
         [:*
-         [:> toolbar* {:timeline timeline
+         [:> toolbar* {:timeline clock
                        :playing? playing?
                        :recording? recording?
+                       :full-quality? (dwa/full-quality? anim)
                        :unit unit
                        :zoom zoom
                        :on-zoom-change on-zoom-change}]

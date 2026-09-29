@@ -7,6 +7,7 @@
 (ns common-tests.logic.timelines-test
   (:require
    [app.common.files.changes-builder :as pcb]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.logic.libraries :as cll]
@@ -249,8 +250,8 @@
         ;; main is in the main
         dx        (- (at copy-rect board) (at (thi/id :main-rect) (thi/id :main)))
         timelines (cltl/instance-timelines objects board nil main-page)
-        timeline  (get timelines [:copy copy])]
-    (t/is (= [[:copy copy]] (keys timelines)))
+        timeline  (get timelines [:copy copy (thi/id :main)])]
+    (t/is (= [[:copy copy (thi/id :main)]] (keys timelines)))
     (t/is (= board (:board-id timeline)))
     (t/is (= [1000 :loop] [(:duration timeline) (:playback timeline)]) "the clock of its main")
     (t/is (= [(+ 10 dx) (+ 60 dx)] (x-values timeline copy-rect)))
@@ -293,3 +294,62 @@
                       (cltl/with-copies-clock copies true)
                       :duration))
           "a longer duration set on it")))
+
+(defn- scale-copy
+  "`objects` with the copy `copy-id` and its layers as big as `factor`
+  times, from its top left corner (only their selrects, all the timelines
+  read)."
+  [objects copy-id factor]
+  (let [{cx :x cy :y} (get-in objects [copy-id :selrect])]
+    (reduce (fn [objects id]
+              (update-in objects [id :selrect]
+                         (fn [{:keys [x y width height] :as rect}]
+                           (assoc rect
+                                  :x (+ cx (* factor (- x cx)))
+                                  :y (+ cy (* factor (- y cy)))
+                                  :width (* factor width)
+                                  :height (* factor height)))))
+            objects
+            (cons copy-id (cfh/get-children-ids objects copy-id)))))
+
+(t/deftest a-scaled-copy-plays-its-main-scaled
+  (let [{:keys [objects board copy copy-rect timelines]} (component-scene)
+        objects   (scale-copy objects copy 2)
+        main-page (constantly {:objects objects :timelines timelines})
+        at        (- (get-in objects [copy-rect :selrect :x]) (get-in objects [board :selrect :x]))
+        timeline  (get (cltl/instance-timelines objects board nil main-page) [:copy copy (thi/id :main)])]
+    ;; from where it is, twice as far: 50 in the main, 100 here
+    (t/is (= [at (+ at 100)] (x-values timeline copy-rect)))))
+
+(t/deftest a-component-in-a-copy-plays-its-own-main
+  (let [file      (-> (thf/sample-file :file1)
+                      (tho/add-nested-component :inner :inner-main :inner-rect
+                                                :outer :outer-main :nested
+                                                :root1-params {:x 0 :y 0 :width 200 :height 200}
+                                                :main1-child-params {:x 10 :y 20 :width 50 :height 50}
+                                                :main2-root-params {:x 1000 :y 0 :width 400 :height 400})
+                      (tho/add-frame :host :x 3000 :y 100 :width 600 :height 600)
+                      (thc/instantiate-component :outer :copy :parent-label :host))
+        inner     (thi/id :inner-main)
+        tl        (-> (cta/make-timeline {:board-id inner :duration 800 :playback :loop})
+                      (cta/add-keyframe (thi/id :inner-rect) {:time 0 :property :x :value 10 :easing :linear})
+                      (cta/add-keyframe (thi/id :inner-rect) {:time 800 :property :x :value 60}))
+        file      (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                              (pcb/with-page (thf/current-page file))
+                                              (pcb/set-timeline inner tl)))
+        page      (thf/current-page file)
+        objects   (:objects page)
+        host      (thi/id :host)
+        copy      (thi/id :copy)
+        ;; the rect of the component inside the copy of the outer one
+        rect      (->> (cfh/get-children-ids objects copy)
+                       (filter #(= :rect (get-in objects [% :type])))
+                       (first))
+        at        (- (get-in objects [rect :selrect :x]) (get-in objects [host :selrect :x]))
+        timelines (cltl/instance-timelines objects host nil
+                                           (constantly {:objects objects :timelines (:timelines page)}))
+        timeline  (get timelines [:copy copy inner])]
+    (t/is (some? rect))
+    (t/is (= [[:copy copy inner]] (keys timelines)) "on the clock of the inner main")
+    (t/is (= [800 :loop] [(:duration timeline) (:playback timeline)]))
+    (t/is (= [at (+ at 50)] (x-values timeline rect)))))
