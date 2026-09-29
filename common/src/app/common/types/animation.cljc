@@ -604,7 +604,8 @@
   :keyframe-id}` each) moved `dt` ms along, all of them as far and none
   before the start. Locked ones stay where they are. One that lands on
   another keyframe of its property takes its place, as a keyframe added
-  there does (see `add-keyframe`). The duration grows to hold them."
+  there does (see `add-keyframe`). The duration stays: they can go past
+  the end, where they do not play, as in Figma."
   [timeline keyframes dt]
   (let [moving (filterv (fn [{:keys [shape-id] :as ref}]
                           (when-let [keyframe (find-keyframe timeline ref)]
@@ -619,11 +620,10 @@
                                 (update-keyframe timeline shape-id keyframe-id #(update % :time + dt)))
                               timeline
                               moving)]
-        (-> (reduce (fn [timeline shape-id]
-                      (update-in timeline [:tracks shape-id :keyframes] drop-landed-on moved-ids))
-                    shifted
-                    (into #{} (map :shape-id) moving))
-            (update :duration max (+ (reduce max times) dt)))))))
+        (reduce (fn [timeline shape-id]
+                  (update-in timeline [:tracks shape-id :keyframes] drop-landed-on moved-ids))
+                shifted
+                (into #{} (map :shape-id) moving))))))
 
 (defn property-keyframes
   "The (time-sorted) keyframes of `property` in the track of `shape-id`.
@@ -840,16 +840,14 @@
 
 (defn update-animation
   "Apply `f` to the animation `animation-id` of `shape-id`, keeping it
-  valid, unless it is locked. The duration grows to fit it."
+  valid, unless it is locked. The duration stays: the animation can go
+  past the end, where it does not play (see `shift-keyframes`)."
   [timeline shape-id animation-id f]
-  (let [timeline (d/update-in-when timeline [:tracks shape-id :animations]
-                                   (partial mapv #(if (and (= (:id %) animation-id)
-                                                           (not (:locked %)))
-                                                    (make-animation (f %))
-                                                    %)))]
-    (if-let [animation (get-animation timeline shape-id animation-id)]
-      (update timeline :duration max (animation-end animation))
-      timeline)))
+  (d/update-in-when timeline [:tracks shape-id :animations]
+                    (partial mapv #(if (and (= (:id %) animation-id)
+                                            (not (:locked %)))
+                                     (make-animation (f %))
+                                     %))))
 
 (defn remove-animation
   "Remove an animation, unless it is locked. If it leaves the track empty,
@@ -2340,7 +2338,12 @@
   (let [duration (max 1 (:duration timeline))
         sid      (:shape-id track)
         kfs      (:keyframes track)
-        times    (-> (into (sorted-set 0 duration) (map :time kfs)) vec)
+        ;; Keyframes past the end do not play: the value at the end is
+        ;; the one on the way to them.
+        times    (-> (into (sorted-set 0 duration)
+                           (comp (map :time) (filter #(<= % duration)))
+                           kfs)
+                     vec)
         stops    (for [t times]
                    (let [values     (get (values-at timeline t) sid {})
                          pct        (fmt (* 100.0 (/ (double t) duration)))

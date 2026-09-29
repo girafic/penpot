@@ -1096,14 +1096,14 @@
                 :title (tr "workspace.animation.rewind")
                 :on-click on-stop}
        [:> i/icon* {:icon-id i/reload}]]
-      [:button {:class (stl/css-case :ctrl-btn true :active (not= :once playback))
+      [:button {:class (stl/css-case :ctrl-btn true :toggle-btn true :active (not= :once playback))
                 :title (playback-mode-label playback)
                 :on-click on-cycle-playback}
        [:> i/icon* {:icon-id (playback-mode-icons playback)}]]
       ;; Playing renders fast, without shadows and blur, unless asked
       ;; for full quality; at rest it is always in full quality.
       [:button {:type "button"
-                :class (stl/css-case :ctrl-btn true :active full-quality?)
+                :class (stl/css-case :ctrl-btn true :toggle-btn true :active full-quality?)
                 :title (tr "workspace.animation.full-quality")
                 :aria-pressed full-quality?
                 :on-click on-toggle-quality}
@@ -1612,11 +1612,12 @@
              (show-snap target)
              (st/emit! (dwa/set-playhead (or target t))))))
 
-        ;; Dragging the end of the timeline changes its duration, as one
-        ;; undo step. The end follows the pointer, snapping like the other
-        ;; drags; past the right end of the ruler the duration keeps growing,
-        ;; the faster the farther the pointer is. A click on it without a
-        ;; drag moves the playhead there, as on the rest of the ruler.
+        ;; Dragging the end of the timeline, on the background of the rows
+        ;; (see `lanes/hit`), changes its duration, as one undo step. The
+        ;; end follows the pointer, snapping like the other drags; past the
+        ;; right end of the ruler the duration keeps growing, the faster the
+        ;; farther the pointer is. A click on it without a drag is one on
+        ;; the background: it clears the keyframe selection.
         duration-drag-ref (mf/use-ref nil)
 
         grow-duration
@@ -1659,7 +1660,6 @@
 
         on-duration-up
         (mf/use-fn
-         (mf/deps on-scrub)
          (fn [event]
            (when-let [{:keys [undo-id listen-keys timer moved?]} (mf/ref-val duration-drag-ref)]
              (mf/set-ref-val! duration-drag-ref nil)
@@ -1668,8 +1668,8 @@
                (events/unlistenByKey key))
              (reset! axis-lock* nil)
              (show-snap nil)
-             (when-not moved?
-               (on-scrub event))
+             (when-not (or moved? (kbd/shift? event))
+               (st/emit! (dwa/select-keyframes [])))
              (st/emit! (dwu/commit-undo-transaction undo-id)))))
 
         on-duration-down

@@ -118,6 +118,20 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
+// A button that stays on (the loop, full quality): filled while on, like
+// the pressed tools of the toolbar, so it shows under the pointer too.
+.toggle-btn {
+  &:hover {
+    color: var(--color-foreground-primary);
+  }
+
+  &.active,
+  &.active:hover {
+    background-color: var(--color-background-quaternary);
+    color: var(--color-accent-primary);
+  }
+}
+
 // Auto-keyframe: a dot like a record button, red while it is on.
 .rec-btn {
   display: inline-flex;
@@ -291,14 +305,21 @@ $header-height: $ruler-height + $row-height;
   border-bottom: 1px solid var(--panel-border-color);
 }
 
+// In the accent colour, with a ring of the background that keeps it apart
+// from the filled track, so it shows in both themes.
 @mixin zoom-thumb {
+  box-sizing: border-box;
   inline-size: 14px;
   block-size: 14px;
-  border: none;
+  border: 2px solid var(--color-background-primary);
   border-radius: 50%;
-  background-color: var(--color-static-white);
+  background-color: var(--color-accent-primary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+
+@mixin zoom-thumb-halo {
   box-shadow:
-    0 0 0 1px var(--color-background-quaternary),
+    0 0 0 3px var(--color-accent-primary-muted),
     0 1px 3px rgb(0 0 0 / 0.25);
 }
 
@@ -327,6 +348,20 @@ $header-height: $ruler-height + $row-height;
 
   &::-moz-range-thumb {
     @include zoom-thumb;
+  }
+
+  &:hover::-webkit-slider-thumb,
+  &:focus-visible::-webkit-slider-thumb {
+    @include zoom-thumb-halo;
+  }
+
+  &:hover::-moz-range-thumb,
+  &:focus-visible::-moz-range-thumb {
+    @include zoom-thumb-halo;
+  }
+
+  &:focus-visible {
+    outline: none;
   }
 
   &::-moz-range-track {

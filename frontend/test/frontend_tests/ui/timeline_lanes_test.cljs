@@ -76,12 +76,26 @@
     (t/is (= [150 126] (lanes/content-point geo 50 150)))
     (t/is (= [100 28] (lanes/content-point geo -5 10)) "kept on the rows")))
 
-(t/deftest the-ruler-and-its-end
+(t/deftest the-ruler-scrubs-to-its-end
   (t/is (= {:type :ruler} (hit-at geo 20 10)))
-  (t/is (= {:type :duration} (hit-at geo 812 10)))
-  (t/is (= {:type :duration} (hit-at geo 816 10)))
+  (t/is (= {:type :ruler} (hit-at geo 812 10)) "the end is not dragged there")
   (t/is (nil? (hit-at geo 20 30)) "the markers are not drawn")
   (t/is (nil? (hit-at geo -1 100)) "off the canvas"))
+
+;; The end of the timeline, at 800 ms, is at x = 812.
+(t/deftest the-end-of-the-timeline-is-dragged-on-its-background
+  (t/is (= {:type :duration} (hit-at geo 812 66)) "in a layer row")
+  (t/is (= {:type :duration} (hit-at geo 816 150)) "in the lane of a property")
+  (t/is (= {:type :duration} (hit-at geo 808 200)) "under the rows")
+  (t/is (= {:type :row :row 0} (hit-at geo 820 66)) "only close to it")
+  (t/is (= {:type :bar :row 0 :mode :end}
+           (-> (lanes/hit geo (assoc-in scene [:rows 0 :range] [100 800]) 812 66)
+               (select-keys [:type :row :mode])))
+        "a bar ending there keeps its end")
+  (t/is (= :keyframe
+           (let [timeline (cta/add-keyframe timeline shape-id {:time 800 :property :x :value 30})]
+             (:type (lanes/hit geo (assoc scene :timeline timeline) 812 150))))
+        "and a keyframe there its place"))
 
 (t/deftest bars-and-blocks-have-ends-to-drag
   (t/is (= {:type :bar :row 0 :mode :start} (hit-at geo 110 66)))

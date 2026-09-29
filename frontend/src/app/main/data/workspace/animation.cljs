@@ -1223,24 +1223,47 @@
                      (apply-preview))))
           (rx/empty))))))
 
+(declare pause)
+
+(defn- switch-playhead
+  "The animation state `anim` targeting `board-id`: each board keeps its
+  playhead, so the one of the board left stays with it and the one of
+  `board-id` comes back, the start the first time."
+  [anim board-id]
+  (let [prev (:board-id anim)]
+    (if (= prev board-id)
+      anim
+      (-> anim
+          (cond-> (some? prev)
+            (assoc-in [:playheads prev] (get anim :playhead 0)))
+          (assoc :board-id board-id
+                 :playhead (get-in anim [:playheads board-id] 0))))))
+
 (defn set-active-board
   "Remember the board the timeline dock targets (see `active-board-id`).
   The canvas shows the animation of that board, the one edits on the
-  canvas are recorded to."
+  canvas are recorded to, at the playhead the board was left at (see
+  `switch-playhead`). What played stops."
   [board-id]
   (ptk/reify ::set-active-board
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-animation :board-id] board-id))
+      (update state :workspace-animation switch-playhead board-id))
 
     ptk/WatchEvent
     (watch [_ state _]
-      (if (and (contains? (:workspace-layout state) :animation-timeline)
-               (not= board-id (dm/get-in state [:workspace-animation :preview :board-id])))
-        ;; The board shown before goes back to how it is.
-        (rx/of (dwm/clear-local-transform)
-               (apply-preview))
-        (rx/empty)))))
+      (let [shown (dm/get-in state [:workspace-animation :preview :board-id])]
+        (if (not= board-id shown)
+          (rx/concat
+           (if (dm/get-in state [:workspace-animation :playing?])
+             (rx/of (pause))
+             (rx/empty))
+           ;; The board shown before goes back to how it is.
+           (if (contains? (:workspace-layout state) :animation-timeline)
+             (rx/of (dwm/clear-local-transform)
+                    (apply-preview))
+             (rx/empty)))
+          (rx/empty))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PLAYBACK & PREVIEW
@@ -1325,8 +1348,6 @@
     ptk/WatchEvent
     (watch [_ _ _]
       (rx/of (apply-preview)))))
-
-(declare pause)
 
 (defn motion-mode?
   "Whether the workspace is in motion mode, with the timeline dock."

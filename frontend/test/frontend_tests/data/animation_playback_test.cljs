@@ -9,7 +9,9 @@
    [app.common.uuid :as uuid]
    [app.main.data.helpers :as dsh]
    [app.main.data.workspace.animation :as dwa]
-   [cljs.test :as t :include-macros true]))
+   [beicon.v2.core :as rx]
+   [cljs.test :as t :include-macros true]
+   [potok.v2.core :as ptk]))
 
 (defn- steps
   "How far playback moves on in frames `dts` ms apart."
@@ -68,3 +70,31 @@
           "the other boards stay as they are")
     (t/is (nil? (dsh/lookup-animation-preview (update state :workspace-layout disj :animation-timeline)))
           "none outside motion mode")))
+
+(t/deftest each-board-keeps-its-playhead
+  (let [a      (uuid/next)
+        b      (uuid/next)
+        switch (fn [state board-id] (ptk/update (dwa/set-active-board board-id) state))
+        at     #(get-in % [:workspace-animation :playhead])
+        start  {:workspace-animation {:board-id a :playhead 700}}
+        on-b   (switch start b)]
+    (t/is (= 0 (at on-b)) "a board shows from the start the first time")
+    (let [back (-> on-b
+                   (assoc-in [:workspace-animation :playhead] 250)
+                   (switch a))]
+      (t/is (= 700 (at back)) "back where it was left")
+      (t/is (= 250 (at (switch back b))) "and so is the other one"))
+    (t/is (= 700 (at (switch start a))) "the same board stays where it is")))
+
+(t/deftest another-board-stops-what-plays
+  (let [a      (uuid/next)
+        b      (uuid/next)
+        state  {:workspace-animation {:board-id a :playhead 700 :playing? true
+                                      :preview {:board-id a :time 700}}}
+        types  (fn [event state]
+                 (let [types (atom [])]
+                   (->> (ptk/watch event state (rx/empty))
+                        (rx/subs! #(swap! types conj (ptk/type %))))
+                   @types))]
+    (t/is (= [::dwa/pause] (types (dwa/set-active-board b) state)))
+    (t/is (= [] (types (dwa/set-active-board a) state)) "not the board that plays")))

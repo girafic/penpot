@@ -188,10 +188,16 @@
                 (partition 2 1 keyframes))
           (assoc base :type :lane)))))
 
+(def ^:private end-grip
+  "How far (px) from the end of the timeline a press on the background of
+  the rows drags it (see `hit`)."
+  4)
+
+(declare row-hit)
+
 (defn hit
   "What is at `x`, `y` of the canvas, a map with its `:type`:
-  - on the ruler, the `:duration` handle at its end or the rest of the
-    `:ruler`;
+  - on the ruler, the `:ruler`;
   - in a row (`:row` its index, `:shape-id` its layer), a layer `:bar` or
     an `:animation` block, `:mode` telling which part (see `bar-part`),
     the bar of a component `:copy`, or else the rest of the `:row`; in
@@ -199,61 +205,71 @@
     when it is), a `:keyframe`, the `:easing` button of a segment (with
     its `:rect`) or the rest of a `:segment` (both with the keyframe it
     starts `:from`), or else the rest of its `:lane`;
-  - `:empty` under the rows.
+  - `:empty` under the rows;
+  - on the background of the rows (a `:row`, a `:lane` or `:empty`),
+    close to the end of the timeline, the `:duration`, which a drag
+    there changes, like the end of the timeline in Figma.
   Nil over the markers and off the canvas. `scene` gives the `:rows` (see
   `timeline-rows`), their `:timeline` and its `:duration`."
-  [geo {:keys [rows timeline duration]} x y]
+  [geo {:keys [duration] :as scene} x y]
   (cond
     (or (neg? x) (neg? y) (> x (:width geo)) (> y (:height geo)))
     nil
 
     (< y ruler-height)
-    (if (<= -4 (- x (time->x geo duration)) 5)
-      {:type :duration}
-      {:type :ruler})
+    {:type :ruler}
 
     (< y header-height)
     nil
 
     :else
-    (let [index (row-index geo y)]
-      (if-let [row (get rows index)]
-        (let [top  (row-y geo index)
-              bar? (<= bar-inset (- y top) (- row-height bar-inset))
-              base {:row index :shape-id (:id row)}]
-          (case (:type row)
-            :layer
-            (let [[start end] (:range row)
-                  [_ copy-end] (:copy row)
-                  part        (when (and bar? (some? start))
-                                (bar-part (time->x geo start) (time->x geo end) x true))]
-              (cond
-                (some? part)
-                (assoc base :type :bar :mode part)
+    (let [target (row-hit geo scene x y)]
+      (if (and (contains? #{:row :lane :empty} (:type target))
+               (<= (mth/abs (- x (time->x geo duration))) end-grip))
+        {:type :duration}
+        target))))
 
-                ;; the bar of a component copy: it selects the copy
-                (and bar? (some? copy-end)
-                     (<= (time->x geo 0) x (max (time->x geo copy-end)
-                                                (+ (time->x geo 0) min-bar-width))))
-                (assoc base :type :copy)
+(defn- row-hit
+  "What is at `x`, `y` of the rows (see `hit`)."
+  [geo {:keys [rows timeline]} x y]
+  (let [index (row-index geo y)]
+    (if-let [row (get rows index)]
+      (let [top  (row-y geo index)
+            bar? (<= bar-inset (- y top) (- row-height bar-inset))
+            base {:row index :shape-id (:id row)}]
+        (case (:type row)
+          :layer
+          (let [[start end] (:range row)
+                [_ copy-end] (:copy row)
+                part        (when (and bar? (some? start))
+                              (bar-part (time->x geo start) (time->x geo end) x true))]
+            (cond
+              (some? part)
+              (assoc base :type :bar :mode part)
 
-                :else
-                (assoc base :type :row)))
+              ;; the bar of a component copy: it selects the copy
+              (and bar? (some? copy-end)
+                   (<= (time->x geo 0) x (max (time->x geo copy-end)
+                                              (+ (time->x geo 0) min-bar-width))))
+              (assoc base :type :copy)
 
-            :animation
-            (let [animation (:animation row)
-                  part      (when bar?
-                              (bar-part (time->x geo (:start animation))
-                                        (time->x geo (cta/animation-end animation))
-                                        x
-                                        (not (:locked animation))))]
-              (if (some? part)
-                (assoc base :type :animation :animation animation :mode part)
-                (assoc base :type :row)))
+              :else
+              (assoc base :type :row)))
 
-            :property
-            (property-hit geo timeline row top x y base)))
-        {:type :empty}))))
+          :animation
+          (let [animation (:animation row)
+                part      (when bar?
+                            (bar-part (time->x geo (:start animation))
+                                      (time->x geo (cta/animation-end animation))
+                                      x
+                                      (not (:locked animation))))]
+            (if (some? part)
+              (assoc base :type :animation :animation animation :mode part)
+              (assoc base :type :row)))
+
+          :property
+          (property-hit geo timeline row top x y base)))
+      {:type :empty})))
 
 (defn keyframe-boxes
   "The boxes of the keyframes that can be selected (not locked), with their
@@ -526,7 +542,7 @@
 
 (defn- draw-rows!
   [^js ctx geo {:keys [rows selected duration span markers playhead snap-line
-                       hover-row marquee] :as scene}
+                       hover hover-row marquee] :as scene}
    palette font dpr]
   (let [{:keys [width height scroll-x scroll-y]} geo
         [start end] (visible-rows geo 0)
@@ -550,11 +566,15 @@
       (fill-rect! ctx color 0 (row-y geo index) width row-height))
 
     ;; Under the bars and keyframes: past the duration, up to the right
-    ;; edge so no row shows its background after the end of the axis, and
-    ;; the markers.
+    ;; edge so no row shows its background after the end of the axis, the
+    ;; end, which a drag on it moves (see `hit`), and the markers.
     (when (> span duration)
       (let [x (time->x geo duration)]
         (fill-rect! ctx (:shade palette) x header-height (max 0 (- width x)) rows-height)))
+    (let [x (crisp (time->x geo duration) dpr)]
+      (if (= :duration (:type hover))
+        (fill-rect! ctx (:accent palette) (dec x) header-height 2 rows-height)
+        (fill-rect! ctx (:border palette) x header-height 1 rows-height)))
     (faded! ctx 0.6
             (fn []
               (doseq [{:keys [time]} markers]
@@ -603,8 +623,8 @@
 
 (defn- draw-ruler!
   "The ruler: a tick every half `tick` ms, labelled every `tick`, the time
-  past the duration shaded, the handle at its end and the playhead."
-  [^js ctx geo {:keys [span duration tick tick-label playhead hover]} palette font dpr]
+  past the duration shaded and the playhead."
+  [^js ctx geo {:keys [span duration tick tick-label playhead]} palette font dpr]
   (let [width (:width geo)
         half  (/ tick 2)]
     (.save ctx)
@@ -632,8 +652,6 @@
             (.fillText ctx (tick-label time) (+ x 5) 8)))))
 
     (fill-rect! ctx (:border palette) 0 (dec ruler-height) width 1)
-    (fill-round-rect! ctx (if (= :duration (:type hover)) (:accent palette) (:fg palette))
-                      (dec (time->x geo duration)) 5 3 13 2)
     (let [x (crisp (time->x geo playhead) dpr)]
       (fill-rect! ctx (:playhead palette) x 0 1 (dec ruler-height))
       (draw-pin! ctx (:playhead palette) x))

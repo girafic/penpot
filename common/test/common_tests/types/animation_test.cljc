@@ -204,6 +204,17 @@
     (t/testing "with reduced motion, the shape stays as designed"
       (t/is (re-find #"@media \(prefers-reduced-motion: reduce\) \{\s+\.penpot-shape-\S+ \{\s+animation: none;" css)))))
 
+(t/deftest timeline->css-stops-at-the-end
+  (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
+        sid   (:id shape)
+        tl    (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :x :value 0 :easing :linear})
+                  (cta/add-keyframe sid {:time 2000 :property :x :value 200}))
+        css   (cta/timeline->css tl {sid shape})]
+    (t/is (re-find #"100% \{[^}]*translate\(100px, 0px\)" css)
+          "the end, on the way to the keyframe past it")
+    (t/is (not (re-find #"200%" css)) "no stop past the end")))
+
 (t/deftest timeline->css-names-every-shape-apart
   ;; The ids of the shapes of a file begin alike.
   (let [a   (cts/setup-shape {:id #uuid "e7bdc995-7266-8021-8008-b4418c7390cd"
@@ -1151,7 +1162,7 @@
         tl2 (cta/update-animation tl sid aid #(assoc % :start 800 :duration 600 :direction :out))
         animation (cta/get-animation tl2 sid aid)]
     (t/is (= [800 600 :out] [(:start animation) (:duration animation) (:direction animation)]))
-    (t/is (= 1400 (:duration tl2)))
+    (t/is (= (:duration tl) (:duration tl2)) "the duration stays, the animation goes past the end")
     (t/is (cta/valid-timeline? tl2))))
 
 (t/deftest fade-in-hides-until-it-starts
@@ -1934,8 +1945,11 @@
     (t/is (= [150 450 700] (times (cta/shift-keyframes tl ids 50))))
     (t/testing "none goes before the start"
       (t/is (= [0 300 700] (times (cta/shift-keyframes tl ids -250)))))
-    (t/testing "the duration grows to hold them"
-      (t/is (= 1400 (:duration (cta/shift-keyframes tl ids 1000)))))
+    (t/testing "the duration stays: they go past the end"
+      (let [tl' (cta/shift-keyframes tl ids 1000)]
+        (t/is (= 1000 (:duration tl')))
+        (t/is (= [700 1100 1400] (sort (times tl'))))
+        (t/is (cta/valid-timeline? tl'))))
     (t/testing "one landing on another of its property takes its place"
       (let [kfs  #(mapv (juxt :time :property :value) (get-in % [:tracks sid :keyframes]))
             y-id (-> tl (get-in [:tracks sid :keyframes]) last :id)]
