@@ -7,6 +7,8 @@
 (ns common-tests.files.helpers-test
   (:require
    [app.common.files.helpers :as cfh]
+   [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.uuid :as uuid]
    [clojure.test :as t]))
 
@@ -53,3 +55,20 @@
 
     (t/testing "Returns nil when the shape is missing from parent ordering"
       (t/is (nil? (cfh/get-prev-sibling objects orphan-id))))))
+
+(t/deftest relink-refs-relinks-the-uses-of-animation-styles
+  (let [old-file (uuid/next)
+        new-file (uuid/next)
+        library  (uuid/next)
+        page-id  (uuid/next)
+        board    (uuid/next)
+        shape    (uuid/next)
+        style    (ctas/make-animation-style {:name "Pop" :entries [{:type :fade :duration 300}]})
+        timeline (-> (cta/make-timeline {:board-id board})
+                     (cta/add-animation shape (ctas/make-use style old-file 0))
+                     (cta/add-animation shape (ctas/make-use style library 0)))
+        data     {:pages-index {page-id {:id page-id :timelines {board timeline}}}}
+        relinked (cfh/relink-refs data #(get {old-file new-file} % %))]
+    (t/is (= [new-file library]
+             (mapv :style-ref-file
+                   (get-in relinked [:pages-index page-id :timelines board :tracks shape :animations]))))))

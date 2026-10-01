@@ -140,7 +140,7 @@
 (def animation-directions
   #{:in :out})
 
-(def schema:animation
+(def schema:preset-animation
   [:map {:title "PresetAnimation"}
    [:id ::sm/uuid]
    [:type [::sm/one-of animation-types]]
@@ -156,6 +156,57 @@
    ;; left out of playback and exports / kept from edits
    [:hidden {:optional true} :boolean]
    [:locked {:optional true} :boolean]])
+
+(def schema:style-entry
+  "An entry of an animation style (see `app.common.types.animation-style`)
+  and of its uses: a preset animation without the flags of a row, its
+  `:start` counted from the start of the style."
+  [:map {:title "AnimationStyleEntry"}
+   [:id ::sm/uuid]
+   [:type [::sm/one-of animation-types]]
+   [:direction [::sm/one-of animation-directions]]
+   [:start ::sm/safe-int]
+   [:duration ::sm/safe-int]
+   [:easing {:optional true} schema:easing]
+   [:amount {:optional true} ::sm/safe-number]
+   [:offset-x {:optional true} ::sm/safe-number]
+   [:offset-y {:optional true} ::sm/safe-number]])
+
+(def max-style-entries
+  "The most entries an animation style holds."
+  32)
+
+(def schema:style-instance
+  "A use of an animation style on a track, one of its `:animations`: the
+  style it links to, a copy of its name and entries, so it plays without
+  the style (as a text keeps the values of its typography), and when it
+  plays. Its entries scale in time to its `:duration` (see
+  `expand-style`)."
+  [:map {:title "AnimationStyleUse"}
+   [:id ::sm/uuid]
+   [:type [::sm/one-of #{:style}]]
+   [:style-ref-id ::sm/uuid]
+   [:style-ref-file ::sm/uuid]
+   [:name :string]
+   [:start ::sm/safe-int]
+   [:duration ::sm/safe-int]
+   [:entries [:vector {:min 1 :max max-style-entries :gen/max 4} schema:style-entry]]
+   [:hidden {:optional true} :boolean]
+   [:locked {:optional true} :boolean]])
+
+(def schema:animation
+  "An animation of a track: a preset or a use of an animation style. JSON
+  gives the type as a string, and a type that is no string or keyword
+  takes the preset branch, where it fails as an invalid value."
+  [:multi {:title "TrackAnimation"
+           :dispatch (fn [v]
+                       (if (and (map? v)
+                                (or (keyword? (:type v)) (string? (:type v)))
+                                (= :style (keyword (:type v))))
+                         :style
+                         :preset))}
+   [:style schema:style-instance]
+   [:preset schema:preset-animation]])
 
 (def schema:track
   [:map {:title "AnimationTrack"}
@@ -230,6 +281,9 @@
   [:map-of {:gen/max 2} ::sm/uuid schema:timeline])
 
 (sm/register! ::keyframe schema:keyframe)
+(sm/register! ::preset-animation schema:preset-animation)
+(sm/register! ::style-entry schema:style-entry)
+(sm/register! ::style-instance schema:style-instance)
 (sm/register! ::animation schema:animation)
 (sm/register! ::track schema:track)
 (sm/register! ::timeline schema:timeline)
@@ -763,8 +817,11 @@
    :scale  {:amount 0.5}
    :rotate {:amount -90}})
 
-(def animation-styles
-  "Composite presets and the animations each one adds."
+(def builtin-styles
+  "The built-in composite presets and the animations each one adds, which
+  the UI calls presets (\"slide-up\", \"pop\"...): templates that add plain
+  animations, not the animation styles of a library (see
+  `app.common.types.animation-style`)."
   {:slide-up    [{:type :fade} {:type :move :offset-x 0 :offset-y 40}]
    :slide-down  [{:type :fade} {:type :move :offset-x 0 :offset-y -40}]
    :slide-left  [{:type :fade} {:type :move :offset-x 40 :offset-y 0}]
@@ -783,19 +840,80 @@
     :rotate [:rotation]
     []))
 
+(defn style-use?
+  "Whether `animation` is a use of an animation style (see
+  `schema:style-instance`), not a preset."
+  [animation]
+  (= :style (:type animation)))
+
+(defn style-length
+  "How long the `entries` of an animation style play: to the end of the
+  last one."
+  [entries]
+  (reduce max 0 (map animation-end entries)))
+
+(declare make-style-entry)
+
 (defn make-animation
-  "A valid animation from `params`; missing settings take the defaults of
-  its type."
+  "A valid animation from `params`: a preset, missing settings taking the
+  defaults of its type, or a use of an animation style (`:type :style`),
+  which keeps its ref, name and entries (see `make-style-entry`) and lasts
+  as long as its style unless it says otherwise."
   [{:keys [id type direction start duration hidden locked] :as params}]
-  (cond-> (merge (get animation-defaults type)
-                 (d/without-nils (select-keys params [:easing :amount :offset-x :offset-y]))
-                 {:id (or id (uuid/next))
-                  :type type
-                  :direction (or direction :in)
-                  :start (max 0 (int (or start 0)))
-                  :duration (max 1 (int (or duration default-animation-duration)))})
+  (cond-> (if (= :style type)
+            (let [entries (mapv make-style-entry (:entries params))]
+              {:id (or id (uuid/next))
+               :type :style
+               :style-ref-id (:style-ref-id params)
+               :style-ref-file (:style-ref-file params)
+               :name (or (:name params) "")
+               :start (max 0 (int (or start 0)))
+               :duration (max 1 (int (or duration (style-length entries))))
+               :entries entries})
+            (merge (get animation-defaults type)
+                   (d/without-nils (select-keys params [:easing :amount :offset-x :offset-y]))
+                   {:id (or id (uuid/next))
+                    :type type
+                    :direction (or direction :in)
+                    :start (max 0 (int (or start 0)))
+                    :duration (max 1 (int (or duration default-animation-duration)))}))
     (true? hidden) (assoc :hidden true)
     (true? locked) (assoc :locked true)))
+
+(defn make-style-entry
+  "A valid entry of an animation style from `params`, a preset animation
+  (see `make-animation`) in style time: its `:id` kept (a new one only
+  when it has none), so the presets a use plays keep the same ids (see
+  `expand-style`), and without the flags of a row."
+  [params]
+  (-> (make-animation (dissoc params :hidden :locked))
+      (dissoc :hidden :locked)))
+
+(defn expand-style
+  "The preset animations the style use `use` plays, in timeline time: its
+  entries from its `:start`, scaled to its `:duration`. Each keeps the
+  `:id` of its entry, so expanding a use twice gives the same presets."
+  [{:keys [start duration entries]}]
+  (let [length (style-length entries)
+        k      (if (pos? length) (/ duration length) 1)]
+    (mapv (fn [entry]
+            (assoc entry
+                   :start (+ start (mth/round (* (:start entry) k)))
+                   :duration (max 1 (mth/round (* (:duration entry) k)))))
+          entries)))
+
+(defn- expand-uses
+  "`animations` with each style use replaced, in place, by its presets."
+  [animations]
+  (into [] (mapcat #(if (style-use? %) (expand-style %) [%])) animations))
+
+(defn track-animations
+  "The preset animations `track` plays, in order: the hidden ones left out
+  and each style use replaced, in place, by the presets it stands for (see
+  `expand-style`). Everything that plays animations reads them through
+  it, so nothing after it knows that styles exist."
+  [track]
+  (expand-uses (remove :hidden (:animations track))))
 
 (defn get-animation
   [timeline shape-id animation-id]
@@ -1835,8 +1953,9 @@
            animations)))
 
 (defn- resolve-track
-  [timeline objects shape-id {:keys [animations keyframes] :as track}]
-  (let [shape (get objects shape-id)]
+  [timeline objects shape-id {:keys [keyframes] :as track}]
+  (let [shape      (get objects shape-id)
+        animations (track-animations track)]
     (if (or (empty? animations) (nil? shape))
       (dissoc track :animations)
       (let [origin     (position-origin timeline objects shape-id)
@@ -2053,24 +2172,26 @@
 
 (defn- pivot-motion?
   "Whether `track` scales, resizes or turns its layer: what its pivot is
-  the centre of."
+  the centre of. A style use does when one of its entries does."
   [{:keys [keyframes animations]}]
   (boolean (or (some #(contains? pivot-properties (:property %)) keyframes)
-               (some #(contains? #{:scale :rotate} (:type %)) animations))))
+               (some #(contains? #{:scale :rotate} (:type %)) (expand-uses animations)))))
 
 (defn- merge-animation
   "Add `animation` (see `make-animation`) to the track of `shape-id`, in
-  place of the one it has of the same type and direction starting at the
-  same time, as a keyframe takes the place of the one of its row at the
-  same time (see `add-keyframe`); that one keeps its row. A locked one
-  stays, and `animation` is left out."
+  place of the one it has of the same type and direction (for a style
+  use, of the same style) starting at the same time, as a keyframe takes
+  the place of the one of its row at the same time (see `add-keyframe`);
+  that one keeps its row. A locked one stays, and `animation` is left
+  out."
   [timeline shape-id animation]
-  (let [{:keys [type direction start] :as animation} (make-animation animation)
+  (let [{:keys [type direction start style-ref-id] :as animation} (make-animation animation)
 
         animations (dm/get-in timeline [:tracks shape-id :animations])
         index      (d/index-of-pred animations #(and (= type (:type %))
                                                      (= direction (:direction %))
-                                                     (= start (:start %))))]
+                                                     (= start (:start %))
+                                                     (= style-ref-id (:style-ref-id %))))]
     (cond
       (nil? index)
       (add-animation timeline shape-id animation)
@@ -2086,15 +2207,16 @@
 (defn paste-track
   "Paste `track` (see `retarget-track`) onto `shape-id` of `timeline`.
   `:replace` first removes the unlocked keyframes of the rows `track` has
-  keyframes of and, when it has presets, the unlocked presets of
-  `shape-id`; `:merge` removes nothing. Either way a keyframe takes the
-  place of the one of its row at the same time, and a preset the one of
-  the same type and direction starting at the same time (see
-  `merge-animation`), so pasting twice at the same time leaves no
-  doubles. Locked rows and presets stay, and take nothing. The rows of
-  `track` loop as they did. Its pivot goes on when it scales, resizes or
-  turns and `shape-id` does not anymore; otherwise `shape-id` keeps its
-  own, so its own motion plays as before. The duration grows to fit it.
+  keyframes of and, when it has presets or style uses, the unlocked
+  presets and uses of `shape-id`; `:merge` removes nothing. Either way a
+  keyframe takes the place of the one of its row at the same time, and a
+  preset the one of the same type and direction starting at the same
+  time (a use, the one of the same style; see `merge-animation`), so
+  pasting twice at the same time leaves no doubles. Locked rows and
+  presets stay, and take nothing. The rows of `track` loop as they did.
+  Its pivot goes on when it scales, resizes or turns and `shape-id` does
+  not anymore; otherwise `shape-id` keeps its own, so its own motion
+  plays as before. The duration grows to fit it.
   `{:timeline :pivot-kept?}`."
   [timeline shape-id track mode]
   (let [slots   (into #{} (map keyframe-slot) (:keyframes track))

@@ -454,15 +454,25 @@
 
 (def max-paste-keyframes
   "The most keyframes one paste of an animation clip writes, over all its
-  targets."
+  targets; each entry of a style use counts as one."
   10000)
 
 (defn- clip-track?
   "Whether the keyframes and presets of `track` can be pasted: none
-  before the start, and the values of the kind their properties take."
+  before the start (nor the entries of a style use before the start of
+  its style), and the values of the kind their properties take."
   [{:keys [keyframes animations]}]
   (and (every? #(and (>= (:time %) 0) (cta/keyframe-value-fits? %)) keyframes)
-       (every? #(>= (:start %) 0) animations)))
+       (every? #(and (>= (:start %) 0)
+                     (every? (fn [entry] (>= (:start entry) 0)) (:entries %)))
+               animations)))
+
+(defn- clip-size
+  "How much a paste of `track` writes: its keyframes and the entries of
+  its style uses."
+  [{:keys [keyframes animations]}]
+  (+ (count keyframes)
+     (transduce (map #(count (:entries %))) + 0 animations)))
 
 (def schema:animation-clip
   "An animation clip (see `animation-clip`). It comes from the clipboard,
@@ -605,10 +615,10 @@
   how many targets kept their pivot, the targets pasted onto, and the
   boards whose timeline grew longer. `{:error :too-large}`, and nothing
   pasted, onto more than `max-paste-targets` layers or for more than
-  `max-paste-keyframes` keyframes in all."
+  `max-paste-keyframes` keyframes in all (see `clip-size`)."
   [file-id page-id timelines objects clip pairs
    {:keys [mode time stagger exact? skip-source?] :or {mode :replace stagger 0}}]
-  (let [keyframes (transduce (map #(count (dm/get-in % [:layer :track :keyframes]))) + 0 pairs)]
+  (let [keyframes (transduce (map #(clip-size (dm/get-in % [:layer :track]))) + 0 pairs)]
     (if (or (> (count pairs) max-paste-targets) (> keyframes max-paste-keyframes))
       {:error :too-large}
       (let [source?

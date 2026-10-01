@@ -78,7 +78,7 @@
   #{"once" "loop" "ping-pong"})
 
 (def ^:private style-names
-  (into #{} (map name) (keys cta/animation-styles)))
+  (into #{} (map name) (keys cta/builtin-styles)))
 
 (def ^:private export-qualities
   #{"low" "medium" "high"})
@@ -733,7 +733,7 @@
 
               :else
               (let [animations (mapv #(assoc % :id (uuid/next) :start (mth/round start))
-                                     (get cta/animation-styles (keyword style)))]
+                                     (get cta/builtin-styles (keyword style)))]
                 (when (write! :addAnimationStyle
                               #(reduce (fn [timeline animation]
                                          (cta/add-animation timeline shape-id animation))

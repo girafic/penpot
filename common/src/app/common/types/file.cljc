@@ -17,6 +17,7 @@
    [app.common.logging :as l]
    [app.common.schema :as sm]
    [app.common.time :as ct]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.color :as ctc]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
@@ -70,6 +71,9 @@
 (def schema:typographies
   [:map-of {:gen/max 2} ::sm/uuid cty/schema:typography])
 
+(def schema:animation-styles
+  [:map-of {:gen/max 2} ::sm/uuid ctas/schema:animation-style])
+
 (def schema:pages-index
   [:map-of {:gen/max 5} ::sm/uuid ctp/schema:page])
 
@@ -86,6 +90,7 @@
    [:colors {:optional true} schema:colors]
    [:components {:optional true} schema:components]
    [:typographies {:optional true} schema:typographies]
+   [:animation-styles {:optional true} schema:animation-styles]
    [:plugin-data {:optional true} schema:plugin-data]
    [:tokens-source {:optional true} ::sm/uuid]                ;; Forward-compat: UUID of external library containing tokens-lib (full support in follow-up PR)
    [:tokens-lib {:optional true} ctob/schema:tokens-lib]
@@ -1234,9 +1239,17 @@
         (fn [objects]
           (d/update-vals objects #(detach-shape objects %)))
 
+        ;; the uses of the animation styles of other files turn into
+        ;; their presets
+        detach-timelines
+        (fn [timelines]
+          (d/update-vals timelines #(ctas/detach-foreign-uses % file-id)))
+
         detach-pages
         (fn [pages-index]
-          (d/update-vals pages-index #(update % :objects detach-objects)))]
+          (d/update-vals pages-index #(-> %
+                                          (update :objects detach-objects)
+                                          (d/update-when :timelines detach-timelines))))]
 
     (update-in file [:data :pages-index] detach-pages)))
 

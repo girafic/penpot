@@ -23,6 +23,7 @@
    [app.common.logic.variant-properties :as clvp]
    [app.common.math :as mth]
    [app.common.path-names :as cpn]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
    [app.common.types.container :as ctn]
@@ -564,6 +565,43 @@
                                             (cfh/make-container local-component :component)
                                             libraries
                                             current-file-id)))))))))
+
+(defn generate-sync-timelines
+  "Generate changes to synchronize the uses of the animation styles of the
+  given library (of the given style only, when an asset id is given) in
+  the timelines of every page of the given file (see
+  `ctas/sync-timeline`): one `pcb/change-timeline` per changed board. A
+  use whose style is gone from the library turns into its presets. While
+  the library data is not loaded, nothing changes. The timelines of the
+  main components are page timelines too, so there is no local library
+  part.
+
+  If early-return? is true, stops after the first page that changes."
+  ([changes file-id asset-id library-id libraries]
+   (generate-sync-timelines changes file-id asset-id library-id libraries false))
+  ([changes file-id asset-id library-id libraries early-return?]
+   (assert (or (nil? asset-id) (uuid? asset-id)))
+   (assert (uuid? file-id))
+   (assert (uuid? library-id))
+
+   (let [file   (get-in libraries [file-id :data])
+         styles (when-let [library (get-in libraries [library-id :data])]
+                  (or (:animation-styles library) {}))]
+     (if (nil? styles)
+       changes
+       (loop [pages   (ctpl/pages-seq file)
+              changes changes]
+         (let [page (first pages)]
+           (if (or (nil? page)
+                   (and early-return? (seq (:redo-changes changes))))
+             changes
+             (let [timelines  (:timelines page)
+                   timelines' (d/update-vals timelines #(ctas/sync-timeline % library-id styles asset-id))]
+               (recur (next pages)
+                      (cond-> changes
+                        (not= timelines timelines')
+                        (pcb/concat-changes
+                         (cltl/commit-timelines (pcb/empty-changes nil) page timelines'))))))))))))
 
 (defn- generate-sync-container
   "Generate changes to synchronize all shapes in a particular container (a page
@@ -2767,6 +2805,7 @@
    (let [sync-components?   (or (nil? asset-type) (= asset-type :components))
          sync-colors?       (or (nil? asset-type) (= asset-type :colors))
          sync-typographies? (or (nil? asset-type) (= asset-type :typographies))
+         sync-styles?       (or (nil? asset-type) (= asset-type :animation-styles))
          done?              (fn [c] (and early-return? (seq (:redo-changes c))))]
      (-> (pcb/set-undo-group changes undo-group)
          ;; library-changes
@@ -2776,7 +2815,8 @@
          ;; file-changes
          (maybe-sync sync-components? done? #(generate-sync-file % file-id :components asset-id library-id libraries current-file-id early-return?))
          (maybe-sync sync-colors? done? #(generate-sync-file % file-id :colors asset-id library-id libraries current-file-id early-return?))
-         (maybe-sync sync-typographies? done? #(generate-sync-file % file-id :typographies asset-id library-id libraries current-file-id early-return?))))))
+         (maybe-sync sync-typographies? done? #(generate-sync-file % file-id :typographies asset-id library-id libraries current-file-id early-return?))
+         (maybe-sync sync-styles? done? #(generate-sync-timelines % file-id asset-id library-id libraries early-return?))))))
 
 
 (defn generate-sync-head

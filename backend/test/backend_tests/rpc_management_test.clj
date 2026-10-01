@@ -9,6 +9,8 @@
    [app.binfile.common :as bfc]
    [app.common.features :as cfeat]
    [app.common.pprint :as pp]
+   [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -152,6 +154,49 @@
         ;; Check the total number of files
         (let [rows (th/db-query :file {:project-id (:id project)})]
           (t/is (= 3 (count rows))))))))
+
+(t/deftest duplicate-file-keeps-its-animation-styles
+  (let [profile  (th/create-profile* 1 {:is-active true})
+        project  (th/create-project* 1 {:team-id (:default-team-id profile)
+                                        :profile-id (:id profile)})
+        file     (th/create-file* 1 {:profile-id (:id profile)
+                                     :project-id (:id project)})
+        page-id  (uuid/custom 1 1)
+        board-id (uuid/custom 1 2)
+        rect-id  (uuid/custom 1 3)
+        style    (ctas/make-animation-style {:id (uuid/custom 9 1)
+                                             :name "Pop"
+                                             :entries [{:type :fade :start 0 :duration 300}]})
+        timeline (-> (cta/make-timeline {:board-id board-id})
+                     (cta/add-animation rect-id (ctas/make-use style (:id file) 0)))]
+    (update-file!
+     :file-id (:id file)
+     :profile-id (:id profile)
+     :changes
+     [{:type :add-page :name "styles" :id page-id}
+      {:type :add-obj :page-id page-id :id board-id :parent-id uuid/zero :frame-id uuid/zero
+       :components-v2 true
+       :obj (cts/setup-shape {:id board-id :name "board" :type :frame
+                              :frame-id uuid/zero :parent-id uuid/zero
+                              :x 0 :y 0 :width 300 :height 200})}
+      {:type :add-obj :page-id page-id :id rect-id :parent-id board-id :frame-id board-id
+       :components-v2 true
+       :obj (cts/setup-shape {:id rect-id :name "rect" :type :rect
+                              :frame-id board-id :parent-id board-id
+                              :x 10 :y 10 :width 50 :height 50})}
+      {:type :add-animation-style :animation-style style}
+      {:type :set-timeline :page-id page-id :id board-id :params timeline}])
+
+    (let [out  (th/command! {::th/type :duplicate-file
+                             ::rpc/profile-id (:id profile)
+                             :file-id (:id file)
+                             :name "file 1 (copy)"})
+          copy (bfc/get-file th/*system* (get-in out [:result :id]) :realize? true)
+          use  (get-in copy [:data :pages-index page-id :timelines board-id :tracks rect-id :animations 0])]
+      (t/is (nil? (:error out)))
+      (t/is (contains? (get-in copy [:data :animation-styles]) (:id style)))
+      (t/is (= [(:id copy) (:id style)] ((juxt :style-ref-file :style-ref-id) use))
+            "the use links to the style of the copy"))))
 
 (t/deftest duplicate-file-with-deleted-relations
   (let [storage (-> (:app.storage/storage th/*system*)

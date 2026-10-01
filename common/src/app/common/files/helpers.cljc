@@ -687,6 +687,11 @@
               (uuid? (:component-file form))
               (update :component-file lookup-index)
 
+              ;; This covers the uses of animation styles in the
+              ;; timelines of the pages
+              (uuid? (:style-ref-file form))
+              (update :style-ref-file lookup-index)
+
               ;; This covers the shadows and grids (they have directly
               ;; the :file-id prop)
               (uuid? (:file-id form))

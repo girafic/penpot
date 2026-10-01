@@ -236,18 +236,19 @@
                                 (pcb/set-timeline main tl)))))
 
 (defn- component-scene
-  "The scene of `component-file`."
-  []
-  (let [file     (component-file)
-        page     (thf/current-page file)
-        objects  (:objects page)
-        copy     (thi/id :copy)]
-    {:objects   objects
-     :timelines (:timelines page)
-     :board     (thi/id :board-b)
-     :copy      copy
-     :copy-rect (first (get-in objects [copy :shapes]))
-     :main-page (constantly {:objects objects :timelines (:timelines page)})}))
+  "The scene of `component-file`, or of `file`, one like it."
+  ([]
+   (component-scene (component-file)))
+  ([file]
+   (let [page    (thf/current-page file)
+         objects (:objects page)
+         copy    (thi/id :copy)]
+     {:objects   objects
+      :timelines (:timelines page)
+      :board     (thi/id :board-b)
+      :copy      copy
+      :copy-rect (first (get-in objects [copy :shapes]))
+      :main-page (constantly {:objects objects :timelines (:timelines page)})})))
 
 (t/deftest copies-play-the-animation-of-their-main
   (let [{:keys [objects board copy copy-rect main-page]} (component-scene)
@@ -614,3 +615,128 @@
         pasted  (thf/apply-changes file changes)]
     (t/is (= 2 (count (timelines pasted))))
     (t/is (= (timelines file) (timelines (thf/apply-undo-changes pasted changes))))))
+
+;; ANIMATION STYLE USES
+
+(defn- style-use
+  "A use, from 100 ms, of a style of a fade in (0-300 ms), a scale in
+  (100-400 ms) and a move out to the right (200-400 ms), with `params`
+  over it."
+  [& {:as params}]
+  (cta/make-animation
+   (merge {:type :style
+           :style-ref-id (uuid/next)
+           :style-ref-file (uuid/next)
+           :name "Pop"
+           :start 100
+           :entries [{:type :fade :start 0 :duration 300}
+                     {:type :scale :start 100 :duration 300}
+                     {:type :move :direction :out :start 200 :duration 200 :offset-x 30 :offset-y 0}]}
+          params)))
+
+(defn- values-at
+  "The values of `shape-id` that `timeline` plays at `time`."
+  [timeline objects shape-id time]
+  (get (cta/values-at (cta/resolve-animations timeline objects) time) shape-id))
+
+(t/deftest copies-play-a-style-use-of-their-main
+  (let [file     (with-timeline (component-file) :main
+                   #(cta/add-animation % (thi/id :main-rect) (style-use)))
+        {:keys [objects timelines board copy copy-rect main-page]} (component-scene file)
+        main     (get timelines (thi/id :main))
+        copies   (cltl/instance-timelines objects board nil main-page)
+        timeline (get copies [:copy copy (thi/id :main)])
+        exported (cltl/with-instance-tracks (cta/make-timeline {:board-id board}) (vals copies) objects)
+        shown    (fn [time] (get (cta/values-at (cta/expand-loops exported) time) copy-rect))]
+    (t/is (cta/style-use? (first (get-in timeline [:tracks copy-rect :animations]))))
+    (t/is (nil? (get-in exported [:tracks copy-rect :animations])) "the exports bake it")
+    (doseq [time [0 150 250 350 450]
+            :let [played (values-at main objects (thi/id :main-rect) time)]]
+      (t/is (close-all? ((juxt :opacity :scale-x) played)
+                        ((juxt :opacity :scale-x) (values-at timeline objects copy-rect time)))
+            (str "t=" time))
+      (t/is (close-all? ((juxt :opacity :scale-x) played) ((juxt :opacity :scale-x) (shown time)))
+            (str "exported, t=" time)))))
+
+(t/deftest a-style-use-goes-along-with-a-paste
+  (let [use    (style-use)
+        file   (with-timeline (paste-file) :board-a #(cta/add-animation % (thi/id :rect) use))
+        clip   (clip-of file [:rect] :whole-layer? true)
+        result (paste file clip [:rect-b] {:mode :replace})
+        pasted (first (filter cta/style-use? (:animations (track-in result :board-b :rect-b))))
+        kept   #(select-keys % [:style-ref-id :style-ref-file :name :entries :start :duration])]
+    (t/is (cltl/animation-clip-valid? clip))
+    (t/is (= (kept use) (kept pasted)))
+    (t/is (not= (:id use) (:id pasted)))
+    (t/testing "the target plays it from where it rests"
+      (let [objects (:objects (thf/current-page file))
+            source  (get (timelines file) (thi/id :board-a))
+            target  (get-in result [:timelines (thi/id :board-b)])]
+        (doseq [time [0 150 250 350 450 600 1000]
+                :let [a (values-at source objects (thi/id :rect) time)
+                      b (values-at target objects (thi/id :rect-b) time)]]
+          (t/is (close-all? ((juxt :opacity :scale-x) a) ((juxt :opacity :scale-x) b))
+                (str "t=" time))
+          ;; rect rests at 50 in board A, rect-b at 100 in board B
+          (t/is (mth/close? 50 (- (:x b) (:x a))) (str "t=" time)))))))
+
+(t/deftest a-clip-checks-the-style-uses-it-carries
+  (let [file (with-timeline (animated-file) :board-a #(cta/add-animation % (thi/id :rect) (style-use)))
+        clip (clip-of file [:rect] :whole-layer? true)
+        with (fn [f] (update-in clip [:layers 0 :track :animations 1] f))]
+    (t/is (cta/style-use? (get-in clip [:layers 0 :track :animations 1])))
+    (t/is (cltl/animation-clip-valid? clip))
+    (t/is (not (cltl/animation-clip-valid? (with #(assoc % :start -1)))))
+    (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:entries 0 :start] -1)))))))
+
+(t/deftest a-style-use-counts-its-entries-toward-the-paste-limit
+  (let [file  (paste-file)
+        page  (thf/current-page file)
+        use   (style-use :entries (mapv #(hash-map :type :fade :start (* 10 %) :duration 10) (range 32)))
+        clip  (clip-of file [:rect] :whole-layer? true)
+        layer (update (first (:layers clip)) :track assoc :keyframes [] :animations [use])
+        paste #(cltl/paste-animation (:id file) (:id page) (:timelines page) (:objects page) clip
+                                     (vec (repeat % {:layer layer :target-id (thi/id :rect-a)}))
+                                     {:mode :replace})
+        most  (quot cltl/max-paste-keyframes 32)]
+    (t/is (= 32 (count (:entries use))))
+    (t/is (= {:error :too-large} (paste (inc most))) "32 for each target")
+    (t/is (= #{(thi/id :rect-a)} (:targets (paste most))))))
+
+(t/deftest paste-keeps-the-pivot-of-a-style-use-that-turns
+  (let [spin (style-use :entries [{:type :rotate :start 0 :duration 400}])]
+    (t/testing "on the target"
+      (let [file   (with-timeline (paste-file) :board-a
+                     #(-> %
+                          (cta/add-keyframe (thi/id :rect) {:time 0 :property :rotation :value 0})
+                          (cta/add-keyframe (thi/id :rect) {:time 1000 :property :rotation :value 90})
+                          (cta/set-track-origin (thi/id :rect) 0 1)
+                          (cta/add-animation (thi/id :rect-a) spin)))
+            result (paste file (clip-of file [:rect] :whole-layer? true) [:rect-a :rect-b] {:mode :merge})]
+        (t/is (= 1 (:pivot-kept result)))
+        (t/is (nil? (:origin (track-in result :board-a :rect-a))))
+        (t/is (= {:x 0.0 :y 1.0} (:origin (track-in result :board-b :rect-b))))))
+    (t/testing "in the clip"
+      (let [file   (with-timeline (paste-file) :board-a
+                     #(-> %
+                          (cta/add-animation (thi/id :rect) spin)
+                          (cta/set-track-origin (thi/id :rect) 0 1)))
+            result (paste file (clip-of file [:rect] :whole-layer? true) [:rect-b] {:mode :merge})]
+        (t/is (= 0 (:pivot-kept result)))
+        (t/is (= {:x 0.0 :y 1.0} (:origin (track-in result :board-b :rect-b))))))))
+
+(t/deftest paste-replaces-the-style-uses-of-the-target
+  (let [file   (paste-file)
+        rect-a (thi/id :rect-a)
+        file   (with-timeline file :board-a
+                 #(let [tl (-> %
+                               (cta/add-animation rect-a {:type :scale :start 0 :duration 300})
+                               (cta/add-animation rect-a (style-use :name "Mine"))
+                               (cta/add-animation rect-a (style-use :name "Locked")))]
+                    (cta/toggle-animation-flag tl rect-a (-> tl (cta/get-track rect-a) :animations last :id)
+                                               :locked)))
+        clip   (assoc-in (clip-of file [:rect] :whole-layer? true)
+                         [:layers 0 :track :animations] [(style-use :name "Pasted")])
+        track  (track-in (paste file clip [:rect-a] {:mode :replace}) :board-a :rect-a)]
+    (t/is (= [[:style "Locked"] [:style "Pasted"]] (mapv (juxt :type :name) (:animations track)))
+          "a use counts as a preset: the unlocked ones go, the locked one stays")))

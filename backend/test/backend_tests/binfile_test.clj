@@ -16,6 +16,8 @@
    [app.common.pprint :as pp]
    [app.common.thumbnails :as thc]
    [app.common.time :as ct]
+   [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -1967,3 +1969,111 @@
                     d)))]
       (t/is (= :validation (:type out)))
       (t/is (= :max-file-size-reached (:code out))))))
+
+;; -----------------------------------------------------------------------------
+;; Animation styles
+;; -----------------------------------------------------------------------------
+
+(defn- style-of
+  [id name]
+  (ctas/make-animation-style {:id id
+                              :name name
+                              :entries [{:type :fade :start 0 :duration 300}
+                                        {:type :scale :start 100 :duration 300}]}))
+
+(defn- prepare-styled-file!
+  "A file `n` of `profile` with the animation styles `styles` and a page
+  whose rect, in a board, plays a use of each `[library-id style]` that
+  `uses-of` gives for the id of the file."
+  [profile n styles uses-of & {:keys [shared?]}]
+  (let [file     (th/create-file* n {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)
+                                     :is-shared (boolean shared?)})
+        page-id  (uuid/custom n 1)
+        board-id (uuid/custom n 2)
+        rect-id  (uuid/custom n 3)
+        timeline (reduce (fn [timeline [library-id style]]
+                           (cta/add-animation timeline rect-id (ctas/make-use style library-id 0)))
+                         (cta/make-timeline {:board-id board-id})
+                         (uses-of (:id file)))]
+    (update-file!
+     :file-id (:id file)
+     :profile-id (:id profile)
+     :changes
+     (-> [{:type :add-page :name "styles" :id page-id}
+          {:type :add-obj :page-id page-id :id board-id :parent-id uuid/zero :frame-id uuid/zero
+           :components-v2 true
+           :obj (cts/setup-shape {:id board-id :name "board" :type :frame
+                                  :frame-id uuid/zero :parent-id uuid/zero
+                                  :x 0 :y 0 :width 300 :height 200})}
+          {:type :add-obj :page-id page-id :id rect-id :parent-id board-id :frame-id board-id
+           :components-v2 true
+           :obj (cts/setup-shape {:id rect-id :name "rect" :type :rect
+                                  :frame-id board-id :parent-id board-id
+                                  :x 10 :y 10 :width 50 :height 50})}]
+         (into (map (fn [style] {:type :add-animation-style :animation-style style})) styles)
+         (conj {:type :set-timeline :page-id page-id :id board-id :params timeline})))
+    {:id (:id file) :page-id page-id :board-id board-id :rect-id rect-id}))
+
+(defn- styled-animations
+  "The animations of the rect of the styled file `id`, as stored."
+  [file-id {:keys [page-id board-id rect-id]}]
+  (let [file (bfc/get-file th/*system* file-id :realize? true)]
+    (get-in file [:data :pages-index page-id :timelines board-id :tracks rect-id :animations])))
+
+(defn- styled-library-and-file!
+  "A shared library with the style :lib and a file linked to it that uses
+  that style and :own, a style of its own."
+  [profile]
+  (let [lib-style (style-of (uuid/custom 9 1) "Library pop")
+        own-style (style-of (uuid/custom 9 2) "Own pop")
+        library   (prepare-styled-file! profile 1 [lib-style] (constantly []) :shared? true)
+        file      (prepare-styled-file! profile 2 [own-style]
+                                        (fn [file-id] [[(:id library) lib-style] [file-id own-style]]))]
+    (db/insert! th/*system* :file-library-rel {:file-id (:id file) :library-file-id (:id library)})
+    {:library library :file file :lib-style lib-style :own-style own-style}))
+
+(defn- export-and-import!
+  [profile file-id export-type]
+  (let [output (tmp/tempfile :suffix ".zip")]
+    (v3/export-files!
+     (-> th/*system*
+         (assoc ::bfc/ids #{file-id})
+         (assoc ::bfc/export-type export-type))
+     (io/output-stream output))
+    (-> th/*system*
+        (assoc ::bfc/project-id (:default-project-id profile))
+        (assoc ::bfc/profile-id (:id profile))
+        (assoc ::bfc/input output)
+        (v3/import-files!))))
+
+(t/deftest export-and-import-keep-animation-styles
+  (let [profile (th/create-profile* 1)
+        {:keys [library file lib-style own-style]} (styled-library-and-file! profile)
+        result  (export-and-import! profile (:id file) :include-libraries)
+        rel     (->> (:file-ids result)
+                     (mapcat #(db/query th/*system* :file-library-rel {:file-id %}))
+                     (first))
+        file-id (:file-id rel)
+        lib-id  (:library-file-id rel)]
+    (t/is (= 2 (count (:file-ids result))))
+    (t/is (not= (:id file) file-id))
+    (t/is (= {(:id lib-style) lib-style}
+             (d/update-vals (get-in (bfc/get-file th/*system* lib-id :realize? true) [:data :animation-styles])
+                            #(dissoc % :modified-at))))
+    (t/is (= [(:id own-style)]
+             (keys (get-in (bfc/get-file th/*system* file-id :realize? true) [:data :animation-styles]))))
+    (t/testing "the uses link to the imported files"
+      (t/is (= [[lib-id (:id lib-style)] [file-id (:id own-style)]]
+               (mapv (juxt :style-ref-file :style-ref-id) (styled-animations file-id file)))))))
+
+(t/deftest export-detaching-libraries-plays-their-styles-as-presets
+  (let [profile (th/create-profile* 1)
+        {:keys [file own-style]} (styled-library-and-file! profile)
+        result  (export-and-import! profile (:id file) :detach-libraries)
+        file-id (first (:file-ids result))
+        uses    (styled-animations file-id file)]
+    (t/is (= 1 (count (:file-ids result))))
+    (t/is (= [:fade :scale :style] (mapv :type uses)) "the use of the library turns into presets")
+    (t/is (= [file-id (:id own-style)] ((juxt :style-ref-file :style-ref-id) (last uses)))
+          "its own style stays linked, to the imported file")))

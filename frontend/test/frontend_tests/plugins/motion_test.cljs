@@ -179,7 +179,7 @@
 
         (t/testing "a style adds several"
           (let [added (.addAnimationStyle timeline rect "pop" 600)]
-            (t/is (= 2 (.-length added)))
+            (t/is (= ["fade" "scale"] (mapv #(.-type ^js %) added)))
             (t/is (= 3 (.-length (.-animations timeline))))
             (t/is (thrown? js/Error (.addAnimationStyle timeline rect "wobble")))))
 

@@ -1137,12 +1137,12 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- preset-animations
-  "The animations `preset` adds: an animation type, or the several of an
-  animation style (see `cta/animation-styles`)."
+  "The animations `preset` adds: an animation type, or the several of a
+  built-in composite (see `cta/builtin-styles`)."
   [preset]
   (if (contains? cta/animation-types preset)
     [{:type preset}]
-    (get cta/animation-styles preset)))
+    (get cta/builtin-styles preset)))
 
 (def ^:private default-stagger
   "Milliseconds between the starts of a preset added to several layers."

@@ -48,6 +48,7 @@
    [common-tests.geom-shapes-tree-seq-test]
    [common-tests.geom-snap-test]
    [common-tests.geom-test]
+   [common-tests.logic.animation-styles-sync-test]
    [common-tests.logic.chained-propagation-test]
    [common-tests.logic.comp-creation-test]
    [common-tests.logic.comp-detach-with-nested-test]
@@ -76,6 +77,7 @@
    [common-tests.text-test]
    [common-tests.time-test]
    [common-tests.types.absorb-assets-test]
+   [common-tests.types.animation-style-test]
    [common-tests.types.animation-test]
    [common-tests.types.color-test]
    [common-tests.types.components-test]
@@ -131,6 +133,7 @@
    'common-tests.geom-shapes-tree-seq-test
    'common-tests.geom-snap-test
    'common-tests.geom-test
+   'common-tests.logic.animation-styles-sync-test
    'common-tests.logic.chained-propagation-test
    'common-tests.logic.comp-creation-test
    'common-tests.logic.comp-detach-with-nested-test
@@ -159,6 +162,7 @@
    'common-tests.text-test
    'common-tests.time-test
    'common-tests.types.absorb-assets-test
+   'common-tests.types.animation-style-test
    'common-tests.types.animation-test
    'common-tests.types.color-test
    'common-tests.types.components-test

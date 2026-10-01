@@ -16,6 +16,7 @@
    [app.common.schema.desc-native :as smd]
    [app.common.schema.generators :as sg]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.color :as ctc]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
@@ -180,7 +181,7 @@
    [:attrs cta/schema:timeline-attrs]])
 
 (def schema:set-plugin-data-change
-  (let [types  #{:file :page :shape :color :typography :component}
+  (let [types  #{:file :page :shape :color :typography :component :animation-style}
 
         schema [:map {:title "SetPagePluginData"}
                 [:type [:= :set-plugin-data]]
@@ -418,6 +419,21 @@
    [:del-typography
     [:map {:title "DelTypogrphyChange"}
      [:type [:= :del-typography]]
+     [:id ::sm/uuid]]]
+
+   [:add-animation-style
+    [:map {:title "AddAnimationStyleChange"}
+     [:type [:= :add-animation-style]]
+     [:animation-style ctas/schema:animation-style]]]
+
+   [:mod-animation-style
+    [:map {:title "ModAnimationStyleChange"}
+     [:type [:= :mod-animation-style]]
+     [:animation-style ctas/schema:animation-style]]]
+
+   [:del-animation-style
+    [:map {:title "DelAnimationStyleChange"}
+     [:type [:= :del-animation-style]]
      [:id ::sm/uuid]]]
 
    [:set-tokens-lib
@@ -996,7 +1012,10 @@
       (d/update-in-when data [:typographies object-id] update-fn)
 
       :component
-      (d/update-in-when data [:components object-id] update-fn))))
+      (d/update-in-when data [:components object-id] update-fn)
+
+      :animation-style
+      (d/update-in-when data [:animation-styles object-id] update-fn))))
 
 (defmethod process-change :del-page
   [data {:keys [id]}]
@@ -1067,6 +1086,22 @@
 (defmethod process-change :del-typography
   [data {:keys [id]}]
   (ctyl/delete-typography data id))
+
+;; -- Animation styles
+
+(defmethod process-change :add-animation-style
+  [data {:keys [animation-style]}]
+  (ctas/add-animation-style data animation-style))
+
+;; The whole style, as `:mod-color` does: undo puts back exactly the
+;; style there was.
+(defmethod process-change :mod-animation-style
+  [data {:keys [animation-style]}]
+  (ctas/set-animation-style data animation-style))
+
+(defmethod process-change :del-animation-style
+  [data {:keys [id]}]
+  (ctas/delete-animation-style data id))
 
 ;; -- Design Tokens
 

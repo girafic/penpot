@@ -21,6 +21,7 @@
    [app.common.schema :as sm]
    [app.common.thumbnails :as cth]
    [app.common.time :as ct]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.color :as ctcl]
    [app.common.types.component :as ctc]
    [app.common.types.file :as ctf]
@@ -129,6 +130,9 @@
 (def encode-typography
   (sm/encoder cty/schema:typography sm/json-transformer))
 
+(def encode-animation-style
+  (sm/encoder ctas/schema:animation-style sm/json-transformer))
+
 (def encode-tokens-lib
   (sm/encoder ctob/schema:tokens-lib sm/json-transformer))
 
@@ -167,6 +171,9 @@
 (def decode-typography
   (sm/decoder cty/schema:typography sm/json-transformer))
 
+(def decode-animation-style
+  (sm/decoder ctas/schema:animation-style sm/json-transformer))
+
 (def decode-tokens-lib
   (sm/decoder ctob/schema:tokens-lib sm/json-transformer))
 
@@ -204,6 +211,9 @@
 
 (def validate-typography
   (sm/check-fn cty/schema:typography))
+
+(def validate-animation-style
+  (sm/check-fn ctas/schema:animation-style))
 
 (def validate-tokens-lib
   (sm/check-fn ctob/schema:tokens-lib))
@@ -280,6 +290,7 @@
 
         data         (:data file)
         typographies (:typographies data)
+        styles       (:animation-styles data)
         components   (:components data)
         colors       (:colors data)
         tokens-lib   (:tokens-lib data)
@@ -370,6 +381,12 @@
             typography (encode-typography object)]
         (events/tap :progress {:section :typography :id id :file-id file-id})
         (write-entry! output path typography)))
+
+    (doseq [[id object] styles]
+      (let [path  (str "files/" file-id "/animation-styles/" id ".json")
+            style (encode-animation-style object)]
+        (events/tap :progress {:section :animation-style :id id :file-id file-id})
+        (write-entry! output path style)))
 
     (when (and tokens-lib
                (not (ctob/empty-lib? tokens-lib)))
@@ -565,6 +582,15 @@
         {:entry entry
          :id (parse-uuid id)}))))
 
+(defn- match-animation-style-entry-fn
+  [file-id]
+  (let [pattern (str "^files/" file-id "/animation-styles/([^/]+).json$")
+        pattern (re-pattern pattern)]
+    (fn [entry]
+      (when-let [[_ id] (re-matches pattern (zip-entry-name entry))]
+        {:entry entry
+         :id (parse-uuid id)}))))
+
 (defn- match-tokens-lib-entry-fn
   [file-id]
   (let [pattern (str "^files/" file-id "/tokens.json$")
@@ -723,6 +749,20 @@
                {})
        (not-empty)))
 
+(defn- read-file-animation-styles
+  [{:keys [::bfc/input ::entries]} file-id]
+  (->> (keep (match-animation-style-entry-fn file-id) entries)
+       (reduce (fn [result {:keys [id entry]}]
+                 (let [object (->> (read-entry input entry)
+                                   (decode-animation-style)
+                                   (validate-animation-style))]
+                   (events/tap :progress {:section :animation-style :id id :file-id file-id})
+                   (if (= id (:id object))
+                     (assoc result id object)
+                     result)))
+               {})
+       (not-empty)))
+
 (defn- read-file-tokens-lib
   [{:keys [::bfc/input ::entries]} file-id]
   (when-let [entry (d/seek (match-tokens-lib-entry-fn file-id) entries)]
@@ -781,6 +821,7 @@
   [cfg file-id]
   (let [colors       (read-file-colors cfg file-id)
         typographies (read-file-typographies cfg file-id)
+        styles       (read-file-animation-styles cfg file-id)
         tokens-lib   (read-file-tokens-lib cfg file-id)
         components   (read-file-components cfg file-id)
         plugin-data  (read-file-plugin-data cfg file-id)
@@ -789,6 +830,7 @@
      :pages-index (into {} pages)
      :colors colors
      :typographies typographies
+     :animation-styles styles
      :tokens-lib tokens-lib
      :components components
      :plugin-data plugin-data}))

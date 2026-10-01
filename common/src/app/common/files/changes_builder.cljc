@@ -948,6 +948,33 @@
         (update :undo-changes conj {:type :add-typography :typography prev-typography})
         (apply-changes-local))))
 
+(defn add-animation-style
+  [changes style]
+  (-> changes
+      (update :redo-changes conj {:type :add-animation-style :animation-style style})
+      (update :undo-changes conj {:type :del-animation-style :id (:id style)})
+      (apply-changes-local)))
+
+(defn update-animation-style
+  [changes style]
+  (assert-library! changes)
+  (let [library-data (::library-data (meta changes))
+        prev-style   (get-in library-data [:animation-styles (:id style)])]
+    (-> changes
+        (update :redo-changes conj {:type :mod-animation-style :animation-style style})
+        (update :undo-changes conj {:type :mod-animation-style :animation-style prev-style})
+        (apply-changes-local))))
+
+(defn delete-animation-style
+  [changes style-id]
+  (assert-library! changes)
+  (let [library-data (::library-data (meta changes))
+        prev-style   (get-in library-data [:animation-styles style-id])]
+    (-> changes
+        (update :redo-changes conj {:type :del-animation-style :id style-id})
+        (update :undo-changes conj {:type :add-animation-style :animation-style prev-style})
+        (apply-changes-local))))
+
 (defn add-component
   ([changes id path name updated-shapes main-instance-id main-instance-page]
    (add-component changes id path name updated-shapes main-instance-id main-instance-page nil nil nil))

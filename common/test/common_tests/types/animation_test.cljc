@@ -1582,6 +1582,163 @@
     (t/is (cta/valid-timeline? timeline))
     (t/is (= timeline (-> timeline encode json-roundtrip decode)))))
 
+;; ANIMATION STYLE USES
+
+(defn- style-use
+  "A use, from 100 ms, of a style of a fade in (0-300 ms), an overshooting
+  scale in (100-500 ms) and a move out to the right (200-400 ms), with
+  `params` over it."
+  [& {:as params}]
+  (cta/make-animation
+   (merge {:type :style
+           :style-ref-id (uuid/next)
+           :style-ref-file (uuid/next)
+           :name "Pop"
+           :start 100
+           :entries [{:type :fade :start 0 :duration 300}
+                     {:type :scale :start 100 :duration 400 :easing cta/overshoot-easing}
+                     {:type :move :direction :out :start 200 :duration 200 :offset-x 30 :offset-y 0}]}
+          params)))
+
+(defn- style-presets
+  "The presets `style-use` stands for, written out: from `start`, `k`
+  times as long."
+  [start k]
+  [{:type :fade :start start :duration (* k 300)}
+   {:type :scale :start (+ start (* k 100)) :duration (* k 400) :easing cta/overshoot-easing}
+   {:type :move :direction :out :start (+ start (* k 200)) :duration (* k 200)
+    :offset-x 30 :offset-y 0}])
+
+(defn- styled-and-written-out
+  "Two timelines of `rect` (of `board`) moving right in a second, one with
+  `use` and one with `presets` in its place."
+  [board rect use presets]
+  (let [sid (:id rect)
+        tl  (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                (cta/add-keyframe sid {:time 0 :property :x :value 50})
+                (cta/add-keyframe sid {:time 1000 :property :x :value 150}))]
+    [(cta/add-animation tl sid use)
+     (reduce #(cta/add-animation %1 sid %2) tl presets)]))
+
+(t/deftest a-style-use-plays-as-the-presets-it-stands-for
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid     (:id rect)
+        objects (assoc-in objects [(:id board) :shapes] [sid])
+
+        [styled written] (styled-and-written-out board rect (style-use) (style-presets 100 1))]
+    (t/is (cta/valid-timeline? styled))
+    (t/is (= (:duration written) (:duration styled)))
+    (t/is (= [] (filterv #(not= (values-at written objects %) (values-at styled objects %))
+                         (range 0 (inc (:duration styled)) 10)))
+          "the times it plays otherwise")
+    (doseq [time [0 150 250 350 450 550 1000]]
+      (t/is (= (cta/timeline->modif-tree written objects time)
+               (cta/timeline->modif-tree styled objects time))
+            (str "t=" time)))
+    (t/is (= (cta/timeline->css written objects) (cta/timeline->css styled objects)))
+    (t/is (= (cta/timeline->svg written objects {}) (cta/timeline->svg styled objects {})))
+    (t/is (= (mapv :ks (:layers (cta/timeline->lottie written objects nil)))
+             (mapv :ks (:layers (cta/timeline->lottie styled objects nil)))))))
+
+(t/deftest a-style-use-stretches-its-entries-to-its-duration
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid  (:id rect)
+        use  (style-use :duration 1000)
+        play #(get (values-at (cta/add-animation (cta/make-timeline {:board-id (:id board)}) sid %)
+                              objects %2)
+                   sid)]
+    (t/is (= [[100 600] [300 800] [500 400]] (mapv (juxt :start :duration) (cta/expand-style use))))
+    ;; twice as long, it shows at 100 + 2t what it shows at 100 + t
+    (doseq [t (range 0 501 10)]
+      (let [once  (play (assoc use :duration 500) (+ 100 t))
+            twice (play use (+ 100 (* 2 t)))]
+        (t/is (= (set (keys once)) (set (keys twice))))
+        (t/is (every? #(close? (get once %) (get twice %)) (keys once)) (str "t=" t))))))
+
+(t/deftest expanding-a-style-use-keeps-the-ids-of-its-entries
+  (let [use (style-use)
+        id  (uuid/next)]
+    (t/is (= (cta/expand-style use) (cta/expand-style use)))
+    (t/is (= (mapv :id (:entries use)) (mapv :id (cta/expand-style use))))
+    (t/is (every? uuid? (map :id (:entries use))))
+    (t/is (= {:id id :type :fade :direction :in :start 0 :duration 400 :amount 0}
+             (cta/make-style-entry {:id id :type :fade :hidden true :locked true}))
+          "an entry keeps its id and has no flags")))
+
+(t/deftest track-animations-expand-the-uses-in-place
+  (let [hidden  (cta/make-animation {:type :rotate :hidden true})
+        use     (style-use)
+        visible (cta/make-animation {:type :fade :direction :out :start 700})
+        ids     #(mapv :id (cta/track-animations {:animations %}))]
+    (t/is (= (conj (mapv :id (:entries use)) (:id visible))
+             (ids [hidden use visible])))
+    (t/is (= [] (ids [(assoc use :hidden true)])))
+    (t/is (= [] (ids nil)))))
+
+(t/deftest hidden-and-locked-style-uses
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid (:id rect)
+        tl  (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                (cta/add-animation sid (style-use)))
+        uid (:id (first (get-in tl [:tracks sid :animations])))]
+    (t/testing "a hidden one plays nothing"
+      (let [tl (cta/toggle-animation-flag tl sid uid :hidden)]
+        (t/is (cta/valid-timeline? tl))
+        (t/is (nil? (get (values-at tl objects 300) sid)))
+        (t/is (not (re-find #"opacity" (cta/timeline->css tl objects))))))
+    (t/testing "a locked one is kept from edits"
+      (let [tl (cta/toggle-animation-flag tl sid uid :locked)]
+        (t/is (= [uid] (mapv :id (get-in (cta/remove-track tl sid) [:tracks sid :animations]))))
+        (t/is (= tl (cta/retime-keyframes tl [sid] [0 1000] [500 1500])))
+        (t/is (= tl (cta/update-animation tl sid uid #(assoc % :start 0))))
+        (t/is (= tl (cta/remove-animation tl sid uid)))))))
+
+(t/deftest a-style-use-keeps-its-style-through-edits
+  (let [sid  (uuid/next)
+        use  (style-use)
+        tl   (cta/add-animation (mk-timeline) sid use)
+        kept #(select-keys % [:style-ref-id :style-ref-file :name :entries])]
+    (t/testing "an update"
+      (let [tl2  (cta/update-animation tl sid (:id use) #(assoc % :start 300 :duration 1000))
+            use2 (cta/get-animation tl2 sid (:id use))]
+        (t/is (= [300 1000] [(:start use2) (:duration use2)]))
+        (t/is (= (kept use) (kept use2)))
+        (t/is (cta/valid-timeline? tl2))))
+    (t/testing "a retime, as a preset"
+      (let [tl2         (-> tl
+                            (cta/add-animation sid {:type :fade :start 100 :duration 500})
+                            (cta/retime-keyframes [sid] [0 1000] [0 2000]))
+            [use2 fade] (get-in tl2 [:tracks sid :animations])]
+        (t/is (= [200 1000] [(:start use2) (:duration use2)]))
+        (t/is (= [(:start fade) (:duration fade)] [(:start use2) (:duration use2)]))
+        (t/is (= (kept use) (kept use2)))))))
+
+(t/deftest a-style-use-survives-json
+  (let [sid      (uuid/next)
+        timeline (-> (mk-timeline)
+                     (cta/add-animation sid {:type :fade})
+                     (cta/add-animation sid (style-use :locked true)))
+        encode   (sm/encoder cta/schema:timeline (sm/json-transformer))
+        decode   (sm/decoder cta/schema:timeline (sm/json-transformer))
+        json     (-> timeline encode json-roundtrip)]
+    (t/is (cta/valid-timeline? timeline))
+    (t/is (= ["fade" "style"] (->> json :tracks vals first :animations (mapv :type))))
+    (t/is (= timeline (decode json)))))
+
+(t/deftest an-animation-of-no-known-type-is-not-valid
+  (let [sid  (uuid/next)
+        fade (cta/make-animation {:type :fade})
+        with #(assoc-in (mk-timeline) [:tracks sid] {:shape-id sid :keyframes [] :animations [%]})]
+    (doseq [animation [(assoc fade :type 5) (dissoc fade :type) (assoc fade :type "5")
+                       (assoc fade :type :style)]]
+      (let [tl (with animation)]
+        (t/is (not (cta/valid-timeline? tl)) (pr-str (:type animation)))
+        (t/is (some? (sm/explain cta/schema:timeline tl)))))))
+
+(t/deftest builtin-styles-are-the-seven-composites
+  (t/is (= #{:slide-up :slide-down :slide-left :slide-right :pop :zoom :spin}
+           (set (keys cta/builtin-styles)))))
+
 (defn- arc-timeline
   "A shape moving 100 to the right in a second, arcing 30 up on the way."
   [sid]
