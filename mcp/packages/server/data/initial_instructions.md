@@ -426,6 +426,12 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
     effect to the layer as it is; default) or "out" (an exit)
   * `addAnimationStyle(shape, style, start?): PresetAnimation[]` - Several effects at once:
     "slide-up" | "slide-down" | "slide-left" | "slide-right" | "pop" | "zoom" | "spin"
+  * `copyAnimation(shape, targets, {properties?, presets?, values?, start?, stagger?, replace?}?)` - Copies the
+    animation of `shape` onto `targets` (layers of the page, in any board), as pasting a copied animation does: the
+    values are relative, so each target moves, turns and resizes from where it rests by as much as `shape` does
+    (`values: "exact"` copies them as they are); `stagger` (ms) starts each target that much after the one before;
+    `replace: false` adds to what the targets have. Returns `{targets, skipped, pivotKept}`. To animate a list,
+    animate its first item, then copy that onto the rest.
   * `record(time, shapes, callback)` - Auto-keyframe (like the REC button): runs `callback`, which changes `shapes`
     (e.g. `shape.x = 100`), and records the changes as keyframes at `time`. A property that is not animated yet also
     gets a keyframe at 0 with its value before, so one call makes the change play. The changes stay on the shapes;
@@ -477,6 +483,9 @@ const card = penpotUtils.findShape(s => s.name === "Card", board);
 timeline.record(900, [card], () => { card.y = card.y - 24; card.opacity = 1; });
 timeline.addMarker({time: 0, name: "intro"});
 timeline.addMarker({time: 900, name: "idle"});
+const [first, ...rest] = penpotUtils.findShape(s => s.name === "Features", board).children;
+timeline.addAnimationStyle(first, "slide-up", 300);
+timeline.copyAnimation(first, rest, {stagger: 80});
 ```
 
 # Visual Inspection of Designs

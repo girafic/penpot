@@ -7,15 +7,19 @@
 (ns frontend-tests.plugins.motion-test
   (:require
    [app.common.files.changes-builder :as pcb]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.test-helpers.components :as cthc]
    [app.common.test-helpers.compositions :as ctho]
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
+   [app.common.test-helpers.shapes :as cths]
    [app.common.types.animation :as cta]
+   [app.common.uuid :as uuid]
    [app.main.store :as st]
    [app.plugins.api :as api]
    [app.plugins.motion :as motion]
+   [app.plugins.register :as r]
    [app.plugins.shape :as shape]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.state :as ths]
@@ -25,18 +29,20 @@
 (def ^:private plugin-id "00000000-0000-0000-0000-000000000000")
 
 (defn- setup
-  "A store with an empty file, Motion on when `motion?`, and the plugin
-  context: `[store context]`."
-  [motion?]
-  (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
-        ^js context (api/create-context plugin-id)]
-    ;; as `app.plugins` does, which the tests leave out with the runtime
-    (set! motion/shape-proxy shape/shape-proxy)
-    (set! motion/shape-proxy? shape/shape-proxy?)
-    (set! st/state store)
-    (ptk/emit! store #(cond-> (assoc-in % [:plugins :flags plugin-id :throw-validation-errors] true)
-                        motion? (update :features (fnil conj #{}) "animation/v1")))
-    [store context]))
+  "A store with `file` (an empty one by default), Motion on when
+  `motion?`, and the plugin context: `[store context]`."
+  ([motion?]
+   (setup (cthf/sample-file :file1 :page-label :page1) motion?))
+  ([file motion?]
+   (let [store       (ths/setup-store file)
+         ^js context (api/create-context plugin-id)]
+     ;; as `app.plugins` does, which the tests leave out with the runtime
+     (set! motion/shape-proxy shape/shape-proxy)
+     (set! motion/shape-proxy? shape/shape-proxy?)
+     (set! st/state store)
+     (ptk/emit! store #(cond-> (assoc-in % [:plugins :flags plugin-id :throw-validation-errors] true)
+                         motion? (update :features (fnil conj #{}) "animation/v1")))
+     [store context])))
 
 (defn- stored-timelines
   [store ^js context]
@@ -317,3 +323,156 @@
           (t/is (= [1200 "loop"] [(.-duration copy) (.-playback copy)])))
         (t/is (nil? (.-timeline (proxy (cthi/id :anim-host)))) "without a timeline of its own")
         (t/is (zero? (.-length (.-animatedCopies (proxy main)))) "the main plays its own")))))
+
+(defn- copy-file
+  "Board A at 100,100 with the rect `source` at 150,200 (50,100 in it)
+  moving right by 100 and down by 40 in a second and fading in, and the
+  rects `b` and `c` 100 and 200 to its right; board B at 1000,100 with the
+  rect `d` at 1100,150 (100,50 in it). With `keyframes`, `source` moves
+  along that many keyframes instead."
+  ([] (copy-file nil))
+  ([keyframes]
+   (let [file     (-> (cthf/sample-file :copy-file :page-label :copy-page)
+                      (ctho/add-frame :board-a :x 100 :y 100 :width 400 :height 300)
+                      (cths/add-sample-shape :source :type :rect :parent-label :board-a
+                                             :x 150 :y 200 :width 50 :height 50)
+                      (cths/add-sample-shape :b :type :rect :parent-label :board-a
+                                             :x 250 :y 200 :width 50 :height 50)
+                      (cths/add-sample-shape :c :type :rect :parent-label :board-a
+                                             :x 350 :y 200 :width 50 :height 50)
+                      (ctho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
+                      (cths/add-sample-shape :d :type :rect :parent-label :board-b
+                                             :x 1100 :y 150 :width 100 :height 100))
+         source   (cthi/id :source)
+         timeline (cta/make-timeline {:board-id (cthi/id :board-a) :duration (or keyframes 1000)})
+         timeline (if (some? keyframes)
+                    (assoc-in timeline [:tracks source]
+                              {:shape-id source
+                               :keyframes (mapv #(cta/make-keyframe {:time % :property :x :value %})
+                                                (range keyframes))})
+                    (-> timeline
+                        (cta/add-keyframe source {:time 0 :property :x :value 50})
+                        (cta/add-keyframe source {:time 1000 :property :x :value 150})
+                        (cta/add-keyframe source {:time 0 :property :y :value 100})
+                        (cta/add-keyframe source {:time 1000 :property :y :value 140})
+                        (cta/add-animation source {:type :fade :start 0 :duration 300})))]
+     (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                  (pcb/with-page (cthf/current-page file))
+                                  (pcb/set-timeline (cthi/id :board-a) timeline))))))
+
+(defn- shape-of
+  "The proxy of the shape `label` of `file`."
+  [file label]
+  (shape/shape-proxy plugin-id (:id file) (cthf/current-page-id file) (cthi/id label)))
+
+(defn- keyframes-of
+  "`[time value]` of the keyframes of `property` of the layer `label` in
+  the timeline of the board `board-label`."
+  [store context board-label label property]
+  (->> (get-in (stored-timelines store context)
+               [(cthi/id board-label) :tracks (cthi/id label) :keyframes])
+       (filter #(= property (:property %)))
+       (mapv (juxt :time :value))))
+
+(t/deftest copy-animation-onto-other-layers
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file                (copy-file)
+            [store ^js context] (setup file true)
+            shape               (partial shape-of file)
+            ^js timeline        (.-timeline (shape :board-a))
+            result              (.copyAnimation timeline (shape :source)
+                                                #js [(shape :b) (shape :c) (shape :d)]
+                                                #js {:stagger 100})
+            x                   #(keyframes-of store context %1 %2 :x)]
+
+        (t/testing "each target moves from where it rests, one after the other"
+          (t/is (= [[0 150] [1000 250]] (x :board-a :b)))
+          (t/is (= [[100 250] [1100 350]] (x :board-a :c))))
+
+        (t/testing "a target in another board lands in its timeline"
+          (t/is (= [[200 100] [1200 200]] (x :board-b :d)))
+          (t/is (= [[200 50] [1200 90]] (keyframes-of store context :board-b :d :y))))
+
+        (t/testing "the presets go along"
+          (t/is (= [:fade] (mapv :type (get-in (stored-timelines store context)
+                                               [(cthi/id :board-a) :tracks (cthi/id :b) :animations])))))
+
+        (t/testing "it tells what it did"
+          (t/is (object? result))
+          (t/is (= {:targets 3 :skipped 0 :pivotKept 0} (js->clj result :keywordize-keys true))))))))
+
+(t/deftest copy-animation-takes-options
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file                (copy-file)
+            [store ^js context] (setup file true)
+            shape               (partial shape-of file)
+            ^js timeline        (.-timeline (shape :board-a))
+            track               #(get-in (stored-timelines store context)
+                                         [(cthi/id :board-a) :tracks (cthi/id %)])
+            x                   #(keyframes-of store context :board-a % :x)]
+
+        (t/testing "only the properties given, without the presets"
+          (.copyAnimation timeline (shape :source) #js [(shape :b)]
+                          #js {:properties #js ["x"] :presets false})
+          (t/is (= #{:x} (into #{} (map :property) (:keyframes (track :b)))))
+          (t/is (empty? (:animations (track :b)))))
+
+        (t/testing "the values of the shape, at another start, rounded"
+          (.copyAnimation timeline (shape :source) #js [(shape :c)] #js {:values "exact" :start 12.6})
+          (t/is (= [[13 50] [1013 150]] (x :c))))
+
+        (t/testing "added to what the target has, or in its place"
+          (.addKeyframe timeline (shape :b) #js {:property "x" :time 500 :value 0})
+          (.copyAnimation timeline (shape :source) #js [(shape :b)] #js {:replace false})
+          (t/is (= [[0 150] [500 0] [1000 250]] (x :b)))
+          (.copyAnimation timeline (shape :source) #js [(shape :b)])
+          (t/is (= [[0 150] [1000 250]] (x :b))))))))
+
+(t/deftest copy-animation-refuses-what-is-not-valid
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file                (copy-file)
+            [store ^js context] (setup file true)
+            shape               (partial shape-of file)
+            ^js timeline        (.-timeline (shape :board-a))
+            before              (stored-timelines store context)
+            copy                #(.copyAnimation timeline (shape :source) %1 %2)
+            elsewhere           (shape/shape-proxy plugin-id (:id file) (uuid/next) (cthi/id :b))]
+        (t/is (thrown? js/Error (copy #js [(shape :b)] #js {:start -5})))
+        (t/is (thrown? js/Error (copy #js [(shape :b)] #js {:stagger "x"})))
+        (t/is (thrown? js/Error (copy #js [(shape :b)] #js {:values "absolute"})))
+        (t/is (thrown? js/Error (copy #js [(shape :b)] #js {:properties #js ["colour"]})))
+        (t/is (thrown? js/Error (copy #js [(shape :b)] "fast")) "options that are no object")
+        (t/is (thrown? js/Error (copy #js [elsewhere] nil)) "a shape of another page")
+        (t/is (thrown? js/Error (copy #js [#js {:id "b"}] nil)) "not a shape")
+        (t/is (thrown? js/Error (copy (shape :b) nil)) "not an array")
+        (t/is (thrown? js/Error (.copyAnimation timeline (shape :d) #js [(shape :b)]))
+              "a shape out of the board")
+        (t/is (thrown? js/Error (.copyAnimation timeline (shape :b) #js [(shape :c)]))
+              "nothing to copy")
+        (with-redefs [r/check-permission (constantly false)]
+          (t/is (thrown? js/Error (copy #js [(shape :b)] nil)) "without content:write"))
+        (t/is (= before (stored-timelines store context)))))))
+
+(t/deftest copy-animation-needs-motion
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file                (copy-file)
+            [store ^js context] (setup file false)
+            timeline            (motion/timeline-proxy plugin-id (:id file) (cthf/current-page-id file)
+                                                       (cthi/id :board-a))]
+        (t/is (thrown? js/Error (.copyAnimation ^js timeline (shape-of file :source)
+                                                #js [(shape-of file :b)])))
+        (t/is (= (:timelines (cthf/current-page file)) (stored-timelines store context)))))))
+
+(t/deftest copy-animation-has-limits
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file                (copy-file (inc cltl/max-paste-keyframes))
+            [store ^js context] (setup file true)
+            ^js timeline        (.-timeline (shape-of file :board-a))]
+        (t/is (thrown? js/Error (.copyAnimation timeline (shape-of file :source)
+                                                #js [(shape-of file :b)])))
+        (t/is (= (:timelines (cthf/current-page file)) (stored-timelines store context)))))))

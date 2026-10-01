@@ -746,32 +746,6 @@
             timeline
             shape-ids)))
 
-(defn paste-keyframes
-  "Add copies of `keyframes` (any properties) to the track of `shape-id`,
-  shifted so the earliest one lands at `time`, and make the properties in
-  `loops` repeat. Locked properties of `shape-id` take none. The duration
-  grows to fit the pasted keyframes."
-  [timeline shape-id keyframes loops time]
-  (let [locked    (dm/get-in timeline [:tracks shape-id :locked] #{})
-        offset    (when (seq keyframes)
-                    (- time (reduce min (map :time keyframes))))
-        keyframes (filterv #(not (contains? locked (slot-key (:property %) (:index %))))
-                           keyframes)]
-    (if (empty? keyframes)
-      timeline
-      (let [timeline (reduce (fn [timeline keyframe]
-                               (add-keyframe timeline shape-id
-                                             (-> keyframe
-                                                 (dissoc :id)
-                                                 (update :time + offset))))
-                             timeline
-                             keyframes)]
-        (-> (reduce (fn [timeline key]
-                      (d/update-in-when timeline [:tracks shape-id] update-slot-flag :loops conj key))
-                    timeline
-                    (remove locked loops))
-            (update :duration max (+ offset (reduce max (map :time keyframes)))))))))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PRESET ANIMATIONS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

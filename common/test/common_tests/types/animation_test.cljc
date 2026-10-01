@@ -343,14 +343,17 @@
     (t/is (nil? (get-in (cta/remove-property tl' sid :opacity) [:tracks sid])))
     (t/is (nil? (get-in (cta/remove-track tl sid) [:tracks sid])))))
 
-(t/deftest paste-keyframes-at-time
-  (let [src (uuid/next)
-        dst (uuid/next)
-        tl  (-> (mk-timeline)
-                (cta/add-keyframe src {:time 100 :property :opacity :value 0})
-                (cta/add-keyframe src {:time 400 :property :opacity :value 1}))
-        kfs (cta/property-keyframes tl src :opacity)
-        tl' (cta/paste-keyframes tl dst kfs #{:opacity} 900)
+(t/deftest paste-track-onto-a-layer
+  (let [src    (uuid/next)
+        dst    (uuid/next)
+        tl     (-> (mk-timeline)
+                   (cta/add-keyframe src {:time 100 :property :opacity :value 0})
+                   (cta/add-keyframe src {:time 400 :property :opacity :value 1}))
+        kfs    (cta/property-keyframes tl src :opacity)
+        track  {:shape-id  dst
+                :keyframes (mapv #(-> % (dissoc :id) (update :time + 800)) kfs)
+                :loops     #{:opacity}}
+        tl'    (:timeline (cta/paste-track tl dst track :merge))
         pasted (get-in tl' [:tracks dst :keyframes])]
     (t/is (= [900 1200] (mapv :time pasted)))
     (t/is (= [0 1] (mapv :value pasted)))
@@ -1369,9 +1372,12 @@
         (t/is (cta/valid-timeline? tl2))))
 
     (t/testing "pasting skips them"
-      (let [kfs (into (cta/property-keyframes tl sid :x)
-                      (cta/property-keyframes tl sid :opacity))
-            tl2 (cta/paste-keyframes tl sid kfs #{:x} 300)]
+      (let [kfs   (into (cta/property-keyframes tl sid :x)
+                        (cta/property-keyframes tl sid :opacity))
+            track {:shape-id  sid
+                   :keyframes (mapv #(-> % (dissoc :id) (update :time + 300)) kfs)
+                   :loops     #{:x}}
+            tl2   (:timeline (cta/paste-track tl sid track :merge))]
         (t/is (= [0 500] (mapv :time (cta/property-keyframes tl2 sid :x))))
         (t/is (= [0 300] (mapv :time (cta/property-keyframes tl2 sid :opacity))))
         (t/is (not (cta/looping? tl2 sid :x)))))

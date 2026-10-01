@@ -12,6 +12,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.exceptions :as ex]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
@@ -23,6 +24,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
+   [app.main.data.notifications :as ntf]
    [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.undo :as dwu]
@@ -31,6 +33,7 @@
    [app.main.worker :as mw]
    [app.util.clipboard :as clipboard]
    [app.util.dom :as dom]
+   [app.util.i18n :refer [tr]]
    [app.util.mouse :as mse]
    [app.util.storage :as storage]
    [app.util.timers :as ts]
@@ -310,7 +313,7 @@
    :trim-start :trim-end :trim-offset])
 
 (def animatable-properties
-  (into transform-properties (cons :opacity appearance-properties)))
+  (into transform-properties (concat [:opacity :r1 :r2 :r3 :r4] appearance-properties)))
 
 (defn- store-value
   [m property index v]
@@ -395,7 +398,8 @@
           (distinct)
           (sort)))))
 
-(declare apply-preview select-keyframe set-playhead set-keyframe-value store-keyframe-selection)
+(declare apply-preview motion-mode? select-keyframe set-playhead set-keyframe-value
+         store-keyframe-selection)
 
 (defn- commit-timeline
   "Commit `timeline` (or, when nil, delete it) as the timeline keyed by
@@ -854,110 +858,178 @@
            (rx/ignore)))))
 
 (defn copy-keyframes
-  "Copy the keyframes of `properties` of `shape-id`, with their loop
-  flags, to the animation clipboard."
-  ([shape-id properties]
-   (copy-keyframes shape-id properties nil))
-  ([shape-id properties index]
-   (ptk/reify ::copy-keyframes
-     ptk/UpdateEvent
-     (update [_ state]
-       (if-let [tl (current-timeline state)]
-         (let [properties (set properties)
-               keyframes  (filterv #(and (contains? properties (:property %))
-                                         (or (nil? index) (= (:index %) index)))
-                                   (dm/get-in tl [:tracks shape-id :keyframes]))
-               loops      (into #{}
-                                (keep (fn [property]
-                                        (when (cta/looping? tl shape-id property index)
-                                          (if (some? index) [property index] property))))
-                                properties)]
-           (assoc-in state [:workspace-animation :clipboard]
-                     {:keyframes keyframes
-                      :shapes    {shape-id keyframes}
-                      :loops     loops}))
-         state)))))
+  "Copy the animation of `shape-id` to the clipboard (see
+  `write-animation-clip`): with `property`, the keyframes of that row
+  (with `index`), hidden or not; otherwise what the layer plays, with its
+  presets and pivot."
+  [shape-id property index]
+  (ptk/reify ::copy-keyframes
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [file-id (:current-file-id state)
+            page    (dsh/lookup-page state)
+            files   (dsh/lookup-libraries state)
+            clip    (if (some? property)
+                      (cltl/animation-clip file-id page (:objects page) files [shape-id]
+                                           :properties [[property index]]
+                                           :presets? false)
+                      (cltl/animation-clip file-id page (:objects page) files [shape-id]
+                                           :whole-layer? true))]
+        (when (seq (:layers clip))
+          (rx/of (write-animation-clip clip)))))))
 
 (defn copy-selected-keyframes
-  "Copy the selected keyframes to the animation clipboard, by layer."
+  "Copy the selected keyframes, hidden or not, to the clipboard (see
+  `write-animation-clip`), by layer."
   []
   (ptk/reify ::copy-selected-keyframes
-    ptk/UpdateEvent
-    (update [_ state]
-      (let [tl       (current-timeline state)
-            selected (dm/get-in state [:workspace-animation :selected-kfs])
-            shapes   (reduce (fn [shapes {:keys [shape-id keyframe-id]}]
-                               (if-let [keyframe (d/seek #(= keyframe-id (:id %))
-                                                         (dm/get-in tl [:tracks shape-id :keyframes]))]
-                                 (update shapes shape-id (fnil conj []) keyframe)
-                                 shapes))
-                             {}
-                             selected)]
-        (if (seq shapes)
-          (assoc-in state [:workspace-animation :clipboard]
-                    {:keyframes (into [] (mapcat val) shapes)
-                     :shapes    shapes
-                     :loops     #{}})
-          state)))))
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [selected  (dm/get-in state [:workspace-animation :selected-kfs])
+            shape-ids (into [] (comp (map :shape-id) (distinct) (take cltl/max-clip-layers)) selected)
+            page      (dsh/lookup-page state)
+            clip      (cltl/animation-clip (:current-file-id state) page (:objects page)
+                                           (dsh/lookup-libraries state) shape-ids
+                                           :keyframe-ids (map :keyframe-id selected)
+                                           :presets? false)]
+        (when (seq (:layers clip))
+          (rx/of (write-animation-clip clip)))))))
 
-(defn paste-keyframes-at-playhead
-  "Paste the animation clipboard with its earliest keyframe at the
-  playhead, the others keeping their timing: onto the layers it was
-  copied from or, when it holds those of one layer, onto the selected
-  layer. The pasted keyframes end up selected."
-  []
-  (ptk/reify ::paste-keyframes-at-playhead
+(defn payload-clip
+  "The animation clip of the clipboard text `text` when it holds a valid
+  `:copied-animation` payload (see `write-animation-clip`), or nil."
+  [text]
+  ;; a cheap look first: the clipboard may hold large shape payloads
+  (when (and (string? text) (str/includes? text "~:copied-animation"))
+    (let [payload (ex/ignoring (t/decode-str text))]
+      (when (and (map? payload)
+                 (= :copied-animation (:type payload))
+                 (int? (:version payload))
+                 (cltl/animation-clip-valid? (:clip payload)))
+        (:clip payload)))))
+
+(defn clip-targets
+  "What the dock pastes the animation clip `clip` onto, the pairs
+  `[{:layer :target-id}]` of `cltl/paste-animation`: with one layer, onto
+  each layer of `ids` (see `cltl/paste-targets`) of `objects`; otherwise,
+  or without `ids`, back onto the layers it was copied from, when it was
+  copied on the page `page-id` of the file `file-id`."
+  [clip objects ids file-id page-id]
+  (let [layers  (:layers clip)
+        targets (cltl/paste-targets objects ids)]
+    (cond
+      (and (= 1 (count layers)) (seq targets))
+      (mapv #(hash-map :layer (first layers) :target-id %) targets)
+
+      (and (= file-id (:file-id clip)) (= page-id (:page-id clip)))
+      (into []
+            (keep #(when (contains? objects (:shape-id %))
+                     {:layer % :target-id (:shape-id %)}))
+            layers)
+
+      :else
+      [])))
+
+(defn paste-result-toast
+  "The toast telling what a paste of an animation clip (see
+  `cltl/paste-animation`) left out or changed, or nil."
+  [{:keys [skipped grown]}]
+  (let [notes (cond-> []
+                (pos? skipped) (conj (tr "workspace.animation.paste-skipped" skipped))
+                (seq grown)    (conj (tr "workspace.animation.paste-grown")))]
+    (when (seq notes)
+      (ntf/show {:content (str/join " " notes)
+                 :type :toast
+                 :level (if (pos? skipped) :warning :info)
+                 :timeout 5000}))))
+
+(defn- pasted-keyframes
+  "The keyframes of the layers `targets` in `timelines` that are not in
+  `before`, as the keyframe selection holds them."
+  [before timelines targets]
+  (let [ids-of (fn [timelines shape-id]
+                 (when-let [[_ track] (cltl/find-track timelines shape-id)]
+                   (into #{} (map :id) (:keyframes track))))]
+    (into #{}
+          (mapcat (fn [shape-id]
+                    (let [old (ids-of before shape-id)]
+                      (for [id (ids-of timelines shape-id)
+                            :when (not (contains? old id))]
+                        {:shape-id shape-id :keyframe-id id}))))
+          targets)))
+
+(defn- paste-clip*
+  "Paste the animation clip `clip` onto the layers `ids` (see
+  `clip-targets`), added to what they play with its earliest keyframe or
+  preset at the playhead, and select the pasted keyframes."
+  [clip ids]
+  (ptk/reify ::paste-clip
     ptk/WatchEvent
     (watch [it state _]
-      (let [{:keys [shapes loops]} (dm/get-in state [:workspace-animation :clipboard])
-            tl (current-or-new-timeline state)]
-        (if (and (some? tl) (seq shapes))
-          (let [objects   (dsh/lookup-page-objects state)
-                board-id  (:board-id tl)
-                in-board? #(or (= % board-id)
-                               (= board-id (cfh/get-shape-id-root-frame objects %)))
-                selected  (d/seek in-board? (dsh/lookup-selected state))
-                targets   (if (and (= 1 (count shapes)) (some? selected))
-                            {selected (val (first shapes))}
-                            (into {} (filter (comp in-board? key)) shapes))
-                earliest  (fn [keyframes] (reduce min (map :time keyframes)))
-                start     (earliest (mapcat val targets))
-                time      (playhead state)
-                tl'       (reduce-kv (fn [tl shape-id keyframes]
-                                       (cta/paste-keyframes tl shape-id keyframes loops
-                                                            (+ time (- (earliest keyframes) start))))
-                                     tl
-                                     targets)
-                ids-of    (fn [tl shape-id]
-                            (into #{} (map :id) (dm/get-in tl [:tracks shape-id :keyframes])))
-                pasted    (into #{}
-                                (mapcat (fn [shape-id]
-                                          (let [before (ids-of tl shape-id)]
-                                            (for [id (ids-of tl' shape-id)
-                                                  :when (not (contains? before id))]
-                                              {:shape-id shape-id :keyframe-id id}))))
-                                (keys targets))]
-            (if (= tl tl')
-              (rx/empty)
-              (rx/of (commit-timeline it state (:board-id tl') tl')
-                     #(store-keyframe-selection % pasted)
-                     (apply-preview))))
-          (rx/empty))))))
+      (cond
+        (-> state :workspace-global :read-only?)
+        (rx/empty)
 
-(defn paste-keyframes
-  "Paste the animation clipboard onto `shape-id`, starting at the
-  playhead."
+        (not (features/active-feature? state "animation/v1"))
+        (rx/of (ntf/warn (tr "workspace.animation.paste-needs-motion")))
+
+        :else
+        (let [file-id (:current-file-id state)
+              page    (dsh/lookup-page state)
+              pairs   (clip-targets clip (:objects page) ids file-id (:id page))
+              result  (cltl/generate-paste-animation (pcb/empty-changes it) file-id page clip pairs
+                                                     {:mode :merge :time (playhead state)})]
+          (cond
+            (= :too-large (:error result))
+            (rx/of (ntf/warn (tr "workspace.animation.paste-too-large")))
+
+            (empty? (:targets result))
+            (rx/of (ntf/warn (tr "workspace.animation.paste-no-target")))
+
+            :else
+            (let [pasted (pasted-keyframes (:timelines page) (:timelines result) (:targets result))
+                  toast  (paste-result-toast result)]
+              (rx/from (cond-> [(dch/commit-changes (:changes result))
+                                #(store-keyframe-selection % pasted)]
+                         (motion-mode? state) (conj (apply-preview))
+                         (some? toast)        (conj toast))))))))))
+
+(defn paste-clip-at-playhead
+  "Paste the animation clip `clip`, from Cmd/Ctrl+V in the dock, at the
+  playhead: with one layer, onto the selected layers of the active board;
+  otherwise back onto the layers it was copied from (see
+  `clip-targets`)."
+  [clip]
+  (ptk/reify ::paste-clip-at-playhead
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [objects   (dsh/lookup-page-objects state)
+            board-id  (active-board-id state)
+            in-board? #(or (= % board-id) (= board-id (cfh/get-shape-id-root-frame objects %)))]
+        (rx/of (paste-clip* clip (filter in-board? (dsh/lookup-selected state))))))))
+
+(defn paste-clip
+  "Paste the animation clip `clip` at the playhead onto `shape-id`, from
+  the menu of its row, when it holds one layer; otherwise back onto the
+  layers it was copied from (see `clip-targets`)."
+  [clip shape-id]
+  (paste-clip* clip [shape-id]))
+
+(defn paste-clipboard-onto
+  "Paste the animation on the clipboard onto `shape-id` (see
+  `paste-clip`)."
   [shape-id]
-  (ptk/reify ::paste-keyframes
+  (ptk/reify ::paste-clipboard-onto
     ptk/WatchEvent
-    (watch [it state _]
-      (let [tl (current-timeline state)
-            {:keys [keyframes loops]} (dm/get-in state [:workspace-animation :clipboard])]
-        (if (and (some? tl) (seq keyframes))
-          (let [tl' (cta/paste-keyframes tl shape-id keyframes loops (playhead state))]
-            (rx/of (commit-timeline it state (:board-id tl') tl')
-                   (apply-preview)))
-          (rx/empty))))))
+    (watch [_ _ _]
+      (->> (rx/from (clipboard/read-text))
+           (rx/map (fn [text]
+                     (if-let [clip (payload-clip text)]
+                       (paste-clip clip shape-id)
+                       (ntf/warn (tr "workspace.animation.paste-invalid")))))
+           (rx/catch (fn [cause]
+                       (rx/of (ntf/warn (or (clipboard/error-message cause)
+                                            (tr "workspace.animation.paste-invalid"))))))))))
 
 (defn toggle-track-loop
   ([shape-id property]

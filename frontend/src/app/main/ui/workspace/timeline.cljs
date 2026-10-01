@@ -24,6 +24,7 @@
    [app.config :as cfg]
    [app.main.data.comments :as dcm]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.clipboard :as dwcp]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.selection :as dws]
@@ -233,7 +234,6 @@
 
 (def ^:private c-key? (kbd/is-key-ignore-case? "c"))
 (def ^:private x-key? (kbd/is-key-ignore-case? "x"))
-(def ^:private v-key? (kbd/is-key-ignore-case? "v"))
 (def ^:private m-key? (kbd/is-key-ignore-case? "m"))
 
 (def ^:private marquee-threshold
@@ -1699,7 +1699,12 @@
         ;; property lane.
         menu*      (mf/use-state nil)
         menu       (deref menu*)
-        can-paste? (boolean (seq (dm/get-in anim [:clipboard :keyframes])))
+
+        ;; What the clipboard holds, read when the menu opens: Chrome reads
+        ;; it without asking, the other browsers try when pasting.
+        paste-type* (mf/use-state nil)
+        can-paste?  (or (not (cfg/check-browser? :chrome))
+                        (= :copied-animation (deref paste-type*)))
 
         on-context-menu
         (mf/use-fn
@@ -2057,13 +2062,14 @@
 
         ;; A click in the dock focuses it; then Delete/Backspace delete the
         ;; selected keyframes, the arrows move them (10 ms, 100 ms with
-        ;; Shift) and Cmd/Ctrl+C, X and V copy, cut and paste them at the
-        ;; playhead, instead of reaching the workspace shortcuts for the
-        ;; selected shapes. M adds a marker at the playhead and Alt with
-        ;; the arrows goes to the marker before or after it.
+        ;; Shift) and Cmd/Ctrl+C and X copy and cut them to the clipboard,
+        ;; instead of reaching the workspace shortcuts for the selected
+        ;; shapes (Cmd/Ctrl+V: see `on-paste`). M adds a marker at the
+        ;; playhead and Alt with the arrows goes to the marker before or
+        ;; after it.
         on-key-down
         (mf/use-fn
-         (mf/deps selected-kfs can-paste? timeline)
+         (mf/deps selected-kfs timeline)
          (fn [event]
            (cond
              (editing-text? event)
@@ -2092,11 +2098,6 @@
                  (if (x-key? event)
                    (st/emit! (dwa/copy-selected-keyframes) (dwa/delete-selected-keyframes))
                    (st/emit! (dwa/copy-selected-keyframes))))
-
-             (and (kbd/mod? event) (v-key? event) can-paste?)
-             (do (dom/prevent-default event)
-                 (dom/stop-propagation event)
-                 (st/emit! (dwa/paste-keyframes-at-playhead)))
 
              (and (seq selected-kfs)
                   (or (kbd/left-arrow? event) (kbd/right-arrow? event)))
@@ -2135,30 +2136,53 @@
                 :handler #(st/emit! (dwa/remove-animation shape-id animation-id))}]
 
               :else
-              (let [properties (if (some? property) [property] dwa/animatable-properties)]
-                (cond-> [{:name (tr "workspace.shape.menu.copy")
-                          :id "copy"
-                          :handler #(st/emit! (dwa/copy-keyframes shape-id properties index))}
-                         {:name (tr "workspace.shape.menu.paste")
-                          :id "paste"
-                          :disabled (not can-paste?)
-                          :handler #(st/emit! (dwa/paste-keyframes shape-id))}
-                         {:name :separator}]
-                  (some? property)
-                  (conj {:name (tr "workspace.animation.loop-track")
-                         :id "loop-track"
-                         :disabled menu-locked?
-                         :handler #(st/emit! (dwa/toggle-track-loop shape-id property index))})
+              (cond-> [{:name (tr "workspace.shape.menu.copy")
+                        :id "copy"
+                        :handler #(st/emit! (dwa/copy-keyframes shape-id property index))}
+                       {:name (tr "workspace.shape.menu.paste")
+                        :id "paste"
+                        :disabled (not can-paste?)
+                        :handler #(st/emit! (dwa/paste-clipboard-onto shape-id))}
+                       {:name :separator}]
+                (some? property)
+                (conj {:name (tr "workspace.animation.loop-track")
+                       :id "loop-track"
+                       :disabled menu-locked?
+                       :handler #(st/emit! (dwa/toggle-track-loop shape-id property index))})
 
-                  :always
-                  (conj {:name (tr "workspace.animation.delete-track")
-                         :id "delete-track"
-                         :disabled menu-locked?
-                         :handler #(st/emit! (dwa/delete-track shape-id property index))}))))))
+                :always
+                (conj {:name (tr "workspace.animation.delete-track")
+                       :id "delete-track"
+                       :disabled menu-locked?
+                       :handler #(st/emit! (dwa/delete-track shape-id property index))})))))
 
         menu-looping?
         (and (some? (:property menu))
              (cta/looping? timeline (:shape-id menu) (:property menu) (:index menu)))]
+
+    ;; The paste entry of the menu needs to know what the clipboard holds.
+    (mf/with-effect [menu]
+      (when (and (some? menu) (cfg/check-browser? :chrome))
+        (dwcp/clipboard-payload-type (partial reset! paste-type*)))
+      nil)
+
+    ;; Cmd/Ctrl+V in the dock pastes an animation, copied in the dock or
+    ;; on the canvas, at the playhead (see `dwa/paste-clip-at-playhead`).
+    ;; Anything else on the clipboard goes on to the workspace, which
+    ;; pastes it as before.
+    (mf/with-effect []
+      (let [on-paste
+            (fn [^js event]
+              (when-not (editing-text? event)
+                (when-let [clip (some-> (.getBrowserEvent event)
+                                        (.-clipboardData)
+                                        (.getData "text/plain")
+                                        (dwa/payload-clip))]
+                  (dom/prevent-default event)
+                  (dom/stop-propagation event)
+                  (st/emit! (dwa/paste-clip-at-playhead clip)))))
+            key (events/listen (mf/ref-val dock-ref) "paste" on-paste)]
+        #(events/unlistenByKey key)))
 
     ;; Focus the easing editor when it opens, so Escape closes it.
     (mf/with-effect [easing]

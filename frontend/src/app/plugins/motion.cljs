@@ -250,6 +250,37 @@
                       (se/add-event plugin-id))))
       true)))
 
+(defn- paste-animation!
+  "Paste the animation of the layer `shape-id` onto the layers
+  `target-ids`, in that order, of the page `page-id`, in the boards they
+  are in, and commit it, as pasting a copied animation does (see
+  `cltl/paste-animation` for `opts`): `{:targets :skipped :pivot-kept}`.
+  Nil, reported as `code`, when the plugin may not, the layer has nothing
+  to copy or it would paste too much."
+  [plugin-id file-id page-id code shape-id target-ids {:keys [properties presets?] :as opts}]
+  (if-let [error (write-error plugin-id page-id)]
+    (u/not-valid plugin-id code error)
+    (let [page  (u/locate-page file-id page-id)
+          clip  (cltl/animation-clip file-id page (:objects page) (:files @st/state) [shape-id]
+                                     :properties properties
+                                     :presets? presets?
+                                     :whole-layer? true)
+          layer (first (:layers clip))]
+      (if (nil? layer)
+        (u/not-valid plugin-id code "The shape has no animation to copy")
+        (let [pairs  (mapv #(hash-map :layer layer :target-id %) target-ids)
+              result (cltl/generate-paste-animation (pcb/empty-changes) file-id page clip pairs
+                                                    (assoc opts :skip-source? true))]
+          (if (some? (:error result))
+            (u/not-valid plugin-id code
+                         (dm/str "Too much to paste: at most " cltl/max-paste-targets
+                                 " layers and " cltl/max-paste-keyframes " keyframes in all"))
+            (do
+              (when (seq (:redo-changes (:changes result)))
+                (st/emit! (-> (dch/commit-changes (:changes result))
+                              (se/add-event plugin-id))))
+              result)))))))
+
 (defn- locked?
   [file-id page-id board-id shape-id {:keys [property index]}]
   (cta/slot-flag? (locate-timeline file-id page-id board-id) shape-id :locked property index))
@@ -541,6 +572,43 @@
         (contains? numbers "offsetX") (assoc :offset-x (get numbers "offsetX"))
         (contains? numbers "offsetY") (assoc :offset-y (get numbers "offsetY"))))))
 
+(defn- copy-options
+  "The settings the object `options` of `Timeline.copyAnimation` gives
+  `cltl/paste-animation`, or a string saying what is wrong with them."
+  [options]
+  (let [names    (obj/get options "properties")
+        presets? (obj/get options "presets")
+        values   (obj/get options "values")
+        start    (obj/get options "start")
+        stagger  (obj/get options "stagger")
+        replace? (obj/get options "replace")]
+    (cond
+      (and (some? names) (not (and (array? names) (every? #(contains? properties %) names))))
+      "The properties should be an array of properties that can be animated"
+
+      (and (some? presets?) (not (boolean? presets?)))
+      "Whether it copies the preset animations should be true or false"
+
+      (and (some? values) (not (contains? #{"relative" "exact"} values)))
+      "The values should be 'relative' or 'exact'"
+
+      (and (some? start) (not (valid-time? start)))
+      "The start should be a number of milliseconds from 0"
+
+      (and (some? stagger) (not (valid-time? stagger)))
+      "The stagger should be a number of milliseconds from 0"
+
+      (and (some? replace?) (not (boolean? replace?)))
+      "Whether it replaces the animation of the targets should be true or false"
+
+      :else
+      {:properties (some->> names (into #{} (map properties)))
+       :presets?   (d/nilv presets? true)
+       :exact?     (= "exact" values)
+       :time       (some-> start mth/round)
+       :stagger    (mth/round (d/nilv stagger 0))
+       :mode       (if (false? replace?) :merge :replace)})))
+
 (defn- track-items
   "`[shape-id item]` of the keyframes (`:keyframes`) or preset animations
   (`:animations`) of every layer of `timeline`, by time."
@@ -766,6 +834,36 @@
       (fn [shape]
         (when-let [shape-id (layer :clear shape)]
           (write! :clear #(cta/remove-track % shape-id))))
+
+      ;; As copying the animation of a layer on the canvas and pasting it
+      ;; onto others, in the boards of the page they are in.
+      :copyAnimation
+      (fn [shape targets options]
+        (when-let [shape-id (layer :copyAnimation shape)]
+          (let [ids  (when (array? targets)
+                       (mapv #(when (and (shape-proxy? %)
+                                         (= file-id (obj/get % "$file"))
+                                         (= page-id (obj/get % "$page")))
+                                (obj/get % "$id"))
+                             targets))
+                opts (cond
+                       (nil? options)    (copy-options #js {})
+                       (object? options) (copy-options options)
+                       :else             "The options should be an object")]
+            (cond
+              (or (nil? ids) (some nil? ids))
+              (u/not-valid plugin-id :copyAnimation "The targets should be an array of shapes of the page of the timeline")
+
+              (string? opts)
+              (u/not-valid plugin-id :copyAnimation opts)
+
+              :else
+              (when-let [{:keys [targets skipped pivot-kept]}
+                         (paste-animation! plugin-id file-id page-id :copyAnimation shape-id
+                                           (distinct ids) opts)]
+                #js {:targets (count targets)
+                     :skipped skipped
+                     :pivotKept pivot-kept})))))
 
       ;; With the animations of the component copies in the board, as the
       ;; exports of the app (see `dwa/board-export-timeline`).

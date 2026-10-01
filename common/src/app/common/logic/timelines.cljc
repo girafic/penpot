@@ -667,8 +667,6 @@
   nothing."
   [changes file-id page clip pairs opts]
   (let [result (paste-animation file-id (:id page) (:timelines page) (:objects page) clip pairs opts)]
-    (if (:error result)
-      result
-      (-> result
-          (dissoc :timelines)
-          (assoc :changes (commit-timelines changes page (:timelines result)))))))
+    (cond-> result
+      (nil? (:error result))
+      (assoc :changes (commit-timelines changes page (:timelines result))))))

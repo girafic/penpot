@@ -19,6 +19,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.undo :as dwu]
    [app.util.i18n :refer [tr]]
@@ -258,3 +259,82 @@
          ;; from another file, the layer with the source's id is another one
          (t/is (close-all? [50 150] (x-values state :board-a :source)))
          (t/is (close-all? [200 300] (x-values state :board-a :rect-a))))))))
+
+(t/deftest a-clip-is-read-from-the-clipboard-text
+  (let [clip (:clip (copied (setup-file) :source))
+        text #(transit/encode-str % {:type :json-verbose})]
+    (t/is (= clip (dwa/payload-clip (text {:type :copied-animation :version 1 :clip clip}))))
+    (t/is (nil? (dwa/payload-clip "some text")))
+    (t/is (nil? (dwa/payload-clip nil)))
+    (t/is (nil? (dwa/payload-clip (text {:type :copied-props :version 1 :props {}}))))
+    (t/is (nil? (dwa/payload-clip (text {:type :copied-animation :version 1
+                                         :clip (assoc-in clip [:layers 0 :track :keyframes 0 :time] -1)})))
+          "not a valid clip")
+    (t/is (nil? (dwa/payload-clip "{\"~:type\":\"~:copied-animation\"")) "cut short")))
+
+(t/deftest the-dock-pastes-onto-the-selection-or-back
+  (let [file    (setup-file)
+        page    (cthf/current-page file)
+        objects (:objects page)
+        clip    (:clip (copied file :source))
+        two     (update clip :layers conj (assoc (first (:layers clip)) :shape-id (cthi/id :rect-a)))
+        pairs   #(mapv (juxt (comp :shape-id :layer) :target-id)
+                       (dwa/clip-targets %1 objects (map cthi/id %2) (:id file) (:id page)))]
+
+    (t/testing "one layer goes onto each layer given, not onto a child of another"
+      (t/is (= #{[(cthi/id :source) (cthi/id :rect-a)] [(cthi/id :source) (cthi/id :group)]}
+               (set (pairs clip [:rect-a :group :child])))))
+
+    (t/testing "without layers given, back onto the one it was copied from"
+      (t/is (= [[(cthi/id :source) (cthi/id :source)]] (pairs clip []))))
+
+    (t/testing "several layers go back onto theirs"
+      (t/is (= [[(cthi/id :source) (cthi/id :source)] [(cthi/id :rect-a) (cthi/id :rect-a)]]
+               (pairs two [:rect-b]))))
+
+    (t/testing "not onto a layer of another page or file with the same id"
+      (t/is (= [] (pairs (assoc clip :page-id (uuid/next)) [])))
+      (t/is (= [] (pairs (assoc clip :file-id (uuid/next)) []))))))
+
+(defn- at-playhead
+  [time]
+  #(assoc-in % [:workspace-animation :playhead] time))
+
+(t/deftest the-dock-pastes-at-the-playhead
+  (t/async
+    done
+    (let [file  (setup-file)
+          store (store-of file)
+          clip  (:clip (copied file :source))]
+      (ths/run-store
+       store done
+       [(select [:rect-a])
+        (at-playhead 500)
+        (dwa/paste-clip-at-playhead clip)]
+       (fn [state]
+         (let [timeline (get (timelines-of state) (cthi/id :board-a))
+               selected (get-in state [:workspace-animation :selected-kfs])]
+           (t/is (close-all? [200 300] (x-values state :board-a :rect-a)))
+           (t/is (= [500 1500] (mapv :time (cta/property-keyframes timeline (cthi/id :rect-a) :x))))
+           (t/is (= 1500 (:duration timeline)))
+           (t/is (= (tr "workspace.animation.paste-grown") (toast state)))
+           (t/is (= 2 (count selected)) "the pasted keyframes are selected")
+           (t/is (= #{(cthi/id :rect-a)} (into #{} (map :shape-id) selected)))))))))
+
+(t/deftest the-dock-pastes-back-onto-the-layers-copied
+  (t/async
+    done
+    (let [file  (setup-file)
+          store (store-of file)
+          clip  (:clip (copied file :source))]
+      (ths/run-store
+       store done
+       [(dws/deselect-all)
+        (at-playhead 200)
+        (dwa/paste-clip-at-playhead clip)]
+       (fn [state]
+         ;; added to its own keyframes
+         (t/is (= [0 200 1000 1200]
+                  (mapv :time (cta/property-keyframes (get (timelines-of state) (cthi/id :board-a))
+                                                      (cthi/id :source) :x))))
+         (t/is (close-all? [50 50 150 150] (x-values state :board-a :source))))))))

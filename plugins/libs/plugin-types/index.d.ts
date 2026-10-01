@@ -3766,6 +3766,32 @@ export interface Timeline {
   ): PresetAnimation[];
 
   /**
+   * Copies the animation of `shape` onto `targets`, as copying an animation
+   * on the canvas and pasting it onto other layers does. Each target moves,
+   * turns and resizes from where it rests, by as much as `shape` does, in
+   * the timeline of the board it is in (a board without one gets one). What
+   * plays is copied: hidden keyframe rows and preset animations are not.
+   * Keyframes of a fill, stroke, shadow, blur or corner radius a target does
+   * not have are left out. So are targets outside any board, and `shape`
+   * itself. One undo step undoes it all.
+   * @param shape The board or a layer inside it.
+   * @param targets Layers of the same page, in any board.
+   * @param options What it copies and how it pastes it.
+   *
+   * @example
+   * ```js
+   * const [first, ...rest] = board.children;
+   * timeline.addAnimationStyle(first, 'slide-up');
+   * timeline.copyAnimation(first, rest, { stagger: 80 });
+   * ```
+   */
+  copyAnimation(
+    shape: Shape,
+    targets: Shape[],
+    options?: CopyAnimationOptions,
+  ): CopyAnimationResult | null;
+
+  /**
    * How the board is exported as an animation, as the export panel sets
    * it and offers it again. Reading it gives all the settings; setting it
    * changes the ones given.
@@ -3840,6 +3866,71 @@ export interface Timeline {
    * Removes the animation of the board.
    */
   remove(): void;
+}
+
+/**
+ * What `Timeline.copyAnimation` copies and how it pastes it.
+ */
+export interface CopyAnimationOptions {
+  /**
+   * Copy only the keyframes of these properties. All of them by default.
+   */
+  properties?: AnimatableProperty[];
+
+  /**
+   * Whether the preset animations are copied too. `true` by default.
+   */
+  presets?: boolean;
+
+  /**
+   * `relative` (the default): the targets move, turn and resize by as much
+   * as the shape does, from where they rest. `exact`: they take the values
+   * of the shape.
+   */
+  values?: 'relative' | 'exact';
+
+  /**
+   * When the copy starts on the targets, in milliseconds: its first
+   * keyframe or preset animation lands there. By default it keeps the
+   * timing of the shape.
+   */
+  start?: number;
+
+  /**
+   * How much later each target starts than the one before it in `targets`,
+   * in milliseconds. 0 by default.
+   */
+  stagger?: number;
+
+  /**
+   * Whether the copy takes the place of the keyframes the targets have of
+   * the same properties, and of their preset animations when it has some
+   * (`true`, the default), or is added to them (`false`). Locked
+   * properties keep their keyframes.
+   */
+  replace?: boolean;
+}
+
+/**
+ * What `Timeline.copyAnimation` did.
+ */
+export interface CopyAnimationResult {
+  /**
+   * How many targets got the animation.
+   */
+  readonly targets: number;
+
+  /**
+   * How many keyframes were left out because the target has no matching
+   * fill, stroke, shadow, blur or corner radius.
+   */
+  readonly skipped: number;
+
+  /**
+   * How many targets kept their own pivot because they already turn, scale
+   * or resize: the copy turns, scales or resizes them around it.
+   */
+  readonly pivotKept: number;
 }
 
 /**

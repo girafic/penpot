@@ -816,22 +816,11 @@
             (rx/of (ntf/warn (tr "workspace.animation.paste-no-target")))
 
             :else
-            (let [{:keys [changes skipped grown]} result
-                  notes (cond-> []
-                          (pos? skipped) (conj (tr "workspace.animation.paste-skipped" skipped))
-                          (seq grown)    (conj (tr "workspace.animation.paste-grown")))]
-              (rx/concat
-               (rx/of (dch/commit-changes changes))
-               ;; out of motion mode the canvas shows the layers at rest
-               (if (dwa/motion-mode? state)
-                 (rx/of (dwa/apply-preview))
-                 (rx/empty))
-               (if (seq notes)
-                 (rx/of (ntf/show {:content (str/join " " notes)
-                                   :type :toast
-                                   :level (if (pos? skipped) :warning :info)
-                                   :timeout 5000}))
-                 (rx/empty))))))))))
+            (let [toast (dwa/paste-result-toast result)]
+              (rx/from (cond-> [(dch/commit-changes (:changes result))]
+                         ;; out of motion mode the canvas shows the layers at rest
+                         (dwa/motion-mode? state) (conj (dwa/apply-preview))
+                         (some? toast)            (conj toast))))))))))
 
 (defn paste-shapes
   [{in-viewport? :in-viewport :as pdata}]
