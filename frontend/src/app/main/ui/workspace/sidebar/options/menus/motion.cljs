@@ -9,6 +9,7 @@
   the animatable rows and the preset animations of the selection."
   (:require-macros [app.main.style :as stl])
   (:require
+   [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.math :as mth]
    [app.common.path-names :as cpn]
@@ -164,6 +165,9 @@
       :rotate (if out? (tr "workspace.animation.rotate-out") (tr "workspace.animation.rotate-in"))
       (name type))))
 
+(def ^:private noop
+  (constantly nil))
+
 (defn- easing->option
   [easing]
   (cond
@@ -205,6 +209,11 @@
   (let [{:keys [id type direction start duration easing amount offset-x offset-y locked]} animation
         read-only? (true? read-only)
         locked?    (or (true? locked) read-only?)
+
+        ;; the number fields take functions or nothing: the layers list
+        ;; has no drag of its own to follow
+        on-change-start (d/nilv on-change-start noop)
+        on-change-end   (d/nilv on-change-end noop)
 
         open*  (mf/use-state false)
         open?  (deref open*)
