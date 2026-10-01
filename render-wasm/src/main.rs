@@ -630,6 +630,18 @@ pub extern "C" fn set_shape_trim(start: f32, end: f32, offset: f32) -> Result<()
     Ok(())
 }
 
+/// Pose the units of the current text one by one, as the bytes buffer holds
+/// them (see `shapes::text_units`); no units draw it at rest.
+#[no_mangle]
+#[wasm_error]
+pub extern "C" fn set_shape_text_units() -> Result<()> {
+    let units = shapes::TextUnits::from_bytes(&mem::bytes())?;
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        shape.set_text_units(units);
+    });
+    Ok(())
+}
+
 #[no_mangle]
 #[wasm_error]
 pub extern "C" fn set_shape_hidden(hidden: bool) -> Result<()> {

@@ -1560,24 +1560,34 @@ pub fn add_text_with_tabs(builder: &mut ParagraphBuilder, text: &str, font_size:
     }
 }
 
+/// What `process_ignored_chars` makes of `c`: control characters below
+/// U+0020 other than tabs and line breaks are dropped in Firefox and turned
+/// into spaces elsewhere.
+fn ignored_char(c: char, browser: u8) -> Option<char> {
+    if c == '\t' || c == '\n' || c == '\r' || c == '\u{2028}' || c == '\u{2029}' {
+        return Some(c);
+    }
+    if c < '\u{0020}' {
+        if browser == Browser::Firefox as u8 {
+            None
+        } else {
+            Some(' ')
+        }
+    } else {
+        Some(c)
+    }
+}
+
+/// The UTF-16 length of `chars`.
+fn utf16_len(chars: impl Iterator<Item = char>) -> usize {
+    chars.map(char::len_utf16).sum()
+}
+
 /// Filter control characters below U+0020, preserving tabs and line breaks.
 /// Browser-dependent: Firefox drops them, others replace with space.
 fn process_ignored_chars(text: &str, browser: u8) -> String {
     text.chars()
-        .filter_map(|c| {
-            if c == '\t' || c == '\n' || c == '\r' || c == '\u{2028}' || c == '\u{2029}' {
-                return Some(c);
-            }
-            if c < '\u{0020}' {
-                if browser == Browser::Firefox as u8 {
-                    None
-                } else {
-                    Some(' ')
-                }
-            } else {
-                Some(c)
-            }
-        })
+        .filter_map(|c| ignored_char(c, browser))
         .collect()
 }
 
@@ -1767,6 +1777,36 @@ impl TextSpan {
 
     pub fn apply_text_transform(&self) -> String {
         self.transform_text(&self.text)
+    }
+
+    /// Call `f` with each character of the text and the UTF-16 length it
+    /// takes in the laid out text, where `transform_text` has run over the
+    /// whole span with the ignored characters of `browser`: 0 for a dropped
+    /// control character, 2 for `ß` in uppercase. The lengths add up to the
+    /// UTF-16 length of `transform_text(&self.text)`.
+    pub fn for_each_laid_out_char(&self, browser: u8, mut f: impl FnMut(char, usize)) {
+        // as `capitalize_words`
+        let mut capitalize_next = true;
+        for c in self.text.chars() {
+            let len = match ignored_char(c, browser) {
+                None => 0,
+                Some(c) => match self.text_transform {
+                    Some(TextTransform::Uppercase) => utf16_len(c.to_uppercase()),
+                    Some(TextTransform::Lowercase) => utf16_len(c.to_lowercase()),
+                    Some(TextTransform::Capitalize) => {
+                        let len = if c.is_alphabetic() && capitalize_next {
+                            utf16_len(c.to_uppercase())
+                        } else {
+                            c.len_utf16()
+                        };
+                        capitalize_next = !c.is_alphabetic();
+                        len
+                    }
+                    None => c.len_utf16(),
+                },
+            };
+            f(c, len);
+        }
     }
 
     pub fn scale_content(&mut self, value: f32) {

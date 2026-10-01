@@ -1131,6 +1131,12 @@
   [start end offset]
   (h/call wasm/internal-module "_set_shape_trim" (or start 0) (or end 1) (or offset 0)))
 
+(defn set-shape-text-units
+  "Pose the units of the current text one by one, see
+  `props/set-shape-text-units`."
+  [entries]
+  (props/set-shape-text-units entries))
+
 (defn set-constraints-h
   [constraint]
   (when constraint

@@ -28,6 +28,7 @@ mod svg_attrs;
 mod svgraw;
 mod text;
 pub mod text_paths;
+pub mod text_units;
 mod transform;
 
 pub use blend::*;
@@ -49,6 +50,7 @@ pub use strokes::*;
 pub use svg_attrs::*;
 pub use svgraw::*;
 pub use text::*;
+pub use text_units::TextUnits;
 pub use transform::*;
 
 use crate::math::{self, Bounds, Matrix, Point};
@@ -206,6 +208,9 @@ pub struct Shape {
     deferred_batch_strokes: Option<Vec<Stroke>>,
     // Path trim of the strokes (start, end, offset), see `Stroke::trim`.
     pub trim: Option<(f32, f32, f32)>,
+    /// The units of a text that a split animation poses one by one, see
+    /// `text_units`.
+    pub text_units: Option<TextUnits>,
 }
 
 // Returns all ancestor shapes of this shape, traversing up the parent hierarchy
@@ -311,6 +316,7 @@ impl Shape {
             deferred_batch_fills: None,
             deferred_batch_strokes: None,
             trim: None,
+            text_units: None,
         }
     }
 
@@ -443,6 +449,14 @@ impl Shape {
         } else {
             Some((start, end, offset))
         };
+    }
+
+    /// Pose the units of the text one by one (see `text_units`); `None`
+    /// draws it at rest. They can reach out of the text, so the extrect is
+    /// worked out again.
+    pub fn set_text_units(&mut self, units: Option<TextUnits>) {
+        self.text_units = units;
+        self.invalidate_extrect();
     }
 
     pub fn set_vertical_align(&mut self, align: VerticalAlign) {
@@ -1150,7 +1164,15 @@ impl Shape {
             }
             Type::Text(text_content) => {
                 // FIXME: we need to recalculate the text bounds here because the shape's selrect
-                text_content.calculate_bounds(shape, false)
+                let bounds = text_content.calculate_bounds(shape, false);
+                match &shape.text_units {
+                    Some(units) => {
+                        let rect = bounds.to_rect();
+                        let outset = units.outset(&rect);
+                        Bounds::from_rect(&rect.with_outset((outset, outset)))
+                    }
+                    None => bounds,
+                }
             }
             _ => shape.calculate_bounds(false),
         }

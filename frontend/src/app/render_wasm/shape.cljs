@@ -180,6 +180,10 @@
         (:trim-start :trim-end :trim-offset)
         (api/set-shape-trim (:trim-start shape) (:trim-end shape) (:trim-offset shape))
 
+        ;; the units of a text a split animation poses (Penpot Motion)
+        :text-units
+        (api/set-shape-text-units v)
+
         :hidden
         (api/set-shape-hidden v)
 

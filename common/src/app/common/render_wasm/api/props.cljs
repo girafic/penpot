@@ -19,6 +19,7 @@
    [app.common.render-wasm.mem :as mem]
    [app.common.render-wasm.serializers :as sr]
    [app.common.render-wasm.serializers.color :as sr-clr]
+   [app.common.render-wasm.serializers.text-units :as sr-tu]
    [app.common.render-wasm.wasm :as wasm]
    [app.common.types.fills :as types.fills]
    [app.common.types.fills.impl :as types.fills.impl]
@@ -170,6 +171,15 @@
         offset (mem/alloc size)]
     (h/call wasm/internal-module "stringToUTF8" content offset size)
     (h/call wasm/internal-module "_set_shape_svg_raw_content")))
+
+(defn set-shape-text-units
+  "Pose the units of the current text one by one, as a split animation of
+  Penpot Motion moves them (see `app.common.render-wasm.serializers.text-units`);
+  nil or no `entries` draw it at rest."
+  [entries]
+  (sr-tu/write! entries)
+  (h/call wasm/internal-module "_set_shape_text_units")
+  nil)
 
 (defn set-shape-path-content
   "Upload path content in chunks to WASM."

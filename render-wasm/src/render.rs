@@ -16,6 +16,7 @@ mod surfaces;
 pub mod svg;
 pub mod text;
 pub mod text_editor;
+pub mod text_units;
 mod ui;
 mod vector;
 

@@ -1,4 +1,4 @@
-use super::{filters, RenderState, Shape, SurfaceId, DEFAULT_EMOJI_FONT};
+use super::{filters, text_units, RenderState, Shape, SurfaceId, DEFAULT_EMOJI_FONT};
 use crate::{
     error::Result,
     math::Rect,
@@ -331,6 +331,12 @@ pub fn try_paint_from_layout_cache(
     surface_id: Option<SurfaceId>,
     layout_cache_rotation_only: bool,
 ) -> Result<bool> {
+    // the cached paragraphs are shared and cannot be walked glyph by glyph,
+    // so a text with units posed is laid out again (see `text_units`)
+    if shape.text_units.is_some() {
+        return Ok(false);
+    }
+
     let text_content = shape.get_text_content();
     let cache_usable = if layout_cache_rotation_only {
         text_content.layout_cache_versions_match()
@@ -523,8 +529,20 @@ fn paint_text_with_emoji_overlay(
     overlay_emoji: bool,
 ) {
     let text_content = shape.get_text_content();
+    let group_sizes: Vec<usize> = paragraph_builder_groups.iter().map(Vec::len).collect();
     let mut layout_info =
         calculate_text_layout_data(shape, text_content, paragraph_builder_groups, true);
+
+    if let Some(units) = &shape.text_units {
+        text_units::paint_layouts(
+            canvas,
+            text_content,
+            &mut layout_info.paragraphs,
+            &group_sizes,
+            units,
+        );
+        return;
+    }
 
     for para in &mut layout_info.paragraphs {
         para.paragraph.paint(canvas, (para.x, para.y));
@@ -770,6 +788,12 @@ pub fn render_emoji_overlay(
     surface_id: SurfaceId,
     blur: Option<&ImageFilter>,
 ) {
+    // The overlay would paint the emoji at rest over units that move.
+    // TODO: pose the emoji of the overlay too (text animation v1 leaves it out).
+    if shape.text_units.is_some() {
+        return;
+    }
+
     let text_content = shape.get_text_content();
     let mut emoji_layout = calculate_text_layout_data(shape, text_content, emoji_builders, true);
 
