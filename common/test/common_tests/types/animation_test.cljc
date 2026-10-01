@@ -17,6 +17,7 @@
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
+   [app.common.types.text-units :as tu]
    [app.common.uuid :as uuid]
    [clojure.string :as str]
    [clojure.test :as t]
@@ -1573,6 +1574,7 @@
                                             :interpolation :step})
                      (cta/add-keyframe sid {:time 0 :property :opacity :value 1 :easing :ease-in})
                      (cta/add-animation sid {:type :move :offset-x 10 :easing cta/overshoot-easing})
+                     (cta/add-animation sid {:type :fade :split :char :spread 0.3 :order :random})
                      (cta/toggle-loop sid :x)
                      (cta/toggle-slot-flag sid :hidden :fill-color 0)
                      (cta/toggle-slot-flag sid :locked :opacity)
@@ -1735,8 +1737,9 @@
         (t/is (not (cta/valid-timeline? tl)) (pr-str (:type animation)))
         (t/is (some? (sm/explain cta/schema:timeline tl)))))))
 
-(t/deftest builtin-styles-are-the-seven-composites
-  (t/is (= #{:slide-up :slide-down :slide-left :slide-right :pop :zoom :spin}
+(t/deftest builtin-styles-are-the-composites-and-the-text-presets
+  (t/is (= #{:slide-up :slide-down :slide-left :slide-right :pop :zoom :spin
+             :typewriter :rise-words :cascade-lines :pop-letters}
            (set (keys cta/builtin-styles)))))
 
 (defn- arc-timeline
@@ -2367,3 +2370,330 @@
   (t/is (cta/keyframe-value-fits? {:property :fill-color :value "#ff00ff"}))
   (t/is (not (cta/keyframe-value-fits? {:property :x :value "#ffffff"})))
   (t/is (not (cta/keyframe-value-fits? {:property :fill-color :value 3}))))
+
+;; TEXT SPLITS
+
+(defn- text-content
+  "Text content of `paragraphs`, one leaf each."
+  [& paragraphs]
+  {:type "root"
+   :children [{:type "paragraph-set"
+               :children (mapv (fn [text] {:type "paragraph" :children [{:text text}]})
+                               paragraphs)}]})
+
+(defn- board-and-text
+  "A board at 100,100 with a text of `paragraphs` at 50,100 inside it."
+  [& paragraphs]
+  (let [board (cts/setup-shape {:type :frame :x 100 :y 100 :width 800 :height 600})
+        text  (-> (cts/setup-shape {:type :text :x 150 :y 200 :width 300 :height 40})
+                  (assoc :content (apply text-content paragraphs)))
+        bid   (:id board)]
+    {:board board
+     :text text
+     :objects {bid (assoc board :shapes [(:id text)])
+               (:id text) (assoc text :frame-id bid :parent-id bid)}}))
+
+(defn- text-timeline
+  "A timeline of `board` with `animations` on the shape `sid`."
+  [board sid & animations]
+  (reduce #(cta/add-animation %1 sid %2)
+          (cta/make-timeline {:board-id (:id board) :duration 2000})
+          animations))
+
+(defn- text-units-at
+  "The `:text-units` the animation of `timeline` gives `sid` at `time`,
+  `::none` without."
+  [timeline objects sid time]
+  (-> (cta/timeline->modif-tree timeline objects time)
+      (get-in [sid :modifiers])
+      (cta/appearance-changes)
+      (get :text-units ::none)))
+
+(defn- ranges
+  [entries]
+  (mapv (juxt :paragraph :start :end) entries))
+
+(t/deftest a-split-animation-keeps-its-settings
+  (let [sid       (uuid/next)
+        tl        (cta/add-animation (mk-timeline) sid {:type :fade :split :word})
+        aid       (:id (first (get-in tl [:tracks sid :animations])))
+        animation (cta/get-animation tl sid aid)
+        settings  #(select-keys % [:split :spread :order :seed])]
+    (t/is (= {:split :word :spread 0.5 :order :forward} (settings animation))
+          "half spread and in reading order by default")
+    (t/is (cta/valid-timeline? tl))
+    (t/is (= animation (cta/make-animation animation)))
+    (t/is (= {:split :word :spread 0.2 :order :edges}
+             (settings (-> tl
+                           (cta/update-animation sid aid #(assoc % :duration 900 :spread 0.2 :order :edges))
+                           (cta/get-animation sid aid)))))))
+
+(t/deftest split-settings-are-made-valid
+  (t/is (= 1 (:spread (cta/make-animation {:type :fade :split :char :spread 3}))))
+  (t/is (= 0 (:spread (cta/make-animation {:type :fade :split :char :spread -1}))))
+  (t/is (= {} (select-keys (cta/make-animation {:type :fade :split :letter :spread 1 :order :edges})
+                           [:split :spread :order :seed]))
+        "no split settings without a known split")
+  (t/is (not (sm/validate cta/schema:preset-animation
+                          (assoc (cta/make-animation {:type :fade}) :split :letter))))
+  (let [animation (cta/make-animation {:type :fade :split :word :order :random})]
+    (t/is (int? (:seed animation)) "a random order gets a seed")
+    (t/is (= (:seed animation) (:seed (cta/make-animation animation))) "and keeps it")
+    (t/is (sm/validate cta/schema:preset-animation animation))))
+
+(t/deftest a-split-fade-in-holds-its-units-until-they-start
+  (let [{:keys [board text objects]} (board-and-text "Hi you there")
+        sid (:id text)
+        tl  (text-timeline board sid {:type :fade :split :word :start 100 :duration 1000})
+        at  #(text-units-at tl objects sid %)]
+    (t/is (= [[0 0 2] [0 3 6] [0 7 12]] (ranges (at 0))))
+    (t/is (every? #(and (= :word (:kind %)) (zero? (:opacity %))) (at 0))
+          "an entrance holds its effect, as on a layer")
+    (t/is (apply > (map :opacity (at 400))) "the units start one after the other")
+    (t/is (= [] (at 1100)) "at rest once it ends, and there")
+    (t/is (= [] (at 1600)))))
+
+(t/deftest a-spread-1-fade-ends-at-rest
+  (let [{:keys [board text objects]} (board-and-text "Hi you there")
+        sid (:id text)
+        tl  (text-timeline board sid {:type :fade :split :word :spread 1 :start 100 :duration 1000})]
+    (t/is (= [[0 7 12]] (ranges (text-units-at tl objects sid 1050))) "the last unit plays last")
+    (t/is (= [] (text-units-at tl objects sid 1100)))))
+
+(t/deftest split-animations-stay-on-the-track-of-a-text
+  (let [{:keys [board text objects]} (board-and-text "Hi you")
+        sid   (:id text)
+        track #(cta/get-track (cta/resolve-animations % objects) sid)]
+    (t/testing "a whole move gives keyframes, a split fade none"
+      (let [resolved (track (text-timeline board sid {:type :fade :split :word} {:type :move}))]
+        (t/is (= #{:x :y} (into #{} (map :property) (:keyframes resolved))))
+        (t/is (= [[:fade :word]] (mapv (juxt :type :split) (:animations resolved))))))
+    (t/testing "a text with split animations only keeps its track"
+      (let [resolved (track (text-timeline board sid {:type :fade :split :word}))]
+        (t/is (= [] (:keyframes resolved)))
+        (t/is (= 1 (count (:animations resolved))))))))
+
+(t/deftest a-split-animation-plays-whole-on-a-layer-that-is-no-text
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid   (:id rect)
+        fade  {:type :fade :start 200 :duration 400}
+        split (text-timeline board sid (assoc fade :split :word))
+        whole (text-timeline board sid fade)
+        times [0 300 500 700]]
+    (t/is (= (mapv #(values-at whole objects %) times)
+             (mapv #(values-at split objects %) times)))
+    (t/is (not (contains? (cta/get-track (cta/resolve-animations split objects) sid) :animations)))
+    (t/is (= ::none (text-units-at split objects sid 300)))))
+
+(t/deftest a-hidden-split-animation-plays-nothing
+  (let [{:keys [board text objects]} (board-and-text "Hi you")
+        sid (:id text)
+        tl  (text-timeline board sid {:type :fade :split :word})
+        aid (:id (first (get-in tl [:tracks sid :animations])))
+        tl  (cta/toggle-animation-flag tl sid aid :hidden)]
+    (t/is (= ::none (text-units-at tl objects sid 0)))
+    (t/is (= {} (cta/text-unit-entries tl objects 0)))
+    (t/is (nil? (cta/get-track (cta/resolve-animations tl objects) sid)))))
+
+(t/deftest split-animations-of-a-unit-play-together
+  (let [{:keys [board text objects]} (board-and-text "Hi you")
+        sid     (:id text)
+        tl      (text-timeline board sid
+                               {:type :fade :split :word :start 100}
+                               {:type :move :split :word :start 100 :offset-x 0 :offset-y 30})
+        entries (text-units-at tl objects sid 0)]
+    (t/is (= [[0 0 2] [0 3 6]] (ranges entries)) "one entry a word")
+    (t/is (every? #(and (zero? (:opacity %)) (== 30 (:dy %)) (zero? (:dx %))) entries))))
+
+(t/deftest a-text-plays-one-kind-of-units
+  (let [{:keys [board text objects]} (board-and-text "Hi you")
+        sid      (:id text)
+        tl       (text-timeline board sid
+                                {:type :fade :split :word :start 100}
+                                {:type :move :split :char :start 100})
+        entries  (text-units-at tl objects sid 0)
+        resolved (cta/get-track (cta/resolve-animations tl objects) sid)]
+    (t/is (= [[0 0 2] [0 3 6]] (ranges entries)) "by words, the first kind")
+    (t/is (every? #(zero? (:dy %)) entries) "the move by characters plays whole")
+    (t/is (= #{:x :y} (into #{} (map :property) (:keyframes resolved))))
+    (t/is (= [:word] (mapv :split (:animations resolved))))))
+
+(t/deftest a-text-past-the-live-cap-plays-its-splits-whole
+  (let [{:keys [board text objects]} (board-and-text (apply str (repeat (inc tu/live-unit-cap) "a")))
+        sid      (:id text)
+        tl       (text-timeline board sid {:type :fade :split :char})
+        resolved (cta/get-track (cta/resolve-animations tl objects) sid)]
+    (t/is (= ::none (text-units-at tl objects sid 0)))
+    (t/is (= #{:opacity} (into #{} (map :property) (:keyframes resolved))))
+    (t/is (not (contains? resolved :animations)))))
+
+(t/deftest lines-come-from-the-position-data
+  (let [{:keys [board text objects]} (board-and-text "Hi you" "there")
+        sid  (:id text)
+        tl   (text-timeline board sid {:type :fade :split :line :start 100})
+        rest {:dx 0 :dy 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 0 :blur 0}]
+    (t/is (= [(merge {:kind :line :index 0 :line-count 1} rest)]
+             (text-units-at tl objects sid 0))
+          "without position data, the text is one line")
+    (let [line    (fn [y text] {:x 150 :y y :width 100 :height 20 :text text :fills []})
+          objects (assoc-in objects [sid :position-data] [(line 220 "Hi you") (line 240 "there")])]
+      (t/is (= [(merge {:kind :line :index 0 :line-count 2} rest)
+                (merge {:kind :line :index 1 :line-count 2} rest)]
+               (text-units-at tl objects sid 0))))))
+
+(t/deftest a-split-entry-of-a-style-use-plays-as-the-split-preset
+  (let [entry {:type :fade :split :word :spread 0.8 :start 0 :duration 600}
+        use   (cta/make-animation {:type :style :style-ref-id (uuid/next) :style-ref-file (uuid/next)
+                                   :name "Words" :start 100 :entries [entry]})
+        times [0 150 300 500 700 1000]]
+    (t/testing "on a text, by its units"
+      (let [{:keys [board text objects]} (board-and-text "Hi you there")
+            sid    (:id text)
+            styled (text-timeline board sid use)
+            plain  (text-timeline board sid (assoc entry :start 100))]
+        (t/is (seq (get (cta/text-unit-entries styled objects 300) sid)))
+        (t/is (= (mapv #(cta/text-unit-entries plain objects %) times)
+                 (mapv #(cta/text-unit-entries styled objects %) times)))))
+    (t/testing "on a rectangle, whole, the use keeping all its entries"
+      (let [{:keys [board rect objects]} (board-and-rect)
+            sid    (:id rect)
+            styled (text-timeline board sid use)
+            whole  (text-timeline board sid (-> entry (dissoc :split :spread) (assoc :start 100)))]
+        (t/is (= (:entries use) (get-in styled [:tracks sid :animations 0 :entries])))
+        (t/is (= (mapv #(values-at whole objects %) times)
+                 (mapv #(values-at styled objects %) times)))))))
+
+(t/deftest appearance-changes-hold-the-units-of-a-text
+  (t/is (= {:text-units []} (cta/appearance-changes (ctm/change-property nil :text-units [])))))
+
+(t/deftest text-presets-split-their-animations
+  (doseq [preset [:typewriter :rise-words :cascade-lines :pop-letters]
+          :let [animations (mapv cta/make-animation (get cta/builtin-styles preset))]]
+    (t/is (seq animations) (name preset))
+    (t/is (every? #(and (:split %) (sm/validate cta/schema:preset-animation %)) animations)
+          (name preset))))
+
+(defn- markup-of
+  "The CSS, SVG and Lottie exports of `timeline`."
+  [timeline objects]
+  [(cta/timeline->css timeline objects)
+   (cta/timeline->svg timeline objects {})
+   (cta/timeline->lottie timeline objects nil)])
+
+(t/deftest markup-exports-play-split-animations-whole
+  (let [{:keys [board text objects]} (board-and-text "Hi you there")
+        sid  (:id text)
+        fade {:type :fade :start 100 :duration 600}
+        use  #(cta/make-animation {:type :style :style-ref-id (uuid/next) :style-ref-file (uuid/next)
+                                   :name "Words" :start 100 :entries [%]})]
+    (t/testing "a preset"
+      (let [split (text-timeline board sid (assoc fade :split :word))]
+        (t/is (cta/split-animations? split objects))
+        (t/is (= (markup-of (text-timeline board sid fade) objects) (markup-of split objects)))))
+    (t/testing "an entry of a style use"
+      (let [split (text-timeline board sid (use (assoc fade :split :word :start 0)))]
+        (t/is (cta/split-animations? split objects))
+        (t/is (= (markup-of (text-timeline board sid (use (assoc fade :start 0))) objects)
+                 (markup-of split objects)))
+        (t/is (str/includes? (first (markup-of split objects)) "opacity") "the text is not static")))
+    (t/testing "none on a layer that is no text"
+      (let [{:keys [board rect objects]} (board-and-rect)]
+        (t/is (not (cta/split-animations? (text-timeline board (:id rect) (assoc fade :split :word))
+                                          objects)))))))
+
+(t/deftest flatten-splits-leaves-no-split-keys
+  (let [sid       (uuid/next)
+        tl        (-> (mk-timeline)
+                      (cta/add-animation sid {:type :fade :split :char :order :random})
+                      (cta/add-animation sid {:type :style :style-ref-id (uuid/next) :style-ref-file (uuid/next)
+                                              :entries [{:type :move :split :line :spread 1}]}))
+        flattened (cta/flatten-splits tl)
+        keys-of   (fn [animation] (into #{} (keys animation)))]
+    (t/is (not-any? #(some (keys-of %) [:split :spread :order :seed])
+                    (concat (get-in flattened [:tracks sid :animations])
+                            (get-in flattened [:tracks sid :animations 1 :entries]))))
+    (t/is (cta/valid-timeline? flattened))))
+
+(t/deftest retarget-track-keeps-split-presets-on-a-text-only
+  (let [track  {:shape-id (uuid/next)
+                :keyframes []
+                :animations [(cta/make-animation {:type :fade :split :word})
+                             (cta/make-animation {:type :move})]}
+        from   (pose 0 0 100 50 0)
+        text   (cts/setup-shape {:type :text :x 0 :y 0 :width 100 :height 50})
+        onto   #(cta/retarget-track track from % from)]
+    (t/testing "onto a rectangle the move goes, the split fade not"
+      (let [{:keys [track skipped]} (onto styled-rect)]
+        (t/is (= [:move] (mapv :type (:animations track))))
+        (t/is (= 1 skipped))))
+    (t/testing "onto a text both go"
+      (let [{:keys [track skipped]} (onto text)]
+        (t/is (= [[:fade :word] [:move nil]] (mapv (juxt :type :split) (:animations track))))
+        (t/is (= 0 skipped))))))
+
+(t/deftest a-text-changes-its-kind-of-units-on-all-its-splits
+  (let [[fade move scale locked]
+        [(cta/make-animation {:type :fade :split :word})
+         (cta/make-animation {:type :move :split :word})
+         (cta/make-animation {:type :scale})
+         (cta/make-animation {:type :rotate :split :word :locked true})]
+        animations [fade move scale locked]
+        kinds      #(mapv :split %)]
+    (t/is (= [:char :char nil :word] (kinds (cta/with-split-kind animations (:id fade) :char cta/make-animation)))
+          "the others that split follow, the whole one and the locked one stay")
+    (t/is (= [nil :word nil :word] (kinds (cta/with-split-kind animations (:id fade) nil cta/make-animation)))
+          "back to the whole layer, only that one")
+    (t/is (= [:line :line :line :word] (kinds (cta/with-split-kind animations (:id scale) :line cta/make-animation))))
+    (t/is (not-any? #(contains? % :hidden) (cta/with-split-kind animations (:id fade) :char cta/make-style-entry))
+          "entries stay entries")))
+
+(t/deftest the-text-presets-are-the-ones-that-split
+  (t/is (= #{:typewriter :rise-words :cascade-lines :pop-letters} cta/text-styles)))
+
+(t/deftest units-follow-a-text-edited-while-it-plays
+  (let [{:keys [board text objects]} (board-and-text "Hi you there")
+        sid  (:id text)
+        tl   (text-timeline board sid {:type :fade :split :word :start 0 :duration 1000})
+        at   #(get (cta/text-unit-entries tl (assoc-in objects [sid :content] (apply text-content %&)) 300) sid)]
+    (t/is (= 3 (count (at "Hi you there"))))
+    (t/is (= 1 (count (at "Hi"))) "fewer units")
+    (t/is (= 5 (count (at "Hi you there and on"))) "more units")
+    (t/is (= [] (at "")) "none")
+    (t/is (= 3 (count (at "Hi you there"))) "and back")))
+
+(t/deftest a-text-at-the-live-cap-still-plays-its-units
+  (let [{:keys [board text objects]} (board-and-text (apply str (repeat tu/live-unit-cap "a")))
+        sid (:id text)
+        tl  (text-timeline board sid {:type :fade :split :char :start 100})]
+    (t/is (= tu/live-unit-cap (count (text-units-at tl objects sid 0))))))
+
+;; BLUR
+
+(defn- blur-at
+  [timeline objects sid time]
+  (-> (cta/timeline->modif-tree timeline objects time)
+      (get-in [sid :modifiers])
+      (cta/appearance-changes)
+      (get :blur ::none)))
+
+(t/deftest a-blur-animation-blurs-any-layer
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid (:id rect)
+        tl  (text-timeline board sid {:type :blur :start 100 :duration 400})]
+    (t/is (= 8 (:amount (first (get-in tl [:tracks sid :animations])))) "8 px by default")
+    (t/is (= {:type :layer-blur :value 8 :hidden false} (dissoc (blur-at tl objects sid 0) :id))
+          "a layer without a blur gets one")
+    (t/is (< 0 (:value (blur-at tl objects sid 300)) 8))
+    (t/is (nil? (blur-at tl objects sid 500)) "and none once it is sharp")
+    (t/testing "a layer with a blur of its own ends at it"
+      (let [objects (assoc-in objects [sid :blur] {:id (uuid/next) :type :layer-blur :value 4 :hidden false})]
+        (t/is (= 12 (:value (blur-at tl objects sid 0))))
+        (t/is (= 4 (:value (blur-at tl objects sid 500))))))
+    (t/is (str/includes? (cta/timeline->css tl objects) "filter: blur(") "CSS blurs it")))
+
+(t/deftest the-units-of-a-text-blur
+  (let [{:keys [board text objects]} (board-and-text "Hi you")
+        sid (:id text)
+        tl  (text-timeline board sid {:type :blur :split :word :start 100 :duration 400 :amount 6})]
+    (t/is (= [6 6] (mapv :blur (text-units-at tl objects sid 0))))
+    (t/is (= [] (text-units-at tl objects sid 500)))))

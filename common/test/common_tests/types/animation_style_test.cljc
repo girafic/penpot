@@ -17,6 +17,7 @@
    [app.common.types.animation-style :as ctas]
    [app.common.types.file :as ctf]
    [app.common.types.shape :as cts]
+   [app.common.types.text-units :as tu]
    [app.common.uuid :as uuid]
    [clojure.test :as t]
    [common-tests.types.shape-decode-encode-test :refer [json-roundtrip]]))
@@ -397,3 +398,33 @@
     (t/is (= [:style :fade :scale] (mapv :type (animations after sid))))
     (t/is (= local (first (animations after sid))) "its own styles stay linked")
     (t/is (= (plays before objects sid) (plays after objects sid)))))
+
+;; TEXT SPLITS
+
+(defn- split-settings
+  [animation]
+  (mapv animation [:split :spread :order :seed]))
+
+(t/deftest a-split-entry-keeps-its-settings
+  (let [entry  (cta/make-style-entry {:type :fade :split :word :spread 0.8 :order :random :seed 42
+                                      :start 0 :duration 600})
+        style  (pop-style :entries [entry])
+        preset (cta/make-animation (assoc entry :start 200))]
+    (t/is (= [:word 0.8 :random 42] (split-settings entry)))
+    (t/is (ctas/valid-animation-style? style))
+    (t/testing "saved as a style, with a new id"
+      (let [{:keys [entries]} (ctas/animations->entries [preset])]
+        (t/is (= [[:word 0.8 :random 42]] (mapv split-settings entries)))
+        (t/is (not= (:id preset) (:id (first entries))))))
+    (t/testing "synced into a use"
+      (let [synced (ctas/sync-use (ctas/make-use (pop-style) (uuid/next) 0) style)]
+        (t/is (= [[:word 0.8 :random 42]] (mapv split-settings (:entries synced))))))))
+
+(t/deftest a-random-entry-gets-a-seed-and-keeps-it
+  (let [entry (cta/make-style-entry {:type :fade :split :char :order :random :start 0 :duration 300})
+        use   (ctas/make-use (pop-style :entries [entry]) (uuid/next) 100)
+        order #(mapv :start (tu/unit-animations (first (cta/expand-style use)) 8))]
+    (t/is (int? (:seed entry)))
+    (t/is (= (:seed entry) (:seed (cta/make-style-entry entry))) "kept")
+    (t/is (= (:seed entry) (:seed (first (:entries use)))) "and by the uses")
+    (t/is (= (order) (order)) "which play the units in the same order")))

@@ -22,6 +22,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape :as cts]
+   [app.common.types.text :as txt]
    [app.common.uuid :as uuid]
    [clojure.test :as t]))
 
@@ -740,3 +741,136 @@
         track  (track-in (paste file clip [:rect-a] {:mode :replace}) :board-a :rect-a)]
     (t/is (= [[:style "Locked"] [:style "Pasted"]] (mapv (juxt :type :name) (:animations track)))
           "a use counts as a preset: the unlocked ones go, the locked one stays")))
+
+;; TEXT SPLITS
+
+(defn- text-component-file
+  "An animated text component: its main, a board at 0,0 whose text fades
+  in word by word in 1 s, playing as `playback` says. A copy of it in
+  board B at 1000,100."
+  [playback]
+  (let [file (-> (thf/sample-file :file1)
+                 (tho/add-frame-with-text :main :main-text "Hi you there"
+                                          :frame-params {:x 0 :y 0 :width 200 :height 200})
+                 (thc/make-component :anim :main)
+                 (tho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
+                 (thc/instantiate-component :anim :copy :parent-label :board-b))
+        main (thi/id :main)
+        tl   (-> (cta/make-timeline {:board-id main :duration 1000 :playback playback})
+                 (cta/add-animation (thi/id :main-text) {:type :fade :split :word :start 0 :duration 1000}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline main tl)))))
+
+(defn- unit-ranges
+  "The ranges of the units of `shape-id` off their rest at `time`."
+  [timeline objects shape-id time]
+  (mapv (juxt :paragraph :start :end) (get (cta/text-unit-entries timeline objects time) shape-id)))
+
+(t/deftest copies-keep-the-split-animations-of-their-texts
+  (let [{:keys [objects board copy main-page] text :copy-rect} (component-scene (text-component-file :once))
+        timeline (get (cltl/instance-timelines objects board nil main-page) [:copy copy (thi/id :main)])]
+    (t/is (= [[:word 0.5 :forward]]
+             (mapv (juxt :split :spread :order) (get-in timeline [:tracks text :animations]))))
+    (t/is (= [[0 0 2] [0 3 6] [0 7 12]] (unit-ranges timeline objects text 0)))
+    (t/testing "a copy with a text of its own plays its own units"
+      (let [objects (update-in objects [text :content] txt/change-text "One two")]
+        (t/is (= [[0 0 3] [0 4 7]] (unit-ranges timeline objects text 0)))))))
+
+(t/deftest exports-play-the-units-of-a-copy-on-its-clock
+  (doseq [playback [:loop :ping-pong]]
+    (let [{:keys [objects board main-page] text :copy-rect} (component-scene (text-component-file playback))
+          copies   (vals (cltl/instance-timelines objects board nil main-page))
+          exported (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 3000})
+                     copies objects)
+          track    (get-in exported [:tracks text])
+          at       #(get (cta/text-unit-entries exported objects %) text)]
+      (t/is (= [:word] (mapv :split (:animations track))) (name playback))
+      (t/is (= {:duration 1000 :playback playback} (:split-clock track)))
+      (doseq [time [100 400 700]]
+        (t/is (seq (at time)))
+        (if (= :loop playback)
+          (t/is (= (at time) (at (+ 1000 time))) (str "loop, t=" time))
+          (t/is (= (at time) (at (- 2000 time))) (str "ping-pong, t=" time)))))))
+
+(t/deftest markup-exports-play-the-units-of-a-copy-whole
+  (let [{:keys [objects board main-page] text :copy-rect} (component-scene (text-component-file :loop))
+        copies   (vals (cltl/instance-timelines objects board nil main-page))
+        exported (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 3000})
+                   copies objects :text-split :whole)
+        track    (get-in exported [:tracks text])
+        opacity  #(get-in (cta/values-at (cta/expand-loops exported) %) [text :opacity])]
+    (t/is (nil? (:animations track)))
+    (t/is (= {} (cta/text-unit-entries exported objects 400)))
+    (t/is (contains? (:loops track) :opacity) "the fade of the whole text loops as keyframes")
+    (t/is (< (opacity 0) (opacity 400) 1))
+    (t/is (mth/close? (opacity 400) (opacity 1400) 0.02))))
+
+(defn- split-paste-file
+  "`paste-file` with a text in board A, and the rect of board A fading in
+  word by word from 500 ms too."
+  []
+  (-> (paste-file)
+      (ths/add-sample-shape :text-a :type :text :parent-label :board-a
+                            :x 300 :y 300 :width 100 :height 20)
+      (with-timeline :board-a
+        #(cta/add-animation % (thi/id :rect) {:type :fade :split :word :start 500 :duration 400}))))
+
+(t/deftest paste-leaves-the-split-presets-out-of-a-layer-that-is-no-text
+  (let [file   (split-paste-file)
+        result (paste file (clip-of file [:rect] :whole-layer? true) [:text-a :rect-a] {:mode :replace})]
+    (t/is (= 1 (:skipped result)))
+    (t/is (= [[:fade nil] [:fade :word]]
+             (mapv (juxt :type :split) (:animations (track-in result :board-a :text-a)))))
+    (t/is (= [[:fade nil]]
+             (mapv (juxt :type :split) (:animations (track-in result :board-a :rect-a)))))
+    (t/is (close-all? [200 300] (mapv second (row (track-in result :board-a :rect-a) :x)))
+          "the rest goes on")))
+
+(t/deftest a-style-use-with-a-split-entry-goes-whole-onto-any-layer
+  (let [use    (style-use :entries [{:type :fade :split :word :start 0 :duration 300}
+                                    {:type :scale :start 100 :duration 300}])
+        file   (with-timeline (split-paste-file) :board-a #(cta/add-animation % (thi/id :rect-a) use))
+        clip   (clip-of file [:rect-a] :whole-layer? true)
+        result (paste file clip [:rect-b] {:mode :replace})
+        pasted (first (:animations (track-in result :board-b :rect-b)))]
+    (t/is (= 0 (:skipped result)))
+    (t/is (= (:entries use) (:entries pasted)))))
+
+(t/deftest units-at-rest-unposes-texts
+  (let [id   (uuid/next)
+        tree {id {:modifiers (-> (ctm/empty)
+                                 (ctm/change-property :opacity 0.5)
+                                 (ctm/change-property :text-units [{:kind :word :opacity 0}]))}}
+        rest (cltl/units-at-rest tree [id])]
+    (t/is (cltl/poses-units? tree id))
+    (t/is (not (cltl/poses-units? tree (uuid/next))))
+    (t/is (= {:opacity 0.5 :text-units []} (cta/appearance-changes (get-in rest [id :modifiers]))))
+    (t/is (= 2 (count (get-in rest [id :modifiers :structure-parent]))) "one units change, not two")
+    (t/is (= {:text-units []} (cta/appearance-changes (get-in (cltl/units-at-rest {} [id]) [id :modifiers])))
+          "also for a text the tree does not pose")))
+
+(t/deftest a-copy-of-a-library-component-plays-the-units-of-its-text
+  (let [library   (let [file (-> (thf/sample-file :library)
+                                 (tho/add-frame-with-text :lib-main :lib-text "Hi you there"
+                                                          :frame-params {:x 0 :y 0 :width 200 :height 200})
+                                 (thc/make-component :lib-anim :lib-main))
+                        tl   (-> (cta/make-timeline {:board-id (thi/id :lib-main) :duration 1000})
+                                 (cta/add-animation (thi/id :lib-text)
+                                                    {:type :fade :split :word :start 0 :duration 1000}))]
+                    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                                (pcb/with-page (thf/current-page file))
+                                                (pcb/set-timeline (thi/id :lib-main) tl))))
+        file      (-> (thf/sample-file :consumer)
+                      (tho/add-frame :host :x 1000 :y 100 :width 400 :height 300)
+                      (thc/instantiate-component :lib-anim :lib-copy :parent-label :host :library library))
+        objects   (:objects (thf/current-page file))
+        copy      (thi/id :lib-copy)
+        text      (first (get-in objects [copy :shapes]))
+        lib-page  (thf/current-page library)
+        timelines (cltl/instance-timelines objects (thi/id :host) nil
+                                           (constantly {:objects (:objects lib-page)
+                                                        :timelines (:timelines lib-page)}))
+        timeline  (get timelines [:copy copy (thi/id :lib-main)])]
+    (t/is (= :text (get-in objects [text :type])))
+    (t/is (= [[0 0 2] [0 3 6] [0 7 12]] (unit-ranges timeline objects text 0)))))

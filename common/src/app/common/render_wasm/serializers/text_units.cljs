@@ -7,21 +7,21 @@
 (ns app.common.render-wasm.serializers.text-units
   "The units of a text (characters, words or lines) that a split animation
   of Penpot Motion poses one by one, as render-wasm reads them with
-  `_set_shape_text_units`: a header (the count and the line count) and 40
+  `_set_shape_text_units`: a header (the count and the line count) and 44
   bytes per unit, little endian (the byte contract is documented in
   `render-wasm/src/shapes/text_units.rs`)."
   (:require
    [app.common.render-wasm.mem :as mem]))
 
 (def ^:private header-size 8)
-(def ^:private entry-size 40)
+(def ^:private entry-size 44)
 
 (def ^:private kinds
   {:char 0 :word 1 :line 2})
 
 (defn entries->bytes
   "The bytes of the text units `entries`, each one
-  `{:kind :paragraph :start :end :dx :dy :rotation :scale-x :scale-y :opacity}`
+  `{:kind :paragraph :start :end :dx :dy :rotation :scale-x :scale-y :opacity :blur}`
   for a `:char` or `:word` unit (UTF-16 offsets in the source text of the
   paragraph), or `{:kind :line :index :line-count ...}` for a line unit.
   The header is always written: nil or no entries give a count of 0, which
@@ -33,7 +33,7 @@
     (.setUint32 view 4 (reduce max 0 (keep :line-count entries)) true)
     (loop [entries (seq entries)
            offset  header-size]
-      (when-let [{:keys [kind paragraph index start end dx dy rotation scale-x scale-y opacity]}
+      (when-let [{:keys [kind paragraph index start end dx dy rotation scale-x scale-y opacity blur]}
                  (first entries)]
         (.setUint8 view offset (get kinds kind 0))
         (.setUint32 view (+ offset 4) (or (if (= kind :line) index paragraph) 0) true)
@@ -45,6 +45,7 @@
         (.setFloat32 view (+ offset 28) (or scale-x 1) true)
         (.setFloat32 view (+ offset 32) (or scale-y 1) true)
         (.setFloat32 view (+ offset 36) (or opacity 1) true)
+        (.setFloat32 view (+ offset 40) (or blur 0) true)
         (recur (next entries) (+ offset entry-size))))
     (js/Uint8Array. buffer)))
 

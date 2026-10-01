@@ -30,6 +30,7 @@
    [app.common.types.shape.interactions :as cti]
    [app.common.types.shape.layout :as ctl]
    [app.common.types.shape.radius :as ctsr]
+   [app.common.types.text-units :as tu]
    [app.common.uuid :as uuid]
    [clojure.string :as str]))
 
@@ -135,7 +136,7 @@
 ;; layer's own values, `:out` from them to the effect. Within its span it
 ;; takes over the keyframes of the properties it animates.
 (def animation-types
-  #{:fade :move :scale :rotate})
+  #{:fade :move :scale :rotate :blur})
 
 (def animation-directions
   #{:in :out})
@@ -148,11 +149,19 @@
    [:start ::sm/safe-int]
    [:duration ::sm/safe-int]
    [:easing {:optional true} schema:easing]
-   ;; fade: opacity factor, scale: scale factor, rotate: degrees
+   ;; fade: opacity factor, scale: scale factor, rotate: degrees, blur:
+   ;; the radius of a layer blur in px
    [:amount {:optional true} ::sm/safe-number]
    ;; move: offset in px
    [:offset-x {:optional true} ::sm/safe-number]
    [:offset-y {:optional true} ::sm/safe-number]
+   ;; on a text, played by its characters, words or lines one after the
+   ;; other (see `app.common.types.text-units`): how far apart they start
+   ;; (0..1), in which order and, for a random one, its seed
+   [:split {:optional true} [::sm/one-of tu/split-kinds]]
+   [:spread {:optional true} ::sm/safe-number]
+   [:order {:optional true} [::sm/one-of tu/orders]]
+   [:seed {:optional true} ::sm/safe-int]
    ;; left out of playback and exports / kept from edits
    [:hidden {:optional true} :boolean]
    [:locked {:optional true} :boolean]])
@@ -170,7 +179,11 @@
    [:easing {:optional true} schema:easing]
    [:amount {:optional true} ::sm/safe-number]
    [:offset-x {:optional true} ::sm/safe-number]
-   [:offset-y {:optional true} ::sm/safe-number]])
+   [:offset-y {:optional true} ::sm/safe-number]
+   [:split {:optional true} [::sm/one-of tu/split-kinds]]
+   [:spread {:optional true} ::sm/safe-number]
+   [:order {:optional true} [::sm/one-of tu/orders]]
+   [:seed {:optional true} ::sm/safe-int]])
 
 (def max-style-entries
   "The most entries an animation style holds."
@@ -815,20 +828,35 @@
   {:fade   {:amount 0}
    :move   {:offset-x 0 :offset-y 40}
    :scale  {:amount 0.5}
-   :rotate {:amount -90}})
+   :rotate {:amount -90}
+   :blur   {:amount 8}})
 
 (def builtin-styles
   "The built-in composite presets and the animations each one adds, which
   the UI calls presets (\"slide-up\", \"pop\"...): templates that add plain
   animations, not the animation styles of a library (see
-  `app.common.types.animation-style`)."
-  {:slide-up    [{:type :fade} {:type :move :offset-x 0 :offset-y 40}]
-   :slide-down  [{:type :fade} {:type :move :offset-x 0 :offset-y -40}]
-   :slide-left  [{:type :fade} {:type :move :offset-x 40 :offset-y 0}]
-   :slide-right [{:type :fade} {:type :move :offset-x -40 :offset-y 0}]
-   :pop         [{:type :fade} {:type :scale :amount 0.5 :easing overshoot-easing}]
-   :zoom        [{:type :fade} {:type :scale :amount 1.5}]
-   :spin        [{:type :fade} {:type :scale :amount 0.5} {:type :rotate :amount -180}]})
+  `app.common.types.animation-style`). The text presets play the
+  characters, words or lines of a text one after the other (`:split`)."
+  {:slide-up      [{:type :fade} {:type :move :offset-x 0 :offset-y 40}]
+   :slide-down    [{:type :fade} {:type :move :offset-x 0 :offset-y -40}]
+   :slide-left    [{:type :fade} {:type :move :offset-x 40 :offset-y 0}]
+   :slide-right   [{:type :fade} {:type :move :offset-x -40 :offset-y 0}]
+   :pop           [{:type :fade} {:type :scale :amount 0.5 :easing overshoot-easing}]
+   :zoom          [{:type :fade} {:type :scale :amount 1.5}]
+   :spin          [{:type :fade} {:type :scale :amount 0.5} {:type :rotate :amount -180}]
+   :typewriter    [{:type :fade :duration 1000 :easing :linear :split :char :spread 1}]
+   :rise-words    [{:type :fade :duration 800 :split :word}
+                   {:type :move :duration 800 :offset-x 0 :offset-y 24 :split :word}]
+   :cascade-lines [{:type :fade :duration 900 :split :line}
+                   {:type :move :duration 900 :offset-x 0 :offset-y 40 :split :line}]
+   :pop-letters   [{:type :fade :duration 800 :split :char :spread 0.7}
+                   {:type :scale :duration 800 :amount 0.3 :easing overshoot-easing
+                    :split :char :spread 0.7}]})
+
+(def text-styles
+  "The built-in presets that play the units of a text (see
+  `builtin-styles`), which go on texts only."
+  (into #{} (keep (fn [[preset animations]] (when (some :split animations) preset))) builtin-styles))
 
 (defn animation-properties
   "The properties an animation of `type` takes over."
@@ -838,6 +866,7 @@
     :move   [:x :y]
     :scale  [:scale-x :scale-y]
     :rotate [:rotation]
+    :blur   [:blur]
     []))
 
 (defn style-use?
@@ -853,6 +882,26 @@
   (reduce max 0 (map animation-end entries)))
 
 (declare make-style-entry)
+
+(defn- random-seed
+  []
+  (inc (rand-int 2147483646)))
+
+(defn- split-settings
+  "The split keys of the preset `params` (see `schema:preset-animation`),
+  valid: none without a known `:split`, the spread kept within 0..1, and
+  by default half spread and in reading order. A random order without a
+  seed gets one, kept from then on, so that its copies, a style made of
+  it and the uses of that style play its units in the same order."
+  [{:keys [split spread order seed]}]
+  (when (contains? tu/split-kinds split)
+    (let [order (if (contains? tu/orders order) order :forward)
+          seed  (when (int? seed) seed)]
+      (cond-> {:split split
+               :spread (mth/clamp (if (number? spread) spread tu/default-spread) 0 1)
+               :order order}
+        (some? seed)                         (assoc :seed seed)
+        (and (nil? seed) (= :random order))  (assoc :seed (random-seed))))))
 
 (defn make-animation
   "A valid animation from `params`: a preset, missing settings taking the
@@ -872,6 +921,7 @@
                :entries entries})
             (merge (get animation-defaults type)
                    (d/without-nils (select-keys params [:easing :amount :offset-x :offset-y]))
+                   (split-settings params)
                    {:id (or id (uuid/next))
                     :type type
                     :direction (or direction :in)
@@ -914,6 +964,43 @@
   it, so nothing after it knows that styles exist."
   [track]
   (expand-uses (remove :hidden (:animations track))))
+
+(def ^:private split-keys
+  [:split :spread :order :seed])
+
+(defn- play-whole
+  "`animation` playing as an animation of its whole layer: a preset
+  without its split keys, a style use without those of its entries."
+  [animation]
+  (if (style-use? animation)
+    (update animation :entries (partial mapv #(apply dissoc % split-keys)))
+    (apply dissoc animation split-keys)))
+
+(defn with-split-kind
+  "`animations`, the presets of a track or the entries of a style, with
+  the one `animation-id` played by `kind` of units (nil for the whole
+  layer), and, a text playing one kind (see `unit-split-kind`), the
+  others that split by `kind` too, each remade with `make`
+  (`make-animation` or `make-style-entry`). Locked ones and style uses
+  stay as they are."
+  [animations animation-id kind make]
+  (mapv (fn [{:keys [id split locked] :as animation}]
+          (cond
+            (or locked (style-use? animation))  animation
+            (= id animation-id)                 (make (assoc animation :split kind))
+            (and (some? kind) (some? split))    (make (assoc animation :split kind))
+            :else                               animation))
+        animations))
+
+(defn flatten-splits
+  "`timeline` with its split animations playing as animations of their
+  whole layers, the presets and the entries of the style uses alike: as
+  the markup exports (CSS, SVG and Lottie), which know no units of a
+  text, play them."
+  [timeline]
+  (update timeline :tracks d/update-vals
+          (fn [track]
+            (d/update-when track :animations (partial mapv play-whole)))))
 
 (defn get-animation
   [timeline shape-id animation-id]
@@ -1337,10 +1424,13 @@
         (<= time (:time first-kf)) (:value first-kf)
         (>= time (:time last-kf))  (:value last-kf)
         :else
-        (let [[from to] (->> (partition 2 1 keyframes)
-                             (some (fn [[a b]]
-                                     (when (and (<= (:time a) time) (< time (:time b)))
-                                       [a b]))))]
+        ;; two keyframes, the most common (every preset): the span between
+        (let [[from to] (if (== 2 (count keyframes))
+                          [first-kf last-kf]
+                          (->> (partition 2 1 keyframes)
+                               (some (fn [[a b]]
+                                       (when (and (<= (:time a) time) (< time (:time b)))
+                                         [a b])))))]
           ;; `:step` interpolation holds the source value (exact, keeps type)
           (if (= :step (:interpolation from :linear))
             (:value from)
@@ -1645,10 +1735,11 @@
 
 (def appearance-attrs
   "The attributes of a shape the animation changes with `:change-property`
-  modifiers (see `shape->modifiers`): how it looks. Its geometry takes the
-  transform path."
+  modifiers (see `shape->modifiers`): how it looks, and the poses of the
+  units of a text (`:text-units`, see `text-unit-entries`). Its geometry
+  takes the transform path."
   #{:opacity :r1 :r2 :r3 :r4 :fills :strokes :shadow :blur :background-blur
-    :trim-start :trim-end :trim-offset})
+    :trim-start :trim-end :trim-offset :text-units})
 
 (defn appearance-changes
   "`{attr value}` of the `appearance-attrs` that `modifiers` change, or nil.
@@ -1802,10 +1893,14 @@
          idxs)))))
 
 (defn- apply-blur
+  "`blur` (a layer blur, or nil) with the radius `value`: a layer without a
+  blur gets one while it is blurred, as a blur animation blurs any layer."
   [blur value]
-  (cond-> blur
-    (and (some? blur) (some? value))
-    (assoc :value value)))
+  (cond
+    (nil? value)  blur
+    (some? blur)  (assoc blur :value value)
+    (pos? value)  {:id uuid/zero :type :layer-blur :value value :hidden false}
+    :else         nil))
 
 (defn position-origin
   "Keyframe positions (`:x`/`:y`) are relative to the board of the
@@ -1911,6 +2006,7 @@
     :rotation (or (:rotation shape) 0)
     :scale-x  1
     :scale-y  1
+    :blur     (or (dm/get-in shape [:blur :value]) 0)
     nil))
 
 (defn- effect-value
@@ -1921,6 +2017,7 @@
     :move   (+ base (or (if (= property :x) offset-x offset-y) 0))
     :scale  (* base (or amount 1))
     :rotate (+ base (or amount 0))
+    :blur   (+ base (or amount 0))
     base))
 
 (defn- animation-keyframes
@@ -1952,37 +2049,60 @@
            keyframes
            animations)))
 
+(defn unit-split-kind
+  "The kind of units (`:char`, `:word` or `:line`) that the split
+  animations among `animations` (presets, see `track-animations`) play one
+  by one on `shape`, or nil when they play as animations of the whole
+  layer: on a layer that is no text, and on a text with more units than
+  `tu/live-unit-cap`. A text plays one kind, that of its first split
+  animation; the split animations of another kind play whole."
+  [shape animations]
+  (when (= :text (:type shape))
+    (when-let [kind (some :split animations)]
+      (when (<= (tu/unit-count shape kind) tu/live-unit-cap)
+        kind))))
+
 (defn- resolve-track
+  "`track` of `shape-id` as it plays: its animations turned into the
+  keyframes they stand for, but the split animations that play the units
+  of a text one by one (see `unit-split-kind`), which stay its
+  `:animations` (see `text-unit-entries`)."
   [timeline objects shape-id {:keys [keyframes] :as track}]
   (let [shape      (get objects shape-id)
-        animations (track-animations track)]
-    (if (or (empty? animations) (nil? shape))
-      (dissoc track :animations)
-      (let [origin     (position-origin timeline objects shape-id)
-            loops      (get track :loops #{})
-            animations (sort-by :start animations)
-            properties (into #{} (mapcat (comp animation-properties :type)) animations)
-            by-slot    (group-by keyframe-slot keyframes)
+        animations (track-animations track)
+        kind       (unit-split-kind shape animations)
+        by-units?  #(and (some? kind) (= kind (:split %)))
+        splits     (filterv by-units? animations)
+        animations (remove by-units? animations)]
+    (cond-> (if (or (empty? animations) (nil? shape))
+              (dissoc track :animations)
+              (let [origin     (position-origin timeline objects shape-id)
+                    loops      (get track :loops #{})
+                    animations (sort-by :start animations)
+                    properties (into #{} (mapcat (comp animation-properties :type)) animations)
+                    by-slot    (group-by keyframe-slot keyframes)
 
-            resolve
-            (fn [property]
-              ;; A looping property is unrolled first, its repeats being
-              ;; plain keyframes the animation can take over.
-              (let [own     (sort-keyframes (get by-slot [property nil]))
-                    own     (cond-> own
-                              (and (seq own) (contains? loops property))
-                              (expand-property-loop (:duration timeline)))
-                    base-at #(or (property-value-at own %)
-                                 (rest-value shape property origin))
-                    covers  (filter #(some #{property} (animation-properties (:type %))) animations)]
-                (resolve-property own covers property base-at)))]
-        (-> (reduce #(update-slot-flag %1 :loops disj %2) track properties)
-            (dissoc :animations)
-            (assoc :keyframes
-                   (sort-keyframes
-                    (into (filterv #(not (contains? properties (:property %))) keyframes)
-                          (mapcat resolve)
-                          properties))))))))
+                    resolve
+                    (fn [property]
+                      ;; A looping property is unrolled first, its repeats being
+                      ;; plain keyframes the animation can take over.
+                      (let [own     (sort-keyframes (get by-slot [property nil]))
+                            own     (cond-> own
+                                      (and (seq own) (contains? loops property))
+                                      (expand-property-loop (:duration timeline)))
+                            base-at #(or (property-value-at own %)
+                                         (rest-value shape property origin))
+                            covers  (filter #(some #{property} (animation-properties (:type %))) animations)]
+                        (resolve-property own covers property base-at)))]
+                (-> (reduce #(update-slot-flag %1 :loops disj %2) track properties)
+                    (dissoc :animations)
+                    (assoc :keyframes
+                           (sort-keyframes
+                            (into (filterv #(not (contains? properties (:property %))) keyframes)
+                                  (mapcat resolve)
+                                  properties))))))
+      (seq splits)
+      (assoc :animations splits))))
 
 (defn visible-track
   "`track` without its hidden keyframes and animations."
@@ -1996,7 +2116,9 @@
 
 (defn resolve-animations
   "Return `timeline` as it plays: its hidden rows left out and its preset
-  animations turned into the keyframes they stand for. Everything that
+  animations turned into the keyframes they stand for, but the split
+  animations that play the units of a text one by one, which stay the
+  `:animations` of its track (see `text-unit-entries`). Everything that
   reads keyframes uses it: the preview, the playback and the exports."
   [timeline objects]
   (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
@@ -2005,32 +2127,174 @@
               (reduce-kv (fn [tracks shape-id track]
                            (let [track (resolve-track timeline objects shape-id (visible-track track))]
                              ;; Nothing left to play once all of it is hidden.
-                             (if (empty? (:keyframes track))
+                             (if (and (empty? (:keyframes track)) (empty? (:animations track)))
                                (dissoc tracks shape-id)
                                (assoc tracks shape-id track))))
                          tracks
                          tracks)))
     timeline))
 
+(def ^:private unit-rest
+  "The values of a unit of a text at rest, where the text lays it out,
+  which the effects of its split animations start from."
+  {:x 0 :y 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 1 :blur 0})
+
+(defn- resolve-unit
+  "`{property keyframes}` of a unit of a text playing `animations`, the
+  ones its split animations give it (see `tu/unit-animations`), from its
+  rest values, the later one taking over where two overlap, as on a layer
+  (see `resolve-property`)."
+  [animations]
+  (let [animations (sort-by :start animations)]
+    (into {}
+          (map (fn [property]
+                 (let [covers (filter #(some #{property} (animation-properties (:type %))) animations)]
+                   [property (resolve-property [] covers property (constantly (get unit-rest property)))])))
+          (into #{} (mapcat (comp animation-properties :type)) animations))))
+
+(defn- unit-entry
+  "The entry of a unit, `base` (its kind and place, see `unit-plans`),
+  with `keyframes` (see `resolve-unit`) at `time`, or nil when it is at
+  rest then."
+  [base keyframes time]
+  (let [value    (fn [property]
+                   (if-let [keyframes (get keyframes property)]
+                     (property-value-at keyframes time)
+                     (get unit-rest property)))
+        x        (value :x)
+        y        (value :y)
+        rotation (value :rotation)
+        scale-x  (value :scale-x)
+        scale-y  (value :scale-y)
+        opacity  (value :opacity)
+        blur     (value :blur)]
+    (when-not (and (== x 0) (== y 0) (== rotation 0) (== scale-x 1) (== scale-y 1) (== opacity 1)
+                   (== blur 0))
+      (assoc base :dx x :dy y :rotation rotation :scale-x scale-x :scale-y scale-y :opacity opacity
+             :blur blur))))
+
+(defrecord UnitPlan [base keyframes from to before after])
+
+(defn- unit-plan
+  "How the unit `base` plays the unit animations `animations` (see
+  `tu/unit-animations`): its keyframes (see `resolve-unit`), from when to
+  when they change it, and the entries it holds before and after, so a
+  frame only works out the units on their way (see `text-unit-entries`)."
+  [base animations]
+  (let [keyframes (resolve-unit animations)
+        times     (into [] (comp (mapcat val) (map :time)) keyframes)]
+    (if (empty? times)
+      (UnitPlan. base keyframes 0 0 nil nil)
+      (let [from (reduce min times)
+            to   (reduce max times)]
+        (UnitPlan. base keyframes from to (unit-entry base keyframes from) (unit-entry base keyframes to))))))
+
+(defonce ^:private unit-plans-cache
+  (atom {}))
+
+(def ^:private unit-plans-cache-size
+  "The most texts whose unit plans are kept (see `unit-plans`)."
+  256)
+
+(defn- unit-plans
+  "The plans (see `unit-plan`) of the units of `kind` of the text
+  `shape-id` playing its split `animations`, in unit order: `units`, as
+  `tu/units` gives them, for characters and words, `n` lines for lines.
+  Kept, one entry per text, until its animations or its units change."
+  [shape-id kind units n animations]
+  (let [entry (get @unit-plans-cache shape-id)]
+    (if (and (= kind (:kind entry))
+             (= n (:n entry))
+             (= units (:units entry))
+             (= animations (:animations entry)))
+      (:plans entry)
+      (let [by-animation (mapv #(tu/unit-animations % n) animations)
+            bases        (if (= :line kind)
+                           (mapv (fn [index] {:kind :line :index index :line-count n}) (range n))
+                           (mapv (fn [[paragraph start end]]
+                                   {:kind kind :paragraph paragraph :start start :end end})
+                                 units))
+            plans        (mapv (fn [index base]
+                                 (unit-plan base (map #(nth % index) by-animation)))
+                               (range n)
+                               bases)]
+        (swap! unit-plans-cache
+               (fn [cache]
+                 (-> (if (or (contains? cache shape-id) (< (count cache) unit-plans-cache-size))
+                       cache
+                       {})
+                     (assoc shape-id {:kind kind :n n :units units :animations animations :plans plans}))))
+        plans))))
+
+(defn text-unit-entries
+  "`{shape-id entries}` for every text of `timeline` with split
+  animations that play its units one by one (see `unit-split-kind`): the
+  units off their rest pose at `time`, as render-wasm poses them (see
+  `app.common.render-wasm.serializers.text-units`), `[]` when none is.
+  Several split animations of a unit play together, as on a layer. A
+  track with a `:split-clock`, the settings of a timeline, plays them at
+  the time of that clock (see `playback-time`): the one of the component
+  copy it comes from."
+  [timeline objects time]
+  (reduce-kv
+   (fn [result shape-id track]
+     (let [shape      (get objects shape-id)
+           animations (track-animations track)
+           kind       (unit-split-kind shape animations)]
+       (if (nil? kind)
+         result
+         (let [n     (tu/unit-count shape kind)
+               units (when (not= :line kind) (tu/units shape kind))
+               plans (unit-plans shape-id kind units n (filterv #(= kind (:split %)) animations))
+               time  (if-let [clock (:split-clock track)] (playback-time clock time) time)]
+           (assoc result shape-id
+                  (into []
+                        (keep (fn [plan]
+                                (cond
+                                  (<= time (:from plan)) (:before plan)
+                                  (>= time (:to plan))   (:after plan)
+                                  :else                  (unit-entry (:base plan) (:keyframes plan) time))))
+                        plans))))))
+   {}
+   (:tracks timeline)))
+
+(defn split-animations?
+  "Whether `timeline` plays a text of `objects` by its units (see
+  `unit-split-kind`), from a preset or from an entry of a style use: what
+  the markup exports play whole (see `flatten-splits`)."
+  [timeline objects]
+  (boolean
+   (some (fn [[shape-id track]]
+           (unit-split-kind (get objects shape-id) (track-animations track)))
+         (:tracks timeline))))
+
 (defn timeline->modif-tree
   "Compute a transient modif-tree `{shape-id {:modifiers ...}}` for
-  `timeline` at `time`, covering transforms (x/y/scale/rotation) and
-  opacity (as a change-property modifier). Designed to be fed to
+  `timeline` at `time`, covering transforms (x/y/scale/rotation), opacity
+  and the other looks (as change-property modifiers), and the poses of
+  the units of the texts that split animations play one by one
+  (`:text-units`, see `text-unit-entries`): there at every time, `[]` at
+  rest, so that every renderer clears a pose. Designed to be fed to
   `set-modifiers` / `set-wasm-modifiers` (editor preview) or applied
   through `transform-shape` (viewer/export)."
   [timeline objects time]
-  (reduce-kv
-   (fn [tree shape-id values]
-     (if-let [shape (get objects shape-id)]
-       (let [board-origin (position-origin timeline objects shape-id)
-             pivot        (origin-point shape (track-origin (get-track timeline shape-id)))
-             modifiers    (shape->modifiers shape values board-origin pivot)]
-         (if (ctm/empty? modifiers)
-           tree
-           (assoc tree shape-id {:modifiers modifiers})))
-       tree))
-   {}
-   (values-at (resolve-animations timeline objects) time)))
+  (let [timeline (resolve-animations timeline objects)
+        tree     (reduce-kv
+                  (fn [tree shape-id values]
+                    (if-let [shape (get objects shape-id)]
+                      (let [board-origin (position-origin timeline objects shape-id)
+                            pivot        (origin-point shape (track-origin (get-track timeline shape-id)))
+                            modifiers    (shape->modifiers shape values board-origin pivot)]
+                        (if (ctm/empty? modifiers)
+                          tree
+                          (assoc tree shape-id {:modifiers modifiers})))
+                      tree))
+                  {}
+                  (values-at timeline time))]
+    (reduce-kv (fn [tree shape-id entries]
+                 (update-in tree [shape-id :modifiers] ctm/change-property :text-units entries))
+               tree
+               (text-unit-entries timeline objects time))))
 
 (defn timeline->opacity
   "Compute `{shape-id opacity}` for every shape that animates opacity at
@@ -2140,13 +2404,19 @@
   `target` resting at `to`: its positions and rotation counted from where
   `target` rests and its sizes scaled to it (see `relative-value`), or
   its values as they are with `exact?`. The keyframes `target` cannot
-  show (see `fits-keyframe?`) are left out. The track gets new keyframe
-  and animation ids and keeps the loops of the rows left and its pivot;
-  nothing in it is hidden or locked. `{:track :skipped}`, `:skipped`
-  being the number of keyframes left out."
+  show (see `fits-keyframe?`) are left out, and so are the split presets
+  (see `schema:preset-animation`) when it is no text; a style use goes
+  whole, with all its entries. The track gets new keyframe and animation
+  ids and keeps the loops of the rows left and its pivot; nothing in it
+  is hidden or locked. `{:track :skipped}`, `:skipped` being the number
+  of keyframes and presets left out."
   [track from target to & {:keys [exact?]}]
-  (let [keyframes (:keyframes track)
-        fits      (filterv #(fits-keyframe? target %) keyframes)
+  (let [keyframes  (:keyframes track)
+        fits       (filterv #(fits-keyframe? target %) keyframes)
+        animations (:animations track)
+        kept       (if (= :text (:type target))
+                     animations
+                     (filterv #(or (style-use? %) (nil? (:split %))) animations))
 
         retarget
         (fn [{:keys [property] :as keyframe}]
@@ -2158,12 +2428,13 @@
         (-> track
             (assoc :shape-id (:id target))
             (assoc :keyframes (sort-keyframes (mapv retarget fits)))
-            (dissoc :hidden :locked)
-            (d/update-when :animations
-                           (partial mapv #(make-animation (dissoc % :id :hidden :locked))))
+            (dissoc :hidden :locked :animations)
+            (cond-> (seq kept)
+              (assoc :animations (mapv #(make-animation (dissoc % :id :hidden :locked)) kept)))
             (prune-slot-flags))]
     {:track track
-     :skipped (- (count keyframes) (count fits))}))
+     :skipped (+ (- (count keyframes) (count fits))
+                 (- (count animations) (count kept)))}))
 
 (def ^:private pivot-properties
   "The properties that scale, resize or turn a layer around its pivot (the
@@ -2663,7 +2934,8 @@
   "Generate a CSS string (`@keyframes` blocks + per-shape `animation`
   rules) for `timeline`, using the base geometry from `objects`. Pure.
   Played once, a shape keeps the last frame. With reduced motion asked
-  for, the shapes stay as designed. Options: `:ids`, the shapes to write
+  for, the shapes stay as designed. Split animations play as animations
+  of the whole text (see `flatten-splits`). Options: `:ids`, the shapes to write
   (all by default), `:selector`, the CSS selector of a shape
   (`shape-css-class` by default), and `:origin`, the `transform-origin`
   of a shape and its track (`origin-css` of the track origin, a share of
@@ -2671,7 +2943,7 @@
   ([timeline objects]
    (timeline->css timeline objects nil))
   ([timeline objects {:keys [ids selector origin]}]
-   (let [timeline (-> timeline (resolve-animations objects) expand-loops expand-paths)
+   (let [timeline (-> timeline flatten-splits (resolve-animations objects) expand-loops expand-paths)
          duration (max 1 (:duration timeline))
          iter     (case (playback-mode timeline)
                     :loop      "infinite"
@@ -3543,13 +3815,15 @@
   assets the animated shapes are the layers, as vectors or rectangles of
   their bounds. Layers holding layers become precomps (see
   `lottie-layers`). The markers become Lottie markers (see
-  `lottie-markers`)."
+  `lottie-markers`). Split animations play as animations of the whole
+  text (see `flatten-splits`)."
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]
    (let [markers   (lottie-markers timeline)
          ;; Lottie has no ping-pong, so the way back is part of the document.
-         timeline  (-> timeline (resolve-animations objects) expand-loops expand-paths expand-springs expand-ping-pong)
+         timeline  (-> timeline flatten-splits (resolve-animations objects)
+                       expand-loops expand-paths expand-springs expand-ping-pong)
          board-id  (:board-id timeline)
          layer-ids (if (seq assets)
                      (set (export-layer-ids objects board-id (:tracks timeline)))
@@ -3625,9 +3899,10 @@
   layer follows the one it sits in and a board clips them; each turns
   and scales around its pivot in the SVG. `images` is `{shape-id {:href
   :x :y :width :height}}`; the board's own image, when there, goes below
-  them."
+  them. Split animations play as animations of the whole text (see
+  `flatten-splits`)."
   [timeline objects images]
-  (let [timeline (-> timeline (resolve-animations objects) expand-loops)
+  (let [timeline (-> timeline flatten-splits (resolve-animations objects) expand-loops)
         board-id (:board-id timeline)
         bsr      (:selrect (get objects board-id))
         width    (mth/round (or (:width bsr) 100))

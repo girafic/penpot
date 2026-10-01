@@ -17,13 +17,15 @@ use std::ops::Range;
 
 use skia_safe::{
     textlayout::{self, RectHeightStyle, RectWidthStyle, TextStyle},
-    Canvas, Matrix, Paint, Point, Rect,
+    BlurStyle, Canvas, MaskFilter, Matrix, Paint, Point, Rect,
 };
 
 use crate::globals::current_browser;
 use crate::performance;
 use crate::shapes::text_units::{TextUnits, UnitPose};
-use crate::shapes::{Paragraph, ParagraphLayout, TextContent, TextDecorationSegment};
+use crate::shapes::{
+    radius_to_sigma, Paragraph, ParagraphLayout, TextContent, TextDecorationSegment,
+};
 
 /// A unit piece where it paints: its range in the laid out text of its
 /// paragraph, its box at rest and the matrix that poses it.
@@ -32,6 +34,7 @@ struct Placed {
     bounds: Rect,
     matrix: Matrix,
     opacity: f32,
+    blur: f32,
 }
 
 /// Paint `layouts`, the paragraphs of the text `content` laid out from
@@ -115,6 +118,7 @@ fn place(layout: &ParagraphLayout, range: Range<usize>, pose: &UnitPose) -> Plac
         bounds,
         matrix,
         opacity: pose.opacity,
+        blur: pose.blur,
     }
 }
 
@@ -212,17 +216,27 @@ fn paint_paragraph(
 }
 
 /// Draw with `draw` and `paint` as the unit of `piece` stands: moved,
-/// turned, scaled and faded. A unit faded out draws nothing.
+/// turned, scaled, faded and blurred (as a layer blur of its radius blurs).
+/// A unit faded out draws nothing.
 fn posed(canvas: &Canvas, piece: &Placed, paint: &Paint, draw: impl Fn(&Canvas, &Paint)) {
     if piece.opacity <= 0.0 {
         return;
     }
     canvas.save();
     canvas.concat(&piece.matrix);
-    if piece.opacity < 1.0 {
-        let mut faded = paint.clone();
-        faded.set_alpha_f(paint.alpha_f() * piece.opacity);
-        draw(canvas, &faded);
+    if piece.opacity < 1.0 || piece.blur > 0.0 {
+        let mut posed = paint.clone();
+        if piece.opacity < 1.0 {
+            posed.set_alpha_f(paint.alpha_f() * piece.opacity);
+        }
+        if piece.blur > 0.0 {
+            posed.set_mask_filter(MaskFilter::blur(
+                BlurStyle::Normal,
+                radius_to_sigma(piece.blur),
+                Some(true),
+            ));
+        }
+        draw(canvas, &posed);
     } else {
         draw(canvas, paint);
     }
@@ -323,6 +337,15 @@ mod tests {
     const HEIGHT: i32 = 120;
 
     fn text_shape(text: &str, decoration: Option<skia::textlayout::TextDecoration>) -> Shape {
+        text_shape_with(text, decoration, TextAlign::Left, TextDirection::LTR)
+    }
+
+    fn text_shape_with(
+        text: &str,
+        decoration: Option<skia::textlayout::TextDecoration>,
+        align: TextAlign,
+        direction: TextDirection,
+    ) -> Shape {
         let bounds = Rect::from_xywh(0.0, 0.0, WIDTH as f32, HEIGHT as f32);
         let mut content = TextContent::new(bounds, GrowType::Fixed);
         let span = TextSpan::new(
@@ -333,14 +356,14 @@ mod tests {
             0.0,
             decoration,
             None,
-            TextDirection::LTR,
+            direction,
             400,
             Uuid::nil(),
             vec![Fill::Solid(SolidColor(skia::Color::BLACK))],
         );
         content.add_paragraph(Paragraph::new(
-            TextAlign::Left,
-            TextDirection::LTR,
+            align,
+            direction,
             None,
             None,
             1.2,
@@ -540,6 +563,160 @@ mod tests {
                 assert_eq!(pixel(&moved, x, y + 20), pixel(&at_rest, x, y));
             }
         }
+    }
+
+    /// How many glyphs the laid out text of `shape` has.
+    fn glyph_count(shape: &Shape) -> usize {
+        let content = shape.get_text_content();
+        let mut builders = content.paragraph_builder_group_from_text(None);
+        let mut layout = calculate_text_layout_data(shape, content, &mut builders, true);
+        let mut count = 0;
+        for paragraph in &mut layout.paragraphs {
+            paragraph.paragraph.visit(|_, info| {
+                if let Some(info) = info {
+                    count += info.glyphs().len();
+                }
+            });
+        }
+        count
+    }
+
+    fn moved_down(kind: UnitKind, start: u32, end: u32) -> TextUnits {
+        TextUnits {
+            line_count: 0,
+            units: vec![unit(
+                kind,
+                start,
+                end,
+                UnitPose {
+                    dy: 20.0,
+                    ..UnitPose::REST
+                },
+            )],
+        }
+    }
+
+    #[test]
+    fn a_cluster_goes_with_its_first_character() {
+        let mut resources = RenderResources::try_new_headless().expect("headless resources");
+        let _guard = TestRenderResourcesGuard::install(&mut resources);
+        // an `e` with a combining accent: one cluster, whether it is shaped as
+        // one glyph or two, as a ligature (`fi`) is one cluster of two
+        // characters (the bundled font has no `fi` ligature)
+        let shape = text_shape("e\u{301}t", None);
+        assert!(glyph_count(&shape) >= 2, "the text paints its glyphs");
+
+        let at_rest = painted(&shape, None, fills);
+        assert!(
+            at_rest == painted(&shape, Some(&moved_down(UnitKind::Char, 1, 2)), fills),
+            "the accent alone does not move the cluster it is part of"
+        );
+        // the columns of the cluster, and those of the `t` after it
+        let accented = range_box(&shape, 0..2);
+        let before = accented.right.floor() as i32 - 1;
+        let after = accented.right.ceil() as i32 + 1;
+        let moved = painted(&shape, Some(&moved_down(UnitKind::Char, 0, 1)), fills);
+        let (l, t, r, b) = ink_box(&at_rest, 0..before).expect("the cluster paints");
+        assert_eq!(
+            ink_box(&moved, 0..before),
+            Some((l, t + 20, r, b + 20)),
+            "the whole cluster moves with its first character"
+        );
+        assert_eq!(
+            ink_box(&moved, after..WIDTH),
+            ink_box(&at_rest, after..WIDTH)
+        );
+    }
+
+    #[test]
+    fn a_right_to_left_paragraph_poses_its_units() {
+        let mut resources = RenderResources::try_new_headless().expect("headless resources");
+        let _guard = TestRenderResourcesGuard::install(&mut resources);
+        let shape = text_shape_with("Hello world", None, TextAlign::Right, TextDirection::RTL);
+        let world = range_box(&shape, 6..11);
+        let hello = range_box(&shape, 0..5);
+        assert!(hello.right <= world.left, "the words keep their order");
+
+        let at_rest = painted(&shape, None, fills);
+        let moved = painted(&shape, Some(&moved_down(UnitKind::Word, 6, 11)), fills);
+        let split = world.left.floor() as i32 - 1;
+        assert_eq!(
+            ink_box(&moved, 0..split),
+            ink_box(&at_rest, 0..split),
+            "Hello stays"
+        );
+        let (l, t, r, b) = ink_box(&at_rest, split..WIDTH).expect("world paints");
+        assert_eq!(ink_box(&moved, split..WIDTH), Some((l, t + 20, r, b + 20)));
+    }
+
+    #[test]
+    fn a_justified_paragraph_poses_its_units() {
+        let mut resources = RenderResources::try_new_headless().expect("headless resources");
+        let _guard = TestRenderResourcesGuard::install(&mut resources);
+        let text = "Words in a line that wraps";
+        let shape = text_shape_with(text, None, TextAlign::Justify, TextDirection::LTR);
+        let at_rest = painted(&shape, None, fills);
+        let rest = TextUnits {
+            line_count: 0,
+            units: vec![unit(UnitKind::Word, 0, 5, UnitPose::REST)],
+        };
+        assert!(
+            at_rest == painted(&shape, Some(&rest), fills),
+            "at rest it paints as the text does, spaces stretched"
+        );
+
+        let words = range_box(&shape, 0..5);
+        let moved = painted(&shape, Some(&moved_down(UnitKind::Word, 0, 5)), fills);
+        let split = words.right.ceil() as i32 + 1;
+        assert_eq!(
+            ink_box(&moved, split..WIDTH),
+            ink_box(&at_rest, split..WIDTH),
+            "the others stay"
+        );
+        let (l, t, r, _) = ink_box(&at_rest, 0..split).expect("`Words` paints");
+        let (ml, mt, mr, _) = ink_box(&moved, 0..split).expect("`Words` paints");
+        assert_eq!((ml, mt, mr), (l, t + 20, r));
+    }
+
+    #[test]
+    fn a_blurred_unit_spreads_its_ink() {
+        let mut resources = RenderResources::try_new_headless().expect("headless resources");
+        let _guard = TestRenderResourcesGuard::install(&mut resources);
+        let shape = text_shape("Hello world", None);
+        let world = range_box(&shape, 6..11);
+        let split = world.left.floor() as i32 - 1;
+        let units = TextUnits {
+            line_count: 0,
+            units: vec![unit(
+                UnitKind::Word,
+                6,
+                11,
+                UnitPose {
+                    blur: 6.0,
+                    ..UnitPose::REST
+                },
+            )],
+        };
+
+        let at_rest = painted(&shape, None, fills);
+        let blurred = painted(&shape, Some(&units), fills);
+        // far from the reach of the blur, `Hello` stays sharp
+        let half = range_box(&shape, 0..5).center().x as i32;
+        assert_eq!(ink_box(&blurred, 0..half), ink_box(&at_rest, 0..half));
+        let (l, t, r, b) = ink_box(&at_rest, split..WIDTH).expect("world paints");
+        let (bl, bt, br, bb) = ink_box(&blurred, split - 14..WIDTH).expect("world paints");
+        assert!(bl < l && bt < t && br > r && bb > b, "the blur reaches out");
+        let darkest = |pixels: &[u8]| {
+            (t..=b)
+                .flat_map(|y| (l..=r).map(move |x| (x, y)))
+                .map(|(x, y)| pixel(pixels, x, y)[0])
+                .min()
+                .unwrap_or(255)
+        };
+        assert!(
+            darkest(&blurred) > darkest(&at_rest),
+            "and lightens the glyphs"
+        );
     }
 
     #[test]

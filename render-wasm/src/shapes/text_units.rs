@@ -11,11 +11,12 @@
 //! writes it:
 //!
 //! ```text
-//! u32 count, u32 line_count, then `count` entries of 40 bytes:
+//! u32 count, u32 line_count, then `count` entries of 44 bytes:
 //!   u8 kind (0 char, 1 word, 2 line), u8[3] padding,
 //!   u32 index (the paragraph of a char or word unit; the line of a line unit),
 //!   u32 start, u32 end (UTF-16 offsets in the source text of the paragraph; 0 for a line),
-//!   f32 dx, f32 dy, f32 rotation (degrees), f32 scale_x, f32 scale_y, f32 opacity
+//!   f32 dx, f32 dy, f32 rotation (degrees), f32 scale_x, f32 scale_y, f32 opacity,
+//!   f32 blur (the radius of a layer blur, px)
 //! ```
 
 use std::collections::HashMap;
@@ -23,7 +24,7 @@ use std::ops::Range;
 
 use skia_safe::textlayout;
 
-use super::Paragraph;
+use super::{radius_to_sigma, Paragraph};
 use crate::error::{Error, Result};
 use crate::math::Rect;
 
@@ -50,8 +51,8 @@ impl TryFrom<u8> for UnitKind {
 }
 
 /// How a unit stands off its rest pose: moved by `dx`, `dy`, turned by
-/// `rotation` degrees and scaled around the centre of its box, and faded to
-/// `opacity`.
+/// `rotation` degrees and scaled around the centre of its box, faded to
+/// `opacity` and blurred by `blur`, the radius of a layer blur.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UnitPose {
     pub dx: f32,
@@ -60,6 +61,7 @@ pub struct UnitPose {
     pub scale_x: f32,
     pub scale_y: f32,
     pub opacity: f32,
+    pub blur: f32,
 }
 
 impl UnitPose {
@@ -70,10 +72,11 @@ impl UnitPose {
         scale_x: 1.0,
         scale_y: 1.0,
         opacity: 1.0,
+        blur: 0.0,
     };
 
     /// The pose of the given values, a value that is not a number taking
-    /// the rest one and the opacity kept within 0 and 1.
+    /// the rest one, the opacity kept within 0 and 1 and the blur from 0.
     fn sanitized(
         dx: f32,
         dy: f32,
@@ -81,6 +84,7 @@ impl UnitPose {
         scale_x: f32,
         scale_y: f32,
         opacity: f32,
+        blur: f32,
     ) -> Self {
         let or = |value: f32, rest: f32| if value.is_finite() { value } else { rest };
         let rest = Self::REST;
@@ -91,6 +95,7 @@ impl UnitPose {
             scale_x: or(scale_x, rest.scale_x),
             scale_y: or(scale_y, rest.scale_y),
             opacity: or(opacity, rest.opacity).clamp(0.0, 1.0),
+            blur: or(blur, rest.blur).max(0.0),
         }
     }
 
@@ -135,7 +140,7 @@ pub struct UnitPiece {
 
 impl TextUnits {
     pub const HEADER_SIZE: usize = 8;
-    pub const ENTRY_SIZE: usize = 40;
+    pub const ENTRY_SIZE: usize = 44;
 
     /// The units `bytes` holds (see the byte contract above); `None` for no
     /// units, which clears them.
@@ -227,15 +232,21 @@ impl TextUnits {
     }
 
     /// How far the units can reach out of `text`, the box of the text at
-    /// rest: as far as they move and, for a unit that turns or grows, as far
-    /// as a box as big as the text could turn or grow around its centre.
+    /// rest: as far as they move and blur and, for a unit that turns or
+    /// grows, as far as a box as big as the text could turn or grow around
+    /// its centre.
     pub fn outset(&self, text: &Rect) -> f32 {
         let half_diagonal = text.width().hypot(text.height()) / 2.0;
         self.units
             .iter()
             .map(|unit| {
                 let pose = &unit.pose;
-                let moved = pose.dx.abs().max(pose.dy.abs());
+                let blurred = if pose.blur > 0.0 {
+                    3.0 * radius_to_sigma(pose.blur)
+                } else {
+                    0.0
+                };
+                let moved = pose.dx.abs().max(pose.dy.abs()) + blurred;
                 if pose.reaches_out() {
                     let scale = pose.scale_x.abs().max(pose.scale_y.abs()).max(1.0);
                     moved + scale * half_diagonal
@@ -264,6 +275,7 @@ fn parse_unit(bytes: &[u8]) -> Result<TextUnit> {
             f32_at(28),
             f32_at(32),
             f32_at(36),
+            f32_at(40),
         ),
     })
 }
@@ -324,7 +336,7 @@ mod tests {
     use crate::utils::Browser;
     use crate::uuid::Uuid;
 
-    fn bytes(line_count: u32, entries: &[(u8, u32, u32, u32, [f32; 6])]) -> Vec<u8> {
+    fn bytes(line_count: u32, entries: &[(u8, u32, u32, u32, [f32; 7])]) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend((entries.len() as u32).to_le_bytes());
         out.extend(line_count.to_le_bytes());
@@ -368,7 +380,7 @@ mod tests {
         )
     }
 
-    const REST: [f32; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    const REST: [f32; 7] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
 
     #[test]
     fn no_units_clear_them() {
@@ -380,8 +392,8 @@ mod tests {
         let units = TextUnits::from_bytes(&bytes(
             3,
             &[
-                (1, 0, 6, 11, [0.0, 12.5, 0.0, 1.0, 1.0, 0.4]),
-                (2, 1, 0, 0, [3.0, 0.0, 45.0, 2.0, 0.5, 1.0]),
+                (1, 0, 6, 11, [0.0, 12.5, 0.0, 1.0, 1.0, 0.4, 0.0]),
+                (2, 1, 0, 0, [3.0, 0.0, 45.0, 2.0, 0.5, 1.0, 2.5]),
             ],
         ))
         .unwrap()
@@ -412,6 +424,7 @@ mod tests {
                         rotation: 45.0,
                         scale_x: 2.0,
                         scale_y: 0.5,
+                        blur: 2.5,
                         ..UnitPose::REST
                     },
                 },
@@ -441,7 +454,7 @@ mod tests {
                 0,
                 0,
                 1,
-                [f32::NAN, f32::INFINITY, f32::NAN, f32::NAN, 2.0, 7.0],
+                [f32::NAN, f32::INFINITY, f32::NAN, f32::NAN, 2.0, 7.0, -3.0],
             )],
         ))
         .unwrap()
@@ -491,6 +504,11 @@ mod tests {
 
         // offsets past the end are clamped
         assert_eq!(map_range(&utf16_offset_map(&text, chrome), 3, 99), 3..4);
+
+        // a family joined by ZWJ keeps its eight UTF-16 units
+        let text = paragraph(vec![span("👨\u{200d}👩\u{200d}👧 a", None)]);
+        assert_eq!(map_range(&utf16_offset_map(&text, chrome), 0, 8), 0..8);
+        assert_eq!(map_range(&utf16_offset_map(&text, chrome), 9, 10), 9..10);
     }
 
     #[test]
@@ -703,5 +721,12 @@ mod tests {
             ..UnitPose::REST
         };
         assert_eq!(units(vec![turned]).outset(&text), 25.0);
+        // a blur reaches three sigmas out
+        let blurred = UnitPose {
+            blur: 6.0,
+            ..UnitPose::REST
+        };
+        let reach = units(vec![blurred]).outset(&text);
+        assert!((reach - 3.0 * radius_to_sigma(6.0)).abs() < 1e-4, "{reach}");
     }
 }

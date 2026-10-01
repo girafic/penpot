@@ -401,12 +401,19 @@
   "`timeline`, of a board, with the animations of the component copies
   in it, `copies` (see `instance-timelines`), for the exports, which read
   one timeline: each as it plays on its own clock, over and over when it
-  loops (see `cta/loop-track`). A shape `timeline` animates itself keeps
-  that animation."
-  [timeline copies objects]
+  loops (see `cta/loop-track`). The split animations of a text of a copy
+  stay on its track with the clock of the copy, `:split-clock` (see
+  `cta/text-unit-entries`), or, with `text-split` `:whole`, play as
+  animations of the whole text, as the markup exports play them (see
+  `cta/flatten-splits`). A shape `timeline` animates itself keeps that
+  animation."
+  [timeline copies objects & {:keys [text-split]}]
   (reduce
    (fn [timeline copy]
-     (let [copy   (-> copy (cta/resolve-animations objects) cta/expand-loops)
+     (let [clock  (select-keys copy [:duration :playback :loop])
+           copy   (-> (cond-> copy (= :whole text-split) cta/flatten-splits)
+                      (cta/resolve-animations objects)
+                      (cta/expand-loops))
            ;; ping-pong turns into a loop of there and back
            copy   (cond-> copy
                     (= :ping-pong (cta/playback-mode copy))
@@ -418,7 +425,9 @@
                  (reduce-kv (fn [tracks id track]
                               (cond-> tracks
                                 (not (contains? tracks id))
-                                (assoc id (cond-> track loop? (cta/loop-track period)))))
+                                (assoc id (cond-> track
+                                            loop?                     (cta/loop-track period)
+                                            (seq (:animations track)) (assoc :split-clock clock)))))
                             tracks
                             (:tracks copy))))))
    timeline
@@ -444,6 +453,28 @@
                     (when-let [shape (get objects id)]
                       [id (gsh/transform-shape shape modifiers)])))
             (gm/set-objects-modifiers modif-tree objects)))))
+
+(defn poses-units?
+  "Whether `modif-tree` poses the units of the text `id` (see
+  `cta/text-unit-entries`)."
+  [modif-tree id]
+  (boolean (some #(= :text-units (:property %))
+                 (dm/get-in modif-tree [id :modifiers :structure-parent]))))
+
+(defn units-at-rest
+  "`modif-tree` with the units of the texts of `ids` at rest
+  (`:text-units []`), as a text shows while it is edited, so that its
+  caret and its glyphs line up."
+  [modif-tree ids]
+  (reduce (fn [tree id]
+            (update-in tree [id :modifiers]
+                       (fn [modifiers]
+                         (-> (or modifiers (ctm/empty))
+                             (update :structure-parent
+                                     (partial filterv #(not= :text-units (:property %))))
+                             (ctm/change-property :text-units [])))))
+          modif-tree
+          ids))
 
 (defn edit-preview
   "The modif-tree showing `edit`, a modif-tree that changes shapes of
@@ -639,11 +670,12 @@
   named after it.
 
   `{:timelines :skipped :pivot-kept :targets :grown}`: the timelines of
-  the page after it, how many keyframes the targets could not show and
-  how many targets kept their pivot, the targets pasted onto, and the
-  boards whose timeline grew longer. `{:error :too-large}`, and nothing
-  pasted, onto more than `max-paste-targets` layers or for more than
-  `max-paste-keyframes` keyframes in all (see `clip-size`)."
+  the page after it, how many keyframes and split presets the targets
+  could not take (see `cta/retarget-track`) and how many targets kept
+  their pivot, the targets pasted onto, and the boards whose timeline
+  grew longer. `{:error :too-large}`, and nothing pasted, onto more than
+  `max-paste-targets` layers or for more than `max-paste-keyframes`
+  keyframes in all (see `clip-size`)."
   [file-id page-id timelines objects clip pairs
    {:keys [mode time stagger exact? skip-source?] :or {mode :replace stagger 0}}]
   (let [keyframes (transduce (map #(clip-size (dm/get-in % [:layer :track]))) + 0 pairs)]
