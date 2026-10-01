@@ -44,10 +44,12 @@
         tree (cta/timeline->modif-tree tl objects 1000)
         bridge {:set-modifiers (fn [entries & {:keys [request-render?]}]
                                  (log calls :set-modifiers entries request-render?))
+                :clean-modifiers (fn [] (log calls :clean-modifiers))
                 :apply-shape-properties (fn [shape props]
                                           (log calls :props (:id shape) props))}]
     (dea/apply-pose! objects tree {:bridge bridge})
-    (t/is (some #(= :set-modifiers (first %)) @calls))
+    (t/is (= [:clean-modifiers :set-modifiers :props] (mapv first @calls))
+          "the modifiers of the frame before go first, with the copies they made")
     (t/is (some (fn [[k _ render?]]
                   (and (= k :set-modifiers) (false? render?)))
                 @calls))

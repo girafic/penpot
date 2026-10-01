@@ -62,14 +62,18 @@
        (group-by first)))
 
 (defn apply-pose!
-  "Write `modif-tree` to WASM without scheduling a viewport render."
+  "Write `modif-tree` to WASM without scheduling a viewport render. The
+  modifiers of the frame before go first, as the workspace drops them
+  (see `dwm/set-wasm-modifiers`): WASM keeps the copies of the shapes they
+  modified, and a shape no longer modified would show the copy instead of
+  the properties set now."
   [objects modif-tree {:keys [bridge] :or {bridge (default-bridge)}}]
   (let [{:keys [set-modifiers clean-modifiers apply-shape-properties]} bridge
         entries (geometry-entries modif-tree)]
-    (if (seq entries)
-      (set-modifiers entries :request-render? false)
-      (when clean-modifiers
-        (clean-modifiers)))
+    (when clean-modifiers
+      (clean-modifiers))
+    (when (seq entries)
+      (set-modifiers entries :request-render? false))
     (doseq [[id ops] (property-ops modif-tree)]
       (when-let [shape (get objects id)]
         (let [ops   (map second ops)
