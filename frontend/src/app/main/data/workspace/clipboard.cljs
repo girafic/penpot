@@ -40,6 +40,7 @@
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
    [app.main.data.persistence :as dps]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.media :as dwm]
    [app.main.data.workspace.path.clipboard :as path-cp]
    [app.main.data.workspace.selection :as dws]
@@ -266,6 +267,7 @@
 (declare ^:private paste-image)
 (declare ^:private paste-svg-text)
 (declare ^:private paste-shapes)
+(declare paste-animation-data)
 
 (def ^:private default-options
   #js {:decodeTransit t/decode-str
@@ -301,6 +303,7 @@
                 (case (:type pdata)
                   :copied-props        (rx/of (paste-transit-props pdata))
                   :copied-shapes       (rx/of (paste-transit-shapes pdata))
+                  :copied-animation    (rx/of (paste-animation-data pdata))
                   :copied-path-content (rx/of (path-cp/paste-nodes-as-shape (:content pdata)))
                   (rx/empty)))))
 
@@ -528,6 +531,41 @@
                (rx/take 1)
                (rx/catch on-error)))))))
 
+(defn copy-selected-animation
+  "Copy the animation of the selected layer (only one) to the clipboard:
+  what it plays, its own or the one of its main (see
+  `cltl/animation-clip`). Nothing when it plays none."
+  []
+  (ptk/reify ::copy-selected-animation
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [selected (dsh/lookup-selected state)]
+        (when (= 1 (count selected))
+          (let [page (dsh/lookup-page state)
+                clip (cltl/animation-clip (:current-file-id state) page (:objects page)
+                                          (dsh/lookup-libraries state) selected
+                                          :whole-layer? true)]
+            (when (seq (:layers clip))
+              (rx/of (dwa/write-animation-clip clip)))))))))
+
+(defn paste-selected-animation
+  "Paste the animation on the clipboard onto the selected layers (see
+  `paste-animation-data`)."
+  []
+  (ptk/reify ::paste-selected-animation
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when-not (-> state :workspace-global :read-only?)
+        (->> (clipboard/from-navigator default-options)
+             (rx/mapcat #(.text %))
+             (rx/map t/decode-str)
+             (rx/take 1)
+             (rx/map paste-animation-data)
+             (rx/catch (fn [cause]
+                         (if-let [message (clipboard/error-message cause)]
+                           (rx/of (ntf/warn message))
+                           (rx/of (ntf/warn (tr "workspace.animation.paste-invalid")))))))))))
+
 (defn- selected-frame? [state]
   (let [selected (dsh/lookup-selected state)
         objects  (dsh/lookup-page-objects state)]
@@ -578,13 +616,40 @@
     ;; todo type the properties
     [:map-of :keyword :any]]])
 
+(def ^:private
+  schema:paste-data-animation
+  [:map {:title "paste-data-animation"}
+   [:type [:= :copied-animation]]
+   [:version :int]
+   [:clip cltl/schema:animation-clip]])
+
 (def schema:paste-data
   [:multi {:title "paste-data" :dispatch :type}
    [:copied-shapes schema:paste-data-shapes]
-   [:copied-props schema:paste-data-props]])
+   [:copied-props schema:paste-data-props]
+   [:copied-animation schema:paste-data-animation]])
 
 (def paste-data-valid?
   (sm/lazy-validator schema:paste-data))
+
+(defn clipboard-payload-type
+  "Read the system clipboard and call `on-type` with the type of the
+  Penpot payload on it (`:copied-props`, `:copied-animation`...) when it
+  holds a valid one, nil otherwise: what a paste of it would do, for the
+  menus to enable their paste entries. Only Chrome reads it without
+  asking."
+  [on-type]
+  (->> (clipboard/from-navigator)
+       (rx/mapcat #(.text %))
+       (rx/take 1)
+       (rx/subs! (fn [data]
+                   (on-type (try
+                              (let [pdata (t/decode-str data)]
+                                (when (paste-data-valid? pdata)
+                                  (:type pdata)))
+                              (catch :default _ nil))))
+                 (fn [_]
+                   (on-type nil)))))
 
 (defn- paste-transit-shapes
   [{:keys [images] :as pdata}]
@@ -712,6 +777,61 @@
                    (rx/of (dwu/commit-undo-transaction undo-id)))))
               ;;
               (rx/empty))))))))
+
+(defn paste-animation-data
+  "Paste the animation clip of `pdata`, a `:copied-animation` payload,
+  onto the selected layers but the one it was copied from: each one gets
+  the animation of the clip counted from where it rests, in place of the
+  rows (and presets) the clip has (see `cltl/paste-animation`), all in
+  one undo step. A toast tells what could not be pasted."
+  [pdata]
+  (ptk/reify ::paste-animation-data
+    ptk/WatchEvent
+    (watch [it state _]
+      (cond
+        (-> state :workspace-global :read-only?)
+        (rx/empty)
+
+        (not (features/active-feature? state "animation/v1"))
+        (rx/of (ntf/warn (tr "workspace.animation.paste-needs-motion")))
+
+        (not (and (= :copied-animation (:type pdata)) (paste-data-valid? pdata)))
+        (rx/of (ntf/warn (tr "workspace.animation.paste-invalid")))
+
+        :else
+        (let [page    (dsh/lookup-page state)
+              clip    (:clip pdata)
+              layer   (first (:layers clip))
+              targets (cltl/paste-targets (:objects page) (dsh/lookup-selected state))
+              result  (when (some? layer)
+                        (cltl/generate-paste-animation
+                         (pcb/empty-changes it) (:current-file-id state) page clip
+                         (mapv (fn [id] {:layer layer :target-id id}) targets)
+                         {:mode :replace :skip-source? true}))]
+          (cond
+            (= :too-large (:error result))
+            (rx/of (ntf/warn (tr "workspace.animation.paste-too-large")))
+
+            (empty? (:targets result))
+            (rx/of (ntf/warn (tr "workspace.animation.paste-no-target")))
+
+            :else
+            (let [{:keys [changes skipped grown]} result
+                  notes (cond-> []
+                          (pos? skipped) (conj (tr "workspace.animation.paste-skipped" skipped))
+                          (seq grown)    (conj (tr "workspace.animation.paste-grown")))]
+              (rx/concat
+               (rx/of (dch/commit-changes changes))
+               ;; out of motion mode the canvas shows the layers at rest
+               (if (dwa/motion-mode? state)
+                 (rx/of (dwa/apply-preview))
+                 (rx/empty))
+               (if (seq notes)
+                 (rx/of (ntf/show {:content (str/join " " notes)
+                                   :type :toast
+                                   :level (if (pos? skipped) :warning :info)
+                                   :timeout 5000}))
+                 (rx/empty))))))))))
 
 (defn paste-shapes
   [{in-viewport? :in-viewport :as pdata}]

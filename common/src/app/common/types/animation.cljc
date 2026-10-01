@@ -29,6 +29,7 @@
    [app.common.types.path :as path]
    [app.common.types.shape.interactions :as cti]
    [app.common.types.shape.layout :as ctl]
+   [app.common.types.shape.radius :as ctsr]
    [app.common.uuid :as uuid]
    [clojure.string :as str]))
 
@@ -1890,7 +1891,7 @@
                           (mapcat resolve)
                           properties))))))))
 
-(defn- visible-track
+(defn visible-track
   "`track` without its hidden keyframes and animations."
   [{:keys [hidden animations] :as track}]
   (cond-> (dissoc track :hidden)
@@ -1950,6 +1951,185 @@
        acc))
    {}
    (values-at timeline time)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; RETARGETING
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; The animation of a layer goes onto another one where that one is:
+;; keyframe positions, rotations and sizes are absolute, so they are
+;; counted again from where the other layer rests.
+
+(def schema:pose
+  "Where a layer rests in the board of its timeline (see `rest-pose`)."
+  [:map {:title "AnimationPose"}
+   [:x ::sm/safe-number]
+   [:y ::sm/safe-number]
+   [:width ::sm/safe-number]
+   [:height ::sm/safe-number]
+   [:rotation ::sm/safe-number]])
+
+(defn rest-pose
+  "Where `shape-id` of `objects` rests in the board of `timeline`, as its
+  keyframes count it: its position in the board (a board on the canvas,
+  see `position-origin`), its size and its rotation."
+  [timeline objects shape-id]
+  (let [shape   (get objects shape-id)
+        origin  (position-origin timeline objects shape-id)
+        selrect (:selrect shape)]
+    {:x        (- (or (:x selrect) 0) (:x origin))
+     :y        (- (or (:y selrect) 0) (:y origin))
+     :width    (or (:width selrect) 0)
+     :height   (or (:height selrect) 0)
+     :rotation (or (:rotation shape) 0)}))
+
+(defn fits-keyframe?
+  "Whether `shape` can show `keyframe`: it has the fill, stroke or shadow
+  slot the keyframe animates (in a flat colour for the colour and opacity
+  of fills and strokes), and the radius, blur or strokes (for a trim) it
+  animates. Position, size, rotation, scale and opacity fit any shape."
+  [shape {:keys [property index]}]
+  (case property
+    (:fill-color :fill-opacity)
+    (boolean (solid-color-fill? (get (as-vec (:fills shape)) index)))
+
+    (:stroke-color :stroke-opacity)
+    (boolean (solid-color-stroke? (get (as-vec (:strokes shape)) index)))
+
+    :stroke-width
+    (some? (get (as-vec (:strokes shape)) index))
+
+    (:shadow-offset-x :shadow-offset-y :shadow-blur :shadow-spread :shadow-color :shadow-opacity)
+    (some? (get (as-vec (:shadow shape)) index))
+
+    (:r1 :r2 :r3 :r4)
+    (ctsr/has-radius? shape)
+
+    :blur
+    (some? (:blur shape))
+
+    :background-blur
+    (some? (:background-blur shape))
+
+    (:trim-start :trim-end :trim-offset)
+    (d/not-empty? (:strokes shape))
+
+    true))
+
+(defn keyframe-value-fits?
+  "Whether the value of `keyframe` is of the kind its property takes: a
+  hex colour for a colour, a finite number for the others."
+  [{:keys [property value]}]
+  (if (color-property? property)
+    (clr/hex-color-string? value)
+    (mth/finite? value)))
+
+(defn- relative-value
+  "`value` of `property`, of a layer resting at `from`, for a layer
+  resting at `to`: positions and rotation moved as far as `to` rests from
+  `from`, sizes scaled as much as it is bigger (as the copies of a
+  component take the animation of their main). Scales are factors
+  already, and the other properties look the same on any layer."
+  [property value from to]
+  (let [ratio (fn [k]
+                (let [base (get from k)]
+                  (if (and (number? base) (pos? base)) (/ (get to k) base) 1)))]
+    (case property
+      :x        (+ value (- (:x to) (:x from)))
+      :y        (+ value (- (:y to) (:y from)))
+      :rotation (+ value (- (:rotation to) (:rotation from)))
+      :width    (* value (ratio :width))
+      :height   (* value (ratio :height))
+      value)))
+
+(defn retarget-track
+  "`track`, of a layer resting at `from` (see `rest-pose`), for the shape
+  `target` resting at `to`: its positions and rotation counted from where
+  `target` rests and its sizes scaled to it (see `relative-value`), or
+  its values as they are with `exact?`. The keyframes `target` cannot
+  show (see `fits-keyframe?`) are left out. The track gets new keyframe
+  and animation ids and keeps the loops of the rows left and its pivot;
+  nothing in it is hidden or locked. `{:track :skipped}`, `:skipped`
+  being the number of keyframes left out."
+  [track from target to & {:keys [exact?]}]
+  (let [keyframes (:keyframes track)
+        fits      (filterv #(fits-keyframe? target %) keyframes)
+
+        retarget
+        (fn [{:keys [property] :as keyframe}]
+          (make-keyframe
+           (cond-> (dissoc keyframe :id)
+             (not exact?) (update :value #(relative-value property % from to)))))
+
+        track
+        (-> track
+            (assoc :shape-id (:id target))
+            (assoc :keyframes (sort-keyframes (mapv retarget fits)))
+            (dissoc :hidden :locked)
+            (d/update-when :animations
+                           (partial mapv #(make-animation (dissoc % :id :hidden :locked))))
+            (prune-slot-flags))]
+    {:track track
+     :skipped (- (count keyframes) (count fits))}))
+
+(def ^:private pivot-properties
+  "The properties that scale, resize or turn a layer around its pivot (the
+  `:origin` of its track)."
+  #{:rotation :scale-x :scale-y :width :height})
+
+(defn- pivot-motion?
+  "Whether `track` scales, resizes or turns its layer: what its pivot is
+  the centre of."
+  [{:keys [keyframes animations]}]
+  (boolean (or (some #(contains? pivot-properties (:property %)) keyframes)
+               (some #(contains? #{:scale :rotate} (:type %)) animations))))
+
+(defn paste-track
+  "Paste `track` (see `retarget-track`) onto `shape-id` of `timeline`.
+  `:replace` first removes the unlocked keyframes of the rows `track` has
+  keyframes of and, when it has presets, the unlocked presets of
+  `shape-id`; `:merge` removes nothing. Locked rows and presets stay,
+  and take nothing. The rows of `track` loop as they did. Its pivot goes
+  on when it scales, resizes or turns and `shape-id` does not anymore;
+  otherwise `shape-id` keeps its own, so its own motion plays as before.
+  The duration grows to fit it. `{:timeline :pivot-kept?}`."
+  [timeline shape-id track mode]
+  (let [slots   (into #{} (map keyframe-slot) (:keyframes track))
+
+        cleared
+        (if (= mode :replace)
+          (let [timeline (reduce (fn [timeline [property index]]
+                                   (remove-property timeline shape-id property index))
+                                 timeline
+                                 slots)]
+            (if (seq (:animations track))
+              (reduce #(remove-animation %1 shape-id (:id %2))
+                      timeline
+                      (dm/get-in timeline [:tracks shape-id :animations]))
+              timeline))
+          timeline)
+
+        own         (get-track cleared shape-id)
+        locked      (get own :locked #{})
+        pivot?      (pivot-motion? track)
+        pivot-kept? (and pivot? (pivot-motion? own))
+        end         (reduce max 0 (track-times track))
+
+        pasted
+        (as-> cleared $
+          (reduce #(add-keyframe %1 shape-id %2) $ (:keyframes track))
+          (reduce #(add-animation %1 shape-id %2) $ (:animations track))
+          (reduce #(d/update-in-when %1 [:tracks shape-id] update-slot-flag :loops conj %2)
+                  $
+                  (remove locked (:loops track)))
+          (cond-> $
+            (and pivot? (not pivot-kept?))
+            (set-track-origin shape-id
+                              (dm/get-in track [:origin :x] 0.5)
+                              (dm/get-in track [:origin :y] 0.5)))
+          (update $ :duration max end))]
+    {:timeline pasted
+     :pivot-kept? pivot-kept?}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; EDITS ON THE CANVAS

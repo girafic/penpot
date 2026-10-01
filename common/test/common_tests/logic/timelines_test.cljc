@@ -22,6 +22,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape :as cts]
+   [app.common.uuid :as uuid]
    [clojure.test :as t]))
 
 (t/use-fixtures :each thi/test-fixture)
@@ -216,23 +217,28 @@
              (get-in shown [a :selrect :x])))
     (t/is (mth/close? (+ 2000 200) (get-in shown [(:id c) :selrect :x])))))
 
-(defn- component-scene
+(defn- component-file
   "An animated component: its main, a board at 0,0 whose rect moves from
   10 to 60 in 1 s, over and over. A copy of it in board B at 1000,100."
   []
-  (let [file     (-> (thf/sample-file :file1)
-                     (tho/add-simple-component :anim :main :main-rect
-                                               :root-params {:x 0 :y 0 :width 200 :height 200}
-                                               :child-params {:x 10 :y 20 :width 50 :height 50})
-                     (tho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
-                     (thc/instantiate-component :anim :copy :parent-label :board-b))
-        main     (thi/id :main)
-        tl       (-> (cta/make-timeline {:board-id main :duration 1000 :playback :loop})
-                     (cta/add-keyframe (thi/id :main-rect) {:time 0 :property :x :value 10 :easing :linear})
-                     (cta/add-keyframe (thi/id :main-rect) {:time 1000 :property :x :value 60}))
-        file     (thf/apply-changes file (-> (pcb/empty-changes nil)
-                                             (pcb/with-page (thf/current-page file))
-                                             (pcb/set-timeline main tl)))
+  (let [file (-> (thf/sample-file :file1)
+                 (tho/add-simple-component :anim :main :main-rect
+                                           :root-params {:x 0 :y 0 :width 200 :height 200}
+                                           :child-params {:x 10 :y 20 :width 50 :height 50})
+                 (tho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
+                 (thc/instantiate-component :anim :copy :parent-label :board-b))
+        main (thi/id :main)
+        tl   (-> (cta/make-timeline {:board-id main :duration 1000 :playback :loop})
+                 (cta/add-keyframe (thi/id :main-rect) {:time 0 :property :x :value 10 :easing :linear})
+                 (cta/add-keyframe (thi/id :main-rect) {:time 1000 :property :x :value 60}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline main tl)))))
+
+(defn- component-scene
+  "The scene of `component-file`."
+  []
+  (let [file     (component-file)
         page     (thf/current-page file)
         objects  (:objects page)
         copy     (thi/id :copy)]
@@ -353,3 +359,258 @@
     (t/is (= [[:copy copy inner]] (keys timelines)) "on the clock of the inner main")
     (t/is (= [800 :loop] [(:duration timeline) (:playback timeline)]))
     (t/is (= [at (+ at 50)] (x-values timeline rect)))))
+
+;; ANIMATION CLIPS: what copying the animation of layers takes
+
+(defn- close-all?
+  [expected actual]
+  (and (= (count expected) (count actual))
+       (every? true? (map #(mth/close? (double %1) (double %2) 0.001) expected actual))))
+
+(defn- with-timeline
+  "`file` with the timeline of the board `label` changed by `f`."
+  [file label f]
+  (let [page (thf/current-page file)
+        id   (thi/id label)]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page page)
+                                (pcb/set-timeline id (f (get (:timelines page) id)))))))
+
+(defn- clip-of
+  "The animation clip of the layers `labels` of `file`."
+  [file labels & {:as opts}]
+  (let [page (thf/current-page file)]
+    (cltl/animation-clip (:id file) page (:objects page) {(:id file) file}
+                         (mapv thi/id labels) opts)))
+
+(t/deftest a-clip-holds-what-a-layer-plays
+  (let [file  (with-timeline (animated-file) :board-a #(cta/set-track-origin % (thi/id :rect) 0 1))
+        clip  (clip-of file [:rect] :whole-layer? true)
+        layer (first (:layers clip))]
+    (t/is (= [(:id file) (:id (thf/current-page file))] [(:file-id clip) (:page-id clip)]))
+    (t/is (= (thi/id :rect) (:shape-id layer)))
+    (t/is (= [50 150] (mapv :value (get-in layer [:track :keyframes]))))
+    (t/is (= [:fade] (mapv :type (get-in layer [:track :animations]))))
+    (t/is (= {:x 0.0 :y 1.0} (get-in layer [:track :origin])))
+    (t/is (close-all? [50 100 50 50 0] ((juxt :x :y :width :height :rotation) (:pose layer))))
+    (t/is (cltl/animation-clip-valid? clip))))
+
+(t/deftest a-clip-of-the-whole-layer-leaves-out-hidden-rows
+  (let [file (animated-file)
+        rect (thi/id :rect)
+        file (with-timeline file :board-a #(cta/toggle-slot-flag % rect :hidden :x))]
+    (t/testing "the whole layer"
+      (let [track (-> (clip-of file [:rect] :whole-layer? true) :layers first :track)]
+        (t/is (empty? (:keyframes track)))
+        (t/is (= [:fade] (mapv :type (:animations track))))
+        (t/is (nil? (:hidden track)))))
+    (t/testing "one row, hidden or not"
+      (let [track (-> (clip-of file [:rect] :properties [:x] :presets? false) :layers first :track)]
+        (t/is (= [50 150] (mapv :value (:keyframes track))))
+        (t/is (nil? (:animations track)))))
+    (t/testing "some keyframes"
+      (let [keyframe (-> (get-in (thf/current-page file) [:timelines (thi/id :board-a)])
+                         (cta/property-keyframes rect :x)
+                         first)
+            track    (-> (clip-of file [:rect] :keyframe-ids [(:id keyframe)] :presets? false)
+                         :layers first :track)]
+        (t/is (= [50] (mapv :value (:keyframes track))))))))
+
+(t/deftest a-clip-leaves-out-what-is-not-animated
+  (t/is (= [] (:layers (clip-of (animated-file) [:board-b] :whole-layer? true)))))
+
+(t/deftest a-clip-of-a-copy-holds-the-animation-of-its-main
+  (let [file      (component-file)
+        page      (thf/current-page file)
+        objects   (:objects page)
+        files     {(:id file) file}
+        board     (thi/id :board-b)
+        copy-rect (first (get-in objects [(thi/id :copy) :shapes]))
+        at        #(- (get-in objects [%1 :selrect :x]) (get-in objects [%2 :selrect :x]))
+        dx        (- (at copy-rect board) (at (thi/id :main-rect) (thi/id :main)))
+        layer     (-> (cltl/animation-clip (:id file) page objects files [copy-rect] {:whole-layer? true})
+                      :layers first)]
+    (t/is (= copy-rect (:shape-id layer)))
+    (t/is (close-all? [(+ 10 dx) (+ 60 dx)] (mapv :value (get-in layer [:track :keyframes]))))
+    (t/is (mth/close? (at copy-rect board) (get-in layer [:pose :x])))
+    (t/is (cltl/animated-layer? page files copy-rect))
+    (t/is (not (cltl/animated-layer? page files board)))))
+
+(t/deftest animation-clip-valid-checks-what-comes-from-the-clipboard
+  (let [clip (clip-of (animated-file) [:rect] :whole-layer? true)
+        with (fn [f] (update-in clip [:layers 0 :track] f))]
+    (t/is (cltl/animation-clip-valid? clip))
+    (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:keyframes 0 :value] "#ffffff")))))
+    (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:keyframes 0 :time] -10)))))
+    (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:animations 0 :start] -1)))))
+    (t/is (not (cltl/animation-clip-valid?
+                (assoc clip :layers (vec (repeat (inc cltl/max-clip-layers) (first (:layers clip))))))))))
+
+;; PASTING ANIMATION CLIPS
+
+(defn- paste-file
+  "`animated-file` with more rects: one in board A at 300,200 (200,100 in
+  it), one in board B at 1100,150 (100,50 in it), and one out of any
+  board."
+  []
+  (-> (animated-file)
+      (ths/add-sample-shape :rect-a :type :rect :parent-label :board-a
+                            :x 300 :y 200 :width 50 :height 50)
+      (ths/add-sample-shape :rect-b :type :rect :parent-label :board-b
+                            :x 1100 :y 150 :width 100 :height 100)
+      (ths/add-sample-shape :loose :type :rect :x 3000 :y 3000 :width 10 :height 10)))
+
+(defn- paste
+  "Paste the first layer of `clip` onto the layers `labels` of `file`."
+  [file clip labels opts]
+  (let [page  (thf/current-page file)
+        layer (first (:layers clip))
+        pairs (mapv (fn [label] {:layer layer :target-id (thi/id label)}) labels)]
+    (cltl/paste-animation (:id file) (:id page) (:timelines page) (:objects page) clip pairs opts)))
+
+(defn- track-in
+  [result board-label label]
+  (get-in result [:timelines (thi/id board-label) :tracks (thi/id label)]))
+
+(defn- row
+  "`[time value]` of the keyframes of `property` of `track`."
+  [track property]
+  (->> (:keyframes track)
+       (filter #(= property (:property %)))
+       (mapv (juxt :time :value))))
+
+(t/deftest paste-takes-the-animation-where-each-target-is
+  (let [file   (paste-file)
+        clip   (clip-of file [:rect] :whole-layer? true)
+        result (paste file clip [:rect-a :rect-b] {:mode :replace})
+        b      (get-in result [:timelines (thi/id :board-b)])]
+    (t/is (close-all? [200 300] (mapv second (row (track-in result :board-a :rect-a) :x))))
+    (t/is (close-all? [100 200] (mapv second (row (track-in result :board-b :rect-b) :x))))
+    (t/is (= #{(thi/id :rect-a) (thi/id :rect-b)} (:targets result)))
+    (t/is (= [:fade] (mapv :type (:animations (track-in result :board-b :rect-b)))) "presets too")
+    (t/testing "a board without a timeline gets one named after it"
+      (t/is (= (get-in (thf/current-page file) [:objects (thi/id :board-b) :name]) (:name b)))
+      (t/is (cta/valid-timeline? b)))))
+
+(t/deftest paste-replaces-what-the-clip-carries
+  (let [file (with-timeline (paste-file) :board-a
+               #(-> %
+                    (cta/add-keyframe (thi/id :rect-a) {:time 0 :property :x :value 0})
+                    (cta/add-keyframe (thi/id :rect-a) {:time 0 :property :opacity :value 1})
+                    (cta/add-animation (thi/id :rect-a) {:type :scale :start 0 :duration 300})))]
+    (t/testing "only the rows it has keyframes of"
+      (let [clip  (clip-of file [:rect] :properties [:x] :presets? false)
+            track (track-in (paste file clip [:rect-a] {:mode :replace}) :board-a :rect-a)]
+        (t/is (close-all? [200 300] (mapv second (row track :x))))
+        (t/is (= [[0 1]] (row track :opacity)))
+        (t/is (= [:scale] (mapv :type (:animations track))))))
+    (t/testing "its presets in place of the target's"
+      (let [clip  (clip-of file [:rect] :whole-layer? true)
+            track (track-in (paste file clip [:rect-a] {:mode :replace}) :board-a :rect-a)]
+        (t/is (= [:fade] (mapv :type (:animations track))))))))
+
+(t/deftest paste-keeps-what-is-locked
+  (let [file  (with-timeline (paste-file) :board-a
+                #(let [id (thi/id :rect-a)
+                       tl (-> %
+                              (cta/add-keyframe id {:time 0 :property :x :value 0})
+                              (cta/add-animation id {:type :scale :start 0 :duration 300})
+                              (cta/toggle-slot-flag id :locked :x))]
+                   (cta/toggle-animation-flag tl id (-> tl (cta/get-track id) :animations first :id) :locked)))
+        clip  (clip-of file [:rect] :whole-layer? true)
+        track (track-in (paste file clip [:rect-a] {:mode :replace}) :board-a :rect-a)]
+    (t/is (= [[0 0]] (row track :x)) "a locked row takes nothing")
+    (t/is (= [:scale :fade] (mapv :type (:animations track))) "a locked preset stays")))
+
+(t/deftest paste-merges-at-the-playhead
+  (let [file  (with-timeline (paste-file) :board-a
+                #(cta/add-keyframe % (thi/id :rect-a) {:time 0 :property :x :value 0}))
+        clip  (clip-of file [:rect] :whole-layer? true)
+        track (track-in (paste file clip [:rect-a] {:mode :merge :time 500}) :board-a :rect-a)]
+    (t/is (= [0 500 1500] (mapv first (row track :x))))
+    (t/is (= [[500 900]] (mapv (juxt :start cta/animation-end) (:animations track))))))
+
+(t/deftest paste-onto-the-layer-copied
+  (let [file (paste-file)
+        clip (clip-of file [:rect] :whole-layer? true)
+        rect (thi/id :rect)]
+    (t/testing "the dock pastes onto it again"
+      (let [track (track-in (paste file clip [:rect] {:mode :merge :time 1000}) :board-a :rect)]
+        (t/is (= [[0 50] [1000 50] [2000 150]] (row track :x)))))
+    (t/testing "the canvas leaves it out"
+      (t/is (= #{(thi/id :rect-a)}
+               (:targets (paste file clip [:rect :rect-a] {:mode :replace :skip-source? true})))))
+    (t/testing "a layer with its id on another page is another layer"
+      (t/is (= #{rect}
+               (:targets (paste file (assoc clip :page-id (uuid/next)) [:rect]
+                                {:mode :replace :skip-source? true})))))))
+
+(t/deftest paste-gives-the-pivot-to-a-target-that-does-not-turn
+  (let [file   (with-timeline (paste-file) :board-a
+                 #(-> %
+                      (cta/add-keyframe (thi/id :rect) {:time 0 :property :rotation :value 0})
+                      (cta/add-keyframe (thi/id :rect) {:time 1000 :property :rotation :value 90})
+                      (cta/set-track-origin (thi/id :rect) 0 1)
+                      (cta/add-keyframe (thi/id :rect-a) {:time 0 :property :rotation :value 10})))
+        clip   (clip-of file [:rect] :whole-layer? true)
+        result (paste file clip [:rect-a :rect-b] {:mode :merge})]
+    (t/is (= 1 (:pivot-kept result)))
+    (t/is (nil? (:origin (track-in result :board-a :rect-a))))
+    (t/is (= {:x 0.0 :y 1.0} (:origin (track-in result :board-b :rect-b))))))
+
+(t/deftest paste-targets-leave-out-what-a-target-carries
+  (let [file    (-> (paste-file)
+                    (tho/add-group :group :parent-label :board-a)
+                    (ths/add-sample-shape :child :type :rect :parent-label :group
+                                          :x 120 :y 120 :width 10 :height 10))
+        objects (:objects (thf/current-page file))
+        layers  (get-in objects [(thi/id :board-a) :shapes])]
+    (t/is (= [(thi/id :group)] (cltl/paste-targets objects [(thi/id :child) (thi/id :group)])))
+    (t/is (= (vec (reverse layers)) (cltl/paste-targets objects layers))
+          "from the top-most layer down")))
+
+(t/deftest paste-staggers-the-targets
+  (let [file   (ths/add-sample-shape (paste-file) :rect-c :type :rect :parent-label :board-a
+                                     :x 400 :y 200 :width 10 :height 10)
+        clip   (clip-of file [:rect] :properties [:x] :presets? false)
+        result (paste file clip [:rect-a :rect-c :rect-b] {:mode :replace :time 0 :stagger 100})
+        start  #(ffirst (row (track-in result %1 %2) :x))]
+    (t/is (= [0 100 200] [(start :board-a :rect-a) (start :board-a :rect-c) (start :board-b :rect-b)]))))
+
+(t/deftest paste-grows-the-boards-to-fit
+  (let [file   (paste-file)
+        clip   (clip-of file [:rect] :whole-layer? true)
+        result (paste file clip [:rect-a :rect-b] {:mode :replace :time 800})]
+    (t/is (= 1800 (get-in result [:timelines (thi/id :board-a) :duration])))
+    (t/is (= 1800 (get-in result [:timelines (thi/id :board-b) :duration])))
+    (t/is (= #{(thi/id :board-a)} (:grown result)) "only the boards that had a timeline")))
+
+(t/deftest paste-refuses-what-is-too-large
+  (let [file  (paste-file)
+        page  (thf/current-page file)
+        clip  (clip-of file [:rect] :whole-layer? true)
+        layer (first (:layers clip))
+        heavy (assoc-in layer [:track :keyframes]
+                        (mapv #(cta/make-keyframe {:time % :property :x :value %}) (range 2001)))
+        paste #(cltl/paste-animation (:id file) (:id page) (:timelines page) (:objects page) clip
+                                     (vec (repeat %2 {:layer %1 :target-id (thi/id :rect-a)}))
+                                     {:mode :replace})]
+    (t/is (= {:error :too-large} (paste layer (inc cltl/max-paste-targets))))
+    (t/is (= {:error :too-large} (paste heavy 5)) "2001 keyframes onto 5 layers")))
+
+(t/deftest paste-skips-a-layer-out-of-any-board
+  (let [file (paste-file)
+        clip (clip-of file [:rect] :whole-layer? true)]
+    (t/is (= #{(thi/id :rect-a)} (:targets (paste file clip [:loose :rect-a] {:mode :replace}))))))
+
+(t/deftest a-paste-is-one-step-to-undo
+  (let [file    (paste-file)
+        page    (thf/current-page file)
+        clip    (clip-of file [:rect] :whole-layer? true)
+        pairs   (mapv (fn [label] {:layer (first (:layers clip)) :target-id (thi/id label)})
+                      [:rect-a :rect-b])
+        changes (:changes (cltl/generate-paste-animation (pcb/empty-changes nil) (:id file) page clip
+                                                         pairs {:mode :replace}))
+        pasted  (thf/apply-changes file changes)]
+    (t/is (= 2 (count (timelines pasted))))
+    (t/is (= (timelines file) (timelines (thf/apply-undo-changes pasted changes))))))

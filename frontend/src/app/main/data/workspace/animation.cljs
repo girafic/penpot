@@ -17,6 +17,7 @@
    [app.common.geom.shapes :as gsh]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
+   [app.common.transit :as t]
    [app.common.types.animation :as cta]
    [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
@@ -28,6 +29,7 @@
    [app.main.features :as features]
    [app.main.streams :as ms]
    [app.main.worker :as mw]
+   [app.util.clipboard :as clipboard]
    [app.util.dom :as dom]
    [app.util.mouse :as mse]
    [app.util.storage :as storage]
@@ -832,6 +834,24 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TRACK ACTIONS (timeline context menu)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn write-animation-clip
+  "Put the animation clip `clip` (see `cltl/animation-clip`) on the system
+  clipboard as a `:copied-animation` payload, where any tab or file
+  pastes it. Every copy of animation writes it this way, so the last one
+  is the one pasted."
+  [clip]
+  (ptk/reify ::write-animation-clip
+    ptk/WatchEvent
+    (watch [_ _ _]
+      ;; written at once, within the user gesture that copies
+      (->> (rx/from (clipboard/to-clipboard
+                     (t/encode-str {:type :copied-animation :version 1 :clip clip}
+                                   {:type :json-verbose})))
+           (rx/catch (fn [cause]
+                       (js/console.error "clipboard blocked:" cause)
+                       (rx/empty)))
+           (rx/ignore)))))
 
 (defn copy-keyframes
   "Copy the keyframes of `properties` of `shape-id`, with their loop

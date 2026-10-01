@@ -1997,3 +1997,168 @@
                          (cta/make-keyframe {:time 1500 :property :x :value 300}))]
       (t/is (= 1000 (:time (last (:keyframes (cta/loop-track longer 1000)))))
             "cut at the period"))))
+
+;; RETARGETING: the animation of a layer onto another one
+
+(defn- pose-values
+  [pose]
+  ((juxt :x :y :width :height :rotation) pose))
+
+(defn- pose
+  [x y width height rotation]
+  {:x x :y y :width width :height height :rotation rotation})
+
+(defn- track-with
+  "The track, of a new shape, of the keyframes `[property time value
+  extra]`."
+  [& keyframes]
+  (let [id (uuid/next)]
+    (-> (reduce (fn [timeline [property time value extra]]
+                  (cta/add-keyframe timeline id (merge {:time time :property property :value value}
+                                                       extra)))
+                (mk-timeline)
+                keyframes)
+        (cta/get-track id))))
+
+(defn- values-of
+  "The values of the keyframes of `property` of `track`, by time."
+  ([track property]
+   (values-of track property nil))
+  ([track property index]
+   (->> (:keyframes track)
+        (filter #(cta/same-slot? % property index))
+        (sort-by :time)
+        (mapv :value))))
+
+(def ^:private styled-rect
+  (cts/setup-shape
+   {:type :rect :x 0 :y 0 :width 100 :height 50
+    :fills [{:fill-color "#000000" :fill-opacity 1}]
+    :strokes [{:stroke-color "#111111" :stroke-opacity 1 :stroke-width 1}]
+    :shadow [{:id (uuid/next) :style :drop-shadow
+              :offset-x 0 :offset-y 0 :blur 0 :spread 0
+              :hidden false
+              :color {:color "#000000" :opacity 1}}]
+    :blur {:id (uuid/next) :type :layer-blur :value 0 :hidden false}}))
+
+(t/deftest rest-pose-is-where-a-shape-rests-in-its-board
+  (let [{:keys [board rect objects]} (board-and-rect)
+        timeline (cta/make-timeline {:board-id (:id board)})]
+    (t/is (close-all? [50 100 100 50 0]
+                      (pose-values (cta/rest-pose timeline objects (:id rect)))))
+    (t/testing "a board rests where it is on the canvas"
+      (t/is (close-all? [100 100 800 600 0]
+                        (pose-values (cta/rest-pose timeline objects (:id board))))))
+    (t/testing "with its rotation"
+      (let [objects (turned objects (:id rect) 30)]
+        (t/is (close? 30 (:rotation (cta/rest-pose timeline objects (:id rect)))))))))
+
+(t/deftest retarget-track-moves-positions-to-the-target
+  (let [track  (track-with [:x 0 50] [:x 1000 150] [:y 0 20] [:y 1000 120])
+        result (cta/retarget-track track (pose 50 20 100 50 0)
+                                   styled-rect (pose 300 70 100 50 0))]
+    (t/is (close-all? [300 400] (values-of (:track result) :x)))
+    (t/is (close-all? [70 170] (values-of (:track result) :y)))
+    (t/is (= 0 (:skipped result)))
+    (t/is (= (:id styled-rect) (get-in result [:track :shape-id])))))
+
+(t/deftest retarget-track-turns-rotation-from-the-target-rotation
+  (let [track  (track-with [:rotation 0 0] [:rotation 1000 90])
+        result (cta/retarget-track track (pose 0 0 100 50 0) styled-rect (pose 0 0 100 50 45))]
+    (t/is (close-all? [45 135] (values-of (:track result) :rotation)))))
+
+(t/deftest retarget-track-scales-sizes-to-the-target
+  (let [track (track-with [:width 0 100] [:width 1000 200] [:height 0 50] [:height 1000 25])]
+    (t/is (close-all? [50 100]
+                      (values-of (:track (cta/retarget-track track (pose 0 0 100 50 0)
+                                                             styled-rect (pose 0 0 50 100 0)))
+                                 :width)))
+    (t/is (close-all? [100 50]
+                      (values-of (:track (cta/retarget-track track (pose 0 0 100 50 0)
+                                                             styled-rect (pose 0 0 50 100 0)))
+                                 :height)))
+    (t/testing "a source without width keeps the values"
+      (t/is (close-all? [100 200]
+                        (values-of (:track (cta/retarget-track track (pose 0 0 0 0 0)
+                                                               styled-rect (pose 0 0 50 100 0)))
+                                   :width))))))
+
+(t/deftest retarget-track-keeps-factors-and-looks
+  (let [track  (track-with [:scale-x 0 0.5] [:scale-x 1000 1]
+                           [:opacity 0 0] [:opacity 1000 1]
+                           [:r1 0 0] [:r1 1000 12]
+                           [:fill-color 0 "#000000" {:index 0}] [:fill-color 1000 "#ff0000" {:index 0}])
+        result (cta/retarget-track track (pose 0 0 100 50 0) styled-rect (pose 300 70 50 25 45))]
+    (t/is (close-all? [0.5 1] (values-of (:track result) :scale-x)))
+    (t/is (close-all? [0 1] (values-of (:track result) :opacity)))
+    (t/is (close-all? [0 12] (values-of (:track result) :r1)))
+    (t/is (= ["#000000" "#ff0000"] (values-of (:track result) :fill-color 0)))))
+
+(t/deftest retarget-track-keeps-exact-values
+  (let [track  (track-with [:x 0 50] [:rotation 0 10] [:width 0 100])
+        result (cta/retarget-track track (pose 50 0 100 50 0) styled-rect (pose 300 70 50 25 45)
+                                   :exact? true)]
+    (t/is (close-all? [50] (values-of (:track result) :x)))
+    (t/is (close-all? [10] (values-of (:track result) :rotation)))
+    (t/is (close-all? [100] (values-of (:track result) :width)))))
+
+(t/deftest retarget-track-leaves-out-what-the-target-cannot-show
+  (let [track (track-with [:x 0 0] [:x 1000 10]
+                          [:fill-color 0 "#000000" {:index 1}]
+                          [:fill-color 1000 "#ffffff" {:index 1}]
+                          [:r1 0 0]
+                          [:blur 0 4]
+                          [:trim-end 0 0.5])
+        from  (pose 0 0 100 50 0)]
+    (t/testing "a fill slot the target does not have"
+      (let [result (cta/retarget-track track from styled-rect from)]
+        (t/is (= [] (values-of (:track result) :fill-color 1)))
+        (t/is (= 2 (:skipped result)))))
+    (t/testing "radius on an ellipse, blur and trim on a shape without them"
+      (let [ellipse (cts/setup-shape {:type :circle :x 0 :y 0 :width 100 :height 50})
+            result  (cta/retarget-track track from ellipse from)]
+        (t/is (= #{:x} (into #{} (map :property) (get-in result [:track :keyframes]))))
+        (t/is (= 5 (:skipped result)))))
+    (t/testing "a fill that is a gradient takes no colour"
+      (let [gradient (assoc styled-rect :fills [{:fill-color-gradient {:type :linear}}
+                                                {:fill-color "#000000"}])
+            fill-0   (track-with [:fill-color 0 "#ff0000" {:index 0}] [:fill-color 0 "#ff0000" {:index 1}])
+            result   (cta/retarget-track fill-0 from gradient from)]
+        (t/is (= [1] (mapv :index (get-in result [:track :keyframes]))))
+        (t/is (= 1 (:skipped result)))))
+    (t/testing "a text keeps its position, size, rotation and opacity"
+      (let [text   (cts/setup-shape {:type :text :x 0 :y 0 :width 100 :height 20})
+            moving (track-with [:x 0 0] [:y 0 0] [:width 0 100] [:height 0 20]
+                               [:rotation 0 0] [:opacity 0 1])
+            result (cta/retarget-track moving from text from)]
+        (t/is (= #{:x :y :width :height :rotation :opacity}
+                 (into #{} (map :property) (get-in result [:track :keyframes]))))
+        (t/is (= 0 (:skipped result)))))))
+
+(t/deftest retarget-track-makes-a-new-unlocked-track
+  (let [id       (uuid/next)
+        timeline (-> (mk-timeline)
+                     (cta/add-keyframe id {:time 0 :property :x :value 0})
+                     (cta/add-keyframe id {:time 500 :property :x :value 10})
+                     (cta/add-keyframe id {:time 0 :property :opacity :value 1})
+                     (cta/add-animation id {:type :fade :start 0 :duration 300})
+                     (cta/toggle-loop id :x)
+                     (cta/toggle-slot-flag id :hidden :opacity)
+                     (cta/set-track-origin id 0 1)
+                     (cta/toggle-slot-flag id :locked :x))
+        track    (cta/get-track timeline id)
+        result   (:track (cta/retarget-track track (pose 0 0 100 50 0) styled-rect (pose 0 0 100 50 0)))
+        old-ids  (into #{} (map :id) (concat (:keyframes track) (:animations track)))]
+    (t/is (= #{:x} (:loops result)))
+    (t/is (nil? (:hidden result)))
+    (t/is (nil? (:locked result)))
+    (t/is (= {:x 0.0 :y 1.0} (:origin result)))
+    (t/is (= 1 (count (:animations result))))
+    (t/is (not-any? old-ids (map :id (concat (:keyframes result) (:animations result)))))
+    (t/is (sm/validate cta/schema:track result))))
+
+(t/deftest keyframe-value-fits-its-property
+  (t/is (cta/keyframe-value-fits? {:property :x :value 10}))
+  (t/is (cta/keyframe-value-fits? {:property :fill-color :value "#ff00ff"}))
+  (t/is (not (cta/keyframe-value-fits? {:property :x :value "#ffffff"})))
+  (t/is (not (cta/keyframe-value-fits? {:property :fill-color :value 3}))))

@@ -11,7 +11,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
-   [app.common.transit :as t]
+   [app.common.logic.timelines :as cltl]
    [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
    [app.common.types.page :as ctp]
@@ -37,13 +37,11 @@
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.workspace.sidebar.assets.common :as cmm]
-   [app.util.clipboard :as clipboard]
    [app.util.debug :as dbg]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr] :as i18n]
    [app.util.shape-icon :as usi]
    [app.util.timers :as timers]
-   [beicon.v2.core :as rx]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -172,7 +170,16 @@
         do-paste          #(st/emit! (dw/paste-from-clipboard))
         do-duplicate      #(st/emit! (dwv/duplicate-or-add-variant))
 
-        enabled-paste-props* (mf/use-state false)
+        ;; the type of the payload on the clipboard, which the paste
+        ;; entries need (read on Chrome only, see `handle-hover-copy-paste`)
+        paste-type*       (mf/use-state nil)
+
+        motion?           (features/use-feature "animation/v1")
+        page              (mf/deref refs/workspace-page)
+        files             (mf/deref refs/files)
+        animated?         (mf/with-memo [motion? multiple? page files shapes]
+                            (and motion? (not multiple?)
+                                 (cltl/animated-layer? page files (:id (first shapes)))))
 
         handle-copy-css
         (mf/use-fn
@@ -190,6 +197,14 @@
         (mf/use-fn
          #(st/emit! (dw/paste-selected-props)))
 
+        handle-copy-animation
+        (mf/use-fn
+         #(st/emit! (dw/copy-selected-animation)))
+
+        handle-paste-animation
+        (mf/use-fn
+         #(st/emit! (dw/paste-selected-animation)))
+
         handle-copy-svg
         (mf/use-fn
          #(st/emit! (dw/copy-selected-svg)))
@@ -204,21 +219,7 @@
 
         handle-hover-copy-paste
         (mf/use-fn
-         (fn []
-           (->> (clipboard/from-navigator)
-                (rx/mapcat #(.text %))
-                (rx/take 1)
-                (rx/subs!
-                 (fn [data]
-                   (try
-                     (let [pdata (t/decode-str data)]
-                       (reset! enabled-paste-props*
-                               (and (dw/paste-data-valid? pdata)
-                                    (= :copied-props (:type pdata)))))
-                     (catch :default _
-                       (reset! enabled-paste-props* false))))
-                 (fn []
-                   (reset! enabled-paste-props* false))))))]
+         #(dw/clipboard-payload-type (partial reset! paste-type*)))]
 
     [:*
      (when (and (not multiple?)
@@ -273,8 +274,18 @@
       [:> menu-entry* {:title (tr "workspace.shape.menu.paste-props")
                        :shortcut (get-tt :paste-props)
                        :shortcut-key :paste-props
-                       :disabled (and (cf/check-browser? :chrome) (not @enabled-paste-props*))
-                       :on-click handle-paste-props}]]
+                       :disabled (and (cf/check-browser? :chrome) (not= :copied-props @paste-type*))
+                       :on-click handle-paste-props}]
+
+      (when motion?
+        [:*
+         [:> menu-entry* {:title (tr "workspace.shape.menu.copy-animation")
+                          :disabled (not animated?)
+                          :on-click handle-copy-animation}]
+         [:> menu-entry* {:title (tr "workspace.shape.menu.paste-animation")
+                          :disabled (and (cf/check-browser? :chrome)
+                                         (not= :copied-animation @paste-type*))
+                          :on-click handle-paste-animation}]])]
 
      [:> menu-separator* {}]]))
 

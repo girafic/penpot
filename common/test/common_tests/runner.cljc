@@ -62,6 +62,7 @@
    [common-tests.logic.multiple-nesting-levels-test]
    [common-tests.logic.swap-and-reset-test]
    [common-tests.logic.swap-as-override-test]
+   [common-tests.logic.timelines-test]
    [common-tests.logic.token-test]
    [common-tests.logic.variants-switch-test]
    [common-tests.math-test]
@@ -144,6 +145,7 @@
    'common-tests.logic.multiple-nesting-levels-test
    'common-tests.logic.swap-and-reset-test
    'common-tests.logic.swap-as-override-test
+   'common-tests.logic.timelines-test
    'common-tests.logic.token-test
    'common-tests.logic.variants-switch-test
    'common-tests.math-test

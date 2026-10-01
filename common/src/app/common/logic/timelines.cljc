@@ -18,6 +18,8 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.modifiers :as gm]
    [app.common.geom.shapes :as gsh]
+   [app.common.math :as mth]
+   [app.common.schema :as sm]
    [app.common.types.animation :as cta]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
@@ -104,8 +106,13 @@
                (assoc-in [:tracks (:shape-id track)] track)
                (update :duration max (track-end track))))))
 
-(defn- commit-timelines
-  "Changes turning the timelines of `page` into `timelines`."
+(defn commit-timelines
+  "Changes turning the timelines of `page` into `timelines`, one
+  `pcb/change-timeline` per board that changed. Call it once per change
+  set, with the whole `:timelines` map of the page and every edit in it:
+  a board missing from `timelines` loses its timeline, and a second call
+  for the same board would write wrong undo changes (each call takes the
+  old timeline from the page as it was)."
   [changes page timelines]
   (let [old (:timelines page)]
     (reduce (fn [changes board-id]
@@ -428,3 +435,240 @@
                   (update edit :modifiers ctm/add-modifiers (:modifiers shown)))
                 edit
                 (animation-tree timelines after time))))
+
+;; COPY AND PASTE OF ANIMATION
+;;
+;; Copying the animation of layers takes an animation clip: the track of
+;; each layer and where the layer rests in its board (see
+;; `cta/rest-pose`), so that pasting it counts the positions, rotations
+;; and sizes again from where the layers it goes onto rest (see
+;; `cta/retarget-track`).
+
+(def max-clip-layers
+  "The most layers an animation clip holds."
+  100)
+
+(def max-paste-targets
+  "The most layers one paste of an animation clip goes onto."
+  500)
+
+(def max-paste-keyframes
+  "The most keyframes one paste of an animation clip writes, over all its
+  targets."
+  10000)
+
+(defn- clip-track?
+  "Whether the keyframes and presets of `track` can be pasted: none
+  before the start, and the values of the kind their properties take."
+  [{:keys [keyframes animations]}]
+  (and (every? #(and (>= (:time %) 0) (cta/keyframe-value-fits? %)) keyframes)
+       (every? #(>= (:start %) 0) animations)))
+
+(def schema:animation-clip
+  "An animation clip (see `animation-clip`). It comes from the clipboard,
+  so it is checked more strictly than a stored track, and its size is
+  capped."
+  [:map {:title "AnimationClip"}
+   [:file-id {:optional true} ::sm/uuid]
+   [:page-id {:optional true} ::sm/uuid]
+   [:layers [:vector {:max max-clip-layers}
+             [:map {:title "AnimationClipLayer"}
+              [:shape-id ::sm/uuid]
+              [:pose cta/schema:pose]
+              [:track [:and cta/schema:track [:fn clip-track?]]]]]]])
+
+(def animation-clip-valid?
+  (sm/lazy-validator schema:animation-clip))
+
+(defn- played-track
+  "What animates the layer `shape-id` of `page` (with its `objects`):
+  `{:timeline :track}`, its own track or, in a component copy without
+  one, the track it plays of its main (see `copy-timelines`; `files`
+  holds the files of the components, by id). Nil when nothing does."
+  [page objects files shape-id]
+  (let [timelines (:timelines page)]
+    (if-let [[board-id track] (find-track timelines shape-id)]
+      {:timeline (get timelines board-id) :track track}
+      (when-let [board-id (cfh/get-shape-id-root-frame objects shape-id)]
+        (some (fn [timeline]
+                (when-let [track (cta/get-track timeline shape-id)]
+                  {:timeline timeline :track track}))
+              (vals (copy-timelines objects timelines files board-id)))))))
+
+(defn- plays?
+  "Whether `track` holds keyframes or presets."
+  [track]
+  (or (seq (:keyframes track)) (seq (:animations track))))
+
+(defn- clip-track
+  "`track` as an animation clip takes it (see `animation-clip`)."
+  [track {:keys [properties keyframe-ids presets? whole-layer?]}]
+  (let [slot? (fn [{:keys [property index]}]
+                (or (contains? properties property)
+                    (contains? properties [property index])))]
+    (cond-> (dissoc (cond-> track whole-layer? cta/visible-track) :hidden :locked)
+      (some? properties)
+      (update :keyframes (partial filterv slot?))
+
+      (some? keyframe-ids)
+      (update :keyframes (partial filterv #(contains? keyframe-ids (:id %))))
+
+      (not presets?)
+      (dissoc :animations))))
+
+(defn animation-clip
+  "What copying the animation of the layers `shape-ids` of `page` (with
+  its `objects`) of the file `file-id` takes: for each animated one, its
+  track and where it rests in its board (see `cta/rest-pose`). A layer of
+  a component copy without a track of its own gives the one it plays of
+  its main, as it plays it (`files` holds the files of the components, by
+  id). With `whole-layer?`, what plays: no hidden rows or presets.
+  Otherwise, hidden or not, the rows of `properties` (properties, or
+  `[property index]` slots) and the keyframes of `keyframe-ids`, when
+  given. Presets unless not `presets?`. Never locks."
+  [file-id page objects files shape-ids
+   & {:keys [properties keyframe-ids presets? whole-layer?] :or {presets? true}}]
+  (let [opts {:properties   (some-> properties set)
+              :keyframe-ids (some-> keyframe-ids set)
+              :presets?     presets?
+              :whole-layer? whole-layer?}]
+    {:file-id file-id
+     :page-id (:id page)
+     :layers
+     (into []
+           (keep (fn [shape-id]
+                   (when-let [{:keys [timeline track]} (played-track page objects files shape-id)]
+                     (let [track (clip-track track opts)]
+                       (when (plays? track)
+                         {:shape-id shape-id
+                          :pose     (cta/rest-pose timeline objects shape-id)
+                          :track    track})))))
+           shape-ids)}))
+
+(defn animated-layer?
+  "Whether the layer `shape-id` of `page` plays an animation, its own or
+  the one of its main (see `animation-clip`)."
+  [page files shape-id]
+  (boolean
+   (when-let [{:keys [track]} (played-track page (:objects page) files shape-id)]
+     (plays? (cta/visible-track track)))))
+
+(defn- layer-order
+  "The ids of `objects` from the top-most layer down, as the layers panel
+  lists them."
+  [objects]
+  (letfn [(walk [id]
+            (cons id (mapcat walk (reverse (dm/get-in objects [id :shapes])))))]
+    (walk uuid/zero)))
+
+(defn paste-targets
+  "The layers of `ids` (of `objects`) to paste an animation onto, from
+  the top-most down: none inside another one of them, whose animation
+  carries it along."
+  [objects ids]
+  (let [ids (cfh/clean-loops objects ids)]
+    (filterv #(contains? ids %) (layer-order objects))))
+
+(defn- clip-start
+  "The earliest keyframe or preset of the tracks of `layers`."
+  [layers]
+  (let [times (mapcat (fn [{:keys [track]}]
+                        (concat (map :time (:keyframes track))
+                                (map :start (:animations track))))
+                      layers)]
+    (if (seq times) (reduce min times) 0)))
+
+(defn- shift-track
+  "`track` with its keyframes and presets `dt` ms later."
+  [track dt]
+  (cond-> track
+    (not (zero? dt))
+    (-> (update :keyframes (partial mapv #(update % :time + dt)))
+        (d/update-when :animations (partial mapv #(update % :start + dt))))))
+
+(defn paste-animation
+  "Paste the animation clip `clip` (see `animation-clip`) onto the layers
+  of `pairs`, `[{:layer clip-layer :target-id id}]` in order, of the page
+  `page-id` (with its `timelines` and `objects`) of the file `file-id`.
+  Each target takes the track of its clip layer counted from where it
+  rests (see `cta/retarget-track`, the values as they are with `exact?`),
+  in the timeline of its board (see `cta/paste-track` for `mode`,
+  `:replace` or `:merge`). With `time` nil the clip keeps its timing;
+  otherwise its earliest keyframe or preset lands at `time`. The n-th
+  target starts n × `stagger` ms later. A target out of any board is
+  left out, and so is the layer the clip was taken from (same file,
+  page and id) with `skip-source?`. A board without a timeline gets one,
+  named after it.
+
+  `{:timelines :skipped :pivot-kept :targets :grown}`: the timelines of
+  the page after it, how many keyframes the targets could not show and
+  how many targets kept their pivot, the targets pasted onto, and the
+  boards whose timeline grew longer. `{:error :too-large}`, and nothing
+  pasted, onto more than `max-paste-targets` layers or for more than
+  `max-paste-keyframes` keyframes in all."
+  [file-id page-id timelines objects clip pairs
+   {:keys [mode time stagger exact? skip-source?] :or {mode :replace stagger 0}}]
+  (let [keyframes (transduce (map #(count (dm/get-in % [:layer :track :keyframes]))) + 0 pairs)]
+    (if (or (> (count pairs) max-paste-targets) (> keyframes max-paste-keyframes))
+      {:error :too-large}
+      (let [source?
+            (fn [{:keys [layer target-id]}]
+              (and skip-source?
+                   (= file-id (:file-id clip))
+                   (= page-id (:page-id clip))
+                   (= target-id (:shape-id layer))))
+
+            pairs
+            (into []
+                  (keep (fn [{:keys [target-id] :as pair}]
+                          (when (and (contains? objects target-id) (not (source? pair)))
+                            (when-let [board-id (cfh/get-shape-id-root-frame objects target-id)]
+                              (assoc pair :board-id board-id)))))
+                  pairs)
+
+            offset (if (some? time) (- time (clip-start (map :layer pairs))) 0)
+
+            result
+            (reduce
+             (fn [result [n {:keys [layer target-id board-id]}]]
+               (let [timeline (or (get-in result [:timelines board-id])
+                                  (cta/make-timeline {:board-id board-id
+                                                      :name (dm/get-in objects [board-id :name])}))
+                     to       (cta/rest-pose timeline objects target-id)
+
+                     {:keys [track skipped]}
+                     (cta/retarget-track (:track layer) (:pose layer) (get objects target-id) to
+                                         :exact? exact?)
+
+                     {:keys [timeline pivot-kept?]}
+                     (cta/paste-track timeline target-id
+                                      (shift-track track (mth/round (+ offset (* n stagger))))
+                                      mode)]
+                 (-> result
+                     (assoc-in [:timelines board-id] timeline)
+                     (update :skipped + skipped)
+                     (update :pivot-kept + (if pivot-kept? 1 0))
+                     (update :targets conj target-id))))
+             {:timelines timelines :skipped 0 :pivot-kept 0 :targets #{}}
+             (map-indexed vector pairs))]
+        (assoc result :grown
+               (into #{}
+                     (filter (fn [board-id]
+                               (when-let [before (get timelines board-id)]
+                                 (> (dm/get-in result [:timelines board-id :duration])
+                                    (:duration before)))))
+                     (keys (:timelines result))))))))
+
+(defn generate-paste-animation
+  "Paste the animation clip `clip` onto the layers of `pairs` of `page`
+  of the file `file-id` (see `paste-animation`): what it pasted and left
+  out, with the `:changes` doing it, one undo step for every board. The
+  `{:error ...}` of `paste-animation`, without changes, when it pasted
+  nothing."
+  [changes file-id page clip pairs opts]
+  (let [result (paste-animation file-id (:id page) (:timelines page) (:objects page) clip pairs opts)]
+    (if (:error result)
+      result
+      (-> result
+          (dissoc :timelines)
+          (assoc :changes (commit-timelines changes page (:timelines result)))))))
