@@ -338,3 +338,22 @@
                   (mapv :time (cta/property-keyframes (get (timelines-of state) (cthi/id :board-a))
                                                       (cthi/id :source) :x))))
          (t/is (close-all? [50 50 150 150] (x-values state :board-a :source))))))))
+
+(t/deftest the-dock-pastes-a-preset-once-at-the-same-time
+  (t/async
+    done
+    (let [file  (setup-file)
+          store (store-of file)
+          clip  (-> (:clip (copied file :source))
+                    (assoc-in [:layers 0 :track :animations]
+                              [(cta/make-animation {:type :fade :start 0 :duration 300})]))]
+      (ths/run-store
+       store done
+       [(select [:rect-a])
+        (at-playhead 500)
+        (dwa/paste-clip-at-playhead clip)
+        (dwa/paste-clip-at-playhead clip)]
+       (fn [state]
+         (let [track (get-in (timelines-of state) [(cthi/id :board-a) :tracks (cthi/id :rect-a)])]
+           (t/is (= [[:fade 500]] (mapv (juxt :type :start) (:animations track))))
+           (t/is (= [500 1500] (mapv :time (:keyframes track))))))))))

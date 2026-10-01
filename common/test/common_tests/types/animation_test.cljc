@@ -362,6 +362,38 @@
     (t/is (= 1200 (:duration tl')))
     (t/is (cta/valid-timeline? tl'))))
 
+(t/deftest paste-track-replaces-a-like-preset
+  (let [sid   (uuid/next)
+        fade  {:type :fade :start 0 :duration 300}
+        tl    (-> (mk-timeline)
+                  (cta/add-animation sid {:type :move :start 0 :duration 400})
+                  (cta/add-animation sid fade))
+        paste (fn [tl animation]
+                (:timeline (cta/paste-track tl sid {:shape-id sid :keyframes [] :animations [animation]}
+                                            :merge)))
+        rows  #(mapv (juxt :type :direction :start :duration) (get-in % [:tracks sid :animations]))]
+
+    (t/testing "pasted twice at the same time, it is there once"
+      (t/is (= [[:move :in 0 400] [:fade :in 0 300]]
+               (rows (-> tl (paste fade) (paste fade))))))
+
+    (t/testing "it takes the place of the one there, in its row"
+      (t/is (= [[:move :in 0 400] [:fade :in 0 500]]
+               (rows (paste tl (assoc fade :duration 500)))))
+      (t/is (cta/valid-timeline? (paste tl (assoc fade :duration 500)))))
+
+    (t/testing "at another time or the other way, it is added"
+      (t/is (= [[:move :in 0 400] [:fade :in 0 300] [:fade :in 600 300]]
+               (rows (paste tl (assoc fade :start 600)))))
+      (t/is (= [[:move :in 0 400] [:fade :in 0 300] [:fade :out 0 300]]
+               (rows (paste tl (assoc fade :direction :out))))))
+
+    (t/testing "a locked one stays, and takes nothing"
+      (let [fid (:id (second (get-in tl [:tracks sid :animations])))
+            tl  (cta/toggle-animation-flag tl sid fid :locked)]
+        (t/is (= [[:move :in 0 400] [:fade :in 0 300]]
+                 (rows (paste tl (assoc fade :duration 500)))))))))
+
 (t/deftest expand-loops-matches-values-at
   (let [sid (uuid/next)
         tl  (-> (mk-timeline)

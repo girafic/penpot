@@ -2058,15 +2058,44 @@
   (boolean (or (some #(contains? pivot-properties (:property %)) keyframes)
                (some #(contains? #{:scale :rotate} (:type %)) animations))))
 
+(defn- merge-animation
+  "Add `animation` (see `make-animation`) to the track of `shape-id`, in
+  place of the one it has of the same type and direction starting at the
+  same time, as a keyframe takes the place of the one of its row at the
+  same time (see `add-keyframe`); that one keeps its row. A locked one
+  stays, and `animation` is left out."
+  [timeline shape-id animation]
+  (let [{:keys [type direction start] :as animation} (make-animation animation)
+
+        animations (dm/get-in timeline [:tracks shape-id :animations])
+        index      (d/index-of-pred animations #(and (= type (:type %))
+                                                     (= direction (:direction %))
+                                                     (= start (:start %))))]
+    (cond
+      (nil? index)
+      (add-animation timeline shape-id animation)
+
+      (:locked (nth animations index))
+      timeline
+
+      :else
+      (-> timeline
+          (assoc-in [:tracks shape-id :animations index] animation)
+          (update :duration max (animation-end animation))))))
+
 (defn paste-track
   "Paste `track` (see `retarget-track`) onto `shape-id` of `timeline`.
   `:replace` first removes the unlocked keyframes of the rows `track` has
   keyframes of and, when it has presets, the unlocked presets of
-  `shape-id`; `:merge` removes nothing. Locked rows and presets stay,
-  and take nothing. The rows of `track` loop as they did. Its pivot goes
-  on when it scales, resizes or turns and `shape-id` does not anymore;
-  otherwise `shape-id` keeps its own, so its own motion plays as before.
-  The duration grows to fit it. `{:timeline :pivot-kept?}`."
+  `shape-id`; `:merge` removes nothing. Either way a keyframe takes the
+  place of the one of its row at the same time, and a preset the one of
+  the same type and direction starting at the same time (see
+  `merge-animation`), so pasting twice at the same time leaves no
+  doubles. Locked rows and presets stay, and take nothing. The rows of
+  `track` loop as they did. Its pivot goes on when it scales, resizes or
+  turns and `shape-id` does not anymore; otherwise `shape-id` keeps its
+  own, so its own motion plays as before. The duration grows to fit it.
+  `{:timeline :pivot-kept?}`."
   [timeline shape-id track mode]
   (let [slots   (into #{} (map keyframe-slot) (:keyframes track))
 
@@ -2092,7 +2121,7 @@
         pasted
         (as-> cleared $
           (reduce #(add-keyframe %1 shape-id %2) $ (:keyframes track))
-          (reduce #(add-animation %1 shape-id %2) $ (:animations track))
+          (reduce #(merge-animation %1 shape-id %2) $ (:animations track))
           (reduce #(d/update-in-when %1 [:tracks shape-id] update-slot-flag :loops conj %2)
                   $
                   (remove locked (:loops track)))
