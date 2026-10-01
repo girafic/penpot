@@ -21,6 +21,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
    [app.common.types.shape.interactions :as cti]
+   [app.common.types.text-units :as tu]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.workspace.animation :as dwa]
@@ -207,6 +208,42 @@
                    nil)]
       (when (and (some? easing) (sm/validate cta/schema:easing easing))
         {:easing easing}))))
+
+(defn- split-error
+  "Why the layer `shape-id` cannot play an animation by `kind` of units
+  (see `cta/unit-split-kind`), the animation `animation-id` of it aside,
+  or nil: only a text splits, and a text plays one kind, its split
+  animations and the split entries of its style uses alike."
+  [file-id page-id timeline shape-id kind animation-id]
+  (when (some? kind)
+    (let [shape (get (u/locate-objects file-id page-id) shape-id)
+          other (->> (cta/track-animations (cta/get-track timeline shape-id))
+                     (remove #(= animation-id (:id %)))
+                     (keep :split)
+                     (first))]
+      (cond
+        (not (cfh/text-shape? shape))
+        "Only a text plays its characters, words or lines one by one"
+
+        (and (some? other) (not= other kind))
+        (dm/str "The text already plays its units by '" (name other) "': a text plays one kind")))))
+
+(defn- parse-split
+  "The kind of units the plugin API names `value` (nil for none), or
+  `::invalid`."
+  [value]
+  (cond
+    (nil? value)                                                 nil
+    (and (string? value) (contains? tu/split-kinds (keyword value))) (keyword value)
+    :else                                                        ::invalid))
+
+(defn- valid-spread?
+  [value]
+  (and (sm/valid-safe-number? value) (<= 0 value 1)))
+
+(defn- valid-order?
+  [value]
+  (and (string? value) (contains? tu/orders (keyword value))))
 
 (defn- in-board?
   "Whether the shape `shape-id` is the board `board-id` or inside it, so
@@ -426,7 +463,21 @@
           (fn [value]
             (if (not (valid? value))
               (u/not-valid plugin-id code value)
-              (update! code #(assoc % attr value)))))]
+              (update! code #(assoc % attr value)))))
+
+        ;; the settings of a split animation
+        split-setter
+        (fn [code attr valid? parse]
+          (fn [value]
+            (cond
+              (nil? (:split (locate)))
+              (u/not-valid plugin-id code "Only an animation with a split has it")
+
+              (not (valid? value))
+              (u/not-valid plugin-id code value)
+
+              :else
+              (update! code #(assoc % attr (parse value))))))]
 
     (obj/reify {:name "PresetAnimationProxy" :on-error (u/handle-error plugin-id)}
       :$plugin {:enumerable false :get (constantly plugin-id)}
@@ -486,6 +537,30 @@
       {:get #(:offset-y (locate))
        :set (number-setter :offsetY :offset-y sm/valid-safe-number?)}
 
+      :split
+      {:get #(some-> (locate) :split name)
+       :set
+       (fn [value]
+         (let [kind (parse-split value)]
+           (if (= ::invalid kind)
+             (u/not-valid plugin-id :split value)
+             (if-let [error (split-error file-id page-id (locate-timeline file-id page-id board-id)
+                                         shape-id kind id)]
+               (u/not-valid plugin-id :split error)
+               (update! :split #(assoc % :split kind))))))}
+
+      :spread
+      {:get #(:spread (locate))
+       :set (split-setter :spread :spread valid-spread? identity)}
+
+      :order
+      {:get #(some-> (locate) :order name)
+       :set (split-setter :order :order valid-order? keyword)}
+
+      :seed
+      {:get #(:seed (locate))
+       :set (split-setter :seed :seed sm/valid-safe-int? identity)}
+
       :remove
       (fn []
         (if (:locked (locate))
@@ -542,10 +617,14 @@
         easing    (some-> (obj/get props "easing") (parse-easing false))
         numbers   (->> ["amount" "offsetX" "offsetY"]
                        (keep #(when-let [v (obj/get props %)] [% v]))
-                       (into {}))]
+                       (into {}))
+        split     (parse-split (obj/get props "split"))
+        spread    (obj/get props "spread")
+        order     (obj/get props "order")
+        seed      (obj/get props "seed")]
     (cond
       (not (contains? cta/animation-types type))
-      "The type should be one of 'fade', 'move', 'scale' or 'rotate'"
+      "The type should be one of 'fade', 'move', 'scale', 'rotate' or 'blur'"
 
       (not (contains? #{"in" "out"} direction))
       "The direction should be 'in' or 'out'"
@@ -562,6 +641,21 @@
       (not (every? sm/valid-safe-number? (vals numbers)))
       "The amount and offsets should be numbers"
 
+      (= ::invalid split)
+      "The split should be 'char', 'word' or 'line'"
+
+      (and (nil? split) (some some? [spread order seed]))
+      "The spread, order and seed go with a split"
+
+      (and (some? spread) (not (valid-spread? spread)))
+      "The spread should be a number from 0 to 1"
+
+      (and (some? order) (not (valid-order? order)))
+      "The order should be 'forward', 'backward', 'center', 'edges' or 'random'"
+
+      (and (some? seed) (not (sm/valid-safe-int? seed)))
+      "The seed should be a whole number"
+
       :else
       (cond-> {:type type
                :direction (keyword direction)
@@ -570,7 +664,11 @@
         (some? easing)                (merge easing)
         (contains? numbers "amount")  (assoc :amount (get numbers "amount"))
         (contains? numbers "offsetX") (assoc :offset-x (get numbers "offsetX"))
-        (contains? numbers "offsetY") (assoc :offset-y (get numbers "offsetY"))))))
+        (contains? numbers "offsetY") (assoc :offset-y (get numbers "offsetY"))
+        (some? split)                 (assoc :split split)
+        (some? spread)                (assoc :spread spread)
+        (some? order)                 (assoc :order (keyword order))
+        (some? seed)                  (assoc :seed seed)))))
 
 (defn- copy-options
   "The settings the object `options` of `Timeline.copyAnimation` gives
@@ -712,9 +810,12 @@
       :addAnimation
       (fn [shape props]
         (when-let [shape-id (layer :addAnimation shape)]
-          (let [animation (if (object? props) (parse-animation props) "No animation given")]
-            (if (string? animation)
-              (u/not-valid plugin-id :addAnimation animation)
+          (let [animation (if (object? props) (parse-animation props) "No animation given")
+                error     (if (string? animation)
+                            animation
+                            (split-error file-id page-id (locate) shape-id (:split animation) nil))]
+            (if (some? error)
+              (u/not-valid plugin-id :addAnimation error)
               (let [id (uuid/next)]
                 (when (write! :addAnimation #(cta/add-animation % shape-id (assoc animation :id id)))
                   (preset-animation-proxy plugin-id file-id page-id board-id shape-id id)))))))
@@ -722,7 +823,10 @@
       :addAnimationStyle
       (fn [shape style start]
         (when-let [shape-id (layer :addAnimationStyle shape)]
-          (let [start (d/nilv start 0)]
+          (let [start (d/nilv start 0)
+                kind  (some :split (get cta/builtin-styles (keyword style)))
+                error (when (contains? style-names style)
+                        (split-error file-id page-id (locate) shape-id kind nil))]
             (cond
               (not (contains? style-names style))
               (u/not-valid plugin-id :addAnimationStyle
@@ -730,6 +834,9 @@
 
               (not (valid-time? start))
               (u/not-valid plugin-id :addAnimationStyle "The start should be a number of milliseconds from 0")
+
+              (some? error)
+              (u/not-valid plugin-id :addAnimationStyle error)
 
               :else
               (let [animations (mapv #(assoc % :id (uuid/next) :start (mth/round start))
@@ -866,12 +973,13 @@
                      :pivotKept pivot-kept})))))
 
       ;; With the animations of the component copies in the board, as the
-      ;; exports of the app (see `dwa/board-export-timeline`).
+      ;; exports of the app (see `dwa/board-export-timeline`); split
+      ;; animations play as animations of their whole texts.
       :toCSS
       (fn []
         (when (some? (locate))
           (let [page (u/locate-page file-id page-id)]
-            (some-> (dwa/board-export-timeline page (:files @st/state) board-id)
+            (some-> (dwa/board-export-timeline page (:files @st/state) board-id :text-split :whole)
                     (cta/timeline->css (:objects page))))))
 
       :remove

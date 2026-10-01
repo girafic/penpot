@@ -480,3 +480,86 @@
         (t/is (thrown? js/Error (.copyAnimation timeline (shape-of file :source)
                                                 #js [(shape-of file :b)])))
         (t/is (= (:timelines (cthf/current-page file)) (stored-timelines store context)))))))
+
+;; SPLIT ANIMATIONS: the units of a text one by one
+
+(defn- text-file
+  "A board with the texts `words` (\"Hi you there\") and `styled`, which
+  plays a use of a style whose entry fades it in word by word, and the
+  rect `rect`."
+  []
+  (let [file   (-> (cthf/sample-file :text-file :page-label :text-page)
+                   (ctho/add-frame-with-text :board :words "Hi you there"
+                                             :frame-params {:x 0 :y 0 :width 400 :height 300})
+                   (cths/add-sample-shape :styled :type :text :parent-label :board
+                                          :x 10 :y 100 :width 200 :height 20)
+                   (cths/add-sample-shape :rect :type :rect :parent-label :board
+                                          :x 10 :y 200 :width 50 :height 50))
+        board  (cthi/id :board)
+        use    {:type :style :style-ref-id (uuid/next) :style-ref-file (uuid/next) :name "Words"
+                :entries [{:type :fade :split :word :start 0 :duration 600}]}
+        tl     (cta/add-animation (cta/make-timeline {:board-id board}) (cthi/id :styled) use)]
+    (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                 (pcb/with-page (cthf/current-page file))
+                                 (pcb/set-timeline board tl)))))
+
+(t/deftest split-animations-play-a-text-by-its-units
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file                (text-file)
+            [store ^js context] (setup file true)
+            shape               (partial shape-of file)
+            ^js timeline        (.-timeline (shape :board))
+            ^js fade            (.addAnimation timeline (shape :words) #js {:type "fade" :split "word"})
+            stored              #(:animations (get-in (stored-timelines store context)
+                                                      [(cthi/id :board) :tracks (cthi/id %)]))]
+
+        (t/testing "a text plays its words one by one"
+          (t/is (= ["word" 0.5 "forward"] [(.-split fade) (.-spread fade) (.-order fade)]))
+          (t/is (= [:word] (mapv :split (stored :words)))))
+
+        (t/testing "a random order gets a seed"
+          (t/is (number? (.-seed (.addAnimation timeline (shape :words)
+                                                #js {:type "move" :split "word" :order "random"})))))
+
+        (t/testing "its settings change"
+          (set! (.-spread fade) 0.2)
+          (set! (.-order fade) "edges")
+          (t/is (= [0.2 "edges"] [(.-spread fade) (.-order fade)])))
+
+        (t/testing "what is not valid is refused and changes nothing"
+          (let [before (stored-timelines store context)
+                add    #(.addAnimation timeline (shape %1) (clj->js %2))]
+            (t/is (thrown? js/Error (add :rect {:type "fade" :split "word"})) "a layer that is no text")
+            (t/is (thrown? js/Error (add :words {:type "fade" :split "char"})) "another kind than its splits")
+            (t/is (thrown? js/Error (add :styled {:type "fade" :split "char"}))
+                  "another kind than the entry of its style use")
+            (t/is (thrown? js/Error (add :words {:type "fade" :split "letter"})))
+            (t/is (thrown? js/Error (add :words {:type "fade" :split "word" :spread 2})))
+            (t/is (thrown? js/Error (add :words {:type "fade" :split "word" :order "sideways"})))
+            (t/is (thrown? js/Error (add :words {:type "fade" :spread 0.5})) "a spread without a split")
+            (t/is (thrown? js/Error (set! (.-split fade) "char")) "another kind than the other split")
+            (t/is (thrown? js/Error (set! (.-spread fade) -1)))
+            (t/is (thrown? js/Error (.addAnimationStyle timeline (shape :rect) "typewriter"))
+                  "a text style on a rectangle")
+            (t/is (= before (stored-timelines store context)))))
+
+        (t/testing "the same kind on the text of a style use"
+          (t/is (some? (.addAnimation timeline (shape :styled) #js {:type "move" :split "word"}))))
+
+        (t/testing "a whole animation again"
+          (set! (.-split fade) nil)
+          (t/is (nil? (.-split fade)))
+          (t/is (nil? (.-spread fade))))
+
+        (t/testing "the CSS plays it on the whole text"
+          (t/is (re-find #"opacity" (.toCSS timeline))))))))
+
+(t/deftest text-styles-go-on-texts
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file         (text-file)
+            _            (setup file true)
+            ^js timeline (.-timeline (shape-of file :board))
+            added        (.addAnimationStyle timeline (shape-of file :words) "typewriter" 100)]
+        (t/is (= [["fade" "char" 100]] (mapv (fn [^js a] [(.-type a) (.-split a) (.-start a)]) added)))))))

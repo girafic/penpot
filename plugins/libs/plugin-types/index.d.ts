@@ -3748,6 +3748,7 @@ export interface Timeline {
    * ```js
    * timeline.addAnimation(shape, { type: 'move', start: 0, duration: 400, offsetY: 40 });
    * timeline.addAnimation(shape, { type: 'fade', direction: 'out', start: 1600, duration: 300 });
+   * timeline.addAnimation(text, { type: 'fade', duration: 1200, split: 'word', spread: 0.6 });
    * ```
    */
   addAnimation(shape: Shape, animation: PresetAnimationProps): PresetAnimation;
@@ -3757,6 +3758,8 @@ export interface Timeline {
    * at `start` milliseconds (0 by default), and returns them.
    * @param shape The board or a layer inside it.
    * @param style The style, like `slide-up` (a fade and a move up) or `pop`.
+   * The text styles (`typewriter`, `rise-words`, `cascade-lines`,
+   * `pop-letters`) go on text layers only.
    * @param start When they start, in milliseconds.
    */
   addAnimationStyle(
@@ -3859,6 +3862,9 @@ export interface Timeline {
   /**
    * The animation as CSS: `@keyframes` and the `animation` rules of the
    * layers, those of the animated component copies in the board included.
+   * CSS has no characters, words or lines of a text: a split animation
+   * (see `PresetAnimationProps.split`) plays on the whole text, as in the
+   * SVG and Lottie exports.
    */
   toCSS(): string;
 
@@ -4211,8 +4217,10 @@ export interface Keyframe {
  * - `move`: the position, from `offsetX` and `offsetY` pixels away.
  * - `scale`: the size, from `amount` times it (0.5 by default).
  * - `rotate`: the rotation, from `amount` degrees turned (-90 by default).
+ * - `blur`: a layer blur, from a radius of `amount` pixels (8 by default) to
+ *   the layer's own; a layer without a blur gets one while it plays.
  */
-export type PresetAnimationType = 'fade' | 'move' | 'scale' | 'rotate';
+export type PresetAnimationType = 'fade' | 'move' | 'scale' | 'rotate' | 'blur';
 
 /**
  * A preset animation to add, see `Timeline.addAnimation`.
@@ -4241,7 +4249,7 @@ export interface PresetAnimationProps {
    */
   easing?: MotionEasing;
   /**
-   * For `fade`, `scale` and `rotate`: where the effect starts or ends, see
+   * For `fade`, `scale`, `rotate` and `blur`: where the effect starts or ends, see
    * `PresetAnimationType`.
    */
   amount?: number;
@@ -4253,7 +4261,45 @@ export interface PresetAnimationProps {
    * For `move`: the vertical offset, in pixels.
    */
   offsetY?: number;
+  /**
+   * Text layers only: plays the animation on each character, word or
+   * line of the text, one after the other, within its span. A text plays
+   * one kind of units: all its split animations split alike. The text
+   * stays editable, and typing gives more units. The video exports play
+   * it; CSS, SVG and Lottie play it on the whole text.
+   */
+  split?: TextSplit;
+  /**
+   * With `split`: how far apart the units start, from 0 (all together,
+   * each over the whole span) to 1 (one after the other); 0.5 by default.
+   * The units always play within the span.
+   */
+  spread?: number;
+  /**
+   * With `split`: the order the units start in, `forward` by default.
+   */
+  order?: TextSplitOrder;
+  /**
+   * With `split` and a `random` order: the seed of its shuffle, so the
+   * order stays the same. Set when not given.
+   */
+  seed?: number;
 }
+
+/**
+ * What a split animation plays one by one: the characters (not the
+ * spaces), the words (with the punctuation next to them) or the lines of
+ * a text.
+ */
+export type TextSplit = 'char' | 'word' | 'line';
+
+/**
+ * The order the units of a split animation start in: from the first, from
+ * the last, from the middle, from both ends, or shuffled (see
+ * `PresetAnimationProps.seed`).
+ */
+export type TextSplitOrder =
+  'forward' | 'backward' | 'center' | 'edges' | 'random';
 
 /**
  * An effect over a span of time of a layer, in a `Timeline`. Within its
@@ -4289,7 +4335,7 @@ export interface PresetAnimation {
    */
   easing: MotionEasing;
   /**
-   * For `fade`, `scale` and `rotate`, see `PresetAnimationType`.
+   * For `fade`, `scale`, `rotate` and `blur`, see `PresetAnimationType`.
    */
   amount?: number;
   /**
@@ -4300,6 +4346,26 @@ export interface PresetAnimation {
    * For `move`: the vertical offset, in pixels.
    */
   offsetY?: number;
+  /**
+   * The units of a text it plays one by one, see
+   * `PresetAnimationProps.split`; none for the whole layer. Setting
+   * another kind than the other split animations of the text have is
+   * refused.
+   */
+  split?: TextSplit;
+  /**
+   * With `split`: how far apart the units start, from 0 to 1.
+   */
+  spread?: number;
+  /**
+   * With `split`: the order the units start in.
+   */
+  order?: TextSplitOrder;
+  /**
+   * With `split` and a `random` order: the seed of its shuffle. A new one
+   * shuffles the units again.
+   */
+  seed?: number;
   /**
    * Removes the animation.
    */
@@ -4313,6 +4379,13 @@ export interface PresetAnimation {
  * - `pop`: a fade and a scale from half the size that overshoots.
  * - `zoom`: a fade and a scale from 1.5 times the size.
  * - `spin`: a fade, a scale and half a turn.
+ *
+ * And, for text layers only (split animations, see
+ * `PresetAnimationProps.split`):
+ * - `typewriter`: the characters fade in one after the other.
+ * - `rise-words`: the words fade in and rise.
+ * - `cascade-lines`: the lines fade in and rise.
+ * - `pop-letters`: the characters fade in and pop from a small size.
  */
 export type AnimationStyle =
   | 'slide-up'
@@ -4321,7 +4394,11 @@ export type AnimationStyle =
   | 'slide-right'
   | 'pop'
   | 'zoom'
-  | 'spin';
+  | 'spin'
+  | 'typewriter'
+  | 'rise-words'
+  | 'cascade-lines'
+  | 'pop-letters';
 
 /**
  * Represents shadow properties in Penpot.

@@ -421,11 +421,19 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
   * `addKeyframe(shape, {property, time, value, easing?, index?}): Keyframe` - The value of a property of the board or a
     layer inside it at `time` (ms). A keyframe of the same property and time is replaced. Each animated property needs
     two keyframes or more: between two, the value goes from one to the other.
-  * `addAnimation(shape, {type, start?, duration?, direction?, easing?, amount?, offsetX?, offsetY?}): PresetAnimation` -
-    An effect over a span of time: `type` "fade" | "move" | "scale" | "rotate"; `direction` "in" (an entrance, from the
-    effect to the layer as it is; default) or "out" (an exit)
+  * `addAnimation(shape, {type, start?, duration?, direction?, easing?, amount?, offsetX?, offsetY?, split?, spread?,
+    order?, seed?}): PresetAnimation` - An effect over a span of time: `type` "fade" | "move" | "scale" | "rotate" |
+    "blur" (a layer blur of `amount` px, 8 by default); `direction` "in" (an entrance, from the effect to the layer as
+    it is; default) or "out" (an exit)
+  * Text layers only: `split` "char" | "word" | "line" plays the effect on each character, word or line of the text in
+    turn, within the span; `spread` 0..1 (0.5 by default) is how far apart they start (0 all together, 1 one after the
+    other); `order` "forward" (default) | "backward" | "center" | "edges" | "random" (with a `seed`, set when missing).
+    A text plays one kind of units: a second kind is refused, and so is a split on another layer. The text stays
+    editable. Video exports (MP4, WebM, GIF, AVIF) play the units; CSS (`toCSS`), SVG and Lottie play the effect on the
+    whole text.
   * `addAnimationStyle(shape, style, start?): PresetAnimation[]` - Several effects at once:
-    "slide-up" | "slide-down" | "slide-left" | "slide-right" | "pop" | "zoom" | "spin"
+    "slide-up" | "slide-down" | "slide-left" | "slide-right" | "pop" | "zoom" | "spin", and for text layers
+    "typewriter" | "rise-words" | "cascade-lines" | "pop-letters"
   * `copyAnimation(shape, targets, {properties?, presets?, values?, start?, stagger?, replace?}?)` - Copies the
     animation of `shape` onto `targets` (layers of the page, in any board), as pasting a copied animation does: the
     values are relative, so each target moves, turns and resizes from where it rests by as much as `shape` does
@@ -441,7 +449,8 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
     app can play parts of one animation by name (e.g. "intro", "loop", "outro")
   * `valueAt(shape, property, time, index?)` - The value the animation gives then (`null` when it does not animate it)
   * `clear(shape)` - Removes the keyframes and animations of a layer; `remove()` - removes the timeline
-  * `toCSS(): string` - The animation as CSS `@keyframes` and `animation` rules, animated component copies included
+  * `toCSS(): string` - The animation as CSS `@keyframes` and `animation` rules, animated component copies included;
+    split animations play on the whole text
   * `exportSettings` - How the board is exported as an animation, as the export panel sets and offers it:
     `{format: "mp4" | "webm" | "gif" | "avif" | "svg" | "lottie" | "dotlottie", quality: "low" | "medium" | "high",
     fps: 1..120, size: "0.5" | "1" | "2" | "w1920" | "h720" | "h1080" | "h1440" | "h2160", loop: boolean}`; setting it
@@ -480,6 +489,8 @@ timeline.addKeyframe(title, {property: "y", time: 0, value: title.boardY + 40, e
 timeline.addKeyframe(title, {property: "y", time: 600, value: title.boardY});
 timeline.addAnimation(title, {type: "fade", start: 0, duration: 600});
 timeline.addAnimationStyle(penpotUtils.findShape(s => s.name === "Button", board), "pop", 500);
+timeline.addAnimation(penpotUtils.findShape(s => s.name === "Headline", board),
+  {type: "fade", start: 200, duration: 1200, split: "word", spread: 0.6});
 const card = penpotUtils.findShape(s => s.name === "Card", board);
 timeline.record(900, [card], () => { card.y = card.y - 24; card.opacity = 1; });
 timeline.addMarker({time: 0, name: "intro"});

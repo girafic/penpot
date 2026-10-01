@@ -16271,7 +16271,7 @@ Timeline:
 
         Example
         ```
-        timeline.addAnimation(shape, { type: 'move', start: 0, duration: 400, offsetY: 40 });timeline.addAnimation(shape, { type: 'fade', direction: 'out', start: 1600, duration: 300 });
+        timeline.addAnimation(shape, { type: 'move', start: 0, duration: 400, offsetY: 40 });timeline.addAnimation(shape, { type: 'fade', direction: 'out', start: 1600, duration: 300 });timeline.addAnimation(text, { type: 'fade', duration: 1200, split: 'word', spread: 0.6 });
         ```
       addAnimationStyle: |-
         ```
@@ -16293,6 +16293,8 @@ Timeline:
         * style: AnimationStyle
 
           The style, like `slide-up` (a fade and a move up) or `pop`.
+          The text styles (`typewriter`, `rise-words`, `cascade-lines`,
+          `pop-letters`) go on text layers only.
         * start: number
 
           When they start, in milliseconds.
@@ -16431,6 +16433,9 @@ Timeline:
 
         The animation as CSS: `@keyframes` and the `animation` rules of the
         layers, those of the animated component copies in the board included.
+        CSS has no characters, words or lines of a text: a split animation
+        (see `PresetAnimationProps.split`) plays on the whole text, as in the
+        SVG and Lottie exports.
 
         Returns string
       remove: |-
@@ -16894,6 +16899,10 @@ PresetAnimationProps:
         amount?: number;
         offsetX?: number;
         offsetY?: number;
+        split?: TextSplit;
+        spread?: number;
+        order?: TextSplitOrder;
+        seed?: number;
     }
     ```
 
@@ -16937,7 +16946,7 @@ PresetAnimationProps:
         amount?: number
         ```
 
-        For `fade`, `scale` and `rotate`: where the effect starts or ends, see
+        For `fade`, `scale`, `rotate` and `blur`: where the effect starts or ends, see
         `PresetAnimationType`.
       offsetX: |-
         ```
@@ -16951,6 +16960,37 @@ PresetAnimationProps:
         ```
 
         For `move`: the vertical offset, in pixels.
+      split: |-
+        ```
+        split?: TextSplit
+        ```
+
+        Text layers only: plays the animation on each character, word or
+        line of the text, one after the other, within its span. A text plays
+        one kind of units: all its split animations split alike. The text
+        stays editable, and typing gives more units. The video exports play
+        it; CSS, SVG and Lottie play it on the whole text.
+      spread: |-
+        ```
+        spread?: number
+        ```
+
+        With `split`: how far apart the units start, from 0 (all together,
+        each over the whole span) to 1 (one after the other); 0.5 by default.
+        The units always play within the span.
+      order: |-
+        ```
+        order?: TextSplitOrder
+        ```
+
+        With `split`: the order the units start in, `forward` by default.
+      seed: |-
+        ```
+        seed?: number
+        ```
+
+        With `split` and a `random` order: the seed of its shuffle, so the
+        order stays the same. Set when not given.
 PresetAnimation:
   overview: |-
     Interface PresetAnimation
@@ -16971,6 +17011,10 @@ PresetAnimation:
         amount?: number;
         offsetX?: number;
         offsetY?: number;
+        split?: TextSplit;
+        spread?: number;
+        order?: TextSplitOrder;
+        seed?: number;
         remove(): void;
     }
     ```
@@ -17025,7 +17069,7 @@ PresetAnimation:
         amount?: number
         ```
 
-        For `fade`, `scale` and `rotate`, see `PresetAnimationType`.
+        For `fade`, `scale`, `rotate` and `blur`, see `PresetAnimationType`.
       offsetX: |-
         ```
         offsetX?: number
@@ -17038,6 +17082,34 @@ PresetAnimation:
         ```
 
         For `move`: the vertical offset, in pixels.
+      split: |-
+        ```
+        split?: TextSplit
+        ```
+
+        The units of a text it plays one by one, see
+        `PresetAnimationProps.split`; none for the whole layer. Setting
+        another kind than the other split animations of the text have is
+        refused.
+      spread: |-
+        ```
+        spread?: number
+        ```
+
+        With `split`: how far apart the units start, from 0 to 1.
+      order: |-
+        ```
+        order?: TextSplitOrder
+        ```
+
+        With `split`: the order the units start in.
+      seed: |-
+        ```
+        seed?: number
+        ```
+
+        With `split` and a `random` order: the seed of its shuffle. A new one
+        shuffles the units again.
     Methods:
       remove: |-
         ```
@@ -24602,7 +24674,7 @@ PresetAnimationType:
     ==============================
 
     ```
-    PresetAnimationType: "fade" | "move" | "scale" | "rotate"
+    PresetAnimationType: "fade" | "move" | "scale" | "rotate" | "blur"
     ```
 
     The effect of a preset animation:
@@ -24611,6 +24683,38 @@ PresetAnimationType:
     * `move`: the position, from `offsetX` and `offsetY` pixels away.
     * `scale`: the size, from `amount` times it (0.5 by default).
     * `rotate`: the rotation, from `amount` degrees turned (-90 by default).
+    * `blur`: a layer blur, from a radius of `amount` pixels (8 by default) to
+      the layer's own; a layer without a blur gets one while it plays.
+
+    Referenced by: PresetAnimation, PresetAnimationProps
+  members: {}
+TextSplit:
+  overview: |-
+    Type Alias TextSplit
+    ====================
+
+    ```
+    TextSplit: "char" | "word" | "line"
+    ```
+
+    What a split animation plays one by one: the characters (not the
+    spaces), the words (with the punctuation next to them) or the lines of
+    a text.
+
+    Referenced by: PresetAnimation, PresetAnimationProps
+  members: {}
+TextSplitOrder:
+  overview: |-
+    Type Alias TextSplitOrder
+    =========================
+
+    ```
+    TextSplitOrder: "forward" | "backward" | "center" | "edges" | "random"
+    ```
+
+    The order the units of a split animation start in: from the first, from
+    the last, from the middle, from both ends, or shuffled (see
+    `PresetAnimationProps.seed`).
 
     Referenced by: PresetAnimation, PresetAnimationProps
   members: {}
@@ -24628,6 +24732,10 @@ AnimationStyle:
         | "pop"
         | "zoom"
         | "spin"
+        | "typewriter"
+        | "rise-words"
+        | "cascade-lines"
+        | "pop-letters"
     ```
 
     Animation styles, several preset animations at once:
@@ -24637,6 +24745,14 @@ AnimationStyle:
     * `pop`: a fade and a scale from half the size that overshoots.
     * `zoom`: a fade and a scale from 1.5 times the size.
     * `spin`: a fade, a scale and half a turn.
+
+    And, for text layers only (split animations, see
+    `PresetAnimationProps.split`):
+
+    * `typewriter`: the characters fade in one after the other.
+    * `rise-words`: the words fade in and rise.
+    * `cascade-lines`: the lines fade in and rise.
+    * `pop-letters`: the characters fade in and pop from a small size.
 
     Referenced by: Timeline
   members: {}
