@@ -466,6 +466,13 @@
                                   (with-meta {:team-id team-id
                                               :file-id file-id}))))))
 
+               ;; Uses of local animation styles that a sync missed take
+               ;; their style again
+               (->> stream
+                    (rx/filter (ptk/type? ::workspace-initialized))
+                    (rx/take 1)
+                    (rx/map #(dwl/repair-local-style-uses)))
+
                ;; Install dev perf observers once the workspace is ready
                (when (contains? cf/flags :perf-logs)
                  (->> stream
@@ -1228,6 +1235,30 @@
             component (cfv/get-primary-component fdata component-id)
             wrapper-id (str "component-shape-id-" (:id component))]
         (tm/schedule-on-idle #(dom/scroll-into-view-if-needed! (dom/get-element wrapper-id)))))))
+
+(defn show-animation-style-in-assets
+  "Open the animation style `style-id` of the current file in the assets
+  panel, in its groups, to edit it."
+  [style-id]
+  (ptk/reify ::show-animation-style-in-assets
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-global :edit-animation-style] style-id))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [file-id (:current-file-id state)
+            style   (dm/get-in (dsh/lookup-file-data state file-id) [:animation-styles style-id])
+            path    (cpn/split-path (:path style))
+            paths   (map (fn [i] (cpn/join-path (take (inc i) path)))
+                         (range (count path)))]
+        (when (some? style)
+          (rx/concat
+           (rx/from (map #(set-assets-group-open file-id :animation-styles % true) paths))
+           (rx/of (dcm/go-to-workspace :layout :assets)
+                  (set-assets-section-open file-id :library true)
+                  (set-assets-section-open file-id :animation-styles true)
+                  (select-single-asset file-id style-id :animation-styles))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Context Menu

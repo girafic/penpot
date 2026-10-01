@@ -79,7 +79,8 @@
 (mf/defc prototype-pill*
   [{:keys [title description on-change is-editable
            left-button-icon-id left-button-tooltip on-left-button-click is-left-button-active
-           right-button-icon-id right-button-tooltip on-right-button-click is-right-button-active]} external-ref]
+           right-button-icon-id right-button-tooltip on-right-button-click is-right-button-active
+           is-right-button-disabled]} external-ref]
   (let [local-ref (mf/use-ref)
         ref       (or external-ref local-ref)
 
@@ -135,6 +136,7 @@
                         :aria-pressed is-right-button-active
                         :icon right-button-icon-id
                         :aria-label right-button-tooltip
+                        :disabled is-right-button-disabled
                         :on-click on-right-button-click}]]]))
 
 (mf/defc flow-item*

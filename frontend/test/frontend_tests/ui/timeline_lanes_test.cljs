@@ -7,6 +7,7 @@
 (ns frontend-tests.ui.timeline-lanes-test
   (:require
    [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.uuid :as uuid]
    [app.main.ui.workspace.timeline.lanes :as lanes]
    [cljs.test :as t :include-macros true]))
@@ -108,6 +109,14 @@
   (t/is (= {:type :animation :row 1 :mode :end} (hit-at geo 710 94)))
   (t/is (= {:type :animation :row 2 :mode :move} (hit-at geo 115 122))
         "a locked block cannot be stretched"))
+
+(t/deftest a-style-use-is-a-block-like-a-preset
+  (let [style (ctas/make-animation-style {:name "Pop" :entries [{:type :fade :start 0 :duration 200}]})
+        scene (assoc-in scene [:rows 1 :animation] (ctas/make-use style (uuid/next) 500))
+        hit   #(select-keys (lanes/hit geo scene %1 %2) [:type :row :mode])]
+    (t/is (= {:type :animation :row 1 :mode :start} (hit 515 94)))
+    (t/is (= {:type :animation :row 1 :mode :move} (hit 600 94)))
+    (t/is (= {:type :animation :row 1 :mode :end} (hit 710 94)) "its end stretches it")))
 
 (t/deftest keyframes-segments-and-easing-buttons
   (t/is (= {:type :keyframe :row 3 :locked? false :time 100} (hit-at geo 112 150)))

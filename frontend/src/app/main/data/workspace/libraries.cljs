@@ -19,6 +19,8 @@
    [app.common.logic.variants :as clv]
    [app.common.path-names :as cpn]
    [app.common.time :as ct]
+   [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.color :as ctc]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
@@ -37,6 +39,7 @@
    [app.main.data.modal :as modal]
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace :as-alias dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.groups :as dwg]
    [app.main.data.workspace.notifications :as-alias dwn]
    [app.main.data.workspace.pages :as-alias dwpg]
@@ -386,6 +389,205 @@
             changes        (-> (pcb/empty-changes it)
                                (pcb/add-typography new-typography))]
         (rx/of (dch/commit-changes changes))))))
+
+
+;; --- Animation styles
+
+(defn add-animation-style
+  "Add the animation style `style` to the current file."
+  [style]
+  (let [style (-> (update style :id #(or % (uuid/next)))
+                  (ctas/check-animation-style))]
+    (ptk/reify ::add-animation-style
+      ev/Event
+      (-data [_] {:id (:id style)})
+
+      ptk/WatchEvent
+      (watch [it _ _]
+        (rx/of (dch/commit-changes (-> (pcb/empty-changes it)
+                                       (pcb/add-animation-style style))))))))
+
+(defn- commit-animation-styles
+  "Commit `changes` to the animation styles of the current file together
+  with the sync of their uses in it (see `cll/generate-sync-timelines`),
+  `styles` being its styles after them: the uses of the style
+  `asset-id`, or of every style when nil. One change set, so one undo
+  step, and the canvas shows it."
+  [changes state styles asset-id]
+  (let [file-id   (:current-file-id state)
+        libraries (assoc-in (dsh/lookup-libraries state) [file-id :data :animation-styles] styles)
+        changes   (cll/generate-sync-timelines changes file-id asset-id file-id libraries)]
+    (rx/of (dch/commit-changes changes)
+           (dwa/apply-preview))))
+
+(defn- end-style-preview
+  "`state` without the preview of a style being edited (see
+  `dwa/preview-animation-style`): what follows commits it."
+  [state]
+  (d/update-when state :workspace-animation dissoc :style-preview))
+
+(defn- local-style
+  "The animation style `id` of the current file, the file `file-id`; nil
+  for a style of another file."
+  [state file-id id]
+  (when (= file-id (:current-file-id state))
+    (ctas/get-animation-style (dsh/lookup-file-data state) id)))
+
+(defn update-animation-style
+  "Change the animation style `style` of the current file, the file
+  `file-id`, and sync its uses, in one undo step. A style that is not one
+  of the current file changes nothing."
+  [style file-id]
+  (assert (uuid? file-id) "expected valid uuid for `file-id`")
+  (let [style (ctas/check-animation-style style)]
+    (ptk/reify ::update-animation-style
+      ev/Event
+      (-data [_] {:id (:id style)})
+
+      ptk/UpdateEvent
+      (update [_ state]
+        (end-style-preview state))
+
+      ptk/WatchEvent
+      (watch [it state _]
+        (when (some? (local-style state file-id (:id style)))
+          (let [data (dsh/lookup-file-data state)]
+            (-> (pcb/empty-changes it)
+                (pcb/with-library-data data)
+                (pcb/update-animation-style style)
+                (commit-animation-styles state (assoc (:animation-styles data) (:id style) style) (:id style)))))))))
+
+(defn- renamed
+  "`style` named `new-name`, which puts it in groups when it has slashes."
+  [style new-name]
+  (let [[path name] (cpn/split-group-name new-name)]
+    (assoc style :path path :name name)))
+
+(defn rename-animation-style
+  "Rename the animation style `id` of the current file, the file
+  `file-id`, and its uses."
+  [file-id id new-name]
+  (assert (uuid? file-id) "expected valid uuid for `file-id`")
+  (assert (uuid? id) "expected valid uuid for `id`")
+  (ptk/reify ::rename-animation-style
+    ev/Event
+    (-data [_] {:id id :name new-name})
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when-let [style (local-style state file-id id)]
+        (when-not (str/blank? new-name)
+          (rx/of (update-animation-style (renamed style new-name) file-id)))))))
+
+(defn rename-animation-styles
+  "Rename several animation styles of the current file, the file
+  `file-id`, at once: `names` holds the new name, with its groups, of
+  each, by id. As grouping, renaming a group or ungrouping does: one
+  change set, one sync, one undo step."
+  [file-id names]
+  (assert (uuid? file-id) "expected valid uuid for `file-id`")
+  (ptk/reify ::rename-animation-styles
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [data   (dsh/lookup-file-data state)
+            styles (into []
+                         (keep (fn [[id new-name]]
+                                 (when-let [style (local-style state file-id id)]
+                                   (when-not (str/blank? new-name)
+                                     (renamed style new-name)))))
+                         names)]
+        (when (seq styles)
+          (-> (reduce pcb/update-animation-style
+                      (-> (pcb/empty-changes it)
+                          (pcb/with-library-data data))
+                      styles)
+              (commit-animation-styles state
+                                       (into (:animation-styles data) (map (juxt :id identity)) styles)
+                                       nil)))))))
+
+(defn duplicate-animation-style
+  "Add a copy of the animation style `style-id` of the current file, the
+  file `file-id`, with entries of its own."
+  [file-id style-id]
+  (assert (uuid? file-id) "expected valid uuid for `file-id`")
+  (assert (uuid? style-id) "expected valid uuid for `style-id`")
+  (ptk/reify ::duplicate-animation-style
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when-let [style (local-style state file-id style-id)]
+        (rx/of (add-animation-style
+                (-> style
+                    (assoc :id (uuid/next))
+                    (dissoc :modified-at)
+                    (update :entries (partial mapv #(assoc % :id (uuid/next)))))))))))
+
+(defn delete-animation-style
+  "Delete the animation style `id` of the current file; its uses turn into
+  their presets in the same undo step."
+  [id]
+  (assert (uuid? id) "expected valid uuid for `id`")
+  (ptk/reify ::delete-animation-style
+    ev/Event
+    (-data [_] {:id id})
+
+    ptk/UpdateEvent
+    (update [_ state]
+      (end-style-preview state))
+
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [data (dsh/lookup-file-data state)]
+        (when (some? (ctas/get-animation-style data id))
+          (-> (pcb/empty-changes it)
+              (pcb/with-library-data data)
+              (pcb/delete-animation-style id)
+              (commit-animation-styles state (dissoc (:animation-styles data) id) id)))))))
+
+(defn- drifted-uses?
+  "Whether a use of a style of the current file differs from it on some
+  page (see `ctas/drifted?`)."
+  [state]
+  (let [file-id (:current-file-id state)
+        data    (dsh/lookup-file-data state)
+        styles  (:animation-styles data)]
+    (some (fn [page]
+            (some #(ctas/drifted? % file-id styles) (vals (:timelines page))))
+          (vals (:pages-index data)))))
+
+(defn repair-local-style-uses
+  "Sync the uses of the animation styles of the current file that differ
+  from their style, as when a whole track was written with old entries
+  after the style changed (see `ctas/drifted?`). It brings the file back
+  to what it should be, so no undo step. Nothing when no use drifted or
+  the file cannot be edited."
+  []
+  (ptk/reify ::repair-local-style-uses
+    ptk/WatchEvent
+    (watch [it state _]
+      (when (and (dm/get-in state [:permissions :can-edit])
+                 (drifted-uses? state))
+        (let [file-id (:current-file-id state)
+              changes (cll/generate-sync-timelines (pcb/empty-changes it) file-id nil file-id
+                                                   (dsh/lookup-libraries state))]
+          (when (seq (:redo-changes changes))
+            (rx/of (dch/commit-changes (assoc changes :save-undo? false))
+                   (dwa/apply-preview))))))))
+
+(defn touches-local-styles?
+  "Whether `changes` (of the file `file-id`) edit an animation style, or
+  write a track that holds a use of a style of that file: after them a
+  use may differ from its style (see `repair-local-style-uses`)."
+  [file-id changes]
+  (letfn [(local-use? [animation]
+            (and (cta/style-use? animation)
+                 (= file-id (:style-ref-file animation))))]
+    (some (fn [{:keys [type params]}]
+            (case type
+              :mod-animation-style true
+              :set-timeline-track  (some local-use? (:animations params))
+              :set-timeline        (some local-use? (mapcat :animations (vals (:tracks params))))
+              false))
+          changes)))
 
 (defn- add-component2
   "This is the second step of the component creation."
@@ -1128,7 +1330,7 @@
          (rx/of (dwsp/open-specialized-panel :component-swap)))))))
 
 (def valid-asset-types
-  #{:colors :components :typographies})
+  #{:colors :components :typographies :animation-styles})
 
 (defn- sync-file-pending-ids
   [file-id changes]

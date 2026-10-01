@@ -18,8 +18,10 @@
    [app.common.geom.shapes :as gsh]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
+   [app.common.path-names :as cpn]
    [app.common.transit :as t]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
@@ -96,14 +98,24 @@
   [objects timelines files board-id]
   (cltl/copy-timelines objects timelines files board-id))
 
+(defn- with-style-preview
+  "`timelines` with the uses of the style being edited synced with it, as
+  the canvas shows them before the style is committed (see
+  `preview-animation-style`)."
+  [state timelines]
+  (if-let [style (dm/get-in state [:workspace-animation :style-preview])]
+    (d/update-vals timelines #(ctas/sync-timeline % (:current-file-id state) {(:id style) style} (:id style)))
+    timelines))
+
 (defn- shown-timelines
   "The timelines the canvas shows at the playhead: only the one of the
   active board plays, with the ones of the component copies in it, which
   play the animation of their mains (see `cltl/instance-timelines`); the
-  other boards stay as they are."
+  other boards stay as they are. A style being edited shows on its uses
+  (see `preview-animation-style`)."
   [state]
   (let [board-id  (active-board-id state)
-        timelines (get-timelines state)]
+        timelines (with-style-preview state (get-timelines state))]
     (if (some? board-id)
       (merge (select-keys timelines [board-id])
              (copy-timelines (dsh/lookup-page-objects state) timelines
@@ -1169,6 +1181,33 @@
             (cons id (mapcat walk (reverse (dm/get-in objects [id :shapes])))))]
     (walk board-id)))
 
+(defn- add-staggered
+  "Add to the shapes of `shape-ids` that are in the active board the
+  animations `animations-at` gives for a start time: from the playhead,
+  one shape after the other by the `stagger` in the order of the layers,
+  top-most first."
+  [it state shape-ids animations-at]
+  (if-let [tl (current-or-new-timeline state)]
+    (let [objects  (dsh/lookup-page-objects state)
+          board-id (:board-id tl)
+          time     (playhead state)
+          step     (stagger state)
+          order    (into {} (map-indexed (fn [index id] [id index])) (layer-order objects board-id))
+          targets  (->> shape-ids
+                        (filter #(= board-id (cfh/get-shape-id-root-frame objects %)))
+                        (sort-by order))
+          tl'      (reduce (fn [tl [shape-id animation]]
+                             (cta/add-animation tl shape-id animation))
+                           tl
+                           (for [[index shape-id] (map-indexed vector targets)
+                                 animation        (animations-at (+ time (* index step)))]
+                             [shape-id animation]))]
+      (if (= tl tl')
+        (rx/empty)
+        (rx/of (commit-timeline it state board-id tl')
+               (apply-preview))))
+    (rx/empty)))
+
 (defn add-animation-preset
   "Add the animations of `preset` to the shapes of `shape-ids` that are in
   the active board, starting at the playhead, one after the other by the
@@ -1177,26 +1216,125 @@
   (ptk/reify ::add-animation-preset
     ptk/WatchEvent
     (watch [it state _]
-      (if-let [tl (current-or-new-timeline state)]
-        (let [objects  (dsh/lookup-page-objects state)
-              board-id (:board-id tl)
-              time     (playhead state)
-              step     (stagger state)
-              order    (into {} (map-indexed (fn [index id] [id index])) (layer-order objects board-id))
-              targets  (->> shape-ids
-                            (filter #(= board-id (cfh/get-shape-id-root-frame objects %)))
-                            (sort-by order))
-              tl'      (reduce (fn [tl [shape-id start animation]]
-                                 (cta/add-animation tl shape-id (assoc animation :start start)))
-                               tl
-                               (for [[index shape-id] (map-indexed vector targets)
-                                     animation        (preset-animations preset)]
-                                 [shape-id (+ time (* index step)) animation]))]
-          (if (= tl tl')
-            (rx/empty)
-            (rx/of (commit-timeline it state board-id tl')
-                   (apply-preview))))
+      (add-staggered it state shape-ids
+                     (fn [start]
+                       (map #(assoc % :start start) (preset-animations preset)))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ANIMATION STYLES
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- motion?
+  [state]
+  (features/active-feature? state "animation/v1"))
+
+(defn- shape-timeline
+  "The timeline of the board of the shape `shape-id`, nil when it has none."
+  [state shape-id]
+  (let [objects (dsh/lookup-page-objects state)]
+    (get (get-timelines state) (cfh/get-shape-id-root-frame objects shape-id))))
+
+(defn save-animation-style
+  "Save the presets and style uses of the shape `shape-id` that are
+  neither locked nor hidden as a new animation style of the current file,
+  named `name` (slashes put it in groups), and put one use of it in their
+  place, so the shape follows the style (see `ctas/replace-with-use`):
+  one undo step. Refused, with a message, when they hold more entries than
+  a style does."
+  [shape-id name]
+  (ptk/reify ::save-animation-style
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl     (when (motion? state) (shape-timeline state shape-id))
+            track  (cta/get-track tl shape-id)
+            result (ctas/animations->entries (:animations track))]
+        (cond
+          (nil? track)
+          (rx/empty)
+
+          (= :too-many-entries (:error result))
+          (rx/of (ntf/warn (tr "workspace.animation.style-too-many-entries"
+                               cta/max-style-entries (:count result))))
+
+          (some? (:error result))
+          (rx/empty)
+
+          :else
+          (let [[path name] (cpn/split-group-name name)
+                file-id (:current-file-id state)
+                style   (ctas/make-animation-style {:name name :path path :entries (:entries result)})
+                use     (ctas/make-use style file-id (:start result))
+                tl'     (update-in tl [:tracks shape-id] ctas/replace-with-use use)
+                changes (-> (pcb/empty-changes it)
+                            (pcb/add-animation-style style)
+                            (pcb/with-page (dsh/lookup-page state))
+                            (pcb/change-timeline (:board-id tl) tl'))]
+            (rx/of (dch/commit-changes changes)
+                   (apply-preview))))))))
+
+(defn apply-animation-style
+  "Add a use of the animation style `style-id` of the file `library-id`
+  (the current one, or a linked library) to the shapes of `shape-ids` that
+  are in the active board, from the playhead, one after the other by the
+  `stagger` in the order of the layers, top-most first."
+  [shape-ids library-id style-id]
+  (ptk/reify ::apply-animation-style
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [style (dm/get-in (dsh/lookup-libraries state) [library-id :data :animation-styles style-id])]
+        (if (and (motion? state) (some? style))
+          (add-staggered it state shape-ids #(vector (ctas/make-use style library-id %)))
+          (rx/empty))))))
+
+(defn detach-animation-style
+  "Turn the style use `use-id` of the shape `shape-id` into the presets it
+  plays, in its place (see `ctas/detach-use`), unless it is locked."
+  [shape-id use-id]
+  (ptk/reify ::detach-animation-style
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl  (when (motion? state) (shape-timeline state shape-id))
+            use (cta/get-animation tl shape-id use-id)]
+        (if (and (cta/style-use? use) (not (:locked use)))
+          (let [detach (fn [animations]
+                         (into [] (mapcat #(if (= use-id (:id %)) (ctas/detach-use %) [%])) animations))
+                tl'    (update-in tl [:tracks shape-id :animations] detach)]
+            (rx/of (commit-timeline it state (:board-id tl) tl')
+                   (apply-preview)))
+          (rx/empty))))))
+
+(defn preview-animation-style
+  "Show `style`, a style of the current file being edited, on its uses
+  without committing it: the canvas plays them synced with it (see
+  `ctas/sync-timeline`) until it is committed (see
+  `app.main.data.workspace.libraries/update-animation-style`) or the
+  preview ends (see `end-animation-style-preview`)."
+  [style]
+  (ptk/reify ::preview-animation-style
+    ptk/UpdateEvent
+    (update [_ state]
+      (cond-> state
+        (motion? state)
+        (assoc-in [:workspace-animation :style-preview] style)))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (motion? state)
+        (rx/of (apply-preview))
         (rx/empty)))))
+
+(defn end-animation-style-preview
+  "Stop showing a style being edited on its uses, with nothing committed
+  (see `preview-animation-style`)."
+  []
+  (ptk/reify ::end-animation-style-preview
+    ptk/UpdateEvent
+    (update [_ state]
+      (d/update-when state :workspace-animation dissoc :style-preview))
+
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (apply-preview)))))
 
 (defn update-animation
   "Merge `attrs` into the animation `animation-id` of `shape-id`. A nil

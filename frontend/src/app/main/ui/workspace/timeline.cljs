@@ -23,6 +23,7 @@
    [app.common.types.component :as ctk]
    [app.config :as cfg]
    [app.main.data.comments :as dcm]
+   [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.clipboard :as dwcp]
    [app.main.data.workspace.comments :as dwcm]
@@ -35,6 +36,7 @@
    [app.main.ui.components.color-input :refer [color-input*]]
    [app.main.ui.components.context-menu-a11y :refer [context-menu*]]
    [app.main.ui.components.numeric-input :as deprecated-input]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.ds.utilities.swatch :refer [swatch*]]
    [app.main.ui.hooks.resize :as r]
@@ -1194,6 +1196,7 @@
         ;; their mains, and when each ends; the board keeps time with
         ;; them while it has no tracks itself.
         files      (mf/deref refs/files)
+        file-id    (mf/use-ctx ctx/current-file-id)
         copies     (mf/with-memo [objects timelines files board-id]
                      (when (some? board-id)
                        (dwa/copy-timelines objects timelines files board-id)))
@@ -2109,10 +2112,22 @@
             (and (some? property)
                  (cta/slot-flag? timeline shape-id :locked property index))))
 
+        ;; The use of an animation style the menu is on: it can be
+        ;; detached, and its style edited when it is one of this file.
+        menu-use
+        (when-let [{:keys [shape-id animation-id]} menu]
+          (let [animation (some->> animation-id (cta/get-animation timeline shape-id))]
+            (when (cta/style-use? animation)
+              animation)))
+
+        menu-style-id
+        (when (= file-id (:style-ref-file menu-use))
+          (:style-ref-id menu-use))
+
         ;; The context menu re-runs its effects when the options change,
         ;; so they must stay identical between renders.
         menu-options
-        (mf/with-memo [menu can-paste? menu-locked?]
+        (mf/with-memo [menu can-paste? menu-locked? (some? menu-use) menu-style-id]
           (when-let [{:keys [shape-id property index animation-id marker-id]} menu]
             (cond
               (some? marker-id)
@@ -2124,10 +2139,23 @@
                 :handler #(st/emit! (dwa/remove-marker marker-id))}]
 
               (some? animation-id)
-              [{:name (tr "workspace.animation.remove-animation")
-                :id "remove-animation"
-                :disabled menu-locked?
-                :handler #(st/emit! (dwa/remove-animation shape-id animation-id))}]
+              (cond-> []
+                (some? menu-use)
+                (conj {:name (tr "workspace.animation.detach-style")
+                       :id "detach-style"
+                       :disabled menu-locked?
+                       :handler #(st/emit! (dwa/detach-animation-style shape-id animation-id))})
+
+                (some? menu-style-id)
+                (conj {:name (tr "workspace.animation.edit-style")
+                       :id "edit-style"
+                       :handler #(st/emit! (dw/show-animation-style-in-assets menu-style-id))})
+
+                :always
+                (conj {:name (tr "workspace.animation.remove-animation")
+                       :id "remove-animation"
+                       :disabled menu-locked?
+                       :handler #(st/emit! (dwa/remove-animation shape-id animation-id))}))
 
               :else
               (cond-> [{:name (tr "workspace.shape.menu.copy")

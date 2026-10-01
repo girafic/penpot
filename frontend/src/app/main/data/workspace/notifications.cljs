@@ -264,13 +264,20 @@
       ;; and update the persistence internal state with the updated
       ;; file-revn
 
-      (rx/of (dch/commit {:file-id file-id
-                          :file-revn revn
-                          :file-vern vern
-                          :save-undo? false
-                          :source :remote
-                          :redo-changes (vec changes)
-                          :undo-changes []})))))
+      (rx/concat
+       (rx/of (dch/commit {:file-id file-id
+                           :file-revn revn
+                           :file-vern vern
+                           :save-undo? false
+                           :source :remote
+                           :redo-changes (vec changes)
+                           :undo-changes []}))
+       ;; A use of a local animation style may have missed its sync.
+       ;; Wait a moment: the sync of the session that edited the style
+       ;; usually arrives meanwhile.
+       (when (dwl/touches-local-styles? file-id changes)
+         (->> (rx/of (dwl/repair-local-style-uses))
+              (rx/delay 2000)))))))
 
 (defn handle-file-deleted
   [{:keys [file-id] :as msg}]

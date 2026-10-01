@@ -7616,8 +7616,53 @@ msgstr "Add animation"
 msgid "workspace.animation.remove-animation"
 msgstr "Remove animation"
 
-msgid "workspace.animation.styles"
-msgstr "Styles"
+msgid "workspace.animation.presets"
+msgstr "Presets"
+
+msgid "workspace.animation.animation-styles"
+msgstr "Animation styles"
+
+msgid "workspace.animation.library-styles"
+msgstr "Styles of %s"
+
+msgid "workspace.animation.style-library"
+msgstr "Library"
+
+msgid "workspace.animation.detach-style"
+msgstr "Detach style"
+
+msgid "workspace.animation.edit-style"
+msgstr "Edit style"
+
+msgid "workspace.animation.save-as-style"
+msgstr "Save as style"
+
+msgid "workspace.animation.save-as-style-empty"
+msgstr "Add an animation to save it as a style."
+
+msgid "workspace.animation.style-name"
+msgstr "Style name"
+
+msgid "workspace.animation.new-style-name"
+msgstr "Animation style %s"
+
+msgid "workspace.assets.animation-styles"
+msgstr "Animation styles"
+
+msgid "workspace.assets.animation-styles.item-title"
+msgstr "Click to apply it to the selected layers in motion mode, or to open it"
+
+msgid "workspace.assets.animation-styles.from-library"
+msgstr "From %s"
+
+msgid "workspace.assets.animation-styles.description"
+msgstr "Description"
+
+msgid "workspace.assets.animation-styles.delete-used-title"
+msgstr "Delete animation style"
+
+msgid "workspace.assets.animation-styles.delete-used-message"
+msgstr "Layers play this style. They keep its animations as presets."
 
 msgid "workspace.animation.preset.fade"
 msgstr "Fade"
@@ -7765,6 +7810,9 @@ msgstr "The animation is too large to paste onto this many layers."
 
 msgid "workspace.animation.paste-grown"
 msgstr "The board's animation is now longer to fit the pasted motion."
+
+msgid "workspace.animation.style-too-many-entries"
+msgstr "A style holds up to %s animations; these add up to %s."
 
 msgid "workspace.shape.menu.copy-animation"
 msgstr "Copy animation"

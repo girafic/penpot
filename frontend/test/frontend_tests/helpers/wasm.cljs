@@ -96,6 +96,11 @@
   (track! :set-modifiers-end)
   nil)
 
+(defn- mock-set-modifiers-full-quality
+  [_full?]
+  (track! :set-modifiers-full-quality)
+  nil)
+
 (defn- mock-get-selection-rect
   ([_ids] (track! :get-selection-rect) nil)
   ([_ids _] (track! :get-selection-rect) nil))
@@ -211,6 +216,7 @@
            :get-text-dimensions     wasm.api/get-text-dimensions
            :set-modifiers-start     wasm.api/set-modifiers-start
            :set-modifiers-end       wasm.api/set-modifiers-end
+           :set-modifiers-full-quality wasm.api/set-modifiers-full-quality
            :get-selection-rect      wasm.api/get-selection-rect
            :font-stored?            wasm.fonts/font-stored?
            :make-font-data          wasm.fonts/make-font-data
@@ -230,6 +236,7 @@
   (set! wasm.api/get-text-dimensions     mock-get-text-dimensions)
   (set! wasm.api/set-modifiers-start     mock-set-modifiers-start)
   (set! wasm.api/set-modifiers-end       mock-set-modifiers-end)
+  (set! wasm.api/set-modifiers-full-quality mock-set-modifiers-full-quality)
   (set! wasm.api/get-selection-rect      mock-get-selection-rect)
   (set! wasm.fonts/font-stored?          mock-font-stored?)
   (set! wasm.fonts/make-font-data        mock-make-font-data)
@@ -261,6 +268,7 @@
     (set! wasm.api/get-text-dimensions     (:get-text-dimensions orig))
     (set! wasm.api/set-modifiers-start     (:set-modifiers-start orig))
     (set! wasm.api/set-modifiers-end       (:set-modifiers-end orig))
+    (set! wasm.api/set-modifiers-full-quality (:set-modifiers-full-quality orig))
     (set! wasm.api/get-selection-rect      (:get-selection-rect orig))
     (set! wasm.fonts/font-stored?          (:font-stored? orig))
     (set! wasm.fonts/make-font-data        (:make-font-data orig))

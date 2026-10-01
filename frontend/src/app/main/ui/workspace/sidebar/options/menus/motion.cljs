@@ -11,7 +11,11 @@
   (:require
    [app.common.data.macros :as dm]
    [app.common.math :as mth]
+   [app.common.path-names :as cpn]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
+   [app.common.uuid :as uuid]
+   [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -19,13 +23,17 @@
    [app.main.ui.components.select :refer [select]]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.context :as ctx]
+   [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.controls.input :refer [input*]]
    [app.main.ui.ds.controls.numeric-input :refer [numeric-input*]]
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.workspace.sidebar.options.menus.interactions :refer [prototype-pill*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
+   [app.util.keyboard :as kbd]
+   [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -144,10 +152,12 @@
     (name preset)))
 
 (defn animation-label
-  "Name of a preset animation, as the sidebar and the timeline show it."
-  [{:keys [type direction]}]
+  "Name of a preset animation, or of the style a style use plays, as the
+  sidebar and the timeline show it."
+  [{:keys [type direction] :as animation}]
   (let [out? (= direction :out)]
     (case type
+      :style  (:name animation)
       :fade   (if out? (tr "workspace.animation.fade-out") (tr "workspace.animation.fade-in"))
       :move   (if out? (tr "workspace.animation.move-out") (tr "workspace.animation.move-in"))
       :scale  (if out? (tr "workspace.animation.scale-out") (tr "workspace.animation.scale-in"))
@@ -184,13 +194,17 @@
    [:div {:class (stl/css :animation-row-control)} children]])
 
 (mf/defc animation-item*
-  "One preset animation: its name and span, and, once opened, its
-  settings. A locked one shows them disabled, and its lock in place of
-  the remove button."
-  {::mf/private true}
-  [{:keys [shape-id animation]}]
+  "One preset animation, `animation`: its name and span, and, once
+  opened, its settings, each change going to `on-change` as the
+  attributes changed; a drag on a number field starts with
+  `on-change-start` and ends with `on-change-end`. A locked one shows
+  them disabled, and its lock, `on-unlock`, in place of the remove
+  button, `on-remove` (disabled when nil); a `read-only` one shows them
+  disabled. The layers list and the style editor both use it."
+  [{:keys [animation on-change on-remove on-unlock on-change-start on-change-end read-only]}]
   (let [{:keys [id type direction start duration easing amount offset-x offset-y locked]} animation
-        locked? (true? locked)
+        read-only? (true? read-only)
+        locked?    (or (true? locked) read-only?)
 
         open*  (mf/use-state false)
         open?  (deref open*)
@@ -200,9 +214,9 @@
 
         change
         (mf/use-fn
-         (mf/deps shape-id id)
+         (mf/deps on-change)
          (fn [attrs]
-           (st/emit! (dwa/update-animation shape-id id attrs))))
+           (on-change attrs)))
 
         on-type
         (mf/use-fn
@@ -230,16 +244,6 @@
         on-offset-x (mf/use-fn (mf/deps change) (number-handler #(change {:offset-x %})))
         on-offset-y (mf/use-fn (mf/deps change) (number-handler #(change {:offset-y %})))
 
-        on-remove
-        (mf/use-fn
-         (mf/deps shape-id id)
-         #(st/emit! (dwa/remove-animation shape-id id)))
-
-        on-unlock
-        (mf/use-fn
-         (mf/deps shape-id id)
-         #(st/emit! (dwa/toggle-animation-flag shape-id id :locked)))
-
         type-options
         (mf/with-memo []
           (mapv (fn [type] {:value (name type) :label (preset-label type)}) preset-types))
@@ -266,11 +270,12 @@
                           :left-button-tooltip (tr "labels.options")
                           :is-left-button-active open?
                           :on-left-button-click on-toggle
-                          :right-button-icon-id (if locked? i/lock i/remove)
-                          :right-button-tooltip (if locked?
+                          :right-button-icon-id (if (and locked? (not read-only?)) i/lock i/remove)
+                          :right-button-tooltip (if (and locked? (not read-only?))
                                                   (tr "workspace.shape.menu.unlock")
                                                   (tr "workspace.animation.remove-animation"))
-                          :on-right-button-click (if locked? on-unlock on-remove)}]
+                          :is-right-button-disabled (or read-only? (nil? (if locked? on-unlock on-remove)))
+                          :on-right-button-click (when-not read-only? (if locked? on-unlock on-remove))}]
 
      (when open?
        [:*
@@ -300,6 +305,8 @@
                              :step 1
                              :value start
                              :disabled locked?
+                             :on-change-start on-change-start
+                             :on-change-end on-change-end
                              :on-change on-start}]]
 
         [:> animation-row* {:label (tr "workspace.animation.duration")}
@@ -309,6 +316,8 @@
                              :step 1
                              :value duration
                              :disabled locked?
+                             :on-change-start on-change-start
+                             :on-change-end on-change-end
                              :on-change on-duration}]]
 
         [:> animation-row* {:label (tr "workspace.animation.easing")}
@@ -326,6 +335,8 @@
                                :max 100
                                :value (mth/round (* 100 (or amount 0)))
                                :disabled locked?
+                               :on-change-start on-change-start
+                               :on-change-end on-change-end
                                :on-change on-percent}]]
 
           :scale
@@ -336,6 +347,8 @@
                                :step 10
                                :value (mth/round (* 100 (or amount 1)))
                                :disabled locked?
+                               :on-change-start on-change-start
+                               :on-change-end on-change-end
                                :on-change on-percent}]]
 
           :rotate
@@ -345,6 +358,8 @@
                                :step 15
                                :value (or amount 0)
                                :disabled locked?
+                               :on-change-start on-change-start
+                               :on-change-end on-change-end
                                :on-change on-angle}]]
 
           :move
@@ -354,14 +369,215 @@
                                 :property (tr "workspace.animation.offset-x")
                                 :value (or offset-x 0)
                                 :disabled locked?
+                                :on-change-start on-change-start
+                                :on-change-end on-change-end
                                 :on-change on-offset-x}]
             [:> numeric-input* {:icon i/character-y
                                 :property (tr "workspace.animation.offset-y")
                                 :value (or offset-y 0)
                                 :disabled locked?
+                                :on-change-start on-change-start
+                                :on-change-end on-change-end
                                 :on-change on-offset-y}]]]
 
           nil)])]))
+
+(mf/defc layer-animation-item*
+  "A preset animation of the layer `shape-id`, changed in its timeline."
+  {::mf/private true}
+  [{:keys [shape-id animation]}]
+  (let [id (:id animation)
+
+        on-change
+        (mf/use-fn
+         (mf/deps shape-id id)
+         (fn [attrs]
+           (st/emit! (dwa/update-animation shape-id id attrs))))
+
+        on-remove
+        (mf/use-fn
+         (mf/deps shape-id id)
+         #(st/emit! (dwa/remove-animation shape-id id)))
+
+        on-unlock
+        (mf/use-fn
+         (mf/deps shape-id id)
+         #(st/emit! (dwa/toggle-animation-flag shape-id id :locked)))]
+
+    [:> animation-item* {:animation animation
+                         :on-change on-change
+                         :on-remove on-remove
+                         :on-unlock on-unlock}]))
+
+(mf/defc style-use-item*
+  "A use of an animation style by the layer `shape-id`: the name of the
+  style and the span of the use, and, once opened, its start and length,
+  the library the style comes from, and what can be done with the style:
+  detach the use from it, or edit it when it is one of this file
+  (`local?`)."
+  {::mf/private true}
+  [{:keys [shape-id animation library-name local?]}]
+  (let [{:keys [id start duration locked style-ref-id]} animation
+        locked? (true? locked)
+
+        open*   (mf/use-state false)
+        open?   (deref open*)
+
+        on-toggle
+        (mf/use-fn #(swap! open* not))
+
+        change
+        (mf/use-fn
+         (mf/deps shape-id id)
+         (fn [attrs]
+           (st/emit! (dwa/update-animation shape-id id attrs))))
+
+        on-start    (mf/use-fn (mf/deps change) (number-handler #(change {:start %})))
+        on-duration (mf/use-fn (mf/deps change) (number-handler #(change {:duration %})))
+
+        on-remove
+        (mf/use-fn
+         (mf/deps shape-id id)
+         #(st/emit! (dwa/remove-animation shape-id id)))
+
+        on-unlock
+        (mf/use-fn
+         (mf/deps shape-id id)
+         #(st/emit! (dwa/toggle-animation-flag shape-id id :locked)))
+
+        on-detach
+        (mf/use-fn
+         (mf/deps shape-id id)
+         #(st/emit! (dwa/detach-animation-style shape-id id)))
+
+        on-edit
+        (mf/use-fn
+         (mf/deps style-ref-id)
+         #(st/emit! (dw/show-animation-style-in-assets style-ref-id)))]
+
+    [:div {:class (stl/css :animation-item)}
+     [:> prototype-pill* {:title (animation-label animation)
+                          :description (dm/str start "–" (cta/animation-end animation) " ms")
+                          :left-button-icon-id i/library
+                          :left-button-tooltip (tr "labels.options")
+                          :is-left-button-active open?
+                          :on-left-button-click on-toggle
+                          :right-button-icon-id (if locked? i/lock i/remove)
+                          :right-button-tooltip (if locked?
+                                                  (tr "workspace.shape.menu.unlock")
+                                                  (tr "workspace.animation.remove-animation"))
+                          :on-right-button-click (if locked? on-unlock on-remove)}]
+
+     (when open?
+       [:*
+        (when (some? library-name)
+          [:> animation-row* {:label (tr "workspace.animation.style-library")}
+           [:span {:class (stl/css :style-library)} library-name]])
+
+        [:> animation-row* {:label (tr "workspace.animation.start")}
+         [:> numeric-input* {:text-icon "ms"
+                             :property (tr "workspace.animation.start")
+                             :min 0
+                             :step 1
+                             :value start
+                             :disabled locked?
+                             :on-change on-start}]]
+
+        [:> animation-row* {:label (tr "workspace.animation.duration")}
+         [:> numeric-input* {:text-icon "ms"
+                             :property (tr "workspace.animation.duration")
+                             :min 1
+                             :step 1
+                             :value duration
+                             :disabled locked?
+                             :on-change on-duration}]]
+
+        [:div {:class (stl/css :style-use-actions)}
+         [:> button* {:variant "secondary"
+                      :disabled locked?
+                      :on-click on-detach}
+          (tr "workspace.animation.detach-style")]
+         (when local?
+           [:> button* {:variant "secondary"
+                        :on-click on-edit}
+            (tr "workspace.animation.edit-style")])]])]))
+
+(defn- style-label
+  "The name of an animation style with its groups."
+  [{:keys [path name]}]
+  (if (str/blank? path) name (cpn/merge-path-item path name)))
+
+(defn- usable-styles
+  "The animation styles the file `file-id` can use, by file, its own
+  first: `[{:id :name :local? :styles}]`, files without styles left out,
+  the styles by their names."
+  [files file-id]
+  (->> (vals (refs/select-libraries files file-id))
+       (keep (fn [file]
+               (when-let [styles (not-empty (vals (dm/get-in file [:data :animation-styles])))]
+                 {:id     (:id file)
+                  :name   (:name file)
+                  :local? (= file-id (:id file))
+                  :styles (sort-by (comp str/lower style-label) styles)})))
+       (sort-by (juxt (complement :local?) :name))))
+
+(mf/defc save-style*
+  "\"Save as style\" for the layer `shape-id` with `animations`: a button,
+  then a field for the name of the new style. Disabled, with the reason,
+  when the presets and uses it would take cannot make a style."
+  {::mf/private true}
+  [{:keys [shape-id animations style-count]}]
+  (let [result  (mf/with-memo [animations]
+                  (ctas/animations->entries animations))
+        error   (:error result)
+        hint    (case error
+                  :too-many-entries (tr "workspace.animation.style-too-many-entries"
+                                        cta/max-style-entries (:count result))
+                  :no-entries       (tr "workspace.animation.save-as-style-empty")
+                  nil)
+
+        naming* (mf/use-state false)
+        naming? (deref naming*)
+
+        on-start-naming
+        (mf/use-fn #(reset! naming* true))
+
+        on-key-down
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn [event]
+           (cond
+             (kbd/enter? event)
+             (let [name (str/trim (dom/get-value (dom/get-target event)))]
+               (reset! naming* false)
+               (when-not (str/blank? name)
+                 (st/emit! (dwa/save-animation-style shape-id name))))
+
+             (kbd/esc? event)
+             (do (dom/stop-propagation event)
+                 (reset! naming* false)))))
+
+        on-blur
+        (mf/use-fn #(reset! naming* false))]
+
+    [:div {:class (stl/css :save-style)}
+     (if naming?
+       [:> input* {:variant "dense"
+                   :aria-label (tr "workspace.animation.style-name")
+                   :placeholder (tr "workspace.animation.style-name")
+                   :default-value (tr "workspace.animation.new-style-name" (inc style-count))
+                   :auto-focus true
+                   :on-focus dom/select-target
+                   :on-key-down on-key-down
+                   :on-blur on-blur}]
+       [:> button* {:variant "secondary"
+                    :class (stl/css :save-style-button)
+                    :disabled (some? error)
+                    :title hint
+                    :on-click on-start-naming}
+        (tr "workspace.animation.save-as-style")])
+     (when (= error :too-many-entries)
+       [:div {:class (stl/css :save-style-hint)} hint])]))
 
 (def ^:private ref:stagger
   (l/derived dwa/stagger st/state))
@@ -374,9 +590,13 @@
   [{:keys [ids]}]
   (let [timeline   (mf/deref ref:timeline)
         stagger    (mf/deref ref:stagger)
+        files      (mf/deref refs/files)
+        file-id    (mf/use-ctx ctx/current-file-id)
         shape-id   (when (= 1 (count ids)) (first ids))
         animations (when shape-id
                      (dm/get-in timeline [:tracks shape-id :animations]))
+        styles     (mf/with-memo [files file-id]
+                     (usable-styles files file-id))
 
         open*      (mf/use-state false)
         open?      (deref open*)
@@ -401,7 +621,17 @@
                             (dom/get-data "preset")
                             (keyword))]
              (reset! open* false)
-             (st/emit! (dwa/add-animation-preset ids preset)))))]
+             (st/emit! (dwa/add-animation-preset ids preset)))))
+
+        on-apply-style
+        (mf/use-fn
+         (mf/deps ids)
+         (fn [event]
+           (let [node (dom/get-current-target event)]
+             (reset! open* false)
+             (st/emit! (dwa/apply-animation-style ids
+                                                  (uuid/parse (dom/get-data node "library"))
+                                                  (uuid/parse (dom/get-data node "style")))))))]
 
     [:div {:class (stl/css :animations-menu)}
      [:div {:class (stl/css :animations-title)}
@@ -424,13 +654,27 @@
           (preset-label preset)])
        [:li {:class (stl/css :presets-menu-title)
              :role "presentation"}
-        (tr "workspace.animation.styles")]
+        (tr "workspace.animation.presets")]
        (for [preset preset-styles]
          [:> dropdown-menu-item* {:key (name preset)
                                   :class (stl/css :presets-menu-item)
                                   :data-preset (name preset)
                                   :on-click on-add}
-          (preset-label preset)])]]
+          (preset-label preset)])
+       (for [{:keys [id name local? styles]} styles]
+         [:* {:key (dm/str id)}
+          [:li {:class (stl/css :presets-menu-title)
+                :role "presentation"}
+           (if local?
+             (tr "workspace.animation.animation-styles")
+             (tr "workspace.animation.library-styles" name))]
+          (for [style styles]
+            [:> dropdown-menu-item* {:key (dm/str (:id style))
+                                     :class (stl/css :presets-menu-item)
+                                     :data-library (dm/str id)
+                                     :data-style (dm/str (:id style))
+                                     :on-click on-apply-style}
+             (style-label style)])])]]
 
      (when (> (count ids) 1)
        [:> animation-row* {:label (tr "workspace.animation.stagger")}
@@ -444,6 +688,19 @@
      (when (seq animations)
        [:div {:class (stl/css :animations-list)}
         (for [animation animations]
-          [:> animation-item* {:key (dm/str (:id animation))
-                               :shape-id shape-id
-                               :animation animation}])])]))
+          (if (cta/style-use? animation)
+            (let [library-id (:style-ref-file animation)]
+              [:> style-use-item* {:key (dm/str (:id animation))
+                                   :shape-id shape-id
+                                   :animation animation
+                                   :local? (= library-id file-id)
+                                   :library-name (when (not= library-id file-id)
+                                                   (dm/get-in files [library-id :name]))}])
+            [:> layer-animation-item* {:key (dm/str (:id animation))
+                                       :shape-id shape-id
+                                       :animation animation}]))])
+
+     (when (some? shape-id)
+       [:> save-style* {:shape-id shape-id
+                        :animations animations
+                        :style-count (count (dm/get-in files [file-id :data :animation-styles]))}])]))

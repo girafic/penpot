@@ -12,6 +12,7 @@
    [app.main.data.modal :as modal]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.assets :as dwa]
+   [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.context-menu-a11y :refer [context-menu*]]
@@ -153,20 +154,27 @@
         ;; When options are recreated (even with identical content), the effect runs,
         ;; updating the internal state, which triggers another re-render, creating
         ;; an infinite loop: render -> new options -> effect -> state update -> render...
+        motion?
+        (features/use-feature "animation/v1")
+
         options
-        (mf/with-memo [on-section-filter-change]
-          [{:name    (tr "workspace.assets.box-filter-all")
-            :id      "all"
-            :handler on-section-filter-change}
-           {:name    (tr "workspace.assets.components")
-            :id      "components"
-            :handler on-section-filter-change}
-           {:name    (tr "workspace.assets.colors")
-            :id      "colors"
-            :handler on-section-filter-change}
-           {:name    (tr "workspace.assets.typography")
-            :id      "typographies"
-            :handler on-section-filter-change}])]
+        (mf/with-memo [on-section-filter-change motion?]
+          (cond-> [{:name    (tr "workspace.assets.box-filter-all")
+                    :id      "all"
+                    :handler on-section-filter-change}
+                   {:name    (tr "workspace.assets.components")
+                    :id      "components"
+                    :handler on-section-filter-change}
+                   {:name    (tr "workspace.assets.colors")
+                    :id      "colors"
+                    :handler on-section-filter-change}
+                   {:name    (tr "workspace.assets.typography")
+                    :id      "typographies"
+                    :handler on-section-filter-change}]
+            motion?
+            (conj {:name    (tr "workspace.assets.animation-styles")
+                   :id      "animation-styles"
+                   :handler on-section-filter-change})))]
 
     (mf/with-effect [file-id term section]
       (swap! session-filters* assoc file-id {:term term :section section}))

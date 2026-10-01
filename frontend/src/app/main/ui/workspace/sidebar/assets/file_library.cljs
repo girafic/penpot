@@ -17,12 +17,14 @@
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
+   [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.router :as rt]
    [app.main.store :as st]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.context :as ctx]
    [app.main.ui.icons :as deprecated-icon]
+   [app.main.ui.workspace.sidebar.assets.animation-styles :refer [animation-styles-section*]]
    [app.main.ui.workspace.sidebar.assets.colors :refer [colors-section*]]
    [app.main.ui.workspace.sidebar.assets.common :as cmm]
    [app.main.ui.workspace.sidebar.assets.components :refer [components-section*]]
@@ -144,8 +146,10 @@
 
 (mf/defc file-library-content*
   {::mf/private true}
-  [{:keys [file is-local is-loaded open-status-ref on-clear-selection filters colors typographies components count-variants]}]
+  [{:keys [file is-local is-loaded open-status-ref on-clear-selection filters colors typographies
+           animation-styles components count-variants]}]
   (let [open-status       (mf/deref open-status-ref)
+        motion?           (features/use-feature "animation/v1")
 
         file-id           (:id file)
 
@@ -175,6 +179,14 @@
              (or (pos? (count typographies))
                  (not has-filters-term?)))
 
+        ;; Styles are made from the design tab, so an empty section
+        ;; shows only when it is the one asked for.
+        show-animation-styles?
+        (and motion?
+             (or (and (= filters-section "all")
+                      (pos? (count animation-styles)))
+                 (= filters-section "animation-styles")))
+
         force-open-components?
         (when ^boolean has-filters-term? (> 60 (count components)))
 
@@ -183,6 +195,9 @@
 
         force-open-typographies?
         (when ^boolean has-filters-term? (> 60 (count typographies)))
+
+        force-open-animation-styles?
+        (when ^boolean has-filters-term? (> 60 (count animation-styles)))
 
         on-asset-click
         (mf/use-fn
@@ -210,6 +225,9 @@
         on-typography-click
         (mf/use-fn (mf/deps on-asset-click) (partial on-asset-click :typographies))
 
+        on-animation-style-click
+        (mf/use-fn (mf/deps on-asset-click) (partial on-asset-click :animation-styles))
+
         delete-component
         (mf/use-fn
          (mf/deps components)
@@ -234,6 +252,9 @@
                                  (:colors selected)))
              (run! st/emit! (map #(dwl/delete-typography %)
                                  (:typographies selected)))
+             ;; their uses turn into presets in the same step
+             (run! st/emit! (map #(dwl/delete-animation-style %)
+                                 (:animation-styles selected)))
 
              (when (or (seq (:components selected))
                        (seq (:colors selected))
@@ -295,9 +316,25 @@
             :on-assets-delete on-assets-delete
             :on-clear-selection on-clear-selection}])
 
+        (when ^boolean show-animation-styles?
+          [:> animation-styles-section*
+           {:file-id file-id
+            :file-name (:name file)
+            :is-local is-local
+            :styles animation-styles
+            :is-open (or ^boolean force-open-animation-styles?
+                         ^boolean (get open-status :animation-styles false))
+            :open-status-ref open-status-ref
+            :is-reverse-sort reverse-sort?
+            :selected selected
+            :on-asset-click on-animation-style-click
+            :on-assets-delete on-assets-delete
+            :on-clear-selection on-clear-selection}])
+
         (when (and (not ^boolean show-components?)
                    (not ^boolean show-colors?)
-                   (not ^boolean show-typography?))
+                   (not ^boolean show-typography?)
+                   (not ^boolean show-animation-styles?))
           [:div  {:class (stl/css :asset-title)}
            [:span {:class (stl/css :no-found-icon)}
             deprecated-icon/search]
@@ -314,6 +351,7 @@
 
         colors       (:colors library)
         typographies (:typographies library)
+        styles       (:animation-styles library)
 
         filters-term (:term filters)
         is-loaded    (some? library)
@@ -334,6 +372,11 @@
           (-> (vals typographies)
               (cmm/apply-filters filters)))
 
+        filtered-styles
+        (mf/with-memo [filters styles]
+          (-> (vals styles)
+              (cmm/apply-filters filters)))
+
         open-status-ref
         (mf/with-memo [file-id]
           (-> (l/key file-id)
@@ -346,7 +389,8 @@
         (and (not (str/blank? filters-term))
              (or (> 60 (count filtered-colors))
                  (> 60 (count filtered-components))
-                 (> 60 (count filtered-typographies))))
+                 (> 60 (count filtered-typographies))
+                 (> 60 (count filtered-styles))))
 
         open?
         (if (false? (:library open-status))
@@ -392,6 +436,7 @@
          :colors filtered-colors
          :components filtered-components
          :typographies filtered-typographies
+         :animation-styles filtered-styles
          :on-clear-selection unselect-all
          :open-status-ref open-status-ref
          :count-variants count-variants}])]))
