@@ -146,6 +146,39 @@
   gap: var(--sp-xs);
 }
 
+// Split animations: the units of a text one by one
+
+.animation-spread {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--sp-xs);
+}
+
+.animation-order {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+
+  > :first-child {
+    flex: 1;
+    min-inline-size: 0;
+  }
+}
+
+.animation-hint {
+  @include t.use-typography("body-small");
+
+  color: var(--color-foreground-secondary);
+  white-space: nowrap;
+}
+
+.animation-note {
+  @include t.use-typography("body-small");
+
+  color: var(--color-foreground-secondary);
+}
+
 // Uses of animation styles
 
 .style-library {

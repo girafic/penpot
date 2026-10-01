@@ -15,6 +15,7 @@
    [app.common.path-names :as cpn]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.text-units :as tu]
    [app.common.uuid :as uuid]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
@@ -131,42 +132,92 @@
 ;; PRESET ANIMATIONS
 
 (def ^:private preset-types
-  [:fade :move :scale :rotate])
+  [:fade :move :scale :rotate :blur])
 
 (def ^:private preset-styles
   [:slide-up :slide-down :slide-left :slide-right :pop :zoom :spin])
 
+(def ^:private text-preset-styles
+  "The built-in presets that play the units of a text (see
+  `cta/text-styles`), offered when the selection holds a text."
+  [:typewriter :rise-words :cascade-lines :pop-letters])
+
 (defn- preset-label
   [preset]
   (case preset
-    :fade        (tr "workspace.animation.preset.fade")
-    :move        (tr "workspace.animation.preset.move")
-    :scale       (tr "workspace.animation.preset.scale")
-    :rotate      (tr "workspace.animation.preset.rotate")
-    :slide-up    (tr "workspace.animation.preset.slide-up")
-    :slide-down  (tr "workspace.animation.preset.slide-down")
-    :slide-left  (tr "workspace.animation.preset.slide-left")
-    :slide-right (tr "workspace.animation.preset.slide-right")
-    :pop         (tr "workspace.animation.preset.pop")
-    :zoom        (tr "workspace.animation.preset.zoom")
-    :spin        (tr "workspace.animation.preset.spin")
+    :fade          (tr "workspace.animation.preset.fade")
+    :move          (tr "workspace.animation.preset.move")
+    :scale         (tr "workspace.animation.preset.scale")
+    :rotate        (tr "workspace.animation.preset.rotate")
+    :blur          (tr "workspace.animation.preset.blur")
+    :slide-up      (tr "workspace.animation.preset.slide-up")
+    :slide-down    (tr "workspace.animation.preset.slide-down")
+    :slide-left    (tr "workspace.animation.preset.slide-left")
+    :slide-right   (tr "workspace.animation.preset.slide-right")
+    :pop           (tr "workspace.animation.preset.pop")
+    :zoom          (tr "workspace.animation.preset.zoom")
+    :spin          (tr "workspace.animation.preset.spin")
+    :typewriter    (tr "workspace.animation.preset.typewriter")
+    :rise-words    (tr "workspace.animation.preset.rise-words")
+    :cascade-lines (tr "workspace.animation.preset.cascade-lines")
+    :pop-letters   (tr "workspace.animation.preset.pop-letters")
     (name preset)))
 
+(defn- split-label
+  "The name of the units a split animation of `kind` plays, the whole
+  layer for nil."
+  [kind]
+  (case kind
+    :char (tr "workspace.animation.split.char")
+    :word (tr "workspace.animation.split.word")
+    :line (tr "workspace.animation.split.line")
+    (tr "workspace.animation.split.layer")))
+
+(defn- order-label
+  [order]
+  (case order
+    :backward (tr "workspace.animation.order.backward")
+    :center   (tr "workspace.animation.order.center")
+    :edges    (tr "workspace.animation.order.edges")
+    :random   (tr "workspace.animation.order.random")
+    (tr "workspace.animation.order.forward")))
+
 (defn animation-label
-  "Name of a preset animation, or of the style a style use plays, as the
-  sidebar and the timeline show it."
-  [{:keys [type direction] :as animation}]
-  (let [out? (= direction :out)]
-    (case type
-      :style  (:name animation)
-      :fade   (if out? (tr "workspace.animation.fade-out") (tr "workspace.animation.fade-in"))
-      :move   (if out? (tr "workspace.animation.move-out") (tr "workspace.animation.move-in"))
-      :scale  (if out? (tr "workspace.animation.scale-out") (tr "workspace.animation.scale-in"))
-      :rotate (if out? (tr "workspace.animation.rotate-out") (tr "workspace.animation.rotate-in"))
-      (name type))))
+  "Name of a preset animation, with the units it plays one by one when it
+  splits a text (\"Fade in · Words\"), or of the style a style use plays,
+  as the sidebar and the timeline show it."
+  [{:keys [type direction split] :as animation}]
+  (let [out?  (= direction :out)
+        label (case type
+                :style  (:name animation)
+                :fade   (if out? (tr "workspace.animation.fade-out") (tr "workspace.animation.fade-in"))
+                :move   (if out? (tr "workspace.animation.move-out") (tr "workspace.animation.move-in"))
+                :scale  (if out? (tr "workspace.animation.scale-out") (tr "workspace.animation.scale-in"))
+                :rotate (if out? (tr "workspace.animation.rotate-out") (tr "workspace.animation.rotate-in"))
+                :blur   (if out? (tr "workspace.animation.blur-out") (tr "workspace.animation.blur-in"))
+                (name type))]
+    (if (and (some? split) (not= :style type))
+      (tr "workspace.animation.label.split" label (split-label split))
+      label)))
 
 (def ^:private noop
   (constantly nil))
+
+(defn split-controls
+  "The controls `animation-item*` shows to play `animation` by the units
+  of a text, nil without `split-allowed`: `:kind` (`:layer` for the whole
+  layer) and, when it splits, `:spread`, `:order`, `:shuffle` for a
+  random order and, given the `unit-count` of the text, the `:stagger`
+  (ms between two units) and whether it is past the live cap
+  (`:capped`)."
+  [{:keys [split spread order duration]} split-allowed unit-count]
+  (when (true? split-allowed)
+    (let [counted? (and (some? split) (some? unit-count))]
+      (cond-> {:kind (or split :layer)}
+        (some? split)        (assoc :spread (or spread tu/default-spread) :order (or order :forward))
+        (= :random order)    (assoc :shuffle true)
+        counted?             (assoc :stagger (mth/round (tu/unit-stagger duration spread unit-count)))
+        (and counted? (> unit-count tu/live-unit-cap)) (assoc :capped true)))))
 
 (defn- easing->option
   [easing]
@@ -204,8 +255,14 @@
   `on-change-start` and ends with `on-change-end`. A locked one shows
   them disabled, and its lock, `on-unlock`, in place of the remove
   button, `on-remove` (disabled when nil); a `read-only` one shows them
-  disabled. The layers list and the style editor both use it."
-  [{:keys [animation on-change on-remove on-unlock on-change-start on-change-end read-only]}]
+  disabled. With `split-allowed`, it can play the characters, words or
+  lines of a text one by one: the kind chosen goes to `on-split` (the
+  other split animations of the text or style follow it), and, given
+  the `unit-count` of the text, the ms between two units shows next to
+  the spread. It starts closed, or open with `default-open`. The layers
+  list and the style editor both use it."
+  [{:keys [animation on-change on-remove on-unlock on-change-start on-change-end read-only
+           split-allowed on-split unit-count default-open]}]
   (let [{:keys [id type direction start duration easing amount offset-x offset-y locked]} animation
         read-only? (true? read-only)
         locked?    (or (true? locked) read-only?)
@@ -215,7 +272,7 @@
         on-change-start (d/nilv on-change-start noop)
         on-change-end   (d/nilv on-change-end noop)
 
-        open*  (mf/use-state false)
+        open*  (mf/use-state (true? default-open))
         open?  (deref open*)
 
         on-toggle
@@ -252,6 +309,42 @@
         on-angle    (mf/use-fn (mf/deps change) (number-handler #(change {:amount %})))
         on-offset-x (mf/use-fn (mf/deps change) (number-handler #(change {:offset-x %})))
         on-offset-y (mf/use-fn (mf/deps change) (number-handler #(change {:offset-y %})))
+        on-spread   (mf/use-fn (mf/deps change) (number-handler #(change {:spread (/ % 100)})))
+
+        on-split-kind
+        (mf/use-fn
+         (mf/deps change on-split)
+         (fn [value]
+           (let [kind (when (not= value "layer") (keyword value))]
+             (if (some? on-split)
+               (on-split kind)
+               (change {:split kind})))))
+
+        on-order
+        (mf/use-fn
+         (mf/deps change)
+         (fn [value]
+           (change {:order (keyword value)})))
+
+        ;; a new order of the units, at random
+        on-shuffle
+        (mf/use-fn
+         (mf/deps change)
+         #(change {:seed (inc (rand-int 2147483646))}))
+
+        split-options
+        (mf/with-memo []
+          (into [{:value "layer" :label (split-label nil)}]
+                (map (fn [kind] {:value (name kind) :label (split-label kind)}))
+                [:char :word :line]))
+
+        order-options
+        (mf/with-memo []
+          (mapv (fn [order] {:value (name order) :label (order-label order)})
+                [:forward :backward :center :edges :random]))
+
+        controls
+        (split-controls animation split-allowed unit-count)
 
         type-options
         (mf/with-memo []
@@ -293,6 +386,49 @@
                      :options type-options
                      :disabled locked?
                      :on-change on-type}]]
+
+        (when (some? controls)
+          [:*
+           [:> animation-row* {:label (tr "workspace.animation.split")}
+            [:& select {:default-value (name (:kind controls))
+                        :options split-options
+                        :disabled locked?
+                        :on-change on-split-kind}]]
+
+           (when (some? (:spread controls))
+             [:*
+              [:> animation-row* {:label (tr "workspace.animation.spread")}
+               [:div {:class (stl/css :animation-spread)}
+                [:> numeric-input* {:text-icon "%"
+                                    :property (tr "workspace.animation.spread")
+                                    :min 0
+                                    :max 100
+                                    :step 10
+                                    :value (mth/round (* 100 (:spread controls)))
+                                    :disabled locked?
+                                    :on-change-start on-change-start
+                                    :on-change-end on-change-end
+                                    :on-change on-spread}]
+                (when-let [stagger (:stagger controls)]
+                  [:span {:class (stl/css :animation-hint)}
+                   (tr "workspace.animation.spread.hint" stagger)])]]
+
+              [:> animation-row* {:label (tr "workspace.animation.order")}
+               [:div {:class (stl/css :animation-order)}
+                [:& select {:default-value (name (:order controls))
+                            :options order-options
+                            :disabled locked?
+                            :on-change on-order}]
+                (when (:shuffle controls)
+                  [:> icon-button* {:variant "ghost"
+                                    :icon i/reload
+                                    :aria-label (tr "workspace.animation.shuffle")
+                                    :disabled locked?
+                                    :on-click on-shuffle}])]]
+
+              (when (:capped controls)
+                [:div {:class (stl/css :animation-note)}
+                 (tr "workspace.animation.unit-cap-hint" tu/live-unit-cap)])])])
 
         [:> animation-row* {:label (tr "workspace.animation.direction")}
          [:> radio-buttons* {:name (dm/str "animation-direction-" id)
@@ -360,6 +496,17 @@
                                :on-change-end on-change-end
                                :on-change on-percent}]]
 
+          :blur
+          [:> animation-row* {:label (tr "workspace.animation.blur")}
+           [:> numeric-input* {:text-icon "px"
+                               :property (tr "workspace.animation.blur")
+                               :min 0
+                               :value (or amount 0)
+                               :disabled locked?
+                               :on-change-start on-change-start
+                               :on-change-end on-change-end
+                               :on-change on-angle}]]
+
           :rotate
           [:> animation-row* {:label (tr "workspace.options.rotation")}
            [:> numeric-input* {:icon i/rotation
@@ -392,10 +539,23 @@
           nil)])]))
 
 (mf/defc layer-animation-item*
-  "A preset animation of the layer `shape-id`, changed in its timeline."
+  "A preset animation of the layer `shape-id`, changed in its timeline.
+  A `text` can play it by its units (see `animation-item*`)."
   {::mf/private true}
-  [{:keys [shape-id animation]}]
-  (let [id (:id animation)
+  [{:keys [shape-id animation text]}]
+  (let [id    (:id animation)
+        split (:split animation)
+
+        unit-count
+        (mf/with-memo [text split]
+          (when (and (some? text) (some? split))
+            (tu/unit-count text split)))
+
+        on-split
+        (mf/use-fn
+         (mf/deps shape-id id)
+         (fn [kind]
+           (st/emit! (dwa/set-animation-split shape-id id kind))))
 
         on-change
         (mf/use-fn
@@ -416,7 +576,10 @@
     [:> animation-item* {:animation animation
                          :on-change on-change
                          :on-remove on-remove
-                         :on-unlock on-unlock}]))
+                         :on-unlock on-unlock
+                         :split-allowed (some? text)
+                         :on-split on-split
+                         :unit-count unit-count}]))
 
 (mf/defc style-use-item*
   "A use of an animation style by the layer `shape-id`: the name of the
@@ -595,9 +758,14 @@
   "The preset animations of the selection, in motion mode: add one from
   the menu, then open it to change its settings. The list shows for a
   single layer; a preset goes to every selected layer, one after the
-  other by the stagger."
-  [{:keys [ids]}]
-  (let [timeline   (mf/deref ref:timeline)
+  other by the stagger. With a text among the `shapes` selected, the
+  menu offers the text presets, which go to the texts only, and a single
+  text can play its presets by its units."
+  [{:keys [ids shapes]}]
+  (let [text?      (some #(= :text (:type %)) shapes)
+        text       (when (= 1 (count ids))
+                     (d/seek #(and (= :text (:type %)) (= (first ids) (:id %))) shapes))
+        timeline   (mf/deref ref:timeline)
         stagger    (mf/deref ref:stagger)
         files      (mf/deref refs/files)
         file-id    (mf/use-ctx ctx/current-file-id)
@@ -664,7 +832,7 @@
        [:li {:class (stl/css :presets-menu-title)
              :role "presentation"}
         (tr "workspace.animation.presets")]
-       (for [preset preset-styles]
+       (for [preset (cond-> preset-styles text? (into text-preset-styles))]
          [:> dropdown-menu-item* {:key (name preset)
                                   :class (stl/css :presets-menu-item)
                                   :data-preset (name preset)
@@ -707,7 +875,8 @@
                                                    (dm/get-in files [library-id :name]))}])
             [:> layer-animation-item* {:key (dm/str (:id animation))
                                        :shape-id shape-id
-                                       :animation animation}]))])
+                                       :animation animation
+                                       :text text}]))])
 
      (when (some? shape-id)
        [:> save-style* {:shape-id shape-id

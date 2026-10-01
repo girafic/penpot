@@ -44,7 +44,7 @@
   (l/derived dwa/motion-mode? st/state))
 
 (def ^:private entry-types
-  [:fade :move :scale :rotate])
+  [:fade :move :scale :rotate :blur])
 
 (defn- set-editing
   "Open the editor of the style `id`, or close it with nil."
@@ -91,7 +91,7 @@
 
 (mf/defc style-entry*
   {::mf/private true}
-  [{:keys [entry on-change on-remove on-change-start on-change-end read-only]}]
+  [{:keys [entry on-change on-split on-remove on-change-start on-change-end read-only]}]
   (let [id (:id entry)
 
         on-entry-change
@@ -100,14 +100,23 @@
          (fn [attrs]
            (on-change id attrs)))
 
+        on-entry-split
+        (mf/use-fn
+         (mf/deps id on-split)
+         (fn [kind]
+           (on-split id kind)))
+
         on-entry-remove
         (mf/use-fn
          (mf/deps id on-remove)
          #(on-remove id))]
 
+    ;; An entry can play the units of the texts the style goes on.
     [:> animation-item* {:animation entry
                          :read-only read-only
+                         :split-allowed true
                          :on-change on-entry-change
+                         :on-split on-entry-split
                          :on-remove (when (some? on-remove) on-entry-remove)
                          :on-change-start on-change-start
                          :on-change-end on-change-end}]))
@@ -144,6 +153,13 @@
                (do (mf/set-ref-val! draft* style')
                    (st/emit! (dwa/preview-animation-style style')))
                (commit style')))))
+
+        ;; a text plays one kind of units: the other split entries follow
+        on-entry-split
+        (mf/use-fn
+         (mf/deps style commit)
+         (fn [entry-id kind]
+           (commit (update style :entries cta/with-split-kind entry-id kind cta/make-style-entry))))
 
         on-change-start
         (mf/use-fn #(mf/set-ref-val! dragging* true))
@@ -218,6 +234,7 @@
                           :entry entry
                           :read-only (not is-editable)
                           :on-change on-entry-change
+                          :on-split on-entry-split
                           :on-remove (when (and is-editable (> (count entries) 1)) on-entry-remove)
                           :on-change-start on-change-start
                           :on-change-end on-change-end}])]

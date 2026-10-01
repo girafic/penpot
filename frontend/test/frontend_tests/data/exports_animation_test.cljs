@@ -8,7 +8,9 @@
   (:require
    [app.common.types.animation :as cta]
    [app.common.types.shape :as cts]
+   [app.common.uuid :as uuid]
    [app.main.data.exports.animation :as dea]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.lottie :as dwl]
    [app.util.zip :as uz]
    [cljs.test :as t :include-macros true]
@@ -390,3 +392,77 @@
             (t/is (= (vec png) image) "the image keeps its bytes"))
           (p/catch (fn [cause] (t/is (nil? cause))))
           (p/finally (fn [] (done)))))))
+
+(defn- text-board
+  "A board with a text of three words in it."
+  []
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 300 :height 100})
+        text  (-> (cts/setup-shape {:type :text :x 10 :y 10 :width 200 :height 20})
+                  (assoc :content {:type "root"
+                                   :children [{:type "paragraph-set"
+                                               :children [{:type "paragraph"
+                                                           :children [{:text "Hi you there"}]}]}]}))
+        bid   (:id board)]
+    {:bid bid
+     :tid (:id text)
+     :objects {bid (assoc board :shapes [(:id text)])
+               (:id text) (assoc text :parent-id bid :frame-id bid)}}))
+
+(defn- words-use
+  "A use of a style of `entry`."
+  [entry]
+  (cta/make-animation {:type :style :style-ref-id (uuid/next) :style-ref-file (uuid/next)
+                       :name "Words" :start 0 :entries [entry]}))
+
+(t/deftest markup-formats-note-that-split-text-plays-whole
+  (let [{:keys [objects bid tid]} (text-board)
+        with  #(cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid %)
+        split {:type :fade :split :word :start 0 :duration 500}
+        notes {:svg [:split-text] :lottie [:split-text] :dotlottie [:split-text]}]
+    (t/is (= notes (dea/export-caveats objects (with split))))
+    (t/is (= notes (dea/export-caveats objects (with (words-use split))))
+          "a split entry of a style use too")
+    (t/is (= {} (dea/export-caveats objects (with {:type :fade}))))
+    (t/is (= {} (dea/export-caveats objects nil)))))
+
+(t/deftest markup-exports-read-the-board-without-split-keys
+  (let [{:keys [objects bid tid]} (text-board)
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-animation tid {:type :fade :split :word})
+                  (cta/add-animation tid (words-use {:type :move :split :word :start 0 :duration 500})))
+        page  {:objects objects :timelines {bid tl}}
+        split (fn [timeline]
+                (->> (get-in timeline [:tracks tid :animations])
+                     (mapcat #(cons % (:entries %)))
+                     (keep :split)))]
+    (t/is (= [:word :word] (split (dwa/board-export-timeline page {} bid))))
+    (t/is (= [] (split (dwa/board-export-timeline page {} bid :text-split :whole))))))
+
+(t/deftest frames-after-a-split-show-the-text-at-rest
+  (let [{:keys [objects bid tid]} (text-board)
+        tl     (cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid
+                                  {:type :fade :split :word :start 0 :duration 500})
+        sent   (atom [])
+        bridge {:set-modifiers (fn [& _])
+                :clean-modifiers (fn [])
+                :apply-shape-properties (fn [shape props]
+                                          (when (some #{:text-units} props)
+                                            (swap! sent conj (:text-units shape))))}]
+    (doseq [time [250 500 750]]
+      (dea/apply-pose! objects (cta/timeline->modif-tree tl objects time) {:bridge bridge}))
+    (t/is (= 3 (count @sent)) "every frame")
+    (t/is (seq (first @sent)) "posed while it plays")
+    (t/is (= [[] []] (rest @sent)) "at rest from its end")))
+
+(t/deftest a-text-is-shot-at-rest
+  (let [{:keys [objects tid]} (text-board)
+        calls  (atom [])
+        bridge {:use-shape (fn [_])
+                :set-shape-hidden (fn [_])
+                :clean-modifiers (fn [])
+                :apply-shape-properties (fn [shape props] (log calls :props shape (vec props)))
+                :render-shape-pixels (fn [_ _ _] (js/Uint8Array. 0))}]
+    (dea/render-shape-at-rest objects tid [] {:bridge bridge})
+    (let [[_ shape props] (first @calls)]
+      (t/is (= [:opacity :text-units] props))
+      (t/is (= [] (:text-units shape)) "whatever the canvas posed"))))

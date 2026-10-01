@@ -27,6 +27,7 @@
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
+   [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.undo :as dwu]
@@ -177,25 +178,29 @@
   own, with the animations of the component copies in it (see
   `cltl/with-instance-tracks`) and, while it has no tracks, keeping time
   with them. Nil when the board has no timeline and no animated copies.
-  `files` holds the files of the components, by id."
-  [page files board-id]
+  `files` holds the files of the components, by id. With `text-split`
+  `:whole`, every split animation plays as an animation of its whole
+  text, as the markup exports (CSS, SVG and Lottie) play them (see
+  `cta/flatten-splits`)."
+  [page files board-id & {:keys [text-split]}]
   (let [objects   (:objects page)
         timelines (:timelines page)
         stored?   (contains? timelines board-id)
         copies    (vals (copy-timelines objects timelines files board-id))]
     (when-let [own (when (or stored? (seq copies))
                      (board-timeline timelines (get objects board-id)))]
-      (-> own
+      (-> (cond-> own (= :whole text-split) cta/flatten-splits)
           (cltl/with-copies-clock copies stored?)
-          (cltl/with-instance-tracks copies objects)))))
+          (cltl/with-instance-tracks copies objects :text-split text-split)))))
 
 (defn export-timeline
   "The timeline the exports of the active board read (see
-  `board-export-timeline`)."
-  [state]
+  `board-export-timeline`, which takes `opts`)."
+  [state & {:as opts}]
   (board-export-timeline (dsh/lookup-page state)
                          (dsh/lookup-libraries state)
-                         (active-board-id state)))
+                         (active-board-id state)
+                         opts))
 
 (defn playhead
   [state]
@@ -1211,14 +1216,19 @@
 (defn add-animation-preset
   "Add the animations of `preset` to the shapes of `shape-ids` that are in
   the active board, starting at the playhead, one after the other by the
-  `stagger` in the order of the layers, top-most first."
+  `stagger` in the order of the layers, top-most first. A text preset
+  (see `cta/text-styles`) goes to the texts among them only."
   [shape-ids preset]
   (ptk/reify ::add-animation-preset
     ptk/WatchEvent
     (watch [it state _]
-      (add-staggered it state shape-ids
-                     (fn [start]
-                       (map #(assoc % :start start) (preset-animations preset)))))))
+      (let [objects   (dsh/lookup-page-objects state)
+            shape-ids (cond->> shape-ids
+                        (contains? cta/text-styles preset)
+                        (filter #(cfh/text-shape? (get objects %))))]
+        (add-staggered it state shape-ids
+                       (fn [start]
+                         (map #(assoc % :start start) (preset-animations preset))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ANIMATION STYLES
@@ -1342,6 +1352,16 @@
   [shape-id animation-id attrs]
   (update-current-timeline
    #(cta/update-animation % shape-id animation-id (fn [animation] (merge animation attrs)))))
+
+(defn set-animation-split
+  "Play the animation `animation-id` of the text `shape-id` by `kind` of
+  units (`:char`, `:word` or `:line`; nil for the whole layer), and the
+  other split presets of the layer by it too, a text playing one kind
+  (see `cta/with-split-kind`): one change to undo."
+  [shape-id animation-id kind]
+  (update-current-timeline
+   #(d/update-in-when % [:tracks shape-id :animations]
+                      cta/with-split-kind animation-id kind cta/make-animation)))
 
 (defn retime-animation
   "Commit `base` (the timeline as it was when a drag started) with the
@@ -1499,6 +1519,22 @@
 ;; PLAYBACK & PREVIEW
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn texts-at-rest
+  "`modif-tree`, the preview of the animation, with the text in edition
+  at rest (see `cltl/units-at-rest`), and the texts the canvas last posed
+  (see `dwm/set-wasm-modifiers`) that it poses no more, as one whose last
+  split animation was removed, so that their poses clear."
+  [modif-tree state]
+  (let [edition (dm/get-in state [:workspace-local :edition])
+        posed   (into #{}
+                      (keep (fn [[id {:keys [property value]}]]
+                              (when (and (= :text-units property) (seq value)) id)))
+                      (:wasm-props state))]
+    (cltl/units-at-rest modif-tree
+                        (cond-> (into #{} (remove #(cltl/poses-units? modif-tree %)) posed)
+                          (cltl/poses-units? modif-tree edition)
+                          (conj edition)))))
+
 (defn apply-preview
   "Recompute and apply the transient modifiers for the timeline of the
   active board at the playhead (editor scrubbing/playback preview), see
@@ -1526,7 +1562,8 @@
     (watch [_ state _]
       (if-let [timelines (not-empty (shown-timelines state))]
         (let [objects    (dsh/lookup-page-objects state)
-              modif-tree (cltl/animation-tree timelines objects (playhead state))]
+              modif-tree (-> (cltl/animation-tree timelines objects (playhead state))
+                             (texts-at-rest state))]
           ;; The selection frame follows the selected shapes (see the
           ;; viewport), not every shape the preview moves.
           (if ^boolean (features/active-feature? state "render-wasm/v1")
@@ -1901,6 +1938,12 @@
               ;; shown with them.
               (->> stream
                    (rx/filter (ptk/type? ::dwm/clear-local-transform))
+                   (rx/map restore-preview))
+              ;; A text in edition shows at rest (see `texts-at-rest`), and
+              ;; as the animation poses it once left.
+              (->> stream
+                   (rx/filter #(contains? #{::dwe/start-edition-mode ::dwe/clear-edition-mode}
+                                          (ptk/type %)))
                    (rx/map restore-preview)))
              (rx/take-until stopper))))))
 
@@ -1924,7 +1967,7 @@
   (ptk/reify ::export-css
     ptk/EffectEvent
     (effect [_ state _]
-      (when-let [tl (export-timeline state)]
+      (when-let [tl (export-timeline state :text-split :whole)]
         (let [objects (dsh/lookup-page-objects state)
               css     (cta/timeline->css tl objects)
               blob    (wapi/create-blob css "text/css")]
@@ -1937,7 +1980,7 @@
   (ptk/reify ::export-lottie
     ptk/EffectEvent
     (effect [_ state _]
-      (when-let [tl (export-timeline state)]
+      (when-let [tl (export-timeline state :text-split :whole)]
         (let [objects (dsh/lookup-page-objects state)
               data    (cta/timeline->lottie tl objects)
               json    (js/JSON.stringify (clj->js data) nil 2)

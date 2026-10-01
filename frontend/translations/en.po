@@ -7697,6 +7697,75 @@ msgstr "Zoom"
 msgid "workspace.animation.preset.spin"
 msgstr "Spin"
 
+msgid "workspace.animation.preset.blur"
+msgstr "Blur"
+
+msgid "workspace.animation.blur-in"
+msgstr "Blur in"
+
+msgid "workspace.animation.blur-out"
+msgstr "Blur out"
+
+msgid "workspace.animation.preset.typewriter"
+msgstr "Typewriter"
+
+msgid "workspace.animation.preset.rise-words"
+msgstr "Rise words"
+
+msgid "workspace.animation.preset.cascade-lines"
+msgstr "Cascade lines"
+
+msgid "workspace.animation.preset.pop-letters"
+msgstr "Pop letters"
+
+msgid "workspace.animation.split"
+msgstr "Animate by"
+
+msgid "workspace.animation.split.layer"
+msgstr "Layer"
+
+msgid "workspace.animation.split.char"
+msgstr "Characters"
+
+msgid "workspace.animation.split.word"
+msgstr "Words"
+
+msgid "workspace.animation.split.line"
+msgstr "Lines"
+
+msgid "workspace.animation.spread"
+msgstr "Spread"
+
+msgid "workspace.animation.spread.hint"
+msgstr "%s ms per unit"
+
+msgid "workspace.animation.order"
+msgstr "Order"
+
+msgid "workspace.animation.order.forward"
+msgstr "Forward"
+
+msgid "workspace.animation.order.backward"
+msgstr "Backward"
+
+msgid "workspace.animation.order.center"
+msgstr "From the center"
+
+msgid "workspace.animation.order.edges"
+msgstr "From the edges"
+
+msgid "workspace.animation.order.random"
+msgstr "Random"
+
+msgid "workspace.animation.shuffle"
+msgstr "Shuffle"
+
+msgid "workspace.animation.label.split"
+msgstr "%s · %s"
+
+msgid "workspace.animation.unit-cap-hint"
+msgstr "This text has more than %s units, so it plays them as one layer."
+
 msgid "workspace.animation.fade-in"
 msgstr "Fade in"
 
@@ -7794,7 +7863,7 @@ msgid "workspace.animation.spring-bounce"
 msgstr "Bounce"
 
 msgid "workspace.animation.paste-skipped"
-msgstr "%s keyframes were left out: the layer has no matching fill, stroke, shadow, blur or radius."
+msgstr "%s keyframes or text animations were left out: the layer has no matching fill, stroke, shadow, blur, radius or text."
 
 msgid "workspace.animation.paste-no-target"
 msgstr "Select layers inside a board to paste the animation onto."
@@ -8667,6 +8736,9 @@ msgstr "Too many frames. Lower the frame rate or shorten the timeline."
 
 msgid "workspace.options.export.codec-unavailable"
 msgstr "This format is not available in this browser. Try WebM or GIF."
+
+msgid "workspace.options.export.split-text-whole"
+msgstr "Text animated by characters, words or lines moves as a whole in this format."
 
 msgid "workspace.options.export.no-timeline"
 msgstr "This board has no animation yet."

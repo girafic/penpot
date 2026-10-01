@@ -317,10 +317,15 @@
 
 (defn- edit-preview-tree
   "In motion mode, the modif-tree showing the edit `modif-tree` over the
-  animations the canvas shows (see `cltl/edit-preview`), or nil."
+  animations the canvas shows (see `cltl/edit-preview`), the text in
+  edition with its units at rest (see `cltl/units-at-rest`), or nil."
   [state modif-tree]
   (when-let [{:keys [timelines board-id time]} (dsh/lookup-animation-preview state)]
-    (cltl/edit-preview timelines board-id (dsh/lookup-page-objects state) time modif-tree)))
+    (let [tree    (cltl/edit-preview timelines board-id (dsh/lookup-page-objects state) time modif-tree)
+          edition (dm/get-in state [:workspace-local :edition])]
+      (cond-> tree
+        (cltl/poses-units? tree edition)
+        (cltl/units-at-rest [edition])))))
 
 (defn- with-edit-modifiers
   "`state` showing the modifiers `edit`, or in motion mode the modifiers

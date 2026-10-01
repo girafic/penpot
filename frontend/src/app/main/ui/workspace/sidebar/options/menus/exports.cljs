@@ -78,9 +78,14 @@
       (when (and shape (get timelines (:id shape)))
         shape))))
 
+(defn- caveat-label
+  [caveat]
+  (case caveat
+    :split-text (tr "workspace.options.export.split-text-whole")))
+
 (mf/defc animated-exports*
   {::mf/private true}
-  [{:keys [board timeline formats]}]
+  [{:keys [board timeline formats caveats]}]
   (let [progress  (mf/deref refs/export-animation)
         selrect   (:selrect board)
         width     (mth/round (or (:width selrect) 0))
@@ -256,6 +261,9 @@
 
        (when-not codec?
          [:p {:class (stl/css :hint)} (tr "workspace.options.export.codec-unavailable")])
+
+       (for [caveat (get caveats format)]
+         [:p {:key (name caveat) :class (stl/css :hint)} (caveat-label caveat)])
 
        (if busy?
          [:> button* {:variant "secondary"
@@ -453,6 +461,14 @@
 
         formats (mf/deref formats-ref)
 
+        ;; What the export in each format leaves out (see
+        ;; `dea/export-caveats`).
+        caveats-ref
+        (mf/with-memo [timeline]
+          (l/derived #(dea/export-caveats % timeline) refs/workspace-page-objects =))
+
+        caveats (mf/deref caveats-ref)
+
         animated-board
         (when (seq formats)
           (animation-export-board type ids shapes timelines))
@@ -505,7 +521,8 @@
              [:> animated-exports* {:key (str animated-id)
                                     :board animated-board
                                     :timeline timeline
-                                    :formats formats}])])
+                                    :formats formats
+                                    :caveats caveats}])])
 
         (when (or (nil? animated-board) (= tab "static"))
           [:*

@@ -99,7 +99,8 @@
 (defn render-shape-at-rest
   "Rasterize `shape-id` in rest pose, hiding `hide-ids` for the shot. It
   is rasterized opaque: the layer of the export has its opacity, which
-  its animation may change."
+  its animation may change. A text shows its units at rest, whatever the
+  canvas posed (see `cta/text-unit-entries`)."
   [objects shape-id hide-ids {:keys [bridge] :or {bridge (default-bridge)}}]
   (let [{:keys [use-shape set-shape-hidden clean-modifiers
                 render-shape-pixels apply-shape-properties]} bridge
@@ -113,7 +114,9 @@
       ;; after hiding its layers: a change of the shape itself before
       ;; would keep them in the picture of it
       (when (and apply-shape-properties shape)
-        (apply-shape-properties (assoc shape :opacity 1) [:opacity]))
+        (if (= :text (:type shape))
+          (apply-shape-properties (assoc shape :opacity 1 :text-units []) [:opacity :text-units])
+          (apply-shape-properties (assoc shape :opacity 1) [:opacity])))
       (render-shape-pixels shape-id 1 :png)
       (finally
         (when (and apply-shape-properties shape)
@@ -341,6 +344,21 @@
       (if (every? #(cta/lottie-vector-layer? objects idset %) ids)
         [:lottie :dotlottie]
         []))))
+
+(def ^:private whole-text-formats
+  "The formats that play the split animations of a text as animations of
+  the whole text (see `cta/flatten-splits`)."
+  #{:svg :lottie :dotlottie})
+
+(defn export-caveats
+  "The notes the export of `timeline` (of the shapes of `objects`) needs,
+  by format, as the Animated export tab shows them: `:split-text` for the
+  formats that play a text split into characters, words or lines as a
+  whole (see `cta/split-animations?`)."
+  [objects timeline]
+  (if (and (some? timeline) (cta/split-animations? timeline objects))
+    (into {} (map (fn [format] [format [:split-text]])) whole-text-formats)
+    {}))
 
 (defn encode-video
   "Encode decoded frames with Mediabunny. Returns a promise of
@@ -799,7 +817,7 @@
 
 (defn- export-markup!
   [state format {:keys [bridge]}]
-  (let [tl      (dwa/export-timeline state)
+  (let [tl      (dwa/export-timeline state :text-split :whole)
         objects (dsh/lookup-page-objects state)
         board   (get objects (:board-id tl))
         bridge  (or bridge (default-bridge))

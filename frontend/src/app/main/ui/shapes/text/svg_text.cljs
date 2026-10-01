@@ -16,6 +16,7 @@
    [app.main.ui.shapes.fills :as fills]
    [app.main.ui.shapes.gradients :as grad]
    [app.util.object :as obj]
+   [app.util.text-units-svg :as tus]
    [rumext.v2 :as mf]))
 
 (def fill-attrs [:fill-color :fill-color-gradient :fill-opacity])
@@ -39,6 +40,11 @@
   (let [render-id (mf/use-ctx muc/render-id)
         shape (obj/get props "shape")
         shape (cond-> shape (:is-mask? shape) set-white-fill)
+        ;; The units its split animations pose, each piece a fragment
+        ;; of its own (see `tus/posed-fragments`).
+        shape (if-let [fragments (tus/posed-fragments shape)]
+                (assoc shape :position-data fragments)
+                shape)
 
         {:keys [x y width height position-data]} shape
 
@@ -105,12 +111,20 @@
                         (dissoc :shadow :blur))
 
               ;; Need to create new render-id per text-block
-              render-id (dm/str render-id "-" index)]
+              render-id (dm/str render-id "-" index)
 
-          [:& (mf/provider muc/render-id) {:key index :value render-id}
-           ;; Text fills definition. Need to be defined per-text block
-           [:defs
-            [:& fills/fills          {:shape shape :render-id render-id}]]
+              block
+              (mf/html
+               [:& (mf/provider muc/render-id) {:key index :value render-id}
+                ;; Text fills definition. Need to be defined per-text block
+                [:defs
+                 [:& fills/fills          {:shape shape :render-id render-id}]]
 
-           [:& shape-custom-strokes {:shape shape :position index :render-id render-id}
-            [:> :text props (:text data)]]]))]]))
+                [:& shape-custom-strokes {:shape shape :position index :render-id render-id}
+                 [:> :text props (:text data)]]])]
+
+          (if-let [{:keys [transform opacity filter]} (:pose data)]
+            [:g {:key index :transform transform :opacity opacity
+                 :style (when (some? filter) #js {:filter filter})}
+             block]
+            block)))]]))

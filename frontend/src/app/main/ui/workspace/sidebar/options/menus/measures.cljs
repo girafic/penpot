@@ -965,9 +965,9 @@
   "The measures of the selected shapes and, in motion mode, their
   animations: after the measures, as the headed sections come, so the
   rows above keep reading as the shape's own."
-  [{:keys [ids] :as props}]
+  [{:keys [ids shapes] :as props}]
   (let [motion-mode? (mf/use-ctx ctx/motion-mode?)]
     [:*
      [:> measures-section* props]
      (when ^boolean motion-mode?
-       [:> animations-menu* {:ids ids}])]))
+       [:> animations-menu* {:ids ids :shapes shapes}])]))
