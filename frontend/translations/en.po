@@ -7507,9 +7507,6 @@ msgstr "Delete marker"
 msgid "workspace.animation.select-board"
 msgstr "Select a board to animate."
 
-msgid "workspace.animation.tracks-hint"
-msgstr "Select a shape and add a keyframe to start animating."
-
 msgid "workspace.animation.origin"
 msgstr "Origin"
 

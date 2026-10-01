@@ -493,14 +493,6 @@ $header-height: $ruler-height + $row-height;
   font-size: deprecated.$fs-11;
 }
 
-// Under the rows of a timeline without tracks.
-.tracks-hint {
-  position: absolute;
-  inset-inline: 0;
-  padding: deprecated.$s-16;
-  color: var(--color-foreground-secondary);
-}
-
 // The labels of the rows in view, under the markers. They move as the
 // rows scroll (see `sync-scroll!`); the lanes right of them are drawn.
 .row-labels {

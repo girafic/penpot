@@ -253,10 +253,6 @@
   are there as the rows scroll."
   8)
 
-(def ^:private hint-height
-  "Room under the rows for the hint of a timeline without tracks."
-  48)
-
 (def ^:private snap-context
   "What a drag in a lane snaps with, `{:timeline :target :show}`, and the
   `:unit` times show in, see `timeline*`."
@@ -1395,11 +1391,9 @@
         row-start   (min (first row-window) row-count)
         row-end     (min (second row-window) row-count)
         ;; What the view scrolls over: the rows under the ruler and the
-        ;; markers, and a hint while the timeline has no tracks.
-        hint?       (and (empty? (:tracks timeline)) (empty? copies))
+        ;; markers.
         content-height (+ lanes/header-height
-                          (* row-count lanes/row-height)
-                          (if hint? hint-height 0))
+                          (* row-count lanes/row-height))
 
         ;; The values at the playhead of the properties with a label, so
         ;; scrubbing does not work them out for the whole board.
@@ -2465,12 +2459,7 @@
                                          :hovered? hovered?
                                          :on-context-menu on-context-menu
                                          :on-select-layer on-select-keyframe-layer
-                                         :on-hover on-label-hover}])))
-
-                (when hint?
-                  [:div {:class (stl/css :tracks-hint)
-                         :style #js {"top" (dm/str (* row-count lanes/row-height) "px")}}
-                   (tr "workspace.animation.tracks-hint")])]]]]]]]])]
+                                         :on-hover on-label-hover}])))]]]]]]]])]
 
      ;; Above the dock, so it is placed outside of it.
      (when (some? easing-kf)
