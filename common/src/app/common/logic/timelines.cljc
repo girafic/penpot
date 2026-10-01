@@ -123,6 +123,34 @@
             (pcb/with-page changes page)
             (into (set (keys old)) (keys timelines)))))
 
+(defn commit-track-animations
+  "Changes turning the timelines of `page` into `timelines` (its whole
+  `:timelines` map, edited) when only the animations of their tracks and
+  their durations change, as in a style sync: the animations of each
+  track that changed (see `pcb/set-timeline-track-animations`) and each
+  changed duration, so that keyframes other users add meanwhile to the
+  same layers stay. A board without a timeline on `page` is left out."
+  [changes page timelines]
+  (let [old (:timelines page)]
+    (reduce-kv
+     (fn [changes board-id timeline]
+       (let [before (get old board-id)]
+         (if (or (nil? before) (= timeline before))
+           changes
+           (as-> changes $
+             (reduce-kv (fn [changes shape-id track]
+                          (let [animations (:animations track)]
+                            (cond-> changes
+                              (not= animations (get-in before [:tracks shape-id :animations]))
+                              (pcb/set-timeline-track-animations board-id shape-id animations))))
+                        $
+                        (:tracks timeline))
+             (cond-> $
+               (not= (:duration timeline) (:duration before))
+               (pcb/update-timeline board-id {:duration (:duration timeline)}))))))
+     (pcb/with-page changes page)
+     timelines)))
+
 (defn generate-copy-timelines
   "Give the copies of `ids-map` (old id -> new id) the animation of their
   originals, `sources` (see `animation-sources`); `changes` holds the

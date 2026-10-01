@@ -124,7 +124,7 @@
   (let [file    (edit-style (styled-file) :one 4)
         changes (sync-changes file file :one)
         synced  (thf/apply-changes file changes)]
-    (t/is (= {:set-timeline-track 2 :update-timeline 1}
+    (t/is (= {:set-timeline-track-animations 2 :update-timeline 1}
              (frequencies (map :type (:redo-changes changes)))))
     (t/is (= #{(thi/id :r1) (thi/id :r3)}
              (into #{} (keep :shape-id) (:redo-changes changes))))
@@ -148,6 +148,25 @@
 
     (t/testing "nothing to sync, no changes"
       (t/is (empty? (:redo-changes (sync-changes synced synced :one)))))))
+
+(t/deftest a-sync-keeps-the-keyframes-another-session-adds
+  ;; Session B adds a keyframe to r1, writing its whole track with the use
+  ;; as it was, and that lands first. Then the sync of session A, made
+  ;; before it, lands: r1 keeps the keyframe and takes the new entries.
+  (let [file    (styled-file)
+        edited  (edit-style file :one 4)
+        sync    (sync-changes edited edited :one)
+        page    (thf/get-page file :page1)
+        added   (cta/add-keyframe (timeline file :page1 :a) (thi/id :r1) {:time 500 :property :x :value 30})
+        other   (-> (pcb/empty-changes nil)
+                    (pcb/with-page page)
+                    (pcb/change-timeline (thi/id :a) added))
+        result  (-> edited
+                    (thf/apply-changes other)
+                    (thf/apply-changes sync))
+        track   (get-in (timeline result :page1 :a) [:tracks (thi/id :r1)])]
+    (t/is (= [[:x 500]] (mapv (juxt :property :time) (:keyframes track))))
+    (t/is (= (:entries (style result :one)) (get-in track [:animations 0 :entries])))))
 
 (t/deftest syncing-one-style-leaves-the-others
   (let [file   (-> (styled-file) (edit-style :one 2) (edit-style :two 2))
@@ -239,6 +258,6 @@
                            (map-indexed vector labels))))
         file    (edit-style file :one 2)
         changes (sync-changes file file :one)]
-    (t/is (= 200 (count (filter #(= :set-timeline-track (:type %)) (:redo-changes changes)))))
+    (t/is (= 200 (count (filter #(= :set-timeline-track-animations (:type %)) (:redo-changes changes)))))
     (t/is (= (set (map thi/id (take 200 labels)))
              (into #{} (keep :shape-id) (:redo-changes changes))))))

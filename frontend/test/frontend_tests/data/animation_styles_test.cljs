@@ -383,6 +383,7 @@
         track   {:shape-id (random-uuid) :keyframes [] :animations [use]}]
     (t/is (dwl/touches-local-styles? file-id [{:type :mod-animation-style}]))
     (t/is (dwl/touches-local-styles? file-id [{:type :set-timeline-track :params track}]))
+    (t/is (dwl/touches-local-styles? file-id [{:type :set-timeline-track-animations :animations [use]}]))
     (t/is (not (dwl/touches-local-styles? (random-uuid) [{:type :set-timeline-track :params track}])))
     (t/is (not (dwl/touches-local-styles? file-id [{:type :mod-obj}])))))
 

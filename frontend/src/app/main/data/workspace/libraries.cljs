@@ -575,17 +575,19 @@
 
 (defn touches-local-styles?
   "Whether `changes` (of the file `file-id`) edit an animation style, or
-  write a track that holds a use of a style of that file: after them a
-  use may differ from its style (see `repair-local-style-uses`)."
+  write a track, or its animations, holding a use of a style of that
+  file: after them a use may differ from its style (see
+  `repair-local-style-uses`)."
   [file-id changes]
   (letfn [(local-use? [animation]
             (and (cta/style-use? animation)
                  (= file-id (:style-ref-file animation))))]
-    (some (fn [{:keys [type params]}]
+    (some (fn [{:keys [type params animations]}]
             (case type
-              :mod-animation-style true
-              :set-timeline-track  (some local-use? (:animations params))
-              :set-timeline        (some local-use? (mapcat :animations (vals (:tracks params))))
+              :mod-animation-style           true
+              :set-timeline-track            (some local-use? (:animations params))
+              :set-timeline-track-animations (some local-use? animations)
+              :set-timeline                  (some local-use? (mapcat :animations (vals (:tracks params))))
               false))
           changes)))
 

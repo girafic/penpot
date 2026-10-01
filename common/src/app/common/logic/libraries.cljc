@@ -572,9 +572,11 @@
   the timelines of every page of the given file (see
   `ctas/sync-timeline`): one `pcb/change-timeline` per changed board. A
   use whose style is gone from the library turns into its presets. While
-  the library data is not loaded, nothing changes. The timelines of the
-  main components are page timelines too, so there is no local library
-  part.
+  the library data is not loaded, nothing changes. Only the animations
+  of the tracks are written, so keyframes other users add meanwhile to
+  those layers stay (see `cltl/commit-track-animations`). The timelines
+  of the main components are page timelines too, so there is no local
+  library part.
 
   If early-return? is true, stops after the first page that changes."
   ([changes file-id asset-id library-id libraries]
@@ -601,7 +603,7 @@
                       (cond-> changes
                         (not= timelines timelines')
                         (pcb/concat-changes
-                         (cltl/commit-timelines (pcb/empty-changes nil) page timelines'))))))))))))
+                         (cltl/commit-track-animations (pcb/empty-changes nil) page timelines'))))))))))))
 
 (defn- generate-sync-container
   "Generate changes to synchronize all shapes in a particular container (a page

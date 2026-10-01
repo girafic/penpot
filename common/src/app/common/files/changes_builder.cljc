@@ -428,6 +428,30 @@
                                                 :params old-val}))]
     (apply-changes-local changes)))
 
+(defn set-timeline-track-animations
+  "Set (or, when empty, remove) the animations of the track of `shape-id`
+  in the timeline of the board `id`, leaving its keyframes and flags as
+  they are, also those another user changes meanwhile."
+  [changes id shape-id animations]
+  (assert-page-id! changes)
+  (assert-page! changes)
+  (let [page-id (::page-id (meta changes))
+        page    (::page (meta changes))
+        old-val (dm/get-in page [:timelines id :tracks shape-id :animations])
+
+        changes (-> changes
+                    (update :redo-changes conj {:type :set-timeline-track-animations
+                                                :page-id page-id
+                                                :id id
+                                                :shape-id shape-id
+                                                :animations (not-empty animations)})
+                    (update :undo-changes conj {:type :set-timeline-track-animations
+                                                :page-id page-id
+                                                :id id
+                                                :shape-id shape-id
+                                                :animations (not-empty old-val)}))]
+    (apply-changes-local changes)))
+
 (defn update-timeline
   "Change settings (name, duration, playback...) of the timeline of the
   board `id`. A nil value removes an optional one."

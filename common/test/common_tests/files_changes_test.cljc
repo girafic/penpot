@@ -861,6 +861,7 @@
 
 (t/deftest timeline-changes-json-encode-decode
   (doseq [schema [ch/schema:set-timeline-track-change
+                  ch/schema:set-timeline-track-animations-change
                   ch/schema:update-timeline-change]]
     (let [encode (sm/encoder schema (sm/json-transformer))
           decode (sm/decoder schema (sm/json-transformer))]
@@ -885,6 +886,28 @@
     (-> (pcb/empty-changes)
         (pcb/with-page page)
         (pcb/change-timeline board-id (f (get-in page [:timelines board-id]))))))
+
+(t/deftest track-animations-change-leaves-the-keyframes
+  (let [page-id  (uuid/custom 1 1)
+        board-id (uuid/next)
+        a        (uuid/next)
+        b        (uuid/next)
+        data     (timeline-page page-id board-id a b)
+        page     (get-in data [:pages-index page-id])
+        fade     [(cta/make-animation {:type :fade :start 0 :duration 300})]
+        changes  (-> (pcb/empty-changes)
+                     (pcb/with-page page)
+                     (pcb/set-timeline-track-animations board-id a fade))
+        result   (ch/process-changes data (:redo-changes changes))
+        track    (get-in result [:pages-index page-id :timelines board-id :tracks a])]
+    (t/is (= fade (:animations track)))
+    (t/is (= (get-in data [:pages-index page-id :timelines board-id :tracks a :keyframes])
+             (:keyframes track)))
+    (t/is (= data (ch/process-changes result (:undo-changes changes))) "undo")
+    (t/is (= result (ch/process-changes result [{:type :set-timeline-track-animations
+                                                 :page-id page-id :id board-id :shape-id (uuid/next)
+                                                 :animations fade}]))
+          "a track that is gone stays gone")))
 
 (t/deftest timeline-edits-of-different-layers-merge
   (let [page-id  (uuid/custom 1 1)

@@ -173,6 +173,17 @@
 
     (sm/update-properties schema assoc :gen/gen gen)))
 
+(def schema:set-timeline-track-animations-change
+  ;; Only the animations of the track of one layer: a style sync writes
+  ;; them, so the keyframes another user adds meanwhile to the same layer
+  ;; stay.
+  [:map {:title "SetTimelineTrackAnimationsChange"}
+   [:type [:= :set-timeline-track-animations]]
+   [:page-id ::sm/uuid]
+   [:id ::sm/uuid]
+   [:shape-id ::sm/uuid]
+   [:animations [:maybe [:vector {:gen/max 4} cta/schema:animation]]]])
+
 (def schema:update-timeline-change
   [:map {:title "UpdateTimelineChange"}
    [:type [:= :update-timeline]]
@@ -262,6 +273,7 @@
    [:set-flow schema:set-flow-change]
    [:set-timeline schema:set-timeline-change]
    [:set-timeline-track schema:set-timeline-track-change]
+   [:set-timeline-track-animations schema:set-timeline-track-animations-change]
    [:update-timeline schema:update-timeline-change]
    [:set-default-grid schema:set-default-grid-change]
 
@@ -631,7 +643,7 @@
     (let [params (assoc params :board-id id)]
       (d/update-in-when data [:pages-index page-id] update :timelines assoc id params))))
 
-;; Both only change a timeline that is there: another user may have
+;; They only change a timeline that is there: another user may have
 ;; deleted it meanwhile.
 
 (defmethod process-change :set-timeline-track
@@ -641,6 +653,14 @@
                       (if (nil? params)
                         (dissoc tracks shape-id)
                         (assoc tracks shape-id (assoc params :shape-id shape-id))))))
+
+(defmethod process-change :set-timeline-track-animations
+  [data {:keys [page-id id shape-id animations]}]
+  (d/update-in-when data [:pages-index page-id :timelines id :tracks shape-id]
+                    (fn [track]
+                      (if (seq animations)
+                        (assoc track :animations animations)
+                        (dissoc track :animations)))))
 
 (defmethod process-change :update-timeline
   [data {:keys [page-id id attrs]}]
