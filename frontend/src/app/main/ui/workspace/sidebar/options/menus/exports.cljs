@@ -123,7 +123,8 @@
                   {:value "gif" :label "GIF"}
                   {:value "avif" :label "AVIF" :disabled (not (:avif support))}
                   {:value "svg" :label "SVG"}
-                  {:value "lottie" :label "Lottie"}])
+                  {:value "lottie" :label "Lottie"}
+                  {:value "dotlottie" :label "dotLottie"}])
 
         quality-options
         [{:value "low" :label (tr "workspace.options.export.quality-low")}

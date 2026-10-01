@@ -286,6 +286,10 @@
           (t/is (= {:format :gif :fps 15}
                    (get-in (stored-timelines store context) [(aget board "$id") :export]))))
 
+        (t/testing "a dotLottie archive is a format"
+          (set! (.-exportSettings timeline) #js {:format "dotlottie"})
+          (t/is (= "dotlottie" (:format (settings)))))
+
         (t/testing "what is not valid is refused"
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:format "mov"})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:fps 0})))

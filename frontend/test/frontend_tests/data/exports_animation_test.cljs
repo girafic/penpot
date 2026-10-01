@@ -9,8 +9,11 @@
    [app.common.types.animation :as cta]
    [app.common.types.shape :as cts]
    [app.main.data.exports.animation :as dea]
+   [app.main.data.workspace.lottie :as dwl]
+   [app.util.zip :as uz]
    [cljs.test :as t :include-macros true]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [promesa.core :as p]))
 
 (defn- log
   [calls k & args]
@@ -358,8 +361,30 @@
         with-text (-> objects
                       (assoc (:id text) (assoc text :parent-id bid :frame-id bid))
                       (update-in [bid :shapes] conj (:id text)))]
-    (t/is (= [:mp4 :webm :gif :avif :svg :lottie] (dea/export-formats with-text tl true)))
+    (t/is (= [:mp4 :webm :gif :avif :svg :lottie :dotlottie] (dea/export-formats with-text tl true)))
     (t/testing "without WASM, Lottie when all its layers draw as vectors"
-      (t/is (= [:lottie] (dea/export-formats objects tl false)))
+      (t/is (= [:lottie :dotlottie] (dea/export-formats objects tl false)))
       (t/is (= [] (dea/export-formats with-text tl false))))
     (t/is (= [] (dea/export-formats objects nil true)))))
+
+(t/deftest a-dotlottie-archive-reads-back
+  (t/async
+    done
+    (let [doc    {:v "5.7.4" :w 100 :h 50 :layers []
+                  :assets [{:id "img_1" :w 10 :h 10 :u "/images/" :p "img_1.png" :e 0}]}
+          png    (js/Uint8Array. #js [137 80 78 71 13 10 26 10])
+          read   @#'dwl/read-dotlottie
+          text   #(p/then (uz/read-as-text %) (fn [text] (js->clj (js/JSON.parse text) :keywordize-keys true)))
+          bytes  #(p/then (.getData ^js % (uz/bytes-writer)) vec)]
+      (-> (p/let [blob     (dea/lottie->dotlottie doc "intro" {"img_1.png" png} true)
+                  {:keys [files] :as read-back} (read blob)
+                  manifest (text (get files "manifest.json"))
+                  image    (bytes (get files "images/img_1.png"))]
+            (t/is (= #{"manifest.json" "animations/intro.json" "images/img_1.png"} (set (keys files))))
+            (t/is (= {:version "1" :generator "Penpot"
+                      :animations [{:id "intro" :loop true :autoplay true}]}
+                     manifest))
+            (t/is (= doc (:doc read-back)) "the importer reads the document back")
+            (t/is (= (vec png) image) "the image keeps its bytes"))
+          (p/catch (fn [cause] (t/is (nil? cause))))
+          (p/finally (fn [] (done)))))))

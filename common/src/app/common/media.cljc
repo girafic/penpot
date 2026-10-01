@@ -66,6 +66,7 @@
     "image/svg+xml"            ".svg"
     "image/webp"               ".webp"
     "application/zip"          ".zip"
+    "application/zip+dotlottie" ".lottie"
     "application/penpot"       ".penpot"
     "application/pdf"          ".pdf"
     "text/plain"               ".txt"

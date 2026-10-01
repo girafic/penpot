@@ -16571,7 +16571,9 @@ TimelineExportSettings:
         ```
 
         The file: a video (`mp4`, `webm`), an animated image (`gif`, `avif`),
-        an animated `svg` or a `lottie` animation. `mp4` by default.
+        an animated `svg`, or a Lottie animation as JSON (`lottie`) or as a
+        dotLottie archive with its images as files (`dotlottie`). `mp4` by
+        default.
       quality: |-
         ```
         quality?: "low" | "medium" | "high"
@@ -24457,7 +24459,14 @@ TimelineExportFormat:
     ===============================
 
     ```
-    TimelineExportFormat: "mp4" | "webm" | "gif" | "avif" | "svg" | "lottie"
+    TimelineExportFormat:
+        | "mp4"
+        | "webm"
+        | "gif"
+        | "avif"
+        | "svg"
+        | "lottie"
+        | "dotlottie"
     ```
 
     The file formats of an animation export, see `TimelineExportSettings`.

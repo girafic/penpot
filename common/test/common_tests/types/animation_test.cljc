@@ -627,7 +627,17 @@
     (t/testing "the image, from the layer's origin, sits on the shape"
       (t/is (= [100.0 50.0 0] (get-in layer [:ks :a :k])))
       (t/is (= 200.0 (double (get-in layer [:ks :p :x :k 0 :s 0]))))
-      (t/is (= 150.0 (double (get-in layer [:ks :p :y :k])))))))
+      (t/is (= 150.0 (double (get-in layer [:ks :p :y :k])))))
+    (t/testing "embedded, or a file in a dotLottie archive"
+      (t/is (= {:u "" :p "data:image/png;base64,AAA" :e 1}
+               (select-keys (get-in L [:assets 0]) [:u :p :e])))
+      (let [archived (cta/timeline->lottie tl objects
+                                           {sid {:id "img_0" :w 200 :h 100
+                                                 :u "/images/" :p "img_0.png" :e 0}})]
+        (t/is (= {:u "/images/" :p "img_0.png" :e 0}
+                 (select-keys (get-in archived [:assets 0]) [:u :p :e])))))
+    (t/testing "a timeline keeps dotLottie as its export format"
+      (t/is (cta/valid-timeline? (assoc tl :export {:format :dotlottie}))))))
 
 (t/deftest lottie-image-layer-has-the-opacity-of-the-shape
   ;; its image is rasterized opaque

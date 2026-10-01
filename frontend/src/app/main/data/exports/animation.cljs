@@ -24,9 +24,11 @@
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.webapi :as wapi]
+   [app.util.zip :as uz]
    [beicon.v2.core :as rx]
    [clojure.string :as str]
-   [potok.v2.core :as ptk]))
+   [potok.v2.core :as ptk]
+   [promesa.core :as p]))
 
 (defonce ^:private cancel-fn (atom nil))
 
@@ -297,7 +299,7 @@
    (codec-supported? format nil))
   ([format media]
    (case format
-     (:gif :svg :lottie)
+     (:gif :svg :lottie :dotlottie)
      (js/Promise.resolve true)
 
      :avif
@@ -323,17 +325,17 @@
 
 (defn export-formats
   "The formats `timeline` can be exported as, in menu order. Without the
-  WASM renderer only Lottie, and only when every layer draws as vectors:
-  the other formats rasterize through it."
+  WASM renderer only Lottie (as JSON or dotLottie), and only when every
+  layer draws as vectors: the other formats rasterize through it."
   [objects timeline render-wasm?]
   (cond
     (nil? timeline) []
-    render-wasm?    [:mp4 :webm :gif :avif :svg :lottie]
+    render-wasm?    [:mp4 :webm :gif :avif :svg :lottie :dotlottie]
     :else
     (let [ids   (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline))
           idset (set ids)]
       (if (every? #(cta/lottie-vector-layer? objects idset %) ids)
-        [:lottie]
+        [:lottie :dotlottie]
         []))))
 
 (defn encode-video
@@ -766,6 +768,31 @@
              (wasm-gesture/try-begin-interactive-transform!)
              (wasm.api/set-modifiers-start)))))))
 
+(def ^:private dotlottie-mtype
+  "The media type of a dotLottie archive, whose file ends in `.lottie`."
+  "application/zip+dotlottie")
+
+(defn lottie->dotlottie
+  "A promise of the dotLottie archive (a blob) of the Lottie document
+  `doc`: `manifest.json` naming the animation `id`, the document as
+  `animations/<id>.json`, and the PNG `images` (`{file-name bytes}`) its
+  image assets point at, as `images/<file-name>`. `loop?` tells players
+  whether it plays over and over."
+  [doc id images loop?]
+  (let [writer   (uz/writer (uz/blob-writer :mtype dotlottie-mtype))
+        manifest {:version "1"
+                  :generator "Penpot"
+                  :animations [{:id id :loop loop? :autoplay true}]}
+        files    (concat [["manifest.json" (js/JSON.stringify (clj->js manifest))]
+                          [(str "animations/" id ".json") (js/JSON.stringify (clj->js doc))]]
+                         (map (fn [[file-name bytes]] [(str "images/" file-name) bytes])
+                              images))]
+    (-> (reduce (fn [written [path content]]
+                  (p/then written (fn [_] (uz/add writer path content))))
+                (p/resolved nil)
+                files)
+        (p/then (fn [_] (uz/close writer))))))
+
 (defn- export-markup!
   [state format {:keys [bridge]}]
   (let [tl      (dwa/export-timeline state)
@@ -777,7 +804,7 @@
         layers  (set (cta/export-layer-ids objects (:board-id tl) (:tracks tl)))
         images  (collect-layer-images objects tl {:bridge bridge
                                                   :time (dwa/playhead state)
-                                                  :skip? (when (= format :lottie)
+                                                  :skip? (when (#{:lottie :dotlottie} format)
                                                            #(cta/lottie-vector-layer? objects layers %))})]
     (try
       (case format
@@ -795,14 +822,29 @@
               json   (js/JSON.stringify (clj->js data) nil 2)
               blob   (wapi/create-blob json "application/json")]
           (download-blob (or (:name board) (:name tl)) ".json" "application/json" blob)
-          {:status :ok :blob blob}))
+          {:status :ok :blob blob})
+
+        ;; the images go into the archive, next to the document
+        :dotlottie
+        (let [name      (or (:name board) (:name tl))
+              file-name #(str (:id %) ".png")
+              assets    (into {} (map (fn [[id img]]
+                                        [id (-> (select-keys img [:id :w :h])
+                                                (assoc :u "/images/" :p (file-name img) :e 0))]))
+                              images)
+              data      (cta/timeline->lottie tl objects assets)
+              files     (into {} (map (fn [[_ img]] [(file-name img) (:bytes img)])) images)]
+          (p/let [blob (lottie->dotlottie data (safe-filename name "") files
+                                          (not= :once (cta/playback-mode tl)))]
+            (download-blob name ".lottie" dotlottie-mtype blob)
+            {:status :ok :blob blob})))
       (finally
         (st/emit! (dwa/apply-preview))))))
 
 (defn export-animation
   "Export the animation of the active board, with the one of the
   component copies in it (see `dwa/export-timeline`), as `format`
-  (`:mp4` `:webm` `:gif` `:avif` `:svg` `:lottie`)."
+  (`:mp4` `:webm` `:gif` `:avif` `:svg` `:lottie` `:dotlottie`)."
   [{:keys [format] :as params}]
   (ptk/reify ::export-animation
     ptk/UpdateEvent
@@ -823,7 +865,7 @@
                              ::ev/origin "workspace:sidebar"
                              :format (name format)}))
            (->> (rx/from
-                 (if (#{:svg :lottie} format)
+                 (if (#{:svg :lottie :dotlottie} format)
                    (js/Promise.resolve (export-markup! state format params))
                    (export-raster! state params)))
                 (rx/map

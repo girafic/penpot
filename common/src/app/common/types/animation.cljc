@@ -189,7 +189,7 @@
    [:name :string]])
 
 (def export-formats
-  #{:mp4 :webm :gif :avif :svg :lottie})
+  #{:mp4 :webm :gif :avif :svg :lottie :dotlottie})
 
 (def schema:export
   "How the board of a timeline is exported as an animation, as last set
@@ -3412,8 +3412,10 @@
   JSON encoding) for `timeline`, using `objects` for geometry. The board
   (`:board-id`) is the composition. Pure.
 
-  When `assets` is a non-empty map of `{shape-id {:id :w :h :p :e}}`,
-  the export layers (see `export-layer-ids`) are those shapes, which
+  When `assets` is a non-empty map of `{shape-id {:id :w :h :u :p :e}}`
+  (an image embedded as a data URI, `:e` 1, or a file `:p` in the folder
+  `:u` of a dotLottie archive, `:e` 0), the export layers (see
+  `export-layer-ids`) are those shapes, which
   become image layers (`ty` 2) unless they export as vectors (see
   `lottie-vector-layer?`); the board's own asset draws it. Without
   assets the animated shapes are the layers, as vectors or rectangles of
@@ -3435,7 +3437,7 @@
                           {:id (:id asset)
                            :w (:w asset)
                            :h (:h asset)
-                           :u ""
+                           :u (or (:u asset) "")
                            :p (:p asset)
                            :e (or (:e asset) 1)})
                         assets)]

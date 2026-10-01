@@ -443,9 +443,10 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
   * `clear(shape)` - Removes the keyframes and animations of a layer; `remove()` - removes the timeline
   * `toCSS(): string` - The animation as CSS `@keyframes` and `animation` rules, animated component copies included
   * `exportSettings` - How the board is exported as an animation, as the export panel sets and offers it:
-    `{format: "mp4" | "webm" | "gif" | "avif" | "svg" | "lottie", quality: "low" | "medium" | "high", fps: 1..120,
-    size: "0.5" | "1" | "2" | "w1920" | "h720" | "h1080" | "h1440" | "h2160", loop: boolean}`; setting it changes the
-    ones given (e.g. `timeline.exportSettings = {format: "gif", fps: 15}`)
+    `{format: "mp4" | "webm" | "gif" | "avif" | "svg" | "lottie" | "dotlottie", quality: "low" | "medium" | "high",
+    fps: 1..120, size: "0.5" | "1" | "2" | "w1920" | "h720" | "h1080" | "h1440" | "h2160", loop: boolean}`; setting it
+    changes the ones given (e.g. `timeline.exportSettings = {format: "gif", fps: 15}`); "dotlottie" is a `.lottie`
+    archive holding the Lottie JSON and its images
   * `Keyframe` and `PresetAnimation` objects have writable settings (`time`, `value`, `easing`, `start`, ...) and `remove()`
 
 Components: animating the main of a component (its board's timeline) animates every copy of it, in any board, where

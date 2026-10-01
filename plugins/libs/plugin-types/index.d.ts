@@ -3940,7 +3940,9 @@ export interface CopyAnimationResult {
 export interface TimelineExportSettings {
   /**
    * The file: a video (`mp4`, `webm`), an animated image (`gif`, `avif`),
-   * an animated `svg` or a `lottie` animation. `mp4` by default.
+   * an animated `svg`, or a Lottie animation as JSON (`lottie`) or as a
+   * dotLottie archive with its images as files (`dotlottie`). `mp4` by
+   * default.
    */
   format?: TimelineExportFormat;
 
@@ -3973,7 +3975,7 @@ export interface TimelineExportSettings {
  * The file formats of an animation export, see `TimelineExportSettings`.
  */
 export type TimelineExportFormat =
-  'mp4' | 'webm' | 'gif' | 'avif' | 'svg' | 'lottie';
+  'mp4' | 'webm' | 'gif' | 'avif' | 'svg' | 'lottie' | 'dotlottie';
 
 /**
  * The sizes of an animation export, see `TimelineExportSettings`.
