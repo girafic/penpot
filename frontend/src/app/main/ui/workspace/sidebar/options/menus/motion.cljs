@@ -241,6 +241,51 @@
     (when (number? value)
       (f value))))
 
+(def ^:private token-option-prefix
+  "The start of the value of an option of the easing select that binds a
+  design token, followed by its name."
+  "token:")
+
+(defn- tokens-of-types
+  "The tokens of `tokens` (by type, or a delay of them) of the `types`, in
+  that order, for the picker of a setting: an empty map when there are
+  none, nil without `tokens` (no picker)."
+  [tokens types]
+  (when (some? tokens)
+    (let [tokens (if (delay? tokens) @tokens tokens)]
+      (reduce (fn [acc type]
+                (if-let [items (seq (get tokens type))]
+                  (assoc acc type items)
+                  acc))
+              (array-map)
+              types))))
+
+(defn- without-token
+  "`applied-tokens` without the token of the setting `key`, nil when no
+  other is left."
+  [applied-tokens key]
+  (not-empty (dissoc applied-tokens key)))
+
+(defn- setting-handler
+  "A handler of the number field of the setting `key` of a style entry
+  (or of a preset, which has no `applied-tokens`): a number typed in goes
+  into the setting through `to-value` and lets go of its token; a token
+  picked (the input gives the tokens of its name) binds it and sets the
+  setting to its value (see `cta/token-setting`)."
+  [key to-value change applied-tokens]
+  (fn [value]
+    (cond
+      (number? value)
+      (change (cond-> {key (to-value value)}
+                (contains? applied-tokens key)
+                (assoc :applied-tokens (without-token applied-tokens key))))
+
+      (sequential? value)
+      (when-let [token (first value)]
+        (let [setting (cta/token-setting key (:resolved-value token))]
+          (change (cond-> {:applied-tokens (assoc applied-tokens key (:name token))}
+                    (some? setting) (assoc key setting))))))))
+
 (mf/defc animation-row*
   {::mf/private true}
   [{:keys [label children]}]
@@ -260,10 +305,14 @@
   other split animations of the text or style follow it), and, given
   the `unit-count` of the text, the ms between two units shows next to
   the spread. It starts closed, or open with `default-open`. The layers
-  list and the style editor both use it."
+  list and the style editor both use it. With `tokens` (the active
+  design tokens by type), the settings of a style entry bind tokens:
+  each number field and the easing offer those of its types (see
+  `cta/style-token-types`), and its `:applied-tokens` show either way."
   [{:keys [animation on-change on-remove on-unlock on-change-start on-change-end read-only
-           split-allowed on-split unit-count default-open]}]
-  (let [{:keys [id type direction start duration easing amount offset-x offset-y locked]} animation
+           split-allowed on-split unit-count default-open tokens]}]
+  (let [{:keys [id type direction start duration easing amount offset-x offset-y locked
+                applied-tokens]} animation
         read-only? (true? read-only)
         locked?    (or (true? locked) read-only?)
 
@@ -286,10 +335,12 @@
 
         on-type
         (mf/use-fn
-         (mf/deps change)
-         ;; A new type starts from its own settings.
+         (mf/deps change applied-tokens)
+         ;; A new type starts from its own settings, and their tokens go.
          (fn [value]
-           (change {:type (keyword value) :amount nil :offset-x nil :offset-y nil})))
+           (change (cond-> {:type (keyword value) :amount nil :offset-x nil :offset-y nil}
+                     (some? applied-tokens)
+                     (assoc :applied-tokens (not-empty (dissoc applied-tokens :amount :offset-x :offset-y)))))))
 
         on-direction
         (mf/use-fn
@@ -297,19 +348,42 @@
          (fn [value]
            (change {:direction (keyword value)})))
 
+        ;; the tokens each setting can bind, nil without `tokens`
+        time-tokens   (mf/with-memo [tokens] (tokens-of-types tokens [:duration]))
+        amount-tokens (mf/with-memo [tokens type] (tokens-of-types tokens (cta/style-token-types type :amount)))
+        offset-tokens (mf/with-memo [tokens type] (tokens-of-types tokens (cta/style-token-types type :offset-x)))
+        easing-tokens (mf/with-memo [tokens] (sort-by :name (get (tokens-of-types tokens [:cubic-bezier]) :cubic-bezier)))
+        easing-token  (:easing applied-tokens)
+
         on-easing
         (mf/use-fn
-         (mf/deps change)
+         (mf/deps change applied-tokens easing-tokens)
          (fn [value]
-           (change {:easing (option->easing value)})))
+           (if (str/starts-with? value token-option-prefix)
+             (let [token-name (subs value (count token-option-prefix))
+                   token      (d/seek #(= token-name (:name %)) easing-tokens)
+                   setting    (cta/token-setting :easing (:resolved-value token))]
+               (change (cond-> {:applied-tokens (assoc applied-tokens :easing token-name)}
+                         (some? setting) (assoc :easing setting))))
+             (change (cond-> {:easing (option->easing value)}
+                       (contains? applied-tokens :easing)
+                       (assoc :applied-tokens (without-token applied-tokens :easing)))))))
 
-        on-start    (mf/use-fn (mf/deps change) (number-handler #(change {:start %})))
-        on-duration (mf/use-fn (mf/deps change) (number-handler #(change {:duration %})))
-        on-percent  (mf/use-fn (mf/deps change) (number-handler #(change {:amount (/ % 100)})))
-        on-angle    (mf/use-fn (mf/deps change) (number-handler #(change {:amount %})))
-        on-offset-x (mf/use-fn (mf/deps change) (number-handler #(change {:offset-x %})))
-        on-offset-y (mf/use-fn (mf/deps change) (number-handler #(change {:offset-y %})))
+        on-start    (mf/use-fn (mf/deps change applied-tokens) (setting-handler :start identity change applied-tokens))
+        on-duration (mf/use-fn (mf/deps change applied-tokens) (setting-handler :duration identity change applied-tokens))
+        on-percent  (mf/use-fn (mf/deps change applied-tokens) (setting-handler :amount #(/ % 100) change applied-tokens))
+        on-angle    (mf/use-fn (mf/deps change applied-tokens) (setting-handler :amount identity change applied-tokens))
+        on-offset-x (mf/use-fn (mf/deps change applied-tokens) (setting-handler :offset-x identity change applied-tokens))
+        on-offset-y (mf/use-fn (mf/deps change applied-tokens) (setting-handler :offset-y identity change applied-tokens))
         on-spread   (mf/use-fn (mf/deps change) (number-handler #(change {:spread (/ % 100)})))
+
+        ;; the detach of the token of each setting
+        on-detach
+        (mf/with-memo [change applied-tokens]
+          (into {}
+                (map (fn [key]
+                       [key (fn [_] (change {:applied-tokens (without-token applied-tokens key)}))]))
+                [:start :duration :amount :offset-x :offset-y]))
 
         on-split-kind
         (mf/use-fn
@@ -351,10 +425,14 @@
           (mapv (fn [type] {:value (name type) :label (preset-label type)}) preset-types))
 
         easing-option
-        (easing->option easing)
+        (if (some? easing-token)
+          (dm/str token-option-prefix easing-token)
+          (easing->option easing))
 
+        ;; the cubic bezier tokens follow the easings, by their names in
+        ;; braces, and a bound token that is not there shows all the same
         easing-options
-        (mf/with-memo [easing-option]
+        (mf/with-memo [easing-option easing-tokens easing-token]
           (cond-> [{:value "auto" :label (tr "workspace.animation.easing-auto")}
                    {:value "linear" :label (tr "workspace.options.interaction-easing-linear")}
                    {:value "ease" :label (tr "workspace.options.interaction-easing-ease")}
@@ -363,7 +441,19 @@
                    {:value "ease-in-out" :label (tr "workspace.options.interaction-easing-ease-in-out")}
                    {:value "overshoot" :label (tr "workspace.animation.easing-overshoot")}]
             (= easing-option "custom")
-            (conj {:value "custom" :label (tr "workspace.animation.easing-custom") :disabled true})))]
+            (conj {:value "custom" :label (tr "workspace.animation.easing-custom") :disabled true})
+
+            :always
+            (into (map (fn [{token-name :name}]
+                         {:value (dm/str token-option-prefix token-name)
+                          :label (dm/str "{" token-name "}")}))
+                  easing-tokens)
+
+            (and (some? easing-token)
+                 (not-any? #(= easing-token (:name %)) easing-tokens))
+            (conj {:value (dm/str token-option-prefix easing-token)
+                   :label (dm/str "{" easing-token "}")
+                   :disabled true})))]
 
     [:div {:class (stl/css :animation-item)}
      [:> prototype-pill* {:title (animation-label animation)
@@ -449,6 +539,9 @@
                              :min 0
                              :step 1
                              :value start
+                             :tokens time-tokens
+                             :applied-token-name (:start applied-tokens)
+                             :on-detach (:start on-detach)
                              :disabled locked?
                              :on-change-start on-change-start
                              :on-change-end on-change-end
@@ -460,6 +553,9 @@
                              :min 1
                              :step 1
                              :value duration
+                             :tokens time-tokens
+                             :applied-token-name (:duration applied-tokens)
+                             :on-detach (:duration on-detach)
                              :disabled locked?
                              :on-change-start on-change-start
                              :on-change-end on-change-end
@@ -479,6 +575,11 @@
                                :min 0
                                :max 100
                                :value (mth/round (* 100 (or amount 0)))
+                               ;; an opacity token shows as a percent too
+                               :name :opacity
+                               :tokens amount-tokens
+                               :applied-token-name (:amount applied-tokens)
+                               :on-detach (:amount on-detach)
                                :disabled locked?
                                :on-change-start on-change-start
                                :on-change-end on-change-end
@@ -491,6 +592,9 @@
                                :min 0
                                :step 10
                                :value (mth/round (* 100 (or amount 1)))
+                               :tokens amount-tokens
+                               :applied-token-name (:amount applied-tokens)
+                               :on-detach (:amount on-detach)
                                :disabled locked?
                                :on-change-start on-change-start
                                :on-change-end on-change-end
@@ -502,6 +606,9 @@
                                :property (tr "workspace.animation.blur")
                                :min 0
                                :value (or amount 0)
+                               :tokens amount-tokens
+                               :applied-token-name (:amount applied-tokens)
+                               :on-detach (:amount on-detach)
                                :disabled locked?
                                :on-change-start on-change-start
                                :on-change-end on-change-end
@@ -513,6 +620,9 @@
                                :property (tr "workspace.options.rotation")
                                :step 15
                                :value (or amount 0)
+                               :tokens amount-tokens
+                               :applied-token-name (:amount applied-tokens)
+                               :on-detach (:amount on-detach)
                                :disabled locked?
                                :on-change-start on-change-start
                                :on-change-end on-change-end
@@ -524,6 +634,9 @@
             [:> numeric-input* {:icon i/character-x
                                 :property (tr "workspace.animation.offset-x")
                                 :value (or offset-x 0)
+                                :tokens offset-tokens
+                                :applied-token-name (:offset-x applied-tokens)
+                                :on-detach (:offset-x on-detach)
                                 :disabled locked?
                                 :on-change-start on-change-start
                                 :on-change-end on-change-end
@@ -531,6 +644,9 @@
             [:> numeric-input* {:icon i/character-y
                                 :property (tr "workspace.animation.offset-y")
                                 :value (or offset-y 0)
+                                :tokens offset-tokens
+                                :applied-token-name (:offset-y applied-tokens)
+                                :on-detach (:offset-y on-detach)
                                 :disabled locked?
                                 :on-change-start on-change-start
                                 :on-change-end on-change-end

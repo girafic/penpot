@@ -12,12 +12,15 @@
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.test-helpers.shapes :as cths]
+   [app.common.test-helpers.tokens :as ctht]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.tokens-lib :as ctob]
    [app.main.data.changes :as dch]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.selection :as dws]
+   [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.data.workspace.undo :as dwu]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
@@ -25,6 +28,7 @@
    [frontend-tests.helpers.pages :as thp]
    [frontend-tests.helpers.state :as ths]
    [frontend-tests.helpers.wasm :as thw]
+   [frontend-tests.tokens.helpers.state :as tohs]
    [potok.v2.core :as ptk]))
 
 (t/use-fixtures :each
@@ -116,18 +120,20 @@
 (defn- watch-undo-stack
   "Put the commits on the undo stack, as the workspace does (see
   `app.main.data.workspace/initialize-workspace`), which the test store
-  leaves out."
-  []
-  (ptk/reify ::watch-undo-stack
-    ptk/WatchEvent
-    (watch [_ _ stream]
-      (->> stream
-           (rx/filter dch/commit?)
-           (rx/map deref)
-           (rx/filter #(and (= :local (:source %)) (:save-undo? %) (seq (:undo-changes %))))
-           (rx/map #(dwu/append-undo (select-keys % [:undo-changes :redo-changes :undo-group :tags])
-                                     false))
-           (rx/take-until (rx/filter #(= :the/end %) stream))))))
+  leaves out, until the event `stop` (`:the/end` by default; an async
+  run sends it at once, before its commits)."
+  ([] (watch-undo-stack :the/end))
+  ([stop]
+   (ptk/reify ::watch-undo-stack
+     ptk/WatchEvent
+     (watch [_ _ stream]
+       (->> stream
+            (rx/filter dch/commit?)
+            (rx/map deref)
+            (rx/filter #(and (= :local (:source %)) (:save-undo? %) (seq (:undo-changes %))))
+            (rx/map #(dwu/append-undo (select-keys % [:undo-changes :redo-changes :undo-group :tags])
+                                      false))
+            (rx/take-until (rx/filter #(= stop %) stream)))))))
 
 (defn- count-commits
   "Count in `counter` the commits made in the store."
@@ -472,3 +478,99 @@
          (t/is (= (get-in (cthf/current-page file) [:timelines (cthi/id :board-a)])
                   (timeline-of state :board-a)))
          (t/is (nil? (get-in state [:workspace-animation :style-preview]))))))))
+
+;; DESIGN TOKENS
+
+(defn- with-tokens
+  "`file` with a token set, active through a theme, of the `tokens`
+  (`[name type value]`)."
+  [file tokens]
+  (ctht/update-tokens-lib
+   (ctht/add-tokens-lib file)
+   (fn [lib]
+     (reduce (fn [lib [token-name type value]]
+               (ctob/add-token lib (cthi/id :motion-set)
+                               (ctob/make-token :name token-name :type type :value value)))
+             (-> lib
+                 (ctob/add-set (ctob/make-token-set :id (cthi/new-id! :motion-set) :name "motion"))
+                 (ctob/add-theme (ctob/make-token-theme :name "theme" :sets #{"motion"}))
+                 (ctob/set-active-themes #{"/theme"}))
+             tokens))))
+
+(defn- bind-entry
+  "`file` with the entry `n` of its style `label` binding `tokens`."
+  [file label n tokens]
+  (let [style (-> (ctas/get-animation-style (:data file) (cthi/id label))
+                  (assoc-in [:entries n :applied-tokens] tokens))]
+    (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                 (pcb/with-library-data (:data file))
+                                 (pcb/update-animation-style style)))))
+
+(defn- scale-entry
+  [state label]
+  (get-in (styles-of state) [(cthi/id label) :entries 1]))
+
+(t/deftest updating-styles-at-once-is-one-change-set
+  (t/async
+    done
+    (let [file    (setup-file :labels [:pop :zoom]
+                              :f (fn [file tls]
+                                   (update tls :board-a cta/add-animation (cthi/id :r2) (use-of file :zoom 0))))
+          store   (store-of file)
+          commits (atom 0)]
+      (ths/run-store
+       store done
+       [(count-commits commits)
+        (dwl/update-animation-styles [(style :pop 2) (style :zoom 2)] (:id file))]
+       (fn [state]
+         (t/is (= 1 @commits))
+         (t/is (= [600 600] (mapv #(-> (styles-of state) (get (cthi/id %)) :entries first :duration)
+                                  [:pop :zoom])))
+         (t/is (= 600 (:duration (first (animations-of state :board-a :r2))))
+               "the uses follow"))))))
+
+(t/deftest a-token-change-reaches-the-styles-it-sets-and-their-uses
+  (t/async
+    done
+    (let [file  (-> (setup-file :labels [:pop]
+                                :f (fn [file tls]
+                                     (update tls :board-a cta/add-animation (cthi/id :r2) (use-of file :pop 0))))
+                    (bind-entry :pop 1 {:amount "scale.big"})
+                    (with-tokens [["scale.big" :number "1.5"]]))
+          store (store-of file)
+
+          undo
+          (fn []
+            (tohs/run-store-async
+             store done [dwu/undo ::stop-undo]
+             (fn [state]
+               (t/is (= 0.5 (:amount (scale-entry state :pop)))
+                     "one undo takes the style back")
+               (t/is (= 0.5 (:amount (get-in (first (animations-of state :board-a :r2)) [:entries 1])))
+                     "and its use"))))]
+      (tohs/run-store-async
+       store undo
+       [(watch-undo-stack ::stop-undo)
+        (dwtp/propagate-workspace-tokens)]
+       (fn [state]
+         (t/is (= [1.5 {:amount "scale.big"}] ((juxt :amount :applied-tokens) (scale-entry state :pop))))
+         (t/is (= [1.5 {:amount "scale.big"}]
+                  ((juxt :amount :applied-tokens) (get-in (first (animations-of state :board-a :r2)) [:entries 1])))
+               "the use follows, the name of the token with it"))))))
+
+(t/deftest a-token-that-sets-nothing-new-commits-no-style
+  (t/async
+    done
+    (let [file    (-> (setup-file :labels [:pop])
+                      (bind-entry :pop 1 {:amount "scale.half"})
+                      (with-tokens [["scale.half" :number "0.5"]]))
+          store   (store-of file)
+          before  (get-in file [:data :animation-styles (cthi/id :pop)])
+          commits (atom 0)]
+      (tohs/run-store-async
+       store done
+       [(count-commits commits)
+        (dwtp/propagate-workspace-tokens)]
+       (fn [state]
+         (t/is (= 0 @commits))
+         (t/is (= before (get (styles-of state) (cthi/id :pop)))))))))

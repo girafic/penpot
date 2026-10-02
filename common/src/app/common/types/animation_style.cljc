@@ -308,3 +308,40 @@
                                               (= library-id (:style-ref-file %))
                                               (contains? style-ids (:style-ref-id %)))
                                         #(assoc % :style-ref-file file-id))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; DESIGN TOKENS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn resolve-style-tokens
+  "`style` with the settings the design tokens of its entries set taken
+  from `values`, the resolved values of tokens by name (see
+  `cta/resolve-entry-tokens`)."
+  [style values]
+  (update style :entries (partial mapv #(cta/resolve-entry-tokens % values))))
+
+(defn token-resolved-styles
+  "The animation styles of `styles` (by id) that the resolved token
+  `values` change, as they become: the styles of a file to commit when
+  its tokens or its active themes change. The uses follow by sync, so
+  only the file of a style resolves its tokens."
+  [styles values]
+  (into []
+        (keep (fn [style]
+                (let [style' (resolve-style-tokens style values)]
+                  (when (not= style style')
+                    style'))))
+        (vals styles)))
+
+(defn token-renamed-styles
+  "The animation styles of `styles` (by id) whose entries name a design
+  token that `rename` (a function of the old name, returning it when it
+  stays) renames, with the new names."
+  [styles rename]
+  (into []
+        (keep (fn [style]
+                (let [style' (update style :entries
+                                     (partial mapv #(cta/rename-entry-tokens % rename)))]
+                  (when (not= style style')
+                    style'))))
+        (vals styles)))

@@ -32,6 +32,7 @@
    [app.common.types.shape.layout :as ctl]
    [app.common.types.shape.radius :as ctsr]
    [app.common.types.text-units :as tu]
+   [app.common.types.token :as cto]
    [app.common.uuid :as uuid]
    [clojure.string :as str]))
 
@@ -167,10 +168,24 @@
    [:hidden {:optional true} :boolean]
    [:locked {:optional true} :boolean]])
 
+(def schema:style-entry-tokens
+  "The design tokens that set settings of a style entry, by their names
+  (see `style-token-types`). The file of the style resolves them and
+  writes their values into the entry, which plays those values; its uses
+  keep the names, as they keep the values."
+  [:map {:title "AnimationStyleEntryTokens"}
+   [:start {:optional true} cto/schema:token-name]
+   [:duration {:optional true} cto/schema:token-name]
+   [:easing {:optional true} cto/schema:token-name]
+   [:amount {:optional true} cto/schema:token-name]
+   [:offset-x {:optional true} cto/schema:token-name]
+   [:offset-y {:optional true} cto/schema:token-name]])
+
 (def schema:style-entry
   "An entry of an animation style (see `app.common.types.animation-style`)
   and of its uses: a preset animation without the flags of a row, its
-  `:start` counted from the start of the style."
+  `:start` counted from the start of the style, and the design tokens
+  that set some of its settings."
   [:map {:title "AnimationStyleEntry"}
    [:id ::sm/uuid]
    [:type [::sm/one-of animation-types]]
@@ -184,7 +199,8 @@
    [:split {:optional true} [::sm/one-of tu/split-kinds]]
    [:spread {:optional true} ::sm/safe-number]
    [:order {:optional true} [::sm/one-of tu/orders]]
-   [:seed {:optional true} ::sm/safe-int]])
+   [:seed {:optional true} ::sm/safe-int]
+   [:applied-tokens {:optional true} schema:style-entry-tokens]])
 
 (def max-style-entries
   "The most entries an animation style holds."
@@ -979,14 +995,98 @@
     (true? hidden) (assoc :hidden true)
     (true? locked) (assoc :locked true)))
 
+(defn style-token-types
+  "The types of the design tokens that can set the setting `key` of a
+  style entry of the preset type `type`, in the order a picker offers
+  them; empty for a setting no token sets."
+  [type key]
+  (case key
+    (:start :duration) [:duration]
+    :easing [:cubic-bezier]
+    :amount (case type
+              :fade [:opacity]
+              :scale [:number]
+              :rotate [:rotation :number]
+              :blur [:dimensions :number]
+              [])
+    (:offset-x :offset-y) (if (= :move type) [:dimensions :number] [])
+    []))
+
+(defn- entry-tokens
+  "The token names of `tokens` that set a setting of an entry of the
+  preset type `type`, or nil."
+  [type tokens]
+  (when (map? tokens)
+    (not-empty
+     (into {}
+           (filter (fn [[key token-name]]
+                     (and (string? token-name)
+                          (seq (style-token-types type key)))))
+           tokens))))
+
 (defn make-style-entry
   "A valid entry of an animation style from `params`, a preset animation
   (see `make-animation`) in style time: its `:id` kept (a new one only
   when it has none), so the presets a use plays keep the same ids (see
-  `expand-style`), and without the flags of a row."
+  `expand-style`), without the flags of a row, and with the design tokens
+  of `:applied-tokens` that set a setting of its type."
   [params]
-  (-> (make-animation (dissoc params :hidden :locked))
-      (dissoc :hidden :locked)))
+  (let [entry  (-> (make-animation (dissoc params :hidden :locked))
+                   (dissoc :hidden :locked))
+        tokens (entry-tokens (:type entry) (:applied-tokens params))]
+    (cond-> entry
+      (some? tokens) (assoc :applied-tokens tokens))))
+
+(defn token-setting
+  "The value a design token resolved to `value` gives the setting `key` of
+  a style entry: whole ms for its start and duration, a bezier easing for
+  its easing (from the four numbers of a cubic bezier, its times kept
+  within 0..1), the number itself for an amount or an offset; nil when
+  the value does not fit."
+  [key value]
+  (case key
+    (:start :duration)
+    (when (mth/finite? value)
+      (mth/round value))
+
+    :easing
+    (when (and (sequential? value)
+               (= 4 (count value))
+               (every? mth/finite? value))
+      (let [[x1 y1 x2 y2] value]
+        {:type :bezier
+         :curve [(mth/clamp x1 0 1) y1 (mth/clamp x2 0 1) y2]}))
+
+    (:amount :offset-x :offset-y)
+    (when (mth/finite? value)
+      value)
+
+    nil))
+
+(defn resolve-entry-tokens
+  "The style entry `entry` with the settings its design tokens set (its
+  `:applied-tokens`) taken from `values`, the resolved values of tokens
+  by name. A token missing from `values`, or one whose value does not
+  fit (see `token-setting`), leaves its setting as it is."
+  [entry values]
+  (let [settings (reduce-kv (fn [settings key token-name]
+                              (if-some [value (token-setting key (get values token-name))]
+                                (assoc settings key value)
+                                settings))
+                            {}
+                            (:applied-tokens entry))]
+    (if (empty? settings)
+      entry
+      (make-style-entry (merge entry settings)))))
+
+(defn rename-entry-tokens
+  "The style entry `entry` with each token name of its `:applied-tokens`
+  given by `rename`, a function of the old name (returning it when it
+  stays)."
+  [entry rename]
+  (cond-> entry
+    (contains? entry :applied-tokens)
+    (update :applied-tokens d/update-vals rename)))
 
 (defn expand-style
   "The preset animations the style use `use` plays, in timeline time: its

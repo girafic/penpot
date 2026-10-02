@@ -14,7 +14,9 @@
    [app.common.path-names :as cpn]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.tokens-lib :as ctob]
    [app.main.data.modal :as modal]
+   [app.main.data.style-dictionary :as sd]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.refs :as refs]
@@ -74,6 +76,19 @@
                    (vals (:timelines page))))
            (vals (:pages-index data))))))
 
+(defn- use-active-tokens-by-type
+  "The design tokens of the active sets of the current file, resolved and
+  by type: what the entries of its styles bind."
+  []
+  (let [tokens-lib (mf/deref refs/tokens-lib)
+        active     (mf/with-memo [tokens-lib]
+                     (if (some? tokens-lib)
+                       (ctob/get-tokens-in-active-sets tokens-lib)
+                       {}))
+        resolved   (sd/use-resolved-tokens active)]
+    (mf/with-memo [resolved]
+      (ctob/group-by-type resolved))))
+
 (defn- delete-style!
   "Delete the style `id` of the file `file-id`, asking first when layers
   play it: they keep its animations as presets."
@@ -91,7 +106,7 @@
 
 (mf/defc style-entry*
   {::mf/private true}
-  [{:keys [entry on-change on-split on-remove on-change-start on-change-end read-only]}]
+  [{:keys [entry on-change on-split on-remove on-change-start on-change-end read-only tokens]}]
   (let [id (:id entry)
 
         on-entry-change
@@ -114,6 +129,7 @@
     ;; An entry can play the units of the texts the style goes on.
     [:> animation-item* {:animation entry
                          :read-only read-only
+                         :tokens tokens
                          :split-allowed true
                          :on-change on-entry-change
                          :on-split on-entry-split
@@ -123,13 +139,14 @@
 
 (mf/defc style-editor*
   "The entries and description of the animation style `style` of the file
-  `file-id`: edited when `is-editable`, shown with the name of its
-  library, `library-name`, when not `is-local`. While a number is dragged
-  the uses of the style show it as it goes; each finished change is one
-  commit."
+  `file-id`: edited when `is-editable`, their settings binding the design
+  tokens of the file, shown with the name of its library, `library-name`,
+  when not `is-local`. While a number is dragged the uses of the style
+  show it as it goes; each finished change is one commit."
   {::mf/private true}
   [{:keys [style file-id is-local is-editable library-name]}]
   (let [entries   (:entries style)
+        tokens    (use-active-tokens-by-type)
         draft*    (mf/use-ref nil)
         dragging* (mf/use-ref false)
         menu*     (mf/use-state false)
@@ -233,6 +250,7 @@
         [:> style-entry* {:key (dm/str (:id entry))
                           :entry entry
                           :read-only (not is-editable)
+                          :tokens (when is-editable tokens)
                           :on-change on-entry-change
                           :on-split on-entry-split
                           :on-remove (when (and is-editable (> (count entries) 1)) on-entry-remove)

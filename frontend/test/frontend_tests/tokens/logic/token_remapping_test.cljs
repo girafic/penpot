@@ -6,11 +6,14 @@
 
 (ns frontend-tests.tokens.logic.token-remapping-test
   (:require
+   [app.common.files.changes-builder :as pcb]
    [app.common.test-helpers.compositions :as ctho]
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.test-helpers.shapes :as cths]
    [app.common.test-helpers.tokens :as ctht]
+   [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.token :as cto]
    [app.common.types.tokens-lib :as ctob]
    [app.main.data.workspace.tokens.remapping :as dwtr]
@@ -225,3 +228,34 @@
       ;; subsequent sync silently skips :applied-tokens and the copy is left
       ;; pointing at colors.primary.
       (t/is (= "colors.secondary" (get-in copy-child' [:applied-tokens :fill]))))))
+
+(defn- with-motion-style
+  "`file` with a board, an animation style whose fade binds the token
+  `motion.fast` and a use of it by the board."
+  [file]
+  (let [file  (ctho/add-frame file :board)
+        style (ctas/make-animation-style {:id (cthi/new-id! :fade-style)
+                                          :name "Fade"
+                                          :entries [{:type :fade :start 0 :duration 150
+                                                     :applied-tokens {:duration "motion.fast"}}]})
+        file  (cthf/apply-changes file (pcb/add-animation-style (pcb/empty-changes nil) style))
+        board (cthi/id :board)
+        tl    (-> (cta/make-timeline {:board-id board :duration 1000})
+                  (cta/add-animation board (ctas/make-use style (:id file) 0)))]
+    (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                 (pcb/with-page (cthf/current-page file))
+                                 (pcb/set-timeline board tl)))))
+
+(t/deftest renaming-a-token-renames-it-in-the-animation-styles-that-bind-it
+  (let [file (with-motion-style (setup-file-with-tokens))
+        data (:data file)]
+    (t/is (= 1 (dwtr/count-token-references data "motion.fast")) "a style binds it")
+    (let [file'  (cthf/apply-changes file (dwtr/build-remap-changes data "motion.fast" "motion.quick"))
+          style  (get-in file' [:data :animation-styles (cthi/id :fade-style)])
+          board  (cthi/id :board)
+          use    (-> (cthf/current-page file')
+                     (get-in [:timelines board :tracks board :animations])
+                     (first))]
+      (t/is (= {:duration "motion.quick"} (-> style :entries first :applied-tokens)))
+      (t/is (= {:duration "motion.quick"} (-> use :entries first :applied-tokens))
+            "its use follows"))))

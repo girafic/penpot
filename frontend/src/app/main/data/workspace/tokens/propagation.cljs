@@ -10,12 +10,14 @@
    [app.common.files.helpers :as cfh]
    [app.common.logging :as l]
    [app.common.time :as ct]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.token :as ctt]
    [app.common.types.tokens-lib :as ctob]
    [app.config :as cf]
    [app.main.data.helpers :as dsh]
    [app.main.data.style-dictionary :as sd]
    [app.main.data.tokenscript :as ts]
+   [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.thumbnails :as dwt]
    [app.main.data.workspace.tokens.application :as dwta]
@@ -183,6 +185,50 @@
             (let [elapsed (tpoint)]
               (l/inf :status "END" :hint "propagate-tokens" :elapsed elapsed)))))))
 
+(defn- resolve-tokens
+  "The tokens of `tokens-tree` resolved, as a stream of one map by name:
+  with tokenscript or with Style Dictionary."
+  [tokens-tree]
+  (if (contains? cf/flags :tokenscript)
+    (rx/of (-> (ts/resolve-tokens tokens-tree)
+               (d/update-vals #(update % :resolved-value ts/tokenscript-symbols->penpot-unit))))
+    (sd/resolve-tokens tokens-tree)))
+
+(defn- propagate-animation-styles
+  "The commit of the animation styles of the current file whose entries
+  the resolved tokens `resolved-tokens` change, with the sync of their
+  uses (see `ctas/token-resolved-styles`); nil when none changes."
+  [state resolved-tokens]
+  (let [file-id (:current-file-id state)
+        styles  (:animation-styles (dsh/lookup-file-data state file-id))
+        values  (d/update-vals resolved-tokens :resolved-value)
+        changed (ctas/token-resolved-styles styles values)]
+    (when (seq changed)
+      (rx/of (dwl/update-animation-styles changed file-id)))))
+
+(defn- commit-token-styles
+  "Commit the animation styles of the current file that `resolved-tokens`
+  change, the styles read when this runs."
+  [resolved-tokens]
+  (ptk/reify ::commit-token-styles
+    ptk/WatchEvent
+    (watch [_ state _]
+      (propagate-animation-styles state resolved-tokens))))
+
+(defn propagate-style-tokens
+  "Resolve the tokens of the active sets of the current file and commit
+  the animation styles whose bound settings they change, leaving the
+  shapes alone: after a plugin binds tokens in the entries of a style."
+  []
+  (ptk/reify ::propagate-style-tokens
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when-let [tokens-tree (-> (dsh/lookup-file-data state)
+                                 (get :tokens-lib)
+                                 (ctob/get-tokens-in-active-sets))]
+        (->> (resolve-tokens tokens-tree)
+             (rx/map commit-token-styles))))))
+
 (defn propagate-workspace-tokens
   []
   (ptk/reify ::propagate-workspace-tokens
@@ -191,10 +237,7 @@
       (when-let [tokens-tree (-> (dsh/lookup-file-data state)
                                  (get :tokens-lib)
                                  (ctob/get-tokens-in-active-sets))]
-        (->> (if (contains? cf/flags :tokenscript)
-               (rx/of (-> (ts/resolve-tokens tokens-tree)
-                          (d/update-vals #(update % :resolved-value ts/tokenscript-symbols->penpot-unit))))
-               (sd/resolve-tokens tokens-tree))
+        (->> (resolve-tokens tokens-tree)
              (rx/mapcat
               (fn [sd-tokens]
                 (let [undo-id (js/Symbol)]
@@ -211,4 +254,5 @@
                                     (rx/of (dwsh/update-shapes-buffer-stop))
                                     (rx/throw %))))
                    (rx/of (dwsh/update-shapes-buffer-stop))
+                   (propagate-animation-styles state sd-tokens)
                    (rx/of (dwu/commit-undo-transaction undo-id)))))))))))

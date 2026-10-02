@@ -457,6 +457,27 @@
                 (pcb/update-animation-style style)
                 (commit-animation-styles state (assoc (:animation-styles data) (:id style) style) (:id style)))))))))
 
+(defn update-animation-styles
+  "Change the animation styles `styles` of the current file, the file
+  `file-id`, and sync the uses of all its styles, in one change set: the
+  styles its design tokens set (see `ctas/token-resolved-styles` and
+  `ctas/token-renamed-styles`). Styles of other files are left out."
+  [styles file-id]
+  (assert (uuid? file-id) "expected valid uuid for `file-id`")
+  (let [styles (mapv ctas/check-animation-style styles)]
+    (ptk/reify ::update-animation-styles
+      ptk/WatchEvent
+      (watch [it state _]
+        (let [local (filterv #(some? (local-style state file-id (:id %))) styles)]
+          (when (seq local)
+            (let [data    (dsh/lookup-file-data state)
+                  changes (reduce pcb/update-animation-style
+                                  (-> (pcb/empty-changes it)
+                                      (pcb/with-library-data data))
+                                  local)
+                  styles' (reduce #(assoc %1 (:id %2) %2) (:animation-styles data) local)]
+              (commit-animation-styles changes state styles' nil))))))))
+
 (defn- renamed
   "`style` named `new-name`, which puts it in groups when it has slashes."
   [style new-name]

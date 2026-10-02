@@ -428,3 +428,74 @@
     (t/is (= (:seed entry) (:seed (cta/make-style-entry entry))) "kept")
     (t/is (= (:seed entry) (:seed (first (:entries use)))) "and by the uses")
     (t/is (= (order) (order)) "which play the units in the same order")))
+
+;; DESIGN TOKENS
+
+(t/deftest an-entry-keeps-the-tokens-of-its-settings
+  (let [entry (cta/make-style-entry {:type :fade :start 0 :duration 300
+                                     :applied-tokens {:duration "motion.fast"
+                                                      :amount "opacity.half"
+                                                      :offset-x "space.s"
+                                                      :start 3}})]
+    (t/is (= {:duration "motion.fast" :amount "opacity.half"} (:applied-tokens entry))
+          "an offset belongs to a move only, and a name is a string")
+    (t/is (= {:offset-x "space.s" :easing "ease.out"}
+             (:applied-tokens (cta/make-style-entry {:type :move
+                                                     :applied-tokens {:offset-x "space.s"
+                                                                      :easing "ease.out"}}))))
+    (t/is (not (contains? (cta/make-style-entry {:type :fade :applied-tokens {:offset-x "space.s"}})
+                          :applied-tokens))
+          "none left, none kept")
+    (t/is (ctas/valid-animation-style? (pop-style :entries [entry])))
+    (t/is (not (ctas/valid-animation-style?
+                (pop-style :entries [(assoc entry :applied-tokens {:duration "not a name"})]))))))
+
+(t/deftest the-tokens-of-an-entry-set-its-settings
+  (let [entry  (cta/make-style-entry {:type :move :start 0 :duration 300
+                                      :applied-tokens {:start "motion.delay"
+                                                       :duration "motion.fast"
+                                                       :easing "ease.out"
+                                                       :offset-y "space.l"}})
+        values {"motion.delay" 50.4 "motion.fast" 150 "ease.out" [0 0 0.58 1] "space.l" 24}]
+    (t/is (= [50 150 {:type :bezier :curve [0 0 0.58 1]} 24]
+             ((juxt :start :duration :easing :offset-y) (cta/resolve-entry-tokens entry values))))
+    (t/is (= (:applied-tokens entry) (:applied-tokens (cta/resolve-entry-tokens entry values)))
+          "the names stay")
+    (t/testing "a token missing, or of a value that does not fit, leaves its setting"
+      (t/is (= entry (cta/resolve-entry-tokens entry {})))
+      (t/is (= 300 (:duration (cta/resolve-entry-tokens entry {"motion.fast" "fast"}))))
+      (t/is (= (:easing entry) (:easing (cta/resolve-entry-tokens entry {"ease.out" [0 1 2]})))))
+    (t/testing "the times of a curve stay within 0..1, a duration lasts 1 ms at least"
+      (let [resolved (cta/resolve-entry-tokens entry {"ease.out" [-1 0 2 1] "motion.fast" 0})]
+        (t/is (= [0 0 1 1] (get-in resolved [:easing :curve])))
+        (t/is (= 1 (:duration resolved)))))))
+
+(t/deftest token-resolved-styles-are-the-ones-that-change
+  (let [fast   (pop-style :name "Fast" :entries [{:type :fade :start 0 :duration 300
+                                                  :applied-tokens {:duration "motion.fast"}}])
+        plain  (pop-style :name "Plain")
+        same   (pop-style :name "Same" :entries [{:type :fade :start 0 :duration 150
+                                                  :applied-tokens {:duration "motion.fast"}}])
+        styles {(:id fast) fast (:id plain) plain (:id same) same}
+        [changed :as all] (ctas/token-resolved-styles styles {"motion.fast" 150})]
+    (t/is (= 1 (count all)) "the style without tokens and the one already there stay")
+    (t/is (= [(:id fast) 150] [(:id changed) (-> changed :entries first :duration)]))))
+
+(t/deftest token-renamed-styles-take-the-new-names
+  (let [style  (pop-style :entries [{:type :fade :start 0 :duration 300
+                                     :applied-tokens {:duration "motion.fast"
+                                                      :amount "opacity.half"}}])
+        other  (pop-style :name "Other")
+        rename #(if (= % "motion.fast") "motion.quick" %)
+        [renamed :as all] (ctas/token-renamed-styles {(:id style) style (:id other) other} rename)]
+    (t/is (= 1 (count all)))
+    (t/is (= {:duration "motion.quick" :amount "opacity.half"}
+             (-> renamed :entries first :applied-tokens)))))
+
+(t/deftest uses-keep-the-token-names-and-their-presets-drop-them
+  (let [style (pop-style :entries [{:type :fade :start 0 :duration 150
+                                    :applied-tokens {:duration "motion.fast"}}])
+        use   (ctas/make-use style (uuid/next) 0)]
+    (t/is (= {:duration "motion.fast"} (-> use :entries first :applied-tokens)))
+    (t/is (sm/validate cta/schema:animation use))
+    (t/is (not-any? :applied-tokens (ctas/detach-use use)))))

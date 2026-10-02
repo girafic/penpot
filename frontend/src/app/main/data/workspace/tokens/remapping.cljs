@@ -10,6 +10,8 @@
    [app.common.files.changes-builder :as pcb]
    [app.common.files.tokens :as cft]
    [app.common.logging :as log]
+   [app.common.logic.libraries :as cll]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.container :refer [shapes-seq]]
    [app.common.types.file :refer [object-containers-seq]]
    [app.common.types.token :as cto]
@@ -60,6 +62,17 @@
          :source-token-id (:id token)
          :referenced-token-name referenced-token-name}))))
 
+(defn scan-animation-style-references
+  "Scan the animation styles of the file for entries whose settings bind
+  the token `token-name` (see `cta/schema:style-entry-tokens`)."
+  [file-data token-name]
+  (for [style (vals (:animation-styles file-data))
+        :when (some (fn [entry]
+                      (some #(= token-name %) (vals (:applied-tokens entry))))
+                    (:entries style))]
+    {:type :animation-style
+     :style-id (:id style)}))
+
 (defn scan-workspace-token-references
   "Scan entire workspace for all token references to a specific token"
   [file-data old-token-name]
@@ -76,7 +89,10 @@
         matching-aliases (if tokens-lib
                            (let [all-tokens (ctob/get-all-tokens tokens-lib)]
                              (mapcat #(scan-token-value-references % old-token-name) all-tokens))
-                           [])]
+                           [])
+
+        ;; Scan the animation styles of the file for settings bound to it
+        matching-styles (scan-animation-style-references file-data old-token-name)]
     (log/info :hint "token-scan-details"
               :token-name old-token-name
               :containers-count (count containers)
@@ -87,7 +103,8 @@
 
     {:applied-tokens matching-applied
      :token-aliases matching-aliases
-     :total-references (+ (count matching-applied) (count matching-aliases))}))
+     :animation-styles matching-styles
+     :total-references (+ (count matching-applied) (count matching-aliases) (count matching-styles))}))
 
 ;; Token Remapping Core Logic
 ;; ==========================
@@ -149,9 +166,25 @@
                  (pcb/set-token changes (ctob/get-id set) (:id token)
                                 (assoc token :value new-value))))))
          shape-changes
-         (:token-aliases scan-results))]
+         (:token-aliases scan-results))
 
-    (cond-> token-changes
+        ;; Rename it in the animation styles that bind it, and sync their
+        ;; uses, which keep the names of the tokens too
+        renamed-styles
+        (when (seq (:animation-styles scan-results))
+          (ctas/token-renamed-styles (:animation-styles file-data)
+                                     #(if (= % old-token-name) new-token-name %)))
+
+        style-changes
+        (if (seq renamed-styles)
+          (let [file-id    (:id file-data)
+                file-data' (update file-data :animation-styles
+                                   (fn [styles] (reduce #(assoc %1 (:id %2) %2) styles renamed-styles)))]
+            (-> (reduce pcb/update-animation-style token-changes renamed-styles)
+                (cll/generate-sync-timelines file-id nil file-id {file-id {:data file-data'}})))
+          token-changes)]
+
+    (cond-> style-changes
       (some? undo-group)
       (assoc :undo-group undo-group))))
 
@@ -203,5 +236,6 @@
               :token-name token-name
               :applied-refs (count (:applied-tokens scan-results))
               :alias-refs (count (:token-aliases scan-results))
+              :style-refs (count (:animation-styles scan-results))
               :total (:total-references scan-results))
     (:total-references scan-results)))
