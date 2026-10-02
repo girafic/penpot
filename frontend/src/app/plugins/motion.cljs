@@ -26,6 +26,7 @@
    [app.common.types.color :as clr]
    [app.common.types.shape.interactions :as cti]
    [app.common.types.text-units :as tu]
+   [app.common.types.token :as cto]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.workspace.animation :as dwa]
@@ -913,10 +914,22 @@
         (some? order)                 (assoc :order (keyword order))
         (some? seed)                  (assoc :seed seed)))))
 
+(def ^:private style-token-settings
+  "The settings of a style entry a design token sets, by the names the
+  plugin API gives them (see `cta/schema:style-entry-tokens`)."
+  {:start "start"
+   :duration "duration"
+   :easing "easing"
+   :amount "amount"
+   :offset-x "offsetX"
+   :offset-y "offsetY"})
+
 (defn format-style-entry
   "The entry `entry` of an animation style as the plugin API gives it: an
-  object with the fields of `PresetAnimationProps`."
-  [{:keys [type direction start duration amount offset-x offset-y split spread order seed] :as entry}]
+  object with the fields of `PresetAnimationProps` and, for the settings
+  design tokens set, their names in `appliedTokens`."
+  [{:keys [type direction start duration amount offset-x offset-y split spread order seed
+           applied-tokens] :as entry}]
   (cond-> #js {:type (name type)
                :direction (name (or direction :in))
                :start start
@@ -930,12 +943,42 @@
     (some? split)    (obj/set! "split" (name split))
     (some? spread)   (obj/set! "spread" spread)
     (some? order)    (obj/set! "order" (name order))
-    (some? seed)     (obj/set! "seed" seed)))
+    (some? seed)     (obj/set! "seed" seed)
+    (seq applied-tokens)
+    (obj/set! "appliedTokens"
+              (reduce-kv (fn [tokens key token-name]
+                           (obj/set! tokens (get style-token-settings key) token-name))
+                         #js {}
+                         applied-tokens))))
+
+(defn- parse-entry-tokens
+  "The `:applied-tokens` of a style entry of the preset type `type` that
+  the object `tokens` of the plugin API (settings to token names)
+  describes, nil without it, or a string saying what is wrong with it."
+  [tokens type]
+  (when (some? tokens)
+    (if-not (object? tokens)
+      "The applied tokens should be an object of setting names to token names"
+      (let [by-name (set/map-invert style-token-settings)
+            pairs   (mapv (fn [setting] [setting (obj/get tokens setting)]) (js-keys tokens))]
+        (or (some (fn [[setting token-name]]
+                    (let [key (get by-name setting)]
+                      (cond
+                        (nil? key)
+                        (dm/str "No token sets '" setting "'")
+
+                        (not (sm/validate cto/schema:token-name token-name))
+                        (dm/str "The token of '" setting "' should be a token name")
+
+                        (empty? (cta/style-token-types type key))
+                        (dm/str "No token sets '" setting "' of a " (name type) " animation"))))
+                  pairs)
+            (into {} (map (fn [[setting token-name]] [(get by-name setting) token-name])) pairs))))))
 
 (defn parse-style-entries
   "The entries of an animation style that the array `entries` of the
-  plugin API describes (see `parse-animation`), or a string saying what
-  is wrong with them."
+  plugin API describes (see `parse-animation`), with the design tokens of
+  their `appliedTokens`, or a string saying what is wrong with them."
   [entries]
   (cond
     (not (array? entries))
@@ -947,9 +990,17 @@
     :else
     (let [parsed (into []
                        (map-indexed (fn [index props]
-                                      (let [entry (if (object? props)
-                                                    (parse-animation props)
-                                                    "It should be an object")]
+                                      (let [entry  (if (object? props)
+                                                     (parse-animation props)
+                                                     "It should be an object")
+                                            tokens (when (map? entry)
+                                                     (parse-entry-tokens (obj/get props "appliedTokens")
+                                                                         (:type entry)))
+                                            entry  (cond
+                                                     (string? entry)  entry
+                                                     (string? tokens) tokens
+                                                     (seq tokens)     (assoc entry :applied-tokens tokens)
+                                                     :else            entry)]
                                         (if (string? entry)
                                           (dm/str "Entry " (inc index) ": " entry)
                                           entry))))

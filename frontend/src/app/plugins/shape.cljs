@@ -32,6 +32,7 @@
    [app.common.types.shape.radius :as ctsr]
    [app.common.types.shape.shadow :as ctss]
    [app.common.types.text :as txt]
+   [app.common.types.token :as cto]
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.exports.assets :as de]
@@ -1750,6 +1751,9 @@
                   (let [token (u/locate-token file-id (obj/get token "$set-id") (obj/get token "$id"))
                         kw-attrs (into #{} (map token-attr-plugin->token-attr attrs))]
                     (cond
+                      (contains? cto/motion-token-types (:type token))
+                      (u/not-valid plugin-id :applyToken "A duration or cubicBezier token applies to no shape: the entries of animation styles bind it")
+
                       (some #(not (token-attr? %)) kw-attrs)
                       (u/not-valid plugin-id :applyToken attrs)
 

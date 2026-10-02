@@ -775,3 +775,24 @@
         (t/is (= 1 (count @errors)))
         (t/is (= [plugin-id :addSet "Plugin doesn't have 'content:write' permission"] (first @errors)))))))
 
+
+(t/deftest motion-token-resolved-values
+  (let [duration (ctob/make-token {:name "motion.fast" :type :duration :value "0.2s"})
+        bezier   (ctob/make-token {:name "ease.out" :type :cubic-bezier :value [0 0 0.58 1]})]
+    (t/is (= 200 (get-resolved-value duration {(:name duration) duration})) "in ms")
+    (let [result (get-resolved-value bezier {(:name bezier) bezier})]
+      (t/is (array? result))
+      (t/is (= [0 0 0.58 1] (vec result))))))
+
+(t/deftest motion-tokens-apply-to-no-shape
+  (let [token   (ctob/make-token {:name "motion.fast" :type :duration :value "150ms"})
+        apply!  @#'ptok/apply-token-to-shapes
+        invalid (atom [])
+        emitted (atom [])]
+    (with-redefs [r/check-permission (constantly true)
+                  u/locate-token     (constantly token)
+                  u/not-valid        (fn [_ code value] (swap! invalid conj [code value]))
+                  st/emit!           (fn [& events] (swap! emitted into events))]
+      (apply! "plugin-id" (uuid/next) (uuid/next) (:id token) [(uuid/next)] #{:opacity})
+      (t/is (empty? @emitted))
+      (t/is (= :applyToken (ffirst @invalid))))))

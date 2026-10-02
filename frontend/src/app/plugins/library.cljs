@@ -22,6 +22,7 @@
    [app.main.data.plugins :as dp]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.texts :as dwt]
+   [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.data.workspace.variants :as dwv]
    [app.main.features :as features]
    [app.main.repo :as rp]
@@ -742,7 +743,10 @@
          (let [entries (motion/parse-style-entries value)]
            (if (string? entries)
              (u/not-valid plugin-id :entries entries)
-             (update! :entries #(assoc % :entries (mapv cta/make-style-entry entries))))))}
+             (do (update! :entries #(assoc % :entries (mapv cta/make-style-entry entries)))
+                 ;; the settings tokens set take their values
+                 (when (some :applied-tokens entries)
+                   (st/emit! (dwtp/propagate-style-tokens)))))))}
 
       :duration
       {:get #(some-> (locate) :entries cta/style-length)}
@@ -1286,6 +1290,9 @@
           (let [style (ctas/make-animation-style {:id (uuid/next) :name "Animation style" :entries parsed})]
             (st/emit! (-> (dwl/add-animation-style style)
                           (se/add-event plugin-id)))
+            ;; the settings tokens set take their values
+            (when (some :applied-tokens parsed)
+              (st/emit! (dwtp/propagate-style-tokens)))
             (lib-animation-style-proxy plugin-id file-id (:id style))))))
 
     :createComponent

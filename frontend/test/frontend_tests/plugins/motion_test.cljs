@@ -913,3 +913,20 @@
                           (thw/teardown-wasm-mocks!)
                           (done')))))
         done))))
+
+(t/deftest style-entries-carry-their-tokens
+  (let [entry (cta/make-style-entry {:type :move :start 0 :duration 150
+                                     :applied-tokens {:duration "motion.fast" :offset-y "space.l"}})
+        ^js js (motion/format-style-entry entry)]
+    (t/is (= {"duration" "motion.fast" "offsetY" "space.l"} (js->clj (.-appliedTokens js))))
+    (t/is (= {:duration "motion.fast" :offset-y "space.l"}
+             (:applied-tokens (first (motion/parse-style-entries #js [js]))))
+          "and read them back")
+    (t/is (nil? (.-appliedTokens ^js (motion/format-style-entry (dissoc entry :applied-tokens)))))
+    (t/testing "what is not valid is refused"
+      (let [entry-of #(motion/parse-style-entries
+                       #js [#js {:type "fade" :start 0 :duration 300 :appliedTokens %}])]
+        (t/is (string? (entry-of #js {:offsetX "space.s"})) "a fade has no offset")
+        (t/is (string? (entry-of #js {:color "brand"})) "no token sets a color")
+        (t/is (string? (entry-of #js {:duration "not a name"})))
+        (t/is (string? (entry-of "motion.fast")))))))

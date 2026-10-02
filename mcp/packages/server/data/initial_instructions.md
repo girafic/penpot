@@ -359,7 +359,9 @@ The token library: `penpot.library.local.tokens` (type: `TokenCatalog`)
   * `active: boolean` - Only active sets affect shapes; use `set.toggleActive()` to change: `if (!set.active) set.toggleActive();`
   * `tokens: Token[]` - All tokens in set
   * `addToken({type: TokenType, name: string, value: TokenValueString}): Token` - Creates a token, adding it to the set.
-     - `TokenType`: "color" | "dimension" | "spacing" | "typography" | "shadow" | "opacity" | "borderRadius" | "borderWidth" | "fontWeights" | "fontSizes" | "fontFamilies" | "letterSpacing" | "textDecoration" | "textCase"
+     - `TokenType`: "color" | "dimension" | "spacing" | "typography" | "shadow" | "opacity" | "borderRadius" | "borderWidth" | "fontWeights" | "fontSizes" | "fontFamilies" | "letterSpacing" | "textDecoration" | "textCase" | "duration" | "cubicBezier"
+     - "duration" ("150ms", "0.2s"; resolved to ms) and "cubicBezier" ([x1, y1, x2, y2], x1 and x2 from 0 to 1) apply to
+       no shape: the entries of animation styles bind them (see "Animation styles" below)
      - `value`: depends on the type of token (inspect `Token` and related types)
      - Examples:
        const token = set.addToken({type: "color", name: "color.primary", value: "#0066FF"}); // direct value
@@ -488,6 +490,12 @@ of the style). Save one when several layers or boards should enter or leave alik
     uses; `timeline.animations` lists the presets only.
   * A style of a connected library (`penpot.library.connected`) can be applied, not changed: it changes in its own
     file, and the files using it get an update notice.
+  * Design tokens set settings of an entry: `appliedTokens: {start, duration, easing, amount, offsetX, offsetY}` maps
+    a setting to a token name ("duration" tokens for `start` and `duration`, "cubicBezier" for `easing`; for `amount`
+    "opacity" (fade), "number" (scale), "rotation"/"number" (rotate), "dimension"/"number" (blur); for the offsets of a
+    move "dimension"/"number"). Setting `entries` with them binds them: the file of the style resolves them in its
+    active sets, and when a token or the active theme changes, the style and its uses follow. Uses in other files keep
+    the names and the values.
 
 Example (a style for a list of cards):
 ```
@@ -498,6 +506,10 @@ const cards = penpotUtils.findShape(s => s.name === "Cards");
 const timeline = cards.timeline ?? cards.addTimeline({duration: 1200});
 cards.children.forEach((card, i) => timeline.applyAnimationStyle(card, style, i * 80));
 style.entries = [{type: "fade", duration: 500}, {type: "move", duration: 500, offsetY: 48}];
+const set = penpot.library.local.tokens.sets[0];
+set.addToken({type: "duration", name: "motion.fast", value: "150ms"});
+set.addToken({type: "cubicBezier", name: "ease.out", value: [0, 0, 0.58, 1]});
+style.entries = [{type: "fade", duration: 150, appliedTokens: {duration: "motion.fast", easing: "ease.out"}}];
 ```
 
 Keyframe values by property (`AnimatableProperty`):

@@ -11396,9 +11396,7 @@ Library:
         tokens: TokenCatalog;
         createColor(): LibraryColor;
         createTypography(): LibraryTypography;
-        createAnimationStyle(
-            entries: PresetAnimationProps[],
-        ): LibraryAnimationStyle;
+        createAnimationStyle(entries: AnimationStyleEntry[]): LibraryAnimationStyle;
         createComponent(shapes: Shape[]): LibraryComponent;
         getPluginData(key: string): string;
         setPluginData(key: string, value: string): void;
@@ -11506,7 +11504,7 @@ Library:
         ```
       createAnimationStyle: |-
         ```
-        createAnimationStyle(entries: PresetAnimationProps[]): LibraryAnimationStyle
+        createAnimationStyle(entries: AnimationStyleEntry[]): LibraryAnimationStyle
         ```
 
         Creates an animation style in the library of the file itself, named
@@ -11515,7 +11513,7 @@ Library:
 
         Parameters
 
-        * entries: PresetAnimationProps[]
+        * entries: AnimationStyleEntry[]
 
           The preset animations of the style, their `start`
           counted from the start of the style.
@@ -11936,7 +11934,7 @@ LibraryAnimationStyle:
     ```
     interface LibraryAnimationStyle {
         description: string;
-        entries: PresetAnimationProps[];
+        entries: AnimationStyleEntry[];
         duration: number;
         remove(): void;
         clone(): LibraryAnimationStyle;
@@ -11969,7 +11967,7 @@ LibraryAnimationStyle:
         What the style is for.
       entries: |-
         ```
-        entries: PresetAnimationProps[]
+        entries: AnimationStyleEntry[]
         ```
 
         The preset animations the style plays, their `start` counted from the
@@ -17469,7 +17467,7 @@ PresetAnimationProps:
     }
     ```
 
-    Referenced by: AnimationStyleEntry, Library, LibraryAnimationStyle, Timeline
+    Referenced by: AnimationStyleEntry, Timeline
   members:
     Properties:
       type: |-
@@ -17682,6 +17680,56 @@ PresetAnimation:
         Removes the animation.
 
         Returns void
+AnimationStyleEntryTokens:
+  overview: |-
+    Interface AnimationStyleEntryTokens
+    ===================================
+
+    The design tokens that set settings of an animation style entry, by
+    their names (see `AnimationStyleEntry.appliedTokens`): `start` and
+    `duration` take `duration` tokens, `easing` a `cubicBezier` one; the
+    `amount` of a `fade` an `opacity` one, of a `scale` a `number` one, of
+    a `rotate` a `rotation` or `number` one, of a `blur` a `dimension` or
+    `number` one; the offsets of a `move` `dimension` or `number` ones.
+
+    ```
+    interface AnimationStyleEntryTokens {
+        start?: string;
+        duration?: string;
+        easing?: string;
+        amount?: string;
+        offsetX?: string;
+        offsetY?: string;
+    }
+    ```
+
+    Referenced by: AnimationStyleEntry
+  members:
+    Properties:
+      start: |-
+        ```
+        start?: string
+        ```
+      duration: |-
+        ```
+        duration?: string
+        ```
+      easing: |-
+        ```
+        easing?: string
+        ```
+      amount: |-
+        ```
+        amount?: string
+        ```
+      offsetX: |-
+        ```
+        offsetX?: string
+        ```
+      offsetY: |-
+        ```
+        offsetY?: string
+        ```
 AppliedAnimationStyle:
   overview: |-
     Interface AppliedAnimationStyle
@@ -21411,6 +21459,8 @@ TokenBase:
       + TokenFontSizes
       + TokenFontWeights
       + TokenLetterSpacing
+      + TokenDuration
+      + TokenCubicBezier
       + TokenNumber
       + TokenOpacity
       + TokenRotation
@@ -22705,6 +22755,297 @@ TokenLetterSpacing:
         and resolving the references.
 
         It's a number, or undefined if no value has been found in active sets.
+    Methods:
+      duplicate: |-
+        ```
+        duplicate(): Token
+        ```
+
+        Adds to the set that contains this Token a new one equal to this one
+        but with a new id.
+
+        Returns Token
+      remove: |-
+        ```
+        remove(): void
+        ```
+
+        Removes this token from the catalog.
+
+        It will NOT be unapplied from any shape, since there may be other tokens
+        with the same name.
+
+        Returns void
+      applyToShapes: |-
+        ```
+        applyToShapes(shapes: Shape[], properties?: TokenProperty[]): void
+        ```
+
+        Applies this token to one or more properties of the given shapes.
+
+        Parameters
+
+        * shapes: Shape[]
+
+          is an array of shapes to apply it.
+        * properties: TokenProperty[]
+
+          an optional list of property names. If omitted, the
+          default properties will be applied.
+
+          NOTE that the tokens application is by name and not by id. If there exist
+          several tokens with the same name in different sets, the actual token applied
+          and the value set to the attributes will depend on which sets are active
+          (and will change if different sets or themes are activated later).
+
+        Returns void
+      applyToSelected: |-
+        ```
+        applyToSelected(properties?: TokenProperty[]): void
+        ```
+
+        Applies this token to the currently selected shapes.
+
+        Parameters and warnings are the same as above.
+
+        Parameters
+
+        * properties: TokenProperty[]
+
+        Returns void
+TokenDuration:
+  overview: |-
+    Interface TokenDuration
+    =======================
+
+    Represents a token of type Duration (Penpot Motion): a length of time.
+    No shape takes it; the entries of animation styles bind it for their
+    start and duration (see `AnimationStyleEntry.appliedTokens`).
+    This interface extends `TokenBase` and specifies the data type of the value.
+
+    ```
+    interface TokenDuration {
+        id: string;
+        name: string;
+        description: string;
+        duplicate(): Token;
+        remove(): void;
+        resolvedValueString: string | undefined;
+        applyToShapes(shapes: Shape[], properties?: TokenProperty[]): void;
+        applyToSelected(properties?: TokenProperty[]): void;
+        type: "duration";
+        value: string;
+        resolvedValue: number | undefined;
+    }
+    ```
+
+    Hierarchy (View Summary)
+
+    * TokenBase
+      + TokenDuration
+
+    Referenced by: Token
+  members:
+    Properties:
+      id: |-
+        ```
+        readonly id: string
+        ```
+
+        The unique identifier for this token, used only internally inside Penpot.
+        This one is not exported or synced with external Design Token sources.
+      name: |-
+        ```
+        name: string
+        ```
+
+        The name of the token. It may include a group path separated by `.`.
+      description: |-
+        ```
+        description: string
+        ```
+
+        An optional description text.
+      resolvedValueString: |-
+        ```
+        readonly resolvedValueString: string | undefined
+        ```
+
+        The value calculated by finding all tokens with the same name in active sets
+        and resolving the references.
+
+        It's converted to string, regardless of the data type of the value depending
+        on the token type. It can be undefined if no value has been found in active sets.
+      type: |-
+        ```
+        readonly type: "duration"
+        ```
+
+        The type of the token.
+      value: |-
+        ```
+        value: string
+        ```
+
+        The value as defined in the token itself: a number of milliseconds or
+        seconds (`"150ms"`, `"0.2s"`; milliseconds without a unit) or a
+        reference.
+      resolvedValue: |-
+        ```
+        readonly resolvedValue: number | undefined
+        ```
+
+        The value calculated by finding all tokens with the same name in active sets
+        and resolving the references.
+
+        It's a number of milliseconds, or undefined if no value has been found
+        in active sets.
+    Methods:
+      duplicate: |-
+        ```
+        duplicate(): Token
+        ```
+
+        Adds to the set that contains this Token a new one equal to this one
+        but with a new id.
+
+        Returns Token
+      remove: |-
+        ```
+        remove(): void
+        ```
+
+        Removes this token from the catalog.
+
+        It will NOT be unapplied from any shape, since there may be other tokens
+        with the same name.
+
+        Returns void
+      applyToShapes: |-
+        ```
+        applyToShapes(shapes: Shape[], properties?: TokenProperty[]): void
+        ```
+
+        Applies this token to one or more properties of the given shapes.
+
+        Parameters
+
+        * shapes: Shape[]
+
+          is an array of shapes to apply it.
+        * properties: TokenProperty[]
+
+          an optional list of property names. If omitted, the
+          default properties will be applied.
+
+          NOTE that the tokens application is by name and not by id. If there exist
+          several tokens with the same name in different sets, the actual token applied
+          and the value set to the attributes will depend on which sets are active
+          (and will change if different sets or themes are activated later).
+
+        Returns void
+      applyToSelected: |-
+        ```
+        applyToSelected(properties?: TokenProperty[]): void
+        ```
+
+        Applies this token to the currently selected shapes.
+
+        Parameters and warnings are the same as above.
+
+        Parameters
+
+        * properties: TokenProperty[]
+
+        Returns void
+TokenCubicBezier:
+  overview: |-
+    Interface TokenCubicBezier
+    ==========================
+
+    Represents a token of type Cubic Bezier (Penpot Motion): an easing curve
+    as CSS `cubic-bezier()` gives it. No shape takes it; the entries of
+    animation styles bind it for their easing (see
+    `AnimationStyleEntry.appliedTokens`).
+    This interface extends `TokenBase` and specifies the data type of the value.
+
+    ```
+    interface TokenCubicBezier {
+        id: string;
+        name: string;
+        description: string;
+        duplicate(): Token;
+        remove(): void;
+        resolvedValueString: string | undefined;
+        applyToShapes(shapes: Shape[], properties?: TokenProperty[]): void;
+        applyToSelected(properties?: TokenProperty[]): void;
+        type: "cubicBezier";
+        value: string | [number, number, number, number];
+        resolvedValue: number[] | undefined;
+    }
+    ```
+
+    Hierarchy (View Summary)
+
+    * TokenBase
+      + TokenCubicBezier
+
+    Referenced by: Token
+  members:
+    Properties:
+      id: |-
+        ```
+        readonly id: string
+        ```
+
+        The unique identifier for this token, used only internally inside Penpot.
+        This one is not exported or synced with external Design Token sources.
+      name: |-
+        ```
+        name: string
+        ```
+
+        The name of the token. It may include a group path separated by `.`.
+      description: |-
+        ```
+        description: string
+        ```
+
+        An optional description text.
+      resolvedValueString: |-
+        ```
+        readonly resolvedValueString: string | undefined
+        ```
+
+        The value calculated by finding all tokens with the same name in active sets
+        and resolving the references.
+
+        It's converted to string, regardless of the data type of the value depending
+        on the token type. It can be undefined if no value has been found in active sets.
+      type: |-
+        ```
+        readonly type: "cubicBezier"
+        ```
+
+        The type of the token.
+      value: |-
+        ```
+        value: string | [number, number, number, number]
+        ```
+
+        The value as defined in the token itself: the four numbers
+        `[x1, y1, x2, y2]` of the control points, `x1` and `x2` from 0 to 1,
+        or a reference.
+      resolvedValue: |-
+        ```
+        readonly resolvedValue: number[] | undefined
+        ```
+
+        The value calculated by finding all tokens with the same name in active sets
+        and resolving the references.
+
+        It's the four numbers, or undefined if no value has been found in
+        active sets.
     Methods:
       duplicate: |-
         ```
@@ -25407,12 +25748,32 @@ AnimationStyleEntry:
     ==============================
 
     ```
-    AnimationStyleEntry: PresetAnimationProps
+    AnimationStyleEntry: PresetAnimationProps & {
+        appliedTokens?: AnimationStyleEntryTokens;
+    }
     ```
 
     A preset animation of an animation style (`LibraryAnimationStyle`), its
     `start` counted from the start of the style. A split entry plays the
-    units of a text layer, and the whole layer on other layers.
+    units of a text layer, and the whole layer on other layers. Design
+    tokens can set some of its settings, see `appliedTokens`.
+
+    Type Declaration
+
+    * OptionalappliedTokens?: AnimationStyleEntryTokens
+
+      The design tokens that set settings of the entry, by setting. The file
+      of the style resolves them in its active sets and writes their values
+      into the entry (when they change, the style and its uses follow);
+      the uses of the style in other files keep the names and the values.
+      Setting `LibraryAnimationStyle.entries` with them binds them.
+
+      Example
+      ```
+      style.entries = [  { type: 'fade', start: 0, duration: 150, appliedTokens: { duration: 'motion.fast', easing: 'ease.out' } },];
+      ```
+
+    Referenced by: Library, LibraryAnimationStyle
   members: {}
 Shape:
   overview: |-
@@ -25440,7 +25801,7 @@ Shape:
     let shape: Shape;if (penpot.utils.types.isRectangle(shape)) {  console.log(shape.type);}
     ```
 
-    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenDimension, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
+    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
   members: {}
 StrokeCap:
   overview: |-
@@ -25520,6 +25881,7 @@ TokenValueString:
         | string
         | string[]
         | number
+        | number[]
     ```
 
     Any possible type of value field in a token.
@@ -25541,7 +25903,9 @@ Token:
         | TokenBorderRadius
         | TokenShadow
         | TokenColor
+        | TokenCubicBezier
         | TokenDimension
+        | TokenDuration
         | TokenFontFamilies
         | TokenFontSizes
         | TokenFontWeights
@@ -25559,7 +25923,7 @@ Token:
 
     The supported Design Tokens in Penpot.
 
-    Referenced by: Board, Boolean, Ellipse, Group, Image, Path, Rectangle, ShapeBase, SvgRaw, Text, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenDimension, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenSet, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer
+    Referenced by: Board, Boolean, Ellipse, Group, Image, Path, Rectangle, ShapeBase, SvgRaw, Text, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenSet, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer
   members: {}
 TokenBorderRadiusProps:
   overview: |-
@@ -25820,7 +26184,7 @@ TokenProperty:
     `fill` property applies to `fillColor` of the first fill
     of the shape.
 
-    Referenced by: Board, Boolean, Ellipse, Group, Image, Path, Rectangle, ShapeBase, SvgRaw, Text, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenDimension, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer
+    Referenced by: Board, Boolean, Ellipse, Group, Image, Path, Rectangle, ShapeBase, SvgRaw, Text, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer
   members: {}
 TokenType:
   overview: |-
@@ -25832,7 +26196,9 @@ TokenType:
         | "borderRadius"
         | "shadow"
         | "color"
+        | "cubicBezier"
         | "dimension"
+        | "duration"
         | "fontFamilies"
         | "fontSizes"
         | "fontWeights"

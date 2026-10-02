@@ -94,8 +94,14 @@
 
     :else
     (let [token (u/locate-token file-id set-id id)]
-      (if (some #(not (token-attr? %)) attrs)
+      (cond
+        (contains? cto/motion-token-types (:type token))
+        (u/not-valid plugin-id :applyToken "A duration or cubicBezier token applies to no shape: the entries of animation styles bind it")
+
+        (some #(not (token-attr? %)) attrs)
         (u/not-valid plugin-id :applyToSelected attrs)
+
+        :else
         (st/emit!
          (-> (dwta/toggle-token {:token token
                                  :attrs (into #{} (map token-attr-plugin->token-attr) attrs)
@@ -178,6 +184,11 @@
       (shadow-resolved-value->js
        (ts/tokenscript-symbols->penpot-unit resolved-value))
 
+      (= :cubic-bezier (:type token))
+      ;; Its four numbers, as the documented `number[]`.
+      (some-> (ts/tokenscript-symbols->penpot-unit resolved-value)
+              (clj->js))
+
       :else
       (ts/tokenscript-symbols->penpot-unit resolved-value))))
 
@@ -250,7 +261,10 @@
          (let [token (u/locate-token file-id set-id id)
                value (cond-> value
                        (= :font-family (:type token))
-                       (ctob/convert-dtcg-font-family))]
+                       (ctob/convert-dtcg-font-family)
+
+                       (= :cubic-bezier (:type token))
+                       (ctob/convert-dtcg-cubic-bezier))]
            (st/emit! (dwtl/update-token set-id id {:value value})))))}
 
     :resolvedValue

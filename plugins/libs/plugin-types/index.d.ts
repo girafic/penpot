@@ -4660,9 +4660,43 @@ export type AnimationStyle =
 /**
  * A preset animation of an animation style (`LibraryAnimationStyle`), its
  * `start` counted from the start of the style. A split entry plays the
- * units of a text layer, and the whole layer on other layers.
+ * units of a text layer, and the whole layer on other layers. Design
+ * tokens can set some of its settings, see `appliedTokens`.
  */
-export type AnimationStyleEntry = PresetAnimationProps;
+export type AnimationStyleEntry = PresetAnimationProps & {
+  /**
+   * The design tokens that set settings of the entry, by setting. The file
+   * of the style resolves them in its active sets and writes their values
+   * into the entry (when they change, the style and its uses follow);
+   * the uses of the style in other files keep the names and the values.
+   * Setting `LibraryAnimationStyle.entries` with them binds them.
+   *
+   * @example
+   * ```js
+   * style.entries = [
+   *   { type: 'fade', start: 0, duration: 150, appliedTokens: { duration: 'motion.fast', easing: 'ease.out' } },
+   * ];
+   * ```
+   */
+  appliedTokens?: AnimationStyleEntryTokens;
+};
+
+/**
+ * The design tokens that set settings of an animation style entry, by
+ * their names (see `AnimationStyleEntry.appliedTokens`): `start` and
+ * `duration` take `duration` tokens, `easing` a `cubicBezier` one; the
+ * `amount` of a `fade` an `opacity` one, of a `scale` a `number` one, of
+ * a `rotate` a `rotation` or `number` one, of a `blur` a `dimension` or
+ * `number` one; the offsets of a `move` `dimension` or `number` ones.
+ */
+export interface AnimationStyleEntryTokens {
+  start?: string;
+  duration?: string;
+  easing?: string;
+  amount?: string;
+  offsetX?: string;
+  offsetY?: string;
+}
 
 /**
  * A use of an animation style (`LibraryAnimationStyle`) by a layer, in a
@@ -5953,6 +5987,65 @@ export interface TokenLetterSpacing extends TokenBase {
 }
 
 /**
+ * Represents a token of type Duration (Penpot Motion): a length of time.
+ * No shape takes it; the entries of animation styles bind it for their
+ * start and duration (see `AnimationStyleEntry.appliedTokens`).
+ * This interface extends `TokenBase` and specifies the data type of the value.
+ */
+export interface TokenDuration extends TokenBase {
+  /**
+   * The type of the token.
+   */
+  readonly type: 'duration';
+
+  /**
+   * The value as defined in the token itself: a number of milliseconds or
+   * seconds (`"150ms"`, `"0.2s"`; milliseconds without a unit) or a
+   * reference.
+   */
+  value: string;
+
+  /**
+   * The value calculated by finding all tokens with the same name in active sets
+   * and resolving the references.
+   *
+   * It's a number of milliseconds, or undefined if no value has been found
+   * in active sets.
+   */
+  readonly resolvedValue: number | undefined;
+}
+
+/**
+ * Represents a token of type Cubic Bezier (Penpot Motion): an easing curve
+ * as CSS `cubic-bezier()` gives it. No shape takes it; the entries of
+ * animation styles bind it for their easing (see
+ * `AnimationStyleEntry.appliedTokens`).
+ * This interface extends `TokenBase` and specifies the data type of the value.
+ */
+export interface TokenCubicBezier extends TokenBase {
+  /**
+   * The type of the token.
+   */
+  readonly type: 'cubicBezier';
+
+  /**
+   * The value as defined in the token itself: the four numbers
+   * `[x1, y1, x2, y2]` of the control points, `x1` and `x2` from 0 to 1,
+   * or a reference.
+   */
+  value: [number, number, number, number] | string;
+
+  /**
+   * The value calculated by finding all tokens with the same name in active sets
+   * and resolving the references.
+   *
+   * It's the four numbers, or undefined if no value has been found in
+   * active sets.
+   */
+  readonly resolvedValue: number[] | undefined;
+}
+
+/**
  * Represents a token of type Number.
  * This interface extends `TokenBase` and specifies the data type of the value.
  */
@@ -6281,7 +6374,8 @@ export type TokenValueString =
   | TokenTypographyValueString
   | string
   | string[]
-  | number;
+  | number
+  | number[];
 
 /**
  * The supported Design Tokens in Penpot.
@@ -6290,7 +6384,9 @@ export type Token =
   | TokenBorderRadius
   | TokenShadow
   | TokenColor
+  | TokenCubicBezier
   | TokenDimension
+  | TokenDuration
   | TokenFontFamilies
   | TokenFontSizes
   | TokenFontWeights
@@ -6671,7 +6767,9 @@ export type TokenType =
   | 'borderRadius'
   | 'shadow'
   | 'color'
+  | 'cubicBezier'
   | 'dimension'
+  | 'duration'
   | 'fontFamilies'
   | 'fontSizes'
   | 'fontWeights'
