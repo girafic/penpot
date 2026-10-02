@@ -14,8 +14,10 @@
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
+   [app.common.time :as ct]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.file :as ctf]
    [clojure.test :as t]))
 
 (t/use-fixtures :each thi/test-fixture)
@@ -206,6 +208,33 @@
     (t/testing "without the data of the library, nothing changes"
       (t/is (empty? (:redo-changes (sync-changes consumer (delete-style library :lib-style) nil
                                                  :libraries [consumer])))))))
+
+(defn- stamped
+  "`library` with its style `label` last changed at `ms`."
+  [library label ms]
+  (assoc-in library [:data :animation-styles (thi/id label) :modified-at] (ct/inst ms)))
+
+(t/deftest a-file-hears-of-the-changed-and-deleted-styles-it-uses
+  (let [library  (-> (with-styles (thf/sample-file :library) :lib-style :kept)
+                     (stamped :lib-style 20000)
+                     (stamped :kept 5000))
+        other    (-> (with-styles (thf/sample-file :other) :other)
+                     (stamped :other 20000))
+        consumer (-> (consumer-file library other)
+                     (with-timeline :c #(cta/add-animation % (thi/id :c1) (use-of library :kept 0))))
+        heard    (fn [library since]
+                   (->> (ctf/used-assets-changed-since (:data consumer) library since)
+                        (map (juxt :asset-id :asset-type :name :shape-id :container-id))
+                        (set)))
+        page-id  (:id (thf/get-page consumer :page1))]
+    (t/is (= #{[(thi/id :lib-style) :animation-style "lib-style" (thi/id :c1) page-id]}
+             (heard library (ct/inst 10000))
+             (heard library 10000))
+          "a style changed since, not one changed before nor one of another library")
+    (t/is (= #{[(thi/id :lib-style) :animation-style "lib-style" (thi/id :c1) page-id]
+               [(thi/id :kept) :animation-style "kept" (thi/id :c1) page-id]}
+             (heard (delete-style library :kept) (ct/inst 10000)))
+          "a style gone from the library, by the name its use copied")))
 
 (t/deftest early-return-stops-at-the-first-change
   (let [file    (edit-style (styled-file) :one 4)

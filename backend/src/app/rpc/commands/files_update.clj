@@ -99,7 +99,10 @@
     :restore-component
     :add-typography
     :mod-typography
-    :del-typography})
+    :del-typography
+    :add-animation-style
+    :mod-animation-style
+    :del-animation-style})
 
 (def ^:private token-change-types
   #{:set-tokens-lib
@@ -113,11 +116,17 @@
     :set-base-font-size})
 
 (def ^:private file-change-types
+  ;; The timeline changes too, so the copies of animated mains of a
+  ;; library play their edits in open consumer files
   #{:add-obj
     :mod-obj
     :del-obj
     :reg-objects
-    :mov-objects})
+    :mov-objects
+    :set-timeline
+    :set-timeline-track
+    :set-timeline-track-animations
+    :update-timeline})
 
 (defn- library-change?
   [{:keys [type] :as change}]

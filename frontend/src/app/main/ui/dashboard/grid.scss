@@ -429,6 +429,16 @@ $thumbnail-default-height: px2rem(168);
   overflow: hidden;
 }
 
+.library-style-icon {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  block-size: px2rem(20);
+  margin-inline-end: var(--sp-xs);
+  inline-size: px2rem(20);
+  color: var(--color-foreground-secondary);
+}
+
 // ─── MISC ──────────────────────────────────────
 
 .drag-counter {

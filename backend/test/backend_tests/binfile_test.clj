@@ -2077,3 +2077,16 @@
     (t/is (= [:fade :scale :style] (mapv :type uses)) "the use of the library turns into presets")
     (t/is (= [file-id (:id own-style)] ((juxt :style-ref-file :style-ref-id) (last uses)))
           "its own style stays linked, to the imported file")))
+
+(t/deftest export-merging-libraries-keeps-their-used-styles
+  (let [profile (th/create-profile* 1)
+        {:keys [file lib-style own-style]} (styled-library-and-file! profile)
+        result  (export-and-import! profile (:id file) :merge-libraries)
+        file-id (first (:file-ids result))
+        styles  (get-in (bfc/get-file th/*system* file-id :realize? true) [:data :animation-styles])]
+    (t/is (= 1 (count (:file-ids result))))
+    (t/is (= #{(:id lib-style) (:id own-style)} (set (keys styles)))
+          "the library style it uses is now one of its own")
+    (t/is (= [[file-id (:id lib-style)] [file-id (:id own-style)]]
+             (mapv (juxt :style-ref-file :style-ref-id) (styled-animations file-id file)))
+          "both uses link to the imported file")))

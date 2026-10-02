@@ -10,6 +10,8 @@
    [app.common.pprint :as pp]
    [app.common.thumbnails :as thc]
    [app.common.time :as ct]
+   [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -17,6 +19,7 @@
    [app.db.sql :as sql]
    [app.features.fdata :as fdata]
    [app.http :as http]
+   [app.msgbus :as mbus]
    [app.rpc :as-alias rpc]
    [app.rpc.commands.files :as files]
    [app.storage :as sto]
@@ -2307,6 +2310,7 @@
       (t/is (zero? (:deleted-component-count result)))
       (t/is (zero? (:color-count result)))
       (t/is (zero? (:typography-count result)))
+      (t/is (zero? (:animation-style-count result)))
       (t/is (zero? (:library-count result)))
       (t/is (zero? (:referenced-by-count result)))
       (t/is (contains? result :shape-counts))
@@ -2747,3 +2751,147 @@
       (t/is (nil? (:error out)))
       (t/is (contains? (:colors data) color-id))
       (t/is (= (:id consumer) (:fill-color-ref-file fill))))))
+
+(defn- animation-style
+  "An animation style `name` of one fade."
+  [name]
+  (ctas/make-animation-style {:name name :entries [{:type :fade :start 0 :duration 300}]}))
+
+(defn- add-animation-styles!
+  [profile file revn & names]
+  (let [styles (mapv animation-style names)]
+    (update-file! :file-id (:id file)
+                  :profile-id (:id profile)
+                  :revn revn
+                  :changes (mapv (fn [style] {:type :add-animation-style :animation-style style}) styles))
+    styles))
+
+(t/deftest get-file-stats-counts-animation-styles
+  (let [profile (th/create-profile* 1 {:is-active true})
+        file    (th/create-file* 1 {:profile-id (:id profile)
+                                    :project-id (:default-project-id profile)
+                                    :is-shared false})]
+    (add-animation-styles! profile file 0 "One" "Two")
+    (let [out (th/command! {::th/type :get-file-stats
+                            ::rpc/profile-id (:id profile)
+                            :id (:id file)})]
+      (t/is (nil? (:error out)))
+      (t/is (= 2 (-> out :result :animation-style-count))))))
+
+(t/deftest library-summary-counts-animation-styles
+  (let [profile (th/create-profile* 1 {:is-active true})
+        file    (th/create-file* 1 {:profile-id (:id profile)
+                                    :project-id (:default-project-id profile)
+                                    :is-shared true})]
+    (add-animation-styles! profile file 0 "Card enter" "Alpha")
+    (let [out    (th/command! {::th/type :get-file-summary
+                               ::rpc/profile-id (:id profile)
+                               :id (:id file)})
+          styles (-> out :result :animation-styles)]
+      (t/is (nil? (:error out)))
+      (t/is (= 2 (:count styles)))
+      (t/is (= ["Alpha" "Card enter"] (mapv :name (:sample styles)))))))
+
+(t/deftest library-style-and-timeline-changes-reach-open-consumers
+  (let [profile  (th/create-profile* 1 {:is-active true})
+        library  (th/create-file* 1 {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)
+                                     :is-shared true})
+        page-id  (first (get-in library [:data :pages]))
+        board-id (uuid/random)
+        shape-id (uuid/random)
+        messages (atom [])
+        library-changes
+        (fn []
+          (->> @messages
+               (filter #(= :library-change (get-in % [:message :type])))
+               (mapv (fn [{:keys [topic message]}]
+                       [topic (mapv :type (:changes message))]))))]
+
+    (with-redefs [mbus/pub! (fn [_instance & {:keys [topic message]}]
+                              (swap! messages conj {:topic topic :message message})
+                              nil)]
+      (let [[style] (add-animation-styles! profile library 0 "One")]
+        (update-file! :file-id (:id library)
+                      :profile-id (:id profile)
+                      :revn 1
+                      :changes [{:type :mod-animation-style
+                                 :animation-style (assoc style :name "Renamed")}
+                                {:type :set-timeline
+                                 :page-id page-id
+                                 :id board-id
+                                 :params (-> (cta/make-timeline {:board-id board-id :duration 1000})
+                                             (cta/add-animation shape-id {:type :fade}))}])
+        (update-file! :file-id (:id library)
+                      :profile-id (:id profile)
+                      :revn 2
+                      :changes [{:type :set-timeline-track
+                                 :page-id page-id
+                                 :id board-id
+                                 :shape-id shape-id
+                                 :params nil}])))
+
+    (let [team-id (:default-team-id profile)]
+      (t/is (= [[team-id [:add-animation-style]]
+                [team-id [:mod-animation-style :set-timeline]]
+                [team-id [:set-timeline-track]]]
+               (library-changes))))))
+
+(t/deftest unpublishing-a-library-absorbs-its-used-animation-styles
+  (let [profile  (th/create-profile* 1 {:is-active true})
+        library  (th/create-file* 1 {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)
+                                     :is-shared true})
+        consumer (th/create-file* 2 {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)
+                                     :is-shared false})
+        _        (th/link-file-to-library* {:file-id (:id consumer) :library-id (:id library)})
+        [used unused] (add-animation-styles! profile library 0 "Card enter" "Unused")
+        page-id  (first (get-in consumer [:data :pages]))
+        board-id (uuid/random)
+        shape-id (uuid/random)]
+
+    (update-file!
+     :file-id (:id consumer)
+     :profile-id (:id profile)
+     :revn 0
+     :changes
+     [{:type :add-obj
+       :page-id page-id
+       :id board-id
+       :parent-id uuid/zero
+       :frame-id uuid/zero
+       :components-v2 true
+       :obj (cts/setup-shape {:id board-id :name "Board" :frame-id uuid/zero
+                              :parent-id uuid/zero :type :frame})}
+      {:type :add-obj
+       :page-id page-id
+       :id shape-id
+       :parent-id board-id
+       :frame-id board-id
+       :components-v2 true
+       :obj (cts/setup-shape {:id shape-id :name "Rect" :frame-id board-id
+                              :parent-id board-id :type :rect})}
+      {:type :set-timeline
+       :page-id page-id
+       :id board-id
+       :params (-> (cta/make-timeline {:board-id board-id :duration 1000})
+                   (cta/add-animation shape-id (ctas/make-use used (:id library) 0)))}])
+
+    (let [out (th/command! {::th/type :set-file-shared
+                            ::rpc/profile-id (:id profile)
+                            :id (:id library)
+                            :is-shared false})]
+      (t/is (nil? (:error out))))
+
+    (let [out  (th/command! {::th/type :get-file
+                             ::rpc/profile-id (:id profile)
+                             :id (:id consumer)})
+          data (-> out :result :data)
+          use  (first (get-in data [:pages-index page-id :timelines board-id :tracks shape-id :animations]))]
+      (t/is (nil? (:error out)))
+      (t/is (= #{(:id used)} (set (keys (:animation-styles data))))
+            "the consumer holds the style it plays, not the unused one")
+      (t/is (not (contains? (:animation-styles data) (:id unused))))
+      (t/is (= [(:id used) (:id consumer)] [(:style-ref-id use) (:style-ref-file use)])
+            "its use now points at the consumer"))))

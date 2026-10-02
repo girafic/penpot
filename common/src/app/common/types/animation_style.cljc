@@ -244,6 +244,11 @@
         :when     (cta/style-use? animation)]
     (assoc animation ::shape-id (:shape-id track))))
 
+(defn page-uses
+  "The uses of animation styles in the timelines of `page`."
+  [page]
+  (mapcat timeline-uses (vals (:timelines page))))
+
 (defn drifted?
   "Whether a use in `timeline` of a style of its own file `file-id` holds
   other entries or another name than the style, in `styles`, or holds a
@@ -269,25 +274,27 @@
 
 (defn used-styles-changed-since
   "The uses, in the timelines of `page`, of styles of `library` (a file
-  with its `:data`) changed after `since-date`, or gone from its data:
-  `{:shape-id :asset-id :asset-type :container-id}` each, as
-  `ctf/used-assets-changed-since` gives the other assets."
+  with its `:data`) changed after `since-date` (an instant or ms), or
+  gone from its data: `{:shape-id :asset-id :asset-type :container-id}`
+  each, as `ctf/used-assets-changed-since` gives the other assets, and
+  the `:name` the use copied, which is all that is left of a style gone."
   [page library since-date]
   (let [library-id (:id library)
         loaded?    (some? (:data library))
         styles     (dm/get-in library [:data :animation-styles])
+        since      (inst-ms (ct/inst since-date))
         changed?   (fn [{:keys [modified-at]}]
                      (or (nil? modified-at)
-                         (>= (inst-ms modified-at) (inst-ms since-date))))]
-    (for [timeline (vals (:timelines page))
-          use      (timeline-uses timeline)
-          :when    (= library-id (:style-ref-file use))
-          :let     [style (get styles (:style-ref-id use))]
-          :when    (if (some? style) (changed? style) loaded?)]
+                         (>= (inst-ms modified-at) since)))]
+    (for [use   (page-uses page)
+          :when (= library-id (:style-ref-file use))
+          :let  [style (get styles (:style-ref-id use))]
+          :when (if (some? style) (changed? style) loaded?)]
       {:shape-id   (::shape-id use)
        :asset-id   (:style-ref-id use)
        :asset-type :animation-style
-       :container-id (:id page)})))
+       :container-id (:id page)
+       :name       (:name use)})))
 
 (defn remap-style-refs
   "`timelines` (of a page, by board) with the uses of the styles

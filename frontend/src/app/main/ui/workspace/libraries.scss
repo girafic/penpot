@@ -197,6 +197,22 @@
   width: px2rem(168);
 }
 
+.style-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: px2rem(24);
+  block-size: px2rem(24);
+  color: var(--library-content-foreground-color);
+}
+
+.style-removed {
+  @include t.use-typography("body-small");
+
+  display: block;
+  color: var(--library-content-foreground-color);
+}
+
 .ellipsis {
   padding-inline-start: calc(var(--sp-xxl) + var(--sp-s));
 }

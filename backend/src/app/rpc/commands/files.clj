@@ -525,7 +525,8 @@
     {:components components-sample
      :variants {:count (count variant-ids)}
      :colors (sample-assets (:colors data) 3)
-     :typographies (sample-assets (:typographies data) 3)}))
+     :typographies (sample-assets (:typographies data) 3)
+     :animation-styles (sample-assets (:animation-styles data) 3)}))
 
 (def ^:private file-summary-cache-key-ttl
   (ct/duration {:days 30}))
@@ -687,6 +688,7 @@
    [:deleted-component-count [::sm/int {:min 0}]]
    [:color-count [::sm/int {:min 0}]]
    [:typography-count [::sm/int {:min 0}]]
+   [:animation-style-count [::sm/int {:min 0}]]
    [:library-count [::sm/int {:min 0}]]
    [:referenced-by-count [::sm/int {:min 0}]]
    [:revn [::sm/int {:min 0}]]

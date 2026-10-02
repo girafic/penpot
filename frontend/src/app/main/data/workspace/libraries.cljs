@@ -1488,14 +1488,18 @@
 (defn assets-need-sync
   "Get a lazy sequence of all the assets of each type in the library that have
   been modified after the last sync of the library. The sync date may be
-  overriden by providing a ignore-until parameter."
-  ([library file-data]
-   (assets-need-sync library file-data nil))
-  ([library file-data ignore-until]
+  overriden by providing a ignore-until parameter. The animation styles
+  count only with `styles?`, as Motion (`animation/v1`) is on: else a
+  library whose styles alone changed needs no sync."
+  ([library file-data styles?]
+   (assets-need-sync library file-data nil styles?))
+  ([library file-data ignore-until styles?]
    (when (not= (:id library) (:id file-data))
      (let [sync-date (max (:synced-at library) (or ignore-until 0))]
        (when (> (:modified-at library) sync-date)
-         (ctf/used-assets-changed-since file-data library sync-date))))))
+         (cond->> (ctf/used-assets-changed-since file-data library sync-date)
+           (not styles?)
+           (remove #(= :animation-style (:asset-type %)))))))))
 
 (defn notify-sync-file
   "Notify the user that there are updates in the libraries used by the
@@ -1509,11 +1513,12 @@
             file-data    (get file :data)
             ignore-until (get file :ignore-sync-until)
             permissions  (:permissions state)
+            styles?      (features/active-feature? state "animation/v1")
 
             libraries-need-sync
             (->> (vals (get state :files))
                  (filter #(= (:library-of %) file-id))
-                 (filter #(seq (assets-need-sync % file-data ignore-until))))]
+                 (filter #(seq (assets-need-sync % file-data ignore-until styles?))))]
 
         (if-not (and (:can-edit permissions)
                      (seq libraries-need-sync))

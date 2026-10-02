@@ -55,8 +55,8 @@
 
 (defn calc-file-stats
   "Given a decoded file data map with the standard keys
-   `:pages-index`, `:components`, `:deleted-components`, `:colors`
-   and `:typographies`, return per-file aggregates.
+   `:pages-index`, `:components`, `:deleted-components`, `:colors`,
+   `:typographies` and `:animation-styles`, return per-file aggregates.
 
    The result is a plain map suitable for serialization; it never
    contains any pointer-map or objects-map instances."
@@ -65,10 +65,12 @@
         components         (get fdata :components)
         deleted-components (get fdata :deleted-components)
         colors             (get fdata :colors)
-        typographies       (get fdata :typographies)]
+        typographies       (get fdata :typographies)
+        animation-styles   (get fdata :animation-styles)]
     {:page-count              (count pages-index)
      :shape-counts            (aggregate-shape-counts pages-index)
      :component-count         (count components)
      :deleted-component-count (count deleted-components)
      :color-count             (count colors)
-     :typography-count        (count typographies)}))
+     :typography-count        (count typographies)
+     :animation-style-count   (count animation-styles)}))

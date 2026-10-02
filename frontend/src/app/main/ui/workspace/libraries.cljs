@@ -10,6 +10,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.variant :as cfv]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.components-list :as ctkl]
    [app.common.types.file :as ctf]
    [app.common.types.library :as ctl]
@@ -24,6 +25,7 @@
    [app.main.data.team :as dtm]
    [app.main.data.workspace.colors :as mdc]
    [app.main.data.workspace.libraries :as dwl]
+   [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.render :refer [component-svg]]
    [app.main.store :as st]
@@ -34,7 +36,7 @@
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
-   [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
    [app.main.ui.ds.product.empty-state :refer [empty-state*]]
    [app.main.ui.hooks :as h]
@@ -49,47 +51,57 @@
    [rumext.v2 :as mf]))
 
 (defn- get-library-summary
-  "Given a library data return a summary representation of this library"
-  [data]
+  "Given a library data return a summary representation of this library.
+  Its animation styles count with `styles?` (Motion on)."
+  [data styles?]
   (let [colors       (count (:colors data))
         graphics     0
         typographies (count (:typographies data))
+        styles       (if styles? (count (:animation-styles data)) 0)
         components   (count (->> (ctkl/components-seq data)
                                  (remove #(cfv/is-secondary-variant? % data))))
         empty?       (and (zero? components)
                           (zero? graphics)
                           (zero? colors)
-                          (zero? typographies))]
+                          (zero? typographies)
+                          (zero? styles))]
 
     {:is-empty empty?
      :colors colors
      :graphics graphics
      :typographies typographies
+     :animation-styles styles
      :components components}))
 
 (defn- adapt-backend-summary
-  [summary]
+  "The summary of a shared library from the backend, as
+  `get-library-summary` gives it."
+  [summary styles?]
   (let [components   (or (-> summary :components :count) 0)
         graphics     (or (-> summary :media :count) 0)
         typographies (or (-> summary :typographies :count) 0)
         colors       (or (-> summary :colors :count) 0)
+        styles       (if styles? (or (-> summary :animation-styles :count) 0) 0)
 
         empty?       (and (zero? components)
                           (zero? graphics)
                           (zero? colors)
-                          (zero? typographies))]
+                          (zero? typographies)
+                          (zero? styles))]
     {:is-empty     empty?
      :components   components
      :graphics     graphics
      :typographies typographies
+     :animation-styles styles
      :colors       colors}))
 
 (defn- describe-library
-  [components-count graphics-count colors-count typography-count]
+  [components-count graphics-count colors-count typography-count style-count]
   (let [all-zero? (and (zero? components-count)
                        (zero? graphics-count)
                        (zero? colors-count)
-                       (zero? typography-count))]
+                       (zero? typography-count)
+                       (zero? style-count))]
     (str
      (str/join " · "
                (cond-> []
@@ -103,7 +115,10 @@
                  (conj (tr "workspace.libraries.colors" (c colors-count)))
 
                  (or all-zero? (pos? typography-count))
-                 (conj (tr "workspace.libraries.typography" (c typography-count)))))
+                 (conj (tr "workspace.libraries.typography" (c typography-count)))
+
+                 (pos? style-count)
+                 (conj (tr "workspace.libraries.animation-styles" (c style-count)))))
      "\u00A0")))
 
 (mf/defc library-description*
@@ -112,6 +127,7 @@
   (let [components-count (get summary :components)
         graphics-count   (get summary :graphics)
         typography-count (get summary :typographies)
+        style-count      (get summary :animation-styles)
         colors-count     (get summary :colors)]
 
     [:*
@@ -129,7 +145,11 @@
 
      (when (pos? typography-count)
        [:li {:class (stl/css :element-count)}
-        (tr "workspace.libraries.typography" (c typography-count))])]))
+        (tr "workspace.libraries.typography" (c typography-count))])
+
+     (when (pos? style-count)
+       [:li {:class (stl/css :element-count)}
+        (tr "workspace.libraries.animation-styles" (c style-count))])]))
 
 (mf/defc sample-library-entry*
   {::mf/private true}
@@ -189,10 +209,12 @@
         search-term*   (mf/use-state "")
         search-term    (deref search-term*)
 
+        motion?        (features/use-feature "animation/v1")
+
         ;; The summary of the current/local library
         ;; NOTE: we only need a snapshot of current library
         local-library  (deref refs/workspace-data)
-        summary        (get-library-summary local-library)
+        summary        (get-library-summary local-library motion?)
         empty-library? (empty-library? summary)
 
         selected       (h/use-shared-state mdc/colorpalette-selected-broadcast-key :recent)
@@ -359,7 +381,7 @@
              [:div {:class (stl/css-case :item-name true
                                          :item-name-short has-tokens?)} name]
              [:ul {:class (stl/css :item-contents)}
-              (let [summary (get-library-summary data)]
+              (let [summary (get-library-summary data motion?)]
                 [:*
                  [:> library-description* {:summary summary}]
                  (when (seq connected-to)
@@ -404,7 +426,7 @@
              [:div {:class (stl/css :item-name)} name]
              [:ul {:class (stl/css :item-contents)}
               (let [summary (-> (:library-summary library)
-                                (adapt-backend-summary))]
+                                (adapt-backend-summary motion?))]
                 [:> library-description* {:summary summary}])]]
 
             [:> icon-button* {:class (stl/css :item-button-shared)
@@ -440,10 +462,15 @@
              (tr "workspace.libraries.no-matches-for" search-term))]))]]))
 
 (defn- extract-assets
-  [file-data library summary?]
+  "The assets of `library` that `file-data` uses and that changed since
+  its last sync, by type, the first five only with `summary?`. The
+  animation styles count with `styles?` (Motion on); a style gone from
+  the library has the name its uses copied and `:deleted`."
+  [file-data library summary? styles?]
   (let [exceeded (volatile! {:components false
                              :colors false
-                             :typographies false})
+                             :typographies false
+                             :animation-styles false})
 
         truncate (fn [asset-type items]
                    (if (and summary? (> (count items) 5))
@@ -452,7 +479,7 @@
                        (take 5 items))
                      items))
 
-        assets (dwl/assets-need-sync library file-data)
+        assets (dwl/assets-need-sync library file-data styles?)
 
         component-ids  (into #{} (->> assets
                                       (filter #(= (:asset-type %) :component))
@@ -463,6 +490,9 @@
         typography-ids (into #{} (->> assets
                                       (filter #(= (:asset-type %) :typography))
                                       (map :asset-id)))
+        style-names    (into {} (comp (filter #(= (:asset-type %) :animation-style))
+                                      (map (juxt :asset-id :name)))
+                             assets)
 
         components   (->> component-ids
                           (map #(ctkl/get-component (:data library) %))
@@ -475,11 +505,18 @@
         typographies (->> typography-ids
                           (map #(ctyl/get-typography (:data library) %))
                           (sort-by #(str/lower (:name %)))
-                          (truncate :typographies))]
+                          (truncate :typographies))
+        styles       (->> style-names
+                          (map (fn [[id name]]
+                                 (or (ctas/get-animation-style (:data library) id)
+                                     {:id id :name name :deleted true})))
+                          (sort-by #(str/lower (:name %)))
+                          (truncate :animation-styles))]
 
     [library @exceeded {:components components
                         :colors colors
-                        :typographies typographies}]))
+                        :typographies typographies
+                        :animation-styles styles}]))
 
 (mf/defc updates-tab*
   {::mf/private true}
@@ -492,19 +529,21 @@
         ;; NOTE: we don't want to react on file changes, we just want
         ;; a snapshot of file on the momento of open the dialog
         file-data  (deref refs/workspace-data)
+        motion?    (features/use-feature "animation/v1")
 
         see-all-assets
         (mf/use-fn
          (fn []
            (reset! summary?* false)))
 
-        libs-assets (mf/with-memo [file-data libraries summary?*]
+        libs-assets (mf/with-memo [file-data libraries summary?* motion?]
                       (->> (vals libraries)
-                           (map #(extract-assets file-data % summary?))
-                           (filter (fn [[_ _ {:keys [components colors typographies]}]]
+                           (map #(extract-assets file-data % summary? motion?))
+                           (filter (fn [[_ _ {:keys [components colors typographies animation-styles]}]]
                                      (or (seq components)
                                          (seq colors)
-                                         (seq typographies))))))
+                                         (seq typographies)
+                                         (seq animation-styles))))))
 
         update         (mf/use-fn
                         (mf/deps file-id)
@@ -530,7 +569,7 @@
          [:div {:class (stl/css :section-list)}
           (for [[{:keys [id name] :as library}
                  exceeded
-                 {:keys [components colors typographies]}] libs-assets]
+                 {:keys [components colors typographies animation-styles]}] libs-assets]
             [:div {:class (stl/css :section-list-item)
                    :key (dm/str id)}
              [:div {:class (stl/css :item-content)}
@@ -539,7 +578,8 @@
                                                       (count components)
                                                       0
                                                       (count colors)
-                                                      (count typographies))]]
+                                                      (count typographies)
+                                                      (count animation-styles))]]
              [:> button* {:class (stl/css :item-update)
                           :disabled updating?
                           :variant "primary"
@@ -613,11 +653,33 @@
                    [:div {:class (stl/css :libraries-updates-item)
                           :key (uuid/next)}
                     [:div {:class (stl/css :name-block.ellipsis)}
+                     [:span {:class (stl/css :item-name)} "(...)"]]])])
+
+              (when-not (empty? animation-styles)
+                [:div {:class (stl/css :libraries-updates-column)}
+                 (for [style animation-styles]
+                   [:div {:class (stl/css :libraries-updates-item)
+                          :key (dm/str (:id style))}
+                    [:span {:class (stl/css :style-icon)}
+                     [:> icon* {:icon-id i/motion :size "s"}]]
+                    [:div {:class (stl/css :name-block)}
+                     [:span {:class (stl/css :item-name)
+                             :title (:name style)}
+                      (:name style)]
+                     (when (:deleted style)
+                       [:span {:class (stl/css :style-removed)
+                               :title (tr "workspace.libraries.update.style-removed-hint")}
+                        (tr "workspace.libraries.update.style-removed")])]])
+                 (when (:animation-styles exceeded)
+                   [:div {:class (stl/css :libraries-updates-item)
+                          :key (uuid/next)}
+                    [:div {:class (stl/css :name-block.ellipsis)}
                      [:span {:class (stl/css :item-name)} "(...)"]]])])]
 
              (when (or (pos? (:components exceeded))
                        (pos? (:colors exceeded))
-                       (pos? (:typographies exceeded)))
+                       (pos? (:typographies exceeded))
+                       (pos? (:animation-styles exceeded)))
                [:> lb/link-button*
                 {:on-click see-all-assets
                  :class (stl/css :libraries-updates-see-all)

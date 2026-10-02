@@ -129,110 +129,135 @@
 
 (mf/defc grid-item-library*
   [{:keys [file can-restore]}]
-  (mf/with-effect [file]
-    (when file
-      (let [font-ids (map :font-id (get-in file [:library-summary :typographies :sample] []))]
-        (run! fonts/ensure-loaded! font-ids))))
+  (let [motion? (features/use-feature "animation/v1")]
+    (mf/with-effect [file]
+      (when file
+        (let [font-ids (map :font-id (get-in file [:library-summary :typographies :sample] []))]
+          (run! fonts/ensure-loaded! font-ids))))
 
-  [:div {:class (stl/css-case :library-thumbnail true
-                              :is-deleted can-restore)}
-   (if (nil? file)
-     [:> loader* {:class (stl/css :grid-loader)
-                  :overlay true
-                  :title (tr "labels.loading")}]
-     (let [summary      (:library-summary file)
-           components   (:components summary)
-           colors       (:colors summary)
-           typographies (:typographies summary)]
-       [:*
-        (when (and (zero? (:count components)) (zero? (:count colors)) (zero? (:count typographies)))
-          [:*
-           [:div {:class (stl/css :library-asset-section)}
-            [:div {:class (stl/css :library-asset-title)}
-             [:span (tr "workspace.assets.components")]
-             [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") 0 ")"]]] ;; Unicode 00A0 is non-breaking space
-           [:div {:class (stl/css :library-asset-section)}
-            [:div {:class (stl/css :library-asset-title)}
-             [:span (tr "workspace.assets.colors")]
-             [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") 0 ")"]]] ;; Unicode 00A0 is non-breaking space
-           [:div {:class (stl/css :library-asset-section)}
-            [:div {:class (stl/css :library-asset-title)}
-             [:span (tr "workspace.assets.typography")]
-             [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") 0 ")"]]]]) ;; Unicode 00A0 is non-breaking space
+    [:div {:class (stl/css-case :library-thumbnail true
+                                :is-deleted can-restore)}
+     (if (nil? file)
+       [:> loader* {:class (stl/css :grid-loader)
+                    :overlay true
+                    :title (tr "labels.loading")}]
+       (let [summary      (:library-summary file)
+             components   (:components summary)
+             colors       (:colors summary)
+             typographies (:typographies summary)
+             styles       (when motion? (:animation-styles summary))
+             style-count  (or (:count styles) 0)]
+         [:*
+          (when (and (zero? (:count components)) (zero? (:count colors)) (zero? (:count typographies))
+                     (zero? style-count))
+            [:*
+             [:div {:class (stl/css :library-asset-section)}
+              [:div {:class (stl/css :library-asset-title)}
+               [:span (tr "workspace.assets.components")]
+               [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") 0 ")"]]] ;; Unicode 00A0 is non-breaking space
+             [:div {:class (stl/css :library-asset-section)}
+              [:div {:class (stl/css :library-asset-title)}
+               [:span (tr "workspace.assets.colors")]
+               [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") 0 ")"]]] ;; Unicode 00A0 is non-breaking space
+             [:div {:class (stl/css :library-asset-section)}
+              [:div {:class (stl/css :library-asset-title)}
+               [:span (tr "workspace.assets.typography")]
+               [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") 0 ")"]]]]) ;; Unicode 00A0 is non-breaking space
 
 
-        (when (pos? (:count components))
-          [:div {:class (stl/css :library-asset-section)}
-           [:div {:class (stl/css :library-asset-title)}
-            [:span (tr "workspace.assets.components")]
-            [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") (:count components) ")"]] ;; Unicode 00A0 is non-breaking space
-           [:div {:class (stl/css :library-asset-list)}
-            (for [component (:sample components)]
-              (let [root-id (:main-instance-id component)]
+          (when (pos? (:count components))
+            [:div {:class (stl/css :library-asset-section)}
+             [:div {:class (stl/css :library-asset-title)}
+              [:span (tr "workspace.assets.components")]
+              [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") (:count components) ")"]] ;; Unicode 00A0 is non-breaking space
+             [:div {:class (stl/css :library-asset-list)}
+              (for [component (:sample components)]
+                (let [root-id (:main-instance-id component)]
+                  [:div {:class (stl/css :library-asset-item)
+                         :key (str "assets-component-" (:id component))}
+                   [:& render/component-svg {:class (stl/css :library-asset-icon)
+                                             :root-shape (get-in component [:objects root-id])
+                                             :objects (:objects component)}] ;; Components in the summary come loaded with objects, even in v2
+                   [:div {:class (stl/css :library-name-block)}
+                    [:span {:class (stl/css :library-item-name)
+                            :title (:name component)}
+                     (:name component)]]]))
+              (when (> (:count components) (count (:sample components)))
+                [:div {:class (stl/css :library-asset-item)}
+                 [:div {:class (stl/css :library-name-block)}
+                  [:span {:class (stl/css :library-item-name)} "(...)"]]])]])
+
+          (when (pos? (:count colors))
+            [:div {:class (stl/css :library-asset-section)}
+             [:div {:class (stl/css :library-asset-title)}
+              [:span (tr "workspace.assets.colors")]
+              [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") (:count colors) ")"]] ;; Unicode 00A0 is non-breaking space
+             [:div {:class (stl/css :library-asset-list)}
+              (for [color (:sample colors)]
+                (let [default-name (cond
+                                     (:gradient color) (uc/gradient-type->string (get-in color [:gradient :type]))
+                                     (:color color) (:color color)
+                                     :else (:value color))]
+                  [:div {:class (stl/css :library-asset-item :library-color-item)
+                         :key (str "assets-color-" (:id color))}
+                   [:> bc/color-bullet* {:color {:color (:color color)
+                                                 :id (:id color)
+                                                 :opacity (:opacity color)}
+                                         :mini true}]
+                   [:div {:class (stl/css :library-name-block)}
+                    [:span {:class (stl/css :library-color-name)} (:name color)]
+                    (when-not (= (:name color) default-name)
+                      [:span {:class (stl/css :library-color-value)} (:color color)])]]))
+
+              (when (> (:count colors) (count (:sample colors)))
+                [:div {:class (stl/css :library-asset-item)}
+                 [:div {:class (stl/css :library-name-block)}
+                  [:span {:class (stl/css :library-item-name)} "(...)"]]])]])
+
+          (when (pos? (:count typographies))
+            [:div {:class (stl/css :library-asset-section)}
+             [:div {:class (stl/css :library-asset-title)}
+              [:span (tr "workspace.assets.typography")]
+              [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") (:count typographies) ")"]] ;; Unicode 00A0 is non-breaking space
+             [:div {:class (stl/css :library-asset-list)}
+              (for [typography (:sample typographies)]
                 [:div {:class (stl/css :library-asset-item)
-                       :key (str "assets-component-" (:id component))}
-                 [:& render/component-svg {:class (stl/css :library-asset-icon)
-                                           :root-shape (get-in component [:objects root-id])
-                                           :objects (:objects component)}] ;; Components in the summary come loaded with objects, even in v2
+                       :key (str "assets-typography-" (:id typography))}
+                 [:div {:class (stl/css :library-typography-sample)
+                        :style {:font-family (:font-family typography)
+                                :font-weight (:font-weight typography)
+                                :font-style (:font-style typography)}}
+                  (tr "workspace.assets.typography.sample")]
                  [:div {:class (stl/css :library-name-block)}
                   [:span {:class (stl/css :library-item-name)
-                          :title (:name component)}
-                   (:name component)]]]))
-            (when (> (:count components) (count (:sample components)))
-              [:div {:class (stl/css :library-asset-item)}
-               [:div {:class (stl/css :library-name-block)}
-                [:span {:class (stl/css :library-item-name)} "(...)"]]])]])
+                          :title (:name typography)}
+                   (:name typography)]]])
 
-        (when (pos? (:count colors))
-          [:div {:class (stl/css :library-asset-section)}
-           [:div {:class (stl/css :library-asset-title)}
-            [:span (tr "workspace.assets.colors")]
-            [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") (:count colors) ")"]] ;; Unicode 00A0 is non-breaking space
-           [:div {:class (stl/css :library-asset-list)}
-            (for [color (:sample colors)]
-              (let [default-name (cond
-                                   (:gradient color) (uc/gradient-type->string (get-in color [:gradient :type]))
-                                   (:color color) (:color color)
-                                   :else (:value color))]
-                [:div {:class (stl/css :library-asset-item :library-color-item)
-                       :key (str "assets-color-" (:id color))}
-                 [:> bc/color-bullet* {:color {:color (:color color)
-                                               :id (:id color)
-                                               :opacity (:opacity color)}
-                                       :mini true}]
+              (when (> (:count typographies) (count (:sample typographies)))
+                [:div {:class (stl/css :library-asset-item)}
                  [:div {:class (stl/css :library-name-block)}
-                  [:span {:class (stl/css :library-color-name)} (:name color)]
-                  (when-not (= (:name color) default-name)
-                    [:span {:class (stl/css :library-color-value)} (:color color)])]]))
+                  [:span {:class (stl/css :library-item-name)} "(...)"]]])]])
 
-            (when (> (:count colors) (count (:sample colors)))
-              [:div {:class (stl/css :library-asset-item)}
-               [:div {:class (stl/css :library-name-block)}
-                [:span {:class (stl/css :library-item-name)} "(...)"]]])]])
+          (when (pos? style-count)
+            [:div {:class (stl/css :library-asset-section)}
+             [:div {:class (stl/css :library-asset-title)}
+              [:span (tr "workspace.assets.animation-styles")]
+              [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") style-count ")"]] ;; Unicode 00A0 is non-breaking space
+             [:div {:class (stl/css :library-asset-list)}
+              (for [style (:sample styles)]
+                [:div {:class (stl/css :library-asset-item)
+                       :key (str "assets-animation-style-" (:id style))}
+                 [:span {:class (stl/css :library-style-icon)}
+                  [:> icon* {:icon-id i/motion :size "s"}]]
+                 [:div {:class (stl/css :library-name-block)}
+                  [:span {:class (stl/css :library-item-name)
+                          :title (:name style)}
+                   (:name style)]]])
 
-        (when (pos? (:count typographies))
-          [:div {:class (stl/css :library-asset-section)}
-           [:div {:class (stl/css :library-asset-title)}
-            [:span (tr "workspace.assets.typography")]
-            [:span {:class (stl/css :library-num-assets)} (str "\u00A0(") (:count typographies) ")"]] ;; Unicode 00A0 is non-breaking space
-           [:div {:class (stl/css :library-asset-list)}
-            (for [typography (:sample typographies)]
-              [:div {:class (stl/css :library-asset-item)
-                     :key (str "assets-typography-" (:id typography))}
-               [:div {:class (stl/css :library-typography-sample)
-                      :style {:font-family (:font-family typography)
-                              :font-weight (:font-weight typography)
-                              :font-style (:font-style typography)}}
-                (tr "workspace.assets.typography.sample")]
-               [:div {:class (stl/css :library-name-block)}
-                [:span {:class (stl/css :library-item-name)
-                        :title (:name typography)}
-                 (:name typography)]]])
-
-            (when (> (:count typographies) (count (:sample typographies)))
-              [:div {:class (stl/css :library-asset-item)}
-               [:div {:class (stl/css :library-name-block)}
-                [:span {:class (stl/css :library-item-name)} "(...)"]]])]])]))])
+              (when (> style-count (count (:sample styles)))
+                [:div {:class (stl/css :library-asset-item)}
+                 [:div {:class (stl/css :library-name-block)}
+                  [:span {:class (stl/css :library-item-name)} "(...)"]]])]])]))]))
 
 ;; --- Grid Item
 

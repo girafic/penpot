@@ -428,6 +428,29 @@
          (t/is (= 1 (count (get-in state [:workspace-undo :items]))))
          (t/is (nil? (get-in state [:workspace-animation :style-preview])) "the commit ends the preview"))))))
 
+(t/deftest changed-and-deleted-library-styles-need-a-sync-with-motion-on
+  (let [lib-id  (random-uuid)
+        _       (doseq [label [:lib-style [:lib-style 0] [:lib-style 1]]]
+                  (cthi/set-id! label (random-uuid)))
+        changed (assoc (style :lib-style) :modified-at (js/Date. 20000))
+        file    (setup-file
+                 :f (fn [_ tls]
+                      (update tls :board-a cta/add-animation (cthi/id :r2)
+                              (ctas/make-use changed lib-id 0))))
+        library {:id lib-id
+                 :synced-at (js/Date. 10000)
+                 :modified-at (js/Date. 30000)
+                 :data {:id lib-id :animation-styles {(:id changed) changed}}}
+        needs   (fn [library & args]
+                  (mapv (juxt :asset-type :asset-id :shape-id)
+                        (apply dwl/assets-need-sync library (:data file) args)))]
+    (t/is (= [[:animation-style (:id changed) (cthi/id :r2)]] (needs library true)))
+    (t/is (= [] (needs library false)) "without Motion, a change of styles alone needs no sync")
+    (t/is (= [[:animation-style (:id changed) (cthi/id :r2)]]
+             (needs (assoc-in library [:data :animation-styles] {}) true))
+          "a style gone from the library")
+    (t/is (= [] (needs library (js/Date. 40000) true)) "dismissed until the next change")))
+
 (t/deftest without-motion-the-style-events-do-nothing
   (t/async
     done

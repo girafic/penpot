@@ -8378,6 +8378,11 @@ msgid_plural "workspace.libraries.typography"
 msgstr[0] "1 typography"
 msgstr[1] "%s typographies"
 
+msgid "workspace.libraries.animation-styles"
+msgid_plural "workspace.libraries.animation-styles"
+msgstr[0] "1 animation style"
+msgstr[1] "%s animation styles"
+
 #: src/app/main/ui/workspace/libraries.cljs:381
 msgid "workspace.libraries.unlink-library-btn"
 msgstr "Disconnect library"
@@ -8389,6 +8394,12 @@ msgstr "Update"
 #: src/app/main/ui/workspace/libraries.cljs:624
 msgid "workspace.libraries.update.see-all-changes"
 msgstr "see all changes"
+
+msgid "workspace.libraries.update.style-removed"
+msgstr "Removed"
+
+msgid "workspace.libraries.update.style-removed-hint"
+msgstr "Removed from the library: updating turns its uses into presets"
 
 #: src/app/main/ui/workspace/libraries.cljs:671
 msgid "workspace.libraries.updates"

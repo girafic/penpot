@@ -683,11 +683,31 @@
   [_ shape library-id typography]
   (cty/uses-library-typography? shape library-id (:id typography)))
 
-(defn find-asset-type-usages
-  "Find all usages of an asset in a file (may be in pages or in the components
-  of the local library).
+(defn- find-style-usages
+  "The animation styles of `library-data` that the timelines of the pages
+  of `file-data` play, with the uses of each, by page:
+  ((style ((page uses) (page uses)...))...)."
+  [file-data library-data]
+  (let [library-id (:id library-data)
+        by-page    (into []
+                         (keep (fn [page]
+                                 (when-let [uses (seq (filter #(= library-id (:style-ref-file %))
+                                                              (ctas/page-uses page)))]
+                                   [page uses])))
+                         (ctpl/pages-seq file-data))]
+    (keep (fn [style]
+            (let [usages (keep (fn [[page uses]]
+                                 (when-let [uses (seq (filter #(= (:id style) (:style-ref-id %)) uses))]
+                                   [page uses]))
+                               by-page)]
+              (when (seq usages)
+                [style usages])))
+          (ctas/animation-styles-seq library-data))))
 
-  Returns a list ((asset ((container shapes) (container shapes)...))...)"
+(defn- find-shape-usages
+  "The usages of the components, colors or typographies (`asset-type`)
+  of `library-data` by the shapes of `file-data` (see
+  `find-asset-type-usages`)."
   [file-data library-data asset-type]
   (let [assets (case asset-type
                  :component  (ctkl/components-seq library-data)
@@ -711,21 +731,41 @@
                   [[asset instances]])))
             assets)))
 
+(defn find-asset-type-usages
+  "Find all usages of an asset in a file (may be in pages or in the components
+  of the local library). The uses of an `:animation-style` are in the
+  timelines of the pages: the containers are pages and the shapes are uses
+  (see `ctas/page-uses`).
+
+  Returns a list ((asset ((container shapes) (container shapes)...))...)"
+  [file-data library-data asset-type]
+  (if (= :animation-style asset-type)
+    (find-style-usages file-data library-data)
+    (find-shape-usages file-data library-data asset-type)))
+
 (defn used-in?
   "Checks if a specific asset is used in a given file (by any shape in its pages or in
-  the components of the local library)."
+  the components of the local library, or, for an `:animation-style`, by a
+  use in the timelines of its pages)."
   [file-data library-id asset asset-type]
   (letfn [(used-in-shape? [shape]
             (uses-asset? asset-type shape library-id asset))
 
           (used-in-container? [container]
-            (some used-in-shape? (ctn/shapes-seq container)))]
+            (some used-in-shape? (ctn/shapes-seq container)))
 
-    (some used-in-container? (containers-seq file-data))))
+          (used-in-page-timelines? [page]
+            (some #(ctas/uses-style? % library-id (:id asset)) (ctas/page-uses page)))]
+
+    (if (= :animation-style asset-type)
+      (some used-in-page-timelines? (ctpl/pages-seq file-data))
+      (some used-in-container? (containers-seq file-data)))))
 
 (defn used-assets-changed-since
   "Get a lazy sequence of all assets in the library that are in use by the file and have
-   been modified after the given date."
+   been modified after the given date. The animation styles count too, by
+   the uses in the timelines of the pages, and also when they are gone
+   from the library (see `ctas/used-styles-changed-since`)."
   [file-data library since-date]
   (letfn [(used-assets-shape [shape]
             (concat
@@ -738,7 +778,9 @@
                  (mapcat used-assets-shape)
                  (map #(assoc % :container-id (:id container)))))]
 
-    (mapcat used-assets-container (containers-seq file-data))))
+    (concat
+     (mapcat used-assets-container (containers-seq file-data))
+     (mapcat #(ctas/used-styles-changed-since % library since-date) (ctpl/pages-seq file-data)))))
 
 (defn get-or-add-library-page
   "If exists a page named 'Main components', get the id and calculate the position to start
@@ -898,6 +940,25 @@
             file-data
             used-typographies)))
 
+(defn- absorb-animation-styles
+  "`file-data` holding the animation styles of the library `library-id` it
+  plays, `used-styles` (see `find-asset-type-usages`), and its uses of
+  them linked to it (see `ctas/remap-style-refs`)."
+  [file-data library-id used-styles]
+  (let [file-id   (:id file-data)
+        style-ids (into #{} (map (comp :id first)) used-styles)
+        page-ids  (into #{} (comp (mapcat second) (map (comp :id first))) used-styles)]
+    (as-> file-data $
+      (reduce (fn [file-data [style _]]
+                (ctas/add-animation-style file-data style))
+              $
+              used-styles)
+      (reduce (fn [file-data page-id]
+                (ctpl/update-page file-data page-id
+                                  #(update % :timelines ctas/remap-style-refs library-id file-id style-ids)))
+              $
+              page-ids))))
+
 (defn absorb-assets
   "Find all assets of a library that are used in the file, and
   move them to the file local library."
@@ -918,7 +979,12 @@
         used-typographies (find-asset-type-usages file-data library-data :typography)
         file-data         (cond-> file-data
                             (d/not-empty? used-typographies)
-                            (absorb-typographies used-typographies))]
+                            (absorb-typographies used-typographies))
+
+        used-styles       (find-asset-type-usages file-data library-data :animation-style)
+        file-data         (cond-> file-data
+                            (d/not-empty? used-styles)
+                            (absorb-animation-styles (:id library-data) used-styles))]
     file-data))
 
 ;; Debug helpers

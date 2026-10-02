@@ -7,11 +7,14 @@
 (ns common-tests.types.absorb-assets-test
   (:require
    [app.common.data :as d]
+   [app.common.files.changes-builder :as pcb]
    [app.common.test-helpers.components :as thc]
    [app.common.test-helpers.compositions :as tho]
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
+   [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
    [app.common.types.file :as ctf]
@@ -142,3 +145,71 @@
 
     (t/is (= (:typography-ref-id text-node') (thi/id :typography1)))
     (t/is (= (:typography-ref-file text-node') (:id file')))))
+
+(defn- with-style
+  "`library` with an animation style `label` of one fade."
+  [library label]
+  (ctf/update-file-data library #(ctas/add-animation-style
+                                  % (ctas/make-animation-style
+                                     {:id (thi/new-id! label)
+                                      :name (name label)
+                                      :entries [{:type :fade :start 0 :duration 300}]}))))
+
+(defn- style-use
+  [library label start]
+  (ctas/make-use (ctas/get-animation-style (:data library) (thi/id label)) (:id library) start))
+
+(t/deftest absorb-animation-styles
+  (let [;; Setup
+        library (-> (thf/sample-file :library :is-shared true)
+                    (with-style :style1)
+                    (with-style :unused))
+        other   (-> (thf/sample-file :other :is-shared true)
+                    (with-style :other-style))
+
+        file    (-> (thf/sample-file :file)
+                    (tho/add-frame :board1)
+                    (ths/add-sample-shape :shape1 :type :rect :parent-label :board1))
+        page    (thf/current-page file)
+        file    (thf/apply-changes
+                 file
+                 (-> (pcb/empty-changes nil)
+                     (pcb/with-page page)
+                     (pcb/set-timeline (thi/id :board1)
+                                       (-> (cta/make-timeline {:board-id (thi/id :board1) :duration 1000})
+                                           (cta/add-animation (thi/id :shape1) (style-use library :style1 0))
+                                           (cta/add-animation (thi/id :shape1) (style-use other :other-style 300))))))
+
+        used    (ctf/find-asset-type-usages (ctf/file-data file) (:data library) :animation-style)
+
+        ;; Action
+        file' (ctf/update-file-data
+               file
+               #(ctf/absorb-assets % (:data library)))
+
+        _ (thf/validate-file! file')
+
+        ;; Get
+        styles'     (ctas/animation-styles-seq (ctf/file-data file'))
+        animations' (get-in (thf/current-page file')
+                            [:timelines (thi/id :board1) :tracks (thi/id :shape1) :animations])]
+
+    ;; Check
+    (t/is (= [[(thi/id :style1) [[(:id page) [(thi/id :style1)]]]]]
+             (for [[style usages] used]
+               [(:id style) (for [[page uses] usages]
+                              [(:id page) (map :style-ref-id uses)])]))
+          "the styles the file plays, with their uses by page")
+    (t/is (ctf/used-in? (ctf/file-data file) (:id library)
+                        (ctas/get-animation-style (:data library) (thi/id :style1)) :animation-style))
+    (t/is (not (ctf/used-in? (ctf/file-data file) (:id library)
+                             (ctas/get-animation-style (:data library) (thi/id :unused)) :animation-style)))
+
+    (t/is (= [(thi/id :style1)] (map :id styles')) "only the styles in use")
+    (t/is (= "style1" (:name (first styles'))))
+    (t/is (= (:entries (ctas/get-animation-style (:data library) (thi/id :style1)))
+             (:entries (first styles'))))
+
+    (t/is (= [[(thi/id :style1) (:id file')] [(thi/id :other-style) (:id other)]]
+             (map (juxt :style-ref-id :style-ref-file) animations'))
+          "the uses of the library point at the file, those of another library stay")))
