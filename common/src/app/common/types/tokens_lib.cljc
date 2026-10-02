@@ -1756,8 +1756,13 @@ Will return a value that matches this schema:
       (let [child-path (if (empty? parent-path)
                          (name k)
                          (str parent-path "." k))]
-        (if (and (map? v)
-                 (not (contains? v "$value")))
+        (cond
+          ;; A property of the group (its `$type`, `$description`...),
+          ;; no token: a token is an object.
+          (not (map? v))
+          tokens
+
+          (not (contains? v "$value"))
           ;; Group: recurse, letting the group's `$type` (if any) replace
           ;; the inherited type for descendants that don't declare their
           ;; own `$type`.
@@ -1766,6 +1771,8 @@ Will return a value that matches this schema:
                   v
                   child-path
                   (or (get v "$type") inherited-type)))
+
+          :else
           ;; Token: resolve the type from the token's own `$type`,
           ;; falling back to the inherited group `$type`.
           (let [type-key   (or (get v "$type") inherited-type)

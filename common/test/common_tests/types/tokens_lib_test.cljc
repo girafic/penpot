@@ -1354,6 +1354,7 @@
      ;; that does not declare its own $type. Tokens are identified by the
      ;; presence of $value, not by the presence of $type.
      (let [json {"colors" {"$type"  "color"
+                           "$description" "Brand colors"
                            "red"    {"$value" "#ff0000"}
                            "blue"   {"$value" "#0000ff"
                                      "$description" "Brand blue"}
@@ -1390,7 +1391,12 @@
                                    {:name "space.large"
                                     :type :dimensions
                                     :value "16px"
-                                    :description ""}))))))
+                                    :description ""})))
+       (t/testing "the properties of a group are no tokens"
+         (t/is (nil? (ctob/get-token-by-name lib "set" "colors.$type")))
+         (t/is (nil? (ctob/get-token-by-name lib "set" "colors.$description")))
+         (t/is (nil? (ctob/get-token-by-name lib "set" "space.$type")))
+         (t/is (= 5 (count (ctob/get-tokens lib (ctob/get-id (ctob/get-set-by-name lib "set"))))))))))
 
 #?(:clj
    (t/deftest parse-multi-set-legacy-json
