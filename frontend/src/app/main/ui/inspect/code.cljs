@@ -65,14 +65,13 @@
     st/state =)))
 
 (defn- use-timelines
-  "The animation timelines of the page, by board."
-  [from]
+  "The animation timelines of the page `page-id`, by board."
+  [from page-id]
   (let [timelines-ref
-        (mf/with-memo [from]
+        (mf/with-memo [from page-id]
           (if (= from :workspace)
             (l/derived :timelines refs/workspace-page)
-            (let [page-id (:page-id (:query-params (deref refs/route)))]
-              (l/derived #(dm/get-in % [:viewer :pages page-id :timelines]) st/state =))))]
+            (l/derived #(dm/get-in % [:viewer :pages page-id :timelines]) st/state =)))]
     (mf/deref timelines-ref)))
 
 (defn- animation-css
@@ -88,13 +87,14 @@
          (remove str/blank?)
          (str/join "\n\n"))))
 
-(defn- use-objects [from]
+(defn- use-objects [from page-id]
   (let [page-objects-ref
-        (mf/with-memo [from]
+        (mf/with-memo [from page-id]
           (if (= from :workspace)
             ;; FIXME: fix naming consistency issues
             refs/workspace-page-objects
-            (get-viewer-objects)))]
+            ;; The page shown, by id: the one of the route is text.
+            (get-viewer-objects page-id)))]
     (mf/deref page-objects-ref)))
 
 (defn- shapes->images
@@ -122,7 +122,7 @@
     (str/format page-template style-code markup-code)))
 
 (mf/defc code*
-  [{:keys [shapes frame on-expand from]}]
+  [{:keys [shapes frame on-expand from page-id]}]
   (let [style-type*    (mf/use-state "css")
         markup-type*   (mf/use-state "html")
         fontfaces-css* (mf/use-state nil)
@@ -139,8 +139,8 @@
         collapsed-css?    (contains? @collapsed* :css)
         collapsed-markup? (contains? @collapsed* :markup)
 
-        objects        (use-objects from)
-        timelines      (use-timelines from)
+        objects        (use-objects from page-id)
+        timelines      (use-timelines from page-id)
 
         shapes
         (mf/with-memo [shapes frame]

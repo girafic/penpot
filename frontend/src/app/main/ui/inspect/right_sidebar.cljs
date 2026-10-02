@@ -205,7 +205,8 @@
               [:> code* {:frame frame
                          :shapes shapes
                          :on-expand handle-expand
-                         :from from}])]
+                         :from from
+                         :page-id page-id}])]
            [:> tab-switcher* {:tabs tabs
                               :selected (name @section)
                               :on-change handle-change-tab
@@ -225,7 +226,8 @@
               [:> code* {:frame frame
                          :shapes shapes
                          :on-expand handle-expand
-                         :from from}])])]]
+                         :from from
+                         :page-id page-id}])])]]
 
        [:*
         [:div {:class (stl/css :empty)}
