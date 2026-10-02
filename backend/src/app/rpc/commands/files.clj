@@ -936,7 +936,10 @@
              :library-id (str (:id ldata))
              :file-id (str file-id))
 
+      ;; With its features, so the pointer maps the absorption changed
+      ;; are persisted (see `bfc/encode-file`)
       (bfc/update-file! cfg {:id file-id
+                             :features (:features file)
                              :migrations (:migrations file)
                              :revn (inc (:revn file))
                              :data (:data file)
