@@ -6,7 +6,14 @@
 
 (ns frontend-tests.data.exports-animation-test
   (:require
+   [app.common.data :as d]
+   [app.common.files.changes-builder :as pcb]
+   [app.common.test-helpers.components :as cthc]
+   [app.common.test-helpers.compositions :as ctho]
+   [app.common.test-helpers.files :as cthf]
+   [app.common.test-helpers.ids-map :as cthi]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.exports.animation :as dea]
@@ -15,6 +22,7 @@
    [app.util.zip :as uz]
    [cljs.test :as t :include-macros true]
    [clojure.string :as str]
+   [potok.v2.core :as ptk]
    [promesa.core :as p]))
 
 (defn- log
@@ -340,6 +348,277 @@
                     (t/is (nil? err) (str err))
                     (done)))))))
 
+;; SOUND
+
+(def ^:private one-frame
+  [{:data (js/Uint8ClampedArray. #js [0 0 0 255]) :width 1 :height 1}])
+
+(defn- audio-media
+  "The fakes of `media-fakes`, for a video with sound: what the output
+  and the sources are asked goes to `log`, in order, and the browser
+  encodes the audio codecs of `encodable`."
+  [log encodable]
+  (merge (media-fakes (fn [_ _] (js/Promise.resolve "avc")))
+         {:output (fn [_opts]
+                    #js {:addVideoTrack (fn [_ _] (swap! log conj :video-track))
+                         :addAudioTrack (fn [source] (swap! log conj [:audio-track (.-codec source)]))
+                         :start (fn [] (swap! log conj :start) (js/Promise.resolve nil))
+                         :finalize (fn [] (swap! log conj :finalize) (js/Promise.resolve nil))})
+          :sample-source (fn [_opts]
+                           #js {:add (fn [_ _] (swap! log conj :frame) (js/Promise.resolve nil))
+                                :close (fn [] (swap! log conj :frames-closed))})
+          :audio-source (fn [opts]
+                          #js {:codec (.-codec opts)
+                               :add (fn [buffer]
+                                      (swap! log conj [:audio (.-name buffer)])
+                                      (js/Promise.resolve nil))
+                               :close (fn [] (swap! log conj :audio-closed))})
+          :first-audio-codec (fn [codecs _]
+                               (swap! log conj [:probe (vec (array-seq codecs))])
+                               (js/Promise.resolve (some (set encodable) (array-seq codecs))))}))
+
+(defn- failed
+  [done]
+  (fn [err]
+    (t/is (nil? err) (str err))
+    (done)))
+
+(t/deftest encode-video-adds-the-sound-after-the-frames
+  (t/async
+    done
+    (let [log (atom [])]
+      (-> (dea/encode-video (merge {:format :mp4 :frames (into one-frame one-frame) :fps 30 :bitrate 1000
+                                    :audio #js {:name "mix"}}
+                                   (audio-media log #{"aac" "opus"})))
+          (.then (fn [result]
+                   (t/is (= :ok (:status result)))
+                   (t/is (nil? (:audio-dropped result)))
+                   (t/is (= [[:probe ["aac" "opus"]] :video-track [:audio-track "aac"] :start
+                             :frame :frame :frames-closed [:audio "mix"] :audio-closed :finalize]
+                            @log)
+                         "one audio track, added before the start, fed after the frames")
+                   (done)))
+          (.catch (failed done))))))
+
+(t/deftest a-video-without-sound-has-no-audio-track
+  (t/async
+    done
+    (let [log (atom [])]
+      (-> (dea/encode-video (merge {:format :webm :frames one-frame :fps 30 :bitrate 1000}
+                                   (audio-media log #{"opus"})))
+          (.then (fn [result]
+                   (t/is (= :ok (:status result)))
+                   (t/is (nil? (:audio-dropped result)))
+                   (t/is (= [:video-track :start :frame :frames-closed :finalize] @log))
+                   (done)))
+          (.catch (failed done))))))
+
+(t/deftest a-video-goes-without-sound-when-no-codec-encodes-it
+  (t/async
+    done
+    (let [log (atom [])]
+      (-> (dea/encode-video (merge {:format :webm :frames one-frame :fps 30 :bitrate 1000
+                                    :audio #js {:name "mix"}}
+                                   (audio-media log #{"aac"})))
+          (.then (fn [result]
+                   (t/is (= :ok (:status result)))
+                   (t/is (true? (:audio-dropped result)))
+                   (t/is (= [[:probe ["opus" "vorbis"]] :video-track :start :frame :frames-closed :finalize]
+                            @log))
+                   (done)))
+          (.catch (failed done))))))
+
+(t/deftest the-sound-of-a-video-takes-a-codec-its-format-carries
+  (t/async
+    done
+    (let [codec (fn [format encodable]
+                  (dea/audio-codec format {:first-audio-codec
+                                           (fn [codecs _]
+                                             (js/Promise.resolve (some (set encodable) (array-seq codecs))))
+                                           :quality fake-quality}))]
+      (-> (p/all [(codec :mp4 #{"aac" "opus" "vorbis"})
+                  (codec :mp4 #{"opus" "vorbis"})
+                  (codec :mp4 #{"vorbis"})
+                  (codec :webm #{"aac" "opus" "vorbis"})
+                  (codec :webm #{"aac" "vorbis"})
+                  (codec :webm #{"aac"})])
+          (p/then (fn [codecs]
+                    (t/is (= ["aac" "opus" nil "opus" "vorbis" nil] (vec codecs))
+                          "MP4 takes AAC, else Opus; WebM Opus, else Vorbis")
+                    (done)))
+          (p/catch (failed done))))))
+
+(defn- u32
+  [n]
+  (mapv #(bit-and (unsigned-bit-shift-right n %) 255) [24 16 8 0]))
+
+(defn- ascii
+  [text]
+  (mapv #(.charCodeAt text %) (range (count text))))
+
+(defn- box
+  "The bytes of an MP4 box of `type` holding `parts`."
+  [type & parts]
+  (let [body (vec (apply concat parts))]
+    (into (u32 (+ 8 (count body))) (concat (ascii type) body))))
+
+(defn- track
+  "A track whose media is `handler`, of `n` samples in one chunk at
+  `offset` of the file."
+  [handler n offset]
+  (box "trak"
+       (box "mdia"
+            (box "hdlr" (u32 0) (u32 0) (ascii handler) (repeat 13 0))
+            (box "minf"
+                 (box "stbl"
+                      (box "stsz" (u32 0) (u32 0) (u32 n) (mapcat (fn [_] (u32 2)) (range n)))
+                      (box "stco" (u32 0) (u32 1) (u32 offset)))))))
+
+(defn- movie
+  "An MP4 whose movie box comes first, with a picture track and a sound
+  track of 3 samples, and the chunk offsets of both."
+  []
+  (let [ftyp    (box "ftyp" (ascii "isom") (u32 0))
+        sizes   (count (concat ftyp (box "moov" (track "vide" 1 0) (track "soun" 3 0))))
+        picture (+ sizes 8)
+        sound   (+ picture 2)]
+    {:bytes (js/Uint8Array. (clj->js (concat ftyp
+                                             (box "moov" (track "vide" 1 picture) (track "soun" 3 sound))
+                                             (box "mdat" [7 7] [9 9 9 9 9 9]))))
+     :picture picture
+     :sound sound}))
+
+(defn- read-boxes
+  [^js view start end]
+  (loop [offset start acc []]
+    (if (>= offset end)
+      acc
+      (let [size (.getUint32 view offset)
+            type (apply str (map #(char (.getUint8 view (+ offset 4 %))) (range 4)))]
+        (recur (+ offset size) (conj acc {:type type :offset offset :size size}))))))
+
+(defn- box-tree
+  "The boxes of the MP4 `buffer`, nested as far as a sample table."
+  [buffer]
+  (let [view (js/DataView. buffer)
+        walk (fn walk [start end]
+               (mapv (fn [{:keys [type offset size] :as b}]
+                       (cond-> b
+                         (#{"moov" "trak" "mdia" "minf" "stbl"} type)
+                         (assoc :children (walk (+ offset 8) (+ offset size)))))
+                     (read-boxes view start end)))]
+    (walk 0 (.-byteLength buffer))))
+
+(defn- find-boxes
+  [tree type]
+  (mapcat #(if (= type (:type %)) [%] (find-boxes (:children %) type)) tree))
+
+(t/deftest an-aac-movie-gets-a-roll-group
+  (let [{:keys [bytes picture sound]} (movie)
+        before (.-buffer bytes)
+        after  (dea/add-aac-roll-group before)
+        view   (js/DataView. after)
+        tree   (box-tree after)
+        [video audio] (find-boxes tree "stbl")
+        types  #(mapv :type (:children %))]
+    (t/is (= (+ 54 (.-byteLength before)) (.-byteLength after)))
+    (t/is (= (.-byteLength after) (reduce + (map :size tree))) "the boxes fill the file")
+    (t/is (= ["stsz" "stco"] (types video)))
+    (t/is (= ["stsz" "stco" "sgpd" "sbgp"] (types audio)))
+    (let [sgpd (d/seek #(= "sgpd" (:type %)) (:children audio))
+          sbgp (d/seek #(= "sbgp" (:type %)) (:children audio))]
+      (t/is (= -1 (.getInt16 view (+ (:offset sgpd) 24))) "a roll distance of -1")
+      (t/is (= 3 (.getUint32 view (+ (:offset sbgp) 20))) "for its 3 samples"))
+    (t/testing "the chunks still point at their samples"
+      (let [[v a] (map #(.getUint32 view (+ (:offset %) 16)) (find-boxes tree "stco"))
+            bytes (js/Uint8Array. after)]
+        (t/is (= [(+ 54 picture) (+ 54 sound)] [v a]))
+        (t/is (= [7 9] [(aget bytes v) (aget bytes a)]))))
+    (t/testing "once"
+      (t/is (identical? after (dea/add-aac-roll-group after))))
+    (t/testing "a file that is no such movie stays as it is"
+      (let [webm (.-buffer (js/Uint8Array. #js [26 69 223 163 0 0 0 0]))]
+        (t/is (identical? webm (dea/add-aac-roll-group webm)))))))
+
+(defn- clip-at
+  [start duration]
+  {:audio-id (uuid/next) :name "beat.mp3" :source-duration 4000 :start start :duration duration})
+
+(t/deftest the-sound-of-a-video-lasts-as-its-frames
+  (t/async
+    done
+    (let [mixed  (atom nil)
+          mix    (fn [plan length _]
+                   (reset! mixed [(mapv (juxt :at :offset :length) plan) length])
+                   (js/Promise.resolve #js {:name "mix"}))
+          ;; the second clip is cut at the end of the timeline
+          tl     (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                     (ctau/add-audio-clip (clip-at 200 300))
+                     (ctau/add-audio-clip (clip-at 800 600)))
+          n      (count (cta/frame-times 1000 30))
+          there  (count (cta/ping-pong-frames (range n) false))]
+      (-> (dea/export-audio tl n 30 :mix mix)
+          (p/then
+           (fn [sound]
+             (t/is (= "mix" (.-name sound)))
+             (t/is (= [[[200 0 300] [800 0 200]] (/ (* 1000 n) 30)] @mixed) "as long as the frames")
+             (dea/export-audio (assoc tl :playback :ping-pong) there 30 :mix mix)))
+          (p/then
+           (fn [_]
+             (t/is (= [[[200 0 300] [800 0 200]] (/ (* 1000 there) 30)] @mixed)
+                   "there and back, silent on the way back")
+             (dea/export-audio (assoc tl :playback :loop) n 30 :mix mix)))
+          (p/then
+           (fn [_]
+             (t/is (= [[200 0 300] [800 0 200]] (first @mixed)) "a loop plays its clips once")
+             (reset! mixed nil)
+             (dea/export-audio (cta/make-timeline {:board-id (uuid/next) :duration 1000}) n 30 :mix mix)))
+          (p/then
+           (fn [sound]
+             (t/is (nil? sound) "no clip, no sound")
+             (t/is (nil? @mixed))
+             (done)))
+          (p/catch (failed done))))))
+
+(defn- copy-scene
+  "A component whose main board plays a clip, with a copy of it in board
+  B, whose timeline plays `own-clip` when given."
+  [own-clip]
+  (let [file    (-> (cthf/sample-file :file1)
+                    (ctho/add-simple-component :anim :main :main-rect
+                                               :root-params {:x 0 :y 0 :width 200 :height 200}
+                                               :child-params {:x 10 :y 20 :width 50 :height 50})
+                    (ctho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
+                    (cthc/instantiate-component :anim :copy :parent-label :board-b))
+        main    (cthi/id :main)
+        board   (cthi/id :board-b)
+        main-tl (-> (cta/make-timeline {:board-id main :duration 1000 :playback :loop})
+                    (cta/add-keyframe (cthi/id :main-rect) {:time 0 :property :x :value 10})
+                    (cta/add-keyframe (cthi/id :main-rect) {:time 1000 :property :x :value 60})
+                    (ctau/add-audio-clip (assoc (clip-at 0 1000) :name "main")))
+        file    (cthf/apply-changes
+                 file
+                 (cond-> (-> (pcb/empty-changes nil)
+                             (pcb/with-page (cthf/current-page file))
+                             (pcb/set-timeline main main-tl))
+                   (some? own-clip)
+                   (pcb/set-timeline board (-> (cta/make-timeline {:board-id board :duration 2000})
+                                               (ctau/add-audio-clip own-clip)))))]
+    {:page (cthf/current-page file) :files {(:id file) file} :board board}))
+
+(t/deftest a-board-exports-its-own-clips-and-not-those-of-the-mains-of-its-copies
+  (cthi/reset-idmap!)
+  (let [{:keys [page files board]} (copy-scene (assoc (clip-at 500 1000) :name "own"))
+        tl (dwa/board-export-timeline page files board)]
+    (t/is (seq (:tracks tl)) "it plays the copy")
+    (t/is (= ["own"] (map :name (vals (:audio-clips tl)))))
+    (t/is (= (get-in page [:timelines board :audio-clips]) (:audio-clips tl))))
+  (cthi/reset-idmap!)
+  (let [{:keys [page files board]} (copy-scene nil)
+        tl (dwa/board-export-timeline page files board)]
+    (t/is (seq (:tracks tl)) "it plays the copy")
+    (t/is (empty? (:audio-clips tl)) "none of its own, none")))
+
 (t/deftest estimated-size-is-positive-for-raster
   (t/is (pos? (dea/estimated-size :mp4 100 80 :high 1000 30)))
   (t/is (pos? (dea/estimated-size :gif 100 80 :high 1000 30)))
@@ -495,3 +774,50 @@
     (let [[_ shape props] (first @calls)]
       (t/is (= [:opacity :text-units] props))
       (t/is (= [] (:text-units shape)) "whatever the canvas posed"))))
+
+;; AUDIO IN THE EXPORT PANEL
+
+(t/deftest formats-without-sound-say-so
+  (let [{:keys [objects bid]} (test-objects)
+        tl    (cta/make-timeline {:board-id bid :duration 1000})
+        clips (ctau/add-audio-clip tl (clip-at 0 500))]
+    (t/is (= {} (dea/export-caveats objects tl)) "no clips, nothing to say")
+    (t/is (= {:gif [:no-audio] :avif [:no-audio] :svg [:no-audio] :lottie [:no-audio] :dotlottie [:no-audio]}
+             (dea/export-caveats objects clips))
+          "MP4 and WebM carry it")
+    (t/testing "a board that plays only audio"
+      (t/is (= [:mp4 :webm :gif :avif :svg :lottie :dotlottie] (dea/export-formats objects clips true)))
+      (t/is (not-any? dea/audio-formats (dea/export-formats objects clips false))
+            "without the WASM renderer, no format with sound"))))
+
+(t/deftest the-end-of-an-export-frees-the-panel
+  (let [types #(mapv ptk/type (dea/export-finished %))]
+    (t/is (= [:app.main.data.notifications/show ::dea/finish-export-state] (types {:status :unavailable}))
+          "a codec it has not: the error, and the panel free again")
+    (t/is (= [:app.main.data.notifications/show ::dea/finish-export-state] (types {:status :ok :audio-dropped true}))
+          "a video without its sound: a warning")
+    (t/is (= [:app.main.data.notifications/show ::dea/finish-export-state] (types {:status :ok :fitted [4092 2302]}))
+          "a video smaller than asked: a warning")
+    (t/is (= [:app.main.data.notifications/show ::dea/finish-export-state]
+             (types {:status :ok :fitted [4092 2302] :audio-dropped true}))
+          "both in one")
+    (t/is (= [::dea/finish-export-state] (types {:status :ok})))))
+
+(t/deftest a-video-too-large-for-the-encoder-is-made-as-large-as-it-takes
+  (t/async
+    done
+    ;; as Chrome's H.264: at most 4096 px a side and 4096 × 2304 px in all
+    (let [encodable? (fn [w h] (js/Promise.resolve (and (<= w 4096) (<= h 4096) (<= (* w h) (* 4096 2304)))))]
+      (-> (js/Promise.all #js [(dea/fit-video-size 1920 1080 encodable?)
+                               (dea/fit-video-size 5120 2880 encodable?)
+                               (dea/fit-video-size 3000 6000 encodable?)
+                               (dea/fit-video-size 100 100 (fn [_ _] (js/Promise.resolve false)))])
+          (.then
+           (fn [[full wide tall none]]
+             (t/is (= 1 full) "as it is when it fits")
+             (t/is (< 4070 (* 5120 wide) 4096) "as wide as it takes, in proportion")
+             (t/is (< (* 0.99 4096 2304) (* 5120 wide 2880 wide) (* 4096 2304)))
+             (t/is (< 4070 (* 6000 tall) 4096) "a tall one as high as it takes")
+             (t/is (nil? none) "none at all: unavailable")
+             (done)))
+          (.catch (fn [cause] (t/is (nil? cause) (str cause)) (done)))))))

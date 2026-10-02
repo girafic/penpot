@@ -24,6 +24,7 @@
    [frontend-tests.data.uploads-test]
    [frontend-tests.data.viewer-playback-test]
    [frontend-tests.data.viewer-test]
+   [frontend-tests.data.workspace-audio-test]
    [frontend-tests.data.workspace-colors-test]
    [frontend-tests.data.workspace-comments-test]
    [frontend-tests.data.workspace-interactions-test]
@@ -118,6 +119,7 @@
    [frontend-tests.util-text-editor-test]
    [frontend-tests.util-webapi-test]
    [frontend-tests.util-zip-test]
+   [frontend-tests.util.audio-test]
    [frontend-tests.util.dom.dnd-test]
    [frontend-tests.worker-snap-test]
    [goog.object :as gobj]))
@@ -154,6 +156,7 @@
    'frontend-tests.data.uploads-test
    'frontend-tests.data.viewer-playback-test
    'frontend-tests.data.viewer-test
+   'frontend-tests.data.workspace-audio-test
    'frontend-tests.data.workspace-colors-test
    'frontend-tests.data.workspace-comments-test
    'frontend-tests.data.workspace-interactions-test
@@ -247,6 +250,7 @@
    'frontend-tests.util-simple-math-test
    'frontend-tests.util-text-editor-test
    'frontend-tests.util-webapi-test
+   'frontend-tests.util.audio-test
    'frontend-tests.util.dom.dnd-test
    'frontend-tests.util-zip-test
    'frontend-tests.worker-snap-test])

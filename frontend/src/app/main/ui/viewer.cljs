@@ -35,6 +35,7 @@
    [app.main.ui.viewer.login]
    [app.main.ui.viewer.share-link]
    [app.main.ui.viewer.thumbnails :refer [thumbnails-panel*]]
+   [app.util.audio :as audio]
    [app.util.dom :as dom]
    [app.util.dom.normalize-wheel :as nw]
    [app.util.globals :as globals]
@@ -120,18 +121,28 @@
 (def ^:private ref:timeline-playing?
   (l/derived #(boolean (dm/get-in % [:viewer-local :timeline :playing?])) st/state))
 
+(def ^:private ref:audio-muted?
+  (l/derived dv/audio-muted? st/state))
+
 (mf/defc timeline-controls*
   "Play, pause and stop the animation of the board `board-id` (Penpot
   Motion): its timeline, or the animations of the component copies in
   it (see `dv/board-clock`)."
   {::mf/private true}
-  [{:keys [board-id]}]
+  [{:keys [board-id sound?]}]
   (let [playing? (mf/deref ref:timeline-playing?)
+        muted?   (mf/deref ref:audio-muted?)
 
+        ;; a page may start sound only from a user gesture: this one
         on-toggle
         (mf/use-fn
          (mf/deps board-id)
-         #(st/emit! (dv/toggle-play-timeline board-id)))
+         #(do (audio/unlock!)
+              (st/emit! (dv/toggle-play-timeline board-id))))
+
+        on-toggle-sound
+        (mf/use-fn #(do (audio/unlock!)
+                        (st/emit! (dv/toggle-audio-muted))))
 
         on-stop
         (mf/use-fn #(st/emit! (dv/stop-timeline)))]
@@ -151,10 +162,19 @@
                :class (stl/css :timeline-button)
                :title (tr "workspace.animation.rewind")
                :on-click on-stop}
-      [:span {:class (stl/css :stop-icon)}]]]))
+      [:span {:class (stl/css :stop-icon)}]]
+     (when sound?
+       [:button {:type "button"
+                 :class (stl/css :timeline-button)
+                 :title (if muted?
+                          (tr "workspace.animation.unmute")
+                          (tr "workspace.animation.mute"))
+                 :aria-pressed (not muted?)
+                 :on-click on-toggle-sound}
+        [:> icon* {:icon-id (if muted? i/volume-off i/volume) :size "s"}]])]))
 
 (mf/defc viewer-pagination
-  [{:keys [index num-frames left-bar right-bar comment-sidebar animated board-id] :as props}]
+  [{:keys [index num-frames left-bar right-bar comment-sidebar animated sound board-id] :as props}]
   (let [go-prev-frame  (mf/use-fn #(st/emit! dv/select-prev-frame))
         go-next-frame  (mf/use-fn #(st/emit! dv/select-next-frame))
         go-first-frame (mf/use-fn #(st/emit! dv/select-first-frame))]
@@ -181,12 +201,12 @@
        [:span {:class (stl/css :counter)}
         (str/join " / " [(+ index 1) num-frames])]
        (when animated
-         [:> timeline-controls* {:board-id board-id}])]
+         [:> timeline-controls* {:board-id board-id :sound? sound}])]
       [:span]]]))
 
 (mf/defc viewer-pagination-and-sidebar
   {::mf/wrap [mf/memo]}
-  [{:keys [section index users frame page animated]}]
+  [{:keys [section index users frame page animated sound]}]
   (let [comments-local  (mf/deref refs/comments-local)
         show-sidebar?   (and (= section :comments) (:show-sidebar? comments-local))]
     [:*
@@ -195,6 +215,7 @@
        :num-frames (count (:frames page))
        :comment-sidebar show-sidebar?
        :animated animated
+       :sound sound
        :board-id (:id frame)}]
 
      (when show-sidebar?
@@ -300,7 +321,7 @@
 (mf/defc viewer-wrapper
   {::mf/wrap-props false}
   [{:keys [wrapper-size orig-frame orig-viewport-ref orig-size page file users current-viewport-ref
-           size frame interactions-mode overlays zoom section index animated]}]
+           size frame interactions-mode overlays zoom section index animated sound]}]
 
   [:*
    [:& viewer-pagination-and-sidebar
@@ -310,6 +331,7 @@
      :users users
      :frame frame
      :animated animated
+     :sound sound
      :interactions-mode interactions-mode}]
 
    [:div {:class (stl/css :viewer-wrapper)
@@ -512,6 +534,11 @@
       (when (not allowed)
         (st/emit! (dv/go-to-section :interactions))))
 
+    ;; The board on screen changing, or the view mode left, stops what
+    ;; plays and its sound.
+    (mf/with-effect [(:id frame)]
+      #(st/emit! (dv/pause-timeline)))
+
     ;; Set the page title
     (mf/use-effect
      (mf/deps (:name file))
@@ -706,7 +733,8 @@
               :zoom zoom
               :section section
               :index index
-              :animated (some? clock)}]]))]]
+              :animated (some? clock)
+              :sound (boolean (seq (:audio-clips clock)))}]]))]]
 
      [:& header/header {:project project
                         :index index

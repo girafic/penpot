@@ -8,6 +8,7 @@
   (:require
    [app.common.geom.point :as gpt]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
@@ -15,7 +16,10 @@
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.modifiers :as dwm]
+   [app.main.data.workspace.pages :as dwp]
    [app.render-wasm.modifiers :as wasm.modifiers]
+   [app.util.audio :as audio]
+   [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [potok.v2.core :as ptk]))
@@ -38,7 +42,66 @@
       (t/is (= 990 (reduce + steps)))))
   (t/testing "back in a hidden tab, it goes on where it was"
     (t/is (= [500] (steps [60000]))))
-  (t/is (= [0] (steps [-5])) "a clock going back does not"))
+  (t/is (= [0] (steps [-5])) "a clock going back does not")
+  (t/testing "keeping time with its sound, it catches up"
+    (t/is (= [2000 0] (dwa/frame-step 0 2000 false)))
+    (t/is (= [500 0] (dwa/frame-step 0 2000 true)))))
+
+;; SOUND
+
+(defn- sounding
+  "A fake running `AudioContext` that writes down in `log` the sources it
+  starts and stops, with a clip playing in it from `follow!`."
+  [log]
+  (let [ctx #js {:state "running"
+                 :currentTime 10
+                 :destination #js {}
+                 :createBufferSource (fn []
+                                       #js {:connect (fn [_]) :disconnect (fn [])
+                                            :playbackRate #js {:value 1}
+                                            :start (fn [& _] (swap! log conj :start))
+                                            :stop (fn [] (swap! log conj :stop))})
+                 :createGain (fn []
+                               #js {:gain #js {:setValueAtTime (fn [_ _]) :linearRampToValueAtTime (fn [_ _])}
+                                    :connect (fn [_]) :disconnect (fn [])})}
+        id  (uuid/next)
+        n   4800]
+    (audio/use-context! ctx)
+    (audio/remember! id #js {:duration 0.1 :length n :sampleRate 48000 :numberOfChannels 1
+                             :getChannelData (fn [_] (js/Float32Array. n))})
+    (audio/follow! (ctau/add-audio-clip (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                                        {:audio-id id :name "x" :source-duration 100 :duration 100})
+                   0 1 true)))
+
+(t/deftest pausing-and-leaving-the-page-stop-the-sound
+  (doseq [[label event] [["pause" (dwa/pause)]
+                         ["stop and clear-preview, through pause" (dwa/pause)]
+                         ["page change" (dwp/finalize-page (uuid/next) (uuid/next))]]]
+    (let [log (atom [])]
+      (sounding log)
+      (t/is (= [:start] @log) label)
+      (ptk/effect event {} (rx/empty))
+      (t/is (= [:start :stop] @log) label)))
+  (audio/use-context! nil))
+
+(t/deftest the-sound-stays-muted-once-muted
+  (let [before (get @storage/user ::dwa/audio-muted)
+        state  (ptk/update (dwa/toggle-audio-muted) {})]
+    (ptk/effect (dwa/toggle-audio-muted) state (rx/empty))
+    (t/is (true? (dwa/audio-muted? (:workspace-animation state))))
+    (t/is (true? (dwa/audio-muted? {})) "the next time too")
+    (swap! storage/user assoc ::dwa/audio-muted before)))
+
+(t/deftest a-board-with-only-clips-plays
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 100})
+        id    (:id board)
+        page  {:objects {uuid/zero {:id uuid/zero :type :frame :shapes [id]}
+                         id (assoc board :parent-id uuid/zero :frame-id uuid/zero)}
+               :timelines {id (ctau/add-audio-clip (cta/make-timeline {:board-id id})
+                                                   {:audio-id (uuid/next) :name "x"
+                                                    :source-duration 1000 :duration 1000})}}]
+    (t/is (= #{id} (dwa/animated-board-ids page {})) "its title shows the play button")
+    (t/is (= #{} (dwa/animated-board-ids (assoc-in page [:timelines id :audio-clips] {}) {})))))
 
 (t/deftest the-dock-rests-while-playing
   (let [anim {:playing? true :playhead 1234 :play-start 500 :direction -1

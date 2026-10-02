@@ -7,6 +7,7 @@
 (ns frontend-tests.ui.timeline-selection-test
   (:require
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.animation :as dwa]
    [app.main.ui.workspace.timeline :as timeline]
@@ -117,6 +118,29 @@
     (t/is (identical? expanded (timeline/expand-to expanded objects board still #{board other}))
           "the board and layers out of it")))
 
+(t/deftest only-the-layers-that-animate-have-rows
+  (let [board    (uuid/next)
+        group    (uuid/next)
+        rect     (uuid/next)
+        still    (uuid/next)
+        text     (uuid/next)
+        objects  {uuid/zero {:id uuid/zero :parent-id uuid/zero :shapes [board]}
+                  board     {:id board :parent-id uuid/zero :shapes [group still text]}
+                  group     {:id group :parent-id board :shapes [rect]}
+                  rect      {:id rect :parent-id group}
+                  still     {:id still :parent-id board}
+                  text      {:id text :parent-id board}}
+        timeline (-> (cta/make-timeline {:board-id board})
+                     (cta/add-keyframe rect {:time 0 :property :x :value 0})
+                     (cta/add-keyframe rect {:time 500 :property :x :value 10})
+                     (cta/add-animation text {:type :fade :start 0 :duration 300}))
+        layers   #(mapv :id (filter (fn [row] (= :layer (:type row))) %))]
+    (t/is (= [board text group rect] (layers (timeline/timeline-rows objects board timeline {} {})))
+          "a layer without animation has none, a group holding one has")
+    (let [rows (timeline/timeline-rows objects board (cta/make-timeline {:board-id board}) {} {})]
+      (t/is (= [board] (layers rows)) "the board always")
+      (t/is (false? (:expandable? (first rows)))))))
+
 (t/deftest a-click-on-a-property-picks-its-keyframes
   (let [file-id  (uuid/next)
         page-id  (uuid/next)
@@ -145,3 +169,81 @@
                             cta/toggle-slot-flag shape-a :locked :width)]
       (t/is (= #{{:shape-id shape-a :keyframe-id kf-a}} (selected (pick locked :width false)))
             "a locked property keeps its keyframes out of it"))))
+
+;; KEYS OF THE DOCK
+
+(defn- key-event
+  "A key event of `key`, with Cmd and Ctrl (whichever the platform takes)
+  when `mod?`, and Shift or Alt when given."
+  [key & {:keys [mod? shift? alt?]}]
+  #js {:key key :metaKey (boolean mod?) :ctrlKey (boolean mod?)
+       :shiftKey (boolean shift?) :altKey (boolean alt?)})
+
+(t/deftest the-keys-of-a-selected-clip-come-first
+  (let [kfs    #{{:shape-id shape-a :keyframe-id kf-a}}
+        clip   (uuid/next)
+        action #(timeline/dock-key-action %1 %2 %3)]
+    (t/testing "a clip selected"
+      (t/is (= :delete-clip (action (key-event "Delete") #{} clip)))
+      (t/is (= :delete-clip (action (key-event "Backspace") #{} clip)) "never the keyframes")
+      (t/is (= :split-clip (action (key-event "s") #{} clip)))
+      (t/is (= :split-clip (action (key-event "S") #{} clip)))
+      (t/is (= :split-clip (action (key-event "b" :mod? true) #{} clip)) "Cmd/Ctrl+B, as Final Cut or Resolve")
+      (t/is (= :split-all-clips (action (key-event "B" :mod? true :shift? true) #{} clip)) "Shift too: all of them")
+      (t/is (= :nudge-clip (action (key-event "ArrowRight") kfs clip)) "the clip, not the keyframes")
+      (t/is (= :nudge-clip (action (key-event "ArrowLeft" :shift? true) #{} clip)))
+      (t/is (= :jump-to-marker (action (key-event "ArrowLeft" :alt? true) #{} clip)) "Alt jumps still")
+      (t/is (= :no-copy (action (key-event "c" :mod? true) #{} clip)) "nothing copied, handled")
+      (t/is (= :no-copy (action (key-event "x" :mod? true) #{} clip)))
+      (t/is (nil? (action (key-event "s" :mod? true) #{} clip)) "Cmd+S saves as ever"))
+    (t/testing "keyframes selected, as before"
+      (t/is (= :delete-keyframes (action (key-event "Delete") kfs nil)))
+      (t/is (= :copy-keyframes (action (key-event "c" :mod? true) kfs nil)))
+      (t/is (= :cut-keyframes (action (key-event "x" :mod? true) kfs nil)))
+      (t/is (= :shift-keyframes (action (key-event "ArrowLeft") kfs nil)))
+      (t/is (nil? (action (key-event "s") kfs nil)) "S splits no keyframe"))
+    (t/testing "nothing selected"
+      (t/is (nil? (action (key-event "c" :mod? true) #{} nil)) "Cmd/Ctrl+C reaches the workspace")
+      (t/is (nil? (action (key-event "b" :mod? true) #{} nil)) "and Cmd/Ctrl+B")
+      (t/is (= :split-all-clips (action (key-event "b" :mod? true :shift? true) #{} nil))
+            "but the clips under the playhead are cut")
+      (t/is (= :add-marker (action (key-event "m") #{} nil)))
+      (t/is (nil? (action (key-event "m" :shift? true) #{} nil)) "Shift+M leaves motion mode")
+      (t/is (= :jump-to-marker (action (key-event "ArrowRight" :alt? true) #{} nil))))))
+
+(t/deftest a-box-picks-all-kinds-and-whole-tracks
+  (let [hits  {:kfs   [{:shape-id 1 :keyframe-id 10 :left 0 :right 10 :top 0 :bottom 10}]
+               :anims [{:shape-id 1 :animation-id 20 :left 0 :right 100 :top 20 :bottom 40}]
+               :clips [{:clip-id :c :left 50 :right 150 :top 60 :bottom 80}]
+               :bars  [{:shape-id 7 :left 0 :right 200 :top 100 :bottom 120}]}
+        track {:kfs #{{:shape-id 7 :keyframe-id 70}} :anims #{{:shape-id 8 :animation-id 80}}}
+        pick  #(timeline/items-in-rect hits (apply timeline/rect-from-points %) {7 track})]
+    (t/is (= {:kfs #{{:shape-id 1 :keyframe-id 10}} :anims #{{:shape-id 1 :animation-id 20}} :clips #{:c}}
+             (pick [5 5 60 70]))
+          "a keyframe, a block and a clip")
+    (t/is (= {:kfs #{{:shape-id 7 :keyframe-id 70}} :anims #{{:shape-id 8 :animation-id 80}} :clips #{}}
+             (pick [150 110 160 115]))
+          "a bar: all of its track")))
+
+(t/deftest a-box-picks-the-clips-it-touches
+  (let [hits [{:clip-id :a :left 10 :right 50 :top 0 :bottom 20}
+              {:clip-id :b :left 60 :right 90 :top 30 :bottom 50}]]
+    (t/is (= #{:a} (timeline/clips-in-rect hits (timeline/rect-from-points 40 5 50 15))))
+    (t/is (= #{:a :b} (timeline/clips-in-rect hits (timeline/rect-from-points 100 100 0 0))))
+    (t/is (= #{} (timeline/clips-in-rect hits (timeline/rect-from-points 52 0 57 100))) "between them")))
+
+(t/deftest an-arrow-nudges-by-10-or-100-ms
+  (t/is (= 10 (timeline/nudge-step (key-event "ArrowRight"))))
+  (t/is (= -10 (timeline/nudge-step (key-event "ArrowLeft"))))
+  (t/is (= 100 (timeline/nudge-step (key-event "ArrowRight" :shift? true))))
+  (t/is (= -100 (timeline/nudge-step (key-event "ArrowLeft" :shift? true)))))
+
+(t/deftest the-axis-reaches-the-end-of-what-is-past-the-timeline
+  (let [tl (-> (cta/make-timeline {:board-id (uuid/next) :duration 2000})
+               (cta/add-keyframe shape-a {:time 2500 :property :x :value 0}))]
+    (t/is (= 2500 (timeline/content-end tl {})) "a keyframe")
+    (t/is (= 3000 (timeline/content-end tl {(uuid/next) 3000})) "an animated copy")
+    (t/is (= 60500 (timeline/content-end (ctau/add-audio-clip tl {:audio-id (uuid/next) :name "long.mp3"
+                                                                  :source-duration 60000 :start 500})
+                                         {}))
+          "the end of a long audio clip, to trim it there")))

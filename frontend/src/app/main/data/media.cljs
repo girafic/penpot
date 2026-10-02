@@ -38,13 +38,16 @@
 ;; --- Utility functions
 
 (defn validate-file
-  "Check that a file obtained with the file javascript API is valid."
-  [file]
-  (when-not (contains? cm/image-types (.-type file))
-    (ex/raise :type :validation
-              :code :media-type-not-allowed
-              :hint (str/ffmt "media type % is not supported" (.-type file))))
-  file)
+  "Check that a file obtained with the file javascript API is valid: of
+  one of the `allowed` media types, images by default."
+  ([file]
+   (validate-file file cm/image-types))
+  ([file allowed]
+   (when-not (contains? allowed (.-type file))
+     (ex/raise :type :validation
+               :code :media-type-not-allowed
+               :hint (str/ffmt "media type % is not supported" (.-type file))))
+   file))
 
 (defn notify-start-loading
   []

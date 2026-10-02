@@ -7883,6 +7883,132 @@ msgstr "The board's animation is now longer to fit the pasted motion."
 msgid "workspace.animation.style-too-many-entries"
 msgstr "A style holds up to %s animations; these add up to %s."
 
+msgid "workspace.audio.unsupported"
+msgstr "“%s” is not an audio file Penpot plays: use MP3, WAV, M4A, OGG, WebM or FLAC."
+
+msgid "workspace.audio.undecodable"
+msgstr "“%s” can't be played in this browser."
+
+msgid "workspace.audio.too-long"
+msgstr "“%s” is too long: audio can last up to %s minutes."
+
+msgid "workspace.audio.board-gone"
+msgstr "The board is gone, so the audio was not added."
+
+msgid "workspace.audio.upload-not-enabled"
+msgstr "Audio upload is not enabled on this server."
+
+msgid "workspace.audio.drop-on-a-board"
+msgstr "Drop audio onto a board."
+
+msgid "workspace.audio.silent.too-long"
+msgstr "Silent: its file lasts longer than %s minutes"
+
+msgid "workspace.audio.silent.not-loaded"
+msgstr "Silent: its file did not load"
+
+msgid "workspace.audio.silent.undecodable"
+msgstr "Silent: this browser cannot play its file"
+
+msgid "workspace.audio.silent.unavailable"
+msgstr "Silent: this browser plays no sound"
+
+msgid "workspace.audio.silent.too-much"
+msgstr "Silent: too much audio is open at once"
+
+msgid "workspace.animation.mute"
+msgstr "Mute sound"
+
+msgid "workspace.animation.unmute"
+msgstr "Play sound"
+
+msgid "workspace.animation.audio-lane"
+msgstr "Audio %s"
+
+msgid "workspace.animation.clip-volume"
+msgstr "Volume of the clip"
+
+msgid "workspace.animation.clip-mute"
+msgstr "Mute the clip"
+
+msgid "workspace.animation.clip-unmute"
+msgstr "Play the clip"
+
+msgid "workspace.animation.clip-split"
+msgstr "Split the clip at the playhead"
+
+msgid "workspace.animation.clip-delete"
+msgstr "Delete the clip"
+
+msgid "workspace.animation.clip-speed"
+msgstr "Speed of the clip: faster plays its audio in less time and higher, as a tape does"
+
+msgid "workspace.animation.clip-speed-short"
+msgstr "Speed"
+
+msgid "workspace.animation.clip-fade-in"
+msgstr "Fade in, from the start of the clip"
+
+msgid "workspace.animation.clip-fade-in-short"
+msgstr "In"
+
+msgid "workspace.animation.clip-fade-out"
+msgstr "Fade out, to the end of the clip"
+
+msgid "workspace.animation.clip-fade-out-short"
+msgstr "Out"
+
+msgid "workspace.animation.clips-selected"
+msgstr "%s clips"
+
+msgid "workspace.animation.clip-volume-at"
+msgstr "Volume: %s"
+
+msgid "workspace.animation.clip-fade-in-time"
+msgstr "Fade in: %s"
+
+msgid "workspace.animation.clip-fade-out-time"
+msgstr "Fade out: %s"
+
+msgid "workspace.animation.audio-group"
+msgstr "Audio (%s)"
+
+msgid "workspace.animation.audio-mute-all"
+msgstr "Mute all the audio"
+
+msgid "workspace.animation.audio-unmute-all"
+msgstr "Play all the audio"
+
+msgid "workspace.animation.audio-lock-all"
+msgstr "Lock all the audio"
+
+msgid "workspace.animation.audio-unlock-all"
+msgstr "Unlock all the audio"
+
+msgid "workspace.animation.lane-mute"
+msgstr "Mute the clips of this lane"
+
+msgid "workspace.animation.lane-unmute"
+msgstr "Play the clips of this lane"
+
+msgid "workspace.animation.lane-lock"
+msgstr "Lock the clips of this lane"
+
+msgid "workspace.animation.lane-unlock"
+msgstr "Unlock the clips of this lane"
+
+msgid "workspace.animation.clip-lock"
+msgstr "Lock the clip"
+
+msgid "workspace.animation.clip-unlock"
+msgstr "Unlock the clip"
+
+msgid "workspace.animation.clip-split-short"
+msgstr "Split at the playhead"
+
+msgid "workspace.animation.fit-to-audio"
+msgstr "Make the timeline as long as its audio"
+
 msgid "workspace.shape.menu.copy-animation"
 msgstr "Copy animation"
 
@@ -8745,11 +8871,26 @@ msgstr "File size"
 msgid "workspace.options.export.too-many-frames"
 msgstr "Too many frames. Lower the frame rate or shorten the timeline."
 
+msgid "workspace.options.export.fitted"
+msgstr "The MP4 is %s × %s px, the largest this browser encodes as MP4. WebM keeps the full size."
+
 msgid "workspace.options.export.codec-unavailable"
 msgstr "This format is not available in this browser. Try WebM or GIF."
 
 msgid "workspace.options.export.split-text-whole"
 msgstr "Text animated by characters, words or lines moves as a whole in this format."
+
+msgid "workspace.options.export.no-audio"
+msgstr "Audio is not included in this format."
+
+msgid "workspace.options.export.include-audio"
+msgstr "Include audio"
+
+msgid "workspace.options.export.audio-dropped"
+msgstr "This browser can't encode audio for this format: the video was exported without sound."
+
+msgid "workspace.options.export.audio-needs-wasm"
+msgstr "Audio export needs the new renderer."
 
 msgid "workspace.options.export.no-timeline"
 msgstr "This board has no animation yet."

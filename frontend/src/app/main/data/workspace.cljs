@@ -80,6 +80,7 @@
    [app.plugins.register :as preg]
    [app.render-wasm :as wasm]
    [app.render-wasm.api :as wasm.api]
+   [app.util.audio :as audio]
    [app.util.dom :as dom]
    [app.util.globals :as ug]
    [app.util.http :as http]
@@ -618,6 +619,12 @@
           (update :workspace-global dissoc :read-only? :preview-id :default-font)
           (assoc-in [:workspace-global :options-mode] :design)
           (update :files d/update-vals #(dissoc % :data))))
+
+    ;; the sound of a timeline playing stops with the workspace, and its
+    ;; decoded files go
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (audio/forget-all!))
 
     ptk/WatchEvent
     (watch [_ state _]

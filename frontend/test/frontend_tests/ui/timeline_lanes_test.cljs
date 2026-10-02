@@ -8,6 +8,7 @@
   (:require
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.audio-clip :as ctau]
    [app.common.uuid :as uuid]
    [app.main.ui.workspace.timeline.lanes :as lanes]
    [cljs.test :as t :include-macros true]))
@@ -141,3 +142,96 @@
     (let [{:keys [left right top bottom]} (first boxes)]
       (t/is (< 104 left 112 right 120))
       (t/is (< 90 top 98 bottom 106) "in the fourth row, from the top of the rows"))))
+
+(t/deftest audio-clips-have-ends-to-trim
+  ;; an audio row after the others (top 192, middle 206): a clip from 100
+  ;; to 300 ms and a locked one from 500 to 700 ms
+  (let [song   (ctau/make-audio-clip {:audio-id (uuid/next) :name "song" :source-duration 1000
+                                      :start 100 :duration 200})
+        locked (ctau/make-audio-clip {:audio-id (uuid/next) :name "locked" :source-duration 1000
+                                      :start 500 :duration 200 :locked true})
+        scene  (update scene :rows conj {:type :audio :lane 0 :clips [song locked]})
+        hit    #(let [hit (lanes/hit geo scene %1 %2)]
+                  (cond-> (select-keys hit [:type :row :mode :lane])
+                    (some? (:clip hit)) (assoc :clip (:name (:clip hit)))))]
+    (t/is (= {:type :audio :row 5 :lane 0 :mode :start :clip "song"} (hit 110 206)))
+    (t/is (= {:type :audio :row 5 :lane 0 :mode :move :clip "song"} (hit 200 206)))
+    (t/is (= {:type :audio :row 5 :lane 0 :mode :end :clip "song"} (hit 310 206)))
+    (t/is (= {:type :audio :row 5 :lane 0 :mode :move :clip "locked"} (hit 515 206))
+          "a locked clip cannot be trimmed")
+    (t/is (= {:type :row :row 5 :lane 0} (hit 400 206)) "between the clips")
+    (t/testing "the one on top where they overlap"
+      (let [over  (ctau/make-audio-clip {:audio-id (uuid/next) :name "over" :source-duration 1000
+                                         :start 200 :duration 200})
+            scene (assoc-in scene [:rows 5 :clips] [song over])]
+        (t/is (= "over" (:name (:clip (lanes/hit geo scene 250 206)))))))))
+
+(t/deftest audio-clips-have-grips-for-their-fades
+  ;; the audio row from 192 (its bar from 197): a clip from 100 to 300 ms
+  ;; (x 112 to 312) fading in over 50 ms, so its grip is at x 162, and the
+  ;; one of its fade out at its corner, 7 px in (x 305)
+  (let [song   (ctau/make-audio-clip {:audio-id (uuid/next) :name "song" :source-duration 1000
+                                      :start 100 :duration 200 :fade-in 50})
+        locked (ctau/make-audio-clip {:audio-id (uuid/next) :name "locked" :source-duration 1000
+                                      :start 500 :duration 200 :locked true})
+        short  (ctau/make-audio-clip {:audio-id (uuid/next) :name "short" :source-duration 1000
+                                      :start 800 :duration 20})
+        scene  (update scene :rows conj {:type :audio :lane 0 :clips [song locked short]})
+        mode   #(:mode (lanes/hit geo scene %1 %2))]
+    (t/is (= :fade-in (mode 162 198)) "on the top edge where the fade ends")
+    (t/is (= :fade-in (mode 158 193)) "from just above the bar")
+    (t/is (= :fade-out (mode 305 198)) "at the corner of a clip without one")
+    (t/is (= :move (mode 162 206)) "lower in the bar, the clip moves")
+    (t/is (= :start (mode 118 206)) "and its edges trim")
+    (t/is (= :start (mode 118 198)) "away from the grips too")
+    (t/is (= :move (mode 518 198)) "a locked clip has no grips")
+    (t/is (= :start (mode 819 198)) "nor one too short for them")))
+
+(t/deftest audio-clips-have-a-volume-line
+  ;; the audio row from 192, its bar from 197, 18 px tall: the line at 200
+  ;; at full volume, at 206 at half; clips from 100 to 300 ms (x 112 to 312)
+  (let [loud   (ctau/make-audio-clip {:audio-id (uuid/next) :name "loud" :source-duration 1000
+                                      :start 100 :duration 200})
+        quiet  (ctau/make-audio-clip {:audio-id (uuid/next) :name "quiet" :source-duration 1000
+                                      :start 400 :duration 200 :volume 0.5})
+        locked (ctau/make-audio-clip {:audio-id (uuid/next) :name "locked" :source-duration 1000
+                                      :start 700 :duration 200 :locked true})
+        louder (ctau/make-audio-clip {:audio-id (uuid/next) :name "louder" :source-duration 1000
+                                      :start 950 :duration 40 :volume 2})
+        scene  (update scene :rows conj {:type :audio :lane 0 :clips [loud quiet locked louder]})
+        hit    #(let [hit (lanes/hit geo scene %1 %2)] [(:mode hit) (:name (:clip hit))])]
+    (t/is (= [:volume "loud"] (hit 200 200)) "on its line")
+    (t/is (= [:volume "loud"] (hit 200 202)) "close to it")
+    (t/is (= [:move "loud"] (hit 200 206)) "away from it, the clip moves")
+    (t/is (= [:volume "quiet"] (hit 500 206)) "lower when quieter")
+    (t/is (= [:start "loud"] (hit 118 206)) "its ends still trim")
+    (t/is (= [:fade-in "loud"] (hit 118 200)) "at its top corner, the grip of its fade")
+    (t/is (= [:move "locked"] (hit 800 200)) "a locked clip has none")
+    (t/is (= [:volume "louder"] (hit 982 200)) "louder than its file, at the top too")))
+
+(t/deftest the-group-of-the-audio-lanes-is-a-row
+  (let [clip  (ctau/make-audio-clip {:audio-id (uuid/next) :name "x" :source-duration 1000
+                                     :start 100 :duration 200})
+        scene (update scene :rows conj {:type :audio-group :collapsed? true :count 1 :clips [clip]})]
+    (t/is (= :row (:type (lanes/hit geo scene 200 206))) "nothing to drag on it")))
+
+(t/deftest clips-have-boxes-for-a-box-selection
+  ;; the audio row from 140 in what the view scrolls over (index 5),
+  ;; its bars from 145 to 163
+  (let [song   (ctau/make-audio-clip {:audio-id (uuid/next) :name "song" :source-duration 1000
+                                      :start 100 :duration 200})
+        locked (ctau/make-audio-clip {:audio-id (uuid/next) :name "locked" :source-duration 1000
+                                      :start 500 :duration 200 :locked true})
+        scene  (update scene :rows conj {:type :audio :lane 0 :clips [song locked]})]
+    (t/is (= [{:clip-id (:id song) :left 112 :right 312 :top 145 :bottom 163}]
+             (lanes/clip-boxes geo scene))
+          "but the locked ones")))
+
+(t/deftest blocks-and-tracks-have-boxes-for-a-box-selection
+  ;; the rows of `scene`: the layer (top 0, bar from 100 to 400 ms), a
+  ;; block (top 28, 500 to 700 ms) and a locked one (top 56)
+  (t/is (= [{:shape-id shape-id :left 112 :right 412 :top 5 :bottom 23}]
+           (lanes/bar-boxes geo scene)))
+  (t/is (= [[512 712 33 51]]
+           (mapv (juxt :left :right :top :bottom) (lanes/animation-boxes geo scene)))
+        "but the locked ones"))

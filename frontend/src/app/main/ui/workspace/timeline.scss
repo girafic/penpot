@@ -222,6 +222,49 @@ $header-height: $ruler-height + $row-height;
   margin-inline-start: auto;
 }
 
+// The settings of the selected audio clip (see `clip-bar*`).
+.clip-bar {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+  min-inline-size: 0;
+  padding-inline-start: deprecated.$s-8;
+  border-inline-start: 1px solid var(--panel-border-color);
+}
+
+.clip-name {
+  max-inline-size: 120px;
+  overflow: hidden;
+  color: var(--color-foreground-secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.clip-bar .volume-slider {
+  inline-size: 72px;
+}
+
+.volume-value {
+  min-inline-size: 32px;
+  color: var(--color-foreground-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.field-unit {
+  color: var(--color-foreground-secondary);
+}
+
+// The speed, fade in and fade out of the clip, narrower than the duration.
+.clip-bar .fade-field {
+  label {
+    color: var(--color-foreground-secondary);
+  }
+
+  input {
+    width: 52px;
+  }
+}
+
 .timeline-body {
   flex: 1;
   display: flex;
@@ -569,8 +612,8 @@ $header-height: $ruler-height + $row-height;
 
 // Show / hide and lock / unlock, like the layers panel: shown under the
 // pointer and on selected layers; a hidden or locked row keeps its button.
-// Property and animation rows keep room for them, so their other controls
-// stay in place.
+// Property, animation and audio rows keep room for them, so their other
+// controls stay in place. An audio row mutes its clips instead of hiding.
 .row-toggles {
   display: flex;
   align-items: center;
@@ -591,7 +634,8 @@ $header-height: $ruler-height + $row-height;
 
   .has-state &,
   .property-row &,
-  .animation-row & {
+  .animation-row &,
+  .audio-row & {
     display: grid;
     opacity: 0;
   }
@@ -627,8 +671,10 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
-// A hidden property or animation, left out of playback and exports.
+// A hidden property or animation, left out of playback and exports; a
+// muted audio lane.
 .muted {
+  .audio-icon,
   .property-name,
   .row-controls,
   .row-value,
@@ -644,6 +690,37 @@ $header-height: $ruler-height + $row-height;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+// A lane of audio clips moves by its label (see `on-lane-drag-down`); the
+// line shows where it goes: the top of the row it takes the place of,
+// the bottom going down.
+.audio-row .row-label {
+  cursor: grab;
+}
+
+.lane-drop {
+  position: absolute;
+  inset-inline: 0;
+  block-size: $row-height;
+  border-block-start: 2px solid var(--color-accent-primary);
+  pointer-events: none;
+  z-index: 1;
+
+  &.below {
+    border-block-start: none;
+    border-block-end: 2px solid var(--color-accent-primary);
+  }
+}
+
+// The label of a lane of audio clips, in the colour of their bars (see
+// `lanes/palette`).
+.audio-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  inline-size: 24px;
+  color: var(--color-accent-success);
 }
 
 .property-name {

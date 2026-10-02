@@ -33,6 +33,7 @@
    [app.main.router :as rt]
    [app.main.worker :as mw]
    [app.render-wasm.shape :as wasm.shape]
+   [app.util.audio :as audio]
    [app.util.http :as http]
    [app.util.i18n :as i18n :refer [tr]]
    [beicon.v2.core :as rx]
@@ -146,7 +147,13 @@
                               :workspace-focus-selected))]
 
         (cond-> state
-          exit? (dissoc :workspace-drawing))))))
+          exit? (dissoc :workspace-drawing))))
+
+    ;; the sound of a timeline playing on it stops with it, and the
+    ;; decoded files of its clips go
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (audio/forget-all!))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Workspace Page CRUD

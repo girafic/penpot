@@ -21,6 +21,7 @@
    [app.common.data.macros :as dm]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.main.ui.workspace.timeline.easing :as easing]))
 
 ;; METRICS, in step with timeline.scss
@@ -51,6 +52,26 @@
   5)
 
 (def ^:private min-bar-width 12)
+
+(def ^:private fade-grip
+  "The radius of the grip of a fade of an audio clip, on the top edge of
+  its bar where the fade ends (see `fade-grips`); a drag on it, from
+  `fade-reach` px around it, changes the fade."
+  4)
+
+(def ^:private fade-reach 6)
+
+(def ^:private volume-reach
+  "How far, in px, from the volume line of an audio clip a drag takes it
+  (see `volume-y`)."
+  3)
+
+(defn- volume-y
+  "Where the volume line of `clip` is in its bar, from `top`, `height`
+  px tall: near its top at the volume of its file and louder (when the
+  line turns orange, see `draw-clip!`), near its bottom when silent."
+  [top height clip]
+  (+ top 3 (* (- 1 (min 1 (or (:volume clip) 1))) (- height 6))))
 
 (def ^:private keyframe-radius
   "Half the diagonal of a keyframe, a 10px square turned 45°."
@@ -195,6 +216,28 @@
 
 (declare row-hit)
 
+(defn- fade-grips
+  "`[in-x out-x]`, where the grips of the fades of the audio `clip` are
+  on the top edge of its bar: where each fade ends, but at least a grip
+  inside the bar. Nil when the bar is too narrow for them."
+  [geo clip]
+  (let [x0    (time->x geo (:start clip))
+        x1    (max (time->x geo (ctau/clip-end clip)) (+ x0 min-bar-width))
+        inset (+ fade-grip 3)]
+    (when (>= (- x1 x0) (* 4 inset))
+      [(max (+ x0 inset) (time->x geo (+ (:start clip) (or (:fade-in clip) 0))))
+       (min (- x1 inset) (time->x geo (- (ctau/clip-end clip) (or (:fade-out clip) 0))))])))
+
+(defn- fade-hit
+  "The fade of the audio `clip` whose grip is at `x` (see `fade-grips`),
+  `:fade-in` or `:fade-out`; nil for none, and on a locked clip."
+  [geo clip x]
+  (when-not (:locked clip)
+    (when-let [[in-x out-x] (fade-grips geo clip)]
+      (cond
+        (<= (mth/abs (- x in-x)) fade-reach)  :fade-in
+        (<= (mth/abs (- x out-x)) fade-reach) :fade-out))))
+
 (defn hit
   "What is at `x`, `y` of the canvas, a map with its `:type`:
   - on the ruler, the `:ruler`;
@@ -268,8 +311,110 @@
               (assoc base :type :row)))
 
           :property
-          (property-hit geo timeline row top x y base)))
+          (property-hit geo timeline row top x y base)
+
+          ;; the group of the audio lanes: nothing to drag on it
+          :audio-group
+          (assoc base :type :row)
+
+          ;; the top-most clip there, the one drawn last; on the top edge
+          ;; of a clip, the grips of its fades first
+          :audio
+          (let [fade   (when (<= (- y top) (+ bar-inset fade-reach))
+                         (some (fn [clip]
+                                 (when-let [mode (fade-hit geo clip x)]
+                                   [clip mode]))
+                               (rseq (:clips row))))
+                ;; the volume line of a clip, away from its ends
+                volume (when (nil? fade)
+                         (d/seek (fn [clip]
+                                   (and (not (:locked clip))
+                                        (< (+ (time->x geo (:start clip)) 10) x
+                                           (- (time->x geo (ctau/clip-end clip)) 10))
+                                        (<= (mth/abs (- y (volume-y (+ top bar-inset)
+                                                                    (- row-height (* 2 bar-inset))
+                                                                    clip)))
+                                            volume-reach)))
+                                 (rseq (:clips row))))
+                clip (when bar?
+                       (d/seek #(bar-part (time->x geo (:start %)) (time->x geo (ctau/clip-end %)) x true)
+                               (rseq (:clips row))))
+                part (when (some? clip)
+                       (bar-part (time->x geo (:start clip)) (time->x geo (ctau/clip-end clip)) x
+                                 (not (:locked clip))))]
+            (cond
+              (some? fade)
+              (assoc base :type :audio :clip (first fade) :lane (:lane row) :mode (second fade))
+
+              (some? volume)
+              (assoc base :type :audio :clip volume :lane (:lane row) :mode :volume)
+
+              (some? part)
+              (assoc base :type :audio :clip clip :lane (:lane row) :mode part)
+
+              :else
+              (assoc base :type :row :lane (:lane row))))))
       {:type :empty})))
+
+(defn animation-boxes
+  "The boxes of the blocks of the preset animations that can be selected
+  (not locked), with their `:shape-id` and `:animation-id`, where they are
+  on what the view scrolls over (see `content-point`), for a box
+  selection."
+  [{:keys [span axis-width]} {:keys [rows]}]
+  (let [x #(+ start-gap (* axis-width (/ % (max 1 span))))]
+    (into []
+          (comp (map-indexed vector)
+                (filter #(= :animation (:type (second %))))
+                (keep (fn [[index {:keys [id animation]}]]
+                        (when-not (:locked animation)
+                          (let [top (+ (* index row-height) bar-inset)]
+                            {:shape-id     id
+                             :animation-id (:id animation)
+                             :left         (x (:start animation))
+                             :right        (x (cta/animation-end animation))
+                             :top          top
+                             :bottom       (- (+ top row-height) (* 2 bar-inset))})))))
+          rows)))
+
+(defn bar-boxes
+  "The boxes of the bars of the layer tracks, with their `:shape-id`, where
+  they are on what the view scrolls over (see `content-point`), for a box
+  selection: one touched picks all of its track."
+  [{:keys [span axis-width]} {:keys [rows]}]
+  (let [x #(+ start-gap (* axis-width (/ % (max 1 span))))]
+    (into []
+          (comp (map-indexed vector)
+                (keep (fn [[index {:keys [type id range]}]]
+                        (when (and (= :layer type) (some? range))
+                          (let [top (+ (* index row-height) bar-inset)]
+                            {:shape-id id
+                             :left     (x (first range))
+                             :right    (x (second range))
+                             :top      top
+                             :bottom   (- (+ top row-height) (* 2 bar-inset))})))))
+          rows)))
+
+(defn clip-boxes
+  "The boxes of the audio clips that can be selected (not locked), with
+  their `:clip-id`, where they are on what the view scrolls over (see
+  `content-point`), for a box selection."
+  [{:keys [span axis-width]} {:keys [rows]}]
+  (let [x #(+ start-gap (* axis-width (/ % (max 1 span))))]
+    (into []
+          (comp (map-indexed vector)
+                (filter #(= :audio (:type (second %))))
+                (mapcat (fn [[index row]]
+                          (let [top (+ (* index row-height) bar-inset)]
+                            (keep (fn [clip]
+                                    (when-not (:locked clip)
+                                      {:clip-id (:id clip)
+                                       :left    (x (:start clip))
+                                       :right   (x (ctau/clip-end clip))
+                                       :top     top
+                                       :bottom  (- (+ top row-height) (* 2 bar-inset))}))
+                                  (:clips row))))))
+          rows)))
 
 (defn keyframe-boxes
   "The boxes of the keyframes that can be selected (not locked), with their
@@ -317,7 +462,11 @@
    :select-fill  "var(--color-accent-tertiary-muted)"
    ;; a component copy playing the animation of its main
    :component    "var(--color-accent-secondary)"
-   :component-muted "color-mix(in srgb, var(--color-accent-secondary) 30%, transparent)"})
+   :component-muted "color-mix(in srgb, var(--color-accent-secondary) 30%, transparent)"
+   ;; an audio clip and its waveform; one that stays silent
+   :audio        "color-mix(in srgb, var(--color-accent-success) 28%, transparent)"
+   :wave         "var(--color-accent-success)"
+   :error        "var(--color-accent-error)"})
 
 (defn read-palette
   "The colours of `palette` as the browser resolves them on the children of
@@ -416,6 +565,21 @@
                   (fill-round-rect! ctx ink (- x1 8) grip-y 2 grip-h 1)))))
     [x0 x1]))
 
+(defn- outline-bar!
+  "An outline around the bar from `start` to `end` in the row at `y`, in
+  the colour of the box selection: its keyframes or block are selected in
+  the dock (see `dwaa/selection-of`)."
+  [^js ctx geo y start end color]
+  (let [x0     (time->x geo start)
+        x1     (max (time->x geo end) (+ x0 min-bar-width))
+        top    (+ y bar-inset)
+        height (- row-height (* 2 bar-inset))]
+    (.beginPath ctx)
+    (.roundRect ctx (- x0 1) (- top 1) (+ (- x1 x0) 2) (+ height 2) 7)
+    (set! (.-strokeStyle ctx) color)
+    (set! (.-lineWidth ctx) 2)
+    (.stroke ctx)))
+
 (defn- draw-block-label!
   "The name of an animation, centred in its block from `x0` to `x1`."
   [^js ctx text color font x0 x1 cy]
@@ -500,6 +664,169 @@
                 (diamond! ctx x cy (- keyframe-radius (/ (mth/sqrt 2) 2)))
                 (.stroke ctx))))))
 
+(defn- draw-hatching!
+  "Diagonal lines over the box from `x`, `y`, `width` × `height`: a clip
+  whose file is not decoded (yet)."
+  [^js ctx color x y width height]
+  (.save ctx)
+  (.beginPath ctx)
+  (.rect ctx x y width height)
+  (.clip ctx)
+  (set! (.-strokeStyle ctx) color)
+  (set! (.-lineWidth ctx) 1)
+  (.beginPath ctx)
+  (doseq [i (range (- x height) (+ x width) 6)]
+    (.moveTo ctx i (+ y height))
+    (.lineTo ctx (+ i height) y))
+  (.stroke ctx)
+  (.restore ctx))
+
+(defn- draw-waveform!
+  "The waveform `peaks` (see `app.util.audio/peaks`) of `clip`, one line
+  a pixel wide for each column of it in view, between `top` and `bottom`:
+  as loud as its file is at most, but not a near silence, at the volume
+  of the clip."
+  [^js ctx {:keys [span axis-width scroll-x width]} peaks clip x0 x1 top bottom color]
+  (let [{:keys [bucket-ms channels peak]} peaks
+        buckets  (/ (.-length ^js (first channels)) 2)
+        ms-of-px (/ span (max 1 axis-width))
+        speed    (ctau/clip-speed clip)
+        ;; the ms of the file at the left edge of the column at `x`
+        file-ms  (fn [x] (+ (:offset clip)
+                            (* speed (- (* (- (+ x scroll-x) start-gap) ms-of-px) (:start clip)))))
+        mid      (/ (+ top bottom) 2)
+        ;; as loud as the clip plays it
+        amp      (* (or (:volume clip) 1) (/ (- bottom top) 2 (max 0.1 (or peak 1))))]
+    (set! (.-fillStyle ctx) color)
+    (doseq [x (range (mth/floor (max x0 0)) (mth/ceil (min x1 width)))]
+      (let [b0 (mth/floor (/ (file-ms x) bucket-ms))
+            b1 (max (inc b0) (mth/floor (/ (file-ms (inc x)) bucket-ms)))]
+        (when (and (< b0 buckets) (pos? b1))
+          (let [[lo hi] (reduce (fn [[lo hi] ^js data]
+                                  (loop [b (max 0 b0) lo lo hi hi]
+                                    (if (< b (min b1 buckets))
+                                      (recur (inc b)
+                                             (min lo (aget data (* 2 b)))
+                                             (max hi (aget data (inc (* 2 b)))))
+                                      [lo hi])))
+                                [1 -1]
+                                channels)]
+            (when (<= lo hi)
+              (let [y0 (- mid (* hi amp))
+                    y1 (- mid (* lo amp))]
+                (.fillRect ctx x y0 1 (max 1 (- y1 y0)))))))))))
+
+(def ^:private fade-shade
+  "What shades the quiet part of a fade: dark in both themes, so the name
+  of the clip over it stays as readable as on the rest of it."
+  "rgb(0, 0, 0)")
+
+(defn- draw-fade!
+  "The fade over the box from `x0` to `x1`, between `top` and `bottom`, of
+  a clip: the part above the ramp from silence at `x0` to full volume at
+  `x1` (back, when `x1` is left of `x0`) shaded, the ramp drawn."
+  [^js ctx ink x0 x1 top bottom]
+  (.beginPath ctx)
+  (.moveTo ctx x0 bottom)
+  (.lineTo ctx x1 top)
+  (.lineTo ctx x0 top)
+  (.closePath ctx)
+  (set! (.-fillStyle ctx) fade-shade)
+  (faded! ctx 0.3 #(.fill ctx))
+  (.beginPath ctx)
+  (.moveTo ctx x0 bottom)
+  (.lineTo ctx x1 top)
+  (set! (.-strokeStyle ctx) ink)
+  (set! (.-lineWidth ctx) 1)
+  (faded! ctx 0.8 #(.stroke ctx)))
+
+(defn- draw-clip!
+  "The audio `clip` in the row with its top at `y`: a bar over its span
+  with its waveform (diagonal lines until its file is decoded, in the
+  colour of errors when it stays silent, see `problem`), its volume line
+  (see `volume-y`, shaded above) with its fades ramping to it, the part
+  past the end of the timeline dimmed, faded while muted, its name, and
+  grips to trim it but while locked; while it is selected or under the
+  pointer, the grips of its fades too (see `fade-grips`)."
+  [^js ctx geo {:keys [duration waveform problem selected-clips hover]} palette font y clip]
+  (let [x0      (time->x geo (:start clip))
+        x1      (max (time->x geo (ctau/clip-end clip)) (+ x0 min-bar-width))
+        top     (+ y bar-inset)
+        height  (- row-height (* 2 bar-inset))
+        active? (contains? selected-clips (:id clip))
+        ink     (if active? (:on-accent palette) (:fg-strong palette))
+        peaks   (waveform (:audio-id clip))]
+    (when (and (< x0 (:width geo)) (pos? x1))
+      (faded! ctx (if (:muted clip) 0.4 1)
+              (fn []
+                (fill-round-rect! ctx (if active? (:accent palette) (:audio palette)) x0 top (- x1 x0) height 6)
+                (.save ctx)
+                (.beginPath ctx)
+                (.roundRect ctx x0 top (- x1 x0) height 6)
+                (.clip ctx)
+                (if (some? peaks)
+                  (faded! ctx 0.8 #(draw-waveform! ctx geo peaks clip x0 x1 (+ top 3) (- (+ top height) 3)
+                                                   (if active? (:on-accent palette) (:wave palette))))
+                  (let [silent? (and (some? problem) (some? (problem clip)))]
+                    (faded! ctx (if silent? 0.8 0.5)
+                            #(draw-hatching! ctx (if silent? (:error palette) (:wave palette))
+                                             x0 top (- x1 x0) height))))
+                (let [vy  (volume-y top height clip)
+                      xi  (time->x geo (+ (:start clip) (or (:fade-in clip) 0)))
+                      xo  (time->x geo (- (ctau/clip-end clip) (or (:fade-out clip) 0)))
+                      on? (and (= :volume (:mode hover)) (= (:id clip) (:id (:clip hover))))]
+                  ;; quieter than full: the room above the line shaded
+                  (when (>= vy (+ top 3.5))
+                    (faded! ctx 0.3 #(fill-rect! ctx fade-shade x0 top (- x1 x0) (- vy top))))
+                  (when (:fade-in clip)
+                    (draw-fade! ctx ink x0 xi vy (+ top height)))
+                  (when (:fade-out clip)
+                    (draw-fade! ctx ink x1 xo vy (+ top height)))
+                  ;; the volume line between the fades, bolder under the pointer
+                  (.beginPath ctx)
+                  (.moveTo ctx (if (:fade-in clip) xi x0) vy)
+                  (.lineTo ctx (if (:fade-out clip) xo x1) vy)
+                  ;; louder than its file: orange
+                  (set! (.-strokeStyle ctx) (if (> (or (:volume clip) 1) 1) (:snap palette) ink))
+                  (set! (.-lineWidth ctx) (if on? 2 1))
+                  (faded! ctx (if (or on? active?) 0.9 0.5) #(.stroke ctx)))
+                ;; the end of the timeline cuts it: what is past it plays not
+                (let [xd (time->x geo duration)]
+                  (when (< xd x1)
+                    (faded! ctx 0.6 #(fill-rect! ctx (:bg palette) (max x0 xd) top (- x1 (max x0 xd)) height))))
+                (.restore ctx)
+                (when-not (:locked clip)
+                  (let [hovered? (and (= :audio (:type hover)) (= (:id clip) (:id (:clip hover))))]
+                    (faded! ctx (if hovered? 1 0.6)
+                            (fn []
+                              (let [grip-y (+ top (* 0.3 height))
+                                    grip-h (* 0.4 height)]
+                                (fill-round-rect! ctx ink (+ x0 6) grip-y 2 grip-h 1)
+                                (fill-round-rect! ctx ink (- x1 8) grip-y 2 grip-h 1))))
+                    ;; white with the outline of the theme's strongest ink,
+                    ;; so they show on the bar and on the row in both themes
+                    (when (or active? hovered?)
+                      (doseq [grip-x (fade-grips geo clip)]
+                        (.beginPath ctx)
+                        (.arc ctx grip-x (+ top 1) fade-grip 0 (* 2 mth/PI))
+                        (set! (.-fillStyle ctx) (:on-accent palette))
+                        (.fill ctx)
+                        (set! (.-strokeStyle ctx) (:fg-strong palette))
+                        (set! (.-lineWidth ctx) 1.5)
+                        (.stroke ctx)))))
+                (let [room (- x1 x0 32)
+                      ;; its speed when it is not the one of its file, as a factor
+                      name (if (= 1 (ctau/clip-speed clip))
+                             (:name clip)
+                             (dm/str (:name clip) " · " (/ (mth/round (* 100 (ctau/clip-speed clip))) 100) "×"))]
+                  (when (pos? room)
+                    (set! (.-font ctx) (dm/str "11px " font))
+                    (when-let [text (fit-text ctx name room)]
+                      (set! (.-fillStyle ctx) ink)
+                      (set! (.-textAlign ctx) "left")
+                      (set! (.-textBaseline ctx) "top")
+                      (.fillText ctx text (+ x0 14) (+ top 2))))))))))
+
 (defn- draw-lane!
   [ctx geo scene palette font index row]
   (let [y       (row-y geo index)
@@ -520,7 +847,9 @@
                      (if active? (:accent palette) (:bar palette))
                      (if active? (:on-accent palette) (:fg palette))
                      (= :bar (:type hover))
-                     true)))
+                     true)
+          (when (contains? (:selected-tracks scene) (:id row))
+            (outline-bar! ctx geo y start end (:select palette)))))
 
       :animation
       (let [animation (:animation row)
@@ -533,12 +862,31 @@
                                            (= :animation (:type hover))
                                            (not (:locked animation)))]
                     (draw-block-label! ctx ((:animation-label scene) animation) ink font
-                                       x0 x1 (+ y (/ row-height 2)))))))
+                                       x0 x1 (+ y (/ row-height 2)))
+                    (when (contains? (:selected-anims scene)
+                                     {:shape-id (:id row) :animation-id (:id animation)})
+                      (outline-bar! ctx geo y (:start animation) (cta/animation-end animation)
+                                    (:select palette)))))))
 
       :property
       (draw-property! ctx geo scene palette row y
                       (if active? (:accent palette) (:fg palette))
-                      hover))))
+                      hover)
+
+      :audio
+      (doseq [clip (:clips row)]
+        (draw-clip! ctx geo scene palette font y clip))
+
+      ;; collapsed, an overview of all the clips, each a slim bar
+      :audio-group
+      (when (:collapsed? row)
+        (let [mid (+ y (/ row-height 2))]
+          (doseq [clip (:clips row)
+                  :let [x0 (time->x geo (:start clip))
+                        x1 (max (time->x geo (ctau/clip-end clip)) (+ x0 2))]
+                  :when (and (< x0 (:width geo)) (pos? x1))]
+            (faded! ctx (if (:muted clip) 0.3 0.7)
+                    #(fill-round-rect! ctx (:wave palette) x0 (- mid 2) (- x1 x0) 4 2))))))))
 
 (defn- draw-rows!
   [^js ctx geo {:keys [rows selected duration span markers playhead snap-line

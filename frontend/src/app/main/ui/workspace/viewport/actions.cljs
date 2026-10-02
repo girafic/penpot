@@ -14,6 +14,7 @@
    [app.common.uuid :as uuid]
    [app.config :as cfg]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.audio :as dwaa]
    [app.main.data.workspace.drawing :as dd]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.lottie :as dwlt]
@@ -525,14 +526,19 @@
 
 (defn- upload-files
   "Add dropped `files` at `position`: with Motion on, Lottie animations as
-  boards with their timeline; the rest as images and SVGs."
+  boards with their timeline and audio files as clips of the board under
+  them (see `dwaa/drop-audio-files`); the rest as images and SVGs."
   [file-id files position]
   (let [motion? (features/active-feature? @st/state "animation/v1")
         lottie? #(and motion? (dwlt/lottie-file? %))
+        audio?  #(and motion? (not (lottie? %)) (dwaa/audio-file? %))
         files   (seq files)
-        others  (remove lottie? files)]
+        audio   (filter audio? files)
+        others  (remove #(or (lottie? %) (audio? %)) files)]
     (doseq [blob (filter lottie? files)]
       (st/emit! (dwlt/import-lottie blob position)))
+    (when (seq audio)
+      (st/emit! (dwaa/drop-audio-files audio position)))
     (when (seq others)
       (st/emit! (dwm/upload-media-workspace {:file-id file-id
                                              :position position

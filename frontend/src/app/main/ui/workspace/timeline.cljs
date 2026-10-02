@@ -19,12 +19,15 @@
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.component :as ctk]
    [app.config :as cfg]
    [app.main.data.comments :as dcm]
+   [app.main.data.shortcuts :as ds]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.audio :as dwaa]
    [app.main.data.workspace.clipboard :as dwcp]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.data.workspace.modifiers :as dwm]
@@ -43,7 +46,9 @@
    [app.main.ui.workspace.sidebar.options.menus.motion :as motion]
    [app.main.ui.workspace.timeline.easing :refer [easing-editor*]]
    [app.main.ui.workspace.timeline.lanes :as lanes]
+   [app.util.audio :as audio]
    [app.util.dom :as dom]
+   [app.util.dom.dnd :as dnd]
    [app.util.dom.normalize-wheel :as nw]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -166,10 +171,21 @@
   (* 100 (/ (mth/log10 (/ zoom min-zoom))
             (mth/log10 (/ max-zoom min-zoom)))))
 
+(defn content-end
+  "The latest time the dock shows something of `timeline` at: a
+  keyframe, the end of an animated copy (`copy-ends`, by copy) or of an
+  audio clip, which may run far past the duration and is trimmed at its
+  end."
+  [timeline copy-ends]
+  (apply max 0 (concat (map :time (mapcat :keyframes (vals (:tracks timeline))))
+                       (vals copy-ends)
+                       (map ctau/clip-end (vals (:audio-clips timeline))))))
+
 (defn- axis-span
   "Milliseconds the ruler covers. The duration fills the view at zoom 1.
   Zooming out lengthens the ruler so time keeps running to the right
-  edge, and a keyframe past the duration stays on the axis."
+  edge, and what is past the duration (see `content-end`) stays on the
+  axis, which scrolls to it."
   [duration zoom latest]
   (let [fitted (if (< zoom 1)
                  (/ duration (max zoom 0.0001))
@@ -237,6 +253,48 @@
 (def ^:private c-key? (kbd/is-key-ignore-case? "c"))
 (def ^:private x-key? (kbd/is-key-ignore-case? "x"))
 (def ^:private m-key? (kbd/is-key-ignore-case? "m"))
+(def ^:private s-key? (kbd/is-key-ignore-case? "s"))
+(def ^:private b-key? (kbd/is-key-ignore-case? "b"))
+
+(defn nudge-step
+  "How far, in ms, an arrow key `event` moves the selected keyframes or
+  clip: 10 ms, 100 ms with Shift, back with the left arrow."
+  [event]
+  (* (if (kbd/left-arrow? event) -1 1)
+     (if (kbd/shift? event) 100 10)))
+
+(defn dock-key-action
+  "What a key `event` does in the focused dock (but in a text field, which
+  keeps its keys), by what is selected there: `:add-marker` (M),
+  `:jump-to-marker` (Alt with an arrow) or `:split-all-clips` (Shift +
+  Cmd/Ctrl + B, the clips under the playhead, as Final Cut's Blade All);
+  with an audio clip selected (`selected-clip`), `:split-clip` (Cmd/Ctrl
+  + B, as Final Cut, DaVinci Resolve or CapCut, or S), `:delete-clip`
+  (Delete, Backspace), `:nudge-clip` (the arrows, see `nudge-step`) or
+  `:no-copy` (Cmd/Ctrl + C or X: clips are not copied, nor the selected
+  shapes behind them); else `:delete-keyframes`, `:copy-keyframes`,
+  `:cut-keyframes` or `:shift-keyframes` (the arrows) for the keyframes
+  `selected-kfs`. Nil for a key the dock leaves to the workspace."
+  [event selected-kfs selected-clip & [selected-anims]]
+  (let [plain?  (not (or (kbd/mod? event) (kbd/alt? event) (kbd/shift? event)))
+        delete? (or (kbd/delete? event) (kbd/backspace? event))
+        copy?   (and (kbd/mod? event) (or (c-key? event) (x-key? event)))
+        arrow?  (or (kbd/left-arrow? event) (kbd/right-arrow? event))
+        blade?  (and (kbd/mod? event) (not (kbd/alt? event)) (b-key? event))]
+    (cond
+      (and plain? (m-key? event))                 :add-marker
+      (and (kbd/alt? event) arrow?)               :jump-to-marker
+      (and blade? (kbd/shift? event))             :split-all-clips
+      (and (some? selected-clip) blade?)          :split-clip
+      (and (some? selected-clip) plain? (s-key? event)) :split-clip
+      (and (some? selected-clip) delete?)         :delete-clip
+      (and (some? selected-clip) arrow?)          :nudge-clip
+      (and copy? (seq selected-kfs))              (if (x-key? event) :cut-keyframes :copy-keyframes)
+      (and (some? selected-clip) copy?)           :no-copy
+      (and (seq selected-anims) delete?)          :delete-clip
+      (and (seq selected-anims) arrow?)           :nudge-clip
+      delete?                                     :delete-keyframes
+      (and (seq selected-kfs) arrow?)             :shift-keyframes)))
 
 (def ^:private marquee-threshold
   "Pixels the pointer must move before a lane click becomes a box select."
@@ -284,6 +342,66 @@
               (map #(select-keys % [:shape-id :keyframe-id])))
         hits))
 
+(defn track-items
+  "The keyframes and preset animations of the layer `shape-id` and the
+  layers in it, as the bar of its track holds them: `{:kfs :anims}` (see
+  `dwaa/selection-of`)."
+  [timeline objects shape-id]
+  (let [ids (cfh/get-children-ids-with-self objects shape-id)]
+    {:kfs   (into #{} (mapcat (fn [id]
+                                (map #(hash-map :shape-id id :keyframe-id (:id %))
+                                     (dm/get-in timeline [:tracks id :keyframes]))))
+                  ids)
+     :anims (into #{} (mapcat (fn [id]
+                                (map #(hash-map :shape-id id :animation-id (:id %))
+                                     (dm/get-in timeline [:tracks id :animations]))))
+                  ids)}))
+
+(defn- selected-tracks
+  "Ids of the layers of the `rows` whose track is all selected (see
+  `track-items`): their bars show it."
+  [timeline objects rows {:keys [kfs anims]}]
+  (if (and (empty? kfs) (empty? anims))
+    #{}
+    (into #{}
+          (comp (filter #(= :layer (:type %)))
+                (map :id)
+                (filter (fn [id]
+                          (let [items (track-items timeline objects id)]
+                            (and (pos? (dwaa/selection-count items))
+                                 (every? kfs (:kfs items))
+                                 (every? anims (:anims items)))))))
+          rows)))
+
+(defn items-in-rect
+  "What a box `marquee` picks, `{:kfs :anims :clips}` (see
+  `dwaa/selection-of`), of the `hits` of each kind: the keyframes, the
+  blocks of the preset animations and the clips it touches, and all of a
+  track whose bar it touches (`items-of`, of the layer)."
+  [{:keys [kfs anims clips bars]} marquee items-of]
+  (let [touched (fn [boxes] (filter #(rects-intersect? % marquee) boxes))
+        tracks  (map #(items-of (:shape-id %)) (touched bars))]
+    {:kfs   (into (into #{} (map #(select-keys % [:shape-id :keyframe-id])) (touched kfs))
+                  (mapcat :kfs) tracks)
+     :anims (into (into #{} (map #(select-keys % [:shape-id :animation-id])) (touched anims))
+                  (mapcat :anims) tracks)
+     :clips (into #{} (map :clip-id) (touched clips))}))
+
+(defn- whole-selection?
+  "Whether the keys act on all of `selection` together (see
+  `dwaa/selection-of`): when it holds more than one kind, or blocks."
+  [{:keys [kfs anims clips]}]
+  (or (seq anims) (< 1 (count (filter seq [kfs clips])))))
+
+(defn- merge-selection
+  [a b]
+  (merge-with into a b))
+
+(defn clips-in-rect
+  "Ids of the clips whose boxes overlap `marquee` (see `lanes/clip-boxes`)."
+  [hits marquee]
+  (into #{} (comp (filter #(rects-intersect? % marquee)) (map :clip-id)) hits))
+
 (defn marquee-drag?
   "True once the pointer has moved far enough to count as a box, not a click."
   [x0 y0 x y]
@@ -302,16 +420,20 @@
   when it changes."
   [target]
   [(:type target) (:row target) (:mode target)
-   (:id (:keyframe target)) (:id (:from target))])
+   (:id (:keyframe target)) (:id (:from target)) (:id (:clip target))])
 
 (defn- lanes-cursor
-  [{:keys [type mode locked? animation]}]
+  [{:keys [type mode locked? animation clip]}]
   (case type
     (:ruler :duration)       "ew-resize"
     :bar                     (if (= :move mode) "grab" "ew-resize")
     :animation               (cond (:locked animation) "default"
                                    (= :move mode)      "grab"
                                    :else               "ew-resize")
+    :audio                   (cond (:locked clip)    "default"
+                                   (= :move mode)    "grab"
+                                   (= :volume mode)  "ns-resize"
+                                   :else             "ew-resize")
     (:keyframe :easing)      (if locked? "default" "pointer")
     :copy                    "pointer"
     (:segment :lane :row)    "crosshair"
@@ -334,14 +456,17 @@
                  child-ids)))]
      (set (walk board-id)))))
 
-(defn- timeline-rows
+(defn timeline-rows
   "Flatten the layers of `board-id` (top-most first, like the layers
   panel) into rows: one per layer followed, while it is expanded, by one
-  per preset animation, one per animated property and its children.
-  Animated layers start expanded; `expanded` holds the ones the user
-  toggled. A component copy playing the animation of its main, which
-  ends at the time `copy-ends` gives for it, has a bar over it, `:copy`,
-  and keeps its layers folded away unless the board animates them."
+  per preset animation, one per animated property and its children. Only
+  the layers that animate show, and the ones holding them (see
+  `animated-ids`), under the row of the board, which always does: a layer
+  gets its row with its first animation. Animated layers start expanded;
+  `expanded` holds the ones the user toggled. A component copy playing
+  the animation of its main, which ends at the time `copy-ends` gives
+  for it, has a bar over it, `:copy`, and keeps its layers folded away
+  unless the board animates them."
   [objects board-id timeline expanded copy-ends]
   (let [animated (animated-ids objects board-id timeline)
         playing  (animated-ids objects board-id timeline copy-ends)]
@@ -351,7 +476,8 @@
                       ;; A copy shows its own animation, in the board,
                       ;; unfolded; the one of its main, as a bar.
                       folded?    (and (some? copy-end) (not (contains? animated id)))
-                      children   (when-not folded? (reverse (:shapes shape)))
+                      children   (when-not folded?
+                                   (filter #(contains? playing %) (reverse (:shapes shape))))
                       animations (dm/get-in timeline [:tracks id :animations])
                       slots      (track-slots (dm/get-in timeline [:tracks id :keyframes]))
                       expanded?  (and (not folded?) (get expanded id (contains? playing id)))]
@@ -502,11 +628,14 @@
 
 (mf/defc row-toggles*
   "Show / hide and lock / unlock buttons of a row, like the ones of the
-  layers panel."
+  layers panel; the row of an audio lane gives the icon of its sound
+  (`visibility-icon`) and the titles of both."
   {::mf/private true}
-  [{:keys [hidden? locked? on-toggle-visibility on-toggle-lock]}]
-  (let [visibility (if hidden? (tr "workspace.shape.menu.show") (tr "workspace.shape.menu.hide"))
-        lock       (if locked? (tr "workspace.shape.menu.unlock") (tr "workspace.shape.menu.lock"))]
+  [{:keys [hidden? locked? on-toggle-visibility on-toggle-lock visibility-icon visibility-title lock-title]}]
+  (let [visibility (or visibility-title
+                       (if hidden? (tr "workspace.shape.menu.show") (tr "workspace.shape.menu.hide")))
+        lock       (or lock-title
+                       (if locked? (tr "workspace.shape.menu.unlock") (tr "workspace.shape.menu.lock")))]
     ;; Clicks on them do not reach the row label, which selects the layer.
     [:div {:class (stl/css-case :row-toggles true :has-state (or hidden? locked?))
            :on-click dom/stop-propagation}
@@ -516,7 +645,7 @@
                :aria-label visibility
                :aria-pressed hidden?
                :on-click on-toggle-visibility}
-      [:> i/icon* {:icon-id (if hidden? i/hide i/shown) :size "s"}]]
+      [:> i/icon* {:icon-id (or visibility-icon (if hidden? i/hide i/shown)) :size "s"}]]
      [:button {:type "button"
                :class (stl/css-case :row-toggle true :active locked?)
                :title lock
@@ -664,6 +793,108 @@
       [:> row-toggles* {:hidden? hidden?
                         :locked? locked?
                         :on-toggle-visibility on-toggle-visibility
+                        :on-toggle-lock on-toggle-lock}]]]))
+
+(mf/defc audio-group-row*
+  "The row of the group of the audio lanes, like a folder of the layers
+  panel: a click shows or hides their rows (collapsed, its lane shows all
+  their clips), and its buttons mute or lock all the clips."
+  {::mf/private true
+   ::mf/wrap [mf/memo]}
+  [{:keys [row-index lanes collapsed? muted? locked? hovered? on-hover]}]
+  (let [[on-pointer-enter on-pointer-leave] (use-row-hover row-index on-hover)
+
+        on-toggle
+        (mf/use-fn #(st/emit! (dwaa/toggle-audio-collapsed)))
+
+        on-toggle-muted
+        (mf/use-fn
+         (mf/deps muted?)
+         #(st/emit! (dwaa/set-all-muted (not muted?))))
+
+        on-toggle-lock
+        (mf/use-fn
+         (mf/deps locked?)
+         #(st/emit! (dwaa/set-all-locked (not locked?))))]
+
+    [:div {:class (stl/css-case :row true :audio-group-row true :hovered hovered? :muted muted?)
+           :style (row-style row-index)
+           :on-pointer-enter on-pointer-enter
+           :on-pointer-leave on-pointer-leave}
+     [:div {:class (stl/css :row-label)
+            :on-click on-toggle}
+      [:button {:type "button"
+                :class (stl/css :chevron)
+                :aria-expanded (not collapsed?)
+                :aria-label (if collapsed?
+                              (tr "workspace.animation.expand-all")
+                              (tr "workspace.animation.collapse-all"))}
+       [:> i/icon* {:icon-id (if collapsed? i/arrow-right i/arrow-down) :size "s"}]]
+      [:span {:class (stl/css :audio-icon)}
+       [:> i/icon* {:icon-id i/volume :size "s"}]]
+      [:span {:class (stl/css :layer-name)}
+       (tr "workspace.animation.audio-group" lanes)]
+      [:> row-toggles* {:hidden? muted?
+                        :locked? locked?
+                        :visibility-icon (if muted? i/volume-off i/volume)
+                        :visibility-title (if muted?
+                                            (tr "workspace.animation.audio-unmute-all")
+                                            (tr "workspace.animation.audio-mute-all"))
+                        :lock-title (if locked?
+                                      (tr "workspace.animation.audio-unlock-all")
+                                      (tr "workspace.animation.audio-lock-all"))
+                        :on-toggle-visibility on-toggle-muted
+                        :on-toggle-lock on-toggle-lock}]]]))
+
+(mf/defc audio-row*
+  "The label of a lane of audio clips (see `dwaa/audio-rows`), the name of
+  the file it plays, which a drag up or down puts at another place among
+  the lanes (`on-drag-down`), with the buttons of a layer row: its sound, which mutes all its clips or plays
+  them (`muted?` when all are muted), and its lock (`locked?` when all
+  are locked). A drop of audio files on it adds them on this lane."
+  {::mf/private true
+   ::mf/wrap [mf/memo]}
+  [{:keys [row-index lane number name muted? locked? hovered? on-hover on-drag-down]}]
+  (let [[on-pointer-enter on-pointer-leave] (use-row-hover row-index on-hover)
+        label (if (str/blank? name) (tr "workspace.animation.audio-lane" number) name)
+
+        on-pointer-down
+        (mf/use-fn
+         (mf/deps lane on-drag-down)
+         (fn [event]
+           (on-drag-down event lane)))
+
+        on-toggle-muted
+        (mf/use-fn
+         (mf/deps lane muted?)
+         #(st/emit! (dwaa/set-lane-muted lane (not muted?))))
+
+        on-toggle-lock
+        (mf/use-fn
+         (mf/deps lane locked?)
+         #(st/emit! (dwaa/set-lane-locked lane (not locked?))))]
+
+    [:div {:class (stl/css-case :row true :audio-row true :hovered hovered? :muted muted?)
+           :style (row-style row-index)
+           :data-audio-lane lane
+           :on-pointer-enter on-pointer-enter
+           :on-pointer-leave on-pointer-leave}
+     [:div {:class (stl/css :row-label)
+            :on-pointer-down on-pointer-down}
+      [:span {:class (stl/css :audio-icon)}
+       [:> i/icon* {:icon-id i/volume :size "s"}]]
+      [:span {:class (stl/css :property-name) :title label}
+       label]
+      [:> row-toggles* {:hidden? muted?
+                        :locked? locked?
+                        :visibility-icon (if muted? i/volume-off i/volume)
+                        :visibility-title (if muted?
+                                            (tr "workspace.animation.lane-unmute")
+                                            (tr "workspace.animation.lane-mute"))
+                        :lock-title (if locked?
+                                      (tr "workspace.animation.lane-unlock")
+                                      (tr "workspace.animation.lane-lock"))
+                        :on-toggle-visibility on-toggle-muted
                         :on-toggle-lock on-toggle-lock}]]]))
 
 (mf/defc property-row*
@@ -1039,16 +1270,153 @@
     :ping-pong (tr "workspace.animation.ping-pong")
     (tr "workspace.animation.play-once")))
 
+(mf/defc clip-bar*
+  "The settings of the selected audio `clip`, in the toolbar of the dock:
+  its volume (a drag of the slider is one undo step), its speed (in %),
+  its fades (in the time `unit` of the dock), a cut at the playhead
+  (Cmd/Ctrl + B), and the length of the timeline fitted to its clips
+  (which adding or moving them never changes). Delete removes it; its row
+  mutes and locks its lane, its menu the clip. A locked clip only shows
+  them."
+  {::mf/private true}
+  [{:keys [clip unit]}]
+  (let [clip-id  (:id clip)
+        volume   (mth/round (* 100 (or (:volume clip) 1)))
+        locked?  (true? (:locked clip))
+        seconds? (= unit :s)
+        fade-in  (or (:fade-in clip) 0)
+        fade-out (or (:fade-out clip) 0)
+
+        on-fade
+        (mf/use-fn
+         (mf/deps clip-id seconds? fade-in fade-out)
+         (fn [which value]
+           (when (number? value)
+             (let [ms (max 0 (if seconds? (mth/round (* value 1000)) value))]
+               (st/emit! (if (= which :in)
+                           (dwaa/set-clip-fades clip-id ms fade-out)
+                           (dwaa/set-clip-fades clip-id fade-in ms)))))))
+
+        speed (mth/round (* 100 (ctau/clip-speed clip)))
+
+        on-speed
+        (mf/use-fn
+         (mf/deps clip-id)
+         (fn [value]
+           (when (number? value)
+             (st/emit! (dwaa/set-clip-speed clip-id (/ value 100))))))
+
+        on-fade-in  (mf/use-fn (mf/deps on-fade) #(on-fade :in %))
+        on-fade-out (mf/use-fn (mf/deps on-fade) #(on-fade :out %))
+
+        on-volume-down
+        (mf/use-fn
+         (fn [_]
+           (let [undo-id (js/Symbol)]
+             (st/emit! (dwu/start-undo-transaction undo-id))
+             (events/listenOnce js/window "pointerup"
+                                #(st/emit! (dwu/commit-undo-transaction undo-id))))))
+
+        on-volume
+        (mf/use-fn
+         (mf/deps clip-id)
+         (fn [event]
+           (let [value (d/parse-double (dom/get-target-val event) 100)]
+             (st/emit! (dwaa/set-clip-volume clip-id (/ value 100))))))
+
+        ;; the field goes on where the slider stops, up to four times
+        on-volume-value
+        (mf/use-fn
+         (mf/deps clip-id)
+         (fn [value]
+           (when (number? value)
+             (st/emit! (dwaa/set-clip-volume clip-id (/ value 100))))))
+
+        on-split
+        (mf/use-fn (mf/deps clip-id) #(st/emit! (dwaa/split-clip clip-id)))
+
+        on-fit
+        (mf/use-fn #(st/emit! (dwaa/fit-timeline-to-audio)))]
+
+    [:div {:class (stl/css :clip-bar)}
+     [:span {:class (stl/css :clip-name) :title (:name clip)} (:name clip)]
+     [:input {:type "range"
+              :class (stl/css :zoom-slider :volume-slider)
+              :min 0
+              :max 200
+              :step 1
+              :value (min volume 200)
+              :disabled locked?
+              :style #js {"--zoom-fill" (dm/str (/ (min volume 200) 2) "%")}
+              :title (tr "workspace.animation.clip-volume")
+              :aria-label (tr "workspace.animation.clip-volume")
+              :on-pointer-down on-volume-down
+              :on-change on-volume}]
+     [:div {:class (stl/css :duration-field :fade-field)
+            :title (tr "workspace.animation.clip-volume")}
+      [:> deprecated-input/numeric-input* {:min 0
+                                           :max (* 100 ctau/max-volume)
+                                           :step 5
+                                           :value volume
+                                           :is-disabled locked?
+                                           :on-change on-volume-value}]
+      [:span {:class (stl/css :field-unit)} "%"]]
+     [:div {:class (stl/css :duration-field :fade-field)
+            :title (tr "workspace.animation.clip-speed")}
+      [:label (tr "workspace.animation.clip-speed-short")]
+      [:> deprecated-input/numeric-input* {:min (* 100 ctau/min-speed)
+                                           :max (* 100 ctau/max-speed)
+                                           :step 5
+                                           :value speed
+                                           :is-disabled locked?
+                                           :on-change on-speed}]
+      [:span {:class (stl/css :field-unit)} "%"]]
+     [:div {:class (stl/css :duration-field :fade-field)
+            :title (tr "workspace.animation.clip-fade-in")}
+      [:label (tr "workspace.animation.clip-fade-in-short")]
+      [:> deprecated-input/numeric-input* {:key (dm/str "in-" (name unit))
+                                           :min 0
+                                           :step (if seconds? 0.1 10)
+                                           :value (if seconds? (/ fade-in 1000) fade-in)
+                                           :is-disabled locked?
+                                           :on-change on-fade-in}]]
+     [:div {:class (stl/css :duration-field :fade-field)
+            :title (tr "workspace.animation.clip-fade-out")}
+      [:label (tr "workspace.animation.clip-fade-out-short")]
+      [:> deprecated-input/numeric-input* {:key (dm/str "out-" (name unit))
+                                           :min 0
+                                           :step (if seconds? 0.1 10)
+                                           :value (if seconds? (/ fade-out 1000) fade-out)
+                                           :is-disabled locked?
+                                           :on-change on-fade-out}]]
+     [:button {:type "button"
+               :class (stl/css :ctrl-btn)
+               :title (dm/str (tr "workspace.animation.clip-split") " (" (ds/meta "b") ")")
+               :disabled locked?
+               :on-click on-split}
+      [:> i/icon* {:icon-id i/separate-nodes}]]
+     [:button {:type "button"
+               :class (stl/css :ctrl-btn)
+               :title (tr "workspace.animation.fit-to-audio")
+               :on-click on-fit}
+      [:> i/icon* {:icon-id i/fit-content}]]]))
+
 (mf/defc toolbar*
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [timeline playing? recording? full-quality? unit zoom on-zoom-change]}]
+  [{:keys [timeline playing? recording? full-quality? audio-muted? clip clip-count unit zoom on-zoom-change]}]
   (let [duration (:duration timeline)
         playback (cta/playback-mode timeline)
         seconds? (= unit :s)
 
+        ;; a page may start sound only from a user gesture: this one
         on-toggle-play
-        (mf/use-fn #(st/emit! (dwa/toggle-play)))
+        (mf/use-fn #(do (audio/unlock!)
+                        (st/emit! (dwa/toggle-play))))
+
+        on-toggle-audio
+        (mf/use-fn #(do (audio/unlock!)
+                        (st/emit! (dwa/toggle-audio-muted))))
 
         on-toggle-recording
         (mf/use-fn #(st/emit! (dwa/toggle-auto-keyframe)))
@@ -1105,7 +1473,17 @@
                 :title (tr "workspace.animation.full-quality")
                 :aria-pressed full-quality?
                 :on-click on-toggle-quality}
-       [:> i/icon* {:icon-id i/effects}]]]
+       [:> i/icon* {:icon-id i/effects}]]
+      ;; the sound of the audio clips, while the board has some
+      (when (seq (:audio-clips timeline))
+        [:button {:type "button"
+                  :class (stl/css-case :ctrl-btn true :toggle-btn true :active (not audio-muted?))
+                  :title (if audio-muted?
+                           (tr "workspace.animation.unmute")
+                           (tr "workspace.animation.mute"))
+                  :aria-pressed (not audio-muted?)
+                  :on-click on-toggle-audio}
+         [:> i/icon* {:icon-id (if audio-muted? i/volume-off i/volume)}]])]
 
      [:button {:type "button"
                :class (stl/css-case :rec-btn true :active recording?)
@@ -1139,6 +1517,15 @@
                 :on-click on-toggle-unit}
        (if seconds? "s" "ms")]]
 
+     ;; the settings of one clip; of several, how many
+     (cond
+       (some? clip)
+       [:> clip-bar* {:clip clip :unit unit}]
+
+       (> clip-count 1)
+       [:div {:class (stl/css :clip-bar)}
+        [:span {:class (stl/css :clip-name)} (tr "workspace.animation.clips-selected" clip-count)]])
+
      [:div {:class (stl/css :toolbar-end)}
       [:input {:type "range"
                :class (stl/css :zoom-slider)
@@ -1165,13 +1552,42 @@
   [:div {:class (stl/css :empty-state)}
    [:p (tr "workspace.animation.select-board")]])
 
+(defn- clip-problem
+  "Why the audio `clip` stays silent here, or nil: its file lasts too
+  long (`:too-long`, see `audio/too-long?`) or did not load (see
+  `audio/failure`)."
+  [clip]
+  (if (audio/too-long? clip)
+    :too-long
+    (audio/failure (:audio-id clip))))
+
+(defn- problem-text
+  [problem]
+  (case problem
+    :too-long    (tr "workspace.audio.silent.too-long" (/ ctau/max-audio-duration 60000))
+    :not-loaded  (tr "workspace.audio.silent.not-loaded")
+    :undecodable (tr "workspace.audio.silent.undecodable")
+    :unavailable (tr "workspace.audio.silent.unavailable")
+    :too-much    (tr "workspace.audio.silent.too-much")))
+
 (defn- lanes-title
-  "The tooltip of what a `lanes/hit` is on, with times in `unit`."
-  [{:keys [type keyframe animation]} unit]
+  "The tooltip of what a `lanes/hit` is on, with times in `unit`; for an
+  audio clip that stays silent, why."
+  [{:keys [type keyframe animation clip mode]} unit]
   (case type
     :keyframe  (dwa/format-time (:time keyframe) unit)
     :easing    (tr "workspace.animation.easing")
     :animation (motion/animation-label animation)
+    :audio     (case mode
+                 :fade-in  (tr "workspace.animation.clip-fade-in-time"
+                               (dwa/format-time (or (:fade-in clip) 0) unit))
+                 :fade-out (tr "workspace.animation.clip-fade-out-time"
+                               (dwa/format-time (or (:fade-out clip) 0) unit))
+                 :volume   (tr "workspace.animation.clip-volume-at"
+                               (dm/str (mth/round (* 100 (or (:volume clip) 1))) "%"))
+                 (if-let [problem (clip-problem clip)]
+                   (dm/str (:name clip) "\n" (problem-text problem))
+                   (:name clip)))
     :duration  (tr "workspace.animation.drag-duration")
     nil))
 
@@ -1215,6 +1631,14 @@
         duration   (get clock :duration 1000)
 
         selected-kfs (get anim :selected-kfs #{})
+        selected-clip (get anim :selected-clip)
+        selected-clips (dwaa/selected-clips anim)
+        selected-anims (or (:selected-anims anim) #{})
+        ;; all that is selected, which moves together
+        selection     (dwaa/selection-of anim)
+
+        ;; A decoded file draws its waveform (see `audio/version`).
+        audio-version (mf/deref audio/version)
 
         ;; Easing editor of the segment starting at a keyframe, opened from
         ;; the button of the segment and placed at its client `rect`.
@@ -1269,8 +1693,7 @@
         zoom*      (mf/use-state 1)
         zoom       (deref zoom*)
         latest     (mf/with-memo [timeline copy-ends]
-                     (apply max 0 (concat (map :time (mapcat :keyframes (vals (:tracks timeline))))
-                                          (vals copy-ends))))
+                     (content-end timeline copy-ends))
         ;; While the end of the timeline is dragged the axis stays as it
         ;; was, unless the duration outgrows it (see `on-duration-down`).
         axis-lock* (mf/use-state nil)
@@ -1377,9 +1800,12 @@
         ;; Layer tree of the board, like the layers panel.
         expanded*  (mf/use-state {})
         expanded   (deref expanded*)
-        rows       (mf/with-memo [objects board-id timeline expanded copy-ends]
+        ;; the layers, then the lanes of the audio clips
+        audio-collapsed? (true? (:audio-collapsed? anim))
+        rows       (mf/with-memo [objects board-id timeline expanded copy-ends audio-collapsed?]
                      (when (some? timeline)
-                       (timeline-rows objects board-id timeline expanded copy-ends)))
+                       (into (timeline-rows objects board-id timeline expanded copy-ends)
+                             (dwaa/audio-rows timeline :collapsed? audio-collapsed?))))
 
         ;; The selection of the last render and the layers newly selected,
         ;; which the rows scroll to once they show (see the effects).
@@ -1443,6 +1869,51 @@
          (fn [event shape-id]
            (st/emit! (dws/select-shape shape-id (kbd/shift? event)))))
 
+        ;; Dragging a selected track, block or clip, with more selected,
+        ;; moves all that is selected together (see `dwaa/move-selection`),
+        ;; snapping by the span of the one dragged, from the timeline as it
+        ;; was when the drag started, as one undo step.
+        sel-drag-ref (mf/use-ref nil)
+
+        on-sel-move
+        (mf/use-fn
+         (mf/deps span axis-width snap-span)
+         (fn [event]
+           (when-let [{:keys [base selection x0 start end]} (mf/ref-val sel-drag-ref)]
+             (let [dx     (- (:x (dom/get-client-position event)) x0)
+                   dt     (mth/round (* dx (/ span (max 1 axis-width))))
+                   except {:keyframe-ids (into #{} (map :keyframe-id) (:kfs selection))
+                           :animation-ids (into #{} (map :animation-id) (:anims selection))
+                           :clip-ids (:clips selection)}
+                   [to _] (snap-span [(+ start dt) (+ end dt)] event except)]
+               (st/emit! (dwaa/commit-selection-move base selection (- to start)))))))
+
+        on-sel-up
+        (mf/use-fn
+         (mf/deps show-snap)
+         (fn [_event]
+           (when-let [{:keys [undo-id listen-keys]} (mf/ref-val sel-drag-ref)]
+             (mf/set-ref-val! sel-drag-ref nil)
+             (show-snap nil)
+             (run! events/unlistenByKey listen-keys)
+             (st/emit! (dwu/commit-undo-transaction undo-id)))))
+
+        start-selection-drag!
+        (mf/use-fn
+         (mf/deps timeline on-sel-move on-sel-up)
+         (fn [event selection start end]
+           (let [undo-id (js/Symbol)
+                 keys    [(events/listen js/window "pointermove" on-sel-move)
+                          (events/listen js/window "pointerup" on-sel-up)]]
+             (mf/set-ref-val! sel-drag-ref {:base timeline
+                                            :selection selection
+                                            :start start
+                                            :end end
+                                            :x0 (:x (dom/get-client-position event))
+                                            :listen-keys keys
+                                            :undo-id undo-id})
+             (st/emit! (dwu/start-undo-transaction undo-id)))))
+
         ;; Dragging a layer bar retimes the keyframes of the layer and its
         ;; children from the timeline as it was when the drag started; the
         ;; whole drag is a single undo step.
@@ -1487,28 +1958,48 @@
 
         on-bar-down
         (mf/use-fn
-         (mf/deps timeline objects selected on-bar-move on-bar-up)
+         (mf/deps timeline objects selected selection on-bar-move on-bar-up start-selection-drag!)
          (fn [event shape-id mode]
            (dom/stop-propagation event)
            (when (dom/left-mouse? event)
-             (select-on-press event shape-id selected)
-             (let [ids   (cfh/get-children-ids-with-self objects shape-id)
-                   range (cta/keyframes-range timeline ids)]
-               (when (some? range)
-                 (let [undo-id (js/Symbol)
-                       ;; Follow the pointer on the window, so the drag keeps
-                       ;; going below the bar and past its right end.
-                       keys [(events/listen js/window "pointermove" on-bar-move)
-                             (events/listen js/window "pointerup" on-bar-up)]]
-                   (mf/set-ref-val! bar-drag-ref {:base timeline
-                                                  :ids ids
-                                                  :range range
-                                                  :listen-keys keys
-                                                  ;; a single instant can only move
-                                                  :mode (if (apply = range) :move mode)
-                                                  :x0 (:x (dom/get-client-position event))
-                                                  :undo-id undo-id})
-                   (st/emit! (dwu/start-undo-transaction undo-id))))))))
+             (let [ids    (cfh/get-children-ids-with-self objects shape-id)
+                   range  (cta/keyframes-range timeline ids)
+                   items  (track-items timeline objects shape-id)
+                   held?  (and (every? (:kfs selection) (:kfs items))
+                               (every? (:anims selection) (:anims items))
+                               (pos? (dwaa/selection-count items)))]
+               (cond
+                 ;; Shift or Cmd/Ctrl adds the track to what is selected, or
+                 ;; takes it out
+                 (or (kbd/shift? event) (kbd/mod? event))
+                 (st/emit! (dwaa/select-items
+                            (if held?
+                              (merge-with #(reduce disj %1 %2) selection items)
+                              (merge-selection selection items))))
+
+                 ;; selected with more: all of it moves
+                 (and held? (= :move mode) (some? range)
+                      (> (dwaa/selection-count selection) (dwaa/selection-count items)))
+                 (start-selection-drag! event selection (first range) (second range))
+
+                 :else
+                 (do
+                   (select-on-press event shape-id selected)
+                   (when (some? range)
+                     (let [undo-id (js/Symbol)
+                           ;; Follow the pointer on the window, so the drag keeps
+                           ;; going below the bar and past its right end.
+                           keys [(events/listen js/window "pointermove" on-bar-move)
+                                 (events/listen js/window "pointerup" on-bar-up)]]
+                       (mf/set-ref-val! bar-drag-ref {:base timeline
+                                                      :ids ids
+                                                      :range range
+                                                      :listen-keys keys
+                                                      ;; a single instant can only move
+                                                      :mode (if (apply = range) :move mode)
+                                                      :x0 (:x (dom/get-client-position event))
+                                                      :undo-id undo-id})
+                       (st/emit! (dwu/start-undo-transaction undo-id))))))))))
 
         ;; Dragging an animation block works like a layer bar, from the
         ;; timeline as it was when the drag started, as one undo step.
@@ -1551,25 +2042,40 @@
 
         on-animation-down
         (mf/use-fn
-         (mf/deps timeline selected on-animation-move on-animation-up)
+         (mf/deps timeline selected selection on-animation-move on-animation-up start-selection-drag!)
          (fn [event shape-id animation mode]
            (dom/stop-propagation event)
            (when (dom/left-mouse? event)
-             ;; Its settings are in the sidebar of the selected layer.
-             (select-on-press event shape-id selected)
-             ;; A locked animation stays where it is.
-             (when-not (:locked animation)
-               (let [undo-id (js/Symbol)
-                     keys    [(events/listen js/window "pointermove" on-animation-move)
-                              (events/listen js/window "pointerup" on-animation-up)]]
-                 (mf/set-ref-val! animation-drag-ref {:base timeline
-                                                      :shape-id shape-id
-                                                      :animation animation
-                                                      :mode mode
-                                                      :x0 (:x (dom/get-client-position event))
-                                                      :listen-keys keys
-                                                      :undo-id undo-id})
-                 (st/emit! (dwu/start-undo-transaction undo-id)))))))
+             (let [ref {:shape-id shape-id :animation-id (:id animation)}]
+               (cond
+                 ;; Shift or Cmd/Ctrl adds the block to what is selected,
+                 ;; or takes it out
+                 (or (kbd/shift? event) (kbd/mod? event))
+                 (st/emit! (dwa/select-animation-block shape-id (:id animation) true))
+
+                 ;; selected with more: all of it moves
+                 (and (= :move mode) (contains? (:anims selection) ref)
+                      (> (dwaa/selection-count selection) 1))
+                 (start-selection-drag! event selection (:start animation) (cta/animation-end animation))
+
+                 :else
+                 (do
+                   ;; Its settings are in the sidebar of the selected layer.
+                   (select-on-press event shape-id selected)
+                   (st/emit! (dwa/select-animation-block shape-id (:id animation) false))
+                   ;; A locked animation stays where it is.
+                   (when-not (:locked animation)
+                     (let [undo-id (js/Symbol)
+                           keys    [(events/listen js/window "pointermove" on-animation-move)
+                                    (events/listen js/window "pointerup" on-animation-up)]]
+                       (mf/set-ref-val! animation-drag-ref {:base timeline
+                                                            :shape-id shape-id
+                                                            :animation animation
+                                                            :mode mode
+                                                            :x0 (:x (dom/get-client-position event))
+                                                            :listen-keys keys
+                                                            :undo-id undo-id})
+                       (st/emit! (dwu/start-undo-transaction undo-id))))))))))
 
         dock-ref   (mf/use-ref nil)
 
@@ -1765,7 +2271,14 @@
                                               :animation-label motion/animation-label
                                               :markers (:markers timeline)
                                               :snap-line snap-line
-                                              :easing easing})
+                                              :easing easing
+                                              :selected-clips selected-clips
+                                              :selected-anims selected-anims
+                                              :selection selection
+                                              :selected-tracks (selected-tracks timeline objects rows selection)
+                                              :waveform audio/waveform
+                                              :problem clip-problem
+                                              :audio-version audio-version})
 
         draw-lanes
         (mf/use-fn
@@ -1845,9 +2358,150 @@
                  {:keys [x y]}      (dom/get-client-position event)]
              [(- x left) (- y top)])))
 
+        ;; Dragging an audio clip moves it, onto the audio row under the
+        ;; pointer (under the last one, onto a lane of its own, see
+        ;; `dwaa/lane-after`), trims it at an edge, changes a fade by its
+        ;; grip on the top edge or its volume by its line (up louder, a
+        ;; pixel a percent), from the timeline as it was when the drag
+        ;; started, as one undo step. It snaps as the other drags do
+        ;; (Ctrl/Cmd keeps it from snapping). A locked clip stays.
+        clip-drag-ref (mf/use-ref nil)
+
+        on-clip-move
+        (mf/use-fn
+         (mf/deps span axis-width canvas-point snap-target snap-span show-snap)
+         (fn [event]
+           (when-let [{:keys [base clip mode x0 y0 lane group]} (mf/ref-val clip-drag-ref)]
+             (let [start  (:start clip)
+                   end    (ctau/clip-end clip)
+                   dx     (- (:x (dom/get-client-position event)) x0)
+                   dy     (- (:y (dom/get-client-position event)) y0)
+                   dt     (mth/round (* dx (/ span (max 1 axis-width))))
+                   except (if (some? group)
+                            {:clip-ids (:clips group)
+                             :keyframe-ids (into #{} (map :keyframe-id) (:kfs group))
+                             :animation-ids (into #{} (map :animation-id) (:anims group))}
+                            {:clip-ids #{(:id clip)}})
+                   edge   (fn [t]
+                            (let [s (snap-target t event except)]
+                              (show-snap s)
+                              (or s t)))
+                   time   (case mode
+                            :start    (edge (+ start dt))
+                            :end      (edge (+ end dt))
+                            :fade-in  (edge (+ start (or (:fade-in clip) 0) dt))
+                            :fade-out (edge (+ (- end (or (:fade-out clip) 0)) dt))
+                            ;; the volume it is dragged to, past full on up
+                            :volume   (- (or (:volume clip) 1) (/ dy 100))
+                            (first (snap-span [(+ start dt) (+ end dt)] event except)))
+                   [_ y]  (canvas-point event)
+                   rows   (:rows (mf/ref-val scene-ref))
+                   index  (lanes/row-index (mf/ref-val geo-ref) y)
+                   row    (get rows index)
+                   lane   (cond
+                            (= :audio (:type row))
+                            (:lane row)
+
+                            ;; under the last row (the audio rows are the last)
+                            (and (= :move mode) (some? index) (>= index (count rows)))
+                            (dwaa/lane-after base (:id clip))
+
+                            :else
+                            lane)]
+               (st/emit! (if (some? group)
+                           ;; all that is selected, together, each clip on its lane
+                           (dwaa/commit-selection-move base group (- time start))
+                           (dwaa/commit-clip-drag base (:id clip) mode time lane)))))))
+
+        on-clip-up
+        (mf/use-fn
+         (mf/deps show-snap)
+         (fn [_event]
+           (when-let [{:keys [undo-id listen-keys]} (mf/ref-val clip-drag-ref)]
+             (mf/set-ref-val! clip-drag-ref nil)
+             (show-snap nil)
+             (run! events/unlistenByKey listen-keys)
+             (st/emit! (dwu/commit-undo-transaction undo-id)))))
+
+        on-clip-down
+        (mf/use-fn
+         (mf/deps timeline on-clip-move on-clip-up)
+         (fn [event {:keys [clip mode lane]}]
+           (dom/stop-propagation event)
+           (when (dom/left-mouse? event)
+             (let [selection (:selection (mf/ref-val scene-ref))
+                   group?    (and (= :move mode)
+                                  (contains? (:clips selection) (:id clip))
+                                  (> (dwaa/selection-count selection) 1))]
+               (cond
+                 ;; Shift or Cmd/Ctrl adds the clip to the selection, or
+                 ;; takes it out
+                 (or (kbd/shift? event) (kbd/mod? event))
+                 (st/emit! (dwaa/toggle-clip (:id clip)))
+
+                 :else
+                 (do
+                   ;; a selected clip takes the others along
+                   (when-not group?
+                     (st/emit! (dwaa/select-clip (:id clip))))
+                   (when-not (:locked clip)
+                     (let [undo-id (js/Symbol)
+                           keys    [(events/listen js/window "pointermove" on-clip-move)
+                                    (events/listen js/window "pointerup" on-clip-up)]]
+                       (mf/set-ref-val! clip-drag-ref {:base timeline
+                                                       :clip clip
+                                                       :mode mode
+                                                       :lane lane
+                                                       :group (when group? selection)
+                                                       :x0 (:x (dom/get-client-position event))
+                                                       :y0 (:y (dom/get-client-position event))
+                                                       :listen-keys keys
+                                                       :undo-id undo-id})
+                       (st/emit! (dwu/start-undo-transaction undo-id))))))))))
+
+        ;; Dragging the label of an audio lane up or down puts the lane at
+        ;; the place of the one under the pointer (see `dwaa/move-lane`),
+        ;; marked while it moves; one undo step. It starts once the pointer
+        ;; has moved, so a click on the label or its buttons stays one.
+        lane-drag*  (mf/use-state nil)
+        lane-drag   (deref lane-drag*)
+
+        on-lane-drag-down
+        (mf/use-fn
+         (mf/deps canvas-point)
+         (fn [event lane]
+           (when (and (dom/left-mouse? event)
+                      (not (some-> ^js (dom/get-target event) (.closest "button"))))
+             (let [rows      (:rows (mf/ref-val scene-ref))
+                   first-row (d/index-of-pred rows #(= :audio (:type %)))
+                   lanes   (filterv #(= :audio (:type %)) rows)
+                   from    (d/index-of-pred lanes #(= lane (:lane %)))
+                   y0      (:y (dom/get-client-position event))
+                   current (atom nil)
+                   keys    (atom nil)
+                   place   (fn [event]
+                             (let [[_ y] (canvas-point event)
+                                   index (or (lanes/row-index (mf/ref-val geo-ref) y) 0)]
+                               (mth/clamp (- index first-row) 0 (dec (count lanes)))))
+                   on-move (fn [event]
+                             (when (or (some? @current)
+                                       (> (mth/abs (- (:y (dom/get-client-position event)) y0)) 3))
+                               (let [drag {:from from :to (place event) :first-row first-row}]
+                                 (reset! current drag)
+                                 (reset! lane-drag* drag))))
+                   on-up   (fn [_]
+                             (run! events/unlistenByKey @keys)
+                             (reset! lane-drag* nil)
+                             (when-let [{:keys [to]} @current]
+                               (when (not= to from)
+                                 (st/emit! (dwaa/move-lane lane to)))))]
+               (when (and (some? first-row) (some? from))
+                 (reset! keys [(events/listen js/window "pointermove" on-move)
+                               (events/listen js/window "pointerup" on-up)]))))))
+
         on-lanes-down
         (mf/use-fn
-         (mf/deps canvas-point on-duration-down on-bar-down on-animation-down on-scrub)
+         (mf/deps canvas-point objects on-duration-down on-bar-down on-animation-down on-clip-down on-scrub)
          (fn [event]
            (let [[x y]  (canvas-point event)
                  geo    (mf/ref-val geo-ref)
@@ -1863,6 +2517,9 @@
 
                :animation
                (on-animation-down event (:shape-id target) (:animation target) (:mode target))
+
+               :audio
+               (on-clip-down event target)
 
                ;; The animation of a component copy is the one of its
                ;; main, edited there: its bar only picks the copy.
@@ -1894,10 +2551,13 @@
                                          :undo-id undo-id
                                          :base (:timeline scene)
                                          :selected? selected?
-                                         ;; a selected keyframe takes the others along
+                                         ;; a selected keyframe takes the others along,
+                                         ;; the selected blocks and clips too
                                          :moving (if (and selected? (> (count selected-kfs) 1))
                                                    selected-kfs
-                                                   #{kf-ref})})
+                                                   #{kf-ref})
+                                         :others (when selected?
+                                                   (select-keys (:selection scene) [:anims :clips]))})
                        (st/emit! (dwu/start-undo-transaction undo-id))))))
 
                :easing
@@ -1905,17 +2565,22 @@
                  (dom/capture-pointer event)
                  (mf/set-ref-val! press-ref {:kind :easing :target target}))
 
-               ;; Box selection of keyframes. Positions are kept on what the
-               ;; view scrolls over, so the box and its keyframes stay
-               ;; together when the timeline scrolls while dragging.
+               ;; Box selection of keyframes or, from the audio rows, of
+               ;; clips. Positions are kept on what the view scrolls over,
+               ;; so the box and what it holds stay together when the
+               ;; timeline scrolls while dragging.
                (:segment :lane :row :empty)
                (when left?
                  (dom/capture-pointer event)
                  (mf/set-ref-val! press-ref {:kind :marquee
                                              :start (lanes/content-point geo x y)
-                                             :additive? (kbd/shift? event)
-                                             :base (:selected-kfs scene)
-                                             :hits (lanes/keyframe-boxes geo scene)
+                                             :additive? (or (kbd/shift? event) (kbd/mod? event))
+                                             :base (:selection scene)
+                                             :hits {:kfs (lanes/keyframe-boxes geo scene)
+                                                    :anims (lanes/animation-boxes geo scene)
+                                                    :clips (lanes/clip-boxes geo scene)
+                                                    :bars (lanes/bar-boxes geo scene)}
+                                             :items-of #(track-items (:timeline scene) objects %)
                                              :moved? false}))
 
                nil))))
@@ -1933,27 +2598,30 @@
                :keyframe
                (when (and (some? (:undo-id press))
                           (or (:moved? press) (> (mth/abs (- x (:x0 press))) drag-threshold)))
-                 (let [{:keys [base moving target]} press
+                 (let [{:keys [base moving target others]} press
                        t    (pointer->time event (axis-rect) span)
                        to   (snap-target t event {:keyframe-ids (into #{} (map :keyframe-id) moving)})
-                       from (:time (:keyframe target))]
+                       from (:time (:keyframe target))
+                       dt   (- (or to t) from)]
                    (mf/set-ref-val! press-ref (assoc press :moved? true))
                    (show-snap to)
-                   (st/emit! (dwa/shift-keyframes-from base moving (- (or to t) from)))))
+                   (st/emit! (if (pos? (dwaa/selection-count others))
+                               (dwaa/commit-selection-move base (assoc others :kfs moving) dt)
+                               (dwa/shift-keyframes-from base moving dt)))))
 
                :marquee
-               (let [{:keys [start additive? base hits moved? emitted]} press
+               (let [{:keys [start additive? base hits items-of moved? emitted]} press
                      [x0 y0] start
                      [x y]   (lanes/content-point (mf/ref-val geo-ref) x y)]
                  ;; Once a box, it follows the pointer even back to its start.
                  (when (or moved? (marquee-drag? x0 y0 x y))
                    (let [rect     (rect-from-points x0 y0 x y)
-                         picked   (keyframes-in-rect hits rect)
-                         selected (if additive? (into base picked) picked)]
+                         picked   (items-in-rect hits rect items-of)
+                         selected (if additive? (merge-selection base picked) picked)]
                      (mf/set-ref-val! press-ref (assoc press :moved? true :emitted selected :rect rect))
                      (draw-lanes)
                      (when (not= selected emitted)
-                       (st/emit! (dwa/select-keyframes selected))))))
+                       (st/emit! (dwaa/select-items selected))))))
 
                ;; What is under the pointer, unless it drags a bar, a block
                ;; or the end of the timeline.
@@ -1987,7 +2655,8 @@
                  (select-layer event shape-id (:selected (mf/ref-val scene-ref)))
                  (if (or locked? (and moved? selected?))
                    (st/emit! (dwa/set-playhead time))
-                   (st/emit! (dwa/select-keyframe shape-id kf-id (and (not moved?) (kbd/shift? event)))
+                   (st/emit! (dwa/select-keyframe shape-id kf-id
+                                                  (and (not moved?) (or (kbd/shift? event) (kbd/mod? event))))
                              (dwa/set-playhead time)))
                  (when (some? undo-id)
                    (st/emit! (dwu/commit-undo-transaction undo-id))))
@@ -2005,10 +2674,10 @@
                                      (:shape-id target)
                                      (:id (:from target))))))
 
-               ;; A click on nothing clears the keyframe selection.
+               ;; A click on nothing clears all that is selected.
                :marquee
                (when-not (or (:moved? press) (:additive? press))
-                 (st/emit! (dwa/select-keyframes [])))
+                 (st/emit! (dwaa/select-items {})))
 
                nil)
              (draw-lanes))))
@@ -2055,7 +2724,42 @@
                (case (:type row)
                  :layer     (on-context-menu event (:id row) nil)
                  :animation (on-context-menu event (:id row) nil nil (:id (:animation row)))
-                 :property  (on-context-menu event (:id row) (:property row) (:index row)))))))
+                 :property  (on-context-menu event (:id row) (:property row) (:index row))
+                 ;; the menu of the clip there, which it selects
+                 :audio     (when-let [clip (:clip (lanes/hit geo (mf/ref-val scene-ref) x y))]
+                              (let [{:keys [x y]} (dom/get-client-position event)]
+                                (st/emit! (dwaa/select-clip (:id clip)))
+                                (reset! menu* {:top y :left x :clip-id (:id clip)})))
+                 nil)))))
+
+        ;; Audio files dropped on the dock become clips of the board from
+        ;; the time under the pointer, on the audio lane under it or on a
+        ;; free one (see `dwaa/add-audio-files`).
+        on-drag-over
+        (mf/use-fn
+         (fn [event]
+           (when (dnd/has-type? event "Files")
+             (dom/prevent-default event))))
+
+        on-drop
+        (mf/use-fn
+         (mf/deps board-id span axis-rect canvas-point)
+         (fn [event]
+           (when (dnd/has-type? event "Files")
+             (let [files (filter dwaa/audio-file? (dnd/get-files event))]
+               (when (and (seq files) (some? board-id))
+                 (dom/prevent-default event)
+                 (let [[_ y] (canvas-point event)
+                       row   (get (:rows (mf/ref-val scene-ref)) (lanes/row-index (mf/ref-val geo-ref) y))
+                       lane  (if (= :audio (:type row))
+                               (:lane row)
+                               (some-> (dom/get-target event)
+                                       (.closest "[data-audio-lane]")
+                                       (dom/get-data "audio-lane")
+                                       (d/parse-integer)))]
+                   (st/emit! (dwaa/add-audio-files board-id files
+                                                   (pointer->time event (axis-rect) span)
+                                                   lane))))))))
 
         ;; A click in the dock focuses it; then Delete/Backspace delete the
         ;; selected keyframes, the arrows move them (10 ms, 100 ms with
@@ -2066,43 +2770,35 @@
         ;; after it.
         on-key-down
         (mf/use-fn
-         (mf/deps selected-kfs timeline)
+         (mf/deps selected-kfs selected-clip selected-anims selection timeline)
          (fn [event]
-           (cond
-             (editing-text? event)
-             nil
-
-             ;; Shift+M leaves motion mode (see the workspace shortcuts)
-             (and (m-key? event) (not (kbd/mod? event)) (not (kbd/alt? event)) (not (kbd/shift? event)))
-             (do (dom/prevent-default event)
-                 (dom/stop-propagation event)
-                 (st/emit! (dwa/add-marker (tr "workspace.animation.marker-name"
-                                               (inc (count (:markers timeline)))))))
-
-             (and (kbd/alt? event) (or (kbd/left-arrow? event) (kbd/right-arrow? event)))
-             (do (dom/prevent-default event)
-                 (dom/stop-propagation event)
-                 (st/emit! (dwa/jump-to-marker (if (kbd/left-arrow? event) -1 1))))
-
-             (or (kbd/delete? event) (kbd/backspace? event))
-             (do (dom/prevent-default event)
-                 (dom/stop-propagation event)
-                 (st/emit! (dwa/delete-selected-keyframes)))
-
-             (and (kbd/mod? event) (or (c-key? event) (x-key? event)) (seq selected-kfs))
-             (do (dom/prevent-default event)
-                 (dom/stop-propagation event)
-                 (if (x-key? event)
-                   (st/emit! (dwa/copy-selected-keyframes) (dwa/delete-selected-keyframes))
-                   (st/emit! (dwa/copy-selected-keyframes))))
-
-             (and (seq selected-kfs)
-                  (or (kbd/left-arrow? event) (kbd/right-arrow? event)))
-             (do (dom/prevent-default event)
-                 (dom/stop-propagation event)
-                 (st/emit! (dwa/shift-selected-keyframes
-                            (* (if (kbd/left-arrow? event) -1 1)
-                               (if (kbd/shift? event) 100 10))))))))
+           (when-not (editing-text? event)
+             (when-let [action (dock-key-action event selected-kfs selected-clip selected-anims)]
+               (dom/prevent-default event)
+               (dom/stop-propagation event)
+               (case action
+                 ;; Shift+M leaves motion mode (see the workspace shortcuts)
+                 :add-marker       (st/emit! (dwa/add-marker (tr "workspace.animation.marker-name"
+                                                                 (inc (count (:markers timeline))))))
+                 :jump-to-marker   (st/emit! (dwa/jump-to-marker (if (kbd/left-arrow? event) -1 1)))
+                 :split-clip       (st/emit! (dwaa/split-selected-clips))
+                 :split-all-clips  (st/emit! (dwaa/split-all-clips))
+                 ;; with more than one kind selected, or blocks, all of it
+                 :delete-clip      (st/emit! (if (whole-selection? selection)
+                                               (dwaa/delete-selection)
+                                               (dwaa/delete-selected-clips)))
+                 :nudge-clip       (st/emit! (if (whole-selection? selection)
+                                               (dwaa/nudge-selection (nudge-step event))
+                                               (dwaa/nudge-selected-clips (nudge-step event))))
+                 :no-copy          nil
+                 :delete-keyframes (st/emit! (if (whole-selection? selection)
+                                               (dwaa/delete-selection)
+                                               (dwa/delete-selected-keyframes)))
+                 :copy-keyframes   (st/emit! (dwa/copy-selected-keyframes))
+                 :cut-keyframes    (st/emit! (dwa/copy-selected-keyframes) (dwa/delete-selected-keyframes))
+                 :shift-keyframes  (st/emit! (if (whole-selection? selection)
+                                               (dwaa/nudge-selection (nudge-step event))
+                                               (dwa/shift-selected-keyframes (nudge-step event)))))))))
 
         ;; A locked property or animation keeps its keyframes, loop and span.
         menu-locked?
@@ -2126,10 +2822,37 @@
 
         ;; The context menu re-runs its effects when the options change,
         ;; so they must stay identical between renders.
+        ;; The clip the menu is on.
+        menu-clip
+        (some->> (:clip-id menu) (ctau/get-audio-clip timeline))
+
         menu-options
-        (mf/with-memo [menu can-paste? menu-locked? (some? menu-use) menu-style-id]
-          (when-let [{:keys [shape-id property index animation-id marker-id]} menu]
+        (mf/with-memo [menu can-paste? menu-locked? (some? menu-use) menu-style-id menu-clip]
+          (when-let [{:keys [shape-id property index animation-id marker-id clip-id]} menu]
             (cond
+              (some? clip-id)
+              (let [locked? (true? (:locked menu-clip))]
+                [{:name (tr "workspace.animation.clip-split-short")
+                  :id "split-clip"
+                  :disabled locked?
+                  :handler #(st/emit! (dwaa/split-clip clip-id))}
+                 {:name (if (:muted menu-clip)
+                          (tr "workspace.animation.clip-unmute")
+                          (tr "workspace.animation.clip-mute"))
+                  :id "mute-clip"
+                  :disabled locked?
+                  :handler #(st/emit! (dwaa/toggle-clip-muted clip-id))}
+                 {:name (if locked?
+                          (tr "workspace.animation.clip-unlock")
+                          (tr "workspace.animation.clip-lock"))
+                  :id "lock-clip"
+                  :handler #(st/emit! (dwaa/toggle-clip-locked clip-id))}
+                 {:name :separator}
+                 {:name (tr "workspace.animation.clip-delete")
+                  :id "delete-clip"
+                  :disabled locked?
+                  :handler #(st/emit! (dwaa/delete-clip clip-id))}])
+
               (some? marker-id)
               [{:name (tr "workspace.animation.rename-marker")
                 :id "rename-marker"
@@ -2210,11 +2933,19 @@
     (mf/with-effect [easing]
       (some-> (mf/ref-val popover-ref) (dom/focus!)))
 
-    ;; Closing the dock while its end is dragged stops the drag.
+    ;; Closing the dock while its end or a clip is dragged stops the drag.
     (mf/with-effect []
-      #(when-let [{:keys [listen-keys timer]} (mf/ref-val duration-drag-ref)]
-         (js/clearTimeout timer)
-         (run! events/unlistenByKey listen-keys)))
+      #(do (when-let [{:keys [listen-keys timer]} (mf/ref-val duration-drag-ref)]
+             (js/clearTimeout timer)
+             (run! events/unlistenByKey listen-keys))
+           (when-let [{:keys [listen-keys undo-id]} (mf/ref-val clip-drag-ref)]
+             (run! events/unlistenByKey listen-keys)
+             (st/emit! (dwu/commit-undo-transaction undo-id)))))
+
+    ;; The files of the clips load, so their waveforms draw (see
+    ;; `audio/version`) and they play at once.
+    (mf/with-effect [(:audio-clips timeline)]
+      (audio/load-clips! timeline))
 
     (mf/with-effect [sel-board-id]
       (when (some? sel-board-id)
@@ -2249,6 +2980,7 @@
                   (when (plain-space? event)
                     (dom/prevent-default event)
                     (dom/stop-propagation event)
+                    (audio/unlock!)
                     (st/emit! (dwa/toggle-play))))]
           (let [key (events/listen js/window "keydown" on-key true)]
             #(events/unlistenByKey key)))))
@@ -2356,7 +3088,9 @@
      [:section {:class (stl/css-case :timeline-dock true :recording recording?)
                 :ref dock-ref
                 :tab-index -1
-                :on-key-down on-key-down}
+                :on-key-down on-key-down
+                :on-drag-over on-drag-over
+                :on-drop on-drop}
       [:div {:class (stl/css :resize-area)
              :on-pointer-down on-resize-start
              :on-lost-pointer-capture on-resize-end
@@ -2368,6 +3102,10 @@
                        :playing? playing?
                        :recording? recording?
                        :full-quality? (dwa/full-quality? anim)
+                       :audio-muted? (dwa/audio-muted? anim)
+                       :clip (when (= 1 (count selected-clips))
+                               (some->> selected-clip (ctau/get-audio-clip timeline)))
+                       :clip-count (count selected-clips)
                        :unit unit
                        :zoom zoom
                        :on-zoom-change on-zoom-change}]
@@ -2438,6 +3176,10 @@
               [:div {:class (stl/css :row-labels)}
                [:div {:class (stl/css :row-strip)
                       :ref strip-ref}
+                ;; where a dragged audio lane goes
+                (when-let [{:keys [from to first-row]} lane-drag]
+                  [:div {:class (stl/css-case :lane-drop true :below (> to from))
+                         :style (row-style (+ first-row to))}])
                 (for [row-index (range row-start row-end)
                       :let [{:keys [type id depth] :as row} (get rows row-index)
                             hovered? (= row-index hover-row)]]
@@ -2455,6 +3197,28 @@
                                     :on-select on-select-layer
                                     :on-context-menu on-context-menu
                                     :on-hover on-label-hover}]
+
+                    :audio-group
+                    [:> audio-group-row* {:key "audio-group"
+                                          :row-index row-index
+                                          :lanes (:count row)
+                                          :collapsed? (:collapsed? row)
+                                          :muted? (:muted? row)
+                                          :locked? (:locked? row)
+                                          :hovered? hovered?
+                                          :on-hover on-label-hover}]
+
+                    :audio
+                    [:> audio-row* {:key (dm/str "audio-" (:lane row))
+                                    :row-index row-index
+                                    :lane (:lane row)
+                                    :number (:number row)
+                                    :name (:name row)
+                                    :muted? (every? :muted (:clips row))
+                                    :locked? (every? :locked (:clips row))
+                                    :hovered? hovered?
+                                    :on-hover on-label-hover
+                                    :on-drag-down on-lane-drag-down}]
 
                     :animation
                     (let [animation (:animation row)]

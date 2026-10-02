@@ -311,6 +311,8 @@
 (def ^:icon-id vertical-align-items-start "vertical-align-items-start")
 (def ^:icon-id view-as-icons "view-as-icons")
 (def ^:icon-id view-as-list "view-as-list")
+(def ^:icon-id volume "volume")
+(def ^:icon-id volume-off "volume-off")
 (def ^:icon-id wrap "wrap")
 
 (def icon-list

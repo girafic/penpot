@@ -11,7 +11,8 @@
    [app.main.data.profile :as du]
    [app.main.data.shortcuts :as ds]
    [app.main.data.viewer :as dv]
-   [app.main.store :as st]))
+   [app.main.store :as st]
+   [app.util.audio :as audio]))
 
 (def shortcuts
   {:increase-zoom      {:tooltip "+"
@@ -68,10 +69,11 @@
                         :subsections [:generic]
                         :section [:viewer]
                         :fn (fn [event]
-                              (st/emit!
-                               (if (= " " (some-> event .-key))
-                                 (dv/toggle-timeline-or-next-frame)
-                                 dv/select-next-frame)))}
+                              (if (= " " (some-> event .-key))
+                                ;; a page may start sound only from a user gesture: this one
+                                (do (audio/unlock!)
+                                    (st/emit! (dv/toggle-timeline-or-next-frame)))
+                                (st/emit! dv/select-next-frame)))}
 
    :open-inspect       {:tooltip "G I"
                         :command "g i"

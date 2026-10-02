@@ -28,6 +28,7 @@
    [app.main.ui.hooks :as hooks]
    [app.main.ui.workspace.viewport.rulers :as rulers]
    [app.main.ui.workspace.viewport.utils :as vwu]
+   [app.util.audio :as audio]
    [app.util.debug :as dbg]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -197,6 +198,8 @@
            (when (dom/left-mouse? event)
              (dom/prevent-default event)
              (dom/stop-propagation event)
+             ;; a page may start sound only from a user gesture: this one
+             (audio/unlock!)
              (st/emit! (dwa/toggle-board-play (:id frame))))))
 
         edition*         (mf/use-state false)

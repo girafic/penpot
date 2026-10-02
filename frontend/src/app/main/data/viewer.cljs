@@ -29,7 +29,9 @@
    [app.main.repo :as rp]
    [app.main.router :as rt]
    [app.render-wasm.api :as wasm.api]
+   [app.util.audio :as audio]
    [app.util.globals :as ug]
+   [app.util.storage :as storage]
    [app.util.timers :as ts]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -112,6 +114,9 @@
       (dissoc state :viewer))
     ptk/EffectEvent
     (effect [_ _ _]
+      ;; the sound of a timeline playing stops with the viewer, and its
+      ;; decoded files go
+      (audio/forget-all!)
       (cf/set-current-share-id! nil))))
 
 ;; --- Data Fetching
@@ -696,6 +701,8 @@
       (let [params (rt/get-params state)]
         (rx/of (rt/nav :viewer (assoc params :section section)))))))
 
+(declare pause-timeline)
+
 ;; --- Overlays
 
 (defn- open-overlay*
@@ -757,7 +764,12 @@
                          background-overlay
                          animation
                          fixed-source?)
-          state)))))
+          state)))
+
+    ;; the animation playing (and its sound) stops
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (pause-timeline)))))
 
 
 (defn toggle-overlay
@@ -805,7 +817,11 @@
      (update [_ state]
        (close-overlay* state
                        frame-id
-                       animation)))))
+                       animation))
+
+     ptk/WatchEvent
+     (watch [_ _ _]
+       (rx/of (pause-timeline))))))
 
 ;; --- Objects selection
 
@@ -942,29 +958,65 @@
 (defn frame-times
   "The time played from `start` (ms) at each animation frame: it keeps to
   the time that passes, however long the frames take, so a slow frame is
-  skipped rather than the animation slowed down."
-  [start]
-  (rx/create
-   (fn [subs]
-     (let [frame  (volatile! nil)
-           before (volatile! nil)
-           time   (volatile! start)
-           tick   (fn tick [now]
-                    (when-let [then @before]
-                      (vswap! time + (min (max 0 (- now then)) max-frame-gap))
-                      (rx/push! subs @time))
-                    (vreset! before now)
-                    (vreset! frame (ts/raf tick)))]
-       (vreset! frame (ts/raf tick))
-       #(ts/cancel-af! @frame)))))
+  skipped rather than the animation slowed down. The time passes by the
+  frames, or by `clock` (ms, or nil while it has none), as while sound
+  plays (see `audio/now-ms`); `clamp?` keeps a step to `max-frame-gap`."
+  ([start]
+   (frame-times start nil true))
+  ([start clock clamp?]
+   (rx/create
+    (fn [subs]
+      (let [frame  (volatile! nil)
+            before (volatile! nil)
+            time   (volatile! start)
+            tick   (fn tick [frame-now]
+                     (let [now (if (some? clock) (clock) frame-now)]
+                       (when-let [then (when (some? now) @before)]
+                         (vswap! time + (cond-> (max 0 (- now then)) clamp? (min max-frame-gap)))
+                         (rx/push! subs @time))
+                       (vreset! before now)
+                       (vreset! frame (ts/raf tick))))]
+        (vreset! frame (ts/raf tick))
+        #(ts/cancel-af! @frame))))))
+
+(defn audio-muted?
+  "Whether the view mode plays the animations without their sound, as
+  last chosen."
+  [state]
+  (let [value (dm/get-in state [:viewer-local :audio-muted?])]
+    (if (some? value) value (get storage/user ::audio-muted false))))
+
+(defn toggle-audio-muted
+  "Play the sound of the audio clips in the view mode, or not. The choice
+  is kept for the next time."
+  []
+  (ptk/reify ::toggle-audio-muted
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:viewer-local :audio-muted?] (not (audio-muted? state))))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (let [muted? (audio-muted? state)]
+        (swap! storage/user assoc ::audio-muted muted?)
+        (when muted?
+          (audio/stop-all!))))))
+
+(defn- direction-at
+  "Which way playback of `timeline` goes `elapsed` ms after its start: 1,
+  or -1 on the way back of ping-pong."
+  [timeline elapsed]
+  (let [duration (max 1 (:duration timeline))]
+    (if (and (= :ping-pong (cta/playback-mode timeline))
+             (> (mod elapsed (* 2 duration)) duration))
+      -1
+      1)))
 
 (defn- viewer-current-page
   [state]
   (let [params  (rt/get-params state)
         page-id (some-> (:page-id params) uuid/parse)]
     (dm/get-in state [:viewer :pages page-id])))
-
-(declare pause-timeline)
 
 (defn board-clock
   "The timeline the board `board-id` of `page` plays on: its own, keeping
@@ -1004,20 +1056,35 @@
             stopper  (rx/filter (ptk/type? ::pause-timeline) stream)]
         (if (or (nil? timeline) (<= duration 0))
           (rx/empty)
-          (rx/concat
-           (->> (frame-times start)
-                (rx/take-while (fn [t] (not (cta/playback-ended? timeline t))))
-                (rx/map (fn [t] (cta/playback-time timeline t)))
-                (rx/take-until stopper)
-                (rx/map seek-timeline))
-           (rx/of (pause-timeline))))))))
+          ;; While its clips sound, it keeps time with them (see
+          ;; `audio/follow!`), unclamped, so they cannot drift apart.
+          (let [sound? (and (seq (:audio-clips timeline))
+                            (not (audio-muted? state))
+                            (some? (audio/now-ms)))
+                ;; muted meanwhile (see `toggle-audio-muted`), silent
+                follow (fn [t]
+                         (audio/follow! timeline (cta/playback-time timeline t) (direction-at timeline t)
+                                        (not (get storage/user ::audio-muted false))))]
+            (rx/concat
+             (->> (frame-times start (when sound? audio/now-ms) (not sound?))
+                  (rx/take-while (fn [t] (not (cta/playback-ended? timeline t))))
+                  (rx/tap follow)
+                  (rx/map (fn [t] (cta/playback-time timeline t)))
+                  (rx/take-until stopper)
+                  (rx/map seek-timeline))
+             (rx/of (pause-timeline)))))))))
 
 (defn pause-timeline
   []
   (ptk/reify ::pause-timeline
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:viewer-local :timeline :playing?] false))))
+      (assoc-in state [:viewer-local :timeline :playing?] false))
+
+    ;; stop, show-moment and the end of playback pause too
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (audio/stop-all!))))
 
 (defn toggle-play-timeline
   [timeline-id]

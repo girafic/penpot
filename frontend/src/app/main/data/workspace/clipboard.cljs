@@ -221,7 +221,7 @@
                                     :selected selected
                                     :objects {}
                                     :images #{}}
-                             (seq (:tracks motion)) (assoc :motion motion))
+                             (or (seq (:tracks motion)) (seq (:audio motion))) (assoc :motion motion))
 
                   shapes   (keep (d/getf objects) shape-ids)]
 
@@ -651,6 +651,34 @@
                  (fn [_]
                    (on-type nil)))))
 
+(defn with-own-audio
+  "An observable of `pdata`, shapes copied from another file, with the
+  audio clips of their boards (`(:motion pdata)`, see
+  `cltl/animation-sources`) playing copies, in the file `file-id`, of
+  the media objects they played: one clone of each, before the paste,
+  so that the pasting client, its collaborators and the server keep the
+  same ids, as the images are uploaded again before a paste. A clip whose
+  clone fails keeps its id (the server makes a copy when it saves it,
+  see `bfc/update-media-references!`)."
+  [file-id pdata]
+  (let [ids (into #{}
+                  (comp (mapcat vals) (keep :audio-id))
+                  (vals (dm/get-in pdata [:motion :audio])))]
+    (if (empty? ids)
+      (rx/of pdata)
+      (->> (rx/from ids)
+           (rx/merge-map (fn [id]
+                           (->> (rp/cmd! :clone-file-media-object {:file-id file-id :is-local true :id id})
+                                (rx/map (fn [fmo] [id (:id fmo)]))
+                                (rx/catch (fn [_] (rx/empty))))))
+           (rx/reduce conj {})
+           (rx/map (fn [index]
+                     (update-in pdata [:motion :audio]
+                                (fn [audio]
+                                  (d/update-vals audio
+                                                 (fn [clips]
+                                                   (d/update-vals clips #(update % :audio-id (fn [id] (get index id id))))))))))))))
+
 (defn- paste-transit-shapes
   [{:keys [images] :as pdata}]
   (letfn [(upload-media [file-id imgpart]
@@ -685,10 +713,12 @@
             (if (= file-id (:file-id pdata))
               (let [pdata (assoc pdata :images [])]
                 (rx/of (paste-shapes pdata)))
-              (->> (rx/from images)
-                   (rx/merge-map (partial upload-media file-id))
-                   (rx/reduce conj [])
-                   (rx/map #(assoc pdata :images %))
+              (->> (with-own-audio file-id pdata)
+                   (rx/mapcat (fn [pdata]
+                                (->> (rx/from images)
+                                     (rx/merge-map (partial upload-media file-id))
+                                     (rx/reduce conj [])
+                                     (rx/map #(assoc pdata :images %)))))
                    (rx/map paste-shapes)))
             nil))))))
 

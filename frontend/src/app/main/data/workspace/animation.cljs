@@ -34,6 +34,7 @@
    [app.main.features :as features]
    [app.main.streams :as ms]
    [app.main.worker :as mw]
+   [app.util.audio :as audio]
    [app.util.clipboard :as clipboard]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -54,11 +55,16 @@
   "How far playback moves on in a frame `dt` ms after the one before, with
   `carry` ms left over by the frames before: `[step carry]`, the step in
   whole ms. Playback so keeps to the time that passes, however long the
-  frames take, and the steps add up to it."
-  [carry dt]
-  (let [total (+ carry (min (max 0 dt) max-frame-gap))
-        step  (mth/floor total)]
-    [step (- total step)]))
+  frames take, and the steps add up to it. With `clamp?` (the default) a
+  step is at most `max-frame-gap`; without it, as while it keeps time
+  with the sound it plays, the picture catches up with the sound."
+  ([carry dt]
+   (frame-step carry dt true))
+  ([carry dt clamp?]
+   (let [dt    (cond-> (max 0 dt) clamp? (min max-frame-gap))
+         total (+ carry dt)
+         step  (mth/floor total)]
+     [step (- total step)])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; STATE HELPERS
@@ -126,7 +132,7 @@
 (defn- plays-animation?
   [objects timelines main-page board-id]
   (let [timeline (get timelines board-id)]
-    (boolean (or (seq (:tracks timeline))
+    (boolean (or (and (some? timeline) (not (cta/timeline-empty? timeline)))
                  (seq (cltl/instance-timelines objects board-id timeline main-page))))))
 
 (defn animated-board-ids
@@ -202,6 +208,15 @@
                          (active-board-id state)
                          opts))
 
+(defn board-playhead
+  "The playhead of the board `board-id`: each board keeps its own (see
+  `switch-playhead`)."
+  [state board-id]
+  (let [anim (:workspace-animation state)]
+    (if (= board-id (:board-id anim))
+      (get anim :playhead 0)
+      (get-in anim [:playheads board-id] 0))))
+
 (defn playhead
   [state]
   (dm/get-in state [:workspace-animation :playhead] 0))
@@ -263,6 +278,37 @@
   [anim]
   (let [value (:full-quality? anim)]
     (if (some? value) value (get storage/user ::full-quality false))))
+
+(defn audio-muted?
+  "Whether playback in the workspace plays no sound, as last chosen."
+  [anim]
+  (let [value (:audio-muted? anim)]
+    (if (some? value) value (get storage/user ::audio-muted false))))
+
+(defn- follow-audio!
+  "Keep the sound of the timeline playing with the picture (see
+  `audio/follow!`): silent while paused or muted."
+  [state]
+  (let [anim (:workspace-animation state)]
+    (audio/follow! (playback-timeline state)
+                   (playhead state)
+                   (get anim :direction 1)
+                   (and (:playing? anim) (not (audio-muted? anim))))))
+
+(defn toggle-audio-muted
+  "Play the sound of the audio clips in the workspace, or not. The choice
+  is kept for the next time."
+  []
+  (ptk/reify ::toggle-audio-muted
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-animation :audio-muted?]
+                (not (audio-muted? (:workspace-animation state)))))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (swap! storage/user assoc ::audio-muted (dm/get-in state [:workspace-animation :audio-muted?]))
+      (follow-audio! state))))
 
 (defn toggle-full-quality
   "Play the animation in full quality instead of fast, or back (see
@@ -418,7 +464,7 @@
 (declare apply-preview motion-mode? select-keyframe set-playhead set-keyframe-value
          store-keyframe-selection)
 
-(defn- commit-timeline
+(defn commit-timeline
   "Commit `timeline` (or, when nil, delete it) as the timeline keyed by
   `board-id` on the current page, optionally in the `undo-group` of
   another change (so both undo together). Only what changed is sent (see
@@ -1400,10 +1446,39 @@
         (rx/empty)))))
 
 (defn- store-keyframe-selection
-  [state selected]
-  (update state :workspace-animation assoc
-          :selected-kfs selected
-          :selected-kf (when (= 1 (count selected)) (first selected))))
+  "`state` with the keyframes `selected`; selecting some lets go of the
+  selected preset animations and audio clips (see `dwaa/selection-of`),
+  but when they are `added?` to what is selected."
+  ([state selected]
+   (store-keyframe-selection state selected false))
+  ([state selected added?]
+   (update state :workspace-animation
+           #(cond-> (assoc %
+                           :selected-kfs selected
+                           :selected-kf (when (= 1 (count selected)) (first selected)))
+              (and (seq selected) (not added?))
+              (dissoc :selected-anims :selected-clip :selected-clips)))))
+
+(defn select-animation-block
+  "Select the preset animation `animation-id` of `shape-id` in the dock,
+  alone or, with `toggle?`, adding it to (or taking it out of) what is
+  selected there, keyframes and clips too (see `dwaa/selection-of`)."
+  [shape-id animation-id toggle?]
+  (ptk/reify ::select-animation-block
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [ref {:shape-id shape-id :animation-id animation-id}]
+        (update state :workspace-animation
+                (fn [anim]
+                  (if toggle?
+                    (let [selected (or (:selected-anims anim) #{})
+                          selected (if (contains? selected ref) (disj selected ref) (conj selected ref))]
+                      (if (empty? selected)
+                        (dissoc anim :selected-anims)
+                        (assoc anim :selected-anims selected)))
+                    (-> anim
+                        (assoc :selected-anims #{ref})
+                        (dissoc :selected-kfs :selected-kf :selected-clip :selected-clips)))))))))
 
 (defn select-keyframe
   "Select a keyframe or, with `toggle?`, add it to (or remove it from) the
@@ -1422,7 +1497,7 @@
                         (not toggle?)                 #{keyframe}
                         (contains? selected keyframe) (disj selected keyframe)
                         :else                         (conj selected keyframe))]
-         (store-keyframe-selection state selected))))))
+         (store-keyframe-selection state selected toggle?))))))
 
 (defn select-keyframes
   "Replace the keyframe selection. An empty collection clears it."
@@ -1450,7 +1525,8 @@
              state
              (if add?
                (into (dm/get-in state [:workspace-animation :selected-kfs] #{}) picked)
-               picked))))))))
+               picked)
+             add?)))))))
 
 (defn delete-selected-keyframes
   []
@@ -1614,7 +1690,11 @@
 
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (apply-preview)))))
+      (rx/of (apply-preview)))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (follow-audio! state))))
 
 (defn motion-mode?
   "Whether the workspace is in motion mode, with the timeline dock."
@@ -1646,21 +1726,26 @@
 
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (apply-preview)))))
+      (rx/of (apply-preview)))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (follow-audio! state))))
 
 (defn- frame-steps
   "How far playback moves on at each animation frame (see `frame-step`),
-  from the frame after the first on."
-  []
+  from the frame after the first on, by the time `clock` gives (ms, or nil
+  while it has none), clamped or not (`clamp?`)."
+  [clock clamp?]
   (rx/create
    (fn [subs]
      (let [frame  (volatile! nil)
            before (volatile! nil)
            carry  (volatile! 0)
            tick   (fn tick [_]
-                    (let [now (js/performance.now)]
-                      (when-let [then @before]
-                        (let [[step left] (frame-step @carry (- now then))]
+                    (let [now (clock)]
+                      (when-let [then (when (some? now) @before)]
+                        (let [[step left] (frame-step @carry (- now then) clamp?)]
                           (vreset! carry left)
                           (when (pos? step)
                             (rx/push! subs step))))
@@ -1668,6 +1753,16 @@
                       (vreset! frame (ts/raf tick))))]
        (vreset! frame (ts/raf tick))
        #(ts/cancel-af! @frame)))))
+
+(defn- sound-clock?
+  "Whether playback of `timeline` keeps time with the audible clock of the
+  sound it plays (see `audio/now-ms`), unclamped, so picture and sound
+  cannot drift apart: while it has clips, sound is not muted and the
+  context runs."
+  [state timeline]
+  (and (seq (:audio-clips timeline))
+       (not (audio-muted? (:workspace-animation state)))
+       (some? (audio/now-ms))))
 
 (defn- playback-step
   "Play `dt` ms on from the playhead, with the timeline as it is now: a
@@ -1734,17 +1829,27 @@
              (rx/empty))
            ;; Each frame moves on by the time that passed since the last
            ;; one: a slow frame skips ahead instead of slowing it down.
-           (->> (frame-steps)
-                (rx/map playback-step)
-                (rx/take-until stopper))
-           (rx/of (playback-ended))))))))
+           (let [sound? (sound-clock? state tl)]
+             (->> (frame-steps (if sound? audio/now-ms #(js/performance.now)) (not sound?))
+                  (rx/map playback-step)
+                  (rx/take-until stopper)))
+           (rx/of (playback-ended))))))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (follow-audio! state))))
 
 (defn pause
   []
   (ptk/reify ::pause
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-animation :playing?] false))))
+      (assoc-in state [:workspace-animation :playing?] false))
+
+    ;; stop and the clearing of the preview pause too
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (audio/stop-all!))))
 
 (defn toggle-play
   []

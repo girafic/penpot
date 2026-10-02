@@ -81,11 +81,12 @@
 (defn- caveat-label
   [caveat]
   (case caveat
-    :split-text (tr "workspace.options.export.split-text-whole")))
+    :split-text (tr "workspace.options.export.split-text-whole")
+    :no-audio   (tr "workspace.options.export.no-audio")))
 
 (mf/defc animated-exports*
   {::mf/private true}
-  [{:keys [board timeline formats caveats]}]
+  [{:keys [board timeline formats caveats render-wasm?]}]
   (let [progress  (mf/deref refs/export-animation)
         selrect   (:selrect board)
         width     (mth/round (or (:width selrect) 0))
@@ -101,6 +102,9 @@
         fps       (get export :fps 30)
         size      (get export :size "1")
         loop?     (get export :loop true)
+        ;; MP4 and WebM carry the sound of the audio clips, unless left out
+        audio?    (get export :audio true)
+        clips?    (boolean (seq (:audio-clips timeline)))
         support*  (mf/use-state {:mp4 true :webm true :avif true})
         support   (deref support*)
 
@@ -179,15 +183,19 @@
         on-loop
         (mf/use-fn (mf/deps set-export) #(set-export {:loop %}))
 
+        on-audio
+        (mf/use-fn (mf/deps set-export) #(set-export {:audio %}))
+
         on-export
         (mf/use-fn
-         (mf/deps format quality fps scale loop?)
+         (mf/deps format quality fps scale loop? audio?)
          (fn []
            (st/emit! (dea/export-animation {:format format
                                             :quality quality
                                             :fps fps
                                             :scale scale
-                                            :loop? loop?}))))
+                                            :loop? loop?
+                                            :audio? audio?}))))
 
         on-cancel
         (mf/use-fn #(st/emit! (dea/cancel-export-animation)))]
@@ -245,7 +253,13 @@
               [:span {:class (stl/css :row-label)} (tr "workspace.animation.loop")]
               [:> switch* {:aria-label (tr "workspace.animation.loop")
                            :default-checked loop?
-                           :on-change on-loop}]])])]
+                           :on-change on-loop}]])
+           (when (and clips? (contains? dea/audio-formats format))
+             [:div {:class (stl/css :animated-row)}
+              [:span {:class (stl/css :row-label)} (tr "workspace.options.export.include-audio")]
+              [:> switch* {:aria-label (tr "workspace.options.export.include-audio")
+                           :default-checked audio?
+                           :on-change on-audio}]])])]
 
        [:div {:class (stl/css :animated-meta)}
         [:div {:class (stl/css :animated-row)}
@@ -264,6 +278,10 @@
 
        (for [caveat (get caveats format)]
          [:p {:key (name caveat) :class (stl/css :hint)} (caveat-label caveat)])
+
+       ;; MP4 and WebM, which carry audio, render through WASM
+       (when (and clips? (not render-wasm?))
+         [:p {:class (stl/css :hint)} (tr "workspace.options.export.audio-needs-wasm")])
 
        (if busy?
          [:> button* {:variant "secondary"
@@ -522,7 +540,8 @@
                                     :board animated-board
                                     :timeline timeline
                                     :formats formats
-                                    :caveats caveats}])])
+                                    :caveats caveats
+                                    :render-wasm? render-wasm?}])])
 
         (when (or (nil? animated-board) (= tab "static"))
           [:*

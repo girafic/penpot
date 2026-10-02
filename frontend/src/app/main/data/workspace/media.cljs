@@ -170,7 +170,11 @@
           (rx/tap on-svg)))))
 
 (defn process-blobs
-  [{:keys [file-id local? name blobs force-media on-image on-svg]}]
+  "Upload the `blobs` as file media objects of `file-id`, those of the
+  `allowed-types` (images by default; svg images are parsed instead,
+  but with `force-media`)."
+  [{:keys [file-id local? name blobs force-media on-image on-svg allowed-types]
+    :or {allowed-types media/image-types}}]
   (letfn [(svg-blob? [blob]
             (and (not force-media)
                  (= (.-type blob) "image/svg+xml")))
@@ -195,13 +199,13 @@
 
     (rx/merge
      (->> (rx/from blobs)
-          (rx/map dmm/validate-file)
+          (rx/map #(dmm/validate-file % allowed-types))
           (rx/filter (comp not svg-blob?))
           (rx/mapcat upload-blob)
           (rx/tap on-image))
 
      (->> (rx/from blobs)
-          (rx/map dmm/validate-file)
+          (rx/map #(dmm/validate-file % allowed-types))
           (rx/filter svg-blob?)
           (rx/merge-map extract-content)
           (rx/merge-map svg->clj)
