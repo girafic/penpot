@@ -17,6 +17,7 @@
    [app.common.schema.generators :as sg]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as ctc]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
@@ -173,6 +174,24 @@
 
     (sm/update-properties schema assoc :gen/gen gen)))
 
+(def schema:set-timeline-audio-clip-change
+  ;; One audio clip of the timeline of a board, so edits of different
+  ;; clips merge, as those of different tracks do.
+  (let [schema [:map {:title "SetTimelineAudioClipChange"}
+                [:type [:= :set-timeline-audio-clip]]
+                [:page-id ::sm/uuid]
+                [:id ::sm/uuid]
+                [:clip-id ::sm/uuid]
+                [:params [:maybe ctau/schema:audio-clip]]]
+
+        gen    (->> (sg/generator schema)
+                    (sg/fmap (fn [change]
+                               (if (some? (:params change))
+                                 (update change :params assoc :id (:clip-id change))
+                                 change))))]
+
+    (sm/update-properties schema assoc :gen/gen gen)))
+
 (def schema:set-timeline-track-animations-change
   ;; Only the animations of the track of one layer: a style sync writes
   ;; them, so the keyframes another user adds meanwhile to the same layer
@@ -274,6 +293,7 @@
    [:set-timeline schema:set-timeline-change]
    [:set-timeline-track schema:set-timeline-track-change]
    [:set-timeline-track-animations schema:set-timeline-track-animations-change]
+   [:set-timeline-audio-clip schema:set-timeline-audio-clip-change]
    [:update-timeline schema:update-timeline-change]
    [:set-default-grid schema:set-default-grid-change]
 
@@ -629,8 +649,21 @@
 
 ;; --- Timelines (keyframe animations)
 
+(defn- collect-clip-media-refs
+  "`state` with the media object `clips` (of the timeline of the board
+  `board-id` of `page-id`) play, to check (see
+  `collect-shape-media-refs`)."
+  [state page-id board-id clips]
+  (update state :media-refs into
+          (keep (fn [{:keys [id audio-id]}]
+                  (when (some? audio-id)
+                    {:page-id page-id :board-id board-id :clip-id id :id audio-id})))
+          clips))
+
 (defmethod process-change :set-timeline
   [data {:keys [page-id id params]}]
+  (when (and *state* (seq (:audio-clips params)))
+    (swap! *state* collect-clip-media-refs page-id id (vals (:audio-clips params))))
   (if (nil? params)
     (d/update-in-when data [:pages-index page-id]
                       (fn [page]
@@ -661,6 +694,19 @@
                       (if (seq animations)
                         (assoc track :animations animations)
                         (dissoc track :animations)))))
+
+(defmethod process-change :set-timeline-audio-clip
+  [data {:keys [page-id id clip-id params]}]
+  (when (and *state* (some? params))
+    (swap! *state* collect-clip-media-refs page-id id [(assoc params :id clip-id)]))
+  (d/update-in-when data [:pages-index page-id :timelines id]
+                    (fn [timeline]
+                      (let [clips (if (nil? params)
+                                    (dissoc (:audio-clips timeline) clip-id)
+                                    (assoc (:audio-clips timeline) clip-id (assoc params :id clip-id)))]
+                        (if (empty? clips)
+                          (dissoc timeline :audio-clips)
+                          (assoc timeline :audio-clips clips))))))
 
 (defmethod process-change :update-timeline
   [data {:keys [page-id id attrs]}]

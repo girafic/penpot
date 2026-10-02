@@ -437,8 +437,9 @@
                                changes
                                (-> changes
                                    (pcb/with-page page)
+                                   ;; its audio clips keep it
                                    (pcb/change-timeline board-id
-                                                        (when (seq (:tracks pruned)) pruned)))))))
+                                                        (when-not (cta/timeline-empty? pruned) pruned)))))))
                        changes))
 
          changes (reduce (fn [changes component-id]

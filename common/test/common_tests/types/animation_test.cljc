@@ -13,6 +13,7 @@
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
@@ -1578,7 +1579,11 @@
                      (cta/toggle-loop sid :x)
                      (cta/toggle-slot-flag sid :hidden :fill-color 0)
                      (cta/toggle-slot-flag sid :locked :opacity)
-                     (cta/set-track-origin sid 0 1))
+                     (cta/set-track-origin sid 0 1)
+                     (assoc :export {:format :mp4 :audio false})
+                     (ctau/add-audio-clip {:audio-id (uuid/next) :name "beat.mp3" :source-duration 4000
+                                           :start 100 :offset 250 :duration 1500 :lane 1 :volume 0.8
+                                           :fade-in 50 :fade-out 300 :muted true :locked true}))
         encode   (sm/encoder cta/schema:timeline (sm/json-transformer))
         decode   (sm/decoder cta/schema:timeline (sm/json-transformer))]
     (t/is (cta/valid-timeline? timeline))
@@ -2184,6 +2189,90 @@
       (t/is (= 400 (cta/snap-time (cta/snap-times tl) 395 10)))
       (t/is (= 500 (cta/snap-time (cta/snap-times tl) 460 45)))
       (t/is (nil? (cta/snap-time (cta/snap-times tl) 250 10))))))
+
+;; AUDIO CLIPS
+
+(defn- audio-clip
+  "A clip of a 4 s file from `start` on the timeline, playing `duration` ms
+  of it from `offset`, with `params` over it."
+  [& {:as params}]
+  (ctau/make-audio-clip (merge {:audio-id (uuid/next) :name "beat.mp3" :source-duration 4000
+                                :start 0 :offset 0 :duration 1000}
+                               params)))
+
+(defn- with-clips
+  [timeline & clips]
+  (reduce ctau/add-audio-clip timeline clips))
+
+(defn- plan
+  "The parts of the `audio-plan` of `timeline` as `[at offset length]`."
+  [timeline elapsed span]
+  (mapv (juxt :at :offset :length) (cta/audio-plan timeline elapsed span)))
+
+(t/deftest a-timeline-with-audio-clips-validates
+  (let [tl (with-clips (mk-timeline) (audio-clip :start 200 :volume 0.5 :fade-in 100))
+        id (-> tl :audio-clips keys first)]
+    (t/is (cta/valid-timeline? tl))
+    (t/is (cta/valid-timeline? (assoc tl :export {:format :webm :audio false})))
+    (doseq [[k v] [[:audio-id nil] [:start -1] [:offset -1] [:fade-out -1] [:duration 9]
+                   [:volume 4.5] [:lane -1] [:source-duration (inc ctau/max-audio-duration)]
+                   [:speed 0.1] [:speed 5]]]
+      (t/is (not (cta/valid-timeline? (assoc-in tl [:audio-clips id k] v))) (str k " " v)))))
+
+(t/deftest a-timeline-with-only-clips-is-not-empty
+  (t/is (cta/timeline-empty? (mk-timeline)))
+  (t/is (not (cta/timeline-empty? (with-clips (mk-timeline) (audio-clip)))))
+  (t/is (not (cta/timeline-empty? (cta/add-keyframe (mk-timeline) (uuid/next) {:time 0 :property :x :value 0})))))
+
+(t/deftest the-audio-plan-plays-what-sounds-ahead
+  (let [a  (audio-clip :start 200 :duration 300)
+        ;; longer than what is left of the timeline
+        b  (audio-clip :start 600 :offset 1000 :duration 2000)
+        tl (with-clips (mk-timeline) a b)]
+    (t/is (= [[200 0 300] [600 1000 400]] (plan tl 0 1000)) "cut at the end of the timeline")
+    (t/is (= [(:id a) (:id b)] (mapv :clip-id (cta/audio-plan tl 0 1000))))
+    (t/is (= [(:audio-id a) (:audio-id b)] (mapv :audio-id (cta/audio-plan tl 0 1000))))
+    (t/is (= [[0 100 200] [300 1000 400]] (plan tl 300 1000)) "a clip from part-way")
+    (t/is (= [[0 0 100]] (plan tl 200 100)) "only the span")
+    (t/is (= [] (plan tl 1000 1000)) "played once, nothing after the end")
+    (t/testing "muted clips do not sound"
+      (t/is (= [[200 0 300]] (plan (ctau/set-audio-clip-muted tl (:id b) true) 0 1000))))))
+
+(t/deftest the-audio-plan-repeats-the-clips-of-a-loop
+  (let [tl (-> (mk-timeline)
+               (assoc :playback :loop)
+               (with-clips (audio-clip :start 200 :duration 300)))]
+    (t/is (= [[200 0 300] [1200 0 300] [2200 0 300]] (plan tl 0 3000)))
+    (t/is (= [[0 100 200] [900 0 300]] (plan tl 2300 1500)) "from within a cycle")))
+
+(t/deftest the-way-back-of-ping-pong-is-silent
+  (let [tl (-> (mk-timeline)
+               (assoc :playback :ping-pong)
+               (with-clips (audio-clip :start 200 :duration 300)))]
+    (t/is (= [[200 0 300] [2200 0 300]] (plan tl 0 4000)))
+    (t/is (= [] (plan tl 1000 1000)) "the way back")
+    (t/is (= [[200 0 300]] (plan tl 2000 1000)) "forward again")))
+
+(t/deftest the-audio-plan-reads-a-fast-clip-faster
+  (let [tl (with-clips (mk-timeline) (audio-clip :offset 500 :duration 1000 :speed 2))]
+    (t/is (= [{:at 0 :offset 500 :length 1000 :speed 2}]
+             (mapv #(select-keys % [:at :offset :length :speed]) (cta/audio-plan tl 0 1000)))
+          "a second of the timeline plays two of the file")
+    (t/is (= [[0 1100 700]] (plan tl 300 1000)) "from part-way, twice as far into the file")
+    (t/is (= [1] (mapv :speed (cta/audio-plan (with-clips (mk-timeline) (audio-clip)) 0 1000))))))
+
+(t/deftest the-audio-plan-gives-the-gain-of-each-part
+  (let [tl (with-clips (mk-timeline) (audio-clip :duration 1000 :volume 0.5 :fade-in 200))]
+    (t/is (= [[0 0.0] [200 0.5] [1000 0.5]] (:points (first (cta/audio-plan tl 0 1000)))))
+    (t/is (= [[0 0.25] [100 0.5] [500 0.5]] (:points (first (cta/audio-plan tl 100 500))))
+          "from within its fade in")))
+
+(t/deftest snap-times-take-the-edges-of-the-clips
+  (let [a  (audio-clip :start 200 :duration 300)
+        b  (audio-clip :start 600 :duration 100)
+        tl (with-clips (mk-timeline) a b)]
+    (t/is (= [0 200 500 600 700 1000] (vec (cta/snap-times tl))))
+    (t/is (= [0 600 700 1000] (vec (cta/snap-times tl :clip-ids #{(:id a)}))) "but of the dragged ones")))
 
 (t/deftest loop-track-repeats-a-track-every-period
   (let [id     (uuid/next)

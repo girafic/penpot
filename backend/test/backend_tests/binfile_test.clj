@@ -18,6 +18,7 @@
    [app.common.time :as ct]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -2090,3 +2091,96 @@
     (t/is (= [[file-id (:id lib-style)] [file-id (:id own-style)]]
              (mapv (juxt :style-ref-file :style-ref-id) (styled-animations file-id file)))
           "both uses link to the imported file")))
+
+;; -----------------------------------------------------------------------------
+;; Audio clips
+;; -----------------------------------------------------------------------------
+
+(defn- prepare-file-with-clip!
+  "A file of `profile` whose board plays, on its timeline, a clip of an
+  audio media object backed by a storage object of `content` typed
+  `content-type` (an MP3 by default)."
+  [profile & {:keys [index content content-type]
+              :or {index 1 content "ID3 audio bytes" content-type "audio/mpeg"}}]
+  (let [storage  (-> (:app.storage/storage th/*system*)
+                     (stt/configure-storage-backend))
+        sobject  (sto/put-object! storage {::sto/content (sto/content content)
+                                           :content-type content-type
+                                           :bucket "file-media-object"})
+        file     (th/create-file* index {:profile-id (:id profile)
+                                         :project-id (:default-project-id profile)
+                                         :is-shared false})
+        fmo      (th/create-file-media-object* {:file-id (:id file) :media-id (:id sobject)
+                                                :name "beat.mp3" :mtype "audio/mpeg" :width 0 :height 0})
+        page-id  (first (get-in file [:data :pages]))
+        board-id (uuid/next)
+        clip-id  (uuid/next)
+        timeline (ctau/add-audio-clip (cta/make-timeline {:board-id board-id :duration 1000})
+                                      {:id clip-id :audio-id (:id fmo) :name "beat.mp3"
+                                       :source-duration 1000 :start 0 :duration 1000})]
+    (update-file!
+     :file-id (:id file)
+     :profile-id (:id profile)
+     :revn 0
+     :vern 0
+     :changes
+     [{:type :add-obj
+       :page-id page-id
+       :id board-id
+       :parent-id uuid/zero
+       :frame-id uuid/zero
+       :components-v2 true
+       :obj (cts/setup-shape {:id board-id :name "board" :type :frame
+                              :frame-id uuid/zero :parent-id uuid/zero
+                              :x 0 :y 0 :width 100 :height 100})}
+      {:type :set-timeline :page-id page-id :id board-id :params timeline}])
+    {:id (:id file) :page-id page-id :board-id board-id :clip-id clip-id :fmo fmo :sobject sobject}))
+
+(t/deftest export-and-import-keep-the-audio-of-clips
+  (let [profile (th/create-profile* 1)
+        {:keys [id page-id board-id clip-id fmo sobject]} (prepare-file-with-clip! profile)
+        output  (tmp/tempfile :suffix ".zip")
+        _       (v3/export-files! (-> th/*system*
+                                      (assoc ::bfc/ids #{id})
+                                      (assoc ::bfc/export-type :detach-libraries))
+                                  (io/output-stream output))
+        entries (with-open [zip (java.util.zip.ZipFile. (str output))]
+                  (into #{} (map #(.getName ^java.util.zip.ZipEntry %)) (enumeration-seq (.entries zip))))
+        result  (-> th/*system*
+                    (assoc ::bfc/project-id (:default-project-id profile))
+                    (assoc ::bfc/profile-id (:id profile))
+                    (assoc ::bfc/input output)
+                    (v3/import-files!))
+        file-id (first (:file-ids result))
+        clip    (get-in (bfc/get-file th/*system* file-id :realize? true)
+                        [:data :pages-index page-id :timelines board-id :audio-clips clip-id])
+        row     (th/db-get :file-media-object {:id (:audio-id clip)})]
+    (t/is (contains? entries (str "objects/" (:id sobject) ".mp3")) "the audio with its extension")
+    (t/is (not= (:id fmo) (:audio-id clip)))
+    (t/is (= file-id (:file-id row)) "a media object of the imported file")
+    (t/is (= "audio/mpeg" (:mtype row)))))
+
+(defn- import-error
+  "The error of exporting the file `id` of `profile` and importing it
+  again, nil when there is none."
+  [profile id]
+  (try
+    (export-and-import! profile id :detach-libraries)
+    nil
+    (catch Exception cause
+      cause)))
+
+(t/deftest import-refuses-what-penpot-does-not-store
+  (let [profile (th/create-profile* 1)
+        html    "<html><script>alert(1)</script></html>"]
+    (t/testing "a type Penpot never stores"
+      (let [{:keys [id]} (prepare-file-with-clip! profile :index 1 :content html :content-type "text/html")
+            error        (import-error profile id)]
+        (t/is (= [:validation :media-type-not-allowed] ((juxt :type :code) (ex-data error))))))
+    (t/testing "audio whose bytes are not of its type"
+      (let [{:keys [id]} (prepare-file-with-clip! profile :index 2 :content html)
+            error        (import-error profile id)]
+        (t/is (= [:validation :media-type-mismatch] ((juxt :type :code) (ex-data error))))))
+    (t/testing "what it stores imports"
+      (let [{:keys [id]} (prepare-file-with-clip! profile :index 3)]
+        (t/is (nil? (import-error profile id)))))))

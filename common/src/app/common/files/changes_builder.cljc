@@ -455,6 +455,29 @@
                                                 :animations (not-empty old-val)}))]
     (apply-changes-local changes)))
 
+(defn set-timeline-audio-clip
+  "Set (or, when `clip` is nil, delete) the audio clip `clip-id` of the
+  timeline of the board `id`, leaving its other clips as they are."
+  [changes id clip-id clip]
+  (assert-page-id! changes)
+  (assert-page! changes)
+  (let [page-id (::page-id (meta changes))
+        page    (::page (meta changes))
+        old-val (dm/get-in page [:timelines id :audio-clips clip-id])
+
+        changes (-> changes
+                    (update :redo-changes conj {:type :set-timeline-audio-clip
+                                                :page-id page-id
+                                                :id id
+                                                :clip-id clip-id
+                                                :params clip})
+                    (update :undo-changes conj {:type :set-timeline-audio-clip
+                                                :page-id page-id
+                                                :id id
+                                                :clip-id clip-id
+                                                :params old-val}))]
+    (apply-changes-local changes)))
+
 (defn update-timeline
   "Change settings (name, duration, playback...) of the timeline of the
   board `id`. A nil value removes an optional one."
@@ -480,14 +503,14 @@
 
 (defn change-timeline
   "Turn the timeline of the board `id` into `timeline` with the smallest
-  changes: its settings and the tracks that differ. So edits of other
-  layers made at the same time by other users are kept. A new or deleted
-  timeline is set whole."
+  changes: its settings, and the tracks and audio clips that differ. So
+  edits of other layers and clips made at the same time by other users
+  are kept. A new or deleted timeline is set whole."
   [changes id timeline]
   (let [old (dm/get-in (::page (meta changes)) [:timelines id])]
     (if (or (nil? old) (nil? timeline))
       (set-timeline changes id timeline)
-      (let [settings  #(dissoc % :board-id :tracks)
+      (let [settings  #(dissoc % :board-id :tracks :audio-clips)
             new-attrs (settings timeline)
             old-attrs (settings old)
             attrs     (into {}
@@ -497,15 +520,24 @@
                                         [attr value]))))
                             (into (set (keys new-attrs)) (keys old-attrs)))
             tracks    (:tracks timeline)
-            old-tracks (:tracks old)]
-        (reduce (fn [changes shape-id]
-                  (let [track (get tracks shape-id)]
+            old-tracks (:tracks old)
+            clips     (:audio-clips timeline)
+            old-clips (:audio-clips old)
+            changes   (reduce (fn [changes shape-id]
+                                (let [track (get tracks shape-id)]
+                                  (cond-> changes
+                                    (not= track (get old-tracks shape-id))
+                                    (set-timeline-track id shape-id track))))
+                              (cond-> changes
+                                (seq attrs) (update-timeline id attrs))
+                              (into (set (keys tracks)) (keys old-tracks)))]
+        (reduce (fn [changes clip-id]
+                  (let [clip (get clips clip-id)]
                     (cond-> changes
-                      (not= track (get old-tracks shape-id))
-                      (set-timeline-track id shape-id track))))
-                (cond-> changes
-                  (seq attrs) (update-timeline id attrs))
-                (into (set (keys tracks)) (keys old-tracks)))))))
+                      (not= clip (get old-clips clip-id))
+                      (set-timeline-audio-clip id clip-id clip))))
+                changes
+                (into (set (keys clips)) (keys old-clips)))))))
 
 (defn set-comment-thread-position
   [changes {:keys [id frame-id position] :as thread}]

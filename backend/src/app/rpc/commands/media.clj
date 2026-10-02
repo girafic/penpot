@@ -8,7 +8,9 @@
   (:require
    [app.common.data :as d]
    [app.common.exceptions :as ex]
+   [app.common.features :as cfeat]
    [app.common.logging :as l]
+   [app.common.media :as cm]
    [app.common.schema :as sm]
    [app.common.time :as ct]
    [app.common.uuid :as uuid]
@@ -21,6 +23,7 @@
    [app.rpc :as-alias rpc]
    [app.rpc.climit :as climit]
    [app.rpc.commands.files :as files]
+   [app.rpc.commands.teams :as teams]
    [app.rpc.doc :as-alias doc]
    [app.rpc.quotes :as quotes]
    [app.storage :as sto]
@@ -40,11 +43,29 @@
 
 (declare create-file-media-object)
 
-(def ^:private sql:get-team-id-for-file
-  "SELECT p.team_id
-     FROM file AS f
-     JOIN project AS p ON (p.id = f.project_id)
-    WHERE f.id = ?")
+(defn- validate-content!
+  "The upload `content` of a file media object of a file of `team`,
+  checked: an image, or an audio file when the team has Penpot Motion
+  (see `media.v/validate-audio!`), with its canonical type. Motion is a
+  frontend feature: only a backend run with `enable-feature-animation`
+  has it for its teams, and takes audio."
+  [team content]
+  (if (contains? cm/audio-types (:mtype content))
+    (if (contains? (cfeat/get-team-enabled-features cf/flags team) "animation/v1")
+      (media.v/validate-audio! content)
+      (ex/raise :type :validation
+                :code :media-type-not-allowed
+                :hint "audio is not enabled on this server"))
+    (-> content
+        (media.v/validate-media-type!)
+        (media.v/validate-media-size!))))
+
+(defn- check-media-quote!
+  [cfg profile-id team content]
+  (quotes/check! cfg {::quotes/id        ::quotes/media-storage-bytes-per-team
+                      ::quotes/profile-id profile-id
+                      ::quotes/team-id    (:id team)
+                      ::quotes/incr       (:size content)}))
 
 (def ^:private schema:upload-file-media-object
   [:map {:title "upload-file-media-object"}
@@ -61,34 +82,31 @@
                 [:process-image/global]]}
   [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id file-id content] :as params}]
   (files/check-edition-permissions! pool profile-id file-id)
-  (media.v/validate-media-type! content)
-  (media.v/validate-media-size! content)
 
-  (let [team-id (:team-id (db/exec-one! pool [sql:get-team-id-for-file file-id]))]
-    (quotes/check! cfg {::quotes/id        ::quotes/media-storage-bytes-per-team
-                        ::quotes/profile-id profile-id
-                        ::quotes/team-id    team-id
-                        ::quotes/incr       (:size content)}))
+  (let [team    (teams/get-team-for-file pool file-id)
+        content (validate-content! team content)
+        params  (assoc params :content content)]
+    (check-media-quote! cfg profile-id team content)
 
-  (db/run! cfg (fn [{:keys [::db/conn] :as cfg}]
-                 ;; We get the minimal file for proper checking if
-                 ;; file is not already deleted
-                 (let [_      (files/get-minimal-file conn file-id)
-                       mobj   (create-file-media-object cfg params)]
+    (db/run! cfg (fn [{:keys [::db/conn] :as cfg}]
+                   ;; We get the minimal file for proper checking if
+                   ;; file is not already deleted
+                   (let [_      (files/get-minimal-file conn file-id)
+                         mobj   (create-file-media-object cfg params)]
 
-                   (db/update! conn :file
-                               {:modified-at (ct/now)
-                                :has-media-trimmed false}
-                               {:id file-id}
-                               {::db/return-keys false})
+                     (db/update! conn :file
+                                 {:modified-at (ct/now)
+                                  :has-media-trimmed false}
+                                 {:id file-id}
+                                 {::db/return-keys false})
 
-                   (with-meta mobj
-                     {::audit/replace-props
-                      {:name (:name params)
-                       :file-id file-id
-                       :is-local (:is-local params)
-                       :size (:size content)
-                       :mtype (:mtype content)}})))))
+                     (with-meta mobj
+                       {::audit/replace-props
+                        {:name (:name params)
+                         :file-id file-id
+                         :is-local (:is-local params)
+                         :size (:size content)
+                         :mtype (:mtype content)}}))))))
 
 (defn- big-enough-for-thumbnail?
   "Checks if the provided image info is big enough for
@@ -170,6 +188,23 @@
       :always
       (assoc ::image (process-main-image info)))))
 
+(defn- process-audio
+  "An audio file `content` as it is stored: as uploaded, without a
+  thumbnail and without a size (browsers decode it, see
+  `media.v/validate-audio!`)."
+  [content]
+  (let [path (:path content)
+        hash (sto/calculate-hash path)]
+    {:width 0
+     :height 0
+     :mtype (:mtype content)
+     ::image {::sto/content (-> (sto/content path)
+                                (sto/wrap-with-hash hash))
+              ::sto/deduplicate? true
+              ::sto/touched-at (ct/now)
+              :content-type (:mtype content)
+              :bucket "file-media-object"}}))
+
 (defn- create-file-media-object
   [{:keys [::sto/storage ::db/conn] :as cfg}
    {:keys [id file-id is-local name content from-url? from-chunks?]}]
@@ -192,7 +227,9 @@
            :path (str (:path content))
            :origin origin)
 
-    (let [result  (process-image cfg content)
+    (let [result  (if (contains? cm/audio-canonical-types (:mtype content))
+                    (process-audio content)
+                    (process-image cfg content))
           image   (sto/put-object! storage (::image result))
           thumb   (when-let [params (::thumb result)]
                     (sto/put-object! storage params))
@@ -569,12 +606,13 @@
 
   (db/tx-run! cfg
               (fn [{:keys [::db/conn] :as cfg}]
-                (let [content (assemble-chunks cfg profile-id session-id)
-                      content (-> content
-                                  (assoc :filename (str "upload:" name))
-                                  (assoc :mtype mtype)
-                                  (media.v/validate-media-type!)
-                                  (media.v/validate-media-size!))
+                (let [team    (teams/get-team-for-file conn file-id)
+                      content (assemble-chunks cfg profile-id session-id)
+                      content (->> (-> content
+                                       (assoc :filename (str "upload:" name))
+                                       (assoc :mtype mtype))
+                                   (validate-content! team))
+                      _       (check-media-quote! cfg profile-id team content)
                       mobj    (create-file-media-object cfg (assoc params
                                                                    :id id
                                                                    :from-chunks? true

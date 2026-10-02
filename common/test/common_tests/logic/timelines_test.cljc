@@ -20,6 +20,7 @@
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape :as cts]
    [app.common.types.text :as txt]
@@ -72,16 +73,20 @@
                               (-> % :obj :id))))]
     [(thf/apply-changes file changes) copy-id]))
 
-(defn- relocate
+(defn- relocate-changes
   [file label parent-label]
   (let [page (thf/current-page file)]
-    (thf/apply-changes file (cls/generate-relocate (-> (pcb/empty-changes nil)
-                                                       (pcb/with-page-id (:id page))
-                                                       (pcb/with-objects (:objects page))
-                                                       (pcb/with-library-data (:data file)))
-                                                   (thi/id parent-label)
-                                                   0
-                                                   #{(thi/id label)}))))
+    (cls/generate-relocate (-> (pcb/empty-changes nil)
+                               (pcb/with-page-id (:id page))
+                               (pcb/with-objects (:objects page))
+                               (pcb/with-library-data (:data file)))
+                           (thi/id parent-label)
+                           0
+                           #{(thi/id label)})))
+
+(defn- relocate
+  [file label parent-label]
+  (thf/apply-changes file (relocate-changes file label parent-label)))
 
 (t/deftest duplicated-layer-gets-the-animation
   (let [[file copy] (duplicate (animated-file) :rect (gpt/point 10 20))
@@ -874,3 +879,162 @@
         timeline  (get timelines [:copy copy (thi/id :lib-main)])]
     (t/is (= :text (get-in objects [text :type])))
     (t/is (= [[0 0 2] [0 3 6] [0 7 12]] (unit-ranges timeline objects text 0)))))
+
+;; AUDIO CLIPS
+
+(defn- audio-clip
+  "The params of a clip, on the first free lane unless given."
+  [& {:as params}]
+  (merge {:id (uuid/next) :audio-id (uuid/next) :name "beat.mp3" :source-duration 4000
+          :start 0 :duration 1000}
+         params))
+
+(defn- with-clips
+  "`file` with the audio `clips` in the timeline of the board `label`, a
+  new one of 2 s when it has none."
+  [file label & clips]
+  (with-timeline file label
+    (fn [timeline]
+      (reduce ctau/add-audio-clip
+              (or timeline (cta/make-timeline {:board-id (thi/id label) :duration 2000}))
+              clips))))
+
+(defn- delete
+  [file & labels]
+  (let [page        (thf/current-page file)
+        [_ changes] (cls/generate-delete-shapes (pcb/empty-changes) (:data file) page (:objects page)
+                                                (into #{} (map thi/id) labels) {:components-v2 true})]
+    (thf/apply-changes file changes)))
+
+(defn- clips-of
+  [file label]
+  (get-in (timelines file) [(thi/id label) :audio-clips]))
+
+(t/deftest the-clips-keep-the-timeline-of-their-board
+  (let [file (-> (animated-file)
+                 (with-timeline :board-a #(cta/remove-track % (thi/id :board-a)))
+                 (with-clips :board-a (audio-clip :start 200)))
+        tl   (get (timelines (delete file :rect)) (thi/id :board-a))]
+    (t/is (empty? (:tracks tl)) "its last animated layer deleted")
+    (t/is (= 1 (count (:audio-clips tl))))
+    (t/is (not (contains? (timelines (delete file :board-a)) (thi/id :board-a)))
+          "the board deleted, they go with it")))
+
+(t/deftest copies-of-a-component-play-no-audio
+  (let [{:keys [objects board main-page]} (component-scene (with-clips (component-file) :main (audio-clip)))
+        copies (cltl/instance-timelines objects board nil main-page)]
+    (t/is (seq copies))
+    (t/is (not-any? #(contains? % :audio-clips) (vals copies)))))
+
+(t/deftest a-moved-layer-leaves-the-clips-of-its-board
+  (let [file (-> (animated-file)
+                 (with-clips :board-a (audio-clip :start 200))
+                 (relocate :rect :board-b))]
+    (t/is (= 1 (count (clips-of file :board-a))))
+    (t/is (some? (get (timelines file) (thi/id :board-b))))
+    (t/is (nil? (clips-of file :board-b)))))
+
+(t/deftest a-board-put-into-another-gives-it-its-clips
+  (let [file    (-> (animated-file)
+                    (with-clips :board-a (audio-clip :start 0))
+                    ;; board B plays only audio, on two lanes
+                    (with-clips :board-b (audio-clip :start 300) (audio-clip :start 300)))
+        changes (relocate-changes file :board-b :board-a)
+        moved   (thf/apply-changes file changes)
+        clips   (vals (clips-of moved :board-a))
+        set-ups (filter #(= :set-timeline-audio-clip (:type %)) (:redo-changes changes))]
+    (t/is (not (contains? (timelines moved) (thi/id :board-b))))
+    (t/is (= [[0 0] [300 1] [300 2]] (sort (map (juxt :start :lane) clips)))
+          "at their starts, on lanes after the one of the host")
+    (t/is (= (set (keys (clips-of file :board-b)))
+             (set (keep #(when (= 300 (:start %)) (:id %)) clips))))
+    (t/is (= (count set-ups) (count (set (map (juxt :id :clip-id) set-ups))))
+          "one change for each clip")
+    (t/is (= (timelines file)
+             (timelines (thf/apply-changes moved {:redo-changes (vec (:undo-changes changes))})))
+          "one undo")))
+
+(t/deftest a-duplicated-board-gets-copies-of-its-clips
+  (let [file        (with-clips (animated-file) :board-b (audio-clip :start 300 :lane 1))
+        [file copy] (duplicate file :board-b (gpt/point 0 500))
+        tl          (get (timelines file) copy)
+        [original]  (vals (clips-of file :board-b))
+        [clip]      (vals (:audio-clips tl))]
+    (t/is (= 2000 (:duration tl)) "its timeline, though it has no track")
+    (t/is (not= (:id original) (:id clip)) "with new ids")
+    (t/is (= (dissoc original :id) (dissoc clip :id)) "of the same file, start and lane")
+    (t/is (cta/valid-timeline? tl)))
+  (t/testing "with its tracks"
+    (let [[file copy] (duplicate (with-clips (animated-file) :board-a (audio-clip :start 300))
+                                 :board-a (gpt/point 500 0))
+          tl          (get (timelines file) copy)]
+      (t/is (= 2 (count (:tracks tl))))
+      (t/is (= [300] (map :start (vals (:audio-clips tl)))))))
+  (t/testing "by alt-drag"
+    (let [file    (with-clips (animated-file) :board-b (audio-clip :start 300))
+          page    (thf/current-page file)
+          b       (thi/id :board-b)
+          changes (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                  (:objects page) page #{b} (gpt/point 0 500)
+                                                  {(:id file) file} (:data file) (:id file)
+                                                  :alt-duplication? true)
+          copy    (some #(when (and (= :add-obj (:type %)) (= b (:old-id %))) (-> % :obj :id))
+                        (:redo-changes changes))
+          file    (thf/apply-changes file changes)]
+      (t/is (= [300] (map :start (vals (get-in (timelines file) [copy :audio-clips]))))))))
+
+(t/deftest a-pasted-board-brings-its-clips
+  (let [file    (with-clips (animated-file) :board-b (audio-clip :start 300))
+        page    (thf/current-page file)
+        b       (thi/id :board-b)
+        ;; what the clipboard takes of a board that plays only audio
+        motion  (cltl/animation-sources page (:objects page) [b])
+        changes (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                (:objects page) page #{b} (gpt/point 0 600)
+                                                {(:id file) file} (:data file) (:id file)
+                                                {:motion motion})
+        copy    (some #(when (and (= :add-obj (:type %)) (= b (:old-id %))) (-> % :obj :id))
+                      (:redo-changes changes))
+        file    (thf/apply-changes file changes)]
+    (t/is (empty? (:tracks motion)))
+    (t/is (= #{b} (set (keys (:audio motion)))))
+    (t/is (= [300] (map :start (vals (get-in (timelines file) [copy :audio-clips])))))))
+
+(t/deftest pasted-animation-leaves-the-clips-and-their-length
+  ;; board B plays 500 ms and a clip that goes on to 3500 ms
+  (let [file   (-> (paste-file)
+                   (with-clips :board-b (audio-clip :start 500 :duration 3000))
+                   (with-timeline :board-b #(assoc % :duration 500)))
+        clips  (clips-of file :board-b)
+        page   (thf/current-page file)
+        rect   (thi/id :rect)
+        b      (thi/id :board-b)]
+    (t/testing "a pasted layer"
+      (let [motion  (cltl/animation-sources page (:objects page) [rect])
+            pasted  (-> (ths/get-shape file :rect)
+                        (assoc :parent-id b :frame-id b)
+                        (gsh/move (gpt/point 870 -50)))
+            changes (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                    (assoc (:objects page) rect pasted) page #{rect}
+                                                    (gpt/point 0 0)
+                                                    {(:id file) file} (:data file) (:id file)
+                                                    {:motion motion})
+            tl      (get (timelines (thf/apply-changes file changes)) b)]
+        (t/is (= clips (:audio-clips tl)))
+        (t/is (= 1000 (:duration tl)) "as long as the pasted track, not the clip")
+        (t/is (not-any? #(= :set-timeline-audio-clip (:type %)) (:redo-changes changes)))))
+    (t/testing "a pasted animation"
+      (let [result (paste file (clip-of file [:rect] :whole-layer? true) [:rect-b] {:mode :replace})
+            tl     (get-in result [:timelines b])]
+        (t/is (= clips (:audio-clips tl)))
+        (t/is (= 1000 (:duration tl)))))))
+
+(t/deftest a-board-with-only-clips-keeps-its-own-clock
+  (let [{:keys [objects board main-page]} (component-scene)
+        copies (vals (cltl/instance-timelines objects board nil main-page))
+        own    (-> (cta/make-timeline {:board-id board :duration 2500})
+                   (ctau/add-audio-clip (audio-clip)))]
+    (t/is (= [2500 :once] ((juxt :duration cta/playback-mode) (cltl/with-copies-clock own copies true))))
+    (t/is (= [1000 :loop] ((juxt :duration cta/playback-mode)
+                           (cltl/with-copies-clock (dissoc own :audio-clips) copies false)))
+          "without them, the clock of its copies")))

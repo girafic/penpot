@@ -6,12 +6,14 @@
 
 (ns backend-tests.rpc-file-test
   (:require
+   [app.binfile.common :as bfc]
    [app.common.features :as cfeat]
    [app.common.pprint :as pp]
    [app.common.thumbnails :as thc]
    [app.common.time :as ct]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -2895,3 +2897,126 @@
       (t/is (not (contains? (:animation-styles data) (:id unused))))
       (t/is (= [(:id used) (:id consumer)] [(:style-ref-id use) (:style-ref-file use)])
             "its use now points at the consumer"))))
+
+;; -----------------------------------------------------------------------------
+;; Audio clips
+;; -----------------------------------------------------------------------------
+
+(defn- audio-object!
+  "A media object of the file `file-id`, of a storage object of audio."
+  [file-id]
+  (let [storage (:app.storage/storage th/*system*)
+        sobject (sto/put-object! storage {::sto/content (sto/content "ID3 audio bytes")
+                                          :content-type "audio/mpeg"
+                                          :bucket "file-media-object"})]
+    (th/create-file-media-object* {:file-id file-id :media-id (:id sobject) :name "beat.mp3"
+                                   :mtype "audio/mpeg" :width 0 :height 0})))
+
+(defn- board-change
+  [page-id board-id]
+  {:type :add-obj
+   :page-id page-id
+   :id board-id
+   :parent-id uuid/zero
+   :frame-id uuid/zero
+   :components-v2 true
+   :obj (cts/setup-shape {:id board-id :name "board" :type :frame
+                          :frame-id uuid/zero :parent-id uuid/zero
+                          :x 0 :y 0 :width 100 :height 100})})
+
+(defn- audio-clip
+  [clip-id audio-id]
+  (ctau/make-audio-clip {:id clip-id :audio-id audio-id :name "beat.mp3"
+                         :source-duration 1000 :start 0 :duration 1000}))
+
+(defn- deleted-at
+  [fmo-id]
+  (:deleted-at (first (th/db-exec! ["select deleted_at from file_media_object where id = ?" fmo-id]))))
+
+(t/deftest file-gc-keeps-the-audio-of-clips
+  (let [profile  (th/create-profile* 1)
+        file     (th/create-file* 1 {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)
+                                     :is-shared false})
+        fmo      (audio-object! (:id file))
+        page-id  (first (get-in file [:data :pages]))
+        board-id (uuid/random)
+        clip-id  (uuid/random)]
+    (update-file! :file-id (:id file)
+                  :profile-id (:id profile)
+                  :changes [(board-change page-id board-id)
+                            {:type :set-timeline :page-id page-id :id board-id
+                             :params (ctau/add-audio-clip (cta/make-timeline {:board-id board-id :duration 1000})
+                                                          (audio-clip clip-id (:id fmo)))}])
+    (t/is (true? (th/run-task! :file-gc {:file-id (:id file)})))
+    (t/is (nil? (deleted-at (:id fmo))) "a clip plays it")
+
+    (update-file! :file-id (:id file)
+                  :profile-id (:id profile)
+                  :changes [{:type :set-timeline-audio-clip :page-id page-id :id board-id
+                             :clip-id clip-id :params nil}])
+    ;; the snapshots that still hold the clip expire
+    (th/db-exec! ["update file set has_media_trimmed = false where id = ?" (:id file)])
+    (th/db-delete! :file-data {:file-id (:id file) :type "snapshot"})
+    (t/is (true? (th/run-task! :file-gc {:file-id (:id file)})))
+    (t/is (some? (deleted-at (:id fmo))) "no clip plays it any more")))
+
+(t/deftest a-clip-of-the-audio-of-another-file-gets-its-own
+  (let [profile  (th/create-profile* 1)
+        other    (th/create-file* 1 {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)})
+        file     (th/create-file* 2 {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)})
+        fmo      (audio-object! (:id other))
+        page-id  (first (get-in file [:data :pages]))
+        board-id (uuid/random)
+        clip-id  (uuid/random)]
+    (update-file! :file-id (:id file)
+                  :profile-id (:id profile)
+                  :changes [(board-change page-id board-id)
+                            {:type :set-timeline :page-id page-id :id board-id
+                             :params (cta/make-timeline {:board-id board-id :duration 1000})}
+                            {:type :set-timeline-audio-clip :page-id page-id :id board-id
+                             :clip-id clip-id :params (audio-clip clip-id (:id fmo))}])
+    (let [file (bfc/get-file th/*system* (:id file) :realize? true)
+          clip (get-in file [:data :pages-index page-id :timelines board-id :audio-clips clip-id])
+          row  (th/db-get :file-media-object {:id (:audio-id clip)})]
+      (t/is (not= (:id fmo) (:audio-id clip)))
+      (t/is (= (:id file) (:file-id row)) "a media object of the file")
+      (t/is (= (:media-id fmo) (:media-id row)) "of the same audio"))))
+
+(t/deftest a-clip-of-cloned-audio-is-not-cloned-again
+  ;; a paste from another file clones the audio first (see
+  ;; `clone-file-media-object`): the edits of the clip that follow keep
+  ;; that copy
+  (let [profile  (th/create-profile* 1)
+        other    (th/create-file* 1 {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)})
+        file     (th/create-file* 2 {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)})
+        source   (audio-object! (:id other))
+        out      (th/command! {::th/type :clone-file-media-object
+                               ::rpc/profile-id (:id profile)
+                               :file-id (:id file)
+                               :is-local true
+                               :id (:id source)})
+        fmo      (:result out)
+        page-id  (first (get-in file [:data :pages]))
+        board-id (uuid/random)
+        clip-id  (uuid/random)
+        clip     (audio-clip clip-id (:id fmo))
+        objects  #(th/db-query :file-media-object {:file-id (:id file)})]
+    (t/is (nil? (:error out)))
+    (update-file! :file-id (:id file)
+                  :profile-id (:id profile)
+                  :changes [(board-change page-id board-id)
+                            {:type :set-timeline :page-id page-id :id board-id
+                             :params (ctau/add-audio-clip (cta/make-timeline {:board-id board-id :duration 1000}) clip)}])
+    (update-file! :file-id (:id file)
+                  :profile-id (:id profile)
+                  :changes [{:type :set-timeline-audio-clip :page-id page-id :id board-id
+                             :clip-id clip-id :params (assoc clip :start 500)}])
+    (let [stored (get-in (bfc/get-file th/*system* (:id file) :realize? true)
+                         [:data :pages-index page-id :timelines board-id :audio-clips clip-id])]
+      (t/is (= [(:id fmo)] (mapv :id (objects))) "no other copy")
+      (t/is (= [(:id fmo) 500] ((juxt :audio-id :start) stored))))))

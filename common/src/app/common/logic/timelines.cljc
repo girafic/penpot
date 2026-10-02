@@ -10,7 +10,9 @@
   timelines of a page are keyed by board and keyframe positions are
   relative to the board (see `cta/position-origin`), so a track goes to
   the timeline of the board its layer ends up in, its positions moved by
-  as much as the layer moved in its board."
+  as much as the layer moved in its board. The audio clips of a timeline
+  belong to its board: they go with the board when it is duplicated,
+  pasted or put into another board, never with a layer."
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
@@ -50,30 +52,38 @@
         timelines))
 
 (defn- settings
-  "A timeline without its board and tracks."
+  "A timeline without its board, tracks and audio clips."
   [timeline]
-  (dissoc timeline :board-id :tracks))
+  (dissoc timeline :board-id :tracks :audio-clips))
 
 (defn animation-sources
   "What copying the animation of the shapes of `ids` of `page` (with its
   `objects`) takes: their tracks, with where the shapes are in their
-  board, and the settings of the timelines of the boards among them."
+  board, and the settings and the audio clips of the timelines of the
+  boards among them."
   [page objects ids]
   (let [timelines (:timelines page)]
-    {:tracks
-     (into {}
-           (keep (fn [id]
-                   (when-let [[board-id track] (find-track timelines id)]
-                     [id {:board board-id
-                          :track track
-                          :at (in-board objects id board-id)}])))
-           ids)
-     :settings
-     (into {}
-           (keep (fn [id]
-                   (when-let [timeline (get timelines id)]
-                     [id (settings timeline)])))
-           ids)}))
+    (cond-> {:tracks
+             (into {}
+                   (keep (fn [id]
+                           (when-let [[board-id track] (find-track timelines id)]
+                             [id {:board board-id
+                                  :track track
+                                  :at (in-board objects id board-id)}])))
+                   ids)
+             :settings
+             (into {}
+                   (keep (fn [id]
+                           (when-let [timeline (get timelines id)]
+                             [id (settings timeline)])))
+                   ids)}
+      (some #(seq (dm/get-in timelines [% :audio-clips])) ids)
+      (assoc :audio
+             (into {}
+                   (keep (fn [id]
+                           (when-let [clips (not-empty (dm/get-in timelines [id :audio-clips]))]
+                             [id clips])))
+                   ids)))))
 
 (defn- moved-track
   "`track` for `shape-id`, its positions moved by `delta`. A copy gets
@@ -105,6 +115,25 @@
                (assoc :board-id board-id)
                (assoc-in [:tracks (:shape-id track)] track)
                (update :duration max (track-end track))))))
+
+(defn- add-clips
+  "`timelines` with the audio `clips` of another board in the timeline of
+  `board-id`, a new one with `settings` when the board has none: at the
+  same starts, on lanes after the ones the board uses, with new ids when
+  they are copies (`copy?`). Its duration stays."
+  [timelines board-id clips settings copy?]
+  (let [timeline (or (get timelines board-id)
+                     (merge (cta/make-timeline {:board-id board-id}) settings))
+        lanes    (->> (vals (:audio-clips timeline))
+                      (map (comp inc :lane))
+                      (reduce max 0))]
+    (assoc timelines board-id
+           (reduce (fn [timeline clip]
+                     (let [clip (cond-> (update clip :lane + lanes)
+                                  copy? (assoc :id (uuid/next)))]
+                       (assoc-in timeline [:audio-clips (:id clip)] clip)))
+                   (assoc timeline :board-id board-id)
+                   (sort-by (juxt :lane :start) (vals clips))))))
 
 (defn commit-timelines
   "Changes turning the timelines of `page` into `timelines`, one
@@ -157,17 +186,19 @@
   copies on `page`. A copy outside of any board (an alt-drag duplicate
   before it is dropped) keeps the board of its original when
   `keep-board?`."
-  [changes page ids-map {:keys [tracks settings]} & {:keys [keep-board?]}]
-  (if (empty? tracks)
+  [changes page ids-map {:keys [tracks settings audio]} & {:keys [keep-board?]}]
+  (if (and (empty? tracks) (empty? audio))
     changes
     (let [objects   (pcb/get-objects changes)
+          root-of   (fn [new-id]
+                      (when (contains? objects new-id)
+                        (cfh/get-shape-id-root-frame objects new-id)))
           timelines
           (reduce-kv
            (fn [timelines old-id {:keys [board track at]}]
              (let [new-id    (get ids-map old-id)
-                   new-board (when (contains? objects new-id)
-                               (or (cfh/get-shape-id-root-frame objects new-id)
-                                   (when keep-board? board)))]
+                   new-board (or (root-of new-id)
+                                 (when (and keep-board? (contains? objects new-id)) board))]
                (if (nil? new-board)
                  timelines
                  (add-track timelines new-board
@@ -177,7 +208,18 @@
                             (or (get settings (d/seek #(= new-board (get ids-map %)) (keys settings)))
                                 (get settings board))))))
            (:timelines page)
-           tracks)]
+           tracks)
+
+          ;; the clips of a board go to the board of its copy: the copy
+          ;; itself, or the board it is pasted into
+          timelines
+          (reduce-kv
+           (fn [timelines old-board clips]
+             (if-let [new-board (root-of (get ids-map old-board))]
+               (add-clips timelines new-board clips (get settings old-board) true)
+               timelines))
+           timelines
+           audio)]
       (commit-timelines changes page timelines))))
 
 (defn generate-move-timelines
@@ -210,12 +252,17 @@
          timelines
          all-ids)
 
+        ;; a board put into another one gives it its clips too
         result
         (reduce (fn [timelines id]
-                  (cond-> timelines
-                    (and (contains? timelines id)
-                         (not (cfh/root-frame? moved id)))
-                    (dissoc id)))
+                  (if (and (contains? timelines id)
+                           (not (cfh/root-frame? moved id)))
+                    (let [clips (dm/get-in timelines [id :audio-clips])
+                          host  (cfh/get-shape-id-root-frame moved id)]
+                      (cond-> (dissoc timelines id)
+                        (and (seq clips) (some? host) (not= host id))
+                        (add-clips host clips (settings (get timelines id)) false)))
+                    timelines))
                 result
                 ids)]
     (cond-> changes
@@ -386,11 +433,12 @@
 (defn with-copies-clock
   "`timeline`, of a board, keeping time with the animations of the
   component copies in it, `copies` (see `instance-timelines`), while it
-  has no tracks itself: as long as the longest of them, or as the board
-  when it is `stored?` (its timeline was saved, with the duration set on
-  it) and longer, looping when one of them does."
+  has no tracks and no audio clips itself (see `cta/timeline-empty?`): as
+  long as the longest of them, or as the board when it is `stored?` (its
+  timeline was saved, with the duration set on it) and longer, looping
+  when one of them does."
   [timeline copies stored?]
-  (if (or (seq (:tracks timeline)) (empty? copies))
+  (if (or (not (cta/timeline-empty? timeline)) (empty? copies))
     timeline
     (let [longest (reduce max 1 (map cta/cycle-duration copies))]
       (assoc timeline

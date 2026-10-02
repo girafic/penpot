@@ -74,6 +74,7 @@
 
    :media-max-file-size (* 1024 1024 30) ; 30MiB
    :font-max-file-size  (* 1024 1024 30) ; 30MiB
+   :audio-max-file-size (* 1024 1024 100) ; 100MiB, the clips of Penpot Motion
 
    :font-process-mem 512    ;; 512 MiB address space ceiling
    :font-process-cpu 30     ;; 30 seconds CPU time
@@ -138,6 +139,7 @@
 
     [:media-max-file-size {:optional true} ::sm/int]
     [:font-max-file-size  {:optional true} ::sm/int]
+    [:audio-max-file-size {:optional true} ::sm/int]
 
     ;; Font processing resource limits (PENPOT_FONT_PROCESS_*)
     [:font-process-mem {:optional true} ::sm/int]

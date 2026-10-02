@@ -6,6 +6,7 @@
 
 (ns backend-tests.rpc-media-test
   (:require
+   [app.common.features :as cfeat]
    [app.common.uuid :as uuid]
    [app.db :as db]
    [app.http.client :as http]
@@ -1262,3 +1263,115 @@
       (t/is (th/ex-info? error))
       (t/is (= :not-found (:type error-data)))
       (t/is (= :object-not-found (:code error-data))))))
+
+;; --------------------------------------------------------------------
+;; Audio (the clips of Penpot Motion)
+;; --------------------------------------------------------------------
+
+;; The tests run with every feature on (see `th/init-config`), Penpot
+;; Motion too, as a backend with the flag `enable-feature-animation`.
+
+(defn- upload-audio
+  "Upload the test file `filename` as the media type `mtype` to `file`."
+  [prof file filename mtype]
+  (let [path (th/tempfile (str "backend_tests/test_files/" filename))]
+    (th/command! {::th/type :upload-file-media-object
+                  ::rpc/profile-id (:id prof)
+                  :file-id (:id file)
+                  :is-local true
+                  :name filename
+                  :content {:filename filename
+                            :path path
+                            :mtype mtype
+                            :size (java.nio.file.Files/size path)}})))
+
+(defn- audio-file
+  [prof]
+  (th/create-file* 1 {:profile-id (:id prof)
+                      :project-id (:default-project-id prof)
+                      :is-shared false}))
+
+(t/deftest audio-upload-with-motion
+  (let [prof    (th/create-profile* 1)
+        file    (audio-file prof)
+        storage (:app.storage/storage th/*system*)]
+    (doseq [[filename mtype canonical] [["sample.mp3" "audio/mpeg" "audio/mpeg"]
+                                        ["sample.wav" "audio/x-wav" "audio/wav"]
+                                        ["sample.ogg" "audio/ogg" "audio/ogg"]
+                                        ["sample.m4a" "audio/x-m4a" "audio/mp4"]]]
+      (t/testing filename
+        (let [out    (upload-audio prof file filename mtype)
+              result (:result out)]
+          (t/is (nil? (:error out)))
+          (t/is (= canonical (:mtype result)) "its canonical type")
+          (t/is (= [0 0] [(:width result) (:height result)]))
+          (t/is (nil? (:thumbnail-id result)))
+          (t/is (= canonical (:content-type (meta (sto/get-object storage (:media-id result)))))))))))
+
+(t/deftest audio-upload-checks-the-bytes
+  (let [prof (th/create-profile* 1)
+        file (audio-file prof)
+        out  (upload-audio prof file "fake.mp3" "audio/mpeg")]
+    (t/is (= :validation (th/ex-type (:error out))))
+    (t/is (= :media-type-mismatch (th/ex-code (:error out))))
+    (t/testing "against the declared type"
+      (let [out (upload-audio prof file "sample.wav" "audio/mpeg")]
+        (t/is (= :media-type-mismatch (th/ex-code (:error out))))))))
+
+(t/deftest audio-upload-needs-motion
+  (with-redefs [cfeat/get-enabled-features (fn [& _] (disj cfeat/supported-features "animation/v1"))]
+    (let [prof  (th/create-profile* 1)
+          file  (audio-file prof)
+          out   (upload-audio prof file "sample.mp3" "audio/mpeg")
+          image (th/command! {::th/type :upload-file-media-object
+                              ::rpc/profile-id (:id prof)
+                              :file-id (:id file)
+                              :is-local true
+                              :name "image"
+                              :content {:filename "sample.jpg"
+                                        :path (th/tempfile "backend_tests/test_files/sample.jpg")
+                                        :mtype "image/jpeg"
+                                        :size 312043}})]
+      (t/is (= :validation (th/ex-type (:error out))))
+      (t/is (= :media-type-not-allowed (th/ex-code (:error out))))
+      (t/is (nil? (:error image)) "images as before"))))
+
+(t/deftest audio-upload-has-its-own-size-limit
+  (with-mocks [_ {:target 'app.config/get
+                  :return (th/config-get-mock {:audio-max-file-size 100})}]
+    (let [prof (th/create-profile* 1)
+          out  (upload-audio prof (audio-file prof) "sample.mp3" "audio/mpeg")]
+      (t/is (= :restriction (th/ex-type (:error out))))
+      (t/is (= :media-max-file-size-reached (th/ex-code (:error out)))))))
+
+(t/deftest the-same-audio-is-stored-once
+  (let [prof (th/create-profile* 1)
+        file (audio-file prof)
+        one  (:result (upload-audio prof file "sample.mp3" "audio/mpeg"))
+        two  (:result (upload-audio prof file "sample.mp3" "audio/mpeg"))]
+    (t/is (not= (:id one) (:id two)))
+    (t/is (= (:media-id one) (:media-id two)))))
+
+(t/deftest chunked-upload-over-quota-fails-at-assemble
+  (with-mocks [_ {:target 'app.config/get
+                  :return (th/config-get-mock {:quotes-media-storage-bytes-per-team 1000})}]
+    (let [prof (th/create-profile* 1)
+          file (audio-file prof)]
+      (doseq [[filename mtype] [["sample.jpg" "image/jpeg"] ["sample.wav" "audio/wav"]]]
+        (t/testing filename
+          (let [data       (java.nio.file.Files/readAllBytes (th/tempfile (str "backend_tests/test_files/" filename)))
+                session-id (create-session! prof 1)
+                _          (th/command! {::th/type        :upload-chunk
+                                         ::rpc/profile-id (:id prof)
+                                         :session-id      session-id
+                                         :index           0
+                                         :content         (make-chunk-mfile data mtype)})
+                out        (th/command! {::th/type        :assemble-file-media-object
+                                         ::rpc/profile-id (:id prof)
+                                         :session-id      session-id
+                                         :file-id         (:id file)
+                                         :is-local        true
+                                         :name            filename
+                                         :mtype           mtype})]
+            (t/is (= :restriction (th/ex-type (:error out))))
+            (t/is (= :max-quote-reached (th/ex-code (:error out))))))))))

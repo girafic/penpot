@@ -644,12 +644,22 @@
    (mapcat vals)
    (mapcat collect-shape-media-refs)))
 
+(defn collect-timeline-media-refs
+  "The ids of the media objects the audio clips of the timelines of
+  `page` play."
+  [page]
+  (into #{}
+        (comp (mapcat (comp vals :audio-clips))
+              (keep :audio-id))
+        (vals (:timelines page))))
+
 (defn collect-used-media
   "Given a fdata (file data), returns all media references used in the
   file data"
   [data]
   (-> #{}
       (into xform:collect-media-refs (vals (:pages-index data)))
+      (into (mapcat collect-timeline-media-refs) (vals (:pages-index data)))
       (into xform:collect-media-refs (vals (:components data)))
       (into (keys (:media data)))))
 
@@ -691,6 +701,11 @@
               ;; timelines of the pages
               (uuid? (:style-ref-file form))
               (update :style-ref-file lookup-index)
+
+              ;; This covers the audio clips of the timelines: the
+              ;; media objects they play
+              (uuid? (:audio-id form))
+              (update :audio-id lookup-index)
 
               ;; This covers the shadows and grids (they have directly
               ;; the :file-id prop)

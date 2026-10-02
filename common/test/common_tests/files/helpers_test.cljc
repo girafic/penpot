@@ -9,6 +9,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.audio-clip :as ctau]
    [app.common.uuid :as uuid]
    [clojure.test :as t]))
 
@@ -72,3 +73,35 @@
     (t/is (= [new-file library]
              (mapv :style-ref-file
                    (get-in relinked [:pages-index page-id :timelines board :tracks shape :animations]))))))
+
+(defn- clips-data
+  "File data whose page plays the audio objects `audio-ids` on the
+  timeline of a board, and a legacy media entry."
+  [page-id board & audio-ids]
+  (let [timeline (reduce #(ctau/add-audio-clip %1 {:audio-id %2 :name "a.mp3" :source-duration 1000
+                                                   :start 0 :duration 1000})
+                         (cta/make-timeline {:board-id board})
+                         audio-ids)
+        legacy   (uuid/next)]
+    {:pages-index {page-id {:id page-id :objects {} :timelines {board timeline}}}
+     :media {legacy {:id legacy :name "old.png" :mtype "image/png" :width 1 :height 1}}}))
+
+(t/deftest the-media-of-the-audio-clips-are-used
+  (let [a    (uuid/next)
+        b    (uuid/next)
+        data (clips-data (uuid/next) (uuid/next) a b)]
+    (t/is (= #{a b} (cfh/collect-timeline-media-refs (first (vals (:pages-index data))))))
+    (t/is (= (into #{a b} (keys (:media data))) (cfh/collect-used-media data)))))
+
+(t/deftest relink-refs-relinks-the-media-of-the-audio-clips
+  (let [page-id  (uuid/next)
+        board    (uuid/next)
+        a        (uuid/next)
+        b        (uuid/next)
+        a'       (uuid/next)
+        data     (clips-data page-id board a b)
+        ;; it also maps the ids of the legacy media entries: they stay
+        relinked (cfh/relink-refs data #(get (into {a a'} (map (fn [id] [id (uuid/next)])) (keys (:media data))) % %))]
+    (t/is (= #{a' b}
+             (set (map :audio-id (vals (get-in relinked [:pages-index page-id :timelines board :audio-clips]))))))
+    (t/is (= (:media data) (:media relinked)))))

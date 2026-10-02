@@ -537,12 +537,16 @@
 
             id))
 
-        update-shapes
-        (fn [data {:keys [page-id shape-id]}]
-          (d/update-in-when data [:pages-index page-id :objects shape-id] cfh/relink-refs lookup-index))
+        ;; a ref is of a shape, or of an audio clip of a timeline
+        update-refs
+        (fn [data {:keys [page-id shape-id board-id clip-id]}]
+          (if (some? clip-id)
+            (d/update-in-when data [:pages-index page-id :timelines board-id :audio-clips clip-id]
+                              cfh/relink-refs lookup-index)
+            (d/update-in-when data [:pages-index page-id :objects shape-id] cfh/relink-refs lookup-index)))
 
         file
-        (update file :data #(reduce update-shapes % media-refs))]
+        (update file :data #(reduce update-refs % media-refs))]
 
     (doseq [[old-id item] missing-index]
       (l/dbg :hint "create missing references"

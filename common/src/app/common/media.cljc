@@ -25,6 +25,41 @@
 (def tempfile-types
   (conj image-types "application/pdf" "application/zip"))
 
+(def audio-canonical-types
+  "The media types of the audio files the clips of Penpot Motion play,
+  as they are stored."
+  #{"audio/mpeg"
+    "audio/wav"
+    "audio/ogg"
+    "audio/mp4"
+    "audio/webm"
+    "audio/flac"})
+
+(def audio-type-aliases
+  "Other media types browsers give the same audio files, by the
+  canonical type each stands for."
+  {"audio/mp3"      "audio/mpeg"
+   "audio/x-mp3"    "audio/mpeg"
+   "audio/wave"     "audio/wav"
+   "audio/x-wav"    "audio/wav"
+   "audio/vnd.wave" "audio/wav"
+   "audio/opus"     "audio/ogg"
+   "audio/m4a"      "audio/mp4"
+   "audio/x-m4a"    "audio/mp4"
+   "audio/x-flac"   "audio/flac"})
+
+(def audio-types
+  "The media types an audio file may come with: the canonical ones and
+  their aliases."
+  (into audio-canonical-types (keys audio-type-aliases)))
+
+(defn canonical-audio-type
+  "The canonical type of the audio media type `mtype`, nil when it is no
+  audio type a clip plays."
+  [mtype]
+  (or (get audio-type-aliases mtype)
+      (get audio-canonical-types mtype)))
+
 (defn format->extension
   [format]
   (case format
@@ -74,6 +109,12 @@
     "font/woff2"               ".woff2"
     "font/ttf"                 ".ttf"
     "font/otf"                 ".otf"
+    "audio/mpeg"               ".mp3"
+    "audio/wav"                ".wav"
+    "audio/ogg"                ".ogg"
+    "audio/mp4"                ".m4a"
+    "audio/webm"               ".webm"
+    "audio/flac"               ".flac"
     "application/octet-stream" ".bin"
     nil))
 

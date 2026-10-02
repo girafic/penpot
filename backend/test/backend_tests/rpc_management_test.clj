@@ -11,6 +11,7 @@
    [app.common.pprint :as pp]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -715,3 +716,51 @@
       (t/is (vector? result))
       (t/is (= 1 (count result)))
       (t/is (= "test" (:id (first result)))))))
+
+(t/deftest duplicate-file-copies-the-audio-of-clips
+  (let [storage  (-> (:app.storage/storage th/*system*)
+                     (configure-storage-backend))
+        sobject  (sto/put-object! storage {::sto/content (sto/content "ID3 audio bytes")
+                                           :content-type "audio/mpeg"
+                                           :bucket "file-media-object"})
+        profile  (th/create-profile* 1 {:is-active true})
+        file     (th/create-file* 1 {:profile-id (:id profile)
+                                     :project-id (:default-project-id profile)})
+        fmo      (th/create-file-media-object* {:file-id (:id file) :media-id (:id sobject)
+                                                :name "beat.mp3" :mtype "audio/mpeg" :width 0 :height 0})
+        page-id  (first (get-in file [:data :pages]))
+        board-id (uuid/next)
+        clip-id  (uuid/next)
+        timeline (ctau/add-audio-clip (cta/make-timeline {:board-id board-id :duration 1000})
+                                      {:id clip-id :audio-id (:id fmo) :name "beat.mp3"
+                                       :source-duration 1000 :start 0 :duration 1000})]
+    (update-file!
+     :file-id (:id file)
+     :profile-id (:id profile)
+     :revn 0
+     :vern 0
+     :changes
+     [{:type :add-obj
+       :page-id page-id
+       :id board-id
+       :parent-id uuid/zero
+       :frame-id uuid/zero
+       :components-v2 true
+       :obj (cts/setup-shape {:id board-id :name "board" :type :frame
+                              :frame-id uuid/zero :parent-id uuid/zero
+                              :x 0 :y 0 :width 100 :height 100})}
+      {:type :set-timeline :page-id page-id :id board-id :params timeline}])
+
+    (let [out     (th/command! {::th/type :duplicate-file
+                                ::rpc/profile-id (:id profile)
+                                :file-id (:id file)
+                                :name "copy"})
+          copy-id (get-in out [:result :id])
+          rows    (th/db-query :file-media-object {:file-id copy-id})
+          clip    (get-in (bfc/get-file th/*system* copy-id :realize? true)
+                          [:data :pages-index page-id :timelines board-id :audio-clips clip-id])]
+      (t/is (nil? (:error out)))
+      (t/is (= 1 (count rows)))
+      (t/is (not= (:id fmo) (:id (first rows))))
+      (t/is (= (:id sobject) (:media-id (first rows))) "the same audio")
+      (t/is (= (:id (first rows)) (:audio-id clip)) "the clip of the copy plays its own"))))

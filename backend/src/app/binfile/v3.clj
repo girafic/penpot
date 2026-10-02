@@ -34,6 +34,7 @@
    [app.config :as cf]
    [app.db :as db]
    [app.db.sql :as-alias sql]
+   [app.media.validation :as media.v]
    [app.storage :as sto]
    [app.storage.impl :as sto.impl]
    [app.util.events :as events]
@@ -933,6 +934,35 @@
           (db/insert! conn :file-library-rel rel-params)
           (bfc/upsert-file-library-sync! conn (assoc rel-params :synced-at timestamp)))))))
 
+(defn- storable-type?
+  "Whether `mtype` is a type of the storage objects Penpot writes: one
+  `cmedia/mtype->extension` knows (images, fonts, PDF, plain text, raw
+  bytes...) or an audio type."
+  [mtype]
+  (or (some? (cmedia/mtype->extension mtype))
+      (contains? cmedia/audio-types mtype)))
+
+(defn- check-storage-content-type!
+  "Refuse the storage `object` of `content`, at `path` of the archive,
+  unless it is of a type Penpot stores (see `storable-type?`) and, typed
+  as audio, its bytes are of that audio type: a crafted file cannot
+  store HTML as an image or as audio, served from Penpot's origin."
+  [object content path]
+  (let [mtype (:content-type object)]
+    (when-not (storable-type? mtype)
+      (ex/raise :type :validation
+                :code :media-type-not-allowed
+                :hint (str "storage object of a type not allowed: " mtype)
+                :path path))
+    (when (contains? cmedia/audio-types mtype)
+      (let [head (with-open [^InputStream in (jio/input-stream content)]
+                   (.readNBytes in (int media.v/audio-head-size)))]
+        (when (not= (cmedia/canonical-audio-type mtype) (media.v/sniff-audio-head head))
+          (ex/raise :type :validation
+                    :code :media-type-mismatch
+                    :hint (str "storage object not of its audio type: " mtype)
+                    :path path))))))
+
 (defn- import-storage-objects
   [{:keys [::bfc/input ::entries ::bfc/timestamp] :as cfg}]
   (events/tap :progress {:section :storage-objects})
@@ -958,6 +988,8 @@
             content (zip-entry-storage-content input
                                                (get-zip-entry input path)
                                                :max-size (::bfc/import-max-object-size cfg))]
+
+        (check-storage-content-type! object content path)
 
         (when (not= (:size object) (sto/get-size content))
           (ex/raise :type :validation

@@ -14,6 +14,7 @@
    [app.common.schema.generators :as sg]
    [app.common.schema.test :as smt]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.file :as ctf]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
@@ -862,6 +863,7 @@
 (t/deftest timeline-changes-json-encode-decode
   (doseq [schema [ch/schema:set-timeline-track-change
                   ch/schema:set-timeline-track-animations-change
+                  ch/schema:set-timeline-audio-clip-change
                   ch/schema:update-timeline-change]]
     (let [encode (sm/encoder schema (sm/json-transformer))
           decode (sm/decoder schema (sm/json-transformer))]
@@ -976,6 +978,96 @@
                                            :id (uuid/next)
                                            :attrs {:duration 10}}])]
     (t/is (nil? (get-in result [:pages-index page-id :timelines])))))
+
+;; AUDIO CLIPS
+
+(t/deftest audio-clip-changes-are-generated-valid
+  (smt/check!
+   (smt/for [change (sg/generator ch/schema:set-timeline-audio-clip-change)]
+     (and (sm/validate ch/schema:change change)
+          (or (nil? (:params change))
+              (= (:clip-id change) (get-in change [:params :id])))))
+   {:num 200}))
+
+(defn- clip
+  [& {:as params}]
+  (ctau/make-audio-clip (merge {:audio-id (uuid/next) :name "beat.mp3" :source-duration 4000
+                                :start 0 :duration 1000}
+                               params)))
+
+(defn- clips-page
+  "File data with a board timeline animating the layers `a` and `b`,
+  with the audio clips `clips`."
+  [page-id board-id a b & clips]
+  (let [data (timeline-page page-id board-id a b)]
+    (ch/process-changes data [{:type :set-timeline :page-id page-id :id board-id
+                               :params (reduce ctau/add-audio-clip
+                                               (get-in data [:pages-index page-id :timelines board-id])
+                                               clips)}])))
+
+(t/deftest an-audio-clip-change-sets-one-clip
+  (let [page-id  (uuid/custom 1 1)
+        board-id (uuid/next)
+        a        (clip :start 100)
+        data     (clips-page page-id board-id (uuid/next) (uuid/next) a)
+        clips    #(get-in % [:pages-index page-id :timelines board-id :audio-clips])
+        change   #(hash-map :type :set-timeline-audio-clip :page-id page-id :id board-id
+                            :clip-id %1 :params %2)
+        b        (clip :start 2000)
+        added    (ch/process-changes data [(change (:id b) b)])]
+    (t/is (= #{(:id a) (:id b)} (set (keys (clips added)))) "a new one")
+    (t/is (= b (get (clips added) (:id b))))
+    (t/is (= 600 (:start (get (clips (ch/process-changes added [(change (:id a) (assoc a :start 600))]))
+                              (:id a))))
+          "a changed one")
+    (let [removed (ch/process-changes added [(change (:id a) nil) (change (:id b) nil)])]
+      (t/is (not (contains? (get-in removed [:pages-index page-id :timelines board-id]) :audio-clips))
+            "the last one gone, no clips left"))
+    (t/testing "on a timeline that is gone, nothing"
+      (let [gone (uuid/next)]
+        (t/is (= data (ch/process-changes data [(assoc (change (:id b) b) :id gone)])))))))
+
+(t/deftest moving-a-clip-changes-only-that-clip
+  (let [page-id  (uuid/custom 1 1)
+        board-id (uuid/next)
+        a        (clip :start 100)
+        b        (clip :start 2000)
+        data     (clips-page page-id board-id (uuid/next) (uuid/next) a b)
+        before   (get-in data [:pages-index page-id :timelines board-id])
+        changes  (timeline-changes data page-id board-id #(ctau/move-audio-clip % (:id a) 400))
+        result   (ch/process-changes data (:redo-changes changes))
+        undone   (ch/process-changes result (:undo-changes changes))]
+    (t/is (= [:set-timeline-audio-clip] (mapv :type (:redo-changes changes))))
+    (t/is (= 400 (get-in result [:pages-index page-id :timelines board-id :audio-clips (:id a) :start])))
+    (t/is (= before (get-in undone [:pages-index page-id :timelines board-id])) "undo")))
+
+(t/deftest a-track-edit-sends-no-clip
+  ;; a style sync or a paste of animation over a board with clips sends
+  ;; only the changes of its tracks
+  (let [page-id  (uuid/custom 1 1)
+        board-id (uuid/next)
+        a        (uuid/next)
+        data     (clips-page page-id board-id a (uuid/next) (clip :start 100) (clip :start 2000))
+        changes  (timeline-changes data page-id board-id
+                                   #(cta/add-keyframe % a {:time 500 :property :x :value 100}))]
+    (t/is (= [:set-timeline-track] (mapv :type (:redo-changes changes))))
+    (t/is (= [a] (mapv :shape-id (:redo-changes changes))))))
+
+(t/deftest edits-of-different-clips-merge
+  (let [page-id  (uuid/custom 1 1)
+        board-id (uuid/next)
+        a        (clip :start 100)
+        b        (clip :start 2000)
+        data     (clips-page page-id board-id (uuid/next) (uuid/next) a b)
+        ;; two users edit the same timeline at once, from the same version
+        user-1   (timeline-changes data page-id board-id #(ctau/set-audio-clip-volume % (:id a) 0.5))
+        user-2   (timeline-changes data page-id board-id #(ctau/trim-audio-clip-end % (:id b) 2500))
+        clip-of  (fn [data clip] (get-in data [:pages-index page-id :timelines board-id :audio-clips (:id clip)]))]
+    (doseq [order [[user-1 user-2] [user-2 user-1]]]
+      (let [result (reduce #(ch/process-changes %1 (:redo-changes %2)) data order)]
+        (t/is (= 0.5 (:volume (clip-of result a))))
+        (t/is (= 500 (:duration (clip-of result b))))
+        (t/is (cta/valid-timeline? (get-in result [:pages-index page-id :timelines board-id])))))))
 
 (t/deftest set-default-grid-json-encode-decode
   (let [schema ch/schema:set-default-grid-change

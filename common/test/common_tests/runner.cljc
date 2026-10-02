@@ -79,6 +79,7 @@
    [common-tests.types.absorb-assets-test]
    [common-tests.types.animation-style-test]
    [common-tests.types.animation-test]
+   [common-tests.types.audio-clip-test]
    [common-tests.types.color-test]
    [common-tests.types.components-test]
    [common-tests.types.container-test]
@@ -165,6 +166,7 @@
    'common-tests.types.absorb-assets-test
    'common-tests.types.animation-style-test
    'common-tests.types.animation-test
+   'common-tests.types.audio-clip-test
    'common-tests.types.color-test
    'common-tests.types.components-test
    'common-tests.types.container-test

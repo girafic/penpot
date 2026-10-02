@@ -23,6 +23,10 @@
 #
 # WARNING: if you're exposing Penpot to the internet, you should remove the flags
 # 'disable-secure-session-cookies' and 'disable-email-verification'
+#
+# Penpot Motion (the timeline animation) is the 'enable-feature-animation'
+# flag. The audio clips of its timelines need it on the backend as well as
+# on the frontend: only then does the backend take audio uploads.
 x-flags: &penpot-flags
   PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
 

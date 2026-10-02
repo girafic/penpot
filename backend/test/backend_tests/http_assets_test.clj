@@ -847,3 +847,28 @@
                    ::session/profile-id (:id stranger)}
         response  (assets/objects-handler cfg request)]
     (t/is (= 204 (::yres/status response)))))
+
+(t/deftest file-objects-handler-serves-audio-with-its-canonical-type
+  ;; an audio file uploaded as audio/x-wav is served as audio/wav (the
+  ;; tests have every feature on, Penpot Motion too)
+  (let [storage  (-> (:app.storage/storage th/*system*)
+                     (configure-storage-backend))
+        cfg      (make-handler-cfg storage)
+        owner    (th/create-profile* 1)
+        file     (th/create-file* 1 {:profile-id (:id owner)
+                                     :project-id (:default-project-id owner)})
+        path     (th/tempfile "backend_tests/test_files/sample.wav")
+        out      (th/command! {::th/type :upload-file-media-object
+                               ::rpc/profile-id (:id owner)
+                               :file-id (:id file)
+                               :is-local true
+                               :name "sample.wav"
+                               :content {:filename "sample.wav"
+                                         :path path
+                                         :mtype "audio/x-wav"
+                                         :size (java.nio.file.Files/size path)}})
+        response (assets/file-objects-handler cfg {:path-params {:id (str (get-in out [:result :id]))}
+                                                   ::session/profile-id (:id owner)})
+        headers  (::yres/headers response)]
+    (t/is (nil? (:error out)))
+    (t/is (= "audio/wav" (or (get headers "content-type") (get headers "x-mtype"))))))

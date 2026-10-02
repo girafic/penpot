@@ -24,6 +24,7 @@
    [app.common.geom.point :as gpt]
    [app.common.math :as mth]
    [app.common.schema :as sm]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
@@ -263,7 +264,9 @@
    [:quality {:optional true} [::sm/one-of #{:low :medium :high}]]
    [:fps {:optional true} ::sm/safe-int]
    [:size {:optional true} :string]
-   [:loop {:optional true} :boolean]])
+   [:loop {:optional true} :boolean]
+   ;; whether MP4 and WebM carry the audio clips; absent is yes
+   [:audio {:optional true} :boolean]])
 
 (def schema:timeline
   [:map {:title "AnimationTimeline"}
@@ -276,7 +279,8 @@
    [:loop-count {:optional true} [:maybe ::sm/safe-int]]
    [:markers {:optional true} [:vector {:gen/max 3} schema:marker]]
    [:export {:optional true} schema:export]
-   [:tracks [:map-of {:gen/max 3} ::sm/uuid schema:track]]])
+   [:tracks [:map-of {:gen/max 3} ::sm/uuid schema:track]]
+   [:audio-clips {:optional true} [:map-of {:gen/max 2} ::sm/uuid ctau/schema:audio-clip]]])
 
 (def schema:timeline-attrs
   "Settings of a timeline to change, its board and tracks aside. A nil
@@ -443,6 +447,51 @@
   [timeline elapsed]
   (and (= :once (playback-mode timeline))
        (> elapsed (:duration timeline))))
+
+(defn timeline-empty?
+  "Whether `timeline` animates nothing and plays no sound: no tracks and
+  no audio clips."
+  [timeline]
+  (and (empty? (:tracks timeline))
+       (empty? (:audio-clips timeline))))
+
+(defn audio-plan
+  "The parts of the audio clips of `timeline` that sound during the
+  `span` ms of playback from `elapsed`, the ms since playback started at
+  the start of the timeline: `{:clip-id :audio-id :at :offset :length
+  :speed :points}` each, by `:at`, the ms from `elapsed` when the part
+  starts, `:length` how long it plays, `:offset` the ms into its file it
+  plays from, at `:speed` (so `:length` times `:speed` ms of the file,
+  see `ctau/clip-speed`), `:points` its gain (see `ctau/gain-points`). As the keyframes, the clips play on each cycle of
+  a loop and not past the end of the timeline; muted ones do not play,
+  and the way back of ping-pong is silent (sound does not play
+  backwards). Live playback and the exports both schedule by it."
+  [timeline elapsed span]
+  (let [duration (max 1 (:duration timeline))
+        mode     (playback-mode timeline)
+        period   (if (= :ping-pong mode) (* 2 duration) duration)
+        end      (+ elapsed span)
+        clips    (remove :muted (vals (:audio-clips timeline)))
+        cycles   (if (= :once mode)
+                   [0]
+                   (range (* period (int (mth/floor (/ elapsed period)))) end period))]
+    (->> (for [cycle cycles
+               clip  clips
+               :let  [start (+ cycle (:start clip))
+                      ;; a clip does not play past the end of the timeline
+                      stop  (+ cycle (min (ctau/clip-end clip) duration))
+                      from  (max start elapsed)
+                      to    (min stop end)]
+               :when (< from to)]
+           {:clip-id (:id clip)
+            :audio-id (:audio-id clip)
+            :at (- from elapsed)
+            :offset (+ (:offset clip) (* (- from start) (ctau/clip-speed clip)))
+            :length (- to from)
+            :speed (ctau/clip-speed clip)
+            :points (ctau/gain-points clip (- from start) (- to from))})
+         (sort-by :at)
+         (vec))))
 
 (defn advance-playback
   "Where playback of `timeline` is `dt` ms after showing `time` going
@@ -1049,11 +1098,13 @@
   animations, but for the keyframes of `keyframe-ids`, the animations of
   `animation-ids` and the markers of `marker-ids`, the ones being
   dragged, and for its end with `end?` false, when the end is what is
-  dragged."
-  [timeline & {:keys [keyframe-ids animation-ids marker-ids end?] :or {end? true}}]
+  dragged. The starts and ends of the audio clips too, but for the clips
+  of `clip-ids`."
+  [timeline & {:keys [keyframe-ids animation-ids marker-ids clip-ids end?] :or {end? true}}]
   (let [tracks (vals (:tracks timeline))]
     (into (cond-> (sorted-set 0) end? (conj (:duration timeline)))
           (concat
+           (ctau/clip-times timeline :clip-ids clip-ids)
            (for [marker (:markers timeline)
                  :when (not (contains? marker-ids (:id marker)))]
              (:time marker))
