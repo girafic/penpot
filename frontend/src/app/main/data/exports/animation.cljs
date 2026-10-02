@@ -20,6 +20,7 @@
    [app.main.store :as st]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.gesture :as wasm-gesture]
+   [app.render-wasm.modifiers :as wasm.modifiers]
    [app.render-wasm.shape :as wasm.shape]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -35,6 +36,8 @@
 (defn default-bridge
   []
   {:set-modifiers wasm.api/set-modifiers
+   :propagate-modifiers wasm.api/propagate-modifiers
+   :set-structure-modifiers wasm.api/set-structure-modifiers
    :clean-modifiers wasm.api/clean-modifiers
    :use-shape wasm.api/use-shape
    :set-shape-hidden wasm.api/set-shape-hidden
@@ -43,14 +46,6 @@
    :set-modifiers-end wasm.api/set-modifiers-end
    :interactive? wasm-gesture/active?
    :end-interactive wasm-gesture/try-end-interactive-transform!})
-
-(defn- geometry-entries
-  [modif-tree]
-  (into []
-        (keep (fn [[id {:keys [modifiers]}]]
-                (when (and id (ctm/has-geometry? modifiers))
-                  [id (ctm/modifiers->transform modifiers)])))
-        modif-tree))
 
 (defn- property-ops
   [modif-tree]
@@ -62,23 +57,37 @@
        (group-by first)))
 
 (defn apply-pose!
-  "Write `modif-tree` to WASM without scheduling a viewport render. The
-  modifiers of the frame before go first, as the workspace drops them
-  (see `dwm/set-wasm-modifiers`): WASM keeps the copies of the shapes they
-  modified, and a shape no longer modified would show the copy instead of
-  the properties set now."
+  "Write `modif-tree` to WASM without scheduling a viewport render, as the
+  view mode shows a frame (see `render-viewer-wasm/show-animation!`).
+  The modifiers of the frame before go first, as the workspace drops
+  them (see `dwm/set-wasm-modifiers`): WASM keeps the copies of the shapes
+  they modified, and a shape no longer modified would show the copy
+  instead of the properties set now. The properties go before the new
+  modifiers, as these copy the shapes they modify: a shape both moved and
+  faded would show the opacity of the frame before, and the first frame
+  that of the canvas. The transforms go through `propagate-modifiers`,
+  which composes those of a shape and of its parents: sent as they are,
+  a layer moving in a moving board took the move of its board on some
+  frames only, and jittered."
   [objects modif-tree {:keys [bridge] :or {bridge (default-bridge)}}]
-  (let [{:keys [set-modifiers clean-modifiers apply-shape-properties]} bridge
-        entries (geometry-entries modif-tree)]
+  (let [{:keys [set-modifiers clean-modifiers apply-shape-properties
+                propagate-modifiers set-structure-modifiers]} bridge
+        geometry  (wasm.modifiers/parse-geometry-modifiers modif-tree)
+        structure (wasm.modifiers/parse-structure-modifiers modif-tree)]
     (when clean-modifiers
       (clean-modifiers))
-    (when (seq entries)
-      (set-modifiers entries :request-render? false))
     (doseq [[id ops] (property-ops modif-tree)]
       (when-let [shape (get objects id)]
         (let [ops   (map second ops)
               shape (reduce ctm/apply-modifier shape ops)]
-          (apply-shape-properties shape (map :property ops)))))))
+          (apply-shape-properties shape (map :property ops)))))
+    (when (and set-structure-modifiers (seq structure))
+      (set-structure-modifiers structure))
+    (when (seq geometry)
+      (let [propagated (when propagate-modifiers
+                         (propagate-modifiers geometry false nil))
+            roots      (into [] (map (fn [[id data]] [id (:transform data)])) geometry)]
+        (set-modifiers (if (seq propagated) propagated roots) :request-render? false)))))
 
 (defn- begin-full-quality!
   [bridge]
@@ -156,9 +165,20 @@
     (> n 255) 255
     :else n))
 
+(def ^:private video-color-space
+  "The color space of the frames `rgba->i420` makes: the sRGB of the
+  board, as video. Its primaries are those of BT.709, its transfer the
+  sRGB curve (the one of the pixels; tagged BT.709, color-managed players
+  as QuickTime show them lighter than the board), the BT.709 matrix and
+  the limited (TV) range of video."
+  #js {:primaries "bt709" :transfer "iec61966-2-1" :matrix "bt709" :fullRange false})
+
 (defn rgba->i420
-  "Convert interleaved RGBA/RGBX to I420 (BT.601, full range). Pads to
-  even width/height so H.264 4:2:0 is valid for QuickTime."
+  "Convert interleaved RGBA/RGBX to I420 in BT.709 limited range (black
+  at 16, white at 235), as the videos are tagged (see
+  `video-color-space`): full range BT.601 data in a stream tagged so
+  played back darker and bluer than the board. Pads to even width/height
+  so H.264 4:2:0 is valid for QuickTime."
   [data width height]
   (let [src-w (int width)
         src-h (int height)
@@ -177,7 +197,7 @@
               r  (aget data i)
               g  (aget data (+ i 1))
               b  (aget data (+ i 2))
-              Y  (unsigned-bit-shift-right (+ (* 77 r) (* 150 g) (* 29 b)) 8)]
+              Y  (+ 16 (unsigned-bit-shift-right (+ (* 11966 r) (* 40254 g) (* 4064 b) 32768) 16))]
           (aset out (+ (* y w) x) (clamp8 Y)))))
     (dotimes [cy ch]
       (dotimes [cx cw]
@@ -187,8 +207,8 @@
               r  (aget data i)
               g  (aget data (+ i 1))
               b  (aget data (+ i 2))
-              U  (+ 128 (bit-shift-right (+ (* -43 r) (* -85 g) (* 128 b)) 8))
-              V  (+ 128 (bit-shift-right (+ (* 128 r) (* -107 g) (* -21 b)) 8))
+              U  (+ 128 (bit-shift-right (+ (* -6597 r) (* -22187 g) (* 28784 b) 32768) 16))
+              V  (+ 128 (bit-shift-right (+ (* 28784 r) (* -26147 g) (* -2637 b) 32768) 16))
               oi (+ (* cy cw) cx)]
           (aset out (+ y-sz oi) (clamp8 U))
           (aset out (+ y-sz u-sz oi) (clamp8 V)))))
@@ -287,13 +307,13 @@
     "av01.0.16M.08"))
 
 (def ^:private av1-color-space
-  "The color space of `rgba->i420` output: sRGB primaries and transfer,
-  BT.601 matrix, full range."
-  #js {:primaries "bt709" :transfer "iec61966-2-1" :matrix "smpte170m" :fullRange true})
+  "The color space of `rgba->i420` output (see `video-color-space`)."
+  video-color-space)
 
 (def ^:private av1-cicp
-  "`av1-color-space` as CICP codes, for the AVIF `colr` box."
-  #js {:primaries 1 :transfer 13 :matrix 6 :fullRange true})
+  "`av1-color-space` as CICP codes, for the AVIF `colr` box: BT.709
+  primaries, the sRGB transfer, the BT.709 matrix, limited range."
+  #js {:primaries 1 :transfer 13 :matrix 1 :fullRange false})
 
 (defn- default-av1
   []
@@ -425,6 +445,7 @@
                                                       (:data yuv)
                                                       #js {:timestamp (* i dur)
                                                            :duration dur
+                                                           :colorSpace video-color-space
                                                            :format (:format yuv)
                                                            :codedWidth (:width yuv)
                                                            :codedHeight (:height yuv)})]

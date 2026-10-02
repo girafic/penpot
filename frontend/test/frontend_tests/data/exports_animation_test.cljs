@@ -50,12 +50,38 @@
                 :apply-shape-properties (fn [shape props]
                                           (log calls :props (:id shape) props))}]
     (dea/apply-pose! objects tree {:bridge bridge})
-    (t/is (= [:clean-modifiers :set-modifiers :props] (mapv first @calls))
-          "the modifiers of the frame before go first, with the copies they made")
+    (t/is (= [:clean-modifiers :props :set-modifiers] (mapv first @calls))
+          "the modifiers of the frame before go first, with the copies they made,
+          and the properties before the new ones, which copy the shapes")
     (t/is (some (fn [[k _ render?]]
                   (and (= k :set-modifiers) (false? render?)))
                 @calls))
     (t/is (some #(= :props (first %)) @calls))))
+
+(t/deftest apply-pose-composes-the-transforms-of-parents
+  (let [calls  (atom [])
+        {:keys [objects bid cid]} (test-objects)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-animation cid {:type :move :start 0 :duration 1000 :offset-x 0 :offset-y 40}))
+        tree   (cta/timeline->modif-tree tl objects 500)
+        result [[cid :propagated]]
+        bridge {:set-modifiers (fn [entries & _] (log calls :set-modifiers entries))
+                :propagate-modifiers (fn [entries snap? axis]
+                                       (log calls :propagate (mapv first entries) (mapv (comp :kind second) entries)
+                                            snap? axis)
+                                       result)
+                :apply-shape-properties (fn [_ _])}]
+    (dea/apply-pose! objects tree {:bridge bridge})
+    (let [[[_ ids kinds snap? axis] [_ entries]] @calls]
+      (t/is (= [cid] ids))
+      (t/is (every? keyword? kinds) "each transform says how it applies")
+      (t/is (= [false nil] [snap? axis]) "no snap to the pixel grid")
+      (t/is (= result entries) "WASM gets the transforms composed with those of the parents"))
+    (t/testing "without the propagation (WASM not ready), the transforms as they are"
+      (reset! calls [])
+      (dea/apply-pose! objects tree {:bridge (assoc bridge :propagate-modifiers (constantly []))})
+      (let [[[_ entries]] (filter #(= :set-modifiers (first %)) @calls)]
+        (t/is (= [cid] (mapv first entries)))))))
 
 (t/deftest render-shape-at-rest-hides-and-restores
   (let [hidden (atom #{})
@@ -87,20 +113,19 @@
     (t/is (= 0 (aget (:data out) 4)))
     (t/is (= 255 (aget (:data out) 5)))))
 
-(t/deftest rgba->i420-uses-bt601-and-even-size
-  (let [red  (js/Uint8ClampedArray. #js [255 0 0 255 255 0 0 255
-                                         255 0 0 255 255 0 0 255])
-        out  (dea/rgba->i420 red 2 2)
-        y    (aget (:data out) 0)
-        u    (aget (:data out) 4)
-        v    (aget (:data out) 5)]
+(t/deftest rgba->i420-uses-bt709-limited-range-and-even-size
+  (let [i420 (fn [r g b]
+               (let [px  (js/Uint8ClampedArray. (clj->js (apply concat (repeat 4 [r g b 255]))))
+                     out (dea/rgba->i420 px 2 2)]
+                 [(aget (:data out) 0) (aget (:data out) 4) (aget (:data out) 5)]))
+        out  (dea/rgba->i420 (js/Uint8ClampedArray. 16) 2 2)]
     (t/is (= 2 (:width out)))
     (t/is (= 2 (:height out)))
     (t/is (= "I420" (:format out)))
     (t/is (= 6 (.-length (:data out))))
-    (t/is (= 76 y))
-    (t/is (= 85 u))
-    (t/is (= 255 v))))
+    (t/is (= [16 128 128] (i420 0 0 0)) "black at 16")
+    (t/is (= [235 128 128] (i420 255 255 255)) "white at 235")
+    (t/is (= [63 102 240] (i420 255 0 0)) "red, BT.709")))
 
 (t/deftest rgba->i420-pads-odd-dimensions
   (let [px  (js/Uint8ClampedArray. #js [0 255 0 255])
@@ -289,6 +314,7 @@
           sample-ctor (fn [data init]
                         (reset! seen {:view? (js/ArrayBuffer.isView data)
                                       :format (.-format init)
+                                      :color (js->clj (.-colorSpace init))
                                       :w (.-codedWidth init)
                                       :h (.-codedHeight init)})
                         #js {:close (fn [])})]
@@ -304,6 +330,9 @@
                    (t/is (= :ok (:status result)))
                    (t/is (true? (:view? @seen)))
                    (t/is (= "I420" (:format @seen)))
+                   (t/is (= {"primaries" "bt709" "transfer" "iec61966-2-1" "matrix" "bt709" "fullRange" false}
+                            (:color @seen))
+                         "the sRGB of the board, as limited range BT.709 video")
                    (t/is (even? (:w @seen)))
                    (t/is (even? (:h @seen)))
                    (done)))

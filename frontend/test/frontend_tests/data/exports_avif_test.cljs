@@ -201,8 +201,8 @@
                      (t/is (= [[:encode true] [:encode false] [:encode true]]
                               (filterv #(= :encode (first %)) @calls)))
                      (t/is (= 3 (count (filter #(= [:frame-closed] %) @calls)))))
-                   (t/testing "frames are full range I420"
-                     (t/is (every? #(= [:frame "I420" true] %)
+                   (t/testing "frames are limited range I420, as the videos"
+                     (t/is (every? #(= [:frame "I420" false] %)
                                    (filter #(= :frame (first %)) @calls))))
                    (t/is (= [:close] (last @calls)))
                    (t/is (true? (.-loop @written)))
