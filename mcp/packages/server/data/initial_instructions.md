@@ -463,8 +463,14 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
     the end of the last clip to hear all of them.
   * `valueAt(shape, property, time, index?)` - The value the animation gives then (`null` when it does not animate it)
   * `clear(shape)` - Removes the keyframes and animations of a layer; `remove()` - removes the timeline
-  * `toCSS(): string` - The animation as CSS `@keyframes` and `animation` rules, animated component copies included;
-    split animations play on the whole text
+  * `toCSS(): string` - The animation as CSS `@keyframes` and `animation` rules, animated component copies included,
+    with the classes of the code of Inspect (`penpot.generateMarkup`); split animations play on the whole text
+  * `toJSON(): TimelineJson` - The motion of the board as data (`version` 1, as the Motion tab of Inspect gives it):
+    the board, `duration`, `playback`, `markers`, the animated `layers` (each with its `rest` pose, `origin` pivot,
+    `properties` with their keyframes and the easing of each segment, and `presets`, with the `style` and `tokens`
+    they come from) and the `audio` clips; `JSON.stringify(timeline)` gives it as text. The best way to read or
+    describe an animation, or to hand it to a developer.
+  * `toReact(): string` - The animation as React code for motion.dev (`motion/react`), as Inspect gives it
   * `exportSettings` - How the board is exported as an animation, as the export panel sets and offers it:
     `{format: "mp4" | "webm" | "gif" | "avif" | "svg" | "lottie" | "dotlottie", quality: "low" | "medium" | "high",
     fps: 1..120, size: "0.5" | "1" | "2" | "w1920" | "h720" | "h1080" | "h1440" | "h2160", loop: boolean,
@@ -477,7 +483,9 @@ Components: animating the main of a component (its board's timeline) animates ev
 the copy is and scaled as it is; a component inside a component plays the animation of its own main. A copy plays on
 its own clock (the duration and playback of its main). `board.animatedCopies` lists the copies in a board that play so
 (`{copy, duration, playback: "once" | "loop"}`); a board plays them even when `board.timeline` is `null`. Keyframes the
-board's own timeline gives a layer of a copy take its place.
+board's own timeline gives a layer of a copy take its place. The animation of a copy is in its main's
+`board.timeline.toJSON()`; the `toJSON()` of the copy's board, when it has a timeline, lists the layers of the copy
+with their `component` (the copy and the clock of its main).
 
 Animation styles: a style is a library asset holding preset animations (`entries`, each `start` counted from the start
 of the style). Save one when several layers or boards should enter or leave alike: edit it once and every use follows.

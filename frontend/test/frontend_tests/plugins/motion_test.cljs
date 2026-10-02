@@ -7,6 +7,7 @@
 (ns frontend-tests.plugins.motion-test
   (:require
    [app.common.files.changes-builder :as pcb]
+   [app.common.files.helpers :as cfh]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.test-helpers.components :as cthc]
@@ -26,8 +27,11 @@
    [app.plugins.register :as r]
    [app.plugins.shape :as shape]
    [app.util.audio :as audio]
+   [app.util.code-gen.common :as cgc]
+   [app.util.code-gen.motion :as cgm]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
+   [cuerdas.core :as str]
    [frontend-tests.helpers.mock :as mock]
    [frontend-tests.helpers.state :as ths]
    [frontend-tests.helpers.wasm :as thw]
@@ -341,6 +345,69 @@
           (t/is (= [1200 "loop"] [(.-duration copy) (.-playback copy)])))
         (t/is (nil? (.-timeline (proxy (cthi/id :anim-host)))) "without a timeline of its own")
         (t/is (zero? (.-length (.-animatedCopies (proxy main)))) "the main plays its own")))))
+
+(t/deftest a-timeline-gives-the-code-of-the-inspect
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file          (-> (cthf/sample-file :motion-file :page-label :motion-page)
+                              (ctho/add-simple-component :anim-comp :anim-main :anim-rect
+                                                         :root-params {:x 0 :y 0 :width 200 :height 200}
+                                                         :child-params {:x 10 :y 20 :width 50 :height 50})
+                              (ctho/add-frame :anim-host :x 1000 :y 0 :width 400 :height 400)
+                              (cthc/instantiate-component :anim-comp :anim-copy :parent-label :anim-host)
+                              (ctho/add-rect :own :parent-label :anim-host :x 1300 :y 50 :width 40 :height 40)
+                              (ctho/add-frame :still :x 2000 :y 0 :width 100 :height 100))
+            main          (cthi/id :anim-main)
+            host          (cthi/id :anim-host)
+            file          (cthf/apply-changes
+                           file
+                           (-> (pcb/empty-changes nil)
+                               (pcb/with-page (cthf/current-page file))
+                               (pcb/set-timeline main (-> (cta/make-timeline {:board-id main :duration 1200 :playback :loop})
+                                                          (cta/add-keyframe (cthi/id :anim-rect) {:time 0 :property :x :value 10})
+                                                          (cta/add-keyframe (cthi/id :anim-rect) {:time 1200 :property :x :value 60})))
+                               (pcb/set-timeline host (-> (cta/make-timeline {:board-id host :duration 2000})
+                                                          (cta/add-keyframe (cthi/id :own) {:time 0 :property :opacity :value 0})
+                                                          (cta/add-keyframe (cthi/id :own) {:time 500 :property :opacity :value 1})))
+                               (pcb/set-timeline (cthi/id :still) (cta/make-timeline {:board-id (cthi/id :still)}))))
+            [store _]     (setup file false)
+            page          (cthf/current-page file)
+            files         (:files @store)
+            objects       (:objects page)
+            proxy         #(shape/shape-proxy plugin-id (:id file) (:id page) %)
+            ^js timeline  (.-timeline (proxy host))
+            ids           (into #{} (cfh/selected-with-children objects [host]))
+            copy-rect     (first (get-in objects [(cthi/id :anim-copy) :shapes]))]
+
+        (t/testing "the CSS of the Inspect with the board selected"
+          (t/is (= (cgm/animation-css page files ids) (.toCSS timeline)))
+          (t/is (str/includes? (.toCSS timeline)
+                               (str "." (cgc/shape->selector (get objects copy-rect))
+                                    " {\n  animation: penpot-anim-" copy-rect " 1200ms linear infinite;"))
+                "a looping copy plays on the clock of its main, with the class of the Inspect"))
+
+        (t/testing "its JSON, a plain object"
+          (let [data (cgm/animation-json page files ids)]
+            (t/is (= data (js->clj (.toJSON timeline))))
+            (t/is (= (cgm/json-text data) (js/JSON.stringify timeline nil 2))
+                  "as text, the text of the Inspect")))
+
+        (t/testing "its React"
+          (t/is (= (cgm/animation-react page files ids) (.toReact timeline))))
+
+        (t/testing "a board without copies keeps its keyframes"
+          (let [css (.toCSS ^js (.-timeline (proxy main)))]
+            (t/is (str/includes? css (str "@keyframes penpot-anim-" (cthi/id :anim-rect))))
+            (t/is (str/includes? css (str "." (cgc/shape->selector (get objects (cthi/id :anim-rect))) " {")))))
+
+        (t/testing "nothing animating, no code"
+          (let [^js still (.-timeline (proxy (cthi/id :still)))]
+            (t/is (= ["" ""] [(.toCSS still) (.toReact still)]))
+            (t/is (= [] (js->clj (.-layers (.toJSON still)))))))
+
+        (t/testing "reading needs no content:write"
+          (with-redefs [r/check-permission (constantly false)]
+            (t/is (= (cgm/animation-react page files ids) (.toReact timeline)))))))))
 
 (defn- copy-file
   "Board A at 100,100 with the rect `source` at 150,200 (50,100 in it)

@@ -21,6 +21,7 @@
    [app.common.media :as cm]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-code :as ctac]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
@@ -29,7 +30,6 @@
    [app.common.types.token :as cto]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
-   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.audio :as dwaa]
    [app.main.features :as features]
    [app.main.store :as st]
@@ -38,6 +38,7 @@
    [app.plugins.system-events :as se]
    [app.plugins.utils :as u]
    [app.util.audio :as audio]
+   [app.util.code-gen.motion :as cgm]
    [app.util.object :as obj]
    [beicon.v2.core :as rx]
    [clojure.set :as set]
@@ -59,35 +60,9 @@
 
 (def property-names
   "The animatable properties as the plugin API names them, camelCase like
-  the rest of it."
-  {:x "x"
-   :y "y"
-   :width "width"
-   :height "height"
-   :rotation "rotation"
-   :scale-x "scaleX"
-   :scale-y "scaleY"
-   :opacity "opacity"
-   :r1 "borderRadiusTopLeft"
-   :r2 "borderRadiusTopRight"
-   :r3 "borderRadiusBottomRight"
-   :r4 "borderRadiusBottomLeft"
-   :fill-color "fillColor"
-   :fill-opacity "fillOpacity"
-   :stroke-color "strokeColor"
-   :stroke-opacity "strokeOpacity"
-   :stroke-width "strokeWidth"
-   :shadow-offset-x "shadowOffsetX"
-   :shadow-offset-y "shadowOffsetY"
-   :shadow-blur "shadowBlur"
-   :shadow-spread "shadowSpread"
-   :shadow-color "shadowColor"
-   :shadow-opacity "shadowOpacity"
-   :blur "blur"
-   :background-blur "backgroundBlur"
-   :trim-start "trimStart"
-   :trim-end "trimEnd"
-   :trim-offset "trimOffset"})
+  the rest of it (see `ctac/property-names`, which the code of the
+  Inspect shares)."
+  ctac/property-names)
 
 (def ^:private properties
   (set/map-invert property-names))
@@ -1468,15 +1443,36 @@
                      :skipped skipped
                      :pivotKept pivot-kept})))))
 
-      ;; With the animations of the component copies in the board, as the
-      ;; exports of the app (see `dwa/board-export-timeline`); split
-      ;; animations play as animations of their whole texts.
+      ;; The code of the Motion tab of the Inspect with the board selected
+      ;; (see `app.util.code-gen.motion`): the board's own animation and,
+      ;; each on its own clock, those of the component copies in it, with
+      ;; the classes of the code of the Inspect; split animations play as
+      ;; animations of their whole texts.
       :toCSS
       (fn []
         (when (some? (locate))
           (let [page (u/locate-page file-id page-id)]
-            (some-> (dwa/board-export-timeline page (:files @st/state) board-id :text-split :whole)
-                    (cta/timeline->css (:objects page))))))
+            (or (some-> (cltl/code-timelines page (:files @st/state) board-id)
+                        (vector)
+                        (cgm/codes-css (:objects page) nil))
+                ""))))
+
+      :toJSON
+      (fn []
+        (when (some? (locate))
+          (let [page (u/locate-page file-id page-id)]
+            (some-> (cltl/code-timelines page (:files @st/state) board-id)
+                    (ctac/motion-json (:objects page))
+                    (clj->js)))))
+
+      :toReact
+      (fn []
+        (when (some? (locate))
+          (let [page (u/locate-page file-id page-id)]
+            (or (some-> (cltl/code-timelines page (:files @st/state) board-id)
+                        (vector)
+                        (cgm/codes-react (:objects page) nil))
+                ""))))
 
       :remove
       (fn []

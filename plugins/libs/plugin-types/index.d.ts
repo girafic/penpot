@@ -3996,18 +3996,396 @@ export interface Timeline {
   clear(shape: Shape): void;
 
   /**
-   * The animation as CSS: `@keyframes` and the `animation` rules of the
-   * layers, those of the animated component copies in the board included.
-   * CSS has no characters, words or lines of a text: a split animation
-   * (see `PresetAnimationProps.split`) plays on the whole text, as in the
-   * SVG and Lottie exports.
+   * The animation as CSS, as the Motion tab of Inspect gives it with the
+   * board selected: `@keyframes` and the `animation` rules of the layers,
+   * with the classes the code of Inspect gives them (see
+   * `Penpot.generateMarkup`) and keeping the transforms its CSS gives them
+   * at rest. The animated component copies in the board play on the clock
+   * of their main. CSS has no characters, words or lines of a text: a
+   * split animation (see `PresetAnimationProps.split`) plays on the whole
+   * text, as in the SVG and Lottie exports. Audio is left out. An empty
+   * string when nothing animates.
    */
   toCSS(): string;
+
+  /**
+   * The animation as data, version 1 (see `TimelineJson`), as the Motion
+   * tab of Inspect gives it as JSON with the board selected: the board,
+   * its duration, playback and markers, its animated layers with their
+   * keyframes by property and their preset animations, the layers of the
+   * animated component copies with the clock of their main, and the audio
+   * clips. A plain object: `JSON.stringify(timeline, null, 2)` gives the
+   * text of Inspect.
+   *
+   * @example
+   * ```js
+   * const motion = board.timeline.toJSON();
+   * for (const layer of motion.layers) {
+   *   console.log(layer.name, layer.properties.map((p) => p.property));
+   * }
+   * ```
+   */
+  toJSON(): TimelineJson;
+
+  /**
+   * The animation as React code for motion.dev (`motion/react`), as the
+   * Motion tab of Inspect gives it with the board selected: a component
+   * for the board, and a `motion.div` for each animated layer, with the
+   * class the code of Inspect gives it, its pivot and each value with its
+   * keyframes, times and easings, on the clock of the layer (the animated
+   * component copies play on the clock of their main). A spring of a
+   * value that plays once is a spring of motion.dev; other springs, motion
+   * paths and repeating properties are sampled into keyframes. A split
+   * animation plays on the whole text; audio is left out. An empty string
+   * when nothing animates.
+   */
+  toReact(): string;
 
   /**
    * Removes the animation of the board.
    */
   remove(): void;
+}
+
+/**
+ * The animation of a board as data, version 1 (see `Timeline.toJSON`): the
+ * JSON of the Motion tab of Inspect. Times are in milliseconds, positions
+ * and sizes in pixels, rotations in degrees; numbers have up to 3
+ * decimals. Version 1 only ever gains keys; a change of what a key means
+ * makes it version 2.
+ */
+export interface TimelineJson {
+  /**
+   * The version of the format: 1.
+   */
+  version: 1;
+
+  /**
+   * What made it: `Penpot`.
+   */
+  generator: string;
+
+  /**
+   * The board: its id, name and size.
+   */
+  board: { id: string; name: string; width: number; height: number };
+
+  /**
+   * How long the timeline plays.
+   */
+  duration: number;
+
+  /**
+   * What the timeline does at its end.
+   */
+  playback: TimelinePlayback;
+
+  /**
+   * The markers of the timeline, by time.
+   */
+  markers: TimelineJsonMarker[];
+
+  /**
+   * The animated layers, in the order of the layers panel: the board,
+   * then its layers, top-most first, depth first.
+   */
+  layers: TimelineJsonLayer[];
+
+  /**
+   * The audio clips of the timeline.
+   */
+  audio: TimelineJsonAudioClip[];
+}
+
+/**
+ * An animated layer in a `TimelineJson`.
+ */
+export interface TimelineJsonLayer {
+  /**
+   * The id of the layer.
+   */
+  id: string;
+
+  /**
+   * The name of the layer.
+   */
+  name: string;
+
+  /**
+   * The type of the layer, as `Shape.type` names it.
+   */
+  type: string;
+
+  /**
+   * The layer as designed: its position relative to the board (its top
+   * left corner before it is turned), its size and its rotation.
+   */
+  rest: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation: number;
+  };
+
+  /**
+   * The point the layer turns and scales around, as a share of its box:
+   * `{ x: 0.5, y: 0.5 }` is its center.
+   */
+  origin: { x: number; y: number };
+
+  /**
+   * For a text the design animates by units (see
+   * `PresetAnimationProps.split`): the kind of units. Its CSS and React
+   * animate the whole text.
+   */
+  split?: TextSplit;
+
+  /**
+   * For a layer of a component copy that plays the animation of its main:
+   * the copy and the clock of the main.
+   */
+  component?: TimelineJsonComponent;
+
+  /**
+   * The keyframes of the layer, by property, in the order of the timeline
+   * dock. The preset animations of the layer are among them, as keyframes.
+   */
+  properties: TimelineJsonProperty[];
+
+  /**
+   * The preset animations of the layer, those the uses of animation styles
+   * play included.
+   */
+  presets: TimelineJsonPreset[];
+}
+
+/**
+ * The keyframes of one property of a layer in a `TimelineJson`.
+ */
+export interface TimelineJsonProperty {
+  /**
+   * The property, see `AnimatableProperty` for its values.
+   */
+  property: AnimatableProperty;
+
+  /**
+   * For fills, strokes and shadows: which one of the layer.
+   */
+  index?: number;
+
+  /**
+   * Whether the keyframes repeat over the timeline: they are one round,
+   * played again and again up to its end.
+   */
+  loop?: boolean;
+
+  /**
+   * The keyframes, by time.
+   */
+  keyframes: TimelineJsonKeyframe[];
+}
+
+/**
+ * A keyframe in a `TimelineJsonProperty`.
+ */
+export interface TimelineJsonKeyframe {
+  /**
+   * When it is.
+   */
+  time: number;
+
+  /**
+   * The value of the property then, see `AnimatableProperty`.
+   */
+  value: number | string;
+
+  /**
+   * How the value goes on from here to the next keyframe; the last
+   * keyframe has none.
+   */
+  easing?: TimelineJsonEasing;
+
+  /**
+   * For `x` and `y` on a motion path: where the curve comes into the
+   * keyframe from, as an offset from its value, like the handle of a
+   * bezier node.
+   */
+  pathIn?: number;
+
+  /**
+   * For `x` and `y` on a motion path: where the curve leaves the keyframe
+   * towards, as an offset from its value.
+   */
+  pathOut?: number;
+}
+
+/**
+ * How a value goes from a keyframe to the next one, or how a preset
+ * animation plays, in a `TimelineJson`:
+ * - `{ type: 'bezier', curve: [x1, y1, x2, y2] }`, like the CSS
+ *   `cubic-bezier()`, with the `name` of the CSS easing it is, if any
+ *   (`ease` is `[0.25, 0.1, 0.25, 1]`).
+ * - `{ type: 'spring', stiffness, damping, mass }`: a spring that settles
+ *   at the next keyframe.
+ * - `{ type: 'hold' }`: the value stays until the next keyframe.
+ */
+export type TimelineJsonEasing =
+  | {
+      type: 'bezier';
+      curve: [number, number, number, number];
+      name?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
+    }
+  | { type: 'spring'; stiffness: number; damping: number; mass: number }
+  | { type: 'hold' };
+
+/**
+ * A preset animation of a layer in a `TimelineJson`, see
+ * `PresetAnimationProps`.
+ */
+export interface TimelineJsonPreset {
+  /**
+   * The effect.
+   */
+  type: PresetAnimationType;
+
+  /**
+   * Whether the layer enters or exits.
+   */
+  direction: 'in' | 'out';
+
+  /**
+   * When it starts.
+   */
+  start: number;
+
+  /**
+   * How long it plays.
+   */
+  duration: number;
+
+  /**
+   * How it plays, when it is set.
+   */
+  easing?: TimelineJsonEasing;
+
+  /**
+   * How much, when it is set, see `PresetAnimationType`.
+   */
+  amount?: number;
+
+  /**
+   * For `move`: where the layer comes from or goes to, in pixels from
+   * where it is.
+   */
+  offsetX?: number;
+
+  /**
+   * For `move`: as `offsetX`, vertically.
+   */
+  offsetY?: number;
+
+  /**
+   * The name of the animation style it comes from, if any.
+   */
+  style?: string;
+
+  /**
+   * The design tokens that set its settings, if any.
+   */
+  tokens?: AnimationStyleEntryTokens;
+}
+
+/**
+ * The component copy a layer of a `TimelineJson` belongs to, which plays
+ * the animation of its main on its own clock (see `Board.animatedCopies`).
+ * The animation itself is in the `TimelineJson` of the main's board.
+ */
+export interface TimelineJsonComponent {
+  /**
+   * The id of the copy: the top layer of the component copy.
+   */
+  copy: string;
+
+  /**
+   * The name of the copy.
+   */
+  name: string;
+
+  /**
+   * How long the timeline of the main plays.
+   */
+  duration: number;
+
+  /**
+   * What the timeline of the main does at its end.
+   */
+  playback: TimelinePlayback;
+}
+
+/**
+ * A marker in a `TimelineJson`, see `Marker`.
+ */
+export interface TimelineJsonMarker {
+  /**
+   * The name of the marker.
+   */
+  name: string;
+
+  /**
+   * When it is.
+   */
+  time: number;
+}
+
+/**
+ * An audio clip in a `TimelineJson`, see `AudioClip`.
+ */
+export interface TimelineJsonAudioClip {
+  /**
+   * The name of its file.
+   */
+  name: string;
+
+  /**
+   * When it starts playing on the timeline.
+   */
+  start: number;
+
+  /**
+   * How long it plays on the timeline.
+   */
+  duration: number;
+
+  /**
+   * Where in its file it starts playing.
+   */
+  offset: number;
+
+  /**
+   * How fast it plays its file, 1 being as recorded.
+   */
+  speed: number;
+
+  /**
+   * How loud it plays, see `AudioClip.volume`.
+   */
+  volume: number;
+
+  /**
+   * How long it fades in at its start.
+   */
+  fadeIn: number;
+
+  /**
+   * How long it fades out at its end.
+   */
+  fadeOut: number;
+
+  /**
+   * Whether it is silent.
+   */
+  muted: boolean;
 }
 
 /**
