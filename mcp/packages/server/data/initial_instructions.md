@@ -447,15 +447,28 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
   * `markers: Marker[]`, `addMarker({time, name?}): Marker` - Named moments (`name`, `time`, `remove()`): drags snap
     to them, the playhead jumps between them, and a Lottie export names the stretch from each to the next one, so an
     app can play parts of one animation by name (e.g. "intro", "loop", "outro")
+  * `audioClips: AudioClip[]`, `addAudioClip(name, data, mimeType, {start?, lane?}?): Promise<AudioClip>` - Sound the
+    board plays with its animation: in the workspace, in view mode and in MP4 and WebM exports. Audio is added only from
+    bytes the plugin already has (`data`: a `Uint8Array` or `ArrayBuffer`, e.g. from `fetch`): MP3, WAV, Ogg, M4A, WebM
+    or FLAC (`mimeType` "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4", "audio/webm", "audio/flac"), at most 5
+    minutes long and 100 MB; the browser decodes it (else the promise rejects, before any upload), then it is uploaded
+    and a clip plays all of it from `start` (ms). A clip has `start`, `offset` (where in its file it starts),
+    `duration`, `speed` (0.25..4: 2 plays the same part of the file in half the time and higher, like a tape; it changes
+    `duration`), `lane` (its row in the dock; a lane plays a single file, so a new file goes onto a lane without clips),
+    `volume` (0..4: 1 as loud as its file), `muted`, `fadeIn` and `fadeOut` (ms, at most half of the clip each),
+    `locked` (no change but unlocking), `split(time)` (at a time of the timeline; returns the second part) and
+    `remove()`. It plays only within the timeline's `duration`, which adding or moving clips never changes: set it to
+    the end of the last clip to hear all of them.
   * `valueAt(shape, property, time, index?)` - The value the animation gives then (`null` when it does not animate it)
   * `clear(shape)` - Removes the keyframes and animations of a layer; `remove()` - removes the timeline
   * `toCSS(): string` - The animation as CSS `@keyframes` and `animation` rules, animated component copies included;
     split animations play on the whole text
   * `exportSettings` - How the board is exported as an animation, as the export panel sets and offers it:
     `{format: "mp4" | "webm" | "gif" | "avif" | "svg" | "lottie" | "dotlottie", quality: "low" | "medium" | "high",
-    fps: 1..120, size: "0.5" | "1" | "2" | "w1920" | "h720" | "h1080" | "h1440" | "h2160", loop: boolean}`; setting it
-    changes the ones given (e.g. `timeline.exportSettings = {format: "gif", fps: 15}`); "dotlottie" is a `.lottie`
-    archive holding the Lottie JSON and its images
+    fps: 1..120, size: "0.5" | "1" | "2" | "w1920" | "h720" | "h1080" | "h1440" | "h2160", loop: boolean,
+    audio: boolean}`; setting it changes the ones given (e.g. `timeline.exportSettings = {format: "gif", fps: 15}`);
+    "dotlottie" is a `.lottie` archive holding the Lottie JSON and its images; `audio: false` leaves the sound of the
+    audio clips out of an MP4 or WebM video (the other formats have none)
   * `Keyframe` and `PresetAnimation` objects have writable settings (`time`, `value`, `easing`, `start`, ...) and `remove()`
 
 Components: animating the main of a component (its board's timeline) animates every copy of it, in any board, where

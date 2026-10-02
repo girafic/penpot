@@ -7,9 +7,9 @@
 (ns app.plugins.motion
   "The keyframe animation of boards (Penpot Motion) in the plugin API: the
   timeline of a board, the keyframes of its layers, their preset
-  animations and their uses of animation styles (see
-  `app.common.types.animation`). Like the other proxies they keep ids
-  only and read the timeline of the page again each time.
+  animations, their uses of animation styles and the audio clips of the
+  board (see `app.common.types.animation`). Like the other proxies they
+  keep ids only and read the timeline of the page again each time.
   Changing an animation needs the `animation/v1` feature."
   (:require
    [app.common.data :as d]
@@ -18,24 +18,30 @@
    [app.common.files.helpers :as cfh]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
+   [app.common.media :as cm]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.shape.interactions :as cti]
    [app.common.types.text-units :as tu]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.audio :as dwaa]
    [app.main.features :as features]
    [app.main.store :as st]
    [app.plugins.format :as format]
    [app.plugins.register :as r]
    [app.plugins.system-events :as se]
    [app.plugins.utils :as u]
+   [app.util.audio :as audio]
    [app.util.object :as obj]
+   [beicon.v2.core :as rx]
    [clojure.set :as set]
-   [cuerdas.core :as str]))
+   [cuerdas.core :as str]
+   [promesa.core :as p]))
 
 ;; Set in `app.plugins`: the shapes need the timelines and the other way
 ;; round.
@@ -100,7 +106,7 @@
 (def ^:private export-defaults
   "The export settings a board has until they are set, as the export
   panel offers them."
-  {:format :mp4 :quality :high :fps 30 :size "1" :loop true})
+  {:format :mp4 :quality :high :fps 30 :size "1" :loop true :audio true})
 
 (defn- format-export
   "The export settings of a timeline (`cta/schema:export`) as the plugin
@@ -111,7 +117,8 @@
          :quality (name (:quality export))
          :fps (:fps export)
          :size (:size export)
-         :loop (:loop export)}))
+         :loop (:loop export)
+         :audio (:audio export)}))
 
 (defn- parse-export
   "The export settings the object `value` of `Timeline.exportSettings`
@@ -121,7 +128,8 @@
         quality     (obj/get value "quality")
         fps         (obj/get value "fps")
         size        (obj/get value "size")
-        loops?      (obj/get value "loop")]
+        loops?      (obj/get value "loop")
+        audio?      (obj/get value "audio")]
     (cond
       (and (some? file-format) (not (contains? cta/export-formats (keyword file-format))))
       (dm/str "The format should be one of " (pr-str (sort (map name cta/export-formats))))
@@ -138,13 +146,17 @@
       (and (some? loops?) (not (boolean? loops?)))
       "Whether it loops should be true or false"
 
+      (and (some? audio?) (not (boolean? audio?)))
+      "Whether it has sound should be true or false"
+
       :else
       (cond-> {}
         (some? file-format) (assoc :format (keyword file-format))
         (some? quality)     (assoc :quality (keyword quality))
         (some? fps)         (assoc :fps fps)
         (some? size)        (assoc :size size)
-        (some? loops?)      (assoc :loop loops?)))))
+        (some? loops?)      (assoc :loop loops?)
+        (some? audio?)      (assoc :audio audio?)))))
 
 (defn- enabled?
   []
@@ -163,6 +175,11 @@
   [file-id page-id board-id marker-id]
   (d/seek #(= marker-id (:id %))
           (:markers (locate-timeline file-id page-id board-id))))
+
+(defn- locate-clip
+  [file-id page-id board-id clip-id]
+  (some-> (locate-timeline file-id page-id board-id)
+          (ctau/get-audio-clip clip-id)))
 
 (defn- locate-animation
   [file-id page-id board-id shape-id animation-id]
@@ -452,6 +469,222 @@
       (fn []
         (write-timeline! plugin-id file-id page-id board-id :remove
                          #(cta/remove-marker % id))))))
+
+(defn audio-clip-proxy? [p]
+  (obj/type-of? p "AudioClipProxy"))
+
+(defn- valid-lane?
+  [value]
+  (and (sm/valid-safe-int? value) (>= value 0)))
+
+(defn audio-clip-proxy
+  [plugin-id file-id page-id board-id id]
+  (let [locate
+        #(locate-clip file-id page-id board-id id)
+
+        ;; A locked clip takes no write but its unlocking.
+        update!
+        (fn [code f]
+          (if (:locked (locate))
+            (u/not-valid plugin-id code "The clip is locked")
+            (write-timeline! plugin-id file-id page-id board-id code f)))]
+
+    (obj/reify {:name "AudioClipProxy" :on-error (u/handle-error plugin-id)}
+      :$plugin {:enumerable false :get (constantly plugin-id)}
+      :$file {:enumerable false :get (constantly file-id)}
+      :$page {:enumerable false :get (constantly page-id)}
+      :$board {:enumerable false :get (constantly board-id)}
+      :$id {:enumerable false :get (constantly id)}
+
+      :id
+      {:get #(dm/str id)}
+
+      :name
+      {:get #(:name (locate))}
+
+      :sourceDuration
+      {:get #(:source-duration (locate))}
+
+      :start
+      {:get #(:start (locate))
+       :set
+       (fn [value]
+         (if (not (valid-time? value))
+           (u/not-valid plugin-id :start value)
+           (update! :start #(ctau/move-audio-clip % id (mth/round value)))))}
+
+      :offset
+      {:get #(:offset (locate))
+       :set
+       (fn [value]
+         (if (not (valid-time? value))
+           (u/not-valid plugin-id :offset value)
+           (update! :offset #(ctau/set-audio-clip-offset % id (mth/round value)))))}
+
+      :duration
+      {:get #(:duration (locate))
+       :set
+       (fn [value]
+         (if (not (and (sm/valid-safe-number? value) (pos? value)))
+           (u/not-valid plugin-id :duration value)
+           (update! :duration
+                    (fn [timeline]
+                      (let [start (:start (ctau/get-audio-clip timeline id))]
+                        (ctau/trim-audio-clip-end timeline id (+ start (mth/round value))))))))}
+
+      :lane
+      {:get #(:lane (locate))
+       :set
+       (fn [value]
+         (cond
+           (not (valid-lane? value))
+           (u/not-valid plugin-id :lane value)
+
+           ;; a lane plays a single file
+           (not (ctau/lane-takes? (locate-timeline file-id page-id board-id) value
+                                  (:audio-id (locate)) :except-ids #{id}))
+           (u/not-valid plugin-id :lane "The lane plays another audio file")
+
+           :else
+           (update! :lane
+                    (fn [timeline]
+                      (let [start (:start (ctau/get-audio-clip timeline id))]
+                        (ctau/move-audio-clip timeline id start :lane value))))))}
+
+      :speed
+      {:get #(some-> (locate) ctau/clip-speed)
+       :set
+       (fn [value]
+         (if (not (and (sm/valid-safe-number? value) (<= ctau/min-speed value ctau/max-speed)))
+           (u/not-valid plugin-id :speed value)
+           (update! :speed #(ctau/set-audio-clip-speed % id value))))}
+
+      :volume
+      {:get #(or (:volume (locate)) 1)
+       :set
+       (fn [value]
+         (if (not (and (sm/valid-safe-number? value) (<= 0 value ctau/max-volume)))
+           (u/not-valid plugin-id :volume value)
+           (update! :volume #(ctau/set-audio-clip-volume % id value))))}
+
+      :muted
+      {:get #(true? (:muted (locate)))
+       :set
+       (fn [value]
+         (if (not (boolean? value))
+           (u/not-valid plugin-id :muted value)
+           (update! :muted #(ctau/set-audio-clip-muted % id value))))}
+
+      :fadeIn
+      {:get #(or (:fade-in (locate)) 0)
+       :set
+       (fn [value]
+         (if (not (valid-time? value))
+           (u/not-valid plugin-id :fadeIn value)
+           (update! :fadeIn
+                    (fn [timeline]
+                      (let [fade-out (:fade-out (ctau/get-audio-clip timeline id))]
+                        (ctau/set-audio-clip-fades timeline id (mth/round value) fade-out))))))}
+
+      :fadeOut
+      {:get #(or (:fade-out (locate)) 0)
+       :set
+       (fn [value]
+         (if (not (valid-time? value))
+           (u/not-valid plugin-id :fadeOut value)
+           (update! :fadeOut
+                    (fn [timeline]
+                      (let [fade-in (:fade-in (ctau/get-audio-clip timeline id))]
+                        (ctau/set-audio-clip-fades timeline id fade-in (mth/round value)))))))}
+
+      :locked
+      {:get #(true? (:locked (locate)))
+       :set
+       (fn [value]
+         (if (not (boolean? value))
+           (u/not-valid plugin-id :locked value)
+           (write-timeline! plugin-id file-id page-id board-id :locked
+                            #(ctau/set-audio-clip-locked % id value))))}
+
+      ;; As S in the timeline dock, at a time of the timeline.
+      :split
+      (fn [time]
+        (if (not (valid-time? time))
+          (u/not-valid plugin-id :split "The time should be a number of milliseconds from 0")
+          (let [new-id (uuid/next)]
+            (when (update! :split #(ctau/split-audio-clip % id (mth/round time) new-id))
+              (when (some? (locate-clip file-id page-id board-id new-id))
+                (audio-clip-proxy plugin-id file-id page-id board-id new-id))))))
+
+      :remove
+      (fn []
+        (update! :remove #(ctau/remove-audio-clip % id))))))
+
+(defn- audio-bytes
+  "The bytes of the `data` a plugin gives as an audio file: an
+  `Uint8Array`, an `ArrayBuffer` or an array of numbers; nil for anything
+  else."
+  [data]
+  (cond
+    (instance? js/Uint8Array data)  data
+    (instance? js/ArrayBuffer data) (js/Uint8Array. data)
+    (array? data)                   (js/Uint8Array.from data)
+    :else                           nil))
+
+(defn- add-audio-clip!
+  "A promise of the proxy of a clip of the board `board-id` playing the
+  audio file `name` of `bytes` of the type `mtype`, from `start` ms on
+  `lane` (on a free one when nil): the file decoded first, as a drop in
+  the workspace does, then uploaded and the clip added. It rejects what
+  does not decode or lasts longer than `ctau/max-audio-duration` before
+  any upload, and a board that lost its timeline, or a page left, by the
+  time the upload is done."
+  [plugin-id file-id page-id board-id name bytes mtype start lane]
+  (js/Promise.
+   (fn [resolve reject]
+     (let [not-valid #(u/reject-not-valid reject :addAudioClip %)
+
+           add!
+           (fn [{:keys [id]} {:keys [buffer duration]}]
+             (audio/remember! id buffer)
+             (if-let [error (or (write-error plugin-id page-id)
+                                (when (nil? (locate-timeline file-id page-id board-id))
+                                  "The board has no timeline"))]
+               (not-valid error)
+               (let [clip-id (uuid/next)
+                     clip    (cond-> {:id clip-id
+                                      :audio-id id
+                                      :name name
+                                      :source-duration duration
+                                      :start start
+                                      :offset 0
+                                      :duration duration}
+                               (some? lane) (assoc :lane lane))]
+                 (write-timeline! plugin-id file-id page-id board-id :addAudioClip
+                                  #(ctau/add-audio-clip % clip))
+                 (resolve (audio-clip-proxy plugin-id file-id page-id board-id clip-id)))))]
+
+       (-> (dwaa/prepare (js/File. #js [bytes] name #js {:type mtype}) audio/decode)
+           (p/then
+            (fn [{:keys [error] :as item}]
+              (case error
+                :unsupported (not-valid "The type is not of audio a clip plays")
+                :undecodable (not-valid "The audio does not decode in this browser")
+                :too-long    (not-valid (dm/str "The audio lasts longer than "
+                                                (/ ctau/max-audio-duration 60000) " minutes"))
+                (->> (dwaa/upload file-id item)
+                     (rx/take 1)
+                     (rx/subs!
+                      (fn [media]
+                        (try
+                          (add! media item)
+                          (catch :default cause
+                            (reject cause))))
+                      (fn [cause]
+                        (if (= :media-type-not-allowed (:code (ex-data cause)))
+                          (not-valid "The server takes no audio: Motion is not enabled on it")
+                          (reject cause))))))))
+           (p/catch reject))))))
 
 (defn preset-animation-proxy? [p]
   (obj/type-of? p "PresetAnimationProxy"))
@@ -1020,6 +1253,54 @@
          (fn [{:keys [id]}]
            (marker-proxy plugin-id file-id page-id board-id id))
          (:markers (locate)))}
+
+      :audioClips
+      {:get
+       #(format/format-array
+         (fn [{:keys [id]}]
+           (audio-clip-proxy plugin-id file-id page-id board-id id))
+         (ctau/audio-clips (locate)))}
+
+      ;; As a drop of an audio file in the workspace: decoded, uploaded and
+      ;; played by a new clip. The duration of the timeline stays.
+      :addAudioClip
+      (fn [name data mime-type props]
+        (let [bytes (audio-bytes data)
+              start (when (object? props) (obj/get props "start"))
+              lane  (when (object? props) (obj/get props "lane"))
+              error (cond
+                      (some? (write-error plugin-id page-id))
+                      (write-error plugin-id page-id)
+
+                      (not (valid-name? name))
+                      "The name should be a text"
+
+                      (nil? bytes)
+                      "The data should be an Uint8Array or an ArrayBuffer"
+
+                      (not (and (string? mime-type) (some? (cm/canonical-audio-type mime-type))))
+                      (dm/str "The type should be one of " (pr-str (sort cm/audio-canonical-types)))
+
+                      (and (some? props) (not (object? props)))
+                      "The options should be an object"
+
+                      (and (some? start) (not (valid-time? start)))
+                      "The start should be a number of milliseconds from 0"
+
+                      (and (some? lane) (not (valid-lane? lane)))
+                      "The lane should be a whole number from 0"
+
+                      ;; a lane plays a single file, and this one is new
+                      (and (some? lane) (some #(= lane (:lane %)) (vals (:audio-clips (locate)))))
+                      "The lane plays another audio file"
+
+                      (nil? (locate))
+                      "The board has no timeline")]
+          (if (some? error)
+            (js/Promise. (fn [_ reject] (u/reject-not-valid reject :addAudioClip error)))
+            (add-audio-clip! plugin-id file-id page-id board-id name bytes
+                             (cm/canonical-audio-type mime-type)
+                             (mth/round (d/nilv start 0)) lane))))
 
       ;; As the export panel sets them and offers them again; a partial
       ;; object changes only what it has.

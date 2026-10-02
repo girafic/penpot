@@ -16,14 +16,19 @@
    [app.common.test-helpers.shapes :as cths]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.audio-clip :as ctau]
    [app.common.uuid :as uuid]
+   [app.main.repo :as rp]
    [app.main.store :as st]
    [app.plugins.api :as api]
    [app.plugins.library :as library]
    [app.plugins.motion :as motion]
    [app.plugins.register :as r]
    [app.plugins.shape :as shape]
+   [app.util.audio :as audio]
+   [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.mock :as mock]
    [frontend-tests.helpers.state :as ths]
    [frontend-tests.helpers.wasm :as thw]
    [potok.v2.core :as ptk]))
@@ -281,11 +286,11 @@
             settings            #(js->clj (.-exportSettings timeline) :keywordize-keys true)]
 
         (t/testing "the export panel's defaults until they are set"
-          (t/is (= {:format "mp4" :quality "high" :fps 30 :size "1" :loop true} (settings))))
+          (t/is (= {:format "mp4" :quality "high" :fps 30 :size "1" :loop true :audio true} (settings))))
 
         (t/testing "setting some changes only those"
           (set! (.-exportSettings timeline) #js {:format "gif" :fps 15})
-          (t/is (= {:format "gif" :quality "high" :fps 15 :size "1" :loop true} (settings)))
+          (t/is (= {:format "gif" :quality "high" :fps 15 :size "1" :loop true :audio true} (settings)))
           (t/is (= {:format :gif :fps 15}
                    (get-in (stored-timelines store context) [(aget board "$id") :export]))))
 
@@ -293,11 +298,17 @@
           (set! (.-exportSettings timeline) #js {:format "dotlottie"})
           (t/is (= "dotlottie" (:format (settings)))))
 
+        (t/testing "a video leaves its sound out when asked"
+          (set! (.-exportSettings timeline) #js {:audio false})
+          (t/is (false? (:audio (settings))))
+          (t/is (false? (get-in (stored-timelines store context) [(aget board "$id") :export :audio]))))
+
         (t/testing "what is not valid is refused"
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:format "mov"})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:fps 0})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:size "3"})))
-          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:loop "yes"}))))))))
+          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:loop "yes"})))
+          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:audio "no"}))))))))
 
 (t/deftest a-board-lists-the-copies-that-animate
   (thw/with-wasm-mocks*
@@ -681,3 +692,224 @@
         (let [^js pop (aget (.-animationStyles lib) 0)]
           (t/is (= "Pop" (.-name pop)) "they can be read")
           (t/is (thrown? js/Error (set! (.-name pop) "Bounce"))))))))
+
+;; AUDIO CLIPS
+
+(defn- audio-file-of
+  "Board A with a timeline of 3 s and, in it, a clip of a 4 s file from
+  500 ms, playing 2 s of it from 1 s, on lane 0; with `other?`, a clip of
+  another file on lane 1 too: `[file clip-id other-id]`."
+  [& {:keys [other?]}]
+  (let [file     (-> (cthf/sample-file :audio-file :page-label :audio-page)
+                     (ctho/add-frame :board-a :x 0 :y 0 :width 400 :height 300))
+        board    (cthi/id :board-a)
+        clip-id  (uuid/next)
+        other-id (uuid/next)
+        timeline (cond-> (-> (cta/make-timeline {:board-id board :duration 3000})
+                             (ctau/add-audio-clip {:id clip-id :audio-id (uuid/next) :name "beat.mp3"
+                                                   :source-duration 4000 :start 500 :offset 1000
+                                                   :duration 2000 :lane 0}))
+                   other? (ctau/add-audio-clip {:id other-id :audio-id (uuid/next) :name "voice.wav"
+                                                :source-duration 2000 :start 0 :duration 2000 :lane 1}))]
+    [(cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                  (pcb/with-page (cthf/current-page file))
+                                  (pcb/set-timeline board timeline)))
+     clip-id
+     other-id]))
+
+(t/deftest a-timeline-plays-audio-clips
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[file clip-id]      (audio-file-of)
+            [store ^js context] (setup file true)
+            ^js timeline        (.-timeline (shape-of file :board-a))
+            stored              #(get-in (stored-timelines store context) [(cthi/id :board-a) :audio-clips %])
+            ^js clip            (first (.-audioClips timeline))
+            spans               #(mapv (fn [^js clip] [(.-start clip) (.-duration clip)]) (.-audioClips timeline))]
+
+        (t/testing "they read as they are stored"
+          (t/is (= [(str clip-id) "beat.mp3" 4000 500 1000 2000 0 1 false 0 0 false]
+                   [(.-id clip) (.-name clip) (.-sourceDuration clip) (.-start clip) (.-offset clip)
+                    (.-duration clip) (.-lane clip) (.-volume clip) (.-muted clip) (.-fadeIn clip)
+                    (.-fadeOut clip) (.-locked clip)])))
+
+        (t/testing "they change, each fade at most half of the clip"
+          (set! (.-start clip) 250)
+          (set! (.-volume clip) 0.5)
+          (set! (.-muted clip) true)
+          (set! (.-fadeIn clip) 300)
+          (set! (.-fadeOut clip) 5000)
+          (set! (.-lane clip) 2)
+          (set! (.-duration clip) 1500)
+          (t/is (= [250 1500 2 0.5 true 300 750]
+                   ((juxt :start :duration :lane :volume :muted :fade-in :fade-out) (stored clip-id))))
+          (set! (.-offset clip) 3000)
+          (t/is (= [3000 1000] ((juxt :offset :duration) (stored clip-id))) "shorter where the file ends")
+          (t/is (= 3000 (.-duration timeline)) "the timeline keeps its length"))
+
+        (t/testing "what is not valid is refused"
+          (t/is (thrown? js/Error (set! (.-volume clip) 5)) "four times as loud at most")
+          (t/is (thrown? js/Error (set! (.-start clip) -1)))
+          (t/is (thrown? js/Error (set! (.-lane clip) 1.5)))
+          (t/is (thrown? js/Error (set! (.-muted clip) "yes")))
+          (t/is (thrown? js/Error (set! (.-duration clip) 0)))
+          (t/is (thrown? js/Error (.split clip -5))))
+
+        (t/testing "it splits at a time of the timeline"
+          (let [^js right (.split clip 750)]
+            (t/is (= [[250 500] [750 500]] (spans)))
+            (t/is (= [3000 3500] [(.-offset clip) (.-offset right)]) "the same file, lined up")
+            (t/is (nil? (.split clip 5000)) "nothing outside it")
+            (.remove right)
+            (t/is (= [[250 500]] (spans)))))
+
+        (t/testing "a locked clip takes no write but its unlocking"
+          (set! (.-locked clip) true)
+          (t/is (thrown? js/Error (set! (.-start clip) 0)))
+          (t/is (thrown? js/Error (.split clip 400)))
+          (t/is (thrown? js/Error (.remove clip)))
+          (t/is (= [[250 500]] (spans)))
+          (set! (.-locked clip) false)
+          (set! (.-start clip) 0)
+          (t/is (= [[0 500]] (spans))))
+
+        (t/testing "writes need content:write"
+          (with-redefs [r/check-permission (constantly false)]
+            (t/is (thrown? js/Error (set! (.-start clip) 100))))
+          (t/is (= [[0 500]] (spans))))))))
+
+(t/deftest a-clip-plays-faster-or-slower
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[file _]     (audio-file-of)
+            _            (setup file true)
+            ^js timeline (.-timeline (shape-of file :board-a))
+            ^js clip     (first (.-audioClips timeline))]
+        (t/is (= [1 2000] [(.-speed clip) (.-duration clip)]))
+        (set! (.-speed clip) 2)
+        (t/is (= [2 1000 1000] [(.-speed clip) (.-duration clip) (.-offset clip)])
+              "the same part of its file, in half the time")
+        (set! (.-speed clip) 0.5)
+        (t/is (= [0.5 4000] [(.-speed clip) (.-duration clip)]))
+        (t/is (thrown? js/Error (set! (.-speed clip) 0.1)))
+        (t/is (thrown? js/Error (set! (.-speed clip) 5)))
+        (t/is (thrown? js/Error (set! (.-speed clip) "fast")))
+        (t/is (= 0.5 (.-speed clip)))))))
+
+(t/deftest a-lane-plays-a-single-file
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[file clip-id] (audio-file-of :other? true)
+            _              (setup file true)
+            ^js timeline   (.-timeline (shape-of file :board-a))
+            ^js clip       (some #(when (= (str clip-id) (.-id ^js %)) %) (.-audioClips timeline))]
+        (t/is (thrown? js/Error (set! (.-lane clip) 1)) "not onto the lane of another file")
+        (t/is (= 0 (.-lane clip)))
+        (set! (.-lane clip) 2)
+        (t/is (= 2 (.-lane clip)) "onto an empty one")))))
+
+(t/deftest audio-clips-need-motion
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[file _]     (audio-file-of)
+            _            (setup file false)
+            ^js timeline (motion/timeline-proxy plugin-id (:id file) (cthf/current-page-id file)
+                                                (cthi/id :board-a))
+            ^js clip     (first (.-audioClips timeline))]
+        (t/is (= 500 (.-start clip)) "they read")
+        (t/is (thrown? js/Error (set! (.-start clip) 100)))
+        (t/is (= 500 (.-start clip)))))))
+
+(defn- fake-decode
+  "Decodes the bytes \"ms:N\" to N ms of audio, and nothing else."
+  [bytes]
+  (let [text (.decode (js/TextDecoder.) bytes)]
+    (if (.startsWith text "ms:")
+      (let [ms (js/parseInt (subs text 3))
+            n  (js/Math.round (* 48 ms))]
+        (js/Promise.resolve #js {:duration (/ ms 1000) :length n :sampleRate 48000 :numberOfChannels 1
+                                 :getChannelData (fn [_] (js/Float32Array. n))}))
+      (js/Promise.reject (js/Error. "undecodable")))))
+
+(defn- upload-stub
+  "An `rp/cmd!` that uploads a file media object `id`, recording each
+  upload in `calls`; other commands answer nothing."
+  [calls id]
+  (mock/stub
+   (fn [cmd params]
+     (if (= :upload-file-media-object cmd)
+       (do (swap! calls conj [(:name params) (.-type (:content params))])
+           (rx/of {:id id :mtype (.-type (:content params))}))
+       (rx/empty)))))
+
+(defn- text-bytes
+  [text]
+  (.encode (js/TextEncoder.) text))
+
+(t/deftest a-plugin-adds-audio-from-bytes
+  (t/async
+    done
+    (let [[file _]            (audio-file-of)
+          [store ^js context] (setup file true)
+          ^js timeline        (motion/timeline-proxy plugin-id (:id file) (cthf/current-page-id file)
+                                                     (cthi/id :board-a))
+          calls               (atom [])
+          audio-id            (uuid/next)]
+      (thw/setup-wasm-mocks!)
+      (mock/with-mocks
+        {rp/cmd! (upload-stub calls audio-id)
+         audio/decode (mock/stub fake-decode)}
+        (fn [done']
+          (-> (.addAudioClip timeline "voice.wav" (text-bytes "ms:2500") "audio/x-wav" #js {:start 1200 :lane 1})
+              (.then (fn [^js clip]
+                       (let [stored (get-in (stored-timelines store context)
+                                            [(cthi/id :board-a) :audio-clips (uuid/uuid (.-id clip))])]
+                         (t/is (= [["voice.wav" "audio/wav"]] @calls) "uploaded as its canonical type")
+                         (t/is (= [audio-id "voice.wav" 1200 0 2500 2500 1]
+                                  ((juxt :audio-id :name :start :offset :duration :source-duration :lane) stored)))
+                         (t/is (= 2 (.-length (.-audioClips timeline))))
+                         (t/is (= 3000 (.-duration timeline)) "the timeline keeps its length")
+                         (t/is (some? (audio/waveform audio-id)) "decoded once, not fetched again"))))
+              (.catch (fn [cause] (t/is (nil? cause) (str cause))))
+              (.finally (fn []
+                          (thw/teardown-wasm-mocks!)
+                          (done')))))
+        done))))
+
+(t/deftest audio-that-is-not-valid-is-not-uploaded
+  (t/async
+    done
+    (let [[file _]            (audio-file-of)
+          [store ^js context] (setup file true)
+          ^js timeline        (motion/timeline-proxy plugin-id (:id file) (cthf/current-page-id file)
+                                                     (cthi/id :board-a))
+          before              (stored-timelines store context)
+          calls               (atom [])
+          add                 #(.addAudioClip timeline %1 %2 %3 %4)
+          rejects             (fn [label promise]
+                                (-> promise
+                                    (.then (fn [_] (t/is false label)))
+                                    (.catch (fn [_] (t/is true label)))))]
+      (thw/setup-wasm-mocks!)
+      (mock/with-mocks
+        {rp/cmd! (upload-stub calls (uuid/next))
+         audio/decode (mock/stub fake-decode)}
+        (fn [done']
+          (-> (js/Promise.all
+               #js [(rejects "an image" (add "x.png" (text-bytes "ms:100") "image/png" nil))
+                    (rejects "too long" (add "long.mp3" (text-bytes (str "ms:" (inc ctau/max-audio-duration)))
+                                             "audio/mpeg" nil))
+                    (rejects "undecodable" (add "noise.mp3" (text-bytes "noise") "audio/mpeg" nil))
+                    (rejects "no bytes" (add "x.mp3" "ms:100" "audio/mpeg" nil))
+                    (rejects "a start before 0" (add "x.mp3" (text-bytes "ms:100") "audio/mpeg" #js {:start -1}))
+                    (rejects "a lane of another file" (add "x.mp3" (text-bytes "ms:100") "audio/mpeg" #js {:lane 0}))
+                    (rejects "without content:write"
+                             (with-redefs [r/check-permission (constantly false)]
+                               (add "x.mp3" (text-bytes "ms:100") "audio/mpeg" nil)))])
+              (.then (fn [_]
+                       (t/is (empty? @calls) "no upload")
+                       (t/is (= before (stored-timelines store context)))))
+              (.finally (fn []
+                          (thw/teardown-wasm-mocks!)
+                          (done')))))
+        done))))

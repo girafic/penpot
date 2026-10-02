@@ -3736,6 +3736,8 @@ export type RulerGuideOrientation = 'horizontal' | 'vertical';
  * - Preset animations: an effect (fade, move, scale or rotate) over a span
  *   of time that stays editable, like an entrance or an exit.
  *
+ * It can play sound too: audio clips, see `audioClips`.
+ *
  * Changing it needs the Motion feature (`animation/v1`) and the
  * `content:write` permission. Every change can be undone.
  *
@@ -3795,6 +3797,14 @@ export interface Timeline {
    * each to the next one (or to the end), so a player can play it by name.
    */
   readonly markers: Marker[];
+
+  /**
+   * The audio clips of the timeline, by lane and start: the sound files the
+   * board plays with its animation, in the workspace, in view mode and in
+   * its video exports. A clip plays only within `duration`: adding or
+   * moving one never makes the timeline longer.
+   */
+  readonly audioClips: AudioClip[];
 
   /**
    * Adds a keyframe of `shape`, the board or a layer inside it. A keyframe
@@ -3913,6 +3923,36 @@ export interface Timeline {
    * ```
    */
   addMarker(marker: MarkerProps): Marker;
+
+  /**
+   * Adds a clip that plays an audio file the plugin has as bytes, as
+   * dropping the file on the board does: the file is decoded in the
+   * browser first, then uploaded to the file and played by the new clip,
+   * whole, from `start`. It rejects a file of another type, one the
+   * browser cannot decode or one that lasts longer than 5 minutes, before
+   * uploading anything; the server takes files up to 100 MB. The timeline
+   * keeps its duration: set `duration` to hear all of a longer clip.
+   * @param name The name of the file, shown on the clip.
+   * @param data The bytes of the file.
+   * @param mimeType Its type: `audio/mpeg` (MP3), `audio/wav`, `audio/ogg`,
+   * `audio/mp4` (M4A), `audio/webm` or `audio/flac`.
+   * @param props Where it plays from.
+   * @return A promise of the new clip.
+   *
+   * @example
+   * ```js
+   * const response = await fetch('https://example.com/beat.mp3');
+   * const data = new Uint8Array(await response.arrayBuffer());
+   * const clip = await timeline.addAudioClip('beat.mp3', data, 'audio/mpeg', { start: 500 });
+   * clip.fadeOut = 400;
+   * ```
+   */
+  addAudioClip(
+    name: string,
+    data: Uint8Array | ArrayBuffer,
+    mimeType: string,
+    props?: AudioClipProps,
+  ): Promise<AudioClip>;
 
   /**
    * Runs `callback` and records what it changes of `shapes` as keyframes at
@@ -4071,6 +4111,12 @@ export interface TimelineExportSettings {
    * Whether a GIF or AVIF plays over and over. `true` by default.
    */
   loop?: boolean;
+
+  /**
+   * Whether an MP4 or WebM video has the sound of the audio clips of the
+   * timeline. `true` by default; the other formats have no sound.
+   */
+  audio?: boolean;
 }
 
 /**
@@ -4145,6 +4191,121 @@ export interface MarkerProps {
    * Its name, `Marker N` by default.
    */
   name?: string;
+}
+
+/**
+ * A sound file a timeline plays, see `Timeline.audioClips`: a part of the
+ * file (from `offset`) from `start` on the timeline for `duration`, at a
+ * `speed`, on a lane of the timeline dock. Times are in milliseconds:
+ * `start`, `duration` and the fades of the timeline, `offset` and
+ * `sourceDuration` of the file. A locked clip takes no change but its
+ * unlocking.
+ */
+export interface AudioClip {
+  /**
+   * The id of the clip.
+   */
+  readonly id: string;
+
+  /**
+   * The name of its file.
+   */
+  readonly name: string;
+
+  /**
+   * How long its whole file plays.
+   */
+  readonly sourceDuration: number;
+
+  /**
+   * When it starts playing on the timeline, from 0.
+   */
+  start: number;
+
+  /**
+   * Where in its file it starts playing. It plays less when the file ends
+   * before the clip does.
+   */
+  offset: number;
+
+  /**
+   * How long it plays on the timeline, at least 10 milliseconds and at
+   * most to the end of its file at its speed.
+   */
+  duration: number;
+
+  /**
+   * How fast it plays its file, from 0.25 to 4 (1 by default): at 2 it
+   * plays the same part of the file in half the time and an octave
+   * higher, as a tape does. Setting it keeps that part, so `duration`
+   * changes with it.
+   */
+  speed: number;
+
+  /**
+   * The row of the timeline dock it is on, from 0, named after its file. A
+   * lane plays a single file: its clips are parts of it, which may
+   * overlap, and setting a lane that holds another file is refused.
+   */
+  lane: number;
+
+  /**
+   * Its volume, from 0 (silent) to 4: 1 plays its file as loud as it
+   * is, above it louder (4 is +12 dB; loud files may then clip).
+   */
+  volume: number;
+
+  /**
+   * Whether it is silent.
+   */
+  muted: boolean;
+
+  /**
+   * How long it fades in from silence at its start, at most half of it.
+   */
+  fadeIn: number;
+
+  /**
+   * How long it fades out to silence at its end, at most half of it.
+   */
+  fadeOut: number;
+
+  /**
+   * Whether it takes no changes, but its unlocking.
+   */
+  locked: boolean;
+
+  /**
+   * Cuts the clip at `time` of the timeline into two clips of the same
+   * file: this one keeps the part before and its fade in, and the new one,
+   * which it returns, the part after and its fade out. Null when `time` is
+   * not inside the clip, or a part would last less than 10 milliseconds.
+   * @param time A time of the timeline, inside the clip.
+   */
+  split(time: number): AudioClip | null;
+
+  /**
+   * Removes the clip.
+   */
+  remove(): void;
+}
+
+/**
+ * Where a new audio clip plays from, see `Timeline.addAudioClip`.
+ */
+export interface AudioClipProps {
+  /**
+   * When it starts playing on the timeline, in milliseconds (0 by
+   * default).
+   */
+  start?: number;
+
+  /**
+   * The lane of the timeline dock it goes on, from 0: one without clips,
+   * since a lane plays a single file. By default the first lane without
+   * clips.
+   */
+  lane?: number;
 }
 
 /**
