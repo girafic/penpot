@@ -9,6 +9,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.i18n :refer [tr]]
+   [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.token :as cto]
    [app.common.types.tokens-lib :as ctob]
@@ -118,6 +119,68 @@
    schema:token-value-shadow-vector
    schema:token-value-composite-ref])
 
+(def duration-value-regexp
+  "A duration as a token writes it: a number of `ms` or `s`, ms without a
+  unit, with whitespace around it."
+  #"^\s*([0-9]+\.?[0-9]*|\.[0-9]+)\s*(ms|s)?\s*$")
+
+(defn parse-duration-value
+  "The ms of the duration `value`: a number (of ms) or a text like
+  `150ms`, `0.2s` or `150`; nil for anything else, as a negative one."
+  [value]
+  (cond
+    (number? value)
+    (when (and (mth/finite? value) (>= value 0))
+      value)
+
+    (string? value)
+    (when-let [[_ number unit] (re-find duration-value-regexp value)]
+      (when-let [number (d/parse-double number)]
+        (if (= "s" unit)
+          (* number 1000)
+          number)))))
+
+(defn parse-cubic-bezier-value
+  "The `[x1 y1 x2 y2]` of the cubic bezier `value`: four numbers (or
+  numeric texts) or a text like `0.42, 0, 0.58, 1`, its times (x1 and x2)
+  within 0..1; nil for anything else."
+  [value]
+  (let [items   (cond
+                  (sequential? value) value
+                  (string? value)     (str/split (str/trim value) #"\s*,\s*|\s+"))
+        numbers (mapv (fn [item]
+                        (cond
+                          (number? item) item
+                          (string? item) (d/parse-double (str/trim item))))
+                      items)]
+    (when (and (= 4 (count numbers))
+               (every? mth/finite? numbers))
+      (let [[x1 _ x2 _] numbers]
+        (when (and (<= 0 x1 1) (<= 0 x2 1))
+          numbers)))))
+
+(def ^:private single-number-regexp
+  "One number with a unit or none: what a duration token holds, unlike a
+  reference or a formula, which the resolver checks."
+  #"^\s*-?[0-9]*\.?[0-9]+\s*[a-zA-Z%]*\s*$")
+
+(def schema:token-value-duration
+  [:and
+   [::sm/text {:error/fn token-value-empty-fn}]
+   [:fn {:error/fn #(tr "errors.tokens.invalid-duration-token-value" (:value %))}
+    (fn [value]
+      (if (re-find single-number-regexp value)
+        (some? (parse-duration-value value))
+        true))]])  ;; Leave references or formulas to be checked by the resolver
+
+(def schema:token-value-cubic-bezier
+  [:or
+   [:fn {:error/fn #(tr "errors.tokens.invalid-cubic-bezier-token-value")}
+    (fn [value]
+      (and (sequential? value)
+           (some? (parse-cubic-bezier-value value))))]
+   cto/schema:token-ref])
+
 (defn make-token-value-schema
   [token-type]
   [:multi {:dispatch (constantly token-type)
@@ -128,6 +191,8 @@
    [:font-weight schema:token-value-font-weight]
    [:typography schema:token-value-typography]
    [:shadow schema:token-value-shadow]
+   [:duration schema:token-value-duration]
+   [:cubic-bezier schema:token-value-cubic-bezier]
    [::m/default schema:token-value-generic]])
 
 ;; Token
@@ -173,6 +238,11 @@
     (map? value)
     (->> (vals value)
          (keep :reference)
+         (mapcat cto/find-token-value-references))
+
+    ;; the numbers of a cubic bezier may be references too
+    (sequential? value)
+    (->> (filter string? value)
          (mapcat cto/find-token-value-references))
 
     :else
@@ -257,9 +327,11 @@
 
         type  (cto/dtcg-token-type->token-type type)
         value (case type
-                :font-family (ctob/convert-dtcg-font-family value)
-                :typography  (ctob/convert-dtcg-typography-composite value)
-                :shadow      (ctob/convert-dtcg-shadow-composite value)
+                :font-family  (ctob/convert-dtcg-font-family value)
+                :typography   (ctob/convert-dtcg-typography-composite value)
+                :shadow       (ctob/convert-dtcg-shadow-composite value)
+                :duration     (ctob/convert-dtcg-duration value)
+                :cubic-bezier (ctob/convert-dtcg-cubic-bezier value)
                 value)]
 
     (d/without-nils {:name name

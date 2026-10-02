@@ -55,6 +55,8 @@
     :dimensions i/expand
     :sizing i/expand
     :shadow i/drop-shadow
+    :duration i/clock
+    :cubic-bezier i/easing-ease-in-out
     "add"))
 
 (def ^:private schema:token-group
@@ -152,8 +154,10 @@
          (fn [event token]
            (let [token (ctob/get-token tokens-lib selected-token-set-id (:id token))]
              (dom/stop-propagation event)
-             ;; Number tokens can't be applied via button click
-             (when (not= (:type token) :number)
+             ;; Number tokens can't be applied via button click, and the
+             ;; ones no shape takes (the motion ones) not at all
+             (when (and (not= (:type token) :number)
+                        (some? (:on-update-shape (dwta/get-token-properties token))))
                (if (and not-editing? (seq selected-shapes))
                  (st/emit! (dwta/toggle-token {:token token
                                                :shape-ids selected-ids}))

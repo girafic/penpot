@@ -11,6 +11,7 @@
    [app.main.refs :as refs]
    [app.main.ui.workspace.tokens.management.forms.color :as color]
    [app.main.ui.workspace.tokens.management.forms.controls :as token.controls]
+   [app.main.ui.workspace.tokens.management.forms.cubic-bezier :as cubic-bezier]
    [app.main.ui.workspace.tokens.management.forms.font-family :as font-family]
    [app.main.ui.workspace.tokens.management.forms.generic-form :as generic]
    [app.main.ui.workspace.tokens.management.forms.shadow :as shadow]
@@ -57,7 +58,10 @@
         (mf/spread-props props {:input-value-placeholder (tr "workspace.tokens.text-decoration-value-enter")})
 
         font-weight-props
-        (mf/spread-props props {:input-value-placeholder (tr "workspace.tokens.font-weight-value-enter")})]
+        (mf/spread-props props {:input-value-placeholder (tr "workspace.tokens.font-weight-value-enter")})
+
+        duration-props
+        (mf/spread-props props {:input-value-placeholder (tr "workspace.tokens.duration-value-enter")})]
 
     (case token-type
       :color [:> color/form* props]
@@ -67,4 +71,6 @@
       :text-case [:> generic/form* text-case-props]
       :text-decoration [:> generic/form* text-decoration-props]
       :font-weight [:> generic/form* font-weight-props]
+      :duration [:> generic/form* duration-props]
+      :cubic-bezier [:> cubic-bezier/form* props]
       [:> generic/form* props])))

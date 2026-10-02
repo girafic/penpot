@@ -5,12 +5,20 @@
    [app.util.i18n :refer [tr]]
    [cuerdas.core :as str]))
 
+(defn- option-value
+  "A value of a token as an option shows it: a sequence (the numbers of a
+  cubic bezier) as a text."
+  [value]
+  (if (sequential? value)
+    (str/join ", " value)
+    value))
+
 (defn- token->dropdown-option
   [token]
   {:id (str (get token :id))
    :type :token
-   :value (get token :value)
-   :resolved-value (get token :resolved-value)
+   :value (option-value (get token :value))
+   :resolved-value (option-value (get token :resolved-value))
    :name (get token :name)})
 
 (defn- generate-dropdown-options

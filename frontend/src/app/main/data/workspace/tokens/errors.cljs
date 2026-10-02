@@ -83,6 +83,14 @@
    {:error/code :error.style-dictionary/value-with-percent
     :error/fn #(str (tr "errors.tokens.value-with-percent"))}
 
+   :error.style-dictionary/invalid-token-value-duration
+   {:error/code :error.style-dictionary/invalid-token-value-duration
+    :error/fn #(tr "errors.tokens.invalid-duration-token-value" %)}
+
+   :error.style-dictionary/invalid-token-value-cubic-bezier
+   {:error/code :error.style-dictionary/invalid-token-value-cubic-bezier
+    :error/fn #(tr "errors.tokens.invalid-cubic-bezier-token-value")}
+
    :error.style-dictionary/invalid-token-value-opacity
    {:error/code :error.style-dictionary/invalid-token-value-opacity
     :error/fn #(str/join "\n" [(str (tr "errors.tokens.invalid-value" %) ".") (tr "errors.tokens.opacity-range")])}

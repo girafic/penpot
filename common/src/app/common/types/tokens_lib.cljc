@@ -1580,6 +1580,10 @@ Will return a value that matches this schema:
      ["type" :string]]
     [:map
      ["value" :map]
+     ["type" :string]]
+    ;; a cubic bezier
+    [:map
+     ["value" [:sequential number?]]
      ["type" :string]]]))
 
 (def ^:private schema:dtcg-node
@@ -1687,6 +1691,30 @@ Will return a value that matches this schema:
     (sequential? value) value
     :else value))
 
+(defn convert-dtcg-duration
+  "Convert a duration token value from DTCG format to internal format: the
+  object of the 2025 format (`{\"value\": 200, \"unit\": \"ms\"}`) and a
+  plain number (of ms) become a text like `200ms`; the rest is kept."
+  [value]
+  (cond
+    (and (map? value) (number? (get value "value")))
+    (str (get value "value") (or (get value "unit") "ms"))
+
+    (number? value)
+    (str value)
+
+    :else
+    value))
+
+(defn convert-dtcg-cubic-bezier
+  "Convert a cubic bezier token value from DTCG format to internal format:
+  the vector of its four numbers (numeric texts read as numbers); a
+  reference is kept."
+  [value]
+  (if (sequential? value)
+    (mapv #(if (string? %) (or (d/parse-double %) %) %) value)
+    value))
+
 (defn convert-dtcg-typography-composite
   "Convert typography token value keys from DTCG format to internal format."
   [value]
@@ -1787,6 +1815,8 @@ Will return a value that matches this schema:
                                             :font-family (convert-dtcg-font-family token-value)
                                             :typography (convert-dtcg-typography-composite token-value)
                                             :shadow (convert-dtcg-shadow-composite token-value)
+                                            :duration (convert-dtcg-duration token-value)
+                                            :cubic-bezier (convert-dtcg-cubic-bezier token-value)
                                             token-value))
                                         :description (get v "$description")))
               ;; Discard unknown / un-typeable tokens

@@ -151,6 +151,16 @@
   }
 }
 
+// A curve shown, not edited: in the form of a cubic bezier token.
+.graph-preview {
+  inline-size: px2rem(120);
+  margin-block-start: var(--sp-s);
+
+  .graph-handle {
+    cursor: default;
+  }
+}
+
 // Dragged sideways: the sooner the overshoot, the more the spring bounces.
 .spring-handle {
   cursor: ew-resize;

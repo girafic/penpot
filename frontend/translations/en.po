@@ -1974,6 +1974,14 @@ msgstr "Import Error:"
 msgid "errors.tokens.invalid-color"
 msgstr "Invalid color value: %s"
 
+msgid "errors.tokens.invalid-cubic-bezier-token-value"
+msgstr ""
+"Invalid cubic bezier value: use four numbers, the first and the third from "
+"0 to 1 (e.g. 0.42, 0, 0.58, 1)."
+
+msgid "errors.tokens.invalid-duration-token-value"
+msgstr "Invalid duration value: %s. Use a number of ms or s, like 150ms or 0.2s."
+
 #: src/app/main/data/workspace/tokens/errors.cljs:108
 msgid "errors.tokens.invalid-font-family-token-value"
 msgstr "Invalid token value: you can only reference a font-family token"
@@ -10661,6 +10669,9 @@ msgstr "Create one."
 msgid "workspace.tokens.create-token"
 msgstr "Create new %s token"
 
+msgid "workspace.tokens.cubic-bezier-value-enter"
+msgstr "Four numbers (0.42, 0, 0.58, 1) or an {alias}"
+
 #: src/app/main/ui/workspace/tokens/management/context_menu.cljs:371
 msgid "workspace.tokens.delete"
 msgstr "Delete token"
@@ -10692,6 +10703,9 @@ msgid "workspace.tokens.duplicated-json-token-name-detail"
 msgstr ""
 "A token already exists at the path '%s' or at a prefix thereof, in another "
 "set."
+
+msgid "workspace.tokens.duration-value-enter"
+msgstr "Duration (150ms, 0.2s...) or an {alias}"
 
 #: src/app/main/ui/workspace/tokens/management/context_menu.cljs:351
 msgid "workspace.tokens.edit"

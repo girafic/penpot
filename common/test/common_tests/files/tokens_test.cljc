@@ -7,6 +7,7 @@
 (ns common-tests.files.tokens-test
   (:require
    [app.common.files.tokens :as cfo]
+   [app.common.schema :as sm]
    [clojure.test :as t]))
 
 (t/deftest test-parse-token-value
@@ -92,3 +93,51 @@
     (t/is (nil? (cfo/shapes-token-applied? {:name "a"} [{:applied-tokens {:x "a"}}
                                                         {:applied-tokens {:x "a"}}]
                                            #{:y})))))
+
+(t/deftest parse-duration-value-test
+  (t/testing "a number of ms or s, ms without a unit"
+    (t/is (= 150.0 (cfo/parse-duration-value "150ms")))
+    (t/is (= 200.0 (cfo/parse-duration-value " 0.2s ")))
+    (t/is (= 150.0 (cfo/parse-duration-value "150")))
+    (t/is (= 150 (cfo/parse-duration-value 150))))
+  (t/testing "nothing else"
+    (t/is (nil? (cfo/parse-duration-value "-5ms")))
+    (t/is (nil? (cfo/parse-duration-value -1)))
+    (t/is (nil? (cfo/parse-duration-value "fast")))
+    (t/is (nil? (cfo/parse-duration-value "150px")))))
+
+(t/deftest parse-cubic-bezier-value-test
+  (t/testing "four numbers, as numbers or texts"
+    (t/is (= [0.42 0 0.58 1] (cfo/parse-cubic-bezier-value [0.42 0 0.58 1])))
+    (t/is (= [0.42 0.0 0.58 1.0] (cfo/parse-cubic-bezier-value "0.42, 0, 0.58, 1")))
+    (t/is (= [0.42 0.0 0.58 1.0] (cfo/parse-cubic-bezier-value ["0.42" "0" "0.58" "1"])))
+    (t/is (= [0.3 -0.5 0.7 1.5] (cfo/parse-cubic-bezier-value [0.3 -0.5 0.7 1.5]))
+          "the progress (y) may leave 0..1"))
+  (t/testing "nothing else"
+    (t/is (nil? (cfo/parse-cubic-bezier-value [0.42 0 0.58])))
+    (t/is (nil? (cfo/parse-cubic-bezier-value [1.5 0 0.58 1])) "a time past 1")
+    (t/is (nil? (cfo/parse-cubic-bezier-value "{ease.out}")))))
+
+(t/deftest motion-token-value-schemas
+  (let [valid? (fn [type value] (sm/validate (cfo/make-token-value-schema type) value))]
+    (t/is (valid? :duration "150ms"))
+    (t/is (valid? :duration "{motion.fast} * 2") "the resolver checks formulas")
+    (t/is (not (valid? :duration "-150ms")))
+    (t/is (not (valid? :duration "150px")))
+    (t/is (valid? :cubic-bezier [0.42 0 0.58 1]))
+    (t/is (valid? :cubic-bezier "{ease.out}"))
+    (t/is (not (valid? :cubic-bezier [0.42 0 0.58])))
+    (t/is (not (valid? :cubic-bezier "0.42, 0, 0.58, 1")) "kept as numbers")))
+
+(t/deftest convert-dtcg-motion-token-test
+  (t/testing "a duration of the 2025 format becomes a text"
+    (t/is (= {:name "motion.fast" :type :duration :value "150ms"}
+             (cfo/convert-dtcg-token {"name" "motion.fast" "type" "duration"
+                                      "value" {"value" 150 "unit" "ms"}})))
+    (t/is (= {:name "motion.slow" :type :duration :value "0.5s"}
+             (cfo/convert-dtcg-token {"name" "motion.slow" "type" "duration"
+                                      "value" {"value" 0.5 "unit" "s"}}))))
+  (t/testing "a cubic bezier keeps its numbers"
+    (t/is (= {:name "ease.out" :type :cubic-bezier :value [0 0 0.58 1]}
+             (cfo/convert-dtcg-token {"name" "ease.out" "type" "cubicBezier"
+                                      "value" [0 0 0.58 1]})))))

@@ -184,3 +184,38 @@
                (t/is (= "px" (get-in resolved-tokens ["borderRadius.md" :unit])))
                (done))))))))
 
+
+(t/deftest resolve-motion-tokens-test
+  (t/async
+    done
+    (t/testing "durations resolve to ms and cubic beziers to their four numbers"
+      (let [token  (fn [token-name type value]
+                     (ctob/make-token {:name token-name :type type :value value}))
+            tokens (-> (ctob/make-tokens-lib)
+                       (ctob/add-set (ctob/make-token-set :id (cthi/new-id! :motion-set)
+                                                          :name "motion"))
+                       (ctob/add-token (cthi/id :motion-set) (token "motion.fast" :duration "150ms"))
+                       (ctob/add-token (cthi/id :motion-set) (token "motion.slow" :duration "0.5s"))
+                       (ctob/add-token (cthi/id :motion-set) (token "motion.plain" :duration "300"))
+                       (ctob/add-token (cthi/id :motion-set) (token "motion.double" :duration "{motion.fast} * 2"))
+                       (ctob/add-token (cthi/id :motion-set) (token "motion.bad" :duration "fast"))
+                       (ctob/add-token (cthi/id :motion-set) (token "motion.px" :duration "150px"))
+                       (ctob/add-token (cthi/id :motion-set) (token "ease.out" :cubic-bezier [0 0 0.58 1]))
+                       (ctob/add-token (cthi/id :motion-set) (token "ease.std" :cubic-bezier "{ease.out}"))
+                       (ctob/add-token (cthi/id :motion-set) (token "ease.wide" :cubic-bezier [1.5 0 0.58 1]))
+                       (ctob/add-token (cthi/id :motion-set) (token "ease.short" :cubic-bezier [0 0 1]))
+                       (ctob/get-all-tokens-map))]
+        (-> (sd/resolve-tokens tokens)
+            (rx/sub!
+             (fn [resolved]
+               (let [value #(get-in resolved [% :resolved-value])
+                     error #(get-in resolved [% :errors 0 :error/code])]
+                 (t/is (= [150 500 300 300] (mapv value ["motion.fast" "motion.slow" "motion.plain" "motion.double"])))
+                 (t/is (= "ms" (get-in resolved ["motion.fast" :unit])))
+                 (t/is (= :error.style-dictionary/invalid-token-value-duration (error "motion.bad")))
+                 (t/is (= :error.style-dictionary/invalid-token-value-duration (error "motion.px")))
+                 (t/is (= [0 0 0.58 1] (value "ease.out")))
+                 (t/is (= [0 0 0.58 1] (value "ease.std")) "through a reference")
+                 (t/is (= :error.style-dictionary/invalid-token-value-cubic-bezier (error "ease.wide")))
+                 (t/is (= :error.style-dictionary/invalid-token-value-cubic-bezier (error "ease.short"))))
+               (done))))))))

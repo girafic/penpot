@@ -88,7 +88,9 @@
   {:boolean         "boolean"
    :border-radius   "borderRadius"
    :color           "color"
+   :cubic-bezier    "cubicBezier"
    :dimensions      "dimension"
+   :duration        "duration"
    :font-family     "fontFamilies"
    :font-size       "fontSizes"
    :font-weight     "fontWeights"
@@ -128,6 +130,11 @@
 
 (def token-types
   (into #{} (keys token-type->dtcg-token-type)))
+
+(def motion-token-types
+  "The token types no shape takes: the settings of animation styles bind
+  them (Penpot Motion, see `app.common.types.animation/style-token-types`)."
+  #{:duration :cubic-bezier})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SCHEMA: Token
@@ -577,7 +584,11 @@
    :typography         [:typography]
    :number             [:number]
    :sizing             [:sizing :dimensions]
-   :spacing            [:spacing :dimensions]})
+   :spacing            [:spacing :dimensions]
+   ;; the settings of the animation styles bind these (see
+   ;; `app.common.types.animation/style-token-types`)
+   :duration           [:duration]
+   :cubic-bezier       [:cubic-bezier]})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; HELPERS for tokens application

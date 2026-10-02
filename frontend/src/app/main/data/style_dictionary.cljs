@@ -123,6 +123,32 @@
            :references references}
           {:errors [(wte/error-with-value :error.style-dictionary/invalid-token-value value)]})))))
 
+(defn- parse-sd-token-duration-value
+  "Parses `value` of a duration `sd-token` into a map like `{:value 150 :unit \"ms\"}`,
+  the ms of a duration in ms or s (ms without a unit).
+  If the `value` is not parseable and/or has missing references returns a map with `:errors`."
+  [value]
+  (if-let [ms (cfo/parse-duration-value value)]
+    {:value ms :unit "ms"}
+    (if-let [references (seq (cto/find-token-value-references value))]
+      {:errors [(wte/error-with-value :error.style-dictionary/missing-reference references)]
+       :references references}
+      {:errors [(wte/error-with-value :error.style-dictionary/invalid-token-value-duration (str value))]})))
+
+(defn- parse-sd-token-cubic-bezier-value
+  "Parses `value` of a cubic bezier `sd-token`, an array of four numbers (or of texts
+  of them), into a map like `{:value [0.42 0 0.58 1]}`.
+  If the `value` is not parseable and/or has missing references returns a map with `:errors`."
+  [value]
+  (let [value (if (array? value) (js->clj value) value)]
+    (if-let [curve (cfo/parse-cubic-bezier-value value)]
+      {:value curve}
+      (if-let [references (seq (cfo/find-refs value))]
+        {:errors [(wte/error-with-value :error.style-dictionary/missing-reference references)]
+         :references references}
+        {:errors [(wte/error-with-value :error.style-dictionary/invalid-token-value-cubic-bezier
+                                        (if (sequential? value) (str/join ", " value) (str value)))]}))))
+
 (defn- parse-sd-token-opacity-value
   "Parses `value` of a dimensions `sd-token` into a map like `{:value 1 :unit \"px\"}`.
   If the `value` is not parseable and/or has missing references returns a map with `:errors`.
@@ -502,6 +528,8 @@
                                      :opacity (parse-sd-token-opacity-value value)
                                      :stroke-width (parse-sd-token-stroke-width-value value)
                                      :number (parse-sd-token-number-value value)
+                                     :duration (parse-sd-token-duration-value value)
+                                     :cubic-bezier (parse-sd-token-cubic-bezier-value value)
                                      (parse-sd-token-general-value value)))
                output-token (cond (:errors parsed-token-value)
                                   (merge origin-token parsed-token-value)

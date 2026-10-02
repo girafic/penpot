@@ -1063,7 +1063,23 @@
     :on-update-shape apply-spacing-token
     :modal {:key :tokens/spacing
             :fields [{:label "Spacing"
-                      :key :spacing}]}}))
+                      :key :spacing}]}}
+
+   ;; Penpot Motion: the settings of animation styles bind these (see
+   ;; `app.common.types.animation/style-token-types`); no shape takes them.
+   :duration
+   {:title "Duration"
+    :attributes #{}
+    :modal {:key :tokens/duration
+            :fields [{:label "Duration"
+                      :key :duration}]}}
+
+   :cubic-bezier
+   {:title "Cubic Bezier"
+    :attributes #{}
+    :modal {:key :tokens/cubic-bezier
+            :fields [{:label "Cubic Bezier"
+                      :key :cubic-bezier}]}}))
 
 (defn get-token-properties [token]
   (get token-properties (:type token)))

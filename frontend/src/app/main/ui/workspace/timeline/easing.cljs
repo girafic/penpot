@@ -278,6 +278,33 @@
                     :on-pointer-up on-handle-up
                     :on-lost-pointer-capture on-handle-up}])])]))
 
+(mf/defc curve-preview*
+  "The graph of the cubic bezier `curve` (`[x1 y1 x2 y2]`) as the editor
+  of an easing draws it, its control points shown but not dragged: the
+  form of a cubic bezier token shows it."
+  [{:keys [curve class]}]
+  (let [[x1 y1 x2 y2] curve
+        gy (partial graph-y curve-range)]
+    [:svg {:class [class (stl/css :graph :graph-preview)]
+           :view-box (dm/str "0 0 " graph-width " " graph-height)
+           :role "img"
+           :aria-label (tr "workspace.animation.easing")}
+     [:line {:class (stl/css :graph-guide)
+             :x1 0 :x2 graph-width :y1 (gy 0) :y2 (gy 0)}]
+     [:line {:class (stl/css :graph-guide)
+             :x1 0 :x2 graph-width :y1 (gy 1) :y2 (gy 1)}]
+     [:path {:class (stl/css :graph-curve)
+             :d (dm/str "M" (graph-x 0) "," (gy 0)
+                        " C" (graph-x x1) "," (gy y1)
+                        " " (graph-x x2) "," (gy y2)
+                        " " (graph-x 1) "," (gy 1))}]
+     [:line {:class (stl/css :graph-handle-line)
+             :x1 (graph-x 0) :y1 (gy 0) :x2 (graph-x x1) :y2 (gy y1)}]
+     [:line {:class (stl/css :graph-handle-line)
+             :x1 (graph-x 1) :y1 (gy 1) :x2 (graph-x x2) :y2 (gy y2)}]
+     [:circle {:class (stl/css :graph-handle) :cx (graph-x x1) :cy (gy y1) :r 6}]
+     [:circle {:class (stl/css :graph-handle) :cx (graph-x x2) :cy (gy y2) :r 6}]]))
+
 ;; CONTROLS
 
 (mf/defc preset-menu*

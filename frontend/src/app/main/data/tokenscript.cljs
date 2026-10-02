@@ -73,6 +73,10 @@
   (and (number-with-unit-symbol? v)
        (= (.-unit v) "%")))
 
+(defn seconds-number-with-unit? [v]
+  (and (number-with-unit-symbol? v)
+       (= (.-unit v) "s")))
+
 (defn rem->px [^js v]
   (* (.-value v) 16))
 
@@ -97,6 +101,8 @@
     (color-symbol? v) (.-value (.to v "hex"))
     (rem-number-with-unit? v) (rem->px v)
     (percent-number-with-unit? v) (/ (.-value v) 100)
+    ;; durations resolve to ms
+    (seconds-number-with-unit? v) (* (.-value v) 1000)
     :else (.-value v)))
 
 ;; Processors ------------------------------------------------------------------

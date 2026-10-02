@@ -256,7 +256,7 @@
                                           (do
                                             (swap! form assoc-in [:extra-errors input-name] {:message error})
                                             (reset! hint* {:message error :type "error"})))
-                                        (let [message (tr "workspace.tokens.resolved-value" value)]
+                                        (let [message (tr "workspace.tokens.resolved-value" (dwtf/format-token-value value))]
                                           (swap! form update :extra-errors dissoc input-name)
                                           (reset! hint* {:message message :type "hint"}))))))))]
 

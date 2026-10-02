@@ -31,6 +31,8 @@
                        660
                        :shadow
                        660
+                       :cubic-bezier
+                       560
                        400)
         ;; Checks for overflow outside the viewport height
         max-y             (- vh modal-height)
@@ -110,6 +112,18 @@
 (mf/defc boolean-modal
   {::mf/register modal/components
    ::mf/register-as :tokens/boolean}
+  [properties]
+  [:& token-update-create-modal properties])
+
+(mf/defc duration-modal
+  {::mf/register modal/components
+   ::mf/register-as :tokens/duration}
+  [properties]
+  [:& token-update-create-modal properties])
+
+(mf/defc cubic-bezier-modal
+  {::mf/register modal/components
+   ::mf/register-as :tokens/cubic-bezier}
   [properties]
   [:& token-update-create-modal properties])
 

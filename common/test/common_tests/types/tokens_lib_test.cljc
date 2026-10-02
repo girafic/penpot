@@ -1399,6 +1399,46 @@
          (t/is (= 5 (count (ctob/get-tokens lib (ctob/get-id (ctob/get-set-by-name lib "set"))))))))))
 
 #?(:clj
+   (t/deftest parse-and-export-motion-tokens
+     (let [json {"motion" {"$type" "duration"
+                           "$description" "Timing"
+                           "fast" {"$value" "150ms"}
+                           "slow" {"$value" {"value" 0.5 "unit" "s"}}
+                           "base" {"$value" 300}
+                           "double" {"$value" "{motion.fast} * 2"}}
+                 "ease"   {"out" {"$type" "cubicBezier" "$value" [0 0 0.58 1]}
+                           "std" {"$type" "cubicBezier" "$value" "{ease.out}"}}}
+           lib  (ctob/parse-decoded-json json "motion")
+           token (fn [lib token-name] (ctob/get-token-by-name lib "motion" token-name))]
+       (t/testing "a duration keeps a text, of ms or s"
+         (t/is (= [:duration "150ms"] ((juxt :type :value) (token lib "motion.fast"))))
+         (t/is (= "0.5s" (:value (token lib "motion.slow"))))
+         (t/is (= "300" (:value (token lib "motion.base"))))
+         (t/is (= "{motion.fast} * 2" (:value (token lib "motion.double")))))
+       (t/testing "a cubic bezier keeps its numbers, or a reference"
+         (t/is (= [:cubic-bezier [0 0 0.58 1]] ((juxt :type :value) (token lib "ease.out"))))
+         (t/is (= "{ease.out}" (:value (token lib "ease.std")))))
+       (t/testing "the properties of a group are no tokens"
+         (t/is (nil? (token lib "motion.$type")))
+         (t/is (nil? (token lib "motion.$description")))
+         (t/is (= 6 (count (ctob/get-tokens lib (ctob/get-id (ctob/get-set-by-name lib "motion")))))))
+       (t/testing "both types are known"
+         (t/is (empty? (ctob/get-tokens-of-unknown-type {"fast" {"$type" "duration" "$value" "150ms"}
+                                                         "out" {"$type" "cubicBezier" "$value" [0 0 0.58 1]}}
+                                                        {}))))
+       (t/testing "they export as DTCG and come back the same"
+         (let [exported (ctob/export-dtcg-json lib)
+               again    (ctob/parse-decoded-json exported "")]
+           (t/is (= ["duration" "150ms"]
+                    ((juxt #(get % "$type") #(get % "$value")) (get-in exported ["motion" "motion" "fast"]))))
+           (t/is (= ["cubicBezier" [0 0 0.58 1]]
+                    ((juxt #(get % "$type") #(get % "$value")) (get-in exported ["motion" "ease" "out"]))))
+           (doseq [token-name ["motion.fast" "motion.slow" "ease.out" "ease.std"]]
+             (t/is (= ((juxt :type :value) (token lib token-name))
+                      ((juxt :type :value) (token again token-name)))
+                   token-name)))))))
+
+#?(:clj
    (t/deftest parse-multi-set-legacy-json
      (let [json (-> (slurp "test/common_tests/types/data/tokens-multi-set-legacy-example.json")
                     (json/decode {:key-fn identity}))
