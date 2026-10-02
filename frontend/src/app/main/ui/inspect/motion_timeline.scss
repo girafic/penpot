@@ -1,0 +1,167 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS SUBSIDIARY SL
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+}
+
+.board {
+  border-radius: deprecated.$br-8;
+  background-color: var(--color-background-tertiary);
+  padding: var(--sp-s);
+}
+
+.board-head {
+  @include deprecated.body-small-typography;
+
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-s);
+  cursor: pointer;
+  color: var(--color-foreground-primary);
+}
+
+.board-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-clock {
+  flex-shrink: 0;
+  color: var(--color-foreground-secondary);
+}
+
+.markers {
+  position: relative;
+  block-size: var(--sp-s);
+  margin-block-start: var(--sp-xs);
+  margin-inline: calc(40% + var(--sp-xs)) var(--sp-xs);
+}
+
+.marker {
+  position: absolute;
+  inset-block: 0;
+  inline-size: deprecated.$s-2;
+  border-radius: deprecated.$br-2;
+  background-color: var(--color-accent-tertiary);
+  transform: translateX(-50%);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: deprecated.$s-2;
+  margin: var(--sp-xs) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  @include deprecated.body-small-typography;
+
+  display: grid;
+  grid-template-columns: 40% 60%;
+  align-items: center;
+  min-block-size: deprecated.$s-24;
+}
+
+.row-name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-inline-size: 0;
+  padding-inline-end: var(--sp-xs);
+  color: var(--color-foreground-primary);
+}
+
+.row-icon {
+  flex-shrink: 0;
+  color: var(--color-foreground-secondary);
+}
+
+.row-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  flex-shrink: 0;
+  border-radius: deprecated.$br-4;
+  padding: 0 var(--sp-xs);
+  background-color: var(--color-background-quaternary);
+  color: var(--color-foreground-secondary);
+}
+
+// Diamonds at the start and the end of the axis show whole.
+.lane {
+  position: relative;
+  block-size: deprecated.$s-16;
+  margin-inline: var(--sp-xs);
+  border-radius: deprecated.$br-4;
+  background-color: var(--color-background-primary);
+}
+
+.past {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  background-color: var(--color-background-quaternary);
+  opacity: 0.6;
+}
+
+.block,
+.clip {
+  @include deprecated.body-small-typography;
+
+  position: absolute;
+  inset-block: deprecated.$s-2;
+  overflow: hidden;
+  border-radius: deprecated.$br-4;
+  padding-inline: var(--sp-xs);
+  font-size: deprecated.$fs-11;
+  line-height: deprecated.$s-12;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.block {
+  background-color: var(--color-accent-primary-muted);
+  color: var(--color-foreground-primary);
+}
+
+.clip {
+  background-color: var(--color-background-quaternary);
+  color: var(--color-foreground-primary);
+}
+
+.copy-bar {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: deprecated.$s-2;
+  border-block-end: deprecated.$s-1 dashed var(--color-accent-tertiary);
+}
+
+.diamond {
+  position: absolute;
+  inset-block-start: 50%;
+  inline-size: deprecated.$s-8;
+  block-size: deprecated.$s-8;
+  background-color: var(--color-accent-primary);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.group {
+  @include deprecated.body-small-typography;
+
+  margin-block-start: var(--sp-xs);
+  color: var(--color-foreground-secondary);
+}

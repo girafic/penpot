@@ -2596,6 +2596,15 @@ msgstr "Select a shape, board or group to inspect their properties and code"
 msgid "inspect.layer-info"
 msgstr "Layer info"
 
+msgid "inspect.motion.copy-clock"
+msgstr "From its main: %s ms, %s"
+
+msgid "inspect.motion.empty"
+msgstr "Nothing animates in this selection."
+
+msgid "inspect.motion.row-label"
+msgstr "%s: keyframes at %s ms"
+
 #: src/app/main/ui/inspect/right_sidebar.cljs:136
 msgid "inspect.multiple-selected"
 msgstr "%s Selected"
@@ -2656,6 +2665,9 @@ msgstr "SVG"
 #: src/app/main/ui/inspect/right_sidebar.cljs:152
 msgid "inspect.tabs.code.selected.text"
 msgstr "Text"
+
+msgid "inspect.tabs.motion"
+msgstr "Motion"
 
 #: src/app/main/ui/inspect/styles/panels/tokens_panel.cljs:26
 msgid "inspect.tabs.styles.active-sets"

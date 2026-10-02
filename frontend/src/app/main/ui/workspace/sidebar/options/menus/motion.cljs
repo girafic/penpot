@@ -35,6 +35,7 @@
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
+   [app.util.motion-labels :as labels]
    [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
@@ -163,15 +164,10 @@
     :pop-letters   (tr "workspace.animation.preset.pop-letters")
     (name preset)))
 
-(defn- split-label
-  "The name of the units a split animation of `kind` plays, the whole
-  layer for nil."
-  [kind]
-  (case kind
-    :char (tr "workspace.animation.split.char")
-    :word (tr "workspace.animation.split.word")
-    :line (tr "workspace.animation.split.line")
-    (tr "workspace.animation.split.layer")))
+(def ^:private split-label
+  "The name of the units a split animation of a kind plays (see
+  `labels/split-label`)."
+  labels/split-label)
 
 (defn- order-label
   [order]
@@ -182,23 +178,10 @@
     :random   (tr "workspace.animation.order.random")
     (tr "workspace.animation.order.forward")))
 
-(defn animation-label
-  "Name of a preset animation, with the units it plays one by one when it
-  splits a text (\"Fade in · Words\"), or of the style a style use plays,
-  as the sidebar and the timeline show it."
-  [{:keys [type direction split] :as animation}]
-  (let [out?  (= direction :out)
-        label (case type
-                :style  (:name animation)
-                :fade   (if out? (tr "workspace.animation.fade-out") (tr "workspace.animation.fade-in"))
-                :move   (if out? (tr "workspace.animation.move-out") (tr "workspace.animation.move-in"))
-                :scale  (if out? (tr "workspace.animation.scale-out") (tr "workspace.animation.scale-in"))
-                :rotate (if out? (tr "workspace.animation.rotate-out") (tr "workspace.animation.rotate-in"))
-                :blur   (if out? (tr "workspace.animation.blur-out") (tr "workspace.animation.blur-in"))
-                (name type))]
-    (if (and (some? split) (not= :style type))
-      (tr "workspace.animation.label.split" label (split-label split))
-      label)))
+(def animation-label
+  "Name of a preset animation or of the style a style use plays (see
+  `labels/animation-label`, which the Inspect shares)."
+  labels/animation-label)
 
 (def ^:private noop
   (constantly nil))

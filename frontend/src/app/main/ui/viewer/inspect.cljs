@@ -46,7 +46,7 @@
         current-section* (mf/use-state :info)
         current-section  (deref current-section*)
 
-        can-be-expanded? (= current-section :code)
+        can-be-expanded? (contains? #{:code :motion} current-section)
 
         on-mouse-wheel
         (fn [event]

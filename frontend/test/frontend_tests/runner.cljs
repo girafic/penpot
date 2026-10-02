@@ -104,6 +104,7 @@
    [frontend-tests.ui.dynamic-modifiers-test]
    [frontend-tests.ui.exports-menu-test]
    [frontend-tests.ui.gradient-handlers-test]
+   [frontend-tests.ui.inspect-motion-test]
    [frontend-tests.ui.layout-container-multiple-test]
    [frontend-tests.ui.measures-menu-props-test]
    [frontend-tests.ui.motion-split-test]
@@ -235,6 +236,7 @@
    'frontend-tests.ui.dynamic-modifiers-test
    'frontend-tests.ui.exports-menu-test
    'frontend-tests.ui.gradient-handlers-test
+   'frontend-tests.ui.inspect-motion-test
    'frontend-tests.ui.layout-container-multiple-test
    'frontend-tests.ui.measures-menu-props-test
    'frontend-tests.ui.motion-split-test

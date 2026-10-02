@@ -11,10 +11,10 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
-   [app.common.types.animation :as cta]
    [app.common.types.shape-tree :as ctst]
    [app.config :as cfg]
    [app.main.data.event :as ev]
+   [app.main.features :as features]
    [app.main.fonts :as fonts]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -23,11 +23,12 @@
    [app.main.ui.components.radio-buttons :refer [radio-button radio-buttons]]
    [app.main.ui.hooks.resize :refer [use-resize-hook]]
    [app.main.ui.icons :as deprecated-icon]
+   [app.main.ui.inspect.motion :as motion]
    [app.main.ui.shapes.text.fontfaces :refer [shapes->fonts]]
    [app.util.clipboard :as clipboard]
    [app.util.code-beautify :as cb]
    [app.util.code-gen :as cg]
-   [app.util.code-gen.common :as cgc]
+   [app.util.code-gen.motion :as cgm]
    [app.util.dom :as dom]
    [app.util.http :as http]
    [beicon.v2.core :as rx]
@@ -64,29 +65,6 @@
         objects))
     st/state =)))
 
-(defn- use-timelines
-  "The animation timelines of the page `page-id`, by board."
-  [from page-id]
-  (let [timelines-ref
-        (mf/with-memo [from page-id]
-          (if (= from :workspace)
-            (l/derived :timelines refs/workspace-page)
-            (l/derived #(dm/get-in % [:viewer :pages page-id :timelines]) st/state =)))]
-    (mf/deref timelines-ref)))
-
-(defn- animation-css
-  "CSS animating the shapes of `ids`, with the selectors of the code of
-  the shapes, from the timelines of their boards."
-  [timelines objects ids]
-  (let [boards (into #{} (keep #(cfh/get-shape-id-root-frame objects %)) ids)]
-    (->> boards
-         (keep #(get timelines %))
-         (map #(cta/timeline->css % objects {:ids ids
-                                             :selector (fn [shape]
-                                                         (dm/str "." (cgc/shape->selector shape)))}))
-         (remove str/blank?)
-         (str/join "\n\n"))))
-
 (defn- use-objects [from page-id]
   (let [page-objects-ref
         (mf/with-memo [from page-id]
@@ -122,7 +100,7 @@
     (str/format page-template style-code markup-code)))
 
 (mf/defc code*
-  [{:keys [shapes frame on-expand from page-id]}]
+  [{:keys [shapes frame on-expand from page-id libraries]}]
   (let [style-type*    (mf/use-state "css")
         markup-type*   (mf/use-state "html")
         fontfaces-css* (mf/use-state nil)
@@ -140,7 +118,8 @@
         collapsed-markup? (contains? @collapsed* :markup)
 
         objects        (use-objects from page-id)
-        timelines      (use-timelines from page-id)
+        motion?        (features/use-feature "animation/v1")
+        page           (motion/use-motion-page from page-id objects)
 
         shapes
         (mf/with-memo [shapes frame]
@@ -164,23 +143,29 @@
         (mf/with-memo [all-children]
           (shapes->images all-children))
 
-        ;; The animation of the shapes, with the same selectors, so it
-        ;; plays in the copied code.
+        ;; The animation of the shapes (Penpot Motion), with the same
+        ;; selectors, so it plays in the copied code.
         anim-code
-        (mf/with-memo [timelines objects all-children]
-          (when (seq timelines)
-            (animation-css timelines objects (into #{} (map :id) all-children))))
+        (mf/with-memo [motion? page libraries all-children]
+          (when motion?
+            (cgm/animation-css page libraries (into #{} (map :id) all-children))))
 
         style-code
         (mf/use-memo
-         (mf/deps fontfaces-css style-type shapes all-children anim-code cg/generate-style-code)
+         (mf/deps fontfaces-css style-type shapes all-children cg/generate-style-code)
          (fn []
            (dm/str
             fontfaces-css "\n"
             (-> (cg/generate-style-code objects style-type shapes all-children)
-                (cb/format-code style-type))
-            (when-not (str/blank? anim-code)
-              (dm/str "\n\n/* Animation */\n" anim-code)))))
+                (cb/format-code style-type)))))
+
+        ;; The style code with the animation, which the Motion tab shows,
+        ;; so the copied page plays it.
+        all-style-code
+        (mf/with-memo [style-code anim-code]
+          (cond-> style-code
+            (not (str/blank? anim-code))
+            (dm/str "\n\n/* Animation */\n" anim-code)))
 
         markup-code
         (mf/use-memo
@@ -237,9 +222,9 @@
 
         handle-copy-all-code
         (mf/use-fn
-         (mf/deps style-code markup-code images-data fonts-data)
+         (mf/deps all-style-code markup-code images-data fonts-data)
          (fn []
-           (clipboard/to-clipboard (gen-all-code style-code markup-code images-data fonts-data))
+           (clipboard/to-clipboard (gen-all-code all-style-code markup-code images-data fonts-data))
            (let [origin (if (= :workspace from)
                           "workspace"
                           "viewer")]

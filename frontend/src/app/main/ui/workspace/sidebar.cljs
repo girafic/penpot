@@ -288,7 +288,7 @@
         (and (not is-comments?)
              (not is-history?)
              is-inspect?
-             (= current-section :code))
+             (contains? #{:code :motion} current-section))
 
         {on-pointer-down :on-pointer-down
          on-lost-pointer-capture :on-lost-pointer-capture

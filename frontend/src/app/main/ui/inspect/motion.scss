@@ -1,0 +1,128 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS SUBSIDIARY SL
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+.motion-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+  height: calc(100vh - #{deprecated.$s-160}); // as the code tab
+  overflow-y: auto;
+  padding-inline: var(--sp-m);
+  padding-block-end: var(--sp-l);
+}
+
+.viewer {
+  height: calc(100vh - #{deprecated.$s-108});
+}
+
+.empty {
+  padding-block: var(--sp-xl);
+}
+
+.code-block {
+  @include deprecated.code-typography;
+
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 deprecated.$s-4 deprecated.$s-8 0;
+
+  pre {
+    border-radius: deprecated.$br-8;
+    padding: deprecated.$s-16;
+    overflow: auto;
+    height: 100%;
+  }
+
+  // Overrides background setted in the theme
+  :global(.hljs) {
+    background: var(--color-background-tertiary);
+  }
+}
+
+.code-row-lang {
+  display: grid;
+  grid-template-columns: deprecated.$s-12 1fr deprecated.$s-60;
+  gap: deprecated.$s-4;
+  width: 100%;
+}
+
+.code-lang-options {
+  max-width: deprecated.$s-108;
+}
+
+.action-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: deprecated.$s-4;
+}
+
+.expand-button,
+.copy-btn {
+  @extend %button-tertiary;
+
+  height: deprecated.$s-32;
+  width: deprecated.$s-28;
+
+  svg {
+    @extend %button-icon;
+
+    stroke: var(--icon-foreground);
+  }
+}
+
+.code-row-display {
+  max-block-size: var(--code-height);
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: deprecated.$s-8;
+}
+
+.resize-area {
+  block-size: var(--sp-xs);
+  cursor: ns-resize;
+}
+
+.toggle-btn {
+  @include deprecated.button-style;
+
+  display: flex;
+  align-items: center;
+  padding: 0;
+  color: var(--title-foreground-color);
+  stroke: var(--title-foreground-color);
+
+  .collapsabled-icon {
+    @include deprecated.flex-center;
+
+    height: deprecated.$s-24;
+    border-radius: deprecated.$br-8;
+
+    svg {
+      @extend %button-icon-small;
+
+      transform: rotate(90deg);
+      stroke: var(--icon-foreground);
+    }
+
+    &.rotated svg {
+      transform: rotate(0deg);
+    }
+  }
+
+  &:hover .collapsabled-icon svg {
+    stroke: var(--title-foreground-color-hover);
+  }
+}
+
+.note {
+  @include deprecated.body-small-typography;
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}

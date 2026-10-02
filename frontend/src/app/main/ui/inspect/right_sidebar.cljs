@@ -10,6 +10,7 @@
    [app.common.types.component :as ctk]
    [app.config :as cf]
    [app.main.data.event :as ev]
+   [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.ds.buttons.button :refer [button*]]
@@ -19,6 +20,7 @@
    [app.main.ui.ds.product.empty-state :refer [empty-state*]]
    [app.main.ui.inspect.attributes :refer [attributes*]]
    [app.main.ui.inspect.code :refer [code*]]
+   [app.main.ui.inspect.motion :refer [motion-tab*]]
    [app.main.ui.inspect.selection-feedback :refer [resolve-shapes]]
    [app.main.ui.inspect.styles :refer [styles-tab*]]
    [app.util.dom :as dom]
@@ -55,6 +57,7 @@
 
         libraries      (get-libraries from)
         main-instance? (ctk/main-instance? first-shape)
+        motion?        (features/use-feature "animation/v1")
 
         subtitle       (cond
                          (or
@@ -102,20 +105,24 @@
             :id "hsla"}])
 
         tabs
-        (mf/with-memo []
-          (if (contains? cf/flags :inspect-styles)
-            [{:label (tr "labels.styles")
-              :id "styles"}
-             {:label (tr "labels.computed")
-              :id "computed"}
-             {:label (tr "labels.code")
-              :data-testid "code"
-              :id "code"}]
-            [{:label (tr "labels.info")
-              :id "info"}
-             {:label (tr "labels.code")
-              :data-testid "code"
-              :id "code"}]))]
+        (mf/with-memo [motion?]
+          (cond-> (if (contains? cf/flags :inspect-styles)
+                    [{:label (tr "labels.styles")
+                      :id "styles"}
+                     {:label (tr "labels.computed")
+                      :id "computed"}
+                     {:label (tr "labels.code")
+                      :data-testid "code"
+                      :id "code"}]
+                    [{:label (tr "labels.info")
+                      :id "info"}
+                     {:label (tr "labels.code")
+                      :data-testid "code"
+                      :id "code"}])
+            ;; Penpot Motion: the animation of the selection
+            motion? (conj {:label (tr "inspect.tabs.motion")
+                           :data-testid "motion"
+                           :id "motion"})))]
 
     (mf/use-effect
      (mf/deps shapes handle-change-tab)
@@ -206,7 +213,17 @@
                          :shapes shapes
                          :on-expand handle-expand
                          :from from
-                         :page-id page-id}])]
+                         :page-id page-id
+                         :libraries libraries}]
+
+              :motion
+              (when motion?
+                [:> motion-tab* {:shapes shapes
+                                 :objects objects
+                                 :page-id page-id
+                                 :libraries libraries
+                                 :from from
+                                 :on-expand handle-expand}]))]
            [:> tab-switcher* {:tabs tabs
                               :selected (name @section)
                               :on-change handle-change-tab
@@ -227,7 +244,17 @@
                          :shapes shapes
                          :on-expand handle-expand
                          :from from
-                         :page-id page-id}])])]]
+                         :page-id page-id
+                         :libraries libraries}]
+
+              :motion
+              (when motion?
+                [:> motion-tab* {:shapes shapes
+                                 :objects objects
+                                 :page-id page-id
+                                 :libraries libraries
+                                 :from from
+                                 :on-expand handle-expand}]))])]]
 
        [:*
         [:div {:class (stl/css :empty)}
