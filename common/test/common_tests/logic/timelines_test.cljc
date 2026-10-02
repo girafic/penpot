@@ -1038,3 +1038,50 @@
     (t/is (= [1000 :loop] ((juxt :duration cta/playback-mode)
                            (cltl/with-copies-clock (dissoc own :audio-clips) copies false)))
           "without them, the clock of its copies")))
+
+;; CODE
+
+(t/deftest code-timelines-of-a-board-with-its-own-tracks
+  (let [file (component-file)
+        page (thf/current-page file)
+        main (thi/id :main)
+        code (cltl/code-timelines page {(:id file) file} main)]
+    (t/is (= main (:board-id code)))
+    (t/is (= (get-in page [:timelines main]) (:timeline code)) "its stored timeline")
+    (t/is (= [] (:copies code)))
+    (t/is (= {} (:splits code)))))
+
+(t/deftest code-timelines-play-the-copies-on-their-own-clock
+  (let [file  (component-file)
+        page  (thf/current-page file)
+        board (thi/id :board-b)
+        code  (cltl/code-timelines page {(:id file) file} board)
+        [entry :as copies] (:copies code)]
+    (t/is (= [1000 :loop] ((juxt :duration :playback) (:timeline code)))
+          "a board without tracks keeps time with its copy")
+    (t/is (= (get-in page [:objects board :name]) (:name (:timeline code))))
+    (t/is (= 1 (count copies)))
+    (t/is (= (thi/id :copy) (:head-id entry)))
+    (t/is (= [board 1000 :loop] ((juxt :board-id :duration :playback) (:timeline entry)))
+          "the clock of its main, in the board")))
+
+(t/deftest code-timelines-of-a-board-that-plays-nothing
+  (let [file (-> (component-file)
+                 (tho/add-frame :board-c :x 2000 :y 0 :width 100 :height 100))]
+    (t/is (nil? (cltl/code-timelines (thf/current-page file) {(:id file) file} (thi/id :board-c))))))
+
+(t/deftest code-timelines-play-split-text-whole
+  (let [file  (-> (thf/sample-file :file1)
+                  (tho/add-frame :board :x 0 :y 0 :width 400 :height 300)
+                  (tho/add-text :title "Hi you there" :text-params {:parent-label :board}))
+        board (thi/id :board)
+        title (thi/id :title)
+        tl    (cta/add-animation (cta/make-timeline {:board-id board :duration 1000})
+                                 title {:type :fade :split :word})
+        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page (thf/current-page file))
+                                          (pcb/set-timeline board tl)))
+        code  (cltl/code-timelines (thf/current-page file) {} board)]
+    (t/is (= {title :word} (:splits code)) "the design plays it by words")
+    (t/is (not-any? :split (get-in code [:timeline :tracks title :animations]))
+          "the code plays it whole")))

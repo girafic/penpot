@@ -1399,6 +1399,23 @@
     (>= t 1.0) 1.0
     :else      (- 1.0 (spring-displacement spring (* t (settle-time spring))))))
 
+(defn spring-free-progress
+  "Progress of `spring` played as it is, not stretched, `seconds` after it
+  starts: as a physics engine plays it."
+  [spring seconds]
+  (- 1.0 (spring-displacement spring seconds)))
+
+(defn spring-over
+  "The spring that, played as it is, moves in `duration-ms` as `spring`
+  stretched over a segment that long does (see `spring-progress`): its
+  stiffness times (T/L)² and its damping times T/L, T being its settle
+  time and L the segment, in seconds; its mass as it is."
+  [spring duration-ms]
+  (let [scale (/ (settle-time spring) (/ (max 1 duration-ms) 1000.0))]
+    (assoc spring
+           :stiffness (* (double (:stiffness spring)) scale scale)
+           :damping (* (double (:damping spring)) scale))))
+
 ;; Stretched to the segment, a spring only keeps the shape its damping
 ;; ratio gives, so like Figma it is edited as one value: the bounce, 1
 ;; minus the damping ratio (0 settles without overshooting, towards 1 it
@@ -2934,6 +2951,13 @@
       (str (long r))
       (str r))))
 
+(defn format-number
+  "A number as the code of an animation writes it (see `timeline->css`):
+  rounded to 3 decimals, a whole one without a trailing `.0`, the same on
+  the JVM and in JS."
+  [v]
+  (fmt v))
+
 (defn origin-css
   "CSS `transform-origin` value for a normalized `{ :x :y }` origin."
   [origin]
@@ -2993,64 +3017,112 @@
        (css-color (get-in shadow [:color :color])
                   (get-in shadow [:color :opacity]))))
 
-(defn- values->declarations
-  "Build the CSS declarations (transform, opacity, fill, stroke, shadow,
-  blur) for `shape` given the interpolated `values` at one keyframe stop."
+(def ^:private css-transform-properties
+  "The properties the CSS of an animation plays through `transform`."
+  #{:x :y :width :height :scale-x :scale-y :rotation})
+
+(defn frame-values
+  "What `shape` shows at one frame of its animation, `values` (its
+  values then, see `values-at`), as CSS plays it: `:translate-x`,
+  `:translate-y` (px), `:rotate` (degrees) and `:scale-x`, `:scale-y`, all
+  from its rest pose, when its position, size, scale or rotation plays;
+  then, for the properties `values` holds, `:opacity`, `:border-radius`
+  (the four corners in px), `:background-color` and `:border-color` (CSS
+  colours of the first solid fill and stroke), `:border-width` (px),
+  `:box-shadow` (the CSS of its visible shadows), `:blur` and
+  `:backdrop-blur` (px). `origin` is where its positions count from (see
+  `position-origin`)."
   [shape values origin]
   (let [selrect (:selrect shape)
         base-x  (:x selrect)
         base-y  (:y selrect)
         base-r  (or (:rotation shape) 0)
-        dx      (if (contains? values :x) (- (+ (:x origin) (:x values)) base-x) 0)
-        dy      (if (contains? values :y) (- (+ (:y origin) (:y values)) base-y) 0)
-        sx      (axis-scale (or (:width selrect) 0) values :width :scale-x)
-        sy      (axis-scale (or (:height selrect) 0) values :height :scale-y)
-        rot     (- (get values :rotation base-r) base-r)
-        transform (str "translate(" (fmt dx) "px, " (fmt dy) "px) "
-                       "rotate(" (fmt rot) "deg) "
-                       "scale(" (fmt sx) ", " (fmt sy) ")")
         fills   (apply-fills (:fills shape) values)
         strokes (apply-strokes (:strokes shape) values)
         shadows (apply-shadows (:shadow shape) values)
         fill    (d/seek solid-color-fill? fills)
-        stroke  (d/seek solid-color-stroke? strokes)
-        decls   [(str "transform: " transform ";")]]
-    (cond-> decls
+        stroke  (d/seek solid-color-stroke? strokes)]
+    (cond-> {}
+      (some #(contains? values %) css-transform-properties)
+      (assoc :translate-x (if (contains? values :x) (- (+ (:x origin) (:x values)) base-x) 0)
+             :translate-y (if (contains? values :y) (- (+ (:y origin) (:y values)) base-y) 0)
+             :rotate      (- (get values :rotation base-r) base-r)
+             :scale-x     (axis-scale (or (:width selrect) 0) values :width :scale-x)
+             :scale-y     (axis-scale (or (:height selrect) 0) values :height :scale-y))
+
       (contains? values :opacity)
-      (conj (str "opacity: " (fmt (:opacity values)) ";"))
+      (assoc :opacity (:opacity values))
 
       (has? values :r1 :r2 :r3 :r4)
-      (conj (str "border-radius: "
-                 (fmt (get values :r1 (:r1 shape))) "px "
-                 (fmt (get values :r2 (:r2 shape))) "px "
-                 (fmt (get values :r3 (:r3 shape))) "px "
-                 (fmt (get values :r4 (:r4 shape))) "px;"))
+      (assoc :border-radius [(get values :r1 (:r1 shape)) (get values :r2 (:r2 shape))
+                             (get values :r3 (:r3 shape)) (get values :r4 (:r4 shape))])
 
       (and fill (has? values :fill-color :fill-opacity))
-      (conj (str "background-color: "
-                 (css-color (:fill-color fill) (or (:fill-opacity fill) 1)) ";"))
+      (assoc :background-color (css-color (:fill-color fill) (or (:fill-opacity fill) 1)))
 
       (and stroke (has? values :stroke-color :stroke-opacity))
-      (conj (str "border-color: "
-                 (css-color (:stroke-color stroke) (or (:stroke-opacity stroke) 1)) ";"))
+      (assoc :border-color (css-color (:stroke-color stroke) (or (:stroke-opacity stroke) 1)))
 
       (and stroke (contains? values :stroke-width))
-      (conj (str "border-width: " (fmt (or (:stroke-width stroke) 0)) "px;"))
+      (assoc :border-width (or (:stroke-width stroke) 0))
 
       (has? values :shadow-offset-x :shadow-offset-y :shadow-blur
             :shadow-spread :shadow-color :shadow-opacity)
-      (conj (str "box-shadow: "
-                 (->> shadows
-                      (remove :hidden)
-                      (map css-box-shadow)
-                      (str/join ", "))
-                 ";"))
+      (assoc :box-shadow (->> shadows
+                              (remove :hidden)
+                              (map css-box-shadow)
+                              (str/join ", ")))
 
       (contains? values :blur)
-      (conj (str "filter: blur(" (fmt (:blur values)) "px);"))
+      (assoc :blur (:blur values))
 
       (contains? values :background-blur)
-      (conj (str "backdrop-filter: blur(" (fmt (:background-blur values)) "px);")))))
+      (assoc :backdrop-blur (:background-blur values)))))
+
+(defn- values->declarations
+  "Build the CSS declarations (transform, opacity, fill, stroke, shadow,
+  blur) for `shape` given the interpolated `values` at one keyframe stop
+  (see `frame-values`). A `transform` only when the position, size, scale
+  or rotation of the shape plays, as it replaces the one the shape has at
+  rest: with `rest-transform`, that one of the code it plays in, kept
+  between its turn and its scale."
+  [shape values origin rest-transform]
+  (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity border-radius
+                background-color border-color border-width box-shadow blur backdrop-blur]
+         :as frame}
+        (frame-values shape values origin)]
+    (cond-> []
+      (contains? frame :translate-x)
+      (conj (str "transform: translate(" (fmt translate-x) "px, " (fmt translate-y) "px) "
+                 "rotate(" (fmt rotate) "deg) "
+                 (when-not (str/blank? rest-transform)
+                   (str rest-transform " "))
+                 "scale(" (fmt scale-x) ", " (fmt scale-y) ");"))
+
+      (contains? frame :opacity)
+      (conj (str "opacity: " (fmt opacity) ";"))
+
+      (contains? frame :border-radius)
+      (conj (str "border-radius: "
+                 (str/join " " (map #(str (fmt %) "px") border-radius)) ";"))
+
+      (contains? frame :background-color)
+      (conj (str "background-color: " background-color ";"))
+
+      (contains? frame :border-color)
+      (conj (str "border-color: " border-color ";"))
+
+      (contains? frame :border-width)
+      (conj (str "border-width: " (fmt border-width) "px;"))
+
+      (contains? frame :box-shadow)
+      (conj (str "box-shadow: " box-shadow ";"))
+
+      (contains? frame :blur)
+      (conj (str "filter: blur(" (fmt blur) "px);"))
+
+      (contains? frame :backdrop-blur)
+      (conj (str "backdrop-filter: blur(" (fmt backdrop-blur) "px);")))))
 
 (defn- keyframe-timing
   "The CSS timing function of the segment starting at `keyframe`, or nil
@@ -3061,7 +3133,7 @@
     (some? (:easing keyframe))          (easing->css (:easing keyframe))))
 
 (defn- track->keyframes-css
-  [timeline shape track kf-name origin]
+  [timeline shape track kf-name origin rest-transform]
   (let [duration (max 1 (:duration timeline))
         sid      (:shape-id track)
         kfs      (:keyframes track)
@@ -3075,7 +3147,7 @@
                    (let [values     (get (values-at timeline t) sid {})
                          pct        (fmt (* 100.0 (/ (double t) duration)))
                          seg-timing (some #(when (= (:time %) t) (keyframe-timing %)) kfs)
-                         decls      (cond-> (values->declarations shape values origin)
+                         decls      (cond-> (values->declarations shape values origin rest-transform)
                                       (and seg-timing (< t duration))
                                       (conj (str "animation-timing-function: " seg-timing ";")))]
                      (str "  " pct "% { " (str/join " " decls) " }")))]
@@ -3088,12 +3160,14 @@
   for, the shapes stay as designed. Split animations play as animations
   of the whole text (see `flatten-splits`). Options: `:ids`, the shapes to write
   (all by default), `:selector`, the CSS selector of a shape
-  (`shape-css-class` by default), and `:origin`, the `transform-origin`
+  (`shape-css-class` by default), `:origin`, the `transform-origin`
   of a shape and its track (`origin-css` of the track origin, a share of
-  the shape's box, by default)."
+  the shape's box, by default), and `:transform`, the `transform` a shape
+  has at rest in the code its animation plays in (none by default), which
+  the animation keeps."
   ([timeline objects]
    (timeline->css timeline objects nil))
-  ([timeline objects {:keys [ids selector origin]}]
+  ([timeline objects {:keys [ids selector origin transform]}]
    (let [timeline (-> timeline flatten-splits (resolve-animations objects) expand-loops expand-paths)
          duration (max 1 (:duration timeline))
          iter     (case (playback-mode timeline)
@@ -3112,7 +3186,8 @@
                                     [selector
                                      (str comment "\n"
                                           (track->keyframes-css timeline shape track kf-name
-                                                                (position-origin timeline objects sid)) "\n\n"
+                                                                (position-origin timeline objects sid)
+                                                                (when transform (transform shape))) "\n\n"
                                           selector " {\n  animation: " kf-name " "
                                           duration "ms linear " iter ";\n"
                                           "  transform-origin: "

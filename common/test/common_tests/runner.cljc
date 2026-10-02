@@ -77,6 +77,7 @@
    [common-tests.text-test]
    [common-tests.time-test]
    [common-tests.types.absorb-assets-test]
+   [common-tests.types.animation-code-test]
    [common-tests.types.animation-style-test]
    [common-tests.types.animation-test]
    [common-tests.types.audio-clip-test]
@@ -164,6 +165,7 @@
    'common-tests.text-test
    'common-tests.time-test
    'common-tests.types.absorb-assets-test
+   'common-tests.types.animation-code-test
    'common-tests.types.animation-style-test
    'common-tests.types.animation-test
    'common-tests.types.audio-clip-test

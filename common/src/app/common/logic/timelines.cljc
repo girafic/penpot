@@ -481,6 +481,60 @@
    timeline
    copies))
 
+(defn layer-ids
+  "The ids of `id` and the layers in it, in the order of the layers panel
+  and the dock: the shape, then its layers top-most first, depth first."
+  [objects id]
+  (letfn [(walk [id]
+            (when (contains? objects id)
+              (cons id (mapcat walk (rseq (vec (dm/get-in objects [id :shapes])))))))]
+    (walk id)))
+
+(defn- split-kinds
+  "`{text-id kind}`: the kind of units each text of the tracks of
+  `timelines` plays its split animations by (see `cta/unit-split-kind`)."
+  [timelines objects]
+  (reduce (fn [splits timeline]
+            (reduce-kv (fn [splits id track]
+                         (if-let [kind (cta/unit-split-kind (get objects id) (cta/track-animations track))]
+                           (assoc splits id kind)
+                           splits))
+                       splits
+                       (:tracks timeline)))
+          {}
+          timelines))
+
+(defn code-timelines
+  "What the code of the animation of the board `board-id` of `page`
+  shows (the Inspect, the plugin API; `files` holds the files of the
+  components, by id): `:timeline`, its own timeline (a new one named after
+  it while it has none), keeping time with the animated component copies
+  in it while it has no tracks (see `with-copies-clock`); `:copies`, the
+  timelines of those copies (`{:head-id :timeline}`, in layer order),
+  each on its own clock, as the workspace and the view mode play them;
+  the split animations of both played whole (see `cta/flatten-splits`);
+  and `:splits`, the texts the design plays by units, with their kind.
+  Nil when the board plays nothing."
+  [page files board-id]
+  (let [objects   (:objects page)
+        timelines (:timelines page)
+        stored    (get timelines board-id)
+        copies    (copy-timelines objects timelines files board-id)]
+    (when (or (some? stored) (seq copies))
+      (let [own    (or stored (cta/make-timeline {:board-id board-id
+                                                  :name (dm/get-in objects [board-id :name])}))
+            order  (into {} (map-indexed (fn [index id] [id index])) (layer-ids objects board-id))
+            copies (->> copies
+                        (sort-by (fn [[[_ head-id] _]] (get order head-id 0)))
+                        (mapv (fn [[[_ head-id] timeline]] {:head-id head-id :timeline timeline})))
+            splits (split-kinds (cons own (map :timeline copies)) objects)
+            copies (mapv #(update % :timeline cta/flatten-splits) copies)]
+        {:board-id board-id
+         :timeline (-> (cta/flatten-splits own)
+                       (with-copies-clock (map :timeline copies) (some? stored)))
+         :copies   copies
+         :splits   splits}))))
+
 (defn animation-tree
   "The modif-tree showing the animations of `timelines` (by board) at
   `time`: every board as it plays then (see `cta/playback-time`)."

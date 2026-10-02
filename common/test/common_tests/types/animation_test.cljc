@@ -206,6 +206,49 @@
     (t/testing "with reduced motion, the shape stays as designed"
       (t/is (re-find #"@media \(prefers-reduced-motion: reduce\) \{\s+\.penpot-shape-\S+ \{\s+animation: none;" css)))))
 
+(t/deftest timeline->css-keeps-the-rest-transform
+  (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
+        sid   (:id shape)
+        fade  (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :opacity :value 0})
+                  (cta/add-keyframe sid {:time 1000 :property :opacity :value 1}))
+        move  (-> fade
+                  (cta/add-keyframe sid {:time 0 :property :x :value 0})
+                  (cta/add-keyframe sid {:time 1000 :property :x :value 100}))
+        rest  {:transform (constantly "matrix(0.866, 0.5, -0.5, 0.866, 0, 0)")}]
+    (t/is (not (str/includes? (cta/timeline->css fade {sid shape} rest) "transform:"))
+          "a fade leaves the transform of the shape at rest alone")
+    (t/is (str/includes? (cta/timeline->css move {sid shape} rest)
+                         "transform: translate(100px, 0px) rotate(0deg) matrix(0.866, 0.5, -0.5, 0.866, 0, 0) scale(1, 1);")
+          "a move plays on top of it")
+    (t/is (str/includes? (cta/timeline->css move {sid shape})
+                         "transform: translate(100px, 0px) rotate(0deg) scale(1, 1);")
+          "without one, as before")))
+
+(t/deftest frame-values-are-what-css-plays
+  (let [shape  (cts/setup-shape {:type :rect :x 10 :y 20 :width 100 :height 50})
+        origin {:x 0 :y 0}]
+    (t/is (= {:opacity 0.5} (cta/frame-values shape {:opacity 0.5} origin))
+          "no transform while none of its properties plays")
+    (let [{:keys [translate-x translate-y rotate scale-x scale-y]}
+          (cta/frame-values shape {:x 40 :width 200} origin)]
+      (t/is (== 30 translate-x))
+      (t/is (== 0 translate-y))
+      (t/is (== 0 rotate))
+      (t/is (== 2 scale-x))
+      (t/is (== 1 scale-y)))))
+
+(t/deftest a-spring-over-a-segment-moves-as-the-stretched-one
+  (doseq [{:keys [easing]} cta/spring-presets
+          share [0.25 0.5 0.75]]
+    (let [length 400
+          spring (cta/spring-over easing length)]
+      (t/is (< (mth/abs (- (cta/spring-free-progress spring (* share (/ length 1000.0)))
+                           (cta/spring-progress easing share)))
+               1e-6)
+            (str (:stiffness easing) "/" (:damping easing) " at " share))
+      (t/is (= (:mass easing) (:mass spring)) "its mass as it is"))))
+
 (t/deftest timeline->css-stops-at-the-end
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
         sid   (:id shape)
