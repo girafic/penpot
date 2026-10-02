@@ -252,7 +252,7 @@
    (set-plugin-data file-id type id nil namespace key value))
 
   ([file-id type id page-id namespace key value]
-   (dm/assert! (contains? #{:file :page :shape :color :typography :component} type))
+   (dm/assert! (contains? #{:file :page :shape :color :typography :component :animation-style} type))
    (dm/assert! (or (nil? id) (uuid? id)))
    (dm/assert! (or (nil? page-id) (uuid? page-id)))
    (dm/assert! (uuid? file-id))

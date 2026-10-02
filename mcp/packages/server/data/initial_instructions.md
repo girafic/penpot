@@ -464,6 +464,29 @@ its own clock (the duration and playback of its main). `board.animatedCopies` li
 (`{copy, duration, playback: "once" | "loop"}`); a board plays them even when `board.timeline` is `null`. Keyframes the
 board's own timeline gives a layer of a copy take its place.
 
+Animation styles: a style is a library asset holding preset animations (`entries`, each `start` counted from the start
+of the style). Save one when several layers or boards should enter or leave alike: edit it once and every use follows.
+  * `penpot.library.local.createAnimationStyle(entries): LibraryAnimationStyle` - 1 to 32 entries, as for
+    `addAnimation`; then `name`, `path`, `description`, `entries` (setting them updates every use, and boards grow to
+    fit), `duration`, `remove()` (its uses turn into their presets), `clone()`. `library.animationStyles` lists them.
+  * `timeline.applyAnimationStyle(shape, style, start?): AppliedAnimationStyle` - A use: it plays a copy of the entries
+    and follows the edits of the style; `start`, `duration` (the entries scale to it), `name`, `style` (`null` once its
+    library is gone), `detach()` (turns it into presets of its own), `remove()`. `timeline.appliedStyles` lists the
+    uses; `timeline.animations` lists the presets only.
+  * A style of a connected library (`penpot.library.connected`) can be applied, not changed: it changes in its own
+    file, and the files using it get an update notice.
+
+Example (a style for a list of cards):
+```
+const style = penpot.library.local.createAnimationStyle([
+  {type: "fade", duration: 400}, {type: "move", duration: 400, offsetY: 32}]);
+style.name = "Card enter";
+const cards = penpotUtils.findShape(s => s.name === "Cards");
+const timeline = cards.timeline ?? cards.addTimeline({duration: 1200});
+cards.children.forEach((card, i) => timeline.applyAnimationStyle(card, style, i * 80));
+style.entries = [{type: "fade", duration: 500}, {type: "move", duration: 500, offsetY: 48}];
+```
+
 Keyframe values by property (`AnimatableProperty`):
   * "x", "y": the position of the layer itself (its top left corner before it is turned) relative to the board, in px
     (for an unrotated layer, where it is now is `shape.boardX` / `shape.boardY`); the board's own is relative to the canvas

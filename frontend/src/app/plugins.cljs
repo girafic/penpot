@@ -53,6 +53,7 @@
 (set! rg/shape-proxy? shape/shape-proxy?)
 (set! motion/shape-proxy shape/shape-proxy)
 (set! motion/shape-proxy? shape/shape-proxy?)
+(set! motion/lib-animation-style-proxy library/lib-animation-style-proxy)
 
 (set! shape/lib-typography-proxy? library/lib-typography-proxy?)
 (set! shape/lib-component-proxy library/lib-component-proxy)

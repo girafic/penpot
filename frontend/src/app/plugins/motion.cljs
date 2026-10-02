@@ -6,9 +6,10 @@
 
 (ns app.plugins.motion
   "The keyframe animation of boards (Penpot Motion) in the plugin API: the
-  timeline of a board, the keyframes of its layers and their preset
-  animations (see `app.common.types.animation`). Like the other proxies
-  they keep ids only and read the timeline of the page again each time.
+  timeline of a board, the keyframes of its layers, their preset
+  animations and their uses of animation styles (see
+  `app.common.types.animation`). Like the other proxies they keep ids
+  only and read the timeline of the page again each time.
   Changing an animation needs the `animation/v1` feature."
   (:require
    [app.common.data :as d]
@@ -19,6 +20,7 @@
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.color :as clr]
    [app.common.types.shape.interactions :as cti]
    [app.common.types.text-units :as tu]
@@ -39,6 +41,14 @@
 ;; round.
 (def shape-proxy identity)
 (def shape-proxy? identity)
+
+;; Set in `app.plugins` too: the proxy of an animation style of a library
+;; (see `app.plugins.library`), which parses its entries here.
+(def lib-animation-style-proxy identity)
+
+(defn- lib-animation-style-proxy?
+  [p]
+  (obj/type-of? p "LibraryAnimationStyleProxy"))
 
 (def property-names
   "The animatable properties as the plugin API names them, camelCase like
@@ -670,6 +680,49 @@
         (some? order)                 (assoc :order (keyword order))
         (some? seed)                  (assoc :seed seed)))))
 
+(defn format-style-entry
+  "The entry `entry` of an animation style as the plugin API gives it: an
+  object with the fields of `PresetAnimationProps`."
+  [{:keys [type direction start duration amount offset-x offset-y split spread order seed] :as entry}]
+  (cond-> #js {:type (name type)
+               :direction (name (or direction :in))
+               :start start
+               :duration duration
+               :easing (if (some? (:easing entry))
+                         (format-easing entry)
+                         (if (= :out direction) "ease-in" "ease-out"))}
+    (some? amount)   (obj/set! "amount" amount)
+    (some? offset-x) (obj/set! "offsetX" offset-x)
+    (some? offset-y) (obj/set! "offsetY" offset-y)
+    (some? split)    (obj/set! "split" (name split))
+    (some? spread)   (obj/set! "spread" spread)
+    (some? order)    (obj/set! "order" (name order))
+    (some? seed)     (obj/set! "seed" seed)))
+
+(defn parse-style-entries
+  "The entries of an animation style that the array `entries` of the
+  plugin API describes (see `parse-animation`), or a string saying what
+  is wrong with them."
+  [entries]
+  (cond
+    (not (array? entries))
+    "The entries should be an array"
+
+    (not (<= 1 (alength entries) cta/max-style-entries))
+    (dm/str "A style holds from 1 to " cta/max-style-entries " entries")
+
+    :else
+    (let [parsed (into []
+                       (map-indexed (fn [index props]
+                                      (let [entry (if (object? props)
+                                                    (parse-animation props)
+                                                    "It should be an object")]
+                                        (if (string? entry)
+                                          (dm/str "Entry " (inc index) ": " entry)
+                                          entry))))
+                       entries)]
+      (or (d/seek string? parsed) parsed))))
+
 (defn- copy-options
   "The settings the object `options` of `Timeline.copyAnimation` gives
   `cltl/paste-animation`, or a string saying what is wrong with them."
@@ -706,6 +759,83 @@
        :time       (some-> start mth/round)
        :stagger    (mth/round (d/nilv stagger 0))
        :mode       (if (false? replace?) :merge :replace)})))
+
+(defn applied-style-proxy? [p]
+  (obj/type-of? p "AppliedAnimationStyleProxy"))
+
+(defn applied-style-proxy
+  [plugin-id file-id page-id board-id shape-id id]
+  (let [locate
+        #(locate-animation file-id page-id board-id shape-id id)
+
+        update!
+        (fn [code f]
+          (if (:locked (locate))
+            (u/not-valid plugin-id code "The animation is locked")
+            (write-timeline! plugin-id file-id page-id board-id code
+                             #(cta/update-animation % shape-id id f))))]
+
+    (obj/reify {:name "AppliedAnimationStyleProxy" :on-error (u/handle-error plugin-id)}
+      :$plugin {:enumerable false :get (constantly plugin-id)}
+      :$file {:enumerable false :get (constantly file-id)}
+      :$page {:enumerable false :get (constantly page-id)}
+      :$board {:enumerable false :get (constantly board-id)}
+      :$shape {:enumerable false :get (constantly shape-id)}
+      :$id {:enumerable false :get (constantly id)}
+
+      :id
+      {:get #(dm/str id)}
+
+      :shape
+      {:get #(shape-proxy plugin-id file-id page-id shape-id)}
+
+      ;; while its style is in the file or in a library of it
+      :style
+      {:get
+       #(when-let [{:keys [style-ref-file style-ref-id]} (locate)]
+          (when (some? (u/locate-library-animation-style style-ref-file style-ref-id))
+            (lib-animation-style-proxy plugin-id style-ref-file style-ref-id)))}
+
+      :name
+      {:get #(:name (locate))}
+
+      :start
+      {:get #(:start (locate))
+       :set
+       (fn [value]
+         (if (not (valid-time? value))
+           (u/not-valid plugin-id :start value)
+           (update! :start #(assoc % :start (mth/round value)))))}
+
+      :duration
+      {:get #(:duration (locate))
+       :set
+       (fn [value]
+         (if (not (and (sm/valid-safe-number? value) (pos? value)))
+           (u/not-valid plugin-id :duration value)
+           (update! :duration #(assoc % :duration (mth/round value)))))}
+
+      ;; the presets it plays take its place, with ids of their own
+      :detach
+      (fn []
+        (when-let [use (locate)]
+          (if (:locked use)
+            (u/not-valid plugin-id :detach "The animation is locked")
+            (let [presets (ctas/detach-use use)
+                  detach  (fn [animations]
+                            (into [] (mapcat #(if (= id (:id %)) presets [%])) animations))]
+              (when (write-timeline! plugin-id file-id page-id board-id :detach
+                                     #(update-in % [:tracks shape-id :animations] detach))
+                (format/format-array
+                 #(preset-animation-proxy plugin-id file-id page-id board-id shape-id (:id %))
+                 presets))))))
+
+      :remove
+      (fn []
+        (if (:locked (locate))
+          (u/not-valid plugin-id :remove "The animation is locked")
+          (write-timeline! plugin-id file-id page-id board-id :remove
+                           #(cta/remove-animation % shape-id id)))))))
 
 (defn- track-items
   "`[shape-id item]` of the keyframes (`:keyframes`) or preset animations
@@ -784,9 +914,18 @@
       :animations
       {:get
        #(->> (track-items (locate) :animations)
+             (remove (fn [[_ animation]] (cta/style-use? animation)))
              (format/format-array
               (fn [[shape-id {:keys [id]}]]
                 (preset-animation-proxy plugin-id file-id page-id board-id shape-id id))))}
+
+      :appliedStyles
+      {:get
+       #(->> (track-items (locate) :animations)
+             (filter (fn [[_ animation]] (cta/style-use? animation)))
+             (format/format-array
+              (fn [[shape-id {:keys [id]}]]
+                (applied-style-proxy plugin-id file-id page-id board-id shape-id id))))}
 
       :addKeyframe
       (fn [shape props]
@@ -849,6 +988,31 @@
                   (format/format-array
                    #(preset-animation-proxy plugin-id file-id page-id board-id shape-id (:id %))
                    animations)))))))
+
+      ;; A style of the file or of a library of it: a use that plays a
+      ;; copy of its entries and follows the edits of the style.
+      :applyAnimationStyle
+      (fn [shape style start]
+        (when-let [shape-id (layer :applyAnimationStyle shape)]
+          (let [start      (d/nilv start 0)
+                style-file (when (lib-animation-style-proxy? style) (obj/get style "$file"))
+                style-data (when (some? style-file)
+                             (u/locate-library-animation-style style-file (obj/get style "$id")))]
+            (cond
+              (not (lib-animation-style-proxy? style))
+              (u/not-valid plugin-id :applyAnimationStyle "Not an animation style of a library")
+
+              (nil? style-data)
+              (u/not-valid plugin-id :applyAnimationStyle
+                           "The style is neither in the file nor in a library of it")
+
+              (not (valid-time? start))
+              (u/not-valid plugin-id :applyAnimationStyle "The start should be a number of milliseconds from 0")
+
+              :else
+              (let [use (ctas/make-use style-data style-file (mth/round start))]
+                (when (write! :applyAnimationStyle #(cta/add-animation % shape-id use))
+                  (applied-style-proxy plugin-id file-id page-id board-id shape-id (:id use))))))))
 
       :markers
       {:get

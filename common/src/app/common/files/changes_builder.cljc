@@ -299,7 +299,10 @@
            (dm/get-in data [:typographies id :plugin-data namespace key])
 
            :component
-           (dm/get-in data [:components id :plugin-data namespace key]))
+           (dm/get-in data [:components id :plugin-data namespace key])
+
+           :animation-style
+           (dm/get-in data [:animation-styles id :plugin-data namespace key]))
 
          redo-change
          (cond-> {:type :set-plugin-data

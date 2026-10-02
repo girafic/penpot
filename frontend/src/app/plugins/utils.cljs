@@ -60,6 +60,11 @@
   (assert (uuid? id) "Typography not valid uuid")
   (dm/get-in (locate-file file-id) [:data :typographies id]))
 
+(defn locate-library-animation-style
+  [file-id id]
+  (assert (uuid? id) "Animation style not valid uuid")
+  (dm/get-in (locate-file file-id) [:data :animation-styles id]))
+
 (defn locate-library-component
   [file-id id]
   (assert (uuid? id) "Component not valid uuid")

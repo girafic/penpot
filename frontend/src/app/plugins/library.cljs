@@ -10,7 +10,10 @@
    [app.common.data.macros :as dm]
    [app.common.files.variant :as cfv]
    [app.common.geom.point :as gpt]
+   [app.common.path-names :as cpn]
    [app.common.schema :as sm]
+   [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.color :as clr]
    [app.common.types.component :as ctk]
    [app.common.types.file :as ctf]
@@ -20,9 +23,11 @@
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.texts :as dwt]
    [app.main.data.workspace.variants :as dwv]
+   [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.store :as st]
    [app.plugins.format :as format]
+   [app.plugins.motion :as motion]
    [app.plugins.parser :as parser]
    [app.plugins.register :as r]
    [app.plugins.shape :as shape]
@@ -32,6 +37,7 @@
    [app.plugins.utils :as u]
    [app.util.object :as obj]
    [beicon.v2.core :as rx]
+   [cuerdas.core :as str]
    [potok.v2.core :as ptk]))
 
 (declare lib-color-proxy)
@@ -652,6 +658,189 @@
         (let [typography (u/locate-library-typography file-id id)]
           (apply array (keys (dm/get-in typography [:plugin-data (keyword "shared" namespace)]))))))))
 
+(defn lib-animation-style-proxy? [p]
+  (obj/type-of? p "LibraryAnimationStyleProxy"))
+
+(defn- style-write-error
+  "Why the plugin may not change the animation style `id` of the file
+  `file-id`, or nil: Motion is off, it lacks the permission, or the style
+  is in a library of another file (it changes in that file)."
+  [plugin-id file-id id]
+  (cond
+    (not (features/active-feature? @st/state "animation/v1"))
+    "Motion (the animation/v1 feature) is not enabled"
+
+    (not (r/check-permission plugin-id "library:write"))
+    "Plugin doesn't have 'library:write' permission"
+
+    (not= file-id (:current-file-id @st/state))
+    "The style is in a library of another file: change it in that file"
+
+    (nil? (u/locate-library-animation-style file-id id))
+    "The style is gone"))
+
+(defn lib-animation-style-proxy
+  [plugin-id file-id id]
+  (assert (uuid? file-id))
+  (assert (uuid? id))
+
+  (let [locate
+        #(u/locate-library-animation-style file-id id)
+
+        ;; the style changed by `f` and its uses synced, one undo step
+        update!
+        (fn [code f]
+          (if-let [error (style-write-error plugin-id file-id id)]
+            (u/not-valid plugin-id code error)
+            (st/emit! (-> (dwl/update-animation-style (f (locate)) file-id)
+                          (se/add-event plugin-id)))))
+
+        rename!
+        (fn [code new-name]
+          (if-let [error (style-write-error plugin-id file-id id)]
+            (u/not-valid plugin-id code error)
+            (st/emit! (-> (dwl/rename-animation-style file-id id new-name)
+                          (se/add-event plugin-id)))))]
+
+    (obj/reify {:name "LibraryAnimationStyleProxy" :on-error (u/handle-error plugin-id)}
+      :$plugin {:enumerable false :get (constantly plugin-id)}
+      :$id {:enumerable false :get (constantly id)}
+      :$file {:enumerable false :get (constantly file-id)}
+      :id {:get (fn [] (dm/str id))}
+      :libraryId {:get (fn [] (dm/str file-id))}
+
+      :name
+      {:get #(:name (locate))
+       :set
+       (fn [value]
+         (if (or (not (string? value)) (str/blank? value))
+           (u/not-valid plugin-id :name value)
+           (rename! :name (cpn/merge-path-item (:path (locate)) value))))}
+
+      :path
+      {:get #(d/nilv (:path (locate)) "")
+       :set
+       (fn [value]
+         (if (not (string? value))
+           (u/not-valid plugin-id :path value)
+           (rename! :path (cpn/merge-path-item value (:name (locate))))))}
+
+      :description
+      {:get #(d/nilv (:description (locate)) "")
+       :set
+       (fn [value]
+         (if (not (string? value))
+           (u/not-valid plugin-id :description value)
+           (update! :description #(if (str/blank? value)
+                                    (dissoc % :description)
+                                    (assoc % :description value)))))}
+
+      :entries
+      {:get #(some->> (locate) :entries (format/format-array motion/format-style-entry))
+       :set
+       (fn [value]
+         (let [entries (motion/parse-style-entries value)]
+           (if (string? entries)
+             (u/not-valid plugin-id :entries entries)
+             (update! :entries #(assoc % :entries (mapv cta/make-style-entry entries))))))}
+
+      :duration
+      {:get #(some-> (locate) :entries cta/style-length)}
+
+      :remove
+      (fn []
+        (if-let [error (style-write-error plugin-id file-id id)]
+          (u/not-valid plugin-id :remove error)
+          (st/emit! (-> (dwl/delete-animation-style id)
+                        (se/add-event plugin-id)))))
+
+      :clone
+      (fn []
+        (if-let [error (style-write-error plugin-id file-id id)]
+          (u/not-valid plugin-id :clone error)
+          (let [style-id (uuid/next)
+                style    (-> (locate)
+                             (assoc :id style-id)
+                             (dissoc :modified-at)
+                             (update :entries (partial mapv #(assoc % :id (uuid/next)))))]
+            (st/emit! (-> (dwl/add-animation-style style)
+                          (se/add-event plugin-id)))
+            (lib-animation-style-proxy plugin-id file-id style-id))))
+
+      ;; PLUGIN DATA
+      :getPluginData
+      (fn [key]
+        (cond
+          (not (string? key))
+          (u/not-valid plugin-id :animation-style-plugin-data-key key)
+
+          :else
+          (dm/get-in (locate) [:plugin-data (keyword "plugin" (str plugin-id)) key])))
+
+      :setPluginData
+      (fn [key value]
+        (cond
+          (not= file-id (:current-file-id @st/state))
+          (u/not-valid plugin-id :setPluginData-non-local-library file-id)
+
+          (not (string? key))
+          (u/not-valid plugin-id :setPluginData-key key)
+
+          (and (some? value) (not (string? value)))
+          (u/not-valid plugin-id :setPluginData-value value)
+
+          (not (r/check-permission plugin-id "library:write"))
+          (u/not-valid plugin-id :setPluginData "Plugin doesn't have 'library:write' permission")
+
+          :else
+          (st/emit! (dp/set-plugin-data file-id :animation-style id (keyword "plugin" (str plugin-id)) key value))))
+
+      :getPluginDataKeys
+      (fn []
+        (apply array (keys (dm/get-in (locate) [:plugin-data (keyword "plugin" (str plugin-id))]))))
+
+      :getSharedPluginData
+      (fn [namespace key]
+        (cond
+          (not (string? namespace))
+          (u/not-valid plugin-id :getSharedPluginData-namespace namespace)
+
+          (not (string? key))
+          (u/not-valid plugin-id :getSharedPluginData-key key)
+
+          :else
+          (dm/get-in (locate) [:plugin-data (keyword "shared" namespace) key])))
+
+      :setSharedPluginData
+      (fn [namespace key value]
+        (cond
+          (not= file-id (:current-file-id @st/state))
+          (u/not-valid plugin-id :setSharedPluginData-non-local-library file-id)
+
+          (not (string? namespace))
+          (u/not-valid plugin-id :setSharedPluginData-namespace namespace)
+
+          (not (string? key))
+          (u/not-valid plugin-id :setSharedPluginData-key key)
+
+          (and (some? value) (not (string? value)))
+          (u/not-valid plugin-id :setSharedPluginData-value value)
+
+          (not (r/check-permission plugin-id "library:write"))
+          (u/not-valid plugin-id :setSharedPluginData "Plugin doesn't have 'library:write' permission")
+
+          :else
+          (st/emit! (dp/set-plugin-data file-id :animation-style id (keyword "shared" namespace) key value))))
+
+      :getSharedPluginDataKeys
+      (fn [namespace]
+        (cond
+          (not (string? namespace))
+          (u/not-valid plugin-id :getSharedPluginDataKeys-namespace namespace)
+
+          :else
+          (apply array (keys (dm/get-in (locate) [:plugin-data (keyword "shared" namespace)]))))))))
+
 (defn get-variant-components
   [file-id variant-id]
   (cfv/find-variant-components (-> file-id u/locate-file :data) variant-id))
@@ -1024,6 +1213,14 @@
              typographies (->> file :data :typographies keys (map #(lib-typography-proxy plugin-id file-id %)))]
          (apply array typographies)))}
 
+    :animationStyles
+    {:this true
+     :get
+     (fn [_]
+       (let [file (u/locate-file file-id)]
+         (->> file :data :animation-styles keys
+              (format/format-array #(lib-animation-style-proxy plugin-id file-id %)))))}
+
     :components
     {:this true
      :get
@@ -1067,6 +1264,29 @@
           (st/emit! (-> (dwl/add-typography (ctt/make-typography {:id typography-id :name "Typography"}) false)
                         (se/add-event plugin-id)))
           (lib-typography-proxy plugin-id file-id typography-id))))
+
+    ;; In the library of the file itself, as the assets panel does
+    :createAnimationStyle
+    (fn [entries]
+      (let [parsed (motion/parse-style-entries entries)]
+        (cond
+          (not (features/active-feature? @st/state "animation/v1"))
+          (u/not-valid plugin-id :createAnimationStyle "Motion (the animation/v1 feature) is not enabled")
+
+          (not (r/check-permission plugin-id "library:write"))
+          (u/not-valid plugin-id :createAnimationStyle "Plugin doesn't have 'library:write' permission")
+
+          (not= file-id (:current-file-id @st/state))
+          (u/not-valid plugin-id :createAnimationStyle "A style is created in the library of the file itself")
+
+          (string? parsed)
+          (u/not-valid plugin-id :createAnimationStyle parsed)
+
+          :else
+          (let [style (ctas/make-animation-style {:id (uuid/next) :name "Animation style" :entries parsed})]
+            (st/emit! (-> (dwl/add-animation-style style)
+                          (se/add-event plugin-id)))
+            (lib-animation-style-proxy plugin-id file-id (:id style))))))
 
     :createComponent
     (fn [shapes]

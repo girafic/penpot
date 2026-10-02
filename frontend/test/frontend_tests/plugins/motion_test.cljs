@@ -15,9 +15,11 @@
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.test-helpers.shapes :as cths]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.uuid :as uuid]
    [app.main.store :as st]
    [app.plugins.api :as api]
+   [app.plugins.library :as library]
    [app.plugins.motion :as motion]
    [app.plugins.register :as r]
    [app.plugins.shape :as shape]
@@ -39,6 +41,7 @@
      ;; as `app.plugins` does, which the tests leave out with the runtime
      (set! motion/shape-proxy shape/shape-proxy)
      (set! motion/shape-proxy? shape/shape-proxy?)
+     (set! motion/lib-animation-style-proxy library/lib-animation-style-proxy)
      (set! st/state store)
      (ptk/emit! store #(cond-> (assoc-in % [:plugins :flags plugin-id :throw-validation-errors] true)
                          motion? (update :features (fnil conj #{}) "animation/v1")))
@@ -563,3 +566,118 @@
             ^js timeline (.-timeline (shape-of file :board))
             added        (.addAnimationStyle timeline (shape-of file :words) "typewriter" 100)]
         (t/is (= [["fade" "char" 100]] (mapv (fn [^js a] [(.-type a) (.-split a) (.-start a)]) added)))))))
+
+(defn- board-with-rects
+  "A board with `n` rectangles inside: `[board rects]`."
+  [^js context n]
+  (let [^js board (.createBoard context)
+        rects     (vec (repeatedly n #(let [^js rect (.createRectangle context)]
+                                        (.appendChild board rect)
+                                        rect)))]
+    [board rects]))
+
+(t/deftest a-plugin-makes-applies-and-edits-a-style
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            [^js board rects]   (board-with-rects context 3)
+            ^js lib             (.. context -library -local)
+            ^js style           (.createAnimationStyle lib #js [#js {:type "fade" :duration 300}
+                                                                #js {:type "move" :duration 300 :offsetY 40}])
+            ^js timeline        (.addTimeline board #js {:duration 500})
+            uses                (into [] (map-indexed #(.applyAnimationStyle timeline %2 style (* %1 80))) rects)
+            stored-uses         #(mapv (fn [rect] (first (:animations (stored-track store context board rect)))) rects)]
+
+        (t/testing "the style is in the library of the file"
+          (set! (.-name style) "Card enter")
+          (t/is (= ["Card enter"] (mapv #(.-name ^js %) (.-animationStyles lib))))
+          (t/is (= 300 (.-duration style)))
+          (t/is (= [["fade" 0 300] ["move" 0 300]]
+                   (mapv (fn [^js e] [(.-type e) (.-start e) (.-duration e)]) (.-entries style)))))
+
+        (t/testing "three layers play it, staggered"
+          (t/is (= [0 80 160] (mapv #(.-start ^js %) uses)))
+          (t/is (= ["Card enter" "Card enter" "Card enter"] (mapv #(.-name ^js %) uses)))
+          (t/is (= 3 (.-length (.-appliedStyles timeline))))
+          (t/is (zero? (.-length (.-animations timeline))) "the uses are not preset animations")
+          (t/is (every? #(= (aget style "$id") (:style-ref-id %)) (stored-uses)))
+          (t/is (= (aget style "$id") (aget (.-style ^js (first uses)) "$id"))))
+
+        (t/testing "an edit of its entries reaches every use, and the timeline grows"
+          (set! (.-entries style) #js [#js {:type "fade" :duration 900}])
+          (t/is (= [[1 900] [1 900] [1 900]] (mapv (juxt (comp count :entries) :duration) (stored-uses))))
+          (t/is (= 1060 (.-duration timeline))))
+
+        (t/testing "a use moves and stretches"
+          (set! (.-start ^js (last uses)) 200)
+          (set! (.-duration ^js (last uses)) 1200)
+          (t/is (= [200 1200] ((juxt :start :duration) (last (stored-uses)))))
+          (t/is (thrown? js/Error (set! (.-duration ^js (last uses)) 0))))
+
+        (t/testing "plugin data"
+          (.setPluginData style "role" "entrance")
+          (t/is (= "entrance" (.getPluginData style "role"))))
+
+        (t/testing "a use detaches into its presets"
+          (let [presets (.detach ^js (first uses))]
+            (t/is (= ["fade"] (mapv #(.-type ^js %) presets)))
+            (t/is (= 2 (.-length (.-appliedStyles timeline))))
+            (t/is (= 1 (.-length (.-animations timeline))))))
+
+        (t/testing "a copy, then a removal that leaves presets"
+          (let [^js copy (.clone style)]
+            (t/is (= 2 (.-length (.-animationStyles lib))))
+            (.remove copy)
+            (t/is (= 1 (.-length (.-animationStyles lib)))))
+          (.remove style)
+          (t/is (zero? (.-length (.-appliedStyles timeline))))
+          (t/is (= 3 (.-length (.-animations timeline)))))))))
+
+(t/deftest a-style-of-another-file-is-read-only
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            lib-id   (uuid/next)
+            style    (ctas/make-animation-style {:name "Kit pop" :entries [{:type :fade :duration 250}]})
+            _        (ptk/emit! store #(assoc-in % [:files lib-id]
+                                                 {:id lib-id :name "Kit"
+                                                  :data {:id lib-id :animation-styles {(:id style) style}}}))
+            ^js kit-style    (aget (.-animationStyles (library/library-proxy plugin-id lib-id)) 0)
+            [^js board rects] (board-with-rects context 1)
+            ^js timeline      (.addTimeline board)]
+        (t/is (= "Kit pop" (.-name kit-style)))
+        (t/is (thrown-with-msg? js/Error #"another file" (set! (.-name kit-style) "Mine")))
+        (t/is (thrown-with-msg? js/Error #"another file" (set! (.-entries kit-style) #js [#js {:type "fade"}])))
+        (t/is (thrown-with-msg? js/Error #"another file" (.remove kit-style)))
+        (t/is (thrown? js/Error (.createAnimationStyle (library/library-proxy plugin-id lib-id)
+                                                       #js [#js {:type "fade"}])))
+        (t/testing "its layers of the file play it"
+          (let [^js use (.applyAnimationStyle timeline (first rects) kit-style 100)]
+            (t/is (= ["Kit pop" 100 250] [(.-name use) (.-start use) (.-duration use)]))
+            (t/is (= (str lib-id) (.-libraryId (.-style use))))))))))
+
+(t/deftest bad-style-entries-are-refused
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[_ ^js context] (setup true)
+            ^js lib (.. context -library -local)
+            create  #(.createAnimationStyle lib (clj->js %))]
+        (t/is (thrown? js/Error (create [])) "no entries")
+        (t/is (thrown? js/Error (create (repeat 33 {:type "fade"}))) "more than 32")
+        (t/is (thrown-with-msg? js/Error #"Entry 2" (create [{:type "fade"} {:type "shake"}])) "an unknown type")
+        (t/is (thrown? js/Error (create [{:type "fade" :start -10}])) "a negative start")
+        (t/is (thrown? js/Error (.createAnimationStyle lib "fade")) "not an array")
+        (t/is (zero? (.-length (.-animationStyles lib))) "nothing was made")))))
+
+(t/deftest the-style-members-need-motion
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup false)
+            ^js lib (.. context -library -local)
+            style   (ctas/make-animation-style {:name "Pop" :entries [{:type :fade :duration 250}]})
+            file-id (aget (. context -currentFile) "$id")]
+        (t/is (thrown? js/Error (.createAnimationStyle lib #js [#js {:type "fade"}])))
+        (ptk/emit! store #(assoc-in % [:files file-id :data :animation-styles (:id style)] style))
+        (let [^js pop (aget (.-animationStyles lib) 0)]
+          (t/is (= "Pop" (.-name pop)) "they can be read")
+          (t/is (thrown? js/Error (set! (.-name pop) "Bounce"))))))))

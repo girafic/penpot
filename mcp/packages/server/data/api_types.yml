@@ -11391,10 +11391,14 @@ Library:
         name: string;
         colors: LibraryColor[];
         typographies: LibraryTypography[];
+        animationStyles: LibraryAnimationStyle[];
         components: LibraryComponent[];
         tokens: TokenCatalog;
         createColor(): LibraryColor;
         createTypography(): LibraryTypography;
+        createAnimationStyle(
+            entries: PresetAnimationProps[],
+        ): LibraryAnimationStyle;
         createComponent(shapes: Shape[]): LibraryComponent;
         getPluginData(key: string): string;
         setPluginData(key: string, value: string): void;
@@ -11442,6 +11446,14 @@ Library:
         ```
 
         An array of typography elements in the library.
+      animationStyles: |-
+        ```
+        readonly animationStyles: LibraryAnimationStyle[]
+        ```
+
+        The animation styles of the library (Penpot Motion): lists of preset
+        animations that layers play through uses of them, see
+        `Timeline.applyAnimationStyle`.
       components: |-
         ```
         readonly components: LibraryComponent[]
@@ -11491,6 +11503,30 @@ Library:
         Example
         ```
         const newTypography = library.createTypography();
+        ```
+      createAnimationStyle: |-
+        ```
+        createAnimationStyle(entries: PresetAnimationProps[]): LibraryAnimationStyle
+        ```
+
+        Creates an animation style in the library of the file itself, named
+        "Animation style", from the preset animations it plays (1 to 32).
+        Needs Motion (the `animation/v1` feature).
+
+        Parameters
+
+        * entries: PresetAnimationProps[]
+
+          The preset animations of the style, their `start`
+          counted from the start of the style.
+
+        Returns LibraryAnimationStyle
+
+        Returns the new `LibraryAnimationStyle`.
+
+        Example
+        ```
+        const style = penpot.library.local.createAnimationStyle([  { type: 'fade', duration: 400 },  { type: 'move', duration: 400, offsetY: 40 },]);style.name = 'Card enter';
         ```
       createComponent: |-
         ```
@@ -11757,6 +11793,238 @@ LibraryColor:
         ```
         const stroke = libraryColor.asStroke();
         ```
+      getPluginData: |-
+        ```
+        getPluginData(key: string): string
+        ```
+
+        Retrieves the data for our own plugin, given a specific key.
+
+        Parameters
+
+        * key: string
+
+          The key for which to retrieve the data.
+
+        Returns string
+
+        Returns the data associated with the key as a string.
+
+        Example
+        ```
+        const data = shape.getPluginData('exampleKey');console.log(data);
+        ```
+      setPluginData: |-
+        ```
+        setPluginData(key: string, value: string): void
+        ```
+
+        Sets the plugin-specific data for the given key.
+
+        Parameters
+
+        * key: string
+
+          The key for which to set the data.
+        * value: string
+
+          The data to set for the key.
+
+        Returns void
+
+        Example
+        ```
+        shape.setPluginData('exampleKey', 'exampleValue');
+        ```
+      getPluginDataKeys: |-
+        ```
+        getPluginDataKeys(): string[]
+        ```
+
+        Retrieves all the keys for the plugin-specific data.
+
+        Returns string[]
+
+        Returns an array of strings representing all the keys.
+
+        Example
+        ```
+        const keys = shape.getPluginDataKeys();console.log(keys);
+        ```
+      getSharedPluginData: |-
+        ```
+        getSharedPluginData(namespace: string, key: string): string
+        ```
+
+        If we know the namespace of an external plugin, this is the way to get their data.
+
+        Parameters
+
+        * namespace: string
+
+          The namespace for the shared data.
+        * key: string
+
+          The key for which to retrieve the data.
+
+        Returns string
+
+        Returns the shared data associated with the key as a string.
+
+        Example
+        ```
+        const sharedData = shape.getSharedPluginData('exampleNamespace', 'exampleKey');console.log(sharedData);
+        ```
+      setSharedPluginData: |-
+        ```
+        setSharedPluginData(namespace: string, key: string, value: string): void
+        ```
+
+        Sets the shared plugin-specific data for the given namespace and key.
+
+        Parameters
+
+        * namespace: string
+
+          The namespace for the shared data.
+        * key: string
+
+          The key for which to set the data.
+        * value: string
+
+          The data to set for the key.
+
+        Returns void
+
+        Example
+        ```
+        shape.setSharedPluginData('exampleNamespace', 'exampleKey', 'exampleValue');
+        ```
+      getSharedPluginDataKeys: |-
+        ```
+        getSharedPluginDataKeys(namespace: string): string[]
+        ```
+
+        Retrieves all the keys for the shared plugin-specific data in the given namespace.
+
+        Parameters
+
+        * namespace: string
+
+          The namespace for the shared data.
+
+        Returns string[]
+
+        Returns an array of strings representing all the keys in the namespace.
+
+        Example
+        ```
+        const sharedKeys = shape.getSharedPluginDataKeys('exampleNamespace');console.log(sharedKeys);
+        ```
+LibraryAnimationStyle:
+  overview: |-
+    Interface LibraryAnimationStyle
+    ===============================
+
+    An animation style of a library (Penpot Motion): a list of preset
+    animations that layers play through uses of it (see
+    `Timeline.applyAnimationStyle`). A use plays a copy of the entries and
+    follows the edits of the style, in its file and in the files that use
+    its library. The style changes only in the file it belongs to, and
+    needs Motion (the `animation/v1` feature) to change.
+
+    ```
+    interface LibraryAnimationStyle {
+        description: string;
+        entries: PresetAnimationProps[];
+        duration: number;
+        remove(): void;
+        clone(): LibraryAnimationStyle;
+        id: string;
+        libraryId: string;
+        name: string;
+        path: string;
+        getPluginData(key: string): string;
+        setPluginData(key: string, value: string): void;
+        getPluginDataKeys(): string[];
+        getSharedPluginData(namespace: string, key: string): string;
+        setSharedPluginData(namespace: string, key: string, value: string): void;
+        getSharedPluginDataKeys(namespace: string): string[];
+    }
+    ```
+
+    Hierarchy (View Summary)
+
+    * LibraryElement
+      + LibraryAnimationStyle
+
+    Referenced by: AppliedAnimationStyle, Library, LibraryAnimationStyle, Timeline
+  members:
+    Properties:
+      description: |-
+        ```
+        description: string
+        ```
+
+        What the style is for.
+      entries: |-
+        ```
+        entries: PresetAnimationProps[]
+        ```
+
+        The preset animations the style plays, their `start` counted from the
+        start of the style. Setting them replaces them all (1 to 32), and every
+        use follows: a use as long as the style takes its new length, a
+        stretched one keeps its own.
+      duration: |-
+        ```
+        readonly duration: number
+        ```
+
+        How long the style plays, in milliseconds: the end of its last entry.
+      id: |-
+        ```
+        readonly id: string
+        ```
+
+        The unique identifier of the library element.
+      libraryId: |-
+        ```
+        readonly libraryId: string
+        ```
+
+        The unique identifier of the library to which the element belongs.
+      name: |-
+        ```
+        name: string
+        ```
+
+        The name of the library element.
+      path: |-
+        ```
+        path: string
+        ```
+
+        The path of the library element.
+    Methods:
+      remove: |-
+        ```
+        remove(): void
+        ```
+
+        Removes the style. Its uses turn into the preset animations they play.
+
+        Returns void
+      clone: |-
+        ```
+        clone(): LibraryAnimationStyle
+        ```
+
+        Creates a copy of the style in the same library.
+
+        Returns LibraryAnimationStyle
+
+        Returns the new `LibraryAnimationStyle`.
       getPluginData: |-
         ```
         getPluginData(key: string): string
@@ -12425,6 +12693,7 @@ LibraryElement:
     * PluginData
       + LibraryElement
         - LibraryColor
+        - LibraryAnimationStyle
         - LibraryComponent
         - LibraryTypography
   members:
@@ -16134,6 +16403,7 @@ Timeline:
         playback: TimelinePlayback;
         keyframes: Keyframe[];
         animations: PresetAnimation[];
+        appliedStyles: AppliedAnimationStyle[];
         markers: Marker[];
         addKeyframe(shape: Shape, keyframe: KeyframeProps): Keyframe;
         addAnimation(
@@ -16145,6 +16415,11 @@ Timeline:
             style: AnimationStyle,
             start?: number,
         ): PresetAnimation[];
+        applyAnimationStyle(
+            shape: Shape,
+            style: LibraryAnimationStyle,
+            start?: number,
+        ): AppliedAnimationStyle;
         copyAnimation(
             shape: Shape,
             targets: Shape[],
@@ -16206,6 +16481,14 @@ Timeline:
         ```
 
         The preset animations of the board and the layers inside it, by start.
+        The uses of animation styles are in `appliedStyles`.
+      appliedStyles: |-
+        ```
+        readonly appliedStyles: AppliedAnimationStyle[]
+        ```
+
+        The uses of animation styles by the board and the layers inside it,
+        by start, see `applyAnimationStyle`.
       markers: |-
         ```
         readonly markers: Marker[]
@@ -16300,6 +16583,39 @@ Timeline:
           When they start, in milliseconds.
 
         Returns PresetAnimation[]
+      applyAnimationStyle: |-
+        ```
+        applyAnimationStyle(
+            shape: Shape,
+            style: LibraryAnimationStyle,
+            start?: number,
+        ): AppliedAnimationStyle
+        ```
+
+        Applies an animation style of the file or of one of its libraries to
+        `shape`, from `start` milliseconds (0 by default): a use that plays a
+        copy of the entries of the style and follows its edits. The timeline
+        grows to fit it.
+
+        Parameters
+
+        * shape: Shape
+
+          The board or a layer inside it.
+        * style: LibraryAnimationStyle
+
+          A style of `penpot.library.local` or of a connected
+          library.
+        * start: number
+
+          When it starts, in milliseconds.
+
+        Returns AppliedAnimationStyle
+
+        Example
+        ```
+        const [style] = penpot.library.local.animationStyles;board.children.forEach((card, i) => {  timeline.applyAnimationStyle(card, style, i * 80);});
+        ```
       copyAnimation: |-
         ```
         copyAnimation(
@@ -16906,7 +17222,7 @@ PresetAnimationProps:
     }
     ```
 
-    Referenced by: Timeline
+    Referenced by: AnimationStyleEntry, Library, LibraryAnimationStyle, Timeline
   members:
     Properties:
       type: |-
@@ -17019,7 +17335,7 @@ PresetAnimation:
     }
     ```
 
-    Referenced by: Timeline
+    Referenced by: AppliedAnimationStyle, Timeline
   members:
     Properties:
       id: |-
@@ -17117,6 +17433,88 @@ PresetAnimation:
         ```
 
         Removes the animation.
+
+        Returns void
+AppliedAnimationStyle:
+  overview: |-
+    Interface AppliedAnimationStyle
+    ===============================
+
+    A use of an animation style (`LibraryAnimationStyle`) by a layer, in a
+    `Timeline`: it plays a copy of the entries of the style, scaled to its
+    own span, and follows the edits of the style.
+
+    ```
+    interface AppliedAnimationStyle {
+        id: string;
+        shape: Shape;
+        style: LibraryAnimationStyle | null;
+        name: string;
+        start: number;
+        duration: number;
+        detach(): PresetAnimation[];
+        remove(): void;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      id: |-
+        ```
+        readonly id: string
+        ```
+
+        The id of the use.
+      shape: |-
+        ```
+        readonly shape: Shape
+        ```
+
+        The board or layer that plays it.
+      style: |-
+        ```
+        readonly style: LibraryAnimationStyle | null
+        ```
+
+        The style, while it is in the file or in a library of it, else null
+        (the use plays its copy).
+      name: |-
+        ```
+        readonly name: string
+        ```
+
+        The name of the style, as the use copied it.
+      start: |-
+        ```
+        start: number
+        ```
+
+        When it starts, in milliseconds.
+      duration: |-
+        ```
+        duration: number
+        ```
+
+        How long it plays, in milliseconds: its entries scale to it.
+    Methods:
+      detach: |-
+        ```
+        detach(): PresetAnimation[]
+        ```
+
+        Turns the use into the preset animations it plays, which no longer
+        follow the style.
+
+        Returns PresetAnimation[]
+
+        Returns the preset animations.
+      remove: |-
+        ```
+        remove(): void
+        ```
+
+        Removes the use.
 
         Returns void
 Shadow:
@@ -24756,6 +25154,19 @@ AnimationStyle:
 
     Referenced by: Timeline
   members: {}
+AnimationStyleEntry:
+  overview: |-
+    Type Alias AnimationStyleEntry
+    ==============================
+
+    ```
+    AnimationStyleEntry: PresetAnimationProps
+    ```
+
+    A preset animation of an animation style (`LibraryAnimationStyle`), its
+    `start` counted from the start of the style. A split entry plays the
+    units of a text layer, and the whole layer on other layers.
+  members: {}
 Shape:
   overview: |-
     Type Alias Shape
@@ -24782,7 +25193,7 @@ Shape:
     let shape: Shape;if (penpot.utils.types.isRectangle(shape)) {  console.log(shape.type);}
     ```
 
-    Referenced by: AnimatedCopy, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenDimension, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
+    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenDimension, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
   members: {}
 StrokeCap:
   overview: |-

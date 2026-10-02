@@ -2705,6 +2705,13 @@ export interface Library extends PluginData {
   readonly typographies: LibraryTypography[];
 
   /**
+   * The animation styles of the library (Penpot Motion): lists of preset
+   * animations that layers play through uses of them, see
+   * `Timeline.applyAnimationStyle`.
+   */
+  readonly animationStyles: LibraryAnimationStyle[];
+
+  /**
    * An array of component elements in the library.
    * @example
    * ```js
@@ -2741,6 +2748,25 @@ export interface Library extends PluginData {
    * ```
    */
   createTypography(): LibraryTypography;
+
+  /**
+   * Creates an animation style in the library of the file itself, named
+   * "Animation style", from the preset animations it plays (1 to 32).
+   * Needs Motion (the `animation/v1` feature).
+   * @param entries The preset animations of the style, their `start`
+   * counted from the start of the style.
+   * @return Returns the new `LibraryAnimationStyle`.
+   *
+   * @example
+   * ```js
+   * const style = penpot.library.local.createAnimationStyle([
+   *   { type: 'fade', duration: 400 },
+   *   { type: 'move', duration: 400, offsetY: 40 },
+   * ]);
+   * style.name = 'Card enter';
+   * ```
+   */
+  createAnimationStyle(entries: AnimationStyleEntry[]): LibraryAnimationStyle;
 
   /**
    * Creates a new component element in the library using the provided shapes.
@@ -2800,6 +2826,45 @@ export interface LibraryColor extends LibraryElement {
    * ```
    */
   asStroke(): Stroke;
+}
+
+/**
+ * An animation style of a library (Penpot Motion): a list of preset
+ * animations that layers play through uses of it (see
+ * `Timeline.applyAnimationStyle`). A use plays a copy of the entries and
+ * follows the edits of the style, in its file and in the files that use
+ * its library. The style changes only in the file it belongs to, and
+ * needs Motion (the `animation/v1` feature) to change.
+ */
+export interface LibraryAnimationStyle extends LibraryElement {
+  /**
+   * What the style is for.
+   */
+  description: string;
+
+  /**
+   * The preset animations the style plays, their `start` counted from the
+   * start of the style. Setting them replaces them all (1 to 32), and every
+   * use follows: a use as long as the style takes its new length, a
+   * stretched one keeps its own.
+   */
+  entries: AnimationStyleEntry[];
+
+  /**
+   * How long the style plays, in milliseconds: the end of its last entry.
+   */
+  readonly duration: number;
+
+  /**
+   * Removes the style. Its uses turn into the preset animations they play.
+   */
+  remove(): void;
+
+  /**
+   * Creates a copy of the style in the same library.
+   * @return Returns the new `LibraryAnimationStyle`.
+   */
+  clone(): LibraryAnimationStyle;
 }
 
 /**
@@ -3714,8 +3779,15 @@ export interface Timeline {
 
   /**
    * The preset animations of the board and the layers inside it, by start.
+   * The uses of animation styles are in `appliedStyles`.
    */
   readonly animations: PresetAnimation[];
+
+  /**
+   * The uses of animation styles by the board and the layers inside it,
+   * by start, see `applyAnimationStyle`.
+   */
+  readonly appliedStyles: AppliedAnimationStyle[];
 
   /**
    * The markers of the timeline, by time: named moments that drags snap to
@@ -3767,6 +3839,30 @@ export interface Timeline {
     style: AnimationStyle,
     start?: number,
   ): PresetAnimation[];
+
+  /**
+   * Applies an animation style of the file or of one of its libraries to
+   * `shape`, from `start` milliseconds (0 by default): a use that plays a
+   * copy of the entries of the style and follows its edits. The timeline
+   * grows to fit it.
+   * @param shape The board or a layer inside it.
+   * @param style A style of `penpot.library.local` or of a connected
+   * library.
+   * @param start When it starts, in milliseconds.
+   *
+   * @example
+   * ```js
+   * const [style] = penpot.library.local.animationStyles;
+   * board.children.forEach((card, i) => {
+   *   timeline.applyAnimationStyle(card, style, i * 80);
+   * });
+   * ```
+   */
+  applyAnimationStyle(
+    shape: Shape,
+    style: LibraryAnimationStyle,
+    start?: number,
+  ): AppliedAnimationStyle;
 
   /**
    * Copies the animation of `shape` onto `targets`, as copying an animation
@@ -4399,6 +4495,56 @@ export type AnimationStyle =
   | 'rise-words'
   | 'cascade-lines'
   | 'pop-letters';
+
+/**
+ * A preset animation of an animation style (`LibraryAnimationStyle`), its
+ * `start` counted from the start of the style. A split entry plays the
+ * units of a text layer, and the whole layer on other layers.
+ */
+export type AnimationStyleEntry = PresetAnimationProps;
+
+/**
+ * A use of an animation style (`LibraryAnimationStyle`) by a layer, in a
+ * `Timeline`: it plays a copy of the entries of the style, scaled to its
+ * own span, and follows the edits of the style.
+ */
+export interface AppliedAnimationStyle {
+  /**
+   * The id of the use.
+   */
+  readonly id: string;
+  /**
+   * The board or layer that plays it.
+   */
+  readonly shape: Shape;
+  /**
+   * The style, while it is in the file or in a library of it, else null
+   * (the use plays its copy).
+   */
+  readonly style: LibraryAnimationStyle | null;
+  /**
+   * The name of the style, as the use copied it.
+   */
+  readonly name: string;
+  /**
+   * When it starts, in milliseconds.
+   */
+  start: number;
+  /**
+   * How long it plays, in milliseconds: its entries scale to it.
+   */
+  duration: number;
+  /**
+   * Turns the use into the preset animations it plays, which no longer
+   * follow the style.
+   * @return Returns the preset animations.
+   */
+  detach(): PresetAnimation[];
+  /**
+   * Removes the use.
+   */
+  remove(): void;
+}
 
 /**
  * Represents shadow properties in Penpot.
