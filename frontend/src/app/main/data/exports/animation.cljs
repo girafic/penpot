@@ -1072,12 +1072,49 @@
                (reject err)))
        (set! (.-src img) url)))))
 
+(defn align-frames
+  "`frames` (ImageData or `{:data :width :height}`, RGBA) on one canvas,
+  each where it is: the picture of a board that does not clip its
+  layers covers what they cover, which changes as they move, and a video
+  keeps one size. `rects` are the boxes each covers on the canvas (see
+  `wasm.api/get-shape-extrect`), at `scale`; the canvas covers them all,
+  the rest transparent. Without them, the pictures keep their top left
+  corner. `frames` as they are when they all cover the same box."
+  [frames rects scale]
+  (let [parts (mapv image-parts frames)
+        sizes (into #{} (map (fn [[_ w h]] [w h])) parts)
+        rects (when (and (= (count rects) (count frames)) (every? some? rects)) rects)]
+    (if (and (<= (count sizes) 1) (or (empty? rects) (apply = (map (juxt :x :y) rects))))
+      frames
+      (let [x0      (if rects (reduce min (map :x rects)) 0)
+            y0      (if rects (reduce min (map :y rects)) 0)
+            offsets (mapv (fn [i]
+                            (if rects
+                              [(mth/round (* scale (- (:x (nth rects i)) x0)))
+                               (mth/round (* scale (- (:y (nth rects i)) y0)))]
+                              [0 0]))
+                          (range (count frames)))
+            width   (reduce max (map (fn [[_ w] [ox]] (+ ox w)) parts offsets))
+            height  (reduce max (map (fn [[_ _ h] [_ oy]] (+ oy h)) parts offsets))]
+        (mapv (fn [[data w h] [ox oy]]
+                (let [out (js/Uint8ClampedArray. (* 4 width height))]
+                  (dotimes [row h]
+                    (let [from (* 4 row w)]
+                      (.set out (.subarray data from (+ from (* 4 w)))
+                            (* 4 (+ ox (* width (+ oy row)))))))
+                  {:data out :width width :height height}))
+              parts
+              offsets)))))
+
 (defn- capture-frames
+  "The pictures of the board `board-id` at `times`, decoded, on one
+  canvas (see `align-frames`)."
   [{:keys [objects timeline board-id times bridge cancelled? on-progress yield
            decode scale]}]
-  (let [decode (or decode decode-png)
-        yield  (or yield default-yield)
-        n      (count times)]
+  (let [decode   (or decode decode-png)
+        yield    (or yield default-yield)
+        extrect  (:get-shape-extrect bridge)
+        n        (count times)]
     (-> (js/Promise.resolve [])
         (.then
          (fn [_]
@@ -1088,15 +1125,19 @@
                    (fn [acc]
                      (throw-if-cancelled cancelled?)
                      (let [bytes (render-shape-at-time objects timeline board-id t
-                                                       {:bridge bridge :scale (or scale 1)})]
+                                                       {:bridge bridge :scale (or scale 1)})
+                           ;; where the picture is, as posed
+                           rect  (when extrect (extrect board-id))]
                        (-> (decode bytes)
                            (.then (fn [image]
                                     (when on-progress
                                       (on-progress (inc (count acc)) n))
                                     (-> (yield)
-                                        (.then (fn [_] (conj acc image))))))))))))
+                                        (.then (fn [_] (conj acc [image rect]))))))))))))
             (js/Promise.resolve [])
-            times))))))
+            times)))
+        (.then (fn [shots]
+                 (align-frames (mapv first shots) (mapv second shots) (or scale 1)))))))
 
 (defn- download-blob
   [name ext mtype blob]

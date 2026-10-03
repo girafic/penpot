@@ -623,6 +623,39 @@
     (t/is (= [["main" 0 0]] (map (juxt :name :start :lane) (vals (:audio-clips tl))))
           "none of its own: the one of the main, on the clock of the copy")))
 
+(defn- frame
+  "A frame of `w` × `h` pixels, all of `value` (each channel)."
+  [w h value]
+  {:data (.fill (js/Uint8ClampedArray. (* 4 w h)) value) :width w :height h})
+
+(defn- pixel
+  [{:keys [data width]} x y]
+  (aget data (* 4 (+ x (* width y)))))
+
+(t/deftest the-frames-of-a-board-that-does-not-clip-share-one-canvas
+  ;; a moon over the edge of a board that does not clip: the picture of
+  ;; the board grows and moves as it goes round
+  (let [frames [(frame 4 3 10) (frame 4 5 20) (frame 5 3 30)]
+        rects  [{:x 0 :y 0} {:x 0 :y -2} {:x -1 :y 0}]
+        out    (dea/align-frames frames rects 1)]
+    (t/is (= #{[5 5]} (into #{} (map (juxt :width :height)) out)) "one size, covering all of them")
+    (t/is (= [0 10 0] [(pixel (nth out 0) 0 2) (pixel (nth out 0) 1 2) (pixel (nth out 0) 1 1)])
+          "each where it is, the rest transparent")
+    (t/is (= [20 0] [(pixel (nth out 1) 1 0) (pixel (nth out 1) 0 0)]))
+    (t/is (= 30 (pixel (nth out 2) 0 2))))
+  (t/testing "at a scale"
+    (let [out (dea/align-frames [(frame 2 2 1) (frame 2 2 2)] [{:x 0 :y 0} {:x 1 :y 0}] 2)]
+      (t/is (= [4 2] ((juxt :width :height) (first out))))
+      (t/is (= [0 2] [(pixel (second out) 0 0) (pixel (second out) 2 0)]))))
+  (t/testing "the same box each time: the frames as they are"
+    (let [frames [(frame 2 2 1) (frame 2 2 2)]]
+      (t/is (identical? frames (dea/align-frames frames [{:x 3 :y 4} {:x 3 :y 4}] 1)))
+      (t/is (identical? frames (dea/align-frames frames [nil nil] 1)) "without boxes")
+      (t/is (= [] (dea/align-frames [] [] 1)))))
+  (t/testing "without boxes, other sizes: from the top left corner"
+    (let [out (dea/align-frames [(frame 2 2 1) (frame 3 1 2)] [nil nil] 1)]
+      (t/is (= #{[3 2]} (into #{} (map (juxt :width :height)) out))))))
+
 (t/deftest estimated-size-is-positive-for-raster
   (t/is (pos? (dea/estimated-size :mp4 100 80 :high 1000 30)))
   (t/is (pos? (dea/estimated-size :gif 100 80 :high 1000 30)))
