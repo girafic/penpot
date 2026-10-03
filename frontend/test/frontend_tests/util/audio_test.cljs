@@ -451,3 +451,31 @@
                     (t/is (not (audio/decoded? song)) "but it is not kept")
                     (done)))
           (p/catch (fail done))))))
+
+(t/deftest playback-waits-for-the-sound-to-run
+  (t/async done
+    (let [calls  (atom [])
+          resume (atom nil)
+          paused #js {:state "suspended"
+                      :resume (fn [] (js/Promise. (fn [ok _] (reset! resume ok))))}]
+      (t/testing "without a context, or with a running one, at once"
+        (audio/use-context! nil)
+        (audio/when-running #(swap! calls conj :none) 50)
+        (audio/use-context! #js {:state "running"})
+        (audio/when-running #(swap! calls conj :running) 50)
+        (t/is (= [:none :running] @calls)))
+      (audio/use-context! paused)
+      (audio/when-running #(swap! calls conj :resumed) 1000)
+      (t/is (= [:none :running] @calls) "a suspended one first resumes")
+      (@resume nil)
+      (js/setTimeout
+       (fn []
+         (t/is (= [:none :running :resumed] @calls))
+         (audio/when-running #(swap! calls conj :late) 20)
+         (js/setTimeout
+          (fn []
+            (t/is (= [:none :running :resumed :late] @calls) "one that does not resume: after the timeout, once")
+            (audio/use-context! nil)
+            (done))
+          80))
+       10))))

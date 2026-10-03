@@ -439,6 +439,10 @@
                     (when (some? frame)
                       (dv/board-clock base-page files (:id frame))))
 
+        ;; whether a board of the page plays sound
+        sound?    (mf/with-memo [base-page]
+                    (some (comp seq :audio-clips) (vals (:timelines base-page))))
+
         fullscreen? (mf/deref header/fullscreen-ref)
         overlays    (mf/deref current-overlays-ref)
 
@@ -535,9 +539,31 @@
         (st/emit! (dv/go-to-section :interactions))))
 
     ;; The board on screen changing, or the view mode left, stops what
-    ;; plays and its sound.
-    (mf/with-effect [(:id frame)]
-      #(st/emit! (dv/pause-timeline)))
+    ;; plays and its sound. Shown in the prototype, a board that animates
+    ;; plays from its start, as a slide of a presentation does.
+    (mf/with-effect [(:id frame) (some? clock) section]
+      (let [alive? (volatile! true)]
+        (when (and (some? clock) (= section :interactions))
+          (let [board-id (:id frame)
+                play     #(when @alive?
+                            (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))]
+            ;; with sound, once the sound can play (see below)
+            (if (seq (:audio-clips clock))
+              (audio/when-running play 200)
+              (play))))
+        #(do (vreset! alive? false)
+             (st/emit! (dv/pause-timeline)))))
+
+    ;; A page may start sound only from a user gesture: a click or a key
+    ;; that shows a board (a prototype link, the arrows) lets its sound
+    ;; play with it. Captured, before the link handles the gesture.
+    (mf/with-effect [sound?]
+      (when sound?
+        (let [unlock (fn [_] (audio/unlock!))
+              keys   [(events/listen globals/window "pointerdown" unlock true)
+                      (events/listen globals/window "keydown" unlock true)]]
+          #(doseq [key keys]
+             (events/unlistenByKey key)))))
 
     ;; Set the page title
     (mf/use-effect

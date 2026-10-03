@@ -382,6 +382,24 @@
           (.catch (fn [_] nil))))
     ctx))
 
+(defn when-running
+  "Call `f` once live playback can sound (see `unlock!`): at once when its
+  context runs or there is none yet, else when it resumes, or after
+  `timeout` ms when it does not (the playback is then silent)."
+  [f timeout]
+  (let [^js ctx @context]
+    (if (or (nil? ctx) (= "running" (.-state ctx)))
+      (f)
+      (let [done (volatile! false)
+            once (fn [_]
+                   (when-not @done
+                     (vreset! done true)
+                     (f)))]
+        (-> (.resume ctx)
+            (.then once)
+            (.catch once))
+        (js/setTimeout once timeout)))))
+
 (defn- running
   []
   (let [^js ctx @context]
