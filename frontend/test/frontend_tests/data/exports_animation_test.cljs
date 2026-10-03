@@ -639,6 +639,23 @@
       (t/is (str/starts-with? (get-in images [cid :href]) "data:image/png;base64,"))
       (t/is (some? (get-in images [cid :id]))))))
 
+(t/deftest an-image-covers-the-box-of-its-picture
+  ;; a shadow or a turn makes the picture larger than the shape's box
+  (let [{:keys [objects bid cid]} (test-objects)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 500})
+                   (cta/add-keyframe cid {:time 0 :property :x :value 10}))
+        bridge {:clean-modifiers (fn [])
+                :use-shape (fn [_])
+                :set-shape-hidden (fn [_])
+                :apply-shape-properties (fn [_ _])
+                :render-shape-pixels (fn [_ _ _] (js/Uint8Array. #js [137 80 78 71]))
+                :get-shape-extrect (fn [id] (when (= id cid) {:x 4 :y 6 :width 33 :height 30}))}
+        images (dea/collect-layer-images objects tl {:bridge bridge})]
+    (t/is (= [4 6 33 30 33 30]
+             ((juxt :x :y :width :height :w :h) (get images cid))))
+    (t/is (= [0 0 100 80] ((juxt :x :y :width :height) (get images bid)))
+          "without a box to read, that of the shape")))
+
 (t/deftest collect-layer-images-renders-the-layers-as-designed
   ;; The preview at the playhead faded the layer out: it is rasterized
   ;; with its own opacity.
@@ -722,16 +739,51 @@
   (cta/make-animation {:type :style :style-ref-id (uuid/next) :style-ref-file (uuid/next)
                        :name "Words" :start 0 :entries [entry]}))
 
-(t/deftest markup-formats-note-that-split-text-plays-whole
+(t/deftest markup-formats-note-the-split-text-they-play-whole
+  ;; they play the units of a split text, but of one that underlines or
+  ;; strikes some of its text
   (let [{:keys [objects bid tid]} (text-board)
         with  #(cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid %)
         split {:type :fade :split :word :start 0 :duration 500}
+        lined (assoc-in objects [tid :content :children 0 :children 0 :children 0 :text-decoration] "underline")
         notes {:svg [:split-text] :lottie [:split-text] :dotlottie [:split-text]}]
-    (t/is (= notes (dea/export-caveats objects (with split))))
-    (t/is (= notes (dea/export-caveats objects (with (words-use split))))
+    (t/is (= {} (dea/export-caveats objects (with split))))
+    (t/is (= notes (dea/export-caveats lined (with split))))
+    (t/is (= notes (dea/export-caveats lined (with (words-use split))))
           "a split entry of a style use too")
-    (t/is (= {} (dea/export-caveats objects (with {:type :fade}))))
+    (t/is (= {} (dea/export-caveats lined (with {:type :fade}))))
     (t/is (= {} (dea/export-caveats objects nil)))))
+
+(t/deftest each-unit-of-a-split-text-is-its-own-picture
+  (let [{:keys [objects bid tid]} (text-board)
+        tl     (cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid
+                                  {:type :fade :split :word :start 0 :duration 500})
+        shots  (atom [])
+        bridge {:clean-modifiers (fn [])
+                :apply-shape-properties (fn [shape props]
+                                          (when (some #{:text-units} props)
+                                            (swap! shots conj (:text-units shape))))
+                :render-shape-pixels (fn [_ _ _] (js/Uint8Array. #js [137 80 78 71]))
+                :get-shape-extrect (fn [_] {:x 10 :y 10 :width 200 :height 20})
+                ;; as the browser crops each to its ink
+                :crop-picture (fn [bytes rect] (p/resolved {:bytes bytes :rect (update rect :x + 5)}))}
+        texts  (dea/unit-texts objects tl)]
+    (t/is (= #{tid} (set (keys texts))))
+    (t/async
+      done
+      (-> (dea/collect-unit-images objects tl texts {:bridge bridge})
+          (p/then (fn [images]
+                    (t/is (= #{[tid 0] [tid 1] [tid 2] [tid :rest]} (set (keys images))))
+                    (t/is (= [15 10 200 20] ((juxt :x :y :width :height) (get images [tid 1])))
+                          "where its picture is, in the board")
+                    (let [[first-shot second-shot :as all] @shots]
+                      (t/is (= [3 7] (mapv :start first-shot)) "the first word alone: the others hidden")
+                      (t/is (every? #(zero? (:opacity %)) first-shot))
+                      (t/is (= [0 7] (mapv :start second-shot)))
+                      (t/is (= 3 (count (nth all 3))) "then all of them: what is no word")
+                      (t/is (= [] (last all)) "and the text back at rest"))))
+          (p/catch (fn [cause] (t/is (nil? cause) (str cause))))
+          (p/finally done)))))
 
 (t/deftest markup-exports-read-the-board-without-split-keys
   (let [{:keys [objects bid tid]} (text-board)

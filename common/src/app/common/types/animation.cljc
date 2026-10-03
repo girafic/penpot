@@ -1318,12 +1318,14 @@
   [:split :spread :order :seed])
 
 (defn- play-whole
-  "`animation` playing as an animation of its whole layer: a preset
-  without its split keys, a style use without those of its entries."
-  [animation]
-  (if (style-use? animation)
-    (update animation :entries (partial mapv #(apply dissoc % split-keys)))
-    (apply dissoc animation split-keys)))
+  "`animation` playing as an animation of its whole layer, unless it
+  splits by a kind of units of `keep` (a set): a preset without its split
+  keys, a style use without those of its entries."
+  [animation keep]
+  (let [whole #(cond-> % (not (contains? keep (:split %))) (as-> a (apply dissoc a split-keys)))]
+    (if (style-use? animation)
+      (update animation :entries (partial mapv whole))
+      (whole animation))))
 
 (defn with-split-kind
   "`animations`, the presets of a track or the entries of a style, with
@@ -1343,13 +1345,23 @@
 
 (defn flatten-splits
   "`timeline` with its split animations playing as animations of their
-  whole layers, the presets and the entries of the style uses alike: as
-  the markup exports (CSS, SVG and Lottie), which know no units of a
-  text, play them."
-  [timeline]
-  (update timeline :tracks d/update-vals
-          (fn [track]
-            (d/update-when track :animations (partial mapv play-whole)))))
+  whole layers, the presets and the entries of the style uses alike, but
+  those that split by a kind of units of `keep` (none by default): as an
+  export plays the units it cannot play one by one (lines in the code of
+  a page, whose browser breaks them, see `unit-timelines`)."
+  ([timeline]
+   (flatten-splits timeline #{}))
+  ([timeline keep]
+   (flatten-splits timeline keep (constantly true)))
+  ([timeline keep keep?]
+   ;; `keep?` of a shape id: whether its split animations may keep theirs
+   (update timeline :tracks
+           (fn [tracks]
+             (reduce-kv (fn [tracks id track]
+                          (let [keep (if (keep? id) keep #{})]
+                            (assoc tracks id (d/update-when track :animations (partial mapv #(play-whole % keep))))))
+                        tracks
+                        tracks)))))
 
 (defn get-animation
   [timeline shape-id animation-id]
@@ -2685,6 +2697,74 @@
    {}
    (:tracks timeline)))
 
+(defn unit-timelines
+  "The units of the texts of `timeline` (as it plays, see
+  `resolve-animations`, its copies' tracks too, see
+  `app.common.logic.timelines/with-instance-tracks`) whose split
+  animations play them one by one (see `unit-split-kind`), as timelines
+  of the settings of `timeline`: `{text-id {:kind :n :ids :bases
+  :timeline}}`, `:ids` the ids of the tracks of the units in their
+  timeline (`[text-id k]`, which no shape has), in unit order, `:bases`
+  where they are in the text (see `unit-plans`). Their keyframes are in
+  the time of `timeline`, of `:x :y` offsets in px from where a unit
+  rests, `:rotation` degrees, `:scale-x :scale-y` and `:opacity` factors
+  and `:blur` px; the units of a track with a `:split-clock` (a copy)
+  play on that clock, unrolled over `timeline` as its keyframes are, and
+  loops are unrolled (see `expand-loops`). What the code and the markup
+  exports play the units by (see `timeline->css`)."
+  [timeline objects]
+  (let [settings (select-keys timeline [:duration :playback :loop])]
+    (reduce-kv
+     (fn [result text-id track]
+       (let [shape      (get objects text-id)
+             animations (track-animations track)
+             kind       (unit-split-kind shape animations)]
+         (if (nil? kind)
+           result
+           (let [n      (tu/unit-count shape kind)
+                 units  (when (not= :line kind) (tu/units shape kind))
+                 plans  (unit-plans text-id kind units n (filterv #(= kind (:split %)) animations))
+                 ids    (mapv #(vector text-id %) (range n))
+                 tracks (zipmap ids
+                                (map (fn [id plan]
+                                       {:shape-id id
+                                        :keyframes (sort-keyframes (into [] (mapcat val) (:keyframes plan)))})
+                                     ids
+                                     plans))
+                 clock  (:split-clock track)
+                 units  (assoc timeline :tracks tracks)
+                 ;; on the clock of a copy, unrolled as its keyframes are
+                 units  (if (nil? clock)
+                          units
+                          (let [own    (cond-> (merge units clock)
+                                         (= :ping-pong (playback-mode (merge units clock)))
+                                         (-> expand-springs expand-ping-pong))
+                                period (:duration own)]
+                            (merge (cond-> own
+                                     (= :loop (playback-mode own))
+                                     (update :tracks d/update-vals #(loop-track % period)))
+                                   settings)))]
+             (assoc result text-id {:kind kind
+                                    :n n
+                                    :ids ids
+                                    :bases (mapv :base plans)
+                                    :timeline (expand-loops units)})))))
+     {}
+     (:tracks timeline))))
+
+(defn unit-shape
+  "A shape for the unit `id` of a text of `timeline` (see
+  `unit-timelines`) to play as a layer in the code and markup exports
+  (see `frame-values`): at rest where the positions of its keyframes
+  count from, so they are the offsets of the unit, unturned and of no
+  size."
+  [timeline objects id]
+  (let [origin (position-origin timeline objects id)]
+    {:id id
+     :type :rect
+     :selrect {:x (:x origin) :y (:y origin) :width 0 :height 0}
+     :rotation 0}))
+
 (defn split-animations?
   "Whether `timeline` plays a text of `objects` by its units (see
   `unit-split-kind`), from a preset or from an entry of a style use: what
@@ -3462,17 +3542,29 @@
   rules) for `timeline`, using the base geometry from `objects`. Pure.
   Played once, a shape keeps the last frame. With reduced motion asked
   for, the shapes stay as designed. Split animations play as animations
-  of the whole text (see `flatten-splits`). Options: `:ids`, the shapes to write
-  (all by default), `:selector`, the CSS selector of a shape
-  (`shape-css-class` by default), `:origin`, the `transform-origin`
-  of a shape and its track (`origin-css` of the track origin, a share of
-  the shape's box, by default), and `:transform`, the `transform` a shape
-  has at rest in the code its animation plays in (none by default), which
-  the animation keeps."
+  of the whole text (see `flatten-splits`) unless `:units` says
+  otherwise. Options: `:ids`, the shapes to write (all by default),
+  `:selector`, the CSS selector of a shape (`shape-css-class` by
+  default), `:origin`, the `transform-origin` of a shape and its track
+  (`origin-css` of the track origin, a share of the shape's box, by
+  default), `:transform`, the `transform` a shape has at rest in the code
+  its animation plays in (none by default), which the animation keeps,
+  and `:units`, to play the units of split texts one by one (see
+  `unit-timelines`): `{:kinds :texts :selector :origin :display}`, the
+  kinds of units (the others play whole), whether a text plays by them
+  (a function of its id, all by default), the selector of a unit (of the
+  text and its index), its `transform-origin` (of the same), its CSS
+  `display`, if any (an inline element of a page takes no transform),
+  and `:adjust`, if any, a function of a text and the timeline of its
+  units (see `unit-timelines`) giving the one to play."
   ([timeline objects]
    (timeline->css timeline objects nil))
-  ([timeline objects {:keys [ids selector origin transform]}]
-   (let [timeline (-> timeline flatten-splits (resolve-animations objects) expand-loops expand-paths)
+  ([timeline objects {:keys [ids selector origin transform units]}]
+   (let [timeline (-> timeline
+                      (flatten-splits (or (:kinds units) #{}) (or (:texts units) (constantly true)))
+                      (resolve-animations objects)
+                      expand-loops
+                      expand-paths)
          duration (max 1 (:duration timeline))
          iter     (case (playback-mode timeline)
                     :loop      "infinite"
@@ -3480,6 +3572,27 @@
                     "1 both")
          selector (or selector #(str "." (shape-css-class (:id %))))
          origin   (or origin (fn [_ track] (origin-css (track-origin track))))
+         ;; each unit of a split text, a layer in it (see `unit-timelines`)
+         unit-rules
+         (when (some? units)
+           (for [[text-id {units-tl :timeline unit-ids :ids}] (unit-timelines timeline objects)
+                 :let  [text     (get objects text-id)
+                        units-tl (if-let [adjust (:adjust units)] (adjust text units-tl) units-tl)]
+                 :when (and (some? text) (or (nil? ids) (contains? ids text-id)))
+                 [k unit-id] (map-indexed vector unit-ids)]
+             (let [kf-name  (str "penpot-unit-" text-id "-" k)
+                   selector ((:selector units) text k)
+                   unit     (unit-shape units-tl objects unit-id)]
+               [selector
+                (str "/* " (or (:name text) (str text-id)) ", unit " (inc k) " */\n"
+                     (track->keyframes-css units-tl unit (get-in units-tl [:tracks unit-id]) kf-name
+                                           (position-origin units-tl objects unit-id) nil)
+                     "\n\n"
+                     selector " {\n"
+                     (when-let [display (:display units)]
+                       (str "  display: " display ";\n"))
+                     "  animation: " kf-name " " duration "ms linear " iter ";\n"
+                     "  transform-origin: " ((:origin units) text k) ";\n}")])))
          rules    (into []
                         (keep (fn [[sid track]]
                                 (when-let [shape (and (or (nil? ids) (contains? ids sid))
@@ -3496,7 +3609,8 @@
                                           duration "ms linear " iter ";\n"
                                           "  transform-origin: "
                                           (origin shape track) ";\n}")]))))
-                        (:tracks timeline))]
+                        (:tracks timeline))
+         rules    (into rules unit-rules)]
      (if (empty? rules)
        ""
        (str (str/join "\n\n" (map second rules))
@@ -3791,7 +3905,7 @@
        (vec)))
 
 (defn- lottie-anchor
-  "Layer-space point of the track origin on `shape`."
+  "Layer-space point of the track origin on `shape`, before it turns."
   [shape ox oy origin]
   (let [sr (:selrect shape)
         sw (double (or (:width sr) 0))
@@ -3801,28 +3915,56 @@
     [(+ (- (or (:x sr) 0) ox) (* sw nx))
      (+ (- (or (:y sr) 0) oy) (* sh ny))]))
 
+(defn- pivot-offset
+  "Where the track origin `origin` (0..1 on the box of `shape`, see
+  `track-origin`) is from the top left of the box, turned as the shape
+  is around its center: what the pivot is in the picture of the shape."
+  [shape origin]
+  (let [sr    (:selrect shape)
+        sw    (double (or (:width sr) 0))
+        sh    (double (or (:height sr) 0))
+        dx    (* (- (or (:x origin) 0.5) 0.5) sw)
+        dy    (* (- (or (:y origin) 0.5) 0.5) sh)
+        angle (mth/radians (or (:rotation shape) 0))
+        cos   (mth/cos angle)
+        sin   (mth/sin angle)]
+    [(+ (/ sw 2) (- (* dx cos) (* dy sin)))
+     (+ (/ sh 2) (+ (* dx sin) (* dy cos)))]))
+
+(defn- lottie-pivot
+  "Layer-space point of the track origin on `shape` as it is, turned with
+  it (see `pivot-offset`)."
+  [shape ox oy origin]
+  (let [sr      (:selrect shape)
+        [dx dy] (pivot-offset shape origin)]
+    [(+ (- (or (:x sr) 0) ox) dx)
+     (+ (- (or (:y sr) 0) oy) dy)]))
+
 (defn- lottie-ks
+  "The transform of the Lottie layer of `shape`: it turns its picture,
+  drawn as it is before it turns, around its pivot (`lottie-anchor`),
+  which sits where the pivot of the turned shape is (`lottie-pivot`)."
   [shape track ox oy origin]
   (let [by-prop (group-by :property (:keyframes track))
         pivot   (track-origin track)
         [ax ay] (lottie-anchor shape ox oy pivot)
-        nx      (:x pivot)
-        ny      (:y pivot)
-        sw      (double (or (:width (:selrect shape)) 0))
-        sh      (double (or (:height (:selrect shape)) 0))
+        [px py] (lottie-pivot shape ox oy pivot)
+        [dx dy] (pivot-offset shape pivot)
         base-r  (or (:rotation shape) 0)]
     {:o (lottie-prop-1d (by-prop :opacity) (fn [v] (* 100.0 v)) (* 100.0 (or (:opacity shape) 1)))
      :r (lottie-prop-1d (by-prop :rotation) identity base-r)
      :p {:s true
-         :x (lottie-prop-1d (by-prop :x) (fn [v] (+ (- (+ (:x origin) v) ox) (* sw nx))) ax)
-         :y (lottie-prop-1d (by-prop :y) (fn [v] (+ (- (+ (:y origin) v) oy) (* sh ny))) ay)}
+         :x (lottie-prop-1d (by-prop :x) (fn [v] (+ (- (+ (:x origin) v) ox) dx)) px)
+         :y (lottie-prop-1d (by-prop :y) (fn [v] (+ (- (+ (:y origin) v) oy) dy)) py)}
      :a {:a 0 :k [ax ay 0]}
      :s (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y))}))
 
 (defn- shape->lottie-image-layer
   "An image layer of `shape`, whose image is rasterized opaque: the layer
-  has its opacity. The image begins at the layer's origin: the anchor is
-  the track origin on it, not on the composition."
+  has its opacity. The image is the shape as it is, turned, over the box
+  `asset` gives (`:x :y` in the board, the box of the shape when not
+  there): the anchor is the pivot on it, and the layer turns it only as
+  much as the animation turns the shape."
   [ind shape track ox oy origin asset duration]
   {:ddd 0
    :ind (inc ind)
@@ -3830,10 +3972,16 @@
    :nm (or (:name shape) (str "layer-" (inc ind)))
    :refId (:id asset)
    :sr 1
-   :ks (assoc (lottie-ks shape track ox oy origin)
-              :a {:a 0 :k (conj (lottie-anchor (update shape :selrect assoc :x 0 :y 0) 0 0
-                                               (track-origin track))
-                                0)})
+   :ks (let [by-prop (group-by :property (:keyframes track))
+             pivot   (track-origin track)
+             [px py] (lottie-pivot shape ox oy pivot)
+             sr      (:selrect shape)
+             ix      (or (:x asset) (- (or (:x sr) 0) ox))
+             iy      (or (:y asset) (- (or (:y sr) 0) oy))
+             base-r  (or (:rotation shape) 0)]
+         (assoc (lottie-ks shape track ox oy origin)
+                :r (lottie-prop-1d (by-prop :rotation) #(- % base-r) 0)
+                :a {:a 0 :k [(- px ix) (- py iy) 0]}))
    :ao 0
    :ip 0
    :op (ms->frames (max 1 duration))
@@ -4284,15 +4432,135 @@
       (clipping-board? shape)
       (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy)]))))
 
+(defn- unit-text-ids
+  "The texts `images` has pictures of the units of (`[text-id k]`, see
+  `timeline->svg`)."
+  [images]
+  (into #{}
+        (keep (fn [key] (when (vector? key) (first key))))
+        (keys images)))
+
+(defn- turned-moves
+  "The timeline of the units of a text (see `unit-timelines`) turned
+  `angle` degrees with it: the offsets of its units, in the text, turned
+  as they move in the picture of the turned text."
+  [units angle]
+  (if (mth/almost-zero? (mod (or angle 0) 360))
+    units
+    (let [radians (mth/radians angle)
+          cos     (mth/cos radians)
+          sin     (mth/sin radians)]
+      (update units :tracks d/update-vals
+              (fn [{:keys [keyframes] :as track}]
+                (let [xs (sort-keyframes (filter #(= :x (:property %)) keyframes))
+                      ys (sort-keyframes (filter #(= :y (:property %)) keyframes))]
+                  (if (and (empty? xs) (empty? ys))
+                    track
+                    (let [at     (fn [keyframes time] (or (property-value-at keyframes time) 0))
+                          easing (fn [time]
+                                   (-> (or (d/seek #(= time (:time %)) xs) (d/seek #(= time (:time %)) ys))
+                                       (select-keys [:easing :interpolation])))
+                          turned (mapcat (fn [time]
+                                           (let [x (at xs time)
+                                                 y (at ys time)]
+                                             [(make-keyframe (merge (easing time) {:time time :property :x
+                                                                                   :value (- (* x cos) (* y sin))}))
+                                              (make-keyframe (merge (easing time) {:time time :property :y
+                                                                                   :value (+ (* x sin) (* y cos))}))]))
+                                         (into (sorted-set) (map :time) (concat xs ys)))]
+                      (assoc track :keyframes
+                             (sort-keyframes (into (filterv #(not (#{:x :y} (:property %))) keyframes) turned)))))))))))
+
+(defn- lottie-unit-layer
+  "The image layer of the unit `k` of a text, whose picture is `asset`
+  (over its box in the board, see `timeline->lottie`), playing the
+  keyframes of the unit, `track` (see `unit-timelines`): it moves by them
+  from where it rests and turns and scales around its middle."
+  [name k asset track duration]
+  (let [by-prop (group-by :property (:keyframes track))
+        w       (double (or (:w asset) 0))
+        h       (double (or (:h asset) 0))
+        cx      (+ (or (:x asset) 0) (/ w 2))
+        cy      (+ (or (:y asset) 0) (/ h 2))]
+    {:ddd 0
+     :ty 2
+     :nm (str name " " (inc k))
+     :refId (:id asset)
+     :sr 1
+     :ks {:o (lottie-prop-1d (by-prop :opacity) (fn [v] (* 100.0 v)) 100.0)
+          :r (lottie-prop-1d (by-prop :rotation) identity 0)
+          :p {:s true
+              :x (lottie-prop-1d (by-prop :x) (fn [v] (+ cx v)) cx)
+              :y (lottie-prop-1d (by-prop :y) (fn [v] (+ cy v)) cy)}
+          :a {:a 0 :k [(/ w 2) (/ h 2) 0]}
+          :s (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y))}
+     :ao 0
+     :ip 0
+     :op (ms->frames duration)
+     :st 0
+     :bm 0}))
+
+(defn- lottie-units-layer
+  "A precomp layer of the text `shape` whose units play one by one (see
+  `unit-timelines`), with the picture of each unit and of what is no unit
+  as assets (`[text-id k]`, `[text-id :rest]`): it moves, turns and fades
+  the text as its track says (its picture turned already, it turns by
+  the animation only), and the units inside it play their own
+  keyframes, their moves turned with the text. The precomp goes to
+  `comps`."
+  [{:keys [objects timeline duration width height ox oy comps assets units] :as ctx} shape]
+  (let [id       (:id shape)
+        name     (or (:name shape) (str id))
+        track    (lottie-track ctx id)
+        by-prop  (group-by :property (:keyframes track))
+        units    (get units id)
+        units-tl (turned-moves (:timeline units) (:rotation shape))
+        rest     (get assets [id :rest])
+        layers   (cond-> (into []
+                               (keep-indexed (fn [k unit-id]
+                                               (when-let [asset (get assets [id k])]
+                                                 (lottie-unit-layer name k asset
+                                                                    (get-in units-tl [:tracks unit-id])
+                                                                    duration))))
+                               (:ids units))
+                   (some? rest)
+                   (conj {:ddd 0 :ty 2 :nm (str name " text") :refId (:id rest) :sr 1
+                          :ks {:o {:a 0 :k 100}
+                               :r {:a 0 :k 0}
+                               :p {:a 0 :k [(or (:x rest) 0) (or (:y rest) 0) 0]}
+                               :a {:a 0 :k [0 0 0]}
+                               :s {:a 0 :k [100 100 100]}}
+                          :ao 0 :ip 0 :op (ms->frames duration) :st 0 :bm 0}))
+        ref      (str "comp_" id)
+        [px py]  (lottie-pivot shape ox oy (track-origin track))
+        base-r   (or (:rotation shape) 0)]
+    (vswap! comps conj {:id ref :nm name :layers (lottie-numbered layers)})
+    {:ddd 0
+     :ty 0
+     :nm name
+     :refId ref
+     :sr 1
+     :ks (assoc (lottie-ks shape track ox oy (position-origin timeline objects id))
+                :r (lottie-prop-1d (by-prop :rotation) #(- % base-r) 0)
+                :a {:a 0 :k [px py 0]})
+     :ao 0
+     :w width
+     :h height
+     :ip 0
+     :op (ms->frames duration)
+     :st 0
+     :bm 0}))
+
 (defn- lottie-node-layers
   "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first."
   [ctx nodes]
   (into []
         (keep (fn [{:keys [id inner] :as node}]
                 (when-let [shape (get (:objects ctx) id)]
-                  (if (seq inner)
-                    (lottie-precomp-layer ctx node)
-                    (lottie-shape-layer ctx shape (lottie-track ctx id))))))
+                  (cond
+                    (contains? (:units ctx) id) (lottie-units-layer ctx shape)
+                    (seq inner)                 (lottie-precomp-layer ctx node)
+                    :else                       (lottie-shape-layer ctx shape (lottie-track ctx id))))))
         (rseq nodes)))
 
 (defn- lottie-layers
@@ -4301,13 +4569,14 @@
   clips some, becomes a precomp (see `lottie-precomp-layer`). Layers not
   in the tree of the board go below the others, and the board draws
   itself, and what is no layer, at the bottom."
-  [timeline objects layer-ids assets]
+  [timeline objects layer-ids assets units]
   (let [board-id (:board-id timeline)
         board    (get objects board-id)
         bsr      (:selrect board)
         ctx      {:objects objects
                   :layer-ids layer-ids
                   :assets assets
+                  :units units
                   :timeline timeline
                   :duration (max 1 (:duration timeline))
                   :ox (or (:x bsr) 0)
@@ -4336,9 +4605,10 @@
   JSON encoding) for `timeline`, using `objects` for geometry. The board
   (`:board-id`) is the composition. Pure.
 
-  When `assets` is a non-empty map of `{shape-id {:id :w :h :u :p :e}}`
-  (an image embedded as a data URI, `:e` 1, or a file `:p` in the folder
-  `:u` of a dotLottie archive, `:e` 0), the export layers (see
+  When `assets` is a non-empty map of `{shape-id {:id :w :h :u :p :e :x
+  :y}}` (an image embedded as a data URI, `:e` 1, or a file `:p` in the
+  folder `:u` of a dotLottie archive, `:e` 0; `:x :y` where it begins in
+  the board, the box of the shape when not there), the export layers (see
   `export-layer-ids`) are those shapes, which
   become image layers (`ty` 2) unless they export as vectors (see
   `lottie-vector-layer?`); the board's own asset draws it. Without
@@ -4350,15 +4620,22 @@
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]
-   (let [markers   (lottie-markers timeline)
+   (let [markers    (lottie-markers timeline)
+         unit-texts (unit-text-ids assets)
+         resolved   (-> timeline
+                        (flatten-splits #{:char :word :line} unit-texts)
+                        (resolve-animations objects))
          ;; Lottie has no ping-pong, so the way back is part of the document.
-         timeline  (-> timeline flatten-splits (resolve-animations objects)
-                       expand-loops expand-paths expand-springs expand-ping-pong)
-         board-id  (:board-id timeline)
-         layer-ids (if (seq assets)
-                     (set (export-layer-ids objects board-id (:tracks timeline)))
-                     (disj (set (keys (:tracks timeline))) board-id))
-         {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets)
+         expand     #(-> % expand-paths expand-springs expand-ping-pong)
+         units      (into {}
+                          (map (fn [[id units]] [id (update units :timeline expand)]))
+                          (select-keys (unit-timelines resolved objects) unit-texts))
+         timeline   (expand (expand-loops resolved))
+         board-id   (:board-id timeline)
+         layer-ids  (if (seq assets)
+                      (set (export-layer-ids objects board-id (:tracks timeline)))
+                      (disj (set (keys (:tracks timeline))) board-id))
+         {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets units)
          images    (map (fn [[_ asset]]
                           {:id (:id asset)
                            :w (:w asset)
@@ -4394,19 +4671,60 @@
                    "</clipPath>")))
        (str/join "")))
 
+(defn- unit-image-indexes
+  "The indexes of the units of the text `text-id` that `images` has a
+  picture of, in order: a unit of no ink has none."
+  [images text-id]
+  (sort (keep (fn [key]
+                (when (and (vector? key) (= text-id (first key)) (int? (second key)))
+                  (second key)))
+              (keys images))))
+
+(defn unit-css-class
+  "The CSS class of the unit `k` of the text `text-id` in the SVG export
+  (see `timeline->svg`)."
+  [text-id k]
+  (str "penpot-unit-" text-id "-" k))
+
+(defn- svg-image
+  [img]
+  (str "<image href=\"" (svg-escape (or (:href img) ""))
+       "\" x=\"" (fmt (:x img)) "\" y=\"" (fmt (:y img))
+       "\" width=\"" (fmt (:width img)) "\" height=\"" (fmt (:height img)) "\"/>"))
+
 (defn- emit-svg-node
   "The SVG of a node of `layer-nodes`: a layer is a group its CSS class
   animates, holding its image and the layers inside it, which so follow
-  it; a board that clips keeps those to its outline. All images sit
-  where they are in the SVG, whose origin is `ox`/`oy`."
+  it; a board that clips keeps those to its outline. A text whose units
+  `images` has pictures of (see `timeline->svg`) holds, instead of its
+  image, the picture of what is no unit and a group of each unit, which
+  its CSS class animates. All images sit where they are in the SVG,
+  whose origin is `ox`/`oy`."
   [objects images ox oy {:keys [id inner clip?]}]
   (when-let [shape (get objects id)]
     (let [inner   (str/join "" (keep #(emit-svg-node objects images ox oy %) inner))
           clipped #(if (and (seq inner) (clipping-board? shape))
                      (str "<g clip-path=\"url(#" (svg-escape (svg-clip-id id)) ")\">" % "</g>")
                      %)]
-      (if clip?
+      (cond
+        clip?
         (clipped inner)
+
+        (seq (unit-image-indexes images id))
+        (let [opacity (or (:opacity shape) 1)]
+          (str "<g class=\"" (svg-escape (shape-css-class id)) "\""
+               (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
+               ">"
+               (some-> (get images [id :rest]) (svg-image))
+               (str/join "" (map (fn [k]
+                                   (str "<g class=\"" (svg-escape (unit-css-class id k)) "\">"
+                                        (svg-image (get images [id k]))
+                                        "</g>"))
+                                 (unit-image-indexes images id)))
+               inner
+               "</g>"))
+
+        :else
         (let [img     (get images id)
               sr      (:selrect shape)
               ;; the image is opaque; an animated opacity overrides this
@@ -4415,9 +4733,11 @@
                (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
                ">"
                (clipped
+                ;; the picture of the shape as it is, turned, over its box
+                ;; with shadows and blur (`:x :y` of the image), or its box
                 (str "<image href=\"" (svg-escape (or (:href img) ""))
-                     "\" x=\"" (fmt (- (or (:x sr) 0) ox))
-                     "\" y=\"" (fmt (- (or (:y sr) 0) oy))
+                     "\" x=\"" (fmt (or (:x img) (- (or (:x sr) 0) ox)))
+                     "\" y=\"" (fmt (or (:y img) (- (or (:y sr) 0) oy)))
                      "\" width=\"" (fmt (or (:width img) (:width sr) 0))
                      "\" height=\"" (fmt (or (:height img) (:height sr) 0)) "\"/>"
                      inner))
@@ -4429,10 +4749,18 @@
   layer follows the one it sits in and a board clips them; each turns
   and scales around its pivot in the SVG. `images` is `{shape-id {:href
   :x :y :width :height}}`; the board's own image, when there, goes below
-  them. Split animations play as animations of the whole text (see
+  them. A split text plays its units one by one when `images` has
+  pictures of them, `[text-id k]` of the unit `k` (see `unit-timelines`)
+  and, when it has ink (an underline), `[text-id :rest]` of what is no
+  unit, each over the box it covers (with the text turned); otherwise its
+  split animations play as animations of the whole text (see
   `flatten-splits`)."
   [timeline objects images]
-  (let [timeline (-> timeline flatten-splits (resolve-animations objects) expand-loops)
+  (let [unit-texts (unit-text-ids images)
+        timeline (-> timeline
+                     (flatten-splits #{:char :word :line} unit-texts)
+                     (resolve-animations objects)
+                     expand-loops)
         board-id (:board-id timeline)
         bsr      (:selrect (get objects board-id))
         width    (mth/round (or (:width bsr) 100))
@@ -4442,8 +4770,18 @@
         ;; SVG takes a share of `transform-origin` of the whole drawing
         css      (timeline->css timeline objects
                                 {:origin (fn [shape track]
-                                           (let [[x y] (lottie-anchor shape ox oy (track-origin track))]
-                                             (str (fmt x) "px " (fmt y) "px")))})
+                                           (let [[x y] (lottie-pivot shape ox oy (track-origin track))]
+                                             (str (fmt x) "px " (fmt y) "px")))
+                                 :units (when (seq unit-texts)
+                                          {:kinds #{:char :word :line}
+                                           :texts unit-texts
+                                           :selector (fn [text k] (str "." (unit-css-class (:id text) k)))
+                                           ;; each unit turns around the middle of its picture
+                                           :origin (fn [text k]
+                                                     (let [{:keys [x y width height]} (get images [(:id text) k])]
+                                                       (str (fmt (+ (or x 0) (/ (or width 0) 2))) "px "
+                                                            (fmt (+ (or y 0) (/ (or height 0) 2))) "px")))
+                                           :adjust (fn [text units] (turned-moves units (:rotation text)))})})
         ids      (export-layer-ids objects board-id (:tracks timeline))
         nodes    (layer-nodes objects (set ids) board-id)
         clips    (svg-clip-paths objects ox oy nodes)

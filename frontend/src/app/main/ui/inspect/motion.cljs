@@ -45,13 +45,17 @@
 
 (defn- notes
   "What the code in `format` leaves out of the animation of `codes` (the
-  code models of the boards): split text played whole and audio, which
-  only the JSON gives."
-  [codes format]
+  code models of the boards) of `objects`: the texts it plays whole,
+  split by lines (a page breaks the lines) or drawn as SVG (see
+  `cgm/code-units?`), and audio, which only the JSON gives."
+  [codes objects format]
   (when (not= "json" format)
     (cond-> []
-      (some (comp seq :splits) codes)
-      (conj (tr "workspace.options.export.split-text-whole"))
+      (some (fn [{:keys [splits]}]
+              (some (fn [[id kind]] (or (= :line kind) (not (cgm/code-units? (get objects id)))))
+                    splits))
+            codes)
+      (conj (tr "workspace.options.export.split-lines-whole"))
 
       (some #(seq (get-in % [:timeline :audio-clips])) codes)
       (conj (tr "workspace.options.export.no-audio")))))
@@ -86,8 +90,8 @@
             (cgm/animation-css page libraries ids)))
 
         notes
-        (mf/with-memo [codes format]
-          (notes codes format))
+        (mf/with-memo [codes objects format]
+          (notes codes objects format))
 
         boards
         (mf/with-memo [codes objects ids]

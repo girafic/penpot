@@ -222,6 +222,56 @@
                          (property-json layer "x"))))
     (t/is (= [] (get layer "presets")) "the hidden preset left out")))
 
+(defn- split-text-page
+  "A page whose board plays the words of the text :title one after the
+  other."
+  []
+  (let [file  (-> (thf/sample-file :file1)
+                  (tho/add-frame :board :x 0 :y 0 :width 400 :height 300)
+                  (tho/add-text :title "Hi you there" :text-params {:parent-label :board}))
+        board (thi/id :board)
+        tl    (cta/add-animation (cta/make-timeline {:board-id board :duration 1000})
+                                 (thi/id :title) {:type :move :split :word :spread 1 :start 0 :duration 600
+                                                  :offset-x 0 :offset-y 20})
+        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page (thf/current-page file))
+                                          (pcb/set-timeline board tl)))]
+    (thf/current-page file)))
+
+(t/deftest the-code-can-play-the-units-of-a-text
+  (let [page  (split-text-page)
+        board (thi/id :board)
+        code  (cltl/code-timelines page {} board :units? #(= :text (:type %)))]
+    (t/testing "the JSON lists the keyframes of each unit"
+      (let [layer (layer-json (ctac/motion-json code (:objects page)) :title)
+            units (get layer "units")]
+        (t/is (= ["word" 3] [(get units "kind") (get units "count")]))
+        (t/is (= [0 1 2] (mapv #(get % "index") (get units "keyframes"))))
+        (t/is (= [[0 20] [200 0]]
+                 (->> (get-in units ["keyframes" 0 "properties"])
+                      (some #(when (= "y" (get % "property")) %))
+                      (#(get % "keyframes"))
+                      (mapv (juxt (fn [k] (get k "time")) (fn [k] (get k "value"))))))
+              "the first word, 20 px down, rises in a third of the span")
+        (t/is (nil? (property-json layer "y")) "the text itself stays")))
+    (t/testing "the React plays a span by unit, with its text"
+      (let [react (ctac/motion-react code (:objects page))]
+        (t/is (= 3 (count (re-seq #"<motion.span" react))))
+        (t/is (cstr/includes? react "className=\"penpot-unit penpot-unit-2\""))
+        (t/is (cstr/includes? react ">{\"there\"}</motion.span>"))
+        (t/is (cstr/includes? react "{\" \"}") "the space between them as it is")))
+    (t/testing "the CSS, a rule by unit"
+      (let [css (cta/timeline->css (:timeline code) (:objects page)
+                                   {:units {:kinds #{:word}
+                                            :selector (fn [_ k] (str ".title .penpot-unit-" k))
+                                            :origin (constantly "50% 50%")
+                                            :display "inline-block"}})]
+        (t/is (= 3 (count (re-seq #"@keyframes penpot-unit-" css))))
+        (t/is (cstr/includes? css ".title .penpot-unit-1 {\n  display: inline-block;"))))
+    (t/testing "the texts the code cannot play so play whole"
+      (let [whole (cltl/code-timelines page {} board)]
+        (t/is (nil? (get (layer-json (ctac/motion-json whole (:objects page)) :title) "units")))))))
+
 (t/deftest a-split-text-plays-whole-and-says-so
   (let [file  (-> (thf/sample-file :file1)
                   (tho/add-frame :board :x 0 :y 0 :width 400 :height 300)

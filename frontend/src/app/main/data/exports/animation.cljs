@@ -45,6 +45,7 @@
    :use-shape wasm.api/use-shape
    :set-shape-hidden wasm.api/set-shape-hidden
    :render-shape-pixels wasm.api/render-shape-pixels
+   :get-shape-extrect wasm.api/get-shape-extrect
    :apply-shape-properties wasm.shape/apply-shape-properties!
    :set-modifiers-end wasm.api/set-modifiers-end
    :interactive? wasm-gesture/active?
@@ -108,13 +109,16 @@
   (apply-pose! objects (cta/timeline->modif-tree timeline objects time) {:bridge bridge})
   ((:render-shape-pixels bridge) shape-id scale :png))
 
-(defn render-shape-at-rest
-  "Rasterize `shape-id` in rest pose, hiding `hide-ids` for the shot. It
-  is rasterized opaque: the layer of the export has its opacity, which
-  its animation may change. A text shows its units at rest, whatever the
+(defn shoot-shape-at-rest
+  "Rasterize `shape-id` in rest pose, hiding `hide-ids` for the shot:
+  `{:bytes :rect}`, `:rect` the box the picture covers on the canvas (the
+  shape as it is, turned, with its shadows and blur, see
+  `wasm.api/get-shape-extrect`), nil without a way to know it. It is
+  rasterized opaque: the layer of the export has its opacity, which its
+  animation may change. A text shows its units at rest, whatever the
   canvas posed (see `cta/text-unit-entries`)."
   [objects shape-id hide-ids {:keys [bridge] :or {bridge (default-bridge)}}]
-  (let [{:keys [use-shape set-shape-hidden clean-modifiers
+  (let [{:keys [use-shape set-shape-hidden clean-modifiers get-shape-extrect
                 render-shape-pixels apply-shape-properties]} bridge
         shape (get objects shape-id)]
     (try
@@ -129,7 +133,10 @@
         (if (= :text (:type shape))
           (apply-shape-properties (assoc shape :opacity 1 :text-units []) [:opacity :text-units])
           (apply-shape-properties (assoc shape :opacity 1) [:opacity])))
-      (render-shape-pixels shape-id 1 :png)
+      (let [bytes (render-shape-pixels shape-id 1 :png)]
+        {:bytes bytes
+         :rect  (when get-shape-extrect
+                  (get-shape-extrect shape-id))})
       (finally
         (when (and apply-shape-properties shape)
           (apply-shape-properties shape [:opacity]))
@@ -139,6 +146,11 @@
               (apply-shape-properties shape [:hidden])
               (do (use-shape id)
                   (set-shape-hidden (boolean (:hidden shape)))))))))))
+
+(defn render-shape-at-rest
+  "The picture of `shape-id` in rest pose (see `shoot-shape-at-rest`)."
+  [objects shape-id hide-ids opts]
+  (:bytes (shoot-shape-at-rest objects shape-id hide-ids opts)))
 
 (defn flatten-rgba
   "Composite `data` (RGBA) onto `[r g b]`. Returns a map with opaque pixels."
@@ -370,9 +382,18 @@
         [:lottie :dotlottie]
         []))))
 
+(defn- decorated?
+  "Whether the text `shape` underlines or strikes some of its text: lines
+  that cross the spaces between its units, which belong to none."
+  [shape]
+  (boolean
+   (some #(contains? #{"underline" "line-through"} (:text-decoration %))
+         (tree-seq :children :children (:content shape)))))
+
 (def ^:private whole-text-formats
-  "The formats that play the split animations of a text as animations of
-  the whole text (see `cta/flatten-splits`)."
+  "The formats that play the split animations of a text that underlines
+  or strikes some of its text as animations of the whole text (see
+  `unit-texts`)."
   #{:svg :lottie :dotlottie})
 
 (def audio-formats
@@ -383,10 +404,13 @@
   "The notes the export of `timeline` (of the shapes of `objects`) needs,
   by format, as the Animated export tab shows them: `:split-text` for the
   formats that play a text split into characters, words or lines as a
-  whole (see `cta/split-animations?`), and `:no-audio` for the ones
-  without the sound of its audio clips."
+  whole (one that underlines or strikes some of its text, see
+  `unit-texts`), and `:no-audio` for the ones without the sound of its
+  audio clips."
   [objects timeline]
-  (let [split? (and (some? timeline) (cta/split-animations? timeline objects))
+  (let [split? (and (some? timeline)
+                    (some (fn [[id _]] (decorated? (get objects id)))
+                          (cta/unit-timelines (cta/resolve-animations timeline objects) objects)))
         audio? (seq (:audio-clips timeline))]
     (reduce (fn [caveats format]
               (cond-> caveats
@@ -877,6 +901,114 @@
     (when-let [shape (get objects id)]
       (apply-shape-properties shape (map (comp :property second) ops)))))
 
+(defn unit-texts
+  "The texts of `timeline` (as an export plays it, its split animations
+  kept, see `dwa/export-timeline`) whose units the markup exports play
+  one by one (see `cta/unit-timelines`): `{text-id units}`. A text that
+  underlines or strikes some of its text plays whole (see `decorated?`)."
+  [objects timeline]
+  (into {}
+        (remove (fn [[id _]] (decorated? (get objects id))))
+        (cta/unit-timelines (cta/resolve-animations timeline objects) objects)))
+
+(defn- shoot-units
+  "The pictures (see `shoot-shape-at-rest`, uncropped) of the units of the
+  text `text-id` at rest, `units` (see `cta/unit-timelines`): `{k shot}`,
+  each with the other units hidden, and `:rest` with them all hidden, the
+  rest of the text. The text keeps its units at rest after."
+  [objects text-id {:keys [bases]} {:keys [bridge] :or {bridge (default-bridge)}}]
+  (let [{:keys [apply-shape-properties render-shape-pixels get-shape-extrect clean-modifiers]} bridge
+        shape  (get objects text-id)
+        hidden (fn [base] (assoc base :dx 0 :dy 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 0 :blur 0))
+        shoot  (fn [entries]
+                 (apply-shape-properties (assoc shape :opacity 1 :text-units entries) [:opacity :text-units])
+                 {:bytes (render-shape-pixels text-id 1 :png)
+                  :rect  (when get-shape-extrect (get-shape-extrect text-id))})]
+    (try
+      (when clean-modifiers
+        (clean-modifiers))
+      (-> (into {}
+                (map (fn [k]
+                       [k (shoot (into [] (keep-indexed (fn [j base] (when (not= j k) (hidden base)))) bases))]))
+                (range (count bases)))
+          (assoc :rest (shoot (mapv hidden bases))))
+      (finally
+        (apply-shape-properties (assoc shape :text-units []) [:opacity :text-units])))))
+
+(defn crop-picture
+  "A promise of the picture `bytes` (PNG) over the box `rect` cropped to
+  its ink, `{:bytes :rect}`, or of nil when it has no ink."
+  [bytes rect]
+  (p/let [bitmap (js/createImageBitmap (js/Blob. #js [bytes] #js {:type "image/png"}))]
+    (let [w      (.-width bitmap)
+          h      (.-height bitmap)
+          canvas (js/OffscreenCanvas. (max 1 w) (max 1 h))
+          ctx    (.getContext canvas "2d")
+          _      (.drawImage ctx bitmap 0 0)
+          data   (.-data (.getImageData ctx 0 0 (max 1 w) (max 1 h)))
+          ;; the box of the pixels that are not transparent
+          [x0 y0 x1 y1]
+          (loop [i 0 x0 w y0 h x1 -1 y1 -1]
+            (if (< i (* w h))
+              (if (pos? (aget data (+ 3 (* 4 i))))
+                (let [x (mod i w) y (quot i w)]
+                  (recur (inc i) (min x0 x) (min y0 y) (max x1 x) (max y1 y)))
+                (recur (inc i) x0 y0 x1 y1))
+              [x0 y0 x1 y1]))]
+      (when (>= x1 0)
+        (let [cw  (inc (- x1 x0))
+              ch  (inc (- y1 y0))
+              sx  (if (pos? w) (/ (:width rect) w) 1)
+              sy  (if (pos? h) (/ (:height rect) h) 1)
+              out (js/OffscreenCanvas. cw ch)]
+          (.drawImage (.getContext out "2d") bitmap x0 y0 cw ch 0 0 cw ch)
+          (p/let [blob   (.convertToBlob out #js {:type "image/png"})
+                  buffer (.arrayBuffer blob)]
+            {:bytes (js/Uint8Array. buffer)
+             :rect  {:x (+ (:x rect) (* x0 sx))
+                     :y (+ (:y rect) (* y0 sy))
+                     :width (* cw sx)
+                     :height (* ch sy)}}))))))
+
+(defn collect-unit-images
+  "A promise of the pictures of the units of the texts `texts` (see
+  `unit-texts`) of `timeline`, each cropped to its ink (see
+  `crop-picture`), as `timeline->svg` and `timeline->lottie` take them:
+  `[text-id k]` of the unit `k`, `[text-id :rest]` of the rest of the
+  text; a unit of no ink has none."
+  [objects timeline texts {:keys [bridge] :or {bridge (default-bridge)}}]
+  (let [board (get objects (:board-id timeline))
+        ox    (or (:x (:selrect board)) 0)
+        oy    (or (:y (:selrect board)) 0)
+        crop  (or (:crop-picture bridge) crop-picture)
+        shots (into []
+                    (mapcat (fn [[text-id units]]
+                              (map (fn [[k shot]] [[text-id k] shot])
+                                   (shoot-units objects text-id units {:bridge bridge}))))
+                    texts)]
+    (p/let [cropped (p/all (map (fn [[_ {:keys [bytes rect]}]]
+                                  (if (and (some? bytes) (some? rect))
+                                    (crop bytes rect)
+                                    (p/resolved nil)))
+                                shots))]
+      (into {}
+            (keep (fn [[[key _] picture]]
+                    (when-let [{:keys [bytes rect]} picture]
+                      (let [[text-id k] key
+                            href (str "data:image/png;base64," (u8->base64 bytes))]
+                        [key {:href href
+                              :x (- (:x rect) ox)
+                              :y (- (:y rect) oy)
+                              :width (:width rect)
+                              :height (:height rect)
+                              :bytes bytes
+                              :id (str "img_" text-id "_" (if (keyword? k) (name k) k))
+                              :w (mth/round (:width rect))
+                              :h (mth/round (:height rect))
+                              :p href
+                              :e 1}]))))
+            (map vector shots cropped)))))
+
 (defn collect-layer-images
   "Rasterize each export layer at rest, but for those whose id `skip?` is
   true of. Children that are themselves layers are hidden so they are not
@@ -896,18 +1028,21 @@
            (fn [id]
              (when-let [shape (get objects id)]
                (let [hide  (child-layer-ids objects id idset)
-                     bytes (render-shape-at-rest objects id hide {:bridge bridge})
-                     sr    (:selrect shape)
+                     shot  (shoot-shape-at-rest objects id hide {:bridge bridge})
+                     bytes (:bytes shot)
+                     ;; where the picture is: the box it covers, turned
+                     ;; shape, shadows and blur in it, or the shape's box
+                     box   (or (:rect shot) (:selrect shape))
                      href  (str "data:image/png;base64," (u8->base64 bytes))]
                  [id {:href href
-                      :x (- (or (:x sr) 0) ox)
-                      :y (- (or (:y sr) 0) oy)
-                      :width (or (:width sr) 0)
-                      :height (or (:height sr) 0)
+                      :x (- (or (:x box) 0) ox)
+                      :y (- (or (:y box) 0) oy)
+                      :width (or (:width box) 0)
+                      :height (or (:height box) 0)
                       :bytes bytes
                       :id (str "img_" id)
-                      :w (mth/round (or (:width sr) 0))
-                      :h (mth/round (or (:height sr) 0))
+                      :w (mth/round (or (:width box) 0))
+                      :h (mth/round (or (:height box) 0))
                       :p href
                       :e 1}]))))
           (cond->> ids
@@ -1103,53 +1238,65 @@
                 files)
         (p/then (fn [_] (uz/close writer))))))
 
+(defn- export-markup-file!
+  "Write the SVG, Lottie or dotLottie of the board `board` playing `tl`,
+  with the pictures `images` (see `collect-layer-images` and
+  `collect-unit-images`), and download it."
+  [tl objects board format images]
+  (try
+    (case format
+      :svg
+      (let [svg (cta/timeline->svg tl objects images)
+            blob (wapi/create-blob svg "image/svg+xml")]
+        (download-blob (or (:name board) (:name tl)) ".svg" "image/svg+xml" blob)
+        {:status :ok :blob blob})
+
+      :lottie
+      (let [assets (into {} (map (fn [[id img]]
+                                   [id (select-keys img [:id :w :h :p :e :x :y])]))
+                         images)
+            data   (cta/timeline->lottie tl objects assets)
+            json   (js/JSON.stringify (clj->js data) nil 2)
+            blob   (wapi/create-blob json "application/json")]
+        (download-blob (or (:name board) (:name tl)) ".json" "application/json" blob)
+        {:status :ok :blob blob})
+
+      ;; the images go into the archive, next to the document
+      :dotlottie
+      (let [name      (or (:name board) (:name tl))
+            file-name #(str (:id %) ".png")
+            assets    (into {} (map (fn [[id img]]
+                                      [id (-> (select-keys img [:id :w :h :x :y])
+                                              (assoc :u "/images/" :p (file-name img) :e 0))]))
+                            images)
+            data      (cta/timeline->lottie tl objects assets)
+            files     (into {} (map (fn [[_ img]] [(file-name img) (:bytes img)])) images)]
+        (p/let [blob (lottie->dotlottie data (safe-filename name "") files
+                                        (not= :once (cta/playback-mode tl)))]
+          (download-blob name ".lottie" dotlottie-mtype blob)
+          {:status :ok :blob blob})))
+    (finally
+      (st/emit! (dwa/apply-preview)))))
+
 (defn- export-markup!
   [state format {:keys [bridge]}]
-  (let [tl      (dwa/export-timeline state :text-split :whole)
+  (let [tl      (dwa/export-timeline state)
         objects (dsh/lookup-page-objects state)
         board   (get objects (:board-id tl))
         bridge  (or bridge (default-bridge))
         _       (begin-full-quality! bridge)
+        ;; split texts play their units, each its own picture
+        texts   (unit-texts objects tl)
         ;; Lottie draws the layers it can as vectors
         layers  (set (cta/export-layer-ids objects (:board-id tl) (:tracks tl)))
         images  (collect-layer-images objects tl {:bridge bridge
                                                   :time (dwa/playhead state)
-                                                  :skip? (when (#{:lottie :dotlottie} format)
-                                                           #(cta/lottie-vector-layer? objects layers %))})]
-    (try
-      (case format
-        :svg
-        (let [svg (cta/timeline->svg tl objects images)
-              blob (wapi/create-blob svg "image/svg+xml")]
-          (download-blob (or (:name board) (:name tl)) ".svg" "image/svg+xml" blob)
-          {:status :ok :blob blob})
-
-        :lottie
-        (let [assets (into {} (map (fn [[id img]]
-                                     [id (select-keys img [:id :w :h :p :e])]))
-                           images)
-              data   (cta/timeline->lottie tl objects assets)
-              json   (js/JSON.stringify (clj->js data) nil 2)
-              blob   (wapi/create-blob json "application/json")]
-          (download-blob (or (:name board) (:name tl)) ".json" "application/json" blob)
-          {:status :ok :blob blob})
-
-        ;; the images go into the archive, next to the document
-        :dotlottie
-        (let [name      (or (:name board) (:name tl))
-              file-name #(str (:id %) ".png")
-              assets    (into {} (map (fn [[id img]]
-                                        [id (-> (select-keys img [:id :w :h])
-                                                (assoc :u "/images/" :p (file-name img) :e 0))]))
-                              images)
-              data      (cta/timeline->lottie tl objects assets)
-              files     (into {} (map (fn [[_ img]] [(file-name img) (:bytes img)])) images)]
-          (p/let [blob (lottie->dotlottie data (safe-filename name "") files
-                                          (not= :once (cta/playback-mode tl)))]
-            (download-blob name ".lottie" dotlottie-mtype blob)
-            {:status :ok :blob blob})))
-      (finally
-        (st/emit! (dwa/apply-preview))))))
+                                                  :skip? #(or (contains? texts %)
+                                                              (and (#{:lottie :dotlottie} format)
+                                                                   (cta/lottie-vector-layer? objects layers %)))})]
+    (p/let [units  (collect-unit-images objects tl texts {:bridge bridge})
+            images (merge images units)]
+      (export-markup-file! tl objects board format images))))
 
 (defn export-finished
   "What an export ending with `result` shows: that the browser encodes

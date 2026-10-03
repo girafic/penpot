@@ -8934,7 +8934,10 @@ msgid "workspace.options.export.codec-unavailable"
 msgstr "This format is not available in this browser. Try WebM or GIF."
 
 msgid "workspace.options.export.split-text-whole"
-msgstr "Text animated by characters, words or lines moves as a whole in this format."
+msgstr "Underlined or struck text animated by characters, words or lines moves as a whole in this format."
+
+msgid "workspace.options.export.split-lines-whole"
+msgstr "Text animated by lines, or with a stroke or a shadow, moves as a whole in this format."
 
 msgid "workspace.options.export.no-audio"
 msgstr "Audio is not included in this format."

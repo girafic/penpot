@@ -18,6 +18,7 @@
    [app.common.types.audio-clip :as ctau]
    [app.common.uuid :as uuid]
    [app.main.ui.inspect.motion-timeline :as mtl]
+   [app.util.code-gen :as cg]
    [app.util.code-gen.common :as cgc]
    [app.util.code-gen.motion :as cgm]
    [app.util.motion-labels :as labels]
@@ -171,3 +172,27 @@
     (t/is (not-any? #(= :audio (:kind %)) (:rows (first (mtl/motion-rows codes objects #{(cthi/id :own)}))))
           "a layer selected, no clips")
     (t/is (= [] (mtl/motion-rows codes objects #{})) "nothing selected, nothing")))
+
+(t/deftest the-code-plays-the-words-of-a-text-one-by-one
+  (let [file    (-> (cthf/sample-file :file1)
+                    (ctho/add-frame :board :x 0 :y 0 :width 400 :height 300)
+                    (ctho/add-text :title "Hi you there" :text-params {:parent-label :board}))
+        board   (cthi/id :board)
+        title   (cthi/id :title)
+        tl      (cta/add-animation (cta/make-timeline {:board-id board :duration 1000})
+                                   title {:type :fade :split :word :spread 1 :start 0 :duration 600})
+        file    (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                             (pcb/with-page (cthf/current-page file))
+                                             (pcb/set-timeline board tl)))
+        page    (cthf/current-page file)
+        objects (:objects page)
+        codes   (cgm/code-of-boards page {} #{title})
+        units   (cgm/code-units codes objects)
+        text    (cgm/with-code-units (get objects title) units)
+        html    (cg/generate-markup-code (update-vals objects #(cgm/with-code-units % units)) "html" [text])
+        css     (cgm/codes-css codes objects #{title})]
+    (t/is (= 3 (count (get units title))) "three words")
+    (t/is (str/includes? html "<span class=\"penpot-unit penpot-unit-0\">Hi</span> <span class=\"penpot-unit penpot-unit-1\">you</span>")
+          "its HTML wraps them")
+    (t/is (str/includes? css (str (cgm/code-selector text) " .penpot-unit-2 {")) "its CSS plays each")
+    (t/is (str/includes? css "display: inline-block;"))))

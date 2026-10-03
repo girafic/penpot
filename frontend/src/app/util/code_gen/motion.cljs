@@ -26,15 +26,60 @@
   [shape]
   (dm/str "." (cgc/shape->selector shape)))
 
+(defn code-units?
+  "Whether the code of the Inspect plays the units of the split
+  animations of `shape` one by one: a text it writes as HTML (not as SVG,
+  see `cgc/svg-markup?`), whose characters or words it wraps (see
+  `code-units`)."
+  [shape]
+  (and (cfh/text-shape? shape) (not (cgc/svg-markup? shape))))
+
+(defn code-timelines
+  "The code model of the board `board-id` of `page` (see
+  `cltl/code-timelines`), playing by units the texts the code can play
+  so (see `code-units?`)."
+  [page files board-id]
+  (cltl/code-timelines page files board-id :units? code-units?))
+
 (defn code-of-boards
-  "The code model (see `cltl/code-timelines`) of each board the shapes of
+  "The code model (see `code-timelines`) of each board the shapes of
   `ids` of `page` are in, by the name of the board; `files` holds the
   files of the components, by id."
   [page files ids]
   (let [objects (:objects page)
         boards  (->> (into #{} (keep #(cfh/get-shape-id-root-frame objects %)) ids)
                      (sort-by (fn [id] [(dm/get-in objects [id :name]) (str id)])))]
-    (into [] (keep #(cltl/code-timelines page files %)) boards)))
+    (into [] (keep #(code-timelines page files %)) boards)))
+
+(defn code-units
+  "`{text-id bases}`: the texts of `codes` (see `code-of-boards`) the code
+  plays by units, with where their units are (see `cta/unit-timelines`),
+  which their HTML wraps (`:code-units` of a shape, see
+  `app.main.ui.shapes.text.html-text`)."
+  [codes objects]
+  (into {}
+        (comp (mapcat (fn [{:keys [timeline copies]}] (cons timeline (map :timeline copies))))
+              (mapcat #(cta/unit-timelines (cta/resolve-animations % objects) objects))
+              (map (fn [[id {:keys [bases]}]] [id bases])))
+        codes))
+
+(defn with-code-units
+  "`shape` with the units its HTML wraps, `:code-units`, when `units` (see
+  `code-units`) has them."
+  [shape units]
+  (if-let [bases (get units (:id shape))]
+    (assoc shape :code-units bases)
+    shape))
+
+(def ^:private unit-options
+  "How the CSS of the Inspect plays the units of a text (see
+  `cta/timeline->css`): characters and words, the classes its HTML gives
+  them, each turning around its middle, as blocks in the line, which CSS
+  can transform."
+  {:kinds #{:char :word}
+   :selector (fn [text k] (dm/str (code-selector text) " .penpot-unit-" k))
+   :origin (constantly "50% 50%")
+   :display "inline-block"})
 
 (defn codes-css
   "CSS animating the layers of the boards of `codes` (see
@@ -46,7 +91,8 @@
   [codes objects ids]
   (let [options {:ids ids
                  :selector code-selector
-                 :transform #(sv/get-value :transform % objects {})}]
+                 :transform #(sv/get-value :transform % objects {})
+                 :units (assoc unit-options :texts #(code-units? (get objects %)))}]
     (some->> (seq codes)
              (mapcat (fn [{:keys [timeline copies]}] (cons timeline (map :timeline copies))))
              (map #(cta/timeline->css % objects options))

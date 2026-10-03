@@ -887,6 +887,37 @@
     (t/is (re-find #"transform-origin: 70px 60px;" (cta/timeline->svg tl objects {})))
     (t/is (re-find #"transform-origin: 50% 50%;" (cta/timeline->css tl objects)) "unlike CSS")))
 
+(t/deftest the-pictures-of-turned-layers-sit-where-they-are
+  ;; A rect of 100 x 50 at 100,100 turned a quarter, its pivot on its top
+  ;; left corner before it turns: its picture is 50 x 100 at 125,75 and
+  ;; its pivot, turned with it, at 175,75.
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape   (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 50
+                                      :fills [{:fill-image {:id (uuid/next) :width 10 :height 10
+                                                            :mtype "image/png"}}]})
+                    (assoc :rotation 90))
+        [bid sid] (map :id [board shape])
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe sid {:time 0 :property :rotation :value 90})
+                    (cta/add-keyframe sid {:time 1000 :property :rotation :value 180})
+                    (cta/set-track-origin sid 0 0))
+        box     {:x 125 :y 75 :width 50 :height 100}]
+    (t/testing "SVG: the image on its box, turning around the turned pivot"
+      (let [svg (cta/timeline->svg tl objects {sid (assoc box :href "data:,")})]
+        (t/is (re-find #"x=\"125\" y=\"75\" width=\"50\" height=\"100\"" svg))
+        (t/is (re-find #"transform-origin: 175px 75px;" svg))))
+    (t/testing "Lottie: an image layer turns only as much as the animation turns it"
+      (let [L     (cta/timeline->lottie tl objects {sid {:id "img_0" :w 50 :h 100 :x 125 :y 75
+                                                         :p "data:," :e 1}})
+            layer (first (:layers L))
+            close (fn [a b] (every? true? (map mth/close? a b)))]
+        (t/is (= 2 (:ty layer)))
+        (t/is (close [50 0] (take 2 (get-in layer [:ks :a :k]))) "anchored on the pivot of the picture")
+        (t/is (close [175 75] [(get-in layer [:ks :p :x :k]) (get-in layer [:ks :p :y :k])]))
+        (t/is (close [0] (get-in layer [:ks :r :k 0 :s])) "from its own turn")))))
+
 (t/deftest timeline->svg-paints-the-layers-of-a-layout-as-it-does
   ;; A flex board paints its first layer on top: in SVG, last.
   (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100
@@ -2928,3 +2959,101 @@
         tl  (text-timeline board sid {:type :blur :split :word :start 100 :duration 400 :amount 6})]
     (t/is (= [6 6] (mapv :blur (text-units-at tl objects sid 0))))
     (t/is (= [] (text-units-at tl objects sid 500)))))
+
+;; UNITS FOR THE CODE AND MARKUP EXPORTS
+
+(defn- unit-values
+  "`[dx opacity]` of each unit `units` (see `cta/unit-timelines`) of a text
+  at `time`."
+  [units time]
+  (let [values (cta/values-at (:timeline units) time)]
+    (mapv #(let [v (get values %)] [(get v :x 0) (get v :opacity 1)]) (:ids units))))
+
+(t/deftest unit-timelines-hold-every-unit-of-a-split-text
+  (let [{:keys [board text objects]} (board-and-text "Hi you there")
+        sid   (:id text)
+        tl    (text-timeline board sid {:type :move :start 100 :duration 600 :offset-x 20 :offset-y 0
+                                        :split :word :spread 1 :easing :linear})
+        units (get (cta/unit-timelines (cta/resolve-animations tl objects) objects) sid)
+        ;; the units off rest at `time`, by where they start in the text
+        posed (fn [time]
+                (let [entries (text-units-at tl objects sid time)]
+                  (into {} (map (juxt :start (juxt :dx :opacity))) (if (= ::none entries) [] entries))))]
+    (t/is (= [:word 3] ((juxt :kind :n) units)))
+    (t/is (= [[sid 0] [sid 1] [sid 2]] (:ids units)))
+    (t/is (= [[0 0] [0 3] [0 7]] (mapv (juxt :paragraph :start) (:bases units)))
+          "where they are in the text")
+    (doseq [time [100 250 400 550 700]]
+      (let [posed (posed time)]
+        (t/is (every? true? (map (fn [[x o] base]
+                                   (let [[ex eo] (get posed (:start base) [0 1])]
+                                     (and (mth/close? x ex) (mth/close? o eo))))
+                                 (unit-values units time)
+                                 (:bases units)))
+              (str "as the units play at " time))))))
+
+(t/deftest a-selective-flatten-keeps-the-kinds-asked-for
+  (let [sid (uuid/next)
+        tl  (-> (cta/make-timeline {:board-id (uuid/next)})
+                (cta/add-animation sid {:type :fade :start 0 :split :word})
+                (cta/add-animation sid {:type :move :start 0 :split :line}))
+        kinds #(mapv :split (get-in % [:tracks sid :animations]))]
+    (t/is (= [nil nil] (kinds (cta/flatten-splits tl))))
+    (t/is (= [:word nil] (kinds (cta/flatten-splits tl #{:char :word}))))
+    (t/is (= [:word :line] (kinds (cta/flatten-splits tl #{:char :word :line}))))))
+
+(t/deftest the-units-of-a-copy-play-on-its-clock
+  (let [{:keys [board text objects]} (board-and-text "Hi you")
+        sid   (:id text)
+        tl    (-> (text-timeline board sid {:type :fade :start 0 :duration 200 :split :word :spread 1
+                                            :easing :linear})
+                  (assoc :duration 1200))
+        ;; as `with-instance-tracks` leaves the track of a looping copy
+        tl    (assoc-in tl [:tracks sid :split-clock] {:duration 400 :playback :loop})
+        units (get (cta/unit-timelines (cta/resolve-animations tl objects) objects) sid)]
+    (t/is (= 1200 (get-in units [:timeline :duration])) "over the board")
+    (t/is (every? (fn [[a b]] (< (abs (- a b)) 0.02))
+                  (map vector
+                       (flatten (concat (unit-values units 50) (unit-values units 50)))
+                       (flatten (concat (unit-values units 450) (unit-values units 850)))))
+          "the same every 400 ms (each repeat starting 1 ms after the one before)")))
+
+(t/deftest the-markup-exports-play-the-units-they-have-pictures-of
+  (let [{:keys [board text objects]} (board-and-text "Hi you there")
+        sid    (:id text)
+        tl     (text-timeline board sid {:type :move :start 0 :duration 600 :offset-x 0 :offset-y 20
+                                         :split :word :spread 1})
+        ;; the board at 100,100: the words in it from 50,100
+        images (into {[sid :rest] {:href "data:," :x 50 :y 100 :width 300 :height 40}}
+                     (map (fn [k] [[sid k] {:href "data:," :x (+ 50 (* 60 k)) :y 100 :width 40 :height 20}]))
+                     (range 3))]
+    (t/testing "SVG: a group by unit in the text, its CSS turning it around its middle"
+      (let [svg (cta/timeline->svg tl objects images)]
+        (t/is (= 3 (count (re-seq #"<g class=\"penpot-unit-" svg))))
+        (t/is (str/includes? svg (str ".penpot-unit-" sid "-1 {")))
+        (t/is (str/includes? svg "transform-origin: 130px 110px;") "the middle of the second word")
+        (t/is (= 3 (count (re-seq #"@keyframes penpot-unit-" svg))))))
+    (t/testing "Lottie: the text a precomp of its units"
+      (let [assets (update-vals images #(assoc % :id (str "img_" (:x %)) :w (:width %) :h (:height %) :e 1 :p "data:,"))
+            L      (cta/timeline->lottie tl objects assets)
+            layer  (first (:layers L))
+            comp   (some #(when (= (:refId layer) (:id %)) %) (:assets L))]
+        (t/is (= 0 (:ty layer)) "a precomp")
+        (t/is (= 4 (count (:layers comp))) "three words and the rest")
+        (t/is (= [2 2 2 2] (mapv :ty (:layers comp))))
+        (t/is (= 1 (get-in comp [:layers 0 :ks :p :y :a])) "a word moves")
+        (t/is (mth/close? 130 (get-in comp [:layers 0 :ks :p :y :k 0 :s 0]))
+              "the first word from 20 px under the middle of its picture")))
+    (t/testing "a text with no ink besides its units has no picture of the rest"
+      (let [images (dissoc images [sid :rest])
+            svg    (cta/timeline->svg tl objects images)
+            assets (update-vals images #(assoc % :id (str "img_" (:x %)) :w (:width %) :h (:height %) :e 1 :p "data:,"))
+            L      (cta/timeline->lottie tl objects assets)
+            layer  (first (:layers L))
+            comp   (some #(when (= (:refId layer) (:id %)) %) (:assets L))]
+        (t/is (= 3 (count (re-seq #"<g class=\"penpot-unit-" svg))))
+        (t/is (= 3 (count (re-seq #"<image " svg))) "the words only")
+        (t/is (= 3 (count (:layers comp))) "the words only")))
+    (t/testing "without pictures, the text plays whole"
+      (let [svg (cta/timeline->svg tl objects {})]
+        (t/is (not (str/includes? svg "penpot-unit-")))))))

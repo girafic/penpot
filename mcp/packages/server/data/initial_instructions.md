@@ -436,8 +436,8 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
     turn, within the span; `spread` 0..1 (0.5 by default) is how far apart they start (0 all together, 1 one after the
     other); `order` "forward" (default) | "backward" | "center" | "edges" | "random" (with a `seed`, set when missing).
     A text plays one kind of units: a second kind is refused, and so is a split on another layer. The text stays
-    editable. Video exports (MP4, WebM, GIF, AVIF) play the units; CSS (`toCSS`), SVG and Lottie play the effect on the
-    whole text.
+    editable. Video, SVG, Lottie and dotLottie exports play the units (an underlined or struck text plays whole in SVG
+    and Lottie); the code (`toCSS`, `toReact`, `toJSON`, Inspect) plays characters and words, lines on the whole text.
   * `addAnimationStyle(shape, style, start?): PresetAnimation[]` - Several effects at once:
     "slide-up" | "slide-down" | "slide-left" | "slide-right" | "pop" | "zoom" | "spin", and for text layers
     "typewriter" | "rise-words" | "cascade-lines" | "pop-letters"
@@ -474,7 +474,8 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
   * `valueAt(shape, property, time, index?)` - The value the animation gives then (`null` when it does not animate it)
   * `clear(shape)` - Removes the keyframes and animations of a layer; `remove()` - removes the timeline
   * `toCSS(): string` - The animation as CSS `@keyframes` and `animation` rules, animated component copies included,
-    with the classes of the code of Inspect (`penpot.generateMarkup`); split animations play on the whole text
+    with the classes of the code of Inspect (`penpot.generateMarkup`, which wraps the characters or words of a split
+    text in spans of the class `penpot-unit-<n>`, played one by one)
   * `toJSON(): TimelineJson` - The motion of the board as data (`version` 1, as the Motion tab of Inspect gives it):
     the board, `duration`, `playback`, `markers`, the animated `layers` (each with its `rest` pose, `origin` pivot,
     `properties` with their keyframes and the easing of each segment, and `presets`, with the `style` and `tokens`

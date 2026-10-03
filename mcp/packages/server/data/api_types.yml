@@ -16853,10 +16853,12 @@ Timeline:
         with the classes the code of Inspect gives them (see
         `Penpot.generateMarkup`) and keeping the transforms its CSS gives them
         at rest. The animated component copies in the board play on the clock
-        of their main. CSS has no characters, words or lines of a text: a
-        split animation (see `PresetAnimationProps.split`) plays on the whole
-        text, as in the SVG and Lottie exports. Audio is left out. An empty
-        string when nothing animates.
+        of their main. A split animation (see `PresetAnimationProps.split`)
+        by characters or words plays each one, with the class
+        `penpot-unit-<n>` the code of Inspect gives it (`penpot-unit-0` the
+        first, inside the class of its text); one by lines, or of a text with
+        a stroke or a shadow (which the code draws as SVG), plays on the
+        whole text. Audio is left out. An empty string when nothing animates.
 
         Returns string
       toJSON: |-
@@ -16891,8 +16893,9 @@ Timeline:
         component copies play on the clock of their main). A spring of a
         value that plays once is a spring of motion.dev; other springs, motion
         paths and repeating properties are sampled into keyframes. A split
-        animation plays on the whole text; audio is left out. An empty string
-        when nothing animates.
+        animation by characters or words gives the text a `motion.span` for
+        each, with its text and its keyframes (see `toCSS` for the rest);
+        audio is left out. An empty string when nothing animates.
 
         Returns string
       remove: |-
@@ -17000,6 +17003,7 @@ TimelineJsonLayer:
         };
         origin: { x: number; y: number };
         split?: TextSplit;
+        units?: TimelineJsonUnits;
         component?: TimelineJsonComponent;
         properties: TimelineJsonProperty[];
         presets: TimelineJsonPreset[];
@@ -17047,8 +17051,15 @@ TimelineJsonLayer:
         ```
 
         For a text the design animates by units (see
-        `PresetAnimationProps.split`): the kind of units. Its CSS and React
-        animate the whole text.
+        `PresetAnimationProps.split`): the kind of units.
+      units: |-
+        ```
+        units?: TimelineJsonUnits
+        ```
+
+        For a text whose units the code plays one by one (characters or
+        words; see `Timeline.toCSS`): their keyframes. The text's own
+        `properties` then hold what it does as a whole.
       component: |-
         ```
         component?: TimelineJsonComponent
@@ -17086,7 +17097,7 @@ TimelineJsonProperty:
     }
     ```
 
-    Referenced by: TimelineJsonLayer
+    Referenced by: TimelineJsonLayer, TimelineJsonUnits
   members:
     Properties:
       property: |-
@@ -17114,6 +17125,46 @@ TimelineJsonProperty:
         ```
 
         The keyframes, by time.
+TimelineJsonUnits:
+  overview: |-
+    Interface TimelineJsonUnits
+    ===========================
+
+    The units of a text the code plays one by one, in a `TimelineJsonLayer`.
+
+    ```
+    interface TimelineJsonUnits {
+        kind: TextSplit;
+        count: number;
+        keyframes: { index: number; properties: TimelineJsonProperty[] }[];
+    }
+    ```
+
+    Referenced by: TimelineJsonLayer
+  members:
+    Properties:
+      kind: |-
+        ```
+        kind: TextSplit
+        ```
+
+        The kind of units: `char` or `word`.
+      count: |-
+        ```
+        count: number
+        ```
+
+        How many units the text has, as the text splits them (spaces are
+        none).
+      keyframes: |-
+        ```
+        keyframes: { index: number; properties: TimelineJsonProperty[] }[]
+        ```
+
+        The keyframes of each unit, by its index from 0, by property: `x` and
+        `y` offsets in pixels from where the unit rests, `rotation` in
+        degrees, `scaleX`, `scaleY` and `opacity` factors and `blur` in
+        pixels.
 TimelineJsonKeyframe:
   overview: |-
     Interface TimelineJsonKeyframe
@@ -18177,8 +18228,11 @@ PresetAnimationProps:
         Text layers only: plays the animation on each character, word or
         line of the text, one after the other, within its span. A text plays
         one kind of units: all its split animations split alike. The text
-        stays editable, and typing gives more units. The video exports play
-        it; CSS, SVG and Lottie play it on the whole text.
+        stays editable, and typing gives more units. The video, SVG, Lottie
+        and dotLottie exports play the units (an SVG or Lottie as a picture
+        of each, but of a text that underlines or strikes some of its text,
+        which plays whole); the code (`Timeline.toCSS`, `toReact`, `toJSON`)
+        plays characters and words, a split by lines on the whole text.
       spread: |-
         ```
         spread?: number
@@ -26715,7 +26769,7 @@ TextSplit:
     spaces), the words (with the punctuation next to them) or the lines of
     a text.
 
-    Referenced by: PresetAnimation, PresetAnimationProps, TimelineJsonLayer
+    Referenced by: PresetAnimation, PresetAnimationProps, TimelineJsonLayer, TimelineJsonUnits
   members: {}
 TextSplitOrder:
   overview: |-

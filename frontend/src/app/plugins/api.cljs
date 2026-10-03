@@ -54,6 +54,7 @@
    [app.plugins.utils :as u]
    [app.plugins.viewport :as viewport]
    [app.util.code-gen :as cg]
+   [app.util.code-gen.motion :as cgm]
    [app.util.object :as obj]
    [app.util.theme :as theme]
    [beicon.v2.core :as rx]
@@ -509,11 +510,20 @@
                      (reduce-kv
                       (fn [acc _ shapes]
                         (let [shape (first shapes)
-                              objects (u/locate-objects (:file-id shape) (:page-id shape))
+                              page (u/locate-page (:file-id shape) (:page-id shape))
+                              objects (:objects page)
                               resolved-shapes
                               (->> (cfh/clean-loops objects shapes)
-                                   (mapcat #(cfh/get-children-with-self objects (:id %))))]
-                          (conj acc (cg/generate-formatted-markup-code objects type resolved-shapes))))
+                                   (mapcat #(cfh/get-children-with-self objects (:id %))))
+                              ;; the units of the split texts the CSS of
+                              ;; `Timeline.toCSS` plays one by one
+                              units (cgm/code-units (cgm/code-of-boards page (:files @st/state)
+                                                                        (into #{} (map :id) resolved-shapes))
+                                                    objects)
+                              with-units #(cgm/with-code-units % units)]
+                          (conj acc (cg/generate-formatted-markup-code (d/update-vals objects with-units)
+                                                                       type
+                                                                       (mapv with-units resolved-shapes)))))
                       []))]
 
             (st/emit! (se/event plugin-id "copy-inspect-code"))

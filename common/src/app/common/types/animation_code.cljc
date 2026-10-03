@@ -17,6 +17,7 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
+   [app.common.types.text-units :as tu]
    [cuerdas.core :as str]))
 
 (def property-names
@@ -79,23 +80,26 @@
   yet: their entries (see `code-layers`), `head-id` the copy whose main's
   animation they play."
   [layers timeline head-id objects splits]
-  (reduce-kv
-   (fn [layers id track]
-     (if (contains? layers id)
-       layers
-       (assoc layers id
-              (cond-> {:id     id
-                       :shape  (get objects id)
-                       :clock  timeline
-                       :source (cta/visible-track (dm/get-in timeline [:tracks id]))
-                       :track  track
-                       :rest   (cta/rest-pose timeline objects id)
-                       :origin (cta/track-origin track)}
-                (some? head-id)       (assoc :copy {:head-id head-id
-                                                    :name (dm/get-in objects [head-id :name])})
-                (contains? splits id) (assoc :split (get splits id))))))
-   layers
-   (:tracks (cta/resolve-animations timeline objects))))
+  (let [resolved (cta/resolve-animations timeline objects)
+        units    (cta/unit-timelines resolved objects)]
+    (reduce-kv
+     (fn [layers id track]
+       (if (contains? layers id)
+         layers
+         (assoc layers id
+                (cond-> {:id     id
+                         :shape  (get objects id)
+                         :clock  timeline
+                         :source (cta/visible-track (dm/get-in timeline [:tracks id]))
+                         :track  track
+                         :rest   (cta/rest-pose timeline objects id)
+                         :origin (cta/track-origin track)}
+                  (some? head-id)       (assoc :copy {:head-id head-id
+                                                      :name (dm/get-in objects [head-id :name])})
+                  (contains? splits id) (assoc :split (get splits id))
+                  (contains? units id)  (assoc :units (get units id))))))
+     layers
+     (:tracks resolved))))
 
 (defn code-layers
   "The layers `code` (see `cltl/code-timelines`) animates, in the order
@@ -107,7 +111,8 @@
   its rest pose (see `cta/rest-pose`) and `:origin` its pivot (see
   `cta/track-origin`); a layer of a component copy playing its main's
   animation has `:copy` `{:head-id :name}`, a text the design plays by
-  units `:split`, the kind."
+  units `:split`, the kind, and one the code plays by units `:units` (see
+  `cta/unit-timelines`)."
   [{:keys [board-id timeline copies splits]} objects & {:keys [ids]}]
   (let [layers (reduce (fn [layers {:keys [timeline head-id]}]
                          (clock-layers layers timeline head-id objects splits))
@@ -238,8 +243,22 @@
       :bool   "boolean"
       (name type))))
 
+(defn- json-units
+  "The units a text plays one by one (see `cta/unit-timelines`): their
+  kind, how many, and the keyframes of each, by property, from where it
+  rests."
+  [{:keys [kind n ids timeline]}]
+  (d/ordered-map "kind" (name kind)
+                 "count" n
+                 "keyframes" (into []
+                                   (map-indexed (fn [k id]
+                                                  (d/ordered-map "index" k
+                                                                 "properties" (json-properties
+                                                                               (get-in timeline [:tracks id])))))
+                                   ids)))
+
 (defn- json-layer
-  [{:keys [id shape clock source track rest origin copy split]}]
+  [{:keys [id shape clock source track rest origin copy split units]}]
   (cond-> (d/ordered-map "id" (str id)
                          "name" (or (:name shape) "")
                          "type" (type-name shape)
@@ -252,6 +271,9 @@
                                                  "y" (json-number (:y origin))))
     (some? split)
     (assoc "split" (name split))
+
+    (some? units)
+    (assoc "units" (json-units units))
 
     (some? copy)
     (assoc "component" (d/ordered-map "copy" (str (:head-id copy))
@@ -284,8 +306,9 @@
   with their rest pose, pivot, keyframes by property (each segment with
   its easing) and presets (those of style uses named after the style and
   with the tokens that set them), a layer of a component copy with the
-  clock of its main, a text the design plays by units with the kind, and
-  the audio clips of the board. Version 1 only ever gains keys."
+  clock of its main, a text the design plays by units with the kind (and
+  the keyframes of each unit, when the code plays them), and the audio
+  clips of the board. Version 1 only ever gains keys."
   [{:keys [board-id timeline] :as code} objects & {:keys [ids]}]
   (let [board (get objects board-id)]
     (d/ordered-map
@@ -525,14 +548,74 @@
   "The helper of `transform-template`."
   "const withUnit = (value, unit) => (typeof value === \"number\" ? `${value}${unit}` : value);")
 
+(defn- react-text
+  "The JSX of the text `text`: an expression of a JS string."
+  [text]
+  (str "{\"" (-> text
+                 (str/replace "\\" "\\\\")
+                 (str/replace "\"" "\\\"")
+                 (str/replace "\n" "\\n"))
+       "\"}"))
+
+(defn- react-props
+  "The motion.dev props of the animated `values`, indented by `indent`."
+  [values indent]
+  (str indent "initial={{ " (str/join ", " (map #(str (:name %) ": " (:initial %)) values)) " }}\n"
+       indent "animate={{ " (str/join ", " (map #(str (:name %) ": " (:animate %)) values)) " }}\n"
+       indent "transition={{\n"
+       (str/join "" (map #(str indent "  " (:name %) ": " (:transition %) ",\n") values))
+       indent "}}\n"))
+
+(defn- react-units
+  "The `motion.span` of each unit of the text of `layer`, which the code
+  plays one by one (see `cta/unit-timelines`), with the text between them
+  as it is, a `br` between its paragraphs: `{:hold? :code}`."
+  [{:keys [shape units]} objects]
+  (let [{units-tl :timeline :keys [ids bases]} units
+        played  (cta/expand-paths units-tl)
+        sampled (cta/expand-springs played)
+        spans   (mapv (fn [k id]
+                        (let [unit   {:id id :shape (cta/unit-shape units-tl objects id) :clock units-tl}
+                              values (merge-scale (layer-animation unit objects played sampled))]
+                          {:hold? (some :hold? values)
+                           :values values
+                           :class (str "penpot-unit penpot-unit-" k)}))
+                      (range)
+                      ids)
+        texts   (tu/paragraph-texts (:content shape))
+        ;; the pieces of each paragraph: its units, the text between them
+        pieces  (for [[p text] (map-indexed vector texts)]
+                  (let [in-p (filter (fn [[_ base]] (= p (:paragraph base)))
+                                     (map vector (range) bases))]
+                    (loop [at 0 units in-p out []]
+                      (if-let [[[k {:keys [start end]}] & more] (seq units)]
+                        (recur end more (cond-> out
+                                          (< at start) (conj (subs text at start))
+                                          :always      (conj [k (subs text start end)])))
+                        (cond-> out (< at (count text)) (conj (subs text at)))))))
+        piece   (fn [item]
+                  (if (string? item)
+                    (str "        " (react-text item) "\n")
+                    (let [[k text] item
+                          {:keys [values class]} (nth spans k)]
+                      (str "        <motion.span\n"
+                           "          className=\"" class "\"\n"
+                           "          style={{ display: \"inline-block\" }}\n"
+                           (react-props values "          ")
+                           "        >" (react-text text) "</motion.span>\n"))))]
+    {:hold? (some :hold? spans)
+     :code  (str/join "        <br />\n" (map #(str/join "" (map piece %)) pieces))}))
+
 (defn- react-layer
-  "The `motion.div` of `layer`."
+  "The `motion.div` of `layer`, holding the `motion.span` of each unit of
+  a text the code plays by units (see `react-units`)."
   [layer objects played sampled class-name]
   (let [values (merge-scale (layer-animation layer objects played sampled))
         names  (into #{} (map :name) values)
         origin (:origin layer)
+        units  (when (:units layer) (react-units layer objects))
         template? (and (contains? names "rotate") (contains? names "scaleX"))]
-    {:hold? (some :hold? values)
+    {:hold? (or (some :hold? values) (:hold? units))
      :template? template?
      :code
      (str "      {/* " (or (get-in layer [:shape :name]) "Layer") " */}\n"
@@ -541,12 +624,10 @@
           "        style={{ originX: " (react-number (:x origin)) ", originY: " (react-number (:y origin)) " }}\n"
           (when template?
             (str "        " transform-template "\n"))
-          "        initial={{ " (str/join ", " (map #(str (:name %) ": " (:initial %)) values)) " }}\n"
-          "        animate={{ " (str/join ", " (map #(str (:name %) ": " (:animate %)) values)) " }}\n"
-          "        transition={{\n"
-          (str/join "" (map #(str "          " (:name %) ": " (:transition %) ",\n") values))
-          "        }}\n"
-          "      />")}))
+          (react-props values "        ")
+          (if (some? units)
+            (str "      >\n" (:code units) "      </motion.div>")
+            "      />"))}))
 
 (defn- react-board
   "The React component `component` of the board of `code`: its animated

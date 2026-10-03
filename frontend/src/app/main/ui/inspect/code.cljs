@@ -145,10 +145,25 @@
 
         ;; The animation of the shapes (Penpot Motion), with the same
         ;; selectors, so it plays in the copied code.
-        anim-code
-        (mf/with-memo [motion? page libraries all-children]
+        anim-ids
+        (mf/with-memo [all-children]
+          (into #{} (map :id) all-children))
+
+        codes
+        (mf/with-memo [motion? page libraries anim-ids]
           (when motion?
-            (cgm/animation-css page libraries (into #{} (map :id) all-children))))
+            (cgm/code-of-boards page libraries anim-ids)))
+
+        anim-code
+        (mf/with-memo [codes page anim-ids]
+          (when (seq codes)
+            (cgm/codes-css codes (:objects page) anim-ids)))
+
+        ;; the characters or words of the split texts it plays one by one
+        code-units
+        (mf/with-memo [codes page]
+          (when (seq codes)
+            (cgm/code-units codes (:objects page))))
 
         style-code
         (mf/use-memo
@@ -169,9 +184,13 @@
 
         markup-code
         (mf/use-memo
-         (mf/deps markup-type shapes images-data)
+         (mf/deps markup-type shapes images-data objects code-units)
          (fn []
-           (cg/generate-formatted-markup-code objects markup-type shapes)))
+           (if (seq code-units)
+             (cg/generate-formatted-markup-code (d/update-vals objects #(cgm/with-code-units % code-units))
+                                                markup-type
+                                                (mapv #(cgm/with-code-units % code-units) shapes))
+             (cg/generate-formatted-markup-code objects markup-type shapes))))
 
         on-markup-copied
         (mf/use-fn

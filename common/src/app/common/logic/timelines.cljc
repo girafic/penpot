@@ -535,10 +535,12 @@
   in it while it has no tracks (see `with-copies-clock`); `:copies`, the
   timelines of those copies (`{:head-id :timeline}`, in layer order),
   each on its own clock, as the workspace and the view mode play them;
-  the split animations of both played whole (see `cta/flatten-splits`);
-  and `:splits`, the texts the design plays by units, with their kind.
-  Nil when the board plays nothing."
-  [page files board-id]
+  the split animations of both played whole (see `cta/flatten-splits`),
+  but those by characters or words of the texts `units?` (a function of
+  a text) is true of, which the code plays by units (see
+  `cta/unit-timelines`); and `:splits`, the texts the design plays by
+  units, with their kind. Nil when the board plays nothing."
+  [page files board-id & {:keys [units?] :or {units? (constantly false)}}]
   (let [objects   (:objects page)
         timelines (:timelines page)
         stored    (get timelines board-id)
@@ -551,9 +553,11 @@
                         (sort-by (fn [[[_ head-id] _]] (get order head-id 0)))
                         (mapv (fn [[[_ head-id] timeline]] {:head-id head-id :timeline timeline})))
             splits (split-kinds (cons own (map :timeline copies)) objects)
-            copies (mapv #(update % :timeline cta/flatten-splits) copies)]
+            ;; lines play whole: a page breaks them as its width says
+            flat   #(cta/flatten-splits % #{:char :word} (fn [id] (units? (get objects id))))
+            copies (mapv #(update % :timeline flat) copies)]
         {:board-id board-id
-         :timeline (-> (cta/flatten-splits own)
+         :timeline (-> (flat own)
                        (with-copies-clock (map :timeline copies) (some? stored)))
          :copies   copies
          :splits   splits}))))

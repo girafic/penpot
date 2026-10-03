@@ -1656,7 +1656,7 @@
       (fn []
         (when (some? (locate))
           (let [page (u/locate-page file-id page-id)]
-            (or (some-> (cltl/code-timelines page (:files @st/state) board-id)
+            (or (some-> (cgm/code-timelines page (:files @st/state) board-id)
                         (vector)
                         (cgm/codes-css (:objects page) nil))
                 ""))))
@@ -1665,7 +1665,7 @@
       (fn []
         (when (some? (locate))
           (let [page (u/locate-page file-id page-id)]
-            (some-> (cltl/code-timelines page (:files @st/state) board-id)
+            (some-> (cgm/code-timelines page (:files @st/state) board-id)
                     (ctac/motion-json (:objects page))
                     (clj->js)))))
 
@@ -1673,7 +1673,7 @@
       (fn []
         (when (some? (locate))
           (let [page (u/locate-page file-id page-id)]
-            (or (some-> (cltl/code-timelines page (:files @st/state) board-id)
+            (or (some-> (cgm/code-timelines page (:files @st/state) board-id)
                         (vector)
                         (cgm/codes-react (:objects page) nil))
                 ""))))
