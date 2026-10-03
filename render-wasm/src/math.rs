@@ -214,11 +214,7 @@ impl Bounds {
             result = -result;
         }
 
-        if self.flip_y() {
-            result = -result;
-        }
-
-        if self.flip_x() {
+        if self.flipped() {
             result = -result;
         }
 
@@ -239,11 +235,7 @@ impl Bounds {
             result = -result;
         }
 
-        if self.flip_y() {
-            result = -result;
-        }
-
-        if self.flip_x() {
+        if self.flipped() {
             result = -result;
         }
 
@@ -264,11 +256,7 @@ impl Bounds {
             result = -result;
         }
 
-        if self.flip_y() {
-            result = -result;
-        }
-
-        if self.flip_x() {
+        if self.flipped() {
             result = -result;
         }
 
@@ -289,15 +277,20 @@ impl Bounds {
             result = -result;
         }
 
-        if self.flip_y() {
-            result = -result;
-        }
-
-        if self.flip_x() {
+        if self.flipped() {
             result = -result;
         }
 
         result
+    }
+
+    /// Whether the box is mirrored: one of its axes flipped. Turning it
+    /// never mirrors it (both axes flipped is a half turn), a quarter
+    /// turn included: the signs of the scales of its transform, which
+    /// are the cosines of the turn there, zero but for the rounding,
+    /// cannot tell.
+    pub fn flipped(&self) -> bool {
+        self.horizontal_vec().cross(self.vertical_vec()) < 0.0
     }
 
     pub fn center(&self) -> Point {
@@ -338,18 +331,6 @@ impl Bounds {
         target_points_matrix.set_translate_y(0.0);
 
         Some(target_points_matrix)
-    }
-
-    // TODO: Probably we can improve performance here removing the access
-    pub fn flip_x(&self) -> bool {
-        let m = self.transform_matrix().unwrap_or_default();
-        m.scale_x() < 0.0
-    }
-
-    // TODO: Probably we can improve performance here removing the access
-    pub fn flip_y(&self) -> bool {
-        let m = self.transform_matrix().unwrap_or_default();
-        m.scale_y() < 0.0
     }
 
     pub fn to_rect(self) -> Rect {
@@ -564,6 +545,46 @@ mod tests {
         assert_eq!(b1.top(Point::new(4.0, 8.0)), 7.0);
         assert_eq!(b1.right(Point::new(7.0, 6.0),), 1.0);
         assert_eq!(b1.bottom(Point::new(7.0, 6.0),), 4.0);
+    }
+
+    #[test]
+    fn test_bounds_distances_of_a_turned_box() {
+        // a point 133 from the left and 10 from the top of a box of 280,
+        // the box and the point turned together: the distances stay, a
+        // quarter turn included, where the cosines are zero but for the
+        // rounding
+        let rect = Bounds::new(
+            Point::new(0.0, 0.0),
+            Point::new(280.0, 0.0),
+            Point::new(280.0, 280.0),
+            Point::new(0.0, 280.0),
+        );
+        for deg in [
+            0.0, 45.0, 90.0, 135.0, 180.0, 269.9, 270.0, 270.1, 315.0, -90.0, 630.0,
+        ] {
+            let m = Matrix::rotate_deg_pivot(deg, Point::new(140.0, 140.0));
+            let b = rect.transform(&m);
+            let p = m.map_point(Point::new(133.0, 10.0));
+            assert!(
+                (b.left(p) - 133.0).abs() < 0.01,
+                "left at {deg}: {}",
+                b.left(p)
+            );
+            assert!((b.top(p) - 10.0).abs() < 0.01, "top at {deg}: {}", b.top(p));
+            assert!(
+                (b.right(p) - 147.0).abs() < 0.01,
+                "right at {deg}: {}",
+                b.right(p)
+            );
+            assert!(
+                (b.bottom(p) - 270.0).abs() < 0.01,
+                "bottom at {deg}: {}",
+                b.bottom(p)
+            );
+            assert!(!b.flipped(), "a turn does not mirror, at {deg}");
+        }
+        let mirrored = rect.transform(&Matrix::scale((-1.0, 1.0)));
+        assert!(mirrored.flipped());
     }
 
     #[test]
