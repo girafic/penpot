@@ -386,6 +386,10 @@ export interface Board extends ShapeBase {
    * and a component inside a component plays the animation of its own
    * main. Each plays on its own clock, where the copy is and as big as it
    * is. A layer the timeline of the board animates keeps that animation.
+   * The copies play the audio clips of the board of their main too, on
+   * their clock: once for all the copies of a main in the board, in the
+   * workspace, in view mode and in MP4 and WebM exports (a public share
+   * link plays no sound of a library's components).
    *
    * @example
    * ```js
@@ -3835,7 +3839,9 @@ export interface Timeline {
    * The audio clips of the timeline, by lane and start: the sound files the
    * board plays with its animation, in the workspace, in view mode and in
    * its video exports. A clip plays only within `duration`: adding or
-   * moving one never makes the timeline longer.
+   * moving one never makes the timeline longer. The animated component
+   * copies in the board play the clips of their mains as well (see
+   * `Board.animatedCopies`), which are not listed here.
    */
   readonly audioClips: AudioClip[];
 

@@ -16,6 +16,7 @@
    [app.common.test-helpers.shapes :as cths]
    [app.common.transit :as transit]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.workspace :as dw]
@@ -320,6 +321,33 @@
            (t/is (= (tr "workspace.animation.paste-grown") (toast state)))
            (t/is (= 2 (count selected)) "the pasted keyframes are selected")
            (t/is (= #{(cthi/id :rect-a)} (into #{} (map :shape-id) selected)))))))))
+
+(t/deftest keyframes-and-audio-clips-paste-together
+  ;; the keyframes at 0 and 1 s, the clip at 500 ms: at the playhead,
+  ;; 1 s, the first keyframe, the clip half a second after it
+  (t/async
+    done
+    (let [file  (setup-file)
+          store (store-of file)
+          audio (uuid/next)
+          sound (ctau/make-audio-clip {:audio-id audio :name "ping.wav" :source-duration 1000
+                                       :start 500 :duration 300})
+          clip  (-> (:clip (copied file :source))
+                    (assoc :board-id (cthi/id :board-a) :audio [sound]))]
+      (t/is (cltl/animation-clip-valid? clip))
+      (ths/run-store
+       store done
+       [(select [:rect-a])
+        (at-playhead 1000)
+        (dwa/paste-clip-at-playhead clip)]
+       (fn [state]
+         (let [timeline (get (timelines-of state) (cthi/id :board-a))
+               [pasted] (vals (:audio-clips timeline))]
+           (t/is (= [1000 2000] (mapv :time (cta/property-keyframes timeline (cthi/id :rect-a) :x))))
+           (t/is (= [1500 0 audio] ((juxt :start :lane :audio-id) pasted)) "at the same distance")
+           (t/is (not= (:id sound) (:id pasted)) "a new id")
+           (t/is (= #{(:id pasted)} (get-in state [:workspace-animation :selected-clips])))
+           (t/is (= 2 (count (get-in state [:workspace-animation :selected-kfs]))) "all that was pasted")))))))
 
 (t/deftest the-dock-pastes-back-onto-the-layers-copied
   (t/async

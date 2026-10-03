@@ -2831,12 +2831,21 @@
                                  :page-id page-id
                                  :id board-id
                                  :shape-id shape-id
+                                 :params nil}])
+        (update-file! :file-id (:id library)
+                      :profile-id (:id profile)
+                      :revn 3
+                      :changes [{:type :set-timeline-audio-clip
+                                 :page-id page-id
+                                 :id board-id
+                                 :clip-id (uuid/random)
                                  :params nil}])))
 
     (let [team-id (:default-team-id profile)]
       (t/is (= [[team-id [:add-animation-style]]
                 [team-id [:mod-animation-style :set-timeline]]
-                [team-id [:set-timeline-track]]]
+                [team-id [:set-timeline-track]]
+                [team-id [:set-timeline-audio-clip]]]
                (library-changes))))))
 
 (t/deftest unpublishing-a-library-absorbs-its-used-animation-styles

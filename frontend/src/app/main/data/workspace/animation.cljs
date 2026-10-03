@@ -32,6 +32,7 @@
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
+   [app.main.repo :as rp]
    [app.main.streams :as ms]
    [app.main.worker :as mw]
    [app.util.audio :as audio]
@@ -173,17 +174,20 @@
 (defn- playback-timeline
   "The timeline playback of the active board keeps time with: its own
   or, while that has no tracks, the one of the animations of the
-  component copies in the board (see `cltl/with-copies-clock`)."
+  component copies in the board (see `cltl/with-copies-clock`), with the
+  sound of their mains (see `cltl/with-instance-clips`)."
   [state]
   (when-let [tl (current-or-new-timeline state)]
-    (cltl/with-copies-clock tl
-      (vals (dissoc (shown-timelines state) (:board-id tl)))
-      (contains? (get-timelines state) (:board-id tl)))))
+    (let [copies (dissoc (shown-timelines state) (:board-id tl))]
+      (-> tl
+          (cltl/with-copies-clock (vals copies) (contains? (get-timelines state) (:board-id tl)))
+          (cltl/with-instance-clips copies)))))
 
 (defn board-export-timeline
   "The timeline the exports of the board `board-id` of `page` read: its
-  own, with the animations of the component copies in it (see
-  `cltl/with-instance-tracks`) and, while it has no tracks, keeping time
+  own, with the animations of the component copies in it and the sound
+  of their mains (see `cltl/with-instance-tracks` and
+  `cltl/with-instance-clips`) and, while it has no tracks, keeping time
   with them. Nil when the board has no timeline and no animated copies.
   `files` holds the files of the components, by id. With `text-split`
   `:whole`, every split animation plays as an animation of its whole
@@ -193,12 +197,13 @@
   (let [objects   (:objects page)
         timelines (:timelines page)
         stored?   (contains? timelines board-id)
-        copies    (vals (copy-timelines objects timelines files board-id))]
+        copies    (copy-timelines objects timelines files board-id)]
     (when-let [own (when (or stored? (seq copies))
                      (board-timeline timelines (get objects board-id)))]
       (-> (cond-> own (= :whole text-split) cta/flatten-splits)
-          (cltl/with-copies-clock copies stored?)
-          (cltl/with-instance-tracks copies objects :text-split text-split)))))
+          (cltl/with-copies-clock (vals copies) stored?)
+          (cltl/with-instance-tracks (vals copies) objects :text-split text-split)
+          (cltl/with-instance-clips copies)))))
 
 (defn export-timeline
   "The timeline the exports of the active board read (see
@@ -971,22 +976,17 @@
         (when (seq (:layers clip))
           (rx/of (write-animation-clip clip)))))))
 
-(defn copy-selected-keyframes
-  "Copy the selected keyframes, hidden or not, to the clipboard (see
-  `write-animation-clip`), by layer."
-  []
-  (ptk/reify ::copy-selected-keyframes
-    ptk/WatchEvent
-    (watch [_ state _]
-      (let [selected  (dm/get-in state [:workspace-animation :selected-kfs])
-            shape-ids (into [] (comp (map :shape-id) (distinct) (take cltl/max-clip-layers)) selected)
-            page      (dsh/lookup-page state)
-            clip      (cltl/animation-clip (:current-file-id state) page (:objects page)
-                                           (dsh/lookup-libraries state) shape-ids
-                                           :keyframe-ids (map :keyframe-id selected)
-                                           :presets? false)]
-        (when (seq (:layers clip))
-          (rx/of (write-animation-clip clip)))))))
+(defn selected-keyframes-clip
+  "The animation clip (see `cltl/animation-clip`) of the keyframes
+  selected in the dock, hidden or not, by layer."
+  [state]
+  (let [selected  (dm/get-in state [:workspace-animation :selected-kfs])
+        shape-ids (into [] (comp (map :shape-id) (distinct) (take cltl/max-clip-layers)) selected)
+        page      (dsh/lookup-page state)]
+    (cltl/animation-clip (:current-file-id state) page (:objects page)
+                         (dsh/lookup-libraries state) shape-ids
+                         :keyframe-ids (map :keyframe-id selected)
+                         :presets? false)))
 
 (defn payload-clip
   "The animation clip of the clipboard text `text` when it holds a valid
@@ -1051,10 +1051,45 @@
                         {:shape-id shape-id :keyframe-id id}))))
           targets)))
 
+(defn- with-pasted-audio
+  "`result`, of `cltl/paste-animation`, with the audio clips of `clip`
+  pasted into the timeline of the board `board-id` (a new one named after
+  it when it has none, see `cltl/paste-audio`), `dt` ms later: `:clips`,
+  their ids."
+  [result objects clip board-id dt]
+  (if (and (seq (:audio clip)) (some? board-id))
+    (let [timeline (or (dm/get-in result [:timelines board-id])
+                       (board-timeline (:timelines result) (get objects board-id)))
+          {:keys [timeline ids]} (cltl/paste-audio timeline (:audio clip) dt)]
+      (-> result
+          (assoc-in [:timelines board-id] timeline)
+          (assoc :clips ids)))
+    result))
+
+(defn- with-own-audio
+  "An observable of `clip`, an animation clip copied in another file, with
+  its audio clips playing copies, in the file `file-id`, of the media
+  objects they played: one clone of each, before the paste, as
+  `dwcp/with-own-audio` does for boards. A clip whose clone fails keeps
+  its id (the server makes a copy when it saves it, see
+  `bfc/update-media-references!`)."
+  [file-id clip]
+  (->> (rx/from (into #{} (map :audio-id) (:audio clip)))
+       (rx/merge-map (fn [id]
+                       (->> (rp/cmd! :clone-file-media-object {:file-id file-id :is-local true :id id})
+                            (rx/map (fn [fmo] [id (:id fmo)]))
+                            (rx/catch (fn [_] (rx/empty))))))
+       (rx/reduce conj {})
+       (rx/map (fn [index]
+                 (-> clip
+                     (assoc ::own-audio? true)
+                     (update :audio (partial mapv #(update % :audio-id (fn [id] (get index id id))))))))))
+
 (defn- paste-clip*
   "Paste the animation clip `clip` onto the layers `ids` (see
-  `clip-targets`), added to what they play with its earliest keyframe or
-  preset at the playhead, and select the pasted keyframes."
+  `clip-targets`), added to what they play, and its audio clips into the
+  active board (see `cltl/paste-audio`), with the earliest of them (see
+  `cltl/paste-start`) at the playhead, and select what was pasted."
   [clip ids]
   (ptk/reify ::paste-clip
     ptk/WatchEvent
@@ -1066,24 +1101,45 @@
         (not (features/active-feature? state "animation/v1"))
         (rx/of (ntf/warn (tr "workspace.animation.paste-needs-motion")))
 
+        ;; the audio of another file is cloned into this one first
+        (and (seq (:audio clip))
+             (not= (:current-file-id state) (:file-id clip))
+             (not (::own-audio? clip)))
+        (->> (with-own-audio (:current-file-id state) clip)
+             (rx/map #(paste-clip* % ids)))
+
         :else
         (let [file-id (:current-file-id state)
               page    (dsh/lookup-page state)
-              pairs   (clip-targets clip (:objects page) ids file-id (:id page))
-              result  (cltl/generate-paste-animation (pcb/empty-changes it) file-id page clip pairs
-                                                     {:mode :merge :time (playhead state)})]
+              objects (:objects page)
+              time    (playhead state)
+              start   (cltl/paste-start clip)
+              pairs   (clip-targets clip objects ids file-id (:id page))
+              ;; the layers keep their distance to the audio clips
+              result  (-> (cltl/paste-animation file-id (:id page) (:timelines page) objects clip pairs
+                                                {:mode :merge
+                                                 :time (+ time (- (cltl/paste-start (dissoc clip :audio)) start))})
+                          (with-pasted-audio objects clip (active-board-id state) (- time start)))]
           (cond
             (= :too-large (:error result))
             (rx/of (ntf/warn (tr "workspace.animation.paste-too-large")))
 
-            (empty? (:targets result))
+            (and (empty? (:targets result)) (empty? (:clips result)))
             (rx/of (ntf/warn (tr "workspace.animation.paste-no-target")))
 
             :else
-            (let [pasted (pasted-keyframes (:timelines page) (:timelines result) (:targets result))
-                  toast  (paste-result-toast result)]
-              (rx/from (cond-> [(dch/commit-changes (:changes result))
-                                #(store-keyframe-selection % pasted)]
+            (let [pasted  (pasted-keyframes (:timelines page) (:timelines result) (:targets result))
+                  clips   (:clips result)
+                  toast   (paste-result-toast result)
+                  changes (cltl/commit-timelines (pcb/empty-changes it) page (:timelines result))]
+              (rx/from (cond-> [(dch/commit-changes changes)
+                                #(cond-> (store-keyframe-selection % pasted)
+                                   (seq clips)
+                                   (update :workspace-animation
+                                           (fn [anim]
+                                             (-> (dissoc anim :selected-anims)
+                                                 (assoc :selected-clips (set clips)
+                                                        :selected-clip (first clips))))))]
                          (motion-mode? state) (conj (apply-preview))
                          (some? toast)        (conj toast))))))))))
 

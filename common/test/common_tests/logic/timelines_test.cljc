@@ -465,6 +465,45 @@
         (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:entries 0 :keyframes 1 :value] "#ffffff"))))
               "a colour on a position")))))
 
+(t/deftest a-clip-takes-the-audio-clips-copied-along
+  (let [ping   (uuid/next)
+        tl     (reduce ctau/add-audio-clip
+                       (cta/make-timeline {:board-id (uuid/next) :duration 3000})
+                       [{:id (uuid/next) :audio-id ping :name "ping.wav" :source-duration 1000
+                         :start 800 :duration 500 :locked true}
+                        {:id (uuid/next) :audio-id ping :name "ping.wav" :source-duration 1000
+                         :start 200 :duration 500}])
+        ids    (keys (:audio-clips tl))
+        audio  (cltl/audio-copy tl ids)
+        clip   (assoc (clip-of (animated-file) [:rect] :whole-layer? true)
+                      :board-id (:board-id tl) :audio audio)]
+    (t/is (= [200 800] (mapv :start audio)) "by start")
+    (t/is (not-any? :locked audio) "never locked")
+    (t/is (cltl/animation-clip-valid? clip))
+    (t/is (cltl/animation-clip-valid? (assoc clip :layers [])) "the clips alone")
+    (t/is (not (cltl/animation-clip-valid? (assoc clip :audio (vec (repeat (inc cltl/max-clip-audio) (first audio)))))))
+    (t/is (= 0 (cltl/paste-start clip)) "the first keyframe")
+    (t/is (= 200 (cltl/paste-start (assoc clip :layers []))) "the first clip")))
+
+(t/deftest pasted-audio-clips-get-a-lane-of-their-own-file
+  (let [[ping beat] [(uuid/next) (uuid/next)]
+        clip        #(ctau/make-audio-clip (merge {:audio-id ping :name "x" :source-duration 3000
+                                                   :start 0 :duration 500}
+                                                  %))
+        ;; a lane of another file, one of the same file that is free there
+        tl          (reduce ctau/add-audio-clip
+                            (cta/make-timeline {:board-id (uuid/next) :duration 2000})
+                            [(clip {:audio-id beat :lane 0}) (clip {:lane 1 :start 1500})])
+        copied      [(clip {:start 100}) (clip {:start 300 :lane 2})]
+        {:keys [timeline ids]} (cltl/paste-audio tl copied 900)
+        pasted      (mapv #(ctau/get-audio-clip timeline %) ids)]
+    (t/is (= [[1000 1] [1200 2]] (mapv (juxt :start :lane) pasted))
+          "900 ms later: on the lane of their file where it is free, the next one where it is not")
+    (t/is (empty? (filter (set (map :id copied)) ids)) "new ids")
+    (t/is (= 2000 (:duration timeline)) "the duration stays")
+    (let [{:keys [timeline ids]} (cltl/paste-audio tl [(clip {:start 100})] -500)]
+      (t/is (= [0] (mapv #(:start (ctau/get-audio-clip timeline %)) ids)) "none before 0"))))
+
 ;; PASTING ANIMATION CLIPS
 
 (defn- paste-file
@@ -932,11 +971,71 @@
     (t/is (not (contains? (timelines (delete file :board-a)) (thi/id :board-a)))
           "the board deleted, they go with it")))
 
-(t/deftest copies-of-a-component-play-no-audio
-  (let [{:keys [objects board main-page]} (component-scene (with-clips (component-file) :main (audio-clip)))
+(t/deftest copies-of-a-component-play-the-sound-of-their-main
+  (let [file   (with-clips (component-file) :main (audio-clip :start 200))
+        {:keys [objects board copy main-page timelines]} (component-scene file)
+        main   (thi/id :main)
         copies (cltl/instance-timelines objects board nil main-page)]
-    (t/is (seq copies))
-    (t/is (not-any? #(contains? % :audio-clips) (vals copies)))))
+    (t/is (= [[:copy copy main]] (keys copies)) "one entry, with the tracks")
+    (t/is (= (clips-of file :main) (get-in copies [[:copy copy main] :audio-clips])))
+    (t/testing "only the clips of the board that is the main"
+      (let [host      (uuid/next)
+            main-page (constantly {:objects objects
+                                   :timelines (-> timelines
+                                                  (assoc host (assoc (get timelines main) :board-id host))
+                                                  (update main dissoc :audio-clips))})
+            copies    (cltl/instance-timelines objects board nil main-page)]
+        (t/is (not-any? #(contains? % :audio-clips) (vals copies)))))))
+
+(t/deftest a-main-that-only-sounds-gives-its-copies-its-clock
+  (let [file   (-> (component-file)
+                   (with-timeline :main #(cta/remove-track % (thi/id :main-rect)))
+                   (with-clips :main (audio-clip :start 200)))
+        {:keys [objects board copy main-page]} (component-scene file)
+        copies (cltl/instance-timelines objects board nil main-page)
+        entry  (get copies [:copy copy (thi/id :main)])]
+    (t/is (= 1 (count copies)))
+    (t/is (= [board {} 1000 :loop] [(:board-id entry) (:tracks entry) (:duration entry) (:playback entry)]))
+    (t/is (= 1 (count (:audio-clips entry))))))
+
+(defn- copies-with-sound
+  "Three copies, in board B, of a main of 1 s playing as `playback` says
+  a clip from 200 ms to 1.2 s, and the timeline of B, 2.5 s long, with a
+  clip of its own."
+  [playback]
+  (let [file   (-> (component-file)
+                   (with-timeline :main #(assoc % :playback playback))
+                   (with-clips :main (audio-clip :start 200 :fade-in 50 :fade-out 100))
+                   (thc/instantiate-component :anim :copy2 :parent-label :board-b)
+                   (thc/instantiate-component :anim :copy3 :parent-label :board-b)
+                   (with-clips :board-b (audio-clip :start 0 :duration 500)))
+        {:keys [objects board main-page]} (component-scene file)
+        tl     (-> (get (timelines file) board) (assoc :duration 2500))]
+    {:timeline tl
+     :copies (cltl/instance-timelines objects board tl main-page)}))
+
+(t/deftest the-copies-of-a-main-sound-once-on-their-clock
+  (let [{:keys [timeline copies]} (copies-with-sound :loop)
+        played (cltl/with-instance-clips timeline copies)
+        theirs (->> (vals (:audio-clips played))
+                    (remove #(contains? (:audio-clips timeline) (:id %)))
+                    (sort-by :start))]
+    (t/is (= 3 (count copies)))
+    (t/is (= [[200 800 1] [1200 800 1] [2200 300 1]] (mapv (juxt :start :duration :lane) theirs))
+          "once for the three copies, at each round, cut at its end and at the board's")
+    (t/is (= [50 nil] ((juxt :fade-in :fade-out) (first theirs))) "a fade out cut off goes")
+    (t/is (= played (cltl/with-instance-clips timeline copies)) "the same ids each time")
+    (t/is (= 4 (count (cta/audio-plan played 0 2500))))
+    (t/testing "ping-pong: on the way there only"
+      (let [{:keys [timeline copies]} (copies-with-sound :ping-pong)
+            played (cltl/with-instance-clips timeline copies)]
+        (t/is (= [0 200 2200] (sort (map :start (vals (:audio-clips played))))))))
+    (t/testing "once: the first round only"
+      (let [{:keys [timeline copies]} (copies-with-sound :once)
+            played (cltl/with-instance-clips timeline copies)]
+        (t/is (= [0 200] (sort (map :start (vals (:audio-clips played))))))))
+    (t/testing "no copies with sound: the timeline as it is"
+      (t/is (= timeline (cltl/with-instance-clips timeline {}))))))
 
 (t/deftest a-moved-layer-leaves-the-clips-of-its-board
   (let [file (-> (animated-file)

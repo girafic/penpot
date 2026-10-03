@@ -23,6 +23,7 @@
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
    [app.common.types.modifiers :as ctm]
@@ -423,26 +424,36 @@
   `main-track`), taken to where the copies are in the board and scaled as
   much as they are. One by copy and main board, keyed `[:copy id board]`,
   with the settings of the timeline of that main, so that each plays on
-  its own clock (see `cta/playback-time`). A shape `timeline`, the one of
-  the board, animates itself keeps that animation."
+  its own clock (see `cta/playback-time`). The board that is the main of
+  a copy gives it its audio clips too, an entry of their own when it
+  animates nothing (see `with-instance-clips`). A shape `timeline`, the
+  one of the board, animates itself keeps that animation."
   [objects board-id timeline main-page]
   (let [own (:tracks timeline)]
     (reduce
      (fn [result head-id]
-       (let [head (get objects head-id)]
-         (reduce
-          (fn [result id]
-            (if-let [{:keys [board track ref-id] main :timeline mobjs :objects cmap :map}
-                     (when-not (contains? own id)
-                       (main-track (get objects id) head main-page))]
-              (let [k [:copy head-id board]]
-                (-> result
-                    (update k #(or % (assoc (settings main) :board-id board-id :tracks {})))
-                    (assoc-in [k :tracks id]
-                              (mapped-track track ref-id mobjs board id objects board-id cmap))))
-              result))
-          result
-          (cfh/get-children-ids-with-self objects head-id))))
+       (let [head    (get objects head-id)
+             main-id (:shape-ref head)
+             main    (some-> (main-page head) :timelines (get main-id))
+             result  (reduce
+                      (fn [result id]
+                        (if-let [{:keys [board track ref-id] main :timeline mobjs :objects cmap :map}
+                                 (when-not (contains? own id)
+                                   (main-track (get objects id) head main-page))]
+                          (let [k [:copy head-id board]]
+                            (-> result
+                                (update k #(or % (assoc (settings main) :board-id board-id :tracks {})))
+                                (assoc-in [k :tracks id]
+                                          (mapped-track track ref-id mobjs board id objects board-id cmap))))
+                          result))
+                      result
+                      (cfh/get-children-ids-with-self objects head-id))]
+         (if-let [clips (not-empty (:audio-clips main))]
+           (let [k [:copy head-id main-id]]
+             (-> result
+                 (update k #(or % (assoc (settings main) :board-id board-id :tracks {})))
+                 (assoc-in [k :audio-clips] clips)))
+           result)))
      {}
      (copy-heads objects board-id))))
 
@@ -503,6 +514,74 @@
                             (:tracks copy))))))
    timeline
    copies))
+
+(defn- copy-cycles
+  "The starts of the cycles of `copy` (see `instance-timelines`) whose
+  sound plays within `duration` ms: the first only when it plays once,
+  each one when it loops, the way there of each when it plays ping-pong
+  (the way back is silent, see `cta/audio-plan`)."
+  [copy duration]
+  (if (= :once (cta/playback-mode copy))
+    [0]
+    (range 0 duration (max 1 (cta/cycle-duration copy)))))
+
+(defn- cycle-clip
+  "`clip` of a copy as it plays in the cycle of the copy from `at` ms of
+  the board, on `lane`, with the id `id`: cut `length` ms into the cycle,
+  where it or the board ends (its fade out, past it, goes), nil when it
+  starts there or later."
+  [clip id at lane length]
+  (when (< (:start clip) length)
+    (cond-> (assoc clip :id id :start (+ at (:start clip)) :lane lane)
+      (> (ctau/clip-end clip) length)
+      (-> (assoc :duration (- length (:start clip)))
+          (dissoc :fade-out)))))
+
+(defn sounding-mains
+  "The main boards whose audio clips the component copies `copies` (by
+  `[:copy id main-board]`, see `instance-timelines`) play, each once,
+  however many copies of it there are (they keep the same clock): `[main
+  copy]`, by main board, `copy` the timeline of one of them."
+  [copies]
+  (->> copies
+       (filter (fn [[_ copy]] (seq (:audio-clips copy))))
+       (group-by (fn [[[_ _ main-id] _]] main-id))
+       (sort-by (comp str key))
+       (mapv (fn [[main-id entries]]
+               [main-id (val (first (sort-by (comp str key) entries)))]))))
+
+(defn with-instance-clips
+  "`timeline`, of a board, with the audio clips of the mains of the
+  component copies in it, `copies` (see `sounding-mains`), as the copies
+  play them over the duration of the board: on each of their cycles
+  (see `copy-cycles`), on lanes after the ones of the board, with ids
+  that stay the same from call to call, so that live playback goes on
+  (see `app.util.audio/follow!`). What the workspace plays and the video
+  exports mix, which play one timeline."
+  [timeline copies]
+  (let [duration (:duration timeline)
+        mains    (sounding-mains copies)
+        lanes    (->> (vals (:audio-clips timeline))
+                      (map (comp inc :lane))
+                      (reduce max 0))]
+    (first
+     (reduce
+      (fn [[timeline lanes] [main-id copy]]
+        (let [clips  (sort-by (juxt :lane :start) (vals (:audio-clips copy)))
+              length (:duration copy)
+              clips  (for [[index at] (map-indexed vector (copy-cycles copy duration))
+                           clip       clips
+                           :let       [id (uuid/custom (long (hash [main-id (:id clip)])) (long index))]
+                           :when      (< at duration)]
+                       (cycle-clip clip id at (+ lanes (:lane clip)) (min length (- duration at))))]
+          [(reduce (fn [timeline clip]
+                     (cond-> timeline
+                       (some? clip) (assoc-in [:audio-clips (:id clip)] clip)))
+                   timeline
+                   clips)
+           (+ lanes (reduce max 0 (map (comp inc :lane) (vals (:audio-clips copy)))))]))
+      [timeline lanes]
+      mains))))
 
 (defn layer-ids
   "The ids of `id` and the layers in it, in the order of the layers panel
@@ -699,18 +778,25 @@
                 0
                 animations)))
 
+(def max-clip-audio
+  "The most audio clips an animation clip holds."
+  100)
+
 (def schema:animation-clip
-  "An animation clip (see `animation-clip`). It comes from the clipboard,
-  so it is checked more strictly than a stored track, and its size is
-  capped."
+  "An animation clip (see `animation-clip`), with the audio clips of the
+  board `:board-id` copied along (see `audio-copy`). It comes from the
+  clipboard, so it is checked more strictly than a stored track, and its
+  size is capped."
   [:map {:title "AnimationClip"}
    [:file-id {:optional true} ::sm/uuid]
    [:page-id {:optional true} ::sm/uuid]
+   [:board-id {:optional true} ::sm/uuid]
    [:layers [:vector {:max max-clip-layers}
              [:map {:title "AnimationClipLayer"}
               [:shape-id ::sm/uuid]
               [:pose cta/schema:pose]
-              [:track [:and cta/schema:track [:fn clip-track?]]]]]]])
+              [:track [:and cta/schema:track [:fn clip-track?]]]]]]
+   [:audio {:optional true} [:vector {:max max-clip-audio} ctau/schema:audio-clip]]])
 
 (def animation-clip-valid?
   (sm/lazy-validator schema:animation-clip))
@@ -779,6 +865,46 @@
                           :pose     (cta/rest-pose timeline objects shape-id)
                           :track    track})))))
            shape-ids)}))
+
+(defn audio-copy
+  "The audio clips `clip-ids` of `timeline` as an animation clip takes
+  them (see `schema:animation-clip`), by start: never locked, at most
+  `max-clip-audio`."
+  [timeline clip-ids]
+  (into []
+        (comp (keep #(dm/get-in timeline [:audio-clips %]))
+              (map #(dissoc % :locked))
+              (take max-clip-audio))
+        (sort-by (fn [id] (dm/get-in timeline [:audio-clips id :start] 0))
+                 (set clip-ids))))
+
+(defn paste-start
+  "The earliest start of what the animation clip `clip` holds: the
+  keyframes and presets of its layers, its audio clips. A paste lands
+  it at the playhead, the rest at the same distance from it."
+  [clip]
+  (let [times (concat (mapcat (fn [{:keys [track]}]
+                                (concat (map :time (:keyframes track))
+                                        (map :start (:animations track))))
+                              (:layers clip))
+                      (map :start (:audio clip)))]
+    (if (seq times) (reduce min times) 0)))
+
+(defn paste-audio
+  "`timeline` with the audio clips `clips` (see `audio-copy`) `dt` ms
+  later, none before 0: new ids, each on the first lane free there and
+  of its file (see `ctau/free-lane`), the duration as it is. `{:timeline
+  :ids}`, the ids of the pasted clips."
+  [timeline clips dt]
+  (reduce (fn [{:keys [timeline] :as result} clip]
+            (let [start (max 0 (mth/round (+ (:start clip) dt)))
+                  lane  (ctau/free-lane timeline start (+ start (:duration clip)) :audio-id (:audio-id clip))
+                  clip  (assoc clip :id (uuid/next) :start start :lane lane)]
+              (-> result
+                  (assoc :timeline (assoc-in timeline [:audio-clips (:id clip)] clip))
+                  (update :ids conj (:id clip)))))
+          {:timeline timeline :ids []}
+          (sort-by (juxt :start :lane) clips)))
 
 (defn animated-layer?
   "Whether the layer `shape-id` of `page` plays an animation, its own or

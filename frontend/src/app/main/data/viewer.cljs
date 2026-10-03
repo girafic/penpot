@@ -1034,6 +1034,16 @@
         copies
         (some? own)))))
 
+(defn board-sound?
+  "Whether the board `board-id` of `page` plays sound: its own audio
+  clips, or those of the mains of the component copies in it (see
+  `cltl/sounding-mains`). `files` holds the files of the components, by
+  id."
+  [page files board-id]
+  (boolean
+   (or (seq (dm/get-in page [:timelines board-id :audio-clips]))
+       (seq (cltl/sounding-mains (cltl/copy-timelines (:objects page) (:timelines page) files board-id))))))
+
 (defn seek-timeline
   "Show the board at the `time` of its timeline, the component copies in
   it `elapsed` ms after playback started (`time` by default)."
@@ -1065,7 +1075,8 @@
       (let [page     (viewer-current-page state)
             files    (:files state)
             timeline (board-clock page files timeline-id)
-            copies   (vals (cltl/copy-timelines (:objects page) (:timelines page) files timeline-id))
+            copies   (cltl/copy-timelines (:objects page) (:timelines page) files timeline-id)
+            voices   (cltl/sounding-mains copies)
             duration (or (:duration timeline) 0)
             ;; from where it was paused, from the start once played
             start    (let [{:keys [time elapsed]} (:timeline (:viewer-local state))
@@ -1076,23 +1087,25 @@
           (rx/empty)
           ;; While its clips sound, it keeps time with them (see
           ;; `audio/follow!`), unclamped, so they cannot drift apart.
-          (let [sound?  (and (seq (:audio-clips timeline))
+          (let [sound?  (and (or (seq (:audio-clips timeline)) (seq voices))
                              (not (audio-muted? state))
                              (some? (audio/now-ms)))
-                ;; muted meanwhile (see `toggle-audio-muted`), silent
-                follow  (fn [t]
-                          (audio/follow! timeline (cta/playback-time timeline t) (direction-at timeline t)
-                                         (not (get storage/user ::audio-muted false))))
-                ;; A component copy that loops goes on once the board's
-                ;; own animation, and its sound, have ended.
-                silent? (volatile! false)
+                ;; The board and the mains of the component copies in it
+                ;; each sound on their clock, a voice each: a copy that
+                ;; loops goes on once the board's own animation, and its
+                ;; sound, have ended. Muted meanwhile (see
+                ;; `toggle-audio-muted`), silent.
+                follow  (fn [voice tl t on?]
+                          (audio/follow! voice tl (cta/playback-time tl t) (direction-at tl t)
+                                         (and on? (not (cta/playback-ended? tl t)))))
                 sound!  (fn [t]
-                          (cond
-                            (not (cta/playback-ended? timeline t)) (follow t)
-                            (not @silent?) (do (vreset! silent? true) (audio/stop-all!))))]
+                          (let [on? (not (get storage/user ::audio-muted false))]
+                            (follow ::board timeline t on?)
+                            (doseq [[main-id copy] voices]
+                              (follow main-id copy t on?))))]
             (rx/concat
              (->> (frame-times start (when sound? audio/now-ms) (not sound?))
-                  (rx/take-while (fn [t] (not (cltl/view-playback-ended? timeline copies t))))
+                  (rx/take-while (fn [t] (not (cltl/view-playback-ended? timeline (vals copies) t))))
                   (rx/tap sound!)
                   (rx/take-until stopper)
                   (rx/map (fn [t] (seek-timeline (cta/playback-time timeline t) t))))

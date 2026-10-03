@@ -331,18 +331,20 @@
 ;; The sound of the timeline playing in the workspace or the viewer. It
 ;; does not keep time itself: it follows the picture (see `follow!`),
 ;; which keeps time with the audible clock of the context while sound
-;; plays (see `now-ms`).
+;; plays (see `now-ms`). Each voice follows a timeline of its own: the
+;; view mode plays the sound of the mains of the component copies in a
+;; board on their clock, which goes on past the end of the board.
 
 (defonce ^:private context
   ;; the `AudioContext` of live playback, made by `unlock!`
   (atom nil))
 
 (defonce ^:private playing
-  ;; what plays: `{:sources :origin :elapsed :until :key}`, the parts of
-  ;; the clips heard from the audible time `:origin` (ms) on, when
-  ;; playback was `:elapsed` ms from its start, scheduled until `:until`
-  ;; ms of it
-  (atom nil))
+  ;; what each voice plays: voice -> `{:sources :origin :elapsed :until
+  ;; :key}`, the parts of the clips heard from the audible time `:origin`
+  ;; (ms) on, when playback was `:elapsed` ms from its start, scheduled
+  ;; until `:until` ms of it
+  (atom {}))
 
 (def ^:private tolerance
   "How far, in ms, the sound may be off the picture before it starts again
@@ -433,16 +435,21 @@
     (catch :default _ nil))
   (release! part))
 
+(defn- stop-voice!
+  [voice]
+  (run! stop! (:sources (get @playing voice)))
+  (swap! playing dissoc voice))
+
 (defn stop-all!
-  "Stop all the sound of live playback."
+  "Stop all the sound of live playback, of every voice."
   []
-  (run! stop! (:sources @playing))
-  (reset! playing nil))
+  (run! stop! (mapcat :sources (vals @playing)))
+  (reset! playing {}))
 
 (defn- playing-ids
   "The files of the clips live playback plays."
   []
-  (into #{} (map :audio-id) (vals (first (:key @playing)))))
+  (into #{} (comp (mapcat (comp vals first :key)) (map :audio-id)) (vals @playing)))
 
 (defn forget-all!
   "Stop the sound and let go of every file decoded, and of what failed,
@@ -537,17 +544,18 @@
           (cta/audio-plan timeline from (- to from)))))
 
 (defn- start!
-  "Play the sound of `timeline` from the audible time `now`, at which the
-  picture shows `time` going in `direction`."
-  [^js ctx timeline time direction now]
-  (stop-all!)
+  "Play with `voice` the sound of `timeline` from the audible time `now`,
+  at which the picture shows `time` going in `direction`."
+  [^js ctx voice timeline time direction now]
+  (stop-voice! voice)
   (let [elapsed (elapsed-at timeline time direction)
         until   (+ elapsed window)]
-    (reset! playing {:sources (schedule! ctx timeline now elapsed elapsed until)
-                     :origin now
-                     :elapsed elapsed
-                     :until until
-                     :key (sound-key timeline)})))
+    (swap! playing assoc voice
+           {:sources (schedule! ctx timeline now elapsed elapsed until)
+            :origin now
+            :elapsed elapsed
+            :until until
+            :key (sound-key timeline)})))
 
 (defn load-clips!
   "Start loading the files of the clips of `timeline` not loaded yet, but
@@ -573,29 +581,32 @@
   more than `tolerance`, when the direction changes, or when the clips
   or the files loaded of them change; steady playback, loops and the
   turns of ping-pong included, only schedule more of it (see
-  `lookahead`). Silent without a running context (see `unlock!`)."
-  [timeline time direction playing?]
-  (let [^js ctx (running)
-        now     (now-ms)]
-    (if (or (not playing?) (nil? ctx) (nil? timeline) (empty? (:audio-clips timeline)))
-      (when (some? @playing)
-        (stop-all!))
-      (let [{:keys [origin elapsed until key] :as current} @playing
-            expected (when current (+ elapsed (- now origin)))
-            [shown dir] (when expected (shown-at timeline expected))]
-        (load-clips! timeline)
-        (cond
-          (or (nil? current)
-              (not= key (sound-key timeline))
-              (not= dir direction)
-              (> (mth/abs (- shown time)) tolerance))
-          (start! ctx timeline time direction now)
+  `lookahead`). Silent without a running context (see `unlock!`). Each
+  `voice` follows its own timeline; without one, the main voice."
+  ([timeline time direction playing?]
+   (follow! ::main timeline time direction playing?))
+  ([voice timeline time direction playing?]
+   (let [^js ctx (running)
+         now     (now-ms)]
+     (if (or (not playing?) (nil? ctx) (nil? timeline) (empty? (:audio-clips timeline)))
+       (when (contains? @playing voice)
+         (stop-voice! voice))
+       (let [{:keys [origin elapsed until key] :as current} (get @playing voice)
+             expected (when current (+ elapsed (- now origin)))
+             [shown dir] (when expected (shown-at timeline expected))]
+         (load-clips! timeline)
+         (cond
+           (or (nil? current)
+               (not= key (sound-key timeline))
+               (not= dir direction)
+               (> (mth/abs (- shown time)) tolerance))
+           (start! ctx voice timeline time direction now)
 
-          (< (- until expected) lookahead)
-          (let [current      (.-currentTime ctx)
-                [done going] ((juxt filter remove) #(< (nth % 2) current) (:sources @playing))]
-            ;; the parts heard to their end are let go
-            (run! release! done)
-            (swap! playing assoc
-                   :sources (into (vec going) (schedule! ctx timeline origin elapsed until (+ until window)))
-                   :until (+ until window))))))))
+           (< (- until expected) lookahead)
+           (let [current      (.-currentTime ctx)
+                 [done going] ((juxt filter remove) #(< (nth % 2) current) (:sources (get @playing voice)))]
+             ;; the parts heard to their end are let go
+             (run! release! done)
+             (swap! playing update voice assoc
+                    :sources (into (vec going) (schedule! ctx timeline origin elapsed until (+ until window)))
+                    :until (+ until window)))))))))

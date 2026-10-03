@@ -237,11 +237,11 @@
   Cmd/Ctrl + B, the clips under the playhead, as Final Cut's Blade All);
   with an audio clip selected (`selected-clip`), `:split-clip` (Cmd/Ctrl
   + B, as Final Cut, DaVinci Resolve or CapCut, or S), `:delete-clip`
-  (Delete, Backspace), `:nudge-clip` (the arrows, see `nudge-step`) or
-  `:no-copy` (Cmd/Ctrl + C or X: clips are not copied, nor the selected
-  shapes behind them); else `:delete-keyframes`, `:copy-keyframes`,
-  `:cut-keyframes` or `:shift-keyframes` (the arrows) for the keyframes
-  `selected-kfs`. Nil for a key the dock leaves to the workspace."
+  (Delete, Backspace) or `:nudge-clip` (the arrows, see `nudge-step`);
+  `:copy-selection` or `:cut-selection` (Cmd/Ctrl + C or X) for the
+  keyframes `selected-kfs` and the clips, together; else
+  `:delete-keyframes` or `:shift-keyframes` (the arrows) for the
+  keyframes. Nil for a key the dock leaves to the workspace."
   [event selected-kfs selected-clip & [selected-anims]]
   (let [plain?  (not (or (kbd/mod? event) (kbd/alt? event) (kbd/shift? event)))
         delete? (or (kbd/delete? event) (kbd/backspace? event))
@@ -256,8 +256,8 @@
       (and (some? selected-clip) plain? (s-key? event)) :split-clip
       (and (some? selected-clip) delete?)         :delete-clip
       (and (some? selected-clip) arrow?)          :nudge-clip
-      (and copy? (seq selected-kfs))              (if (x-key? event) :cut-keyframes :copy-keyframes)
-      (and (some? selected-clip) copy?)           :no-copy
+      (and copy? (or (seq selected-kfs) (some? selected-clip)))
+      (if (x-key? event) :cut-selection :copy-selection)
       (and (seq selected-anims) delete?)          :delete-clip
       (and (seq selected-anims) arrow?)           :nudge-clip
       delete?                                     :delete-keyframes
@@ -2742,6 +2742,7 @@
         ;; A click in the dock focuses it; then Delete/Backspace delete the
         ;; selected keyframes, the arrows move them (10 ms, 100 ms with
         ;; Shift) and Cmd/Ctrl+C and X copy and cut them to the clipboard,
+        ;; with the selected audio clips,
         ;; instead of reaching the workspace shortcuts for the selected
         ;; shapes (Cmd/Ctrl+V: see `on-paste`). M adds a marker at the
         ;; playhead and Alt with the arrows goes to the marker before or
@@ -2768,12 +2769,11 @@
                  :nudge-clip       (st/emit! (if (whole-selection? selection)
                                                (dwaa/nudge-selection (nudge-step event))
                                                (dwaa/nudge-selected-clips (nudge-step event))))
-                 :no-copy          nil
                  :delete-keyframes (st/emit! (if (whole-selection? selection)
                                                (dwaa/delete-selection)
                                                (dwa/delete-selected-keyframes)))
-                 :copy-keyframes   (st/emit! (dwa/copy-selected-keyframes))
-                 :cut-keyframes    (st/emit! (dwa/copy-selected-keyframes) (dwa/delete-selected-keyframes))
+                 :copy-selection   (st/emit! (dwaa/copy-selection))
+                 :cut-selection    (st/emit! (dwaa/cut-selection))
                  :shift-keyframes  (st/emit! (if (whole-selection? selection)
                                                (dwaa/nudge-selection (nudge-step event))
                                                (dwa/shift-selected-keyframes (nudge-step event)))))))))
@@ -2804,13 +2804,34 @@
         menu-clip
         (some->> (:clip-id menu) (ctau/get-audio-clip timeline))
 
+        ;; Copy and Cut of the menu of a clip take what is selected with
+        ;; it, or it alone.
+        menu-in-selection?
+        (contains? selected-clips (:clip-id menu))
+
         menu-options
-        (mf/with-memo [menu can-paste? menu-locked? (some? menu-use) menu-style-id menu-clip]
+        (mf/with-memo [menu can-paste? menu-locked? (some? menu-use) menu-style-id menu-clip menu-in-selection?]
           (when-let [{:keys [shape-id property index animation-id marker-id clip-id]} menu]
             (cond
               (some? clip-id)
-              (let [locked? (true? (:locked menu-clip))]
-                [{:name (tr "workspace.animation.clip-split-short")
+              (let [locked? (true? (:locked menu-clip))
+                    copy    (fn [event]
+                              (if menu-in-selection?
+                                (st/emit! event)
+                                (st/emit! (dwaa/select-clip clip-id) event)))]
+                [{:name (tr "workspace.shape.menu.copy")
+                  :id "copy-clip"
+                  :handler #(copy (dwaa/copy-selection))}
+                 {:name (tr "workspace.shape.menu.cut")
+                  :id "cut-clip"
+                  :disabled locked?
+                  :handler #(copy (dwaa/cut-selection))}
+                 {:name (tr "workspace.shape.menu.paste")
+                  :id "paste-clip"
+                  :disabled (not can-paste?)
+                  :handler #(st/emit! (dwaa/paste-clipboard-at-playhead))}
+                 {:name :separator}
+                 {:name (tr "workspace.animation.clip-split-short")
                   :id "split-clip"
                   :disabled locked?
                   :handler #(st/emit! (dwaa/split-clip clip-id))}

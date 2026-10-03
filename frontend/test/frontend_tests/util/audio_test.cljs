@@ -333,6 +333,26 @@
     (audio/stop-all!)
     (audio/use-context! nil)))
 
+(t/deftest each-voice-follows-its-own-timeline
+  (let [clock (atom 10.0)
+        log   (atom [])
+        song  (decoded "song" 4000)
+        beat  (decoded "beat" 4000)
+        board (with-clip (cta/make-timeline {:board-id (uuid/next) :duration 3000}) song)
+        copy  (with-clip (cta/make-timeline {:board-id (uuid/next) :duration 3000}) beat :duration 500)]
+    (audio/use-context! (live-context clock log))
+    (audio/follow! board 500 1 true)
+    (audio/follow! :copy copy 100 1 true)
+    (t/is (= [[:start "song" 10 0.5 1.5] [:start "beat" 10 0.1 0.4]] (starts log)) "both, each where it is")
+    (reset! clock 10.1)
+    (audio/follow! board 600 1 true)
+    (t/is (empty? (stops log)) "the main voice goes on")
+    (audio/follow! :copy copy 100 1 false)
+    (t/is (= [[:stop "beat"]] (stops log)) "one voice stops, the other plays")
+    (audio/stop-all!)
+    (t/is (= [[:stop "beat"] [:stop "song"]] (stops log)) "all of them")
+    (audio/use-context! nil)))
+
 (t/deftest the-way-back-of-ping-pong-is-heard-as-silence
   (let [clock (atom 10.0)
         log   (atom [])

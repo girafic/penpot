@@ -193,13 +193,14 @@
       (t/is (= :nudge-clip (action (key-event "ArrowRight") kfs clip)) "the clip, not the keyframes")
       (t/is (= :nudge-clip (action (key-event "ArrowLeft" :shift? true) #{} clip)))
       (t/is (= :jump-to-marker (action (key-event "ArrowLeft" :alt? true) #{} clip)) "Alt jumps still")
-      (t/is (= :no-copy (action (key-event "c" :mod? true) #{} clip)) "nothing copied, handled")
-      (t/is (= :no-copy (action (key-event "x" :mod? true) #{} clip)))
+      (t/is (= :copy-selection (action (key-event "c" :mod? true) #{} clip)) "the clips")
+      (t/is (= :cut-selection (action (key-event "x" :mod? true) #{} clip)))
+      (t/is (= :copy-selection (action (key-event "c" :mod? true) kfs clip)) "with the keyframes")
       (t/is (nil? (action (key-event "s" :mod? true) #{} clip)) "Cmd+S saves as ever"))
     (t/testing "keyframes selected, as before"
       (t/is (= :delete-keyframes (action (key-event "Delete") kfs nil)))
-      (t/is (= :copy-keyframes (action (key-event "c" :mod? true) kfs nil)))
-      (t/is (= :cut-keyframes (action (key-event "x" :mod? true) kfs nil)))
+      (t/is (= :copy-selection (action (key-event "c" :mod? true) kfs nil)))
+      (t/is (= :cut-selection (action (key-event "x" :mod? true) kfs nil)))
       (t/is (= :shift-keyframes (action (key-event "ArrowLeft") kfs nil)))
       (t/is (nil? (action (key-event "s") kfs nil)) "S splits no keyframe"))
     (t/testing "nothing selected"

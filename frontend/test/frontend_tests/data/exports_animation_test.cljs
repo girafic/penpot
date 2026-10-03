@@ -606,18 +606,22 @@
                                                (ctau/add-audio-clip own-clip)))))]
     {:page (cthf/current-page file) :files {(:id file) file} :board board}))
 
-(t/deftest a-board-exports-its-own-clips-and-not-those-of-the-mains-of-its-copies
+(t/deftest a-board-exports-its-own-clips-and-those-of-the-mains-of-its-copies
   (cthi/reset-idmap!)
   (let [{:keys [page files board]} (copy-scene (assoc (clip-at 500 1000) :name "own"))
-        tl (dwa/board-export-timeline page files board)]
+        tl    (dwa/board-export-timeline page files board)
+        clips (sort-by (juxt :lane :start) (vals (:audio-clips tl)))]
     (t/is (seq (:tracks tl)) "it plays the copy")
-    (t/is (= ["own"] (map :name (vals (:audio-clips tl)))))
-    (t/is (= (get-in page [:timelines board :audio-clips]) (:audio-clips tl))))
+    (t/is (= [["own" 500 0] ["main" 0 1] ["main" 1000 1]] (map (juxt :name :start :lane) clips))
+          "the clip of the main at each round of the copy, after the lanes of the board")
+    (t/is (= (get-in page [:timelines board :audio-clips])
+             (select-keys (:audio-clips tl) (keys (get-in page [:timelines board :audio-clips]))))))
   (cthi/reset-idmap!)
   (let [{:keys [page files board]} (copy-scene nil)
         tl (dwa/board-export-timeline page files board)]
     (t/is (seq (:tracks tl)) "it plays the copy")
-    (t/is (empty? (:audio-clips tl)) "none of its own, none")))
+    (t/is (= [["main" 0 0]] (map (juxt :name :start :lane) (vals (:audio-clips tl))))
+          "none of its own: the one of the main, on the clock of the copy")))
 
 (t/deftest estimated-size-is-positive-for-raster
   (t/is (pos? (dea/estimated-size :mp4 100 80 :high 1000 30)))

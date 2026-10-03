@@ -494,7 +494,9 @@ Components: animating the main of a component (its board's timeline) animates ev
 the copy is and scaled as it is; a component inside a component plays the animation of its own main. A copy plays on
 its own clock (the duration and playback of its main). `board.animatedCopies` lists the copies in a board that play so
 (`{copy, duration, playback: "once" | "loop"}`); a board plays them even when `board.timeline` is `null`. Keyframes the
-board's own timeline gives a layer of a copy take its place. The animation of a copy is in its main's
+board's own timeline gives a layer of a copy take its place. The copies play the audio clips of their main's board too,
+on their clock, once for all the copies of one main in a board (a button with a click sound: add the clip to the
+main); a public share link plays no sound of a library's components. The animation of a copy is in its main's
 `board.timeline.toJSON()`; the `toJSON()` of the copy's board, when it has a timeline, lists the layers of the copy
 with their `component` (the copy and the clock of its main).
 

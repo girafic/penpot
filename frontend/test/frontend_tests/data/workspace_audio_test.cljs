@@ -23,6 +23,7 @@
    [app.main.data.workspace.undo :as dwu]
    [app.main.repo :as rp]
    [app.util.audio :as audio]
+   [app.util.clipboard :as clipboard]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
@@ -645,6 +646,58 @@
            [(dwaa/add-audio-files (cthi/id :board-a) [(audio-file "voice.mp3" :ms 500)] 0 0 :decode decode)]
            (fn [state]
              (t/is (= [[(:audio-id clip) 0] [id 1]] (mapv (juxt :audio-id :lane) (clips-of state :board-a)))))
+           (after commit-of-clips?)))
+        done))))
+
+(t/deftest the-selected-clips-are-cut-but-the-locked-ones
+  (t/async
+    done
+    (let [[[free locked] file] (with-clips {:lane 0} {:lane 1 :start 1200 :locked true})
+          written              (atom nil)]
+      (mock/with-mocks
+        {clipboard/to-clipboard (mock/stub (fn [text] (reset! written text) (js/Promise.resolve nil)))}
+        (fn [done']
+          (run-clip-edits
+           done' file
+           [(dwaa/select-items {:clips [(:id free) (:id locked)]})
+            (dwaa/cut-selection)]
+           (fn [state]
+             (let [clip (dwa/payload-clip @written)]
+               (t/is (= [(:id free) (:id locked)] (mapv :id (:audio clip))) "both copied, by start")
+               (t/is (= (cthi/id :board-a) (:board-id clip)))
+               (t/is (not-any? :locked (:audio clip)) "never locked"))
+             (t/is (= [(:id locked)] (mapv :id (clips-of state :board-a))) "the locked one stays")
+             (t/is (= #{(:id locked)} (dwaa/selected-clips (:workspace-animation state))) "selected"))
+           (fn [state]
+             (t/is (= 2 (count (clips-of state :board-a))) "one undo"))))
+        done))))
+
+(t/deftest clips-pasted-in-the-dock-from-another-file-play-copies-of-their-audio
+  (t/async
+    done
+    (let [store  (store-of (setup-file))
+          [a c]  [(uuid/next) (uuid/next)]
+          calls  (atom [])
+          clip   {:file-id (uuid/next) :page-id (uuid/next) :board-id (uuid/next) :layers []
+                  :audio [(ctau/make-audio-clip {:audio-id a :name "ping.wav" :source-duration 1000
+                                                 :start 300 :duration 500})]}]
+      (mock/with-mocks
+        {rp/cmd! (mock/stub (fn [cmd params]
+                              (swap! calls conj [cmd (:id params)])
+                              (rx/of {:id c})))}
+        (fn [done']
+          (ths/run-store
+           store done'
+           [(dwa/set-active-board (cthi/id :board-a))
+            (fn [state] (assoc-in state [:workspace-animation :playhead] 600))
+            (dwa/paste-clip-at-playhead clip)]
+           (fn [state]
+             (t/is (= [[:clone-file-media-object a]] @calls))
+             (t/is (= [[c 600 0]] (mapv (juxt :audio-id :start :lane) (clips-of state :board-a)))
+                   "at the playhead, the copy of its audio")
+             (t/is (= (into #{} (map :id) (clips-of state :board-a))
+                      (dwaa/selected-clips (:workspace-animation state)))
+                   "selected"))
            (after commit-of-clips?)))
         done))))
 

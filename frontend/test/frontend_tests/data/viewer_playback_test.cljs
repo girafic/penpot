@@ -6,7 +6,9 @@
 
 (ns frontend-tests.data.viewer-playback-test
   (:require
+   [app.common.files.changes-builder :as pcb]
    [app.common.geom.point :as gpt]
+   [app.common.test-helpers.components :as cthc]
    [app.common.test-helpers.compositions :as ctho]
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
@@ -126,6 +128,61 @@
                       (rx/subs! #(swap! types conj (ptk/type %))))
                  @types)))
       (t/is (empty? @log)))
+    (audio/use-context! nil)))
+
+(t/deftest a-looping-copy-sounds-on-after-the-board
+  ;; board B plays 500 ms once; the copy in it of a main of 1 s that
+  ;; loops a clip of 300 ms goes on
+  (cthi/reset-idmap!)
+  (let [audio-id (uuid/next)
+        n        48000
+        _        (audio/remember! audio-id #js {:duration 1 :length n :sampleRate 48000 :numberOfChannels 1
+                                                :getChannelData (fn [_] (js/Float32Array. n))})
+        file     (-> (cthf/sample-file :file1)
+                     (ctho/add-simple-component :anim :main :main-rect
+                                                :root-params {:x 0 :y 0 :width 200 :height 200}
+                                                :child-params {:x 10 :y 20 :width 50 :height 50})
+                     (ctho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
+                     (cthc/instantiate-component :anim :copy :parent-label :board-b))
+        main     (cthi/id :main)
+        board    (cthi/id :board-b)
+        file     (cthf/apply-changes
+                  file
+                  (-> (pcb/empty-changes nil)
+                      (pcb/with-page (cthf/current-page file))
+                      (pcb/set-timeline main (-> (cta/make-timeline {:board-id main :duration 1000 :playback :loop})
+                                                 (ctau/add-audio-clip {:audio-id audio-id :name "ping"
+                                                                       :source-duration 1000
+                                                                       :start 0 :duration 300})))
+                      (pcb/set-timeline board (-> (cta/make-timeline {:board-id board :duration 500})
+                                                  (cta/add-keyframe board {:time 0 :property :opacity :value 1})))))
+        page     (cthf/current-page file)
+        files    {(:id file) file}
+        state    {:route {:params {:query {:page-id (str (:id page))}}}
+                  :viewer {:pages {(:id page) page}}
+                  :files files
+                  :viewer-local {:timeline {:time 0}}}
+        frames   (atom [])
+        clock    (atom 10)
+        log      (atom [])]
+    (t/is (dv/board-sound? page files board) "the sound of the main")
+    (t/is (dv/board-sound? page files main) "its own")
+    (t/is (not (dv/board-sound? page (assoc-in files [(:id file) :data :pages-index (:id page) :timelines main :audio-clips] {})
+                                board))
+          "no sound of the main, none")
+    (audio/use-context! (sounding-context clock log))
+    (with-redefs [ts/raf        (fn [f] (swap! frames conj f) (count @frames))
+                  ts/cancel-af! (fn [_] nil)]
+      (let [sub (rx/subs! (fn [_]) (ptk/watch (dv/play-timeline board) state (rx/subject)))]
+        (doseq [s [10 10.016 10.6 11.1]]
+          (reset! clock s)
+          ((peek @frames) 0))
+        (rx/dispose! sub)))
+    (t/is (= [:start 0.016] (first @log)) "on the clock of the copy")
+    (t/is (= 5 (count (filter #(= :start (first %)) @log))) "each round, scheduled ahead")
+    (t/is (not-any? #(= :stop (first %)) @log) "past the end of the board, on")
+    (ptk/effect (dv/pause-timeline) state (rx/subject))
+    (t/is (= 5 (count (filter #(= :stop (first %)) @log))) "paused, silent")
     (audio/use-context! nil)))
 
 (t/deftest the-layers-of-an-animated-board-follow-it

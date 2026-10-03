@@ -13,6 +13,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.media :as cm]
    [app.common.types.animation :as cta]
@@ -25,6 +26,7 @@
    [app.main.data.workspace.media :as dwm]
    [app.main.data.workspace.modifiers :as dwmo]
    [app.util.audio :as audio]
+   [app.util.clipboard :as clipboard]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
@@ -380,6 +382,67 @@
                               (with-clip-selection clips nil false))
                     (seq anims)  (assoc :selected-anims anims)
                     (empty? anims) (dissoc :selected-anims))))))))
+
+(defn copy-selection
+  "Copy the keyframes (hidden or not) and the audio clips selected in the
+  dock to the clipboard as one animation clip (see
+  `dwa/write-animation-clip`), which pastes them together, at the same
+  distance."
+  []
+  (ptk/reify ::copy-selection
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [ids      (selected-clips (:workspace-animation state))
+            timeline (dwa/current-timeline state)
+            audio    (when (and (some? timeline) (seq ids))
+                       (cltl/audio-copy timeline ids))
+            clip     (cond-> (dwa/selected-keyframes-clip state)
+                       (seq audio) (assoc :board-id (:board-id timeline) :audio audio))]
+        (when (or (seq (:layers clip)) (seq (:audio clip)))
+          (rx/of (dwa/write-animation-clip clip)))))))
+
+(defn cut-selection
+  "Copy the keyframes and the audio clips selected in the dock (see
+  `copy-selection`) and delete them but the locked clips, which stay
+  selected, in one undo step. The selected preset animations stay."
+  []
+  (ptk/reify ::cut-selection
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [{:keys [kfs clips]} (selection-of (:workspace-animation state))
+            timeline (dwa/current-timeline state)]
+        (if (nil? timeline)
+          (rx/empty)
+          (let [locked    (into #{} (filter #(:locked (ctau/get-audio-clip timeline %))) clips)
+                timeline' (as-> timeline tl
+                            (reduce (fn [tl {:keys [shape-id keyframe-id]}]
+                                      (cta/remove-keyframe tl shape-id keyframe-id))
+                                    tl kfs)
+                            (reduce ctau/remove-audio-clip tl (remove locked clips)))]
+            (rx/concat
+             (rx/of (copy-selection)
+                    (select-items {:clips locked}))
+             (if (= timeline timeline')
+               (rx/empty)
+               (rx/of (dwa/commit-timeline it state (:board-id timeline') timeline')
+                      (dwmo/clear-local-transform)
+                      (dwa/apply-preview))))))))))
+
+(defn paste-clipboard-at-playhead
+  "Paste the animation on the clipboard at the playhead, as Cmd/Ctrl+V in
+  the dock does (see `dwa/paste-clip-at-playhead`)."
+  []
+  (ptk/reify ::paste-clipboard-at-playhead
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (->> (rx/from (clipboard/read-text))
+           (rx/map (fn [text]
+                     (if-let [clip (dwa/payload-clip text)]
+                       (dwa/paste-clip-at-playhead clip)
+                       (ntf/warn (tr "workspace.animation.paste-invalid")))))
+           (rx/catch (fn [cause]
+                       (rx/of (ntf/warn (or (clipboard/error-message cause)
+                                            (tr "workspace.animation.paste-invalid"))))))))))
 
 (defn move-selection
   "`base` with the keyframes, preset animations and clips of `selection`

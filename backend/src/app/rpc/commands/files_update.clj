@@ -117,7 +117,7 @@
 
 (def ^:private file-change-types
   ;; The timeline changes too, so the copies of animated mains of a
-  ;; library play their edits in open consumer files
+  ;; library play their edits, and their sound, in open consumer files
   #{:add-obj
     :mod-obj
     :del-obj
@@ -126,6 +126,7 @@
     :set-timeline
     :set-timeline-track
     :set-timeline-track-animations
+    :set-timeline-audio-clip
     :update-timeline})
 
 (defn- library-change?

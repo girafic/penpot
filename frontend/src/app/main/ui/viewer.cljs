@@ -437,9 +437,13 @@
                     (when (some? frame)
                       (dv/board-clock base-page files (:id frame))))
 
-        ;; whether a board of the page plays sound
-        sound?    (mf/with-memo [base-page]
-                    (some (comp seq :audio-clips) (vals (:timelines base-page))))
+        ;; whether the board on screen, and a board of the page, plays
+        ;; sound, its own or the one of the mains of its component copies
+        board-sound? (mf/with-memo [base-page files (:id frame)]
+                       (and (some? frame) (dv/board-sound? base-page files (:id frame))))
+        sound?    (mf/with-memo [base-page files frames]
+                    (or (some (comp seq :audio-clips) (vals (:timelines base-page)))
+                        (some #(dv/board-sound? base-page files (:id %)) frames)))
 
         fullscreen? (mf/deref header/fullscreen-ref)
         overlays    (mf/deref current-overlays-ref)
@@ -547,7 +551,7 @@
                 play     #(when @alive?
                             (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))]
             ;; with sound, once the sound can play (see below)
-            (if (seq (:audio-clips clock))
+            (if board-sound?
               (audio/when-running play 200)
               (play))))
         #(do (vreset! alive? false)
@@ -759,7 +763,7 @@
               :section section
               :index index
               :animated (some? clock)
-              :sound (boolean (seq (:audio-clips clock)))}]]))]]
+              :sound board-sound?}]]))]]
 
      [:& header/header {:project project
                         :index index
