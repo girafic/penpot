@@ -1041,6 +1041,37 @@
 
 ;; CODE
 
+(t/deftest the-view-mode-plays-copies-on-their-own-clock
+  (let [file      (component-file)
+        board     (thi/id :board-b)
+        own       (-> (cta/make-timeline {:board-id board :duration 400})
+                      (cta/add-keyframe board {:time 0 :property :opacity :value 0})
+                      (cta/add-keyframe board {:time 400 :property :opacity :value 1}))
+        file      (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                              (pcb/with-page (thf/current-page file))
+                                              (pcb/set-timeline board own)))
+        page      (thf/current-page file)
+        objects   (:objects page)
+        files     {(:id file) file}
+        copy-rect (first (get-in objects [(thi/id :copy) :shapes]))
+        copies    (cltl/copy-timelines objects (:timelines page) files board)
+        tree      (cltl/view-animation-tree page files board 400 1250)]
+    (t/is (= (get (cltl/animation-tree copies objects 250) copy-rect) (get tree copy-rect))
+          "the copy 1250 ms on, 250 ms into its loop")
+    (t/is (not= (get (cltl/animation-tree copies objects 400) copy-rect) (get tree copy-rect))
+          "not at the time of the board")
+    (t/is (= (get (cltl/animation-tree {board own} objects 400) board) (get tree board))
+          "the board at its own time, its end")))
+
+(t/deftest the-view-mode-plays-on-while-a-copy-loops
+  (let [once (fn [duration] (cta/make-timeline {:board-id (uuid/next) :duration duration}))
+        loop (assoc (once 1600) :playback :loop)]
+    (t/is (cltl/view-playback-ended? (once 500) [] 600))
+    (t/is (not (cltl/view-playback-ended? (once 500) [] 400)))
+    (t/is (not (cltl/view-playback-ended? (once 500) [loop] 60000)) "a looping copy goes on")
+    (t/is (not (cltl/view-playback-ended? (once 500) [(once 1000)] 800)) "a longer copy plays to its end")
+    (t/is (cltl/view-playback-ended? (once 500) [(once 1000)] 1100))))
+
 (t/deftest code-timelines-of-a-board-with-its-own-tracks
   (let [file (component-file)
         page (thf/current-page file)

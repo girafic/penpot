@@ -544,6 +544,27 @@
              {}
              timelines))
 
+(defn view-animation-tree
+  "The modif-tree of the board `board-id` of `page` as the view mode plays
+  it: its own timeline at its playback `time`, and the animated component
+  copies in it (see `copy-timelines`) each on its own clock, `elapsed` ms
+  after playback started, so a copy that loops goes on once the board's
+  own animation has ended. `files` holds the files of the components, by
+  id."
+  [page files board-id time elapsed]
+  (let [objects   (:objects page)
+        timelines (:timelines page)]
+    (merge (animation-tree (copy-timelines objects timelines files board-id) objects elapsed)
+           (animation-tree (select-keys timelines [board-id]) objects time))))
+
+(defn view-playback-ended?
+  "Whether the view mode stops playing a board `elapsed` ms after it
+  started: when its `clock` (see `with-copies-clock`) and every
+  animated component copy in it, `copies`, have played once to their
+  end; never while one of them loops."
+  [clock copies elapsed]
+  (every? #(cta/playback-ended? % elapsed) (cons clock copies)))
+
 (defn shown-shapes
   "The shapes the animations of `timelines` move at `time`, by id, as the
   canvas shows them: with the children they carry along."

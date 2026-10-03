@@ -64,18 +64,15 @@
 
 (defn- animation-modifiers
   "When a timeline is active, the modif-tree of the shapes of `page` at
-  the current playback time: the timeline of the board and the ones of
-  the component copies in it, which play the animation of their mains
-  (see `cltl/copy-timelines`; `files` holds the files of the components).
-  It covers transforms and the other animated attributes (as
-  change-property modifiers). Otherwise nil."
-  [page files {:keys [timeline-id time] :as _viewer-timeline}]
-  (let [objects   (:objects page)
-        timelines (when (some? timeline-id)
-                    (merge (select-keys (:timelines page) [timeline-id])
-                           (cltl/copy-timelines objects (:timelines page) files timeline-id)))]
-    (when (seq timelines)
-      (cltl/animation-tree timelines objects (or time 0)))))
+  the current playback time: the timeline of the board at its time and
+  the ones of the component copies in it, which play the animation of
+  their mains, each on its own clock (see `cltl/view-animation-tree`;
+  `files` holds the files of the components). It covers transforms and
+  the other animated attributes (as change-property modifiers).
+  Otherwise nil."
+  [page files {:keys [timeline-id time elapsed] :as _viewer-timeline}]
+  (when (some? timeline-id)
+    (not-empty (cltl/view-animation-tree page files timeline-id (or time 0) (or elapsed time 0)))))
 
 (defn- calculate-size
   "Calculate the total size we must reserve for the frame, including possible paddings

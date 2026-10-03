@@ -945,7 +945,10 @@
 ;; --- Timeline animation playback (Penpot Motion) ---
 ;;
 ;; Plays a page-level keyframe timeline in the viewer. State lives under
-;; `[:viewer-local :timeline] {:timeline-id :time :playing?}`. Playback is
+;; `[:viewer-local :timeline] {:timeline-id :time :elapsed :playing?}`:
+;; `:time` the time of the board's timeline, `:elapsed` the ms since
+;; playback started, the clock of the component copies (see
+;; `cltl/view-animation-tree`). Playback is
 ;; a requestAnimationFrame-paced loop feeding the shared pure engine
 ;; `app.common.types.animation`; the rendered shapes are recomputed from
 ;; geometry (not WAAPI) in `app.main.ui.viewer`.
@@ -1032,46 +1035,67 @@
         (some? own)))))
 
 (defn seek-timeline
-  [time]
-  (ptk/reify ::seek-timeline
-    ptk/UpdateEvent
-    (update [_ state]
-      (assoc-in state [:viewer-local :timeline :time] (max 0 (int time))))))
+  "Show the board at the `time` of its timeline, the component copies in
+  it `elapsed` ms after playback started (`time` by default)."
+  ([time]
+   (seek-timeline time time))
+  ([time elapsed]
+   (ptk/reify ::seek-timeline
+     ptk/UpdateEvent
+     (update [_ state]
+       (update-in state [:viewer-local :timeline] assoc
+                  :time (max 0 (int time))
+                  :elapsed (max 0 (int elapsed)))))))
 
 (defn play-timeline
   [timeline-id]
   (ptk/reify ::play-timeline
     ptk/UpdateEvent
     (update [_ state]
+      ;; another board's timeline plays from its start
       (update-in state [:viewer-local :timeline]
-                 assoc :timeline-id timeline-id :playing? true))
+                 (fn [local]
+                   (-> (cond-> local
+                         (not= timeline-id (:timeline-id local))
+                         (assoc :time 0 :elapsed 0))
+                       (assoc :timeline-id timeline-id :playing? true)))))
 
     ptk/WatchEvent
     (watch [_ state stream]
       (let [page     (viewer-current-page state)
-            timeline (board-clock page (:files state) timeline-id)
+            files    (:files state)
+            timeline (board-clock page files timeline-id)
+            copies   (vals (cltl/copy-timelines (:objects page) (:timelines page) files timeline-id))
             duration (or (:duration timeline) 0)
-            start    (let [p (dm/get-in state [:viewer-local :timeline :time] 0)]
-                       (if (>= p duration) 0 p))
+            ;; from where it was paused, from the start once played
+            start    (let [{:keys [time elapsed]} (:timeline (:viewer-local state))
+                           at (or elapsed time 0)]
+                       (if (and (= :once (cta/playback-mode timeline)) (>= at duration)) 0 at))
             stopper  (rx/filter (ptk/type? ::pause-timeline) stream)]
         (if (or (nil? timeline) (<= duration 0))
           (rx/empty)
           ;; While its clips sound, it keeps time with them (see
           ;; `audio/follow!`), unclamped, so they cannot drift apart.
-          (let [sound? (and (seq (:audio-clips timeline))
-                            (not (audio-muted? state))
-                            (some? (audio/now-ms)))
+          (let [sound?  (and (seq (:audio-clips timeline))
+                             (not (audio-muted? state))
+                             (some? (audio/now-ms)))
                 ;; muted meanwhile (see `toggle-audio-muted`), silent
-                follow (fn [t]
-                         (audio/follow! timeline (cta/playback-time timeline t) (direction-at timeline t)
-                                        (not (get storage/user ::audio-muted false))))]
+                follow  (fn [t]
+                          (audio/follow! timeline (cta/playback-time timeline t) (direction-at timeline t)
+                                         (not (get storage/user ::audio-muted false))))
+                ;; A component copy that loops goes on once the board's
+                ;; own animation, and its sound, have ended.
+                silent? (volatile! false)
+                sound!  (fn [t]
+                          (cond
+                            (not (cta/playback-ended? timeline t)) (follow t)
+                            (not @silent?) (do (vreset! silent? true) (audio/stop-all!))))]
             (rx/concat
              (->> (frame-times start (when sound? audio/now-ms) (not sound?))
-                  (rx/take-while (fn [t] (not (cta/playback-ended? timeline t))))
-                  (rx/tap follow)
-                  (rx/map (fn [t] (cta/playback-time timeline t)))
+                  (rx/take-while (fn [t] (not (cltl/view-playback-ended? timeline copies t))))
+                  (rx/tap sound!)
                   (rx/take-until stopper)
-                  (rx/map seek-timeline))
+                  (rx/map (fn [t] (seek-timeline (cta/playback-time timeline t) t))))
              (rx/of (pause-timeline)))))))))
 
 (defn pause-timeline
