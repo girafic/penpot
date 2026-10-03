@@ -721,6 +721,48 @@
         response (assets/file-objects-handler cfg request)]
     (t/is (= 404 (::yres/status response)))))
 
+(t/deftest file-objects-handler-anonymous-share-link-reads-its-libraries
+  ;; The view mode of a share link plays the media of the libraries of
+  ;; its file (the sound of the mains of animated component copies), a
+  ;; library of a library too, and of no other file.
+  (let [storage  (-> (:app.storage/storage th/*system*)
+                     (configure-storage-backend))
+        cfg      (make-handler-cfg storage)
+        owner    (th/create-profile* 1)
+        team     (th/create-team* 1 {:profile-id (:id owner)})
+        project  (th/create-project* 1 {:profile-id (:id owner)
+                                        :team-id (:id team)})
+        file     (th/create-file* 1 {:profile-id (:id owner)
+                                     :project-id (:id project)})
+        library  (th/create-file* 2 {:profile-id (:id owner)
+                                     :project-id (:id project)
+                                     :is-shared true})
+        deeper   (th/create-file* 3 {:profile-id (:id owner)
+                                     :project-id (:id project)
+                                     :is-shared true})
+        other    (th/create-file* 4 {:profile-id (:id owner)
+                                     :project-id (:id project)
+                                     :is-shared true})
+        media-of (fn [file]
+                   (let [sobj (create-storage-object! storage "file-media-object" "ring tone")]
+                     (th/create-file-media-object* {:file-id (:id file) :media-id (:id sobj)})))
+        _        (th/link-file-to-library* {:file-id (:id file) :library-id (:id library)})
+        _        (th/link-file-to-library* {:file-id (:id library) :library-id (:id deeper)})
+        slink    (:result (th/command! {::th/type :create-share-link
+                                        ::rpc/profile-id (:id owner)
+                                        :file-id (:id file)
+                                        :pages #{}
+                                        :who-comment "team"
+                                        :who-inspect "all"}))
+        status   (fn [mobj share-id]
+                   (::yres/status (assets/file-objects-handler
+                                   cfg {:path-params {:id (str (:id mobj))}
+                                        :query-params {:share-id (str share-id)}})))]
+    (t/is (= 204 (status (media-of library) (:id slink))) "a library of its file")
+    (t/is (= 204 (status (media-of deeper) (:id slink))) "a library of that library")
+    (t/is (= 404 (status (media-of other) (:id slink))) "a library its file does not use")
+    (t/is (= 404 (status (media-of library) (uuid/next))) "no such share link")))
+
 (t/deftest file-objects-handler-anonymous-with-malformed-share-id-returns-404
   ;; Malformed share-id must not raise; it must short-circuit to 404.
   (let [storage  (-> (:app.storage/storage th/*system*)

@@ -156,8 +156,38 @@
       :else
       (serve-object cfg obj))))
 
+(def ^:private sql:share-link-library?
+  "Whether the file of the share link uses the file as a library, through
+  a library of a library too, as the view mode loads them (see
+  `app.binfile.common/get-file-libraries`)."
+  "WITH RECURSIVE libs AS (
+     SELECT flr.library_file_id AS id
+       FROM share_link AS sl
+       JOIN file_library_rel AS flr ON (flr.file_id = sl.file_id)
+      WHERE sl.id = ?::uuid
+
+     UNION
+
+     SELECT flr.library_file_id
+       FROM file_library_rel AS flr
+       JOIN libs AS l ON (flr.file_id = l.id)
+   )
+   SELECT EXISTS (SELECT 1 FROM libs WHERE id = ?::uuid) AS library")
+
+(defn- share-link-library?
+  "Whether the share link `share-id` shows the file `file-id` as a
+  library of its file: its view mode plays the media of the components
+  of the libraries (the sound of the mains of animated copies), which it
+  gets with the file."
+  [pool share-id file-id]
+  (-> (db/exec-one! pool [sql:share-link-library? share-id file-id])
+      (:library)
+      (true?)))
+
 (defn- generic-handler
-  "A generic handler helper/common code for file-media based handlers."
+  "A generic handler helper/common code for file-media based handlers.
+  A share link reads the media of its file and of the libraries of its
+  file (see `share-link-library?`)."
   [{:keys [::sto/storage] :as cfg} request kf]
   (let [pool       (::db/pool storage)
         id         (get-id request)
@@ -169,7 +199,8 @@
                            (::actoken/profile-id request))
             share-id   (get-share-id request)
             perms      (perms/get-file-read-permissions pool profile-id file-id share-id)]
-        (if-not (:can-read perms)
+        (if-not (or (:can-read perms)
+                    (and (some? share-id) (share-link-library? pool share-id file-id)))
           {::yres/status 404}
           (let [sobj (sto/get-object storage (kf mobj))]
             (if sobj
