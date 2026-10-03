@@ -488,13 +488,24 @@
 
 (defn- component-name
   "The name of the React component of a board: its name in PascalCase,
-  then Motion."
+  then Motion; `Board` first when it starts with a digit (`01 · Intro`
+  gives `Board01IntroMotion`) or has none."
   [board-name]
   (let [words (re-seq #"[A-Za-z0-9]+" (or board-name ""))
         base  (str/join "" (map #(str (str/upper (subs % 0 1)) (subs % 1)) words))]
-    (if (re-find #"^[A-Za-z]" base)
-      (str base "Motion")
-      "BoardMotion")))
+    (str (when-not (re-find #"^[A-Za-z]" base) "Board") base "Motion")))
+
+(defn- component-names
+  "The names of the React components of `boards`, in order: each as
+  `component-name` gives it, a number after the ones it gave before."
+  [boards]
+  (first
+   (reduce (fn [[names seen] board]
+             (let [base (component-name (:name board))
+                   n    (inc (get seen base 0))]
+               [(conj names (if (= 1 n) base (str base n))) (assoc seen base n)]))
+           [[] {}]
+           boards)))
 
 (def ^:private transform-template
   "Penpot turns a layer, then scales it; motion.dev the other way round.
@@ -532,9 +543,9 @@
           "      />")}))
 
 (defn- react-board
-  "The React component of the board of `code`: its animated layers (those
-  of `ids` only when given)."
-  [{:keys [board-id timeline] :as code} objects ids class-name]
+  "The React component `component` of the board of `code`: its animated
+  layers (those of `ids` only when given)."
+  [{:keys [board-id timeline] :as code} component objects ids class-name]
   (let [board   (get objects board-id)
         played  (memoize (fn [clock]
                            (-> (cta/resolve-animations clock objects) cta/expand-loops cta/expand-paths)))
@@ -553,7 +564,7 @@
             (when (seq markers)
               (str " Markers: " (str/join ", " (map #(str (:name %) " " (:time %) " ms") markers)) "."))
             " */\n"
-            "export function " (component-name (:name board)) "() {\n"
+            "export function " component "() {\n"
             "  return (\n"
             "    <MotionConfig reducedMotion=\"user\">\n"
             (str/join "\n" (map :code divs)) "\n"
@@ -575,7 +586,9 @@
   [codes objects & {:keys [ids class-name]}]
   (let [codes      (if (map? codes) [codes] codes)
         class-name (or class-name #(cta/shape-css-class (:id %)))
-        boards     (into [] (keep #(react-board % objects ids class-name)) codes)]
+        names      (component-names (map #(get objects (:board-id %)) codes))
+        boards     (into [] (keep identity)
+                         (map #(react-board %1 %2 objects ids class-name) codes names))]
     (when (seq boards)
       (str "import { MotionConfig, motion } from \"motion/react\";\n"
            (when (some :hold? boards)

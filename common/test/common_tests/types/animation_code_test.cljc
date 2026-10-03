@@ -337,6 +337,19 @@
         react       (ctac/motion-react code objects :ids #{copy-rect})]
     (t/is (cstr/includes? react "x: { duration: 1, times: [0, 1], ease: [\"linear\"], repeat: Infinity }"))))
 
+(t/deftest react-components-have-names-of-their-own
+  (let [[objects code] (board-scene #(-> %
+                                         (cta/add-keyframe (thi/id :a) {:time 0 :property :x :value 20})
+                                         (cta/add-keyframe (thi/id :a) {:time 400 :property :x :value 60})))
+        named (fn [board-name] (assoc-in objects [(thi/id :board) :name] board-name))
+        names (fn [react] (map second (re-seq #"export function (\w+)\(" react)))]
+    (t/is (= ["CardMotion"] (names (ctac/motion-react code objects))))
+    (t/is (= ["Board01PenpotMotionMotion"] (names (ctac/motion-react code (named "01 · Penpot Motion"))))
+          "an identifier starts with a letter")
+    (t/is (= ["BoardMotion"] (names (ctac/motion-react code (named "· 🎬 ·")))))
+    (t/is (= ["CardMotion" "CardMotion2"] (names (ctac/motion-react [code code] objects)))
+          "two boards of one name")))
+
 (t/deftest nothing-animates-no-react
   (let [[objects code] (board-scene identity)]
     (t/is (nil? (ctac/motion-react code objects)))))
