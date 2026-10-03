@@ -259,3 +259,22 @@
       (t/is (= {:duration "motion.quick"} (-> style :entries first :applied-tokens)))
       (t/is (= {:duration "motion.quick"} (-> use :entries first :applied-tokens))
             "its use follows"))))
+
+(t/deftest renaming-a-token-renames-it-in-presets-and-keyframes
+  (let [file  (ctho/add-frame (setup-file-with-tokens) :board2)
+        board (cthi/id :board2)
+        tl    (-> (cta/make-timeline {:board-id board :duration 1000})
+                  (cta/add-animation board {:type :fade :start 0 :duration 300
+                                            :applied-tokens {:duration "motion.fast"}})
+                  (cta/add-keyframe board {:time 0 :property :x :value 0
+                                           :applied-tokens {:easing "motion.fast"}})
+                  (cta/add-keyframe board {:time 300 :property :x :value 10}))
+        file  (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                           (pcb/with-page (cthf/current-page file))
+                                           (pcb/set-timeline board tl)))
+        data  (:data file)]
+    (t/is (= 2 (dwtr/count-token-references data "motion.fast")) "a preset and a keyframe bind it")
+    (let [file'  (cthf/apply-changes file (dwtr/build-remap-changes data "motion.fast" "motion.quick"))
+          track  (get-in (cthf/current-page file') [:timelines board :tracks board])]
+      (t/is (= {:duration "motion.quick"} (-> track :animations first :applied-tokens)))
+      (t/is (= {:easing "motion.quick"} (-> track :keyframes first :applied-tokens))))))

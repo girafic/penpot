@@ -204,6 +204,10 @@
                        (ctob/add-token (cthi/id :motion-set) (token "ease.std" :cubic-bezier "{ease.out}"))
                        (ctob/add-token (cthi/id :motion-set) (token "ease.wide" :cubic-bezier [1.5 0 0.58 1]))
                        (ctob/add-token (cthi/id :motion-set) (token "ease.short" :cubic-bezier [0 0 1]))
+                       (ctob/add-token (cthi/id :motion-set) (token "spring.soft" :spring {:stiffness 120 :damping 14 :mass 1}))
+                       (ctob/add-token (cthi/id :motion-set) (token "spring.ui" :spring "{spring.soft}"))
+                       (ctob/add-token (cthi/id :motion-set) (token "spring.heavy" :spring {:stiffness 120 :damping 14 :mass 0}))
+                       (ctob/add-token (cthi/id :motion-set) (token "spring.lost" :spring "{spring.gone}"))
                        (ctob/get-all-tokens-map))]
         (-> (sd/resolve-tokens tokens)
             (rx/sub!
@@ -217,5 +221,9 @@
                  (t/is (= [0 0 0.58 1] (value "ease.out")))
                  (t/is (= [0 0 0.58 1] (value "ease.std")) "through a reference")
                  (t/is (= :error.style-dictionary/invalid-token-value-cubic-bezier (error "ease.wide")))
-                 (t/is (= :error.style-dictionary/invalid-token-value-cubic-bezier (error "ease.short"))))
+                 (t/is (= :error.style-dictionary/invalid-token-value-cubic-bezier (error "ease.short")))
+                 (t/is (= {:stiffness 120 :damping 14 :mass 1} (value "spring.soft")) "a spring, its three numbers")
+                 (t/is (= {:stiffness 120 :damping 14 :mass 1} (value "spring.ui")) "through a reference")
+                 (t/is (= :error.style-dictionary/invalid-token-value-spring (error "spring.heavy")))
+                 (t/is (= :error.style-dictionary/missing-reference (error "spring.lost"))))
                (done))))))))

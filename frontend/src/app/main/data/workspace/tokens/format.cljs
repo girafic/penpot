@@ -22,7 +22,11 @@
    :blur "Blur"
    :spread "Spread"
    :color "Color"
-   :inset "Inner Shadow"})
+   :inset "Inner Shadow"
+   ;; a spring (Penpot Motion)
+   :stiffness "Stiffness"
+   :damping "Damping"
+   :mass "Mass"})
 
 (declare format-token-value)
 

@@ -112,6 +112,26 @@
    [:bezier schema:bezier-easing]
    [:spring schema:spring-easing]])
 
+(def schema:animation-tokens
+  "The design tokens that set settings of a preset animation or of a style
+  entry, by their names (see `animation-token-types`). The file of the
+  timeline or of the style resolves them and writes their values into the
+  settings, which play those values; the uses of a style keep the names,
+  as they keep the values."
+  [:map {:title "AnimationTokens"}
+   [:start {:optional true} cto/schema:token-name]
+   [:duration {:optional true} cto/schema:token-name]
+   [:easing {:optional true} cto/schema:token-name]
+   [:amount {:optional true} cto/schema:token-name]
+   [:offset-x {:optional true} cto/schema:token-name]
+   [:offset-y {:optional true} cto/schema:token-name]])
+
+(def schema:keyframe-tokens
+  "The design token that sets the easing of the segment a keyframe starts,
+  by its name: a cubic bezier or a spring token (see `token-setting`)."
+  [:map {:title "KeyframeTokens"}
+   [:easing {:optional true} cto/schema:token-name]])
+
 (def schema:loop-key
   [:or
    [::sm/one-of animatable-properties]
@@ -131,7 +151,8 @@
    ;; it from the previous one (`:path-in`), like the handles of a bezier
    ;; node. Without them the position moves in a straight line.
    [:path-in {:optional true} ::sm/safe-number]
-   [:path-out {:optional true} ::sm/safe-number]])
+   [:path-out {:optional true} ::sm/safe-number]
+   [:applied-tokens {:optional true} schema:keyframe-tokens]])
 
 ;; A preset animation (like Figma's animation styles): an effect over a
 ;; span of time that stays editable. `:in` plays from the effect to the
@@ -164,29 +185,53 @@
    [:spread {:optional true} ::sm/safe-number]
    [:order {:optional true} [::sm/one-of tu/orders]]
    [:seed {:optional true} ::sm/safe-int]
+   ;; the design tokens that set some of its settings
+   [:applied-tokens {:optional true} schema:animation-tokens]
    ;; left out of playback and exports / kept from edits
    [:hidden {:optional true} :boolean]
    [:locked {:optional true} :boolean]])
 
 (def schema:style-entry-tokens
-  "The design tokens that set settings of a style entry, by their names
-  (see `style-token-types`). The file of the style resolves them and
-  writes their values into the entry, which plays those values; its uses
-  keep the names, as they keep the values."
-  [:map {:title "AnimationStyleEntryTokens"}
-   [:start {:optional true} cto/schema:token-name]
-   [:duration {:optional true} cto/schema:token-name]
-   [:easing {:optional true} cto/schema:token-name]
-   [:amount {:optional true} cto/schema:token-name]
-   [:offset-x {:optional true} cto/schema:token-name]
-   [:offset-y {:optional true} cto/schema:token-name]])
+  "The design tokens of a style entry (see `schema:animation-tokens`)."
+  schema:animation-tokens)
 
-(def schema:style-entry
-  "An entry of an animation style (see `app.common.types.animation-style`)
-  and of its uses: a preset animation without the flags of a row, its
-  `:start` counted from the start of the style, and the design tokens
-  that set some of its settings."
-  [:map {:title "AnimationStyleEntry"}
+(def max-style-keyframes
+  "The most keyframes the keyframe entries of an animation style hold
+  together."
+  256)
+
+(def schema:entry-keyframe
+  "A keyframe of a keyframe entry (see `schema:keys-entry`): as one of a
+  track, without its id, property and index, which its entry gives, its
+  `:time` counted from the start of the entry."
+  [:map {:title "AnimationStyleEntryKeyframe"}
+   [:time ::sm/safe-int]
+   [:value [:or ::sm/safe-number clr/schema:hex-color]]
+   [:easing {:optional true} schema:easing]
+   [:interpolation {:optional true} [::sm/one-of interpolation-types]]
+   [:path-in {:optional true} ::sm/safe-number]
+   [:path-out {:optional true} ::sm/safe-number]
+   [:applied-tokens {:optional true} schema:keyframe-tokens]])
+
+(def schema:keys-entry
+  "A keyframe entry of an animation style: the keyframes of one property
+  (and index, for fills, strokes and shadows) over `:duration` ms from
+  `:start`, their times counted from the start of the entry. Their values
+  are relative to the layer that plays them (see `keys-entry-keyframes`):
+  positions and rotation as offsets from where it rests, sizes as factors
+  of its own, the other properties as they are."
+  [:map {:title "AnimationStyleKeysEntry"}
+   [:id ::sm/uuid]
+   [:type [:= :keys]]
+   [:property [::sm/one-of animatable-properties]]
+   [:index {:optional true} ::sm/safe-int]
+   [:start ::sm/safe-int]
+   [:duration ::sm/safe-int]
+   [:keyframes [:vector {:min 1 :max max-style-keyframes :gen/max 4} schema:entry-keyframe]]])
+
+(def schema:preset-entry
+  "A preset entry of an animation style (see `schema:style-entry`)."
+  [:map {:title "AnimationStylePresetEntry"}
    [:id ::sm/uuid]
    [:type [::sm/one-of animation-types]]
    [:direction [::sm/one-of animation-directions]]
@@ -201,6 +246,22 @@
    [:order {:optional true} [::sm/one-of tu/orders]]
    [:seed {:optional true} ::sm/safe-int]
    [:applied-tokens {:optional true} schema:style-entry-tokens]])
+
+(def schema:style-entry
+  "An entry of an animation style (see `app.common.types.animation-style`)
+  and of its uses, its `:start` counted from the start of the style: a
+  preset animation without the flags of a row, with the design tokens
+  that set some of its settings, or a keyframe entry (see
+  `schema:keys-entry`). JSON gives the type as a string."
+  [:multi {:title "AnimationStyleEntry"
+           :dispatch (fn [v]
+                       (if (and (map? v)
+                                (or (keyword? (:type v)) (string? (:type v)))
+                                (= :keys (keyword (:type v))))
+                         :keys
+                         :preset))}
+   [:keys schema:keys-entry]
+   [:preset schema:preset-entry]])
 
 (def max-style-entries
   "The most entries an animation style holds."
@@ -554,16 +615,20 @@
         {:time duration :direction 1 :ended? true}))))
 
 (defn make-keyframe
-  [{:keys [id time property value easing interpolation index path-in path-out]}]
-  (cond-> {:id (or id (uuid/next))
-           :time (or time 0)
-           :property property
-           :value value}
-    (some? easing) (assoc :easing easing)
-    (some? interpolation) (assoc :interpolation interpolation)
-    (some? path-in) (assoc :path-in path-in)
-    (some? path-out) (assoc :path-out path-out)
-    (some? index) (assoc :index index)))
+  "A keyframe from `params`, with the design token that sets its easing
+  (`:applied-tokens` `{:easing name}`) when it names one."
+  [{:keys [id time property value easing interpolation index path-in path-out applied-tokens]}]
+  (let [easing-token (:easing applied-tokens)]
+    (cond-> {:id (or id (uuid/next))
+             :time (or time 0)
+             :property property
+             :value value}
+      (some? easing) (assoc :easing easing)
+      (some? interpolation) (assoc :interpolation interpolation)
+      (some? path-in) (assoc :path-in path-in)
+      (some? path-out) (assoc :path-out path-out)
+      (some? index) (assoc :index index)
+      (string? easing-token) (assoc :applied-tokens {:easing easing-token}))))
 
 (defn- keyframe-slot
   [keyframe]
@@ -959,6 +1024,12 @@
   [animation]
   (= :style (:type animation)))
 
+(defn keys-entry?
+  "Whether the style entry `entry` is a keyframe entry (see
+  `schema:keys-entry`), not a preset."
+  [entry]
+  (= :keys (:type entry)))
+
 (defn style-length
   "How long the `entries` of an animation style play: to the end of the
   last one."
@@ -987,41 +1058,14 @@
         (some? seed)                         (assoc :seed seed)
         (and (nil? seed) (= :random order))  (assoc :seed (random-seed))))))
 
-(defn make-animation
-  "A valid animation from `params`: a preset, missing settings taking the
-  defaults of its type, or a use of an animation style (`:type :style`),
-  which keeps its ref, name and entries (see `make-style-entry`) and lasts
-  as long as its style unless it says otherwise."
-  [{:keys [id type direction start duration hidden locked] :as params}]
-  (cond-> (if (= :style type)
-            (let [entries (mapv make-style-entry (:entries params))]
-              {:id (or id (uuid/next))
-               :type :style
-               :style-ref-id (:style-ref-id params)
-               :style-ref-file (:style-ref-file params)
-               :name (or (:name params) "")
-               :start (max 0 (int (or start 0)))
-               :duration (max 1 (int (or duration (style-length entries))))
-               :entries entries})
-            (merge (get animation-defaults type)
-                   (d/without-nils (select-keys params [:easing :amount :offset-x :offset-y]))
-                   (split-settings params)
-                   {:id (or id (uuid/next))
-                    :type type
-                    :direction (or direction :in)
-                    :start (max 0 (int (or start 0)))
-                    :duration (max 1 (int (or duration default-animation-duration)))}))
-    (true? hidden) (assoc :hidden true)
-    (true? locked) (assoc :locked true)))
-
-(defn style-token-types
+(defn animation-token-types
   "The types of the design tokens that can set the setting `key` of a
-  style entry of the preset type `type`, in the order a picker offers
-  them; empty for a setting no token sets."
+  preset animation or a style entry of the preset type `type`, in the
+  order a picker offers them; empty for a setting no token sets."
   [type key]
   (case key
     (:start :duration) [:duration]
-    :easing [:cubic-bezier]
+    :easing [:cubic-bezier :spring]
     :amount (case type
               :fade [:opacity]
               :scale [:number]
@@ -1040,28 +1084,99 @@
      (into {}
            (filter (fn [[key token-name]]
                      (and (string? token-name)
-                          (seq (style-token-types type key)))))
+                          (seq (animation-token-types type key)))))
            tokens))))
 
+(defn make-animation
+  "A valid animation from `params`: a preset, missing settings taking the
+  defaults of its type, with the design tokens of `:applied-tokens` that
+  set a setting of its type, or a use of an animation style (`:type :style`),
+  which keeps its ref, name and entries (see `make-style-entry`) and lasts
+  as long as its style unless it says otherwise."
+  [{:keys [id type direction start duration hidden locked] :as params}]
+  (cond-> (if (= :style type)
+            (let [entries (mapv make-style-entry (:entries params))]
+              {:id (or id (uuid/next))
+               :type :style
+               :style-ref-id (:style-ref-id params)
+               :style-ref-file (:style-ref-file params)
+               :name (or (:name params) "")
+               :start (max 0 (int (or start 0)))
+               :duration (max 1 (int (or duration (style-length entries))))
+               :entries entries})
+            (let [tokens (entry-tokens type (:applied-tokens params))]
+              (cond-> (merge (get animation-defaults type)
+                             (d/without-nils (select-keys params [:easing :amount :offset-x :offset-y]))
+                             (split-settings params)
+                             {:id (or id (uuid/next))
+                              :type type
+                              :direction (or direction :in)
+                              :start (max 0 (int (or start 0)))
+                              :duration (max 1 (int (or duration default-animation-duration)))})
+                (some? tokens) (assoc :applied-tokens tokens))))
+    (true? hidden) (assoc :hidden true)
+    (true? locked) (assoc :locked true)))
+
+(declare keyframe-value-fits?)
+
+(defn- make-keys-entry
+  "A valid keyframe entry from `params` (see `schema:keys-entry`): its
+  keyframes by time, one at each whole ms (the last one given), those
+  within 0..`:duration` (as long as they last by default) whose value is
+  of the kind of its property, each with the easing and the design token
+  it has (see `make-keyframe`); an index for the properties of fills,
+  strokes and shadows (0 by default)."
+  [{:keys [id property index start duration keyframes]}]
+  (let [keyframes (->> keyframes
+                       (filter #(and (mth/finite? (:time %))
+                                     (keyframe-value-fits? {:property property :value (:value %)})))
+                       (reduce #(assoc %1 (int (mth/round (:time %2))) %2) (sorted-map)))
+        duration  (max 1 (int (or duration (reduce max 0 (keys keyframes)))))]
+    (cond-> {:id (or id (uuid/next))
+             :type :keys
+             :property property
+             :start (max 0 (int (or start 0)))
+             :duration duration
+             :keyframes (into []
+                              (keep (fn [[time keyframe]]
+                                      (when (<= 0 time duration)
+                                        (-> (make-keyframe (assoc keyframe :time time :property property))
+                                            (dissoc :id :property :index)))))
+                              keyframes)}
+      (indexed-property? property)
+      (assoc :index (if (int? index) (max 0 index) 0)))))
+
 (defn make-style-entry
-  "A valid entry of an animation style from `params`, a preset animation
-  (see `make-animation`) in style time: its `:id` kept (a new one only
-  when it has none), so the presets a use plays keep the same ids (see
-  `expand-style`), without the flags of a row, and with the design tokens
-  of `:applied-tokens` that set a setting of its type."
+  "A valid entry of an animation style from `params` in style time: a
+  preset animation (see `make-animation`, which keeps its design tokens)
+  without the flags of a row, or a keyframe entry (`:type :keys`, see
+  `make-keys-entry`). Its `:id` is kept (a new one only when it has
+  none), so the entries a use plays keep the same ids (see
+  `expand-style`)."
   [params]
-  (let [entry  (-> (make-animation (dissoc params :hidden :locked))
-                   (dissoc :hidden :locked))
-        tokens (entry-tokens (:type entry) (:applied-tokens params))]
-    (cond-> entry
-      (some? tokens) (assoc :applied-tokens tokens))))
+  (if (= :keys (:type params))
+    (make-keys-entry params)
+    (-> (make-animation (dissoc params :hidden :locked))
+        (dissoc :hidden :locked))))
+
+(defn- spring-setting
+  "The spring easing of the resolved spring token `value`
+  (`{:stiffness :damping :mass}`), or nil when it does not fit."
+  [value]
+  (when (map? value)
+    (let [{:keys [stiffness damping mass]} value]
+      (when (and (mth/finite? stiffness) (pos? stiffness)
+                 (mth/finite? damping) (>= damping 0)
+                 (mth/finite? mass) (pos? mass))
+        {:type :spring :stiffness stiffness :damping damping :mass mass}))))
 
 (defn token-setting
   "The value a design token resolved to `value` gives the setting `key` of
-  a style entry: whole ms for its start and duration, a bezier easing for
-  its easing (from the four numbers of a cubic bezier, its times kept
-  within 0..1), the number itself for an amount or an offset; nil when
-  the value does not fit."
+  a preset animation or a style entry: whole ms for its start and
+  duration, an easing for its easing (a bezier from the four numbers of a
+  cubic bezier, its times kept within 0..1, or a spring from a spring
+  token), the number itself for an amount or an offset; nil when the
+  value does not fit."
   [key value]
   (case key
     (:start :duration)
@@ -1069,12 +1184,14 @@
       (mth/round value))
 
     :easing
-    (when (and (sequential? value)
-               (= 4 (count value))
-               (every? mth/finite? value))
-      (let [[x1 y1 x2 y2] value]
-        {:type :bezier
-         :curve [(mth/clamp x1 0 1) y1 (mth/clamp x2 0 1) y2]}))
+    (if (map? value)
+      (spring-setting value)
+      (when (and (sequential? value)
+                 (= 4 (count value))
+                 (every? mth/finite? value))
+        (let [[x1 y1 x2 y2] value]
+          {:type :bezier
+           :curve [(mth/clamp x1 0 1) y1 (mth/clamp x2 0 1) y2]})))
 
     (:amount :offset-x :offset-y)
     (when (mth/finite? value)
@@ -1082,42 +1199,95 @@
 
     nil))
 
-(defn resolve-entry-tokens
-  "The style entry `entry` with the settings its design tokens set (its
-  `:applied-tokens`) taken from `values`, the resolved values of tokens
-  by name. A token missing from `values`, or one whose value does not
-  fit (see `token-setting`), leaves its setting as it is."
-  [entry values]
-  (let [settings (reduce-kv (fn [settings key token-name]
-                              (if-some [value (token-setting key (get values token-name))]
-                                (assoc settings key value)
-                                settings))
-                            {}
-                            (:applied-tokens entry))]
-    (if (empty? settings)
-      entry
-      (make-style-entry (merge entry settings)))))
+(defn resolve-keyframe-tokens
+  "`keyframe` (of a track or of a keyframe entry) with the easing its
+  design token sets taken from `values` (see `resolve-animation-tokens`):
+  a held keyframe bound to a curve or a spring eases."
+  [keyframe values]
+  (let [easing (some->> (dm/get-in keyframe [:applied-tokens :easing])
+                        (get values)
+                        (token-setting :easing))]
+    (if (or (nil? easing)
+            (and (= easing (:easing keyframe)) (nil? (:interpolation keyframe))))
+      keyframe
+      (-> keyframe
+          (assoc :easing easing)
+          (dissoc :interpolation)))))
 
-(defn rename-entry-tokens
-  "The style entry `entry` with each token name of its `:applied-tokens`
-  given by `rename`, a function of the old name (returning it when it
-  stays)."
+(defn resolve-animation-tokens
+  "The preset animation or style entry `entry` with the settings its
+  design tokens set (its `:applied-tokens`, those of the keyframes of a
+  keyframe entry) taken from `values`, the resolved values of tokens by
+  name. A token missing from `values`, or one whose value does not fit
+  (see `token-setting`), leaves its setting as it is."
+  [entry values]
+  (if (keys-entry? entry)
+    (update entry :keyframes (partial mapv #(resolve-keyframe-tokens % values)))
+    (let [settings (reduce-kv (fn [settings key token-name]
+                                (if-some [value (token-setting key (get values token-name))]
+                                  (assoc settings key value)
+                                  settings))
+                              {}
+                              (:applied-tokens entry))]
+      (if (empty? settings)
+        entry
+        (make-animation (merge entry settings))))))
+
+(defn rename-animation-tokens
+  "The preset animation, style entry or keyframe `entry` with each token
+  name of its `:applied-tokens` (those of the keyframes of a keyframe
+  entry) given by `rename`, a function of the old name (returning it
+  when it stays)."
   [entry rename]
   (cond-> entry
     (contains? entry :applied-tokens)
-    (update :applied-tokens d/update-vals rename)))
+    (update :applied-tokens d/update-vals rename)
+
+    (keys-entry? entry)
+    (update :keyframes (partial mapv #(rename-animation-tokens % rename)))))
+
+(defn resolve-timeline-tokens
+  "`timeline` with the settings its design tokens set taken from `values`,
+  the resolved values of tokens by name: those of its presets and of the
+  easings of its keyframes. The uses of styles are left alone: they take
+  the values of their style by sync. Nothing to change, `timeline` as it
+  is."
+  [timeline values]
+  (update timeline :tracks
+          d/update-vals
+          (fn [track]
+            (cond-> (update track :keyframes (partial mapv #(resolve-keyframe-tokens % values)))
+              (contains? track :animations)
+              (update :animations (partial mapv #(if (style-use? %) % (resolve-animation-tokens % values))))))))
+
+(defn rename-timeline-tokens
+  "`timeline` with each token name its presets and keyframes bind given by
+  `rename` (see `rename-animation-tokens`); the uses of styles take the
+  names of their style by sync."
+  [timeline rename]
+  (update timeline :tracks
+          d/update-vals
+          (fn [track]
+            (cond-> (update track :keyframes (partial mapv #(rename-animation-tokens % rename)))
+              (contains? track :animations)
+              (update :animations (partial mapv #(if (style-use? %) % (rename-animation-tokens % rename))))))))
 
 (defn expand-style
-  "The preset animations the style use `use` plays, in timeline time: its
-  entries from its `:start`, scaled to its `:duration`. Each keeps the
-  `:id` of its entry, so expanding a use twice gives the same presets."
+  "The preset animations and keyframe entries the style use `use` plays,
+  in timeline time: its entries from its `:start`, scaled to its
+  `:duration`, the keyframes of a keyframe entry too. Each keeps the `:id`
+  of its entry, so expanding a use twice gives the same presets."
   [{:keys [start duration entries]}]
   (let [length (style-length entries)
         k      (if (pos? length) (/ duration length) 1)]
     (mapv (fn [entry]
-            (assoc entry
-                   :start (+ start (mth/round (* (:start entry) k)))
-                   :duration (max 1 (mth/round (* (:duration entry) k)))))
+            (let [duration (max 1 (mth/round (* (:duration entry) k)))]
+              (cond-> (assoc entry
+                             :start (+ start (mth/round (* (:start entry) k)))
+                             :duration duration)
+                (keys-entry? entry)
+                (update :keyframes (partial mapv (fn [keyframe]
+                                                   (update keyframe :time #(min duration (mth/round (* % k))))))))))
           entries)))
 
 (defn- expand-uses
@@ -1127,9 +1297,10 @@
 
 (defn track-animations
   "The preset animations `track` plays, in order: the hidden ones left out
-  and each style use replaced, in place, by the presets it stands for (see
-  `expand-style`). Everything that plays animations reads them through
-  it, so nothing after it knows that styles exist."
+  and each style use replaced, in place, by the presets and keyframe
+  entries it stands for (see `expand-style`). Everything that plays
+  animations reads them through it, so nothing after it knows that
+  styles exist."
   [track]
   (expand-uses (remove :hidden (:animations track))))
 
@@ -2249,18 +2420,63 @@
       (when (<= (tu/unit-count shape kind) tu/live-unit-cap)
         kind))))
 
+(declare rest-pose keys-entry-keyframes)
+
+(defn take-over-keys
+  "`track` with the keyframe entries `entries` (in its time, as its style
+  uses play them, see `expand-style`) taking over their spans in their
+  rows, played by a layer resting at `pose` (see `keys-entry-keyframes`):
+  the keyframes of a row inside the span of an entry give way to those of
+  the entry, the later entry winning where two overlap, as a preset takes
+  over its span (see `resolve-property`). A looping row is unrolled over
+  `duration` first, and loops no more."
+  [track entries pose duration]
+  (let [slots   (into #{} (map keyframe-slot) entries)
+        loops   (get track :loops #{})
+        by-slot (group-by keyframe-slot (:keyframes track))
+
+        take-over
+        (fn [[property index :as slot]]
+          (let [own (sort-keyframes (get by-slot slot))
+                own (cond-> own
+                      (and (seq own) (contains? loops (slot-key property index)))
+                      (expand-property-loop duration))]
+            (reduce (fn [keyframes {:keys [start] :as entry}]
+                      (let [end (animation-end entry)]
+                        (into (filterv #(not (<= start (:time %) end)) keyframes)
+                              (keys-entry-keyframes entry pose))))
+                    own
+                    (sort-by :start (filter #(= slot (keyframe-slot %)) entries)))))]
+    (-> (reduce (fn [track [property index]]
+                  (update-slot-flag track :loops disj (slot-key property index)))
+                track
+                slots)
+        (assoc :keyframes
+               (sort-keyframes
+                (into (filterv #(not (contains? slots (keyframe-slot %))) (:keyframes track))
+                      (mapcat take-over)
+                      slots))))))
+
 (defn- resolve-track
-  "`track` of `shape-id` as it plays: its animations turned into the
-  keyframes they stand for, but the split animations that play the units
-  of a text one by one (see `unit-split-kind`), which stay its
-  `:animations` (see `text-unit-entries`)."
-  [timeline objects shape-id {:keys [keyframes] :as track}]
+  "`track` of `shape-id` as it plays: the keyframe entries of its style
+  uses taking over their spans in their rows (see `take-over-keys`), then
+  its presets turned into the keyframes they stand for, over those, but
+  the split animations that play the units of a text one by one (see
+  `unit-split-kind`), which stay its `:animations` (see
+  `text-unit-entries`)."
+  [timeline objects shape-id track]
   (let [shape      (get objects shape-id)
         animations (track-animations track)
         kind       (unit-split-kind shape animations)
         by-units?  #(and (some? kind) (= kind (:split %)))
         splits     (filterv by-units? animations)
-        animations (remove by-units? animations)]
+        animations (remove by-units? animations)
+        entries    (filterv keys-entry? animations)
+        animations (remove keys-entry? animations)
+        track      (cond-> track
+                     (and (seq entries) (some? shape))
+                     (take-over-keys entries (rest-pose timeline objects shape-id) (:duration timeline)))
+        keyframes  (:keyframes track)]
     (cond-> (if (or (empty? animations) (nil? shape))
               (dissoc track :animations)
               (let [origin     (position-origin timeline objects shape-id)
@@ -2577,7 +2793,7 @@
   [property value from to]
   (let [ratio (fn [k]
                 (let [base (get from k)]
-                  (if (and (number? base) (pos? base)) (/ (get to k) base) 1)))]
+                  (if (and (number? base) (pos? base)) (/ (double (get to k)) base) 1)))]
     (case property
       :x        (+ value (- (:x to) (:x from)))
       :y        (+ value (- (:y to) (:y from)))
@@ -2585,6 +2801,47 @@
       :width    (* value (ratio :width))
       :height   (* value (ratio :height))
       value)))
+
+(def ^:private neutral-pose
+  "The pose the values of keyframe entries are counted from (see
+  `schema:keys-entry`): positions and rotation from 0, sizes as factors of
+  1."
+  {:x 0 :y 0 :rotation 0 :width 1 :height 1})
+
+(defn keyframes->keys-entry
+  "A keyframe entry (see `schema:keys-entry`) of `keyframes`, those of one
+  row (property and index) of a layer resting at `pose` (see `rest-pose`):
+  from the first one, as long as they last, their values relative to the
+  layer (see `relative-value`), so that it plays on any layer from where
+  that one rests, as a pasted animation does."
+  [keyframes pose]
+  (let [keyframes (sort-keyframes keyframes)
+        {:keys [property index]} (first keyframes)
+        start     (:time (first keyframes))]
+    (make-style-entry
+     {:type :keys
+      :property property
+      :index index
+      :start start
+      :duration (- (:time (peek keyframes)) start)
+      :keyframes (mapv (fn [keyframe]
+                         (-> keyframe
+                             (update :time - start)
+                             (update :value #(relative-value property % pose neutral-pose))))
+                       keyframes)})))
+
+(defn keys-entry-keyframes
+  "The keyframes the keyframe entry `entry` (in the time of a track, see
+  `expand-style`) gives a layer resting at `pose` (see `rest-pose`): from
+  its start, their values the layer's own (see `relative-value`)."
+  [{:keys [property index start keyframes]} pose]
+  (mapv (fn [keyframe]
+          (make-keyframe (assoc keyframe
+                                :time (+ start (:time keyframe))
+                                :property property
+                                :index index
+                                :value (relative-value property (:value keyframe) neutral-pose pose))))
+        keyframes))
 
 (defn retarget-track
   "`track`, of a layer resting at `from` (see `rest-pose`), for the shape
@@ -2630,10 +2887,14 @@
 
 (defn- pivot-motion?
   "Whether `track` scales, resizes or turns its layer: what its pivot is
-  the centre of. A style use does when one of its entries does."
+  the centre of. A style use does when one of its entries does, a preset
+  or a keyframe entry."
   [{:keys [keyframes animations]}]
   (boolean (or (some #(contains? pivot-properties (:property %)) keyframes)
-               (some #(contains? #{:scale :rotate} (:type %)) (expand-uses animations)))))
+               (some #(if (keys-entry? %)
+                        (contains? pivot-properties (:property %))
+                        (contains? #{:scale :rotate} (:type %)))
+                     (expand-uses animations)))))
 
 (defn- merge-animation
   "Add `animation` (see `make-animation`) to the track of `shape-id`, in

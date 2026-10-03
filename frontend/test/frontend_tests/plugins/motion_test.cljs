@@ -15,10 +15,13 @@
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.test-helpers.shapes :as cths]
+   [app.common.test-helpers.tokens :as ctht]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
+   [app.common.types.tokens-lib :as ctob]
    [app.common.uuid :as uuid]
+   [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.repo :as rp]
    [app.main.store :as st]
    [app.plugins.api :as api]
@@ -35,6 +38,7 @@
    [frontend-tests.helpers.mock :as mock]
    [frontend-tests.helpers.state :as ths]
    [frontend-tests.helpers.wasm :as thw]
+   [frontend-tests.tokens.helpers.state :as tohs]
    [potok.v2.core :as ptk]))
 
 (def ^:private plugin-id "00000000-0000-0000-0000-000000000000")
@@ -763,7 +767,69 @@
         (t/is (thrown-with-msg? js/Error #"Entry 2" (create [{:type "fade"} {:type "shake"}])) "an unknown type")
         (t/is (thrown? js/Error (create [{:type "fade" :start -10}])) "a negative start")
         (t/is (thrown? js/Error (.createAnimationStyle lib "fade")) "not an array")
+        (t/testing "keyframe entries"
+          (let [row (fn [n] {:type "keyframes" :property "x"
+                             :keyframes (mapv #(hash-map :time % :value %) (range n))})]
+            (t/is (thrown-with-msg? js/Error #"Keyframe 2"
+                                    (create [{:type "keyframes" :property "x"
+                                              :keyframes [{:time 0 :value 0} {:time 100 :value "#ff0000"}]}]))
+                  "a colour on a position")
+            (t/is (thrown-with-msg? js/Error #"within the duration"
+                                    (create [{:type "keyframes" :property "x" :duration 100
+                                              :keyframes [{:time 0 :value 0} {:time 200 :value 1}]}])))
+            (t/is (thrown-with-msg? js/Error #"Not a property" (create [{:type "keyframes" :property "colour"
+                                                                         :keyframes [{:time 0 :value 0}]}])))
+            (t/is (thrown-with-msg? js/Error #"256 keyframes" (create [(row 257)])))
+            (t/is (thrown-with-msg? js/Error #"256 keyframes" (create [(row 130) (row 130)])) "in all")))
         (t/is (zero? (.-length (.-animationStyles lib))) "nothing was made")))))
+
+(t/deftest a-plugin-makes-a-style-of-keyframes
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            [^js board rects]   (board-with-rects context 2)
+            [^js one ^js two]   rects
+            _                   (set! (.-x two) 50)
+            ^js lib             (.. context -library -local)
+            ^js style           (.createAnimationStyle
+                                 lib
+                                 #js [#js {:type "keyframes" :property "rotation" :start 0 :duration 600
+                                           :keyframes #js [#js {:time 0 :value 0 :easing "linear"}
+                                                           #js {:time 300 :value 8 :easing "linear"}
+                                                           #js {:time 600 :value 0}]}
+                                      #js {:type "keyframes" :property "x"
+                                           :keyframes #js [#js {:time 0 :value 0 :easing "linear"}
+                                                           #js {:time 400 :value 40}]}])
+            ^js timeline        (.addTimeline board #js {:duration 1000})
+            entries             #(mapv (fn [^js e] [(.-type e) (.-property e) (.-start e) (.-duration e)
+                                                    (.-length (.-keyframes e))])
+                                       (.-entries style))]
+        (doseq [rect rects]
+          (.applyAnimationStyle timeline rect style 0))
+
+        (t/testing "its entries read back"
+          (t/is (= [["keyframes" "rotation" 0 600 3] ["keyframes" "x" 0 400 2]] (entries)))
+          (t/is (= [{"time" 300 "value" 8 "easing" "linear"}]
+                   (js->clj (.slice (.-keyframes ^js (aget (.-entries style) 0)) 1 2))))
+          (let [before (js->clj (.-entries style))]
+            (set! (.-entries style) (.-entries style))
+            (t/is (= before (js->clj (.-entries style))) "and write back the same")))
+
+        (t/testing "two layers play them from where they rest"
+          (t/is (= [40 90] [(.valueAt timeline one "x" 400) (.valueAt timeline two "x" 400)]))
+          (t/is (= [8 8] [(.valueAt timeline one "rotation" 300) (.valueAt timeline two "rotation" 300)])))
+
+        (t/testing "an update from a layer reaches every use"
+          (.addKeyframe timeline one #js {:property "y" :time 0 :value 0 :easing "linear"})
+          (.addKeyframe timeline one #js {:property "y" :time 500 :value 30})
+          (.updateFromShape style one)
+          (t/is (= #{"rotation" "x" "y"} (into #{} (map #(.-property ^js %)) (.-entries style))))
+          (t/is (empty? (:keyframes (stored-track store context board one))) "the keyframes went into it")
+          (t/is (= 30 (.valueAt timeline two "y" 500)))
+          (t/is (= [1 1] (mapv #(count (:animations (stored-track store context board %))) rects))))
+
+        (t/testing "a layer that does not use it is refused"
+          (t/is (thrown-with-msg? js/Error #"does not use" (.updateFromShape style board))))))))
 
 (t/deftest the-style-members-need-motion
   (thw/with-wasm-mocks*
@@ -1015,3 +1081,71 @@
         (t/is (string? (entry-of #js {:color "brand"})) "no token sets a color")
         (t/is (string? (entry-of #js {:duration "not a name"})))
         (t/is (string? (entry-of "motion.fast")))))))
+
+(defn- tokens-file
+  "A board :board-a holding a rect :r1, and the active tokens
+  `motion.base` (300 ms) and `ease.spring` (a spring)."
+  []
+  (-> (cthf/sample-file :file1 :page-label :page1)
+      (ctho/add-frame :board-a :x 0 :y 0 :width 400 :height 300)
+      (cths/add-sample-shape :r1 :type :rect :parent-label :board-a
+                             :x 10 :y 10 :width 50 :height 50)
+      (ctht/add-tokens-lib)
+      (ctht/update-tokens-lib
+       #(-> %
+            (ctob/add-set (ctob/make-token-set :id (cthi/new-id! :motion-set) :name "motion"))
+            (ctob/add-theme (ctob/make-token-theme :name "theme" :sets #{"motion"}))
+            (ctob/set-active-themes #{"/theme"})
+            (ctob/add-token (cthi/id :motion-set)
+                            (ctob/make-token :name "motion.base" :type :duration :value "300ms"))
+            (ctob/add-token (cthi/id :motion-set)
+                            (ctob/make-token :name "ease.spring" :type :spring
+                                             :value {:stiffness 120 :damping 14 :mass 1}))))))
+
+(t/deftest presets-and-keyframes-bind-tokens
+  (t/async
+    done
+    (thw/setup-wasm-mocks!)
+    (let [[store ^js context] (setup (tokens-file) true)
+          ^js page     (.-currentPage context)
+          ^js board    (.getShapeById page (str (cthi/id :board-a)))
+          ^js rect     (.getShapeById page (str (cthi/id :r1)))
+          ^js timeline (.addTimeline board)
+          ^js fade     (.addAnimation timeline rect #js {:type "fade" :start 0 :duration 500
+                                                         :appliedTokens #js {:duration "motion.base"}})
+          ^js from     (.addKeyframe timeline rect #js {:property "x" :time 0 :value 0})]
+      (.addKeyframe timeline rect #js {:property "x" :time 1000 :value 100})
+      (set! (.-appliedTokens from) #js {:easing "ease.spring"})
+
+      (t/testing "they read back"
+        (t/is (= {"duration" "motion.base"} (js->clj (.-appliedTokens fade))))
+        (t/is (= {"easing" "ease.spring"} (js->clj (.-appliedTokens from)))))
+
+      (t/testing "what is not valid is refused"
+        (t/is (thrown? js/Error (set! (.-appliedTokens fade) #js {:offsetX "space.s"})) "a fade has no offset")
+        (t/is (thrown? js/Error (set! (.-appliedTokens from) #js {:duration "motion.base"}))
+              "a keyframe binds its easing only")
+        (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "y" :time 0 :value 0
+                                                                 :appliedTokens "ease.spring"}))))
+
+      (tohs/run-store-async
+       store
+       (fn []
+         (thw/teardown-wasm-mocks!)
+         (done))
+       [(dwtp/propagate-style-tokens)]
+       (fn [_]
+         (t/testing "the values follow the tokens"
+           (t/is (= 300 (.-duration fade)))
+           (t/is (= {"type" "spring" "stiffness" 120 "damping" 14 "mass" 1}
+                    (js->clj (.-easing from))))
+           (let [layer (first (get (js->clj (.toJSON timeline)) "layers"))
+                 x     (some #(when (= "x" (get % "property")) %) (get layer "properties"))]
+             (t/is (= {"duration" "motion.base"} (get-in layer ["presets" 0 "tokens"])))
+             (t/is (= {"easing" "ease.spring"} (get-in x ["keyframes" 0 "tokens"])))))
+
+         (t/testing "a setting set by hand unbinds its token"
+           (set! (.-duration fade) 400)
+           (t/is (nil? (.-appliedTokens fade)))
+           (set! (.-easing from) "linear")
+           (t/is (nil? (.-appliedTokens from)))))))))

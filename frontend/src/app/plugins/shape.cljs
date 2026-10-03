@@ -1752,7 +1752,7 @@
                         kw-attrs (into #{} (map token-attr-plugin->token-attr attrs))]
                     (cond
                       (contains? cto/motion-token-types (:type token))
-                      (u/not-valid plugin-id :applyToken "A duration or cubicBezier token applies to no shape: the entries of animation styles bind it")
+                      (u/not-valid plugin-id :applyToken "A duration, cubicBezier or spring token applies to no shape: the settings of animations bind it")
 
                       (some #(not (token-attr? %)) kw-attrs)
                       (u/not-valid plugin-id :applyToken attrs)

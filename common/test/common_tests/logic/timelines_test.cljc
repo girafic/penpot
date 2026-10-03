@@ -20,6 +20,7 @@
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape :as cts]
@@ -451,7 +452,18 @@
     (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:keyframes 0 :time] -10)))))
     (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:animations 0 :start] -1)))))
     (t/is (not (cltl/animation-clip-valid?
-                (assoc clip :layers (vec (repeat (inc cltl/max-clip-layers) (first (:layers clip))))))))))
+                (assoc clip :layers (vec (repeat (inc cltl/max-clip-layers) (first (:layers clip))))))))
+    (t/testing "the keyframe entries of a style use"
+      (let [use  (ctas/make-use (ctas/make-animation-style
+                                 {:entries [{:type :keys :property :x :start 0 :duration 400
+                                             :keyframes [{:time 0 :value 0} {:time 400 :value 40}]}]})
+                                (uuid/next) 0)
+            with (fn [f] (update-in clip [:layers 0 :track :animations] (fnil conj []) (f use)))]
+        (t/is (cltl/animation-clip-valid? (with identity)))
+        (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:entries 0 :keyframes 1 :time] 500))))
+              "a keyframe past its entry")
+        (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:entries 0 :keyframes 1 :value] "#ffffff"))))
+              "a colour on a position")))))
 
 ;; PASTING ANIMATION CLIPS
 

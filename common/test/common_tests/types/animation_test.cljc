@@ -206,6 +206,74 @@
     (t/testing "with reduced motion, the shape stays as designed"
       (t/is (re-find #"@media \(prefers-reduced-motion: reduce\) \{\s+\.penpot-shape-\S+ \{\s+animation: none;" css)))))
 
+;; DESIGN TOKENS
+
+(t/deftest presets-and-keyframes-keep-the-tokens-of-their-settings
+  (let [fade (cta/make-animation {:type :fade :start 0 :duration 300
+                                  :applied-tokens {:duration "motion.fast" :amount "opacity.half"
+                                                   :offset-x "space.s" :easing 3}})
+        key  (cta/make-keyframe {:time 0 :property :x :value 10
+                                 :applied-tokens {:easing "ease.out" :value "space.s"}})]
+    (t/is (= {:duration "motion.fast" :amount "opacity.half"} (:applied-tokens fade))
+          "an offset belongs to a move only, and a name is a string")
+    (t/is (= {:easing "ease.out"} (:applied-tokens key)) "a keyframe binds its easing only")
+    (t/is (not (contains? (cta/make-keyframe {:time 0 :property :x :value 10 :applied-tokens {:easing 1}})
+                          :applied-tokens)))
+    (let [tl (-> (cta/make-timeline {:board-id (uuid/next)})
+                 (cta/add-animation (uuid/next) fade))]
+      (t/is (sm/validate cta/schema:timeline
+                         (assoc-in tl [:tracks (first (keys (:tracks tl))) :keyframes] [key]))))))
+
+(defn- bound-timeline
+  "A timeline of a layer `shape` with a fade bound to `motion.fast`, a
+  hidden move bound to `motion.slow`, keyframes of x bound to `ease.out`
+  (a hold first) and a use of a style whose entry is bound to
+  `motion.fast` too."
+  [shape]
+  (-> (cta/make-timeline {:board-id (uuid/next) :duration 2000})
+      (cta/add-animation shape {:id (uuid/next) :type :fade :start 0 :duration 300
+                                :applied-tokens {:duration "motion.fast"}})
+      (cta/add-animation shape {:id (uuid/next) :type :move :start 500 :duration 300 :hidden true
+                                :offset-x 10 :applied-tokens {:duration "motion.slow"}})
+      (cta/add-animation shape {:type :style :style-ref-id (uuid/next) :style-ref-file (uuid/next)
+                                :name "Pop" :start 1000
+                                :entries [{:type :fade :start 0 :duration 300
+                                           :applied-tokens {:duration "motion.fast"}}]})
+      (cta/add-keyframe shape {:time 0 :property :x :value 0 :interpolation :step
+                               :applied-tokens {:easing "ease.out"}})
+      (cta/add-keyframe shape {:time 600 :property :x :value 40})))
+
+(t/deftest the-tokens-of-a-timeline-set-its-presets-and-keyframes
+  (let [shape    (uuid/next)
+        tl       (bound-timeline shape)
+        values   {"motion.fast" 150 "motion.slow" 450 "ease.out" [0 0 0.58 1]}
+        resolved (cta/resolve-timeline-tokens tl values)
+        [fade move use] (get-in resolved [:tracks shape :animations])
+        k0       (first (get-in resolved [:tracks shape :keyframes]))]
+    (t/is (= [150 450] [(:duration fade) (:duration move)]))
+    (t/is (true? (:hidden move)) "a preset keeps its flags")
+    (t/is (= (get-in tl [:tracks shape :animations 2]) use) "a use follows its style, not the timeline")
+    (t/is (= {:type :bezier :curve [0 0 0.58 1]} (:easing k0)))
+    (t/is (nil? (:interpolation k0)) "a held keyframe bound to a curve eases")
+    (t/is (= {:easing "ease.out"} (:applied-tokens k0)) "the names stay")
+    (t/is (= {:type :spring :stiffness 120 :damping 14 :mass 1}
+             (-> (cta/resolve-timeline-tokens tl {"ease.out" {:stiffness 120 :damping 14 :mass 1}})
+                 (get-in [:tracks shape :keyframes 0 :easing])))
+          "or a spring")
+    (t/is (= tl (cta/resolve-timeline-tokens tl {})) "nothing to resolve, the same timeline")
+    (t/is (= resolved (cta/resolve-timeline-tokens resolved values)) "resolved, it stays")))
+
+(t/deftest renamed-tokens-reach-presets-and-keyframes
+  (let [shape   (uuid/next)
+        rename  #(case % "motion.fast" "motion.quick" "ease.out" "ease.soft" %)
+        renamed (cta/rename-timeline-tokens (bound-timeline shape) rename)
+        [fade move use] (get-in renamed [:tracks shape :animations])]
+    (t/is (= ["motion.quick" "motion.slow"] [(get-in fade [:applied-tokens :duration])
+                                             (get-in move [:applied-tokens :duration])]))
+    (t/is (= "motion.fast" (get-in use [:entries 0 :applied-tokens :duration]))
+          "a use takes the names of its style by sync")
+    (t/is (= {:easing "ease.soft"} (get-in renamed [:tracks shape :keyframes 0 :applied-tokens])))))
+
 (t/deftest a-timeline-plays-in-the-prototype-unless-told-not-to
   (let [tl (cta/make-timeline {:board-id (uuid/next)})]
     (t/is (cta/autoplay? tl) "by default")

@@ -57,6 +57,7 @@
     :shadow i/drop-shadow
     :duration i/clock
     :cubic-bezier i/easing-ease-in-out
+    :spring i/curve
     "add"))
 
 (def ^:private schema:token-group

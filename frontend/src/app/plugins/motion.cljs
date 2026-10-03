@@ -31,6 +31,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.workspace.audio :as dwaa]
+   [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.features :as features]
    [app.main.store :as st]
    [app.plugins.format :as format]
@@ -325,6 +326,71 @@
   [file-id page-id board-id shape-id {:keys [property index]}]
   (cta/slot-flag? (locate-timeline file-id page-id board-id) shape-id :locked property index))
 
+(def ^:private style-token-settings
+  "The settings of a style entry a design token sets, by the names the
+  plugin API gives them (see `cta/schema:animation-tokens`)."
+  {:start "start"
+   :duration "duration"
+   :easing "easing"
+   :amount "amount"
+   :offset-x "offsetX"
+   :offset-y "offsetY"})
+
+(defn- parse-entry-tokens
+  "The `:applied-tokens` of a style entry of the preset type `type` that
+  the object `tokens` of the plugin API (settings to token names)
+  describes, nil without it, or a string saying what is wrong with it."
+  [tokens type]
+  (when (some? tokens)
+    (if-not (object? tokens)
+      "The applied tokens should be an object of setting names to token names"
+      (let [by-name (set/map-invert style-token-settings)
+            pairs   (mapv (fn [setting] [setting (obj/get tokens setting)]) (js-keys tokens))]
+        (or (some (fn [[setting token-name]]
+                    (let [key (get by-name setting)]
+                      (cond
+                        (nil? key)
+                        (dm/str "No token sets '" setting "'")
+
+                        (not (sm/validate cto/schema:token-name token-name))
+                        (dm/str "The token of '" setting "' should be a token name")
+
+                        (empty? (cta/animation-token-types type key))
+                        (dm/str "No token sets '" setting "' of a " (name type) " animation"))))
+                  pairs)
+            (into {} (map (fn [[setting token-name]] [(get by-name setting) token-name])) pairs))))))
+
+(defn- format-applied-tokens
+  "The design tokens `applied-tokens` (setting to name) as the plugin API
+  gives them: an object of the plugin names of the settings."
+  [applied-tokens]
+  (reduce-kv (fn [tokens key token-name]
+               (obj/set! tokens (get style-token-settings key) token-name))
+             #js {}
+             applied-tokens))
+
+(defn- parse-keyframe-tokens
+  "The `:applied-tokens` of a keyframe that the object `tokens` of the
+  plugin API describes (only its `easing`), nil without it (or an empty
+  one), or a string saying what is wrong with it."
+  [tokens]
+  (when (some? tokens)
+    (cond
+      (not (object? tokens))
+      "The applied tokens should be an object of setting names to token names"
+
+      (empty? (js-keys tokens))
+      nil
+
+      (some #(not= "easing" %) (js-keys tokens))
+      "A keyframe binds its easing only"
+
+      (not (sm/validate cto/schema:token-name (obj/get tokens "easing")))
+      "The token of 'easing' should be a token name"
+
+      :else
+      {:easing (obj/get tokens "easing")})))
+
 (defn keyframe-proxy? [p]
   (obj/type-of? p "KeyframeProxy"))
 
@@ -386,9 +452,22 @@
       {:get #(some-> (locate) format-easing)
        :set
        (fn [value]
+         ;; set by hand, no token sets it
          (if-let [easing (parse-easing value true)]
-           (update! :easing #(-> % (dissoc :easing :interpolation) (merge easing)))
+           (update! :easing #(-> % (dissoc :easing :interpolation :applied-tokens) (merge easing)))
            (u/not-valid plugin-id :easing value)))}
+
+      :appliedTokens
+      {:get #(some-> (locate) :applied-tokens format-applied-tokens)
+       :set
+       (fn [value]
+         (let [tokens (parse-keyframe-tokens value)]
+           (if (string? tokens)
+             (u/not-valid plugin-id :appliedTokens tokens)
+             (when (update! :appliedTokens #(cond-> (dissoc % :applied-tokens)
+                                              (some? tokens) (assoc :applied-tokens tokens)))
+               (when (some? tokens)
+                 (st/emit! (dwtp/propagate-style-tokens)))))))}
 
       :remove
       (fn []
@@ -677,12 +756,20 @@
             (write-timeline! plugin-id file-id page-id board-id code
                              #(cta/update-animation % shape-id id f))))
 
+        ;; set by hand, no token sets it
+        set-by-hand
+        (fn [animation attr value]
+          (-> animation
+              (assoc attr value)
+              (d/update-when :applied-tokens dissoc attr)
+              (as-> a (cond-> a (empty? (:applied-tokens a)) (dissoc :applied-tokens)))))
+
         number-setter
         (fn [code attr valid?]
           (fn [value]
             (if (not (valid? value))
               (u/not-valid plugin-id code value)
-              (update! code #(assoc % attr value)))))
+              (update! code #(set-by-hand % attr value)))))
 
         ;; the settings of a split animation
         split-setter
@@ -741,8 +828,20 @@
        :set
        (fn [value]
          (if-let [{:keys [easing]} (parse-easing value false)]
-           (update! :easing #(assoc % :easing easing))
+           (update! :easing #(set-by-hand % :easing easing))
            (u/not-valid plugin-id :easing value)))}
+
+      :appliedTokens
+      {:get #(some-> (locate) :applied-tokens format-applied-tokens)
+       :set
+       (fn [value]
+         (let [tokens (if (nil? value) nil (parse-entry-tokens value (:type (locate))))]
+           (if (string? tokens)
+             (u/not-valid plugin-id :appliedTokens tokens)
+             (when (update! :appliedTokens #(cond-> (dissoc % :applied-tokens)
+                                              (seq tokens) (assoc :applied-tokens tokens)))
+               (when (seq tokens)
+                 (st/emit! (dwtp/propagate-style-tokens)))))))}
 
       :amount
       {:get #(:amount (locate))
@@ -795,7 +894,8 @@
         time     (obj/get props "time")
         value    (obj/get props "value")
         index    (obj/get props "index")
-        easing   (parse-easing (d/nilv (obj/get props "easing") "ease") true)]
+        easing   (parse-easing (d/nilv (obj/get props "easing") "ease") true)
+        tokens   (parse-keyframe-tokens (obj/get props "appliedTokens"))]
     (cond
       (nil? property)
       "Not a property that can be animated"
@@ -817,13 +917,18 @@
       (nil? easing)
       "Not a valid easing"
 
+      (string? tokens)
+      tokens
+
       :else
       (merge {:property property
               :time (mth/round time)
               :value value}
              (when (cta/indexed-property? property)
                {:index (or index 0)})
-             easing))))
+             easing
+             (when (some? tokens)
+               {:applied-tokens tokens})))))
 
 (defn- parse-animation
   "The preset animation the object `props` of the plugin API describes,
@@ -840,7 +945,9 @@
         split     (parse-split (obj/get props "split"))
         spread    (obj/get props "spread")
         order     (obj/get props "order")
-        seed      (obj/get props "seed")]
+        seed      (obj/get props "seed")
+        tokens    (when (contains? cta/animation-types type)
+                    (parse-entry-tokens (obj/get props "appliedTokens") type))]
     (cond
       (not (contains? cta/animation-types type))
       "The type should be one of 'fade', 'move', 'scale', 'rotate' or 'blur'"
@@ -875,6 +982,9 @@
       (and (some? seed) (not (sm/valid-safe-int? seed)))
       "The seed should be a whole number"
 
+      (string? tokens)
+      tokens
+
       :else
       (cond-> {:type type
                :direction (keyword direction)
@@ -887,22 +997,113 @@
         (some? split)                 (assoc :split split)
         (some? spread)                (assoc :spread spread)
         (some? order)                 (assoc :order (keyword order))
-        (some? seed)                  (assoc :seed seed)))))
+        (some? seed)                  (assoc :seed seed)
+        (seq tokens)                  (assoc :applied-tokens tokens)))))
 
-(def ^:private style-token-settings
-  "The settings of a style entry a design token sets, by the names the
-  plugin API gives them (see `cta/schema:style-entry-tokens`)."
-  {:start "start"
-   :duration "duration"
-   :easing "easing"
-   :amount "amount"
-   :offset-x "offsetX"
-   :offset-y "offsetY"})
+(defn- parse-entry-keyframe
+  "The keyframe of a keyframe entry of `property` that the object `props`
+  of the plugin API describes (`time` from the start of the entry, the
+  `value` relative to the layer, see `cta/schema:keys-entry`), or a
+  string saying what is wrong with it."
+  [property props]
+  (if-not (object? props)
+    "It should be an object"
+    (let [time     (obj/get props "time")
+          value    (obj/get props "value")
+          easing   (parse-easing (d/nilv (obj/get props "easing") "ease") true)
+          tokens   (parse-keyframe-tokens (obj/get props "appliedTokens"))
+          path-in  (obj/get props "pathIn")
+          path-out (obj/get props "pathOut")]
+      (cond
+        (not (valid-time? time))
+        "The time should be a number of milliseconds from the start of the entry"
 
-(defn format-style-entry
-  "The entry `entry` of an animation style as the plugin API gives it: an
-  object with the fields of `PresetAnimationProps` and, for the settings
-  design tokens set, their names in `appliedTokens`."
+        (not (valid-value? property value))
+        (if (cta/color-property? property)
+          "The value of a color should be an hexadecimal color like '#ff0000'"
+          "The value should be a number")
+
+        (nil? easing)
+        "Not a valid easing"
+
+        (string? tokens)
+        tokens
+
+        (not (every? #(or (nil? %) (sm/valid-safe-number? %)) [path-in path-out]))
+        "The handles of a motion path should be numbers"
+
+        :else
+        (cond-> (merge {:time (mth/round time) :value value} easing)
+          (some? tokens)   (assoc :applied-tokens tokens)
+          (some? path-in)  (assoc :path-in path-in)
+          (some? path-out) (assoc :path-out path-out))))))
+
+(defn- parse-keys-entry
+  "The keyframe entry of an animation style that the object `props` of
+  the plugin API describes (`type: 'keyframes'`, see
+  `cta/schema:keys-entry`), or a string saying what is wrong with it."
+  [props]
+  (let [property  (get properties (obj/get props "property"))
+        index     (obj/get props "index")
+        start     (d/nilv (obj/get props "start") 0)
+        duration  (obj/get props "duration")
+        keyframes (obj/get props "keyframes")]
+    (cond
+      (nil? property)
+      "Not a property that can be animated"
+
+      (and (some? index) (not (cta/indexed-property? property)))
+      "Only fills, strokes and shadows take an index"
+
+      (and (some? index) (not (and (sm/valid-safe-int? index) (>= index 0))))
+      "The index should be a number from 0"
+
+      (not (valid-time? start))
+      "The start should be a number of milliseconds from 0"
+
+      (and (some? duration) (not (and (sm/valid-safe-number? duration) (pos? duration))))
+      "The duration should be a number of milliseconds above 0"
+
+      (not (and (array? keyframes) (pos? (alength keyframes))))
+      "The keyframes should be an array of one or more"
+
+      (> (alength keyframes) cta/max-style-keyframes)
+      (dm/str "A style holds up to " cta/max-style-keyframes " keyframes")
+
+      :else
+      (let [parsed (into []
+                         (map-indexed (fn [i props]
+                                        (let [keyframe (parse-entry-keyframe property props)]
+                                          (if (string? keyframe)
+                                            (dm/str "Keyframe " (inc i) ": " keyframe)
+                                            keyframe))))
+                         keyframes)]
+        (cond
+          (some string? parsed)
+          (d/seek string? parsed)
+
+          (and (some? duration) (some #(> (:time %) duration) parsed))
+          "The keyframes should be within the duration"
+
+          :else
+          (cond-> {:type :keys
+                   :property property
+                   :start (mth/round start)
+                   :keyframes parsed}
+            (some? index)    (assoc :index index)
+            (some? duration) (assoc :duration (mth/round duration))))))))
+
+(defn- format-entry-keyframe
+  "A keyframe of a keyframe entry as the plugin API gives it."
+  [{:keys [time value path-in path-out applied-tokens] :as keyframe}]
+  (cond-> #js {:time time
+               :value value
+               :easing (format-easing keyframe)}
+    (some? path-in)      (obj/set! "pathIn" path-in)
+    (some? path-out)     (obj/set! "pathOut" path-out)
+    (seq applied-tokens) (obj/set! "appliedTokens" (format-applied-tokens applied-tokens))))
+
+(defn- format-preset-entry
   [{:keys [type direction start duration amount offset-x offset-y split spread order seed
            applied-tokens] :as entry}]
   (cond-> #js {:type (name type)
@@ -920,40 +1121,34 @@
     (some? order)    (obj/set! "order" (name order))
     (some? seed)     (obj/set! "seed" seed)
     (seq applied-tokens)
-    (obj/set! "appliedTokens"
-              (reduce-kv (fn [tokens key token-name]
-                           (obj/set! tokens (get style-token-settings key) token-name))
-                         #js {}
-                         applied-tokens))))
+    (obj/set! "appliedTokens" (format-applied-tokens applied-tokens))))
 
-(defn- parse-entry-tokens
-  "The `:applied-tokens` of a style entry of the preset type `type` that
-  the object `tokens` of the plugin API (settings to token names)
-  describes, nil without it, or a string saying what is wrong with it."
-  [tokens type]
-  (when (some? tokens)
-    (if-not (object? tokens)
-      "The applied tokens should be an object of setting names to token names"
-      (let [by-name (set/map-invert style-token-settings)
-            pairs   (mapv (fn [setting] [setting (obj/get tokens setting)]) (js-keys tokens))]
-        (or (some (fn [[setting token-name]]
-                    (let [key (get by-name setting)]
-                      (cond
-                        (nil? key)
-                        (dm/str "No token sets '" setting "'")
+(defn format-style-entry
+  "The entry `entry` of an animation style as the plugin API gives it: an
+  object with the fields of `PresetAnimationProps` and, for the settings
+  design tokens set, their names in `appliedTokens`; or, for a keyframe
+  entry, `type: 'keyframes'` with its property, span and keyframes."
+  [{:keys [property index start duration keyframes] :as entry}]
+  (if (cta/keys-entry? entry)
+    (cond-> #js {:type "keyframes"
+                 :property (get property-names property)
+                 :start start
+                 :duration duration
+                 :keyframes (into-array (map format-entry-keyframe keyframes))}
+      (some? index) (obj/set! "index" index))
+    (format-preset-entry entry)))
 
-                        (not (sm/validate cto/schema:token-name token-name))
-                        (dm/str "The token of '" setting "' should be a token name")
-
-                        (empty? (cta/style-token-types type key))
-                        (dm/str "No token sets '" setting "' of a " (name type) " animation"))))
-                  pairs)
-            (into {} (map (fn [[setting token-name]] [(get by-name setting) token-name])) pairs))))))
+(defn binds-tokens?
+  "Whether the style `entries` bind design tokens: in their settings, or in
+  the easings of the keyframes of keyframe entries."
+  [entries]
+  (boolean (some #(or (seq (:applied-tokens %)) (some :applied-tokens (:keyframes %))) entries)))
 
 (defn parse-style-entries
   "The entries of an animation style that the array `entries` of the
-  plugin API describes (see `parse-animation`), with the design tokens of
-  their `appliedTokens`, or a string saying what is wrong with them."
+  plugin API describes (see `parse-animation` and `parse-keys-entry`),
+  with the design tokens of their `appliedTokens`, or a string saying
+  what is wrong with them."
   [entries]
   (cond
     (not (array? entries))
@@ -965,22 +1160,28 @@
     :else
     (let [parsed (into []
                        (map-indexed (fn [index props]
-                                      (let [entry  (if (object? props)
-                                                     (parse-animation props)
-                                                     "It should be an object")
-                                            tokens (when (map? entry)
-                                                     (parse-entry-tokens (obj/get props "appliedTokens")
-                                                                         (:type entry)))
-                                            entry  (cond
-                                                     (string? entry)  entry
-                                                     (string? tokens) tokens
-                                                     (seq tokens)     (assoc entry :applied-tokens tokens)
-                                                     :else            entry)]
+                                      (let [entry (cond
+                                                    (not (object? props))
+                                                    "It should be an object"
+
+                                                    (= "keyframes" (obj/get props "type"))
+                                                    (parse-keys-entry props)
+
+                                                    :else
+                                                    (parse-animation props))]
                                         (if (string? entry)
                                           (dm/str "Entry " (inc index) ": " entry)
                                           entry))))
                        entries)]
-      (or (d/seek string? parsed) parsed))))
+      (cond
+        (some string? parsed)
+        (d/seek string? parsed)
+
+        (> (ctas/keyframe-count parsed) cta/max-style-keyframes)
+        (dm/str "A style holds up to " cta/max-style-keyframes " keyframes")
+
+        :else
+        parsed))))
 
 (defn- copy-options
   "The settings the object `options` of `Timeline.copyAnimation` gives
@@ -1074,20 +1275,22 @@
            (u/not-valid plugin-id :duration value)
            (update! :duration #(assoc % :duration (mth/round value)))))}
 
-      ;; the presets it plays take its place, with ids of their own
+      ;; the presets it plays take its place, with ids of their own, and
+      ;; its keyframe entries become keyframes of the layer
       :detach
       (fn []
         (when-let [use (locate)]
           (if (:locked use)
             (u/not-valid plugin-id :detach "The animation is locked")
-            (let [presets (ctas/detach-use use)
-                  detach  (fn [animations]
-                            (into [] (mapcat #(if (= id (:id %)) presets [%])) animations))]
+            (let [objects (u/locate-objects file-id page-id)
+                  before  (into #{} (map :id) (:animations (cta/get-track (locate-timeline file-id page-id board-id) shape-id)))]
               (when (write-timeline! plugin-id file-id page-id board-id :detach
-                                     #(update-in % [:tracks shape-id :animations] detach))
+                                     #(update-in % [:tracks shape-id] ctas/detach-track-use id % objects))
                 (format/format-array
                  #(preset-animation-proxy plugin-id file-id page-id board-id shape-id (:id %))
-                 presets))))))
+                 (->> (cta/get-track (locate-timeline file-id page-id board-id) shape-id)
+                      :animations
+                      (remove #(contains? before (:id %))))))))))
 
       :remove
       (fn []
@@ -1211,6 +1414,8 @@
                               #(-> %
                                    (cta/add-keyframe shape-id (assoc keyframe :id id))
                                    (update :duration max (:time keyframe))))
+                  (when (contains? keyframe :applied-tokens)
+                    (st/emit! (dwtp/propagate-style-tokens)))
                   (keyframe-proxy plugin-id file-id page-id board-id shape-id id)))))))
 
       :addAnimation
@@ -1224,6 +1429,8 @@
               (u/not-valid plugin-id :addAnimation error)
               (let [id (uuid/next)]
                 (when (write! :addAnimation #(cta/add-animation % shape-id (assoc animation :id id)))
+                  (when (contains? animation :applied-tokens)
+                    (st/emit! (dwtp/propagate-style-tokens)))
                   (preset-animation-proxy plugin-id file-id page-id board-id shape-id id)))))))
 
       :addAnimationStyle

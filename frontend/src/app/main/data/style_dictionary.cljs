@@ -149,6 +149,22 @@
         {:errors [(wte/error-with-value :error.style-dictionary/invalid-token-value-cubic-bezier
                                         (if (sequential? value) (str/join ", " value) (str value)))]}))))
 
+(defn- parse-sd-token-spring-value
+  "Parses `value` of a spring `sd-token`, an object of its stiffness,
+  damping and mass, into a map like `{:value {:stiffness 170 :damping 26
+  :mass 1}}`.
+  If the `value` is not parseable and/or has missing references returns a map with `:errors`."
+  [value]
+  (let [value (if (object? value) (js->clj value) value)]
+    (if-let [spring (cfo/parse-spring-value value)]
+      {:value spring}
+      (if-let [references (seq (if (map? value)
+                                 (mapcat cto/find-token-value-references (filter string? (vals value)))
+                                 (cfo/find-refs value)))]
+        {:errors [(wte/error-with-value :error.style-dictionary/missing-reference references)]
+         :references references}
+        {:errors [(wte/error-with-value :error.style-dictionary/invalid-token-value-spring (str value))]}))))
+
 (defn- parse-sd-token-opacity-value
   "Parses `value` of a dimensions `sd-token` into a map like `{:value 1 :unit \"px\"}`.
   If the `value` is not parseable and/or has missing references returns a map with `:errors`.
@@ -530,6 +546,7 @@
                                      :number (parse-sd-token-number-value value)
                                      :duration (parse-sd-token-duration-value value)
                                      :cubic-bezier (parse-sd-token-cubic-bezier-value value)
+                                     :spring (parse-sd-token-spring-value value)
                                      (parse-sd-token-general-value value)))
                output-token (cond (:errors parsed-token-value)
                                   (merge origin-token parsed-token-value)

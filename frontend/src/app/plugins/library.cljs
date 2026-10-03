@@ -19,7 +19,9 @@
    [app.common.types.file :as ctf]
    [app.common.types.typography :as ctt]
    [app.common.uuid :as uuid]
+   [app.main.data.helpers :as dsh]
    [app.main.data.plugins :as dp]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.texts :as dwt]
    [app.main.data.workspace.tokens.propagation :as dwtp]
@@ -745,11 +747,51 @@
              (u/not-valid plugin-id :entries entries)
              (do (update! :entries #(assoc % :entries (mapv cta/make-style-entry entries)))
                  ;; the settings tokens set take their values
-                 (when (some :applied-tokens entries)
+                 (when (motion/binds-tokens? entries)
                    (st/emit! (dwtp/propagate-style-tokens)))))))}
 
       :duration
       {:get #(some-> (locate) :entries cta/style-length)}
+
+      ;; what a layer that uses the style plays now goes into it
+      :updateFromShape
+      (fn [shape]
+        (let [error (style-write-error plugin-id file-id id)]
+          (cond
+            (some? error)
+            (u/not-valid plugin-id :updateFromShape error)
+
+            (not (shape/shape-proxy? shape))
+            (u/not-valid plugin-id :updateFromShape "It should be a shape")
+
+            (not (u/page-active? (obj/get shape "$page")))
+            (u/not-valid plugin-id :updateFromShape "Cannot modify a page that is not currently active")
+
+            :else
+            (let [state    @st/state
+                  shape-id (obj/get shape "$id")
+                  timeline (dwa/shape-timeline state shape-id)
+                  track    (cta/get-track timeline shape-id)
+                  use      (d/seek #(ctas/uses-style? % file-id id) (:animations track))
+                  result   (when (some? use)
+                             (ctas/update-from-track track (:id use)
+                                                     (cta/rest-pose timeline (dsh/lookup-page-objects state) shape-id)
+                                                     (locate) file-id))]
+              (cond
+                (nil? use)
+                (u/not-valid plugin-id :updateFromShape "The shape does not use the style")
+
+                (= :too-many-entries (:error result))
+                (u/not-valid plugin-id :updateFromShape
+                             (dm/str "A style holds up to " cta/max-style-entries " entries"))
+
+                (= :too-many-keyframes (:error result))
+                (u/not-valid plugin-id :updateFromShape
+                             (dm/str "A style holds up to " cta/max-style-keyframes " keyframes"))
+
+                :else
+                (st/emit! (-> (dwl/update-style-from-layer shape-id (:id use))
+                              (se/add-event plugin-id))))))))
 
       :remove
       (fn []
@@ -1291,7 +1333,7 @@
             (st/emit! (-> (dwl/add-animation-style style)
                           (se/add-event plugin-id)))
             ;; the settings tokens set take their values
-            (when (some :applied-tokens parsed)
+            (when (motion/binds-tokens? parsed)
               (st/emit! (dwtp/propagate-style-tokens)))
             (lib-animation-style-proxy plugin-id file-id (:id style))))))
 

@@ -53,7 +53,7 @@
 
 (def token-setting-names
   "The settings of a style entry a design token sets (see
-  `cta/schema:style-entry-tokens`), as the code and the plugin API name
+  `cta/schema:animation-tokens`), as the code and the plugin API name
   them."
   {:start "start"
    :duration "duration"
@@ -157,16 +157,18 @@
 
 (defn- json-keyframes
   "The keyframes of one property, by time: each but the last with the
-  easing of the segment it starts."
+  easing of the segment it starts, and the token that sets it."
   [keyframes]
   (let [keyframes  (vec (sort-by :time keyframes))
         last-index (dec (count keyframes))]
     (into []
           (map-indexed
-           (fn [i {:keys [time value path-in path-out] :as keyframe}]
+           (fn [i {:keys [time value path-in path-out applied-tokens] :as keyframe}]
              (cond-> (d/ordered-map "time" (json-number time)
                                     "value" (json-value value))
                (< i last-index)  (assoc "easing" (json-easing keyframe))
+               (and (< i last-index) (:easing applied-tokens))
+               (assoc "tokens" (d/ordered-map "easing" (:easing applied-tokens)))
                (some? path-in)   (assoc "pathIn" (json-number path-in))
                (some? path-out)  (assoc "pathOut" (json-number path-out)))))
           keyframes)))
@@ -212,12 +214,16 @@
 
 (defn- json-presets
   "The visible presets of `source`, the track as designed: a use of an
-  animation style as the presets it plays, in timeline time."
+  animation style as the presets it plays, in timeline time. Its keyframe
+  entries are no presets: their keyframes are in the properties, which
+  give everything as it plays."
   [source]
   (into []
         (mapcat (fn [animation]
                   (if (cta/style-use? animation)
-                    (map #(json-preset % (:name animation)) (cta/expand-style animation))
+                    (->> (cta/expand-style animation)
+                         (remove cta/keys-entry?)
+                         (map #(json-preset % (:name animation))))
                     [(json-preset animation nil)])))
         (:animations source)))
 

@@ -14,9 +14,7 @@
    [app.common.path-names :as cpn]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
-   [app.common.types.tokens-lib :as ctob]
    [app.main.data.modal :as modal]
-   [app.main.data.style-dictionary :as sd]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.refs :as refs]
@@ -27,7 +25,8 @@
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.workspace.sidebar.assets.common :as cmm]
    [app.main.ui.workspace.sidebar.assets.groups :as grp]
-   [app.main.ui.workspace.sidebar.options.menus.motion :as motion :refer [animation-item*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :as motion :refer [animation-item* keys-entry-item*]]
+   [app.main.ui.workspace.tokens.motion :as motion-tokens]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -76,19 +75,6 @@
                    (vals (:timelines page))))
            (vals (:pages-index data))))))
 
-(defn- use-active-tokens-by-type
-  "The design tokens of the active sets of the current file, resolved and
-  by type: what the entries of its styles bind."
-  []
-  (let [tokens-lib (mf/deref refs/tokens-lib)
-        active     (mf/with-memo [tokens-lib]
-                     (if (some? tokens-lib)
-                       (ctob/get-tokens-in-active-sets tokens-lib)
-                       {}))
-        resolved   (sd/use-resolved-tokens active)]
-    (mf/with-memo [resolved]
-      (ctob/group-by-type resolved))))
-
 (defn- delete-style!
   "Delete the style `id` of the file `file-id`, asking first when layers
   play it: they keep its animations as presets."
@@ -126,16 +112,23 @@
          (mf/deps id on-remove)
          #(on-remove id))]
 
-    ;; An entry can play the units of the texts the style goes on.
-    [:> animation-item* {:animation entry
-                         :read-only read-only
-                         :tokens tokens
-                         :split-allowed true
-                         :on-change on-entry-change
-                         :on-split on-entry-split
-                         :on-remove (when (some? on-remove) on-entry-remove)
-                         :on-change-start on-change-start
-                         :on-change-end on-change-end}]))
+    ;; A preset entry can play the units of the texts the style goes on.
+    (if (cta/keys-entry? entry)
+      [:> keys-entry-item* {:entry entry
+                            :read-only read-only
+                            :on-change on-entry-change
+                            :on-remove (when (some? on-remove) on-entry-remove)
+                            :on-change-start on-change-start
+                            :on-change-end on-change-end}]
+      [:> animation-item* {:animation entry
+                           :read-only read-only
+                           :tokens tokens
+                           :split-allowed true
+                           :on-change on-entry-change
+                           :on-split on-entry-split
+                           :on-remove (when (some? on-remove) on-entry-remove)
+                           :on-change-start on-change-start
+                           :on-change-end on-change-end}])))
 
 (mf/defc style-editor*
   "The entries and description of the animation style `style` of the file
@@ -146,7 +139,7 @@
   {::mf/private true}
   [{:keys [style file-id is-local is-editable library-name]}]
   (let [entries   (:entries style)
-        tokens    (use-active-tokens-by-type)
+        tokens    (motion-tokens/use-active-tokens-by-type)
         draft*    (mf/use-ref nil)
         dragging* (mf/use-ref false)
         menu*     (mf/use-state false)

@@ -2751,10 +2751,11 @@ export interface Library extends PluginData {
 
   /**
    * Creates an animation style in the library of the file itself, named
-   * "Animation style", from the preset animations it plays (1 to 32).
-   * Needs Motion (the `animation/v1` feature).
-   * @param entries The preset animations of the style, their `start`
-   * counted from the start of the style.
+   * "Animation style", from the preset animations and keyframe entries it
+   * plays (1 to 32, see `AnimationStyleEntry`). Needs Motion (the
+   * `animation/v1` feature).
+   * @param entries The preset animations and keyframe entries of the
+   * style, their `start` counted from the start of the style.
    * @return Returns the new `LibraryAnimationStyle`.
    *
    * @example
@@ -2843,10 +2844,11 @@ export interface LibraryAnimationStyle extends LibraryElement {
   description: string;
 
   /**
-   * The preset animations the style plays, their `start` counted from the
-   * start of the style. Setting them replaces them all (1 to 32), and every
-   * use follows: a use as long as the style takes its new length, a
-   * stretched one keeps its own.
+   * The preset animations and keyframe entries the style plays, their
+   * `start` counted from the start of the style. Setting them replaces
+   * them all (1 to 32, with at most 256 keyframes), and every use follows:
+   * a use as long as the style takes its new length, a stretched one keeps
+   * its own.
    */
   entries: AnimationStyleEntry[];
 
@@ -2856,7 +2858,29 @@ export interface LibraryAnimationStyle extends LibraryElement {
   readonly duration: number;
 
   /**
-   * Removes the style. Its uses turn into the preset animations they play.
+   * Saves into the style what `shape`, a layer that uses it, plays now:
+   * its preset animations, the entries of its uses of styles (this one
+   * too) and its rows of keyframes that are neither hidden, locked nor
+   * looping, which become keyframe entries (see `KeyframesStyleEntry`).
+   * The use takes their place, still stretched as it was, and every use
+   * of the style follows, in one undo step. The way to change the values
+   * of keyframe entries: apply the style, add keyframes to the layer
+   * (they take over the span of the entry in their row), then update the
+   * style from it. Only a style of the file itself, and a layer on the
+   * current page.
+   *
+   * @example
+   * ```js
+   * const use = timeline.applyAnimationStyle(card, style, 0);
+   * timeline.addKeyframe(card, { property: 'rotation', time: 200, value: 12 });
+   * style.updateFromShape(card);
+   * ```
+   */
+  updateFromShape(shape: Shape): void;
+
+  /**
+   * Removes the style. Its uses turn into the preset animations they play,
+   * and their keyframe entries into keyframes of their layers.
    */
   remove(): void;
 
@@ -4216,6 +4240,12 @@ export interface TimelineJsonKeyframe {
   easing?: TimelineJsonEasing;
 
   /**
+   * The design token that sets its easing, by name, see
+   * `Keyframe.appliedTokens`.
+   */
+  tokens?: KeyframeTokens;
+
+  /**
    * For `x` and `y` on a motion path: where the curve comes into the
    * keyframe from, as an offset from its value, like the handle of a
    * bezier node.
@@ -4820,6 +4850,18 @@ export interface KeyframeProps {
    * For fills, strokes and shadows: which one of the layer (0 by default).
    */
   index?: number;
+  /**
+   * The design token that sets its easing, see `Keyframe.appliedTokens`.
+   */
+  appliedTokens?: KeyframeTokens;
+}
+
+/**
+ * The design token that sets the easing of a keyframe, by its name: a
+ * `cubicBezier` or a `spring` token (see `Keyframe.appliedTokens`).
+ */
+export interface KeyframeTokens {
+  easing?: string;
 }
 
 /**
@@ -4851,9 +4893,22 @@ export interface Keyframe {
    */
   value: number | string;
   /**
-   * How the value goes on from here to the next keyframe.
+   * How the value goes on from here to the next keyframe. Setting it
+   * unbinds the token of `appliedTokens`.
    */
   easing: MotionEasing;
+  /**
+   * The design token that sets its easing, by name, or undefined. The
+   * file resolves it in its active sets and writes its value into
+   * `easing`; when the token changes, the keyframe follows. Setting it
+   * binds a token, `undefined` unbinds it and keeps the easing.
+   *
+   * @example
+   * ```js
+   * keyframe.appliedTokens = { easing: 'ease.bounce' };
+   * ```
+   */
+  appliedTokens: KeyframeTokens | undefined;
   /**
    * Removes the keyframe.
    */
@@ -4933,6 +4988,12 @@ export interface PresetAnimationProps {
    * order stays the same. Set when not given.
    */
   seed?: number;
+  /**
+   * The design tokens that set settings of the animation, by setting,
+   * see `PresetAnimation.appliedTokens`. The values of the tokens win
+   * over the settings given.
+   */
+  appliedTokens?: AnimationStyleEntryTokens;
 }
 
 /**
@@ -5016,6 +5077,20 @@ export interface PresetAnimation {
    */
   seed?: number;
   /**
+   * The design tokens that set settings of the animation, by setting, or
+   * undefined (see `AnimationStyleEntryTokens` for the settings and the
+   * types of their tokens). The file resolves them in its active sets
+   * and writes their values into the settings; when a token changes, the
+   * animation follows. Setting a setting by hand unbinds its token;
+   * setting `appliedTokens` binds tokens, `undefined` unbinds them all.
+   *
+   * @example
+   * ```js
+   * animation.appliedTokens = { duration: 'motion.fast', easing: 'ease.spring' };
+   * ```
+   */
+  appliedTokens: AnimationStyleEntryTokens | undefined;
+  /**
    * Removes the animation.
    */
   remove(): void;
@@ -5050,12 +5125,20 @@ export type AnimationStyle =
   | 'pop-letters';
 
 /**
+ * An entry of an animation style (`LibraryAnimationStyle`), its `start`
+ * counted from the start of the style: a preset animation
+ * (`PresetStyleEntry`) or the keyframes of one property
+ * (`KeyframesStyleEntry`, `type: 'keyframes'`).
+ */
+export type AnimationStyleEntry = PresetStyleEntry | KeyframesStyleEntry;
+
+/**
  * A preset animation of an animation style (`LibraryAnimationStyle`), its
  * `start` counted from the start of the style. A split entry plays the
  * units of a text layer, and the whole layer on other layers. Design
  * tokens can set some of its settings, see `appliedTokens`.
  */
-export type AnimationStyleEntry = PresetAnimationProps & {
+export type PresetStyleEntry = PresetAnimationProps & {
   /**
    * The design tokens that set settings of the entry, by setting. The file
    * of the style resolves them in its active sets and writes their values
@@ -5074,9 +5157,99 @@ export type AnimationStyleEntry = PresetAnimationProps & {
 };
 
 /**
+ * The keyframes of one property of an animation style
+ * (`LibraryAnimationStyle`): from `start`, over `duration`, they take over
+ * that span of the row of the property on every layer that uses the
+ * style, as its own keyframes there give way; preset animations of the
+ * same property win over them. Their values are relative to the layer
+ * that plays them, so a style moves, turns and resizes each layer from
+ * where it rests: `x` and `y` are offsets in pixels from its rest
+ * position and `rotation` in degrees from its own, `width` and `height`
+ * factors of its own size (1 is its size), the other properties as they
+ * are. A layer with a row of keyframes saved as a style, or a style
+ * updated from a layer (`LibraryAnimationStyle.updateFromShape`), gives
+ * them; a style holds at most 256 keyframes in all.
+ *
+ * @example
+ * ```js
+ * const wobble = penpot.library.local.createAnimationStyle([
+ *   { type: 'keyframes', property: 'rotation', start: 0, duration: 600, keyframes: [
+ *     { time: 0, value: 0, easing: 'ease-in-out' }, { time: 200, value: 8, easing: 'ease-in-out' },
+ *     { time: 400, value: -8, easing: 'ease-in-out' }, { time: 600, value: 0 },
+ *   ] },
+ * ]);
+ * ```
+ */
+export interface KeyframesStyleEntry {
+  /**
+   * The kind of entry.
+   */
+  type: 'keyframes';
+  /**
+   * The property its keyframes set, see `AnimatableProperty`.
+   */
+  property: AnimatableProperty;
+  /**
+   * For fills, strokes and shadows: which one of the layer (0 by default).
+   */
+  index?: number;
+  /**
+   * When it starts, in milliseconds from the start of the style (0 by
+   * default).
+   */
+  start?: number;
+  /**
+   * How long it plays, in milliseconds: its keyframes are within it (as
+   * long as they last by default). Stretching a use of the style
+   * stretches them too.
+   */
+  duration?: number;
+  /**
+   * Its keyframes, one or more, at different times.
+   */
+  keyframes: KeyframesStyleEntryKeyframe[];
+}
+
+/**
+ * A keyframe of a `KeyframesStyleEntry`.
+ */
+export interface KeyframesStyleEntryKeyframe {
+  /**
+   * When, in milliseconds from the start of its entry.
+   */
+  time: number;
+  /**
+   * The value of the property then, relative to the layer that plays it
+   * (see `KeyframesStyleEntry`): a number, or a hexadecimal color for the
+   * colors.
+   */
+  value: number | string;
+  /**
+   * How the value goes on from here to the next keyframe (`ease` by
+   * default).
+   */
+  easing?: MotionEasing;
+  /**
+   * The design token that sets its easing, see `Keyframe.appliedTokens`.
+   */
+  appliedTokens?: KeyframeTokens;
+  /**
+   * For `x` and `y` on a motion path: where the curve comes into the
+   * keyframe from, as an offset from its value.
+   */
+  pathIn?: number;
+  /**
+   * For `x` and `y` on a motion path: where the curve leaves the keyframe
+   * towards, as an offset from its value.
+   */
+  pathOut?: number;
+}
+
+/**
  * The design tokens that set settings of an animation style entry, by
- * their names (see `AnimationStyleEntry.appliedTokens`): `start` and
- * `duration` take `duration` tokens, `easing` a `cubicBezier` one; the
+ * their names (see `PresetStyleEntry.appliedTokens` and
+ * `PresetAnimation.appliedTokens`): `start` and `duration` take
+ * `duration` tokens, `easing` a `cubicBezier` or a `spring` one; the
  * `amount` of a `fade` an `opacity` one, of a `scale` a `number` one, of
  * a `rotate` a `rotation` or `number` one, of a `blur` a `dimension` or
  * `number` one; the offsets of a `move` `dimension` or `number` ones.
@@ -6380,8 +6553,9 @@ export interface TokenLetterSpacing extends TokenBase {
 
 /**
  * Represents a token of type Duration (Penpot Motion): a length of time.
- * No shape takes it; the entries of animation styles bind it for their
- * start and duration (see `AnimationStyleEntry.appliedTokens`).
+ * No shape takes it; preset animations and the entries of animation
+ * styles bind it for their start and duration (see
+ * `PresetAnimation.appliedTokens`).
  * This interface extends `TokenBase` and specifies the data type of the value.
  */
 export interface TokenDuration extends TokenBase {
@@ -6409,9 +6583,10 @@ export interface TokenDuration extends TokenBase {
 
 /**
  * Represents a token of type Cubic Bezier (Penpot Motion): an easing curve
- * as CSS `cubic-bezier()` gives it. No shape takes it; the entries of
- * animation styles bind it for their easing (see
- * `AnimationStyleEntry.appliedTokens`).
+ * as CSS `cubic-bezier()` gives it. No shape takes it; preset
+ * animations, the entries of animation styles and keyframes bind it for
+ * their easing (see `PresetAnimation.appliedTokens` and
+ * `Keyframe.appliedTokens`).
  * This interface extends `TokenBase` and specifies the data type of the value.
  */
 export interface TokenCubicBezier extends TokenBase {
@@ -6435,6 +6610,56 @@ export interface TokenCubicBezier extends TokenBase {
    * active sets.
    */
   readonly resolvedValue: number[] | undefined;
+}
+
+/**
+ * The settings of a spring, see `TokenSpring`.
+ */
+export interface TokenSpringValue {
+  /**
+   * How hard it pulls to the end value, more than 0 (`170` by default in
+   * the easing editor).
+   */
+  stiffness: number;
+  /**
+   * How much it slows down, 0 or more (`26` by default).
+   */
+  damping: number;
+  /**
+   * How heavy the moving value is, more than 0 (`1` by default).
+   */
+  mass: number;
+}
+
+/**
+ * Represents a token of type Spring (Penpot Motion): an easing that
+ * settles like a spring. No shape takes it; the easing of preset
+ * animations, of animation style entries and of keyframes binds it like
+ * a `cubicBezier` token (see `PresetAnimation.appliedTokens` and
+ * `Keyframe.appliedTokens`). Its DTCG `$type` is `spring`.
+ * This interface extends `TokenBase` and specifies the data type of the value.
+ */
+export interface TokenSpring extends TokenBase {
+  /**
+   * The type of the token.
+   */
+  readonly type: 'spring';
+
+  /**
+   * The value as defined in the token itself: the settings of the spring,
+   * as an object or a text with the three numbers (`"170, 26, 1"`), or a
+   * reference.
+   */
+  value: TokenSpringValue | string;
+
+  /**
+   * The value calculated by finding all tokens with the same name in active sets
+   * and resolving the references.
+   *
+   * It's the settings of the spring, or undefined if no value has been
+   * found in active sets.
+   */
+  readonly resolvedValue: TokenSpringValue | undefined;
 }
 
 /**
@@ -6764,6 +6989,7 @@ export interface TokenTypography extends TokenBase {
 export type TokenValueString =
   | TokenShadowValueString
   | TokenTypographyValueString
+  | TokenSpringValue
   | string
   | string[]
   | number
@@ -6788,6 +7014,7 @@ export type Token =
   | TokenRotation
   | TokenSizing
   | TokenSpacing
+  | TokenSpring
   | TokenBorderWidth
   | TokenTextCase
   | TokenTextDecoration
@@ -7171,6 +7398,7 @@ export type TokenType =
   | 'rotation'
   | 'sizing'
   | 'spacing'
+  | 'spring'
   | 'borderWidth'
   | 'textCase'
   | 'textDecoration'

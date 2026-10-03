@@ -52,6 +52,7 @@
    [app.util.dom.normalize-wheel :as nw]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
+   [app.util.motion-labels :as labels]
    [app.util.shape-icon :as usi]
    [app.util.text.ui :as txu]
    [app.util.theme :as theme]
@@ -73,40 +74,6 @@
 
 (def ^:private property-order
   (into {} (map-indexed (fn [i p] [p i]) dwa/animatable-properties)))
-
-(defn- property-label
-  [property index]
-  (let [n (when (some? index) (inc index))]
-    (case property
-      :x "Position X"
-      :y "Position Y"
-      :width "Width"
-      :height "Height"
-      :scale-x "Scale X"
-      :scale-y "Scale Y"
-      :rotation "Rotation"
-      :r1 (tr "workspace.options.radius-top-left")
-      :r2 (tr "workspace.options.radius-top-right")
-      :r3 (tr "workspace.options.radius-bottom-right")
-      :r4 (tr "workspace.options.radius-bottom-left")
-      :opacity (tr "workspace.options.opacity")
-      :fill-color (tr "workspace.animation.fill" n)
-      :fill-opacity (tr "workspace.animation.fill-opacity" n)
-      :stroke-color (tr "workspace.animation.stroke" n)
-      :stroke-opacity (tr "workspace.animation.stroke-opacity" n)
-      :stroke-width (tr "workspace.animation.stroke-width" n)
-      :shadow-offset-x (tr "workspace.animation.shadow-x" n)
-      :shadow-offset-y (tr "workspace.animation.shadow-y" n)
-      :shadow-blur (tr "workspace.animation.shadow-blur" n)
-      :shadow-spread (tr "workspace.animation.shadow-spread" n)
-      :shadow-color (tr "workspace.animation.shadow-color" n)
-      :shadow-opacity (tr "workspace.animation.shadow-opacity" n)
-      :blur (tr "workspace.animation.blur")
-      :background-blur (tr "workspace.animation.background-blur")
-      :trim-start (tr "workspace.animation.trim-start")
-      :trim-end (tr "workspace.animation.trim-end")
-      :trim-offset (tr "workspace.animation.trim-offset")
-      (name property))))
 
 (defn- track-slots
   "Distinct `[property index]` slots of `keyframes`, in display order."
@@ -943,7 +910,7 @@
             :on-click on-label-click}
       [:span {:class (stl/css :tree-line)}]
       [:span {:class (stl/css :property-name)}
-       (property-label property index)
+       (labels/property-label property index)
        (when looping?
          [:> i/icon* {:icon-id i/loop
                       :size "s"

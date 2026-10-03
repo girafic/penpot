@@ -91,6 +91,10 @@
    {:error/code :error.style-dictionary/invalid-token-value-cubic-bezier
     :error/fn #(tr "errors.tokens.invalid-cubic-bezier-token-value")}
 
+   :error.style-dictionary/invalid-token-value-spring
+   {:error/code :error.style-dictionary/invalid-token-value-spring
+    :error/fn #(tr "errors.tokens.invalid-spring-token-value")}
+
    :error.style-dictionary/invalid-token-value-opacity
    {:error/code :error.style-dictionary/invalid-token-value-opacity
     :error/fn #(str/join "\n" [(str (tr "errors.tokens.invalid-value" %) ".") (tr "errors.tokens.opacity-range")])}

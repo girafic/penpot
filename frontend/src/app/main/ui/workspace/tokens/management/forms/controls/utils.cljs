@@ -7,11 +7,12 @@
 
 (defn- option-value
   "A value of a token as an option shows it: a sequence (the numbers of a
-  cubic bezier) as a text."
+  cubic bezier) or a spring (its stiffness, damping and mass) as a text."
   [value]
-  (if (sequential? value)
-    (str/join ", " value)
-    value))
+  (cond
+    (sequential? value) (str/join ", " value)
+    (map? value)        (str/join ", " (keep value [:stiffness :damping :mass]))
+    :else               value))
 
 (defn- token->dropdown-option
   [token]

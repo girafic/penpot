@@ -96,7 +96,7 @@
     (let [token (u/locate-token file-id set-id id)]
       (cond
         (contains? cto/motion-token-types (:type token))
-        (u/not-valid plugin-id :applyToken "A duration or cubicBezier token applies to no shape: the entries of animation styles bind it")
+        (u/not-valid plugin-id :applyToken "A duration, cubicBezier or spring token applies to no shape: the settings of animations bind it")
 
         (some #(not (token-attr? %)) attrs)
         (u/not-valid plugin-id :applyToSelected attrs)
@@ -189,6 +189,11 @@
       (some-> (ts/tokenscript-symbols->penpot-unit resolved-value)
               (clj->js))
 
+      (= :spring (:type token))
+      ;; `{stiffness, damping, mass}`, as the documented `TokenSpringValue`.
+      (some-> (ts/tokenscript-symbols->penpot-unit resolved-value)
+              (clj->js))
+
       :else
       (ts/tokenscript-symbols->penpot-unit resolved-value))))
 
@@ -264,7 +269,10 @@
                        (ctob/convert-dtcg-font-family)
 
                        (= :cubic-bezier (:type token))
-                       (ctob/convert-dtcg-cubic-bezier))]
+                       (ctob/convert-dtcg-cubic-bezier)
+
+                       (and (= :spring (:type token)) (object? value))
+                       (-> (js->clj) (ctob/convert-dtcg-spring)))]
            (st/emit! (dwtl/update-token set-id id {:value value})))))}
 
     :resolvedValue

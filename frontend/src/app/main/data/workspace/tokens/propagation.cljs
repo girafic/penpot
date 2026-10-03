@@ -7,13 +7,17 @@
 (ns app.main.data.workspace.tokens.propagation
   (:require
    [app.common.data :as d]
+   [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
    [app.common.logging :as l]
+   [app.common.logic.timelines :as cltl]
    [app.common.time :as ct]
+   [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
    [app.common.types.token :as ctt]
    [app.common.types.tokens-lib :as ctob]
    [app.config :as cf]
+   [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
    [app.main.data.style-dictionary :as sd]
    [app.main.data.tokenscript :as ts]
@@ -194,17 +198,35 @@
                (d/update-vals #(update % :resolved-value ts/tokenscript-symbols->penpot-unit))))
     (sd/resolve-tokens tokens-tree)))
 
+(defn- commit-token-timelines
+  "Commit the timelines of the pages of the current file whose presets
+  and keyframes the resolved token `values` (by name) change (see
+  `cta/resolve-timeline-tokens`): one change set over all the pages."
+  [values]
+  (ptk/reify ::commit-token-timelines
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [fdata   (dsh/lookup-file-data state)
+            pages   (map #(dsh/get-page fdata %) (:pages fdata))
+            changes (cltl/commit-page-timelines (pcb/empty-changes it) pages
+                                                #(cta/resolve-timeline-tokens % values))]
+        (when (seq (:redo-changes changes))
+          (rx/of (dch/commit-changes changes)))))))
+
 (defn- propagate-animation-styles
-  "The commit of the animation styles of the current file whose entries
-  the resolved tokens `resolved-tokens` change, with the sync of their
-  uses (see `ctas/token-resolved-styles`); nil when none changes."
+  "The commits of what the resolved tokens `resolved-tokens` change in
+  the animations of the current file (Penpot Motion): its animation
+  styles, with the sync of their uses (see `ctas/token-resolved-styles`),
+  and the presets and keyframes of its timelines that bind them."
   [state resolved-tokens]
   (let [file-id (:current-file-id state)
         styles  (:animation-styles (dsh/lookup-file-data state file-id))
         values  (d/update-vals resolved-tokens :resolved-value)
         changed (ctas/token-resolved-styles styles values)]
-    (when (seq changed)
-      (rx/of (dwl/update-animation-styles changed file-id)))))
+    (rx/concat
+     (when (seq changed)
+       (rx/of (dwl/update-animation-styles changed file-id)))
+     (rx/of (commit-token-timelines values)))))
 
 (defn- commit-token-styles
   "Commit the animation styles of the current file that `resolved-tokens`
@@ -217,8 +239,8 @@
 
 (defn propagate-style-tokens
   "Resolve the tokens of the active sets of the current file and commit
-  the animation styles whose bound settings they change, leaving the
-  shapes alone: after a plugin binds tokens in the entries of a style."
+  the animation styles, presets and keyframes whose bound settings they
+  change, leaving the shapes alone: after a plugin binds tokens in them."
   []
   (ptk/reify ::propagate-style-tokens
     ptk/WatchEvent

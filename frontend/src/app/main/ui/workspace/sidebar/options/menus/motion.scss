@@ -199,6 +199,10 @@
   gap: var(--sp-xs);
 }
 
+.style-update {
+  align-self: flex-end;
+}
+
 .save-style {
   grid-column: 1 / -1;
   display: flex;

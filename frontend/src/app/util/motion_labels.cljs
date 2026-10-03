@@ -5,9 +5,10 @@
 ;; Copyright (c) KALEIDOS SUBSIDIARY SL
 
 (ns app.util.motion-labels
-  "The names Penpot Motion shows for its preset animations, shared by the
-  workspace (the design tab, the dock, the style editor) and the Inspect
-  of the view mode, which loads no workspace code."
+  "The names Penpot Motion shows for its preset animations and the
+  properties it animates, shared by the workspace (the design tab, the
+  dock, the style editor) and the Inspect of the view mode, which loads
+  no workspace code."
   (:require
    [app.util.i18n :refer [tr]]))
 
@@ -21,14 +22,53 @@
     :line (tr "workspace.animation.split.line")
     (tr "workspace.animation.split.layer")))
 
+(defn property-label
+  "The name of `property` (and of its `index`, the fill, stroke or shadow
+  it animates, counted from 1), as the dock names its rows."
+  [property index]
+  (let [n (when (some? index) (inc index))]
+    (case property
+      :x "Position X"
+      :y "Position Y"
+      :width "Width"
+      :height "Height"
+      :scale-x "Scale X"
+      :scale-y "Scale Y"
+      :rotation "Rotation"
+      :r1 (tr "workspace.options.radius-top-left")
+      :r2 (tr "workspace.options.radius-top-right")
+      :r3 (tr "workspace.options.radius-bottom-right")
+      :r4 (tr "workspace.options.radius-bottom-left")
+      :opacity (tr "workspace.options.opacity")
+      :fill-color (tr "workspace.animation.fill" n)
+      :fill-opacity (tr "workspace.animation.fill-opacity" n)
+      :stroke-color (tr "workspace.animation.stroke" n)
+      :stroke-opacity (tr "workspace.animation.stroke-opacity" n)
+      :stroke-width (tr "workspace.animation.stroke-width" n)
+      :shadow-offset-x (tr "workspace.animation.shadow-x" n)
+      :shadow-offset-y (tr "workspace.animation.shadow-y" n)
+      :shadow-blur (tr "workspace.animation.shadow-blur" n)
+      :shadow-spread (tr "workspace.animation.shadow-spread" n)
+      :shadow-color (tr "workspace.animation.shadow-color" n)
+      :shadow-opacity (tr "workspace.animation.shadow-opacity" n)
+      :blur (tr "workspace.animation.blur")
+      :background-blur (tr "workspace.animation.background-blur")
+      :trim-start (tr "workspace.animation.trim-start")
+      :trim-end (tr "workspace.animation.trim-end")
+      :trim-offset (tr "workspace.animation.trim-offset")
+      (name property))))
+
 (defn animation-label
   "Name of a preset animation, with the units it plays one by one when it
-  splits a text (\"Fade in · Words\"), or of the style a style use plays,
-  as the sidebar and the timeline show it."
+  splits a text (\"Fade in · Words\"), of the style a style use plays, or
+  of the row a keyframe entry of a style animates, as the sidebar and the
+  timeline show it."
   [{:keys [type direction split] :as animation}]
   (let [out?  (= direction :out)
         label (case type
                 :style  (:name animation)
+                :keys   (tr "workspace.animation.keys-entry"
+                            (property-label (:property animation) (:index animation)))
                 :fade   (if out? (tr "workspace.animation.fade-out") (tr "workspace.animation.fade-in"))
                 :move   (if out? (tr "workspace.animation.move-out") (tr "workspace.animation.move-in"))
                 :scale  (if out? (tr "workspace.animation.scale-out") (tr "workspace.animation.scale-in"))

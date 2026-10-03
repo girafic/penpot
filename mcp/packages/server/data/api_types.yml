@@ -11508,15 +11508,16 @@ Library:
         ```
 
         Creates an animation style in the library of the file itself, named
-        "Animation style", from the preset animations it plays (1 to 32).
-        Needs Motion (the `animation/v1` feature).
+        "Animation style", from the preset animations and keyframe entries it
+        plays (1 to 32, see `AnimationStyleEntry`). Needs Motion (the
+        `animation/v1` feature).
 
         Parameters
 
         * entries: AnimationStyleEntry[]
 
-          The preset animations of the style, their `start`
-          counted from the start of the style.
+          The preset animations and keyframe entries of the
+          style, their `start` counted from the start of the style.
 
         Returns LibraryAnimationStyle
 
@@ -11936,6 +11937,7 @@ LibraryAnimationStyle:
         description: string;
         entries: AnimationStyleEntry[];
         duration: number;
+        updateFromShape(shape: Shape): void;
         remove(): void;
         clone(): LibraryAnimationStyle;
         id: string;
@@ -11970,10 +11972,11 @@ LibraryAnimationStyle:
         entries: AnimationStyleEntry[]
         ```
 
-        The preset animations the style plays, their `start` counted from the
-        start of the style. Setting them replaces them all (1 to 32), and every
-        use follows: a use as long as the style takes its new length, a
-        stretched one keeps its own.
+        The preset animations and keyframe entries the style plays, their
+        `start` counted from the start of the style. Setting them replaces
+        them all (1 to 32, with at most 256 keyframes), and every use follows:
+        a use as long as the style takes its new length, a stretched one keeps
+        its own.
       duration: |-
         ```
         readonly duration: number
@@ -12005,12 +12008,39 @@ LibraryAnimationStyle:
 
         The path of the library element.
     Methods:
+      updateFromShape: |-
+        ```
+        updateFromShape(shape: Shape): void
+        ```
+
+        Saves into the style what `shape`, a layer that uses it, plays now:
+        its preset animations, the entries of its uses of styles (this one
+        too) and its rows of keyframes that are neither hidden, locked nor
+        looping, which become keyframe entries (see `KeyframesStyleEntry`).
+        The use takes their place, still stretched as it was, and every use
+        of the style follows, in one undo step. The way to change the values
+        of keyframe entries: apply the style, add keyframes to the layer
+        (they take over the span of the entry in their row), then update the
+        style from it. Only a style of the file itself, and a layer on the
+        current page.
+
+        Parameters
+
+        * shape: Shape
+
+        Returns void
+
+        Example
+        ```
+        const use = timeline.applyAnimationStyle(card, style, 0);timeline.addKeyframe(card, { property: 'rotation', time: 200, value: 12 });style.updateFromShape(card);
+        ```
       remove: |-
         ```
         remove(): void
         ```
 
-        Removes the style. Its uses turn into the preset animations they play.
+        Removes the style. Its uses turn into the preset animations they play,
+        and their keyframe entries into keyframes of their layers.
 
         Returns void
       clone: |-
@@ -17096,6 +17126,7 @@ TimelineJsonKeyframe:
         time: number;
         value: string | number;
         easing?: TimelineJsonEasing;
+        tokens?: KeyframeTokens;
         pathIn?: number;
         pathOut?: number;
     }
@@ -17123,6 +17154,13 @@ TimelineJsonKeyframe:
 
         How the value goes on from here to the next keyframe; the last
         keyframe has none.
+      tokens: |-
+        ```
+        tokens?: KeyframeTokens
+        ```
+
+        The design token that sets its easing, by name, see
+        `Keyframe.appliedTokens`.
       pathIn: |-
         ```
         pathIn?: number
@@ -17896,6 +17934,7 @@ KeyframeProps:
         value: string | number;
         easing?: MotionEasing;
         index?: number;
+        appliedTokens?: KeyframeTokens;
     }
     ```
 
@@ -17934,6 +17973,33 @@ KeyframeProps:
         ```
 
         For fills, strokes and shadows: which one of the layer (0 by default).
+      appliedTokens: |-
+        ```
+        appliedTokens?: KeyframeTokens
+        ```
+
+        The design token that sets its easing, see `Keyframe.appliedTokens`.
+KeyframeTokens:
+  overview: |-
+    Interface KeyframeTokens
+    ========================
+
+    The design token that sets the easing of a keyframe, by its name: a
+    `cubicBezier` or a `spring` token (see `Keyframe.appliedTokens`).
+
+    ```
+    interface KeyframeTokens {
+        easing?: string;
+    }
+    ```
+
+    Referenced by: Keyframe, KeyframeProps, KeyframesStyleEntryKeyframe, TimelineJsonKeyframe
+  members:
+    Properties:
+      easing: |-
+        ```
+        easing?: string
+        ```
 Keyframe:
   overview: |-
     Interface Keyframe
@@ -17950,6 +18016,7 @@ Keyframe:
         time: number;
         value: string | number;
         easing: MotionEasing;
+        appliedTokens: KeyframeTokens | undefined;
         remove(): void;
     }
     ```
@@ -17998,7 +18065,22 @@ Keyframe:
         easing: MotionEasing
         ```
 
-        How the value goes on from here to the next keyframe.
+        How the value goes on from here to the next keyframe. Setting it
+        unbinds the token of `appliedTokens`.
+      appliedTokens: |-
+        ```
+        appliedTokens: KeyframeTokens | undefined
+        ```
+
+        The design token that sets its easing, by name, or undefined. The
+        file resolves it in its active sets and writes its value into
+        `easing`; when the token changes, the keyframe follows. Setting it
+        binds a token, `undefined` unbinds it and keeps the easing.
+
+        Example
+        ```
+        keyframe.appliedTokens = { easing: 'ease.bounce' };
+        ```
     Methods:
       remove: |-
         ```
@@ -18029,10 +18111,11 @@ PresetAnimationProps:
         spread?: number;
         order?: TextSplitOrder;
         seed?: number;
+        appliedTokens?: AnimationStyleEntryTokens;
     }
     ```
 
-    Referenced by: AnimationStyleEntry, Timeline
+    Referenced by: PresetStyleEntry, Timeline
   members:
     Properties:
       type: |-
@@ -18117,6 +18200,14 @@ PresetAnimationProps:
 
         With `split` and a `random` order: the seed of its shuffle, so the
         order stays the same. Set when not given.
+      appliedTokens: |-
+        ```
+        appliedTokens?: AnimationStyleEntryTokens
+        ```
+
+        The design tokens that set settings of the animation, by setting,
+        see `PresetAnimation.appliedTokens`. The values of the tokens win
+        over the settings given.
 PresetAnimation:
   overview: |-
     Interface PresetAnimation
@@ -18141,6 +18232,7 @@ PresetAnimation:
         spread?: number;
         order?: TextSplitOrder;
         seed?: number;
+        appliedTokens: AnimationStyleEntryTokens | undefined;
         remove(): void;
     }
     ```
@@ -18236,6 +18328,22 @@ PresetAnimation:
 
         With `split` and a `random` order: the seed of its shuffle. A new one
         shuffles the units again.
+      appliedTokens: |-
+        ```
+        appliedTokens: AnimationStyleEntryTokens | undefined
+        ```
+
+        The design tokens that set settings of the animation, by setting, or
+        undefined (see `AnimationStyleEntryTokens` for the settings and the
+        types of their tokens). The file resolves them in its active sets
+        and writes their values into the settings; when a token changes, the
+        animation follows. Setting a setting by hand unbinds its token;
+        setting `appliedTokens` binds tokens, `undefined` unbinds them all.
+
+        Example
+        ```
+        animation.appliedTokens = { duration: 'motion.fast', easing: 'ease.spring' };
+        ```
     Methods:
       remove: |-
         ```
@@ -18245,14 +18353,153 @@ PresetAnimation:
         Removes the animation.
 
         Returns void
+KeyframesStyleEntry:
+  overview: |-
+    Interface KeyframesStyleEntry
+    =============================
+
+    The keyframes of one property of an animation style
+    (`LibraryAnimationStyle`): from `start`, over `duration`, they take over
+    that span of the row of the property on every layer that uses the
+    style, as its own keyframes there give way; preset animations of the
+    same property win over them. Their values are relative to the layer
+    that plays them, so a style moves, turns and resizes each layer from
+    where it rests: `x` and `y` are offsets in pixels from its rest
+    position and `rotation` in degrees from its own, `width` and `height`
+    factors of its own size (1 is its size), the other properties as they
+    are. A layer with a row of keyframes saved as a style, or a style
+    updated from a layer (`LibraryAnimationStyle.updateFromShape`), gives
+    them; a style holds at most 256 keyframes in all.
+
+    Example
+    ```
+    const wobble = penpot.library.local.createAnimationStyle([  { type: 'keyframes', property: 'rotation', start: 0, duration: 600, keyframes: [    { time: 0, value: 0, easing: 'ease-in-out' }, { time: 200, value: 8, easing: 'ease-in-out' },    { time: 400, value: -8, easing: 'ease-in-out' }, { time: 600, value: 0 },  ] },]);
+    ```
+
+    ```
+    interface KeyframesStyleEntry {
+        type: "keyframes";
+        property: AnimatableProperty;
+        index?: number;
+        start?: number;
+        duration?: number;
+        keyframes: KeyframesStyleEntryKeyframe[];
+    }
+    ```
+
+    Referenced by: AnimationStyleEntry
+  members:
+    Properties:
+      type: |-
+        ```
+        type: "keyframes"
+        ```
+
+        The kind of entry.
+      property: |-
+        ```
+        property: AnimatableProperty
+        ```
+
+        The property its keyframes set, see `AnimatableProperty`.
+      index: |-
+        ```
+        index?: number
+        ```
+
+        For fills, strokes and shadows: which one of the layer (0 by default).
+      start: |-
+        ```
+        start?: number
+        ```
+
+        When it starts, in milliseconds from the start of the style (0 by
+        default).
+      duration: |-
+        ```
+        duration?: number
+        ```
+
+        How long it plays, in milliseconds: its keyframes are within it (as
+        long as they last by default). Stretching a use of the style
+        stretches them too.
+      keyframes: |-
+        ```
+        keyframes: KeyframesStyleEntryKeyframe[]
+        ```
+
+        Its keyframes, one or more, at different times.
+KeyframesStyleEntryKeyframe:
+  overview: |-
+    Interface KeyframesStyleEntryKeyframe
+    =====================================
+
+    A keyframe of a `KeyframesStyleEntry`.
+
+    ```
+    interface KeyframesStyleEntryKeyframe {
+        time: number;
+        value: string | number;
+        easing?: MotionEasing;
+        appliedTokens?: KeyframeTokens;
+        pathIn?: number;
+        pathOut?: number;
+    }
+    ```
+
+    Referenced by: KeyframesStyleEntry
+  members:
+    Properties:
+      time: |-
+        ```
+        time: number
+        ```
+
+        When, in milliseconds from the start of its entry.
+      value: |-
+        ```
+        value: string | number
+        ```
+
+        The value of the property then, relative to the layer that plays it
+        (see `KeyframesStyleEntry`): a number, or a hexadecimal color for the
+        colors.
+      easing: |-
+        ```
+        easing?: MotionEasing
+        ```
+
+        How the value goes on from here to the next keyframe (`ease` by
+        default).
+      appliedTokens: |-
+        ```
+        appliedTokens?: KeyframeTokens
+        ```
+
+        The design token that sets its easing, see `Keyframe.appliedTokens`.
+      pathIn: |-
+        ```
+        pathIn?: number
+        ```
+
+        For `x` and `y` on a motion path: where the curve comes into the
+        keyframe from, as an offset from its value.
+      pathOut: |-
+        ```
+        pathOut?: number
+        ```
+
+        For `x` and `y` on a motion path: where the curve leaves the keyframe
+        towards, as an offset from its value.
 AnimationStyleEntryTokens:
   overview: |-
     Interface AnimationStyleEntryTokens
     ===================================
 
     The design tokens that set settings of an animation style entry, by
-    their names (see `AnimationStyleEntry.appliedTokens`): `start` and
-    `duration` take `duration` tokens, `easing` a `cubicBezier` one; the
+    their names (see `PresetStyleEntry.appliedTokens` and
+    `PresetAnimation.appliedTokens`): `start` and `duration` take
+    `duration` tokens, `easing` a `cubicBezier` or a `spring` one; the
     `amount` of a `fade` an `opacity` one, of a `scale` a `number` one, of
     a `rotate` a `rotation` or `number` one, of a `blur` a `dimension` or
     `number` one; the offsets of a `move` `dimension` or `number` ones.
@@ -18268,7 +18515,7 @@ AnimationStyleEntryTokens:
     }
     ```
 
-    Referenced by: AnimationStyleEntry, TimelineJsonPreset
+    Referenced by: PresetAnimation, PresetAnimationProps, PresetStyleEntry, TimelineJsonPreset
   members:
     Properties:
       start: |-
@@ -22026,6 +22273,7 @@ TokenBase:
       + TokenLetterSpacing
       + TokenDuration
       + TokenCubicBezier
+      + TokenSpring
       + TokenNumber
       + TokenOpacity
       + TokenRotation
@@ -23384,8 +23632,9 @@ TokenDuration:
     =======================
 
     Represents a token of type Duration (Penpot Motion): a length of time.
-    No shape takes it; the entries of animation styles bind it for their
-    start and duration (see `AnimationStyleEntry.appliedTokens`).
+    No shape takes it; preset animations and the entries of animation
+    styles bind it for their start and duration (see
+    `PresetAnimation.appliedTokens`).
     This interface extends `TokenBase` and specifies the data type of the value.
 
     ```
@@ -23529,9 +23778,10 @@ TokenCubicBezier:
     ==========================
 
     Represents a token of type Cubic Bezier (Penpot Motion): an easing curve
-    as CSS `cubic-bezier()` gives it. No shape takes it; the entries of
-    animation styles bind it for their easing (see
-    `AnimationStyleEntry.appliedTokens`).
+    as CSS `cubic-bezier()` gives it. No shape takes it; preset
+    animations, the entries of animation styles and keyframes bind it for
+    their easing (see `PresetAnimation.appliedTokens` and
+    `Keyframe.appliedTokens`).
     This interface extends `TokenBase` and specifies the data type of the value.
 
     ```
@@ -23611,6 +23861,190 @@ TokenCubicBezier:
 
         It's the four numbers, or undefined if no value has been found in
         active sets.
+    Methods:
+      duplicate: |-
+        ```
+        duplicate(): Token
+        ```
+
+        Adds to the set that contains this Token a new one equal to this one
+        but with a new id.
+
+        Returns Token
+      remove: |-
+        ```
+        remove(): void
+        ```
+
+        Removes this token from the catalog.
+
+        It will NOT be unapplied from any shape, since there may be other tokens
+        with the same name.
+
+        Returns void
+      applyToShapes: |-
+        ```
+        applyToShapes(shapes: Shape[], properties?: TokenProperty[]): void
+        ```
+
+        Applies this token to one or more properties of the given shapes.
+
+        Parameters
+
+        * shapes: Shape[]
+
+          is an array of shapes to apply it.
+        * properties: TokenProperty[]
+
+          an optional list of property names. If omitted, the
+          default properties will be applied.
+
+          NOTE that the tokens application is by name and not by id. If there exist
+          several tokens with the same name in different sets, the actual token applied
+          and the value set to the attributes will depend on which sets are active
+          (and will change if different sets or themes are activated later).
+
+        Returns void
+      applyToSelected: |-
+        ```
+        applyToSelected(properties?: TokenProperty[]): void
+        ```
+
+        Applies this token to the currently selected shapes.
+
+        Parameters and warnings are the same as above.
+
+        Parameters
+
+        * properties: TokenProperty[]
+
+        Returns void
+TokenSpringValue:
+  overview: |-
+    Interface TokenSpringValue
+    ==========================
+
+    The settings of a spring, see `TokenSpring`.
+
+    ```
+    interface TokenSpringValue {
+        stiffness: number;
+        damping: number;
+        mass: number;
+    }
+    ```
+
+    Referenced by: TokenSpring, TokenValueString
+  members:
+    Properties:
+      stiffness: |-
+        ```
+        stiffness: number
+        ```
+
+        How hard it pulls to the end value, more than 0 (`170` by default in
+        the easing editor).
+      damping: |-
+        ```
+        damping: number
+        ```
+
+        How much it slows down, 0 or more (`26` by default).
+      mass: |-
+        ```
+        mass: number
+        ```
+
+        How heavy the moving value is, more than 0 (`1` by default).
+TokenSpring:
+  overview: |-
+    Interface TokenSpring
+    =====================
+
+    Represents a token of type Spring (Penpot Motion): an easing that
+    settles like a spring. No shape takes it; the easing of preset
+    animations, of animation style entries and of keyframes binds it like
+    a `cubicBezier` token (see `PresetAnimation.appliedTokens` and
+    `Keyframe.appliedTokens`). Its DTCG `$type` is `spring`.
+    This interface extends `TokenBase` and specifies the data type of the value.
+
+    ```
+    interface TokenSpring {
+        id: string;
+        name: string;
+        description: string;
+        duplicate(): Token;
+        remove(): void;
+        resolvedValueString: string | undefined;
+        applyToShapes(shapes: Shape[], properties?: TokenProperty[]): void;
+        applyToSelected(properties?: TokenProperty[]): void;
+        type: "spring";
+        value: string | TokenSpringValue;
+        resolvedValue: TokenSpringValue | undefined;
+    }
+    ```
+
+    Hierarchy (View Summary)
+
+    * TokenBase
+      + TokenSpring
+
+    Referenced by: Token
+  members:
+    Properties:
+      id: |-
+        ```
+        readonly id: string
+        ```
+
+        The unique identifier for this token, used only internally inside Penpot.
+        This one is not exported or synced with external Design Token sources.
+      name: |-
+        ```
+        name: string
+        ```
+
+        The name of the token. It may include a group path separated by `.`.
+      description: |-
+        ```
+        description: string
+        ```
+
+        An optional description text.
+      resolvedValueString: |-
+        ```
+        readonly resolvedValueString: string | undefined
+        ```
+
+        The value calculated by finding all tokens with the same name in active sets
+        and resolving the references.
+
+        It's converted to string, regardless of the data type of the value depending
+        on the token type. It can be undefined if no value has been found in active sets.
+      type: |-
+        ```
+        readonly type: "spring"
+        ```
+
+        The type of the token.
+      value: |-
+        ```
+        value: string | TokenSpringValue
+        ```
+
+        The value as defined in the token itself: the settings of the spring,
+        as an object or a text with the three numbers (`"170, 26, 1"`), or a
+        reference.
+      resolvedValue: |-
+        ```
+        readonly resolvedValue: TokenSpringValue | undefined
+        ```
+
+        The value calculated by finding all tokens with the same name in active sets
+        and resolving the references.
+
+        It's the settings of the spring, or undefined if no value has been
+        found in active sets.
     Methods:
       duplicate: |-
         ```
@@ -26215,7 +26649,7 @@ AnimatableProperty:
     The fill, stroke and shadow properties take the `index` of the fill,
     stroke or shadow of the layer.
 
-    Referenced by: CopyAnimationOptions, Keyframe, KeyframeProps, Timeline, TimelineJsonProperty
+    Referenced by: CopyAnimationOptions, Keyframe, KeyframeProps, KeyframesStyleEntry, Timeline, TimelineJsonProperty
   members: {}
 MotionEasing:
   overview: |-
@@ -26245,7 +26679,7 @@ MotionEasing:
     * A spring that settles at the next keyframe:
       `{ type: 'spring', stiffness: 170, damping: 26, mass: 1 }`.
 
-    Referenced by: Keyframe, KeyframeProps, PresetAnimation, PresetAnimationProps
+    Referenced by: Keyframe, KeyframeProps, KeyframesStyleEntryKeyframe, PresetAnimation, PresetAnimationProps
   members: {}
 PresetAnimationType:
   overview: |-
@@ -26341,7 +26775,23 @@ AnimationStyleEntry:
     ==============================
 
     ```
-    AnimationStyleEntry: PresetAnimationProps & {
+    AnimationStyleEntry: PresetStyleEntry | KeyframesStyleEntry
+    ```
+
+    An entry of an animation style (`LibraryAnimationStyle`), its `start`
+    counted from the start of the style: a preset animation
+    (`PresetStyleEntry`) or the keyframes of one property
+    (`KeyframesStyleEntry`, `type: 'keyframes'`).
+
+    Referenced by: Library, LibraryAnimationStyle
+  members: {}
+PresetStyleEntry:
+  overview: |-
+    Type Alias PresetStyleEntry
+    ===========================
+
+    ```
+    PresetStyleEntry: PresetAnimationProps & {
         appliedTokens?: AnimationStyleEntryTokens;
     }
     ```
@@ -26366,7 +26816,7 @@ AnimationStyleEntry:
       style.entries = [  { type: 'fade', start: 0, duration: 150, appliedTokens: { duration: 'motion.fast', easing: 'ease.out' } },];
       ```
 
-    Referenced by: Library, LibraryAnimationStyle
+    Referenced by: AnimationStyleEntry
   members: {}
 Shape:
   overview: |-
@@ -26394,7 +26844,7 @@ Shape:
     let shape: Shape;if (penpot.utils.types.isRectangle(shape)) {  console.log(shape.type);}
     ```
 
-    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
+    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryAnimationStyle, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
   members: {}
 StrokeCap:
   overview: |-
@@ -26471,6 +26921,7 @@ TokenValueString:
     TokenValueString:
         | TokenShadowValueString
         | TokenTypographyValueString
+        | TokenSpringValue
         | string
         | string[]
         | number
@@ -26508,6 +26959,7 @@ Token:
         | TokenRotation
         | TokenSizing
         | TokenSpacing
+        | TokenSpring
         | TokenBorderWidth
         | TokenTextCase
         | TokenTextDecoration
@@ -26516,7 +26968,7 @@ Token:
 
     The supported Design Tokens in Penpot.
 
-    Referenced by: Board, Boolean, Ellipse, Group, Image, Path, Rectangle, ShapeBase, SvgRaw, Text, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenSet, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer
+    Referenced by: Board, Boolean, Ellipse, Group, Image, Path, Rectangle, ShapeBase, SvgRaw, Text, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenSet, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer
   members: {}
 TokenBorderRadiusProps:
   overview: |-
@@ -26777,7 +27229,7 @@ TokenProperty:
     `fill` property applies to `fillColor` of the first fill
     of the shape.
 
-    Referenced by: Board, Boolean, Ellipse, Group, Image, Path, Rectangle, ShapeBase, SvgRaw, Text, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer
+    Referenced by: Board, Boolean, Ellipse, Group, Image, Path, Rectangle, ShapeBase, SvgRaw, Text, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer
   members: {}
 TokenType:
   overview: |-
@@ -26801,6 +27253,7 @@ TokenType:
         | "rotation"
         | "sizing"
         | "spacing"
+        | "spring"
         | "borderWidth"
         | "textCase"
         | "textDecoration"

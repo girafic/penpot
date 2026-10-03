@@ -1306,16 +1306,16 @@
           (d/update-vals objects #(detach-shape objects %)))
 
         ;; the uses of the animation styles of other files turn into
-        ;; their presets
+        ;; their presets and keyframes
         detach-timelines
-        (fn [timelines]
-          (d/update-vals timelines #(ctas/detach-foreign-uses % file-id)))
+        (fn [timelines objects]
+          (d/update-vals timelines #(ctas/detach-foreign-uses % objects file-id)))
 
         detach-pages
         (fn [pages-index]
-          (d/update-vals pages-index #(-> %
-                                          (update :objects detach-objects)
-                                          (d/update-when :timelines detach-timelines))))]
+          (d/update-vals pages-index #(as-> % $
+                                        (update $ :objects detach-objects)
+                                        (d/update-when $ :timelines detach-timelines (:objects $)))))]
 
     (update-in file [:data :pages-index] detach-pages)))
 

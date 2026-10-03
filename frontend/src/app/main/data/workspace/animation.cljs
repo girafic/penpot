@@ -111,7 +111,8 @@
   `preview-animation-style`)."
   [state timelines]
   (if-let [style (dm/get-in state [:workspace-animation :style-preview])]
-    (d/update-vals timelines #(ctas/sync-timeline % (:current-file-id state) {(:id style) style} (:id style)))
+    (let [objects (dsh/lookup-page-objects state)]
+      (d/update-vals timelines #(ctas/sync-timeline % objects (:current-file-id state) {(:id style) style} (:id style))))
     timelines))
 
 (defn- shown-timelines
@@ -742,11 +743,34 @@
       (if-let [tl (current-timeline state)]
         (let [tl' (cta/update-keyframe tl shape-id keyframe-id
                                        (fn [keyframe]
+                                         ;; set by hand, no token sets it
                                          (if (= easing :hold)
-                                           (assoc keyframe :interpolation :step)
+                                           (-> keyframe
+                                               (assoc :interpolation :step)
+                                               (dissoc :applied-tokens))
                                            (-> keyframe
                                                (assoc :easing easing)
-                                               (dissoc :interpolation)))))]
+                                               (dissoc :interpolation :applied-tokens)))))]
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (apply-preview)))
+        (rx/empty)))))
+
+(defn bind-keyframe-easing
+  "Bind the easing of the keyframe `keyframe-id` of `shape-id` to the
+  design token `token-name` (a cubic bezier or a spring token), its
+  `easing` the one the token gives now (see `cta/token-setting`); token
+  changes set it from then on (see `cta/resolve-timeline-tokens`)."
+  [shape-id keyframe-id token-name easing]
+  (ptk/reify ::bind-keyframe-easing
+    ptk/WatchEvent
+    (watch [it state _]
+      (if-let [tl (current-timeline state)]
+        (let [tl' (cta/update-keyframe tl shape-id keyframe-id
+                                       (fn [keyframe]
+                                         (cond-> (-> keyframe
+                                                     (assoc :applied-tokens {:easing token-name})
+                                                     (dissoc :interpolation))
+                                           (some? easing) (assoc :easing easing))))]
           (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview)))
         (rx/empty)))))
@@ -1286,30 +1310,33 @@
 ;; ANIMATION STYLES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- motion?
+(defn motion?
+  "Whether the current file animates (the `animation/v1` feature)."
   [state]
   (features/active-feature? state "animation/v1"))
 
-(defn- shape-timeline
+(defn shape-timeline
   "The timeline of the board of the shape `shape-id`, nil when it has none."
   [state shape-id]
   (let [objects (dsh/lookup-page-objects state)]
     (get (get-timelines state) (cfh/get-shape-id-root-frame objects shape-id))))
 
 (defn save-animation-style
-  "Save the presets and style uses of the shape `shape-id` that are
-  neither locked nor hidden as a new animation style of the current file,
-  named `name` (slashes put it in groups), and put one use of it in their
-  place, so the shape follows the style (see `ctas/replace-with-use`):
-  one undo step. Refused, with a message, when they hold more entries than
-  a style does."
+  "Save the presets, style uses and rows of keyframes of the shape
+  `shape-id` that are neither locked nor hidden (nor looping, for rows)
+  as a new animation style of the current file, named `name` (slashes put
+  it in groups), and put one use of it in their place, so the shape
+  follows the style (see `ctas/replace-with-use`): one undo step. Refused,
+  with a message, when they hold more entries or keyframes than a style
+  does."
   [shape-id name]
   (ptk/reify ::save-animation-style
     ptk/WatchEvent
     (watch [it state _]
       (let [tl     (when (motion? state) (shape-timeline state shape-id))
             track  (cta/get-track tl shape-id)
-            result (ctas/animations->entries (:animations track))]
+            result (when (some? track)
+                     (ctas/animations->entries track (cta/rest-pose tl (dsh/lookup-page-objects state) shape-id)))]
         (cond
           (nil? track)
           (rx/empty)
@@ -1317,6 +1344,10 @@
           (= :too-many-entries (:error result))
           (rx/of (ntf/warn (tr "workspace.animation.style-too-many-entries"
                                cta/max-style-entries (:count result))))
+
+          (= :too-many-keyframes (:error result))
+          (rx/of (ntf/warn (tr "workspace.animation.style-too-many-keyframes"
+                               cta/max-style-keyframes (:count result))))
 
           (some? (:error result))
           (rx/empty)
@@ -1350,7 +1381,8 @@
 
 (defn detach-animation-style
   "Turn the style use `use-id` of the shape `shape-id` into the presets it
-  plays, in its place (see `ctas/detach-use`), unless it is locked."
+  plays, in its place, and its keyframe entries into keyframes of the
+  shape (see `ctas/detach-track-use`), unless it is locked."
   [shape-id use-id]
   (ptk/reify ::detach-animation-style
     ptk/WatchEvent
@@ -1358,9 +1390,8 @@
       (let [tl  (when (motion? state) (shape-timeline state shape-id))
             use (cta/get-animation tl shape-id use-id)]
         (if (and (cta/style-use? use) (not (:locked use)))
-          (let [detach (fn [animations]
-                         (into [] (mapcat #(if (= use-id (:id %)) (ctas/detach-use %) [%])) animations))
-                tl'    (update-in tl [:tracks shape-id :animations] detach)]
+          (let [objects (dsh/lookup-page-objects state)
+                tl'     (update-in tl [:tracks shape-id] ctas/detach-track-use use-id tl objects)]
             (rx/of (commit-timeline it state (:board-id tl) tl')
                    (apply-preview)))
           (rx/empty))))))

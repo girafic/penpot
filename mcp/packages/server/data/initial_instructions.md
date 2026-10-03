@@ -359,9 +359,10 @@ The token library: `penpot.library.local.tokens` (type: `TokenCatalog`)
   * `active: boolean` - Only active sets affect shapes; use `set.toggleActive()` to change: `if (!set.active) set.toggleActive();`
   * `tokens: Token[]` - All tokens in set
   * `addToken({type: TokenType, name: string, value: TokenValueString}): Token` - Creates a token, adding it to the set.
-     - `TokenType`: "color" | "dimension" | "spacing" | "typography" | "shadow" | "opacity" | "borderRadius" | "borderWidth" | "fontWeights" | "fontSizes" | "fontFamilies" | "letterSpacing" | "textDecoration" | "textCase" | "duration" | "cubicBezier"
-     - "duration" ("150ms", "0.2s"; resolved to ms) and "cubicBezier" ([x1, y1, x2, y2], x1 and x2 from 0 to 1) apply to
-       no shape: the entries of animation styles bind them (see "Animation styles" below)
+     - `TokenType`: "color" | "dimension" | "spacing" | "typography" | "shadow" | "opacity" | "borderRadius" | "borderWidth" | "fontWeights" | "fontSizes" | "fontFamilies" | "letterSpacing" | "textDecoration" | "textCase" | "duration" | "cubicBezier" | "spring"
+     - "duration" ("150ms", "0.2s"; resolved to ms), "cubicBezier" ([x1, y1, x2, y2], x1 and x2 from 0 to 1) and
+       "spring" ({stiffness, damping, mass}, or the text "170, 26, 1") apply to no shape: preset animations, keyframes
+       and the entries of animation styles bind them (see "Motion" below)
      - `value`: depends on the type of token (inspect `Token` and related types)
      - Examples:
        const token = set.addToken({type: "color", name: "color.primary", value: "#0066FF"}); // direct value
@@ -440,6 +441,11 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
   * `addAnimationStyle(shape, style, start?): PresetAnimation[]` - Several effects at once:
     "slide-up" | "slide-down" | "slide-left" | "slide-right" | "pop" | "zoom" | "spin", and for text layers
     "typewriter" | "rise-words" | "cascade-lines" | "pop-letters"
+  * Design tokens set settings of presets and keyframes: `appliedTokens` (in the props of `addAnimation` and
+    `addKeyframe`, or set on a `PresetAnimation` or `Keyframe`) maps a setting to a token name, as for the entries of
+    animation styles (below); a keyframe binds its `easing` only (`{easing: "ease.bounce"}`). An `easing` takes a
+    "cubicBezier" or a "spring" token. The file resolves them in its active sets on every page, and the settings follow
+    when a token or the active theme changes; setting a bound setting by hand unbinds its token.
   * `copyAnimation(shape, targets, {properties?, presets?, values?, start?, stagger?, replace?}?)` - Copies the
     animation of `shape` onto `targets` (layers of the page, in any board), as pasting a copied animation does: the
     values are relative, so each target moves, turns and resizes from where it rests by as much as `shape` does
@@ -491,11 +497,22 @@ board's own timeline gives a layer of a copy take its place. The animation of a 
 `board.timeline.toJSON()`; the `toJSON()` of the copy's board, when it has a timeline, lists the layers of the copy
 with their `component` (the copy and the clock of its main).
 
-Animation styles: a style is a library asset holding preset animations (`entries`, each `start` counted from the start
-of the style). Save one when several layers or boards should enter or leave alike: edit it once and every use follows.
+Animation styles: a style is a library asset holding preset animations and keyframe entries (`entries`, each `start`
+counted from the start of the style). Save one when several layers or boards should enter, leave or move alike: edit it
+once and every use follows.
   * `penpot.library.local.createAnimationStyle(entries): LibraryAnimationStyle` - 1 to 32 entries, as for
     `addAnimation`; then `name`, `path`, `description`, `entries` (setting them updates every use, and boards grow to
-    fit), `duration`, `remove()` (its uses turn into their presets), `clone()`. `library.animationStyles` lists them.
+    fit), `duration`, `remove()` (its uses turn into their presets and keyframes), `clone()`. `library.animationStyles`
+    lists them.
+  * Keyframe entries: `{type: "keyframes", property, index?, start?, duration?, keyframes: [{time, value, easing?,
+    appliedTokens?}]}`, the keyframes of one property, `time` from the start of the entry. Their values are relative to
+    the layer that plays them: "x", "y" offsets in px and "rotation" in degrees from where it rests, "width", "height"
+    factors of its size, the others as they are; so a "wobble" or a "nudge" plays on any layer. Within its span an
+    entry takes over the row of its property (the layer's own keyframes there give way); presets of the same property
+    win over it. At most 256 keyframes per style.
+  * `style.updateFromShape(shape)` - Saves what a layer that uses the style plays now into it: its presets, uses and
+    rows of keyframes (not hidden, locked or looping) become the entries, the use takes their place, every use follows.
+    To change the values of a keyframe entry: add keyframes to a layer that uses the style, then update from it.
   * `timeline.applyAnimationStyle(shape, style, start?): AppliedAnimationStyle` - A use: it plays a copy of the entries
     and follows the edits of the style; `start`, `duration` (the entries scale to it), `name`, `style` (`null` once its
     library is gone), `detach()` (turns it into presets of its own), `remove()`. `timeline.appliedStyles` lists the
@@ -503,11 +520,11 @@ of the style). Save one when several layers or boards should enter or leave alik
   * A style of a connected library (`penpot.library.connected`) can be applied, not changed: it changes in its own
     file, and the files using it get an update notice.
   * Design tokens set settings of an entry: `appliedTokens: {start, duration, easing, amount, offsetX, offsetY}` maps
-    a setting to a token name ("duration" tokens for `start` and `duration`, "cubicBezier" for `easing`; for `amount`
-    "opacity" (fade), "number" (scale), "rotation"/"number" (rotate), "dimension"/"number" (blur); for the offsets of a
-    move "dimension"/"number"). Setting `entries` with them binds them: the file of the style resolves them in its
-    active sets, and when a token or the active theme changes, the style and its uses follow. Uses in other files keep
-    the names and the values.
+    a setting to a token name ("duration" tokens for `start` and `duration`, "cubicBezier" or "spring" for `easing`;
+    for `amount` "opacity" (fade), "number" (scale), "rotation"/"number" (rotate), "dimension"/"number" (blur); for the
+    offsets of a move "dimension"/"number"). Setting `entries` with them binds them: the file of the style resolves
+    them in its active sets, and when a token or the active theme changes, the style and its uses follow. Uses in other
+    files keep the names and the values.
 
 Example (a style for a list of cards):
 ```
@@ -522,6 +539,13 @@ const set = penpot.library.local.tokens.sets[0];
 set.addToken({type: "duration", name: "motion.fast", value: "150ms"});
 set.addToken({type: "cubicBezier", name: "ease.out", value: [0, 0, 0.58, 1]});
 style.entries = [{type: "fade", duration: 150, appliedTokens: {duration: "motion.fast", easing: "ease.out"}}];
+set.addToken({type: "spring", name: "ease.bounce", value: {stiffness: 300, damping: 15, mass: 1}});
+timeline.addAnimation(cards.children[0], {type: "scale", duration: 400, appliedTokens: {easing: "ease.bounce"}});
+const wobble = penpot.library.local.createAnimationStyle([{type: "keyframes", property: "rotation", duration: 600,
+  keyframes: [{time: 0, value: 0, easing: "ease-in-out"}, {time: 200, value: 8, easing: "ease-in-out"},
+              {time: 400, value: -8, easing: "ease-in-out"}, {time: 600, value: 0}]}]);
+wobble.name = "Wobble";
+cards.children.forEach((card) => timeline.applyAnimationStyle(card, wobble, 1200));
 ```
 
 Keyframe values by property (`AnimatableProperty`):

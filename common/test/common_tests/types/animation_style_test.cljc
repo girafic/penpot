@@ -8,6 +8,7 @@
   (:require
    [app.common.files.changes :as ch]
    [app.common.files.changes-builder :as pcb]
+   [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.schema.generators :as sg]
    [app.common.test-helpers.files :as thf]
@@ -193,6 +194,15 @@
   [timeline shape-id]
   (get-in timeline [:tracks shape-id :animations]))
 
+(def ^:private pose
+  "Where a layer rests, for what does not depend on it."
+  {:x 0 :y 0 :width 100 :height 100 :rotation 0})
+
+(defn- combine
+  "What a new style takes from `animations` (see `ctas/animations->entries`)."
+  [animations]
+  (ctas/animations->entries {:keyframes [] :animations animations} pose))
+
 (t/deftest combining-presets-and-uses-into-a-style
   (let [{:keys [board rect objects]} (board-and-rect)
         library  (uuid/next)
@@ -200,7 +210,7 @@
         use      (ctas/make-use (three-style) library 300)
         before   (timeline-of board rect (conj slide-up use))
 
-        {:keys [entries start]} (ctas/animations->entries (animations before (:id rect)))
+        {:keys [entries start]} (combine (animations before (:id rect)))
         style    (pop-style :name "Card enter" :entries entries)
         after    (timeline-of board rect [(ctas/make-use style (uuid/next) start)])]
     (t/is (= 5 (count entries)))
@@ -215,14 +225,14 @@
   (let [library (uuid/next)
         twenty  (pop-style :entries (fades 20))
         uses    [(ctas/make-use twenty library 0) (ctas/make-use twenty library 0)]]
-    (t/is (= {:error :too-many-entries :count 40} (ctas/animations->entries uses)))
-    (t/is (= {:error :no-entries :count 0} (ctas/animations->entries [])))))
+    (t/is (= {:error :too-many-entries :count 40} (combine uses)))
+    (t/is (= {:error :no-entries :count 0} (combine [])))))
 
 (t/deftest combining-leaves-out-hidden-and-locked-rows
   (let [library (uuid/next)
         hidden  #(assoc % :hidden true)
         locked  #(assoc % :locked true)
-        result  (ctas/animations->entries
+        result  (combine
                  [(cta/make-animation {:type :fade :start 100})
                   (hidden (cta/make-animation {:type :move :start 0}))
                   (hidden (ctas/make-use (three-style) library 0))
@@ -241,7 +251,7 @@
         hidden (cta/make-animation {:type :rotate :start 0 :hidden true})
         before (timeline-of board rect [fade locked scale hidden])
 
-        {:keys [entries start]} (ctas/animations->entries (animations before sid))
+        {:keys [entries start]} (combine (animations before sid))
         use    (ctas/make-use (pop-style :entries entries) (uuid/next) start)
         after  (update-in before [:tracks sid] ctas/replace-with-use use)]
     (t/is (= [(:id use) (:id locked) (:id hidden)] (mapv :id (animations after sid)))
@@ -273,13 +283,13 @@
         use     (assoc (ctas/make-use (three-style) library 100) :duration 600 :locked true)
         before  (timeline-of board rect [(cta/make-animation {:type :move :start 0}) use])
         presets (ctas/sync-use use nil)
-        after   (ctas/sync-timeline before library {} nil)]
+        after   (ctas/sync-timeline before objects library {} nil)]
     (t/is (= [:scale :rotate :fade] (mapv :type presets)))
     (t/is (every? :locked presets) "with the flags of the use")
     (t/is (not-any? (set (map :id (:entries use))) (map :id presets)) "new ids")
     (t/is (= [:move :scale :rotate :fade] (mapv :type (animations after sid))) "in its place")
     (t/is (= (plays before objects sid) (plays after objects sid)))
-    (t/is (identical? before (ctas/sync-timeline before library nil nil))
+    (t/is (identical? before (ctas/sync-timeline before objects library nil nil))
           "nothing changes while the styles are not known")))
 
 (t/deftest sync-timeline-grows-the-duration-to-fit
@@ -290,12 +300,12 @@
                     (cta/add-animation sid (ctas/make-use style library 400))
                     (assoc :audio-clips [{:id (uuid/next) :start 0 :duration 5000}]))
         resized #(assoc style :entries (mapv (fn [entry] (update entry :duration * %)) (:entries style)))
-        twice   (ctas/sync-timeline tl library {(:id style) (resized 2)} nil)
-        shorter (ctas/sync-timeline tl library {(:id style) (update (resized 1) :entries pop)} nil)]
+        twice   (ctas/sync-timeline tl {} library {(:id style) (resized 2)} nil)
+        shorter (ctas/sync-timeline tl {} library {(:id style) (update (resized 1) :entries pop)} nil)]
     (t/is (= 900 (cta/animation-end (first (animations twice sid)))))
     (t/is (= 1000 (:duration twice)) "still within the duration")
     (let [tl    (assoc tl :duration 600)
-          twice (ctas/sync-timeline tl library {(:id style) (resized 2)} nil)]
+          twice (ctas/sync-timeline tl {} library {(:id style) (resized 2)} nil)]
       (t/is (= 900 (:duration twice)) "to the end of the last use, never to the audio")
       (t/is (= (:audio-clips tl) (:audio-clips twice))))
     (t/is (= 1000 (:duration shorter)) "never shorter")
@@ -313,8 +323,8 @@
                     (cta/add-animation sid (ctas/make-use two lib-a 0))
                     (cta/add-animation sid (ctas/make-use one lib-b 0)))
         names   #(mapv :name (animations % sid))]
-    (t/is (= ["One!" "Two" "One"] (names (ctas/sync-timeline tl lib-a renamed (:id one)))))
-    (t/is (= ["One!" "Two!" "One"] (names (ctas/sync-timeline tl lib-a renamed nil))))))
+    (t/is (= ["One!" "Two" "One"] (names (ctas/sync-timeline tl {} lib-a renamed (:id one)))))
+    (t/is (= ["One!" "Two!" "One"] (names (ctas/sync-timeline tl {} lib-a renamed nil))))))
 
 (t/deftest drifted-finds-uses-a-sync-missed
   (let [file    (uuid/next)
@@ -334,7 +344,7 @@
     (t/is (ctas/drifted? tl file {(:id style) (assoc style :name "Renamed")}))
     (t/is (ctas/drifted? tl file {}) "its style is gone")
     (t/is (not (ctas/drifted? tl (uuid/next) {})) "uses of a library are not checked")
-    (t/is (not (ctas/drifted? (ctas/sync-timeline tl file edited nil) file edited)))))
+    (t/is (not (ctas/drifted? (ctas/sync-timeline tl {} file edited nil) file edited)))))
 
 (t/deftest detach-foreign-uses-keeps-the-local-ones
   (let [{:keys [board rect objects]} (board-and-rect)
@@ -342,7 +352,7 @@
         file   (uuid/next)
         local  (ctas/make-use (three-style) file 0)
         before (timeline-of board rect [local (ctas/make-use (pop-style) (uuid/next) 400)])
-        after  (ctas/detach-foreign-uses before file)]
+        after  (ctas/detach-foreign-uses before {} file)]
     (t/is (= [:style :fade :scale] (mapv :type (animations after sid))))
     (t/is (= local (first (animations after sid))))
     (t/is (= (plays before objects sid) (plays after objects sid)))))
@@ -413,7 +423,7 @@
     (t/is (= [:word 0.8 :random 42] (split-settings entry)))
     (t/is (ctas/valid-animation-style? style))
     (t/testing "saved as a style, with a new id"
-      (let [{:keys [entries]} (ctas/animations->entries [preset])]
+      (let [{:keys [entries]} (combine [preset])]
         (t/is (= [[:word 0.8 :random 42]] (mapv split-settings entries)))
         (t/is (not= (:id preset) (:id (first entries))))))
     (t/testing "synced into a use"
@@ -458,17 +468,27 @@
                                                        :offset-y "space.l"}})
         values {"motion.delay" 50.4 "motion.fast" 150 "ease.out" [0 0 0.58 1] "space.l" 24}]
     (t/is (= [50 150 {:type :bezier :curve [0 0 0.58 1]} 24]
-             ((juxt :start :duration :easing :offset-y) (cta/resolve-entry-tokens entry values))))
-    (t/is (= (:applied-tokens entry) (:applied-tokens (cta/resolve-entry-tokens entry values)))
+             ((juxt :start :duration :easing :offset-y) (cta/resolve-animation-tokens entry values))))
+    (t/is (= (:applied-tokens entry) (:applied-tokens (cta/resolve-animation-tokens entry values)))
           "the names stay")
     (t/testing "a token missing, or of a value that does not fit, leaves its setting"
-      (t/is (= entry (cta/resolve-entry-tokens entry {})))
-      (t/is (= 300 (:duration (cta/resolve-entry-tokens entry {"motion.fast" "fast"}))))
-      (t/is (= (:easing entry) (:easing (cta/resolve-entry-tokens entry {"ease.out" [0 1 2]})))))
+      (t/is (= entry (cta/resolve-animation-tokens entry {})))
+      (t/is (= 300 (:duration (cta/resolve-animation-tokens entry {"motion.fast" "fast"}))))
+      (t/is (= (:easing entry) (:easing (cta/resolve-animation-tokens entry {"ease.out" [0 1 2]})))))
     (t/testing "the times of a curve stay within 0..1, a duration lasts 1 ms at least"
-      (let [resolved (cta/resolve-entry-tokens entry {"ease.out" [-1 0 2 1] "motion.fast" 0})]
+      (let [resolved (cta/resolve-animation-tokens entry {"ease.out" [-1 0 2 1] "motion.fast" 0})]
         (t/is (= [0 0 1 1] (get-in resolved [:easing :curve])))
         (t/is (= 1 (:duration resolved)))))))
+
+(t/deftest an-easing-takes-a-bezier-or-a-spring-token
+  (t/is (= [:cubic-bezier :spring] (cta/animation-token-types :fade :easing)))
+  (let [entry (cta/make-style-entry {:type :scale :start 0 :duration 400
+                                     :applied-tokens {:easing "spring.soft"}})]
+    (t/is (= {:type :spring :stiffness 120 :damping 14 :mass 1}
+             (:easing (cta/resolve-animation-tokens entry {"spring.soft" {:stiffness 120 :damping 14 :mass 1}}))))
+    (t/is (= (:easing entry)
+             (:easing (cta/resolve-animation-tokens entry {"spring.soft" {:stiffness 0 :damping 14 :mass 1}})))
+          "a spring that does not fit leaves the easing")))
 
 (t/deftest token-resolved-styles-are-the-ones-that-change
   (let [fast   (pop-style :name "Fast" :entries [{:type :fade :start 0 :duration 300
@@ -492,10 +512,233 @@
     (t/is (= {:duration "motion.quick" :amount "opacity.half"}
              (-> renamed :entries first :applied-tokens)))))
 
-(t/deftest uses-keep-the-token-names-and-their-presets-drop-them
+(t/deftest uses-and-their-detached-presets-keep-the-token-names
   (let [style (pop-style :entries [{:type :fade :start 0 :duration 150
                                     :applied-tokens {:duration "motion.fast"}}])
         use   (ctas/make-use style (uuid/next) 0)]
     (t/is (= {:duration "motion.fast"} (-> use :entries first :applied-tokens)))
     (t/is (sm/validate cta/schema:animation use))
-    (t/is (not-any? :applied-tokens (ctas/detach-use use)))))
+    (t/is (= [{:duration "motion.fast"}] (map :applied-tokens (ctas/detach-use use)))
+          "a preset binds its settings too")))
+
+;; KEYFRAME ENTRIES
+
+(defn- x-style
+  "A style of a move 40 px to the right over 600 ms, by keyframes, and of
+  `entries`."
+  [& entries]
+  (pop-style :entries (into [{:type :keys :property :x :start 0 :duration 600
+                              :keyframes [{:time 0 :value 0 :easing :linear} {:time 600 :value 40}]}]
+                            entries)))
+
+(defn- close-all?
+  [expected actual]
+  (and (= (count expected) (count actual))
+       (every? true? (map mth/close? expected actual))))
+
+(t/deftest a-keys-entry-is-made-valid
+  (let [entry (cta/make-style-entry {:type :keys :property :x :start -5 :duration 600
+                                     :keyframes [{:time 600 :value 40}
+                                                 {:time 0 :value 0 :easing :ease-in}
+                                                 {:time 300 :value "#ff0000"}
+                                                 {:time 600.4 :value 50}
+                                                 {:time 900 :value 1}]})]
+    (t/is (= [:keys :x 0 600] ((juxt :type :property :start :duration) entry)))
+    (t/is (= [[0 0] [600 50]] (mapv (juxt :time :value) (:keyframes entry)))
+          "by time, one at each ms (the last one given), within its span, values that fit")
+    (t/is (= :ease-in (get-in entry [:keyframes 0 :easing])))
+    (t/is (not (contains? entry :index)))
+    (t/is (= 0 (:index (cta/make-style-entry {:type :keys :property :fill-color
+                                              :keyframes [{:time 0 :value "#ff0000"}]})))
+          "a fill gets an index")
+    (t/is (= 300 (:duration (cta/make-style-entry {:type :keys :property :x
+                                                   :keyframes [{:time 0 :value 0} {:time 300 :value 4}]})))
+          "as long as its keyframes")
+    (t/is (ctas/valid-animation-style? (x-style {:type :fade :start 0 :duration 100})))))
+
+(t/deftest a-keys-entry-holds-values-relative-to-its-layer
+  (let [from  {:x 100 :y 20 :width 100 :height 50 :rotation 10}
+        to    {:x 300 :y 0 :width 50 :height 50 :rotation 0}
+        row   #(vector (cta/make-keyframe {:time 200 :property %1 :value %2})
+                       (cta/make-keyframe {:time 800 :property %1 :value %3}))
+        entry (cta/keyframes->keys-entry (row :x 100 140) from)]
+    (t/is (= [200 600 [0 600]] [(:start entry) (:duration entry) (mapv :time (:keyframes entry))]))
+    (t/is (close-all? [0 40] (mapv :value (:keyframes entry))) "positions as offsets")
+    (t/is (close-all? [300 340] (mapv :value (cta/keys-entry-keyframes entry to))) "from where it rests")
+    (t/is (= [200 800] (mapv :time (cta/keys-entry-keyframes entry to))))
+    (let [entry (cta/keyframes->keys-entry (row :width 100 150) from)]
+      (t/is (close-all? [1 1.5] (mapv :value (:keyframes entry))) "sizes as factors")
+      (t/is (close-all? [50 75] (mapv :value (cta/keys-entry-keyframes entry to)))))
+    (let [entry (cta/keyframes->keys-entry (row :rotation 10 100) from)]
+      (t/is (close-all? [0 90] (mapv :value (:keyframes entry)))))
+    (let [entry (cta/keyframes->keys-entry (row :opacity 1 0.5) from)]
+      (t/is (= [1 0.5] (mapv :value (cta/keys-entry-keyframes entry to))) "the others as they are"))))
+
+(t/deftest a-fill-entry-keeps-its-index
+  (let [entry (cta/make-style-entry {:type :keys :property :fill-color :index 1
+                                     :keyframes [{:time 0 :value "#ff0000"} {:time 400 :value "#0000ff"}]})]
+    (t/is (= [[:fill-color 1 "#ff0000"] [:fill-color 1 "#0000ff"]]
+             (mapv (juxt :property :index :value)
+                   (cta/keys-entry-keyframes entry {:x 0 :y 0 :width 10 :height 10 :rotation 0}))))))
+
+(t/deftest a-use-plays-its-keys-entries-on-its-layer
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid (:id rect)
+        tl  (-> (timeline-of board rect [(ctas/make-use (x-style) (uuid/next) 100)])
+                (assoc :duration 2000))
+        xs  (fn [tl times]
+              (let [resolved (cta/resolve-animations tl objects)]
+                (mapv #(get-in (cta/values-at resolved %) [sid :x]) times)))]
+    (t/is (cta/valid-timeline? tl))
+    (t/is (close-all? [50 70 90] (xs tl [100 400 700])) "from where the rect rests, 50 px into the board")
+    (t/is (close-all? [50 70 90] (xs (assoc-in tl [:tracks sid :animations 0 :duration] 1200) [100 700 1300]))
+          "stretched to twice its length, twice as slow")))
+
+(t/deftest keys-entries-take-over-their-rows-and-presets-win-over-them
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid (:id rect)
+        tl  (-> (timeline-of board rect [(ctas/make-use (x-style) (uuid/next) 100)])
+                (cta/add-keyframe sid {:time 0 :property :x :value 10})
+                (cta/add-keyframe sid {:time 300 :property :x :value 500})
+                (cta/add-keyframe sid {:time 900 :property :x :value 30}))
+        xs  (fn [tl]
+              (->> (get-in (cta/resolve-animations tl objects) [:tracks sid :keyframes])
+                   (filter #(= :x (:property %)))
+                   (mapv :time)))]
+    (t/is (= [0 100 700 900] (xs tl)) "its own keyframe at 300 gives way")
+    (t/is (= [0 100 300 500 700 900]
+             (xs (cta/add-animation tl sid {:type :move :start 300 :duration 200 :offset-x 100 :offset-y 0})))
+          "a move over the same row wins in its span")))
+
+(t/deftest the-keyframes-of-a-keys-entry-bind-easing-tokens
+  (let [style    (pop-style :entries [{:type :keys :property :rotation :start 0 :duration 400
+                                       :keyframes [{:time 0 :value 0 :applied-tokens {:easing "ease.out"}}
+                                                   {:time 400 :value 90}]}])
+        resolved (ctas/resolve-style-tokens style {"ease.out" [0 0 0.58 1]})
+        renamed  (first (ctas/token-renamed-styles {(:id style) style} #(if (= % "ease.out") "ease.exit" %)))]
+    (t/is (= {:easing "ease.out"} (get-in style [:entries 0 :keyframes 0 :applied-tokens])))
+    (t/is (= {:type :bezier :curve [0 0 0.58 1]} (get-in resolved [:entries 0 :keyframes 0 :easing])))
+    (t/is (= {:easing "ease.exit"} (get-in renamed [:entries 0 :keyframes 0 :applied-tokens])))))
+
+(t/deftest a-detached-use-gives-its-layer-the-keyframes-of-its-keys-entries
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid    (:id rect)
+        use    (ctas/make-use (x-style {:type :fade :start 0 :duration 300}) (uuid/next) 100)
+        before (timeline-of board rect [use])
+        after  (update-in before [:tracks sid] ctas/detach-track-use (:id use) before objects)
+        gone   (ctas/sync-timeline before objects (:style-ref-file use) {} nil)
+        xs     #(get-in % [:tracks sid :keyframes])]
+    (t/is (= [:fade] (mapv :type (animations after sid))) "its presets in its place")
+    (t/is (= [100 700] (mapv :time (xs after))))
+    (t/is (close-all? [50 90] (mapv :value (xs after))) "keyframes of the rect where it rests")
+    (t/is (= (plays before objects sid) (plays after objects sid)))
+    (t/is (cta/valid-timeline? after))
+    (t/is (= (mapv (juxt :time :value) (xs after)) (mapv (juxt :time :value) (xs gone)))
+          "and so when its style is gone")
+    (t/is (= [:fade] (mapv :type (animations gone sid))))))
+
+(t/deftest a-keys-entry-of-a-turn-takes-the-pivot
+  (let [use   (ctas/make-use (pop-style :entries [{:type :keys :property :rotation :start 0 :duration 600
+                                                   :keyframes [{:time 0 :value 0} {:time 600 :value 90}]}])
+                             (uuid/next) 0)
+        sid   (uuid/next)
+        track {:shape-id (uuid/next) :keyframes [] :animations [use] :origin {:x 0 :y 0}}
+        empty (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+        turns (-> empty
+                  (cta/add-keyframe sid {:time 0 :property :rotation :value 0})
+                  (cta/add-keyframe sid {:time 500 :property :rotation :value 45}))]
+    (t/is (= {:x 0.0 :y 0.0} (get-in (:timeline (cta/paste-track empty sid track :merge)) [:tracks sid :origin])))
+    (t/is (:pivot-kept? (cta/paste-track turns sid track :merge)) "a layer that turns keeps its own")))
+
+;; SAVING AND UPDATING STYLES FROM A LAYER
+
+(defn- with-rows
+  "`timeline` with a rotation row on `sid` (0 at 100 ms, 90 at 500) and
+  `f` of it."
+  [timeline sid & {:keys [f] :or {f identity}}]
+  (-> timeline
+      (cta/add-keyframe sid {:time 100 :property :rotation :value 0 :easing :linear})
+      (cta/add-keyframe sid {:time 500 :property :rotation :value 90})
+      (f)))
+
+(t/deftest saving-a-layer-takes-its-rows-of-keyframes
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid    (:id rect)
+        before (with-rows (timeline-of board rect [(cta/make-animation {:type :fade :start 200 :duration 300})]) sid)
+        pose   (cta/rest-pose before objects sid)
+        track  (get-in before [:tracks sid])
+
+        {:keys [entries start]} (ctas/animations->entries track pose)
+        style  (pop-style :name "Turn in" :entries entries)
+        use    (ctas/make-use style (uuid/next) start)
+        after  (update-in before [:tracks sid] ctas/replace-with-use use)]
+    (t/is (= [[:keys 0] [:fade 100]] (mapv (juxt :type :start) entries)) "a keyframe entry and a preset")
+    (t/is (= 100 start))
+    (t/is (ctas/valid-animation-style? style))
+    (t/is (= [(:id use)] (mapv :id (animations after sid))) "one use")
+    (t/is (empty? (get-in after [:tracks sid :keyframes])) "and no rotation keyframes")
+    (t/is (= (plays before objects sid) (plays after objects sid)) "it plays as before")
+    (t/is (cta/valid-timeline? after))))
+
+(t/deftest looping-hidden-and-locked-rows-stay-on-the-layer
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid   (:id rect)
+        row   (fn [tl property]
+                (-> tl
+                    (cta/add-keyframe sid {:time 0 :property property :value 0})
+                    (cta/add-keyframe sid {:time 400 :property property :value 10})))
+        tl    (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                  (row :x) (row :y) (row :rotation) (row :opacity)
+                  (cta/toggle-loop sid :y nil)
+                  (cta/toggle-slot-flag sid :hidden :rotation nil)
+                  (cta/toggle-slot-flag sid :locked :opacity nil))
+        track (get-in tl [:tracks sid])
+        {:keys [entries start]} (ctas/animations->entries track (cta/rest-pose tl objects sid))
+        after (ctas/replace-with-use track (ctas/make-use (pop-style :entries entries) (uuid/next) start))]
+    (t/is (= [:x] (mapv :property entries)))
+    (t/is (= #{:y :rotation :opacity} (into #{} (map :property) (:keyframes after))))))
+
+(t/deftest saving-counts-the-keyframes-of-a-style
+  (let [sid   (uuid/next)
+        many  (reduce #(cta/add-keyframe %1 sid {:time %2 :property :x :value %2})
+                      (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                      (range (inc cta/max-style-keyframes)))
+        track (get-in many [:tracks sid])]
+    (t/is (= {:error :too-many-keyframes :count (inc cta/max-style-keyframes)}
+             (ctas/animations->entries track pose)))
+    (t/is (= :too-many-keyframes (:error (ctas/entries-error track))))
+    (t/is (nil? (ctas/entries-error (update track :keyframes (partial take 3)))))))
+
+(t/deftest updating-a-style-from-a-stretched-use
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid     (:id rect)
+        library (uuid/next)
+        style   (x-style)
+        use     (assoc (ctas/make-use style library 100) :duration 1200)
+        tl      (with-rows (assoc (timeline-of board rect [use]) :duration 2000) sid)
+        result  (ctas/update-from-track (get-in tl [:tracks sid]) (:id use) (cta/rest-pose tl objects sid)
+                                        style library)
+        style'  (:style result)
+        after   (assoc-in tl [:tracks sid] (:track result))]
+    (t/is (= [[:keys :x 0 600] [:keys :rotation 0 200]]
+             (mapv (juxt :type :property :start :duration) (:entries style')))
+          "in the time of the style: the use plays it twice as slow")
+    (t/is (= [(:id use)] (mapv :id (animations after sid))) "the use keeps its id")
+    (t/is (= [100 1200] ((juxt :start :duration) (first (animations after sid)))) "and its stretch")
+    (t/is (empty? (get-in after [:tracks sid :keyframes])))
+    (t/is (= (plays tl objects sid) (plays after objects sid)) "the layer plays as it did")
+    (t/testing "the other uses follow by sync"
+      (let [other  (ctas/make-use style library 0)
+            synced (ctas/sync-use other style')]
+        (t/is (= (:entries style') (:entries synced)))
+        (t/is (= 600 (:duration synced)) "not stretched, as long as the style")))))
+
+(t/deftest sync-and-drift-keep-keys-entries
+  (let [library (uuid/next)
+        style   (x-style {:type :fade :start 0 :duration 300})
+        use     (ctas/make-use (assoc (pop-style) :id (:id style)) library 0)
+        synced  (ctas/sync-use use style)
+        tl      (cta/add-animation (cta/make-timeline {:board-id (uuid/next) :duration 1000}) (uuid/next) synced)]
+    (t/is (= (:entries style) (:entries synced)))
+    (t/is (not (ctas/drifted? tl library {(:id style) style})))
+    (t/is (ctas/drifted? tl library {(:id style) (update style :entries pop)}))))

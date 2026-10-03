@@ -1065,8 +1065,8 @@
             :fields [{:label "Spacing"
                       :key :spacing}]}}
 
-   ;; Penpot Motion: the settings of animation styles bind these (see
-   ;; `app.common.types.animation/style-token-types`); no shape takes them.
+   ;; Penpot Motion: the settings of animations bind these (see
+   ;; `app.common.types.animation/animation-token-types`); no shape takes them.
    :duration
    {:title "Duration"
     :attributes #{}
@@ -1079,7 +1079,14 @@
     :attributes #{}
     :modal {:key :tokens/cubic-bezier
             :fields [{:label "Cubic Bezier"
-                      :key :cubic-bezier}]}}))
+                      :key :cubic-bezier}]}}
+
+   :spring
+   {:title "Spring"
+    :attributes #{}
+    :modal {:key :tokens/spring
+            :fields [{:label "Spring"
+                      :key :spring}]}}))
 
 (defn get-token-properties [token]
   (get token-properties (:type token)))

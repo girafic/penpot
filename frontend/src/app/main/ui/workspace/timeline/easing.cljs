@@ -17,10 +17,12 @@
    [app.main.data.workspace.undo :as dwu]
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu* dropdown-menu-item*]]
+   [app.main.ui.components.select :refer [select]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.controls.numeric-input :refer [numeric-input*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
+   [app.main.ui.workspace.tokens.motion :as motion-tokens]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -305,6 +307,22 @@
      [:circle {:class (stl/css :graph-handle) :cx (graph-x x1) :cy (gy y1) :r 6}]
      [:circle {:class (stl/css :graph-handle) :cx (graph-x x2) :cy (gy y2) :r 6}]]))
 
+(mf/defc spring-preview*
+  "The graph of the spring easing `spring` (`{:type :spring :stiffness
+  :damping :mass}`) as the editor of an easing draws it, without its
+  handle: the form of a spring token shows it."
+  [{:keys [spring class]}]
+  (let [gy (partial graph-y spring-range)
+        d  (mf/with-memo [spring]
+             (sampled-path spring false graph-x gy 96))]
+    [:svg {:class [class (stl/css :graph :graph-preview)]
+           :view-box (dm/str "0 0 " graph-width " " graph-height)
+           :role "img"
+           :aria-label (tr "workspace.animation.easing")}
+     [:line {:class (stl/css :graph-guide)
+             :x1 0 :x2 graph-width :y1 (gy 1) :y2 (gy 1)}]
+     [:path {:class (stl/css :graph-curve) :d d}]]))
+
 ;; CONTROLS
 
 (mf/defc preset-menu*
@@ -405,6 +423,53 @@
                          :step 0.05
                          :value (mth/precision (cta/spring-bounce spring) 2)
                          :on-change on-bounce}]]))
+
+(def ^:private no-token "none")
+
+(defn easing-token-options
+  "The options of the design token of an easing: none, then the cubic
+  bezier and spring `tokens` by name, and `bound`, the name of the token
+  it binds, when it is none of them (a token of another set, or gone)."
+  [tokens bound]
+  (cond-> (into [{:value no-token :label (tr "workspace.animation.easing-no-token")}]
+                (map (fn [{:keys [name]}] {:value name :label name}))
+                tokens)
+    (and (some? bound) (not-any? #(= bound (:name %)) tokens))
+    (conj {:value bound :label bound})))
+
+(mf/defc token-row*
+  "The design token the easing of `keyframe` of `shape-id` binds: picking
+  one binds it and takes its easing; none keeps the easing as it is."
+  {::mf/private true}
+  [{:keys [shape-id keyframe]}]
+  (let [tokens  (motion-tokens/use-active-tokens-by-type)
+        tokens  (mf/with-memo [tokens]
+                  (->> [:cubic-bezier :spring]
+                       (mapcat #(get tokens %))
+                       (sort-by :name)))
+        bound   (dm/get-in keyframe [:applied-tokens :easing])
+        options (mf/with-memo [tokens bound]
+                  (easing-token-options tokens bound))
+
+        on-change
+        (mf/use-fn
+         (mf/deps shape-id keyframe tokens)
+         (fn [value]
+           (let [keyframe-id (:id keyframe)]
+             (if (= value no-token)
+               (st/emit! (dwa/set-keyframe-easing shape-id keyframe-id
+                                                  (if (= :step (:interpolation keyframe))
+                                                    :hold
+                                                    (or (:easing keyframe) :ease))))
+               (let [token (d/seek #(= value (:name %)) tokens)]
+                 (st/emit! (dwa/bind-keyframe-easing shape-id keyframe-id value
+                                                     (cta/token-setting :easing (:resolved-value token)))))))))]
+    (when (or (seq tokens) (some? bound))
+      [:div {:class (stl/css :token-row)}
+       [:span {:class (stl/css :token-label)} (tr "workspace.animation.easing-token")]
+       [:& select {:default-value (or bound no-token)
+                   :options options
+                   :on-change on-change}]])))
 
 (mf/defc easing-editor*
   "Edit the easing of the segment that starts at `keyframe` of `shape-id`."
@@ -515,4 +580,6 @@
          [:> icon-button* {:variant "ghost"
                            :icon i/flip-horizontal
                            :aria-label (tr "workspace.animation.easing-reverse")
-                           :on-click on-reverse}]])]]))
+                           :on-click on-reverse}]])
+
+      [:> token-row* {:shape-id shape-id :keyframe keyframe}]]]))

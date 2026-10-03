@@ -118,6 +118,23 @@
     (t/is (nil? (cfo/parse-cubic-bezier-value [1.5 0 0.58 1])) "a time past 1")
     (t/is (nil? (cfo/parse-cubic-bezier-value "{ease.out}")))))
 
+(t/deftest parse-spring-value-test
+  (t/testing "three numbers, or numeric texts, by their names"
+    (t/is (= {:stiffness 170 :damping 26 :mass 1}
+             (cfo/parse-spring-value {:stiffness 170 :damping 26 :mass 1})))
+    (t/is (= {:stiffness 170.0 :damping 26 :mass 1.0}
+             (cfo/parse-spring-value {"stiffness" "170" "damping" 26 "mass" "1"})))
+    (t/is (= {:stiffness 170.0 :damping 26.0 :mass 1.0} (cfo/parse-spring-value "170, 26, 1"))
+          "as a form writes it, in this order"))
+  (t/testing "nothing else"
+    (t/is (nil? (cfo/parse-spring-value {:stiffness 170 :damping 26})))
+    (t/is (nil? (cfo/parse-spring-value {:stiffness 0 :damping 26 :mass 1})) "a spring needs stiffness")
+    (t/is (nil? (cfo/parse-spring-value {:stiffness 170 :damping -1 :mass 1})))
+    (t/is (nil? (cfo/parse-spring-value {:stiffness 170 :damping 26 :mass 0})))
+    (t/is (nil? (cfo/parse-spring-value {:stiffness "stiff" :damping 26 :mass 1})))
+    (t/is (nil? (cfo/parse-spring-value "170, 26")))
+    (t/is (nil? (cfo/parse-spring-value "{spring.soft}")))))
+
 (t/deftest motion-token-value-schemas
   (let [valid? (fn [type value] (sm/validate (cfo/make-token-value-schema type) value))]
     (t/is (valid? :duration "150ms"))
@@ -127,7 +144,12 @@
     (t/is (valid? :cubic-bezier [0.42 0 0.58 1]))
     (t/is (valid? :cubic-bezier "{ease.out}"))
     (t/is (not (valid? :cubic-bezier [0.42 0 0.58])))
-    (t/is (not (valid? :cubic-bezier "0.42, 0, 0.58, 1")) "kept as numbers")))
+    (t/is (not (valid? :cubic-bezier "0.42, 0, 0.58, 1")) "kept as numbers")
+    (t/is (valid? :spring {:stiffness 170 :damping 26 :mass 1}))
+    (t/is (valid? :spring "{spring.soft}"))
+    (t/is (not (valid? :spring {:stiffness 170 :damping 26})))
+    (t/is (not (valid? :spring {:stiffness -1 :damping 26 :mass 1})))
+    (t/is (not (valid? :spring "170, 26, 1")))))
 
 (t/deftest convert-dtcg-motion-token-test
   (t/testing "a duration of the 2025 format becomes a text"
@@ -140,4 +162,10 @@
   (t/testing "a cubic bezier keeps its numbers"
     (t/is (= {:name "ease.out" :type :cubic-bezier :value [0 0 0.58 1]}
              (cfo/convert-dtcg-token {"name" "ease.out" "type" "cubicBezier"
-                                      "value" [0 0 0.58 1]})))))
+                                      "value" [0 0 0.58 1]}))))
+  (t/testing "a spring keeps its three numbers by their names"
+    (t/is (= {:name "spring.soft" :type :spring :value {:stiffness 120 :damping 14.0 :mass 1}}
+             (cfo/convert-dtcg-token {"name" "spring.soft" "type" "spring"
+                                      "value" {"stiffness" 120 "damping" "14" "mass" 1}})))
+    (t/is (= {:name "spring.ui" :type :spring :value "{spring.soft}"}
+             (cfo/convert-dtcg-token {"name" "spring.ui" "type" "spring" "value" "{spring.soft}"})))))

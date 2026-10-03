@@ -102,6 +102,7 @@
    :shadow          "shadow"
    :sizing          "sizing"
    :spacing         "spacing"
+   :spring          "spring"
    :string          "string"
    :stroke-width    "borderWidth"
    :text-case       "textCase"
@@ -132,9 +133,11 @@
   (into #{} (keys token-type->dtcg-token-type)))
 
 (def motion-token-types
-  "The token types no shape takes: the settings of animation styles bind
-  them (Penpot Motion, see `app.common.types.animation/style-token-types`)."
-  #{:duration :cubic-bezier})
+  "The token types no shape takes: the settings of animations bind them
+  (Penpot Motion, see `app.common.types.animation/animation-token-types`).
+  `:spring` is Penpot's own type (`{stiffness damping mass}`), which DTCG
+  does not have."
+  #{:duration :cubic-bezier :spring})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SCHEMA: Token
@@ -585,10 +588,11 @@
    :number             [:number]
    :sizing             [:sizing :dimensions]
    :spacing            [:spacing :dimensions]
-   ;; the settings of the animation styles bind these (see
-   ;; `app.common.types.animation/style-token-types`)
+   ;; the settings of animations bind these (see
+   ;; `app.common.types.animation/animation-token-types`)
    :duration           [:duration]
-   :cubic-bezier       [:cubic-bezier]})
+   :cubic-bezier       [:cubic-bezier]
+   :spring             [:spring]})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; HELPERS for tokens application

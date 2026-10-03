@@ -159,6 +159,37 @@
         (when (and (<= 0 x1 1) (<= 0 x2 1))
           numbers)))))
 
+(def spring-keys
+  "The settings of a spring token, in this order."
+  [:stiffness :damping :mass])
+
+(defn parse-spring-value
+  "The `{:stiffness :damping :mass}` of the spring `value`: a map of three
+  numbers (or numeric texts) by their names, keywords or strings, or a
+  text of the three in this order (`170, 26, 1`), with a positive
+  stiffness and mass and a damping of 0 or more; nil for anything else,
+  as a reference."
+  [value]
+  (let [value (if (string? value)
+                (let [items (str/split (str/trim value) #"\s*,\s*|\s+")]
+                  (when (= 3 (count items))
+                    (zipmap spring-keys items)))
+                value)]
+    (when (map? value)
+      (let [number  (fn [item]
+                      (cond
+                        (number? item) item
+                        (string? item) (d/parse-double (str/trim item))))
+            numbers (into {}
+                          (map (fn [k] [k (number (or (get value k) (get value (name k))))]))
+                          spring-keys)
+            {:keys [stiffness damping mass]} numbers]
+        (when (and (every? mth/finite? (vals numbers))
+                   (pos? stiffness)
+                   (>= damping 0)
+                   (pos? mass))
+          numbers)))))
+
 (def ^:private single-number-regexp
   "One number with a unit or none: what a duration token holds, unlike a
   reference or a formula, which the resolver checks."
@@ -181,6 +212,14 @@
            (some? (parse-cubic-bezier-value value))))]
    cto/schema:token-ref])
 
+(def schema:token-value-spring
+  [:or
+   [:fn {:error/fn #(tr "errors.tokens.invalid-spring-token-value")}
+    (fn [value]
+      (and (map? value)
+           (some? (parse-spring-value value))))]
+   cto/schema:token-ref])
+
 (defn make-token-value-schema
   [token-type]
   [:multi {:dispatch (constantly token-type)
@@ -193,6 +232,7 @@
    [:shadow schema:token-value-shadow]
    [:duration schema:token-value-duration]
    [:cubic-bezier schema:token-value-cubic-bezier]
+   [:spring schema:token-value-spring]
    [::m/default schema:token-value-generic]])
 
 ;; Token
@@ -332,6 +372,7 @@
                 :shadow       (ctob/convert-dtcg-shadow-composite value)
                 :duration     (ctob/convert-dtcg-duration value)
                 :cubic-bezier (ctob/convert-dtcg-cubic-bezier value)
+                :spring       (ctob/convert-dtcg-spring value)
                 value)]
 
     (d/without-nils {:name name

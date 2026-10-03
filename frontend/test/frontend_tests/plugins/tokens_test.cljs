@@ -782,7 +782,11 @@
     (t/is (= 200 (get-resolved-value duration {(:name duration) duration})) "in ms")
     (let [result (get-resolved-value bezier {(:name bezier) bezier})]
       (t/is (array? result))
-      (t/is (= [0 0 0.58 1] (vec result))))))
+      (t/is (= [0 0 0.58 1] (vec result)))))
+  (let [spring (ctob/make-token {:name "spring.soft" :type :spring :value {:stiffness 120 :damping 14 :mass 1}})
+        result (get-resolved-value spring {(:name spring) spring})]
+    (t/is (object? result) "an object of its three numbers")
+    (t/is (= {"stiffness" 120 "damping" 14 "mass" 1} (js->clj result)))))
 
 (t/deftest motion-tokens-apply-to-no-shape
   (let [token   (ctob/make-token {:name "motion.fast" :type :duration :value "150ms"})

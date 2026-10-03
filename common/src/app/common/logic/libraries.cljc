@@ -598,7 +598,7 @@
                    (and early-return? (seq (:redo-changes changes))))
              changes
              (let [timelines  (:timelines page)
-                   timelines' (d/update-vals timelines #(ctas/sync-timeline % library-id styles asset-id))]
+                   timelines' (d/update-vals timelines #(ctas/sync-timeline % (:objects page) library-id styles asset-id))]
                (recur (next pages)
                       (cond-> changes
                         (not= timelines timelines')

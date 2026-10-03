@@ -11,6 +11,8 @@
    [app.common.files.tokens :as cft]
    [app.common.logging :as log]
    [app.common.logic.libraries :as cll]
+   [app.common.logic.timelines :as cltl]
+   [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
    [app.common.types.container :refer [shapes-seq]]
    [app.common.types.file :refer [object-containers-seq]]
@@ -73,6 +75,20 @@
     {:type :animation-style
      :style-id (:id style)}))
 
+(defn scan-animation-timeline-references
+  "Scan the timelines of the pages of the file for presets and keyframes
+  whose settings bind the token `token-name` (the uses of styles take the
+  names of their style): one reference by preset or keyframe."
+  [file-data token-name]
+  (for [page      (vals (:pages-index file-data))
+        [board-id timeline] (:timelines page)
+        track     (vals (:tracks timeline))
+        item      (concat (remove cta/style-use? (:animations track)) (:keyframes track))
+        :when (some #(= token-name %) (vals (:applied-tokens item)))]
+    {:type :animation-timeline
+     :page-id (:id page)
+     :board-id board-id}))
+
 (defn scan-workspace-token-references
   "Scan entire workspace for all token references to a specific token"
   [file-data old-token-name]
@@ -92,7 +108,10 @@
                            [])
 
         ;; Scan the animation styles of the file for settings bound to it
-        matching-styles (scan-animation-style-references file-data old-token-name)]
+        matching-styles (scan-animation-style-references file-data old-token-name)
+
+        ;; and the presets and keyframes of its timelines
+        matching-timelines (scan-animation-timeline-references file-data old-token-name)]
     (log/info :hint "token-scan-details"
               :token-name old-token-name
               :containers-count (count containers)
@@ -104,7 +123,9 @@
     {:applied-tokens matching-applied
      :token-aliases matching-aliases
      :animation-styles matching-styles
-     :total-references (+ (count matching-applied) (count matching-aliases) (count matching-styles))}))
+     :animation-timelines matching-timelines
+     :total-references (+ (count matching-applied) (count matching-aliases) (count matching-styles)
+                          (count matching-timelines))}))
 
 ;; Token Remapping Core Logic
 ;; ==========================
@@ -182,9 +203,19 @@
                                    (fn [styles] (reduce #(assoc %1 (:id %2) %2) styles renamed-styles)))]
             (-> (reduce pcb/update-animation-style token-changes renamed-styles)
                 (cll/generate-sync-timelines file-id nil file-id {file-id {:data file-data'}})))
-          token-changes)]
+          token-changes)
 
-    (cond-> style-changes
+        ;; and in the presets and keyframes of the timelines that bind it
+        timeline-changes
+        (if (seq (:animation-timelines scan-results))
+          (let [page-ids (into #{} (map :page-id) (:animation-timelines scan-results))
+                rename   #(if (= % old-token-name) new-token-name %)]
+            (cltl/commit-page-timelines style-changes
+                                        (keep #(get-in file-data [:pages-index %]) page-ids)
+                                        #(cta/rename-timeline-tokens % rename)))
+          style-changes)]
+
+    (cond-> timeline-changes
       (some? undo-group)
       (assoc :undo-group undo-group))))
 

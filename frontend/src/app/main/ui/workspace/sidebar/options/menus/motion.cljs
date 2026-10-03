@@ -19,6 +19,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.libraries :as dwl]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu* dropdown-menu-item*]]
@@ -32,6 +33,7 @@
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.workspace.sidebar.options.menus.interactions :refer [prototype-pill*]]
+   [app.main.ui.workspace.tokens.motion :as motion-tokens]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.keyboard :as kbd]
@@ -251,10 +253,10 @@
 
 (defn- setting-handler
   "A handler of the number field of the setting `key` of a style entry
-  (or of a preset, which has no `applied-tokens`): a number typed in goes
-  into the setting through `to-value` and lets go of its token; a token
-  picked (the input gives the tokens of its name) binds it and sets the
-  setting to its value (see `cta/token-setting`)."
+  or a preset: a number typed in goes into the setting through
+  `to-value` and lets go of its token; a token picked (the input gives
+  the tokens of its name) binds it and sets the setting to its value
+  (see `cta/token-setting`)."
   [key to-value change applied-tokens]
   (fn [value]
     (cond
@@ -289,9 +291,9 @@
   the `unit-count` of the text, the ms between two units shows next to
   the spread. It starts closed, or open with `default-open`. The layers
   list and the style editor both use it. With `tokens` (the active
-  design tokens by type), the settings of a style entry bind tokens:
-  each number field and the easing offer those of its types (see
-  `cta/style-token-types`), and its `:applied-tokens` show either way."
+  design tokens by type), the settings of a style entry or a preset bind
+  tokens: each number field and the easing offer those of its types (see
+  `cta/animation-token-types`), and its `:applied-tokens` show either way."
   [{:keys [animation on-change on-remove on-unlock on-change-start on-change-end read-only
            split-allowed on-split unit-count default-open tokens]}]
   (let [{:keys [id type direction start duration easing amount offset-x offset-y locked
@@ -333,9 +335,12 @@
 
         ;; the tokens each setting can bind, nil without `tokens`
         time-tokens   (mf/with-memo [tokens] (tokens-of-types tokens [:duration]))
-        amount-tokens (mf/with-memo [tokens type] (tokens-of-types tokens (cta/style-token-types type :amount)))
-        offset-tokens (mf/with-memo [tokens type] (tokens-of-types tokens (cta/style-token-types type :offset-x)))
-        easing-tokens (mf/with-memo [tokens] (sort-by :name (get (tokens-of-types tokens [:cubic-bezier]) :cubic-bezier)))
+        amount-tokens (mf/with-memo [tokens type] (tokens-of-types tokens (cta/animation-token-types type :amount)))
+        offset-tokens (mf/with-memo [tokens type] (tokens-of-types tokens (cta/animation-token-types type :offset-x)))
+        easing-tokens (mf/with-memo [tokens type]
+                        (->> (tokens-of-types tokens (cta/animation-token-types type :easing))
+                             (mapcat val)
+                             (sort-by :name)))
         easing-token  (:easing applied-tokens)
 
         on-easing
@@ -639,9 +644,10 @@
 
 (mf/defc layer-animation-item*
   "A preset animation of the layer `shape-id`, changed in its timeline.
-  A `text` can play it by its units (see `animation-item*`)."
+  A `text` can play it by its units (see `animation-item*`), and its
+  settings bind the design `tokens` (by type)."
   {::mf/private true}
-  [{:keys [shape-id animation text]}]
+  [{:keys [shape-id animation text tokens]}]
   (let [id    (:id animation)
         split (:split animation)
 
@@ -678,14 +684,96 @@
                          :on-unlock on-unlock
                          :split-allowed (some? text)
                          :on-split on-split
-                         :unit-count unit-count}]))
+                         :unit-count unit-count
+                         :tokens tokens}]))
+
+(defn- stretch-keys
+  "The keyframe entry `entry` from `start` and `duration` ms long, its
+  keyframes retimed in proportion, as a stretched use plays them (see
+  `cta/expand-style`)."
+  [entry start duration]
+  (first (cta/expand-style {:start start
+                            :duration duration
+                            :entries [(assoc entry :start 0)]})))
+
+(mf/defc keys-entry-item*
+  "A keyframe entry of an animation style, `entry`: the row it animates,
+  its keyframes and span, and, once opened, its start and duration, a new
+  duration retiming its keyframes, each change going to `on-change` as
+  the attributes changed; a drag on a number field starts with
+  `on-change-start` and ends with `on-change-end`. Its remove button,
+  `on-remove`, is disabled when nil; a `read-only` one shows them
+  disabled. Its values come from a layer that uses the style (see
+  `dwl/update-style-from-layer`)."
+  [{:keys [entry on-change on-remove on-change-start on-change-end read-only]}]
+  (let [{:keys [start duration keyframes]} entry
+        read-only?      (true? read-only)
+        on-change-start (d/nilv on-change-start noop)
+        on-change-end   (d/nilv on-change-end noop)
+
+        open*  (mf/use-state false)
+        open?  (deref open*)
+
+        on-toggle
+        (mf/use-fn #(swap! open* not))
+
+        on-start
+        (mf/use-fn
+         (mf/deps on-change)
+         (number-handler #(on-change {:start %})))
+
+        on-duration
+        (mf/use-fn
+         (mf/deps entry on-change)
+         (number-handler
+          #(on-change (select-keys (stretch-keys entry (:start entry) (max 1 %)) [:duration :keyframes]))))]
+
+    [:div {:class (stl/css :animation-item)}
+     [:> prototype-pill* {:title (animation-label entry)
+                          :description (tr "workspace.animation.keys-entry.span"
+                                           (count keyframes) start (cta/animation-end entry))
+                          :left-button-icon-id i/hsva
+                          :left-button-tooltip (tr "labels.options")
+                          :is-left-button-active open?
+                          :on-left-button-click on-toggle
+                          :right-button-icon-id i/remove
+                          :right-button-tooltip (tr "workspace.animation.remove-animation")
+                          :is-right-button-disabled (or read-only? (nil? on-remove))
+                          :on-right-button-click (when-not read-only? on-remove)}]
+
+     (when open?
+       [:*
+        [:> animation-row* {:label (tr "workspace.animation.start")}
+         [:> numeric-input* {:text-icon "ms"
+                             :property (tr "workspace.animation.start")
+                             :min 0
+                             :step 1
+                             :value start
+                             :disabled read-only?
+                             :on-change-start on-change-start
+                             :on-change-end on-change-end
+                             :on-change on-start}]]
+
+        [:> animation-row* {:label (tr "workspace.animation.duration")}
+         [:> numeric-input* {:text-icon "ms"
+                             :property (tr "workspace.animation.duration")
+                             :min 1
+                             :step 1
+                             :value duration
+                             :disabled read-only?
+                             :on-change-start on-change-start
+                             :on-change-end on-change-end
+                             :on-change on-duration}]]
+
+        [:div {:class (stl/css :animation-note)}
+         (tr "workspace.animation.keys-entry.hint")]])]))
 
 (mf/defc style-use-item*
   "A use of an animation style by the layer `shape-id`: the name of the
   style and the span of the use, and, once opened, its start and length,
   the library the style comes from, and what can be done with the style:
-  detach the use from it, or edit it when it is one of this file
-  (`local?`)."
+  detach the use from it, or, when it is one of this file (`local?`),
+  edit it or save into it what the layer plays now."
   {::mf/private true}
   [{:keys [shape-id animation library-name local?]}]
   (let [{:keys [id start duration locked style-ref-id]} animation
@@ -724,7 +812,12 @@
         on-edit
         (mf/use-fn
          (mf/deps style-ref-id)
-         #(st/emit! (dw/show-animation-style-in-assets style-ref-id)))]
+         #(st/emit! (dw/show-animation-style-in-assets style-ref-id)))
+
+        on-update-style
+        (mf/use-fn
+         (mf/deps shape-id id)
+         #(st/emit! (dwl/update-style-from-layer shape-id id)))]
 
     [:div {:class (stl/css :animation-item)}
      [:> prototype-pill* {:title (animation-label animation)
@@ -771,7 +864,13 @@
          (when local?
            [:> button* {:variant "secondary"
                         :on-click on-edit}
-            (tr "workspace.animation.edit-style")])]])]))
+            (tr "workspace.animation.edit-style")])]
+        (when local?
+          [:> button* {:variant "secondary"
+                       :class (stl/css :style-update)
+                       :title (tr "workspace.animation.update-style-from-layer.hint")
+                       :on-click on-update-style}
+           (tr "workspace.animation.update-style-from-layer")])])]))
 
 (defn- style-label
   "The name of an animation style with its groups."
@@ -793,18 +892,21 @@
        (sort-by (juxt (complement :local?) :name))))
 
 (mf/defc save-style*
-  "\"Save as style\" for the layer `shape-id` with `animations`: a button,
+  "\"Save as style\" for the layer `shape-id` with its `track`: a button,
   then a field for the name of the new style. Disabled, with the reason,
-  when the presets and uses it would take cannot make a style."
+  when the presets, uses and rows of keyframes it would take cannot make
+  a style."
   {::mf/private true}
-  [{:keys [shape-id animations style-count]}]
-  (let [result  (mf/with-memo [animations]
-                  (ctas/animations->entries animations))
+  [{:keys [shape-id track style-count]}]
+  (let [result  (mf/with-memo [track]
+                  (ctas/entries-error track))
         error   (:error result)
         hint    (case error
-                  :too-many-entries (tr "workspace.animation.style-too-many-entries"
-                                        cta/max-style-entries (:count result))
-                  :no-entries       (tr "workspace.animation.save-as-style-empty")
+                  :too-many-entries   (tr "workspace.animation.style-too-many-entries"
+                                          cta/max-style-entries (:count result))
+                  :too-many-keyframes (tr "workspace.animation.style-too-many-keyframes"
+                                          cta/max-style-keyframes (:count result))
+                  :no-entries         (tr "workspace.animation.save-as-style-empty")
                   nil)
 
         naming* (mf/use-state false)
@@ -847,7 +949,7 @@
                     :title hint
                     :on-click on-start-naming}
         (tr "workspace.animation.save-as-style")])
-     (when (= error :too-many-entries)
+     (when (contains? #{:too-many-entries :too-many-keyframes} error)
        [:div {:class (stl/css :save-style-hint)} hint])]))
 
 (def ^:private ref:stagger
@@ -873,6 +975,8 @@
                      (dm/get-in timeline [:tracks shape-id :animations]))
         styles     (mf/with-memo [files file-id]
                      (usable-styles files file-id))
+        ;; what the settings of its presets bind
+        tokens     (motion-tokens/use-active-tokens-by-type)
 
         open*      (mf/use-state false)
         open?      (deref open*)
@@ -975,9 +1079,10 @@
             [:> layer-animation-item* {:key (dm/str (:id animation))
                                        :shape-id shape-id
                                        :animation animation
-                                       :text text}]))])
+                                       :text text
+                                       :tokens tokens}]))])
 
      (when (some? shape-id)
        [:> save-style* {:shape-id shape-id
-                        :animations animations
+                        :track (dm/get-in timeline [:tracks shape-id])
                         :style-count (count (dm/get-in files [file-id :data :animation-styles]))}])]))

@@ -1715,6 +1715,20 @@ Will return a value that matches this schema:
     (mapv #(if (string? %) (or (d/parse-double %) %) %) value)
     value))
 
+(defn convert-dtcg-spring
+  "Convert a spring token value from DTCG format to internal format: the
+  map of its three settings by keyword, numeric texts read as numbers; a
+  reference is kept."
+  [value]
+  (if (map? value)
+    (into {}
+          (keep (fn [k]
+                  (let [v (or (get value (name k)) (get value k))]
+                    (when (some? v)
+                      [k (if (string? v) (or (d/parse-double v) v) v)]))))
+          [:stiffness :damping :mass])
+    value))
+
 (defn convert-dtcg-typography-composite
   "Convert typography token value keys from DTCG format to internal format."
   [value]
@@ -1817,6 +1831,7 @@ Will return a value that matches this schema:
                                             :shadow (convert-dtcg-shadow-composite token-value)
                                             :duration (convert-dtcg-duration token-value)
                                             :cubic-bezier (convert-dtcg-cubic-bezier token-value)
+                                            :spring (convert-dtcg-spring token-value)
                                             token-value))
                                         :description (get v "$description")))
               ;; Discard unknown / un-typeable tokens
@@ -2064,7 +2079,10 @@ Will return a value that matches this schema:
                       typography-token->dtcg-token
                       ;; Transform shadow token values
                       (= :shadow (:type token))
-                      shadow-token->dtcg-token)
+                      shadow-token->dtcg-token
+                      ;; A spring: its settings by their names
+                      (and (= :spring (:type token)) (map? (:value token)))
+                      (->> (into {} (map (fn [[k v]] [(name k) v])))))
            "$type" (cto/token-type->dtcg-token-type (:type token))}
     (:description token) (assoc "$description" (:description token))))
 

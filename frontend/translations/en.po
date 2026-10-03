@@ -2011,6 +2011,12 @@ msgstr ""
 msgid "errors.tokens.invalid-shadow-type-token-value"
 msgstr "Invalid shadow type: only 'innerShadow' or 'dropShadow' are accepted"
 
+#: src/app/main/ui/workspace/tokens/management/forms/spring.cljs
+msgid "errors.tokens.invalid-spring-token-value"
+msgstr ""
+"Invalid spring value: use a stiffness and a mass above 0 and a damping of 0 "
+"or more."
+
 #: src/app/main/data/workspace/tokens/errors.cljs:96
 msgid "errors.tokens.invalid-text-case-token-value"
 msgstr ""
@@ -7037,6 +7043,14 @@ msgstr "Align top (%s)"
 msgid "workspace.animation.autoplay"
 msgstr "Play when the prototype shows the board"
 
+#: src/app/main/ui/workspace/timeline/easing.cljs
+msgid "workspace.animation.easing-no-token"
+msgstr "None"
+
+#: src/app/main/ui/workspace/timeline/easing.cljs
+msgid "workspace.animation.easing-token"
+msgstr "Token"
+
 #: src/app/main/ui/workspace/sidebar/assets.cljs:181
 msgid "workspace.assets.add-library"
 msgstr "Add library"
@@ -7658,6 +7672,21 @@ msgstr "Detach style"
 msgid "workspace.animation.edit-style"
 msgstr "Edit style"
 
+msgid "workspace.animation.update-style-from-layer"
+msgstr "Update style from this layer"
+
+msgid "workspace.animation.update-style-from-layer.hint"
+msgstr "Save what this layer plays now, its keyframes too, into the style: every layer using it follows."
+
+msgid "workspace.animation.keys-entry"
+msgstr "%s keyframes"
+
+msgid "workspace.animation.keys-entry.span"
+msgstr "%s keyframes · %s–%s ms"
+
+msgid "workspace.animation.keys-entry.hint"
+msgstr "Its values come from a layer: change the keyframes of a layer that uses the style, then update the style from it."
+
 msgid "workspace.animation.save-as-style"
 msgstr "Save as style"
 
@@ -7906,6 +7935,9 @@ msgstr "The board's animation is now longer to fit the pasted motion."
 
 msgid "workspace.animation.style-too-many-entries"
 msgstr "A style holds up to %s animations; these add up to %s."
+
+msgid "workspace.animation.style-too-many-keyframes"
+msgstr "A style holds up to %s keyframes; these add up to %s."
 
 msgid "workspace.audio.unsupported"
 msgstr "“%s” is not an audio file Penpot plays: use MP3, WAV, M4A, OGG, WebM or FLAC."
@@ -11107,6 +11139,10 @@ msgstr "Y"
 #: src/app/main/ui/workspace/tokens/management/context_menu.cljs:267
 msgid "workspace.tokens.size"
 msgstr "Size"
+
+#: src/app/main/ui/workspace/tokens/management/forms/spring.cljs
+msgid "workspace.tokens.spring-value-enter"
+msgstr "Stiffness, damping, mass (170, 26, 1) or an {alias}"
 
 #: src/app/main/ui/workspace/tokens/management/forms/form_container.cljs:54, src/app/main/ui/workspace/tokens/management/forms/typography.cljs:161
 msgid "workspace.tokens.text-case-value-enter"

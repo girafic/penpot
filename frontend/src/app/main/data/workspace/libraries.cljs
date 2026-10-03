@@ -457,6 +457,63 @@
                 (pcb/update-animation-style style)
                 (commit-animation-styles state (assoc (:animation-styles data) (:id style) style) (:id style)))))))))
 
+(defn update-style-from-layer
+  "Save what the shape `shape-id` plays now into the animation style of
+  the current file its use `use-id` plays (see `ctas/update-from-track`):
+  the style takes its presets, the entries of its uses and its rows of
+  keyframes, a use of it takes their place, and every use of the style in
+  the file follows, in one undo step. Refused, with a message, when they
+  hold more entries or keyframes than a style does; a use of a style of a
+  library changes nothing."
+  [shape-id use-id]
+  (ptk/reify ::update-style-from-layer
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [file-id  (:current-file-id state)
+            data     (dsh/lookup-file-data state)
+            page     (dsh/lookup-page state)
+            tl       (when (dwa/motion? state) (dwa/shape-timeline state shape-id))
+            use      (cta/get-animation tl shape-id use-id)
+            style    (when (and (cta/style-use? use) (= file-id (:style-ref-file use)))
+                       (dm/get-in data [:animation-styles (:style-ref-id use)]))
+            result   (when (some? style)
+                       (ctas/update-from-track (cta/get-track tl shape-id) use-id
+                                               (cta/rest-pose tl (:objects page) shape-id)
+                                               style file-id))]
+        (cond
+          (nil? result)
+          (rx/empty)
+
+          (= :too-many-entries (:error result))
+          (rx/of (ntf/warn (tr "workspace.animation.style-too-many-entries"
+                               cta/max-style-entries (:count result))))
+
+          (= :too-many-keyframes (:error result))
+          (rx/of (ntf/warn (tr "workspace.animation.style-too-many-keyframes"
+                               cta/max-style-keyframes (:count result))))
+
+          (some? (:error result))
+          (rx/empty)
+
+          :else
+          (let [style     (ctas/check-animation-style (:style result))
+                board-id  (:board-id tl)
+                tl'       (assoc-in tl [:tracks shape-id] (:track result))
+                styles    (assoc (:animation-styles data) (:id style) style)
+                ;; the sync starts from the new track, which already plays
+                ;; the new style, so it writes only the other uses
+                libraries (-> (dsh/lookup-libraries state)
+                              (assoc-in [file-id :data :animation-styles] styles)
+                              (assoc-in [file-id :data :pages-index (:id page) :timelines board-id] tl'))
+                changes   (-> (pcb/empty-changes it)
+                              (pcb/with-library-data data)
+                              (pcb/update-animation-style style)
+                              (pcb/with-page page)
+                              (pcb/set-timeline-track board-id shape-id (:track result))
+                              (cll/generate-sync-timelines file-id (:id style) file-id libraries))]
+            (rx/of (dch/commit-changes changes)
+                   (dwa/apply-preview))))))))
+
 (defn update-animation-styles
   "Change the animation styles `styles` of the current file, the file
   `file-id`, and sync the uses of all its styles, in one change set: the

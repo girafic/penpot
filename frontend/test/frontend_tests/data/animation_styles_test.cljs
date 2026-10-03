@@ -574,3 +574,212 @@
        (fn [state]
          (t/is (= 0 @commits))
          (t/is (= before (get (styles-of state) (cthi/id :pop)))))))))
+
+;; DESIGN TOKENS ON PRESETS AND KEYFRAMES
+
+(defn- with-keyframes-page
+  "`file` with a page :page-2 holding a board :board-c whose rect :c1 has
+  keyframes of x, the first one easing by the token `ease.out`; the first
+  page stays the current one."
+  [file]
+  (let [file (-> (cthf/add-sample-page file :page-2)
+                 (ctho/add-frame :board-c :x 0 :y 0 :width 200 :height 200)
+                 (cths/add-sample-shape :c1 :type :rect :parent-label :board-c
+                                        :x 10 :y 10 :width 20 :height 20))
+        tl   (-> (cta/make-timeline {:board-id (cthi/id :board-c) :duration 1000})
+                 (cta/add-keyframe (cthi/id :c1) {:time 0 :property :x :value 10
+                                                  :applied-tokens {:easing "ease.out"}})
+                 (cta/add-keyframe (cthi/id :c1) {:time 500 :property :x :value 60}))
+        file (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page (cthf/current-page file))
+                                          (pcb/set-timeline (cthi/id :board-c) tl)))]
+    (cthf/switch-to-page file :page-1)))
+
+(defn- bound-file
+  "A file whose rect :r3 fades bound to `motion.fast` (300 ms as it is)
+  and whose second page has a keyframe bound to `ease.out`, with these
+  tokens: `motion.fast` 150 ms, `ease.out` a curve."
+  []
+  (-> (setup-file :f (fn [_ tls]
+                       (update tls :board-a cta/add-animation (cthi/id :r3)
+                               {:type :fade :start 0 :duration 300
+                                :applied-tokens {:duration "motion.fast"}})))
+      (with-keyframes-page)
+      (with-tokens [["motion.fast" :duration "150ms"]
+                    ["ease.out" :cubic-bezier [0.16 1 0.3 1]]])))
+
+(defn- page-2-keyframe
+  [state]
+  (-> (ths/get-file-from-state state)
+      (get-in [:data :pages-index (cthi/id :page-2) :timelines (cthi/id :board-c)
+               :tracks (cthi/id :c1) :keyframes 0])))
+
+(t/deftest a-token-change-reaches-bound-presets-and-keyframes-on-every-page
+  (t/async
+    done
+    (let [store (store-of (bound-file))
+
+          undo
+          (fn []
+            (tohs/run-store-async
+             store done [dwu/undo ::stop-undo]
+             (fn [state]
+               (t/is (= 300 (:duration (first (animations-of state :board-a :r3))))
+                     "one undo takes the preset back")
+               (t/is (nil? (:easing (page-2-keyframe state))) "and the keyframe"))))]
+      (tohs/run-store-async
+       store undo
+       [(watch-undo-stack ::stop-undo)
+        (dwtp/propagate-workspace-tokens)]
+       (fn [state]
+         (t/is (= [150 {:duration "motion.fast"}]
+                  ((juxt :duration :applied-tokens) (first (animations-of state :board-a :r3)))))
+         (t/is (= {:type :bezier :curve [0.16 1 0.3 1]} (:easing (page-2-keyframe state)))
+               "a keyframe on another page"))))))
+
+(t/deftest resolved-timelines-commit-nothing-again
+  (t/async
+    done
+    (let [store   (store-of (bound-file))
+          commits (atom 0)
+          again
+          (fn []
+            (tohs/run-store-async
+             store done
+             [(count-commits commits)
+              (dwtp/propagate-workspace-tokens)]
+             (fn [_]
+               (t/is (= 0 @commits)))))]
+      (tohs/run-store-async
+       store again
+       [(dwtp/propagate-workspace-tokens)]
+       (fn [_] nil)))))
+
+(t/deftest a-keyframe-easing-binds-and-an-edit-detaches-it
+  (t/async
+    done
+    (let [file    (-> (setup-file :f (fn [_ tls]
+                                       (-> tls
+                                           (update :board-a cta/add-keyframe (cthi/id :r2)
+                                                   {:id (cthi/new-id! :k0) :time 0 :property :x :value 100})
+                                           (update :board-a cta/add-keyframe (cthi/id :r2)
+                                                   {:time 500 :property :x :value 200}))))
+                      (with-tokens [["spring.soft" :spring {:stiffness 120 :damping 14 :mass 1}]]))
+          store   (store-of file)
+          key-of  #(-> (timeline-of % :board-a) :tracks (get (cthi/id :r2)) :keyframes first)
+          detach
+          (fn []
+            (tohs/run-store-async
+             store done
+             [(dwa/set-keyframe-easing (cthi/id :r2) (cthi/id :k0) :ease-in)]
+             (fn [state]
+               (t/is (= [:ease-in nil] ((juxt :easing :applied-tokens) (key-of state)))
+                     "a hand edit detaches the token"))))]
+      (tohs/run-store-async
+       store detach
+       [(select [:r2])
+        (dwa/bind-keyframe-easing (cthi/id :r2) (cthi/id :k0) "spring.soft"
+                                  {:type :spring :stiffness 120 :damping 14 :mass 1})]
+       (fn [state]
+         (t/is (= [{:type :spring :stiffness 120 :damping 14 :mass 1} {:easing "spring.soft"}]
+                  ((juxt :easing :applied-tokens) (key-of state)))
+               "bound, it takes the value at once"))))))
+
+;; KEYFRAME ENTRIES
+
+(defn- with-x-row
+  "Board A's timeline in `tls` with a row of :r1 that moves it 40 px to
+  the right from 100 to 500 ms (from where it rests, 10 px into the
+  board)."
+  [tls]
+  (update tls :board-a
+          #(-> %
+               (cta/add-keyframe (cthi/id :r1) {:time 100 :property :x :value 10 :easing :linear})
+               (cta/add-keyframe (cthi/id :r1) {:time 500 :property :x :value 50}))))
+
+(defn- file-plays
+  "What the board `board-label` of `file` shows of `label` (see `plays`)."
+  [file board-label label]
+  (let [page     (cthf/current-page file)
+        resolved (cta/resolve-animations (get-in page [:timelines (cthi/id board-label)]) (:objects page))]
+    (mapv #(get (cta/values-at resolved %) (cthi/id label)) (range 0 1001 50))))
+
+(defn- x-keyframes
+  [state board-label label]
+  (->> (get-in (timeline-of state board-label) [:tracks (cthi/id label) :keyframes])
+       (filter #(= :x (:property %)))
+       (mapv (juxt :time :value))))
+
+(t/deftest saving-a-style-takes-the-keyframes-of-the-layer
+  (t/async
+    done
+    (let [file  (setup-file :f (fn [_ tls] (with-x-row tls)))
+          store (store-of file)]
+      (ths/run-store
+       store done
+       [(dwa/save-animation-style (cthi/id :r1) "Slide")]
+       (fn [state]
+         (let [style (first (vals (styles-of state)))]
+           (t/is (= [[:fade 0] [:move 0] [:keys 0]] (mapv (juxt :type :start) (:entries style)))
+                 "the presets and a keyframe entry")
+           (t/is (= [[0 0] [400 40]] (mapv (juxt :time :value) (:keyframes (d/seek cta/keys-entry? (:entries style)))))
+                 "relative to where the layer rests")
+           (t/is (empty? (x-keyframes state :board-a :r1)) "they leave the layer")
+           (t/is (= (file-plays file :board-a :r1) (plays state :board-a :r1))
+                 "which plays as before")))))))
+
+(defn- update-file
+  "`setup-file` with the style :pop used from 0 by :r1, which also has a
+  row of keyframes (see `with-x-row`), and by :b1: `[file use-id]`, the
+  use of :r1."
+  []
+  (let [file (setup-file :labels [:pop]
+                         :f (fn [file tls]
+                              (-> tls
+                                  (with-x-row)
+                                  (update :board-a cta/add-animation (cthi/id :r1) (use-of file :pop 0))
+                                  (update :board-b cta/add-animation (cthi/id :b1) (use-of file :pop 0)))))]
+    [file (->> (get-in (cthf/current-page file) [:timelines (cthi/id :board-a) :tracks (cthi/id :r1) :animations])
+               (d/seek cta/style-use?)
+               :id)]))
+
+(t/deftest updating-a-style-from-a-layer-reaches-its-uses
+  (t/async
+    done
+    (let [[file use-id] (update-file)
+          store         (store-of file)
+          commits       (atom 0)]
+      (ths/run-store
+       store done
+       [(count-commits commits)
+        (dwl/update-style-from-layer (cthi/id :r1) use-id)]
+       (fn [state]
+         (let [entries (:entries (get (styles-of state) (cthi/id :pop)))]
+           (t/is (= 1 @commits) "one change set")
+           (t/is (= {:fade 2 :scale 1 :move 1 :keys 1} (frequencies (map :type entries)))
+                 "the style takes what the layer plays")
+           (t/is (= [use-id] (mapv :id (animations-of state :board-a :r1)))
+                 "the use, the same, takes the place of the presets")
+           (t/is (empty? (x-keyframes state :board-a :r1)) "and of the keyframes")
+           (t/is (= (file-plays file :board-a :r1) (plays state :board-a :r1)) "the layer plays as before")
+           (t/is (= entries (:entries (first (animations-of state :board-b :b1)))) "another use follows")
+           (t/is (= (plays state :board-a :r1) (plays state :board-b :b1))
+                 "and plays it from where its layer rests")))))))
+
+(t/deftest one-undo-reverts-an-update-from-a-layer
+  (t/async
+    done
+    (let [[file use-id] (update-file)
+          store         (store-of file)
+          page          (cthf/current-page file)]
+      (ths/run-store
+       store done
+       [(watch-undo-stack)
+        (dwl/update-style-from-layer (cthi/id :r1) use-id)
+        dwu/undo]
+       (fn [state]
+         (t/is (= (:entries (style :pop)) (:entries (get (styles-of state) (cthi/id :pop)))))
+         (t/is (= (get-in page [:timelines (cthi/id :board-a)]) (timeline-of state :board-a))
+               "the layer as it was")
+         (t/is (= (get-in page [:timelines (cthi/id :board-b)]) (timeline-of state :board-b))
+               "and the other uses"))))))

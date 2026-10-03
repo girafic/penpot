@@ -152,13 +152,31 @@
             (pcb/with-page changes page)
             (into (set (keys old)) (keys timelines)))))
 
+(defn commit-page-timelines
+  "Changes turning every timeline of `pages` into what `f` gives of it,
+  for the timelines `f` changes (see `commit-timelines`): one change set
+  over several pages, as when a design token changes the settings it
+  binds in all of them."
+  [changes pages f]
+  (reduce (fn [changes page]
+            (let [timelines  (:timelines page)
+                  timelines' (d/update-vals timelines f)]
+              (if (= timelines timelines')
+                changes
+                (commit-timelines changes page timelines'))))
+          changes
+          pages))
+
 (defn commit-track-animations
   "Changes turning the timelines of `page` into `timelines` (its whole
-  `:timelines` map, edited) when only the animations of their tracks and
-  their durations change, as in a style sync: the animations of each
+  `:timelines` map, edited) when mostly the animations of their tracks
+  and their durations change, as in a style sync: the animations of each
   track that changed (see `pcb/set-timeline-track-animations`) and each
   changed duration, so that keyframes other users add meanwhile to the
-  same layers stay. A board without a timeline on `page` is left out."
+  same layers stay; a track whose keyframes or flags change too (a use
+  whose keyframe entries turn into keyframes, see
+  `ctas/detach-track-use`) is written whole. A board without a timeline
+  on `page` is left out."
   [changes page timelines]
   (let [old (:timelines page)]
     (reduce-kv
@@ -168,10 +186,15 @@
            changes
            (as-> changes $
              (reduce-kv (fn [changes shape-id track]
-                          (let [animations (:animations track)]
-                            (cond-> changes
-                              (not= animations (get-in before [:tracks shape-id :animations]))
-                              (pcb/set-timeline-track-animations board-id shape-id animations))))
+                          (let [old-track (get-in before [:tracks shape-id])]
+                            (cond
+                              (= (dissoc track :animations) (dissoc old-track :animations))
+                              (cond-> changes
+                                (not= (:animations track) (:animations old-track))
+                                (pcb/set-timeline-track-animations board-id shape-id (:animations track)))
+
+                              :else
+                              (pcb/set-timeline-track changes board-id shape-id track))))
                         $
                         (:tracks timeline))
              (cond-> $
@@ -636,25 +659,41 @@
 
 (def max-paste-keyframes
   "The most keyframes one paste of an animation clip writes, over all its
-  targets; each entry of a style use counts as one."
+  targets; each preset entry of a style use counts as one, a keyframe
+  entry as its keyframes."
   10000)
+
+(defn- clip-entry?
+  "Whether the entry `entry` of a style use can be pasted: it does not
+  start before its style, and the keyframes of a keyframe entry are
+  within its span, with values of the kind its property takes."
+  [{:keys [start duration property keyframes] :as entry}]
+  (and (>= start 0)
+       (or (not (cta/keys-entry? entry))
+           (every? #(and (<= 0 (:time %) duration)
+                         (cta/keyframe-value-fits? {:property property :value (:value %)}))
+                   keyframes))))
 
 (defn- clip-track?
   "Whether the keyframes and presets of `track` can be pasted: none
   before the start (nor the entries of a style use before the start of
-  its style), and the values of the kind their properties take."
+  its style, see `clip-entry?`), and the values of the kind their
+  properties take."
   [{:keys [keyframes animations]}]
   (and (every? #(and (>= (:time %) 0) (cta/keyframe-value-fits? %)) keyframes)
        (every? #(and (>= (:start %) 0)
-                     (every? (fn [entry] (>= (:start entry) 0)) (:entries %)))
+                     (every? clip-entry? (:entries %)))
                animations)))
 
 (defn- clip-size
   "How much a paste of `track` writes: its keyframes and the entries of
-  its style uses."
+  its style uses, a keyframe entry counting as its keyframes."
   [{:keys [keyframes animations]}]
   (+ (count keyframes)
-     (transduce (map #(count (:entries %))) + 0 animations)))
+     (transduce (mapcat :entries)
+                (completing #(+ %1 (if (cta/keys-entry? %2) (count (:keyframes %2)) 1)))
+                0
+                animations)))
 
 (def schema:animation-clip
   "An animation clip (see `animation-clip`). It comes from the clipboard,

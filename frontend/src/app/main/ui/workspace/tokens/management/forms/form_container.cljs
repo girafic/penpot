@@ -15,6 +15,7 @@
    [app.main.ui.workspace.tokens.management.forms.font-family :as font-family]
    [app.main.ui.workspace.tokens.management.forms.generic-form :as generic]
    [app.main.ui.workspace.tokens.management.forms.shadow :as shadow]
+   [app.main.ui.workspace.tokens.management.forms.spring :as spring]
    [app.main.ui.workspace.tokens.management.forms.typography :as typography]
    [app.util.i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -73,4 +74,5 @@
       :font-weight [:> generic/form* font-weight-props]
       :duration [:> generic/form* duration-props]
       :cubic-bezier [:> cubic-bezier/form* props]
+      :spring [:> spring/form* props]
       [:> generic/form* props])))

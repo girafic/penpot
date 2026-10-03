@@ -173,6 +173,35 @@
     (t/is (= ["fade" 500 "Card enter" {"duration" "motion.fast"}]
              ((juxt #(get % "type") #(get % "start") #(get % "style") #(get % "tokens")) preset)))))
 
+(t/deftest the-keyframe-entries-of-a-style-play-as-keyframes
+  (let [style (ctas/make-animation-style {:name "Nudge"
+                                          :entries [{:type :fade :start 0 :duration 300}
+                                                    {:type :keys :property :x :start 0 :duration 400
+                                                     :keyframes [{:time 0 :value 0 :easing :linear}
+                                                                 {:time 400 :value 30}]}]})
+        [objects code] (board-scene #(cta/add-animation % (thi/id :a) (ctas/make-use style (uuid/next) 100)))
+        layer (layer-json (ctac/motion-json code objects) :a)]
+    (t/is (= ["fade"] (mapv #(get % "type") (get layer "presets"))) "no preset of them")
+    (t/is (= [[100 20] [500 50]]
+             (mapv (juxt #(get % "time") #(get % "value")) (get (property-json layer "x") "keyframes")))
+          "their keyframes, from where the layer rests")))
+
+(t/deftest bound-presets-and-keyframes-name-their-tokens
+  (let [[objects code]
+        (board-scene #(-> %
+                          (cta/add-animation (thi/id :a) {:type :fade :start 0 :duration 300
+                                                          :applied-tokens {:easing "ease.spring"}})
+                          (cta/add-keyframe (thi/id :b) {:time 0 :property :x :value 0
+                                                         :easing :ease-in
+                                                         :applied-tokens {:easing "ease.in"}})
+                          (cta/add-keyframe (thi/id :b) {:time 400 :property :x :value 80})))
+        json      (ctac/motion-json code objects)
+        preset    (first (get (layer-json json :a) "presets"))
+        keyframes (get (property-json (layer-json json :b) "x") "keyframes")]
+    (t/is (= {"easing" "ease.spring"} (get preset "tokens")))
+    (t/is (= {"easing" "ease.in"} (get-in keyframes [0 "tokens"])))
+    (t/is (not (contains? (second keyframes) "tokens")) "the last keyframe starts no segment")))
+
 (t/deftest loops-paths-and-hidden-rows
   (let [[objects code]
         (board-scene #(-> %

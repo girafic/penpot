@@ -33,6 +33,8 @@
                        660
                        :cubic-bezier
                        560
+                       :spring
+                       560
                        400)
         ;; Checks for overflow outside the viewport height
         max-y             (- vh modal-height)
@@ -124,6 +126,12 @@
 (mf/defc cubic-bezier-modal
   {::mf/register modal/components
    ::mf/register-as :tokens/cubic-bezier}
+  [properties]
+  [:& token-update-create-modal properties])
+
+(mf/defc spring-modal
+  {::mf/register modal/components
+   ::mf/register-as :tokens/spring}
   [properties]
   [:& token-update-create-modal properties])
 
