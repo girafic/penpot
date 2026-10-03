@@ -9,6 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.geom.modifiers :as gm]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.types.page :as ctp]
@@ -127,6 +128,13 @@
                 :fill "none"}
           [:& wrapper-not-fixed {:shape frame :view-box vbox}]]])]]))
 
+(defn animated-objects
+  "`objects` where the animation `modifiers` (a modif-tree, see
+  `cltl/animation-tree`) has them: the layers of a board it moves, turns
+  or scales follow the board, as on the canvas (see `dwm/set-modifiers`)."
+  [objects modifiers]
+  (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects)))
+
 (mf/defc animated-viewport-svg*
   "`viewport-svg*` with the shapes of `page` where the animation in
   `modifiers-ref` has them at the playback time (see `viewport*`): it
@@ -137,7 +145,7 @@
         page      (mf/with-memo [page modifiers]
                     (cond-> page
                       (seq modifiers)
-                      (update :objects gsh/apply-objects-modifiers modifiers)))]
+                      (update :objects animated-objects modifiers)))]
     [:> viewport-svg* {:page page
                        :frame frame
                        :base base

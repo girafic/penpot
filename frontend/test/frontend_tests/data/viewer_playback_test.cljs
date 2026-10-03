@@ -6,10 +6,16 @@
 
 (ns frontend-tests.data.viewer-playback-test
   (:require
+   [app.common.geom.point :as gpt]
+   [app.common.test-helpers.compositions :as ctho]
+   [app.common.test-helpers.files :as cthf]
+   [app.common.test-helpers.ids-map :as cthi]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
+   [app.common.types.modifiers :as ctm]
    [app.common.uuid :as uuid]
    [app.main.data.viewer :as dv]
+   [app.main.ui.viewer.interactions :as vi]
    [app.util.audio :as audio]
    [app.util.timers :as ts]
    [beicon.v2.core :as rx]
@@ -121,3 +127,14 @@
                  @types)))
       (t/is (empty? @log)))
     (audio/use-context! nil)))
+
+(t/deftest the-layers-of-an-animated-board-follow-it
+  (cthi/reset-idmap!)
+  (let [file    (-> (cthf/sample-file :file1)
+                    (ctho/add-frame :board :x 0 :y 0 :width 400 :height 300)
+                    (ctho/add-frame :arm :parent-label :board :x 100 :y 100 :width 80 :height 80)
+                    (ctho/add-rect :moon :parent-label :arm :x 130 :y 90 :width 20 :height 20))
+        objects (:objects (cthf/current-page file))
+        shown   (vi/animated-objects objects {(cthi/id :arm) {:modifiers (ctm/move-modifiers (gpt/point 50 0))}})]
+    (t/is (= 150 (get-in shown [(cthi/id :arm) :x])))
+    (t/is (= 180 (get-in shown [(cthi/id :moon) :x])) "the layer of the board follows it")))
