@@ -2865,9 +2865,9 @@ export interface LibraryAnimationStyle extends LibraryElement {
    * The use takes their place, still stretched as it was, and every use
    * of the style follows, in one undo step. The way to change the values
    * of keyframe entries: apply the style, add keyframes to the layer
-   * (they take over the span of the entry in their row), then update the
-   * style from it. Only a style of the file itself, and a layer on the
-   * current page.
+   * (they play at once in their span, see `KeyframesStyleEntry`), then
+   * update the style from it, which saves the row as it plays. Only a
+   * style of the file itself, and a layer on the current page.
    *
    * @example
    * ```js
@@ -5158,10 +5158,11 @@ export type PresetStyleEntry = PresetAnimationProps & {
 
 /**
  * The keyframes of one property of an animation style
- * (`LibraryAnimationStyle`): from `start`, over `duration`, they take over
- * that span of the row of the property on every layer that uses the
- * style, as its own keyframes there give way; preset animations of the
- * same property win over them. Their values are relative to the layer
+ * (`LibraryAnimationStyle`): from `start`, over `duration`, they play in
+ * the row of the property on every layer that uses the style, but where
+ * the layer has keyframes of its own in that row: from the first to the
+ * last of them its own keyframes play; preset animations of the same
+ * property win over both. Their values are relative to the layer
  * that plays them, so a style moves, turns and resizes each layer from
  * where it rests: `x` and `y` are offsets in pixels from its rest
  * position and `rotation` in degrees from its own, `width` and `height`

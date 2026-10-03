@@ -930,11 +930,22 @@
     (when (seq times)
       [(reduce min times) (reduce max times)])))
 
+(defn set-by-hand
+  "`animation` (a preset, a style entry or a style use) with `attrs` set
+  by hand: the design tokens that bound the settings whose values change
+  let go of them (see `schema:animation-tokens`), the others stay bound."
+  [animation attrs]
+  (let [changed (into [] (keep (fn [[key value]] (when (not= value (get animation key)) key))) attrs)
+        tokens  (not-empty (apply dissoc (:applied-tokens animation) changed))]
+    (cond-> (dissoc (merge animation attrs) :applied-tokens)
+      (some? tokens) (assoc :applied-tokens tokens))))
+
 (defn retime-keyframes
   "Map the keyframe and animation times of the tracks of `shape-ids`
   linearly from the span `from` to the span `to` (both `[start end]`):
   moves them when both spans have the same length, stretches them
-  otherwise."
+  otherwise. The design tokens that bound the times of an animation that
+  change let go of them (see `set-by-hand`)."
   [timeline shape-ids [from-start from-end] [to-start to-end]]
   (let [span  (- from-end from-start)
         scale (if (pos? span) (/ (- to-end to-start) span) 1)
@@ -943,9 +954,8 @@
         retime-animation
         (fn [animation]
           (let [start (remap (:start animation))]
-            (assoc animation
-                   :start start
-                   :duration (max 1 (- (remap (animation-end animation)) start)))))]
+            (set-by-hand animation {:start start
+                                    :duration (max 1 (- (remap (animation-end animation)) start))})))]
     ;; Locked keyframes and animations stay where they are.
     (reduce (fn [timeline shape-id]
               (let [locked (dm/get-in timeline [:tracks shape-id :locked] #{})]
@@ -2422,13 +2432,32 @@
 
 (declare rest-pose keys-entry-keyframes)
 
+(defn row-with-entries
+  "The keyframes a row (a property and index) of a layer resting at `pose`
+  plays, in the time of its track: `own`, its own keyframes (by time, a
+  loop unrolled), and those of the keyframe entries `entries` of that row
+  (see `keys-entry-keyframes`), the later entry winning where two
+  overlap. The own keyframes win in their span, from the first to the
+  last of them, so an edit on the layer shows at once; the entries play
+  outside it."
+  [own entries pose]
+  (let [own     (vec own)
+        from    (:time (first own))
+        to      (:time (peek own))
+        inside? #(and (some? from) (<= from (:time %) to))
+        played  (reduce (fn [keyframes {:keys [start] :as entry}]
+                          (let [end (animation-end entry)]
+                            (into (filterv #(not (<= start (:time %) end)) keyframes)
+                                  (keys-entry-keyframes entry pose))))
+                        []
+                        (sort-by :start entries))]
+    (sort-keyframes (into own (remove inside?) played))))
+
 (defn take-over-keys
   "`track` with the keyframe entries `entries` (in its time, as its style
-  uses play them, see `expand-style`) taking over their spans in their
-  rows, played by a layer resting at `pose` (see `keys-entry-keyframes`):
-  the keyframes of a row inside the span of an entry give way to those of
-  the entry, the later entry winning where two overlap, as a preset takes
-  over its span (see `resolve-property`). A looping row is unrolled over
+  uses play them, see `expand-style`) played in their rows by a layer
+  resting at `pose` (see `row-with-entries`: they play in their spans but
+  where the row's own keyframes are). A looping row is unrolled over
   `duration` first, and loops no more."
   [track entries pose duration]
   (let [slots   (into #{} (map keyframe-slot) entries)
@@ -2441,12 +2470,7 @@
                 own (cond-> own
                       (and (seq own) (contains? loops (slot-key property index)))
                       (expand-property-loop duration))]
-            (reduce (fn [keyframes {:keys [start] :as entry}]
-                      (let [end (animation-end entry)]
-                        (into (filterv #(not (<= start (:time %) end)) keyframes)
-                              (keys-entry-keyframes entry pose))))
-                    own
-                    (sort-by :start (filter #(= slot (keyframe-slot %)) entries)))))]
+            (row-with-entries own (filter #(= slot (keyframe-slot %)) entries) pose)))]
     (-> (reduce (fn [track [property index]]
                   (update-slot-flag track :loops disj (slot-key property index)))
                 track
@@ -2459,7 +2483,7 @@
 
 (defn- resolve-track
   "`track` of `shape-id` as it plays: the keyframe entries of its style
-  uses taking over their spans in their rows (see `take-over-keys`), then
+  uses playing in their rows (see `take-over-keys`), then
   its presets turned into the keyframes they stand for, over those, but
   the split animations that play the units of a text one by one (see
   `unit-split-kind`), which stay its `:animations` (see

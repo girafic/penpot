@@ -809,8 +809,9 @@
 
         (t/testing "its entries read back"
           (t/is (= [["keyframes" "rotation" 0 600 3] ["keyframes" "x" 0 400 2]] (entries)))
-          (t/is (= [{"time" 300 "value" 8 "easing" "linear"}]
-                   (js->clj (.slice (.-keyframes ^js (aget (.-entries style) 0)) 1 2))))
+          (let [^js wobble (aget (.-entries style) 0)]
+            (t/is (= [{"time" 300 "value" 8 "easing" "linear"}]
+                     (js->clj (.slice (.-keyframes wobble) 1 2)))))
           (let [before (js->clj (.-entries style))]
             (set! (.-entries style) (.-entries style))
             (t/is (= before (js->clj (.-entries style))) "and write back the same")))

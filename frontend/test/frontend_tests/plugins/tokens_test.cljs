@@ -10,6 +10,7 @@
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.test-helpers.tokens :as ctht]
+   [app.common.types.animation :as cta]
    [app.common.types.tokens-lib :as ctob]
    [app.common.uuid :as uuid]
    [app.main.data.tokenscript :as ts]
@@ -787,6 +788,46 @@
         result (get-resolved-value spring {(:name spring) spring})]
     (t/is (object? result) "an object of its three numbers")
     (t/is (= {"stiffness" 120 "damping" 14 "mass" 1} (js->clj result)))))
+
+(t/deftest a-spring-resolves-to-its-settings-under-tokenscript
+  ;; what the propagation does with the `:tokenscript` flag on
+  (let [spring   (ctob/make-token {:name "spring.soft" :type :spring :value {:stiffness 120 :damping 14 :mass 1}})
+        alias    (ctob/make-token {:name "spring.ui" :type :spring :value "{spring.soft}"})
+        resolved (ts/resolve-tokens {(:name spring) spring (:name alias) alias})
+        value    #(ts/tokenscript-symbols->penpot-unit (get-in resolved [% :resolved-value]))]
+    (t/is (= {:stiffness 120 :damping 14 :mass 1} (value "spring.soft")))
+    (t/is (= {:stiffness 120 :damping 14 :mass 1} (value "spring.ui")) "through a reference")
+    (t/is (= {:type :spring :stiffness 120 :damping 14 :mass 1}
+             (cta/token-setting :easing (value "spring.ui")))
+          "which an easing binds")))
+
+(t/deftest a-spring-token-takes-its-settings-as-a-text
+  (t/async
+    done
+    (let [set-id      (cthi/new-id! :token-set)
+          file        (-> (cthf/sample-file :file1 :page-label :page1)
+                          (ctht/add-tokens-lib)
+                          (ctht/update-tokens-lib
+                           #(-> %
+                                (ctob/add-set (ctob/make-token-set :id set-id :name "motion"))
+                                (ctob/add-theme (ctob/make-token-theme :name "theme" :sets #{"motion"}))
+                                (ctob/set-active-themes #{"/theme"}))))
+          store       (ths/setup-store file)
+          _           (set! st/state store)
+          _           (set! st/stream (ptk/input-stream store))
+          ^js context (api/create-context "00000000-0000-0000-0000-000000000000")
+          ^js catalog (.. context -library -local -tokens)
+          ^js token-set (.getSetById catalog (str set-id))
+          ^js token   (.addToken token-set #js {:type "spring" :name "spring.ring" :value "170, 26, 1"})]
+      (js/setTimeout
+       (fn []
+         (t/is (some? token))
+         (t/is (= {:stiffness 170 :damping 26 :mass 1}
+                  (-> (get-in @store [:files (:id file) :data :tokens-lib])
+                      (ctob/get-token-by-name "motion" "spring.ring")
+                      :value)))
+         (done))
+       0))))
 
 (t/deftest motion-tokens-apply-to-no-shape
   (let [token   (ctob/make-token {:name "motion.fast" :type :duration :value "150ms"})

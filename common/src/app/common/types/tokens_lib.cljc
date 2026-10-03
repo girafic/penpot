@@ -1717,17 +1717,28 @@ Will return a value that matches this schema:
 
 (defn convert-dtcg-spring
   "Convert a spring token value from DTCG format to internal format: the
-  map of its three settings by keyword, numeric texts read as numbers; a
-  reference is kept."
+  map of its three settings by keyword, numeric texts read as numbers, or
+  of the text of the three in this order (`170, 26, 1`); a reference is
+  kept."
   [value]
-  (if (map? value)
-    (into {}
-          (keep (fn [k]
-                  (let [v (or (get value (name k)) (get value k))]
-                    (when (some? v)
-                      [k (if (string? v) (or (d/parse-double v) v) v)]))))
-          [:stiffness :damping :mass])
-    value))
+  (let [settings [:stiffness :damping :mass]]
+    (cond
+      (map? value)
+      (into {}
+            (keep (fn [k]
+                    (let [v (or (get value (name k)) (get value k))]
+                      (when (some? v)
+                        [k (if (string? v) (or (d/parse-double v) v) v)]))))
+            settings)
+
+      (string? value)
+      (let [numbers (map d/parse-double (str/split (str/trim value) #"\s*,\s*|\s+"))]
+        (if (and (= 3 (count numbers)) (every? some? numbers))
+          (zipmap settings numbers)
+          value))
+
+      :else
+      value)))
 
 (defn convert-dtcg-typography-composite
   "Convert typography token value keys from DTCG format to internal format."

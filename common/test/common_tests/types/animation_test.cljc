@@ -224,6 +224,28 @@
       (t/is (sm/validate cta/schema:timeline
                          (assoc-in tl [:tracks (first (keys (:tracks tl))) :keyframes] [key]))))))
 
+(t/deftest a-setting-set-by-hand-lets-go-of-its-token
+  (let [fade (cta/make-animation {:type :fade :start 100 :duration 300
+                                  :applied-tokens {:start "motion.delay" :duration "motion.fast"
+                                                   :easing "ease.out"}})]
+    (t/testing "only the settings whose values change"
+      (t/is (= {:start "motion.delay" :easing "ease.out"}
+               (:applied-tokens (cta/set-by-hand fade {:duration 500}))))
+      (t/is (= (:applied-tokens fade) (:applied-tokens (cta/set-by-hand fade {:duration 300})))
+            "the same value keeps it")
+      (t/is (not (contains? (cta/set-by-hand fade {:start 0 :duration 1 :easing :linear}) :applied-tokens))))
+    (t/testing "moving or stretching in the dock sets times by hand"
+      (let [sid   (uuid/next)
+            tl    (cta/add-animation (cta/make-timeline {:board-id (uuid/next)}) sid fade)
+            moved (cta/retime-keyframes tl [sid] [100 400] [200 500])
+            grown (cta/retime-keyframes tl [sid] [100 400] [100 700])]
+        (t/is (= {:duration "motion.fast" :easing "ease.out"}
+                 (get-in moved [:tracks sid :animations 0 :applied-tokens]))
+              "a move changes the start only")
+        (t/is (= {:start "motion.delay" :easing "ease.out"}
+                 (get-in grown [:tracks sid :animations 0 :applied-tokens]))
+              "a stretch from the start changes the duration only")))))
+
 (defn- bound-timeline
   "A timeline of a layer `shape` with a fade bound to `motion.fast`, a
   hidden move bound to `motion.slow`, keyframes of x bound to `ease.out`

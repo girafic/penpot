@@ -7,6 +7,7 @@
 (ns app.main.data.workspace.tokens.remapping
   "Core logic for token remapping functionality"
   (:require
+   [app.common.data :as d]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.tokens :as cft]
    [app.common.logging :as log]
@@ -189,33 +190,46 @@
          shape-changes
          (:token-aliases scan-results))
 
-        ;; Rename it in the animation styles that bind it, and sync their
-        ;; uses, which keep the names of the tokens too
-        renamed-styles
-        (when (seq (:animation-styles scan-results))
-          (ctas/token-renamed-styles (:animation-styles file-data)
-                                     #(if (= % old-token-name) new-token-name %)))
+        rename
+        #(if (= % old-token-name) new-token-name %)
 
-        style-changes
-        (if (seq renamed-styles)
-          (let [file-id    (:id file-data)
-                file-data' (update file-data :animation-styles
-                                   (fn [styles] (reduce #(assoc %1 (:id %2) %2) styles renamed-styles)))]
-            (-> (reduce pcb/update-animation-style token-changes renamed-styles)
-                (cll/generate-sync-timelines file-id nil file-id {file-id {:data file-data'}})))
+        ;; Rename it in the presets and keyframes of the timelines that
+        ;; bind it
+        timeline-page-ids
+        (into #{} (map :page-id) (:animation-timelines scan-results))
+
+        timeline-changes
+        (if (seq timeline-page-ids)
+          (cltl/commit-page-timelines token-changes
+                                      (keep #(get-in file-data [:pages-index %]) timeline-page-ids)
+                                      #(cta/rename-timeline-tokens % rename))
           token-changes)
 
-        ;; and in the presets and keyframes of the timelines that bind it
-        timeline-changes
-        (if (seq (:animation-timelines scan-results))
-          (let [page-ids (into #{} (map :page-id) (:animation-timelines scan-results))
-                rename   #(if (= % old-token-name) new-token-name %)]
-            (cltl/commit-page-timelines style-changes
-                                        (keep #(get-in file-data [:pages-index %]) page-ids)
-                                        #(cta/rename-timeline-tokens % rename)))
-          style-changes)]
+        ;; and in the animation styles that bind it, then sync their uses,
+        ;; which keep the names of the tokens too: last, from the pages with
+        ;; the timelines renamed, so the sync writes over those changes
+        renamed-styles
+        (when (seq (:animation-styles scan-results))
+          (ctas/token-renamed-styles (:animation-styles file-data) rename))
 
-    (cond-> timeline-changes
+        changes
+        (if (seq renamed-styles)
+          (let [file-id    (:id file-data)
+                file-data' (-> file-data
+                               (update :animation-styles
+                                       (fn [styles] (reduce #(assoc %1 (:id %2) %2) styles renamed-styles)))
+                               (update :pages-index
+                                       (fn [pages]
+                                         (reduce (fn [pages page-id]
+                                                   (d/update-in-when pages [page-id :timelines]
+                                                                     d/update-vals #(cta/rename-timeline-tokens % rename)))
+                                                 pages
+                                                 timeline-page-ids))))]
+            (-> (reduce pcb/update-animation-style timeline-changes renamed-styles)
+                (cll/generate-sync-timelines file-id nil file-id {file-id {:data file-data'}})))
+          timeline-changes)]
+
+    (cond-> changes
       (some? undo-group)
       (assoc :undo-group undo-group))))
 

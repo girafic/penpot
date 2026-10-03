@@ -1448,13 +1448,14 @@
 
 (defn retime-animation
   "Commit `base` (the timeline as it was when a drag started) with the
-  animation `animation-id` of `shape-id` over `start` and `duration`."
+  animation `animation-id` of `shape-id` over `start` and `duration`, set
+  by hand: the tokens that bound them let go (see `cta/set-by-hand`)."
   [base shape-id animation-id start duration]
   (ptk/reify ::retime-animation
     ptk/WatchEvent
     (watch [it state _]
       (let [tl' (cta/update-animation base shape-id animation-id
-                                      #(assoc % :start start :duration duration))]
+                                      #(cta/set-by-hand % {:start start :duration duration}))]
         (rx/of (commit-timeline it state (:board-id tl') tl')
                (apply-preview))))))
 

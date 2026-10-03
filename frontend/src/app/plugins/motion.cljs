@@ -328,13 +328,9 @@
 
 (def ^:private style-token-settings
   "The settings of a style entry a design token sets, by the names the
-  plugin API gives them (see `cta/schema:animation-tokens`)."
-  {:start "start"
-   :duration "duration"
-   :easing "easing"
-   :amount "amount"
-   :offset-x "offsetX"
-   :offset-y "offsetY"})
+  plugin API gives them, those of the code too (see
+  `cta/schema:animation-tokens`)."
+  ctac/token-setting-names)
 
 (defn- parse-entry-tokens
   "The `:applied-tokens` of a style entry of the preset type `type` that
@@ -756,20 +752,13 @@
             (write-timeline! plugin-id file-id page-id board-id code
                              #(cta/update-animation % shape-id id f))))
 
-        ;; set by hand, no token sets it
-        set-by-hand
-        (fn [animation attr value]
-          (-> animation
-              (assoc attr value)
-              (d/update-when :applied-tokens dissoc attr)
-              (as-> a (cond-> a (empty? (:applied-tokens a)) (dissoc :applied-tokens)))))
-
+        ;; set by hand, no token sets it (see `cta/set-by-hand`)
         number-setter
         (fn [code attr valid?]
           (fn [value]
             (if (not (valid? value))
               (u/not-valid plugin-id code value)
-              (update! code #(set-by-hand % attr value)))))
+              (update! code #(cta/set-by-hand % {attr value})))))
 
         ;; the settings of a split animation
         split-setter
@@ -828,7 +817,7 @@
        :set
        (fn [value]
          (if-let [{:keys [easing]} (parse-easing value false)]
-           (update! :easing #(set-by-hand % :easing easing))
+           (update! :easing #(cta/set-by-hand % {:easing easing}))
            (u/not-valid plugin-id :easing value)))}
 
       :appliedTokens

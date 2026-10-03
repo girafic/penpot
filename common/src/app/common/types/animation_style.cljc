@@ -121,7 +121,8 @@
   entries of its uses (see `cta/track-animations`) that are neither
   locked nor hidden, and a keyframe entry of each row of its keyframes
   that is neither hidden, locked nor looping (see
-  `cta/keyframes->keys-entry`), by start, the first one starting at 0,
+  `cta/keyframes->keys-entry`; with the keyframe entries of the uses in
+  that row, of what the row plays), by start, the first one starting at 0,
   with new ids. `{:entries [...] :start ms}`, `:start` being where the
   first one starts in the track, so that a use of the new style from
   there plays as they do; or `{:error :too-many-entries :count n}` above
@@ -129,13 +130,22 @@
   `cta/max-style-keyframes` and `{:error :no-entries :count 0}` without
   any."
   [track pose]
-  (let [presets (cta/track-animations {:animations (filterv taken? (:animations track))})
-        rows    (->> (:keyframes track)
-                     (filter #(taken-row? track %))
-                     (group-by (juxt :property :index))
-                     (vals)
-                     (map #(cta/keyframes->keys-entry % pose)))
-        entries (sort-by :start (concat presets rows))
+  (let [presets  (cta/track-animations {:animations (filterv taken? (:animations track))})
+        slot     (juxt :property :index)
+        own-rows (->> (:keyframes track)
+                      (filter #(taken-row? track %))
+                      (group-by slot))
+        ;; a row with own keyframes and keyframe entries of uses becomes
+        ;; one entry of what it plays (see `cta/row-with-entries`)
+        merged?  #(and (cta/keys-entry? %) (contains? own-rows (slot %)))
+        rows     (map (fn [[row own]]
+                        (cta/keyframes->keys-entry
+                         (cta/row-with-entries (cta/sort-keyframes own)
+                                               (filter #(and (cta/keys-entry? %) (= row (slot %))) presets)
+                                               pose)
+                         pose))
+                      own-rows)
+        entries  (sort-by :start (concat (remove merged? presets) rows))
         n       (count entries)
         start   (:start (first entries))]
     (cond
@@ -247,21 +257,30 @@
               (map #(cta/make-animation (assoc % :id (uuid/next) :hidden hidden :locked locked))))
         (cta/expand-style use)))
 
+(defn- entry-slot
+  [{:keys [property index]}]
+  (cta/slot-key property index))
+
 (defn- detach-keys
   "`track` with the keyframe entries of its style use `use` turned into
   keyframes of its layer, which rests at `pose` (see `cta/rest-pose`),
-  over a timeline `duration` ms long: they take over their spans in their
-  rows, as they played (see `cta/take-over-keys`), and those rows get the
-  flags of `use`."
+  over a timeline `duration` ms long, as they played (see
+  `cta/take-over-keys`): no own keyframe of the layer goes. A hidden use,
+  which played nothing, only gives the layer the rows it has none of; the
+  rows it gives get the flags of `use`, those the layer had keep theirs
+  (a row the user hid stays hidden)."
   [track use pose duration]
-  (let [entries (filterv cta/keys-entry? (cta/expand-style use))]
+  (let [own-slots (into #{} (map entry-slot) (:keyframes track))
+        entries   (cond->> (filterv cta/keys-entry? (cta/expand-style use))
+                    (true? (:hidden use))
+                    (filterv #(not (contains? own-slots (entry-slot %)))))]
     (if (empty? entries)
       track
-      (let [slot-keys (into #{} (map #(cta/slot-key (:property %) (:index %))) entries)
+      (let [new-slots (into #{} (comp (map entry-slot) (remove own-slots)) entries)
             flag      (fn [track flag]
                         (cond-> track
-                          (true? (get use flag))
-                          (update flag (fnil into #{}) slot-keys)))]
+                          (and (true? (get use flag)) (seq new-slots))
+                          (update flag (fnil into #{}) new-slots)))]
         (-> (cta/take-over-keys track entries pose duration)
             (flag :hidden)
             (flag :locked))))))
@@ -298,7 +317,7 @@
 (defn- rewrite-uses
   "`timeline`, of the layers of `objects`, with each animation that
   `rewrite?` in its tracks replaced, in place, by what `f` gives for it:
-  one animation, or a vector of presets for a use it detaches (see
+  one animation, or `{:detach presets}` for a use it detaches (see
   `detach-use`), whose keyframe entries then become keyframes of its
   layer (see `detach-keys`). `[timeline rewritten]`, `rewritten` being
   every animation `f` gave."
@@ -314,12 +333,13 @@
                                      (into []
                                            (mapcat (fn [animation]
                                                      (if (rewrite? animation)
-                                                       (let [result (f animation)]
-                                                         (when (vector? result)
+                                                       (let [result (f animation)
+                                                             detach (contains? result :detach)
+                                                             result (if detach (:detach result) [result])]
+                                                         (when detach
                                                            (vswap! detached conj animation))
-                                                         (let [result (if (map? result) [result] result)]
-                                                           (vswap! rewritten into result)
-                                                           result))
+                                                         (vswap! rewritten into result)
+                                                         result)
                                                        [animation])))
                                            animations)))
                   pose     (when (seq @detached)
@@ -348,7 +368,10 @@
                          (or (nil? asset-id) (= asset-id (:style-ref-id animation)))))
 
           [timeline' rewritten]
-          (rewrite-uses timeline objects synced? #(sync-use % (get styles (:style-ref-id %))))]
+          (rewrite-uses timeline objects synced?
+                        #(if-let [style (get styles (:style-ref-id %))]
+                           (sync-use % style)
+                           {:detach (detach-use %)}))]
       (if (= timeline timeline')
         timeline
         (update timeline' :duration max (reduce max 0 (map cta/animation-end rewritten)))))))
@@ -390,7 +413,7 @@
   (first (rewrite-uses timeline
                        objects
                        #(and (cta/style-use? %) (not= file-id (:style-ref-file %)))
-                       detach-use)))
+                       #(hash-map :detach (detach-use %)))))
 
 (defn used-styles-changed-since
   "The uses, in the timelines of `page`, of styles of `library` (a file

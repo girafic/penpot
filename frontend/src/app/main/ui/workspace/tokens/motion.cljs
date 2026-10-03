@@ -9,20 +9,38 @@
   presets of layers, the entries of animation styles and the easings of
   keyframes."
   (:require
+   [app.common.data :as d]
    [app.common.types.tokens-lib :as ctob]
+   [app.config :as cf]
    [app.main.data.style-dictionary :as sd]
+   [app.main.data.tokenscript :as ts]
    [app.main.refs :as refs]
    [rumext.v2 :as mf]))
 
+(defn plain-value
+  "The resolved value of a token as the settings of animations take it:
+  a tokenscript symbol (with the `:tokenscript` flag) turned into numbers
+  or a map, any other value as it is."
+  [value]
+  (if (ts/tokenscript-symbol? value)
+    (ts/tokenscript-symbols->penpot-unit value)
+    value))
+
 (defn use-active-tokens-by-type
   "The design tokens of the active sets of the current file, resolved and
-  by type."
+  by type: for what is not in the right sidebar, which gets them from
+  its context (`app.main.ui.context/active-tokens-by-type`). Tokenscript
+  resolves once per change of the tokens."
   []
-  (let [tokens-lib (mf/deref refs/tokens-lib)
-        active     (mf/with-memo [tokens-lib]
-                     (if (some? tokens-lib)
-                       (ctob/get-tokens-in-active-sets tokens-lib)
-                       {}))
-        resolved   (sd/use-resolved-tokens active)]
-    (mf/with-memo [resolved]
-      (ctob/group-by-type resolved))))
+  (let [tokens-lib   (mf/deref refs/tokens-lib)
+        tokenscript? (contains? cf/flags :tokenscript)
+        active       (mf/with-memo [tokens-lib]
+                       (if (some? tokens-lib)
+                         (ctob/get-tokens-in-active-sets tokens-lib)
+                         {}))
+        by-script    (mf/with-memo [active tokenscript?]
+                       (when tokenscript?
+                         (d/update-vals (ts/resolve-tokens active) #(update % :resolved-value plain-value))))
+        resolved     (sd/use-resolved-tokens (if tokenscript? {} active))]
+    (mf/with-memo [resolved by-script]
+      (ctob/group-by-type (or by-script resolved)))))

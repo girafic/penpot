@@ -508,11 +508,12 @@ once and every use follows.
     appliedTokens?}]}`, the keyframes of one property, `time` from the start of the entry. Their values are relative to
     the layer that plays them: "x", "y" offsets in px and "rotation" in degrees from where it rests, "width", "height"
     factors of its size, the others as they are; so a "wobble" or a "nudge" plays on any layer. Within its span an
-    entry takes over the row of its property (the layer's own keyframes there give way); presets of the same property
-    win over it. At most 256 keyframes per style.
+    entry plays in the row of its property, but where the layer has keyframes of its own in that row (from the first
+    to the last of them) those play; presets of the same property win over both. At most 256 keyframes per style.
   * `style.updateFromShape(shape)` - Saves what a layer that uses the style plays now into it: its presets, uses and
     rows of keyframes (not hidden, locked or looping) become the entries, the use takes their place, every use follows.
-    To change the values of a keyframe entry: add keyframes to a layer that uses the style, then update from it.
+    To change the values of a keyframe entry: add keyframes to a layer that uses the style (they play at once), then
+    update from it: the row is saved as it plays.
   * `timeline.applyAnimationStyle(shape, style, start?): AppliedAnimationStyle` - A use: it plays a copy of the entries
     and follows the edits of the style; `start`, `duration` (the entries scale to it), `name`, `style` (`null` once its
     library is gone), `detach()` (turns it into presets of its own), `remove()`. `timeline.appliedStyles` lists the

@@ -685,6 +685,21 @@
                   ((juxt :easing :applied-tokens) (key-of state)))
                "bound, it takes the value at once"))))))
 
+(t/deftest a-preset-stretched-in-the-dock-keeps-its-length-when-tokens-change
+  (t/async
+    done
+    (let [file  (bound-file)
+          store (store-of file)
+          base  (get-in (cthf/current-page file) [:timelines (cthi/id :board-a)])
+          fade  (first (get-in base [:tracks (cthi/id :r3) :animations]))]
+      (tohs/run-store-async
+       store done
+       [(dwa/retime-animation base (cthi/id :r3) (:id fade) 0 500)
+        (dwtp/propagate-workspace-tokens)]
+       (fn [state]
+         (t/is (= [500 nil] ((juxt :duration :applied-tokens) (first (animations-of state :board-a :r3))))
+               "the drag let go of the token, which so sets it no more"))))))
+
 ;; KEYFRAME ENTRIES
 
 (defn- with-x-row

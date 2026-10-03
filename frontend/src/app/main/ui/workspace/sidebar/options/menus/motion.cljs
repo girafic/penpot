@@ -240,7 +240,7 @@
     (let [tokens (if (delay? tokens) @tokens tokens)]
       (reduce (fn [acc type]
                 (if-let [items (seq (get tokens type))]
-                  (assoc acc type items)
+                  (assoc acc type (map #(update % :resolved-value motion-tokens/plain-value) items))
                   acc))
               (array-map)
               types))))
@@ -976,7 +976,7 @@
         styles     (mf/with-memo [files file-id]
                      (usable-styles files file-id))
         ;; what the settings of its presets bind
-        tokens     (motion-tokens/use-active-tokens-by-type)
+        tokens     (mf/use-ctx ctx/active-tokens-by-type)
 
         open*      (mf/use-state false)
         open?      (deref open*)

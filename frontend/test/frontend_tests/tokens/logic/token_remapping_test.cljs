@@ -260,6 +260,30 @@
       (t/is (= {:duration "motion.quick"} (-> use :entries first :applied-tokens))
             "its use follows"))))
 
+(t/deftest renaming-a-token-renames-a-use-and-a-preset-of-one-track
+  (let [file  (with-motion-style (setup-file-with-tokens))
+        board (cthi/id :board)
+        file  (cthf/apply-changes
+               file
+               (-> (pcb/empty-changes nil)
+                   (pcb/with-page (cthf/current-page file))
+                   (pcb/set-timeline board
+                                     (-> (get-in (cthf/current-page file) [:timelines board])
+                                         (cta/add-animation board {:type :move :start 500 :duration 300
+                                                                   :applied-tokens {:duration "motion.fast"}})))))
+        data    (:data file)
+        changes (dwtr/build-remap-changes data "motion.fast" "motion.quick")
+        file'   (cthf/apply-changes file changes)
+        tl      (get-in (cthf/current-page file') [:timelines board])
+        [use move] (get-in tl [:tracks board :animations])]
+    (t/is (= {:duration "motion.quick"} (-> use :entries first :applied-tokens)) "the use of the style")
+    (t/is (= {:duration "motion.quick"} (:applied-tokens move)) "and the preset of the same track")
+    (t/is (not (ctas/drifted? tl (:id file) (get-in file' [:data :animation-styles]))))
+    (t/testing "undone, all as it was"
+      (let [undone (cthf/apply-undo-changes file' changes)]
+        (t/is (= (get-in (cthf/current-page file) [:timelines board])
+                 (get-in (cthf/current-page undone) [:timelines board])))))))
+
 (t/deftest renaming-a-token-renames-it-in-presets-and-keyframes
   (let [file  (ctho/add-frame (setup-file-with-tokens) :board2)
         board (cthi/id :board2)

@@ -594,21 +594,34 @@
     (t/is (close-all? [50 70 90] (xs (assoc-in tl [:tracks sid :animations 0 :duration] 1200) [100 700 1300]))
           "stretched to twice its length, twice as slow")))
 
-(t/deftest keys-entries-take-over-their-rows-and-presets-win-over-them
+(defn- x-times
+  "The times of the x keyframes `sid` plays in `tl`."
+  [tl objects sid]
+  (->> (get-in (cta/resolve-animations tl objects) [:tracks sid :keyframes])
+       (filter #(= :x (:property %)))
+       (mapv :time)))
+
+(t/deftest own-keyframes-win-in-their-span-and-presets-over-both
   (let [{:keys [board rect objects]} (board-and-rect)
         sid (:id rect)
-        tl  (-> (timeline-of board rect [(ctas/make-use (x-style) (uuid/next) 100)])
-                (cta/add-keyframe sid {:time 0 :property :x :value 10})
-                (cta/add-keyframe sid {:time 300 :property :x :value 500})
-                (cta/add-keyframe sid {:time 900 :property :x :value 30}))
-        xs  (fn [tl]
-              (->> (get-in (cta/resolve-animations tl objects) [:tracks sid :keyframes])
-                   (filter #(= :x (:property %)))
-                   (mapv :time)))]
-    (t/is (= [0 100 700 900] (xs tl)) "its own keyframe at 300 gives way")
-    (t/is (= [0 100 300 500 700 900]
-             (xs (cta/add-animation tl sid {:type :move :start 300 :duration 200 :offset-x 100 :offset-y 0})))
-          "a move over the same row wins in its span")))
+        tl  (timeline-of board rect [(ctas/make-use (x-style) (uuid/next) 100)])]
+    (t/testing "the entry plays outside the span of the own keyframes"
+      (let [tl (-> tl
+                   (cta/add-keyframe sid {:time 300 :property :x :value 500})
+                   (cta/add-keyframe sid {:time 400 :property :x :value 520}))]
+        (t/is (= [100 300 400 700] (x-times tl objects sid)))
+        (t/is (= [100 300 500 700]
+                 (x-times (cta/add-animation tl sid {:type :move :start 300 :duration 200 :offset-x 100 :offset-y 0})
+                          objects sid))
+              "a move over the same row wins in its span")))
+    (t/testing "an edit on the layer shows at once"
+      (let [tl (cta/add-keyframe tl sid {:time 400 :property :x :value 200})]
+        (t/is (mth/close? 200 (get-in (cta/values-at (cta/resolve-animations tl objects) 400) [sid :x])))))
+    (t/testing "own keyframes before the entry leave it whole"
+      (let [tl (-> tl
+                   (cta/add-keyframe sid {:time 0 :property :x :value 10})
+                   (cta/add-keyframe sid {:time 50 :property :x :value 20}))]
+        (t/is (= [0 50 100 700] (x-times tl objects sid)))))))
 
 (t/deftest the-keyframes-of-a-keys-entry-bind-easing-tokens
   (let [style    (pop-style :entries [{:type :keys :property :rotation :start 0 :duration 400
@@ -742,3 +755,78 @@
     (t/is (= (:entries style) (:entries synced)))
     (t/is (not (ctas/drifted? tl library {(:id style) style})))
     (t/is (ctas/drifted? tl library {(:id style) (update style :entries pop)}))))
+
+;; OWN KEYFRAMES UNDER KEYFRAME ENTRIES
+
+(defn- with-own-x
+  "`tl` with keyframes of x of `sid`, `[time value]` each, easing linear."
+  [tl sid own]
+  (reduce (fn [tl [time value]]
+            (cta/add-keyframe tl sid {:time time :property :x :value value :easing :linear}))
+          tl
+          own))
+
+(defn- x-keyframe-times
+  [tl sid]
+  (->> (get-in tl [:tracks sid :keyframes])
+       (filter #(= :x (:property %)))
+       (mapv :time)))
+
+(t/deftest saving-a-row-under-an-entry-saves-what-it-plays
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid   (:id rect)
+        lib   (uuid/next)
+        style (x-style)
+        use   (ctas/make-use style lib 100)
+        base  (timeline-of board rect [use])
+        pose  (cta/rest-pose base objects sid)]
+    (doseq [[label own] [["before the entry" [[0 10] [50 20]]]
+                         ["across its start" [[50 0] [200 80]]]
+                         ["inside it" [[300 500] [400 520]]]
+                         ["after it" [[800 30] [900 60]]]]]
+      (t/testing label
+        (let [before (with-own-x base sid own)
+              track  (get-in before [:tracks sid])
+
+              {:keys [entries start]} (ctas/animations->entries track pose)
+              saved  (assoc-in before [:tracks sid]
+                               (ctas/replace-with-use track (ctas/make-use (pop-style :entries entries) (uuid/next) start)))
+              result (ctas/update-from-track track (:id use) pose style lib)
+              again  (ctas/update-from-track (:track result) (:id use) pose (:style result) lib)]
+          (t/is (= 1 (count entries)) "one entry for the row")
+          (t/is (= (plays before objects sid) (plays saved objects sid)) "saved as a style, it plays as before")
+          (t/is (= (plays before objects sid) (plays (assoc-in before [:tracks sid] (:track result)) objects sid))
+                "and so when the style is updated from it")
+          (t/is (= 1 (count (:entries (:style again)))) "a second update keeps one entry"))))))
+
+(t/deftest detaching-keeps-the-own-keyframes-and-the-hidden-rows
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid   (:id rect)
+        style (x-style {:type :keys :property :y :start 0 :duration 300
+                        :keyframes [{:time 0 :value 0} {:time 300 :value 20}]})
+        own   [[300 500] [400 520]]]
+    (t/testing "a hidden use played nothing: it only gives the rows the layer has none of, hidden"
+      (let [use    (assoc (ctas/make-use style (uuid/next) 100) :hidden true)
+            before (with-own-x (timeline-of board rect [use]) sid own)
+            after  (update-in before [:tracks sid] ctas/detach-track-use (:id use) before objects)]
+        (t/is (= [300 400] (x-keyframe-times after sid)) "the own row keeps its keyframes")
+        (t/is (= #{:y} (get-in after [:tracks sid :hidden])) "and stays visible")
+        (t/is (= (plays before objects sid) (plays after objects sid)))
+        (t/testing "and so when its style is gone"
+          (let [gone (ctas/sync-timeline before objects (:style-ref-file use) {} nil)]
+            (t/is (= [300 400] (x-keyframe-times gone sid)))
+            (t/is (= (plays before objects sid) (plays gone objects sid)))))))
+    (t/testing "a visible use over a row the user hid: the row keeps its keyframes and stays hidden"
+      (let [use    (ctas/make-use style (uuid/next) 100)
+            before (-> (with-own-x (timeline-of board rect [use]) sid own)
+                       (cta/toggle-slot-flag sid :hidden :x nil))
+            after  (update-in before [:tracks sid] ctas/detach-track-use (:id use) before objects)]
+        (t/is (= [100 300 400 700] (x-keyframe-times after sid)))
+        (t/is (contains? (get-in after [:tracks sid :hidden]) :x))
+        (t/is (cta/valid-timeline? after))))
+    (t/testing "a visible use over a visible row plays as before"
+      (let [use    (ctas/make-use style (uuid/next) 100)
+            before (with-own-x (timeline-of board rect [use]) sid own)
+            after  (update-in before [:tracks sid] ctas/detach-track-use (:id use) before objects)]
+        (t/is (= [100 300 400 700] (x-keyframe-times after sid)))
+        (t/is (= (plays before objects sid) (plays after objects sid)))))))

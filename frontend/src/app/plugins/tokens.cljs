@@ -271,8 +271,8 @@
                        (= :cubic-bezier (:type token))
                        (ctob/convert-dtcg-cubic-bezier)
 
-                       (and (= :spring (:type token)) (object? value))
-                       (-> (js->clj) (ctob/convert-dtcg-spring)))]
+                       (= :spring (:type token))
+                       (-> (cond-> (object? value) (js->clj)) (ctob/convert-dtcg-spring)))]
            (st/emit! (dwtl/update-token set-id id {:value value})))))}
 
     :resolvedValue

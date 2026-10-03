@@ -1409,7 +1409,9 @@
                  "ease"   {"out" {"$type" "cubicBezier" "$value" [0 0 0.58 1]}
                            "std" {"$type" "cubicBezier" "$value" "{ease.out}"}}
                  "spring" {"$type" "spring"
-                           "soft" {"$value" {"stiffness" 120 "damping" 14 "mass" 1}}}}
+                           "soft" {"$value" {"stiffness" 120 "damping" 14 "mass" 1}}
+                           "text" {"$value" "170, 26, 1"}
+                           "ref" {"$value" "{spring.soft}"}}}
            lib  (ctob/parse-decoded-json json "motion")
            token (fn [lib token-name] (ctob/get-token-by-name lib "motion" token-name))]
        (t/testing "a duration keeps a text, of ms or s"
@@ -1421,11 +1423,13 @@
          (t/is (= [:cubic-bezier [0 0 0.58 1]] ((juxt :type :value) (token lib "ease.out"))))
          (t/is (= "{ease.out}" (:value (token lib "ease.std")))))
        (t/testing "a spring keeps its numbers"
-         (t/is (= [:spring {:stiffness 120 :damping 14 :mass 1}] ((juxt :type :value) (token lib "spring.soft")))))
+         (t/is (= [:spring {:stiffness 120 :damping 14 :mass 1}] ((juxt :type :value) (token lib "spring.soft"))))
+         (t/is (= {:stiffness 170.0 :damping 26.0 :mass 1.0} (:value (token lib "spring.text"))) "given as a text")
+         (t/is (= "{spring.soft}" (:value (token lib "spring.ref"))) "a reference stays"))
        (t/testing "the properties of a group are no tokens"
          (t/is (nil? (token lib "motion.$type")))
          (t/is (nil? (token lib "motion.$description")))
-         (t/is (= 7 (count (ctob/get-tokens lib (ctob/get-id (ctob/get-set-by-name lib "motion")))))))
+         (t/is (= 9 (count (ctob/get-tokens lib (ctob/get-id (ctob/get-set-by-name lib "motion")))))))
        (t/testing "the three types are known"
          (t/is (empty? (ctob/get-tokens-of-unknown-type {"fast" {"$type" "duration" "$value" "150ms"}
                                                          "out" {"$type" "cubicBezier" "$value" [0 0 0.58 1]}
