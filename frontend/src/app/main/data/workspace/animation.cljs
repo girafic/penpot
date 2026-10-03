@@ -536,6 +536,12 @@
   [name]
   (update-current-timeline #(assoc % :name name)))
 
+(defn toggle-autoplay
+  "Play the timeline when the prototype shows its board, or keep the board
+  at rest there until it is played (see `cta/autoplay?`)."
+  []
+  (update-current-timeline #(cta/with-autoplay % (not (cta/autoplay? %)))))
+
 (defn set-playback-mode
   "Set what playback does at the end of the timeline, one of
   `cta/playback-modes`."

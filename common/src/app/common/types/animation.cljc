@@ -293,6 +293,9 @@
    ;; Timelines saved before `:playback` only say whether they loop.
    [:loop {:optional true} :boolean]
    [:loop-count {:optional true} [:maybe ::sm/safe-int]]
+   ;; `false`: the prototype shows the board at rest until it is played
+   ;; (see `autoplay?`)
+   [:autoplay {:optional true} :boolean]
    [:markers {:optional true} [:vector {:gen/max 3} schema:marker]]
    [:export {:optional true} schema:export]
    [:tracks [:map-of {:gen/max 3} ::sm/uuid schema:track]]
@@ -307,6 +310,7 @@
    [:playback {:optional true} [:maybe [::sm/one-of playback-modes]]]
    [:loop {:optional true} [:maybe :boolean]]
    [:loop-count {:optional true} [:maybe ::sm/safe-int]]
+   [:autoplay {:optional true} [:maybe :boolean]]
    [:markers {:optional true} [:maybe [:vector {:gen/max 3} schema:marker]]]
    [:export {:optional true} [:maybe schema:export]]])
 
@@ -424,19 +428,34 @@
 (defn make-timeline
   "Create a timeline for `board-id` (a top-level frame). The page-level
   `:timelines` map is keyed by this same board-id."
-  [{:keys [board-id name duration playback loop-count]}]
+  [{:keys [board-id name duration playback loop-count autoplay]}]
   (cond-> {:board-id board-id
            :name (or name "Animation")
            :duration (or duration default-duration)
            :tracks {}}
     (some? playback) (assoc :playback playback)
-    (some? loop-count) (assoc :loop-count loop-count)))
+    (some? loop-count) (assoc :loop-count loop-count)
+    (false? autoplay) (assoc :autoplay false)))
 
 (defn playback-mode
   "What playback of `timeline` does at its end, one of `playback-modes`."
   [timeline]
   (or (:playback timeline)
       (if (:loop timeline) :loop :once)))
+
+(defn autoplay?
+  "Whether the prototype (the view mode) plays `timeline` when its board
+  shows, from its start: unless it was turned off."
+  [timeline]
+  (not (false? (:autoplay timeline))))
+
+(defn with-autoplay
+  "`timeline` playing when its board shows in the prototype, or not:
+  only the exception is kept (see `autoplay?`)."
+  [timeline autoplay]
+  (if autoplay
+    (dissoc timeline :autoplay)
+    (assoc timeline :autoplay false)))
 
 (defn cycle-duration
   "Time in ms until playback of `timeline` is back at its start: twice

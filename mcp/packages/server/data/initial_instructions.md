@@ -416,9 +416,13 @@ A board at the top of a page can animate (Penpot Motion): the board and the laye
 as its timeline says. Changing animations needs the Motion feature (`animation/v1`); without it, the calls throw.
 
 The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it has none); all of a page: `page.timelines`.
-  * `board.addTimeline({duration?: number, playback?: "once" | "loop" | "ping-pong", name?: string}): Timeline` - Gives the
-    board its timeline (or changes the settings of the one it has). Only for a board whose parent is the root.
+  * `board.addTimeline({duration?: number, playback?: "once" | "loop" | "ping-pong", autoplay?: boolean, name?: string}):
+    Timeline` - Gives the board its timeline (or changes the settings of the one it has). Only for a board whose parent is
+    the root.
   * `duration: number` (ms), `playback`, `name` - Settings; adding a keyframe or animation past the end makes it longer
+  * `autoplay: boolean` - Whether the prototype (view mode) plays the animation from its start when it shows the board
+    (`true` by default): a deck of boards linked by click interactions plays each one as it comes. Animated component
+    copies in the board go on looping there after its own animation ends
   * `keyframes: Keyframe[]`, `animations: PresetAnimation[]` - What animates in the board
   * `addKeyframe(shape, {property, time, value, easing?, index?}): Keyframe` - The value of a property of the board or a
     layer inside it at `time` (ms). A keyframe of the same property and time is replaced. Each animated property needs

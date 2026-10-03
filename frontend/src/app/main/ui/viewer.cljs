@@ -14,6 +14,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes.bounds :as gsb]
    [app.common.logic.timelines :as cltl]
+   [app.common.types.animation :as cta]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.types.text :as txt]
    [app.main.data.comments :as dcm]
@@ -537,10 +538,11 @@
 
     ;; The board on screen changing, or the view mode left, stops what
     ;; plays and its sound. Shown in the prototype, a board that animates
-    ;; plays from its start, as a slide of a presentation does.
+    ;; plays from its start, as a slide of a presentation does, unless its
+    ;; timeline says not to (see `cta/autoplay?`).
     (mf/with-effect [(:id frame) (some? clock) section]
       (let [alive? (volatile! true)]
-        (when (and (some? clock) (= section :interactions))
+        (when (and (some? clock) (cta/autoplay? clock) (= section :interactions))
           (let [board-id (:id frame)
                 play     #(when @alive?
                             (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))]

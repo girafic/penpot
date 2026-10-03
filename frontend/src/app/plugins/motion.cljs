@@ -1163,6 +1163,14 @@
            (u/not-valid plugin-id :playback value)
            (write! :playback #(-> % (assoc :playback (keyword value)) (dissoc :loop)))))}
 
+      :autoplay
+      {:get #(some-> (locate) cta/autoplay?)
+       :set
+       (fn [value]
+         (if (not (boolean? value))
+           (u/not-valid plugin-id :autoplay value)
+           (write! :autoplay #(cta/with-autoplay % value))))}
+
       :keyframes
       {:get
        #(->> (track-items (locate) :keyframes)
@@ -1501,7 +1509,8 @@
   [options]
   (let [name     (obj/get options "name")
         duration (obj/get options "duration")
-        playback (obj/get options "playback")]
+        playback (obj/get options "playback")
+        autoplay (obj/get options "autoplay")]
     (cond
       (and (some? name) (not (string? name)))
       "The name should be a string"
@@ -1512,11 +1521,15 @@
       (and (some? playback) (not (contains? playback-names playback)))
       "The playback should be 'once', 'loop' or 'ping-pong'"
 
+      (and (some? autoplay) (not (boolean? autoplay)))
+      "The autoplay should be true or false"
+
       :else
       (cond-> {}
         (some? name)     (assoc :name name)
         (some? duration) (assoc :duration (mth/round duration))
-        (some? playback) (assoc :playback (keyword playback))))))
+        (some? playback) (assoc :playback (keyword playback))
+        (some? autoplay) (assoc :autoplay autoplay)))))
 
 (defn add-timeline!
   "Give the board `board-id` a timeline, or the one it has the settings
@@ -1526,6 +1539,7 @@
     (if (string? settings)
       (u/not-valid plugin-id :addTimeline settings)
       (when (write-timeline! plugin-id file-id page-id board-id :addTimeline
-                             #(cond-> (merge % settings)
-                                (contains? settings :playback) (dissoc :loop)))
+                             #(cond-> (merge % (dissoc settings :autoplay))
+                                (contains? settings :playback) (dissoc :loop)
+                                (contains? settings :autoplay) (cta/with-autoplay (:autoplay settings))))
         (timeline-proxy plugin-id file-id page-id board-id)))))

@@ -7033,6 +7033,10 @@ msgstr "Distribute vertical spacing (%s)"
 msgid "workspace.align.vtop"
 msgstr "Align top (%s)"
 
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.autoplay"
+msgstr "Play when the prototype shows the board"
+
 #: src/app/main/ui/workspace/sidebar/assets.cljs:181
 msgid "workspace.assets.add-library"
 msgstr "Add library"

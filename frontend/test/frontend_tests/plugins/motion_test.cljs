@@ -314,6 +314,24 @@
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:loop "yes"})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:audio "no"}))))))))
 
+(t/deftest a-timeline-plays-when-the-prototype-shows-it
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            [^js board _]       (board-with-rect context)
+            ^js timeline        (.addTimeline board)
+            stored              #(get (stored-timelines store context) (aget board "$id"))]
+        (t/is (true? (.-autoplay timeline)) "by default")
+        (set! (.-autoplay timeline) false)
+        (t/is (false? (.-autoplay timeline)))
+        (t/is (false? (:autoplay (stored))))
+        (set! (.-autoplay timeline) true)
+        (t/is (not (contains? (stored) :autoplay)) "only the exception is kept")
+        (t/is (thrown? js/Error (set! (.-autoplay timeline) "yes")))
+        (let [^js other (.createBoard context)]
+          (t/is (false? (.-autoplay ^js (.addTimeline other #js {:autoplay false}))))
+          (t/is (thrown? js/Error (.addTimeline other #js {:autoplay 1}))))))))
+
 (t/deftest a-board-lists-the-copies-that-animate
   (thw/with-wasm-mocks*
     (fn []

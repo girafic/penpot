@@ -16401,6 +16401,7 @@ Timeline:
         name: string;
         duration: number;
         playback: TimelinePlayback;
+        autoplay: boolean;
         keyframes: Keyframe[];
         animations: PresetAnimation[];
         appliedStyles: AppliedAnimationStyle[];
@@ -16478,6 +16479,16 @@ Timeline:
 
         What playback does at the end: stop there (`once`), start over (`loop`)
         or play backwards and on (`ping-pong`).
+      autoplay: |-
+        ```
+        autoplay: boolean
+        ```
+
+        Whether the prototype (view mode) plays the animation from its start
+        when it shows the board: when view mode opens on it, or a link or the
+        arrows lead to it. `true` by default; with `false` the board shows at
+        rest until it is played. The animated component copies in the board
+        go on looping on their own clock once its animation has ended.
       keyframes: |-
         ```
         readonly keyframes: Keyframe[]
@@ -17839,6 +17850,7 @@ TimelineOptions:
         name?: string;
         duration?: number;
         playback?: TimelinePlayback;
+        autoplay?: boolean;
     }
     ```
 
@@ -17863,6 +17875,13 @@ TimelineOptions:
         ```
 
         What playback does at the end (`once` by default).
+      autoplay: |-
+        ```
+        autoplay?: boolean
+        ```
+
+        Whether the prototype plays it when it shows the board (`true` by
+        default), see `Timeline.autoplay`.
 KeyframeProps:
   overview: |-
     Interface KeyframeProps

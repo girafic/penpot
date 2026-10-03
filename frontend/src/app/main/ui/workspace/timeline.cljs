@@ -1407,6 +1407,7 @@
   [{:keys [timeline playing? recording? full-quality? audio-muted? clip clip-count unit zoom on-zoom-change]}]
   (let [duration (:duration timeline)
         playback (cta/playback-mode timeline)
+        autoplay? (cta/autoplay? timeline)
         seconds? (= unit :s)
 
         ;; a page may start sound only from a user gesture: this one
@@ -1446,6 +1447,9 @@
          (mf/deps playback)
          (fn [_] (st/emit! (dwa/set-playback-mode (next-playback-mode playback)))))
 
+        on-toggle-autoplay
+        (mf/use-fn #(st/emit! (dwa/toggle-autoplay)))
+
         on-close
         (mf/use-fn #(st/emit! (dwa/close-timeline)))]
 
@@ -1466,6 +1470,13 @@
                 :title (playback-mode-label playback)
                 :on-click on-cycle-playback}
        [:> i/icon* {:icon-id (playback-mode-icons playback)}]]
+      ;; whether the prototype plays it when the board shows
+      [:button {:type "button"
+                :class (stl/css-case :ctrl-btn true :toggle-btn true :active autoplay?)
+                :title (tr "workspace.animation.autoplay")
+                :aria-pressed autoplay?
+                :on-click on-toggle-autoplay}
+       [:> i/icon* {:icon-id i/interaction}]]
       ;; Playing renders fast, without shadows and blur, unless asked
       ;; for full quality; at rest it is always in full quality.
       [:button {:type "button"

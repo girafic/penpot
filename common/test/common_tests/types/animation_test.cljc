@@ -206,6 +206,15 @@
     (t/testing "with reduced motion, the shape stays as designed"
       (t/is (re-find #"@media \(prefers-reduced-motion: reduce\) \{\s+\.penpot-shape-\S+ \{\s+animation: none;" css)))))
 
+(t/deftest a-timeline-plays-in-the-prototype-unless-told-not-to
+  (let [tl (cta/make-timeline {:board-id (uuid/next)})]
+    (t/is (cta/autoplay? tl) "by default")
+    (t/is (not (contains? tl :autoplay)))
+    (t/is (false? (:autoplay (cta/make-timeline {:board-id (uuid/next) :autoplay false}))))
+    (t/is (not (cta/autoplay? (cta/with-autoplay tl false))))
+    (t/is (= tl (cta/with-autoplay (cta/with-autoplay tl false) true)) "only the exception is kept")
+    (t/is (sm/validate cta/schema:timeline (cta/with-autoplay tl false)))))
+
 (t/deftest timeline->css-keeps-the-rest-transform
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
         sid   (:id shape)

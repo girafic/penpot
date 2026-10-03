@@ -3775,6 +3775,15 @@ export interface Timeline {
   playback: TimelinePlayback;
 
   /**
+   * Whether the prototype (view mode) plays the animation from its start
+   * when it shows the board: when view mode opens on it, or a link or the
+   * arrows lead to it. `true` by default; with `false` the board shows at
+   * rest until it is played. The animated component copies in the board
+   * go on looping on their own clock once its animation has ended.
+   */
+  autoplay: boolean;
+
+  /**
    * The keyframes of the board and the layers inside it, by time.
    */
   readonly keyframes: Keyframe[];
@@ -4702,6 +4711,11 @@ export interface TimelineOptions {
    * What playback does at the end (`once` by default).
    */
   playback?: TimelinePlayback;
+  /**
+   * Whether the prototype plays it when it shows the board (`true` by
+   * default), see `Timeline.autoplay`.
+   */
+  autoplay?: boolean;
 }
 
 /**
