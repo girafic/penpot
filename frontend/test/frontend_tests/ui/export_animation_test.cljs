@@ -286,7 +286,7 @@
   (t/async
     done
     (let [{:keys [params locks heard ws] :as scene} (job-scene nil)
-          loaded (atom 0)
+          loaded    (atom 0)
           first-tab (p/deferred)]
       (mock/with-mocks
         {dv/load-bundle (fn [_] (swap! loaded inc) (rx/empty))}
@@ -418,6 +418,38 @@
               (.catch fail!)
               (.finally #(end! scene done'))))
         done))))
+
+(t/deftest a-tab-closed-before-it-holds-the-lock-says-nothing
+  (t/async
+    done
+    (let [{:keys [params ctor heard] :as scene} (job-scene :saved)
+          grant (atom nil)
+          ;; a lock granted only once asked to
+          locks #js {:request (fn [name _ callback]
+                                (js/Promise.
+                                 (fn [resolve _]
+                                   (reset! grant #(resolve (callback #js {:name name}))))))}]
+      (st/emit! (dat/initialize (job/encode-params params) :channel-ctor ctor :locks locks))
+      (-> (thj/wait-until #(some? @grant))
+          (.then (fn [_]
+                   (st/emit! (dat/finalize))
+                   (@grant)
+                   (pause 40)))
+          (.then (fn [_]
+                   (t/is (nil? (:export-tab @st/state)))
+                   (t/is (empty? @heard) "no channel, no hello from a closed tab")))
+          (.catch fail!)
+          (.finally #(end! scene done))))))
+
+(t/deftest a-late-preview-is-for-a-done-export-only
+  (st/emit! (dat/initialize {:format "mp4"}))
+  (swap! st/state assoc-in [:export-tab :status] :cancelled)
+  (st/emit! (#'dat/preview-ready "blob:late"))
+  (t/is (nil? (get-in @st/state [:export-tab :result :url])) "nothing plays for a cancelled export")
+  (swap! st/state assoc-in [:export-tab :status] :done)
+  (st/emit! (#'dat/preview-ready "blob:file"))
+  (t/is (= "blob:file" (get-in @st/state [:export-tab :result :url])))
+  (st/emit! (dat/finalize)))
 
 (t/deftest a-tab-the-workspace-never-answers-goes-stale
   (t/async

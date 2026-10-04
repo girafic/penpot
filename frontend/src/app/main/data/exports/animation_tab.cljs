@@ -189,8 +189,25 @@
     (effect [_ _ _]
       (post! {:type :cancelled}))))
 
+(defn- run-job
+  "A promise of the export of the job `params` on `page` (see
+  `dea/run-export`), unless it was cancelled meanwhile (while WASM
+  started)."
+  [{:keys [board-id] :as params} page files]
+  (if (:cancel-requested? @live)
+    (p/rejected (ex-info "cancelled" {:type :export-cancelled}))
+    (let [{:keys [promise cancel]}
+          (dea/run-export {:page page
+                           :files files
+                           :board-id board-id
+                           :bridge (tab-bridge)
+                           :on-progress #(st/emit! (progress %))}
+                          (select-keys params [:format :quality :fps :scale :loop? :audio?]))]
+      (swap! live assoc :cancel cancel)
+      promise)))
+
 (defn- start-export
-  "Run the export of the job on the file loaded (see `dea/run-export`)."
+  "Run the export of the job on the file loaded (see `run-job`)."
   []
   (ptk/reify ::start-export
     ptk/UpdateEvent
@@ -199,22 +216,8 @@
 
     ptk/WatchEvent
     (watch [_ state _]
-      (let [{:keys [params page files]} (tab-state state)
-            {:keys [format board-id wasm?]} params
-            start-wasm (or (:start-wasm @live) start-wasm!)
-            run (fn []
-                  ;; cancelled while WASM started
-                  (if (:cancel-requested? @live)
-                    (p/rejected (ex-info "cancelled" {:type :export-cancelled}))
-                    (let [{:keys [promise cancel]}
-                          (dea/run-export {:page page
-                                           :files files
-                                           :board-id board-id
-                                           :bridge (tab-bridge)
-                                           :on-progress #(st/emit! (progress %))}
-                                          (select-keys params [:format :quality :fps :scale :loop? :audio?]))]
-                      (swap! live assoc :cancel cancel)
-                      promise)))]
+      (let [{:keys [params page files]}     (tab-state state)
+            {:keys [format board-id wasm?]} params]
         (rx/concat
          ;; as the export in the workspace tells it
          (rx/of (ev/event {::ev/name "export-animation"
@@ -225,9 +228,9 @@
          ;; layers that are no vectors, taken as pictures
          (->> (rx/from
                (if wasm?
-                 (-> (start-wasm (:objects page) board-id)
-                     (p/then run))
-                 (run)))
+                 (-> ((:start-wasm @live) (:objects page) board-id)
+                     (p/then #(run-job params page files)))
+                 (run-job params page files)))
               (rx/map finished)
               (rx/catch
                (fn [cause]
@@ -337,7 +340,7 @@
               (rx/take-until answered)
               (rx/tap (fn [_] (post! {:type :hello})))
               (rx/ignore))
-         (->> (rx/timer (or (:save-wait-ms @live) save-wait-ms))
+         (->> (rx/timer (:save-wait-ms @live))
               (rx/take-until answered)
               (rx/map (fn [_] (stale)))))))))
 
@@ -371,9 +374,7 @@
   tab goes or freezes (see `listen!`)."
   [job-id channel-ctor]
   (let [on-message #(st/emit! (received %))
-        channel    (if channel-ctor
-                     (job/open-channel job-id on-message channel-ctor)
-                     (job/open-channel job-id on-message))]
+        channel    (job/open-channel job-id on-message (or channel-ctor (job/default-channel-ctor)))]
     (swap! live assoc :channel channel :listeners (listen!))))
 
 (defn initialize
@@ -403,9 +404,7 @@
             (reset! live {:release release
                           :start-wasm (or start-wasm start-wasm!)
                           :save-wait-ms (get opts :save-wait-ms save-wait-ms)})
-            (-> (if locks
-                  (job/hold-lock job-id release locks)
-                  (job/hold-lock job-id release))
+            (-> (job/hold-lock job-id release (or locks (job/default-locks)))
                 (p/then (fn [held?]
                           ;; unless the tab closed meanwhile
                           (when (identical? release (:release @live))

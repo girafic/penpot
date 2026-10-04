@@ -4,6 +4,7 @@
 //
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
+@use "ds/_sizes.scss" as *;
 @use "refactor/common-refactor.scss" as deprecated;
 @use "../../../sidebar/common/sidebar.scss" as sidebar;
 
@@ -141,6 +142,16 @@
 
 .animated-export-btn {
   width: 100%;
+}
+
+// read by screen readers, not shown
+.sr-status {
+  position: absolute;
+  inline-size: $sz-1;
+  block-size: $sz-1;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .animated-offer {

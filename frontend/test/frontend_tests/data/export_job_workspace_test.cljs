@@ -50,13 +50,15 @@
 
 (defn- scene
   "A job started in the workspace, with its tab when `tab?`."
-  [& {:keys [tab? wait-ms cancel-wait] :or {tab? true wait-ms 50 cancel-wait 10000}}]
+  [& {:keys [tab? hello-wait-ms cancel-wait-ms]
+      :or {tab? true hello-wait-ms 50 cancel-wait-ms 10000}}]
   (let [job   (new-job)
         ctor  (thj/broadcast-channels)
         locks (thj/locks)
         tab   (when tab? (fake-tab job ctor locks))]
-    (st/emit! (deaw/start-export-job job :channel-ctor ctor :locks locks :wait-ms wait-ms
-                                     :cancel-wait cancel-wait))
+    (st/emit! (deaw/start-export-job job :channel-ctor ctor :locks locks
+                                     :hello-wait-ms hello-wait-ms
+                                     :cancel-wait-ms cancel-wait-ms))
     {:job job :ctor ctor :locks locks :tab tab}))
 
 (defn- export-state
@@ -125,7 +127,7 @@
   (t/async
     done
     (swap! st/state dissoc :persistence)
-    (let [{:keys [tab] :as scene} (scene :wait-ms 20)
+    (let [{:keys [tab] :as scene} (scene :hello-wait-ms 20)
           post (:post tab)]
       (-> (hello! scene)
           (.then (fn [_]
@@ -159,7 +161,7 @@
   (t/async
     done
     (swap! st/state dissoc :persistence)
-    (let [{:keys [tab] :as scene} (scene :cancel-wait 40)]
+    (let [{:keys [tab] :as scene} (scene :cancel-wait-ms 40)]
       (-> (hello! scene)
           (.then (fn [_] (thj/wait-until #(:opened? (export-state)))))
           (.then (fn [_]
@@ -206,14 +208,14 @@
   (t/async
     done
     (swap! st/state dissoc :persistence)
-    (let [{:keys [job] :as scene} (scene :tab? false :wait-ms 20)
+    (let [{:keys [job] :as scene} (scene :tab? false :hello-wait-ms 20)
           started (atom [])
           sub     (rx/sub! (->> st/stream
                                 (rx/filter #(= ::dea/export-animation (ptk/type %))))
                            #(swap! started conj %))]
       (-> (thj/wait-until #(:offer? (export-state)))
           (.then (fn [_]
-                   (st/emit! (deaw/job-tab-reopened (:job-id job) :wait-ms 20))
+                   (st/emit! (deaw/job-tab-reopened (:job-id job) :hello-wait-ms 20))
                    (t/is (not (:offer? (export-state))) "waits again")
                    (thj/wait-until #(:offer? (export-state)))))
           (.then (fn [_]
@@ -229,12 +231,37 @@
   (t/async
     done
     (swap! st/state dissoc :persistence)
-    (let [{:keys [tab] :as scene} (scene :wait-ms 1000)]
+    (let [{:keys [tab] :as scene} (scene :hello-wait-ms 1000)]
       (st/emit! (deaw/cancel-export-animation))
       (t/is (nil? (export-state)) "free at once")
       (-> (thj/wait-until #(some #{:cancel} (types tab)))
           (.catch fail!)
           (.finally #(clean! scene done))))))
+
+(t/deftest cancel-stops-an-export-in-place-there
+  (t/async
+    done
+    (let [stops (atom 0)]
+      (mock/with-mocks
+        {dea/cancel-in-place! (mock/stub #(swap! stops inc))}
+        (fn [done']
+          ;; an export in place (a version preview, "Export here")
+          (swap! st/state assoc :export-animation {:in-progress true :format :mp4})
+          (st/emit! (deaw/cancel-export-animation))
+          (t/is (= 1 @stops) "the export in place stops")
+          (t/is (:cancelling? (export-state)))
+          (swap! st/state dissoc :export-animation)
+          ;; a job in a tab is cancelled by its tab, not in place
+          (let [{:keys [tab] :as scene} (scene)]
+            (-> (hello! scene)
+                (.then (fn [_] (thj/wait-until #(:opened? (export-state)))))
+                (.then (fn [_]
+                         (st/emit! (deaw/cancel-export-animation))
+                         (thj/wait-until #(some #{:cancel} (types tab)))))
+                (.then (fn [_] (t/is (= 1 @stops) "nothing stops in place")))
+                (.catch fail!)
+                (.finally #(clean! scene done')))))
+        done))))
 
 (t/deftest a-preview-or-a-browser-without-what-tabs-need-exports-in-place
   (let [globals #js {:BroadcastChannel (fn [])

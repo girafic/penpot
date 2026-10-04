@@ -947,22 +947,30 @@
         (remove (fn [[id _]] (decorated? (get objects id))))
         (cta/unit-timelines (cta/resolve-animations timeline objects) objects)))
 
-(defn- unit-shots
+(defn- hidden-unit
+  "The unit `base` (see `cta/unit-timelines`) hidden, at rest."
+  [base]
+  (assoc base :dx 0 :dy 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 0 :blur 0))
+
+(defn- unit-shot-keys
   "The pictures taken of a text of `units` (see `cta/unit-timelines`), in
-  order: `[k entries]`, the units `entries` the text shows for the
-  picture of its unit `k` (the others hidden), then `[:rest entries]`
-  with them all hidden, the rest of the text."
+  order: each unit `k`, then `:rest`, the rest of the text."
   [{:keys [bases]}]
-  (let [hidden (fn [base] (assoc base :dx 0 :dy 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 0 :blur 0))]
-    (conj (mapv (fn [k]
-                  [k (into [] (keep-indexed (fn [j base] (when (not= j k) (hidden base)))) bases)])
-                (range (count bases)))
-          [:rest (mapv hidden bases)])))
+  (conj (vec (range (count bases))) :rest))
+
+(defn- unit-entries
+  "The units a text shows for its picture `k`: all of its `hidden` units
+  (see `hidden-unit`) but `k`, or all of them for `:rest`. Made for its
+  picture only: a text of n units has n pictures."
+  [hidden k]
+  (if (= :rest k)
+    hidden
+    (into [] (keep-indexed (fn [j base] (when (not= j k) base))) hidden)))
 
 (defn unit-shot-count
   "How many pictures `collect-unit-images` takes of `texts`."
   [texts]
-  (reduce + 0 (map (fn [[_ units]] (count (unit-shots units))) texts)))
+  (reduce + 0 (map (fn [[_ {:keys [bases]}]] (inc (count bases))) texts)))
 
 (defn- shoot-unit
   "The picture (see `shoot-shape-at-rest`, uncropped) of the text `shape`
@@ -1029,21 +1037,23 @@
         oy      (or (:y (:selrect board)) 0)
         crop    (or (:crop-picture bridge) crop-picture)
         yield   (or yield default-yield)
+        ;; the hidden units of a text, once, shared by its pictures
         steps   (into []
                       (mapcat (fn [[text-id units]]
-                                (map (fn [[k entries]] [text-id k entries]) (unit-shots units))))
+                                (let [hidden (mapv hidden-unit (:bases units))]
+                                  (map (fn [k] [text-id k hidden]) (unit-shot-keys units)))))
                       texts)
         n       (count steps)
         ;; the text whose units are shown as no design has them
         current (atom nil)
-        shoot   (fn [shots [i [text-id k entries]]]
+        shoot   (fn [shots [i [text-id k hidden]]]
                   (throw-if-cancelled cancelled?)
                   (let [shape (get objects text-id)]
                     (when (not= text-id @current)
                       (reset! current text-id)
                       (when-let [clean-modifiers (:clean-modifiers bridge)]
                         (clean-modifiers)))
-                    (let [shot (shoot-unit shape entries bridge)]
+                    (let [shot (shoot-unit shape (unit-entries hidden k) bridge)]
                       (when (= :rest k)
                         (restore-units! shape bridge)
                         (reset! current nil))

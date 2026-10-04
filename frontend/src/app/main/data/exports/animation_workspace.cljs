@@ -107,6 +107,12 @@
        (when message
          (job-post! job-id message))))))
 
+(defn- job-ended?
+  "Whether `event` ends the job `job-id` (see `job-ended`)."
+  [job-id event]
+  (and (= ::job-ended (ptk/type event))
+       (= job-id @event)))
+
 (defn- job-saved
   "The workspace has saved what was pending before the job `job-id`
   (`outcome` `:saved`), or could not (`:save-failed`, which ends it): the
@@ -168,9 +174,7 @@
             (job-post! job-id {:type save}))
           (when-not lock-asked?
             (swap! jobs assoc-in [job-id :lock-asked?] true)
-            (-> (if locks
-                  (job/when-released job-id locks)
-                  (job/when-released job-id))
+            (-> (job/when-released job-id (or locks (job/default-locks)))
                 (.then #(st/emit! (job-ended job-id)))
                 (.catch (constantly nil)))))))))
 
@@ -189,11 +193,10 @@
   within `wait-ms`."
   [job-id wait-ms stream]
   (let [heard (rx/filter (fn [event]
-                           (case (ptk/type event)
-                             ::job-heard (let [{:keys [type] :as message} @event]
-                                           (and (= :hello type) (= job-id (:job-id message))))
-                             ::job-ended (= job-id @event)
-                             false))
+                           (or (job-ended? job-id event)
+                               (and (= ::job-heard (ptk/type event))
+                                    (let [{:keys [type] :as message} @event]
+                                      (and (= :hello type) (= job-id (:job-id message)))))))
                          stream)]
     (->> (rx/timer wait-ms)
          (rx/take-until heard)
@@ -206,11 +209,10 @@
   ends, is cancelled, or the tab goes (its lock is free). When the tab
   says nothing within `hello-wait-ms`, the panel offers to open it again
   (see `job-tab-reopened`) or to export here (see `export-job-here`).
-  `channel-ctor`, `locks`, `wait-ms` and `cancel-wait` replace
-  `BroadcastChannel`, `navigator.locks`, `hello-wait-ms` and
-  `cancel-wait-ms` (in tests)."
-  [job & {:keys [channel-ctor locks wait-ms cancel-wait]
-          :or {wait-ms hello-wait-ms cancel-wait cancel-wait-ms}}]
+  `channel-ctor`, `locks`, `hello-wait-ms` and `cancel-wait-ms` replace
+  `BroadcastChannel`, `navigator.locks` and the waits of the same names
+  (in tests)."
+  [job & {:keys [channel-ctor locks] :as opts}]
   (ptk/reify ::start-export-job
     ptk/UpdateEvent
     (update [_ state]
@@ -229,17 +231,16 @@
     ptk/WatchEvent
     (watch [_ _ stream]
       (let [job-id (:job-id job)
-            ended  (rx/filter #(and (= ::job-ended (ptk/type %)) (= job-id @%)) stream)
+            ended  (rx/filter #(job-ended? job-id %) stream)
             ;; the channel is open while the job lasts
             heard  (rx/create
                     (fn [subs]
                       (let [on-message #(rx/push! subs %)
-                            channel    (if channel-ctor
-                                         (job/open-channel job-id on-message channel-ctor)
-                                         (job/open-channel job-id on-message))]
+                            channel    (job/open-channel job-id on-message
+                                                         (or channel-ctor (job/default-channel-ctor)))]
                         (swap! jobs assoc job-id {:channel channel
                                                   :locks locks
-                                                  :cancel-wait-ms cancel-wait})
+                                                  :cancel-wait-ms (get opts :cancel-wait-ms cancel-wait-ms)})
                         (fn []
                           (when-let [close (:close channel)]
                             (close))
@@ -253,12 +254,13 @@
               (rx/map (fn [_] (job-saved job-id :saved)))
               (rx/catch (fn [_] (rx/of (job-saved job-id :save-failed))))
               (rx/take-until ended))
-         (hello-wait job-id wait-ms stream))))))
+         (hello-wait job-id (get opts :hello-wait-ms hello-wait-ms) stream))))))
 
 (defn job-tab-reopened
   "The panel opened the tab of the job `job-id` again (see
-  `open-job-tab!`): it waits for its word once more."
-  [job-id & {:keys [wait-ms] :or {wait-ms hello-wait-ms}}]
+  `open-job-tab!`): it waits for its word once more (`hello-wait-ms`,
+  replaced in tests)."
+  [job-id & {:as opts}]
   (ptk/reify ::job-tab-reopened
     ptk/UpdateEvent
     (update [_ state]
@@ -268,7 +270,7 @@
 
     ptk/WatchEvent
     (watch [_ _ stream]
-      (hello-wait job-id wait-ms stream))))
+      (hello-wait job-id (get opts :hello-wait-ms hello-wait-ms) stream))))
 
 (defn export-job-here
   "Give up the tab of the job `job-id`, which did not open, and export in
@@ -310,12 +312,12 @@
     ptk/WatchEvent
     (watch [_ state stream]
       (let [{:keys [in-tab? opened? job]} (:export-animation state)
-            job-id (:job-id job)]
+            job-id                        (:job-id job)]
         (cond
           (not in-tab?) (rx/empty)
           (not opened?) (rx/of (job-ended job-id {:type :cancel}))
           :else
-          (let [ended (rx/filter #(and (= ::job-ended (ptk/type %)) (= job-id @%)) stream)]
+          (let [ended (rx/filter #(job-ended? job-id %) stream)]
             (->> (rx/timer (get-in @jobs [job-id :cancel-wait-ms] cancel-wait-ms))
                  (rx/take-until ended)
                  (rx/map (fn [_] (job-ended job-id {:type :cancel}))))))))

@@ -128,12 +128,17 @@
   [job-id]
   (str "penpot-export-" job-id))
 
+(defn default-channel-ctor
+  "The `BroadcastChannel` of the browser, nil without one."
+  []
+  (unchecked-get js/globalThis "BroadcastChannel"))
+
 (defn open-channel
   "The channel of the job `job-id`: `{:post :close}`, `on-message`
   hearing each message the other side posts (see `decode-message`).
   `ctor` replaces `BroadcastChannel` (in tests); nil without one."
   ([job-id on-message]
-   (open-channel job-id on-message (unchecked-get js/globalThis "BroadcastChannel")))
+   (open-channel job-id on-message (default-channel-ctor)))
   ([job-id on-message ctor]
    (when (some? ctor)
      (let [^js channel (new ctor (channel-name job-id))]
@@ -150,7 +155,9 @@
   [job-id]
   (str "penpot-export-" job-id))
 
-(defn- default-locks
+(defn default-locks
+  "The `navigator.locks` of the browser, nil without them (not a secure
+  context)."
   []
   (some-> (unchecked-get js/globalThis "navigator") (unchecked-get "locks")))
 

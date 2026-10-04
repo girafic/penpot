@@ -344,8 +344,12 @@
        (when (and clips? (not render-wasm?))
          [:p {:class (stl/css :hint)} (tr "workspace.options.export.audio-needs-wasm")])
 
+       ;; mounted while the panel shows, so what comes in is read out
+       [:span {:class (stl/css :sr-status) :role "status" :aria-live "polite"}
+        (some->> (:note view) (apply tr))]
+
        (when-let [note (:note view)]
-         [:p {:class (stl/css :hint) :role "status" :aria-live "polite"} (apply tr note)])
+         [:p {:class (stl/css :hint)} (apply tr note)])
 
        (when (:offer? view)
          [:div {:class (stl/css :animated-offer)}
