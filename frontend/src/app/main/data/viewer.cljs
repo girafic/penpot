@@ -704,6 +704,10 @@
 (declare pause-timeline)
 
 ;; --- Overlays
+;;
+;; An overlay opens over the board shown, which goes on playing its
+;; animation and its sound: a hover state, a menu or a dialog do not stop
+;; it, as going to another board does.
 
 (defn- open-overlay*
   [state frame position snap-to close-click-outside background-overlay animation fixed-source?]
@@ -764,12 +768,7 @@
                          background-overlay
                          animation
                          fixed-source?)
-          state)))
-
-    ;; the animation playing (and its sound) stops
-    ptk/WatchEvent
-    (watch [_ _ _]
-      (rx/of (pause-timeline)))))
+          state)))))
 
 
 (defn toggle-overlay
@@ -817,11 +816,7 @@
      (update [_ state]
        (close-overlay* state
                        frame-id
-                       animation))
-
-     ptk/WatchEvent
-     (watch [_ _ _]
-       (rx/of (pause-timeline))))))
+                       animation)))))
 
 ;; --- Objects selection
 

@@ -130,6 +130,21 @@
       (t/is (empty? @log)))
     (audio/use-context! nil)))
 
+(t/deftest an-overlay-keeps-the-board-playing
+  ;; a hover state opened and closed over a board that plays
+  (let [{:keys [state]} (viewer-state :once 500)
+        types (fn [event]
+                (if (satisfies? ptk/WatchEvent event)
+                  (let [types (atom [])]
+                    (->> (ptk/watch event state (rx/subject))
+                         (rx/subs! #(swap! types conj (ptk/type %))))
+                    @types)
+                  []))
+        id    (uuid/next)]
+    (t/is (not-any? #{::dv/pause-timeline}
+                    (types (dv/open-overlay id (gpt/point 0 0) nil false false nil false))))
+    (t/is (not-any? #{::dv/pause-timeline} (types (dv/close-overlay id))))))
+
 (t/deftest a-looping-copy-sounds-on-after-the-board
   ;; board B plays 500 ms once; the copy in it of a main of 1 s that
   ;; loops a clip of 300 ms goes on
