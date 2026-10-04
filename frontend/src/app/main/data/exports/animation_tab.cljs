@@ -6,7 +6,7 @@
 
 (ns app.main.data.exports.animation-tab
   "The export tab: it runs the animated export the workspace starts (see
-  `dea/start-export-job`) in a tab of its own, with the file loaded as
+  `deaw/start-export-job`) in a tab of its own, with the file loaded as
   the view mode loads it and a WASM renderer of its own, so the
   workspace stays fluid. It waits for the workspace to save, exports,
   downloads, and tells the workspace on the channel of the job (see
@@ -24,6 +24,7 @@
    [app.main.store :as st]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.shape :as wasm.shape]
+   [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]
    [promesa.core :as p]))
@@ -42,7 +43,8 @@
   100)
 
 (defonce ^:private live
-  ;; {:channel :release :cancel :result :listeners :last-post}
+  ;; {:channel :release :cancel :cancel-requested? :result :preview-url
+  ;;  :listeners :last-post :start-wasm :save-wait-ms}
   (atom nil))
 
 (defn- post!
@@ -129,9 +131,20 @@
   []
   (assoc (dea/default-bridge) :apply-shape-properties wasm.shape/set-shape-properties!))
 
+(defn- preview-ready
+  "The file of the export can be played at `url` (see `finished`)."
+  [url]
+  (ptk/reify ::preview-ready
+    ptk/UpdateEvent
+    (update [_ state]
+      (cond-> state
+        (= :done (:status (tab-state state)))
+        (assoc-in [:export-tab :result :url] url)))))
+
 (defn- finished
-  "The export ended with `result` (see `dea/run-export`): downloaded and
-  kept for Download again, told to the workspace."
+  "The export ended with `result` (see `dea/run-export`): downloaded,
+  kept for Download again and for its preview (an object URL of its
+  blob, revoked when the tab closes), told to the workspace."
   [result]
   (ptk/reify ::finished
     ptk/UpdateEvent
@@ -155,7 +168,9 @@
     ptk/EffectEvent
     (effect [_ _ _]
       (when (= :ok (:status result))
-        (swap! live assoc :result result)
+        (let [url (wapi/create-uri (:blob result))]
+          (swap! live assoc :result result :preview-url url)
+          (st/emit! (preview-ready url)))
         (dea/download-result result)
         (post! {:type :done
                 :name (:name result)
@@ -185,26 +200,32 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [{:keys [params page files]} (tab-state state)
-            {:keys [format board-id]} params
+            {:keys [format board-id wasm?]} params
+            start-wasm (or (:start-wasm @live) start-wasm!)
             run (fn []
-                  (let [{:keys [promise cancel]}
-                        (dea/run-export {:page page
-                                         :files files
-                                         :board-id board-id
-                                         :bridge (tab-bridge)
-                                         :on-progress #(st/emit! (progress %))}
-                                        (select-keys params [:format :quality :fps :scale :loop? :audio?]))]
-                    (swap! live assoc :cancel cancel)
-                    promise))]
+                  ;; cancelled while WASM started
+                  (if (:cancel-requested? @live)
+                    (p/rejected (ex-info "cancelled" {:type :export-cancelled}))
+                    (let [{:keys [promise cancel]}
+                          (dea/run-export {:page page
+                                           :files files
+                                           :board-id board-id
+                                           :bridge (tab-bridge)
+                                           :on-progress #(st/emit! (progress %))}
+                                          (select-keys params [:format :quality :fps :scale :loop? :audio?]))]
+                      (swap! live assoc :cancel cancel)
+                      promise)))]
         (rx/concat
          ;; as the export in the workspace tells it
          (rx/of (ev/event {::ev/name "export-animation"
                            ::ev/origin "export-tab"
                            :format (name format)
                            :in-tab true}))
+         ;; WASM when the workspace renders with it: a Lottie may have
+         ;; layers that are no vectors, taken as pictures
          (->> (rx/from
-               (if (job/needs-wasm? format)
-                 (-> (start-wasm! (:objects page) board-id)
+               (if wasm?
+                 (-> (start-wasm (:objects page) board-id)
                      (p/then run))
                  (run)))
               (rx/map finished)
@@ -282,17 +303,22 @@
 
     ptk/EffectEvent
     (effect [_ _ _]
+      ;; kept for an export not started yet (WASM starting)
+      (swap! live assoc :cancel-requested? true)
       (when-let [cancel (:cancel @live)]
         (cancel)))))
 
 (defn- received
-  "A message of the workspace."
+  "A message of the workspace. A `:saved` that comes again (the workspace
+  answers every `:hello`) loads nothing more."
   [{:keys [type]}]
   (ptk/reify ::received
     ptk/WatchEvent
-    (watch [_ _ _]
+    (watch [_ state _]
       (case type
-        :saved       (rx/of (saved))
+        :saved       (if (#{:waiting :stale} (:status (tab-state state)))
+                       (rx/of (saved))
+                       (rx/empty))
         :save-failed (rx/of (failed :save-failed))
         :cancel      (rx/of (cancel))
         (rx/empty)))))
@@ -311,9 +337,17 @@
               (rx/take-until answered)
               (rx/tap (fn [_] (post! {:type :hello})))
               (rx/ignore))
-         (->> (rx/timer save-wait-ms)
+         (->> (rx/timer (or (:save-wait-ms @live) save-wait-ms))
               (rx/take-until answered)
               (rx/map (fn [_] (stale)))))))))
+
+(defn- duplicate
+  "Another tab holds the lock of the job: it exports, this one does not."
+  []
+  (ptk/reify ::duplicate
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:export-tab :status] :duplicate))))
 
 (defn- listen!
   "Tell the workspace when the tab goes (`pagehide`) and when the browser
@@ -332,12 +366,26 @@
         (.removeEventListener js/document "resume" on-resume)))
     (constantly nil)))
 
+(defn- open-channel!
+  "Open the channel of the job `job-id` and tell the workspace when the
+  tab goes or freezes (see `listen!`)."
+  [job-id channel-ctor]
+  (let [on-message #(st/emit! (received %))
+        channel    (if channel-ctor
+                     (job/open-channel job-id on-message channel-ctor)
+                     (job/open-channel job-id on-message))]
+    (swap! live assoc :channel channel :listeners (listen!))))
+
 (defn initialize
   "Start the export tab of the job of the query params `query` (see
-  `job/decode-params`): it names its window after the job, opens the
-  channel of the job, holds its lock, then says it is there until the
-  workspace has saved. Params that are not valid end it at once."
-  [query & {:keys [channel-ctor locks]}]
+  `job/decode-params`): it takes the lock of the job, then opens the
+  channel of the job and says it is there until the workspace has saved.
+  When another tab holds the lock, that tab exports and this one ends
+  (`:duplicate`); params that are not valid end it at once.
+  `channel-ctor`, `locks`, `start-wasm` and `save-wait-ms` replace
+  `BroadcastChannel`, `navigator.locks`, `start-wasm!` and
+  `save-wait-ms` (in tests)."
+  [query & {:keys [channel-ctor locks start-wasm] :as opts}]
   (ptk/reify ::initialize
     ptk/UpdateEvent
     (update [_ state]
@@ -351,16 +399,20 @@
       (let [{:keys [status params]} (tab-state state)]
         (when (= :waiting status)
           (let [job-id  (:job-id params)
-                release (p/deferred)
-                channel (if channel-ctor
-                          (job/open-channel job-id #(st/emit! (received %)) channel-ctor)
-                          (job/open-channel job-id #(st/emit! (received %))))]
-            (unchecked-set js/globalThis "name" (str "export-" job-id))
-            (reset! live {:channel channel :release release :listeners (listen!)})
+                release (p/deferred)]
+            (reset! live {:release release
+                          :start-wasm (or start-wasm start-wasm!)
+                          :save-wait-ms (get opts :save-wait-ms save-wait-ms)})
             (-> (if locks
                   (job/hold-lock job-id release locks)
                   (job/hold-lock job-id release))
-                (p/then #(st/emit! (lock-held))))))))))
+                (p/then (fn [held?]
+                          ;; unless the tab closed meanwhile
+                          (when (identical? release (:release @live))
+                            (if held?
+                              (do (open-channel! job-id channel-ctor)
+                                  (st/emit! (lock-held)))
+                              (st/emit! (duplicate)))))))))))))
 
 (defn download-again
   "Download the file of the export once more."
@@ -372,7 +424,8 @@
         (dea/download-result result)))))
 
 (defn finalize
-  "The tab closes: the channel closes and the lock goes."
+  "The tab closes: the channel closes, the lock goes, and the preview of
+  the file with it."
   []
   (ptk/reify ::finalize
     ptk/UpdateEvent
@@ -381,8 +434,9 @@
 
     ptk/EffectEvent
     (effect [_ _ _]
-      (when-let [{:keys [channel release listeners]} @live]
+      (when-let [{:keys [channel release listeners preview-url]} @live]
         (when listeners (listeners))
         (when channel ((:close channel)))
-        (when release (p/resolve release nil)))
+        (when release (p/resolve release nil))
+        (when preview-url (wapi/revoke-uri preview-url)))
       (reset! live nil))))

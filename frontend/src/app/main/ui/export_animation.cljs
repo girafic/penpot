@@ -31,15 +31,28 @@
     (< bytes (* 1024 1024))       (str (mth/round (/ bytes 1024.0)) " KB")
     :else                         (str (mth/precision (/ bytes (* 1024.0 1024.0)) 1) " MB")))
 
+(defn preview-kind
+  "How the Done page plays a file of the extension `ext`: as a video, as
+  an image (GIF, AVIF and SVG animate there; an SVG runs no script in
+  an image), or not (`:none`: Lottie, for want of a player)."
+  [ext]
+  (case ext
+    (".mp4" ".webm")        :video
+    (".gif" ".avif" ".svg") :image
+    :none))
+
 (defn page-state
   "What the export tab shows of its state `tab`: `{:text :percent :notes
-  :actions}`, the text as `[key & args]` for `tr`, the percent while it
-  exports, the notes of the file (see `dea/export-notes`) and its
-  buttons (`:cancel` `:download` `:close`)."
+  :preview :actions}`, the text as `[key & args]` for `tr`, the percent
+  while it exports, the notes of the file (see `dea/export-notes`), how
+  to play it (`{:kind :url :name}`, see `preview-kind`) and its buttons
+  (`:cancel` `:download` `:close`)."
   [{:keys [status params page percent cancelling? result error]}]
   (let [board  (get-in page [:objects (:board-id params) :name])
         format (some-> (:format params) name str/upper)]
     (case status
+      ;; before the tab starts its job
+      nil        {:text ["export-animation.waiting"] :actions []}
       :waiting   {:text ["export-animation.waiting"] :actions []}
       :loading   {:text ["export-animation.loading"] :actions []}
       :exporting {:text ["export-animation.exporting" (or board "") (or format "")]
@@ -49,9 +62,13 @@
                          (str (:name result) (:ext result))
                          (size-label (:size result))]
                   :notes (:notes result)
+                  :preview {:kind (preview-kind (:ext result))
+                            :url (:url result)
+                            :name (str (:name result) (:ext result))}
                   :actions [:download :close]}
       :cancelled {:text ["export-animation.cancelled"] :actions [:close]}
       :stale     {:text ["export-animation.stale"] :actions [:close]}
+      :duplicate {:text ["export-animation.duplicate"] :actions [:close]}
       :error     {:text (job/error-text error) :actions [:close]}
       {:text ["export-animation.invalid"] :actions [:close]})))
 
@@ -71,9 +88,12 @@
       #(st/emit! (dat/finalize)))
 
     [:main {:class (stl/css :export-page)}
-     [:section {:class (stl/css :export-card)}
+     [:section {:class (stl/css-case :export-card true
+                                     :export-card-wide (contains? #{:video :image}
+                                                                  (get-in view [:preview :kind])))}
       [:h1 {:class (stl/css :title)} (tr "export-animation.title")]
-      [:p {:class (stl/css :status)} (apply tr (:text view))]
+      [:p {:class (stl/css :status) :role "status" :aria-live "polite"}
+       (apply tr (:text view))]
 
       (when-let [percent (:percent view)]
         [:div {:class (stl/css :bar)
@@ -83,6 +103,24 @@
                :aria-valuemax 100}
          [:div {:class (stl/css :bar-fill)
                 :style {:width (str percent "%")}}]])
+
+      (when-let [{:keys [kind url name]} (:preview view)]
+        (case kind
+          :video (when url
+                   [:div {:class (stl/css :preview-frame)}
+                    [:video {:class (stl/css :preview)
+                             :src url
+                             :controls true
+                             :auto-play true
+                             :muted true
+                             :loop true
+                             :plays-inline true}]])
+          :image (when url
+                   [:div {:class (stl/css :preview-frame)}
+                    [:img {:class (stl/css :preview)
+                           :src url
+                           :alt (tr "export-animation.preview-alt" name)}]])
+          [:p {:class (stl/css :note)} (tr "export-animation.no-preview")]))
 
       (for [note (:notes view)]
         [:p {:key (name (first note)) :class (stl/css :note)} (dea/note-text note)])

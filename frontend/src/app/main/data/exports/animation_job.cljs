@@ -43,10 +43,12 @@
   (sm/lazy-validator schema:params))
 
 (defn needs-wasm?
-  "Whether `format` renders pictures through WASM: all but Lottie, which
-  draws vector layers as they are (see `dea/export-formats`)."
+  "Whether `format` cannot be exported without WASM: all but the Lottie
+  formats, which draw vector layers as they are (see
+  `dea/export-formats`). With WASM, a Lottie takes the pictures of the
+  layers that are not vectors through it too."
   [format]
-  (not= :lottie format))
+  (not (contains? #{:lottie :dotlottie} format)))
 
 (defn new-job-id
   []
@@ -155,19 +157,21 @@
 (defn hold-lock
   "Hold the lock of the job `job-id` until the promise `release`
   resolves, as the tab does while it lives (the browser lets it go when
-  the tab closes or crashes): a promise resolved once it is held. `locks`
-  replaces `navigator.locks`; without one, resolved at once."
+  the tab closes or crashes), unless another tab holds it already: a
+  promise of true once it is held, of false when another tab has it.
+  `locks` replaces `navigator.locks`; without one, true at once."
   ([job-id release]
    (hold-lock job-id release (default-locks)))
   ([job-id release ^js locks]
    (if (some? locks)
      (js/Promise.
       (fn [resolve _]
-        (.request locks (lock-name job-id)
-                  (fn [_]
-                    (resolve nil)
-                    release))))
-     (js/Promise.resolve nil))))
+        (.request locks (lock-name job-id) #js {:ifAvailable true}
+                  (fn [lock]
+                    (if (nil? lock)
+                      (do (resolve false) nil)
+                      (do (resolve true) release))))))
+     (js/Promise.resolve true))))
 
 (defn when-released
   "A promise resolved once nobody holds the lock of the job `job-id`: the

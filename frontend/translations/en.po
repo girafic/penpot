@@ -2213,6 +2213,10 @@ msgid "export-animation.download-again"
 msgstr "Download again"
 
 #: src/app/main/ui/export_animation.cljs
+msgid "export-animation.duplicate"
+msgstr "This export already runs in another tab."
+
+#: src/app/main/ui/export_animation.cljs
 msgid "export-animation.error.export"
 msgstr "The export failed: %s"
 
@@ -2243,6 +2247,14 @@ msgstr "This export cannot start. Start it again from the workspace."
 #: src/app/main/ui/export_animation.cljs
 msgid "export-animation.loading"
 msgstr "Loading the file…"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.no-preview"
+msgstr "Lottie files have no preview here yet."
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.preview-alt"
+msgstr "Preview of %s"
 
 #: src/app/main/ui/export_animation.cljs
 msgid "export-animation.stale"
@@ -9020,6 +9032,9 @@ msgstr "This board has no animation yet."
 
 msgid "workspace.options.export.progress"
 msgstr "Export frame %s of %s"
+
+msgid "workspace.options.export.exporting"
+msgstr "Exporting… %s%"
 
 msgid "workspace.options.export.opening-tab"
 msgstr "Opening the export tab…"

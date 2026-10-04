@@ -13,6 +13,7 @@
    [app.main.data.viewer :as dv]
    [app.main.store :as st]
    [app.main.ui.export-animation :as uea]
+   [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.export-job :as thj]
@@ -32,25 +33,41 @@
     (t/is (= [] (:actions (view {:status :exporting :cancelling? true}))) "no second Cancel")
     (t/is (= {:text ["export-animation.done" "Hero.mp4" "1.5 MB"]
               :notes [[:audio-dropped]]
+              :preview {:kind :video :url "blob:hero" :name "Hero.mp4"}
               :actions [:download :close]}
              (view {:status :done :result {:name "Hero" :ext ".mp4" :size (* 1.5 1024 1024)
-                                           :notes [[:audio-dropped]]}})))
+                                           :notes [[:audio-dropped]] :url "blob:hero"}})))
     (t/is (= [:close] (:actions (view {:status :cancelled}))))
     (t/is (= ["export-animation.stale"] (:text (view {:status :stale}))))
+    (t/is (= {:text ["export-animation.duplicate"] :actions [:close]} (view {:status :duplicate}))
+          "another tab exports the job")
     (t/is (= ["export-animation.error.save-failed"] (:text (view {:status :error :error {:reason :save-failed}}))))
     (t/is (= ["export-animation.error.export" "boom"] (:text (view {:status :error :error {:reason :export :message "boom"}}))))
-    (t/is (= ["export-animation.invalid"] (:text (uea/page-state {:status :invalid}))))))
+    (t/is (= ["export-animation.invalid"] (:text (uea/page-state {:status :invalid}))))
+    (t/is (= {:text ["export-animation.waiting"] :actions []} (uea/page-state nil))
+          "before the tab starts its job")))
+
+(t/deftest the-done-page-plays-what-the-browser-plays
+  (t/is (= [:video :video] (map uea/preview-kind [".mp4" ".webm"])))
+  (t/is (= [:image :image :image] (map uea/preview-kind [".gif" ".avif" ".svg"]))
+        "an animated image; an SVG runs no script there")
+  (t/is (= [:none :none] (map uea/preview-kind [".json" ".lottie"])) "no Lottie player yet"))
+
+;; THE TAB, AGAINST A STAND-IN OF THE WORKSPACE
 
 (defn- job-scene
-  "The params of a job (a Lottie, which draws without WASM), the bundle of
-  its file and the workspace's side of the channel, answering each
-  `:hello` with `answer`."
-  [answer]
+  "The params of a job (a Lottie without WASM unless `params` says
+  otherwise), the bundle of its file and the workspace's side of the
+  channel, answering each `:hello` with `answer`. `opts` go to
+  `dat/initialize` with the fake channels and locks."
+  [answer & {:keys [params opts]}]
   (let [file-id  (uuid/next)
         page-id  (uuid/next)
         board-id (uuid/next)
-        params   {:file-id file-id :page-id page-id :board-id board-id :job-id (job/new-job-id)
-                  :format :lottie :quality :high :fps 30 :scale 1 :loop? true :audio? false :wasm? false}
+        params   (merge {:file-id file-id :page-id page-id :board-id board-id :job-id (job/new-job-id)
+                         :format :lottie :quality :high :fps 30 :scale 1 :loop? true :audio? false
+                         :wasm? false}
+                        params)
         ctor     (thj/broadcast-channels)
         heard    (atom [])
         ws       (atom nil)]
@@ -63,6 +80,7 @@
     {:params params
      :ctor ctor
      :locks (thj/locks)
+     :opts opts
      :heard heard
      :ws ws
      :bundle {:file {:id file-id
@@ -73,18 +91,38 @@
               :team {:features #{}}}}))
 
 (defn- start!
-  [{:keys [params ctor locks]}]
-  (st/emit! (dat/initialize (job/encode-params params) :channel-ctor ctor :locks locks)))
+  [{:keys [params ctor locks opts]}]
+  (st/emit! (apply dat/initialize (job/encode-params params)
+                   (mapcat identity (merge {:channel-ctor ctor :locks locks} opts)))))
 
-(defn- after
-  [ms f]
-  (js/setTimeout f ms))
+(defn- status
+  []
+  (get-in @st/state [:export-tab :status]))
+
+(defn- types
+  [heard]
+  (mapv :type @heard))
+
+(defn- ok-result
+  []
+  {:status :ok :blob (js/Blob. #js ["{}"]) :name "Hero" :ext ".json" :mtype "application/json"})
+
+(defn- fail!
+  [cause]
+  (t/is false (str "unexpected: " (ex-message cause))))
 
 (defn- end!
+  "Close the tab and the workspace's side, then `done'`; returns nothing."
   [{:keys [ws]} done']
   (st/emit! (dat/finalize))
   ((:close @ws))
-  (done'))
+  (done')
+  nil)
+
+(defn- pause
+  "A promise resolved after `ms`: only to see that nothing more happens."
+  [ms]
+  (js/Promise. (fn [resolve] (js/setTimeout resolve ms))))
 
 (t/deftest the-tab-exports-once-the-workspace-has-saved
   (t/async
@@ -92,7 +130,8 @@
     (let [{:keys [bundle heard] :as scene} (job-scene :saved)
           loaded    (atom 0)
           downloads (atom 0)
-          viewer    (atom 0)]
+          viewer    (atom 0)
+          wasm      (atom 0)]
       (mock/with-mocks
         {dv/load-bundle (fn [_] (swap! loaded inc) (rx/of bundle))
          dv/update-page-position-data (fn [& _] (swap! viewer inc) (ptk/data-event ::noop))
@@ -101,21 +140,69 @@
                           (t/is (= "Hero" (get-in ctx [:page :objects (:board-id ctx) :name])) "the page of the file")
                           (t/is (= :lottie (:format params)))
                           ((:on-progress ctx) {:phase :layers :current 1 :total 2})
-                          {:promise (js/Promise.resolve {:status :ok :blob (js/Blob. #js ["{}"])
-                                                         :name "Hero" :ext ".json" :mtype "application/json"})
-                           :cancel (fn [])})
+                          {:promise (js/Promise.resolve (ok-result)) :cancel (fn [])})
          dea/download-result (fn [_] (swap! downloads inc))}
         (fn [done']
-          (start! scene)
-          (after 150
-                 (fn []
-                   (t/is (= :done (get-in @st/state [:export-tab :status])))
-                   (t/is (= [1 1] [@loaded @downloads]) "loaded once, downloaded once")
-                   (t/is (= 0 @viewer) "nothing of the view mode")
-                   (t/is (= [:hello :progress :done] (distinct (map :type @heard))))
-                   (t/is (= {:type :done :name "Hero" :ext ".json" :size 2 :notes []}
-                            (last @heard)))
-                   (end! scene done'))))
+          (start! (assoc scene :opts {:start-wasm (fn [_ _] (swap! wasm inc) (js/Promise.resolve nil))}))
+          ;; what the workspace hears comes a task later
+          (-> (thj/wait-until #(= :done (last (types heard))))
+              (.then (fn [_]
+                       (t/is (= [1 1] [@loaded @downloads]) "loaded once, downloaded once")
+                       (t/is (= 0 @viewer) "nothing of the view mode")
+                       (t/is (= 0 @wasm) "no WASM without it in the workspace")
+                       (t/is (= [:hello :progress :done] (distinct (types heard))))
+                       (t/is (= {:type :done :name "Hero" :ext ".json" :size 2 :notes []}
+                                (last @heard)))))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
+        done))))
+
+(t/deftest a-lottie-of-a-wasm-workspace-starts-wasm-first
+  (t/async
+    done
+    (let [{:keys [bundle] :as scene} (job-scene :saved :params {:wasm? true})
+          calls (atom [])]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_] (rx/of bundle))
+         dea/run-export (fn [_ _]
+                          (swap! calls conj :export)
+                          {:promise (js/Promise.resolve (ok-result)) :cancel (fn [])})
+         dea/download-result (fn [_] nil)}
+        (fn [done']
+          (start! (assoc scene :opts {:start-wasm (fn [_ _] (swap! calls conj :wasm) (js/Promise.resolve nil))}))
+          (-> (thj/wait-until #(= :done (status)))
+              (.then (fn [_] (t/is (= [:wasm :export] @calls) "its layers that are no vectors are pictures")))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
+        done))))
+
+(t/deftest a-cancel-while-wasm-starts-exports-nothing
+  (t/async
+    done
+    (let [{:keys [bundle heard ws] :as scene} (job-scene :saved :params {:format :mp4 :wasm? true})
+          starting  (p/deferred)
+          exports   (atom 0)
+          downloads (atom 0)]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_] (rx/of bundle))
+         dea/run-export (fn [_ _]
+                          (swap! exports inc)
+                          {:promise (js/Promise.resolve (ok-result)) :cancel (fn [])})
+         dea/download-result (fn [_] (swap! downloads inc))}
+        (fn [done']
+          (start! (assoc scene :opts {:start-wasm (fn [_ _] starting)}))
+          (-> (thj/wait-until #(= :exporting (status)))
+              (.then (fn [_]
+                       ((:post @ws) {:type :cancel})
+                       (thj/wait-until #(get-in @st/state [:export-tab :cancelling?]))))
+              (.then (fn [_]
+                       (p/resolve starting nil)
+                       (thj/wait-until #(= :cancelled (status)))))
+              (.then (fn [_]
+                       (t/is (= [0 0] [@exports @downloads]) "no export, no download")
+                       (t/is (= :cancelled (last (types heard))))))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
         done))))
 
 (t/deftest the-tab-waits-for-the-save
@@ -127,12 +214,13 @@
         {dv/load-bundle (fn [_] (swap! loaded inc) (rx/empty))}
         (fn [done']
           (start! scene)
-          (after 80
-                 (fn []
-                   (t/is (= :waiting (get-in @st/state [:export-tab :status])))
-                   (t/is (= 0 @loaded) "nothing loads before the save")
-                   (t/is (= [{:type :hello}] @heard) "it says it is there")
-                   (end! scene done'))))
+          (-> (thj/wait-until #(seq @heard))
+              (.then (fn [_]
+                       (t/is (= :waiting (status)))
+                       (t/is (= 0 @loaded) "nothing loads before the save")
+                       (t/is (= [:hello] (types heard)) "it says it is there")))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
         done))))
 
 (t/deftest the-tab-tells-a-failed-save
@@ -144,14 +232,13 @@
         {dv/load-bundle (fn [_] (swap! loaded inc) (rx/empty))}
         (fn [done']
           (start! scene)
-          (after 100
-                 (fn []
-                   (t/is (= {:status :error :reason :save-failed}
-                            {:status (get-in @st/state [:export-tab :status])
-                             :reason (get-in @st/state [:export-tab :error :reason])}))
-                   (t/is (= 0 @loaded) "a stale file is not exported")
-                   (t/is (= :error (:type (last @heard))))
-                   (end! scene done'))))
+          (-> (thj/wait-until #(= :error (last (types heard))))
+              (.then (fn [_]
+                       (t/is (= [:error :save-failed]
+                                [(status) (get-in @st/state [:export-tab :error :reason])]))
+                       (t/is (= 0 @loaded) "a stale file is not exported")))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
         done))))
 
 (t/deftest the-workspace-cancels-the-export-of-the-tab
@@ -167,17 +254,18 @@
          dea/download-result (fn [_] nil)}
         (fn [done']
           (start! scene)
-          (after 80 #((:post @ws) {:type :cancel}))
-          (after 160
-                 (fn []
-                   (t/is (= :cancelled (get-in @st/state [:export-tab :status])))
-                   (t/is (= :cancelled (:type (last @heard))))
-                   (end! scene done'))))
+          (-> (thj/wait-until #(= :exporting (status)))
+              (.then (fn [_]
+                       ((:post @ws) {:type :cancel})
+                       (thj/wait-until #(= :cancelled (status)))))
+              (.then (fn [_] (t/is (= :cancelled (last (types heard))))))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
         done))))
 
 (t/deftest a-tab-opened-by-hand-does-not-start
   (st/emit! (dat/initialize {:format "mp4"}))
-  (t/is (= :invalid (get-in @st/state [:export-tab :status])))
+  (t/is (= :invalid (status)))
   (st/emit! (dat/finalize)))
 
 (t/deftest a-cancel-before-the-export-ends-the-tab-at-once
@@ -185,17 +273,159 @@
     done
     (let [{:keys [heard ws] :as scene} (job-scene nil)]
       (start! scene)
-      (after 30
-             (fn []
-               (t/is (= :waiting (get-in @st/state [:export-tab :status])))
-               ((:post @ws) {:type :cancel})
-               (after 30
-                      (fn []
-                        (t/is (= :cancelled (get-in @st/state [:export-tab :status])))
-                        (t/is (some #{:cancelled} (map :type @heard)))
-                        (let [hellos (count (filter #(= :hello (:type %)) @heard))]
-                          (after 40
-                                 (fn []
-                                   (t/is (= hellos (count (filter #(= :hello (:type %)) @heard)))
-                                         "no more hellos")
-                                   (end! scene done)))))))))))
+      (-> (thj/wait-until #(seq @heard))
+          (.then (fn [_]
+                   (t/is (= :waiting (status)))
+                   ((:post @ws) {:type :cancel})
+                   (thj/wait-until #(= :cancelled (status)))))
+          (.then (fn [_] (t/is (some #{:cancelled} (types heard)))))
+          (.catch fail!)
+          (.finally #(end! scene done))))))
+
+(t/deftest a-second-tab-of-the-job-does-not-export
+  (t/async
+    done
+    (let [{:keys [params locks heard ws] :as scene} (job-scene nil)
+          loaded (atom 0)
+          first-tab (p/deferred)]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_] (swap! loaded inc) (rx/empty))}
+        (fn [done']
+          ;; the first tab of the job holds its lock
+          (-> (job/hold-lock (:job-id params) first-tab locks)
+              (.then (fn [held?]
+                       (t/is (true? held?))
+                       (start! scene)
+                       (thj/wait-until #(= :duplicate (status)))))
+              (.then (fn [_]
+                       ((:post @ws) {:type :saved})
+                       (pause 30)))
+              (.then (fn [_]
+                       (t/is (= :duplicate (status)) "the save is not for it")
+                       (t/is (= 0 @loaded))
+                       (t/is (empty? @heard) "it never says it is there")))
+              (.catch fail!)
+              (.finally (fn []
+                          (p/resolve first-tab nil)
+                          (end! scene done')))))
+        done))))
+
+(t/deftest a-second-saved-loads-nothing-more
+  (t/async
+    done
+    (let [{:keys [bundle ws] :as scene} (job-scene nil)
+          loaded (atom 0)]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_]
+                          (swap! loaded inc)
+                          (->> (rx/timer 30) (rx/map (constantly bundle))))
+         dea/run-export (fn [_ _] {:promise (js/Promise.resolve (ok-result)) :cancel (fn [])})
+         dea/download-result (fn [_] nil)}
+        (fn [done']
+          (start! scene)
+          (-> (thj/wait-until #(= :waiting (status)))
+              (.then (fn [_]
+                       ;; the end of the save, and the answer to a hello
+                       ((:post @ws) {:type :saved})
+                       ((:post @ws) {:type :saved})
+                       (thj/wait-until #(= :done (status)))))
+              (.then (fn [_] (t/is (= 1 @loaded))))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
+        done))))
+
+(t/deftest an-export-error-is-told
+  (t/async
+    done
+    (let [{:keys [bundle heard] :as scene} (job-scene :saved)]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_] (rx/of bundle))
+         dea/run-export (fn [_ _] {:promise (js/Promise.reject (ex-info "boom" {})) :cancel (fn [])})}
+        (fn [done']
+          (start! scene)
+          (-> (thj/wait-until #(= :error (last (types heard))))
+              (.then (fn [_]
+                       (t/is (= {:type :error :reason :export :message "boom"} (last @heard)))
+                       (t/is (= ["export-animation.error.export" "boom"]
+                                (:text (uea/page-state (:export-tab @st/state)))))))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
+        done))))
+
+(t/deftest progress-is-told-at-most-every-100-ms
+  (t/async
+    done
+    (let [{:keys [bundle heard] :as scene} (job-scene :saved)]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_] (rx/of bundle))
+         dea/run-export (fn [{:keys [on-progress]} _]
+                          (doseq [i (range 1 6)]
+                            (on-progress {:phase :layers :current i :total 5}))
+                          (on-progress {:phase :write :current 1 :total 1})
+                          {:promise (js/Promise.resolve (ok-result)) :cancel (fn [])})
+         dea/download-result (fn [_] nil)}
+        (fn [done']
+          (start! scene)
+          (-> (thj/wait-until #(= :done (last (types heard))))
+              (.then (fn [_]
+                       (t/is (= [18 100] (->> @heard (filter #(= :progress (:type %))) (mapv :percent)))
+                             "the first, then the end")))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
+        done))))
+
+(t/deftest download-again-downloads-the-kept-file
+  (t/async
+    done
+    (let [{:keys [bundle] :as scene} (job-scene :saved)
+          result    (ok-result)
+          downloads (atom [])]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_] (rx/of bundle))
+         dea/run-export (fn [_ _] {:promise (js/Promise.resolve result) :cancel (fn [])})
+         dea/download-result (fn [r] (swap! downloads conj r))}
+        (fn [done']
+          (start! scene)
+          (-> (thj/wait-until #(= :done (status)))
+              (.then (fn [_]
+                       (st/emit! (dat/download-again))
+                       (t/is (= [result result] @downloads))))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
+        done))))
+
+(t/deftest the-file-plays-until-the-tab-closes
+  (t/async
+    done
+    (let [{:keys [bundle] :as scene} (job-scene :saved)
+          made (atom 0)]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_] (rx/of bundle))
+         dea/run-export (fn [_ _] {:promise (js/Promise.resolve (ok-result)) :cancel (fn [])})
+         dea/download-result (fn [_] nil)
+         wapi/create-uri (mock/stub (fn [_] (swap! made inc) "blob:preview"))
+         wapi/revoke-uri (mock/stub mock/revoke-uri-mock)}
+        (fn [done']
+          (start! scene)
+          (-> (thj/wait-until #(= :done (status)))
+              (.then (fn [_]
+                       (t/is (= 1 @made) "one URL of the file")
+                       (t/is (= {:kind :none :url "blob:preview" :name "Hero.json"}
+                                (:preview (uea/page-state (:export-tab @st/state))))
+                             "a Lottie: no player yet")
+                       (st/emit! (dat/finalize))
+                       (t/is (= ["blob:preview"] @mock/revoked-uris) "gone with the tab")))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
+        done))))
+
+(t/deftest a-tab-the-workspace-never-answers-goes-stale
+  (t/async
+    done
+    (let [scene (job-scene nil :opts {:save-wait-ms 40})]
+      (start! scene)
+      (-> (thj/wait-until #(= :stale (status)))
+          (.then (fn [_]
+                   (t/is (= ["export-animation.stale"] (:text (uea/page-state (:export-tab @st/state)))))))
+          (.catch fail!)
+          (.finally #(end! scene done))))))

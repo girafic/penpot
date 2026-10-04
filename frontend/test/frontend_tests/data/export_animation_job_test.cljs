@@ -9,7 +9,8 @@
    [app.common.uuid :as uuid]
    [app.main.data.exports.animation-job :as job]
    [cljs.test :as t :include-macros true]
-   [frontend-tests.helpers.export-job :as thj]))
+   [frontend-tests.helpers.export-job :as thj]
+   [promesa.core :as p]))
 
 (defn- job-params
   [& {:as more}]
@@ -41,10 +42,11 @@
       (t/is (nil? (job/decode-params (assoc query :scale "0"))))
       (t/is (nil? (job/decode-params (dissoc query :board-id))))
       (t/is (nil? (job/decode-params (assoc query :job-id "nope"))))))
-  (t/testing "without WASM, only the Lottie of vector layers"
+  (t/testing "without WASM, only the Lottie formats of vector layers"
     (t/is (nil? (job/decode-params (job/encode-params (job-params :wasm? false)))))
     (t/is (nil? (job/decode-params (job/encode-params (job-params :wasm? false :format :svg)))))
-    (t/is (some? (job/decode-params (job/encode-params (job-params :wasm? false :format :lottie)))))))
+    (t/is (some? (job/decode-params (job/encode-params (job-params :wasm? false :format :lottie)))))
+    (t/is (some? (job/decode-params (job/encode-params (job-params :wasm? false :format :dotlottie)))))))
 
 (t/deftest the-messages-of-a-job
   (let [message {:type :done :name "Hero" :size 1234 :notes [[:fitted 4092 2302]]}]
@@ -94,3 +96,24 @@
                    (js/Promise. (fn [resolve _] (js/setTimeout resolve 20)))))
           (.then (fn [_] (t/is @gone? "once it lets it go")))
           (.finally (fn [] (done) nil))))))
+
+(t/deftest a-second-tab-does-not-get-the-lock-of-the-job
+  (t/async
+    done
+    (let [locks  (thj/locks)
+          id     (job/new-job-id)
+          first  (p/deferred)
+          second (p/deferred)]
+      (-> (job/hold-lock id first locks)
+          (.then (fn [held?]
+                   (t/is (true? held?) "the first tab holds it")
+                   (job/hold-lock id second locks)))
+          (.then (fn [held?]
+                   (t/is (false? held?) "the second does not wait for it")
+                   (p/resolve first nil)
+                   ;; the lock goes once its holder's promise settles
+                   (js/Promise. (fn [resolve] (js/setTimeout resolve 10)))))
+          (.then (fn [_] (job/hold-lock id second locks)))
+          (.then (fn [held?] (t/is (true? held?) "free once the first tab is gone")))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (fn [] (p/resolve second nil) (done) nil))))))

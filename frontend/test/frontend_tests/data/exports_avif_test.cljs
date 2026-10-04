@@ -212,6 +212,24 @@
                     (t/is (nil? err) (str err))
                     (done)))))))
 
+(t/deftest encode-avif-gives-the-page-its-turn-after-each-frame
+  (t/async
+    done
+    (let [calls (atom [])
+          turns (atom 0)]
+      (-> (dea/encode-avif {:frames (frames 3)
+                            :fps 2
+                            :bitrate 1000
+                            :video-encoder (fake-encoder calls true)
+                            :video-frame (fake-frame calls)
+                            :write-avif (fn [opts] (avif/writeSequence opts))
+                            :yield (fn [] (swap! turns inc) (js/Promise.resolve nil))})
+          (.then (fn [result]
+                   (t/is (= :ok (:status result)))
+                   (t/is (= 3 @turns) "one turn a frame")))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (fn [] (done) nil))))))
+
 (t/deftest avif-is-estimated-below-video
   (let [avif-size (dea/estimated-size :avif 1920 1080 :high 2000 30)
         mp4-size  (dea/estimated-size :mp4 1920 1080 :high 2000 30)]

@@ -4,6 +4,9 @@
 //
 // Copyright (c) KALEIDOS INC
 
+@use "ds/_borders.scss" as *;
+@use "ds/_sizes.scss" as *;
+@use "ds/_utils.scss" as *;
 @use "./ds/typography.scss" as t;
 
 .export-page {
@@ -19,11 +22,45 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-l);
-  inline-size: 420px;
+  inline-size: $sz-430;
   max-inline-size: calc(100% - 2 * var(--sp-xxl));
   padding: var(--sp-xxl);
-  border-radius: var(--sp-s);
+  border-radius: $br-8;
   background-color: var(--color-background-primary);
+}
+
+.export-card-wide {
+  inline-size: px2rem(800);
+}
+
+// a checkerboard shows what is transparent
+.preview-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: $br-8;
+  background-color: var(--color-background-tertiary);
+  background-image:
+    linear-gradient(45deg, var(--color-background-quaternary) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--color-background-quaternary) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--color-background-quaternary) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--color-background-quaternary) 75%);
+  background-position:
+    0 0,
+    0 px2rem(8),
+    px2rem(8) px2rem(-8),
+    px2rem(-8) 0;
+  background-size: px2rem(16) px2rem(16);
+}
+
+// at most its own size: a small file is not blown up
+.preview {
+  display: block;
+  inline-size: auto;
+  max-inline-size: 100%;
+  max-block-size: 60vh;
+  object-fit: contain;
 }
 
 .title {
@@ -45,8 +82,8 @@
 }
 
 .bar {
-  block-size: var(--sp-xs);
-  border-radius: var(--sp-xs);
+  block-size: px2rem(4);
+  border-radius: $br-4;
   background-color: var(--color-background-quaternary);
   overflow: hidden;
 }

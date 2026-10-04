@@ -11,6 +11,7 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.main.data.exports.animation :as dea]
+   [app.main.data.exports.animation-workspace :as deaw]
    [app.main.data.exports.assets :as de]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.shapes :as dwsh]
@@ -84,19 +85,22 @@
   the label and the note as `[key & args]` for `tr`, what a click on the
   button does (`:export` `:cancel`), and whether it offers to open the
   export tab again or to export here (the tab said nothing, see
-  `dea/start-export-job`). `format-label` names the format of the export
+  `deaw/start-export-job`). `format-label` names the format of the export
   and `disabled?` tells that it cannot start."
   [progress format-label disabled?]
   (let [{:keys [in-progress in-tab? opened? offer? paused? cancelling?
-                current total percent]} progress]
+                phase current total percent]} progress]
     (cond
       (not in-progress)
       {:label ["workspace.options.export.export-format" format-label]
        :action :export
        :disabled? (boolean disabled?)}
 
+      ;; frames while it takes them, then how far it is
       (not in-tab?)
-      {:label ["workspace.options.export.progress" (or current 0) (or total 0)]
+      {:label (if (contains? #{nil :capture} phase)
+                ["workspace.options.export.progress" (or current 0) (or total 0)]
+                ["workspace.options.export.exporting" (or percent 0)])
        :action :cancel
        :disabled? (boolean cancelling?)}
 
@@ -232,25 +236,25 @@
         (mf/use-fn
          (mf/deps format quality fps scale loop? audio?)
          (fn []
-           (dea/export-from-panel! {:format format
-                                    :quality quality
-                                    :fps fps
-                                    :scale scale
-                                    :loop? loop?
-                                    :audio? audio?})))
+           (deaw/export-from-panel! {:format format
+                                     :quality quality
+                                     :fps fps
+                                     :scale scale
+                                     :loop? loop?
+                                     :audio? audio?})))
 
         on-cancel
-        (mf/use-fn #(st/emit! (dea/cancel-export-animation)))
+        (mf/use-fn #(st/emit! (deaw/cancel-export-animation)))
 
         on-open-tab
         (mf/use-fn
          (mf/deps progress)
          (fn []
-           (dea/open-job-tab! @st/state (:job progress))
-           (st/emit! (dea/job-tab-reopened job-id))))
+           (deaw/open-job-tab! @st/state (:job progress))
+           (st/emit! (deaw/job-tab-reopened job-id))))
 
         on-export-here
-        (mf/use-fn (mf/deps job-id) #(st/emit! (dea/export-job-here job-id)))
+        (mf/use-fn (mf/deps job-id) #(st/emit! (deaw/export-job-here job-id)))
 
         view
         (export-button-state progress
@@ -341,7 +345,7 @@
          [:p {:class (stl/css :hint)} (tr "workspace.options.export.audio-needs-wasm")])
 
        (when-let [note (:note view)]
-         [:p {:class (stl/css :hint)} (apply tr note)])
+         [:p {:class (stl/css :hint) :role "status" :aria-live "polite"} (apply tr note)])
 
        (when (:offer? view)
          [:div {:class (stl/css :animated-offer)}
