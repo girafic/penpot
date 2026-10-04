@@ -48,6 +48,9 @@
 (def workspace-page*
   (mf/lazy #(mod/load 'app.main.ui.workspace/workspace-page*)))
 
+(def export-animation-page*
+  (mf/lazy #(mod/load 'app.main.ui.export-animation/export-page*)))
+
 (mf/defc team-container*
   {::mf/props :obj
    ::mf/private true}
@@ -225,6 +228,10 @@
 
        :frame-preview
        [:> frame-preview/frame-preview*]
+
+       ;; the animated export of a board, in a tab of its own
+       :export-animation
+       [:? [:> export-animation-page* {:query (get params :query)}]]
 
        nil)]))
 

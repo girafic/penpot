@@ -143,6 +143,12 @@
   width: 100%;
 }
 
+.animated-offer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
 .animated-meta {
   display: flex;
   flex-direction: column;

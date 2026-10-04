@@ -25,6 +25,13 @@
    [potok.v2.core :as ptk]
    [promesa.core :as p]))
 
+(defn- finish
+  "A callback ending an async test with `done` and returning nothing:
+  `done` starts the next tests at once and returns what they return, a
+  promise that `.finally` would wait for and take the rejection of."
+  [done]
+  (fn [] (done) nil))
+
 (defn- log
   [calls k & args]
   (swap! calls conj (into [k] args)))
@@ -142,55 +149,108 @@
     (t/is (= 2 (:height out)))
     (t/is (= 6 (.-length (:data out))))))
 
+(defn- fake-gif
+  "A gifenc encoder that notes the `repeat` of its frames in `repeat` and
+  how many it wrote in `written`."
+  [repeat written]
+  #js {:writeFrame (fn [_ _ _ opts]
+                     (swap! written inc)
+                     (reset! repeat (.-repeat opts)))
+       :finish (fn [])
+       :bytes (fn [] (js/Uint8Array. #js [71 73 70]))})
+
+(defn- gif-params
+  [gif & {:as params}]
+  (merge {:frames [{:data #js [255 0 0 255] :width 1 :height 1}]
+          :fps 30
+          :gif-encoder (fn [] gif)
+          :quantize (fn [data _] data)
+          :apply-palette (fn [data _] data)
+          :yield #(js/Promise.resolve nil)}
+         params))
+
 (t/deftest encode-gif-writes-loop-flag
-  (let [repeat (atom nil)
-        gif    #js {:writeFrame (fn [_ _ _ opts]
-                                  (reset! repeat (.-repeat opts)))
-                    :finish (fn [])
-                    :bytes (fn [] (js/Uint8Array. #js [71 73 70]))}
-        result (dea/encode-gif
-                {:frames [{:data #js [255 0 0 255] :width 1 :height 1}]
-                 :fps 30
-                 :loop? true
-                 :gif-encoder (fn [] gif)
-                 :quantize (fn [data _] data)
-                 :apply-palette (fn [data _] data)})]
-    (t/is (= :ok (:status result)))
-    (t/is (= "image/gif" (:mtype result)))
-    (t/is (= 0 @repeat))
-    (t/is (pos? (.-size (:blob result))))))
+  (t/async
+    done
+    (let [repeat (atom nil)]
+      (-> (dea/encode-gif (gif-params (fake-gif repeat (atom 0)) :loop? true))
+          (.then (fn [result]
+                   (t/is (= :ok (:status result)))
+                   (t/is (= "image/gif" (:mtype result)))
+                   (t/is (= 0 @repeat))
+                   (t/is (pos? (.-size (:blob result))))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
 
 (t/deftest encode-gif-plays-once-without-loop
-  (let [repeat (atom nil)
-        gif    #js {:writeFrame (fn [_ _ _ opts]
-                                  (reset! repeat (.-repeat opts)))
-                    :finish (fn [])
-                    :bytes (fn [] (js/Uint8Array. #js [71 73 70]))}
-        result (dea/encode-gif
-                {:frames [{:data #js [255 0 0 255] :width 1 :height 1}]
-                 :fps 12
-                 :loop? false
-                 :gif-encoder (fn [] gif)
-                 :quantize (fn [data _] data)
-                 :apply-palette (fn [data _] data)})]
-    (t/is (= -1 @repeat))
-    (t/is (= :ok (:status result)))))
+  (t/async
+    done
+    (let [repeat (atom nil)]
+      (-> (dea/encode-gif (gif-params (fake-gif repeat (atom 0)) :fps 12 :loop? false))
+          (.then (fn [result]
+                   (t/is (= -1 @repeat))
+                   (t/is (= :ok (:status result)))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
 
 (t/deftest encode-gif-abort-skips-download
-  (t/is (thrown-with-msg?
-         js/Error
-         #"cancelled"
-         (let [gif #js {:writeFrame (fn [_ _ _ _])
-                        :finish (fn [])
-                        :bytes (fn [] (js/Uint8Array. #js [1]))}]
-           (dea/encode-gif
-            {:frames [{:data #js [1] :width 1 :height 1}
-                      {:data #js [1] :width 1 :height 1}]
-             :fps 30
-             :cancelled? (fn [] true)
-             :gif-encoder (fn [] gif)
-             :quantize (fn [data _] data)
-             :apply-palette (fn [data _] data)})))))
+  (t/async
+    done
+    (let [written (atom 0)
+          frame   {:data #js [1] :width 1 :height 1}]
+      (-> (dea/encode-gif (gif-params (fake-gif (atom nil) written)
+                                      :frames [frame frame]
+                                      :cancelled? (fn [] true)))
+          (.then (fn [_] (t/is false "it should stop")))
+          (.catch (fn [cause]
+                    (t/is (= :export-cancelled (:type (ex-data cause))))
+                    (t/is (= 0 @written))))
+          (.finally (finish done))))))
+
+(t/deftest encode-gif-gives-the-page-its-turn-between-frames
+  (t/async
+    done
+    (let [written (atom 0)
+          turns   (atom [])
+          cancel? (atom false)
+          frame   {:data #js [1] :width 1 :height 1}]
+      (-> (dea/encode-gif (gif-params (fake-gif (atom nil) written)
+                                      :frames [frame frame frame]
+                                      :cancelled? #(deref cancel?)
+                                      ;; cancelled at the turn after the first frame
+                                      :yield (fn []
+                                               (swap! turns conj @written)
+                                               (reset! cancel? true)
+                                               (js/Promise.resolve nil))))
+          (.then (fn [_] (t/is false "it should stop")))
+          (.catch (fn [cause]
+                    (t/is (= :export-cancelled (:type (ex-data cause))))
+                    (t/is (= [1] @turns) "a turn after the first frame")
+                    (t/is (= 1 @written) "and no frame after it")))
+          (.finally (finish done))))))
+
+(t/deftest the-yield-is-a-task-of-a-message-channel
+  (t/async
+    done
+    (let [posted  (atom 0)
+          closed  (atom 0)
+          ;; `this-as` first: inside a `let`, `this` is not the new object
+          channel (fn []
+                    (this-as this
+                             (let [port1 #js {:close #(swap! closed inc)}]
+                               (set! (.-port1 this) port1)
+                               (set! (.-port2 this)
+                                     #js {:postMessage (fn [_]
+                                                         (swap! posted inc)
+                                                         (js/setTimeout #((.-onmessage port1) #js {}) 0))})
+                               this)))]
+      (-> (dea/yield-to-ui channel)
+          (.then (fn [_]
+                   (t/is (= 1 @posted))
+                   (t/is (= 1 @closed) "its port closed")))
+          (.catch (fn [cause]
+                    (t/is false (str "the yield failed: " (ex-message cause)))))
+          (.finally (finish done))))))
 
 (t/deftest render-shape-at-time-is-silent
   (let [calls (atom [])
@@ -878,6 +938,134 @@
       (t/is (= [:mp4 :webm :gif :avif :svg :lottie :dotlottie] (dea/export-formats objects clips true)))
       (t/is (not-any? dea/audio-formats (dea/export-formats objects clips false))
             "without the WASM renderer, no format with sound"))))
+
+(defn- export-scene
+  "The board of `test-objects` on a page of its own, its rect moving over
+  `duration` ms; and a bridge to a fake WASM that notes its calls."
+  [duration]
+  (let [{:keys [objects bid cid]} (test-objects)
+        tl    (-> (cta/make-timeline {:board-id bid :duration duration})
+                  (cta/add-keyframe cid {:time 0 :property :x :value 10})
+                  (cta/add-keyframe cid {:time duration :property :x :value 50}))
+        calls (atom [])]
+    {:page {:id (uuid/next) :objects objects :timelines {bid tl}}
+     :bid bid
+     :calls calls
+     :bridge {:set-modifiers (fn [_ & _] (swap! calls conj :modifiers))
+              :clean-modifiers (fn [] nil)
+              :use-shape (fn [_] nil)
+              :set-shape-hidden (fn [_] nil)
+              :apply-shape-properties (fn [_ _] nil)
+              :render-shape-pixels (fn [id _ _]
+                                     (swap! calls conj [:pixels id])
+                                     (js/Uint8Array. #js [137 80 78 71]))}}))
+
+(defn- export-ctx
+  "What `run-export` takes for the scene: the page and no files, frames
+  decoded as 2x2 px, no turn for the page, a fake GIF encoder."
+  [{:keys [page bid bridge]} & {:as more}]
+  (merge {:page page
+          :files {}
+          :board-id bid
+          :bridge bridge
+          :decode (fn [_] (js/Promise.resolve {:data (js/Uint8ClampedArray. 16) :width 2 :height 2}))
+          :yield #(js/Promise.resolve nil)
+          ;; gifenc is a browser module
+          :gif-encoder (fn [] (fake-gif (atom nil) (atom 0)))
+          :quantize (fn [data _] data)
+          :apply-palette (fn [data _] data)}
+         more))
+
+(t/deftest an-export-runs-from-a-page-alone
+  (t/async
+    done
+    (let [scene    (export-scene 100)
+          progress (atom [])
+          {:keys [promise]}
+          (dea/run-export (export-ctx scene :on-progress #(swap! progress conj %))
+                          {:format :gif :quality :low :fps 30 :scale 1 :loop? true})]
+      (-> promise
+          (.then (fn [result]
+                   (t/is (= [:ok ".gif" "image/gif"] ((juxt :status :ext :mtype) result)))
+                   (t/is (string? (:name result)) "named after the board")
+                   (t/is (pos? (.-size (:blob result))))
+                   (t/is (= [:capture :encode] (distinct (map :phase @progress))) "the frames, then their encoding")
+                   (t/is (= 100 (dea/progress-percent (last @progress))) "100 % at the end only")
+                   (t/is (every? #(< (dea/progress-percent %) 100) (butlast @progress)))
+                   (t/is (some #{[:pixels (:bid scene)]} @(:calls scene)) "through the bridge")))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
+(t/deftest an-export-stops-at-its-next-frame-when-cancelled
+  (t/async
+    done
+    (let [scene  (export-scene 1000)
+          cancel (atom nil)
+          {:keys [promise] :as job}
+          (dea/run-export (export-ctx scene :on-progress (fn [_] (@cancel)))
+                          {:format :gif :quality :low :fps 30 :scale 1})]
+      (reset! cancel (:cancel job))
+      (-> promise
+          (.then (fn [_] (t/is false "it should stop")))
+          (.catch (fn [cause]
+                    (t/is (= :export-cancelled (:type (ex-data cause))))
+                    (t/is (= 1 (count (filter vector? @(:calls scene)))) "one frame taken")))
+          (.finally (finish done))))))
+
+(t/deftest a-markup-export-stops-between-its-pictures-when-cancelled
+  (t/async
+    done
+    (let [scene    (export-scene 500)
+          cancel   (atom nil)
+          progress (atom [])
+          {:keys [promise] :as job}
+          (dea/run-export (export-ctx scene :on-progress (fn [p] (swap! progress conj p) (@cancel)))
+                          {:format :svg})]
+      (reset! cancel (:cancel job))
+      (-> promise
+          (.then (fn [_] (t/is false "it should stop")))
+          (.catch (fn [cause]
+                    (t/is (= :export-cancelled (:type (ex-data cause))))
+                    (t/is (= [:layers] (mapv :phase @progress)) "after its first picture")))
+          (.finally (finish done))))))
+
+(t/deftest a-markup-export-writes-its-file-from-a-page-alone
+  (t/async
+    done
+    (let [scene    (export-scene 500)
+          progress (atom [])
+          {:keys [promise]} (dea/run-export (export-ctx scene :on-progress #(swap! progress conj %))
+                                            {:format :svg})]
+      (-> promise
+          (.then (fn [result]
+                   (t/is (= [:ok ".svg" "image/svg+xml"] ((juxt :status :ext :mtype) result)))
+                   (t/is (= :write (:phase (last @progress))))
+                   (t/is (= 100 (dea/progress-percent (last @progress))))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
+(t/deftest an-export-of-a-board-that-plays-nothing-is-nothing
+  (t/async
+    done
+    (let [scene (update (export-scene 500) :page assoc :timelines {})]
+      (-> (:promise (dea/run-export (export-ctx scene) {:format :mp4}))
+          (.then (fn [result] (t/is (= :nothing (:status result)))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
+(t/deftest the-notes-of-an-export
+  (t/is (= {:unavailable? true :notes []} (dea/export-notes {:status :unavailable})))
+  (t/is (= {:unavailable? false :notes [[:fitted 4092 2302] [:audio-dropped]]}
+           (dea/export-notes {:status :ok :fitted [4092 2302] :audio-dropped true})))
+  (t/is (= {:unavailable? false :notes []} (dea/export-notes {:status :ok}))))
+
+(t/deftest the-percent-of-an-export
+  (t/is (= 0 (dea/progress-percent {:phase :capture :current 0 :total 10})))
+  (t/is (= 40 (dea/progress-percent {:phase :capture :current 5 :total 10})))
+  (t/is (= 90 (dea/progress-percent {:phase :encode :current 5 :total 10})))
+  (t/is (= 45 (dea/progress-percent {:phase :layers :current 1 :total 2})))
+  (t/is (= 100 (dea/progress-percent {:phase :write :current 1 :total 1})))
+  (t/is (= 0 (dea/progress-percent nil))))
 
 (t/deftest the-end-of-an-export-frees-the-panel
   (let [types #(mapv ptk/type (dea/export-finished %))]

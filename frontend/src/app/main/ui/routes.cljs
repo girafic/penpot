@@ -49,6 +49,7 @@
           :settings-notifications
           :settings-shortcuts
           :frame-preview
+          :export-animation
           :viewer
           :render-sprite
           :dashboard-members

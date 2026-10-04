@@ -16,9 +16,13 @@
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
    [app.main.data.event :as ev]
+   [app.main.data.exports.animation-job :as job]
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
+   [app.main.data.persistence :as dps]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.features :as features]
+   [app.main.router :as rt]
    [app.main.store :as st]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.gesture :as wasm-gesture]
@@ -239,9 +243,28 @@
     [(:data image) (:width image) (:height image)]
     [(.-data image) (.-width image) (.-height image)]))
 
+(defn yield-to-ui
+  "A promise resolved by a task of a `MessageChannel` (`channel`, the
+  browser's by default): the page draws and handles input before it,
+  and a hidden tab does not slow it down as it slows timers (an export
+  tab in the background goes on at its pace). A timer without one."
+  ([]
+   (yield-to-ui (unchecked-get js/globalThis "MessageChannel")))
+  ([channel]
+   (js/Promise.
+    (fn [resolve]
+      (if (some? channel)
+        (let [^js ch (new channel)]
+          (set! (.. ch -port1 -onmessage)
+                (fn [_]
+                  (.close (.-port1 ch))
+                  (resolve nil)))
+          (.postMessage (.-port2 ch) nil))
+        (js/setTimeout resolve 0))))))
+
 (defn- default-yield
   []
-  (js/Promise. (fn [resolve] (js/setTimeout resolve 0))))
+  (yield-to-ui))
 
 (defn- throw-if-cancelled
   [cancelled?]
@@ -249,33 +272,45 @@
     (throw (ex-info "cancelled" {:type :export-cancelled}))))
 
 (defn encode-gif
-  "Encode decoded frames with gifenc. `frames` is a seq of ImageData or
-  `{:data :width :height}` maps."
-  [{:keys [frames fps loop? colors cancelled? on-progress
+  "Encode decoded frames with gifenc: a promise of `{:status :ok :blob
+  ...}`. `frames` is a seq of ImageData or `{:data :width :height}`
+  maps. It gives the page its turn (`yield`) after each frame, and
+  stops there when `cancelled?`."
+  [{:keys [frames fps loop? colors cancelled? on-progress yield
            gif-encoder quantize apply-palette]
     :or {colors 128 fps 30}}]
   (let [encoder      (or gif-encoder gifenc/GIFEncoder)
         quantize*    (or quantize gifenc/quantize)
         apply-pal*   (or apply-palette gifenc/applyPalette)
+        yield        (or yield default-yield)
         ^js gif      (encoder)
         delay        (max 1 (mth/round (/ 1000.0 fps)))
         n            (count frames)]
-    (doseq [[i image] (map-indexed vector frames)]
-      (throw-if-cancelled cancelled?)
-      (let [[data w h] (image-parts image)
-            palette    (quantize* data colors)
-            index      (apply-pal* data palette)]
-        (.writeFrame gif index w h
-                     #js {:palette palette
-                          :delay delay
-                          :repeat (if loop? 0 -1)}))
-      (when on-progress (on-progress (inc i) n)))
-    (.finish gif)
-    (let [bytes (.bytes gif)]
-      {:status :ok
-       :blob (js/Blob. #js [bytes] #js {:type "image/gif"})
-       :mtype "image/gif"
-       :ext ".gif"})))
+    (-> (reduce (fn [p [i image]]
+                  (-> p
+                      (.then
+                       (fn [_]
+                         (throw-if-cancelled cancelled?)
+                         (let [[data w h] (image-parts image)
+                               palette    (quantize* data colors)
+                               index      (apply-pal* data palette)]
+                           (.writeFrame gif index w h
+                                        #js {:palette palette
+                                             :delay delay
+                                             :repeat (if loop? 0 -1)}))
+                         (when on-progress (on-progress (inc i) n))
+                         (yield)))))
+                (js/Promise.resolve nil)
+                (map-indexed vector frames))
+        (.then
+         (fn [_]
+           (throw-if-cancelled cancelled?)
+           (.finish gif)
+           (let [bytes (.bytes gif)]
+             {:status :ok
+              :blob (js/Blob. #js [bytes] #js {:type "image/gif"})
+              :mtype "image/gif"
+              :ext ".gif"}))))))
 
 (defn- default-media
   []
@@ -595,9 +630,10 @@
   `AudioBuffer` as long as the frames) when given. Returns a promise of
   `{:status :ok|:unavailable :blob ...}`, with `:audio-dropped true` when
   the browser encodes no audio codec the format carries."
-  [{:keys [format frames fps bitrate cancelled? on-progress flatten-bg audio]
+  [{:keys [format frames fps bitrate cancelled? on-progress flatten-bg audio yield]
     :as params}]
-  (let [media           (merge (default-media)
+  (let [yield           (or yield default-yield)
+        media           (merge (default-media)
                                (select-keys params [:output :mp4-format :webm-format
                                                     :target :sample-source :video-sample
                                                     :quality :first-codec
@@ -681,7 +717,9 @@
                                              (.close sample)
                                              (swap! closed inc)
                                              (when on-progress
-                                               (on-progress (inc i) n))))))))))
+                                               (on-progress (inc i) n))))
+                                          ;; the page gets its turn
+                                          (.then (fn [_] (yield)))))))))
                            (js/Promise.resolve nil)
                            (map-indexed vector frames))))
                        (.then
@@ -758,9 +796,10 @@
   "Encode decoded frames as an animated AVIF: AV1 through WebCodecs, in
   the container `avif.js` writes. Returns a promise of `{:status
   :ok|:unavailable :blob ...}`."
-  [{:keys [frames fps bitrate loop? cancelled? on-progress flatten-bg]
+  [{:keys [frames fps bitrate loop? cancelled? on-progress flatten-bg yield]
     :as params}]
-  (let [{:keys [video-encoder video-frame write-avif]}
+  (let [yield (or yield default-yield)
+        {:keys [video-encoder video-frame write-avif]}
         (merge (default-av1)
                (select-keys params [:video-encoder :video-frame :write-avif]))
 
@@ -825,7 +864,8 @@
                                      (finally
                                        (.close frame)))
                                    (when on-progress
-                                     (on-progress (inc i) n)))))))
+                                     (on-progress (inc i) n))
+                                   (yield))))))
                         (js/Promise.resolve nil)
                         (map-indexed vector frames))
                        (.then (fn [_] (.flush encoder)))
@@ -1009,6 +1049,41 @@
                               :e 1}]))))
             (map vector shots cropped)))))
 
+(defn- layer-ids-to-shoot
+  "The export layers of `timeline` and its board, the pictures
+  `collect-layer-images` takes, but those `skip?` is true of."
+  [objects timeline skip?]
+  (cond->> (conj (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline))
+                 (:board-id timeline))
+    (some? skip?) (remove skip?)))
+
+(defn- layer-image
+  "The picture of the layer `id` at rest for the markup exports, its
+  layers in `idset` hidden (see `collect-layer-images`): `[id image]`,
+  nil when the shape is gone."
+  [objects id idset board bridge]
+  (when-let [shape (get objects id)]
+    (let [ox    (or (:x (:selrect board)) 0)
+          oy    (or (:y (:selrect board)) 0)
+          hide  (child-layer-ids objects id idset)
+          shot  (shoot-shape-at-rest objects id hide {:bridge bridge})
+          bytes (:bytes shot)
+          ;; where the picture is: the box it covers, turned shape,
+          ;; shadows and blur in it, or the shape's box
+          box   (or (:rect shot) (:selrect shape))
+          href  (str "data:image/png;base64," (u8->base64 bytes))]
+      [id {:href href
+           :x (- (or (:x box) 0) ox)
+           :y (- (or (:y box) 0) oy)
+           :width (or (:width box) 0)
+           :height (or (:height box) 0)
+           :bytes bytes
+           :id (str "img_" id)
+           :w (mth/round (or (:width box) 0))
+           :h (mth/round (or (:height box) 0))
+           :p href
+           :e 1}])))
+
 (defn collect-layer-images
   "Rasterize each export layer at rest, but for those whose id `skip?` is
   true of. Children that are themselves layers are hidden so they are not
@@ -1016,37 +1091,36 @@
   The animation shown at `time` is undone first, else a layer that fades
   in would be rasterized invisible."
   [objects timeline {:keys [bridge skip? time] :or {bridge (default-bridge) time 0}}]
-  (let [ids  (conj (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline))
-                   (:board-id timeline))
-        idset (set ids)
-        board (get objects (:board-id timeline))
-        ox    (or (:x (:selrect board)) 0)
-        oy    (or (:y (:selrect board)) 0)]
+  (let [idset (set (layer-ids-to-shoot objects timeline nil))
+        board (get objects (:board-id timeline))]
     (restore-rest-properties! objects timeline time bridge)
     (into {}
-          (keep
-           (fn [id]
-             (when-let [shape (get objects id)]
-               (let [hide  (child-layer-ids objects id idset)
-                     shot  (shoot-shape-at-rest objects id hide {:bridge bridge})
-                     bytes (:bytes shot)
-                     ;; where the picture is: the box it covers, turned
-                     ;; shape, shadows and blur in it, or the shape's box
-                     box   (or (:rect shot) (:selrect shape))
-                     href  (str "data:image/png;base64," (u8->base64 bytes))]
-                 [id {:href href
-                      :x (- (or (:x box) 0) ox)
-                      :y (- (or (:y box) 0) oy)
-                      :width (or (:width box) 0)
-                      :height (or (:height box) 0)
-                      :bytes bytes
-                      :id (str "img_" id)
-                      :w (mth/round (or (:width box) 0))
-                      :h (mth/round (or (:height box) 0))
-                      :p href
-                      :e 1}]))))
-          (cond->> ids
-            (some? skip?) (remove skip?)))))
+          (keep #(layer-image objects % idset board bridge))
+          (layer-ids-to-shoot objects timeline skip?))))
+
+(defn- collect-layer-images-async
+  "A promise of `collect-layer-images`, a layer at a time: the page gets
+  its turn (`yield`) after each picture, `on-progress` hears how many
+  are taken, and it stops there when `cancelled?`."
+  [objects timeline {:keys [bridge skip? time yield cancelled? on-progress]
+                     :or {bridge (default-bridge) time 0}}]
+  (let [idset (set (layer-ids-to-shoot objects timeline nil))
+        ids   (vec (layer-ids-to-shoot objects timeline skip?))
+        board (get objects (:board-id timeline))
+        yield (or yield default-yield)
+        n     (count ids)]
+    (restore-rest-properties! objects timeline time bridge)
+    (reduce (fn [p [i id]]
+              (-> p
+                  (.then
+                   (fn [images]
+                     (throw-if-cancelled cancelled?)
+                     (let [image (layer-image objects id idset board bridge)]
+                       (when on-progress (on-progress (inc i) n))
+                       (-> (yield)
+                           (.then (fn [_] (cond-> images (some? image) (conj image))))))))))
+            (js/Promise.resolve {})
+            (map-indexed vector ids))))
 
 (defn- decode-png
   [bytes]
@@ -1152,35 +1226,58 @@
     (update [_ state]
       (dissoc state :export-animation))))
 
+(defn progress-percent
+  "How far an export is, 0 to 100, from its `progress` (`{:phase :current
+  :total}`): capturing the frames is the first 80 % of a raster export,
+  encoding them the rest; the pictures of the layers are the first 90 %
+  of a markup export, writing the file the rest."
+  [{:keys [phase current total]}]
+  (let [f (if (and (number? total) (pos? total)) (/ (or current 0) total) 0)]
+    (mth/round (case phase
+                 :capture (* 80 f)
+                 :encode  (+ 80 (* 20 f))
+                 :layers  (* 90 f)
+                 :write   (+ 90 (* 10 f))
+                 0))))
+
 (defn- set-export-progress
-  [current total]
+  [progress]
   (ptk/reify ::set-export-progress
     ptk/UpdateEvent
     (update [_ state]
-      (update state :export-animation merge {:current current :total total}))))
+      (update state :export-animation merge
+              (select-keys progress [:phase :current :total])
+              {:percent (progress-percent progress)}))))
 
-(defn- export-raster!
-  [state {:keys [format quality fps scale loop? audio? bridge decode yield]
-          :or {audio? true}}]
-  (let [tl       (dwa/export-timeline state)
+(defn- phase-progress
+  "The `on-progress` of a phase of an export: `on-progress` hears
+  `{:phase :current :total}`."
+  [on-progress phase]
+  (fn [current total]
+    (when on-progress
+      (on-progress {:phase phase :current current :total total}))))
+
+(defn- raster-export
+  "A promise of the raster export (`:mp4` `:webm` `:gif` `:avif`) of
+  `opts` (see `run-export`)."
+  [{:keys [page files board-id format quality fps scale loop? audio? bridge
+           decode yield on-progress cancelled?]
+    :or {audio? true}
+    :as opts}]
+  (let [tl       (dwa/board-export-timeline page files board-id)
         ;; MP4 and WebM carry the clips of the board
         sound?   (and audio? (contains? #{:mp4 :webm} format))
-        objects  (dsh/lookup-page-objects state)
-        board-id (:board-id tl)
+        objects  (:objects page)
         board    (get objects board-id)
         scale    (or scale 1)
         bw       (* (or (:width (:selrect board)) 1) scale)
         bh       (* (or (:height (:selrect board)) 1) scale)
         times    (cta/frame-times (:duration tl) fps)
-        bridge   (or bridge (default-bridge))
-        cancel?  (atom false)
-        _        (reset! cancel-fn #(reset! cancel? true))
-        was-fast (begin-full-quality! bridge)
-        on-prog  (fn [i n] (st/emit! (set-export-progress i n)))]
+        encoding (phase-progress on-progress :encode)]
     (when sound?
       (prefetch-audio! tl))
     ;; An MP4 larger than the browser encodes is made as large as it does
-    ;; (see `fit-video-size`), which `export-finished` tells.
+    ;; (see `fit-video-size`), which `export-notes` tells.
     (-> (if (= format :mp4)
           (fit-video-size bw bh (mp4-encodable? fps quality))
           (js/Promise.resolve 1))
@@ -1195,8 +1292,8 @@
                                     :board-id board-id
                                     :times times
                                     :bridge bridge
-                                    :cancelled? #(deref cancel?)
-                                    :on-progress on-prog
+                                    :cancelled? cancelled?
+                                    :on-progress (phase-progress on-progress :capture)
                                     :yield yield
                                     :decode decode
                                     :scale (* scale fit)})
@@ -1210,17 +1307,22 @@
                    (.then
                     (fn [frames]
                       (case format
-                        :gif (encode-gif {:frames frames
-                                          :fps fps
-                                          :loop? (boolean loop?)
-                                          :colors (cta/gif-colors quality)
-                                          :cancelled? #(deref cancel?)})
+                        :gif (encode-gif (merge (select-keys opts [:gif-encoder :quantize :apply-palette])
+                                                {:frames frames
+                                                 :fps fps
+                                                 :loop? (boolean loop?)
+                                                 :colors (cta/gif-colors quality)
+                                                 :cancelled? cancelled?
+                                                 :on-progress encoding
+                                                 :yield yield}))
                         :avif (encode-avif {:frames frames
                                             :fps fps
                                             :bitrate (avif-bitrate bw bh quality)
                                             :loop? (boolean loop?)
                                             :flatten-bg (board-backdrop board)
-                                            :cancelled? #(deref cancel?)})
+                                            :cancelled? cancelled?
+                                            :on-progress encoding
+                                            :yield yield})
                         (:mp4 :webm)
                         (-> (if sound?
                               (export-audio tl (count frames) fps)
@@ -1233,26 +1335,13 @@
                                               :bitrate (cta/video-bitrate bw bh quality)
                                               :flatten-bg (board-backdrop board)
                                               :audio sound
-                                              :cancelled? #(deref cancel?)})))))))
+                                              :cancelled? cancelled?
+                                              :on-progress encoding
+                                              :yield yield})))))))
                    (.then
                     (fn [result]
-                      (cond-> result
-                        (< fit 1) (assoc :fitted [(even-dim bw) (even-dim bh)])))))))))
-        (.then
-         (fn [result]
-           (when (= :ok (:status result))
-             (download-blob (or (:name board) (:name tl))
-                            (:ext result)
-                            (:mtype result)
-                            (:blob result)))
-           result))
-        (.finally
-         (fn []
-           (reset! cancel-fn nil)
-           (st/emit! (dwa/apply-preview))
-           (when (and was-fast (not (wasm-gesture/active?)))
-             (wasm-gesture/try-begin-interactive-transform!)
-             (wasm.api/set-modifiers-start)))))))
+                      (cond-> (assoc result :name (or (:name board) (:name tl)))
+                        (< fit 1) (assoc :fitted [(even-dim bw) (even-dim bh)]))))))))))))
 
 (def ^:private dotlottie-mtype
   "The media type of a dotLottie archive, whose file ends in `.lottie`."
@@ -1279,86 +1368,186 @@
                 files)
         (p/then (fn [_] (uz/close writer))))))
 
-(defn- export-markup-file!
-  "Write the SVG, Lottie or dotLottie of the board `board` playing `tl`,
-  with the pictures `images` (see `collect-layer-images` and
-  `collect-unit-images`), and download it."
+(def markup-formats
+  "The formats written as markup over pictures of the layers."
+  #{:svg :lottie :dotlottie})
+
+(defn- markup-file
+  "A promise of the SVG, Lottie or dotLottie of the board `board` playing
+  `tl`, with the pictures `images` (see `collect-layer-images` and
+  `collect-unit-images`): `{:status :ok :blob :ext :mtype}`."
   [tl objects board format images]
-  (try
-    (case format
-      :svg
-      (let [svg (cta/timeline->svg tl objects images)
-            blob (wapi/create-blob svg "image/svg+xml")]
-        (download-blob (or (:name board) (:name tl)) ".svg" "image/svg+xml" blob)
-        {:status :ok :blob blob})
+  (case format
+    :svg
+    (let [svg (cta/timeline->svg tl objects images)]
+      (js/Promise.resolve {:status :ok
+                           :blob (wapi/create-blob svg "image/svg+xml")
+                           :ext ".svg"
+                           :mtype "image/svg+xml"}))
 
-      :lottie
-      (let [assets (into {} (map (fn [[id img]]
-                                   [id (select-keys img [:id :w :h :p :e :x :y])]))
-                         images)
-            data   (cta/timeline->lottie tl objects assets)
-            json   (js/JSON.stringify (clj->js data) nil 2)
-            blob   (wapi/create-blob json "application/json")]
-        (download-blob (or (:name board) (:name tl)) ".json" "application/json" blob)
-        {:status :ok :blob blob})
+    :lottie
+    (let [assets (into {} (map (fn [[id img]]
+                                 [id (select-keys img [:id :w :h :p :e :x :y])]))
+                       images)
+          data   (cta/timeline->lottie tl objects assets)
+          json   (js/JSON.stringify (clj->js data) nil 2)]
+      (js/Promise.resolve {:status :ok
+                           :blob (wapi/create-blob json "application/json")
+                           :ext ".json"
+                           :mtype "application/json"}))
 
-      ;; the images go into the archive, next to the document
-      :dotlottie
-      (let [name      (or (:name board) (:name tl))
-            file-name #(str (:id %) ".png")
-            assets    (into {} (map (fn [[id img]]
-                                      [id (-> (select-keys img [:id :w :h :x :y])
-                                              (assoc :u "/images/" :p (file-name img) :e 0))]))
-                            images)
-            data      (cta/timeline->lottie tl objects assets)
-            files     (into {} (map (fn [[_ img]] [(file-name img) (:bytes img)])) images)]
-        (p/let [blob (lottie->dotlottie data (safe-filename name "") files
-                                        (not= :once (cta/playback-mode tl)))]
-          (download-blob name ".lottie" dotlottie-mtype blob)
-          {:status :ok :blob blob})))
-    (finally
-      (st/emit! (dwa/apply-preview)))))
+    ;; the images go into the archive, next to the document
+    :dotlottie
+    (let [name      (or (:name board) (:name tl))
+          file-name #(str (:id %) ".png")
+          assets    (into {} (map (fn [[id img]]
+                                    [id (-> (select-keys img [:id :w :h :x :y])
+                                            (assoc :u "/images/" :p (file-name img) :e 0))]))
+                          images)
+          data      (cta/timeline->lottie tl objects assets)
+          files     (into {} (map (fn [[_ img]] [(file-name img) (:bytes img)])) images)]
+      (p/let [blob (lottie->dotlottie data (safe-filename name "") files
+                                      (not= :once (cta/playback-mode tl)))]
+        {:status :ok :blob blob :ext ".lottie" :mtype dotlottie-mtype}))))
 
-(defn- export-markup!
-  [state format {:keys [bridge]}]
-  (let [tl      (dwa/export-timeline state)
-        objects (dsh/lookup-page-objects state)
-        board   (get objects (:board-id tl))
-        bridge  (or bridge (default-bridge))
-        _       (begin-full-quality! bridge)
+(defn- markup-export
+  "A promise of the markup export (`:svg` `:lottie` `:dotlottie`) of
+  `opts` (see `run-export`): the pictures of its layers one at a time,
+  so it stops between them when `cancelled?`."
+  [{:keys [page files board-id format bridge time yield on-progress cancelled?]}]
+  (let [tl      (dwa/board-export-timeline page files board-id)
+        objects (:objects page)
+        board   (get objects board-id)
         ;; split texts play their units, each its own picture
         texts   (unit-texts objects tl)
         ;; Lottie draws the layers it can as vectors
-        layers  (set (cta/export-layer-ids objects (:board-id tl) (:tracks tl)))
-        images  (collect-layer-images objects tl {:bridge bridge
-                                                  :time (dwa/playhead state)
-                                                  :skip? #(or (contains? texts %)
-                                                              (and (#{:lottie :dotlottie} format)
-                                                                   (cta/lottie-vector-layer? objects layers %)))})]
-    (p/let [units  (collect-unit-images objects tl texts {:bridge bridge})
-            images (merge images units)]
-      (export-markup-file! tl objects board format images))))
+        layers  (set (cta/export-layer-ids objects board-id (:tracks tl)))]
+    (p/let [images (collect-layer-images-async
+                    objects tl
+                    {:bridge bridge
+                     :time (or time 0)
+                     :yield yield
+                     :cancelled? cancelled?
+                     :on-progress (phase-progress on-progress :layers)
+                     :skip? #(or (contains? texts %)
+                                 (and (#{:lottie :dotlottie} format)
+                                      (cta/lottie-vector-layer? objects layers %)))})
+            units  (do (throw-if-cancelled cancelled?)
+                       (collect-unit-images objects tl texts {:bridge bridge}))
+            result (do (throw-if-cancelled cancelled?)
+                       (markup-file tl objects board format (merge images units)))]
+      (when on-progress
+        (on-progress {:phase :write :current 1 :total 1}))
+      (assoc result :name (or (:name board) (:name tl))))))
+
+(defn run-export
+  "Export the animation of the board `board-id` of `page`, with the one of
+  the component copies in it (`files` holds the files of their
+  components, see `dwa/board-export-timeline`), as `format` (`:mp4`
+  `:webm` `:gif` `:avif` `:svg` `:lottie` `:dotlottie`), with
+  `:quality` `:fps` `:scale` `:loop?` and `:audio?` (the sound of its
+  clips in MP4 and WebM, true by default). `ctx` holds `page` `files`
+  `board-id`, the `:time` the shapes show (undone for the pictures of the
+  markup exports), and may replace the `:bridge` to WASM, `:decode`,
+  `:yield` and the GIF encoder (`:gif-encoder` `:quantize`
+  `:apply-palette`, see `encode-gif`); `:on-progress` hears `{:phase :current :total}` (see
+  `progress-percent`). Neither reads nor changes the workspace.
+
+  `{:promise :cancel}`: the promise of the result, `{:status :ok :blob
+  :name :ext :mtype}` with what `export-notes` tells, `{:status
+  :unavailable}` (no codec), or `{:status :nothing}` (nothing plays);
+  `cancel` makes it reject with `:export-cancelled` at its next frame or
+  picture."
+  [{:keys [page files board-id] :as ctx} params]
+  (let [cancel? (atom false)
+        opts    (-> (merge ctx params)
+                    (update :bridge #(or % (default-bridge)))
+                    (assoc :cancelled? #(deref cancel?)))]
+    {:cancel  #(reset! cancel? true)
+     :promise (cond
+                (nil? (dwa/board-export-timeline page files board-id))
+                (js/Promise.resolve {:status :nothing})
+
+                ;; a native promise, as the others (`p/let` makes one of promesa)
+                (contains? markup-formats (:format params))
+                (js/Promise.resolve (markup-export opts))
+
+                :else
+                (raster-export opts))}))
+
+(defn download-result
+  "Download the file of an export `result` (see `run-export`)."
+  [{:keys [name ext mtype blob]}]
+  (download-blob name ext mtype blob))
+
+(defn export-notes
+  "What an export ending with `result` (see `run-export`) tells:
+  `{:unavailable? :notes}`, the notes `[:fitted w h]` (it was made as
+  large as the browser encodes, see `fit-video-size`) and
+  `[:audio-dropped]` (no audio codec of the format, see `encode-video`)."
+  [result]
+  (if (= :unavailable (:status result))
+    {:unavailable? true :notes []}
+    {:unavailable? false
+     :notes (cond-> []
+              (:fitted result)        (conj (into [:fitted] (:fitted result)))
+              (:audio-dropped result) (conj [:audio-dropped]))}))
+
+(defn note-text
+  "The text of a note of `export-notes`."
+  [[kind & args]]
+  (case kind
+    :fitted        (apply tr "workspace.options.export.fitted" args)
+    :audio-dropped (tr "workspace.options.export.audio-dropped")
+    nil))
+
+(defn- notes-shown
+  "The notification of the `notes` of an export (see `export-notes`), if
+  any."
+  [notes]
+  (when (seq notes)
+    [(ntf/warn (str/join " " (map note-text notes)))]))
 
 (defn export-finished
   "What an export ending with `result` shows: that the browser encodes
-  none of the codecs of the format (`:unavailable`), or what the video
-  had to go without: its full size (`:fitted`, the `[width height]` it
-  has, see `fit-video-size`) and its sound (`:audio-dropped`, see
-  `encode-video`); and the export panel free again either way."
+  none of the codecs of the format, or what the file had to go without
+  (see `export-notes`); and the export panel free again either way."
   [result]
-  (if (= :unavailable (:status result))
-    [(ntf/error (tr "workspace.options.export.codec-unavailable"))
-     (finish-export-state)]
-    (let [notes (cond-> []
-                  (:fitted result)
-                  (conj (let [[w h] (:fitted result)]
-                          (tr "workspace.options.export.fitted" w h)))
+  (let [{:keys [unavailable? notes]} (export-notes result)]
+    (if unavailable?
+      [(ntf/error (tr "workspace.options.export.codec-unavailable"))
+       (finish-export-state)]
+      (conj (vec (notes-shown notes)) (finish-export-state)))))
 
-                  (:audio-dropped result)
-                  (conj (tr "workspace.options.export.audio-dropped")))]
-      (cond-> []
-        (seq notes) (conj (ntf/warn (str/join " " notes)))
-        :always     (conj (finish-export-state))))))
+(defn- export-in-place
+  "A promise of the export of the active board run in the workspace tab
+  (see `run-export`), downloaded: the canvas renders in full quality
+  meanwhile and shows the animation at the playhead again after."
+  [state params]
+  (let [bridge   (or (:bridge params) (default-bridge))
+        was-fast (begin-full-quality! bridge)
+        {:keys [promise cancel]}
+        (run-export {:page (dsh/lookup-page state)
+                     :files (dsh/lookup-libraries state)
+                     :board-id (dwa/active-board-id state)
+                     :time (dwa/playhead state)
+                     :bridge bridge
+                     :on-progress #(st/emit! (set-export-progress %))}
+                    (dissoc params :bridge))]
+    (reset! cancel-fn cancel)
+    (-> promise
+        (.then
+         (fn [result]
+           (when (= :ok (:status result))
+             (download-result result))
+           result))
+        (.finally
+         (fn []
+           (reset! cancel-fn nil)
+           (st/emit! (dwa/apply-preview))
+           (when (and was-fast (not (wasm-gesture/active?)))
+             (wasm-gesture/try-begin-interactive-transform!)
+             (wasm.api/set-modifiers-start)))))))
 
 (defn export-animation
   "Export the animation of the active board, with the one of the
@@ -1373,6 +1562,7 @@
       (assoc state :export-animation {:in-progress true
                                       :current 0
                                       :total 0
+                                      :percent 0
                                       :cancelling? false
                                       :format format}))
 
@@ -1385,10 +1575,7 @@
            (rx/of (ev/event {::ev/name "export-animation"
                              ::ev/origin "workspace:sidebar"
                              :format (name format)}))
-           (->> (rx/from
-                 (if (#{:svg :lottie :dotlottie} format)
-                   (js/Promise.resolve (export-markup! state format params))
-                   (export-raster! state params)))
+           (->> (rx/from (export-in-place state params))
                 (rx/mapcat (comp rx/from export-finished))
                 (rx/catch
                  (fn [cause]
@@ -1398,11 +1585,288 @@
                                            (tr "workspace.options.export.codec-unavailable")))
                             (finish-export-state))))))))))))
 
+;; THE EXPORT IN A TAB OF ITS OWN
+
+(def hello-wait-ms
+  "How long the workspace waits for the export tab to say it is there
+  before it offers to open it again or to export in place: the browser
+  may have blocked it."
+  8000)
+
+(defonce ^:private jobs
+  ;; job-id -> {:channel :locks :save :lock-asked?}
+  (atom {}))
+
+(defn export-in-tab?
+  "Whether the workspace in `state` exports in a tab of its own (see
+  `start-export-job`): not while it previews a version, which the tab
+  would not load (it loads the file as saved), nor in a browser the tab
+  could not talk to."
+  [state]
+  (and (nil? (get-in state [:workspace-global :preview-id]))
+       (some? (unchecked-get js/globalThis "BroadcastChannel"))))
+
+(defn export-job
+  "The job (see `job/schema:params`) exporting the active board of the
+  workspace in `state` as `params` (see `export-animation`) in a tab of
+  its own, with the renderer of the workspace."
+  [state {:keys [format quality fps scale loop? audio?]}]
+  {:file-id (:current-file-id state)
+   :page-id (:current-page-id state)
+   :board-id (dwa/active-board-id state)
+   :job-id (job/new-job-id)
+   :format format
+   :quality (or quality :high)
+   :fps (or fps 30)
+   :scale (or scale 1)
+   :loop? (not (false? loop?))
+   :audio? (not (false? audio?))
+   :wasm? (features/active-feature? state "render-wasm/v1")})
+
+(defn open-job-tab!
+  "Open the tab of `job` (see `export-job`) with `noopener`, so the
+  browser may give it a process of its own, in the click that asks for
+  it (a tab opened later is blocked). `window.open` tells nothing then:
+  the tab says it is there on the channel of the job."
+  [state job]
+  (when-let [uri (rt/resolve-uri (:router state) :export-animation (job/encode-params job))]
+    (dom/open-new-window uri "_blank" "noopener")))
+
+(defn- current-job-id
+  [state]
+  (get-in state [:export-animation :job :job-id]))
+
+(defn- job-post!
+  [job-id message]
+  (when-let [post (get-in @jobs [job-id :channel :post])]
+    (post message)))
+
+(defn- job-ended
+  "The job `job-id` is over: the tab hears `message` if any, the channel
+  closes (see `start-export-job`) and the panel is free."
+  ([job-id] (job-ended job-id nil))
+  ([job-id message]
+   (ptk/reify ::job-ended
+     IDeref
+     (-deref [_] job-id)
+
+     ptk/UpdateEvent
+     (update [_ state]
+       (cond-> state
+         (= job-id (current-job-id state))
+         (dissoc :export-animation)))
+
+     ptk/EffectEvent
+     (effect [_ _ _]
+       (when message
+         (job-post! job-id message))))))
+
+(defn- job-saved
+  "The workspace has saved what was pending before the job `job-id`
+  (`outcome` `:saved`), or could not (`:save-failed`, which ends it): the
+  tab hears it now, or at its next `:hello`."
+  [job-id outcome]
+  (ptk/reify ::job-saved
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (and (= :save-failed outcome) (= job-id (current-job-id state)))
+        (rx/of (ntf/error (tr "export-animation.error.save-failed"))
+               (job-ended job-id {:type :save-failed}))
+        (rx/empty)))
+
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (when (and (= :saved outcome) (contains? @jobs job-id))
+        (swap! jobs assoc-in [job-id :save] outcome)
+        (job-post! job-id {:type outcome})))))
+
+(defn- job-heard
+  "A message of the tab of the job `job-id`: it says it is there (the
+  workspace answers once it has saved, and asks for the lock the tab
+  holds, which it gets when the tab is gone), how far it is, that the
+  browser froze it, or how it ended."
+  [job-id {:keys [type] :as message}]
+  (ptk/reify ::job-heard
+    IDeref
+    (-deref [_] (assoc message :job-id job-id))
+
+    ptk/UpdateEvent
+    (update [_ state]
+      (if (= job-id (current-job-id state))
+        (case type
+          :hello    (update state :export-animation assoc :opened? true :offer? false)
+          :progress (update state :export-animation merge
+                            (select-keys message [:phase :current :total :percent]))
+          :paused   (assoc-in state [:export-animation :paused?] true)
+          :resumed  (assoc-in state [:export-animation :paused?] false)
+          state)
+        state))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (= job-id (current-job-id state))
+        (case type
+          :done      (rx/from (conj (vec (notes-shown (:notes message))) (job-ended job-id)))
+          :error     (rx/of (ntf/error (apply tr (job/error-text message)))
+                            (job-ended job-id))
+          :cancelled (rx/of (job-ended job-id))
+          :closed    (rx/of (job-ended job-id))
+          (rx/empty))
+        (rx/empty)))
+
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (when (= :hello type)
+        (when-let [{:keys [save locks lock-asked?]} (get @jobs job-id)]
+          (when save
+            (job-post! job-id {:type save}))
+          (when-not lock-asked?
+            (swap! jobs assoc-in [job-id :lock-asked?] true)
+            (-> (if locks
+                  (job/when-released job-id locks)
+                  (job/when-released job-id))
+                (.then #(st/emit! (job-ended job-id)))
+                (.catch (constantly nil)))))))))
+
+(defn- job-unanswered
+  [job-id]
+  (ptk/reify ::job-unanswered
+    ptk/UpdateEvent
+    (update [_ state]
+      (cond-> state
+        (and (= job-id (current-job-id state))
+             (not (get-in state [:export-animation :opened?])))
+        (assoc-in [:export-animation :offer?] true)))))
+
+(defn- hello-wait
+  "The offer of the panel when the tab of the job `job-id` says nothing
+  within `wait-ms`."
+  [job-id wait-ms stream]
+  (let [heard (rx/filter (fn [event]
+                           (case (ptk/type event)
+                             ::job-heard (let [{:keys [type] :as message} @event]
+                                           (and (= :hello type) (= job-id (:job-id message))))
+                             ::job-ended (= job-id @event)
+                             false))
+                         stream)]
+    (->> (rx/timer wait-ms)
+         (rx/take-until heard)
+         (rx/map (fn [_] (job-unanswered job-id))))))
+
+(defn start-export-job
+  "Export as `job` (see `export-job`) in the tab the click opened (see
+  `open-job-tab!`): the workspace saves what is pending and tells the
+  tab, then mirrors in the panel how far the tab is, until the export
+  ends, is cancelled, or the tab goes (its lock is free). When the tab
+  says nothing within `hello-wait-ms`, the panel offers to open it again
+  (see `job-tab-reopened`) or to export here (see `export-job-here`).
+  `channel-ctor`, `locks` and `wait-ms` replace `BroadcastChannel`,
+  `navigator.locks` and `hello-wait-ms` (in tests)."
+  [job & {:keys [channel-ctor locks wait-ms] :or {wait-ms hello-wait-ms}}]
+  (ptk/reify ::start-export-job
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc state :export-animation {:in-progress true
+                                      :in-tab? true
+                                      :job job
+                                      :format (:format job)
+                                      :current 0
+                                      :total 0
+                                      :percent 0
+                                      :cancelling? false
+                                      :paused? false
+                                      :opened? false
+                                      :offer? false}))
+
+    ptk/WatchEvent
+    (watch [_ _ stream]
+      (let [job-id (:job-id job)
+            ended  (rx/filter #(and (= ::job-ended (ptk/type %)) (= job-id @%)) stream)
+            ;; the channel is open while the job lasts
+            heard  (rx/create
+                    (fn [subs]
+                      (let [on-message #(rx/push! subs %)
+                            channel    (if channel-ctor
+                                         (job/open-channel job-id on-message channel-ctor)
+                                         (job/open-channel job-id on-message))]
+                        (swap! jobs assoc job-id {:channel channel :locks locks})
+                        (fn []
+                          (when-let [close (:close channel)]
+                            (close))
+                          (swap! jobs dissoc job-id)))))]
+        (rx/merge
+         (->> heard
+              (rx/map #(job-heard job-id %))
+              (rx/take-until ended))
+         (rx/of ::dps/force-persist)
+         (->> (dps/wait-persisted-or-error)
+              (rx/map (fn [_] (job-saved job-id :saved)))
+              (rx/catch (fn [_] (rx/of (job-saved job-id :save-failed))))
+              (rx/take-until ended))
+         (hello-wait job-id wait-ms stream))))))
+
+(defn job-tab-reopened
+  "The panel opened the tab of the job `job-id` again (see
+  `open-job-tab!`): it waits for its word once more."
+  [job-id & {:keys [wait-ms] :or {wait-ms hello-wait-ms}}]
+  (ptk/reify ::job-tab-reopened
+    ptk/UpdateEvent
+    (update [_ state]
+      (cond-> state
+        (= job-id (current-job-id state))
+        (assoc-in [:export-animation :offer?] false)))
+
+    ptk/WatchEvent
+    (watch [_ _ stream]
+      (hello-wait job-id wait-ms stream))))
+
+(defn export-job-here
+  "Give up the tab of the job `job-id`, which did not open, and export in
+  place (see `export-animation`)."
+  [job-id]
+  (ptk/reify ::export-job-here
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [job (get-in state [:export-animation :job])]
+        (if (= job-id (:job-id job))
+          (rx/of (job-ended job-id {:type :cancel})
+                 (export-animation (select-keys job [:format :quality :fps :scale :loop? :audio?])))
+          (rx/empty))))))
+
+(defn export-from-panel!
+  "Export the active board as `params` (see `export-animation`), from the
+  click of the panel: in a tab of its own, opened now (see
+  `start-export-job`), or in place (see `export-in-tab?`)."
+  [params]
+  (let [state @st/state]
+    (if (export-in-tab? state)
+      (let [job (export-job state params)]
+        (open-job-tab! state job)
+        (st/emit! (start-export-job job)))
+      (st/emit! (export-animation params)))))
+
 (defn cancel-export-animation
+  "Cancel the export: at its next frame in place, or in its tab, which
+  says when it stopped; a tab that has not said it is there yet is given
+  up at once."
   []
   (ptk/reify ::cancel-export-animation
     ptk/UpdateEvent
     (update [_ state]
-      (when-let [cancel @cancel-fn]
-        (cancel))
-      (assoc-in state [:export-animation :cancelling?] true))))
+      (cond-> state
+        (contains? state :export-animation)
+        (assoc-in [:export-animation :cancelling?] true)))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [{:keys [in-tab? opened? job]} (:export-animation state)]
+        (if (and in-tab? (not opened?))
+          (rx/of (job-ended (:job-id job) {:type :cancel}))
+          (rx/empty))))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (let [{:keys [in-tab? opened? job]} (:export-animation state)]
+        (cond
+          (not in-tab?) (when-let [cancel @cancel-fn] (cancel))
+          opened?       (job-post! (:job-id job) {:type :cancel}))))))

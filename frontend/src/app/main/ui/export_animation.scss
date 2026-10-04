@@ -1,0 +1,64 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "./ds/typography.scss" as t;
+
+.export-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 100%;
+  block-size: 100%;
+  background-color: var(--color-background-secondary);
+}
+
+.export-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-l);
+  inline-size: 420px;
+  max-inline-size: calc(100% - 2 * var(--sp-xxl));
+  padding: var(--sp-xxl);
+  border-radius: var(--sp-s);
+  background-color: var(--color-background-primary);
+}
+
+.title {
+  @include t.use-typography("title-medium");
+
+  color: var(--color-foreground-primary);
+}
+
+.status {
+  @include t.use-typography("body-medium");
+
+  color: var(--color-foreground-primary);
+}
+
+.note {
+  @include t.use-typography("body-small");
+
+  color: var(--color-foreground-secondary);
+}
+
+.bar {
+  block-size: var(--sp-xs);
+  border-radius: var(--sp-xs);
+  background-color: var(--color-background-quaternary);
+  overflow: hidden;
+}
+
+.bar-fill {
+  block-size: 100%;
+  background-color: var(--color-accent-primary);
+  transition: width 100ms linear;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-s);
+}

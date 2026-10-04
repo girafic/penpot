@@ -13,6 +13,8 @@
    [frontend-tests.data.comments-filters-test]
    [frontend-tests.data.comments-moments-test]
    [frontend-tests.data.dashboard-test]
+   [frontend-tests.data.export-animation-job-test]
+   [frontend-tests.data.export-job-workspace-test]
    [frontend-tests.data.exports-animation-test]
    [frontend-tests.data.exports-assets-test]
    [frontend-tests.data.exports-avif-test]
@@ -102,6 +104,7 @@
    [frontend-tests.ui.comments-position-modifier-test]
    [frontend-tests.ui.ds-controls-numeric-input-test]
    [frontend-tests.ui.dynamic-modifiers-test]
+   [frontend-tests.ui.export-animation-test]
    [frontend-tests.ui.exports-menu-test]
    [frontend-tests.ui.gradient-handlers-test]
    [frontend-tests.ui.inspect-motion-test]
@@ -151,6 +154,8 @@
    'frontend-tests.data.repo-test
    'frontend-tests.data.store-test
    'frontend-tests.data.exports-assets-test
+   'frontend-tests.data.export-animation-job-test
+   'frontend-tests.data.export-job-workspace-test
    'frontend-tests.data.exports-animation-test
    'frontend-tests.data.animation-playback-test
    'frontend-tests.data.animation-styles-test
@@ -234,6 +239,7 @@
    'frontend-tests.ui.comments-position-modifier-test
    'frontend-tests.ui.ds-controls-numeric-input-test
    'frontend-tests.ui.dynamic-modifiers-test
+   'frontend-tests.ui.export-animation-test
    'frontend-tests.ui.exports-menu-test
    'frontend-tests.ui.gradient-handlers-test
    'frontend-tests.ui.inspect-motion-test

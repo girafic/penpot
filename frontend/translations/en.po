@@ -2192,6 +2192,70 @@ msgstr "Email or password is incorrect."
 msgid "errors.wrong-old-password"
 msgstr "Old password is incorrect"
 
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.cancel"
+msgstr "Cancel"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.cancelled"
+msgstr "Export cancelled."
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.close"
+msgstr "Close"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.done"
+msgstr "Done: %s (%s)"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.download-again"
+msgstr "Download again"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.error.export"
+msgstr "The export failed: %s"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.error.load"
+msgstr "The file could not be loaded."
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.error.nothing"
+msgstr "The board plays no animation."
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.error.save-failed"
+msgstr "Your changes could not be saved, so nothing was exported."
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.error.wasm"
+msgstr "This browser cannot render this export."
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.exporting"
+msgstr "Exporting %s as %s"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.invalid"
+msgstr "This export cannot start. Start it again from the workspace."
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.loading"
+msgstr "Loading the file…"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.stale"
+msgstr "The workspace did not answer. Start the export again from it."
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.title"
+msgstr "Animated export"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.waiting"
+msgstr "Waiting for your changes to be saved…"
+
 #: src/app/main/ui/settings/feedback.cljs:121
 msgid "feedback.description"
 msgstr "Description"
@@ -8956,6 +9020,24 @@ msgstr "This board has no animation yet."
 
 msgid "workspace.options.export.progress"
 msgstr "Export frame %s of %s"
+
+msgid "workspace.options.export.opening-tab"
+msgstr "Opening the export tab…"
+
+msgid "workspace.options.export.in-tab"
+msgstr "Exporting in a new tab… %s%"
+
+msgid "workspace.options.export.tab-paused"
+msgstr "The browser paused the export tab. Bring it to the front to go on."
+
+msgid "workspace.options.export.tab-blocked"
+msgstr "The export tab did not open. Your browser may have blocked it."
+
+msgid "workspace.options.export.open-tab"
+msgstr "Open the export tab"
+
+msgid "workspace.options.export.export-here"
+msgstr "Export here"
 
 #: src/app/main/ui/exports/assets.cljs:267
 msgid "workspace.options.exporting-busy"

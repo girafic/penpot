@@ -78,6 +78,46 @@
       (when (and shape (get timelines (:id shape)))
         shape))))
 
+(defn export-button-state
+  "What the panel shows of the animated export `progress` (see
+  `refs/export-animation`): `{:label :action :disabled? :note :offer?}`,
+  the label and the note as `[key & args]` for `tr`, what a click on the
+  button does (`:export` `:cancel`), and whether it offers to open the
+  export tab again or to export here (the tab said nothing, see
+  `dea/start-export-job`). `format-label` names the format of the export
+  and `disabled?` tells that it cannot start."
+  [progress format-label disabled?]
+  (let [{:keys [in-progress in-tab? opened? offer? paused? cancelling?
+                current total percent]} progress]
+    (cond
+      (not in-progress)
+      {:label ["workspace.options.export.export-format" format-label]
+       :action :export
+       :disabled? (boolean disabled?)}
+
+      (not in-tab?)
+      {:label ["workspace.options.export.progress" (or current 0) (or total 0)]
+       :action :cancel
+       :disabled? (boolean cancelling?)}
+
+      offer?
+      {:label ["labels.cancel"]
+       :action :cancel
+       :disabled? false
+       :note ["workspace.options.export.tab-blocked"]
+       :offer? true}
+
+      (not opened?)
+      {:label ["workspace.options.export.opening-tab"]
+       :action :cancel
+       :disabled? (boolean cancelling?)}
+
+      :else
+      (cond-> {:label ["workspace.options.export.in-tab" (or percent 0)]
+               :action :cancel
+               :disabled? (boolean cancelling?)}
+        paused? (assoc :note ["workspace.options.export.tab-paused"])))))
+
 (defn- caveat-label
   [caveat]
   (case caveat
@@ -113,6 +153,7 @@
         times     (cta/frame-times (or (:duration timeline) 0) fps)
         too-many? (> (count times) cta/max-export-frames)
         busy?     (boolean (:in-progress progress))
+        job-id    (get-in progress [:job :job-id])
         codec?    (get support format true)
         disabled? (or (nil? timeline) too-many? busy? (not codec?))
 
@@ -186,19 +227,35 @@
         on-audio
         (mf/use-fn (mf/deps set-export) #(set-export {:audio %}))
 
+        ;; in a tab of its own, opened in this click
         on-export
         (mf/use-fn
          (mf/deps format quality fps scale loop? audio?)
          (fn []
-           (st/emit! (dea/export-animation {:format format
-                                            :quality quality
-                                            :fps fps
-                                            :scale scale
-                                            :loop? loop?
-                                            :audio? audio?}))))
+           (dea/export-from-panel! {:format format
+                                    :quality quality
+                                    :fps fps
+                                    :scale scale
+                                    :loop? loop?
+                                    :audio? audio?})))
 
         on-cancel
-        (mf/use-fn #(st/emit! (dea/cancel-export-animation)))]
+        (mf/use-fn #(st/emit! (dea/cancel-export-animation)))
+
+        on-open-tab
+        (mf/use-fn
+         (mf/deps progress)
+         (fn []
+           (dea/open-job-tab! @st/state (:job progress))
+           (st/emit! (dea/job-tab-reopened job-id))))
+
+        on-export-here
+        (mf/use-fn (mf/deps job-id) #(st/emit! (dea/export-job-here job-id)))
+
+        view
+        (export-button-state progress
+                             (:label (d/seek #(= (name format) (:value %)) format-options))
+                             disabled?)]
 
     (mf/use-effect
      (fn []
@@ -283,19 +340,27 @@
        (when (and clips? (not render-wasm?))
          [:p {:class (stl/css :hint)} (tr "workspace.options.export.audio-needs-wasm")])
 
-       (if busy?
-         [:> button* {:variant "secondary"
-                      :class (stl/css :animated-export-btn)
-                      :on-click on-cancel}
-          (tr "workspace.options.export.progress"
-              (c (or (:current progress) 0))
-              (c (or (:total progress) 0)))]
-         [:> button* {:variant "secondary"
-                      :class (stl/css :animated-export-btn)
-                      :disabled disabled?
-                      :on-click on-export}
-          (tr "workspace.options.export.export-format"
-              (:label (d/seek #(= (name format) (:value %)) format-options)))])])))
+       (when-let [note (:note view)]
+         [:p {:class (stl/css :hint)} (apply tr note)])
+
+       (when (:offer? view)
+         [:div {:class (stl/css :animated-offer)}
+          [:> button* {:variant "primary"
+                       :class (stl/css :animated-export-btn)
+                       :on-click on-open-tab}
+           (tr "workspace.options.export.open-tab")]
+          [:> button* {:variant "secondary"
+                       :class (stl/css :animated-export-btn)
+                       :on-click on-export-here}
+           (tr "workspace.options.export.export-here")]])
+
+       [:> button* {:variant (if (:offer? view) "ghost" "secondary")
+                    :class (stl/css :animated-export-btn)
+                    :disabled (:disabled? view)
+                    :on-click (case (:action view)
+                                :export on-export
+                                on-cancel)}
+        (apply tr (:label view))]])))
 
 (mf/defc exports-menu*
   {::mf/wrap [#(mf/memo' % check-exports-menu-props)]}

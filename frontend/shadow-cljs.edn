@@ -42,6 +42,11 @@
     {:entries [app.main.ui.workspace]
      :depends-on #{:shared}}
 
+    ;; the export tab: the encoders stay out of :shared
+    :main-export-animation
+    {:entries [app.main.ui.export-animation]
+     :depends-on #{:shared :main-workspace}}
+
     :main-dashboard
     {:entries [app.main.ui.dashboard]
      :depends-on #{:shared}}

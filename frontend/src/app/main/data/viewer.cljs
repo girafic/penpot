@@ -128,8 +128,58 @@
    [:file-id ::sm/uuid]
    [:share-id {:optional true} ::sm/uuid]])
 
+(defn load-bundle
+  "An observable of the view-only bundle of the file `file-id` (the RPC
+  `get-view-only-bundle`, through the share link `share-id` when given)
+  with the pointers of its pages and data resolved: what the view mode
+  shows, and what the export tab exports (see
+  `app.main.data.exports.animation-tab`). Changes no state."
+  [{:keys [file-id share-id]}]
+  (let [;; NOTE: in viewer we don't have access to the team when
+        ;; user is not logged-in, so we can't know which features
+        ;; are active from team, so in this case it is necesary
+        ;; report the whole set of supported features instead of
+        ;; the enabled ones.
+        features cfeat/supported-features
+        params'  (cond-> {:file-id file-id :features features}
+                   (uuid? share-id)
+                   (assoc :share-id share-id))
+
+        resolve  (fn [[key pointer]]
+                   (let [params {:file-id file-id :fragment-id @pointer}
+                         params (cond-> params
+                                  (uuid? share-id)
+                                  (assoc :share-id share-id))]
+                     (->> (rp/cmd! :get-file-fragment params)
+                          (rx/map :data)
+                          (rx/map #(vector key %)))))]
+
+    (->> (rp/cmd! :get-view-only-bundle params')
+         (rx/mapcat
+          (fn [bundle]
+            (->> (rx/from (-> bundle :file :data :pages-index seq))
+                 (rx/merge-map
+                  (fn [[_ page :as kp]]
+                    (if (t/pointer? page)
+                      (resolve kp)
+                      (rx/of kp))))
+                 (rx/reduce conj {})
+                 (rx/map (fn [pages-index]
+                           (update-in bundle [:file :data] assoc :pages-index pages-index))))))
+         (rx/mapcat
+          (fn [bundle]
+            (->> (rx/from (-> bundle :file :data seq))
+                 (rx/merge-map
+                  (fn [[_ object :as kp]]
+                    (if (t/pointer? object)
+                      (resolve kp)
+                      (rx/of kp))))
+                 (rx/reduce conj {})
+                 (rx/map (fn [data]
+                           (update bundle :file assoc :data data)))))))))
+
 (defn- fetch-bundle
-  [{:keys [file-id share-id] :as params}]
+  [params]
 
   (dm/assert!
    "expected valid params"
@@ -138,53 +188,12 @@
   (ptk/reify ::fetch-bundle
     ptk/WatchEvent
     (watch [_ _ _]
-      (let [;; NOTE: in viewer we don't have access to the team when
-            ;; user is not logged-in, so we can't know which features
-            ;; are active from team, so in this case it is necesary
-            ;; report the whole set of supported features instead of
-            ;; the enabled ones.
-            features cfeat/supported-features
-            params'  (cond-> {:file-id file-id :features features}
-                       (uuid? share-id)
-                       (assoc :share-id share-id))
-
-            resolve  (fn [[key pointer]]
-                       (let [params {:file-id file-id :fragment-id @pointer}
-                             params (cond-> params
-                                      (uuid? share-id)
-                                      (assoc :share-id share-id))]
-                         (->> (rp/cmd! :get-file-fragment params)
-                              (rx/map :data)
-                              (rx/map #(vector key %)))))]
-
-        (->> (rp/cmd! :get-view-only-bundle params')
-             (rx/mapcat
-              (fn [bundle]
-                (->> (rx/from (-> bundle :file :data :pages-index seq))
-                     (rx/merge-map
-                      (fn [[_ page :as kp]]
-                        (if (t/pointer? page)
-                          (resolve kp)
-                          (rx/of kp))))
-                     (rx/reduce conj {})
-                     (rx/map (fn [pages-index]
-                               (update-in bundle [:file :data] assoc :pages-index pages-index))))))
-             (rx/mapcat
-              (fn [bundle]
-                (->> (rx/from (-> bundle :file :data seq))
-                     (rx/merge-map
-                      (fn [[_ object :as kp]]
-                        (if (t/pointer? object)
-                          (resolve kp)
-                          (rx/of kp))))
-                     (rx/reduce conj {})
-                     (rx/map (fn [data]
-                               (update bundle :file assoc :data data))))))
-             (rx/mapcat
-              (fn [{:keys [fonts team] :as bundle}]
-                (rx/of (df/fonts-fetched fonts)
-                       (features/initialize (:features team))
-                       (bundle-fetched (merge bundle params))))))))))
+      (->> (load-bundle params)
+           (rx/mapcat
+            (fn [{:keys [fonts team] :as bundle}]
+              (rx/of (df/fonts-fetched fonts)
+                     (features/initialize (:features team))
+                     (bundle-fetched (merge bundle params)))))))))
 
 (declare go-to-frame)
 (declare go-to-frame-by-index)
