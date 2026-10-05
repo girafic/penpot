@@ -122,8 +122,12 @@
   gap: var(--sp-xs);
 }
 
+// The columns of the sidebar grid, narrower where there is less room
+// (the style editor of the assets in the left sidebar).
 .animation-row {
-  @include sidebar.option-grid-structure;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, $sz-32));
+  column-gap: var(--sp-xs);
 }
 
 .animation-row-name {
@@ -144,6 +148,52 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--sp-xs);
+}
+
+// the token list of a field of the pair: as wide as the pair
+.animation-pair-input {
+  --dropdown-width: calc(200% + var(--sp-xs));
+}
+
+// Easing tokens in the easing select: icon and name; the value in the
+// open list only.
+.easing-token {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-inline-size: 0;
+}
+
+// the select hides the icons of its options but its own
+.easing-token .easing-token-icon {
+  flex-shrink: 0;
+  visibility: visible;
+}
+
+.easing-token-name {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.easing-token-value {
+  display: none;
+  flex-shrink: 3;
+  min-inline-size: 0;
+  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-foreground-secondary);
+}
+
+.easing-dropdown .easing-token-name {
+  flex-shrink: 0;
+}
+
+.easing-dropdown .easing-token-value {
+  display: block;
 }
 
 // Split animations: the units of a text one by one

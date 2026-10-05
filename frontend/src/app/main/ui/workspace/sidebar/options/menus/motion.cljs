@@ -31,7 +31,7 @@
    [app.main.ui.ds.controls.input :refer [input*]]
    [app.main.ui.ds.controls.numeric-input :refer [numeric-input*]]
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
-   [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.workspace.sidebar.options.menus.interactions :refer [prototype-pill*]]
    [app.main.ui.workspace.tokens.motion :as motion-tokens]
    [app.util.dom :as dom]
@@ -231,6 +231,28 @@
   design token, followed by its name."
   "token:")
 
+(defn- easing-token-value
+  "The resolved value of an easing token as its option shows it: the
+  four numbers of a cubic bezier, or the stiffness, damping and mass of
+  a spring."
+  [value]
+  (cond
+    (sequential? value) (str/join ", " value)
+    (map? value)        (str/join ", " (keep value [:stiffness :damping :mass]))
+    :else               (some-> value str)))
+
+(defn- easing-token-label
+  "The label of the option of the easing token `token-name`: the token
+  icon, its name and, in the open list only (see `:easing-dropdown`),
+  its resolved `value`."
+  [token-name value]
+  (mf/html
+   [:span {:class (stl/css :easing-token)}
+    [:> icon* {:icon-id i/tokens :size "s" :class (stl/css :easing-token-icon)}]
+    [:span {:class (stl/css :easing-token-name)} token-name]
+    (when-let [text (easing-token-value value)]
+      [:span {:class (stl/css :easing-token-value) :title text} text])]))
+
 (defn- tokens-of-types
   "The tokens of `tokens` (by type, or a delay of them) of the `types`, in
   that order, for the picker of a setting: an empty map when there are
@@ -417,8 +439,8 @@
           (dm/str token-option-prefix easing-token)
           (easing->option easing))
 
-        ;; the cubic bezier tokens follow the easings, by their names in
-        ;; braces, and a bound token that is not there shows all the same
+        ;; the easing tokens follow the easings, apart, each with its value,
+        ;; and a bound token that is not there shows all the same
         easing-options
         (mf/with-memo [easing-option easing-tokens easing-token]
           (cond-> [{:value "auto" :label (tr "workspace.animation.easing-auto")}
@@ -431,16 +453,19 @@
             (= easing-option "custom")
             (conj {:value "custom" :label (tr "workspace.animation.easing-custom") :disabled true})
 
+            (or (seq easing-tokens) (some? easing-token))
+            (conj :separator)
+
             :always
-            (into (map (fn [{token-name :name}]
+            (into (map (fn [{token-name :name value :resolved-value}]
                          {:value (dm/str token-option-prefix token-name)
-                          :label (dm/str "{" token-name "}")}))
+                          :label (easing-token-label token-name value)}))
                   easing-tokens)
 
             (and (some? easing-token)
                  (not-any? #(= easing-token (:name %)) easing-tokens))
             (conj {:value (dm/str token-option-prefix easing-token)
-                   :label (dm/str "{" easing-token "}")
+                   :label (easing-token-label easing-token nil)
                    :disabled true})))]
 
     [:div {:class (stl/css :animation-item)}
@@ -552,6 +577,7 @@
         [:> animation-row* {:label (tr "workspace.animation.easing")}
          [:& select {:default-value easing-option
                      :options easing-options
+                     :dropdown-class (stl/css :easing-dropdown)
                      :disabled locked?
                      :on-change on-easing}]]
 
@@ -620,6 +646,7 @@
           [:> animation-row* {:label (tr "workspace.animation.offset")}
            [:div {:class (stl/css :animation-pair)}
             [:> numeric-input* {:icon i/character-x
+                                :class (stl/css :animation-pair-input)
                                 :property (tr "workspace.animation.offset-x")
                                 :value (or offset-x 0)
                                 :tokens offset-tokens
@@ -630,6 +657,8 @@
                                 :on-change-end on-change-end
                                 :on-change on-offset-x}]
             [:> numeric-input* {:icon i/character-y
+                                :class (stl/css :animation-pair-input)
+                                :align :right
                                 :property (tr "workspace.animation.offset-y")
                                 :value (or offset-y 0)
                                 :tokens offset-tokens
