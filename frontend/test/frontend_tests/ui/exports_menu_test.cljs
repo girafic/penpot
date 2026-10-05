@@ -32,9 +32,10 @@
              (exp/export-button-state nil "MP4" false)))
     (t/is (:disabled? (exp/export-button-state nil "MP4" true))))
   (t/testing "in place"
-    (t/is (= {:label ["workspace.options.export.progress" 3 90] :action :cancel :disabled? false}
-             (exp/export-button-state {:in-progress true :phase :capture :current 3 :total 90} "MP4" true))
-          "frames while it takes them")
+    (t/is (= {:label ["workspace.options.export.exporting" 3] :action :cancel :disabled? false}
+             (exp/export-button-state {:in-progress true :phase :capture :current 3 :total 90 :percent 3}
+                                      "MP4" true))
+          "how far it is, while it takes the frames")
     (t/is (= {:label ["workspace.options.export.exporting" 85] :action :cancel :disabled? false}
              (exp/export-button-state {:in-progress true :phase :encode :current 2 :total 90 :percent 85}
                                       "MP4" true))

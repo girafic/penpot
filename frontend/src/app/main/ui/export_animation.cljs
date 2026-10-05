@@ -96,13 +96,15 @@
        (apply tr (:text view))]
 
       (when-let [percent (:percent view)]
-        [:div {:class (stl/css :bar)
-               :role "progressbar"
-               :aria-valuenow percent
-               :aria-valuemin 0
-               :aria-valuemax 100}
-         [:div {:class (stl/css :bar-fill)
-                :style {:width (str percent "%")}}]])
+        [:div {:class (stl/css :progress)}
+         [:div {:class (stl/css :bar)
+                :role "progressbar"
+                :aria-valuenow percent
+                :aria-valuemin 0
+                :aria-valuemax 100}
+          [:div {:class (stl/css :bar-fill)
+                 :style {:width (str percent "%")}}]]
+         [:span {:class (stl/css :percent)} (str percent "%")]])
 
       (when-let [{:keys [kind url name]} (:preview view)]
         (case kind

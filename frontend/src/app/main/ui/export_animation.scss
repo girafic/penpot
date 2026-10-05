@@ -81,7 +81,22 @@
   color: var(--color-foreground-secondary);
 }
 
+.progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
+}
+
+.percent {
+  @include t.use-typography("body-small");
+
+  min-inline-size: $sz-32;
+  text-align: end;
+  color: var(--color-foreground-secondary);
+}
+
 .bar {
+  flex: 1;
   block-size: px2rem(4);
   border-radius: $br-4;
   background-color: var(--color-background-quaternary);

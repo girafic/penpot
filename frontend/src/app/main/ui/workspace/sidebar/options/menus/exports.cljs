@@ -88,19 +88,16 @@
   `deaw/start-export-job`). `format-label` names the format of the export
   and `disabled?` tells that it cannot start."
   [progress format-label disabled?]
-  (let [{:keys [in-progress in-tab? opened? offer? paused? cancelling?
-                phase current total percent]} progress]
+  (let [{:keys [in-progress in-tab? opened? offer? paused? cancelling? percent]} progress]
     (cond
       (not in-progress)
       {:label ["workspace.options.export.export-format" format-label]
        :action :export
        :disabled? (boolean disabled?)}
 
-      ;; frames while it takes them, then how far it is
+      ;; how far it is, as the export in a tab tells it
       (not in-tab?)
-      {:label (if (contains? #{nil :capture} phase)
-                ["workspace.options.export.progress" (or current 0) (or total 0)]
-                ["workspace.options.export.exporting" (or percent 0)])
+      {:label ["workspace.options.export.exporting" (or percent 0)]
        :action :cancel
        :disabled? (boolean cancelling?)}
 

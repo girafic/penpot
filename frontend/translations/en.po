@@ -9024,9 +9024,6 @@ msgstr "Audio export needs the new renderer."
 msgid "workspace.options.export.no-timeline"
 msgstr "This board has no animation yet."
 
-msgid "workspace.options.export.progress"
-msgstr "Export frame %s of %s"
-
 msgid "workspace.options.export.exporting"
 msgstr "Exporting… %s%"
 
