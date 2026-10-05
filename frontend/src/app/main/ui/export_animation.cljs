@@ -47,7 +47,7 @@
   while it exports, the notes of the file (see `dea/export-notes`), how
   to play it (`{:kind :url :name}`, see `preview-kind`) and its buttons
   (`:cancel` `:download` `:close`)."
-  [{:keys [status params page percent cancelling? result error]}]
+  [{:keys [status params page percent cancelling? result error frame-url]}]
   (let [board  (get-in page [:objects (:board-id params) :name])
         format (some-> (:format params) name str/upper)]
     (case status
@@ -55,9 +55,11 @@
       nil        {:text ["export-animation.waiting"] :actions []}
       :waiting   {:text ["export-animation.waiting"] :actions []}
       :loading   {:text ["export-animation.loading"] :actions []}
-      :exporting {:text ["export-animation.exporting" (or board "") (or format "")]
-                  :percent (or percent 0)
-                  :actions (if cancelling? [] [:cancel])}
+      :exporting (cond-> {:text ["export-animation.exporting" (or board "") (or format "")]
+                          :percent (or percent 0)
+                          :actions (if cancelling? [] [:cancel])}
+                   ;; the picture it took last
+                   (some? frame-url) (assoc :frame frame-url))
       :done      {:text ["export-animation.done"
                          (str (:name result) (:ext result))
                          (size-label (:size result))]
@@ -89,11 +91,18 @@
 
     [:main {:class (stl/css :export-page)}
      [:section {:class (stl/css-case :export-card true
-                                     :export-card-wide (contains? #{:video :image}
-                                                                  (get-in view [:preview :kind])))}
+                                     :export-card-wide (or (some? (:frame view))
+                                                           (contains? #{:video :image}
+                                                                      (get-in view [:preview :kind]))))}
       [:h1 {:class (stl/css :title)} (tr "export-animation.title")]
       [:p {:class (stl/css :status) :role "status" :aria-live "polite"}
        (apply tr (:text view))]
+
+      (when-let [frame (:frame view)]
+        [:div {:class (stl/css :preview-frame)}
+         [:img {:class (stl/css :preview)
+                :src frame
+                :alt (tr "export-animation.frame-alt")}]])
 
       (when-let [percent (:percent view)]
         [:div {:class (stl/css :progress)}

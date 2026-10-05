@@ -451,6 +451,33 @@
   (t/is (= "blob:file" (get-in @st/state [:export-tab :result :url])))
   (st/emit! (dat/finalize)))
 
+(t/deftest the-tab-shows-the-frame-it-took-last
+  (t/async
+    done
+    (let [{:keys [bundle] :as scene} (job-scene :saved :params {:format :mp4 :wasm? true})
+          made    (atom [])
+          running (p/deferred)]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_] (rx/of bundle))
+         dea/run-export (fn [{:keys [on-frame]} _]
+                          ;; two frames at once: one picture shown
+                          (on-frame (js/Uint8Array. #js [137 80 78 71]))
+                          (on-frame (js/Uint8Array. #js [137 80 78 71]))
+                          {:promise running :cancel (fn [])})
+         wapi/create-uri (mock/stub (fn [_] (let [url (str "blob:frame-" (count @made))] (swap! made conj url) url)))
+         wapi/revoke-uri (mock/stub mock/revoke-uri-mock)}
+        (fn [done']
+          (start! (assoc scene :opts {:start-wasm (fn [_ _] (js/Promise.resolve nil))}))
+          (-> (thj/wait-until #(some? (get-in @st/state [:export-tab :frame-url])))
+              (.then (fn [_]
+                       (t/is (= ["blob:frame-0"] @made) "at most every frame-interval-ms")
+                       (t/is (= "blob:frame-0" (:frame (uea/page-state (:export-tab @st/state)))))
+                       (st/emit! (dat/finalize))
+                       (t/is (= ["blob:frame-0"] @mock/revoked-uris) "gone with the tab")))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
+        done))))
+
 (t/deftest a-tab-the-workspace-never-answers-goes-stale
   (t/async
     done

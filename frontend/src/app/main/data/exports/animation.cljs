@@ -1220,9 +1220,10 @@
 
 (defn- capture-frames
   "The pictures of the board `board-id` at `times`, decoded, on one
-  canvas (see `align-frames`)."
-  [{:keys [objects timeline board-id times bridge cancelled? on-progress yield
-           decode scale]}]
+  canvas (see `align-frames`); `on-frame` hears each as it is taken (the
+  PNG bytes)."
+  [{:keys [objects timeline board-id times bridge cancelled? on-progress on-frame
+           yield decode scale]}]
   (let [decode   (or decode decode-png)
         yield    (or yield default-yield)
         extrect  (:get-shape-extrect bridge)
@@ -1240,6 +1241,8 @@
                                                        {:bridge bridge :scale (or scale 1)})
                            ;; where the picture is, as posed
                            rect  (when extrect (extrect board-id))]
+                       (when on-frame
+                         (on-frame bytes))
                        (-> (decode bytes)
                            (.then (fn [image]
                                     (when on-progress
@@ -1299,7 +1302,7 @@
   "A promise of the raster export (`:mp4` `:webm` `:gif` `:avif`) of
   `opts` (see `run-export`)."
   [{:keys [page files board-id format quality fps scale loop? audio? bridge
-           decode yield on-progress cancelled?]
+           decode yield on-progress on-frame cancelled?]
     :or {audio? true}
     :as opts}]
   (let [tl       (dwa/board-export-timeline page files board-id)
@@ -1332,6 +1335,7 @@
                                     :bridge bridge
                                     :cancelled? cancelled?
                                     :on-progress (phase-progress on-progress :capture)
+                                    :on-frame on-frame
                                     :yield yield
                                     :decode decode
                                     :scale (* scale fit)})
@@ -1452,7 +1456,7 @@
   "A promise of the markup export (`:svg` `:lottie` `:dotlottie`) of
   `opts` (see `run-export`): the pictures of its layers one at a time,
   so it stops between them when `cancelled?`."
-  [{:keys [page files board-id format bridge time yield on-progress cancelled?]}]
+  [{:keys [page files board-id format bridge time yield on-progress on-frame cancelled?]}]
   (let [tl       (dwa/board-export-timeline page files board-id)
         objects  (:objects page)
         board    (get objects board-id)
@@ -1467,6 +1471,9 @@
         n-layers (count (layer-ids-to-shoot objects tl skip?))
         total    (+ n-layers (unit-shot-count texts))
         pictures (phase-progress on-progress :layers)]
+    ;; the board at its end, where what comes in has come
+    (when on-frame
+      (on-frame (render-shape-at-time objects tl board-id (:duration tl) {:bridge bridge})))
     (p/let [images (collect-layer-images
                     objects tl
                     {:bridge bridge
@@ -1497,8 +1504,11 @@
   `board-id`, the `:time` the shapes show (undone for the pictures of the
   markup exports), and may replace the `:bridge` to WASM, `:decode`,
   `:yield` and the GIF encoder (`:gif-encoder` `:quantize`
-  `:apply-palette`, see `encode-gif`); `:on-progress` hears `{:phase :current :total}` (see
-  `progress-percent`). Neither reads nor changes the workspace.
+  `:apply-palette`, see `encode-gif`); `:on-progress` hears `{:phase
+  :current :total}` (see `progress-percent`), `:on-frame` the pictures
+  of the board as they are taken (the PNG bytes: each frame of a raster
+  export, once the board at its end for a markup export). Neither reads
+  nor changes the workspace.
 
   `{:promise :cancel}`: the promise of the result, `{:status :ok :blob
   :name :ext :mtype}` with what `export-notes` tells, `{:status

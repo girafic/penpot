@@ -1083,8 +1083,13 @@
     done
     (let [scene    (export-scene 100)
           progress (atom [])
+          frames   (atom 0)
           {:keys [promise]}
-          (dea/run-export (export-ctx scene :on-progress #(swap! progress conj %))
+          (dea/run-export (export-ctx scene
+                                      :on-progress #(swap! progress conj %)
+                                      :on-frame (fn [bytes]
+                                                  (t/is (instance? js/Uint8Array bytes))
+                                                  (swap! frames inc)))
                           {:format :gif :quality :low :fps 30 :scale 1 :loop? true})]
       (-> promise
           (.then (fn [result]
@@ -1094,7 +1099,9 @@
                    (t/is (= [:capture :encode] (distinct (map :phase @progress))) "the frames, then their encoding")
                    (t/is (= 100 (dea/progress-percent (last @progress))) "100 % at the end only")
                    (t/is (every? #(< (dea/progress-percent %) 100) (butlast @progress)))
-                   (t/is (some #{[:pixels (:bid scene)]} @(:calls scene)) "through the bridge")))
+                   (t/is (some #{[:pixels (:bid scene)]} @(:calls scene)) "through the bridge")
+                   (t/is (= (count (filter vector? @(:calls scene))) @frames)
+                         "each picture as it is taken")))
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally (finish done))))))
 
@@ -1136,13 +1143,17 @@
     done
     (let [scene    (export-scene 500)
           progress (atom [])
-          {:keys [promise]} (dea/run-export (export-ctx scene :on-progress #(swap! progress conj %))
+          frames   (atom 0)
+          {:keys [promise]} (dea/run-export (export-ctx scene
+                                                        :on-progress #(swap! progress conj %)
+                                                        :on-frame (fn [_] (swap! frames inc)))
                                             {:format :svg})]
       (-> promise
           (.then (fn [result]
                    (t/is (= [:ok ".svg" "image/svg+xml"] ((juxt :status :ext :mtype) result)))
                    (t/is (= :write (:phase (last @progress))))
-                   (t/is (= 100 (dea/progress-percent (last @progress))))))
+                   (t/is (= 100 (dea/progress-percent (last @progress))))
+                   (t/is (= 1 @frames) "once, the board at its end")))
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally (finish done))))))
 

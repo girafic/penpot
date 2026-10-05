@@ -42,9 +42,13 @@
   "How often, at most, the tab tells the workspace its progress."
   100)
 
+(def frame-interval-ms
+  "How often, at most, the tab shows the picture it took last."
+  250)
+
 (defonce ^:private live
   ;; {:channel :release :cancel :cancel-requested? :result :preview-url
-  ;;  :listeners :last-post :start-wasm :save-wait-ms}
+  ;;  :frame-url :last-frame :listeners :last-post :start-wasm :save-wait-ms}
   (atom nil))
 
 (defn- post!
@@ -189,6 +193,28 @@
     (effect [_ _ _]
       (post! {:type :cancelled}))))
 
+(defn- frame-shown
+  "The picture of the board the export took last is at `url`."
+  [url]
+  (ptk/reify ::frame-shown
+    ptk/UpdateEvent
+    (update [_ state]
+      (cond-> state
+        (= :exporting (:status (tab-state state)))
+        (assoc-in [:export-tab :frame-url] url)))))
+
+(defn- show-frame!
+  "Show the picture `bytes` (PNG) the export took, at most every
+  `frame-interval-ms`: an object URL of it, the one before revoked."
+  [bytes]
+  (let [now (js/Date.now)]
+    (when (> (- now (or (:last-frame @live) 0)) frame-interval-ms)
+      (let [url (wapi/create-uri (js/Blob. #js [bytes] #js {:type "image/png"}))
+            old (:frame-url @live)]
+        (swap! live assoc :last-frame now :frame-url url)
+        (st/emit! (frame-shown url))
+        (when old (wapi/revoke-uri old))))))
+
 (defn- run-job
   "A promise of the export of the job `params` on `page` (see
   `dea/run-export`), unless it was cancelled meanwhile (while WASM
@@ -197,11 +223,13 @@
   (if (:cancel-requested? @live)
     (p/rejected (ex-info "cancelled" {:type :export-cancelled}))
     (let [{:keys [promise cancel]}
-          (dea/run-export {:page page
-                           :files files
-                           :board-id board-id
-                           :bridge (tab-bridge)
-                           :on-progress #(st/emit! (progress %))}
+          (dea/run-export (cond-> {:page page
+                                   :files files
+                                   :board-id board-id
+                                   :bridge (tab-bridge)
+                                   :on-progress #(st/emit! (progress %))}
+                            ;; the pictures come from WASM
+                            (:wasm? params) (assoc :on-frame show-frame!))
                           (select-keys params [:format :quality :fps :scale :loop? :audio?]))]
       (swap! live assoc :cancel cancel)
       promise)))
@@ -433,9 +461,10 @@
 
     ptk/EffectEvent
     (effect [_ _ _]
-      (when-let [{:keys [channel release listeners preview-url]} @live]
+      (when-let [{:keys [channel release listeners preview-url frame-url]} @live]
         (when listeners (listeners))
         (when channel ((:close channel)))
         (when release (p/resolve release nil))
-        (when preview-url (wapi/revoke-uri preview-url)))
+        (when preview-url (wapi/revoke-uri preview-url))
+        (when frame-url (wapi/revoke-uri frame-url)))
       (reset! live nil))))

@@ -2241,6 +2241,10 @@ msgid "export-animation.exporting"
 msgstr "Exporting %s as %s"
 
 #: src/app/main/ui/export_animation.cljs
+msgid "export-animation.frame-alt"
+msgstr "The frame being exported"
+
+#: src/app/main/ui/export_animation.cljs
 msgid "export-animation.invalid"
 msgstr "This export cannot start. Start it again from the workspace."
 
