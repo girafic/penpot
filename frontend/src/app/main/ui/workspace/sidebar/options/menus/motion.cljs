@@ -31,8 +31,9 @@
    [app.main.ui.ds.controls.input :refer [input*]]
    [app.main.ui.ds.controls.numeric-input :refer [numeric-input*]]
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
-   [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
+   [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.workspace.sidebar.options.menus.interactions :refer [prototype-pill*]]
+   [app.main.ui.workspace.timeline.easing :as easing :refer [easing-menu* easing-curve-editor*]]
    [app.main.ui.workspace.tokens.motion :as motion-tokens]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -204,54 +205,12 @@
         counted?             (assoc :stagger (mth/round (tu/unit-stagger duration spread unit-count)))
         (and counted? (> unit-count tu/live-unit-cap)) (assoc :capped true)))))
 
-(defn- easing->option
-  [easing]
-  (cond
-    (nil? easing)                   "auto"
-    (keyword? easing)               (name easing)
-    (= easing cta/overshoot-easing) "overshoot"
-    :else                           "custom"))
-
-(defn- option->easing
-  [option]
-  (case option
-    "auto"      nil
-    "overshoot" cta/overshoot-easing
-    (keyword option)))
-
 (defn- number-handler
   "Call `f` with the number an input gives, skipping empty values."
   [f]
   (fn [value]
     (when (number? value)
       (f value))))
-
-(def ^:private token-option-prefix
-  "The start of the value of an option of the easing select that binds a
-  design token, followed by its name."
-  "token:")
-
-(defn- easing-token-value
-  "The resolved value of an easing token as its option shows it: the
-  four numbers of a cubic bezier, or the stiffness, damping and mass of
-  a spring."
-  [value]
-  (cond
-    (sequential? value) (str/join ", " value)
-    (map? value)        (str/join ", " (keep value [:stiffness :damping :mass]))
-    :else               (some-> value str)))
-
-(defn- easing-token-label
-  "The label of the option of the easing token `token-name`: the token
-  icon, its name and, in the open list only (see `:easing-dropdown`),
-  its resolved `value`."
-  [token-name value]
-  (mf/html
-   [:span {:class (stl/css :easing-token)}
-    [:> icon* {:icon-id i/tokens :size "s" :class (stl/css :easing-token-icon)}]
-    [:span {:class (stl/css :easing-token-name)} token-name]
-    (when-let [text (easing-token-value value)]
-      [:span {:class (stl/css :easing-token-value) :title text} text])]))
 
 (defn- tokens-of-types
   "The tokens of `tokens` (by type, or a delay of them) of the `types`, in
@@ -365,19 +324,30 @@
                              (sort-by :name)))
         easing-token  (:easing applied-tokens)
 
+        ;; a custom bezier or spring opens its editor under the menu
+        custom-open*  (mf/use-state false)
+
         on-easing
         (mf/use-fn
+         (mf/deps change applied-tokens)
+         (fn [easing]
+           (reset! custom-open* false)
+           (change (cond-> {:easing easing}
+                     (contains? applied-tokens :easing)
+                     (assoc :applied-tokens (without-token applied-tokens :easing))))))
+
+        on-easing-token
+        (mf/use-fn
          (mf/deps change applied-tokens easing-tokens)
-         (fn [value]
-           (if (str/starts-with? value token-option-prefix)
-             (let [token-name (subs value (count token-option-prefix))
-                   token      (d/seek #(= token-name (:name %)) easing-tokens)
-                   setting    (cta/token-setting :easing (:resolved-value token))]
-               (change (cond-> {:applied-tokens (assoc applied-tokens :easing token-name)}
-                         (some? setting) (assoc :easing setting))))
-             (change (cond-> {:easing (option->easing value)}
-                       (contains? applied-tokens :easing)
-                       (assoc :applied-tokens (without-token applied-tokens :easing)))))))
+         (fn [token-name]
+           (reset! custom-open* false)
+           (let [token   (d/seek #(= token-name (:name %)) easing-tokens)
+                 setting (cta/token-setting :easing (:resolved-value token))]
+             (change (cond-> {:applied-tokens (assoc applied-tokens :easing token-name)}
+                       (some? setting) (assoc :easing setting))))))
+
+        on-easing-custom
+        (mf/use-fn #(reset! custom-open* true))
 
         on-start    (mf/use-fn (mf/deps change applied-tokens) (setting-handler :start identity change applied-tokens))
         on-duration (mf/use-fn (mf/deps change applied-tokens) (setting-handler :duration identity change applied-tokens))
@@ -434,39 +404,11 @@
         (mf/with-memo []
           (mapv (fn [type] {:value (name type) :label (preset-label type)}) preset-types))
 
-        easing-option
-        (if (some? easing-token)
-          (dm/str token-option-prefix easing-token)
-          (easing->option easing))
-
-        ;; the easing tokens follow the easings, apart, each with its value,
-        ;; and a bound token that is not there shows all the same
-        easing-options
-        (mf/with-memo [easing-option easing-tokens easing-token]
-          (cond-> [{:value "auto" :label (tr "workspace.animation.easing-auto")}
-                   {:value "linear" :label (tr "workspace.options.interaction-easing-linear")}
-                   {:value "ease" :label (tr "workspace.options.interaction-easing-ease")}
-                   {:value "ease-in" :label (tr "workspace.options.interaction-easing-ease-in")}
-                   {:value "ease-out" :label (tr "workspace.options.interaction-easing-ease-out")}
-                   {:value "ease-in-out" :label (tr "workspace.options.interaction-easing-ease-in-out")}
-                   {:value "overshoot" :label (tr "workspace.animation.easing-overshoot")}]
-            (= easing-option "custom")
-            (conj {:value "custom" :label (tr "workspace.animation.easing-custom") :disabled true})
-
-            (or (seq easing-tokens) (some? easing-token))
-            (conj :separator)
-
-            :always
-            (into (map (fn [{token-name :name value :resolved-value}]
-                         {:value (dm/str token-option-prefix token-name)
-                          :label (easing-token-label token-name value)}))
-                  easing-tokens)
-
-            (and (some? easing-token)
-                 (not-any? #(= easing-token (:name %)) easing-tokens))
-            (conj {:value (dm/str token-option-prefix easing-token)
-                   :label (easing-token-label easing-token nil)
-                   :disabled true})))]
+        ;; the editor of a custom easing, unless a token gives it
+        easing-editor?
+        (and (nil? easing-token)
+             (or (deref custom-open*)
+                 (contains? #{:custom-bezier :custom-spring} (easing/easing-entry easing))))]
 
     [:div {:class (stl/css :animation-item)}
      [:> prototype-pill* {:title (animation-label animation)
@@ -575,11 +517,22 @@
                              :on-change on-duration}]]
 
         [:> animation-row* {:label (tr "workspace.animation.easing")}
-         [:& select {:default-value easing-option
-                     :options easing-options
-                     :dropdown-class (stl/css :easing-dropdown)
-                     :disabled locked?
-                     :on-change on-easing}]]
+         [:> easing-menu* {:easing easing
+                           :auto-easing (if (= :out direction) :ease-in :ease-out)
+                           :token easing-token
+                           :tokens easing-tokens
+                           :is-custom easing-editor?
+                           :disabled locked?
+                           :on-change on-easing
+                           :on-token on-easing-token
+                           :on-custom on-easing-custom}]]
+
+        (when easing-editor?
+          [:> easing-curve-editor* {:easing easing
+                                    :disabled locked?
+                                    :on-change on-easing
+                                    :on-change-start on-change-start
+                                    :on-change-end on-change-end}])
 
         (case type
           :fade

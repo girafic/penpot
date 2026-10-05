@@ -63,11 +63,21 @@
   &:hover {
     background-color: var(--color-background-quaternary);
   }
+
+  &:disabled {
+    cursor: default;
+    color: var(--color-foreground-secondary);
+    background-color: var(--color-background-tertiary);
+  }
 }
 
 .preset-name {
   flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
   text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .preset-arrow {
@@ -216,4 +226,55 @@
   @include t.use-typography("body-small");
 
   color: var(--color-foreground-secondary);
+}
+
+// The easing of a preset animation or a style entry (`easing-menu*`)
+
+// wider than its field when it needs to, over the labels on its left
+.field-list {
+  inset-inline: auto 0;
+  min-inline-size: 100%;
+  inline-size: max-content;
+  max-inline-size: px2rem(260);
+
+  &.up {
+    inset-block: auto calc(#{$sz-32} + var(--sp-xs));
+  }
+}
+
+.field-separator {
+  block-size: $b-1;
+  margin-block: var(--sp-xs);
+  background-color: var(--panel-border-color);
+  list-style: none;
+}
+
+.token-icon {
+  flex-shrink: 0;
+  color: var(--color-foreground-secondary);
+}
+
+.token-name {
+  flex-shrink: 0;
+}
+
+.token-value {
+  min-inline-size: 0;
+  margin-inline-start: auto;
+  padding-inline-start: var(--sp-s);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-foreground-secondary);
+}
+
+.field-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+
+  &.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+  }
 }

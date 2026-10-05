@@ -42,6 +42,7 @@
 (defn- preset-label
   [id]
   (case id
+    :auto             (tr "workspace.animation.easing-auto")
     :hold             (tr "workspace.animation.easing-hold")
     :linear           (tr "workspace.options.interaction-easing-linear")
     :ease             (tr "workspace.options.interaction-easing-ease")
@@ -583,3 +584,217 @@
                            :on-click on-reverse}]])
 
       [:> token-row* {:shape-id shape-id :keyframe keyframe}]]]))
+
+;; THE EASING OF A PRESET ANIMATION OR OF A STYLE ENTRY
+
+(def ^:private field-curve-items
+  (-> [{:id :auto}]
+      (into cta/bezier-presets)
+      (conj {:id :custom-bezier})))
+
+(defn easing-entry
+  "The menu entry of the easing `easing` of a preset animation or of an
+  entry of an animation style: `:auto` (nil, the easing of its type and
+  direction), a named curve or spring, `:custom-bezier` or
+  `:custom-spring`."
+  [easing]
+  (cond
+    (nil? easing)
+    :auto
+
+    (= :spring (:type easing))
+    (or (some #(when (= (spring-params easing) (spring-params (:easing %))) (:id %))
+              cta/spring-presets)
+        :custom-spring)
+
+    :else
+    (or (some #(when (= (cta/easing-curve easing) (cta/easing-curve (:easing %))) (:id %))
+              cta/bezier-presets)
+        :custom-bezier)))
+
+(defn- token-value-text
+  "The resolved value of an easing token as its entry shows it: the four
+  numbers of a cubic bezier, or the stiffness, damping and mass of a
+  spring."
+  [value]
+  (cond
+    (sequential? value) (str/join ", " (map #(mth/precision % 2) value))
+    (map? value)        (str/join ", " (keep value [:stiffness :damping :mass]))
+    :else               (some-> value str)))
+
+(mf/defc easing-item*
+  "An entry of `easing-menu*`: the drawing of `easing` (none for the
+  custom ones) and the name of the entry `entry`."
+  {::mf/private true}
+  [{:keys [entry easing selected on-click]}]
+  [:> dropdown-menu-item* {:class (stl/css-case :preset-item true
+                                                :selected selected)
+                           :data-entry (name entry)
+                           :on-click on-click}
+   (if (some? easing)
+     [:> curve-icon* {:easing easing}]
+     [:span {:class (stl/css :curve-icon)}])
+   [:span (preset-label entry)]])
+
+(mf/defc easing-menu*
+  "The easing `easing` of a preset animation or of an entry of an
+  animation style, as Figma's: a menu of the named curves and springs,
+  each drawn, then the easing `tokens` (`[{:name :resolved-value}]`,
+  `token` the name of the one bound). `auto-easing` is the easing Auto
+  plays. A curve or spring picked goes to `on-change` (nil: Auto), a
+  token to `on-token`, and Custom bezier and Custom spring call
+  `on-custom` too, to open their editor (see `easing-curve-editor*`);
+  while it is open (`is-custom`) the menu names the easing custom, even
+  when it is still one of the named ones."
+  [{:keys [easing auto-easing token tokens is-custom disabled on-change on-token on-custom]}]
+  (let [open*     (mf/use-state false)
+        open?     (deref open*)
+        up*       (mf/use-state false)
+        up?       (deref up*)
+        button    (mf/use-ref nil)
+        entry     (cond
+                    (some? token)              nil
+                    (and is-custom (= :spring (:type easing))) :custom-spring
+                    is-custom                  :custom-bezier
+                    :else                      (easing-entry easing))
+        shown     (if (= :auto entry) auto-easing easing)
+        bound     (when (some? token) (d/seek #(= token (:name %)) tokens))
+
+        on-toggle
+        (mf/use-fn
+         (mf/deps disabled)
+         (fn [event]
+           (dom/stop-propagation event)
+           (when-not disabled
+             ;; up when there is no room under it
+             (when-let [node (mf/ref-val button)]
+               (let [rect  (dom/get-bounding-rect node)
+                     below (- (.-innerHeight js/window) (:bottom rect))]
+                 (reset! up* (and (< below 340) (> (:top rect) below)))))
+             (swap! open* not))))
+
+        on-close
+        (mf/use-fn #(reset! open* false))
+
+        on-item-click
+        (mf/use-fn
+         (mf/deps easing on-change on-token on-custom)
+         (fn [event]
+           (reset! open* false)
+           (let [node  (dom/get-current-target event)
+                 token (dom/get-data node "token")
+                 id    (some-> (dom/get-data node "entry") keyword)]
+             (cond
+               (some? token)
+               (on-token token)
+
+               (= :auto id)
+               (on-change nil)
+
+               (= :custom-bezier id)
+               (do (on-change {:type :bezier
+                               :curve (or (when-not (= :spring (:type easing))
+                                            (cta/easing-curve (or easing auto-easing)))
+                                          [0.25 0.1 0.25 1.0])})
+                   (when on-custom (on-custom)))
+
+               (= :custom-spring id)
+               (do (on-change (if (= :spring (:type easing))
+                                easing
+                                (:easing (second cta/spring-presets))))
+                   (when on-custom (on-custom)))
+
+               :else
+               (when-let [preset (d/seek #(= id (:id %))
+                                         (concat cta/bezier-presets cta/spring-presets))]
+                 (on-change (:easing preset)))))))]
+
+    [:div {:class (stl/css :preset-menu)}
+     [:button {:type "button"
+               :ref button
+               :class (stl/css :preset-button)
+               :disabled disabled
+               :aria-haspopup "menu"
+               :aria-expanded open?
+               :on-click on-toggle}
+      (if (some? token)
+        [:> i/icon* {:icon-id i/tokens :size "s" :class (stl/css :token-icon)}]
+        [:> curve-icon* {:easing shown}])
+      [:span {:class (stl/css :preset-name)}
+       (if (some? token) token (preset-label entry))]
+      [:> i/icon* {:icon-id i/arrow-down :size "s" :class (stl/css :preset-arrow)}]]
+
+     [:> dropdown-menu* {:show open?
+                         :on-close on-close
+                         :class (stl/css-case :preset-list true
+                                              :field-list true
+                                              :up up?)}
+      (for [{:keys [id easing]} field-curve-items]
+        [:> easing-item* {:key (name id)
+                          :entry id
+                          ;; Auto is drawn as what it plays
+                          :easing (if (= :auto id) auto-easing easing)
+                          :selected (= id entry)
+                          :on-click on-item-click}])
+      [:li {:key "springs" :class (stl/css :field-separator) :role "separator"}]
+      (for [{:keys [id easing]} spring-menu]
+        [:> easing-item* {:key (name id)
+                          :entry id
+                          :easing easing
+                          :selected (= id entry)
+                          :on-click on-item-click}])
+      (when (or (seq tokens) (and (some? token) (nil? bound)))
+        [:li {:key "tokens" :class (stl/css :field-separator) :role "separator"}])
+      (for [{token-name :name value :resolved-value}
+            (cond-> (vec tokens)
+              (and (some? token) (nil? bound)) (conj {:name token}))]
+        [:> dropdown-menu-item* {:key (dm/str "token-" token-name)
+                                 :class (stl/css-case :preset-item true
+                                                      :selected (= token token-name))
+                                 :data-token token-name
+                                 :on-click on-item-click}
+         [:> i/icon* {:icon-id i/tokens :size "s" :class (stl/css :token-icon)}]
+         [:span {:class (stl/css :token-name)} token-name]
+         (when-let [text (token-value-text value)]
+           [:span {:class (stl/css :token-value) :title text} text])])]]))
+
+(mf/defc easing-curve-editor*
+  "The editor of the custom `easing` (a cubic bezier or a spring) of a
+  preset animation or of a style entry, under its menu (see
+  `easing-menu*`): the graph with its handles to drag, then the values
+  of the curve or the bounce of the spring. A new easing goes to
+  `on-change`; a drag starts with `on-change-start` and ends with
+  `on-change-end`."
+  [{:keys [easing disabled on-change on-change-start on-change-end]}]
+  (let [spring? (= :spring (:type easing))
+        curve   (cta/easing-curve easing)
+
+        on-curve-change
+        (mf/use-fn
+         (mf/deps on-change)
+         (fn [curve]
+           (on-change {:type :bezier :curve curve})))
+
+        on-reverse
+        (mf/use-fn
+         (mf/deps curve on-curve-change)
+         (fn []
+           (when curve
+             (on-curve-change (reverse-curve curve)))))]
+
+    [:div {:class (stl/css-case :field-editor true
+                                :disabled disabled)}
+     [:> curve-graph* {:easing easing
+                       :is-hold false
+                       :on-curve-change on-curve-change
+                       :on-spring-change on-change
+                       :on-drag-start on-change-start
+                       :on-drag-end on-change-end}]
+     (if spring?
+       [:> spring-bounce* {:spring easing :on-change on-change}]
+       [:div {:class (stl/css :values-row)}
+        [:> curve-values* {:curve curve :on-change on-curve-change}]
+        [:> icon-button* {:variant "ghost"
+                          :icon i/flip-horizontal
+                          :aria-label (tr "workspace.animation.easing-reverse")
+                          :on-click on-reverse}]])]))

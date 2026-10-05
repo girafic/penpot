@@ -7940,12 +7940,6 @@ msgstr "Offset Y"
 msgid "workspace.animation.easing-auto"
 msgstr "Auto"
 
-msgid "workspace.animation.easing-overshoot"
-msgstr "Overshoot"
-
-msgid "workspace.animation.easing-custom"
-msgstr "Custom"
-
 msgid "workspace.animation.easing-curve"
 msgstr "Curve"
 

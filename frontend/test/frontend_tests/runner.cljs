@@ -104,6 +104,7 @@
    [frontend-tests.ui.comments-position-modifier-test]
    [frontend-tests.ui.ds-controls-numeric-input-test]
    [frontend-tests.ui.dynamic-modifiers-test]
+   [frontend-tests.ui.easing-menu-test]
    [frontend-tests.ui.export-animation-test]
    [frontend-tests.ui.exports-menu-test]
    [frontend-tests.ui.gradient-handlers-test]
@@ -239,6 +240,7 @@
    'frontend-tests.ui.comments-position-modifier-test
    'frontend-tests.ui.ds-controls-numeric-input-test
    'frontend-tests.ui.dynamic-modifiers-test
+   'frontend-tests.ui.easing-menu-test
    'frontend-tests.ui.export-animation-test
    'frontend-tests.ui.exports-menu-test
    'frontend-tests.ui.gradient-handlers-test
