@@ -340,6 +340,44 @@ function compressorName(name) {
   out.set(textEncoder.encode(name), 1);
   return out;
 }
+function cstring(s) {
+  return concat([textEncoder.encode(s), u8(0)]);
+}
+
+// The auxiliary type of an alpha plane (MPEG-B part 7, CICP).
+const ALPHA_URN = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha";
+
+// The units of one AV1 sequence with its codec configuration and pixel
+// information.
+function av1Sequence(samples, what) {
+  const units = samples.map((s) => ({
+    data: withoutTemporalDelimiters(s.data),
+    key: !!s.key,
+    duration: s.duration,
+  }));
+  const sequenceHeader = sequenceHeaderObu(units[0].data);
+  if (!units[0].key || sequenceHeader === null) {
+    throw new Error(`The first AVIF ${what} sample must be a key frame with a sequence header`);
+  }
+  const { info, av1C } = codecConfiguration(sequenceHeader);
+  const channels = info.monochrome ? 1 : 3;
+  const pixi = fullBox("pixi", 0, 0, u8(channels), ...Array(channels).fill(u8(info.bitDepth)));
+  const sizes = units.map((s) => s.data.length);
+  return { units, av1C, pixi, sizes, length: sizes.reduce((n, v) => n + v, 0) };
+}
+
+function timeToSample(units) {
+  const durations = [];
+  for (const unit of units) {
+    const last = durations[durations.length - 1];
+    if (last && last.delta === unit.duration) {
+      last.count++;
+    } else {
+      durations.push({ count: 1, delta: unit.duration });
+    }
+  }
+  return fullBox("stts", 0, 0, u32(durations.length), ...durations.flatMap((d) => [u32(d.count), u32(d.delta)]));
+}
 
 /**
  * Build an animated AVIF file from AV1 temporal units.
@@ -349,29 +387,25 @@ function compressorName(name) {
  * - `samples`: `{data, key, duration}` in presentation order; `data` is a
  *   temporal unit, `key` marks key frames and `duration` is in ticks. The
  *   first sample must be a key frame with the sequence header.
+ * - `alphaSamples`: optional samples of the alpha plane, one for each
+ *   sample, as `samples`; the luma of their frames is the opacity. They
+ *   are stored as an auxiliary alpha item and track.
  * - `loop`: repeat forever instead of playing once.
  * - `color`: optional CICP `{primaries, transfer, matrix, fullRange}` of
  *   the frames, stored as an nclx `colr` property.
  *
  * Returns a Uint8Array.
  */
-export function writeSequence({ width, height, timescale, samples, loop, color }) {
+export function writeSequence({ width, height, timescale, samples, alphaSamples, loop, color }) {
   if (!samples || samples.length === 0) {
     throw new Error("An AVIF sequence needs at least one sample");
   }
-  const units = samples.map((s) => ({
-    data: withoutTemporalDelimiters(s.data),
-    key: !!s.key,
-    duration: s.duration,
-  }));
-  const sequenceHeader = sequenceHeaderObu(units[0].data);
-  if (!units[0].key || sequenceHeader === null) {
-    throw new Error("The first AVIF sample must be a key frame with a sequence header");
+  const image = av1Sequence(samples, "color");
+  const alpha = alphaSamples ? av1Sequence(alphaSamples, "alpha") : null;
+  if (alpha && alpha.units.length !== image.units.length) {
+    throw new Error("An AVIF alpha sequence needs one sample for each color sample");
   }
 
-  const { info, av1C } = codecConfiguration(sequenceHeader);
-  const channels = info.monochrome ? 1 : 3;
-  const pixi = fullBox("pixi", 0, 0, u8(channels), ...Array(channels).fill(u8(info.bitDepth)));
   const colr = color
     ? box(
         "colr",
@@ -384,8 +418,7 @@ export function writeSequence({ width, height, timescale, samples, loop, color }
     : null;
   const optional = colr ? [colr] : [];
 
-  const sizes = units.map((s) => s.data.length);
-  const total = units.reduce((n, s) => n + s.duration, 0);
+  const total = image.units.reduce((n, s) => n + s.duration, 0);
 
   const ftyp = box(
     "ftyp",
@@ -399,7 +432,22 @@ export function writeSequence({ width, height, timescale, samples, loop, color }
     fourcc("miaf"),
   );
 
-  // The primary item is the first sample, stored once in the mdat.
+  // Item properties, numbered from 1: av1C, ispe, pixi and colr of the
+  // color item, then av1C, pixi and auxC of the alpha item.
+  const properties = [image.av1C, fullBox("ispe", 0, 0, u32(width), u32(height)), image.pixi, ...optional];
+  const imageAssociations = [0x81, 0x02, 0x03, ...(colr ? [0x04] : [])];
+  const alphaIndex = properties.length + 1;
+  if (alpha) {
+    properties.push(alpha.av1C, alpha.pixi, fullBox("auxC", 0, 0, cstring(ALPHA_URN)));
+  }
+  const alphaAssociations = [0x80 | alphaIndex, 0x02, alphaIndex + 1, alphaIndex + 2];
+
+  const itemInfo = (id, name) => fullBox("infe", 2, 0, u16(id), u16(0), fourcc("av01"), cstring(name));
+  const itemLocation = (id, offset, length) => [u16(id), u16(0), u16(1), u32(offset), u32(length)];
+  const itemProperties = (id, associations) => [u16(id), u8(associations.length), ...associations.map(u8)];
+
+  // The primary item is the first color sample, the alpha item the first
+  // alpha sample, each stored once in the mdat.
   const meta = (dataStart) =>
     fullBox(
       "meta",
@@ -407,47 +455,107 @@ export function writeSequence({ width, height, timescale, samples, loop, color }
       0,
       handler("pict"),
       fullBox("pitm", 0, 0, u16(1)),
-      fullBox("iloc", 0, 0, u8(0x44), u8(0), u16(1), u16(1), u16(0), u16(1), u32(dataStart), u32(sizes[0])),
-      fullBox("iinf", 0, 0, u16(1), fullBox("infe", 2, 0, u16(1), u16(0), fourcc("av01"), fourcc("Color"), u8(0))),
+      fullBox(
+        "iloc",
+        0,
+        0,
+        u8(0x44),
+        u8(0),
+        u16(alpha ? 2 : 1),
+        ...itemLocation(1, dataStart, image.sizes[0]),
+        ...(alpha ? itemLocation(2, dataStart + image.length, alpha.sizes[0]) : []),
+      ),
+      fullBox("iinf", 0, 0, u16(alpha ? 2 : 1), itemInfo(1, "Color"), ...(alpha ? [itemInfo(2, "Alpha")] : [])),
+      ...(alpha ? [fullBox("iref", 0, 0, box("auxl", u16(2), u16(1), u16(1)))] : []),
       box(
         "iprp",
-        box("ipco", av1C, fullBox("ispe", 0, 0, u32(width), u32(height)), pixi, ...optional),
-        fullBox("ipma", 0, 0, u32(1), u16(1), u8(3 + optional.length), u8(0x81), u8(0x02), u8(0x03), ...(colr ? [u8(0x04)] : [])),
+        box("ipco", ...properties),
+        fullBox(
+          "ipma",
+          0,
+          0,
+          u32(alpha ? 2 : 1),
+          ...itemProperties(1, imageAssociations),
+          ...(alpha ? itemProperties(2, alphaAssociations) : []),
+        ),
       ),
     );
 
   const trackDuration = loop ? INDEFINITE : u64(total);
 
-  const durations = [];
-  for (const unit of units) {
-    const last = durations[durations.length - 1];
-    if (last && last.delta === unit.duration) {
-      last.count++;
-    } else {
-      durations.push({ count: 1, delta: unit.duration });
-    }
-  }
-  const syncSamples = units.flatMap((s, i) => (s.key ? [i + 1] : []));
+  const sampleEntry = (sequence, extra) =>
+    box(
+      "av01",
+      new Uint8Array(6),
+      u16(1), // data_reference_index
+      new Uint8Array(16),
+      u16(width),
+      u16(height),
+      u32(0x00480000),
+      u32(0x00480000),
+      u32(0),
+      u16(1), // frame_count
+      compressorName("AOM Coding"),
+      u16(0x0018),
+      u16(0xffff),
+      sequence.av1C,
+      // ccst: intra prediction used, up to 15 references per picture
+      fullBox("ccst", 0, 0, u32(0x7c000000)),
+      ...extra,
+    );
 
-  const sampleEntry = box(
-    "av01",
-    new Uint8Array(6),
-    u16(1), // data_reference_index
-    new Uint8Array(16),
-    u16(width),
-    u16(height),
-    u32(0x00480000),
-    u32(0x00480000),
-    u32(0),
-    u16(1), // frame_count
-    compressorName("AOM Coding"),
-    u16(0x0018),
-    u16(0xffff),
-    av1C,
-    // ccst: intra prediction used, up to 15 references per picture
-    fullBox("ccst", 0, 0, u32(0x7c000000)),
-    ...optional,
-  );
+  // The alpha track refers to the color track (track_ID 1) as auxiliary.
+  const track = (id, sequence, offset) => {
+    const aux = id !== 1;
+    const syncSamples = sequence.units.flatMap((s, i) => (s.key ? [i + 1] : []));
+    return box(
+      "trak",
+      fullBox(
+        "tkhd",
+        1,
+        1, // track enabled
+        u64(0),
+        u64(0),
+        u32(id),
+        u32(0),
+        trackDuration,
+        new Uint8Array(16),
+        ...UNITY_MATRIX,
+        u32(width * 0x10000),
+        u32(height * 0x10000),
+      ),
+      ...(aux ? [box("tref", box("auxl", u32(1)))] : []),
+      // One edit covering all samples; flag 1 repeats it.
+      box("edts", fullBox("elst", 1, loop ? 1 : 0, u32(1), u64(total), u64(0), u16(1), u16(0))),
+      box(
+        "mdia",
+        fullBox("mdhd", 1, 0, u64(0), u64(0), u32(timescale), u64(total), u16(0x55c4), u16(0)),
+        handler(aux ? "auxv" : "pict"),
+        box(
+          "minf",
+          fullBox("vmhd", 0, 1, new Uint8Array(8)),
+          box("dinf", fullBox("dref", 0, 0, u32(1), fullBox("url ", 0, 1))),
+          box(
+            "stbl",
+            fullBox(
+              "stsd",
+              0,
+              0,
+              u32(1),
+              sampleEntry(sequence, aux ? [fullBox("auxi", 0, 0, cstring(ALPHA_URN))] : optional),
+            ),
+            timeToSample(sequence.units),
+            ...(syncSamples.length === sequence.units.length
+              ? []
+              : [fullBox("stss", 0, 0, u32(syncSamples.length), ...syncSamples.map(u32))]),
+            fullBox("stsc", 0, 0, u32(1), u32(1), u32(sequence.units.length), u32(1)),
+            fullBox("stsz", 0, 0, u32(0), u32(sequence.units.length), ...sequence.sizes.map(u32)),
+            fullBox("stco", 0, 0, u32(1), u32(offset)),
+          ),
+        ),
+      ),
+    );
+  };
 
   const moov = (dataStart) =>
     box(
@@ -465,53 +573,16 @@ export function writeSequence({ width, height, timescale, samples, loop, color }
         new Uint8Array(10),
         ...UNITY_MATRIX,
         new Uint8Array(24),
-        u32(2), // next_track_ID
+        u32(alpha ? 3 : 2), // next_track_ID
       ),
-      box(
-        "trak",
-        fullBox(
-          "tkhd",
-          1,
-          1, // track enabled
-          u64(0),
-          u64(0),
-          u32(1), // track_ID
-          u32(0),
-          trackDuration,
-          new Uint8Array(16),
-          ...UNITY_MATRIX,
-          u32(width * 0x10000),
-          u32(height * 0x10000),
-        ),
-        // One edit covering all samples; flag 1 repeats it.
-        box("edts", fullBox("elst", 1, loop ? 1 : 0, u32(1), u64(total), u64(0), u16(1), u16(0))),
-        box(
-          "mdia",
-          fullBox("mdhd", 1, 0, u64(0), u64(0), u32(timescale), u64(total), u16(0x55c4), u16(0)),
-          handler("pict"),
-          box(
-            "minf",
-            fullBox("vmhd", 0, 1, new Uint8Array(8)),
-            box("dinf", fullBox("dref", 0, 0, u32(1), fullBox("url ", 0, 1))),
-            box(
-              "stbl",
-              fullBox("stsd", 0, 0, u32(1), sampleEntry),
-              fullBox("stts", 0, 0, u32(durations.length), ...durations.flatMap((d) => [u32(d.count), u32(d.delta)])),
-              ...(syncSamples.length === units.length
-                ? []
-                : [fullBox("stss", 0, 0, u32(syncSamples.length), ...syncSamples.map(u32))]),
-              fullBox("stsc", 0, 0, u32(1), u32(1), u32(units.length), u32(1)),
-              fullBox("stsz", 0, 0, u32(0), u32(units.length), ...sizes.map(u32)),
-              fullBox("stco", 0, 0, u32(1), u32(dataStart)),
-            ),
-          ),
-        ),
-      ),
+      track(1, image, dataStart),
+      ...(alpha ? [track(2, alpha, dataStart + image.length)] : []),
     );
 
   // Offsets are fixed-size fields, so the sizes do not depend on them.
+  // The mdat holds the color samples, then the alpha samples.
   const dataStart = ftyp.length + meta(0).length + moov(0).length + 8;
-  const mdatSize = 8 + sizes.reduce((n, v) => n + v, 0);
+  const mdatSize = 8 + image.length + (alpha ? alpha.length : 0);
 
   return concat([
     ftyp,
@@ -519,6 +590,7 @@ export function writeSequence({ width, height, timescale, samples, loop, color }
     moov(dataStart),
     u32(mdatSize),
     fourcc("mdat"),
-    ...units.map((s) => s.data),
+    ...image.units.map((s) => s.data),
+    ...(alpha ? alpha.units.map((s) => s.data) : []),
   ]);
 }

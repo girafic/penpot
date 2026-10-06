@@ -229,6 +229,35 @@
           (aset out (+ y-sz u-sz oi) (clamp8 V)))))
     {:data out :width w :height h :format "I420"}))
 
+(defn alpha->i420
+  "The alpha of interleaved RGBA as an I420 picture for an AVIF alpha
+  track: the opacity as full range luma (0 transparent, 255 opaque) and
+  neutral chroma, padded as `rgba->i420`."
+  [data width height]
+  (let [src-w (int width)
+        src-h (int height)
+        w     (even-dim src-w)
+        h     (even-dim src-h)
+        y-sz  (* w h)
+        out   (js/Uint8Array. (+ y-sz (* 2 (quot w 2) (quot h 2))))]
+    (.fill out 128 y-sz)
+    (dotimes [y h]
+      (dotimes [x w]
+        (let [sx (min x (dec src-w))
+              sy (min y (dec src-h))]
+          (aset out (+ (* y w) x) (aget data (+ 3 (* 4 (+ (* sy src-w) sx))))))))
+    {:data out :width w :height h :format "I420"}))
+
+(defn- transparent?
+  "Whether a pixel of the RGBA `data` is not fully opaque."
+  [data]
+  (let [len (alength data)]
+    (loop [i 3]
+      (cond
+        (>= i len) false
+        (< (aget data i) 255) true
+        :else (recur (+ i 4))))))
+
 (defn board-backdrop
   [board]
   (clr/hex->rgb (or (-> board :fills first :fill-color) "#ffffff")))
@@ -362,6 +391,27 @@
   "`av1-color-space` as CICP codes, for the AVIF `colr` box: BT.709
   primaries, the sRGB transfer, the BT.709 matrix, limited range."
   #js {:primaries 1 :transfer 13 :matrix 1 :fullRange false})
+
+(def ^:private av1-alpha-color-space
+  "The color space of `alpha->i420` output: full range, so the luma is
+  the opacity as it is."
+  #js {:primaries "bt709" :transfer "iec61966-2-1" :matrix "bt709" :fullRange true})
+
+(def ^:private alpha-quantizer
+  "The AV1 quantizer (0-63) of the alpha plane: low, so the edges stay
+  sharp and the opaque parts opaque. The plane is mostly flat, which
+  costs little."
+  4)
+
+(defn- alpha-config
+  "Promise of the encoder config of the alpha plane: `config` with a
+  fixed quantizer (`alpha-quantizer`) where the encoder takes one, else
+  as it is."
+  [^js video-encoder config]
+  (let [quantized (js/Object.assign #js {} config #js {:bitrateMode "quantizer"})]
+    (-> (.isConfigSupported video-encoder quantized)
+        (.then (fn [^js support]
+                 (if (.-supported support) quantized config))))))
 
 (defn- default-av1
   []
@@ -788,11 +838,65 @@
                           (fn [] (resolve (encoder-ready encoder)))
                           #js {:once true})))))
 
+(defn- av1-encoder
+  "A VideoEncoder for `config` that collects its temporal units as AVIF
+  samples in `chunks` and keeps an error in `failure`."
+  [video-encoder config chunks failure]
+  (let [^js encoder
+        (new video-encoder
+             #js {:output (fn [^js chunk _]
+                            (let [data (js/Uint8Array. (.-byteLength chunk))]
+                              (.copyTo chunk data)
+                              (swap! chunks conj #js {:data data
+                                                      :key (= "key" (.-type chunk))
+                                                      :duration 1})))
+                  :error (fn [cause] (reset! failure cause))})]
+    (.configure encoder config)
+    encoder))
+
+(defn- encode-i420!
+  "Encode the I420 picture `yuv` as frame `i`, a key frame every second,
+  with the AV1 `quantizer` if given."
+  [video-frame ^js encoder yuv color-space i fps quantizer]
+  (let [step (/ 1000000.0 fps)
+        ^js frame
+        (new video-frame (:data yuv)
+             #js {:format (:format yuv)
+                  :codedWidth (:width yuv)
+                  :codedHeight (:height yuv)
+                  :timestamp (mth/round (* i step))
+                  :duration (mth/round step)
+                  :colorSpace color-space})]
+    (try
+      (.encode encoder frame (let [key? (zero? (mod i fps))]
+                               (if (some? quantizer)
+                                 #js {:keyFrame key? :av1 #js {:quantizer quantizer}}
+                                 #js {:keyFrame key?})))
+      (finally
+        (.close frame)))))
+
+(defn- find-transparency
+  "Promise of whether a pixel of `frames` is not fully opaque. Gives the
+  page its turn (`yield`) after each frame it looks through."
+  [frames yield cancelled?]
+  (reduce (fn [p image]
+            (.then p (fn [found?]
+                       (or found?
+                           (do (throw-if-cancelled cancelled?)
+                               (let [found? (transparent? (first (image-parts image)))]
+                                 (.then (yield) (constantly found?))))))))
+          (js/Promise.resolve false)
+          frames))
+
 (defn encode-avif
   "Encode decoded frames as an animated AVIF: AV1 through WebCodecs, in
   the container `avif.js` writes. Returns a promise of `{:status
-  :ok|:unavailable :blob ...}`."
-  [{:keys [frames fps bitrate loop? cancelled? on-progress flatten-bg yield]
+  :ok|:unavailable :blob ...}`.
+
+  Frames are composited onto `flatten-bg`. With `keep-alpha?`, frames
+  with a pixel that is not fully opaque keep their transparency instead:
+  a second encoder writes their alpha plane to an alpha track."
+  [{:keys [frames fps bitrate loop? cancelled? on-progress flatten-bg keep-alpha? yield]
     :as params}]
   (let [yield (or yield default-yield)
         {:keys [video-encoder video-frame write-avif]}
@@ -815,73 +919,82 @@
              (fn [^js support]
                (if-not (.-supported support)
                  {:status :unavailable}
-                 (let [chunks  (atom [])
-                       failure (atom nil)
-                       n       (count frames)
-                       step    (/ 1000000.0 fps)
+                 (-> (if keep-alpha?
+                       (find-transparency frames yield cancelled?)
+                       (js/Promise.resolve false))
+                     (.then
+                      (fn [alpha?]
+                        (if alpha?
+                          (.then (alpha-config video-encoder config) #(vector true %))
+                          [false nil])))
+                     (.then
+                      (fn [[alpha? ^js alpha-settings]]
+                        (let [chunks       (atom [])
+                              alpha-chunks (atom [])
+                              failure      (atom nil)
+                              n            (count frames)
+                              flatten-bg   (when-not alpha? flatten-bg)
 
-                       ^js encoder
-                       (new video-encoder
-                            #js {:output (fn [^js chunk _]
-                                           (let [data (js/Uint8Array. (.-byteLength chunk))]
-                                             (.copyTo chunk data)
-                                             (swap! chunks conj #js {:data data
-                                                                     :key (= "key" (.-type chunk))
-                                                                     :duration 1})))
-                                 :error (fn [cause] (reset! failure cause))})
+                              ^js encoder
+                              (av1-encoder video-encoder config chunks failure)
 
-                       check!
-                       (fn []
-                         (throw-if-cancelled cancelled?)
-                         (when-let [cause @failure]
-                           (throw cause)))]
-                   (.configure encoder config)
-                   (-> (reduce
-                        (fn [p [i image]]
-                          (-> p
-                              (.then (fn [_] (check!) (encoder-ready encoder)))
+                              ^js alpha-encoder
+                              (when alpha?
+                                (av1-encoder video-encoder alpha-settings alpha-chunks failure))
+
+                              quantizer
+                              (when (= "quantizer" (some-> alpha-settings .-bitrateMode))
+                                alpha-quantizer)
+
+                              encoders (filterv some? [encoder alpha-encoder])
+
+                              check!
+                              (fn []
+                                (throw-if-cancelled cancelled?)
+                                (when-let [cause @failure]
+                                  (throw cause)))]
+                          (-> (reduce
+                               (fn [p [i image]]
+                                 (-> p
+                                     (.then (fn [_]
+                                              (check!)
+                                              (js/Promise.all (into-array (map encoder-ready encoders)))))
+                                     (.then
+                                      (fn [_]
+                                        (check!)
+                                        (let [pixels (frame-pixels image flatten-bg)
+                                              [data pw ph] ((juxt :data :width :height) pixels)]
+                                          (encode-i420! video-frame encoder (rgba->i420 data pw ph)
+                                                        av1-color-space i fps nil)
+                                          (when alpha-encoder
+                                            (encode-i420! video-frame alpha-encoder (alpha->i420 data pw ph)
+                                                          av1-alpha-color-space i fps quantizer)))
+                                        (when on-progress
+                                          (on-progress (inc i) n))
+                                        (yield)))))
+                               (js/Promise.resolve nil)
+                               (map-indexed vector frames))
+                              (.then (fn [_] (js/Promise.all (into-array (map #(.flush ^js %) encoders)))))
                               (.then
                                (fn [_]
                                  (check!)
-                                 (let [pixels (frame-pixels image flatten-bg)
-                                       yuv    (rgba->i420 (:data pixels)
-                                                          (:width pixels)
-                                                          (:height pixels))
-                                       ^js frame
-                                       (new video-frame (:data yuv)
-                                            #js {:format (:format yuv)
-                                                 :codedWidth (:width yuv)
-                                                 :codedHeight (:height yuv)
-                                                 :timestamp (mth/round (* i step))
-                                                 :duration (mth/round step)
-                                                 :colorSpace av1-color-space})]
-                                   (try
-                                     (.encode encoder frame #js {:keyFrame (zero? (mod i fps))})
-                                     (finally
-                                       (.close frame)))
-                                   (when on-progress
-                                     (on-progress (inc i) n))
-                                   (yield))))))
-                        (js/Promise.resolve nil)
-                        (map-indexed vector frames))
-                       (.then (fn [_] (.flush encoder)))
-                       (.then
-                        (fn [_]
-                          (check!)
-                          (let [bytes (write-avif #js {:width w
-                                                       :height h
-                                                       :timescale fps
-                                                       :loop (boolean loop?)
-                                                       :color av1-cicp
-                                                       :samples (into-array @chunks)})]
-                            {:status :ok
-                             :blob (js/Blob. #js [bytes] #js {:type "image/avif"})
-                             :mtype "image/avif"
-                             :ext ".avif"})))
-                       (.finally
-                        (fn []
-                          (when (not= "closed" (.-state encoder))
-                            (.close encoder))))))))))))))
+                                 (let [bytes (write-avif #js {:width w
+                                                              :height h
+                                                              :timescale fps
+                                                              :loop (boolean loop?)
+                                                              :color av1-cicp
+                                                              :samples (into-array @chunks)
+                                                              :alphaSamples (when alpha?
+                                                                              (into-array @alpha-chunks))})]
+                                   {:status :ok
+                                    :blob (js/Blob. #js [bytes] #js {:type "image/avif"})
+                                    :mtype "image/avif"
+                                    :ext ".avif"})))
+                              (.finally
+                               (fn []
+                                 (doseq [^js e encoders]
+                                   (when (not= "closed" (.-state e))
+                                     (.close e))))))))))))))))))
 
 (defn- safe-filename
   [name ext]
@@ -1362,6 +1475,7 @@
                                             :bitrate (avif-bitrate bw bh quality)
                                             :loop? (boolean loop?)
                                             :flatten-bg (board-backdrop board)
+                                            :keep-alpha? true
                                             :cancelled? cancelled?
                                             :on-progress encoding
                                             :yield yield})

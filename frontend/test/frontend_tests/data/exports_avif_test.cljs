@@ -39,6 +39,14 @@
   [^js bytes pos]
   (.getUint32 (js/DataView. (.-buffer bytes) (.-byteOffset bytes)) pos))
 
+(defn- u16-at
+  [^js bytes pos]
+  (.getUint16 (js/DataView. (.-buffer bytes) (.-byteOffset bytes)) pos))
+
+(defn- text-at
+  [^js bytes pos length]
+  (.decode (js/TextDecoder.) (.subarray bytes pos (+ pos length))))
+
 (defn- top-level-boxes
   [^js bytes]
   (loop [pos 0 acc []]
@@ -47,27 +55,38 @@
       (let [size (u32-at bytes pos)]
         (recur (+ pos size) (conj acc {:type (fourcc-at bytes (+ pos 4)) :pos pos :size size}))))))
 
-(defn- box-pos
-  "Offset of the first box of `type`, searching the bytes for its fourcc."
+(defn- box-positions
+  "Offsets of the boxes of `type`, searching the bytes for its fourcc
+  after a size that fits."
   [^js bytes type]
-  (loop [pos 4]
-    (cond
-      (> (+ pos 4) (.-length bytes)) nil
-      (= type (fourcc-at bytes pos)) (- pos 4)
-      :else (recur (inc pos)))))
+  (filterv #(and (= type (fourcc-at bytes (+ % 4)))
+                 (<= 8 (u32-at bytes %) (- (.-length bytes) %)))
+           (range 0 (- (.-length bytes) 7))))
+
+(defn- box-pos
+  "Offset of the first box of `type`."
+  [^js bytes type]
+  (first (box-positions bytes type)))
+
+(defn- ->samples
+  [samples]
+  (into-array
+   (map (fn [[unit key?]]
+          #js {:data (u8 unit) :key key? :duration 1})
+        samples)))
 
 (defn- write
-  [samples loop?]
-  (avif/writeSequence
-   #js {:width 320
-        :height 180
-        :timescale 30
-        :loop loop?
-        :color #js {:primaries 1 :transfer 13 :matrix 6 :fullRange true}
-        :samples (into-array
-                  (map (fn [[unit key?]]
-                         #js {:data (u8 unit) :key key? :duration 1})
-                       samples))}))
+  ([samples loop?]
+   (write samples nil loop?))
+  ([samples alpha-samples loop?]
+   (avif/writeSequence
+    #js {:width 320
+         :height 180
+         :timescale 30
+         :loop loop?
+         :color #js {:primaries 1 :transfer 13 :matrix 6 :fullRange true}
+         :samples (->samples samples)
+         :alphaSamples (some-> alpha-samples ->samples)})))
 
 (t/deftest parse-sequence-header-reads-the-color-config
   (let [info (avif/parseSequenceHeader (u8 (drop 2 sequence-header)))]
@@ -121,6 +140,62 @@
   (t/is (thrown? js/Error (write [[delta-unit false]] true)))
   (t/is (thrown? js/Error (write [[delta-unit true]] true))))
 
+;; The frames of the alpha plane differ from the color frames.
+(def ^:private alpha-frame-obu [0x32 0x02 0xdd 0xee])
+
+(def ^:private alpha-key-unit (concat temporal-delimiter sequence-header alpha-frame-obu))
+(def ^:private alpha-delta-unit (concat temporal-delimiter alpha-frame-obu))
+
+(def ^:private alpha-urn "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha")
+
+(t/deftest write-sequence-adds-an-alpha-item-and-track
+  (let [bytes      (write [[key-unit true] [delta-unit false]]
+                          [[alpha-key-unit true] [alpha-delta-unit false]]
+                          true)
+        boxes      (top-level-boxes bytes)
+        data       (+ (:pos (last boxes)) 8)
+        color-len  (+ (count sequence-header) (* 2 (count frame-obu)))
+        alpha-data (+ data color-len)
+        iloc       (box-pos bytes "iloc")
+        ipma       (box-pos bytes "ipma")
+        auxl       (box-positions bytes "auxl")]
+    (t/is (= ["ftyp" "meta" "moov" "mdat"] (mapv :type boxes)))
+    (t/is (= (.-length bytes) (reduce + (map :size boxes))))
+    (t/testing "the mdat holds the color samples, then the alpha samples"
+      (t/is (= (vec (concat sequence-header frame-obu frame-obu
+                            sequence-header alpha-frame-obu alpha-frame-obu))
+               (->vec (.subarray bytes data)))))
+    (t/testing "the alpha item is the first alpha sample"
+      (t/is (= 2 (u16-at bytes (+ iloc 14))))
+      (t/is (= [1 data] [(u16-at bytes (+ iloc 16)) (u32-at bytes (+ iloc 22))]))
+      (t/is (= [2 alpha-data (+ (count sequence-header) (count alpha-frame-obu))]
+               [(u16-at bytes (+ iloc 30)) (u32-at bytes (+ iloc 36)) (u32-at bytes (+ iloc 40))])))
+    (t/testing "the alpha item is an auxiliary image of the color item"
+      (t/is (= "Alpha" (text-at bytes (+ (second (box-positions bytes "infe")) 20) 5)))
+      (t/is (= [2 1 1] (mapv #(u16-at bytes (+ (first auxl) %)) [8 10 12])))
+      (t/is (= alpha-urn (text-at bytes (+ (box-pos bytes "auxC") 12) (count alpha-urn))))
+      (t/testing "with its own av1C (essential), the ispe, its pixi and the auxC"
+        (t/is (= 2 (u32-at bytes (+ ipma 12))))
+        (t/is (= [1 4 0x81 2 3 4 0 2 4 0x85 2 6 7]
+                 (->vec (.subarray bytes (+ ipma 17) (+ ipma 30)))))))
+    (t/testing "the alpha track is an auxiliary track of the color track"
+      (let [[_ tkhd]  (box-positions bytes "tkhd")
+            [_ stco]  (box-positions bytes "stco")
+            mvhd      (box-pos bytes "mvhd")]
+        (t/is (= 2 (count (box-positions bytes "trak"))))
+        (t/is (= 2 (u32-at bytes (+ tkhd 28))))
+        (t/is (= 3 (u32-at bytes (+ mvhd 116))) "next_track_ID")
+        (t/is (= 1 (u32-at bytes (+ (second auxl) 8))))
+        (t/is (= ["pict" "pict" "auxv"]
+                 (mapv #(fourcc-at bytes (+ % 16)) (box-positions bytes "hdlr"))))
+        (t/is (= alpha-urn (text-at bytes (+ (box-pos bytes "auxi") 12) (count alpha-urn))))
+        (t/is (= alpha-data (u32-at bytes (+ stco 16))))))))
+
+(t/deftest write-sequence-needs-an-alpha-sample-for-each-sample
+  (t/is (thrown? js/Error (write [[key-unit true] [delta-unit false]]
+                                 [[alpha-key-unit true]]
+                                 true))))
+
 ;; A VideoEncoder that turns every frame into one temporal unit.
 (defn- fake-encoder
   [calls supported?]
@@ -133,6 +208,8 @@
                                 (let [key? (.-keyFrame opts)
                                       unit (u8 (if key? key-unit delta-unit))]
                                   (swap! calls conj [:encode key?])
+                                  (when-let [av1 (.-av1 opts)]
+                                    (swap! calls conj [:quantizer (.-quantizer ^js av1)]))
                                   (output #js {:type (if key? "key" "delta")
                                                :byteLength (.-length unit)
                                                :copyTo (fn [dest] (.set dest unit))}
@@ -229,6 +306,81 @@
                    (t/is (= 3 @turns) "one turn a frame")))
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally (fn [] (done) nil))))))
+
+(defn- opaque-frames
+  [n]
+  (vec (repeatedly n #(hash-map :data (.fill (js/Uint8ClampedArray. (* 4 4 4)) 255)
+                                :width 4
+                                :height 4))))
+
+;; Records the range and the first luma byte of each frame.
+(defn- luma-frame
+  [calls]
+  (fn [^js data ^js init]
+    (swap! calls conj [:frame (.. init -colorSpace -fullRange) (aget data 0)])
+    #js {:close (fn [])}))
+
+(t/deftest encode-avif-keeps-transparency-in-an-alpha-track
+  (t/async
+    done
+    (let [calls   (atom [])
+          written (atom nil)]
+      (-> (dea/encode-avif {:frames (frames 3)
+                            :fps 2
+                            :bitrate 1000
+                            :flatten-bg [255 255 255]
+                            :keep-alpha? true
+                            :video-encoder (fake-encoder calls true)
+                            :video-frame (luma-frame calls)
+                            :write-avif (fn [^js opts]
+                                          (reset! written opts)
+                                          (avif/writeSequence opts))})
+          (.then (fn [result]
+                   (t/is (= :ok (:status result)))
+                   (t/is (= 2 (count (filter #(= :configure (first %)) @calls))) "an encoder for the alpha")
+                   (t/is (= [[:quantizer 4] [:quantizer 4] [:quantizer 4]]
+                            (filterv #(= :quantizer (first %)) @calls))
+                         "the alpha at a fixed quantizer")
+                   (t/testing "the color is not composited, the alpha is full range luma"
+                     (t/is (= (vec (take 6 (cycle [[:frame false 16] [:frame true 0]])))
+                              (filterv #(= :frame (first %)) @calls))))
+                   (t/is (= 2 (count (filter #(= [:close] %) @calls))))
+                   (let [^js opts @written]
+                     (t/is (= 3 (.-length (.-samples opts))))
+                     (t/is (= 3 (.-length (.-alphaSamples opts)))))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (fn [] (done) nil))))))
+
+(t/deftest encode-avif-leaves-out-the-alpha-of-opaque-frames
+  (t/async
+    done
+    (let [calls   (atom [])
+          written (atom nil)]
+      (-> (dea/encode-avif {:frames (opaque-frames 3)
+                            :fps 2
+                            :bitrate 1000
+                            :flatten-bg [255 255 255]
+                            :keep-alpha? true
+                            :video-encoder (fake-encoder calls true)
+                            :video-frame (luma-frame calls)
+                            :write-avif (fn [^js opts]
+                                          (reset! written opts)
+                                          (avif/writeSequence opts))})
+          (.then (fn [result]
+                   (t/is (= :ok (:status result)))
+                   (t/is (= 1 (count (filter #(= :configure (first %)) @calls))))
+                   (t/is (= 3 (count (filter #(= :frame (first %)) @calls))))
+                   (t/is (nil? (.-alphaSamples ^js @written)))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (fn [] (done) nil))))))
+
+(t/deftest alpha-to-i420-keeps-the-opacity-as-luma
+  (let [data (js/Uint8ClampedArray. #js [9 9 9 0, 9 9 9 128, 9 9 9 255])
+        yuv  (dea/alpha->i420 data 3 1)]
+    (t/is (= [4 2 "I420"] [(:width yuv) (:height yuv) (:format yuv)]))
+    (t/testing "padded with the last column and row, neutral chroma"
+      (t/is (= [0 128 255 255, 0 128 255 255, 128 128, 128 128]
+               (->vec (:data yuv)))))))
 
 (t/deftest avif-is-estimated-below-video
   (let [avif-size (dea/estimated-size :avif 1920 1080 :high 2000 30)
