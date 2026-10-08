@@ -45,6 +45,7 @@
    [app.main.ui.hooks.resize :as r]
    [app.main.ui.workspace.sidebar.options.menus.motion :as motion]
    [app.main.ui.workspace.timeline.easing :refer [easing-editor*]]
+   [app.main.ui.workspace.timeline.keys :as tlk]
    [app.main.ui.workspace.timeline.lanes :as lanes]
    [app.util.audio :as audio]
    [app.util.dom :as dom]
@@ -54,7 +55,6 @@
    [app.util.keyboard :as kbd]
    [app.util.motion-labels :as labels]
    [app.util.shape-icon :as usi]
-   [app.util.text.ui :as txu]
    [app.util.theme :as theme]
    [cuerdas.core :as str]
    [goog.events :as events]
@@ -166,14 +166,6 @@
   (let [fitted (if (< zoom 1) (/ duration (max zoom 0.0001)) duration)]
     (* (max zoom 1) (/ span fitted))))
 
-(defn- editing-text?
-  "Whether a key event comes from a text field, which keeps its keys."
-  [event]
-  (let [target (dom/get-target event)]
-    (or (contains? #{"INPUT" "TEXTAREA"} (dom/get-tag-name target))
-        (some-> target .-isContentEditable)
-        (txu/some-text-editor-content? target))))
-
 (defn- select-on-press
   "Select the layer of a pressed bar or block: on its own or, with Shift,
   added to (or taken out of) the selection, like a click on its label."
@@ -193,20 +185,6 @@
   [event shape-id selected]
   (when-not (contains? selected shape-id)
     (st/emit! (dws/select-shape shape-id (kbd/shift? event)))))
-
-(defn- plain-space?
-  "Unmodified Space, outside a text field. Key repeat does not count, so
-  holding Space does not toggle on every repeat."
-  [^js event]
-  (let [native (if (fn? (.-getBrowserEvent event))
-                 (.getBrowserEvent event)
-                 event)]
-    (and (or (kbd/space? event) (kbd/space? native))
-         (not (.-repeat native))
-         (not (editing-text? event))
-         (not (kbd/shift? event))
-         (not (kbd/alt? event))
-         (not (kbd/mod? event)))))
 
 (defn- pointer->time
   "Translate a pointer event over a time axis at the client `rect` into a
@@ -2751,7 +2729,7 @@
         (mf/use-fn
          (mf/deps selected-kfs selected-clip selected-anims selection timeline)
          (fn [event]
-           (when-not (editing-text? event)
+           (when-not (tlk/editing-text? event)
              (when-let [action (dock-key-action event selected-kfs selected-clip selected-anims)]
                (dom/prevent-default event)
                (dom/stop-propagation event)
@@ -2917,7 +2895,7 @@
     (mf/with-effect []
       (let [on-paste
             (fn [^js event]
-              (when-not (editing-text? event)
+              (when-not (tlk/editing-text? event)
                 (when-let [clip (some-> (.getBrowserEvent event)
                                         (.-clipboardData)
                                         (.getData "text/plain")
@@ -2976,7 +2954,7 @@
     (mf/with-effect [(some? timeline)]
       (when (some? timeline)
         (letfn [(on-key [event]
-                  (when (plain-space? event)
+                  (when (tlk/plain-space? event)
                     (dom/prevent-default event)
                     (dom/stop-propagation event)
                     (audio/unlock!)

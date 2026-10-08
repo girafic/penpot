@@ -98,6 +98,7 @@
    [frontend-tests.tokens.style-dictionary-test]
    [frontend-tests.tokens.token-errors-test]
    [frontend-tests.tokens.workspace-tokens-remap-test]
+   [frontend-tests.ui.board-play-test]
    [frontend-tests.ui.check-updates-test]
    [frontend-tests.ui.colorpicker-token-set-order-test]
    [frontend-tests.ui.comments-clustering-test]
@@ -234,6 +235,7 @@
    'frontend-tests.tokens.style-dictionary-test
    'frontend-tests.tokens.token-errors-test
    'frontend-tests.tokens.workspace-tokens-remap-test
+   'frontend-tests.ui.board-play-test
    'frontend-tests.ui.check-updates-test
    'frontend-tests.ui.colorpicker-token-set-order-test
    'frontend-tests.ui.comments-clustering-test

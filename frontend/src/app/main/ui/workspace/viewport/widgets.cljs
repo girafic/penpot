@@ -26,6 +26,7 @@
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.hooks :as hooks]
+   [app.main.ui.workspace.timeline.keys :as tlk]
    [app.main.ui.workspace.viewport.rulers :as rulers]
    [app.main.ui.workspace.viewport.utils :as vwu]
    [app.util.audio :as audio]
@@ -35,6 +36,7 @@
    [app.util.keyboard :as kbd]
    [app.util.timers :as ts]
    [cuerdas.core :as str]
+   [goog.events :as events]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -326,6 +328,22 @@
              (dm/str (:id frame) " - " (:name frame))
              (:name frame))]])])))
 
+(def space-tap-ms
+  "How long, at most, Space is held for a tap that plays an animated
+  board (see `frame-titles*`); held longer, it only pans."
+  300)
+
+(defn space-tap-board
+  "The board a tap on Space plays or stops out of the timeline: the one
+  playing on the canvas, else the one animated board selected (its title
+  shows the play button); nil when none."
+  [selected animated playing]
+  (or playing
+      (when (= 1 (count selected))
+        (let [id (first selected)]
+          (when (contains? animated id)
+            id)))))
+
 (mf/defc frame-titles*
   {::mf/wrap [mf/memo]}
   [{:keys [objects zoom selected focus is-show-artboard-names
@@ -343,7 +361,36 @@
 
         motion?        (features/use-feature "animation/v1")
         animated       (mf/deref ref:animated-boards)
-        playing        (mf/deref ref:playing-board)]
+        playing        (mf/deref ref:playing-board)
+        tap-board      (when motion? (space-tap-board selected animated playing))]
+
+    ;; Out of the timeline, a tap on Space plays the board or stops it as
+    ;; the button in its title does; held, or with the pointer pressed
+    ;; meanwhile, Space still pans. In the timeline Space plays itself.
+    (mf/with-effect [tap-board]
+      (when (some? tap-board)
+        (let [down-at (volatile! nil)
+              keys
+              [(events/listen js/window "keydown"
+                              (fn [event]
+                                (when (tlk/plain-space? event)
+                                  (vreset! down-at (js/Date.now))))
+                              true)
+               (events/listen js/window "pointerdown"
+                              (fn [_] (vreset! down-at nil))
+                              true)
+               (events/listen js/window "keyup"
+                              (fn [event]
+                                (when-let [at @down-at]
+                                  (vreset! down-at nil)
+                                  (when (and (tlk/space? event)
+                                             (< (- (js/Date.now) at) space-tap-ms)
+                                             (not (tlk/editing-text? event))
+                                             (not (dwa/motion-mode? @st/state)))
+                                    (audio/unlock!)
+                                    (st/emit! (dwa/toggle-board-play tap-board)))))
+                              true)]]
+          #(run! events/unlistenByKey keys))))
 
     [:g.frame-titles.blurrable
      (for [{:keys [id parent-id] :as shape} shapes]
