@@ -42,13 +42,9 @@
   "How often, at most, the tab tells the workspace its progress."
   100)
 
-(def frame-interval-ms
-  "How often, at most, the tab shows the picture it took last."
-  250)
-
 (defonce ^:private live
   ;; {:channel :release :cancel :cancel-requested? :result :preview-url
-  ;;  :frame-url :last-frame :listeners :last-post :start-wasm :save-wait-ms}
+  ;;  :draw-frame :last-frame :listeners :last-post :start-wasm :save-wait-ms}
   (atom nil))
 
 (defn- post!
@@ -194,26 +190,38 @@
       (post! {:type :cancelled}))))
 
 (defn- frame-shown
-  "The picture of the board the export took last is at `url`."
-  [url]
+  "The export took a picture of the board at `scale`: the page shows it
+  (see `watch-frames!`)."
+  [scale]
   (ptk/reify ::frame-shown
     ptk/UpdateEvent
     (update [_ state]
       (cond-> state
         (= :exporting (:status (tab-state state)))
-        (assoc-in [:export-tab :frame-url] url)))))
+        (assoc-in [:export-tab :frame-scale] scale)))))
 
 (defn- show-frame!
-  "Show the picture `bytes` (PNG) the export took, at most every
-  `frame-interval-ms`: an object URL of it, the one before revoked."
-  [bytes]
-  (let [now (js/Date.now)]
-    (when (> (- now (or (:last-frame @live) 0)) frame-interval-ms)
-      (let [url (wapi/create-uri (js/Blob. #js [bytes] #js {:type "image/png"}))
-            old (:frame-url @live)]
-        (swap! live assoc :last-frame now :frame-url url)
-        (st/emit! (frame-shown url))
-        (when old (wapi/revoke-uri old))))))
+  "Hand the picture `image` the export took, covering `rect` at `scale`
+  (see `dea/run-export`), to the page that draws it (see
+  `watch-frames!`), each of them: the page plays them as they come."
+  [image rect scale]
+  (let [frame [image rect scale]
+        [old] (swap-vals! live assoc :last-frame frame)]
+    (when-let [draw (:draw-frame old)]
+      (apply draw frame))
+    ;; the first one
+    (when (nil? (:last-frame old))
+      (st/emit! (frame-shown scale)))))
+
+(defn watch-frames!
+  "`draw` (`[image rect scale]`) hears the pictures the export takes,
+  first the one it took last; returns the function that stops it."
+  [draw]
+  (let [[_ {:keys [last-frame]}] (swap-vals! live assoc :draw-frame draw)]
+    (when last-frame
+      (apply draw last-frame))
+    (fn []
+      (swap! live #(cond-> % (identical? draw (:draw-frame %)) (dissoc :draw-frame))))))
 
 (defn- run-job
   "A promise of the export of the job `params` on `page` (see
@@ -461,10 +469,9 @@
 
     ptk/EffectEvent
     (effect [_ _ _]
-      (when-let [{:keys [channel release listeners preview-url frame-url]} @live]
+      (when-let [{:keys [channel release listeners preview-url]} @live]
         (when listeners (listeners))
         (when channel ((:close channel)))
         (when release (p/resolve release nil))
-        (when preview-url (wapi/revoke-uri preview-url))
-        (when frame-url (wapi/revoke-uri frame-url)))
+        (when preview-url (wapi/revoke-uri preview-url)))
       (reset! live nil))))

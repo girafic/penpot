@@ -41,14 +41,27 @@
     (".gif" ".avif" ".svg") :image
     :none))
 
+(defn frame-view
+  "How the export tab shows the pictures the export takes of the board,
+  its `selrect`, at `scale`: `{:width :height :selrect}`, on a canvas of
+  the board at that scale (see `frame-canvas*`); nil without them."
+  [selrect scale]
+  (let [{:keys [width height]} selrect]
+    (when (and (number? scale) (number? width) (number? height) (pos? width) (pos? height))
+      {:width (mth/round (* scale width))
+       :height (mth/round (* scale height))
+       :selrect selrect})))
+
 (defn page-state
   "What the export tab shows of its state `tab`: `{:text :percent :notes
   :preview :actions}`, the text as `[key & args]` for `tr`, the percent
   while it exports, the notes of the file (see `dea/export-notes`), how
   to play it (`{:kind :url :name}`, see `preview-kind`) and its buttons
   (`:cancel` `:download` `:close`)."
-  [{:keys [status params page percent cancelling? result error frame-url]}]
-  (let [board  (get-in page [:objects (:board-id params) :name])
+  [{:keys [status params page percent cancelling? result error frame-scale]}]
+  (let [shape  (get-in page [:objects (:board-id params)])
+        board  (:name shape)
+        frame  (frame-view (:selrect shape) frame-scale)
         format (some-> (:format params) name str/upper)]
     (case status
       ;; before the tab starts its job
@@ -58,8 +71,8 @@
       :exporting (cond-> {:text ["export-animation.exporting" (or board "") (or format "")]
                           :percent (or percent 0)
                           :actions (if cancelling? [] [:cancel])}
-                   ;; the picture it took last
-                   (some? frame-url) (assoc :frame frame-url))
+                   ;; the pictures it takes, as it takes them
+                   (some? frame) (assoc :frame frame))
       :done      {:text ["export-animation.done"
                          (str (:name result) (:ext result))
                          (size-label (:size result))]
@@ -73,6 +86,49 @@
       :duplicate {:text ["export-animation.duplicate"] :actions [:close]}
       :error     {:text (job/error-text error) :actions [:close]}
       {:text ["export-animation.invalid"] :actions [:close]})))
+
+(defn- image-data
+  [image]
+  (if (instance? js/ImageData image)
+    image
+    (js/ImageData. (:data image) (:width image) (:height image))))
+
+(mf/defc frame-canvas*
+  "The pictures the export takes, as it takes them (see
+  `dat/watch-frames!`), cut to the board, its `selrect`, on a canvas of
+  `width` × `height` pixels: one drawing for each refresh of the screen."
+  [{:keys [width height selrect]}]
+  (let [canvas-ref (mf/use-ref nil)
+        bx         (:x selrect)
+        by         (:y selrect)]
+    (mf/with-effect [width height bx by]
+      (let [pending (atom nil)
+            raf     (atom nil)
+            draw    (fn []
+                      (reset! raf nil)
+                      (when-let [[image rect scale] @pending]
+                        (when-let [^js canvas (mf/ref-val canvas-ref)]
+                          (let [ctx     (.getContext canvas "2d")
+                                [ox oy] (if rect
+                                          (dea/board-offset {:x bx :y by} rect scale)
+                                          [0 0])]
+                            (.clearRect ctx 0 0 width height)
+                            (.putImageData ctx (image-data image) (- ox) (- oy))))))
+            stop    (dat/watch-frames!
+                     (fn [image rect scale]
+                       (reset! pending [image rect scale])
+                       (when-not @raf
+                         (reset! raf (js/requestAnimationFrame draw)))))]
+        (fn []
+          (stop)
+          (some-> @raf js/cancelAnimationFrame))))
+
+    [:canvas {:ref canvas-ref
+              :class (stl/css :preview)
+              :width width
+              :height height
+              :role "img"
+              :aria-label (tr "export-animation.frame-alt")}]))
 
 (mf/defc export-page*
   "The export tab, for the job of the query params `query`."
@@ -98,11 +154,9 @@
       [:p {:class (stl/css :status) :role "status" :aria-live "polite"}
        (apply tr (:text view))]
 
-      (when-let [frame (:frame view)]
+      (when-let [{:keys [width height selrect]} (:frame view)]
         [:div {:class (stl/css :preview-frame)}
-         [:img {:class (stl/css :preview)
-                :src frame
-                :alt (tr "export-animation.frame-alt")}]])
+         [:> frame-canvas* {:width width :height height :selrect selrect}]])
 
       (when-let [percent (:percent view)]
         [:div {:class (stl/css :progress)}

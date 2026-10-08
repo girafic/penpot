@@ -21,6 +21,22 @@
    [potok.v2.core :as ptk]
    [promesa.core :as p]))
 
+(t/deftest the-pictures-of-the-frames-show-the-board
+  (let [selrect {:x 100 :y 200 :width 400 :height 200}]
+    (t/is (= {:width 800 :height 400 :selrect selrect} (uea/frame-view selrect 2))
+          "a canvas of the board at the scale of the export")
+    (t/is (nil? (uea/frame-view nil 1)))
+    (t/is (nil? (uea/frame-view selrect nil)))
+    (t/testing "where the board starts in a picture larger than it"
+      (t/is (= [0 24] (dea/board-offset selrect {:x 100 :y 188 :width 400 :height 224} 2))))
+    (t/testing "while it exports"
+      (let [board (uuid/next)]
+        (t/is (= {:width 400 :height 200 :selrect selrect}
+                 (:frame (uea/page-state {:status :exporting
+                                          :params {:board-id board :format :avif}
+                                          :page {:objects {board {:name "Spin" :selrect selrect}}}
+                                          :frame-scale 1}))))))))
+
 (t/deftest the-page-shows-where-the-export-is
   (let [board  (uuid/next)
         tab    {:params {:board-id board :format :mp4}
@@ -451,29 +467,36 @@
   (t/is (= "blob:file" (get-in @st/state [:export-tab :result :url])))
   (st/emit! (dat/finalize)))
 
-(t/deftest the-tab-shows-the-frame-it-took-last
+(t/deftest the-tab-shows-each-frame-it-takes
   (t/async
     done
     (let [{:keys [bundle] :as scene} (job-scene :saved :params {:format :mp4 :wasm? true})
-          made    (atom [])
-          running (p/deferred)]
+          running (p/deferred)
+          take!   (atom nil)
+          drawn   (atom [])]
       (mock/with-mocks
         {dv/load-bundle (fn [_] (rx/of bundle))
          dea/run-export (fn [{:keys [on-frame]} _]
-                          ;; two frames at once: one picture shown
-                          (on-frame (js/Uint8Array. #js [137 80 78 71]))
-                          (on-frame (js/Uint8Array. #js [137 80 78 71]))
-                          {:promise running :cancel (fn [])})
-         wapi/create-uri (mock/stub (fn [_] (let [url (str "blob:frame-" (count @made))] (swap! made conj url) url)))
-         wapi/revoke-uri (mock/stub mock/revoke-uri-mock)}
+                          (reset! take! on-frame)
+                          {:promise running :cancel (fn [])})}
         (fn [done']
           (start! (assoc scene :opts {:start-wasm (fn [_ _] (js/Promise.resolve nil))}))
-          (-> (thj/wait-until #(some? (get-in @st/state [:export-tab :frame-url])))
+          (-> (thj/wait-until #(some? @take!))
               (.then (fn [_]
-                       (t/is (= ["blob:frame-0"] @made) "at most every frame-interval-ms")
-                       (t/is (= "blob:frame-0" (:frame (uea/page-state (:export-tab @st/state)))))
-                       (st/emit! (dat/finalize))
-                       (t/is (= ["blob:frame-0"] @mock/revoked-uris) "gone with the tab")))
+                       (@take! :frame-0 {:x 0 :y -10 :width 100 :height 70} 2)
+                       (t/is (= 2 (get-in @st/state [:export-tab :frame-scale])) "the page shows them")
+                       ;; the page draws the one taken last, then each one
+                       (let [stop (dat/watch-frames! #(swap! drawn conj %&))]
+                         (@take! :frame-1 nil 2)
+                         (@take! :frame-2 nil 2)
+                         (stop)
+                         (@take! :frame-3 nil 2))
+                       (t/is (= [[:frame-0 {:x 0 :y -10 :width 100 :height 70} 2]
+                                 [:frame-1 nil 2]
+                                 [:frame-2 nil 2]]
+                                @drawn)
+                             "none after it stops")
+                       (st/emit! (dat/finalize))))
               (.catch fail!)
               (.finally #(end! scene done'))))
         done))))

@@ -1297,44 +1297,52 @@
                (reject err)))
        (set! (.-src img) url)))))
 
-(defn align-frames
-  "`frames` (ImageData or `{:data :width :height}`, RGBA) on one canvas,
-  each where it is: the picture of a board that does not clip its
-  layers covers what they cover, which changes as they move, and a video
-  keeps one size. `rects` are the boxes each covers on the canvas (see
-  `wasm.api/get-shape-extrect`), at `scale`; the canvas covers them all,
-  the rest transparent. Without them, the pictures keep their top left
-  corner. `frames` as they are when they all cover the same box."
-  [frames rects scale]
-  (let [parts (mapv image-parts frames)
-        sizes (into #{} (map (fn [[_ w h]] [w h])) parts)
-        rects (when (and (= (count rects) (count frames)) (every? some? rects)) rects)]
-    (if (and (<= (count sizes) 1) (or (empty? rects) (apply = (map (juxt :x :y) rects))))
-      frames
-      (let [x0      (if rects (reduce min (map :x rects)) 0)
-            y0      (if rects (reduce min (map :y rects)) 0)
-            offsets (mapv (fn [i]
-                            (if rects
-                              [(mth/round (* scale (- (:x (nth rects i)) x0)))
-                               (mth/round (* scale (- (:y (nth rects i)) y0)))]
-                              [0 0]))
-                          (range (count frames)))
-            width   (reduce max (map (fn [[_ w] [ox]] (+ ox w)) parts offsets))
-            height  (reduce max (map (fn [[_ _ h] [_ oy]] (+ oy h)) parts offsets))]
-        (mapv (fn [[data w h] [ox oy]]
-                (let [out (js/Uint8ClampedArray. (* 4 width height))]
-                  (dotimes [row h]
-                    (let [from (* 4 row w)]
-                      (.set out (.subarray data from (+ from (* 4 w)))
-                            (* 4 (+ ox (* width (+ oy row)))))))
-                  {:data out :width width :height height}))
-              parts
-              offsets)))))
+(defn board-offset
+  "Where the board, its `selrect`, starts in a picture that covers `rect`
+  (see `wasm.api/get-shape-extrect`) at `scale`: `[x y]` in pixels."
+  [selrect rect scale]
+  [(mth/round (* scale (- (:x selrect) (:x rect))))
+   (mth/round (* scale (- (:y selrect) (:y rect))))])
+
+(defn crop-frames
+  "`frames` (ImageData or `{:data :width :height}`, RGBA) cut to the
+  board, its `selrect` at `scale`: the export shows the board only. A
+  board that does not clip its layers is pictured as far as they reach,
+  which changes as they move. `rects` are the boxes each picture covers
+  on the canvas (see `wasm.api/get-shape-extrect`), at `scale`; where a
+  picture does not cover the board, it is transparent. Without them,
+  `frames` as they are."
+  [frames rects selrect scale]
+  (if-not (and selrect
+               (= (count rects) (count frames))
+               (every? some? rects))
+    frames
+    (let [width  (mth/round (* scale (:width selrect)))
+          height (mth/round (* scale (:height selrect)))]
+      (mapv (fn [image rect]
+              (let [[data w h] (image-parts image)
+                    [ox oy]    (board-offset selrect rect scale)]
+                (if (and (zero? ox) (zero? oy) (= w width) (= h height))
+                  image
+                  (let [out (js/Uint8ClampedArray. (* 4 width height))
+                        x0  (max 0 ox)
+                        x1  (min w (+ ox width))]
+                    (when (< x0 x1)
+                      (dotimes [row height]
+                        (let [sy (+ oy row)]
+                          (when (and (>= sy 0) (< sy h))
+                            (.set out
+                                  (.subarray data (* 4 (+ x0 (* sy w))) (* 4 (+ x1 (* sy w))))
+                                  (* 4 (+ (- x0 ox) (* row width))))))))
+                    {:data out :width width :height height}))))
+            frames
+            rects))))
 
 (defn- capture-frames
-  "The pictures of the board `board-id` at `times`, decoded, on one
-  canvas (see `align-frames`); `on-frame` hears each as it is taken (the
-  PNG bytes)."
+  "The pictures of the board `board-id` at `times`, decoded, cut to the
+  board (see `crop-frames`); `on-frame` hears each as it is decoded: the
+  picture, the box it covers (nil without a way to know it) and its
+  scale."
   [{:keys [objects timeline board-id times bridge cancelled? on-progress on-frame
            yield decode scale]}]
   (let [decode   (or decode decode-png)
@@ -1354,10 +1362,10 @@
                                                        {:bridge bridge :scale (or scale 1)})
                            ;; where the picture is, as posed
                            rect  (when extrect (extrect board-id))]
-                       (when on-frame
-                         (on-frame bytes))
                        (-> (decode bytes)
                            (.then (fn [image]
+                                    (when on-frame
+                                      (on-frame image rect (or scale 1)))
                                     (when on-progress
                                       (on-progress (inc (count acc)) n))
                                     (-> (yield)
@@ -1365,7 +1373,10 @@
             (js/Promise.resolve [])
             times)))
         (.then (fn [shots]
-                 (align-frames (mapv first shots) (mapv second shots) (or scale 1)))))))
+                 (crop-frames (mapv first shots)
+                              (mapv second shots)
+                              (:selrect (get objects board-id))
+                              (or scale 1)))))))
 
 (defn- download-blob
   [name ext mtype blob]
@@ -1570,7 +1581,7 @@
   "A promise of the markup export (`:svg` `:lottie` `:dotlottie`) of
   `opts` (see `run-export`): the pictures of its layers one at a time,
   so it stops between them when `cancelled?`."
-  [{:keys [page files board-id format bridge time yield on-progress on-frame cancelled?]}]
+  [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled?]}]
   (let [tl       (dwa/board-export-timeline page files board-id)
         objects  (:objects page)
         board    (get objects board-id)
@@ -1587,7 +1598,13 @@
         pictures (phase-progress on-progress :layers)]
     ;; the board at its end, where what comes in has come
     (when on-frame
-      (on-frame (render-shape-at-time objects tl board-id (:duration tl) {:bridge bridge})))
+      (let [bytes (render-shape-at-time objects tl board-id (:duration tl) {:bridge bridge})
+            rect  (when-let [extrect (:get-shape-extrect bridge)]
+                    (extrect board-id))]
+        (-> ((or decode decode-png) bytes)
+            (.then #(on-frame % rect 1))
+            ;; only a picture to look at
+            (.catch (constantly nil)))))
     (p/let [images (collect-layer-images
                     objects tl
                     {:bridge bridge
@@ -1620,9 +1637,10 @@
   `:yield` and the GIF encoder (`:gif-encoder` `:quantize`
   `:apply-palette`, see `encode-gif`); `:on-progress` hears `{:phase
   :current :total}` (see `progress-percent`), `:on-frame` the pictures
-  of the board as they are taken (the PNG bytes: each frame of a raster
-  export, once the board at its end for a markup export). Neither reads
-  nor changes the workspace.
+  of the board as they are taken (decoded, as `:decode` does, with the
+  box each covers and its scale: each frame of a raster export, once
+  the board at its end for a markup export). Neither reads nor changes
+  the workspace.
 
   `{:promise :cancel}`: the promise of the result, `{:status :ok :blob
   :name :ext :mtype}` with what `export-notes` tells, `{:status

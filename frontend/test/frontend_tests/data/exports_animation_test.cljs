@@ -711,29 +711,29 @@
   [{:keys [data width]} x y]
   (aget data (* 4 (+ x (* width y)))))
 
-(t/deftest the-frames-of-a-board-that-does-not-clip-share-one-canvas
+(t/deftest the-frames-of-a-board-are-cut-to-the-board
   ;; a moon over the edge of a board that does not clip: the picture of
-  ;; the board grows and moves as it goes round
-  (let [frames [(frame 4 3 10) (frame 4 5 20) (frame 5 3 30)]
-        rects  [{:x 0 :y 0} {:x 0 :y -2} {:x -1 :y 0}]
-        out    (dea/align-frames frames rects 1)]
-    (t/is (= #{[5 5]} (into #{} (map (juxt :width :height)) out)) "one size, covering all of them")
-    (t/is (= [0 10 0] [(pixel (nth out 0) 0 2) (pixel (nth out 0) 1 2) (pixel (nth out 0) 1 1)])
-          "each where it is, the rest transparent")
-    (t/is (= [20 0] [(pixel (nth out 1) 1 0) (pixel (nth out 1) 0 0)]))
-    (t/is (= 30 (pixel (nth out 2) 0 2))))
+  ;; the board grows and moves as it goes round, the export does not
+  (let [board  {:x 0 :y 0 :width 4 :height 3}
+        frames [(frame 4 3 10) (frame 4 5 20) (frame 5 3 30) (frame 2 2 40)]
+        rects  [{:x 0 :y 0} {:x 0 :y -2} {:x -1 :y 0} {:x 1 :y 1}]
+        out    (dea/crop-frames frames rects board 1)]
+    (t/is (= #{[4 3]} (into #{} (map (juxt :width :height)) out)) "the size of the board")
+    (t/is (identical? (first frames) (first out)) "a picture of the board as it is")
+    (t/is (= [20 20] [(pixel (nth out 1) 0 0) (pixel (nth out 1) 3 2)]) "what is above it cut")
+    (t/is (= [30 30] [(pixel (nth out 2) 0 0) (pixel (nth out 2) 3 2)]) "what is left of it cut")
+    (t/is (= [0 40 40 0] [(pixel (nth out 3) 0 0) (pixel (nth out 3) 1 1)
+                          (pixel (nth out 3) 2 2) (pixel (nth out 3) 3 2)])
+          "where the picture does not reach, transparent"))
   (t/testing "at a scale"
-    (let [out (dea/align-frames [(frame 2 2 1) (frame 2 2 2)] [{:x 0 :y 0} {:x 1 :y 0}] 2)]
-      (t/is (= [4 2] ((juxt :width :height) (first out))))
-      (t/is (= [0 2] [(pixel (second out) 0 0) (pixel (second out) 2 0)]))))
-  (t/testing "the same box each time: the frames as they are"
-    (let [frames [(frame 2 2 1) (frame 2 2 2)]]
-      (t/is (identical? frames (dea/align-frames frames [{:x 3 :y 4} {:x 3 :y 4}] 1)))
-      (t/is (identical? frames (dea/align-frames frames [nil nil] 1)) "without boxes")
-      (t/is (= [] (dea/align-frames [] [] 1)))))
-  (t/testing "without boxes, other sizes: from the top left corner"
-    (let [out (dea/align-frames [(frame 2 2 1) (frame 3 1 2)] [nil nil] 1)]
-      (t/is (= #{[3 2]} (into #{} (map (juxt :width :height)) out))))))
+    (let [[out] (dea/crop-frames [(frame 4 4 7)] [{:x 0 :y -0.5}] {:x 0 :y 0 :width 2 :height 1} 2)]
+      (t/is (= [4 2] ((juxt :width :height) out)))
+      (t/is (= [7 7] [(pixel out 0 0) (pixel out 3 1)]))))
+  (t/testing "without boxes or the board: the frames as they are"
+    (let [frames [(frame 2 2 1) (frame 3 1 2)]]
+      (t/is (identical? frames (dea/crop-frames frames [nil nil] {:x 0 :y 0 :width 2 :height 2} 1)))
+      (t/is (identical? frames (dea/crop-frames frames [{:x 0 :y 0} {:x 0 :y 0}] nil 1)))
+      (t/is (= [] (dea/crop-frames [] [] {:x 0 :y 0 :width 2 :height 2} 1))))))
 
 (t/deftest estimated-size-is-positive-for-raster
   (t/is (pos? (dea/estimated-size :mp4 100 80 :high 1000 30)))
@@ -1084,11 +1084,14 @@
     (let [scene    (export-scene 100)
           progress (atom [])
           frames   (atom 0)
+          rect     {:x 0 :y 0 :width 10 :height 10}
           {:keys [promise]}
           (dea/run-export (export-ctx scene
+                                      :bridge (assoc (:bridge scene) :get-shape-extrect (constantly rect))
                                       :on-progress #(swap! progress conj %)
-                                      :on-frame (fn [bytes]
-                                                  (t/is (instance? js/Uint8Array bytes))
+                                      :on-frame (fn [image at scale]
+                                                  (t/is (= 2 (:width image)) "decoded")
+                                                  (t/is (= [rect 1] [at scale]) "where it is, at what scale")
                                                   (swap! frames inc)))
                           {:format :gif :quality :low :fps 30 :scale 1 :loop? true})]
       (-> promise
