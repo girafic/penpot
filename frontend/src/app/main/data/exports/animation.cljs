@@ -1338,45 +1338,64 @@
             frames
             rects))))
 
+(defn- with-board-clipped
+  "Call `f`, which returns a promise, while `board` clips its layers in
+  WASM (through `bridge`), and put it back as it is after. A board that
+  does not clip them is pictured as far as they reach, which changes as
+  they move, and with it where its pixels start: its layers would shake
+  by a pixel from one frame to the next. Clipped, each picture is the
+  board, on the same pixels."
+  [bridge board f]
+  (let [apply-properties (:apply-shape-properties bridge)]
+    (if (and apply-properties (:show-content board))
+      (do
+        ;; with the selrect, which drops the box WASM keeps of the board
+        (apply-properties (assoc board :show-content false) [:show-content :selrect])
+        (-> (f)
+            (.finally (fn []
+                        (apply-properties board [:show-content :selrect])
+                        nil))))
+      (f))))
+
 (defn- capture-frames
   "The pictures of the board `board-id` at `times`, decoded, cut to the
-  board (see `crop-frames`); `on-frame` hears each as it is decoded: the
-  picture, the box it covers (nil without a way to know it) and its
-  scale."
+  board (see `with-board-clipped`, `crop-frames`); `on-frame` hears each
+  as it is decoded: the picture, the box it covers (nil without a way to
+  know it) and its scale."
   [{:keys [objects timeline board-id times bridge cancelled? on-progress on-frame
            yield decode scale]}]
   (let [decode   (or decode decode-png)
         yield    (or yield default-yield)
         extrect  (:get-shape-extrect bridge)
         n        (count times)]
-    (-> (js/Promise.resolve [])
-        (.then
-         (fn [_]
-           (reduce
-            (fn [p t]
-              (-> p
-                  (.then
-                   (fn [acc]
-                     (throw-if-cancelled cancelled?)
-                     (let [bytes (render-shape-at-time objects timeline board-id t
-                                                       {:bridge bridge :scale (or scale 1)})
-                           ;; where the picture is, as posed
-                           rect  (when extrect (extrect board-id))]
-                       (-> (decode bytes)
-                           (.then (fn [image]
-                                    (when on-frame
-                                      (on-frame image rect (or scale 1)))
-                                    (when on-progress
-                                      (on-progress (inc (count acc)) n))
-                                    (-> (yield)
-                                        (.then (fn [_] (conj acc [image rect]))))))))))))
-            (js/Promise.resolve [])
-            times)))
-        (.then (fn [shots]
-                 (crop-frames (mapv first shots)
-                              (mapv second shots)
-                              (:selrect (get objects board-id))
-                              (or scale 1)))))))
+    (with-board-clipped
+      bridge (get objects board-id)
+      (fn []
+        (-> (reduce
+             (fn [p t]
+               (-> p
+                   (.then
+                    (fn [acc]
+                      (throw-if-cancelled cancelled?)
+                      (let [bytes (render-shape-at-time objects timeline board-id t
+                                                        {:bridge bridge :scale (or scale 1)})
+                            ;; where the picture is, as posed
+                            rect  (when extrect (extrect board-id))]
+                        (-> (decode bytes)
+                            (.then (fn [image]
+                                     (when on-frame
+                                       (on-frame image rect (or scale 1)))
+                                     (when on-progress
+                                       (on-progress (inc (count acc)) n))
+                                     (-> (yield)
+                                         (.then (fn [_] (conj acc [image rect]))))))))))))
+             (js/Promise.resolve [])
+             times)
+            (.then (fn [shots]
+                     (crop-frames (mapv first shots)
+                                  (mapv second shots)
+                                  (:selrect (get objects board-id))
+                                  (or scale 1)))))))))
 
 (defn- download-blob
   [name ext mtype blob]

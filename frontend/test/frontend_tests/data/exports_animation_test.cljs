@@ -1108,6 +1108,28 @@
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally (finish done))))))
 
+(t/deftest an-export-pictures-a-board-that-does-not-clip-clipped
+  (t/async
+    done
+    (let [scene  (export-scene 100)
+          bid    (:bid scene)
+          scene  (update-in scene [:page :objects bid] assoc :show-content true)
+          pushed (atom [])
+          {:keys [promise]}
+          (dea/run-export (export-ctx scene
+                                      :bridge (assoc (:bridge scene) :apply-shape-properties
+                                                     (fn [shape props]
+                                                       (when (= bid (:id shape))
+                                                         (swap! pushed conj [(:show-content shape) props])))))
+                          {:format :gif :quality :low :fps 30 :scale 1 :loop? true})]
+      (-> promise
+          (.then (fn [result]
+                   (t/is (= :ok (:status result)))
+                   (t/is (= [[false [:show-content :selrect]] [true [:show-content :selrect]]] @pushed)
+                         "clipped while it is pictured, then as it was")))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
 (t/deftest an-export-stops-at-its-next-frame-when-cancelled
   (t/async
     done
