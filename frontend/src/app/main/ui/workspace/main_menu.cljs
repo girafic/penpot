@@ -23,6 +23,7 @@
    [app.main.data.profile :as du]
    [app.main.data.shortcuts :as scd]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.lottie :as dwlt]
@@ -372,6 +373,16 @@
          (fn [event]
            (dom/stop-propagation event)
            (st/emit! (dwcm/toggle-comments-visibility {:origin "workspace:menu"}))
+           (on-close-all)))
+
+        ;; as its shortcut does
+        toggle-motion-mode
+        (mf/use-fn
+         (mf/deps on-close-all)
+         (fn [event]
+           (dom/stop-propagation event)
+           (st/emit! (-> (dwa/toggle-motion-mode)
+                         (vary-meta assoc ::ev/origin "workspace:menu")))
            (on-close-all)))]
 
     [:> dropdown-menu* {:show true
@@ -431,16 +442,17 @@
       [:> shortcuts* {:id :toggle-comments-visibility}]]
      (when (and animation? (not ^boolean read-only?))
        [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
-                                :on-click    toggle-flag
+                                :on-click    toggle-motion-mode
                                 :on-key-down (fn [event]
                                                (when (kbd/enter? event)
-                                                 (toggle-flag event)))
+                                                 (toggle-motion-mode event)))
                                 :data-testid "animation-timeline"
                                 :id          "file-menu-animation-timeline"}
         [:span {:class (stl/css :item-name)}
          (if (contains? layout :animation-timeline)
            (tr "workspace.header.menu.hide-timeline")
-           (tr "workspace.header.menu.show-timeline"))]])
+           (tr "workspace.header.menu.show-timeline"))]
+        [:> shortcuts* {:id :toggle-motion-mode}]])
 
 
      (when-not ^boolean read-only?
