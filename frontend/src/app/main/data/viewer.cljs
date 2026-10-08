@@ -1077,6 +1077,17 @@
                   :time (max 0 (int time))
                   :elapsed (max 0 (int elapsed)))))))
 
+(defn cue-timeline
+  "Show the board `timeline-id` at the start of its timeline, not playing:
+  a board that comes in hidden shows its first frame once it shows (see
+  `play-timeline`)."
+  [timeline-id]
+  (ptk/reify ::cue-timeline
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:viewer-local :timeline] assoc
+                 :timeline-id timeline-id :time 0 :elapsed 0 :playing? false))))
+
 (defn play-timeline
   [timeline-id]
   (ptk/reify ::play-timeline

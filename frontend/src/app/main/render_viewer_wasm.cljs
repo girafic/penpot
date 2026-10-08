@@ -400,7 +400,7 @@
                              (enqueue-wasm-render!
                               (fn []
                                 (if (not= generation (mf/ref-val generation-ref))
-                                  ;; a later frame is on its way
+                                  ;; a later frame is on its way, and draws
                                   (p/resolved nil)
                                   (-> (reduce (fn [chain {:keys [canvas opts]}]
                                                 (p/then chain

@@ -239,3 +239,10 @@
              (moved [#js {:opacity "0%"} #js {:opacity "100%"}]))
           "no move, no transform")))
 
+(t/deftest a-board-that-comes-in-is-cued-at-its-start
+  (let [board (uuid/next)
+        state {:viewer-local {:timeline {:timeline-id (uuid/next) :time 900 :elapsed 900 :playing? true}}}]
+    (t/is (= {:timeline-id board :time 0 :elapsed 0 :playing? false}
+             (get-in (ptk/update (dv/cue-timeline board) state) [:viewer-local :timeline]))
+          "at its first frame, not playing until it shows")))
+

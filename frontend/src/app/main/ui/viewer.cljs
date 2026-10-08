@@ -414,9 +414,15 @@
         current-viewport-ref (mf/use-ref nil)
         wasm?                (and (features/use-feature "render-wasm/v1")
                                   (contains? cf/flags :available-viewer-wasm))
-        ;; the change of board hidden and started last (see below)
+        ;; the change of board hidden and started last, and when the
+        ;; board that comes in shows (see below)
         hidden-nav-ref       (mf/use-ref nil)
         started-nav-ref      (mf/use-ref nil)
+        reveal-ref           (mf/use-ref nil)
+        revealing            (fn [frame-id]
+                               (let [{:keys [promise] :as reveal} (mf/ref-val reveal-ref)]
+                                 (when (= frame-id (:frame-id reveal))
+                                   promise)))
         viewer-section-ref   (mf/use-ref nil)
 
         current-animations (mf/deref current-animations-ref)
@@ -564,11 +570,16 @@
         (when (and (some? clock) (cta/autoplay? clock) (= section :interactions))
           (let [board-id (:id frame)
                 play     #(when @alive?
-                            (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))]
-            ;; with sound, once the sound can play (see below)
-            (if board-sound?
-              (audio/when-running play 200)
-              (play))))
+                            (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))
+                ;; with sound, once the sound can play (see below)
+                start    #(if board-sound?
+                            (audio/when-running play 200)
+                            (play))]
+            ;; a board that comes in hidden, once it shows (see above):
+            ;; its sound and animation come with it
+            (if-let [reveal (revealing board-id)]
+              (.then reveal start)
+              (start))))
         #(do (vreset! alive? false)
              (st/emit! (dv/pause-timeline)))))
 
@@ -654,7 +665,17 @@
           (mf/set-ref-val! hidden-nav-ref nav)
           (when-let [current-viewport (mf/ref-val current-viewport-ref)]
             (rwv/copy-canvases! current-viewport (mf/ref-val orig-viewport-ref))
-            (dom/set-style! current-viewport "visibility" "hidden")))))
+            (dom/set-style! current-viewport "visibility" "hidden")
+            ;; A board that plays as it shows starts once it comes in (see
+            ;; below), drawn meanwhile at the start of its animation.
+            (when (and (some? clock) (cta/autoplay? clock) (= section :interactions))
+              ;; the board that leaves stops now: a frame of it would set
+              ;; its time on this one
+              (st/emit! (dv/pause-timeline) (dv/cue-timeline (:id frame))))
+            (mf/set-ref-val! reveal-ref
+                             {:frame-id (:id frame)
+                              :promise (rwv/when-frame-rendered current-viewport (:id frame)
+                                                                wasm-transition-wait-ms)})))))
 
     (mf/use-effect
      (mf/deps index current-animations zoom-type)
@@ -678,9 +699,9 @@
                                     size
                                     orig-size
                                     wrapper-size)]
-             (if wasm?
+             (if-let [reveal (revealing (:id frame))]
                ;; once the board that comes in is drawn
-               (.then (rwv/when-frame-rendered current-viewport (:id frame) wasm-transition-wait-ms)
+               (.then reveal
                       (fn [_]
                         (dom/set-style! current-viewport "visibility" "")
                         (start!)))
