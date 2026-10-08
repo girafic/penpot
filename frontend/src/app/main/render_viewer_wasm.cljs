@@ -306,10 +306,53 @@
        (webapi/on-dpr-change (fn [_] (swap! dpr-key inc)))))
     @dpr-key))
 
+(def ^:private rendered-event
+  "What a canvas of a viewer viewport hears once a board shows on it."
+  "viewer-frame-rendered")
+
+(defn- mark-rendered!
+  "The board `frame-id` shows on `canvases` now (see `when-frame-rendered`)."
+  [canvases frame-id]
+  (doseq [^js canvas canvases]
+    (set! (.. canvas -dataset -frame) (str frame-id))
+    (.dispatchEvent canvas (js/CustomEvent. rendered-event #js {:bubbles true}))))
+
+(defn when-frame-rendered
+  "A promise resolved once the first canvas in `container`, the one of
+  its viewport, shows the board `frame-id` (WASM draws a board after it
+  is shown), or after `timeout-ms`."
+  [^js container frame-id timeout-ms]
+  (js/Promise.
+   (fn [resolve]
+     (let [shown? #(= (str frame-id) (some-> (dom/query container "canvas") .-dataset .-frame))]
+       (if (or (nil? container) (shown?))
+         (resolve nil)
+         (let [timer (atom nil)]
+           (letfn [(done [& _]
+                     (.removeEventListener container rendered-event on-render)
+                     (js/clearTimeout @timer)
+                     (resolve nil))
+                   (on-render [_]
+                     (when (shown?) (done)))]
+             (.addEventListener container rendered-event on-render)
+             (reset! timer (js/setTimeout done timeout-ms)))))))))
+
+(defn copy-canvases!
+  "Draw what the canvases in `from` show onto the ones in `to`, in order:
+  a viewport that shows a board WASM has not drawn on it yet shows the
+  picture of another, as it was."
+  [^js from ^js to]
+  (when (and from to)
+    (doseq [[^js src ^js dst] (map vector (dom/query-all from "canvas") (dom/query-all to "canvas"))]
+      (when (and (pos? (.-width src)) (pos? (.-height src)))
+        (let [ctx (.getContext dst "2d")]
+          (.clearRect ctx 0 0 (.-width dst) (.-height dst))
+          (.drawImage ctx src 0 0 (.-width dst) (.-height dst)))))))
+
 (defn- use-viewer-wasm-layers!
   [page-id page-objects size scale frame-id not-fixed-ref fixed-ref
    not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta dpr-key
-   modifiers-ref]
+   modifiers-ref frozen?]
   ;; The hot-areas SVG shifts every object by `-(size + delta)` so the frame
   ;; `selrect` lands flush against the overlay snap side, ignoring the extra
   ;; padding reserved for shadows/blur/strokes. Bake the same `delta` into the
@@ -328,9 +371,9 @@
         render!
         (mf/use-fn
          (mf/deps page-id page-objects render-size scale frame-id
-                  not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids)
+                  not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids frozen?)
          (fn [modifiers]
-           (when (get page-objects frame-id)
+           (when (and (not frozen?) (get page-objects frame-id))
              (let [generation (inc (mf/ref-val generation-ref))]
                (mf/set-ref-val! generation-ref generation)
                (->> @wasm.api/module
@@ -359,13 +402,14 @@
                                 (if (not= generation (mf/ref-val generation-ref))
                                   ;; a later frame is on its way
                                   (p/resolved nil)
-                                  (reduce (fn [chain {:keys [canvas opts]}]
-                                            (p/then chain
-                                                    #(render-viewer-frame* page-id page-objects
-                                                                           canvas render-size scale frame-id
-                                                                           nil opts)))
-                                          (p/resolved nil)
-                                          passes))))))))))))))]
+                                  (-> (reduce (fn [chain {:keys [canvas opts]}]
+                                                (p/then chain
+                                                        #(render-viewer-frame* page-id page-objects
+                                                                               canvas render-size scale frame-id
+                                                                               nil opts)))
+                                              (p/resolved nil)
+                                              passes)
+                                      (p/then #(mark-rendered! (map :canvas passes) frame-id))))))))))))))))]
 
     (mf/with-layout-effect [render! dpr-key modifiers-ref]
       (render! (some-> modifiers-ref deref)))
@@ -382,13 +426,14 @@
   "WASM render passes and fixed-scroll DOM sync for the viewer viewport.
   `modifiers-ref`, when given, is a ref of the animation it plays at a
   time (a delay of its modif-tree, see `show-animation!`): it renders
-  again at each of its frames."
+  again at each of its frames. `frozen?` renders nothing: the canvases
+  keep the picture drawn on them (see `copy-canvases!`)."
   [page-id page-objects size scale frame-id
    not-fixed-ref fixed-ref fixed-scroll-layer-ref
-   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta modifiers-ref]
+   not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids delta modifiers-ref frozen?]
   (use-fixed-scroll-sync! (some? fixed-scroll-layer-ref) fixed-scroll-layer-ref)
   (let [dpr-key (use-viewer-dpr-key)]
     (use-viewer-wasm-layers! page-id page-objects size scale frame-id
                              not-fixed-ref fixed-ref
                              not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids
-                             delta dpr-key modifiers-ref)))
+                             delta dpr-key modifiers-ref frozen?)))

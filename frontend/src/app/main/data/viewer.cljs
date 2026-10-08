@@ -620,11 +620,27 @@
       (assoc-in state [:inspect-exports-cache shapes-key] exports))))
 
 (defn complete-animation
-  []
-  (ptk/reify ::complete-animation
-    ptk/UpdateEvent
-    (update [_ state]
-      (dissoc state :viewer-animations))))
+  "The animations of the view mode are done: all of them, or only the
+  ones `which` names, a kind (`:go-to-frame` `:open-overlay`) or an
+  overlay by its id. An overlay that opens or closes while the board
+  changes would end the change midway otherwise."
+  ([]
+   (ptk/reify ::complete-animation
+     ptk/UpdateEvent
+     (update [_ state]
+       (dissoc state :viewer-animations))))
+  ([which]
+   (ptk/reify ::complete-animations-of
+     ptk/UpdateEvent
+     (update [_ state]
+       (let [done?      (fn [[id animation]]
+                          (if (keyword? which)
+                            (= which (:kind animation))
+                            (= which id)))
+             animations (into {} (remove done?) (:viewer-animations state))]
+         (if (seq animations)
+           (assoc state :viewer-animations animations)
+           (dissoc state :viewer-animations)))))))
 
 ;; --- Navigation inside page
 

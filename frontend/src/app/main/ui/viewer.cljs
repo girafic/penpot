@@ -17,11 +17,14 @@
    [app.common.types.animation :as cta]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.types.text :as txt]
+   [app.config :as cf]
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
    [app.main.data.viewer.shortcuts :as sc]
+   [app.main.features :as features]
    [app.main.fonts :as fonts]
    [app.main.refs :as refs]
+   [app.main.render-viewer-wasm :as rwv]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
@@ -48,6 +51,11 @@
    [goog.events :as events]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
+
+(def ^:private wasm-transition-wait-ms
+  "How long, at most, the change of board waits for WASM to draw the
+  board that comes in before it plays."
+  600)
 
 (def current-animations-ref
   (l/derived :viewer-animations st/state))
@@ -351,7 +359,9 @@
           :size orig-size
           :page page
           :users users
-          :interactions-mode interactions-mode}]])
+          :interactions-mode interactions-mode
+          ;; WASM keeps the picture of the board as it left
+          :is-snapshot true}]])
 
      [:div {:class (stl/css :viewport-container)
             :ref current-viewport-ref
@@ -402,6 +412,11 @@
         nav-scroll (:nav-scroll local)
         orig-viewport-ref    (mf/use-ref nil)
         current-viewport-ref (mf/use-ref nil)
+        wasm?                (and (features/use-feature "render-wasm/v1")
+                                  (contains? cf/flags :available-viewer-wasm))
+        ;; the change of board hidden and started last (see below)
+        hidden-nav-ref       (mf/use-ref nil)
+        started-nav-ref      (mf/use-ref nil)
         viewer-section-ref   (mf/use-ref nil)
 
         current-animations (mf/deref current-animations-ref)
@@ -627,6 +642,20 @@
          :fill (st/emit! dv/zoom-to-fill)
          nil)))
 
+    ;; WASM draws a board after it shows (see
+    ;; `rwv/use-viewer-wasm-viewport!`): when the board changes with an
+    ;; animation, the one that leaves keeps the picture it had, taken
+    ;; before any drawing ends, and the one that comes in waits hidden.
+    (mf/with-layout-effect [index current-animations]
+      (let [nav (d/seek #(= (:kind %) :go-to-frame) (vals current-animations))]
+        ;; once for each change: the overlays that close meanwhile change
+        ;; the animations again
+        (when (and wasm? nav (not (identical? nav (mf/ref-val hidden-nav-ref))))
+          (mf/set-ref-val! hidden-nav-ref nav)
+          (when-let [current-viewport (mf/ref-val current-viewport-ref)]
+            (rwv/copy-canvases! current-viewport (mf/ref-val orig-viewport-ref))
+            (dom/set-style! current-viewport "visibility" "hidden")))))
+
     (mf/use-effect
      (mf/deps index current-animations zoom-type)
      (fn []
@@ -637,16 +666,25 @@
        ;; Navigate animation needs to be started after navigation
        ;; is complete, and we have the next page index.
        (let [nav-animation (d/seek #(= (:kind %) :go-to-frame) (vals current-animations))]
-         (when nav-animation
+         (when (and nav-animation
+                    (not (identical? nav-animation (mf/ref-val started-nav-ref))))
+           (mf/set-ref-val! started-nav-ref nav-animation)
            (let [orig-viewport    (mf/ref-val orig-viewport-ref)
-                 current-viewport (mf/ref-val current-viewport-ref)]
-             (interactions/animate-go-to-frame
-              (:animation nav-animation)
-              current-viewport
-              orig-viewport
-              size
-              orig-size
-              wrapper-size))))))
+                 current-viewport (mf/ref-val current-viewport-ref)
+                 start!           #(interactions/animate-go-to-frame
+                                    (:animation nav-animation)
+                                    current-viewport
+                                    orig-viewport
+                                    size
+                                    orig-size
+                                    wrapper-size)]
+             (if wasm?
+               ;; once the board that comes in is drawn
+               (.then (rwv/when-frame-rendered current-viewport (:id frame) wasm-transition-wait-ms)
+                      (fn [_]
+                        (dom/set-style! current-viewport "visibility" "")
+                        (start!)))
+               (start!)))))))
 
     (mf/use-effect
      (mf/deps current-animations)

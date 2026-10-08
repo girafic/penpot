@@ -210,3 +210,32 @@
         shown   (vi/animated-objects objects {(cthi/id :arm) {:modifiers (ctm/move-modifiers (gpt/point 50 0))}})]
     (t/is (= 150 (get-in shown [(cthi/id :arm) :x])))
     (t/is (= 180 (get-in shown [(cthi/id :moon) :x])) "the layer of the board follows it")))
+
+(t/deftest an-animation-that-ends-leaves-the-others-running
+  (let [[f o1 o2] [(uuid/next) (uuid/next) (uuid/next)]
+        state     {:viewer-animations {f  {:kind :go-to-frame :orig-frame-id f}
+                                       o1 {:kind :open-overlay :overlay-id o1}
+                                       o2 {:kind :close-overlay :overlay-id o2}}}
+        done      #(ptk/update (dv/complete-animation %) %2)]
+    (t/testing "an overlay that opens or closes while the board changes"
+      (t/is (= #{f o2} (set (keys (:viewer-animations (done :open-overlay state))))))
+      (t/is (= #{f o1} (set (keys (:viewer-animations (done o2 state)))))))
+    (t/is (= #{o1 o2} (set (keys (:viewer-animations (done :go-to-frame state))))))
+    (t/is (not (contains? (done :go-to-frame {:viewer-animations {f {:kind :go-to-frame}}}) :viewer-animations))
+          "none left")
+    (t/is (not (contains? (ptk/update (dv/complete-animation) state) :viewer-animations)) "all")))
+
+(t/deftest the-board-change-moves-with-transforms
+  (let [moved #(mapv (fn [^js kf] (js->clj kf)) (#'vi/moved-keyframes %))]
+    (t/is (= [{"transform" "translate(-1280px, 0px)"} {"transform" "translate(0px, 0px)"}]
+             (moved [#js {:left "-1280px"} #js {:left "0"}])))
+    (t/is (= [{"transform" "translate(1280px, 0px)"} {"transform" "translate(0px, 0px)"}]
+             (moved [#js {:right "-1280px"} #js {:right "0"}]))
+          "right and bottom the other way")
+    (t/is (= [{"transform" "translate(0px, 0px)" "opacity" "100%"} {"transform" "translate(0px, -144px)" "opacity" "0"}]
+             (moved [#js {:bottom "0" :opacity "100%"} #js {:bottom "144px" :opacity "0"}]))
+          "opacity as it is")
+    (t/is (= [{"opacity" "0%"} {"opacity" "100%"}]
+             (moved [#js {:opacity "0%"} #js {:opacity "100%"}]))
+          "no move, no transform")))
+

@@ -86,9 +86,10 @@
 (mf/defc viewport-wasm*
   "The board `frame` of `page` rendered by WASM. `modifiers-ref` holds
   the animation it plays, which shows over its shapes as they are loaded
-  (see `rwv/use-viewer-wasm-viewport!`)."
+  (see `rwv/use-viewer-wasm-viewport!`); `is-snapshot` draws nothing on
+  it (see `interactions/viewport*`)."
   {::mf/wrap [mf/memo]}
-  [{:keys [page frame base offset size delta is-fixed modifiers-ref]}]
+  [{:keys [page frame base offset size delta is-fixed modifiers-ref is-snapshot]}]
   (let [;; the same point each render, or the layers would render again
         delta     (mf/with-memo [delta] (or delta (gpt/point 0 0)))
         vbox      (:vbox size)
@@ -155,7 +156,7 @@
      not-fixed-wasm-ref fixed-wasm-ref
      (when has-fixed? fixed-layer-ref)
      not-fixed-include-ids fixed-include-ids fixed-clear-fills-ids
-     delta modifiers-ref)
+     delta modifiers-ref (true? is-snapshot))
 
     [:& (mf/provider shapes/base-frame-ctx) {:value (get prepared-all (:id base))}
      [:& (mf/provider shapes/frame-offset-ctx) {:value offset}
