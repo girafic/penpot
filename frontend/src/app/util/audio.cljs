@@ -374,7 +374,9 @@
 (defn unlock!
   "Make live playback able to sound: a page may only start sound from a
   user gesture, so the play buttons and Space call this before they
-  play. Makes the context the first time and resumes it when suspended."
+  play. Without one it sounds where the browser lets it (its autoplay
+  policy), else the context waits for the next call. Makes the context
+  the first time and resumes it when suspended."
   []
   (let [^js ctx (or @context
                     (when-let [ctor (audio-context-class)]

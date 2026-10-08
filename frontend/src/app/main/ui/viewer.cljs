@@ -57,6 +57,12 @@
   board that comes in before it plays."
   600)
 
+(def ^:private wasm-first-draw-wait-ms
+  "How long, at most, a board that shows without a change of board (the
+  first one, once WASM and the fonts and images of the page load) waits
+  to be drawn before it plays."
+  8000)
+
 (def current-animations-ref
   (l/derived :viewer-animations st/state))
 
@@ -571,15 +577,26 @@
           (let [board-id (:id frame)
                 play     #(when @alive?
                             (st/emit! (dv/seek-timeline 0) (dv/play-timeline board-id)))
-                ;; with sound, once the sound can play (see below)
+                ;; with sound, once the sound can play (see below); the
+                ;; board the view mode opens with comes without a
+                ;; gesture, but the browser may let it sound (its
+                ;; autoplay policy), else it sounds from the first one
                 start    #(if board-sound?
-                            (audio/when-running play 200)
+                            (do (audio/unlock!)
+                                (audio/when-running play 200))
                             (play))]
             ;; a board that comes in hidden, once it shows (see above):
             ;; its sound and animation come with it
             (if-let [reveal (revealing board-id)]
               (.then reveal start)
-              (start))))
+              (if wasm?
+                ;; else once WASM draws it, as the first board, which
+                ;; shows meanwhile at the start of its animation
+                (do (st/emit! (dv/cue-timeline board-id))
+                    (.then (rwv/when-frame-rendered (mf/ref-val current-viewport-ref) board-id
+                                                    wasm-first-draw-wait-ms)
+                           start))
+                (start)))))
         #(do (vreset! alive? false)
              (st/emit! (dv/pause-timeline)))))
 
