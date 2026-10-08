@@ -1578,6 +1578,16 @@
                       (cond-> (assoc result :name (or (:name board) (:name tl)))
                         (< fit 1) (assoc :fitted [(even-dim bw) (even-dim bh)]))))))))))))
 
+(def format-labels
+  "How the formats of an animation export are written."
+  {:mp4 "MP4"
+   :webm "WebM"
+   :gif "GIF"
+   :avif "AVIF"
+   :svg "SVG"
+   :lottie "Lottie"
+   :dotlottie "dotLottie"})
+
 (def ^:private dotlottie-mtype
   "The media type of a dotLottie archive, whose file ends in `.lottie`."
   "application/zip+dotlottie")

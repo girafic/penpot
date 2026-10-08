@@ -54,6 +54,9 @@
     (t/is (= {:text ["export-animation.loading"] :actions []} (view {:status :loading})))
     (t/is (= {:text ["export-animation.exporting" "Hero" "MP4"] :percent 45 :actions [:cancel]}
              (view {:status :exporting :percent 45})))
+    (t/is (= ["export-animation.exporting" "Hero" "WebM"]
+             (:text (view {:status :exporting :params {:board-id board :format "webm"}})))
+          "the format written as the panel writes it")
     (t/is (= [] (:actions (view {:status :exporting :cancelling? true}))) "no second Cancel")
     (t/is (= {:text ["export-animation.done" "Hero.mp4" "1.5 MB"]
               :notes [[:audio-dropped]]

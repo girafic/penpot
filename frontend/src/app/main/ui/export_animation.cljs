@@ -16,7 +16,6 @@
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
-   [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -63,7 +62,7 @@
   (let [shape  (get-in page [:objects (:board-id params)])
         board  (:name shape)
         frame  (frame-view (:selrect shape) frame-scale)
-        format (some-> (:format params) name str/upper)]
+        format (some->> (:format params) name keyword (get dea/format-labels))]
     (case status
       ;; before the tab starts its job
       nil        {:text ["export-animation.waiting"] :actions []}

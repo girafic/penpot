@@ -56,3 +56,11 @@
                 :note ["workspace.options.export.tab-blocked"] :offer? true}
                (exp/export-button-state (assoc job :offer? true) "MP4" true))
             "the offer when it said nothing"))))
+
+(t/deftest the-animated-size-offers-its-own-size
+  (let [labels #(mapv :label (exp/animated-size-options %))]
+    (t/is (= ["0.5x" "1x" "2x" "1920w" "720h" "1080h" "1440h" "2160h"] (labels "1")))
+    (t/is (= "3.5x" (last (labels "3.5"))) "a typed one after the presets")
+    (t/is (= "512w" (last (labels "w512"))))
+    (t/is (= 8 (count (labels "nonsense"))))))
+

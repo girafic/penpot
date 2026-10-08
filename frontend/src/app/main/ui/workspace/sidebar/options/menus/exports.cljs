@@ -169,13 +169,13 @@
 
         format-options
         (filterv #(some #{(keyword (:value %))} formats)
-                 [{:value "mp4" :label "MP4" :disabled (not (:mp4 support))}
-                  {:value "webm" :label "WebM" :disabled (not (:webm support))}
-                  {:value "gif" :label "GIF"}
-                  {:value "avif" :label "AVIF" :disabled (not (:avif support))}
-                  {:value "svg" :label "SVG"}
-                  {:value "lottie" :label "Lottie"}
-                  {:value "dotlottie" :label "dotLottie"}])
+                 [{:value "mp4" :label (:mp4 dea/format-labels) :disabled (not (:mp4 support))}
+                  {:value "webm" :label (:webm dea/format-labels) :disabled (not (:webm support))}
+                  {:value "gif" :label (:gif dea/format-labels)}
+                  {:value "avif" :label (:avif dea/format-labels) :disabled (not (:avif support))}
+                  {:value "svg" :label (:svg dea/format-labels)}
+                  {:value "lottie" :label (:lottie dea/format-labels)}
+                  {:value "dotlottie" :label (:dotlottie dea/format-labels)}])
 
         quality-options
         [{:value "low" :label (tr "workspace.options.export.quality-low")}
