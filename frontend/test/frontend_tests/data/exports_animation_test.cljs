@@ -370,6 +370,84 @@
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally (finish done))))))
 
+(defn- recording-media
+  "`media-fakes` that note the codecs probed for alpha, the alpha of the
+  source and the format of each sample in `seen`."
+  [seen alpha-codecs]
+  (merge (media-fakes (fn [_ _] (js/Promise.resolve "av1")))
+         {:can-encode (fn [codec ^js opts]
+                        (swap! seen update :probed (fnil conj []) [codec (.-alpha opts)])
+                        (js/Promise.resolve (contains? alpha-codecs codec)))
+          :sample-source (fn [^js opts]
+                           (swap! seen assoc :codec (.-codec opts) :alpha (.-alpha opts))
+                           (fake-sample-source opts))
+          :video-sample (fn [data ^js opts]
+                          (swap! seen update :formats (fnil conj []) (.-format opts))
+                          (fake-video-sample data opts))}))
+
+(defn- video-frames
+  [n alpha]
+  (vec (repeatedly n #(hash-map :data (js/Uint8ClampedArray. #js [9 9 9 alpha, 9 9 9 alpha,
+                                                                  9 9 9 alpha, 9 9 9 alpha])
+                                :width 2
+                                :height 2))))
+
+(t/deftest encode-video-keeps-the-transparency-of-a-webm
+  (t/async
+    done
+    (let [seen (atom {})]
+      (-> (dea/encode-video (merge {:format :webm
+                                    :frames (video-frames 2 128)
+                                    :fps 30
+                                    :bitrate 1000
+                                    :flatten-bg [255 255 255]
+                                    :keep-alpha? true}
+                                   (recording-media seen #{"vp8"})))
+          (.then (fn [result]
+                   (t/is (= :ok (:status result)))
+                   (t/is (= [["vp9" "keep"] ["vp8" "keep"]] (:probed @seen)) "the first that keeps it")
+                   (t/is (= ["vp8" "keep"] ((juxt :codec :alpha) @seen)))
+                   (t/is (= ["I420A" "I420A"] (:formats @seen)))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
+(t/deftest encode-video-flattens-what-keeps-no-transparency
+  (t/async
+    done
+    (let [opaque   (atom {})
+          no-codec (atom {})
+          mp4      (atom {})]
+      (-> (js/Promise.all
+           #js [(dea/encode-video (merge {:format :webm :frames (video-frames 1 255) :fps 30 :bitrate 1000
+                                          :keep-alpha? true}
+                                         (recording-media opaque #{"vp9"})))
+                (dea/encode-video (merge {:format :webm :frames (video-frames 1 0) :fps 30 :bitrate 1000
+                                          :keep-alpha? true}
+                                         (recording-media no-codec #{})))
+                (dea/encode-video (merge {:format :mp4 :frames (video-frames 1 0) :fps 30 :bitrate 1000
+                                          :keep-alpha? true}
+                                         (recording-media mp4 #{"vp9"})))])
+          (.then (fn [_]
+                   (t/testing "opaque frames"
+                     (t/is (nil? (:probed @opaque)))
+                     (t/is (= ["av1" "discard" ["I420"]] ((juxt :codec :alpha :formats) @opaque))))
+                   (t/testing "no codec that keeps it"
+                     (t/is (= 2 (count (:probed @no-codec))))
+                     (t/is (= ["av1" "discard" ["I420"]] ((juxt :codec :alpha :formats) @no-codec))))
+                   (t/testing "an MP4"
+                     (t/is (nil? (:probed @mp4)))
+                     (t/is (= ["discard" ["I420"]] ((juxt :alpha :formats) @mp4))))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
+(t/deftest rgba-to-i420a-adds-the-alpha-plane
+  (let [data (js/Uint8ClampedArray. #js [0 0 0 0, 255 255 255 128, 0 0 0 255])
+        {:keys [width height format] :as yuv} (dea/rgba->i420a data 3 1)
+        bytes (vec (array-seq (js/Array.from (:data yuv))))]
+    (t/is (= [4 2 "I420A"] [width height format]))
+    (t/is (= (+ 8 2 2 8) (count bytes)) "Y, U, V, then A")
+    (t/is (= [0 128 255 255 0 128 255 255] (subvec bytes 12)) "the opacity, padded")))
+
 (t/deftest encode-video-mp4-when-supported
   (t/async
     done

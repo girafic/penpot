@@ -248,6 +248,19 @@
           (aset out (+ (* y w) x) (aget data (+ 3 (* 4 (+ (* sy src-w) sx))))))))
     {:data out :width w :height h :format "I420"}))
 
+(defn rgba->i420a
+  "`rgba->i420` with the opacity after the chroma, as `I420A`: the alpha
+  plane as it is, padded the same."
+  [data width height]
+  (let [yuv   (rgba->i420 data width height)
+        ^js color (:data yuv)
+        y-sz  (* (:width yuv) (:height yuv))
+        ^js alpha (:data (alpha->i420 data width height))
+        out   (js/Uint8Array. (+ (.-length color) y-sz))]
+    (.set out color)
+    (.set out (.subarray alpha 0 y-sz) (.-length color))
+    (assoc yuv :data out :format "I420A")))
+
 (defn- transparent?
   "Whether a pixel of the RGBA `data` is not fully opaque."
   [data]
@@ -347,6 +360,7 @@
    :video-sample  mb/VideoSample
    :quality       mb/Quality
    :first-codec   mb/getFirstEncodableVideoCodec
+   :can-encode    mb/canEncodeVideo
    :audio-source  mb/AudioBufferSource
    :first-audio-codec mb/getFirstEncodableAudioCodec})
 
@@ -671,18 +685,54 @@
     (p/catch (audio/load! (ctau/get-audio-clip timeline (:clip-id part)))
              (constantly nil))))
 
+(defn- find-transparency
+  "Promise of whether a pixel of `frames` is not fully opaque. Gives the
+  page its turn (`yield`) after each frame it looks through."
+  [frames yield cancelled?]
+  (reduce (fn [p image]
+            (.then p (fn [found?]
+                       (or found?
+                           (do (throw-if-cancelled cancelled?)
+                               (let [found? (transparent? (first (image-parts image)))]
+                                 (.then (yield) (constantly found?))))))))
+          (js/Promise.resolve false)
+          frames))
+
+(def ^:private alpha-video-codecs
+  "The codecs of a WebM that keep the transparency of its frames, in the
+  order they are tried (WebCodecs encodes no alpha in AV1)."
+  ["vp9" "vp8"])
+
+(defn- alpha-video-codec
+  "A promise of the first of `alpha-video-codecs` the browser encodes
+  with alpha (`can-encode`, see `mb/canEncodeVideo`) for `options`, nil
+  when none."
+  [can-encode options]
+  (reduce (fn [p codec]
+            (.then p (fn [found]
+                       (or found
+                           (.then (can-encode codec (js/Object.assign #js {} options #js {:alpha "keep"}))
+                                  #(when % codec))))))
+          (js/Promise.resolve nil)
+          alpha-video-codecs))
+
 (defn encode-video
   "Encode decoded frames with Mediabunny, with the sound `audio` (an
   `AudioBuffer` as long as the frames) when given. Returns a promise of
   `{:status :ok|:unavailable :blob ...}`, with `:audio-dropped true` when
-  the browser encodes no audio codec the format carries."
-  [{:keys [format frames fps bitrate cancelled? on-progress flatten-bg audio yield]
+  the browser encodes no audio codec the format carries.
+
+  Frames are composited onto `flatten-bg`. With `keep-alpha?`, the
+  frames of a WebM with a pixel that is not fully opaque keep their
+  transparency instead, when the browser encodes it (see
+  `alpha-video-codecs`)."
+  [{:keys [format frames fps bitrate cancelled? on-progress flatten-bg keep-alpha? audio yield]
     :as params}]
   (let [yield           (or yield default-yield)
         media           (merge (default-media)
                                (select-keys params [:output :mp4-format :webm-format
                                                     :target :sample-source :video-sample
-                                                    :quality :first-codec
+                                                    :quality :first-codec :can-encode
                                                     :audio-source :first-audio-codec]))
         output-ctor     (:output media)
         format-ctor     (output-format-ctor format media)
@@ -709,24 +759,34 @@
             closed (atom 0)
             codecs (if (= format :mp4)
                      #js ["avc"]
-                     (.getSupportedVideoCodecs fmt))]
-        (-> (js/Promise.all
-             #js [(first-codec codecs
-                               #js {:width w
-                                    :height h
-                                    :quality (new quality-ctor #js {:bitrate bitrate})
-                                    :frameRate fps})
-                  (if (some? audio)
-                    (audio-codec format media)
-                    (js/Promise.resolve nil))])
+                     (.getSupportedVideoCodecs fmt))
+            probe  #js {:width w
+                        :height h
+                        :quality (new quality-ctor #js {:bitrate bitrate})
+                        :frameRate fps}
+            can-encode (:can-encode media)]
+        (-> (if (and keep-alpha? (= format :webm) (some? can-encode))
+              (-> (find-transparency frames yield cancelled?)
+                  (.then #(when % (alpha-video-codec can-encode probe))))
+              (js/Promise.resolve nil))
             (.then
-             (fn [[codec acodec]]
+             (fn [alpha-codec]
+               (js/Promise.all
+                #js [(or alpha-codec (first-codec codecs probe))
+                     (if (some? audio)
+                       (audio-codec format media)
+                       (js/Promise.resolve nil))
+                     alpha-codec])))
+            (.then
+             (fn [[codec acodec alpha-codec]]
                (if (nil? codec)
                  {:status :unavailable}
-                 (let [source  (new source-ctor
+                 (let [alpha?     (some? alpha-codec)
+                       flatten-bg (when-not alpha? flatten-bg)
+                       source  (new source-ctor
                                     #js {:codec codec
                                          :quality (new quality-ctor #js {:bitrate bitrate})
-                                         :alpha "discard"})
+                                         :alpha (if alpha? "keep" "discard")})
                        asource (when (some? acodec)
                                  (new audio-ctor
                                       #js {:codec acodec
@@ -745,9 +805,10 @@
                                   (fn [_]
                                     (throw-if-cancelled cancelled?)
                                     (let [pixels (frame-pixels image flatten-bg)
-                                          yuv    (rgba->i420 (:data pixels)
-                                                             (:width pixels)
-                                                             (:height pixels))
+                                          yuv    ((if alpha? rgba->i420a rgba->i420)
+                                                  (:data pixels)
+                                                  (:width pixels)
+                                                  (:height pixels))
                                           sample (new sample-ctor
                                                       (:data yuv)
                                                       #js {:timestamp (* i dur)
@@ -874,19 +935,6 @@
                                  #js {:keyFrame key?})))
       (finally
         (.close frame)))))
-
-(defn- find-transparency
-  "Promise of whether a pixel of `frames` is not fully opaque. Gives the
-  page its turn (`yield`) after each frame it looks through."
-  [frames yield cancelled?]
-  (reduce (fn [p image]
-            (.then p (fn [found?]
-                       (or found?
-                           (do (throw-if-cancelled cancelled?)
-                               (let [found? (transparent? (first (image-parts image)))]
-                                 (.then (yield) (constantly found?))))))))
-          (js/Promise.resolve false)
-          frames))
 
 (defn encode-avif
   "Encode decoded frames as an animated AVIF: AV1 through WebCodecs, in
@@ -1520,6 +1568,7 @@
                                               :fps fps
                                               :bitrate (cta/video-bitrate bw bh quality)
                                               :flatten-bg (board-backdrop board)
+                                              :keep-alpha? true
                                               :audio sound
                                               :cancelled? cancelled?
                                               :on-progress encoding
