@@ -37,12 +37,31 @@
                                           :page {:objects {board {:name "Spin" :selrect selrect}}}
                                           :frame-scale 1}))))))))
 
+(t/deftest the-page-tells-which-of-several-boards-it-exports
+  (let [[a b] [(uuid/next) (uuid/next)]
+        tab   {:status :exporting
+               :params {:board-id a :format :gif
+                        :boards [{:board-id a :scale 1} {:board-id b :scale 1}]}
+               :page {:objects {a {:name "Orbit"} b {:name "Pulse"}}}
+               :percent 60
+               :progress {:board 1 :boards 2}}]
+    (t/is (= ["export-animation.exporting-boards" "Pulse" 2 2 "GIF"] (:text (uea/page-state tab))))
+    (t/is (= {:board "Pulse" :percent 60} (uea/page-title tab)))
+    (t/is (= {:board "Deck"} (uea/page-title (assoc tab :status :done :result {:name "Deck"})))
+          "the ZIP once done")
+    (t/testing "done: what the ZIP holds"
+      (t/is (= {:kind :zip :url "blob:z" :name "Deck.zip" :files ["Orbit.gif" "Pulse.gif"]}
+               (:preview (uea/page-state (assoc tab
+                                                :status :done
+                                                :result {:name "Deck" :ext ".zip" :size 10 :url "blob:z"
+                                                         :files ["Orbit.gif" "Pulse.gif"]}))))))))
+
 (t/deftest the-title-tells-the-board-and-how-far-it-is
   (let [board (uuid/next)
         tab   {:params {:board-id board :format :mp4}
                :page {:objects {board {:name "Orbit"}}}}]
     (t/is (= {:board "Orbit" :percent 49} (uea/page-title (assoc tab :status :exporting :percent 49))))
-    (t/is (= {:board "Orbit"} (uea/page-title (assoc tab :status :done))))
+    (t/is (= {:board "Orbit"} (uea/page-title (assoc tab :status :done :result {:name "Orbit"}))))
     (t/is (nil? (uea/page-title {:status :loading})) "before it knows the board")))
 
 (t/deftest the-page-shows-where-the-export-is

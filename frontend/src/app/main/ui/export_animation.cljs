@@ -16,6 +16,7 @@
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
+   [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -39,6 +40,7 @@
   (case ext
     (".mp4" ".webm")        :video
     (".gif" ".avif" ".svg") :image
+    ".zip"                  :zip
     :none))
 
 (defn frame-view
@@ -58,8 +60,11 @@
   while it exports, the notes of the file (see `dea/export-notes`), how
   to play it (`{:kind :url :name}`, see `preview-kind`) and its buttons
   (`:cancel` `:download` `:close`)."
-  [{:keys [status params page percent cancelling? result error frame-scale]}]
-  (let [shape  (get-in page [:objects (:board-id params)])
+  [{:keys [status params page percent cancelling? result error frame-scale progress]}]
+  (let [boards (dat/job-boards params)
+        index  (min (or (:board progress) 0) (dec (count boards)))
+        ;; the board it exports: of several, the one at `index`
+        shape  (get-in page [:objects (:board-id (nth boards index))])
         board  (:name shape)
         frame  (frame-view (:selrect shape) frame-scale)
         format (some->> (:format params) name keyword (get dea/format-labels))]
@@ -68,7 +73,10 @@
       nil        {:text ["export-animation.waiting"] :actions []}
       :waiting   {:text ["export-animation.waiting"] :actions []}
       :loading   {:text ["export-animation.loading"] :actions []}
-      :exporting (cond-> {:text ["export-animation.exporting" (or board "") (or format "")]
+      :exporting (cond-> {:text (if (> (count boards) 1)
+                                  ["export-animation.exporting-boards"
+                                   (or board "") (inc index) (count boards) (or format "")]
+                                  ["export-animation.exporting" (or board "") (or format "")])
                           :percent (or percent 0)
                           :actions (if cancelling? [] [:cancel])}
                    ;; the pictures it takes, as it takes them
@@ -77,9 +85,11 @@
                          (str (:name result) (:ext result))
                          (size-label (:size result))]
                   :notes (:notes result)
-                  :preview {:kind (preview-kind (:ext result))
-                            :url (:url result)
-                            :name (str (:name result) (:ext result))}
+                  :preview (cond-> {:kind (preview-kind (:ext result))
+                                    :url (:url result)
+                                    :name (str (:name result) (:ext result))}
+                             ;; the files in a ZIP of several boards
+                             (seq (:files result)) (assoc :files (:files result)))
                   :actions [:download :close]}
       :cancelled {:text ["export-animation.cancelled"] :actions [:close]}
       :stale     {:text ["export-animation.stale"] :actions [:close]}
@@ -89,10 +99,16 @@
 
 (defn page-title
   "What the title of the export tab says of its state `tab`: `{:board
-  :percent}`, the percent while it exports; nil before it knows the
-  board."
-  [{:keys [status params page percent]}]
-  (when-let [board (not-empty (get-in page [:objects (:board-id params) :name]))]
+  :percent}`, the board it exports and the percent while it exports, the
+  file it made once done; nil before it knows the board."
+  [{:keys [status params page percent progress result]}]
+  (when-let [board (not-empty
+                    (if (= :done status)
+                      ;; the file it made: the board, or the ZIP of several
+                      (:name result)
+                      (get-in page [:objects
+                                    (:board-id (get (dat/job-boards params) (or (:board progress) 0)))
+                                    :name])))]
     (cond-> {:board board}
       (= :exporting status) (assoc :percent (or percent 0)))))
 
@@ -186,7 +202,7 @@
                  :style {:width (str percent "%")}}]]
          [:span {:class (stl/css :percent)} (str percent "%")]])
 
-      (when-let [{:keys [kind url name]} (:preview view)]
+      (when-let [{:keys [kind url name files]} (:preview view)]
         (case kind
           :video (when url
                    [:div {:class (stl/css :preview-frame)}
@@ -202,6 +218,8 @@
                     [:img {:class (stl/css :preview)
                            :src url
                            :alt (tr "export-animation.preview-alt" name)}]])
+          :zip [:p {:class (stl/css :note)}
+                (tr "export-animation.zip-files" (count files) (str/join ", " files))]
           [:p {:class (stl/css :note)} (tr "export-animation.no-preview")]))
 
       (for [note (:notes view)]

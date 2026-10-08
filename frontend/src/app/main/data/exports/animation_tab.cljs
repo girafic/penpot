@@ -155,7 +155,8 @@
                     :result {:name (:name result)
                              :ext (:ext result)
                              :size (some-> (:blob result) .-size)
-                             :notes (:notes (dea/export-notes result))})
+                             :notes (:notes (dea/export-notes result))
+                             :files (:files result)})
         state))
 
     ptk/WatchEvent
@@ -209,8 +210,8 @@
         [old] (swap-vals! live assoc :last-frame frame)]
     (when-let [draw (:draw-frame old)]
       (apply draw frame))
-    ;; the first one
-    (when (nil? (:last-frame old))
+    ;; the first one, and the first of a board at another scale
+    (when (not= scale (get (:last-frame old) 2))
       (st/emit! (frame-shown scale)))))
 
 (defn watch-frames!
@@ -223,22 +224,29 @@
     (fn []
       (swap! live #(cond-> % (identical? draw (:draw-frame %)) (dissoc :draw-frame))))))
 
+(defn job-boards
+  "The boards of the job `params`, `[{:board-id :scale}]`: its `:boards`
+  (several, into a ZIP), else its board."
+  [{:keys [board-id scale boards]}]
+  (or (not-empty boards) [{:board-id board-id :scale scale}]))
+
 (defn- run-job
   "A promise of the export of the job `params` on `page` (see
-  `dea/run-export`), unless it was cancelled meanwhile (while WASM
-  started)."
-  [{:keys [board-id] :as params} page files]
+  `dea/run-exports`), its boards into a ZIP named after the file,
+  unless it was cancelled meanwhile (while WASM started)."
+  [params page files]
   (if (:cancel-requested? @live)
     (p/rejected (ex-info "cancelled" {:type :export-cancelled}))
     (let [{:keys [promise cancel]}
-          (dea/run-export (cond-> {:page page
-                                   :files files
-                                   :board-id board-id
-                                   :bridge (tab-bridge)
-                                   :on-progress #(st/emit! (progress %))}
-                            ;; the pictures come from WASM
-                            (:wasm? params) (assoc :on-frame show-frame!))
-                          (select-keys params [:format :quality :fps :scale :loop? :audio?]))]
+          (dea/run-exports (cond-> {:page page
+                                    :files files
+                                    :bridge (tab-bridge)
+                                    :on-progress #(st/emit! (progress %))}
+                             ;; the pictures come from WASM
+                             (:wasm? params) (assoc :on-frame show-frame!))
+                           (select-keys params [:format :quality :fps :loop? :audio?])
+                           (job-boards params)
+                           (get-in files [(:file-id params) :name]))]
       (swap! live assoc :cancel cancel)
       promise)))
 

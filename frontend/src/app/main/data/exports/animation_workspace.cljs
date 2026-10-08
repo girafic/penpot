@@ -54,20 +54,22 @@
 
 (defn export-job
   "The job (see `job/schema:params`) exporting the active board of the
-  workspace in `state` as `params` (see `dea/export-animation`) in a tab of
-  its own, with the renderer of the workspace."
-  [state {:keys [format quality fps scale loop? audio?]}]
-  {:file-id (:current-file-id state)
-   :page-id (:current-page-id state)
-   :board-id (dwa/active-board-id state)
-   :job-id (job/new-job-id)
-   :format format
-   :quality (or quality :high)
-   :fps (or fps 30)
-   :scale (or scale 1)
-   :loop? (not (false? loop?))
-   :audio? (not (false? audio?))
-   :wasm? (features/active-feature? state "render-wasm/v1")})
+  workspace in `state`, or the `boards` (`[{:board-id :scale}]`) into a
+  ZIP, as `params` (see `dea/export-animation`) in a tab of its own, with
+  the renderer of the workspace."
+  [state {:keys [format quality fps scale loop? audio? boards]}]
+  (cond-> {:file-id (:current-file-id state)
+           :page-id (:current-page-id state)
+           :board-id (or (:board-id (first boards)) (dwa/active-board-id state))
+           :job-id (job/new-job-id)
+           :format format
+           :quality (or quality :high)
+           :fps (or fps 30)
+           :scale (or (:scale (first boards)) scale 1)
+           :loop? (not (false? loop?))
+           :audio? (not (false? audio?))
+           :wasm? (features/active-feature? state "render-wasm/v1")}
+    (> (count boards) 1) (assoc :boards (vec boards))))
 
 (defn open-job-tab!
   "Open the tab of `job` (see `export-job`) with `noopener`, so the
@@ -282,13 +284,14 @@
       (let [job (get-in state [:export-animation :job])]
         (if (= job-id (:job-id job))
           (rx/of (job-ended job-id {:type :cancel})
-                 (dea/export-animation (select-keys job [:format :quality :fps :scale :loop? :audio?])))
+                 (dea/export-animation (select-keys job [:format :quality :fps :scale :loop? :audio? :boards])))
           (rx/empty))))))
 
 (defn export-from-panel!
-  "Export the active board as `params` (see `dea/export-animation`), from the
-  click of the panel: in a tab of its own, opened now (see
-  `start-export-job`), or in place (see `export-in-tab?`)."
+  "Export the active board, or the `:boards` of `params`, as `params` (see
+  `dea/export-animation`), from the click of the panel: in a tab of its
+  own, opened now (see `start-export-job`), or in place (see
+  `export-in-tab?`)."
   [params]
   (let [state @st/state]
     (if (export-in-tab? state)

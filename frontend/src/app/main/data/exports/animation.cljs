@@ -1484,15 +1484,19 @@
   "How far an export is, 0 to 100, from its `progress` (`{:phase :current
   :total}`): capturing the frames is the first 80 % of a raster export,
   encoding them the rest; the pictures of the layers are the first 90 %
-  of a markup export, writing the file the rest."
-  [{:keys [phase current total]}]
-  (let [f (if (and (number? total) (pos? total)) (/ (or current 0) total) 0)]
-    (mth/round (case phase
-                 :capture (* 80 f)
-                 :encode  (+ 80 (* 20 f))
-                 :layers  (* 90 f)
-                 :write   (+ 90 (* 10 f))
-                 0))))
+  of a markup export, writing the file the rest. Of several boards (see
+  `run-exports`), the `:board` of `:boards` exporting has its share."
+  [{:keys [phase current total board boards]}]
+  (let [f   (if (and (number? total) (pos? total)) (/ (or current 0) total) 0)
+        one (case phase
+              :capture (* 80 f)
+              :encode  (+ 80 (* 20 f))
+              :layers  (* 90 f)
+              :write   (+ 90 (* 10 f))
+              0)]
+    (mth/round (if (and (number? boards) (> boards 1))
+                 (/ (+ (* 100 (or board 0)) one) boards)
+                 one))))
 
 (defn- set-export-progress
   [progress]
@@ -1500,7 +1504,7 @@
     ptk/UpdateEvent
     (update [_ state]
       (update state :export-animation merge
-              (select-keys progress [:phase :current :total])
+              (select-keys progress [:phase :current :total :board :boards])
               {:percent (progress-percent progress)}))))
 
 (defn- phase-progress
@@ -1765,6 +1769,85 @@
                 :else
                 (raster-export opts))}))
 
+(defn- file-names
+  "The names in a ZIP of the files of `results` (see `run-export`): each
+  after its board, a number added to a name that comes again."
+  [results]
+  (first
+   (reduce (fn [[names seen] {:keys [name ext]}]
+             (let [base  (safe-filename name "")
+                   n     (get seen base 0)
+                   fname (if (zero? n) (str base ext) (str base "-" (inc n) ext))]
+               [(conj names fname) (assoc seen base (inc n))]))
+           [[] {}]
+           results)))
+
+(defn- zip-results
+  "A promise of the ZIP (a blob) of the files of `results`."
+  [results]
+  (let [writer (uz/writer (uz/blob-writer :mtype "application/zip"))]
+    ;; a native promise, as the others (`p/then` makes one of promesa)
+    (js/Promise.resolve
+     (-> (reduce (fn [written [fname {:keys [blob]}]]
+                   (p/then written (fn [_] (uz/add writer fname blob))))
+                 (p/resolved nil)
+                 (map vector (file-names results) results))
+         (p/then (fn [_] (uz/close writer)))))))
+
+(defn run-exports
+  "Export the boards `boards` (`[{:board-id :scale}]`) of the page of
+  `ctx` as `params` (see `run-export`), one after another:
+  `{:promise :cancel}`. One board gives its result; several give a ZIP
+  of their files (`:name` `name`, `:files` their names, the boards that
+  play nothing left out), with the notes of the first fitted one and the dropped audio of
+  any (see `export-notes`). `:on-progress` hears the progress of each
+  board with `:board`, its index, and `:boards`, how many (see
+  `progress-percent`); `cancel` stops the one exporting."
+  [{:keys [on-progress] :as ctx} params boards name]
+  (if (<= (count boards) 1)
+    (let [{:keys [board-id scale]} (first boards)]
+      (run-export (assoc ctx :board-id board-id) (assoc params :scale scale)))
+    (let [n          (count boards)
+          cancelled? (atom false)
+          cancel-one (atom nil)
+          promise
+          (-> (reduce
+               (fn [p [i {:keys [board-id scale]}]]
+                 (.then p (fn [results]
+                            (when @cancelled?
+                              (throw (ex-info "cancelled" {:type :export-cancelled})))
+                            (let [{:keys [promise cancel]}
+                                  (run-export (assoc ctx
+                                                     :board-id board-id
+                                                     :on-progress #(when on-progress
+                                                                     (on-progress (assoc % :board i :boards n))))
+                                              (assoc params :scale scale))]
+                              (reset! cancel-one cancel)
+                              (.then promise #(conj results %))))))
+               (js/Promise.resolve [])
+               (map-indexed vector boards))
+              (.then
+               (fn [results]
+                 (let [done (filterv #(= :ok (:status %)) results)]
+                   (if (empty? done)
+                     (or (d/seek #(= :unavailable (:status %)) results)
+                         {:status :nothing})
+                     (.then (zip-results done)
+                            (fn [blob]
+                              (cond-> {:status :ok
+                                       :blob blob
+                                       :name name
+                                       :ext ".zip"
+                                       :mtype "application/zip"
+                                       :files (file-names done)}
+                                (some :fitted done)        (assoc :fitted (some :fitted done))
+                                (some :audio-dropped done) (assoc :audio-dropped true)))))))))]
+      {:promise promise
+       :cancel (fn []
+                 (reset! cancelled? true)
+                 (when-let [cancel @cancel-one]
+                   (cancel)))})))
+
 (defn download-result
   "Download the file of an export `result` (see `run-export`)."
   [{:keys [name ext mtype blob]}]
@@ -1810,20 +1893,24 @@
       (conj (vec (notes-shown notes)) (finish-export-state)))))
 
 (defn- export-in-place
-  "A promise of the export of the active board run in the workspace tab
-  (see `run-export`), downloaded: the canvas renders in full quality
+  "A promise of the export of the active board, or of the `:boards` of
+  `params` into a ZIP named after the file (see `run-exports`), run in
+  the workspace tab, downloaded: the canvas renders in full quality
   meanwhile and shows the animation at the playhead again after."
   [state params]
   (let [bridge   (or (:bridge params) (default-bridge))
         was-fast (begin-full-quality! bridge)
+        boards   (or (not-empty (:boards params))
+                     [{:board-id (dwa/active-board-id state) :scale (or (:scale params) 1)}])
         {:keys [promise cancel]}
-        (run-export {:page (dsh/lookup-page state)
-                     :files (dsh/lookup-libraries state)
-                     :board-id (dwa/active-board-id state)
-                     :time (dwa/playhead state)
-                     :bridge bridge
-                     :on-progress #(st/emit! (set-export-progress %))}
-                    (dissoc params :bridge))]
+        (run-exports {:page (dsh/lookup-page state)
+                      :files (dsh/lookup-libraries state)
+                      :time (dwa/playhead state)
+                      :bridge bridge
+                      :on-progress #(st/emit! (set-export-progress %))}
+                     (dissoc params :bridge :boards :scale)
+                     boards
+                     (:name (dsh/lookup-file state)))]
     (reset! cancel-fn cancel)
     (-> promise
         (.then
@@ -1858,7 +1945,7 @@
 
     ptk/WatchEvent
     (watch [_ state _]
-      (let [tl (dwa/export-timeline state)]
+      (let [tl (or (seq (:boards params)) (dwa/export-timeline state))]
         (if (nil? tl)
           (rx/of (finish-export-state))
           (rx/concat

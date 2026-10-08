@@ -22,6 +22,7 @@
    [app.util.zip :as uz]
    [cljs.test :as t :include-macros true]
    [clojure.string :as str]
+   [frontend-tests.helpers.mock :as mock]
    [potok.v2.core :as ptk]
    [promesa.core :as p]))
 
@@ -967,6 +968,72 @@
             (t/is (= (vec png) image) "the image keeps its bytes"))
           (p/catch (fn [cause] (t/is (nil? cause))))
           (p/finally (fn [] (done)))))))
+
+(t/deftest several-boards-export-into-one-zip
+  (t/async
+    done
+    (let [[a b c]  [(uuid/next) (uuid/next) (uuid/next)]
+          calls    (atom [])
+          progress (atom [])]
+      (mock/with-mocks
+        {dea/run-export (fn [{:keys [board-id on-progress]} params]
+                          (swap! calls conj [board-id (:scale params) (:format params)])
+                          (on-progress {:phase :capture :current 1 :total 2})
+                          {:promise (js/Promise.resolve
+                                     (if (= board-id c)
+                                       {:status :nothing}
+                                       (cond-> {:status :ok :blob (js/Blob. #js ["gif"]) :name "Hero" :ext ".gif"}
+                                         (= board-id b) (assoc :fitted [100 50]))))
+                           :cancel (fn [])})}
+        (fn [done']
+          (-> (:promise (dea/run-exports {:on-progress #(swap! progress conj %)}
+                                         {:format :gif}
+                                         [{:board-id a :scale 2} {:board-id b :scale 1} {:board-id c :scale 0.5}]
+                                         "Deck"))
+              (.then (fn [result]
+                       (t/is (= [[a 2 :gif] [b 1 :gif] [c 0.5 :gif]] @calls) "one after another, each at its scale")
+                       (t/is (= [13 47 80] (mapv dea/progress-percent @progress)) "each board its share")
+                       (t/is (= ["Deck" ".zip" "application/zip"] ((juxt :name :ext :mtype) result)))
+                       (t/is (= ["Hero.gif" "Hero-2.gif"] (:files result))
+                             "what plays nothing left out, a name that comes again numbered")
+                       (t/is (= [100 50] (:fitted result)))
+                       (uz/get-entries (uz/reader (:blob result)))))
+              (.then (fn [entries]
+                       (t/is (= ["Hero.gif" "Hero-2.gif"] (mapv #(.-filename ^js %) entries)))))
+              (.catch (fn [cause] (t/is false (ex-message cause))))
+              (.finally #(done'))))
+        done))))
+
+(t/deftest several-boards-stop-when-cancelled
+  (t/async
+    done
+    (let [calls  (atom [])
+          ended  (atom nil)
+          cancel (atom nil)]
+      (mock/with-mocks
+        {dea/run-export (fn [{:keys [board-id]} _]
+                          (swap! calls conj board-id)
+                          ;; cancelled while the first board exports
+                          (js/setTimeout #(@cancel) 0)
+                          {:promise (js/Promise. (fn [resolve] (reset! ended resolve)))
+                           :cancel (fn [] (@ended {:status :ok :blob (js/Blob. #js [""]) :name "A" :ext ".gif"}))})}
+        (fn [done']
+          (let [{:keys [promise] :as run}
+                (dea/run-exports {} {:format :gif} [{:board-id :a :scale 1} {:board-id :b :scale 1}] "Deck")]
+            (reset! cancel (:cancel run))
+            (-> promise
+                (.then (fn [_] (t/is false "not cancelled")))
+                (.catch (fn [cause]
+                          (t/is (= :export-cancelled (:type (ex-data cause))))
+                          (t/is (= [:a] @calls) "the next one never starts")))
+                (.finally #(done')))))
+        done))))
+
+(t/deftest one-board-exports-as-it-is
+  (let [seen (atom nil)]
+    (with-redefs [dea/run-export (fn [ctx params] (reset! seen [(:board-id ctx) (:scale params)]) :one)]
+      (t/is (= :one (dea/run-exports {} {:format :mp4} [{:board-id :a :scale 2}] "Deck")))
+      (t/is (= [:a 2] @seen)))))
 
 (defn- text-board
   "A board with a text of three words in it."

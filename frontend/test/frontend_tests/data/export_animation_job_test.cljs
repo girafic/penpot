@@ -34,6 +34,12 @@
   (t/testing "a size that fits a small board to a large height"
     (let [params (job-params :scale 21.6)]
       (t/is (= params (job/decode-params (job/encode-params params))))))
+  (t/testing "several boards, each at its scale"
+    (let [params (job-params :boards [{:board-id (uuid/next) :scale 2.0} {:board-id (uuid/next) :scale 0.5}])]
+      (t/is (= params (job/decode-params (job/encode-params params))))
+      (t/is (nil? (job/decode-params (assoc (job/encode-params params) :boards "nope:1,x"))))
+      (t/is (nil? (job/decode-params (assoc (job/encode-params params) :boards (str (uuid/next) ":1"))))
+            "one board is no list")))
   (t/testing "bad ones are refused"
     (let [query (job/encode-params (job-params))]
       (t/is (nil? (job/decode-params (assoc query :format "mov"))))

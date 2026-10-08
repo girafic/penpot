@@ -2241,6 +2241,10 @@ msgid "export-animation.exporting"
 msgstr "Exporting %s as %s"
 
 #: src/app/main/ui/export_animation.cljs
+msgid "export-animation.exporting-boards"
+msgstr "Exporting %s (%s of %s) as %s"
+
+#: src/app/main/ui/export_animation.cljs
 msgid "export-animation.frame-alt"
 msgstr "The frame being exported"
 
@@ -2271,6 +2275,10 @@ msgstr "Animated export"
 #: src/app/main/ui/export_animation.cljs
 msgid "export-animation.waiting"
 msgstr "Waiting for your changes to be saved…"
+
+#: src/app/main/ui/export_animation.cljs
+msgid "export-animation.zip-files"
+msgstr "%s files in the ZIP: %s"
 
 #: src/app/main/ui/settings/feedback.cljs:121
 msgid "feedback.description"
@@ -9007,6 +9015,10 @@ msgstr "Too many frames. Lower the frame rate or shorten the timeline."
 
 msgid "workspace.options.export.fitted"
 msgstr "The MP4 is %s × %s px, the largest this browser encodes as MP4. WebM keeps the full size."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/exports.cljs
+msgid "workspace.options.export.boards-zip"
+msgstr "%s boards, in a ZIP"
 
 msgid "workspace.options.export.codec-unavailable"
 msgstr "This format is not available in this browser. Try WebM or GIF."

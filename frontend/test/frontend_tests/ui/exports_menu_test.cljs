@@ -13,18 +13,24 @@
 (def ^:private timeline {:board-id :board :tracks {}})
 
 (t/deftest animation-tab-hidden-without-timeline
-  (t/is (nil? (exp/animation-export-board :frame [:board] [board] {})))
-  (t/is (nil? (exp/animation-export-board :frame [:board] [board] nil))))
+  (t/is (nil? (exp/animation-export-boards :frame [board] {})))
+  (t/is (nil? (exp/animation-export-boards :frame [board] nil))))
 
 (t/deftest animation-tab-shown-when-board-has-timeline
-  (t/is (= board (exp/animation-export-board
-                  :frame [:board] [board] {:board timeline}))))
+  (t/is (= [board] (exp/animation-export-boards :frame [board] {:board timeline}))))
+
+(t/deftest animation-tab-shown-for-several-boards
+  (let [other {:id :other :type :frame}
+        still {:id :still :type :frame}]
+    (t/is (= [board other]
+             (exp/animation-export-boards :multiple [board still other]
+                                          {:board timeline :other (assoc timeline :board-id :other)}))
+          "the animated ones")))
 
 (t/deftest animation-tab-hidden-for-non-board-selection
-  (t/is (nil? (exp/animation-export-board
-               :rect [:board] [board] {:board timeline})))
-  (t/is (nil? (exp/animation-export-board
-               :frame [:a :b] [board board] {:board timeline}))))
+  (t/is (nil? (exp/animation-export-boards :rect [board] {:board timeline})))
+  (t/is (nil? (exp/animation-export-boards :multiple [board {:id :rect :type :rect}] {:board timeline}))
+        "not with other shapes"))
 
 (t/deftest the-export-button-follows-the-export
   (t/testing "idle, and again once an export is done"

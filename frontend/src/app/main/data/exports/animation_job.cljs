@@ -15,7 +15,8 @@
    [app.common.exceptions :as ex]
    [app.common.schema :as sm]
    [app.common.transit :as t]
-   [app.common.uuid :as uuid]))
+   [app.common.uuid :as uuid]
+   [cuerdas.core :as str]))
 
 (def formats
   #{:mp4 :webm :gif :avif :svg :lottie :dotlottie})
@@ -37,7 +38,11 @@
    [:scale [::sm/number {:min 0.001}]]
    [:loop? :boolean]
    [:audio? :boolean]
-   [:wasm? :boolean]])
+   [:wasm? :boolean]
+   ;; several boards, each at its scale, exported into a ZIP (see
+   ;; `dea/run-exports`); `board-id` and `scale` are those of the first
+   [:boards {:optional true}
+    [:vector {:min 2} [:map [:board-id ::sm/uuid] [:scale [::sm/number {:min 0.001}]]]]]])
 
 (def ^:private valid-params?
   (sm/lazy-validator schema:params))
@@ -58,35 +63,48 @@
   "The query params of the tab of the job `params` (see `schema:params`),
   the renderer the workspace uses as `wasm`, which the app honours (see
   `app.main.features/setup-wasm-features`)."
-  [{:keys [file-id page-id board-id job-id format quality fps scale loop? audio? wasm?]}]
-  {:file-id (str file-id)
-   :page-id (str page-id)
-   :board-id (str board-id)
-   :job-id (str job-id)
-   :format (name format)
-   :quality (name quality)
-   :fps (str fps)
-   :scale (str scale)
-   :loop (str (boolean loop?))
-   :audio (str (boolean audio?))
-   :wasm (str (boolean wasm?))})
+  [{:keys [file-id page-id board-id job-id format quality fps scale loop? audio? wasm? boards]}]
+  (cond-> {:file-id (str file-id)
+           :page-id (str page-id)
+           :board-id (str board-id)
+           :job-id (str job-id)
+           :format (name format)
+           :quality (name quality)
+           :fps (str fps)
+           :scale (str scale)
+           :loop (str (boolean loop?))
+           :audio (str (boolean audio?))
+           :wasm (str (boolean wasm?))}
+    ;; `<board-id>:<scale>,…`
+    (seq boards)
+    (assoc :boards (str/join "," (map #(str (:board-id %) ":" (:scale %)) boards)))))
+
+(defn- decode-boards
+  [text]
+  (when (some? text)
+    (mapv (fn [part]
+            (let [[id scale] (str/split part #":")]
+              {:board-id (uuid/parse* id)
+               :scale (d/parse-double scale)}))
+          (str/split text #","))))
 
 (defn decode-params
   "The settings of a job from the query params of its tab (strings), or
   nil when they are not valid: a format the renderer cannot draw (a
   picture without WASM) is not."
-  [{:keys [file-id page-id board-id job-id format quality fps scale loop audio wasm]}]
-  (let [params {:file-id (uuid/parse* file-id)
-                :page-id (uuid/parse* page-id)
-                :board-id (uuid/parse* board-id)
-                :job-id (uuid/parse* job-id)
-                :format (some-> format keyword)
-                :quality (some-> quality keyword)
-                :fps (d/parse-integer fps)
-                :scale (d/parse-double scale)
-                :loop? (= "true" loop)
-                :audio? (= "true" audio)
-                :wasm? (= "true" wasm)}]
+  [{:keys [file-id page-id board-id job-id format quality fps scale loop audio wasm boards]}]
+  (let [params (cond-> {:file-id (uuid/parse* file-id)
+                        :page-id (uuid/parse* page-id)
+                        :board-id (uuid/parse* board-id)
+                        :job-id (uuid/parse* job-id)
+                        :format (some-> format keyword)
+                        :quality (some-> quality keyword)
+                        :fps (d/parse-integer fps)
+                        :scale (d/parse-double scale)
+                        :loop? (= "true" loop)
+                        :audio? (= "true" audio)
+                        :wasm? (= "true" wasm)}
+                 (some? boards) (assoc :boards (decode-boards boards)))]
     (when (and (valid-params? params)
                (or (:wasm? params) (not (needs-wasm? (:format params)))))
       params)))

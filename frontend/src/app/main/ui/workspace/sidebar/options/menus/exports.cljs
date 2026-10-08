@@ -8,6 +8,7 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
+   [app.common.files.helpers :as cfh]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.main.data.exports.animation :as dea]
@@ -15,6 +16,7 @@
    [app.main.data.exports.assets :as de]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.shapes :as dwsh]
+   [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -30,6 +32,7 @@
    [app.util.dom :as dom]
    [app.util.i18n :refer [c tr]]
    [app.util.keyboard :as kbd]
+   [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -68,16 +71,17 @@
                (not (some #{size} size-presets)))
           (conj size))))
 
-(defn animation-export-board
-  "The selected board when it has a timeline to export, its own or the
-  one of the component copies in it (`timelines` holds them by board, see
-  `dwa/board-export-timeline`), else nil. The Animated export tab is
-  shown only in that case."
-  [type ids shapes timelines]
-  (when (and (= type :frame) (= 1 (count ids)))
-    (let [shape (first shapes)]
-      (when (and shape (get timelines (:id shape)))
-        shape))))
+(defn animation-export-boards
+  "The selected boards that have a timeline to export, their own or the
+  one of the component copies in them (`timelines` holds them by board,
+  see `dwa/board-export-timeline`), when only boards are selected (`type`
+  is `:frame` or `:multiple`); else nil. The Animated export tab is shown
+  only for them: one, or several into a ZIP."
+  [type shapes timelines]
+  (when (and (contains? #{:frame :multiple} type)
+             (seq shapes)
+             (every? cfh/frame-shape? shapes))
+    (not-empty (filterv #(contains? timelines (:id %)) shapes))))
 
 (defn export-button-state
   "What the panel shows of the animated export `progress` (see
@@ -125,17 +129,26 @@
     :split-text (tr "workspace.options.export.split-text-whole")
     :no-audio   (tr "workspace.options.export.no-audio")))
 
+(defn- board-size
+  [board]
+  (let [{:keys [width height]} (:selrect board)]
+    [(mth/round (or width 0)) (mth/round (or height 0))]))
+
 (mf/defc animated-exports*
+  "The Animated export of the `boards` selected (one, or several into a
+  ZIP), with their `timelines` (by board id): the settings of the first,
+  which a change sets for all."
   {::mf/private true}
-  [{:keys [board timeline formats caveats render-wasm?]}]
+  [{:keys [boards timelines formats caveats render-wasm?]}]
   (let [progress  (mf/deref refs/export-animation)
-        selrect   (:selrect board)
-        width     (mth/round (or (:width selrect) 0))
-        height    (mth/round (or (:height selrect) 0))
+        board     (first boards)
+        timeline  (get timelines (:id board))
+        several?  (> (count boards) 1)
+        [width height] (board-size board)
 
         ;; As last set for the board, kept with its timeline (see
         ;; `dwa/set-export`).
-        board-id  (:id board)
+        board-ids (mapv :id boards)
         export    (:export timeline)
         format    (let [format (:format export)]
                     (if (some #{format} formats) format (first formats)))
@@ -145,14 +158,15 @@
         loop?     (get export :loop true)
         ;; MP4 and WebM carry the sound of the audio clips, unless left out
         audio?    (get export :audio true)
-        clips?    (boolean (seq (:audio-clips timeline)))
+        clips?    (boolean (some #(seq (:audio-clips (get timelines %))) board-ids))
         support*  (mf/use-state {:mp4 true :webm true :avif true})
         support   (deref support*)
 
         raster?   (#{:mp4 :webm :gif :avif} format)
         loops?    (#{:gif :avif} format)
-        times     (cta/frame-times (or (:duration timeline) 0) fps)
-        too-many? (> (count times) cta/max-export-frames)
+        too-many? (some #(> (count (cta/frame-times (or (:duration (get timelines %)) 0) fps))
+                            cta/max-export-frames)
+                        board-ids)
         busy?     (boolean (:in-progress progress))
         job-id    (get-in progress [:job :job-id])
         codec?    (get support format true)
@@ -162,10 +176,22 @@
         out-w     (mth/round (* width scale))
         out-h     (mth/round (* height scale))
 
+        ;; each board at the scale the size gives it
+        export-boards
+        (mapv (fn [board]
+                (let [[w h] (board-size board)]
+                  {:board-id (:id board) :scale (cta/export-size-scale size w h)}))
+              boards)
+
         estimate  (when (and timeline raster?)
                     (dea/approx-size-label
-                     (dea/estimated-size format out-w out-h quality
-                                         (cta/cycle-duration timeline) fps)))
+                     (reduce + (map (fn [board {:keys [scale]}]
+                                      (let [[w h] (board-size board)]
+                                        (dea/estimated-size format (mth/round (* w scale)) (mth/round (* h scale))
+                                                            quality
+                                                            (cta/cycle-duration (get timelines (:id board)))
+                                                            fps)))
+                                    boards export-boards))))
 
         format-options
         (filterv #(some #{(keyword (:value %))} formats)
@@ -190,10 +216,15 @@
          {:value "30" :label "30fps"}
          {:value "60" :label "60fps"}]
 
+        ;; one change for all the boards, undone at once
         set-export
         (mf/use-fn
-         (mf/deps board-id)
-         #(st/emit! (dwa/set-export board-id %)))
+         (mf/deps board-ids)
+         (fn [export]
+           (let [undo-id (js/Symbol)]
+             (st/emit! (dwu/start-undo-transaction undo-id))
+             (run! #(st/emit! (dwa/set-export % export)) board-ids)
+             (st/emit! (dwu/commit-undo-transaction undo-id)))))
 
         on-format
         (mf/use-fn
@@ -233,14 +264,15 @@
         ;; in a tab of its own, opened in this click
         on-export
         (mf/use-fn
-         (mf/deps format quality fps scale loop? audio?)
+         (mf/deps format quality fps scale loop? audio? several? export-boards)
          (fn []
-           (deaw/export-from-panel! {:format format
-                                     :quality quality
-                                     :fps fps
-                                     :scale scale
-                                     :loop? loop?
-                                     :audio? audio?})))
+           (deaw/export-from-panel! (cond-> {:format format
+                                             :quality quality
+                                             :fps fps
+                                             :scale scale
+                                             :loop? loop?
+                                             :audio? audio?}
+                                      several? (assoc :boards export-boards)))))
 
         on-cancel
         (mf/use-fn #(st/emit! (deaw/cancel-export-animation)))
@@ -326,7 +358,10 @@
        [:div {:class (stl/css :animated-meta)}
         [:div {:class (stl/css :animated-row)}
          [:span {:class (stl/css :row-label)} (tr "workspace.options.export.dimensions")]
-         [:span {:class (stl/css :row-value)} (str out-w "×" out-h)]]
+         [:span {:class (stl/css :row-value)}
+          (if several?
+            (tr "workspace.options.export.boards-zip" (count boards))
+            (str out-w "×" out-h))]]
         (when estimate
           [:div {:class (stl/css :animated-row)}
            [:span {:class (stl/css :row-label)} (tr "workspace.options.export.file-size")]
@@ -532,40 +567,53 @@
 
         render-wasm? (features/use-feature "render-wasm/v1")
 
-        ;; What the selected board exports as an animation: its timeline
-        ;; with the animations of the component copies in it.
+        ;; What the selected boards export as animations: their
+        ;; timelines with the animations of the component copies in them.
         page      (mf/deref refs/workspace-page)
         files     (mf/deref refs/files)
-        board-id  (when (and (= type :frame) (= 1 (count ids)))
-                    (:id (first shapes)))
-        timeline  (mf/with-memo [page files board-id]
-                    (when (some? board-id)
-                      (dwa/board-export-timeline page files board-id)))
-        timelines (when (some? timeline)
-                    {board-id timeline})
+        board-ids (when (and (contains? #{:frame :multiple} type)
+                             (every? cfh/frame-shape? shapes))
+                    (mapv :id shapes))
+        ;; by value: a new vector each render would make new refs below
+        boards-key (str/join "," board-ids)
+        timelines (mf/with-memo [page files boards-key]
+                    (into {}
+                          (keep (fn [id]
+                                  (when-let [tl (dwa/board-export-timeline page files id)]
+                                    [id tl])))
+                          board-ids))
+        timeline  (get timelines (first (filter #(contains? timelines %) board-ids)))
 
         ;; Most formats rasterize through WASM: without it the tab offers
-        ;; what is left, and is gone when nothing is.
+        ;; what is left, for all the boards, and is gone when nothing is.
         formats-ref
-        (mf/with-memo [timeline render-wasm?]
-          (l/derived #(dea/export-formats % timeline render-wasm?)
+        (mf/with-memo [timelines render-wasm?]
+          (l/derived (fn [objects]
+                       (let [all (map #(dea/export-formats objects % render-wasm?) (vals timelines))]
+                         (if (seq all)
+                           (filterv (fn [format] (every? #(some #{format} %) all)) (first all))
+                           [])))
                      refs/workspace-page-objects =))
 
         formats (mf/deref formats-ref)
 
-        ;; What the export in each format leaves out (see
+        ;; What the export in each format leaves out, of any board (see
         ;; `dea/export-caveats`).
         caveats-ref
-        (mf/with-memo [timeline]
-          (l/derived #(dea/export-caveats % timeline) refs/workspace-page-objects =))
+        (mf/with-memo [timelines]
+          (l/derived (fn [objects]
+                       (apply merge-with (comp vec distinct concat)
+                              (map #(dea/export-caveats objects %) (vals timelines))))
+                     refs/workspace-page-objects =))
 
         caveats (mf/deref caveats-ref)
 
-        animated-board
+        animated-boards
         (when (seq formats)
-          (animation-export-board type ids shapes timelines))
+          (animation-export-boards type shapes timelines))
 
-        animated-id (:id animated-board)
+        animated-board (first animated-boards)
+        animated-id    (str/join "," (map :id animated-boards))
 
         ;; A board exported as an animation opens on that tab: choosing
         ;; it keeps the settings of the board (see `dwa/set-export`).
@@ -575,12 +623,12 @@
 
         on-tab
         (mf/use-fn
-         (mf/deps animated-id)
+         (mf/deps animated-boards)
          (fn [id]
            (let [animated? (= id "export-animated")]
              (reset! tab* (if animated? "animated" "static"))
-             (when (and animated? (some? animated-id))
-               (st/emit! (dwa/set-export animated-id {}))))))
+             (when animated?
+               (run! #(st/emit! (dwa/set-export (:id %) {})) animated-boards)))))
 
         export-tabs
         [{:id "export-static" :label (tr "workspace.options.export.static")}
@@ -610,9 +658,9 @@
                              :selected (str "export-" tab)
                              :on-change on-tab}
            (when (= tab "animated")
-             [:> animated-exports* {:key (str animated-id)
-                                    :board animated-board
-                                    :timeline timeline
+             [:> animated-exports* {:key animated-id
+                                    :boards animated-boards
+                                    :timelines timelines
                                     :formats formats
                                     :caveats caveats
                                     :render-wasm? render-wasm?}])])

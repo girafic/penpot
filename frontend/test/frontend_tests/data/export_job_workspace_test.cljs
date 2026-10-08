@@ -285,3 +285,12 @@
               :scale 2 :loop? false :audio? true :wasm? true}
              (dissoc job :board-id :job-id)))
     (t/is (uuid? (:job-id job)))))
+
+(t/deftest the-job-of-several-boards
+  (let [[a b] [(uuid/next) (uuid/next)]
+        boards [{:board-id a :scale 2} {:board-id b :scale 0.5}]
+        job    (deaw/export-job {:current-file-id (uuid/next) :current-page-id (uuid/next)}
+                                {:format :mp4 :boards boards})]
+    (t/is (= [a 2 boards] ((juxt :board-id :scale :boards) job)) "the first is its board")
+    (t/is (nil? (:boards (deaw/export-job {} {:format :mp4 :boards (take 1 boards)})))
+          "one board is no list")))
