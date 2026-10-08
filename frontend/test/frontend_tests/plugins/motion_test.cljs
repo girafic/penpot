@@ -306,6 +306,12 @@
           (set! (.-exportSettings timeline) #js {:format "dotlottie"})
           (t/is (= "dotlottie" (:format (settings)))))
 
+        (t/testing "a size of its own, as the export panel takes it"
+          (set! (.-exportSettings timeline) #js {:size "3,5"})
+          (t/is (= "3.5" (:size (settings))))
+          (set! (.-exportSettings timeline) #js {:size "512w"})
+          (t/is (= "w512" (:size (settings)))))
+
         (t/testing "a video leaves its sound out when asked"
           (set! (.-exportSettings timeline) #js {:audio false})
           (t/is (false? (:audio (settings))))
@@ -314,7 +320,8 @@
         (t/testing "what is not valid is refused"
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:format "mov"})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:fps 0})))
-          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:size "3"})))
+          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:size "11"})))
+          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:size "big"})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:loop "yes"})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:audio "no"}))))))))
 

@@ -4557,9 +4557,10 @@ export interface TimelineExportSettings {
   fps?: number;
 
   /**
-   * How big it is: a factor of the board (`0.5`, `1`, `2`) or a width or
-   * height in pixels (`w1920`, `h720`, `h1080`, `h1440`, `h2160`). `1` by
-   * default.
+   * How big it is: a factor of the board up to 10 (`0.5`, `1`, `2`,
+   * `3.5`) or a width or height in pixels up to 8192 (`w1920`, `h720`).
+   * `1` by default. It takes what the export panel takes (`3,5`, `3.5x`,
+   * `512w`, `720h`) and keeps it as above.
    */
   size?: TimelineExportSize;
 
@@ -4582,10 +4583,11 @@ export type TimelineExportFormat =
   'mp4' | 'webm' | 'gif' | 'avif' | 'svg' | 'lottie' | 'dotlottie';
 
 /**
- * The sizes of an animation export, see `TimelineExportSettings`.
+ * The size of an animation export, see `TimelineExportSettings`: a factor
+ * of the board (`'2'`, `'3.5'`), a width (`'w1920'`) or a height (`'h720'`)
+ * in pixels.
  */
-export type TimelineExportSize =
-  '0.5' | '1' | '2' | 'w1920' | 'h720' | 'h1080' | 'h1440' | 'h2160';
+export type TimelineExportSize = `${number}` | `w${number}` | `h${number}`;
 
 /**
  * A component copy in a board that plays the animation of its main, see

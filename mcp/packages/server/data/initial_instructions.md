@@ -484,7 +484,7 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
   * `toReact(): string` - The animation as React code for motion.dev (`motion/react`), as Inspect gives it
   * `exportSettings` - How the board is exported as an animation, as the export panel sets and offers it:
     `{format: "mp4" | "webm" | "gif" | "avif" | "svg" | "lottie" | "dotlottie", quality: "low" | "medium" | "high",
-    fps: 1..120, size: "0.5" | "1" | "2" | "w1920" | "h720" | "h1080" | "h1440" | "h2160", loop: boolean,
+    fps: 1..120, size: a factor up to 10 ("0.5", "2", "3.5") or "w<px>" / "h<px>" up to 8192 ("w1920", "h720"), loop: boolean,
     audio: boolean}`; setting it changes the ones given (e.g. `timeline.exportSettings = {format: "gif", fps: 15}`);
     "dotlottie" is a `.lottie` archive holding the Lottie JSON and its images; `audio: false` leaves the sound of the
     audio clips out of an MP4 or WebM video (the other formats have none)

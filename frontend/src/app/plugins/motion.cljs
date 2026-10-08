@@ -77,9 +77,6 @@
 (def ^:private export-qualities
   #{"low" "medium" "high"})
 
-(def ^:private export-sizes
-  #{"0.5" "1" "2" "w1920" "h720" "h1080" "h1440" "h2160"})
-
 (def ^:private export-defaults
   "The export settings a board has until they are set, as the export
   panel offers them."
@@ -117,8 +114,10 @@
       (and (some? fps) (not (and (sm/valid-safe-int? fps) (<= 1 fps 120))))
       "The frame rate should be a whole number from 1 to 120"
 
-      (and (some? size) (not (contains? export-sizes size)))
-      (dm/str "The size should be one of " (pr-str (sort export-sizes)))
+      (and (some? size) (nil? (cta/parse-export-size size)))
+      (dm/str "The size should be a factor of the board up to " cta/max-export-size-factor
+              " ('0.5', '2', '3.5') or a width or height in pixels up to "
+              cta/max-export-size-pixels " ('w1920', 'h720')")
 
       (and (some? loops?) (not (boolean? loops?)))
       "Whether it loops should be true or false"
@@ -131,7 +130,7 @@
         (some? file-format) (assoc :format (keyword file-format))
         (some? quality)     (assoc :quality (keyword quality))
         (some? fps)         (assoc :fps fps)
-        (some? size)        (assoc :size size)
+        (some? size)        (assoc :size (cta/parse-export-size size))
         (some? loops?)      (assoc :loop loops?)
         (some? audio?)      (assoc :audio audio?)))))
 

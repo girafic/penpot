@@ -22,6 +22,7 @@
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.controls.combobox :refer [combobox*]]
    [app.main.ui.ds.controls.switch :refer [switch*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
@@ -54,19 +55,18 @@
        (= (unchecked-get old-props "values")
           (unchecked-get new-props "values"))))
 
-(defn export-scale
-  "Pixel scale for an animated export. `0.5` and `2` are factors.
-  `w1920` fits the width, `h720` and the other heights fit the height."
-  [preset width height]
-  (cond
-    (= preset "0.5") 0.5
-    (= preset "2") 2.0
-    (= preset "w1920") (/ 1920.0 (max 1 width))
-    (= preset "h720") (/ 720.0 (max 1 height))
-    (= preset "h1080") (/ 1080.0 (max 1 height))
-    (= preset "h1440") (/ 1440.0 (max 1 height))
-    (= preset "h2160") (/ 2160.0 (max 1 height))
-    :else 1.0))
+(def ^:private size-presets
+  ["0.5" "1" "2" "w1920" "h720" "h1080" "h1440" "h2160"])
+
+(defn animated-size-options
+  "The sizes the Animated export offers: the presets and, when it is
+  another one, the size `size` it has (see `cta/parse-export-size`)."
+  [size]
+  (mapv (fn [preset] {:id preset :label (cta/export-size-label preset)})
+        (cond-> size-presets
+          (and (some? (cta/parse-export-size size))
+               (not (some #{size} size-presets)))
+          (conj size))))
 
 (defn animation-export-board
   "The selected board when it has a timeline to export, its own or the
@@ -158,7 +158,7 @@
         codec?    (get support format true)
         disabled? (or (nil? timeline) too-many? busy? (not codec?))
 
-        scale     (export-scale size width height)
+        scale     (cta/export-size-scale size width height)
         out-w     (mth/round (* width scale))
         out-h     (mth/round (* height scale))
 
@@ -190,16 +190,6 @@
          {:value "30" :label "30fps"}
          {:value "60" :label "60fps"}]
 
-        size-options
-        [{:value "0.5" :label "0.5x"}
-         {:value "1" :label "1x"}
-         {:value "2" :label "2x"}
-         {:value "w1920" :label "1920w"}
-         {:value "h720" :label "720h"}
-         {:value "h1080" :label "1080h"}
-         {:value "h1440" :label "1440h"}
-         {:value "h2160" :label "2160h"}]
-
         set-export
         (mf/use-fn
          (mf/deps board-id)
@@ -219,8 +209,20 @@
         on-fps
         (mf/use-fn (mf/deps set-export) #(set-export {:fps (d/parse-integer %)}))
 
+        ;; the field shows the size it has after each edit: a typed size
+        ;; it does not take goes back, `3,5` shows as `3.5x`
+        size-edits* (mf/use-state 0)
+        size-ref    (mf/use-ref size)
+        _           (mf/set-ref-val! size-ref size)
+
         on-size
-        (mf/use-fn (mf/deps set-export) #(set-export {:size %}))
+        (mf/use-fn
+         (mf/deps set-export)
+         (fn [value]
+           (let [parsed (cta/parse-export-size value)]
+             (if (and (some? parsed) (not= parsed (mf/ref-val size-ref)))
+               (set-export {:size parsed})
+               (swap! size-edits* inc)))))
 
         on-loop
         (mf/use-fn (mf/deps set-export) #(set-export {:loop %}))
@@ -288,10 +290,12 @@
            [:div {:class (stl/css :animated-row)}
             [:span {:class (stl/css :row-label)} (tr "workspace.options.export.size")]
             [:div {:class (stl/css :row-control)}
-             [:& select {:default-value size
-                         :options size-options
-                         :data-direction "up"
-                         :on-change on-size}]]]
+             [:> combobox* {:key (str size "-" @size-edits*)
+                            :id "animated-export-size"
+                            :default-selected size
+                            :options (animated-size-options size)
+                            :max-length 8
+                            :on-change on-size}]]]
            [:div {:class (stl/css :animated-row)}
             [:span {:class (stl/css :row-label)} (tr "workspace.options.export.quality")]
             [:div {:class (stl/css :row-control)}

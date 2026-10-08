@@ -345,6 +345,63 @@
    ;; whether MP4 and WebM carry the audio clips; absent is yes
    [:audio {:optional true} :boolean]])
 
+(def max-export-size-factor
+  "The largest factor of the board an animation export takes as size."
+  10)
+
+(def max-export-size-pixels
+  "The largest width or height in pixels an animation export takes as
+  size."
+  8192)
+
+(defn parse-export-size
+  "The `:size` of `schema:export` that `text` names, as the export panel
+  takes it: a factor of the board, `2`, `3.5x` or `0,5`, as its number
+  (`\"3.5\"`, up to `max-export-size-factor`); a width in pixels, `512w`
+  or `w512`, as `\"w512\"`; a height, `720h` or `h720`, as `\"h720\"` (up
+  to `max-export-size-pixels`). Nil when it names none."
+  [text]
+  (let [t      (-> (str text)
+                   (str/lower-case)
+                   (str/replace "," ".")
+                   (str/replace #"\s+" ""))
+        pixels (fn [prefix digits]
+                 (let [n (d/parse-integer digits)]
+                   (when (and (some? n) (<= 1 n max-export-size-pixels))
+                     (str prefix n))))]
+    (if-let [[_ a b] (re-matches #"(\d+)w|w(\d+)" t)]
+      (pixels "w" (or a b))
+      (if-let [[_ a b] (re-matches #"(\d+)h|h(\d+)" t)]
+        (pixels "h" (or a b))
+        (when-let [[_ a b] (re-matches #"(\d*\.?\d+)x?|x(\d*\.?\d+)" t)]
+          (let [factor (d/parse-double (or a b))
+                ;; three decimals at most
+                factor (when (some? factor)
+                         (/ (mth/round (* factor 1000)) 1000.0))]
+            (when (and (some? factor) (< 0 factor) (<= factor max-export-size-factor))
+              (if (== factor (mth/floor factor))
+                (str (long factor))
+                (str factor)))))))))
+
+(defn export-size-scale
+  "The pixel scale of the export size `size` (see `parse-export-size`)
+  for a board of `width` × `height`: 1 for a size it does not name."
+  [size width height]
+  (let [size (or (parse-export-size size) "1")]
+    (cond
+      (str/starts-with? size "w") (/ (d/parse-double (subs size 1)) (max 1 width))
+      (str/starts-with? size "h") (/ (d/parse-double (subs size 1)) (max 1 height))
+      :else (d/parse-double size))))
+
+(defn export-size-label
+  "How the export panel shows the export size `size` (see
+  `parse-export-size`): `3.5x`, `512w`, `720h`."
+  [size]
+  (cond
+    (str/starts-with? size "w") (str (subs size 1) "w")
+    (str/starts-with? size "h") (str (subs size 1) "h")
+    :else (str size "x")))
+
 (def schema:timeline
   [:map {:title "AnimationTimeline"}
    [:board-id ::sm/uuid]

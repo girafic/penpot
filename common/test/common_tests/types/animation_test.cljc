@@ -3057,3 +3057,20 @@
     (t/testing "without pictures, the text plays whole"
       (let [svg (cta/timeline->svg tl objects {})]
         (t/is (not (str/includes? svg "penpot-unit-")))))))
+
+(t/deftest export-sizes-take-what-people-type
+  (t/is (= ["2" "3.5" "0.5" "0.125" "1"]
+           (mapv cta/parse-export-size ["2" "3,5" "0.5x" "x0.125" " 1 X "])))
+  (t/is (= ["w512" "w512" "h720" "h720" "w1920"]
+           (mapv cta/parse-export-size ["512w" "w512" "720H" "h 720" "w1920"])))
+  (t/testing "what names no size"
+    (t/is (every? nil? (map cta/parse-export-size
+                            [nil "" "abc" "0" "0x" "0.0001" "11" "0w" "9000h" "2xx" "-1"])))))
+
+(t/deftest export-sizes-scale-the-board
+  (t/is (= 3.5 (cta/export-size-scale "3.5" 400 200)))
+  (t/is (= 2.0 (cta/export-size-scale "w800" 400 200)))
+  (t/is (= 3.6 (cta/export-size-scale "h720" 400 200)))
+  (t/is (= 1.0 (cta/export-size-scale "nonsense" 400 200)) "1 for what names no size")
+  (t/is (= ["3.5x" "512w" "720h" "1x"] (mapv cta/export-size-label ["3.5" "w512" "h720" "1"]))))
+
