@@ -14,6 +14,7 @@
    [app.main.data.exports.animation-tab :as dat]
    [app.main.store :as st]
    [app.main.ui.ds.buttons.button :refer [button*]]
+   [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [cuerdas.core :as str]
    [okulary.core :as l]
@@ -87,6 +88,15 @@
       :error     {:text (job/error-text error) :actions [:close]}
       {:text ["export-animation.invalid"] :actions [:close]})))
 
+(defn page-title
+  "What the title of the export tab says of its state `tab`: `{:board
+  :percent}`, the percent while it exports; nil before it knows the
+  board."
+  [{:keys [status params page percent]}]
+  (when-let [board (not-empty (get-in page [:objects (:board-id params) :name]))]
+    (cond-> {:board board}
+      (= :exporting status) (assoc :percent (or percent 0)))))
+
 (defn- image-data
   [image]
   (if (instance? js/ImageData image)
@@ -134,8 +144,13 @@
   "The export tab, for the job of the query params `query`."
   {::mf/lazy-load true}
   [{:keys [query]}]
-  (let [tab  (mf/deref ref:export-tab)
-        view (page-state tab)
+  (let [tab   (mf/deref ref:export-tab)
+        view  (page-state tab)
+        title (if-let [{:keys [board percent]} (page-title tab)]
+                (cond->> (tr "title.export-animation" board)
+                  ;; how far it is, also from another tab
+                  (some? percent) (str percent "% · "))
+                (tr "title.default"))
 
         on-cancel   (mf/use-fn #(st/emit! (dat/cancel)))
         on-download (mf/use-fn #(st/emit! (dat/download-again)))
@@ -144,6 +159,9 @@
     (mf/with-effect []
       (st/emit! (dat/initialize query))
       #(st/emit! (dat/finalize)))
+
+    (mf/with-effect [title]
+      (dom/set-html-title title))
 
     [:main {:class (stl/css :export-page)}
      [:section {:class (stl/css-case :export-card true

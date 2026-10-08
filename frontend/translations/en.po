@@ -6918,6 +6918,10 @@ msgstr "Shared Libraries - %s - Penpot"
 msgid "title.default"
 msgstr "Penpot | Full-stack design"
 
+#: src/app/main/ui/export_animation.cljs
+msgid "title.export-animation"
+msgstr "%s - Animated export - Penpot"
+
 #: src/app/main/ui/settings/feedback.cljs:162
 msgid "title.settings.feedback"
 msgstr "Give feedback - Penpot"

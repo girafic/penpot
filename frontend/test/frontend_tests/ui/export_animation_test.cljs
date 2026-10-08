@@ -37,6 +37,14 @@
                                           :page {:objects {board {:name "Spin" :selrect selrect}}}
                                           :frame-scale 1}))))))))
 
+(t/deftest the-title-tells-the-board-and-how-far-it-is
+  (let [board (uuid/next)
+        tab   {:params {:board-id board :format :mp4}
+               :page {:objects {board {:name "Orbit"}}}}]
+    (t/is (= {:board "Orbit" :percent 49} (uea/page-title (assoc tab :status :exporting :percent 49))))
+    (t/is (= {:board "Orbit"} (uea/page-title (assoc tab :status :done))))
+    (t/is (nil? (uea/page-title {:status :loading})) "before it knows the board")))
+
 (t/deftest the-page-shows-where-the-export-is
   (let [board  (uuid/next)
         tab    {:params {:board-id board :format :mp4}
