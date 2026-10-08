@@ -309,12 +309,29 @@
   (when (and cancelled? (cancelled?))
     (throw (ex-info "cancelled" {:type :export-cancelled}))))
 
+(defn- find-transparency
+  "Promise of whether a pixel of `frames` is not fully opaque. Gives the
+  page its turn (`yield`) after each frame it looks through."
+  [frames yield cancelled?]
+  (reduce (fn [p image]
+            (.then p (fn [found?]
+                       (or found?
+                           (do (throw-if-cancelled cancelled?)
+                               (let [found? (transparent? (first (image-parts image)))]
+                                 (.then (yield) (constantly found?))))))))
+          (js/Promise.resolve false)
+          frames))
+
 (defn encode-gif
   "Encode decoded frames with gifenc: a promise of `{:status :ok :blob
   ...}`. `frames` is a seq of ImageData or `{:data :width :height}`
   maps. It gives the page its turn (`yield`) after each frame, and
-  stops there when `cancelled?`."
-  [{:keys [frames fps loop? colors cancelled? on-progress yield
+  stops there when `cancelled?`.
+
+  With `keep-alpha?`, frames with a pixel that is not fully opaque keep
+  their transparency as a GIF does: a pixel is transparent or opaque
+  (half opaque or more), each frame clearing the one before."
+  [{:keys [frames fps loop? colors cancelled? on-progress yield keep-alpha?
            gif-encoder quantize apply-palette]
     :or {colors 128 fps 30}}]
   (let [encoder      (or gif-encoder gifenc/GIFEncoder)
@@ -324,22 +341,40 @@
         ^js gif      (encoder)
         delay        (max 1 (mth/round (/ 1000.0 fps)))
         n            (count frames)]
-    (-> (reduce (fn [p [i image]]
-                  (-> p
-                      (.then
-                       (fn [_]
-                         (throw-if-cancelled cancelled?)
-                         (let [[data w h] (image-parts image)
-                               palette    (quantize* data colors)
-                               index      (apply-pal* data palette)]
-                           (.writeFrame gif index w h
-                                        #js {:palette palette
-                                             :delay delay
-                                             :repeat (if loop? 0 -1)}))
-                         (when on-progress (on-progress (inc i) n))
-                         (yield)))))
-                (js/Promise.resolve nil)
-                (map-indexed vector frames))
+    (-> (if keep-alpha?
+          (find-transparency frames yield cancelled?)
+          (js/Promise.resolve false))
+        (.then
+         (fn [alpha?]
+           (reduce (fn [p [i image]]
+                     (-> p
+                         (.then
+                          (fn [_]
+                            (throw-if-cancelled cancelled?)
+                            (let [[data w h] (image-parts image)
+                                  ^js palette (if alpha?
+                                                (quantize* data colors #js {:format "rgba4444"
+                                                                            :oneBitAlpha true})
+                                                (quantize* data colors))
+                                  index      (if alpha?
+                                               (apply-pal* data palette "rgba4444")
+                                               (apply-pal* data palette))
+                                  ;; the color of the transparent pixels
+                                  clear      (if alpha?
+                                               (.findIndex palette #(zero? (aget % 3)))
+                                               -1)]
+                              (.writeFrame gif index w h
+                                           (js/Object.assign
+                                            #js {:palette palette
+                                                 :delay delay
+                                                 :repeat (if loop? 0 -1)}
+                                            (when alpha? #js {:dispose 2})
+                                            (when (>= clear 0)
+                                              #js {:transparent true :transparentIndex clear}))))
+                            (when on-progress (on-progress (inc i) n))
+                            (yield)))))
+                   (js/Promise.resolve nil)
+                   (map-indexed vector frames))))
         (.then
          (fn [_]
            (throw-if-cancelled cancelled?)
@@ -684,19 +719,6 @@
   (doseq [part (cta/audio-plan timeline 0 (cta/cycle-duration timeline))]
     (p/catch (audio/load! (ctau/get-audio-clip timeline (:clip-id part)))
              (constantly nil))))
-
-(defn- find-transparency
-  "Promise of whether a pixel of `frames` is not fully opaque. Gives the
-  page its turn (`yield`) after each frame it looks through."
-  [frames yield cancelled?]
-  (reduce (fn [p image]
-            (.then p (fn [found?]
-                       (or found?
-                           (do (throw-if-cancelled cancelled?)
-                               (let [found? (transparent? (first (image-parts image)))]
-                                 (.then (yield) (constantly found?))))))))
-          (js/Promise.resolve false)
-          frames))
 
 (def ^:private alpha-video-codecs
   "The codecs of a WebM that keep the transparency of its frames, in the
@@ -1543,6 +1565,7 @@
                         :gif (encode-gif (merge (select-keys opts [:gif-encoder :quantize :apply-palette])
                                                 {:frames frames
                                                  :fps fps
+                                                 :keep-alpha? true
                                                  :loop? (boolean loop?)
                                                  :colors (cta/gif-colors quality)
                                                  :cancelled? cancelled?

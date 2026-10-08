@@ -169,6 +169,47 @@
           :yield #(js/Promise.resolve nil)}
          params))
 
+(defn- recording-gif
+  "A gifenc encoder, quantizer and palette mapper that note the options
+  of each call in `seen`; the palette has a transparent color at 1."
+  [seen]
+  {:gif-encoder (fn []
+                  #js {:writeFrame (fn [_ _ _ ^js opts]
+                                     (swap! seen update :frames (fnil conj [])
+                                            [(.-transparent opts) (.-transparentIndex opts) (.-dispose opts)]))
+                       :finish (fn [])
+                       :bytes (fn [] (js/Uint8Array. #js [71 73 70]))})
+   :quantize (fn [_ _ & [^js opts]]
+               (swap! seen update :quantize (fnil conj []) (some-> opts .-format))
+               #js [#js [9 9 9 255] #js [0 0 0 0]])
+   :apply-palette (fn [data _ & [format]]
+                    (swap! seen update :apply (fnil conj []) format)
+                    data)})
+
+(t/deftest encode-gif-keeps-transparency
+  (t/async
+    done
+    (let [clear  (atom {})
+          opaque (atom {})
+          frame  (fn [alpha] {:data (js/Uint8ClampedArray. #js [9 9 9 alpha]) :width 1 :height 1})]
+      (-> (js/Promise.all
+           #js [(dea/encode-gif (merge {:frames [(frame 0) (frame 255)] :fps 30 :keep-alpha? true
+                                        :yield #(js/Promise.resolve nil)}
+                                       (recording-gif clear)))
+                (dea/encode-gif (merge {:frames [(frame 255)] :fps 30 :keep-alpha? true
+                                        :yield #(js/Promise.resolve nil)}
+                                       (recording-gif opaque)))])
+          (.then (fn [_]
+                   (t/testing "a pixel transparent or opaque, each frame clearing the one before"
+                     (t/is (= ["rgba4444" "rgba4444"] (:quantize @clear)))
+                     (t/is (= ["rgba4444" "rgba4444"] (:apply @clear)))
+                     (t/is (= [[true 1 2] [true 1 2]] (:frames @clear))))
+                   (t/testing "opaque frames as before"
+                     (t/is (= [nil] (:quantize @opaque) (:apply @opaque)))
+                     (t/is (= [[nil nil nil]] (:frames @opaque))))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
 (t/deftest encode-gif-writes-loop-flag
   (t/async
     done
