@@ -1705,10 +1705,23 @@
                           (cltl/poses-units? modif-tree edition)
                           (conj edition)))))
 
+(defn- previewed-timelines
+  "The timelines the canvas shows at the playhead (see `shown-timelines`):
+  in motion mode, or out of it while a board plays from its title (see
+  `toggle-board-play`); none else, the boards showing as they are."
+  [state]
+  (when (or (motion-mode? state) (dm/get-in state [:workspace-animation :playing?]))
+    (not-empty (shown-timelines state))))
+
 (defn apply-preview
   "Recompute and apply the transient modifiers for the timeline of the
   active board at the playhead (editor scrubbing/playback preview), see
-  `shown-timelines`. The modif-tree covers transforms AND opacity (as a
+  `previewed-timelines`: out of motion mode, but while a board plays,
+  the canvas shows the boards as they are, so an edit of a timeline
+  there (through the plugin API, an export) poses nothing, which the
+  dock would never settle in full quality (see
+  `dwm/settle-local-transform`): the canvas would draw no blur or
+  shadow until the next gesture. The modif-tree covers transforms AND opacity (as a
   change-property modifier).
 
   Renderer-aware: with the WASM renderer (`render-wasm/v1`) the modifiers
@@ -1724,13 +1737,13 @@
     (update [_ state]
       ;; What the canvas shows, for an edit on it to show over it (see
       ;; `dsh/lookup-animation-preview`).
-      (if (seq (shown-timelines state))
+      (if (some? (previewed-timelines state))
         (assoc-in state [:workspace-animation :preview] {:board-id (active-board-id state) :time (playhead state)})
         (update state :workspace-animation dissoc :preview)))
 
     ptk/WatchEvent
     (watch [_ state _]
-      (if-let [timelines (not-empty (shown-timelines state))]
+      (if-let [timelines (previewed-timelines state)]
         (let [objects    (dsh/lookup-page-objects state)
               modif-tree (-> (cltl/animation-tree timelines objects (playhead state))
                              (texts-at-rest state))]

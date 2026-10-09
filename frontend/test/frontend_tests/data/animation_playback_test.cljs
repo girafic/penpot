@@ -169,6 +169,51 @@
     (t/is (= [::dwa/pause] (types (dwa/set-active-board b) state)))
     (t/is (= [] (types (dwa/set-active-board a) state)) "not the board that plays")))
 
+(t/deftest out-of-motion-mode-the-boards-show-as-they-are
+  ;; an edit of a timeline there (the plugin API, an export) poses
+  ;; nothing, which no dock would settle in full quality, but a board
+  ;; that plays from its title does
+  (let [file-id (uuid/next)
+        page-id (uuid/next)
+        board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 300 :height 200})
+        bid     (:id board)
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe bid {:time 0 :property :opacity :value 0})
+                    (cta/add-keyframe bid {:time 1000 :property :opacity :value 1}))
+        state   {:current-file-id file-id
+                 :current-page-id page-id
+                 :workspace-animation {:board-id bid :playhead 500 :preview {:board-id bid :time 500}}
+                 :files {file-id {:data {:pages-index {page-id {:id page-id
+                                                                :objects {bid board}
+                                                                :timelines {bid tl}}}}}}}
+        types   (fn [state]
+                  (let [types (atom [])]
+                    (->> (ptk/watch (dwa/apply-preview) state (rx/empty))
+                         (rx/subs! #(swap! types conj (ptk/type %))))
+                    @types))
+        posed?  #(some? (get-in (ptk/update (dwa/apply-preview) %) [:workspace-animation :preview]))
+        motion  (assoc state :workspace-layout #{:animation-timeline})
+        playing (assoc-in state [:workspace-animation :playing?] true)]
+    (t/is (= [::dwm/clear-local-transform] (types state)) "out of motion mode")
+    (t/is (not (posed? state)))
+    (t/is (not= [::dwm/clear-local-transform] (types motion)) "in motion mode")
+    (t/is (posed? motion))
+    (t/is (not= [::dwm/clear-local-transform] (types playing)) "while a board plays from its title")
+    (t/is (posed? playing))))
+
+(t/deftest clearing-the-preview-sets-back-what-it-changed
+  ;; a board that played out of motion mode shows as it is again: the
+  ;; opacity it faded to set back, though the update drops what the
+  ;; effect reads
+  (let [id    (uuid/next)
+        props [[id {:type :change-property :property :opacity :value 0.8}]]
+        seen  (atom nil)
+        event (dwm/clear-local-transform)
+        state {:features #{"render-wasm/v1"} :wasm-props props}]
+    (with-redefs [dwm/set-wasm-props! (fn [_ prev next] (reset! seen [prev next]))]
+      (ptk/effect event (ptk/update event state) nil))
+    (t/is (= [props []] @seen))))
+
 ;; TEXT SPLITS
 
 (defn- split-texts

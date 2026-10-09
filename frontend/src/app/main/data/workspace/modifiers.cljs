@@ -353,24 +353,28 @@
       current)))
 
 (defn clear-local-transform []
-  (ptk/reify ::clear-local-transform
-    ptk/EffectEvent
-    (effect [_ state _]
-      (when (features/active-feature? state "render-wasm/v1")
-        ;; End interactive transform mode BEFORE cleaning modifiers so
-        ;; the final full-quality render triggered by subsequent shape
-        ;; updates is not still classified as "interactive" (which would
-        ;; skip shadows / blur).
-        (ensure-interactive-transform-end!)
-        (wasm.api/clean-modifiers)
-        (vreset! wasm-structure-modifiers-active? false)
-        (set-wasm-props! (dsh/lookup-page-objects state) (:wasm-props state) [])))
+  ;; The properties the modifiers changed, which the effect sets back:
+  ;; it sees the state after the update, which drops them.
+  (let [changed (volatile! nil)]
+    (ptk/reify ::clear-local-transform
+      ptk/EffectEvent
+      (effect [_ state _]
+        (when (features/active-feature? state "render-wasm/v1")
+          ;; End interactive transform mode BEFORE cleaning modifiers so
+          ;; the final full-quality render triggered by subsequent shape
+          ;; updates is not still classified as "interactive" (which would
+          ;; skip shadows / blur).
+          (ensure-interactive-transform-end!)
+          (wasm.api/clean-modifiers)
+          (vreset! wasm-structure-modifiers-active? false)
+          (set-wasm-props! (dsh/lookup-page-objects state) @changed [])))
 
-    ptk/UpdateEvent
-    (update [_ state]
-      (-> state
-          (dissoc :workspace-modifiers ::edit-modifiers :wasm-props :prev-wasm-props)
-          (dissoc :app.main.data.workspace.transforms/current-move-selected)))))
+      ptk/UpdateEvent
+      (update [_ state]
+        (vreset! changed (:wasm-props state))
+        (-> state
+            (dissoc :workspace-modifiers ::edit-modifiers :wasm-props :prev-wasm-props)
+            (dissoc :app.main.data.workspace.transforms/current-move-selected))))))
 
 (defn create-modif-tree
   [ids modifiers]
