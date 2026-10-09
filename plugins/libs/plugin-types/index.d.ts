@@ -4574,6 +4574,21 @@ export interface TimelineExportSettings {
    * timeline. `true` by default; the other formats have no sound.
    */
   audio?: boolean;
+
+  /**
+   * Whether an SVG gives each layer, and the board, its name as its
+   * `id` attribute (made a valid XML name, the second layer of a name
+   * `<name>_2` and so on), as the "Include id attribute" option of Figma.
+   * `false` by default.
+   */
+  includeIds?: boolean;
+
+  /**
+   * Whether an SVG starts with a bounding box: an empty rectangle over
+   * the board, as the "Include bounding box" option of Figma. `false`
+   * by default.
+   */
+  includeBoundingBox?: boolean;
 }
 
 /**

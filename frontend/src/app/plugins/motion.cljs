@@ -80,7 +80,7 @@
 (def ^:private export-defaults
   "The export settings a board has until they are set, as the export
   panel offers them."
-  {:format :mp4 :quality :high :fps 30 :size "1" :loop true :audio true})
+  {:format :mp4 :quality :high :fps 30 :size "1" :loop true :audio true :ids false :bbox false})
 
 (defn- format-export
   "The export settings of a timeline (`cta/schema:export`) as the plugin
@@ -92,7 +92,9 @@
          :fps (:fps export)
          :size (:size export)
          :loop (:loop export)
-         :audio (:audio export)}))
+         :audio (:audio export)
+         :includeIds (:ids export)
+         :includeBoundingBox (:bbox export)}))
 
 (defn- parse-export
   "The export settings the object `value` of `Timeline.exportSettings`
@@ -103,7 +105,9 @@
         fps         (obj/get value "fps")
         size        (obj/get value "size")
         loops?      (obj/get value "loop")
-        audio?      (obj/get value "audio")]
+        audio?      (obj/get value "audio")
+        ids?        (obj/get value "includeIds")
+        bbox?       (obj/get value "includeBoundingBox")]
     (cond
       (and (some? file-format) (not (contains? cta/export-formats (keyword file-format))))
       (dm/str "The format should be one of " (pr-str (sort (map name cta/export-formats))))
@@ -125,6 +129,12 @@
       (and (some? audio?) (not (boolean? audio?)))
       "Whether it has sound should be true or false"
 
+      (and (some? ids?) (not (boolean? ids?)))
+      "Whether an SVG has the ids of the layers should be true or false"
+
+      (and (some? bbox?) (not (boolean? bbox?)))
+      "Whether an SVG has a bounding box should be true or false"
+
       :else
       (cond-> {}
         (some? file-format) (assoc :format (keyword file-format))
@@ -132,7 +142,9 @@
         (some? fps)         (assoc :fps fps)
         (some? size)        (assoc :size (cta/parse-export-size size))
         (some? loops?)      (assoc :loop loops?)
-        (some? audio?)      (assoc :audio audio?)))))
+        (some? audio?)      (assoc :audio audio?)
+        (some? ids?)        (assoc :ids ids?)
+        (some? bbox?)       (assoc :bbox bbox?)))))
 
 (defn- enabled?
   []

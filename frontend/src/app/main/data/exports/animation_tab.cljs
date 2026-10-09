@@ -244,7 +244,7 @@
                                     :on-progress #(st/emit! (progress %))}
                              ;; the pictures come from WASM
                              (:wasm? params) (assoc :on-frame show-frame!))
-                           (select-keys params [:format :quality :fps :loop? :audio?])
+                           (select-keys params [:format :quality :fps :loop? :audio? :ids? :bbox?])
                            (job-boards params)
                            (get-in files [(:file-id params) :name]))]
       (swap! live assoc :cancel cancel)

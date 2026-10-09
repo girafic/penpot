@@ -343,7 +343,11 @@
    [:size {:optional true} :string]
    [:loop {:optional true} :boolean]
    ;; whether MP4 and WebM carry the audio clips; absent is yes
-   [:audio {:optional true} :boolean]])
+   [:audio {:optional true} :boolean]
+   ;; SVG: the names of the layers as their `id`s, and a bounding box (see
+   ;; `timeline->svg`); absent is no
+   [:ids {:optional true} :boolean]
+   [:bbox {:optional true} :boolean]])
 
 (def max-export-size-factor
   "The largest factor of the board an animation export takes as size."
@@ -4897,6 +4901,32 @@
        "\" x=\"" (fmt (:x img)) "\" y=\"" (fmt (:y img))
        "\" width=\"" (fmt (:width img)) "\" height=\"" (fmt (:height img)) "\"/>"))
 
+(def ^:private svg-name-junk
+  "What an XML name (an `id`) cannot hold."
+  #"[\s\"'<>&#%/\\:;,()\[\]{}=+*!?@$^|~`]")
+
+(defn svg-layer-ids
+  "The `id`s of the layers `ids` (shape ids) in an SVG export, by shape
+  id, as Figma writes them: their names, what an XML name cannot hold as
+  `_`, with `_` before a name that cannot start one, the second layer of
+  a name `<name>_2` and so on."
+  [objects ids]
+  (loop [ids  (seq ids)
+         used {}
+         out  {}]
+    (if-let [id (first ids)]
+      (let [base  (let [name (str/replace (str (or (not-empty (:name (get objects id))) "layer")) svg-name-junk "_")]
+                    (if (re-find #"^[0-9.-]" name) (str "_" name) name))
+            n     (inc (get used base 0))
+            unique (if (= 1 n) base (str base "_" n))]
+        (recur (next ids) (assoc used base n) (assoc out id unique)))
+      out)))
+
+(defn- svg-id-attr
+  [svg-ids id]
+  (when-let [name (get svg-ids id)]
+    (str " id=\"" (svg-escape name) "\"")))
+
 (defn- emit-svg-node
   "The SVG of a node of `layer-nodes`: a layer is a group its CSS class
   animates, holding its image and the layers inside it, which so follow
@@ -4904,10 +4934,10 @@
   `images` has pictures of (see `timeline->svg`) holds, instead of its
   image, the picture of what is no unit and a group of each unit, which
   its CSS class animates. All images sit where they are in the SVG,
-  whose origin is `ox`/`oy`."
-  [objects images ox oy {:keys [id inner clip?]}]
+  whose origin is `ox`/`oy`. A layer of `svg-ids` has that `id`."
+  [objects images svg-ids ox oy {:keys [id inner clip?]}]
   (when-let [shape (get objects id)]
-    (let [inner   (str/join "" (keep #(emit-svg-node objects images ox oy %) inner))
+    (let [inner   (str/join "" (keep #(emit-svg-node objects images svg-ids ox oy %) inner))
           clipped #(if (and (seq inner) (clipping-board? shape))
                      (str "<g clip-path=\"url(#" (svg-escape (svg-clip-id id)) ")\">" % "</g>")
                      %)]
@@ -4918,6 +4948,7 @@
         (seq (unit-image-indexes images id))
         (let [opacity (or (:opacity shape) 1)]
           (str "<g class=\"" (svg-escape (shape-css-class id)) "\""
+               (svg-id-attr svg-ids id)
                (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
                ">"
                (some-> (get images [id :rest]) (svg-image))
@@ -4935,6 +4966,7 @@
               ;; the image is opaque; an animated opacity overrides this
               opacity (or (:opacity shape) 1)]
           (str "<g class=\"" (svg-escape (shape-css-class id)) "\""
+               (svg-id-attr svg-ids id)
                (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
                ">"
                (clipped
@@ -4959,45 +4991,53 @@
   and, when it has ink (an underline), `[text-id :rest]` of what is no
   unit, each over the box it covers (with the text turned); otherwise its
   split animations play as animations of the whole text (see
-  `flatten-splits`)."
-  [timeline objects images]
-  (let [unit-texts (unit-text-ids images)
-        timeline (-> timeline
-                     (flatten-splits #{:char :word :line} unit-texts)
-                     (resolve-animations objects)
-                     expand-loops)
-        board-id (:board-id timeline)
-        bsr      (:selrect (get objects board-id))
-        width    (mth/round (or (:width bsr) 100))
-        height   (mth/round (or (:height bsr) 100))
-        ox       (or (:x bsr) 0)
-        oy       (or (:y bsr) 0)
+  `flatten-splits`). Options, as Figma's: `:ids?`, the names of the
+  layers and of the board as their `id`s (see `svg-layer-ids`), and
+  `:bbox?`, a bounding box, an empty rectangle over the board, first."
+  ([timeline objects images]
+   (timeline->svg timeline objects images nil))
+  ([timeline objects images {:keys [ids? bbox?]}]
+   (let [unit-texts (unit-text-ids images)
+         timeline (-> timeline
+                      (flatten-splits #{:char :word :line} unit-texts)
+                      (resolve-animations objects)
+                      expand-loops)
+         board-id (:board-id timeline)
+         bsr      (:selrect (get objects board-id))
+         width    (mth/round (or (:width bsr) 100))
+         height   (mth/round (or (:height bsr) 100))
+         ox       (or (:x bsr) 0)
+         oy       (or (:y bsr) 0)
         ;; SVG takes a share of `transform-origin` of the whole drawing
-        css      (timeline->css timeline objects
-                                {:origin (fn [shape track]
-                                           (let [[x y] (lottie-pivot shape ox oy (track-origin track))]
-                                             (str (fmt x) "px " (fmt y) "px")))
-                                 :units (when (seq unit-texts)
-                                          {:kinds #{:char :word :line}
-                                           :texts unit-texts
-                                           :selector (fn [text k] (str "." (unit-css-class (:id text) k)))
+         css      (timeline->css timeline objects
+                                 {:origin (fn [shape track]
+                                            (let [[x y] (lottie-pivot shape ox oy (track-origin track))]
+                                              (str (fmt x) "px " (fmt y) "px")))
+                                  :units (when (seq unit-texts)
+                                           {:kinds #{:char :word :line}
+                                            :texts unit-texts
+                                            :selector (fn [text k] (str "." (unit-css-class (:id text) k)))
                                            ;; each unit turns around the middle of its picture
-                                           :origin (fn [text k]
-                                                     (let [{:keys [x y width height]} (get images [(:id text) k])]
-                                                       (str (fmt (+ (or x 0) (/ (or width 0) 2))) "px "
-                                                            (fmt (+ (or y 0) (/ (or height 0) 2))) "px")))
-                                           :adjust (fn [text units] (turned-moves units (:rotation text)))})})
-        ids      (export-layer-ids objects board-id (:tracks timeline))
-        nodes    (layer-nodes objects (set ids) board-id)
-        clips    (svg-clip-paths objects ox oy nodes)
-        backdrop (when-let [img (get images board-id)]
-                   (str "<image href=\"" (svg-escape (:href img))
-                        "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>"))]
-    (str "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" width
-         "\" height=\"" height "\" viewBox=\"0 0 " width " " height
-         "\" overflow=\"hidden\">"
-         (when (seq clips) (str "<defs>" clips "</defs>"))
-         "<style>g { transform-box: view-box; }\n" css "</style>"
-         backdrop
-         (str/join "" (keep #(emit-svg-node objects images ox oy %) nodes))
-         "</svg>")))
+                                            :origin (fn [text k]
+                                                      (let [{:keys [x y width height]} (get images [(:id text) k])]
+                                                        (str (fmt (+ (or x 0) (/ (or width 0) 2))) "px "
+                                                             (fmt (+ (or y 0) (/ (or height 0) 2))) "px")))
+                                            :adjust (fn [text units] (turned-moves units (:rotation text)))})})
+         ids      (export-layer-ids objects board-id (:tracks timeline))
+         nodes    (layer-nodes objects (set ids) board-id)
+         clips    (svg-clip-paths objects ox oy nodes)
+         svg-ids  (when ids? (svg-layer-ids objects (cons board-id ids)))
+         backdrop (when-let [img (get images board-id)]
+                    (str "<image" (svg-id-attr svg-ids board-id)
+                         " href=\"" (svg-escape (:href img))
+                         "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>"))]
+     (str "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" width
+          "\" height=\"" height "\" viewBox=\"0 0 " width " " height
+          "\" overflow=\"hidden\">"
+          (when (seq clips) (str "<defs>" clips "</defs>"))
+          "<style>g { transform-box: view-box; }\n" css "</style>"
+          (when bbox?
+            (str "<rect width=\"" width "\" height=\"" height "\" fill=\"none\"/>"))
+          backdrop
+          (str/join "" (keep #(emit-svg-node objects images svg-ids ox oy %) nodes))
+          "</svg>"))))

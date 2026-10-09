@@ -38,6 +38,9 @@
    [:scale [::sm/number {:min 0.001}]]
    [:loop? :boolean]
    [:audio? :boolean]
+   ;; SVG: the names of the layers as ids, a bounding box
+   [:ids? {:optional true} :boolean]
+   [:bbox? {:optional true} :boolean]
    [:wasm? :boolean]
    ;; several boards, each at its scale, exported into a ZIP (see
    ;; `dea/run-exports`); `board-id` and `scale` are those of the first
@@ -63,7 +66,7 @@
   "The query params of the tab of the job `params` (see `schema:params`),
   the renderer the workspace uses as `wasm`, which the app honours (see
   `app.main.features/setup-wasm-features`)."
-  [{:keys [file-id page-id board-id job-id format quality fps scale loop? audio? wasm? boards]}]
+  [{:keys [file-id page-id board-id job-id format quality fps scale loop? audio? ids? bbox? wasm? boards]}]
   (cond-> {:file-id (str file-id)
            :page-id (str page-id)
            :board-id (str board-id)
@@ -75,6 +78,8 @@
            :loop (str (boolean loop?))
            :audio (str (boolean audio?))
            :wasm (str (boolean wasm?))}
+    ids?  (assoc :ids "true")
+    bbox? (assoc :bbox "true")
     ;; `<board-id>:<scale>,…`
     (seq boards)
     (assoc :boards (str/join "," (map #(str (:board-id %) ":" (:scale %)) boards)))))
@@ -92,7 +97,7 @@
   "The settings of a job from the query params of its tab (strings), or
   nil when they are not valid: a format the renderer cannot draw (a
   picture without WASM) is not."
-  [{:keys [file-id page-id board-id job-id format quality fps scale loop audio wasm boards]}]
+  [{:keys [file-id page-id board-id job-id format quality fps scale loop audio ids bbox wasm boards]}]
   (let [params (cond-> {:file-id (uuid/parse* file-id)
                         :page-id (uuid/parse* page-id)
                         :board-id (uuid/parse* board-id)
@@ -104,7 +109,9 @@
                         :loop? (= "true" loop)
                         :audio? (= "true" audio)
                         :wasm? (= "true" wasm)}
-                 (some? boards) (assoc :boards (decode-boards boards)))]
+                 (= "true" ids)  (assoc :ids? true)
+                 (= "true" bbox) (assoc :bbox? true)
+                 (some? boards)  (assoc :boards (decode-boards boards)))]
     (when (and (valid-params? params)
                (or (:wasm? params) (not (needs-wasm? (:format params)))))
       params)))

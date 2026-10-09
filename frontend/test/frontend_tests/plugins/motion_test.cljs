@@ -299,11 +299,15 @@
             settings            #(js->clj (.-exportSettings timeline) :keywordize-keys true)]
 
         (t/testing "the export panel's defaults until they are set"
-          (t/is (= {:format "mp4" :quality "high" :fps 30 :size "1" :loop true :audio true} (settings))))
+          (t/is (= {:format "mp4" :quality "high" :fps 30 :size "1" :loop true :audio true
+                    :includeIds false :includeBoundingBox false}
+                   (settings))))
 
         (t/testing "setting some changes only those"
           (set! (.-exportSettings timeline) #js {:format "gif" :fps 15})
-          (t/is (= {:format "gif" :quality "high" :fps 15 :size "1" :loop true :audio true} (settings)))
+          (t/is (= {:format "gif" :quality "high" :fps 15 :size "1" :loop true :audio true
+                    :includeIds false :includeBoundingBox false}
+                   (settings)))
           (t/is (= {:format :gif :fps 15}
                    (get-in (stored-timelines store context) [(aget board "$id") :export]))))
 
@@ -322,7 +326,13 @@
           (t/is (false? (:audio (settings))))
           (t/is (false? (get-in (stored-timelines store context) [(aget board "$id") :export :audio]))))
 
+        (t/testing "an SVG names its layers and has a bounding box when asked"
+          (set! (.-exportSettings timeline) #js {:format "svg" :includeIds true :includeBoundingBox true})
+          (t/is (= [true true] ((juxt :includeIds :includeBoundingBox) (settings))))
+          (t/is (= [true true] ((juxt :ids :bbox) (get-in (stored-timelines store context) [(aget board "$id") :export])))))
+
         (t/testing "what is not valid is refused"
+          (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:includeIds "yes"})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:format "mov"})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:fps 0})))
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:size "11"})))

@@ -9041,6 +9041,12 @@ msgstr "Audio is not included in this format."
 msgid "workspace.options.export.issues"
 msgstr "Issues"
 
+msgid "workspace.options.export.svg-ids"
+msgstr "Include \"id\" attribute"
+
+msgid "workspace.options.export.svg-bbox"
+msgstr "Include bounding box"
+
 msgid "workspace.options.export.issues-count"
 msgid_plural "workspace.options.export.issues-count"
 msgstr[0] "1 issue to review"

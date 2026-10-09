@@ -1728,11 +1728,12 @@
 (defn- markup-file
   "A promise of the SVG, Lottie or dotLottie of the board `board` playing
   `tl`, with the pictures `images` (see `collect-layer-images` and
-  `collect-unit-images`): `{:status :ok :blob :ext :mtype}`."
-  [tl objects board format images]
+  `collect-unit-images`): `{:status :ok :blob :ext :mtype}`. `svg-opts`
+  go to `cta/timeline->svg`."
+  [tl objects board format images svg-opts]
   (case format
     :svg
-    (let [svg (cta/timeline->svg tl objects images)]
+    (let [svg (cta/timeline->svg tl objects images svg-opts)]
       (js/Promise.resolve {:status :ok
                            :blob (wapi/create-blob svg "image/svg+xml")
                            :ext ".svg"
@@ -1767,7 +1768,7 @@
   "A promise of the markup export (`:svg` `:lottie` `:dotlottie`) of
   `opts` (see `run-export`): the pictures of its layers one at a time,
   so it stops between them when `cancelled?`."
-  [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled?]}]
+  [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled? ids? bbox?]}]
   (let [tl       (dwa/board-export-timeline page files board-id)
         objects  (:objects page)
         board    (get objects board-id)
@@ -1806,7 +1807,8 @@
                                              :cancelled? cancelled?
                                              :on-progress (fn [j _] (pictures (+ n-layers j) total))}))
             result (do (throw-if-cancelled cancelled?)
-                       (markup-file tl objects board format (merge images units)))]
+                       (markup-file tl objects board format (merge images units)
+                                    {:ids? ids? :bbox? bbox?}))]
       (when on-progress
         (on-progress {:phase :write :current 1 :total 1}))
       (assoc result :name (or (:name board) (:name tl))))))
@@ -1816,8 +1818,9 @@
   the component copies in it (`files` holds the files of their
   components, see `dwa/board-export-timeline`), as `format` (`:mp4`
   `:webm` `:gif` `:avif` `:svg` `:lottie` `:dotlottie`), with
-  `:quality` `:fps` `:scale` `:loop?` and `:audio?` (the sound of its
-  clips in MP4 and WebM, true by default). `ctx` holds `page` `files`
+  `:quality` `:fps` `:scale` `:loop?`, `:audio?` (the sound of its
+  clips in MP4 and WebM, true by default), and for SVG `:ids?` and
+  `:bbox?` (see `cta/timeline->svg`). `ctx` holds `page` `files`
   `board-id`, the `:time` the shapes show (undone for the pictures of the
   markup exports), and may replace the `:bridge` to WASM, `:decode`,
   `:yield` and the GIF encoder (`:gif-encoder` `:quantize`

@@ -829,6 +829,32 @@
     (t/is (re-find #"linear infinite;" svg))
     (t/is (re-find #"overflow=\"hidden\"" svg))))
 
+(t/deftest timeline->svg-names-layers-and-boxes-the-board-on-request
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100 :name "01 · Intro"})
+        bid   (:id board)
+        a     (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20 :name "Card front"})
+        b     (cts/setup-shape {:type :rect :x 40 :y 10 :width 20 :height 20 :name "Card front"})
+        [aid bid'] (map :id [a b])
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe aid {:time 0 :property :opacity :value 0})
+                  (cta/add-keyframe aid {:time 1000 :property :opacity :value 1}))
+        objects {bid (assoc board :shapes [aid bid'])
+                 aid (assoc a :parent-id bid :frame-id bid)
+                 bid' (assoc b :parent-id bid :frame-id bid)}
+        images {bid {:href "data:image/png;base64,AAA"}
+                aid {:href "data:image/png;base64,BBB" :x 10 :y 10 :width 20 :height 20}
+                bid' {:href "data:image/png;base64,CCC" :x 40 :y 10 :width 20 :height 20}}
+        plain (cta/timeline->svg tl objects images)
+        named (cta/timeline->svg tl objects images {:ids? true :bbox? true})]
+    (t/is (not (re-find #" id=" plain)) "no ids by default")
+    (t/is (not (re-find #"<rect" plain)) "nor a box")
+    (t/is (re-find #"<image id=\"_01_·_Intro\"" named) "the board, its name made an XML name")
+    (t/is (re-find #"<g class=\"[^\"]+\" id=\"Card_front\"" named))
+    (t/is (re-find #" id=\"Card_front_2\"" named) "the second of a name")
+    (t/is (re-find #"<rect width=\"200\" height=\"100\" fill=\"none\"/>" named))
+    (t/is (= {aid "x" bid' "x_2"} (cta/svg-layer-ids {aid {:name "x"} bid' {:name "x"}} [aid bid'])))
+    (t/is (= {aid "a_b_c"} (cta/svg-layer-ids {aid {:name "a b<c"}} [aid])))))
+
 (t/deftest timeline->svg-nests-child-layers
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
         a     (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 40})

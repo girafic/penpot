@@ -24,6 +24,7 @@
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
    [app.main.ui.ds.controls.combobox :refer [combobox*]]
    [app.main.ui.ds.controls.switch :refer [switch*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
@@ -153,6 +154,9 @@
         loop?     (get export :loop true)
         ;; MP4 and WebM carry the sound of the audio clips, unless left out
         audio?    (get export :audio true)
+        ;; SVG: the names of the layers as ids, a bounding box
+        ids?      (get export :ids false)
+        bbox?     (get export :bbox false)
         clips?    (boolean (some #(seq (:audio-clips (get timelines %))) board-ids))
         support*  (mf/use-state {:mp4 true :webm true :avif true})
         support   (deref support*)
@@ -256,17 +260,25 @@
         on-audio
         (mf/use-fn (mf/deps set-export) #(set-export {:audio %}))
 
+        on-ids
+        (mf/use-fn (mf/deps set-export) #(set-export {:ids (dom/checked? (dom/get-target %))}))
+
+        on-bbox
+        (mf/use-fn (mf/deps set-export) #(set-export {:bbox (dom/checked? (dom/get-target %))}))
+
         ;; in a tab of its own, opened in this click
         on-export
         (mf/use-fn
-         (mf/deps format quality fps scale loop? audio? several? export-boards)
+         (mf/deps format quality fps scale loop? audio? ids? bbox? several? export-boards)
          (fn []
            (deaw/export-from-panel! (cond-> {:format format
                                              :quality quality
                                              :fps fps
                                              :scale scale
                                              :loop? loop?
-                                             :audio? audio?}
+                                             :audio? audio?
+                                             :ids? ids?
+                                             :bbox? bbox?}
                                       several? (assoc :boards export-boards)))))
 
         on-cancel
@@ -311,6 +323,18 @@
                       :options format-options
                       :data-direction "up"
                       :on-change on-format}]]]
+
+        ;; as Figma's options of an SVG
+        (when (= :svg format)
+          [:*
+           [:> checkbox* {:id "animated-export-svg-ids"
+                          :label (tr "workspace.options.export.svg-ids")
+                          :checked ids?
+                          :on-change on-ids}]
+           [:> checkbox* {:id "animated-export-svg-bbox"
+                          :label (tr "workspace.options.export.svg-bbox")
+                          :checked bbox?
+                          :on-change on-bbox}]])
 
         [:> export-issues* {:kinds (get issues format)
                             :format-label (get dea/format-labels format)}]
