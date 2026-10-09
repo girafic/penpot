@@ -891,6 +891,31 @@
          (t/is (= 210 (:start (ctau/get-audio-clip (timeline-of state :board-a) id)))
                "one undo a step"))))))
 
+(t/deftest the-design-tab-removes-a-lane-of-clips
+  (t/async
+    done
+    (let [[clip file] (with-clip :lane 2)
+          id          (:id clip)]
+      (run-clip-edits
+       done file
+       [(dwaa/remove-lane-clips 2)]
+       (fn [state]
+         (t/is (nil? (ctau/get-audio-clip (timeline-of state :board-a) id))))
+       (fn [state]
+         (t/is (some? (ctau/get-audio-clip (timeline-of state :board-a) id)) "one undo"))))))
+
+(t/deftest a-locked-clip-stays-when-its-lane-is-removed
+  (t/async
+    done
+    (let [[clip file] (with-clip :locked true)
+          id          (:id clip)]
+      (run-clip-edits
+       done file
+       [(dwaa/remove-lane-clips 0)]
+       (fn [state]
+         (t/is (some? (ctau/get-audio-clip (timeline-of state :board-a) id))))
+       (fn [_] nil)))))
+
 (t/deftest a-locked-clip-takes-no-edit-but-its-unlocking
   (t/async
     done

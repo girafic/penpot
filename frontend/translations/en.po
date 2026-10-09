@@ -8115,6 +8115,15 @@ msgstr "Fade out: %s"
 msgid "workspace.animation.audio-group"
 msgstr "Audio (%s)"
 
+msgid "workspace.animation.audio"
+msgstr "Audio"
+
+msgid "workspace.animation.add-audio"
+msgstr "Add audio"
+
+msgid "workspace.animation.remove-audio"
+msgstr "Remove audio"
+
 msgid "workspace.animation.audio-mute-all"
 msgstr "Mute all the audio"
 

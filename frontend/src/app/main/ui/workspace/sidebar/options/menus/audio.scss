@@ -1,0 +1,83 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "ds/_sizes.scss" as *;
+@use "ds/_borders.scss" as *;
+@use "refactor/common-refactor.scss" as deprecated;
+@use "../../../sidebar/common/sidebar.scss" as sidebar;
+
+.audio-menu {
+  @include sidebar.option-grid-structure;
+
+  row-gap: var(--sp-xs);
+}
+
+.audio-title {
+  grid-column: 1 / -1;
+}
+
+.audio-input {
+  display: none;
+}
+
+.audio-list {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+}
+
+// as the rows of fills and shadows: the name over six columns, then
+// the buttons
+.audio-lane {
+  @include sidebar.option-grid-structure;
+}
+
+.audio-name {
+  @include deprecated.body-small-typography;
+
+  grid-column: span 6;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  min-width: 0;
+  height: $sz-32;
+  padding: 0 var(--sp-s);
+  border: $b-1 solid transparent;
+  border-radius: $br-8;
+  background-color: var(--color-background-tertiary);
+  color: var(--color-foreground-primary);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-quaternary);
+  }
+
+  &.selected {
+    border-color: var(--color-accent-primary);
+    color: var(--color-accent-primary);
+  }
+
+  &.muted {
+    color: var(--color-foreground-secondary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-accent-primary);
+  }
+}
+
+.audio-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audio-actions {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: span 2;
+}

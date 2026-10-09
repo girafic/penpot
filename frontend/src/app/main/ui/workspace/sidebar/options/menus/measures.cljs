@@ -34,6 +34,7 @@
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.icons :as deprecated-icon]
+   [app.main.ui.workspace.sidebar.options.menus.audio :refer [audio-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.border-radius :refer  [border-radius-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
    [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* keyframe-diamond*]]
@@ -970,4 +971,6 @@
     [:*
      [:> measures-section* props]
      (when ^boolean motion-mode?
-       [:> animations-menu* {:ids ids :shapes shapes}])]))
+       [:> animations-menu* {:ids ids :shapes shapes}])
+     (when ^boolean motion-mode?
+       [:> audio-menu* {:ids ids}])]))

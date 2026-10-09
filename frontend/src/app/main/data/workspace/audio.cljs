@@ -689,6 +689,14 @@
   (edit-clips (fn [timeline]
                 (reduce #(ctau/set-audio-clip-muted %1 %2 muted?) timeline (lane-clip-ids timeline lane)))))
 
+(defn remove-lane-clips
+  "Remove the clips on the audio `lane` of the timeline in the dock, in
+  one undo step: what the remove button of its row in the design tab
+  does. A locked clip stays."
+  [lane]
+  (edit-clips (fn [timeline]
+                (reduce ctau/remove-audio-clip timeline (lane-clip-ids timeline lane)))))
+
 (defn set-all-muted
   "Mute all the clips of the timeline in the dock, or play them, in one
   undo step: what the sound button of their group row does. A locked
