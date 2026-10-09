@@ -56,7 +56,9 @@
    [:audio-id ::sm/uuid]
    [:name :string]
    [:source-duration [::sm/int {:min min-clip-duration :max max-audio-duration}]]
-   [:start [::sm/int {:min 0}]]
+   ;; before 0 it does not play: it sounds from the start of the
+   ;; timeline on, as far into its file as it is there
+   [:start ::sm/int]
    [:offset [::sm/int {:min 0}]]
    [:duration [::sm/int {:min min-clip-duration}]]
    [:lane [::sm/int {:min 0}]]
@@ -104,7 +106,7 @@
       :audio-id audio-id
       :name (or name "Audio")
       :source-duration source
-      :start (whole (max 0 (or start 0)))
+      :start (whole (or start 0))
       :offset offset
       :duration duration
       :lane (whole (max 0 (or lane 0)))

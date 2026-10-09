@@ -449,8 +449,10 @@
         with (fn [f] (update-in clip [:layers 0 :track] f))]
     (t/is (cltl/animation-clip-valid? clip))
     (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:keyframes 0 :value] "#ffffff")))))
-    (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:keyframes 0 :time] -10)))))
-    (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:animations 0 :start] -1)))))
+    (t/is (cltl/animation-clip-valid? (with #(assoc-in % [:keyframes 0 :time] -10)))
+          "a keyframe before the start, as on the timeline")
+    (t/is (cltl/animation-clip-valid? (with #(assoc-in % [:animations 0 :start] -1)))
+          "a preset from before the start")
     (t/is (not (cltl/animation-clip-valid?
                 (assoc clip :layers (vec (repeat (inc cltl/max-clip-layers) (first (:layers clip))))))))
     (t/testing "the keyframe entries of a style use"
@@ -502,7 +504,7 @@
     (t/is (empty? (filter (set (map :id copied)) ids)) "new ids")
     (t/is (= 2000 (:duration timeline)) "the duration stays")
     (let [{:keys [timeline ids]} (cltl/paste-audio tl [(clip {:start 100})] -500)]
-      (t/is (= [0] (mapv #(:start (ctau/get-audio-clip timeline %)) ids)) "none before 0"))))
+      (t/is (= [-400] (mapv #(:start (ctau/get-audio-clip timeline %)) ids)) "before 0 too"))))
 
 ;; PASTING ANIMATION CLIPS
 
@@ -743,7 +745,7 @@
         with (fn [f] (update-in clip [:layers 0 :track :animations 1] f))]
     (t/is (cta/style-use? (get-in clip [:layers 0 :track :animations 1])))
     (t/is (cltl/animation-clip-valid? clip))
-    (t/is (not (cltl/animation-clip-valid? (with #(assoc % :start -1)))))
+    (t/is (cltl/animation-clip-valid? (with #(assoc % :start -1))) "a use from before the start")
     (t/is (not (cltl/animation-clip-valid? (with #(assoc-in % [:entries 0 :start] -1)))))))
 
 (t/deftest a-style-use-counts-its-entries-toward-the-paste-limit

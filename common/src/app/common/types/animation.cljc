@@ -633,7 +633,9 @@
                :let  [start (+ cycle (:start clip))
                       ;; a clip does not play past the end of the timeline
                       stop  (+ cycle (min (ctau/clip-end clip) duration))
-                      from  (max start elapsed)
+                      ;; nor before its start: a clip that starts before
+                      ;; it sounds from there, as far into its file
+                      from  (max start cycle elapsed)
                       to    (min stop end)]
                :when (< from to)]
            {:clip-id (:id clip)
@@ -875,18 +877,17 @@
 
 (defn shift-keyframes
   "`timeline` with the keyframes of `keyframes` (`{:shape-id
-  :keyframe-id}` each) moved `dt` ms along, all of them as far and none
-  before the start. Locked ones stay where they are. One that lands on
-  another keyframe of its property takes its place, as a keyframe added
-  there does (see `add-keyframe`). The duration stays: they can go past
-  the end, where they do not play, as in Figma."
+  :keyframe-id}` each) moved `dt` ms along, all of them as far. Locked
+  ones stay where they are. One that lands on another keyframe of its
+  property takes its place, as a keyframe added there does (see
+  `add-keyframe`). The duration stays: they can go before the start or
+  past the end, where they do not play, as in Figma."
   [timeline keyframes dt]
   (let [moving (filterv (fn [{:keys [shape-id] :as ref}]
                           (when-let [keyframe (find-keyframe timeline ref)]
                             (not (locked-keyframe? timeline shape-id keyframe))))
                         keyframes)
-        times  (mapv #(:time (find-keyframe timeline %)) moving)
-        dt     (if (seq times) (max dt (- (reduce min times))) 0)]
+        dt     (if (seq moving) dt 0)]
     (if (zero? dt)
       timeline
       (let [moved-ids (into #{} (map :keyframe-id) moving)
@@ -1001,12 +1002,13 @@
   "Map the keyframe and animation times of the tracks of `shape-ids`
   linearly from the span `from` to the span `to` (both `[start end]`):
   moves them when both spans have the same length, stretches them
-  otherwise. The design tokens that bound the times of an animation that
-  change let go of them (see `set-by-hand`)."
+  otherwise, before the start too (see `shift-keyframes`). The design
+  tokens that bound the times of an animation that change let go of them
+  (see `set-by-hand`)."
   [timeline shape-ids [from-start from-end] [to-start to-end]]
   (let [span  (- from-end from-start)
         scale (if (pos? span) (/ (- to-end to-start) span) 1)
-        remap #(max 0 (mth/round (+ to-start (* (- % from-start) scale))))
+        remap #(mth/round (+ to-start (* (- % from-start) scale)))
 
         retime-animation
         (fn [animation]
@@ -1168,7 +1170,7 @@
                :style-ref-id (:style-ref-id params)
                :style-ref-file (:style-ref-file params)
                :name (or (:name params) "")
-               :start (max 0 (int (or start 0)))
+               :start (int (or start 0))
                :duration (max 1 (int (or duration (style-length entries))))
                :entries entries})
             (let [tokens (entry-tokens type (:applied-tokens params))]
@@ -1178,7 +1180,7 @@
                              {:id (or id (uuid/next))
                               :type type
                               :direction (or direction :in)
-                              :start (max 0 (int (or start 0)))
+                              :start (int (or start 0))
                               :duration (max 1 (int (or duration default-animation-duration)))})
                 (some? tokens) (assoc :applied-tokens tokens))))
     (true? hidden) (assoc :hidden true)
@@ -1224,7 +1226,9 @@
   (if (= :keys (:type params))
     (make-keys-entry params)
     (-> (make-animation (dissoc params :hidden :locked))
-        (dissoc :hidden :locked))))
+        (dissoc :hidden :locked)
+        ;; style time starts at the start of the style
+        (update :start max 0))))
 
 (defn- spring-setting
   "The spring easing of the resolved spring token `value`
@@ -1964,6 +1968,8 @@
                                             (expand-property-loop duration))))
                                 (sort-keyframes)))))))))
 
+(declare cut-keyframes)
+
 (defn loop-track
   "`track` repeating every `period` ms from the start: the keyframes of
   each property up to `period`, closed at 0 and at `period` by the values
@@ -1981,7 +1987,9 @@
                                                            :property property
                                                            :index index
                                                            :value (property-value-at keyframes %)})
-                                kept      (filterv #(<= (:time %) period) keyframes)
+                                ;; what is before the start or past the
+                                ;; period does not repeat
+                                kept      (cut-keyframes keyframes 0 period)
                                 kept      (if (zero? (:time (first kept) -1)) kept (into [(at 0)] kept))]
                             (cond-> kept
                               (< (:time (peek kept)) period) (conj (at period))))))
@@ -2077,6 +2085,142 @@
                                     (expand-property-springs (sort-keyframes keyframes))))
                           (sort-keyframes)))
               track))))
+
+(defn- bezier-param
+  "Where along the cubic bezier easing `[x1 y1 x2 y2]` its time is `t`
+  (0..1): the parameter of the curve there (see `cubic-bezier`)."
+  [[x1 _ x2 _] t]
+  (loop [lo 0.0 hi 1.0 i 0]
+    (let [s (/ (+ lo hi) 2.0)
+          x (cubic-bezier-component s x1 x2)]
+      (if (or (> i 40) (< (mth/abs (- x t)) 1e-7))
+        s
+        (if (< x t)
+          (recur s hi (inc i))
+          (recur lo s (inc i)))))))
+
+(defn- split-easing
+  "The easings of the two parts of a segment eased by `easing` cut at its
+  linear progress `u` (0..1), each stretched over a segment of its own:
+  `[before after]`, the halves of its bezier (de Casteljau), nil for a
+  part that is linear or eases nothing. A spring has no bezier: its
+  segments are cut in steps (see `split-keyframes-at`)."
+  [easing u]
+  (when-let [[x1 y1 x2 y2 :as curve] (when-not (or (nil? easing) (= :linear easing))
+                                       (easing-curve easing))]
+    (let [s     (bezier-param curve u)
+          lp    (fn [a b] (+ a (* s (- b a))))
+          ax    (lp 0 x1) ay (lp 0 y1)
+          bx    (lp x1 x2) by (lp y1 y2)
+          cx    (lp x2 1) cy (lp y2 1)
+          dx    (lp ax bx) dy (lp ay by)
+          ex    (lp bx cx) ey (lp by cy)
+          qx    (lp dx ex) qy (lp dy ey)
+          ;; the control points of a part from (x0, y0) to (x3, y3), as
+          ;; an easing from 0 to 1 in time and progress
+          part  (fn [x0 y0 x3 y3 [px1 py1 px2 py2]]
+                  (let [w (- x3 x0)
+                        h (- y3 y0)]
+                    (when (and (> w 1e-9) (> (mth/abs h) 1e-9))
+                      {:type :bezier
+                       :curve [(mth/clamp (/ (- px1 x0) w) 0 1) (/ (- py1 y0) h)
+                               (mth/clamp (/ (- px2 x0) w) 0 1) (/ (- py2 y0) h)]})))]
+      [(part 0 0 qx qy [ax ay dx dy])
+       (part qx qy 1 1 [ex ey cx cy])])))
+
+(defn- split-segment
+  "The segment of the keyframes `from` and `to` of one property cut at
+  `time`, strictly between them, as `[from' at to']`: a keyframe `at`
+  there with the value it has then, and each part eased and curved as
+  that part of the segment was (see `split-easing` and `curved?`). A
+  spring is cut in steps first (see `split-keyframes-at`)."
+  [from to time]
+  (let [u      (/ (double (- time (:time from))) (- (:time to) (:time from)))
+        at     (make-keyframe {:time time
+                               :property (:property from)
+                               :index (:index from)
+                               :value (property-value-at [from to] time)})
+        from   (dissoc from :applied-tokens)]
+    (if (= :step (:interpolation from :linear))
+      [from (assoc at :interpolation :step) to]
+      (let [[before after] (split-easing (:easing from) u)
+            from' (cond-> (dissoc from :easing) (some? before) (assoc :easing before))
+            at    (cond-> at
+                    (some? after) (assoc :easing after)
+                    (some? (:interpolation from)) (assoc :interpolation (:interpolation from)))]
+        (if (curved? from to)
+          ;; the motion path is a bezier of the values over the eased
+          ;; progress: its halves at the progress there
+          (let [p   (segment-progress from u)
+                lp  (fn [a b] (+ a (* p (- b a))))
+                v0  (:value from)
+                v3  (:value to)
+                v1  (+ v0 (:path-out from 0))
+                v2  (+ v3 (:path-in to 0))
+                a   (lp v0 v1) b (lp v1 v2) c (lp v2 v3)
+                d   (lp a b) e (lp b c)
+                q   (lp d e)]
+            [(assoc from' :path-out (- a v0))
+             (assoc at :value q :path-in (- d q) :path-out (- e q))
+             (assoc to :path-in (- c v3))])
+          [from' at to])))))
+
+(defn- split-keyframes-at
+  "The (time-sorted) `keyframes` of one property with a keyframe at `time`
+  where a segment crosses it (see `split-segment`); a spring segment is
+  first unrolled into its steps (see `expand-property-springs`)."
+  [keyframes time]
+  (let [[before after] (split-with #(< (:time %) time) keyframes)
+        from           (last before)
+        to             (first after)]
+    (cond
+      (or (nil? from) (nil? to) (= time (:time to)))
+      keyframes
+
+      (and (= :spring (:type (:easing from))) (not= :step (:interpolation from)))
+      (recur (into (vec (butlast before)) (concat (expand-property-springs [from to]) (rest after)))
+             time)
+
+      :else
+      (into (vec (butlast before)) (concat (split-segment from to time) (rest after))))))
+
+(defn cut-keyframes
+  "The (time-sorted) `keyframes` of one property as they play from `start`
+  to `end`: those in between and, where a segment crosses either, a
+  keyframe there that ends or starts the part of it inside, eased and
+  curved as that part (see `split-segment`). One that holds a single
+  value all along keeps a keyframe of it at `start`."
+  [keyframes start end]
+  (if (every? #(<= start (:time %) end) keyframes)
+    keyframes
+    (let [kept (->> (-> keyframes
+                        (split-keyframes-at start)
+                        (split-keyframes-at end))
+                    (filterv #(<= start (:time %) end)))]
+      (if (seq kept)
+        kept
+        [(make-keyframe {:time start
+                         :property (:property (first keyframes))
+                         :index (:index (first keyframes))
+                         :value (property-value-at keyframes start)})]))))
+
+(defn cut-timeline
+  "`timeline` with the keyframes of each property cut to what plays, from
+  its start to its end (see `cut-keyframes`): what lies before the start
+  or past the end does not play, but sets where the animation is at
+  either. For the exports that write the keyframes as they are; run it
+  after `expand-loops`, whose loops repeat what is cut."
+  [timeline]
+  (let [duration (:duration timeline 0)]
+    (update timeline :tracks d/update-vals
+            (fn [{:keys [keyframes] :as track}]
+              (if (every? #(<= 0 (:time %) duration) keyframes)
+                track
+                (assoc track :keyframes
+                       (->> (group-by keyframe-slot keyframes)
+                            (mapcat (fn [[_ keyframes]]
+                                      (cut-keyframes (sort-keyframes keyframes) 0 duration)))
+                            (sort-keyframes))))))))
 
 (defn- reverse-easing
   "The easing that plays `easing` backwards: its bezier turned around
@@ -2979,17 +3123,20 @@
   (let [keyframes (sort-keyframes keyframes)
         {:keys [property index]} (first keyframes)
         start     (:time (first keyframes))]
-    (make-style-entry
-     {:type :keys
-      :property property
-      :index index
-      :start start
-      :duration (- (:time (peek keyframes)) start)
-      :keyframes (mapv (fn [keyframe]
-                         (-> keyframe
-                             (update :time - start)
-                             (update :value #(relative-value property % pose neutral-pose))))
-                       keyframes)})))
+    ;; made in the time of the entry, then put where the first one is,
+    ;; before the start of the timeline too
+    (-> (make-style-entry
+         {:type :keys
+          :property property
+          :index index
+          :start 0
+          :duration (- (:time (peek keyframes)) start)
+          :keyframes (mapv (fn [keyframe]
+                             (-> keyframe
+                                 (update :time - start)
+                                 (update :value #(relative-value property % pose neutral-pose))))
+                           keyframes)})
+        (assoc :start start))))
 
 (defn keys-entry-keyframes
   "The keyframes the keyframe entry `entry` (in the time of a track, see
@@ -3621,7 +3768,8 @@
                       (flatten-splits (or (:kinds units) #{}) (or (:texts units) (constantly true)))
                       (resolve-animations objects)
                       expand-loops
-                      expand-paths)
+                      expand-paths
+                      cut-timeline)
          duration (max 1 (:duration timeline))
          iter     (case (playback-mode timeline)
                     :loop      "infinite"
@@ -3634,7 +3782,7 @@
          (when (some? units)
            (for [[text-id {units-tl :timeline unit-ids :ids}] (unit-timelines timeline objects)
                  :let  [text     (get objects text-id)
-                        units-tl (if-let [adjust (:adjust units)] (adjust text units-tl) units-tl)]
+                        units-tl (cut-timeline (if-let [adjust (:adjust units)] (adjust text units-tl) units-tl))]
                  :when (and (some? text) (or (nil? ids) (contains? ids text-id)))
                  [k unit-id] (map-indexed vector unit-ids)]
              (let [kf-name  (str "penpot-unit-" text-id "-" k)
@@ -4683,7 +4831,7 @@
                         (flatten-splits #{:char :word :line} unit-texts)
                         (resolve-animations objects))
          ;; Lottie has no ping-pong, so the way back is part of the document.
-         expand     #(-> % expand-paths expand-springs expand-ping-pong)
+         expand     #(-> % expand-paths expand-springs cut-timeline expand-ping-pong)
          units      (into {}
                           (map (fn [[id units]] [id (update units :timeline expand)]))
                           (select-keys (unit-timelines resolved objects) unit-texts))

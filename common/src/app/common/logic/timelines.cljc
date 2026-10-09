@@ -758,15 +758,13 @@
                    keyframes))))
 
 (defn- clip-track?
-  "Whether the keyframes and presets of `track` can be pasted: none
-  before the start (nor the entries of a style use before the start of
-  its style, see `clip-entry?`), and the values of the kind their
-  properties take."
+  "Whether the keyframes and presets of `track` can be pasted: the values
+  of the kind their properties take, and no entry of a style use before
+  the start of its style (see `clip-entry?`). They may lie before the
+  start of the timeline, as on the timeline itself."
   [{:keys [keyframes animations]}]
-  (and (every? #(and (>= (:time %) 0) (cta/keyframe-value-fits? %)) keyframes)
-       (every? #(and (>= (:start %) 0)
-                     (every? clip-entry? (:entries %)))
-               animations)))
+  (and (every? cta/keyframe-value-fits? keyframes)
+       (every? #(every? clip-entry? (:entries %)) animations)))
 
 (defn- clip-size
   "How much a paste of `track` writes: its keyframes and the entries of
@@ -892,12 +890,12 @@
 
 (defn paste-audio
   "`timeline` with the audio clips `clips` (see `audio-copy`) `dt` ms
-  later, none before 0: new ids, each on the first lane free there and
+  later: new ids, each on the first lane free there and
   of its file (see `ctau/free-lane`), the duration as it is. `{:timeline
   :ids}`, the ids of the pasted clips."
   [timeline clips dt]
   (reduce (fn [{:keys [timeline] :as result} clip]
-            (let [start (max 0 (mth/round (+ (:start clip) dt)))
+            (let [start (mth/round (+ (:start clip) dt))
                   lane  (ctau/free-lane timeline start (+ start (:duration clip)) :audio-id (:audio-id clip))
                   clip  (assoc clip :id (uuid/next) :start start :lane lane)]
               (-> result

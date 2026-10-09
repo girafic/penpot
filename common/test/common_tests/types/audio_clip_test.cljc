@@ -34,7 +34,8 @@
   (let [valid (ctau/make-audio-clip (clip :lane 2 :volume 0.5 :fade-in 100 :fade-out 200 :muted true :locked true))]
     (t/is (ctau/valid-audio-clip? valid))
     (t/is (not (ctau/valid-audio-clip? (dissoc valid :audio-id))))
-    (doseq [[k v] [[:start -1] [:offset -1] [:fade-in -1] [:duration 9] [:volume 4.5]
+    (t/is (ctau/valid-audio-clip? (assoc valid :start -1)) "it may start before the timeline")
+    (doseq [[k v] [[:offset -1] [:fade-in -1] [:duration 9] [:volume 4.5]
                    [:volume -0.1] [:lane -1] [:source-duration (inc ctau/max-audio-duration)]]]
       (t/is (not (ctau/valid-audio-clip? (assoc valid k v))) (str k " " v)))
     (t/is (ctau/valid-audio-clip? (assoc valid :volume 4)) "up to four times as loud")))
@@ -43,8 +44,8 @@
   (let [made (ctau/make-audio-clip {:audio-id (uuid/next) :source-duration 2000.4 :start -50
                                     :offset 1999 :duration 500 :volume 1 :fade-in 9000 :color "red"})]
     (t/is (ctau/valid-audio-clip? made))
-    (t/is (= [0 1990 10] ((juxt :start :offset :duration) made))
-          "at least 10 ms of it, within its file")
+    (t/is (= [-50 1990 10] ((juxt :start :offset :duration) made))
+          "at least 10 ms of it, within its file, before the timeline too")
     (t/is (nil? (:volume made)) "a full volume is left out")
     (t/is (= 1.5 (:volume (ctau/make-audio-clip (assoc made :volume 1.5)))) "a louder one kept")
     (t/is (= 4 (:volume (ctau/make-audio-clip (assoc made :volume 9)))) "at most four times")
@@ -132,7 +133,7 @@
         tl (timeline-with 5000 c)
         id (:id c)]
     (t/is (= [300 1] ((juxt :start :lane) (ctau/get-audio-clip (ctau/move-audio-clip tl id 300 :lane 1) id))))
-    (t/is (= 0 (:start (ctau/get-audio-clip (ctau/move-audio-clip tl id -300) id))) "not before the timeline")
+    (t/is (= -300 (:start (ctau/get-audio-clip (ctau/move-audio-clip tl id -300) id))) "before the timeline too")
     (t/is (= 0.25 (:volume (ctau/get-audio-clip (ctau/set-audio-clip-volume tl id 0.25) id))))
     (t/is (true? (:muted (ctau/get-audio-clip (ctau/set-audio-clip-muted tl id true) id))))
     (t/is (= [100 200] ((juxt :fade-in :fade-out) (ctau/get-audio-clip (ctau/set-audio-clip-fades tl id 100 200) id))))

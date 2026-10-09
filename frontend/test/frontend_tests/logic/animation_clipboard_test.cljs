@@ -269,8 +269,8 @@
     (t/is (nil? (dwa/payload-clip nil)))
     (t/is (nil? (dwa/payload-clip (text {:type :copied-props :version 1 :props {}}))))
     (t/is (nil? (dwa/payload-clip (text {:type :copied-animation :version 1
-                                         :clip (assoc-in clip [:layers 0 :track :keyframes 0 :time] -1)})))
-          "not a valid clip")
+                                         :clip (assoc-in clip [:layers 0 :track :keyframes 0 :value] "#ffffff")})))
+          "not a valid clip: a color for a position")
     (t/is (nil? (dwa/payload-clip "{\"~:type\":\"~:copied-animation\"")) "cut short")))
 
 (t/deftest the-dock-pastes-onto-the-selection-or-back

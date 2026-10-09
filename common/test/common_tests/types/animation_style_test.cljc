@@ -693,6 +693,23 @@
     (t/is (= (plays before objects sid) (plays after objects sid)) "it plays as before")
     (t/is (cta/valid-timeline? after))))
 
+(t/deftest saving-a-layer-that-starts-before-the-start
+  (let [{:keys [board rect objects]} (board-and-rect)
+        sid    (:id rect)
+        before (-> (timeline-of board rect [(cta/make-animation {:type :fade :start -100 :duration 300})])
+                   (cta/add-keyframe sid {:time -300 :property :rotation :value 0 :easing :linear})
+                   (cta/add-keyframe sid {:time 200 :property :rotation :value 90}))
+        pose   (cta/rest-pose before objects sid)
+
+        {:keys [entries start]} (ctas/animations->entries (get-in before [:tracks sid]) pose)
+        style  (pop-style :name "Early" :entries entries)
+        use    (ctas/make-use style (uuid/next) start)
+        after  (update-in before [:tracks sid] ctas/replace-with-use use)]
+    (t/is (= -300 start) "the use starts where the layer did")
+    (t/is (= [[:keys 0] [:fade 200]] (mapv (juxt :type :start) entries)) "in the time of the style, from 0")
+    (t/is (ctas/valid-animation-style? style))
+    (t/is (= (plays before objects sid) (plays after objects sid)) "it plays as before")))
+
 (t/deftest looping-hidden-and-locked-rows-stay-on-the-layer
   (let [{:keys [board rect objects]} (board-and-rect)
         sid   (:id rect)

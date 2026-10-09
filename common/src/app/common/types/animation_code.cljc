@@ -572,7 +572,7 @@
   as it is, a `br` between its paragraphs: `{:hold? :code}`."
   [{:keys [shape units]} objects]
   (let [{units-tl :timeline :keys [ids bases]} units
-        played  (cta/expand-paths units-tl)
+        played  (-> units-tl cta/expand-paths cta/cut-timeline)
         sampled (cta/expand-springs played)
         spans   (mapv (fn [k id]
                         (let [unit   {:id id :shape (cta/unit-shape units-tl objects id) :clock units-tl}
@@ -635,7 +635,7 @@
   [{:keys [board-id timeline] :as code} component objects ids class-name]
   (let [board   (get objects board-id)
         played  (memoize (fn [clock]
-                           (-> (cta/resolve-animations clock objects) cta/expand-loops cta/expand-paths)))
+                           (-> (cta/resolve-animations clock objects) cta/expand-loops cta/expand-paths cta/cut-timeline)))
         layers  (code-layers code objects :ids ids)
         divs    (mapv (fn [layer]
                         (let [p (played (:clock layer))]

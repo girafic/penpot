@@ -570,9 +570,9 @@
       (let [tl' (cta/retime-keyframes tl [a b] [100 500] [300 500])]
         (t/is (= [300 400] (mapv :time (get-in tl' [:tracks a :keyframes]))))
         (t/is (= [500] (mapv :time (get-in tl' [:tracks b :keyframes]))))))
-    (t/testing "other tracks are untouched and times stay non negative"
+    (t/testing "other tracks are untouched, and times go before the start"
       (let [tl' (cta/retime-keyframes tl [a] [100 300] [-50 150])]
-        (t/is (= [0 150] (mapv :time (get-in tl' [:tracks a :keyframes]))))
+        (t/is (= [-50 150] (mapv :time (get-in tl' [:tracks a :keyframes]))))
         (t/is (= [500] (mapv :time (get-in tl' [:tracks b :keyframes]))))
         (t/is (cta/valid-timeline? tl'))))))
 
@@ -1343,7 +1343,8 @@
 (t/deftest make-animation-takes-type-defaults
   (let [animation (cta/make-animation {:type :move :start -5 :duration 0 :easing nil})]
     (t/is (= :in (:direction animation)))
-    (t/is (= [0 1] [(:start animation) (:duration animation)]))
+    ;; it may start before the start of the timeline
+    (t/is (= [-5 1] [(:start animation) (:duration animation)]))
     (t/is (= [0 40] [(:offset-x animation) (:offset-y animation)]))
     (t/is (not (contains? animation :easing)))
     (t/is (uuid? (:id animation)))))
@@ -2329,8 +2330,8 @@
                   (take 2 (get-in tl [:tracks sid :keyframes])))
         times #(mapv :time (get-in % [:tracks sid :keyframes]))]
     (t/is (= [150 450 700] (times (cta/shift-keyframes tl ids 50))))
-    (t/testing "none goes before the start"
-      (t/is (= [0 300 700] (times (cta/shift-keyframes tl ids -250)))))
+    (t/testing "they go before the start, where they do not play"
+      (t/is (= [-150 150 700] (times (cta/shift-keyframes tl ids -250)))))
     (t/testing "the duration stays: they go past the end"
       (let [tl' (cta/shift-keyframes tl ids 1000)]
         (t/is (= 1000 (:duration tl')))
@@ -2387,7 +2388,9 @@
         id (-> tl :audio-clips keys first)]
     (t/is (cta/valid-timeline? tl))
     (t/is (cta/valid-timeline? (assoc tl :export {:format :webm :audio false})))
-    (doseq [[k v] [[:audio-id nil] [:start -1] [:offset -1] [:fade-out -1] [:duration 9]
+    (t/is (cta/valid-timeline? (assoc-in tl [:audio-clips id :start] -300))
+          "a clip may start before the start of the timeline")
+    (doseq [[k v] [[:audio-id nil] [:offset -1] [:fade-out -1] [:duration 9]
                    [:volume 4.5] [:lane -1] [:source-duration (inc ctau/max-audio-duration)]
                    [:speed 0.1] [:speed 5]]]
       (t/is (not (cta/valid-timeline? (assoc-in tl [:audio-clips id k] v))) (str k " " v)))))
@@ -3074,3 +3077,103 @@
   (t/is (= 1.0 (cta/export-size-scale "nonsense" 400 200)) "1 for what names no size")
   (t/is (= ["3.5x" "512w" "720h" "1x"] (mapv cta/export-size-label ["3.5" "w512" "h720" "1"]))))
 
+
+;; BEFORE THE START
+
+(defn- x-at
+  [timeline sid time]
+  (get-in (cta/values-at timeline time) [sid :x]))
+
+(t/deftest cut-timeline-plays-as-the-timeline-does
+  (let [sid  (uuid/next)
+        tl   (fn [from to]
+               (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                   (cta/add-keyframe sid (merge {:time -400 :property :x :value 0} from))
+                   (cta/add-keyframe sid (merge {:time 600 :property :x :value 100 :easing :ease-in} to))
+                   (cta/add-keyframe sid {:time 1500 :property :x :value -50})))]
+    (doseq [[label from to] [["linear" {} {}]
+                             ["a named curve" {:easing :ease-in-out} {}]
+                             ["a curve that overshoots" {:easing {:type :bezier :curve [0.68 -0.6 0.32 1.6]}} {}]
+                             ["a motion path" {:easing :ease-out :path-out 80} {:path-in -40}]
+                             ["a hold" {:interpolation :step} {}]]]
+      (let [tl  (tl from to)
+            cut (cta/cut-timeline tl)
+            kfs (get-in cut [:tracks sid :keyframes])]
+        (t/is (= [0 600 1000] (mapv :time kfs)) (str label ": cut at the start and at the end"))
+        (doseq [time (range 0 1001 25)]
+          ;; within what the solver of the curves takes (see `cta/cubic-bezier`)
+          (t/is (mth/close? (x-at tl sid time) (x-at cut sid time) 0.25)
+                (str label " at " time)))))))
+
+(t/deftest cut-timeline-cuts-a-spring-in-steps
+  (let [sid (uuid/next)
+        tl  (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                (cta/add-keyframe sid {:time -400 :property :x :value 0
+                                       :easing {:type :spring :stiffness 170 :damping 26 :mass 1}})
+                (cta/add-keyframe sid {:time 600 :property :x :value 100}))
+        cut (cta/cut-timeline tl)
+        kfs (get-in cut [:tracks sid :keyframes])]
+    (t/is (= 0 (:time (first kfs))))
+    (t/is (not-any? #(= :spring (:type (:easing %))) kfs) "linear steps")
+    (doseq [time (range 0 1001 25)]
+      (t/is (mth/close? (x-at tl sid time) (x-at cut sid time) 2) (str "at " time)))))
+
+(t/deftest cut-timeline-keeps-what-a-property-holds
+  (let [sid    (uuid/next)
+        values (fn [kfs]
+                 (let [tl (reduce #(cta/add-keyframe %1 sid %2)
+                                  (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                                  kfs)]
+                   (mapv (juxt :time :value) (get-in (cta/cut-timeline tl) [:tracks sid :keyframes]))))]
+    (t/is (= [[0 100]] (values [{:time -800 :property :x :value 0} {:time -300 :property :x :value 100}]))
+          "all before the start: the value it ends with")
+    (t/is (= [[0 5]] (values [{:time 1200 :property :x :value 5} {:time 1500 :property :x :value 9}]))
+          "all past the end: the value it starts with")
+    (t/is (= [[0 0] [500 10]] (values [{:time 0 :property :x :value 0} {:time 500 :property :x :value 10}]))
+          "within: as it is")))
+
+(t/deftest timeline->css-starts-where-the-animation-is-at-0
+  (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
+        sid   (:id shape)
+        tl    (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                  (cta/add-keyframe sid {:time -500 :property :x :value 0 :easing :ease-in})
+                  (cta/add-keyframe sid {:time 500 :property :x :value 100}))
+        css   (cta/timeline->css tl {sid shape})
+        at-0  (x-at tl sid 0)]
+    (t/is (not (re-find #"-[0-9.]+%" css)) "no stop before the start")
+    (let [[_ x] (re-find #"\n  0% \{[^}]*translate\(([-0-9.]+)px, 0px\)[^}]*cubic-bezier" css)]
+      (t/is (some? x) "the start, eased as the rest of the segment")
+      (t/is (mth/close? at-0 (d/parse-double x) 0.01) "where the animation is then"))
+    (t/is (re-find #"50% \{[^}]*translate\(100px, 0px\)" css))))
+
+(t/deftest timeline->lottie-starts-at-0
+  (let [{:keys [board rect]} (board-and-rect)
+        doc   (lottie-of board rect [{:time -500 :property :opacity :value 0 :easing :ease-out}
+                                     {:time 500 :property :opacity :value 1}])
+        times (->> (tree-seq coll? seq doc)
+                   (filter map?)
+                   (keep :t)
+                   (filter number?))]
+    (t/is (seq times))
+    (t/is (every? #(>= % 0) times) "no keyframe before the start")))
+
+(t/deftest loop-track-repeats-what-plays
+  (let [sid    (uuid/next)
+        tl     (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                   (cta/add-keyframe sid {:time -500 :property :x :value 0 :easing :ease-in-out})
+                   (cta/add-keyframe sid {:time 500 :property :x :value 100})
+                   (cta/add-keyframe sid {:time 900 :property :x :value 40}))
+        looped (assoc tl :duration 3000 :tracks {sid (cta/loop-track (get-in tl [:tracks sid]) 1000)})]
+    (t/is (every? #(<= 0 (:time %) 1000) (get-in looped [:tracks sid :keyframes])))
+    (doseq [time (range 0 1000 50)]
+      (t/is (mth/close? (x-at tl sid time) (x-at looped sid time) 0.25) (str "at " time))
+      (t/is (mth/close? (x-at tl sid time) (x-at looped sid (+ 1000 time)) 0.25)
+            (str "a period later, at " time)))))
+
+(t/deftest a-clip-before-the-start-sounds-from-there
+  (let [clip (audio-clip :start -300 :duration 1000)]
+    (t/is (= [[0 300 700]] (plan (with-clips (mk-timeline) clip) 0 1000))
+          "from the start, 300 ms into its file")
+    (t/testing "on each round of a loop, from the start of the round"
+      (let [tl (with-clips (assoc (mk-timeline) :playback :loop) clip)]
+        (t/is (= [[100 300 200]] (plan tl 900 300)))))))
