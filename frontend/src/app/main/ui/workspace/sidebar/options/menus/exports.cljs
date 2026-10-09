@@ -29,6 +29,7 @@
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
    [app.main.ui.exports.assets]
+   [app.main.ui.workspace.sidebar.options.menus.export-issues :refer [export-issues*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [c tr]]
    [app.util.keyboard :as kbd]
@@ -123,12 +124,6 @@
                :disabled? (boolean cancelling?)}
         paused? (assoc :note ["workspace.options.export.tab-paused"])))))
 
-(defn- caveat-label
-  [caveat]
-  (case caveat
-    :split-text (tr "workspace.options.export.split-text-whole")
-    :no-audio   (tr "workspace.options.export.no-audio")))
-
 (defn- board-size
   [board]
   (let [{:keys [width height]} (:selrect board)]
@@ -139,7 +134,7 @@
   ZIP), with their `timelines` (by board id): the settings of the first,
   which a change sets for all."
   {::mf/private true}
-  [{:keys [boards timelines formats caveats render-wasm?]}]
+  [{:keys [boards timelines formats issues render-wasm?]}]
   (let [progress  (mf/deref refs/export-animation)
         board     (first boards)
         timeline  (get timelines (:id board))
@@ -317,6 +312,9 @@
                       :data-direction "up"
                       :on-change on-format}]]]
 
+        [:> export-issues* {:kinds (get issues format)
+                            :format-label (get dea/format-labels format)}]
+
         (when raster?
           [:*
            [:div {:class (stl/css :animated-row)}
@@ -372,9 +370,6 @@
 
        (when-not codec?
          [:p {:class (stl/css :hint)} (tr "workspace.options.export.codec-unavailable")])
-
-       (for [caveat (get caveats format)]
-         [:p {:key (name caveat) :class (stl/css :hint)} (caveat-label caveat)])
 
        ;; MP4 and WebM, which carry audio, render through WASM
        (when (and clips? (not render-wasm?))
@@ -597,16 +592,16 @@
 
         formats (mf/deref formats-ref)
 
-        ;; What the export in each format leaves out, of any board (see
-        ;; `dea/export-caveats`).
-        caveats-ref
+        ;; What the export in each format plays otherwise than the canvas,
+        ;; of any board (see `dea/export-issues`).
+        issues-ref
         (mf/with-memo [timelines]
           (l/derived (fn [objects]
                        (apply merge-with (comp vec distinct concat)
-                              (map #(dea/export-caveats objects %) (vals timelines))))
+                              (map #(dea/export-issues objects %) (vals timelines))))
                      refs/workspace-page-objects =))
 
-        caveats (mf/deref caveats-ref)
+        issues (mf/deref issues-ref)
 
         animated-boards
         (when (seq formats)
@@ -662,7 +657,7 @@
                                     :boards animated-boards
                                     :timelines timelines
                                     :formats formats
-                                    :caveats caveats
+                                    :issues issues
                                     :render-wasm? render-wasm?}])])
 
         (when (or (nil? animated-board) (= tab "static"))

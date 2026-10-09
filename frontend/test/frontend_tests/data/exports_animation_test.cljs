@@ -1063,13 +1063,15 @@
         with  #(cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid %)
         split {:type :fade :split :word :start 0 :duration 500}
         lined (assoc-in objects [tid :content :children 0 :children 0 :children 0 :text-decoration] "underline")
-        notes {:svg [:split-text] :lottie [:split-text] :dotlottie [:split-text]}]
-    (t/is (= {} (dea/export-caveats objects (with split))))
-    (t/is (= notes (dea/export-caveats lined (with split))))
-    (t/is (= notes (dea/export-caveats lined (with (words-use split))))
+        split? (fn [objects tl]
+                 (let [issues (dea/export-issues objects tl)]
+                   (mapv #(contains? (set (get issues %)) :split-text) [:svg :lottie :dotlottie :gif])))]
+    (t/is (= [false false false false] (split? objects (with split))))
+    (t/is (= [true true true false] (split? lined (with split))))
+    (t/is (= [true true true false] (split? lined (with (words-use split))))
           "a split entry of a style use too")
-    (t/is (= {} (dea/export-caveats lined (with {:type :fade}))))
-    (t/is (= {} (dea/export-caveats objects nil)))))
+    (t/is (= [false false false false] (split? lined (with {:type :fade}))))
+    (t/is (= {} (dea/export-issues objects nil)))))
 
 (t/deftest each-unit-of-a-split-text-is-its-own-picture
   (let [{:keys [objects bid tid]} (text-board)
@@ -1218,9 +1220,11 @@
   (let [{:keys [objects bid]} (test-objects)
         tl    (cta/make-timeline {:board-id bid :duration 1000})
         clips (ctau/add-audio-clip tl (clip-at 0 500))]
-    (t/is (= {} (dea/export-caveats objects tl)) "no clips, nothing to say")
-    (t/is (= {:gif [:no-audio] :avif [:no-audio] :svg [:no-audio] :lottie [:no-audio] :dotlottie [:no-audio]}
-             (dea/export-caveats objects clips))
+    (t/is (not-any? #(contains? (set %) :no-audio) (vals (dea/export-issues objects tl)))
+          "no clips, nothing to say")
+    (t/is (= #{:gif :avif :svg :lottie :dotlottie}
+             (into #{} (keep (fn [[format kinds]] (when (some #{:no-audio} kinds) format)))
+                   (dea/export-issues objects clips)))
           "MP4 and WebM carry it")
     (t/testing "a board that plays only audio"
       (t/is (= [:mp4 :webm :gif :avif :svg :lottie :dotlottie] (dea/export-formats objects clips true)))
@@ -1422,3 +1426,60 @@
              (t/is (nil? none) "none at all: unavailable")
              (done)))
           (.catch (fn [cause] (t/is (nil? cause) (str cause)) (done)))))))
+
+;; THE ISSUES OF THE MARKUP EXPORTS
+
+(defn- issues-of
+  "The issue kinds of the export of the rect of `test-objects`, changed by
+  `f`, animated by `kfs` (its x by default), in `format`."
+  [format & {:keys [f kfs] :or {f identity}}]
+  (let [{:keys [objects bid cid]} (test-objects)
+        objects (update objects cid f)
+        tl      (reduce #(cta/add-keyframe %1 cid %2)
+                        (cta/make-timeline {:board-id bid :duration 1000})
+                        (or kfs [{:time 0 :property :x :value 10} {:time 1000 :property :x :value 50}]))]
+    (get (dea/export-issues objects tl) format [])))
+
+(def ^:private shadow
+  {:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 8 :spread 0 :hidden false
+   :color {:color "#000000" :opacity 0.3}})
+
+(t/deftest an-svg-has-every-layer-as-an-image
+  (t/is (= [:svg/images] (issues-of :svg)) "a move plays")
+  (t/is (= [] (issues-of :lottie)) "a plain rect is a vector")
+  (t/is (= [] (issues-of :mp4)) "videos play as the canvas"))
+
+(t/deftest what-svg-keeps-as-it-rests
+  (t/is (= [:svg/images :svg/appearance]
+           (issues-of :svg :kfs [{:time 0 :property :fill-color :value "#ff0000"}
+                                 {:time 1000 :property :fill-color :value "#00ff00"}])))
+  (t/is (= [:svg/images :svg/size :svg/blur]
+           (issues-of :svg :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}
+                                 {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}])))
+  (t/is (= [:lottie/size :lottie/blur]
+           (issues-of :lottie :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}
+                                    {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}]))))
+
+(t/deftest lottie-notes-its-effects
+  (t/is (= [:lottie/shadow] (issues-of :lottie :f #(assoc % :shadow [shadow]))))
+  (t/is (= [] (issues-of :lottie :f #(assoc % :shadow [(assoc shadow :hidden true)]))) "a hidden one draws nothing")
+  (t/is (= [:lottie/images] (issues-of :dotlottie :f #(assoc % :shadow [(assoc shadow :style :inner-shadow)])))
+        "an inner shadow makes the layer an image")
+  (t/is (= [:lottie/blur] (issues-of :lottie :f #(assoc % :blur {:id (uuid/next) :type :layer-blur :value 4 :hidden false}))))
+  (t/is (= [:lottie/stroke]
+           (issues-of :lottie :f #(assoc % :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2
+                                                      :stroke-style :solid :stroke-alignment :inner}])))
+        "an inner stroke")
+  (t/is (= []
+           (issues-of :lottie :f #(assoc % :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2
+                                                      :stroke-style :solid :stroke-alignment :center}])))
+        "a centered one is as Lottie draws it"))
+
+(t/deftest no-markup-format-blends-or-blurs-the-background
+  (doseq [format [:svg :lottie :dotlottie]]
+    (t/is (some #{:blend-mode} (issues-of format :f #(assoc % :blend-mode :multiply))) (name format))
+    (t/is (some #{:background-blur}
+                (issues-of format :f #(assoc % :background-blur {:id (uuid/next) :type :background-blur
+                                                                 :value 6 :hidden false})))
+          (name format)))
+  (t/is (= [] (issues-of :gif :f #(assoc % :blend-mode :multiply))) "a GIF plays it"))

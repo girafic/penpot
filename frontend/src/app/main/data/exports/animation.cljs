@@ -10,11 +10,13 @@
    ["gifenc" :as gifenc]
    ["mediabunny" :as mb]
    [app.common.data :as d]
+   [app.common.files.helpers :as cfh]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
+   [app.common.types.stroke :as ctst]
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
@@ -530,27 +532,110 @@
   "The formats that carry the sound of the audio clips."
   #{:mp4 :webm})
 
-(defn export-caveats
-  "The notes the export of `timeline` (of the shapes of `objects`) needs,
-  by format, as the Animated export tab shows them: `:split-text` for the
-  formats that play a text split into characters, words or lines as a
-  whole (one that underlines or strikes some of its text, see
-  `unit-texts`), and `:no-audio` for the ones without the sound of its
-  audio clips."
-  [objects timeline]
-  (let [split? (and (some? timeline)
-                    (some (fn [[id _]] (decorated? (get objects id)))
-                          (cta/unit-timelines (cta/resolve-animations timeline objects) objects)))
-        audio? (seq (:audio-clips timeline))]
-    (reduce (fn [caveats format]
-              (cond-> caveats
-                (and split? (contains? whole-text-formats format))
-                (update format (fnil conj []) :split-text)
+(def markup-formats
+  "The formats written as markup over pictures of the layers (see
+  `cta/timeline->svg` and `cta/timeline->lottie`)."
+  #{:svg :lottie :dotlottie})
 
-                (and audio? (not (contains? audio-formats format)))
-                (update format (fnil conj []) :no-audio)))
-            {}
-            [:gif :avif :svg :lottie :dotlottie])))
+(def ^:private lottie-formats
+  #{:lottie :dotlottie})
+
+(def ^:private appearance-properties
+  "What the pictures of an SVG export keep as they rest: everything but
+  the moves, turns, scales, opacity and blur of a layer."
+  #{:r1 :r2 :r3 :r4 :fill-color :fill-opacity
+    :stroke-color :stroke-opacity :stroke-width
+    :shadow-offset-x :shadow-offset-y :shadow-blur :shadow-spread :shadow-color :shadow-opacity
+    :trim-start :trim-end :trim-offset :background-blur})
+
+(defn- shown
+  "The items of `items` (a shadow, a stroke, a blur, or a vector of them)
+  that are not hidden."
+  [items]
+  (remove :hidden (if (map? items) [items] items)))
+
+(defn- off-center-stroke?
+  "Whether `stroke` draws otherwise than centered on the outline with
+  plain ends, as Lottie draws a stroke."
+  [stroke]
+  (or (not= :center (:stroke-alignment stroke :inner))
+      (contains? ctst/stroke-caps-marker (:stroke-cap-start stroke))
+      (contains? ctst/stroke-caps-marker (:stroke-cap-end stroke))))
+
+(defn export-issues
+  "What the export of `timeline` (of the shapes of `objects`) plays
+  otherwise than the canvas, by format, as the Animated export panel lists
+  them: a vector of kinds each, the most telling first.
+
+  - `:lottie/text`, texts, which Lottie has as pictures, and
+    `:lottie/images`, layers that draw as pictures for their effects,
+    masks or paints (see `cta/lottie-vector-layer?`); `:svg/images`, as
+    SVG has every layer;
+  - `:svg/appearance`, animated fills, strokes, corners, shadows or
+    trims, which the pictures of SVG keep as they rest;
+  - `:svg/size` and `:lottie/size`, an animated width or height;
+  - `:svg/blur`, an animated blur, which SVG puts on top of the picture,
+    and `:lottie/blur`, a blur, which players draw at their own strength;
+  - `:lottie/shadow`, drop shadows (Lottie effects, without spread);
+  - `:lottie/stroke`, a stroke Lottie draws otherwise (see
+    `off-center-stroke?`);
+  - `:background-blur` and `:blend-mode`, which no markup format plays;
+  - `:split-text`, a split text played whole (one that underlines or
+    strikes some of its text, see `unit-texts`), and `:no-audio`, for the
+    formats without the sound of its audio clips."
+  [objects timeline]
+  (if (nil? timeline)
+    {}
+    (let [board-id  (:board-id timeline)
+          resolved  (cta/resolve-animations timeline objects)
+          shapes    (->> (cfh/get-children-with-self objects board-id)
+                         (filter some?)
+                         (remove :hidden))
+          animated  (into #{} (comp (mapcat :keyframes) (map :property)) (vals (:tracks resolved)))
+          layer-ids (cta/export-layer-ids objects board-id (:tracks resolved))
+          idset     (set layer-ids)
+          some?*    (fn [pred] (boolean (some pred shapes)))
+          size?     (or (contains? animated :width) (contains? animated :height))
+          table
+          [[:lottie/text lottie-formats (some?* #(= :text (:type %)))]
+           [:lottie/images lottie-formats
+            (boolean (some (fn [id]
+                             (let [shape (get objects id)]
+                               (and (some? shape)
+                                    (not (:hidden shape))
+                                    (not (contains? #{:text :image} (:type shape)))
+                                    (not (cta/lottie-vector-layer? objects idset id)))))
+                           (cons board-id layer-ids)))]
+           [:svg/images #{:svg} true]
+           [:svg/appearance #{:svg} (boolean (some appearance-properties animated))]
+           [:svg/size #{:svg} size?]
+           [:lottie/size lottie-formats size?]
+           [:svg/blur #{:svg} (contains? animated :blur)]
+           [:lottie/shadow lottie-formats
+            (some?* (fn [shape] (some #(= :drop-shadow (:style %)) (shown (:shadow shape)))))]
+           [:lottie/blur lottie-formats
+            (or (contains? animated :blur)
+                (some?* (fn [shape] (some #(pos? (:value % 0)) (shown (:blur shape))))))]
+           [:lottie/stroke lottie-formats
+            (some?* (fn [shape]
+                      (and (not= :text (:type shape))
+                           (some off-center-stroke? (shown (:strokes shape))))))]
+           [:background-blur markup-formats
+            (or (contains? animated :background-blur)
+                (some?* (fn [shape] (some #(pos? (:value % 0)) (shown (:background-blur shape))))))]
+           [:blend-mode markup-formats
+            (some?* #(not (contains? #{nil :normal} (:blend-mode %))))]
+           [:split-text whole-text-formats
+            (boolean (some (fn [[id _]] (decorated? (get objects id)))
+                           (cta/unit-timelines resolved objects)))]
+           [:no-audio #{:gif :avif :svg :lottie :dotlottie}
+            (boolean (seq (:audio-clips timeline)))]]]
+      (reduce (fn [issues [kind formats on?]]
+                (if on?
+                  (reduce #(update %1 %2 (fnil conj []) kind) issues formats)
+                  issues))
+              {}
+              table))))
 
 (def ^:private audio-bitrate
   "Bits per second of the sound of a video, stereo."
@@ -1639,10 +1724,6 @@
                 (p/resolved nil)
                 files)
         (p/then (fn [_] (uz/close writer))))))
-
-(def markup-formats
-  "The formats written as markup over pictures of the layers."
-  #{:svg :lottie :dotlottie})
 
 (defn- markup-file
   "A promise of the SVG, Lottie or dotLottie of the board `board` playing

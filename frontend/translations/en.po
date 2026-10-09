@@ -9023,14 +9023,103 @@ msgstr "%s boards, in a ZIP"
 msgid "workspace.options.export.codec-unavailable"
 msgstr "This format is not available in this browser. Try WebM or GIF."
 
-msgid "workspace.options.export.split-text-whole"
-msgstr "Underlined or struck text animated by characters, words or lines moves as a whole in this format."
-
 msgid "workspace.options.export.split-lines-whole"
 msgstr "Text animated by lines, or with a stroke or a shadow, moves as a whole in this format."
 
 msgid "workspace.options.export.no-audio"
 msgstr "Audio is not included in this format."
+
+msgid "workspace.options.export.issues"
+msgstr "Issues"
+
+msgid "workspace.options.export.issues-count"
+msgid_plural "workspace.options.export.issues-count"
+msgstr[0] "1 issue to review"
+msgstr[1] "%s issues to review"
+
+msgid "workspace.options.export.issue.lottie-text"
+msgstr "Text · Exported as an image"
+
+msgid "workspace.options.export.issue.lottie-text.text"
+msgstr "%s has each text as an image of how it rests: its font is not embedded, its fills and strokes don't animate, and it blurs when scaled up."
+
+msgid "workspace.options.export.issue.lottie-images"
+msgstr "Effects and masks · Exported as images"
+
+msgid "workspace.options.export.issue.lottie-images.text"
+msgstr "Layers with inner shadows, masks, image fills or gradient strokes are images in %s: their fills, strokes, shadows and blur don't animate, and they blur when scaled up."
+
+msgid "workspace.options.export.issue.svg-images"
+msgstr "Layers · Exported as images"
+
+msgid "workspace.options.export.issue.svg-images.text"
+msgstr "%s holds each layer as an image of how it rests: it blurs when scaled up, and texts keep no fonts."
+
+msgid "workspace.options.export.issue.svg-appearance"
+msgstr "Fill, stroke and shadow animation · Left out of %s"
+
+msgid "workspace.options.export.issue.svg-appearance.text"
+msgstr "Only moves, turns, scales, fades and blurs play in %s: fills, strokes, corners, shadows and trims stay as they rest."
+
+msgid "workspace.options.export.issue.svg-size"
+msgstr "Size animation · Stretches in %s"
+
+msgid "workspace.options.export.issue.svg-size.text"
+msgstr "Width and height play as a scale of the image, which stretches its strokes, corners and text."
+
+msgid "workspace.options.export.issue.lottie-size"
+msgstr "Size animation · May change in %s"
+
+msgid "workspace.options.export.issue.lottie-size.text"
+msgstr "Only ellipses and rectangles with equal corners animate their size in %s, from their top left corner. Other layers keep theirs."
+
+msgid "workspace.options.export.issue.svg-blur"
+msgstr "Blur animation · May change in %s"
+
+msgid "workspace.options.export.issue.svg-blur.text"
+msgstr "The blur plays on top of the one in the image, so the layer is never sharper than at rest, and browsers blur more than the canvas."
+
+msgid "workspace.options.export.issue.lottie-shadow"
+msgstr "Drop shadow · May change in %s"
+
+msgid "workspace.options.export.issue.lottie-shadow.text"
+msgstr "Drop shadows play as %s effects without spread, which each player draws its own way. A moving shadow swings around the layer."
+
+msgid "workspace.options.export.issue.lottie-blur"
+msgstr "Blur · May change in %s"
+
+msgid "workspace.options.export.issue.lottie-blur.text"
+msgstr "Blurs play as %s effects, which each player draws at its own strength."
+
+msgid "workspace.options.export.issue.lottie-stroke"
+msgstr "Stroke · May change in %s"
+
+msgid "workspace.options.export.issue.lottie-stroke.text"
+msgstr "%s draws strokes centered on the outline: inner and outer strokes, arrows and markers change."
+
+msgid "workspace.options.export.issue.background-blur"
+msgstr "Background blur · Left out of %s"
+
+msgid "workspace.options.export.issue.background-blur.text"
+msgstr "%s doesn't blur what is behind a layer."
+
+msgid "workspace.options.export.issue.blend-mode"
+msgstr "Blend mode · Left out of %s"
+
+msgid "workspace.options.export.issue.blend-mode.text"
+msgstr "%s draws every layer in the normal blend mode."
+
+msgid "workspace.options.export.issue.split-text"
+msgstr "Split text · Moves as a whole in %s"
+
+msgid "workspace.options.export.issue.split-text.text"
+msgstr "Underlined or struck text animated by characters, words or lines moves as a whole in %s."
+
+msgid "workspace.options.export.issue.no-audio"
+msgstr "Audio · Left out of %s"
+
+msgid "workspace.options.export.issue.no-audio.text"
+msgstr "%s has no sound: the audio clips of the timeline aren't in the file."
 
 msgid "workspace.options.export.include-audio"
 msgstr "Include audio"
