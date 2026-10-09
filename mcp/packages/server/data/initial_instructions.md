@@ -428,6 +428,10 @@ The animation of a board: `board.timeline` (type: `Timeline`, or `null` when it 
   * `addKeyframe(shape, {property, time, value, easing?, index?}): Keyframe` - The value of a property of the board or a
     layer inside it at `time` (ms). A keyframe of the same property and time is replaced. Each animated property needs
     two keyframes or more: between two, the value goes from one to the other.
+  * Times may lie before 0 (a keyframe `time`, the `start` of a preset, of a style use or of an audio clip), as in the
+    timeline dock: what lies there does not play, but sets where the animation is at 0 (a fade from -500 to 500 ms
+    starts half done; a clip from -1000 ms sounds from 1 s into its file). The playhead, markers and `duration` start
+    at 0.
   * `addAnimation(shape, {type, start?, duration?, direction?, easing?, amount?, offsetX?, offsetY?, split?, spread?,
     order?, seed?}): PresetAnimation` - An effect over a span of time: `type` "fade" | "move" | "scale" | "rotate" |
     "blur" (a layer blur of `amount` px, 8 by default); `direction` "in" (an entrance, from the effect to the layer as

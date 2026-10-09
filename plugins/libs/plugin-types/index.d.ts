@@ -3881,7 +3881,7 @@ export interface Timeline {
    * @param style The style, like `slide-up` (a fade and a move up) or `pop`.
    * The text styles (`typewriter`, `rise-words`, `cascade-lines`,
    * `pop-letters`) go on text layers only.
-   * @param start When they start, in milliseconds.
+   * @param start When they start, in milliseconds, before 0 too.
    */
   addAnimationStyle(
     shape: Shape,
@@ -3897,7 +3897,7 @@ export interface Timeline {
    * @param shape The board or a layer inside it.
    * @param style A style of `penpot.library.local` or of a connected
    * library.
-   * @param start When it starts, in milliseconds.
+   * @param start When it starts, in milliseconds, before 0 too.
    *
    * @example
    * ```js
@@ -4676,7 +4676,9 @@ export interface AudioClip {
   readonly sourceDuration: number;
 
   /**
-   * When it starts playing on the timeline, from 0.
+   * When it starts playing on the timeline, in milliseconds. Before 0 it
+   * sounds from the start of the timeline on, as far into its file, as in
+   * the timeline dock.
    */
   start: number;
 
@@ -4754,7 +4756,7 @@ export interface AudioClip {
 export interface AudioClipProps {
   /**
    * When it starts playing on the timeline, in milliseconds (0 by
-   * default).
+   * default), before 0 too (see `AudioClip.start`).
    */
   start?: number;
 
@@ -4874,7 +4876,9 @@ export interface KeyframeProps {
    */
   property: AnimatableProperty;
   /**
-   * When, in milliseconds from the start of the animation.
+   * When, in milliseconds from the start of the animation. Before 0 it
+   * does not play, but sets where the animation is at its start, as in
+   * the timeline dock.
    */
   time: number;
   /**
@@ -4926,7 +4930,8 @@ export interface Keyframe {
    */
   readonly index?: number;
   /**
-   * When, in milliseconds from the start of the animation.
+   * When, in milliseconds from the start of the animation, before 0 too
+   * (see `KeyframeProps.time`).
    */
   time: number;
   /**
@@ -4981,7 +4986,9 @@ export interface PresetAnimationProps {
    */
   direction?: 'in' | 'out';
   /**
-   * When it starts, in milliseconds (0 by default).
+   * When it starts, in milliseconds (0 by default). On a timeline before
+   * 0 too, where it does not play but sets where the animation is at its
+   * start; in a style from the start of the style on.
    */
   start?: number;
   /**
@@ -5077,7 +5084,8 @@ export interface PresetAnimation {
    */
   direction: 'in' | 'out';
   /**
-   * When it starts, in milliseconds.
+   * When it starts, in milliseconds, before 0 too (see
+   * `PresetAnimationProps.start`).
    */
   start: number;
   /**
@@ -5332,7 +5340,7 @@ export interface AppliedAnimationStyle {
    */
   readonly name: string;
   /**
-   * When it starts, in milliseconds.
+   * When it starts, in milliseconds, before 0 too, where it does not play.
    */
   start: number;
   /**

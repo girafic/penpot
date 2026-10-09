@@ -16649,7 +16649,7 @@ Timeline:
           `pop-letters`) go on text layers only.
         * start: number
 
-          When they start, in milliseconds.
+          When they start, in milliseconds, before 0 too.
 
         Returns PresetAnimation[]
       applyAnimationStyle: |-
@@ -16677,7 +16677,7 @@ Timeline:
           library.
         * start: number
 
-          When it starts, in milliseconds.
+          When it starts, in milliseconds, before 0 too.
 
         Returns AppliedAnimationStyle
 
@@ -17817,7 +17817,9 @@ AudioClip:
         start: number
         ```
 
-        When it starts playing on the timeline, from 0.
+        When it starts playing on the timeline, in milliseconds. Before 0 it
+        sounds from the start of the timeline on, as far into its file, as in
+        the timeline dock.
       offset: |-
         ```
         offset: number
@@ -17929,7 +17931,7 @@ AudioClipProps:
         ```
 
         When it starts playing on the timeline, in milliseconds (0 by
-        default).
+        default), before 0 too (see `AudioClip.start`).
       lane: |-
         ```
         lane?: number
@@ -18014,7 +18016,9 @@ KeyframeProps:
         time: number
         ```
 
-        When, in milliseconds from the start of the animation.
+        When, in milliseconds from the start of the animation. Before 0 it
+        does not play, but sets where the animation is at its start, as in
+        the timeline dock.
       value: |-
         ```
         value: string | number
@@ -18115,7 +18119,8 @@ Keyframe:
         time: number
         ```
 
-        When, in milliseconds from the start of the animation.
+        When, in milliseconds from the start of the animation, before 0 too
+        (see `KeyframeProps.time`).
       value: |-
         ```
         value: string | number
@@ -18198,7 +18203,9 @@ PresetAnimationProps:
         start?: number
         ```
 
-        When it starts, in milliseconds (0 by default).
+        When it starts, in milliseconds (0 by default). On a timeline before
+        0 too, where it does not play but sets where the animation is at its
+        start; in a style from the start of the style on.
       duration: |-
         ```
         duration?: number
@@ -18334,7 +18341,8 @@ PresetAnimation:
         start: number
         ```
 
-        When it starts, in milliseconds.
+        When it starts, in milliseconds, before 0 too (see
+        `PresetAnimationProps.start`).
       duration: |-
         ```
         duration: number
@@ -18663,7 +18671,7 @@ AppliedAnimationStyle:
         start: number
         ```
 
-        When it starts, in milliseconds.
+        When it starts, in milliseconds, before 0 too, where it does not play.
       duration: |-
         ```
         duration: number

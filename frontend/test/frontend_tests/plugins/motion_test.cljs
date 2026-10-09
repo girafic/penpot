@@ -158,12 +158,17 @@
 
         (t/testing "what is not valid is refused"
           (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "color" :time 0 :value 1})))
-          (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "x" :time -5 :value 1})))
+          (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "x" :time "soon" :value 1})))
           (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "x" :time 0 :value "far"})))
           (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "x" :time 0 :value 1 :index 2})))
           (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "x" :time 0 :value 1 :easing "bouncy"})))
           (t/is (thrown? js/Error (.addKeyframe timeline (.createRectangle context) #js {:property "x" :time 0 :value 1}))
                 "a layer outside the board"))
+
+        (t/testing "a time before 0, as in the dock"
+          (let [^js early (.addKeyframe timeline rect #js {:property "x" :time -5 :value 1})]
+            (t/is (= -5 (.-time early)))
+            (.remove early)))
 
         (t/testing "they go away"
           (.remove from)
@@ -554,7 +559,7 @@
             before              (stored-timelines store context)
             copy                #(.copyAnimation timeline (shape :source) %1 %2)
             elsewhere           (shape/shape-proxy plugin-id (:id file) (uuid/next) (cthi/id :b))]
-        (t/is (thrown? js/Error (copy #js [(shape :b)] #js {:start -5})))
+        (t/is (thrown? js/Error (copy #js [(shape :b)] #js {:start "soon"})))
         (t/is (thrown? js/Error (copy #js [(shape :b)] #js {:stagger "x"})))
         (t/is (thrown? js/Error (copy #js [(shape :b)] #js {:values "absolute"})))
         (t/is (thrown? js/Error (copy #js [(shape :b)] #js {:properties #js ["colour"]})))
@@ -906,9 +911,14 @@
           (t/is (= [3000 1000] ((juxt :offset :duration) (stored clip-id))) "shorter where the file ends")
           (t/is (= 3000 (.-duration timeline)) "the timeline keeps its length"))
 
+        (t/testing "a start before 0, as in the dock"
+          (set! (.-start clip) -300)
+          (t/is (= -300 (:start (stored clip-id))))
+          (set! (.-start clip) 250))
+
         (t/testing "what is not valid is refused"
           (t/is (thrown? js/Error (set! (.-volume clip) 5)) "four times as loud at most")
-          (t/is (thrown? js/Error (set! (.-start clip) -1)))
+          (t/is (thrown? js/Error (set! (.-start clip) "soon")))
           (t/is (thrown? js/Error (set! (.-lane clip) 1.5)))
           (t/is (thrown? js/Error (set! (.-muted clip) "yes")))
           (t/is (thrown? js/Error (set! (.-duration clip) 0)))
@@ -1060,7 +1070,7 @@
                                              "audio/mpeg" nil))
                     (rejects "undecodable" (add "noise.mp3" (text-bytes "noise") "audio/mpeg" nil))
                     (rejects "no bytes" (add "x.mp3" "ms:100" "audio/mpeg" nil))
-                    (rejects "a start before 0" (add "x.mp3" (text-bytes "ms:100") "audio/mpeg" #js {:start -1}))
+                    (rejects "a start that is no number" (add "x.mp3" (text-bytes "ms:100") "audio/mpeg" #js {:start "soon"}))
                     (rejects "a lane of another file" (add "x.mp3" (text-bytes "ms:100") "audio/mpeg" #js {:lane 0}))
                     (rejects "without content:write"
                              (with-redefs [r/check-permission (constantly false)]

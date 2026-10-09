@@ -166,6 +166,12 @@
   [value]
   (and (sm/valid-safe-number? value) (>= value 0)))
 
+(defn- valid-timeline-time?
+  "A time on a timeline, in ms: before 0 too, where nothing plays, as the
+  timeline dock allows."
+  [value]
+  (sm/valid-safe-number? value))
+
 (defn- valid-value?
   [property value]
   (if (cta/color-property? property)
@@ -428,7 +434,7 @@
       {:get #(:time (locate))
        :set
        (fn [value]
-         (if (not (valid-time? value))
+         (if (not (valid-timeline-time? value))
            (u/not-valid plugin-id :time value)
            (let [time (mth/round value)]
              ;; the timeline grows to hold the keyframe
@@ -559,7 +565,7 @@
       {:get #(:start (locate))
        :set
        (fn [value]
-         (if (not (valid-time? value))
+         (if (not (valid-timeline-time? value))
            (u/not-valid plugin-id :start value)
            (update! :start #(ctau/move-audio-clip % id (mth/round value)))))}
 
@@ -800,7 +806,7 @@
 
       :start
       {:get #(:start (locate))
-       :set (number-setter :start :start valid-time?)}
+       :set (number-setter :start :start valid-timeline-time?)}
 
       :duration
       {:get #(:duration (locate))
@@ -888,8 +894,8 @@
       (nil? property)
       "Not a property that can be animated"
 
-      (not (valid-time? time))
-      "The time should be a number of milliseconds from 0"
+      (not (valid-timeline-time? time))
+      "The time should be a number of milliseconds"
 
       (not (valid-value? property value))
       (if (cta/color-property? property)
@@ -918,10 +924,8 @@
              (when (some? tokens)
                {:applied-tokens tokens})))))
 
-(defn- parse-animation
-  "The preset animation the object `props` of the plugin API describes,
-  or a string saying what is wrong with it."
-  [props]
+(defn- parse-animation*
+  [props before-start?]
   (let [type      (some-> (obj/get props "type") keyword)
         direction (d/nilv (obj/get props "direction") "in")
         start     (d/nilv (obj/get props "start") 0)
@@ -943,8 +947,10 @@
       (not (contains? #{"in" "out"} direction))
       "The direction should be 'in' or 'out'"
 
-      (not (valid-time? start))
-      "The start should be a number of milliseconds from 0"
+      (not (if before-start? (valid-timeline-time? start) (valid-time? start)))
+      (if before-start?
+        "The start should be a number of milliseconds"
+        "The start should be a number of milliseconds from 0")
 
       (and (some? duration) (not (and (sm/valid-safe-number? duration) (pos? duration))))
       "The duration should be a number of milliseconds above 0"
@@ -987,6 +993,16 @@
         (some? order)                 (assoc :order (keyword order))
         (some? seed)                  (assoc :seed seed)
         (seq tokens)                  (assoc :applied-tokens tokens)))))
+
+(defn- parse-animation
+  "The preset animation the object `props` of the plugin API describes,
+  or a string saying what is wrong with it. With `before-start?`, one of
+  a timeline, it may start before 0; an entry of a style starts with the
+  style or later."
+  ([props]
+   (parse-animation props false))
+  ([props before-start?]
+   (parse-animation* props before-start?)))
 
 (defn- parse-entry-keyframe
   "The keyframe of a keyframe entry of `property` that the object `props`
@@ -1191,8 +1207,8 @@
       (and (some? values) (not (contains? #{"relative" "exact"} values)))
       "The values should be 'relative' or 'exact'"
 
-      (and (some? start) (not (valid-time? start)))
-      "The start should be a number of milliseconds from 0"
+      (and (some? start) (not (valid-timeline-time? start)))
+      "The start should be a number of milliseconds"
 
       (and (some? stagger) (not (valid-time? stagger)))
       "The stagger should be a number of milliseconds from 0"
@@ -1251,7 +1267,7 @@
       {:get #(:start (locate))
        :set
        (fn [value]
-         (if (not (valid-time? value))
+         (if (not (valid-timeline-time? value))
            (u/not-valid plugin-id :start value)
            (update! :start #(assoc % :start (mth/round value)))))}
 
@@ -1409,7 +1425,7 @@
       :addAnimation
       (fn [shape props]
         (when-let [shape-id (layer :addAnimation shape)]
-          (let [animation (if (object? props) (parse-animation props) "No animation given")
+          (let [animation (if (object? props) (parse-animation props true) "No animation given")
                 error     (if (string? animation)
                             animation
                             (split-error file-id page-id (locate) shape-id (:split animation) nil))]
@@ -1433,8 +1449,8 @@
               (u/not-valid plugin-id :addAnimationStyle
                            (dm/str "The style should be one of " (pr-str (sort style-names))))
 
-              (not (valid-time? start))
-              (u/not-valid plugin-id :addAnimationStyle "The start should be a number of milliseconds from 0")
+              (not (valid-timeline-time? start))
+              (u/not-valid plugin-id :addAnimationStyle "The start should be a number of milliseconds")
 
               (some? error)
               (u/not-valid plugin-id :addAnimationStyle error)
@@ -1468,8 +1484,8 @@
               (u/not-valid plugin-id :applyAnimationStyle
                            "The style is neither in the file nor in a library of it")
 
-              (not (valid-time? start))
-              (u/not-valid plugin-id :applyAnimationStyle "The start should be a number of milliseconds from 0")
+              (not (valid-timeline-time? start))
+              (u/not-valid plugin-id :applyAnimationStyle "The start should be a number of milliseconds")
 
               :else
               (let [use (ctas/make-use style-data style-file (mth/round start))]
@@ -1513,8 +1529,8 @@
                       (and (some? props) (not (object? props)))
                       "The options should be an object"
 
-                      (and (some? start) (not (valid-time? start)))
-                      "The start should be a number of milliseconds from 0"
+                      (and (some? start) (not (valid-timeline-time? start)))
+                      "The start should be a number of milliseconds"
 
                       (and (some? lane) (not (valid-lane? lane)))
                       "The lane should be a whole number from 0"
