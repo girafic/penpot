@@ -855,6 +855,27 @@
     (t/is (= {aid "x" bid' "x_2"} (cta/svg-layer-ids {aid {:name "x"} bid' {:name "x"}} [aid bid'])))
     (t/is (= {aid "a_b_c"} (cta/svg-layer-ids {aid {:name "a b<c"}} [aid])))))
 
+(t/deftest timeline->svg-draws-the-vectors-of-its-layers
+  (let [board (cts/setup-shape {:type :frame :x 100 :y 50 :width 200 :height 100})
+        bid   (:id board)
+        shape (cts/setup-shape {:type :rect :x 110 :y 60 :width 20 :height 20})
+        sid   (:id shape)
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :opacity :value 0})
+                  (cta/add-keyframe sid {:time 1000 :property :opacity :value 1}))
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        images {bid {:markup "<rect class=\"board\"/>"}
+                sid {:markup "<rect class=\"layer\"/>"}}
+        svg   (cta/timeline->svg tl objects images {:fonts "@font-face { font-family: X; }"})]
+    (t/is (not (re-find #"<image" svg)) "no pictures")
+    (t/is (re-find #"<g transform=\"translate\(-100 -50\)\" fill=\"none\"><rect class=\"board\"/></g>" svg)
+          "the board where it is in the SVG, drawn where it is on the page")
+    (t/is (re-find (re-pattern (str "<g class=\"" (cta/shape-css-class sid) "\"><g transform=\"translate\\(-100 -50\\)\" fill=\"none\"><rect class=\"layer\"/>"))
+                   svg)
+          "a layer in the group its CSS plays")
+    (t/is (re-find #"<style>[^<]*@font-face \{ font-family: X; \}" svg) "the fonts of its texts")))
+
 (t/deftest timeline->svg-nests-child-layers
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
         a     (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 40})

@@ -10,6 +10,7 @@
    ["gifenc" :as gifenc]
    ["mediabunny" :as mb]
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
@@ -18,6 +19,7 @@
    [app.common.types.modifiers :as ctm]
    [app.common.types.stroke :as ctst]
    [app.main.data.event :as ev]
+   [app.main.data.exports.svg-vectors :as svgv]
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace.animation :as dwa]
@@ -569,17 +571,21 @@
 
   - `:lottie/text`, texts, which Lottie has as pictures, and
     `:lottie/images`, layers that draw as pictures for their effects,
-    masks or paints (see `cta/lottie-vector-layer?`); `:svg/images`, as
-    SVG has every layer;
+    masks or paints (see `cta/lottie-vector-layer?`); `:svg/units`, the
+    units of split texts, which SVG has as pictures (its layers are
+    vectors, see `app.main.data.exports.svg-vectors`);
   - `:svg/appearance`, animated fills, strokes, corners, shadows or
-    trims, which the pictures of SVG keep as they rest;
+    trims, which SVG keeps as they rest (its CSS plays moves, turns,
+    scales, opacity and blur);
   - `:svg/size` and `:lottie/size`, an animated width or height;
-  - `:svg/blur`, an animated blur, which SVG puts on top of the picture,
-    and `:lottie/blur`, a blur, which players draw at their own strength;
+  - `:svg/blur`, an animated blur, which browsers draw stronger than the
+    canvas, and `:lottie/blur`, a blur, which players draw at their own
+    strength;
   - `:lottie/shadow`, drop shadows (Lottie effects, without spread);
   - `:lottie/stroke`, a stroke Lottie draws otherwise (see
     `off-center-stroke?`);
-  - `:background-blur` and `:blend-mode`, which no markup format plays;
+  - `:background-blur` and `:blend-mode`, which no markup format plays
+    (in SVG a layer blends only within itself);
   - `:split-text`, a split text played whole (one that underlines or
     strikes some of its text, see `unit-texts`), and `:no-audio`, for the
     formats without the sound of its audio clips."
@@ -596,6 +602,7 @@
           idset     (set layer-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
           size?     (or (contains? animated :width) (contains? animated :height))
+          units     (cta/unit-timelines resolved objects)
           table
           [[:lottie/text lottie-formats (some?* #(= :text (:type %)))]
            [:lottie/images lottie-formats
@@ -606,7 +613,7 @@
                                     (not (contains? #{:text :image} (:type shape)))
                                     (not (cta/lottie-vector-layer? objects idset id)))))
                            (cons board-id layer-ids)))]
-           [:svg/images #{:svg} true]
+           [:svg/units #{:svg} (boolean (seq units))]
            [:svg/appearance #{:svg} (boolean (some appearance-properties animated))]
            [:svg/size #{:svg} size?]
            [:lottie/size lottie-formats size?]
@@ -626,8 +633,7 @@
            [:blend-mode markup-formats
             (some?* #(not (contains? #{nil :normal} (:blend-mode %))))]
            [:split-text whole-text-formats
-            (boolean (some (fn [[id _]] (decorated? (get objects id)))
-                           (cta/unit-timelines resolved objects)))]
+            (boolean (some (fn [[id _]] (decorated? (get objects id))) units))]
            [:no-audio #{:gif :avif :svg :lottie :dotlottie}
             (boolean (seq (:audio-clips timeline)))]]]
       (reduce (fn [issues [kind formats on?]]
@@ -1764,6 +1770,34 @@
                                       (not= :once (cta/playback-mode tl)))]
         {:status :ok :blob blob :ext ".lottie" :mtype dotlottie-mtype}))))
 
+(defn- vector-layers
+  "A promise of the vectors of the layers of the SVG export of `tl` and of
+  its board, at rest (see `app.main.data.exports.svg-vectors`), but of
+  the split texts of `texts`, which play their units as pictures:
+  `{:images {id {:markup}} :fonts css}`, the `@font-face` CSS of their
+  texts. A layer at a time, as `collect-layer-images` takes them."
+  [objects tl texts {:keys [yield cancelled? on-progress]}]
+  (let [board-id (:board-id tl)
+        layers   (cta/export-layer-ids objects board-id (:tracks tl))
+        drawn    (into [board-id] (remove texts) layers)
+        drawable (svgv/without-layers objects (set layers))
+        resolved (cta/resolve-animations tl objects)
+        animated #(into #{} (map :property) (dm/get-in resolved [:tracks % :keyframes]))
+        yield    (or yield default-yield)
+        n        (count drawn)]
+    (p/let [_     (svgv/load-media objects)
+            fonts (svgv/fonts-css objects drawn)
+            images
+            (reduce (fn [p [i id]]
+                      (.then p (fn [images]
+                                 (throw-if-cancelled cancelled?)
+                                 (let [markup (svgv/layer-markup drawable id (animated id))]
+                                   (when on-progress (on-progress (inc i) n))
+                                   (.then (yield) (fn [_] (assoc images id {:markup markup})))))))
+                    (js/Promise.resolve {})
+                    (map-indexed vector drawn))]
+      {:images images :fonts fonts})))
+
 (defn- markup-export
   "A promise of the markup export (`:svg` `:lottie` `:dotlottie`) of
   `opts` (see `run-export`): the pictures of its layers one at a time,
@@ -1774,13 +1808,19 @@
         board    (get objects board-id)
         ;; split texts play their units, each its own picture
         texts    (unit-texts objects tl)
-        ;; Lottie draws the layers it can as vectors
+        ;; Lottie draws the layers it can as vectors, SVG all (see
+        ;; `vector-layers`)
         layers   (set (cta/export-layer-ids objects board-id (:tracks tl)))
-        skip?    #(or (contains? texts %)
+        vectors? (= :svg format)
+        skip?    #(or vectors?
+                      (contains? texts %)
                       (and (#{:lottie :dotlottie} format)
                            (cta/lottie-vector-layer? objects layers %)))
-        ;; the pictures of the layers, then of the units of split texts
-        n-layers (count (layer-ids-to-shoot objects tl skip?))
+        ;; the pictures (or vectors) of the layers, then of the units of
+        ;; split texts
+        n-layers (if vectors?
+                   (count (remove texts (layer-ids-to-shoot objects tl nil)))
+                   (count (layer-ids-to-shoot objects tl skip?)))
         total    (+ n-layers (unit-shot-count texts))
         pictures (phase-progress on-progress :layers)]
     ;; the board at its end, where what comes in has come
@@ -1792,14 +1832,21 @@
             (.then #(on-frame % rect 1))
             ;; only a picture to look at
             (.catch (constantly nil)))))
-    (p/let [images (collect-layer-images
-                    objects tl
-                    {:bridge bridge
-                     :time (or time 0)
-                     :yield yield
-                     :cancelled? cancelled?
-                     :on-progress (fn [i _] (pictures i total))
-                     :skip? skip?})
+    (p/let [vectors (when vectors?
+                      (vector-layers objects tl texts
+                                     {:yield yield
+                                      :cancelled? cancelled?
+                                      :on-progress (fn [i _] (pictures i total))}))
+            images  (if vectors?
+                      (:images vectors)
+                      (collect-layer-images
+                       objects tl
+                       {:bridge bridge
+                        :time (or time 0)
+                        :yield yield
+                        :cancelled? cancelled?
+                        :on-progress (fn [i _] (pictures i total))
+                        :skip? skip?}))
             units  (do (throw-if-cancelled cancelled?)
                        (collect-unit-images objects tl texts
                                             {:bridge bridge
@@ -1808,7 +1855,7 @@
                                              :on-progress (fn [j _] (pictures (+ n-layers j) total))}))
             result (do (throw-if-cancelled cancelled?)
                        (markup-file tl objects board format (merge images units)
-                                    {:ids? ids? :bbox? bbox?}))]
+                                    {:ids? ids? :bbox? bbox? :fonts (:fonts vectors)}))]
       (when on-progress
         (on-progress {:phase :write :current 1 :total 1}))
       (assoc result :name (or (:name board) (:name tl))))))

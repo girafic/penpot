@@ -4895,6 +4895,13 @@
   [text-id k]
   (str "penpot-unit-" text-id "-" k))
 
+(defn- svg-vectors
+  "The vectors of a layer (`:markup`, see `timeline->svg`), drawn where
+  they are on the page, moved to where they are in the SVG, whose origin
+  is `ox`/`oy`; nothing draws without a fill of its own."
+  [markup ox oy]
+  (str "<g transform=\"translate(" (fmt (- ox)) " " (fmt (- oy)) ")\" fill=\"none\">" markup "</g>"))
+
 (defn- svg-image
   [img]
   (str "<image href=\"" (svg-escape (or (:href img) ""))
@@ -4970,13 +4977,17 @@
                (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
                ">"
                (clipped
-                ;; the picture of the shape as it is, turned, over its box
-                ;; with shadows and blur (`:x :y` of the image), or its box
-                (str "<image href=\"" (svg-escape (or (:href img) ""))
-                     "\" x=\"" (fmt (or (:x img) (- (or (:x sr) 0) ox)))
-                     "\" y=\"" (fmt (or (:y img) (- (or (:y sr) 0) oy)))
-                     "\" width=\"" (fmt (or (:width img) (:width sr) 0))
-                     "\" height=\"" (fmt (or (:height img) (:height sr) 0)) "\"/>"
+                (str (if-let [markup (:markup img)]
+                       ;; its vectors
+                       (svg-vectors markup ox oy)
+                       ;; the picture of the shape as it is, turned, over its
+                       ;; box with shadows and blur (`:x :y` of the image), or
+                       ;; its box
+                       (str "<image href=\"" (svg-escape (or (:href img) ""))
+                            "\" x=\"" (fmt (or (:x img) (- (or (:x sr) 0) ox)))
+                            "\" y=\"" (fmt (or (:y img) (- (or (:y sr) 0) oy)))
+                            "\" width=\"" (fmt (or (:width img) (:width sr) 0))
+                            "\" height=\"" (fmt (or (:height img) (:height sr) 0)) "\"/>"))
                      inner))
                "</g>"))))))
 
@@ -4991,12 +5002,15 @@
   and, when it has ink (an underline), `[text-id :rest]` of what is no
   unit, each over the box it covers (with the text turned); otherwise its
   split animations play as animations of the whole text (see
-  `flatten-splits`). Options, as Figma's: `:ids?`, the names of the
-  layers and of the board as their `id`s (see `svg-layer-ids`), and
-  `:bbox?`, a bounding box, an empty rectangle over the board, first."
+  `flatten-splits`). An entry of `images` with `:markup` instead holds the
+  vectors of its layer, the SVG of the shape at rest as it is on the page
+  (see `svg-vectors`), and `:fonts` (an option) the `@font-face` CSS of
+  their texts. Options, as Figma's: `:ids?`, the names of the layers and
+  of the board as their `id`s (see `svg-layer-ids`), and `:bbox?`, a
+  bounding box, an empty rectangle over the board, first."
   ([timeline objects images]
    (timeline->svg timeline objects images nil))
-  ([timeline objects images {:keys [ids? bbox?]}]
+  ([timeline objects images {:keys [ids? bbox? fonts]}]
    (let [unit-texts (unit-text-ids images)
          timeline (-> timeline
                       (flatten-splits #{:char :word :line} unit-texts)
@@ -5028,14 +5042,16 @@
          clips    (svg-clip-paths objects ox oy nodes)
          svg-ids  (when ids? (svg-layer-ids objects (cons board-id ids)))
          backdrop (when-let [img (get images board-id)]
-                    (str "<image" (svg-id-attr svg-ids board-id)
-                         " href=\"" (svg-escape (:href img))
-                         "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>"))]
+                    (if-let [markup (:markup img)]
+                      (str "<g" (svg-id-attr svg-ids board-id) ">" (svg-vectors markup ox oy) "</g>")
+                      (str "<image" (svg-id-attr svg-ids board-id)
+                           " href=\"" (svg-escape (:href img))
+                           "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>")))]
      (str "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" width
           "\" height=\"" height "\" viewBox=\"0 0 " width " " height
           "\" overflow=\"hidden\">"
           (when (seq clips) (str "<defs>" clips "</defs>"))
-          "<style>g { transform-box: view-box; }\n" css "</style>"
+          "<style>g { transform-box: view-box; }\n" (some-> fonts (str "\n")) css "</style>"
           (when bbox?
             (str "<rect width=\"" width "\" height=\"" height "\" fill=\"none\"/>"))
           backdrop

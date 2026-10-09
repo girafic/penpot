@@ -21,7 +21,7 @@
 (def ^:private issue-icons
   {:lottie/text     i/text
    :lottie/images   i/img
-   :svg/images      i/img
+   :svg/units       i/text
    :svg/appearance  i/drop-shadow
    :svg/size        i/size-horizontal
    :lottie/size     i/size-horizontal

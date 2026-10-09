@@ -23,6 +23,7 @@
    [frontend-tests.data.profile-test]
    [frontend-tests.data.repo-test]
    [frontend-tests.data.store-test]
+   [frontend-tests.data.svg-vectors-test]
    [frontend-tests.data.uploads-test]
    [frontend-tests.data.viewer-playback-test]
    [frontend-tests.data.viewer-test]
@@ -159,6 +160,7 @@
    'frontend-tests.data.export-animation-job-test
    'frontend-tests.data.export-job-workspace-test
    'frontend-tests.data.exports-animation-test
+   'frontend-tests.data.svg-vectors-test
    'frontend-tests.data.animation-playback-test
    'frontend-tests.data.animation-styles-test
    'frontend-tests.data.exports-avif-test

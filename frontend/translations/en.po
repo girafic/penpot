@@ -9064,11 +9064,11 @@ msgstr "Effects and masks · Exported as images"
 msgid "workspace.options.export.issue.lottie-images.text"
 msgstr "Layers with inner shadows, masks, image fills or gradient strokes are images in %s: their fills, strokes, shadows and blur don't animate, and they blur when scaled up."
 
-msgid "workspace.options.export.issue.svg-images"
-msgstr "Layers · Exported as images"
+msgid "workspace.options.export.issue.svg-units"
+msgstr "Split text · Exported as images"
 
-msgid "workspace.options.export.issue.svg-images.text"
-msgstr "%s holds each layer as an image of how it rests: it blurs when scaled up, and texts keep no fonts."
+msgid "workspace.options.export.issue.svg-units.text"
+msgstr "A text animated by characters, words or lines has each of them as an image in %s, of how it rests: they blur when scaled up."
 
 msgid "workspace.options.export.issue.svg-appearance"
 msgstr "Fill, stroke and shadow animation · Left out of %s"
@@ -9080,7 +9080,7 @@ msgid "workspace.options.export.issue.svg-size"
 msgstr "Size animation · Stretches in %s"
 
 msgid "workspace.options.export.issue.svg-size.text"
-msgstr "Width and height play as a scale of the image, which stretches its strokes, corners and text."
+msgstr "Width and height play as a scale of the layer, which stretches its strokes, corners and text."
 
 msgid "workspace.options.export.issue.lottie-size"
 msgstr "Size animation · May change in %s"
@@ -9092,7 +9092,7 @@ msgid "workspace.options.export.issue.svg-blur"
 msgstr "Blur animation · May change in %s"
 
 msgid "workspace.options.export.issue.svg-blur.text"
-msgstr "The blur plays on top of the one in the image, so the layer is never sharper than at rest, and browsers blur more than the canvas."
+msgstr "The blur plays as a CSS filter, which browsers draw stronger than the canvas."
 
 msgid "workspace.options.export.issue.lottie-shadow"
 msgstr "Drop shadow · May change in %s"
@@ -9122,7 +9122,7 @@ msgid "workspace.options.export.issue.blend-mode"
 msgstr "Blend mode · Left out of %s"
 
 msgid "workspace.options.export.issue.blend-mode.text"
-msgstr "%s draws every layer in the normal blend mode."
+msgstr "%s doesn't blend a layer with the layers under it."
 
 msgid "workspace.options.export.issue.split-text"
 msgstr "Split text · Moves as a whole in %s"

@@ -1444,16 +1444,16 @@
   {:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 8 :spread 0 :hidden false
    :color {:color "#000000" :opacity 0.3}})
 
-(t/deftest an-svg-has-every-layer-as-an-image
-  (t/is (= [:svg/images] (issues-of :svg)) "a move plays")
+(t/deftest an-svg-has-its-layers-as-vectors
+  (t/is (= [] (issues-of :svg)) "a move plays")
   (t/is (= [] (issues-of :lottie)) "a plain rect is a vector")
   (t/is (= [] (issues-of :mp4)) "videos play as the canvas"))
 
 (t/deftest what-svg-keeps-as-it-rests
-  (t/is (= [:svg/images :svg/appearance]
+  (t/is (= [:svg/appearance]
            (issues-of :svg :kfs [{:time 0 :property :fill-color :value "#ff0000"}
                                  {:time 1000 :property :fill-color :value "#00ff00"}])))
-  (t/is (= [:svg/images :svg/size :svg/blur]
+  (t/is (= [:svg/size :svg/blur]
            (issues-of :svg :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}
                                  {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}])))
   (t/is (= [:lottie/size :lottie/blur]
