@@ -1430,6 +1430,76 @@
     (t/is (nil? (:hasMask content)))
     (t/is (= ["still" "shape"] (mapv :nm (:shapes content))) "with what is no layer")))
 
+(t/deftest lottie-turns-a-precomp-only-as-its-animation-does
+  ;; What a precomp holds is drawn as it is, turned: a board turned 30°
+  ;; and the square in it stay at 30°, kept to the board as it is.
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :fills []})
+        card    (cts/setup-shape {:type :frame :name "card" :x 100 :y 100 :width 100 :height 60
+                                  :fills [{:fill-color "#3355ff" :fill-opacity 1}]})
+        square  (cts/setup-shape {:type :rect :name "square" :x 110 :y 110 :width 20 :height 20})
+        center  (gsh/shape->center card)
+        turn    #(gsh/transform-shape % (ctm/rotation-modifiers % center 30))
+        card    (turn card)
+        objects (in-board board [card] {(:id card) [(turn square)]})
+        L       (lottie-with board objects [card square])
+        [layer] (:layers L)
+        comp    (d/seek #(= (:refId layer) (:id %)) (:assets L))
+        [top content] (:layers comp)
+        corners #(into #{} (map (fn [[x y]] [(mth/round x) (mth/round y)])) %)]
+    (t/is (= 0 (:ty layer)) "a precomp")
+    (t/is (close? 0 (get-in layer [:ks :r :k])) "that turns them no more")
+    (t/is (close-all? [(:x center) (:y center)] (take 2 (get-in layer [:ks :a :k])))
+          "around its pivot as it is")
+    (t/is (close? 30 (get-in content [:ks :r :k])) "the card drawn turned")
+    (t/is (close? 30 (get-in top [:ks :r :k])) "and the square in it")
+    (t/is (= (corners (map (juxt :x :y) (:points card)))
+             (corners (get-in layer [:masksProperties 0 :pt :k :v])))
+          "kept to the card as it is")))
+
+(t/deftest lottie-leaves-out-hidden-strokes-and-blur
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :fills []})
+        shape   (cts/setup-shape {:type :rect :name "box" :x 10 :y 10 :width 50 :height 40
+                                  :fills [{:fill-color "#00ff00" :fill-opacity 1}]
+                                  :strokes [{:stroke-color "#ffffff" :stroke-opacity 1 :stroke-width 6
+                                             :stroke-style :solid :stroke-alignment :center :hidden true}
+                                            {:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2
+                                             :stroke-style :solid :stroke-alignment :center}]
+                                  :blur {:id (uuid/next) :type :layer-blur :value 8 :hidden true}})
+        sid     (:id shape)
+        objects (in-board board [shape])
+        tl      (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                    (cta/add-keyframe sid {:time 0 :property :stroke-width :index 1 :value 2})
+                    (cta/add-keyframe sid {:time 1000 :property :stroke-width :index 1 :value 4}))
+        [layer] (:layers (cta/timeline->lottie tl objects))
+        strokes (filterv #(= "st" (:ty %)) (get-in layer [:shapes 0 :it]))]
+    (t/is (= ["stroke 1"] (mapv :nm strokes)) "the stroke shown")
+    (t/is (= 1 (get-in strokes [0 :w :a])) "with the keyframes of its index")
+    (t/is (nil? (:ef layer)) "no blur")
+    (t/testing "a blur shown, as After Effects and lottie-web take it"
+      (let [[layer] (:layers (cta/timeline->lottie tl (assoc-in objects [sid :blur :hidden] false)))
+            [blur]  (:ef layer)]
+        (t/is (= ["Blurriness" "Blur Dimensions" "Repeat Edge Pixels"] (mapv :nm (:ef blur))))
+        ;; render-wasm blurs by a standard deviation of 1/√3 of it plus 0.5,
+        ;; lottie-web by 0.3 of the blurriness
+        (t/is (close? (/ (+ (/ 8 (mth/sqrt 3)) 0.5) 0.3) (get-in blur [:ef 0 :v :k])))
+        (t/is (close? 8 (cta/lottie-blur-value (cta/lottie-blurriness 8))))
+        (t/is (zero? (cta/lottie-blurriness 0)))))))
+
+(t/deftest lottie-without-pictures-has-the-layers-it-would-have-with
+  ;; a still sibling with a blur, which the board cannot draw, is a layer
+  ;; of its own, as when the export has pictures
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        moving  (cts/setup-shape {:type :rect :name "moving" :x 10 :y 10 :width 20 :height 20})
+        blurred (cts/setup-shape {:type :rect :name "blurred" :x 60 :y 10 :width 20 :height 20
+                                  :fills [{:fill-color "#ff00ff" :fill-opacity 1}]
+                                  :blur {:id (uuid/next) :type :layer-blur :value 4 :hidden false}})
+        objects (in-board board [moving blurred])
+        tl      (cta/add-keyframe (cta/make-timeline {:board-id (:id board) :duration 1000})
+                                  (:id moving) {:time 0 :property :opacity :value 1})
+        names   #(set (map :nm (:layers (cta/timeline->lottie tl objects %))))]
+    (t/is (contains? (names {}) "blurred") "all vectors")
+    (t/is (not (contains? (names nil) "blurred")) "without assets, the animated ones only")))
+
 (t/deftest lottie-nests-precomps
   (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :fills []})
         outer   (cts/setup-shape {:type :frame :name "outer" :x 0 :y 0 :width 200 :height 200})

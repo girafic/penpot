@@ -474,9 +474,13 @@
                               :hidden false
                               :color {:color (hex (rest-value (get v "Shadow Color") [0 0 0 1]))
                                       :opacity (clamp01 (/ (scalar (rest-value (get v "Opacity") 255)) 255))}}))
+                ;; a Gaussian blur as strong on the canvas; "Sigma", as the
+                ;; exports of Penpot wrote the value of a blur before
                 29 (assoc acc :blur {:id (uuid/next)
                                      :type :layer-blur
-                                     :value (scalar (rest-value (or (get v "Blurriness") (get v "Sigma")) 0))
+                                     :value (if-let [blurriness (get v "Blurriness")]
+                                              (cta/lottie-blur-value (scalar (rest-value blurriness 0)))
+                                              (scalar (rest-value (get v "Sigma") 0)))
                                      :hidden false})
                 (do (ctx :skip :effect) acc))))
           {:shadows []}

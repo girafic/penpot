@@ -4037,7 +4037,8 @@
 
 (defn- lottie-stroke-items
   "The Lottie strokes of `shape`, top-most first, each with the keyframes
-  of its index. Lottie draws them centered on the outline."
+  of its index, but the hidden ones. Lottie draws them centered on the
+  outline."
   [shape by-prop]
   (->> (as-vec (:strokes shape))
        (map-indexed
@@ -4045,7 +4046,9 @@
           (let [color-kfs (slot-kfs by-prop :stroke-color index)
                 opac-kfs  (slot-kfs by-prop :stroke-opacity index)
                 width-kfs (slot-kfs by-prop :stroke-width index)]
-            (when (or (solid-color-stroke? stroke) (seq color-kfs))
+            ;; a hidden one stays hidden as it plays
+            (when (and (not (:hidden stroke))
+                       (or (solid-color-stroke? stroke) (seq color-kfs)))
               (let [cap    (:stroke-cap-start stroke)
                     dashes (lottie-dashes stroke)]
                 (cond-> {:ty "st" :nm (str "stroke " index)
@@ -4122,15 +4125,44 @@
      :e (lottie-prop-1d (by-prop :trim-end) (fn [v] (* 100.0 v)) 100)
      :o (lottie-prop-1d (by-prop :trim-offset) (fn [v] (* 360.0 v)) 0)}))
 
+(def ^:private blur-sigma-scale
+  "How render-wasm turns the value of a layer blur into the standard
+  deviation of its Gaussian (`radius_to_sigma`): 1/√3 of it, plus 0.5."
+  0.57735027)
+
+(defn lottie-blurriness
+  "The blurriness of a Lottie Gaussian blur as strong as the layer blur
+  `value` on the canvas: lottie-web blurs by 0.3 of it as a standard
+  deviation."
+  [value]
+  (if (pos? value)
+    (/ (+ (* blur-sigma-scale value) 0.5) 0.3)
+    0))
+
+(defn lottie-blur-value
+  "The value of a layer blur as strong as a Lottie Gaussian blur of
+  `blurriness` (see `lottie-blurriness`)."
+  [blurriness]
+  (max 0 (/ (- (* 0.3 blurriness) 0.5) blur-sigma-scale)))
+
 (defn- lottie-blur-effect
+  "A Lottie Gaussian blur of the layer blur of `shape` and its keyframes,
+  as After Effects and lottie-web take it: its blurriness (see
+  `lottie-blurriness`) in both dimensions, edges not repeated. None of a
+  hidden blur, which stays hidden as it plays."
   [shape by-prop]
-  (let [kfs (by-prop :blur)]
-    (when (or (seq kfs) (some? (:blur shape)))
+  (let [blur (:blur shape)
+        kfs  (by-prop :blur)]
+    (when (and (not (:hidden blur)) (or (seq kfs) (some? blur)))
       [{:ty 29
         :nm "Gaussian Blur"
+        :mn "ADBE Gaussian Blur 2"
+        :np 5
         :en 1
-        :ef [{:ty 0 :nm "Sigma"
-              :v (lottie-prop-1d kfs identity (or (get-in shape [:blur :value]) 0))}]}])))
+        :ef [{:ty 0 :nm "Blurriness" :mn "ADBE Gaussian Blur 2-0001"
+              :v (lottie-prop-1d kfs lottie-blurriness (lottie-blurriness (or (:value blur) 0)))}
+             {:ty 7 :nm "Blur Dimensions" :mn "ADBE Gaussian Blur 2-0002" :v {:a 0 :k 1}}
+             {:ty 7 :nm "Repeat Edge Pixels" :mn "ADBE Gaussian Blur 2-0003" :v {:a 0 :k 0}}]}])))
 
 (defn- lottie-pair-1d
   "A 1D Lottie property of two 1D tracks (see `lottie-pair-prop`), `val-fn`
@@ -4227,6 +4259,19 @@
      :a {:a 0 :k [ax ay 0]}
      :s (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y))}))
 
+(defn- lottie-holder-ks
+  "The transform of a precomp layer holding `shape` drawn as it is,
+  turned, and the layers in it where they are: it turns them only as
+  much as the animation turns the shape, and moves and scales them,
+  around its pivot as it is (see `lottie-pivot`)."
+  [shape track ox oy origin]
+  (let [by-prop (group-by :property (:keyframes track))
+        [px py] (lottie-pivot shape ox oy (track-origin track))
+        base-r  (or (:rotation shape) 0)]
+    (assoc (lottie-ks shape track ox oy origin)
+           :r (lottie-prop-1d (by-prop :rotation) #(- % base-r) 0)
+           :a {:a 0 :k [px py 0]})))
+
 (defn- shape->lottie-image-layer
   "An image layer of `shape`, whose image is rasterized opaque: the layer
   has its opacity. The image is the shape as it is, turned, over the box
@@ -4271,11 +4316,11 @@
 
 (defn- lottie-paints?
   "Whether the fills and strokes of `shape` are Lottie paints: flat or
-  gradient fills, flat strokes."
+  gradient fills, flat strokes (a hidden one draws nothing)."
   [shape]
   (and (every? #(or (solid-color-fill? %) (some? (:fill-color-gradient %)))
                (as-vec (:fills shape)))
-       (every? solid-color-stroke? (as-vec (:strokes shape)))))
+       (every? #(or (:hidden %) (solid-color-stroke? %)) (as-vec (:strokes shape)))))
 
 (declare lottie-content?)
 
@@ -4304,8 +4349,8 @@
   (or (true? (:hidden shape))
       (and (some? shape)
            (lottie-paints? shape)
-           (empty? (as-vec (:shadow shape)))
-           (nil? (:blur shape))
+           (every? :hidden (as-vec (:shadow shape)))
+           (or (nil? (:blur shape)) (:hidden (:blur shape)))
            (or (not= :frame (:type shape)) (true? (:show-content shape)))
            (lottie-outline? objects layer-ids shape))))
 
@@ -4477,11 +4522,12 @@
                           (assoc-in it [(dec (count it)) :o :k] (* 100.0 (or (:opacity shape) 1))))))))))
 
 (defn- lottie-clip-mask
-  "A Lottie mask keeping a layer to the outline of the board `shape`."
-  [shape ox oy]
+  "A Lottie mask keeping a layer to the outline of the board `shape`,
+  turned back by `rotation`, as much as the layer turns it."
+  [shape ox oy rotation]
   (let [{:keys [x y width height]} (:selrect shape)
         center (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
-        path   (first (lottie-turned-back (canvas-outline shape) (or (:rotation shape) 0) center ox oy))]
+        path   (first (lottie-turned-back (canvas-outline shape) rotation center ox oy))]
     {:inv false :mode "a" :nm "clip" :pt (:ks path) :o {:a 0 :k 100} :x {:a 0 :k 0}}))
 
 (defn- lottie-layer-groups
@@ -4553,7 +4599,7 @@
       (assoc :ef (vec effects))
 
       (and mask? vector? (= :frame (:type shape)) (not (true? (:show-content shape))))
-      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy)]))))
+      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy (or (:rotation shape) 0))]))))
 
 (defn- lottie-markers
   "The Lottie markers of the markers of `timeline`: each names the stretch
@@ -4658,8 +4704,9 @@
 (declare lottie-node-layers)
 
 (defn- lottie-precomp-layer
-  "A precomp layer of the node `id` (see `layer-nodes`): it moves, fades
-  and clips its layers, with the shape's own drawing at the bottom. The
+  "A precomp layer of the node `id` (see `layer-nodes`): it moves, turns,
+  fades and clips its layers, with the shape's own drawing at the
+  bottom, all drawn as they are, turned (see `lottie-holder-ks`). The
   precomp itself goes to `comps`."
   [{:keys [objects layer-ids timeline duration width height ox oy comps] :as ctx}
    {:keys [id inner clip?]}]
@@ -4686,7 +4733,7 @@
              :nm (or (:name shape) ref)
              :refId ref
              :sr 1
-             :ks (lottie-ks shape track ox oy (position-origin timeline objects id))
+             :ks (lottie-holder-ks shape track ox oy (position-origin timeline objects id))
              :ao 0
              :w width
              :h height
@@ -4697,8 +4744,9 @@
       (seq effects)
       (assoc :ef (vec effects))
 
+      ;; its outline as it is, turned, as what it holds
       (clipping-board? shape)
-      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy)]))))
+      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy 0)]))))
 
 (defn- unit-text-ids
   "The texts `images` has pictures of the units of (`[text-id k]`, see
@@ -4780,7 +4828,6 @@
   (let [id       (:id shape)
         name     (or (:name shape) (str id))
         track    (lottie-track ctx id)
-        by-prop  (group-by :property (:keyframes track))
         units    (get units id)
         units-tl (turned-moves (:timeline units) (:rotation shape))
         rest     (get assets [id :rest])
@@ -4799,18 +4846,14 @@
                                :a {:a 0 :k [0 0 0]}
                                :s {:a 0 :k [100 100 100]}}
                           :ao 0 :ip 0 :op (ms->frames duration) :st 0 :bm 0}))
-        ref      (str "comp_" id)
-        [px py]  (lottie-pivot shape ox oy (track-origin track))
-        base-r   (or (:rotation shape) 0)]
+        ref      (str "comp_" id)]
     (vswap! comps conj {:id ref :nm name :layers (lottie-numbered layers)})
     {:ddd 0
      :ty 0
      :nm name
      :refId ref
      :sr 1
-     :ks (assoc (lottie-ks shape track ox oy (position-origin timeline objects id))
-                :r (lottie-prop-1d (by-prop :rotation) #(- % base-r) 0)
-                :a {:a 0 :k [px py 0]})
+     :ks (lottie-holder-ks shape track ox oy (position-origin timeline objects id))
      :ao 0
      :w width
      :h height
@@ -4873,15 +4916,15 @@
   JSON encoding) for `timeline`, using `objects` for geometry. The board
   (`:board-id`) is the composition. Pure.
 
-  When `assets` is a non-empty map of `{shape-id {:id :w :h :u :p :e :x
-  :y}}` (an image embedded as a data URI, `:e` 1, or a file `:p` in the
-  folder `:u` of a dotLottie archive, `:e` 0; `:x :y` where it begins in
-  the board, the box of the shape when not there), the export layers (see
-  `export-layer-ids`) are those shapes, which
+  When `assets` is a map of `{shape-id {:id :w :h :u :p :e :x :y}}` (an
+  image embedded as a data URI, `:e` 1, or a file `:p` in the folder `:u`
+  of a dotLottie archive, `:e` 0; `:x :y` where it begins in the board,
+  the box of the shape when not there), empty when all draw as vectors,
+  the export layers (see `export-layer-ids`) are those shapes, which
   become image layers (`ty` 2) unless they export as vectors (see
   `lottie-vector-layer?`); the board's own asset draws it. Without
-  assets the animated shapes are the layers, as vectors or rectangles of
-  their bounds. Layers holding layers become precomps (see
+  assets (nil) the animated shapes are the layers, as vectors or
+  rectangles of their bounds. Layers holding layers become precomps (see
   `lottie-layers`). The markers become Lottie markers (see
   `lottie-markers`). Split animations play as animations of the whole
   text (see `flatten-splits`)."
@@ -4900,7 +4943,10 @@
                           (select-keys (unit-timelines resolved objects) unit-texts))
          timeline   (expand (expand-loops resolved))
          board-id   (:board-id timeline)
-         layer-ids  (if (seq assets)
+         ;; the layers the pictures were taken of, even when all draw as
+         ;; vectors: a shape among them that is no Lottie content (with
+         ;; effects, see `lottie-content?`) draws only as one
+         layer-ids  (if (some? assets)
                       (set (export-layer-ids objects board-id (:tracks timeline)))
                       (disj (set (keys (:tracks timeline))) board-id))
          {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets units)

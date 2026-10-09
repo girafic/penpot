@@ -270,6 +270,17 @@
     (t/is (cta/valid-timeline? (get-in page' [:timelines (:id board)])))
     (t/is (every? cts/valid-shape? (vals (:objects page'))))))
 
+(t/deftest an-exported-blur-comes-back-as-strong
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :name "Board"})
+        shape  (cts/setup-shape {:type :rect :x 100 :y 100 :width 200 :height 100 :name "Box"
+                                 :fills [{:fill-color "#336699" :fill-opacity 1}]
+                                 :blur {:id (uuid/next) :type :layer-blur :value 8 :hidden false}})
+        tl     (cta/add-keyframe (cta/make-timeline {:board-id (:id board) :duration 1000})
+                                 (:id shape) {:time 0 :property :opacity :value 1})
+        doc    (cta/timeline->lottie tl {(:id board) board (:id shape) shape})
+        box    (shape-named (lottie/lottie->shapes doc {:x 0 :y 0}) "Box")]
+    (t/is (mth/close? 8 (get-in box [:blur :value]) 0.001))))
+
 (t/deftest exported-animations-come-back
   (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :name "Board"})
         shape  (cts/setup-shape {:type :rect :x 100 :y 100 :width 200 :height 100 :name "Box"
