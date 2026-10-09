@@ -274,9 +274,11 @@
   list and the style editor both use it. With `tokens` (the active
   design tokens by type), the settings of a style entry or a preset bind
   tokens: each number field and the easing offer those of its types (see
-  `cta/animation-token-types`), and its `:applied-tokens` show either way."
+  `cta/animation-token-types`), and its `:applied-tokens` show either way.
+  With `before-start`, a preset of a layer, its start may be before 0, as
+  on the timeline; an entry of a style starts with the style or later."
   [{:keys [animation on-change on-remove on-unlock on-change-start on-change-end read-only
-           split-allowed on-split unit-count default-open tokens]}]
+           split-allowed on-split unit-count default-open tokens before-start]}]
   (let [{:keys [id type direction start duration easing amount offset-x offset-y locked
                 applied-tokens]} animation
         read-only? (true? read-only)
@@ -491,7 +493,7 @@
         [:> animation-row* {:label (tr "workspace.animation.start")}
          [:> numeric-input* {:text-icon "ms"
                              :property (tr "workspace.animation.start")
-                             :min 0
+                             :min (when-not (true? before-start) 0)
                              :step 1
                              :value start
                              :tokens time-tokens
@@ -667,7 +669,8 @@
                          :split-allowed (some? text)
                          :on-split on-split
                          :unit-count unit-count
-                         :tokens tokens}]))
+                         :tokens tokens
+                         :before-start true}]))
 
 (defn- stretch-keys
   "The keyframe entry `entry` from `start` and `duration` ms long, its
@@ -821,9 +824,9 @@
            [:span {:class (stl/css :style-library)} library-name]])
 
         [:> animation-row* {:label (tr "workspace.animation.start")}
+         ;; on a layer: before 0 too, as on the timeline
          [:> numeric-input* {:text-icon "ms"
                              :property (tr "workspace.animation.start")
-                             :min 0
                              :step 1
                              :value start
                              :disabled locked?

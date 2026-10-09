@@ -52,7 +52,13 @@
   (t/is (= 12 (lanes/time->x (assoc geo :scroll-x 100) 100)))
   (t/is (= 100 (lanes/x->time (assoc geo :scroll-x 100) 12)))
   (t/is (= 0 (lanes/x->time geo -100)) "before 0 s")
-  (t/is (= 1000 (lanes/x->time geo 5000)) "past the end"))
+  (t/is (= 1000 (lanes/x->time geo 5000)) "past the end")
+  (t/testing "from before 0, where something lies there"
+    (let [early (assoc geo :origin -500 :span 1500 :axis-width 1500)]
+      (t/is (= 12 (lanes/time->x early -500)))
+      (t/is (= 512 (lanes/time->x early 0)) "0 as far in as 500 ms take")
+      (t/is (= -500 (lanes/x->time early 12)))
+      (t/is (= -500 (lanes/x->time early -100)) "not before its start"))))
 
 (t/deftest the-rows-scroll-under-the-header
   (t/is (= 136 (lanes/row-y geo 3)))

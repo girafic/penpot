@@ -248,3 +248,15 @@
                                                                   :source-duration 60000 :start 500})
                                          {}))
           "the end of a long audio clip, to trim it there")))
+
+(t/deftest the-axis-starts-at-what-lies-before-0
+  (let [tl (-> (cta/make-timeline {:board-id (uuid/next) :duration 2000})
+               (cta/add-keyframe shape-a {:time 300 :property :x :value 0}))]
+    (t/is (= 0 (timeline/content-start tl)) "nothing before 0: at 0")
+    (t/is (= -400 (timeline/content-start (cta/add-keyframe tl shape-a {:time -400 :property :x :value 5})))
+          "a keyframe")
+    (t/is (= -250 (timeline/content-start (cta/add-animation tl shape-a {:type :fade :start -250 :duration 500})))
+          "a preset")
+    (t/is (= -900 (timeline/content-start (ctau/add-audio-clip tl {:audio-id (uuid/next) :name "a.mp3"
+                                                                   :source-duration 3000 :start -900})))
+          "an audio clip")))

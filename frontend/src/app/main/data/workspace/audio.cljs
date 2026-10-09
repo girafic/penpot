@@ -10,8 +10,6 @@
   uploaded as file media objects and played by audio clips of a board
   (see `app.common.types.audio-clip`)."
   (:require
-   [app.common.data :as d]
-   [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
@@ -120,7 +118,7 @@
                                    :duration duration}
                             (some? lane) (assoc :lane lane)))
               (+ start duration)])
-           [[] (max 0 (js/Math.round time))]
+           [[] (js/Math.round time)]
            added)))
 
 (defn- with-clips
@@ -446,25 +444,16 @@
 
 (defn move-selection
   "`base` with the keyframes, preset animations and clips of `selection`
-  (see `selection-of`) moved `dt` ms together, none before 0, so they keep
+  (see `selection-of`) moved `dt` ms together, before 0 too, so they keep
   their spacing; the locked ones stay."
   [base {:keys [kfs anims clips]} dt]
-  (let [kf-time   (fn [{:keys [shape-id keyframe-id]}]
-                    (:time (d/seek #(= keyframe-id (:id %))
-                                   (dm/get-in base [:tracks shape-id :keyframes]))))
-        anim-time (fn [{:keys [shape-id animation-id]}]
-                    (:start (cta/get-animation base shape-id animation-id)))
-        starts    (concat (keep kf-time kfs)
-                          (keep anim-time anims)
-                          (keep #(:start (ctau/get-audio-clip base %)) clips))
-        dt        (max dt (- (reduce min ##Inf starts)))]
-    (as-> base timeline
-      (if (seq kfs) (cta/shift-keyframes timeline kfs dt) timeline)
-      (reduce (fn [timeline {:keys [shape-id animation-id]}]
-                (cta/update-animation timeline shape-id animation-id #(update % :start + dt)))
-              timeline
-              anims)
-      (drag-clips timeline clips dt))))
+  (as-> base timeline
+    (if (seq kfs) (cta/shift-keyframes timeline kfs dt) timeline)
+    (reduce (fn [timeline {:keys [shape-id animation-id]}]
+              (cta/update-animation timeline shape-id animation-id #(update % :start + dt)))
+            timeline
+            anims)
+    (drag-clips timeline clips dt)))
 
 (defn commit-selection-move
   "Commit `base` with `selection` moved by `dt` (see `move-selection`): each
@@ -529,7 +518,7 @@
   [base clip-id mode time lane]
   (let [clip (ctau/get-audio-clip base clip-id)]
     (case mode
-      :move     (ctau/move-audio-clip base clip-id (max 0 time) :lane lane)
+      :move     (ctau/move-audio-clip base clip-id time :lane lane)
       :start    (ctau/trim-audio-clip-start base clip-id time)
       :end      (ctau/trim-audio-clip-end base clip-id time)
       :fade-in  (ctau/set-audio-clip-fades base clip-id (max 0 (- time (:start clip))) (:fade-out clip))
@@ -539,17 +528,15 @@
 
 (defn drag-clips
   "`base`, the timeline as a drag of its clips `clip-ids` started, with
-  them moved by `dt` ms together, none before 0, each on its lane (a
+  them moved by `dt` ms together, before 0 too, each on its lane (a
   locked one stays)."
   [base clip-ids dt]
-  (let [starts (keep #(:start (ctau/get-audio-clip base %)) clip-ids)
-        dt     (max dt (- (reduce min ##Inf starts)))]
-    (reduce (fn [timeline clip-id]
-              (if-let [clip (ctau/get-audio-clip base clip-id)]
-                (ctau/move-audio-clip timeline clip-id (+ (:start clip) dt))
-                timeline))
-            base
-            clip-ids)))
+  (reduce (fn [timeline clip-id]
+            (if-let [clip (ctau/get-audio-clip base clip-id)]
+              (ctau/move-audio-clip timeline clip-id (+ (:start clip) dt))
+              timeline))
+          base
+          clip-ids))
 
 (defn commit-clips-drag
   "Commit `base` with its clips `clip-ids` dragged by `dt` (see
@@ -732,9 +719,9 @@
                 (reduce #(ctau/set-audio-clip-locked %1 %2 locked?) timeline (lane-clip-ids timeline lane)))))
 
 (defn nudge-clip
-  "Move the clip `clip-id` by `dt` ms, not before 0."
+  "Move the clip `clip-id` by `dt` ms, before 0 too."
   [clip-id dt]
   (edit-clips (fn [timeline]
                 (if-let [clip (ctau/get-audio-clip timeline clip-id)]
-                  (ctau/move-audio-clip timeline clip-id (max 0 (+ (:start clip) dt)))
+                  (ctau/move-audio-clip timeline clip-id (+ (:start clip) dt))
                   timeline))))

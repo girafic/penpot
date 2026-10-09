@@ -632,7 +632,7 @@
       (let [tl      (current-timeline state)
             objects (dsh/lookup-page-objects state)
             shape   (get objects shape-id)
-            time    (max 0 (int time))]
+            time    (int time)]
         (if (and (some? tl)
                  (some? shape)
                  (not (cta/slot-flag? tl shape-id :locked property index)))

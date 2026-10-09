@@ -85,9 +85,11 @@
                   [(get property-order property 99) (or index -1)]))))
 
 (defn- time->pct
-  [time duration]
-  (if (pos? duration)
-    (str (* 100 (/ (double time) duration)) "%")
+  "Where `time` is on an axis of `span` ms from `origin` (0 or before), as
+  a share of its width."
+  [time span origin]
+  (if (pos? span)
+    (str (* 100 (/ (double (- time (or origin 0))) span)) "%")
     "0%"))
 
 (def ^:private tick-steps
@@ -138,6 +140,17 @@
   (* 100 (/ (mth/log10 (/ zoom min-zoom))
             (mth/log10 (/ max-zoom min-zoom)))))
 
+(defn content-start
+  "The earliest time the dock shows something of `timeline` at, 0 or
+  before: a keyframe, the start of a preset, of a style use or of an
+  audio clip, which may lie before the start of the timeline, where they
+  do not play (see `cta/shift-keyframes`). The time axis starts there."
+  [timeline]
+  (let [tracks (vals (:tracks timeline))]
+    (apply min 0 (concat (map :time (mapcat :keyframes tracks))
+                         (map :start (mapcat :animations tracks))
+                         (map :start (vals (:audio-clips timeline)))))))
+
 (defn content-end
   "The latest time the dock shows something of `timeline` at: a
   keyframe, the end of an animated copy (`copy-ends`, by copy) or of an
@@ -187,13 +200,16 @@
     (st/emit! (dws/select-shape shape-id (kbd/shift? event)))))
 
 (defn- pointer->time
-  "Translate a pointer event over a time axis at the client `rect` into a
-  time value (ms) clamped to [0, duration]."
-  [event rect duration]
-  (let [x        (:x (dom/get-client-position event))
-        fraction (/ (- x (:left rect)) (max 1 (:width rect)))
-        fraction (-> fraction (max 0.0) (min 1.0))]
-    (int (* fraction duration))))
+  "Translate a pointer event over a time axis at the client `rect`, of
+  `span` ms from `origin` (0 by default, before when something lies
+  there), into a time value (ms) on it."
+  ([event rect span]
+   (pointer->time event rect span 0))
+  ([event rect span origin]
+   (let [x        (:x (dom/get-client-position event))
+         fraction (/ (- x (:left rect)) (max 1 (:width rect)))
+         fraction (-> fraction (max 0.0) (min 1.0))]
+     (int (+ origin (* fraction span))))))
 
 (def ^:private c-key? (kbd/is-key-ignore-case? "c"))
 (def ^:private x-key? (kbd/is-key-ignore-case? "x"))
@@ -954,7 +970,7 @@
   "A marker on its lane: a click moves the playhead to it, dragging moves
   it (snapping like the keyframes), a double click renames it."
   {::mf/private true}
-  [{:keys [marker duration lane-ref editing? on-edit on-context-menu]}]
+  [{:keys [marker duration origin lane-ref editing? on-edit on-context-menu]}]
   (let [{:keys [id time name]} marker
         snap     (mf/use-ctx snap-context)
         ;; The drag in progress: its undo transaction, the timeline as it
@@ -976,14 +992,14 @@
 
         on-pointer-move
         (mf/use-fn
-         (mf/deps id duration snap)
+         (mf/deps id duration origin snap)
          (fn [event]
            (when-let [{:keys [base x0] :as drag} (mf/ref-val drag-ref)]
              (let [x      (:x (dom/get-client-position event))
                    moved? (or (:moved? drag) (> (mth/abs (- x x0)) 3))]
                (mf/set-ref-val! drag-ref (assoc drag :moved? moved?))
                (when-let [node (and moved? (mf/ref-val lane-ref))]
-                 (let [t      (pointer->time event (dom/get-bounding-rect node) duration)
+                 (let [t      (pointer->time event (dom/get-bounding-rect node) duration origin)
                        target ((:target snap) t event {:marker-ids #{id}})]
                    ((:show snap) target)
                    (st/emit! (dwa/move-marker-from base id (or target t)))))))))
@@ -1015,7 +1031,7 @@
 
     [:div {:class (stl/css :marker)
            :data-marker-id (dm/str id)
-           :style #js {"left" (time->pct time duration)}
+           :style #js {"left" (time->pct time duration origin)}
            :title (dm/str name " · " (dwa/format-time time (:unit snap)))
            :on-pointer-down on-pointer-down
            :on-pointer-move on-pointer-move
@@ -1031,16 +1047,16 @@
   "The playhead across the row of the markers, over them: the lanes draw
   it across the rows (see `lanes/draw!`)."
   {::mf/private true}
-  [{:keys [span]}]
+  [{:keys [span origin]}]
   (let [playhead (mf/deref ref:playhead)]
     [:div {:class (stl/css :marker-playhead)
-           :style #js {"left" (time->pct playhead span)}}]))
+           :style #js {"left" (time->pct playhead span origin)}}]))
 
 (mf/defc comment-pin*
   "A comment thread about a moment of the animation, as the avatar of its
   author at the moment: a click opens it and shows the moment."
   {::mf/private true}
-  [{:keys [thread duration unit open?]}]
+  [{:keys [thread duration origin unit open?]}]
   (let [time  (:animation-time thread)
         owner (dcm/get-owner thread)
 
@@ -1057,7 +1073,7 @@
                                    :comment-pin-unread (pos? (:count-unread-comments thread))
                                    :comment-pin-resolved (:is-resolved thread))
               :data-testid (dm/str "timeline-comment-" (:seqn thread))
-              :style #js {"left" (time->pct time duration)}
+              :style #js {"left" (time->pct time duration origin)}
               :title (dm/str (tr "labels.comment") " #" (:seqn thread)
                              " · " (dwa/format-time time unit))
               :on-pointer-down dom/stop-propagation
@@ -1073,7 +1089,7 @@
   comments show on the canvas and as their filters let them (see
   `dcm/apply-filters`)."
   {::mf/private true}
-  [{:keys [board-id objects duration unit]}]
+  [{:keys [board-id objects duration origin unit]}]
   (let [threads-map (mf/deref refs/threads)
         local       (mf/deref refs/comments-local)
         profile     (mf/deref refs/profile)
@@ -1097,6 +1113,7 @@
         [:> comment-pin* {:key (dm/str (:id thread))
                           :thread thread
                           :duration duration
+                          :origin origin
                           :unit unit
                           :open? (= (:id thread) (:open local))}]))))
 
@@ -1107,7 +1124,7 @@
   add one at it. The lane, `axis-width` wide, is at `lane-ref`: it moves
   as the timeline scrolls (see `sync-scroll!`)."
   {::mf/private true}
-  [{:keys [markers playhead duration axis-width editing lane-ref on-edit on-context-menu]}]
+  [{:keys [markers playhead duration origin axis-width editing lane-ref on-edit on-context-menu]}]
   (let [snap     (mf/use-ctx snap-context)
         prev     (d/seek #(< (:time %) playhead) (reverse markers))
         next     (d/seek #(> (:time %) playhead) markers)
@@ -1130,11 +1147,11 @@
 
         on-lane-double-click
         (mf/use-fn
-         (mf/deps new-name duration snap)
+         (mf/deps new-name duration origin snap)
          (fn [event]
            (dom/stop-propagation event)
            (when-let [node (mf/ref-val lane-ref)]
-             (let [t (pointer->time event (dom/get-bounding-rect node) duration)]
+             (let [t (pointer->time event (dom/get-bounding-rect node) duration origin)]
                (st/emit! (dwa/add-marker new-name (or ((:target snap) t event {}) t)))))))]
 
     [:div {:class (stl/css :row :marker-row)}
@@ -1165,11 +1182,12 @@
          [:> marker* {:key (dm/str (:id marker))
                       :marker marker
                       :duration duration
+                      :origin origin
                       :lane-ref lane-ref
                       :editing? (= editing (:id marker))
                       :on-edit on-edit
                       :on-context-menu on-context-menu}])
-       [:> marker-playhead* {:span duration}]]]]))
+       [:> marker-playhead* {:span duration :origin origin}]]]]))
 
 ;; The parts of the dock that follow the playhead as it plays: the rest of
 ;; it shows the time playback started from (see `ref:dock-animation`), the
@@ -1190,8 +1208,8 @@
     (mf/with-layout-effect [playhead zoom span playing?]
       (when (and playing? (> zoom 1))
         (when-let [^js node (mf/ref-val scroll-ref)]
-          (let [{:keys [width axis-width]} (mf/ref-val geo-ref)
-                x    (+ lanes/start-gap (* (/ playhead (max 1 span)) axis-width))
+          (let [{:keys [width axis-width origin]} (mf/ref-val geo-ref)
+                x    (+ lanes/start-gap (* (/ (- playhead origin) (max 1 span)) axis-width))
                 left (.-scrollLeft node)]
             (when (or (< x (+ left lanes/start-gap))
                       (> x (+ left width)))
@@ -1650,13 +1668,16 @@
         zoom       (deref zoom*)
         latest     (mf/with-memo [timeline copy-ends]
                      (content-end timeline copy-ends))
+        ;; Before 0 when something lies there, as in Figma, else from 0.
+        origin     (mf/with-memo [timeline]
+                     (content-start timeline))
         ;; While the end of the timeline is dragged the axis stays as it
         ;; was, unless the duration outgrows it (see `on-duration-down`).
         axis-lock* (mf/use-state nil)
         axis-lock  (deref axis-lock*)
         span       (if (some? axis-lock)
-                     (max (:span axis-lock) duration)
-                     (axis-span duration zoom latest))
+                     (max (:span axis-lock) (- duration origin))
+                     (- (axis-span duration zoom latest) origin))
         axis-zoom  (if (some? axis-lock)
                      (:zoom axis-lock)
                      (content-zoom duration zoom span))
@@ -1725,15 +1746,15 @@
 
         set-zoom
         (mf/use-fn
-         (mf/deps zoom span duration latest axis-width)
+         (mf/deps zoom span origin duration latest axis-width)
          (fn [new-zoom]
            (let [new-zoom (mth/clamp new-zoom min-zoom max-zoom)
                  from     (content-zoom duration zoom span)
-                 to       (content-zoom duration new-zoom (axis-span duration new-zoom latest))
+                 to       (content-zoom duration new-zoom (- (axis-span duration new-zoom latest) origin))
                  playhead (dwa/playhead @st/state)]
              ;; Keep the playhead at the same place on screen.
              (when-let [^js node (mf/ref-val scroll-ref)]
-               (let [x (* (/ playhead (max 1 span)) axis-width)]
+               (let [x (* (/ (- playhead origin) (max 1 span)) axis-width)]
                  (mf/set-ref-val! anchor-ref (+ (.-scrollLeft node)
                                                 (* x (- (/ to from) 1))))))
              (reset! zoom* new-zoom))))
@@ -1889,17 +1910,15 @@
                                                      (map :id))
                                                ids)}
                    to     (case mode
-                            :start (let [t (mth/clamp (+ start dt) 0 (dec end))
+                            :start (let [t (min (+ start dt) (dec end))
                                          s (snap-target t event except)]
                                      (show-snap s)
-                                     [(mth/clamp (or s t) 0 (dec end)) end])
+                                     [(min (or s t) (dec end)) end])
                             :end   (let [t (max (inc start) (+ end dt))
                                          s (snap-target t event except)]
                                      (show-snap s)
                                      [start (max (inc start) (or s t))])
-                            (let [dt (max dt (- start))
-                                  [s e] (snap-span [(+ start dt) (+ end dt)] event except)]
-                              (if (neg? s) [0 (- e s)] [s e])))]
+                            (snap-span [(+ start dt) (+ end dt)] event except))]
                (st/emit! (dwa/retime-keyframes base ids range to))))))
 
         on-bar-up
@@ -1973,17 +1992,15 @@
                    except {:animation-ids #{(:id animation)}}
                    [start end]
                    (case mode
-                     :start (let [t (mth/clamp (+ start dt) 0 (dec end))
+                     :start (let [t (min (+ start dt) (dec end))
                                   s (snap-target t event except)]
                               (show-snap s)
-                              [(mth/clamp (or s t) 0 (dec end)) end])
+                              [(min (or s t) (dec end)) end])
                      :end   (let [t (max (inc start) (+ end dt))
                                   s (snap-target t event except)]
                               (show-snap s)
                               [start (max (inc start) (or s t))])
-                     (let [dt (max dt (- start))
-                           [s e] (snap-span [(+ start dt) (+ end dt)] event except)]
-                       (if (neg? s) [0 (- e s)] [s e])))]
+                     (snap-span [(+ start dt) (+ end dt)] event except))]
                (st/emit! (dwa/retime-animation base shape-id (:id animation) start (- end start)))))))
 
         on-animation-up
@@ -2050,6 +2067,7 @@
                                                    :width (max 0 (- view-width lanes/label-width))
                                                    :height view-height
                                                    :span span
+                                                   :origin origin
                                                    :axis-width axis-width))
         canvas-ref (mf/use-ref nil)
 
@@ -2064,9 +2082,9 @@
 
         on-scrub
         (mf/use-fn
-         (mf/deps span axis-rect)
+         (mf/deps span origin axis-rect)
          (fn [event]
-           (let [t      (pointer->time event (axis-rect) span)
+           (let [t      (pointer->time event (axis-rect) span origin)
                  target (snap-target t event {:playhead? false})]
              (show-snap target)
              (st/emit! (dwa/set-playhead (or target t))))))
@@ -2094,7 +2112,7 @@
 
         on-duration-move
         (mf/use-fn
-         (mf/deps grow-duration axis-rect)
+         (mf/deps grow-duration axis-rect origin)
          (fn [event]
            (when-let [{:keys [x0] :as drag} (mf/ref-val duration-drag-ref)]
              (let [x      (:x (dom/get-client-position event))
@@ -2112,7 +2130,7 @@
 
                  :else
                  (let [{:keys [span]} (mf/ref-val snap-state-ref)
-                       t (max 1 (mth/round (* span (/ (- x (:left rect)) (max 1 (:width rect))))))
+                       t (max 1 (mth/round (+ origin (* span (/ (- x (:left rect)) (max 1 (:width rect)))))))
                        s (snap-target t event {:end? false})]
                    (show-snap s)
                    (st/emit! (dwa/set-duration (or s t)))))))))
@@ -2555,9 +2573,12 @@
                (when (and (some? (:undo-id press))
                           (or (:moved? press) (> (mth/abs (- x (:x0 press))) drag-threshold)))
                  (let [{:keys [base moving target others]} press
-                       t    (pointer->time event (axis-rect) span)
-                       to   (snap-target t event {:keyframe-ids (into #{} (map :keyframe-id) moving)})
+                       {:keys [span axis-width]} (mf/ref-val geo-ref)
                        from (:time (:keyframe target))
+                       ;; as far as the pointer moved: past the start of the
+                       ;; axis too, which then grows before 0 (see `content-start`)
+                       t    (+ from (mth/round (* (- x (:x0 press)) (/ span (max 1 axis-width)))))
+                       to   (snap-target t event {:keyframe-ids (into #{} (map :keyframe-id) moving)})
                        dt   (- (or to t) from)]
                    (mf/set-ref-val! press-ref (assoc press :moved? true))
                    (show-snap to)
@@ -2649,7 +2670,7 @@
         ;; property it adds a keyframe there.
         on-lanes-double-click
         (mf/use-fn
-         (mf/deps canvas-point axis-rect span on-select-keyframe-layer)
+         (mf/deps canvas-point axis-rect span origin on-select-keyframe-layer)
          (fn [event]
            (let [[x y]  (canvas-point event)
                  target (lanes/hit (mf/ref-val geo-ref) (mf/ref-val scene-ref) x y)
@@ -2663,7 +2684,7 @@
                (:segment :lane)
                (do (on-select-keyframe-layer event shape-id)
                    (st/emit! (dwa/add-keyframe-at shape-id (:property target) (:index target)
-                                                  (pointer->time event (axis-rect) span))))
+                                                  (pointer->time event (axis-rect) span origin))))
 
                nil))))
 
@@ -2699,7 +2720,7 @@
 
         on-drop
         (mf/use-fn
-         (mf/deps board-id span axis-rect canvas-point)
+         (mf/deps board-id span origin axis-rect canvas-point)
          (fn [event]
            (when (dnd/has-type? event "Files")
              (let [files (filter dwaa/audio-file? (dnd/get-files event))]
@@ -2714,7 +2735,7 @@
                                        (dom/get-data "audio-lane")
                                        (d/parse-integer)))]
                    (st/emit! (dwaa/add-audio-files board-id files
-                                                   (pointer->time event (axis-rect) span)
+                                                   (pointer->time event (axis-rect) span origin)
                                                    lane))))))))
 
         ;; A click in the dock focuses it; then Delete/Backspace delete the
@@ -3129,6 +3150,7 @@
                 [:> comment-pins* {:board-id board-id
                                    :objects objects
                                    :duration span
+                                   :origin origin
                                    :unit unit}]]]
 
               [:div {:class (stl/css :ruler-corner)}
@@ -3144,6 +3166,7 @@
                [:> marker-row* {:markers (:markers timeline)
                                 :playhead playhead
                                 :duration span
+                                :origin origin
                                 :axis-width axis-width
                                 :editing marker-edit
                                 :lane-ref marker-lane-ref

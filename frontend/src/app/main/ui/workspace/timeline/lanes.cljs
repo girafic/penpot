@@ -14,8 +14,8 @@
   Positions are canvas pixels: `x` from the left edge of the lanes, right
   of the labels, and `y` from the top of the ruler. `geo` places the lanes:
   the `:width` and `:height` of the canvas, the time axis (`:span` ms over
-  `:axis-width` px) and how far the view is scrolled (`:scroll-x`,
-  `:scroll-y`)."
+  `:axis-width` px, from `:origin`, 0 or before when something lies
+  there) and how far the view is scrolled (`:scroll-x`, `:scroll-y`)."
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
@@ -90,15 +90,21 @@
   [axis-width]
   (+ label-width start-gap axis-width end-gap))
 
+(defn- axis-x
+  "Where `time` is on what the view scrolls over."
+  [{:keys [span axis-width origin]} time]
+  (+ start-gap (* axis-width (/ (- time (or origin 0)) (max 1 span)))))
+
 (defn time->x
   "Where `time` is on the canvas."
-  [{:keys [span axis-width scroll-x]} time]
-  (- (+ start-gap (* axis-width (/ time (max 1 span)))) scroll-x))
+  [{:keys [scroll-x] :as geo} time]
+  (- (axis-x geo time) scroll-x))
 
 (defn x->time
   "The time at `x` of the canvas, on the time axis."
-  [{:keys [span axis-width scroll-x]} x]
-  (* span (mth/clamp (/ (- (+ x scroll-x) start-gap) (max 1 axis-width)) 0 1)))
+  [{:keys [span axis-width scroll-x origin]} x]
+  (+ (or origin 0)
+     (* span (mth/clamp (/ (- (+ x scroll-x) start-gap) (max 1 axis-width)) 0 1))))
 
 (defn row-y
   "Top of the row at `index` on the canvas."
@@ -361,8 +367,8 @@
   (not locked), with their `:shape-id` and `:animation-id`, where they are
   on what the view scrolls over (see `content-point`), for a box
   selection."
-  [{:keys [span axis-width]} {:keys [rows]}]
-  (let [x #(+ start-gap (* axis-width (/ % (max 1 span))))]
+  [geo {:keys [rows]}]
+  (let [x #(axis-x geo %)]
     (into []
           (comp (map-indexed vector)
                 (filter #(= :animation (:type (second %))))
@@ -381,8 +387,8 @@
   "The boxes of the bars of the layer tracks, with their `:shape-id`, where
   they are on what the view scrolls over (see `content-point`), for a box
   selection: one touched picks all of its track."
-  [{:keys [span axis-width]} {:keys [rows]}]
-  (let [x #(+ start-gap (* axis-width (/ % (max 1 span))))]
+  [geo {:keys [rows]}]
+  (let [x #(axis-x geo %)]
     (into []
           (comp (map-indexed vector)
                 (keep (fn [[index {:keys [type id range]}]]
@@ -399,8 +405,8 @@
   "The boxes of the audio clips that can be selected (not locked), with
   their `:clip-id`, where they are on what the view scrolls over (see
   `content-point`), for a box selection."
-  [{:keys [span axis-width]} {:keys [rows]}]
-  (let [x #(+ start-gap (* axis-width (/ % (max 1 span))))]
+  [geo {:keys [rows]}]
+  (let [x #(axis-x geo %)]
     (into []
           (comp (map-indexed vector)
                 (filter #(= :audio (:type (second %))))
@@ -420,7 +426,7 @@
   "The boxes of the keyframes that can be selected (not locked), with their
   `:shape-id` and `:keyframe-id`, where they are on what the view scrolls
   over (see `content-point`), for a box selection."
-  [{:keys [span axis-width]} {:keys [rows timeline]}]
+  [geo {:keys [rows timeline]}]
   (into []
         (comp (map-indexed vector)
               (filter #(= :property (:type (second %))))
@@ -429,7 +435,7 @@
                               cy (+ (* index row-height) (/ row-height 2))]
                           (when-not locked?
                             (map (fn [keyframe]
-                                   (let [cx (+ start-gap (* axis-width (/ (:time keyframe) (max 1 span))))]
+                                   (let [cx (axis-x geo (:time keyframe))]
                                      {:shape-id    (:id row)
                                       :keyframe-id (:id keyframe)
                                       :left        (- cx keyframe-radius)
@@ -686,14 +692,15 @@
   a pixel wide for each column of it in view, between `top` and `bottom`:
   as loud as its file is at most, but not a near silence, at the volume
   of the clip."
-  [^js ctx {:keys [span axis-width scroll-x width]} peaks clip x0 x1 top bottom color]
+  [^js ctx {:keys [span axis-width scroll-x width origin]} peaks clip x0 x1 top bottom color]
   (let [{:keys [bucket-ms channels peak]} peaks
         buckets  (/ (.-length ^js (first channels)) 2)
         ms-of-px (/ span (max 1 axis-width))
         speed    (ctau/clip-speed clip)
         ;; the ms of the file at the left edge of the column at `x`
         file-ms  (fn [x] (+ (:offset clip)
-                            (* speed (- (* (- (+ x scroll-x) start-gap) ms-of-px) (:start clip)))))
+                            (* speed (- (+ (or origin 0) (* (- (+ x scroll-x) start-gap) ms-of-px))
+                                        (:start clip)))))
         mid      (/ (+ top bottom) 2)
         ;; as loud as the clip plays it
         amp      (* (or (:volume clip) 1) (/ (- bottom top) 2 (max 0.1 (or peak 1))))]
@@ -913,10 +920,13 @@
             :when (some? color)]
       (fill-rect! ctx color 0 (row-y geo index) width row-height))
 
-    ;; Under the bars and keyframes: past the duration, up to the right
-    ;; edge so no row shows its background after the end of the axis, the
-    ;; end, which a drag on it moves (see `hit`), and the markers.
-    (when (> span duration)
+    ;; Under the bars and keyframes: before the start, where something
+    ;; lies there, and past the duration, up to the right edge so no row
+    ;; shows its background after the end of the axis, the end, which a
+    ;; drag on it moves (see `hit`), and the markers.
+    (when (neg? (:origin geo 0))
+      (fill-rect! ctx (:shade palette) 0 header-height (max 0 (time->x geo 0)) rows-height))
+    (when (> (+ (:origin geo 0) span) duration)
       (let [x (time->x geo duration)]
         (fill-rect! ctx (:shade palette) x header-height (max 0 (- width x)) rows-height)))
     (let [x (crisp (time->x geo duration) dpr)]
@@ -971,31 +981,37 @@
 
 (defn- draw-ruler!
   "The ruler: a tick every half `tick` ms, labelled every `tick`, the time
-  past the duration shaded and the playhead."
+  before the start and past the duration shaded and the playhead."
   [^js ctx geo {:keys [span duration tick tick-label playhead]} palette font dpr]
-  (let [width (:width geo)
-        half  (/ tick 2)]
+  (let [width  (:width geo)
+        half   (/ tick 2)
+        origin (:origin geo 0)
+        end    (+ origin span)]
     (.save ctx)
     (.beginPath ctx)
     (.rect ctx 0 0 width ruler-height)
     (.clip ctx)
 
     (fill-rect! ctx (:bg palette) 0 0 width ruler-height)
-    (when (> span duration)
+    (when (neg? origin)
+      (let [x (time->x geo origin)]
+        (fill-rect! ctx (:shade palette) x 0 (- (time->x geo 0) x) (dec ruler-height))))
+    (when (> end duration)
       (let [x (time->x geo duration)]
-        (fill-rect! ctx (:shade palette) x 0 (- (time->x geo span) x) (dec ruler-height))))
+        (fill-rect! ctx (:shade palette) x 0 (- (time->x geo end) x) (dec ruler-height))))
 
     (set! (.-font ctx) (dm/str "10px " font))
     (set! (.-textAlign ctx) "left")
     (set! (.-textBaseline ctx) "top")
     ;; From a tick before the view, whose label may reach into it.
-    (let [from (max 0 (- (* half (mth/floor (/ (x->time geo 0) half))) tick))
-          to   (min span (+ (x->time geo width) half))]
+    (let [from (max (* half (mth/ceil (/ origin half)))
+                    (- (* half (mth/floor (/ (x->time geo 0) half))) tick))
+          to   (min end (+ (x->time geo width) half))]
       (doseq [time (range from (+ to (/ half 2)) half)]
         (let [major? (zero? (mod time tick))
               x      (crisp (time->x geo time) dpr)]
           (fill-rect! ctx (if major? (:fg palette) (:border palette)) x 0 1 (if major? 7 4))
-          (when (and major? (< time span))
+          (when (and major? (< time end))
             (set! (.-fillStyle ctx) (:fg palette))
             (.fillText ctx (tick-label time) (+ x 5) 8)))))
 

@@ -547,8 +547,8 @@
         tl   (reduce ctau/add-audio-clip (cta/make-timeline {:board-id (uuid/next) :duration 5000}) [a b c])
         at   #(mapv (fn [clip] ((juxt :start :lane) (ctau/get-audio-clip % (:id clip)))) [a b c])]
     (t/is (= [[500 0] [1300 1] [50 2]] (at (dwaa/drag-clips tl (map :id [a b]) 300))) "each on its lane")
-    (t/is (= [[0 0] [800 1] [50 2]] (at (dwaa/drag-clips tl (map :id [a b]) -900)))
-          "not before 0, the spacing kept")
+    (t/is (= [[-700 0] [100 1] [50 2]] (at (dwaa/drag-clips tl (map :id [a b]) -900)))
+          "before 0 too, as in Figma")
     (t/is (= [[200 0] [1000 1] [50 2]] (at (dwaa/drag-clips tl (map :id [c]) 300))) "a locked one stays")))
 
 (t/deftest keyframes-blocks-and-clips-are-selected-together
@@ -587,7 +587,7 @@
                  (:start (cta/get-animation tl shape block))
                  (:start (ctau/get-audio-clip tl (:id clip)))])]
     (t/is (= [500 800 1200] (at (dwaa/move-selection tl sel 200))) "all by as much")
-    (t/is (= [0 300 700] (at (dwaa/move-selection tl sel -1000))) "none before 0, their spacing kept")
+    (t/is (= [-700 -400 0] (at (dwaa/move-selection tl sel -1000))) "before 0 too, their spacing kept")
     (t/is (= [300 600 1000] (at (dwaa/move-selection tl sel 0))) "nothing moves by 0")
     (t/is (= [500 800 1000] (at (dwaa/move-selection (ctau/set-audio-clip-locked tl (:id clip) true) sel 200)))
           "a locked clip stays")))
@@ -877,7 +877,7 @@
        (fn [state]
          (t/is (= [clip] (clips-of state :board-a)) "one undo"))))))
 
-(t/deftest a-clip-nudges-but-not-before-zero
+(t/deftest a-clip-nudges-before-zero-too
   (t/async
     done
     (let [[clip file] (with-clip)
@@ -886,7 +886,7 @@
        done file
        [(dwaa/nudge-clip id 10) (dwaa/nudge-clip id 100) (dwaa/nudge-clip id -1000)]
        (fn [state]
-         (t/is (= 0 (:start (ctau/get-audio-clip (timeline-of state :board-a) id)))))
+         (t/is (= -790 (:start (ctau/get-audio-clip (timeline-of state :board-a) id)))))
        (fn [state]
          (t/is (= 210 (:start (ctau/get-audio-clip (timeline-of state :board-a) id)))
                "one undo a step"))))))
