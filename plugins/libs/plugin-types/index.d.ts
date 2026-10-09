@@ -4589,6 +4589,15 @@ export interface TimelineExportSettings {
    * by default.
    */
   includeBoundingBox?: boolean;
+
+  /**
+   * Whether an SVG has its texts as the outlines of their glyphs instead
+   * of text with its fonts, as the "Outline text" option of Figma: a
+   * smaller file that looks the same everywhere, whose text cannot be
+   * selected. A text in more than one fill, or animated by characters,
+   * words or lines, stays as it is. `false` by default.
+   */
+  outlineText?: boolean;
 }
 
 /**

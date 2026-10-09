@@ -782,7 +782,10 @@
         (t/is (= {:u "/images/" :p "img_0.png" :e 0}
                  (select-keys (get-in archived [:assets 0]) [:u :p :e])))))
     (t/testing "a timeline keeps dotLottie as its export format"
-      (t/is (cta/valid-timeline? (assoc tl :export {:format :dotlottie}))))))
+      (t/is (cta/valid-timeline? (assoc tl :export {:format :dotlottie}))))
+    (t/testing "an SVG keeps whether it outlines its texts"
+      (t/is (cta/valid-timeline? (assoc tl :export {:format :svg :outline true})))
+      (t/is (not (cta/valid-timeline? (assoc tl :export {:format :svg :outline "yes"})))))))
 
 (t/deftest lottie-image-layer-has-the-opacity-of-the-shape
   ;; its image is rasterized opaque

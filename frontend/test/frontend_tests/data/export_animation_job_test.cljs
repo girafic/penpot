@@ -32,7 +32,7 @@
     (t/is (= params (job/decode-params (job/encode-params params))))
     (t/is (every? string? (vals (job/encode-params params))) "as query params"))
   (t/testing "the options of an SVG"
-    (let [params (job-params :format :svg :ids? true :bbox? true)]
+    (let [params (job-params :format :svg :ids? true :bbox? true :outline? true)]
       (t/is (= params (job/decode-params (job/encode-params params))))))
   (t/testing "a size that fits a small board to a large height"
     (let [params (job-params :scale 21.6)]

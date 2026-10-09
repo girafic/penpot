@@ -57,7 +57,7 @@
   workspace in `state`, or the `boards` (`[{:board-id :scale}]`) into a
   ZIP, as `params` (see `dea/export-animation`) in a tab of its own, with
   the renderer of the workspace."
-  [state {:keys [format quality fps scale loop? audio? ids? bbox? boards]}]
+  [state {:keys [format quality fps scale loop? audio? ids? bbox? outline? boards]}]
   (cond-> {:file-id (:current-file-id state)
            :page-id (:current-page-id state)
            :board-id (or (:board-id (first boards)) (dwa/active-board-id state))
@@ -71,6 +71,7 @@
            :wasm? (features/active-feature? state "render-wasm/v1")}
     (true? ids?)         (assoc :ids? true)
     (true? bbox?)        (assoc :bbox? true)
+    (true? outline?)     (assoc :outline? true)
     (> (count boards) 1) (assoc :boards (vec boards))))
 
 (defn open-job-tab!
@@ -286,7 +287,7 @@
       (let [job (get-in state [:export-animation :job])]
         (if (= job-id (:job-id job))
           (rx/of (job-ended job-id {:type :cancel})
-                 (dea/export-animation (select-keys job [:format :quality :fps :scale :loop? :audio? :ids? :bbox? :boards])))
+                 (dea/export-animation (select-keys job [:format :quality :fps :scale :loop? :audio? :ids? :bbox? :outline? :boards])))
           (rx/empty))))))
 
 (defn export-from-panel!

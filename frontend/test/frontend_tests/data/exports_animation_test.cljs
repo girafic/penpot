@@ -14,6 +14,7 @@
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
+   [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.exports.animation :as dea]
@@ -1055,6 +1056,40 @@
   [entry]
   (cta/make-animation {:type :style :style-ref-id (uuid/next) :style-ref-file (uuid/next)
                        :name "Words" :start 0 :entries [entry]}))
+
+(t/deftest an-svg-outlines-its-texts-on-request
+  (let [{:keys [objects bid tid]} (text-board)
+        red     [{:fill-color "#ff0000" :fill-opacity 1}]
+        objects (assoc-in objects [tid :content :children 0 :children 0 :children 0 :fills] red)
+        mixed   (update-in objects [tid :content :children 0 :children 0 :children]
+                           conj {:text " and you" :fills [{:fill-color "#00ff00" :fill-opacity 1}]})
+        tl      (cta/add-keyframe (cta/make-timeline {:board-id bid :duration 1000}) tid
+                                  {:time 0 :property :x :value 10})
+        content (path/from-plain [{:command :move-to :params {:x 20 :y 12}}
+                                  {:command :line-to :params {:x 60 :y 12}}
+                                  {:command :line-to :params {:x 60 :y 26}}
+                                  {:command :close-path :params {}}])
+        asked   (atom [])
+        bridge  {:shape-to-path (fn [id] (swap! asked conj id) content)
+                 :clean-modifiers #(swap! asked conj :clean)}
+        [drawn view] (dea/outline-texts objects tl {} bridge)]
+    (t/is (= [:clean tid] @asked) "at rest")
+    (t/is (= [:path red] ((juxt :type :fills) (get drawn tid))) "a path in the paint of its text")
+    (t/is (= (get-in objects [tid :selrect]) (get-in view [tid :selrect])) "its CSS on the box of the text")
+    (t/is (= mixed (first (dea/outline-texts mixed tl {} bridge))) "a text in several fills stays one")
+    (t/is (= objects (first (dea/outline-texts objects tl {tid :units} bridge)))
+          "as one whose units play as pictures")
+    (t/testing "its issues"
+      (let [on      #(assoc % :export {:format :svg :outline true})
+            stroked (-> tl
+                        (cta/add-keyframe tid {:time 0 :property :stroke-width :index 0 :value 1})
+                        (cta/add-keyframe tid {:time 1000 :property :stroke-width :index 0 :value 3}))
+            svg     #(set (get (dea/export-issues %1 %2) :svg))]
+        (t/is (contains? (svg mixed (on tl)) :svg/outline))
+        (t/is (not (contains? (svg mixed tl) :svg/outline)) "only when asked")
+        (t/is (not (contains? (svg objects (on tl)) :svg/outline)))
+        (t/is (contains? (svg objects stroked) :svg/appearance) "the strokes of a text stay")
+        (t/is (not (contains? (svg objects (on stroked)) :svg/appearance)) "but of an outline")))))
 
 (t/deftest markup-formats-note-the-split-text-they-play-whole
   ;; they play the units of a split text, but of one that underlines or

@@ -154,9 +154,11 @@
         loop?     (get export :loop true)
         ;; MP4 and WebM carry the sound of the audio clips, unless left out
         audio?    (get export :audio true)
-        ;; SVG: the names of the layers as ids, a bounding box
+        ;; SVG: the names of the layers as ids, a bounding box, texts as
+        ;; the outlines of their glyphs
         ids?      (get export :ids false)
         bbox?     (get export :bbox false)
+        outline?  (get export :outline false)
         clips?    (boolean (some #(seq (:audio-clips (get timelines %))) board-ids))
         support*  (mf/use-state {:mp4 true :webm true :avif true})
         support   (deref support*)
@@ -266,10 +268,13 @@
         on-bbox
         (mf/use-fn (mf/deps set-export) #(set-export {:bbox (dom/checked? (dom/get-target %))}))
 
+        on-outline
+        (mf/use-fn (mf/deps set-export) #(set-export {:outline (dom/checked? (dom/get-target %))}))
+
         ;; in a tab of its own, opened in this click
         on-export
         (mf/use-fn
-         (mf/deps format quality fps scale loop? audio? ids? bbox? several? export-boards)
+         (mf/deps format quality fps scale loop? audio? ids? bbox? outline? several? export-boards)
          (fn []
            (deaw/export-from-panel! (cond-> {:format format
                                              :quality quality
@@ -278,7 +283,8 @@
                                              :loop? loop?
                                              :audio? audio?
                                              :ids? ids?
-                                             :bbox? bbox?}
+                                             :bbox? bbox?
+                                             :outline? outline?}
                                       several? (assoc :boards export-boards)))))
 
         on-cancel
@@ -331,6 +337,10 @@
                           :label (tr "workspace.options.export.svg-ids")
                           :checked ids?
                           :on-change on-ids}]
+           [:> checkbox* {:id "animated-export-svg-outline"
+                          :label (tr "workspace.options.export.svg-outline")
+                          :checked outline?
+                          :on-change on-outline}]
            [:> checkbox* {:id "animated-export-svg-bbox"
                           :label (tr "workspace.options.export.svg-bbox")
                           :checked bbox?

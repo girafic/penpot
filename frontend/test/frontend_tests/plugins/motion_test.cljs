@@ -300,13 +300,13 @@
 
         (t/testing "the export panel's defaults until they are set"
           (t/is (= {:format "mp4" :quality "high" :fps 30 :size "1" :loop true :audio true
-                    :includeIds false :includeBoundingBox false}
+                    :includeIds false :includeBoundingBox false :outlineText false}
                    (settings))))
 
         (t/testing "setting some changes only those"
           (set! (.-exportSettings timeline) #js {:format "gif" :fps 15})
           (t/is (= {:format "gif" :quality "high" :fps 15 :size "1" :loop true :audio true
-                    :includeIds false :includeBoundingBox false}
+                    :includeIds false :includeBoundingBox false :outlineText false}
                    (settings)))
           (t/is (= {:format :gif :fps 15}
                    (get-in (stored-timelines store context) [(aget board "$id") :export]))))
@@ -330,6 +330,11 @@
           (set! (.-exportSettings timeline) #js {:format "svg" :includeIds true :includeBoundingBox true})
           (t/is (= [true true] ((juxt :includeIds :includeBoundingBox) (settings))))
           (t/is (= [true true] ((juxt :ids :bbox) (get-in (stored-timelines store context) [(aget board "$id") :export])))))
+
+        (t/testing "an SVG outlines its texts when asked"
+          (set! (.-exportSettings timeline) #js {:outlineText true})
+          (t/is (true? (:outlineText (settings))))
+          (t/is (true? (get-in (stored-timelines store context) [(aget board "$id") :export :outline]))))
 
         (t/testing "what is not valid is refused"
           (t/is (thrown? js/Error (set! (.-exportSettings timeline) #js {:includeIds "yes"})))

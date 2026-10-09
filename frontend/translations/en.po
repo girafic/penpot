@@ -9047,6 +9047,9 @@ msgstr "Include \"id\" attribute"
 msgid "workspace.options.export.svg-bbox"
 msgstr "Include bounding box"
 
+msgid "workspace.options.export.svg-outline"
+msgstr "Outline text"
+
 msgid "workspace.options.export.issues-count"
 msgid_plural "workspace.options.export.issues-count"
 msgstr[0] "1 issue to review"
@@ -9069,6 +9072,12 @@ msgstr "Split text · Exported as images"
 
 msgid "workspace.options.export.issue.svg-units.text"
 msgstr "A text animated by characters, words or lines has each of them as an image in %s, of how it rests: they blur when scaled up."
+
+msgid "workspace.options.export.issue.svg-outline"
+msgstr "Text in several fills · Not outlined in %s"
+
+msgid "workspace.options.export.issue.svg-outline.text"
+msgstr "A text that paints parts of it in other fills stays text in %s, with its fonts: an outline has one fill."
 
 msgid "workspace.options.export.issue.svg-appearance"
 msgstr "Some effects · Left out of %s"

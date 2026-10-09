@@ -51,6 +51,7 @@
    :set-shape-hidden wasm.api/set-shape-hidden
    :render-shape-pixels wasm.api/render-shape-pixels
    :get-shape-extrect wasm.api/get-shape-extrect
+   :shape-to-path wasm.api/shape-to-path
    :apply-shape-properties wasm.shape/apply-shape-properties!
    :set-modifiers-end wasm.api/set-modifiers-end
    :interactive? wasm-gesture/active?
@@ -551,14 +552,16 @@
 
 (defn- svg-static?
   "Whether `track` animates on `shape` what an SVG keeps as it rests:
-  `svg-static-properties`, the strokes and trim of a text, uneven corners
-  (see `cta/svg-even-corners?`) or the shadows of one with an inner
-  shadow, which CSS does not draw."
-  [shape track]
+  `svg-static-properties`, the strokes and trim of a text not
+  `outlined?` (see `outline-texts`), uneven corners (see
+  `cta/svg-even-corners?`) or the shadows of one with an inner shadow,
+  which CSS does not draw."
+  [shape track outlined?]
   (let [props (into #{} (map :property) (:keyframes track))]
     (boolean
      (or (some svg-static-properties props)
          (and (= :text (:type shape))
+              (not outlined?)
               (some #{:stroke-color :stroke-opacity :stroke-width :trim-start :trim-end :trim-offset} props))
          (and (some #{:r1 :r2 :r3 :r4} props) (not (cta/svg-even-corners? shape track)))
          (and (some #{:shadow-offset-x :shadow-offset-y :shadow-blur :shadow-color :shadow-opacity} props)
@@ -589,7 +592,9 @@
     units of split texts, which SVG has as pictures (its layers are
     vectors, see `app.main.data.exports.svg-vectors`);
   - `:svg/appearance`, what an SVG keeps as it rests (see
-    `svg-static?`; its CSS plays the rest on its vectors);
+    `svg-static?`; its CSS plays the rest on its vectors), and
+    `:svg/outline`, with its texts outlined (`:outline` of its export
+    settings), a text that cannot be (see `svgv/text-fills`);
   - `:svg/size`, an animated width or height SVG plays as a stretch
     (see `cta/svg-sized?`), and `:lottie/size`, any;
   - `:svg/blur`, an animated blur, which browsers draw stronger than the
@@ -625,6 +630,12 @@
                                     (not (cta/svg-sized? shape track)))))
                            (:tracks resolved)))
           units     (cta/unit-timelines resolved objects)
+          ;; the texts an SVG outlines, but those whose units play as
+          ;; pictures (see `outline-texts`, `unit-texts`)
+          outline?  (true? (get-in timeline [:export :outline]))
+          pictured  (into #{} (comp (map key) (remove #(decorated? (get objects %)))) units)
+          text?     #(and (= :text (:type %)) (not (contains? pictured (:id %))))
+          outlined? #(and outline? (text? %) (some? (svgv/text-fills %)))
           table
           [[:lottie/text lottie-formats (some?* #(= :text (:type %)))]
            [:lottie/images lottie-formats
@@ -637,8 +648,13 @@
                            (cons board-id layer-ids)))]
            [:svg/units #{:svg} (boolean (seq units))]
            [:svg/appearance #{:svg}
-            (boolean (some (fn [[id track]] (some-> (get objects id) (svg-static? track)))
+            (boolean (some (fn [[id track]]
+                             (when-let [shape (get objects id)]
+                               (svg-static? shape track (outlined? shape))))
                            (:tracks resolved)))]
+           [:svg/outline #{:svg}
+            (and outline?
+                 (some?* #(and (text? %) (nil? (svgv/text-fills %)))))]
            [:svg/size #{:svg} stretch?]
            [:lottie/size lottie-formats size?]
            [:svg/blur #{:svg} (contains? animated :blur)]
@@ -1794,23 +1810,55 @@
                                       (not= :once (cta/playback-mode tl)))]
         {:status :ok :blob blob :ext ".lottie" :mtype dotlottie-mtype}))))
 
+(defn outline-texts
+  "`objects` with the texts in the board of `tl`, but the split texts of
+  `texts` (their units play as pictures) and those that paint their text
+  in more than one way (see `svgv/text-fills`), as the outlines of their
+  glyphs at rest, which WASM gives through `bridge`: `[drawn view]`, the
+  objects an SVG draws (see `svgv/outlined`) and the ones its CSS takes
+  (see `svgv/outlined-view`)."
+  [objects tl texts bridge]
+  (let [{:keys [shape-to-path clean-modifiers]} bridge]
+    (when clean-modifiers
+      (clean-modifiers))
+    (reduce (fn [[drawn view :as both] id]
+              (let [shape   (get objects id)
+                    fills   (svgv/text-fills shape)
+                    content (when (and (some? fills) shape-to-path)
+                              (shape-to-path id))]
+                (if (and (some? content) (pos? (count content)))
+                  [(assoc drawn id (svgv/outlined shape content fills))
+                   (assoc view id (svgv/outlined-view shape content fills))]
+                  both)))
+            [objects objects]
+            (->> (cfh/get-children-ids-with-self objects (:board-id tl))
+                 (filter #(let [shape (get objects %)]
+                            (and (cfh/text-shape? shape) (not (:hidden shape)))))
+                 (remove texts)))))
+
 (defn- vector-layers
   "A promise of the vectors of the layers of the SVG export of `tl` and of
   its board, at rest (see `app.main.data.exports.svg-vectors`), but of
   the split texts of `texts`, which play their units as pictures:
-  `{:images {id {:markup}} :fonts css}`, the `@font-face` CSS of their
-  texts. A layer at a time, as `collect-layer-images` takes them."
-  [objects tl texts {:keys [yield cancelled? on-progress]}]
+  `{:images {id {:markup}} :fonts css :objects}`, the `@font-face` CSS of
+  their texts and the objects its CSS takes. With `outline?`, its texts
+  as the outlines of their glyphs (see `outline-texts`). A layer at a
+  time, as `collect-layer-images` takes them."
+  [objects tl texts {:keys [yield cancelled? on-progress outline? bridge]}]
   (let [board-id (:board-id tl)
         resolved (cta/resolve-animations tl objects)
         layers   (cta/svg-export-layer-ids objects resolved)
         drawn    (into [board-id] (remove texts) layers)
-        drawable (svgv/without-layers objects (set layers))
+        [shapes view] (if outline?
+                        (outline-texts objects tl texts (or bridge (default-bridge)))
+                        [objects objects])
+        drawable (svgv/without-layers shapes (set layers))
         animated #(into #{} (map :property) (dm/get-in resolved [:tracks % :keyframes]))
         yield    (or yield default-yield)
         n        (count drawn)]
     (p/let [_     (svgv/load-media objects)
-            fonts (svgv/fonts-css objects drawn)
+            ;; but those of the split texts, whose units are pictures
+            fonts (svgv/fonts-css (apply dissoc shapes (keys texts)) drawn)
             images
             (reduce (fn [p [i id]]
                       (.then p (fn [images]
@@ -1820,13 +1868,14 @@
                                    (.then (yield) (fn [_] (assoc images id {:markup markup})))))))
                     (js/Promise.resolve {})
                     (map-indexed vector drawn))]
-      {:images images :fonts fonts})))
+      {:images images :fonts fonts :objects view})))
 
 (defn- markup-export
   "A promise of the markup export (`:svg` `:lottie` `:dotlottie`) of
   `opts` (see `run-export`): the pictures of its layers one at a time,
   so it stops between them when `cancelled?`."
-  [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled? ids? bbox?]}]
+  [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled? ids? bbox?
+           outline?]}]
   (let [tl       (dwa/board-export-timeline page files board-id)
         objects  (:objects page)
         board    (get objects board-id)
@@ -1862,6 +1911,8 @@
     (p/let [vectors (when vectors?
                       (vector-layers objects tl texts
                                      {:yield yield
+                                      :outline? outline?
+                                      :bridge bridge
                                       :cancelled? cancelled?
                                       :on-progress (fn [i _] (pictures i total))}))
             images  (if vectors?
@@ -1881,7 +1932,7 @@
                                              :cancelled? cancelled?
                                              :on-progress (fn [j _] (pictures (+ n-layers j) total))}))
             result (do (throw-if-cancelled cancelled?)
-                       (markup-file tl objects board format (merge images units)
+                       (markup-file tl (or (:objects vectors) objects) board format (merge images units)
                                     {:ids? ids? :bbox? bbox? :fonts (:fonts vectors)
                                      :propagate cgm/set-objects-modifiers}))]
       (when on-progress
@@ -1894,10 +1945,12 @@
   components, see `dwa/board-export-timeline`), as `format` (`:mp4`
   `:webm` `:gif` `:avif` `:svg` `:lottie` `:dotlottie`), with
   `:quality` `:fps` `:scale` `:loop?`, `:audio?` (the sound of its
-  clips in MP4 and WebM, true by default), and for SVG `:ids?` and
-  `:bbox?` (see `cta/timeline->svg`). `ctx` holds `page` `files`
-  `board-id`, the `:time` the shapes show (undone for the pictures of the
-  markup exports), and may replace the `:bridge` to WASM, `:decode`,
+  clips in MP4 and WebM, true by default), and for SVG `:ids?`,
+  `:bbox?` (see `cta/timeline->svg`) and `:outline?`, its texts as the
+  outlines of their glyphs (see `outline-texts`). `ctx` holds `page`
+  `files` `board-id`, the `:time` the shapes show (undone for the
+  pictures of the markup exports), and may replace the `:bridge` to
+  WASM, `:decode`,
   `:yield` and the GIF encoder (`:gif-encoder` `:quantize`
   `:apply-palette`, see `encode-gif`); `:on-progress` hears `{:phase
   :current :total}` (see `progress-percent`), `:on-frame` the pictures

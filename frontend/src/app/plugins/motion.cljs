@@ -80,7 +80,8 @@
 (def ^:private export-defaults
   "The export settings a board has until they are set, as the export
   panel offers them."
-  {:format :mp4 :quality :high :fps 30 :size "1" :loop true :audio true :ids false :bbox false})
+  {:format :mp4 :quality :high :fps 30 :size "1" :loop true :audio true :ids false :bbox false
+   :outline false})
 
 (defn- format-export
   "The export settings of a timeline (`cta/schema:export`) as the plugin
@@ -94,7 +95,8 @@
          :loop (:loop export)
          :audio (:audio export)
          :includeIds (:ids export)
-         :includeBoundingBox (:bbox export)}))
+         :includeBoundingBox (:bbox export)
+         :outlineText (:outline export)}))
 
 (defn- parse-export
   "The export settings the object `value` of `Timeline.exportSettings`
@@ -107,7 +109,8 @@
         loops?      (obj/get value "loop")
         audio?      (obj/get value "audio")
         ids?        (obj/get value "includeIds")
-        bbox?       (obj/get value "includeBoundingBox")]
+        bbox?       (obj/get value "includeBoundingBox")
+        outline?    (obj/get value "outlineText")]
     (cond
       (and (some? file-format) (not (contains? cta/export-formats (keyword file-format))))
       (dm/str "The format should be one of " (pr-str (sort (map name cta/export-formats))))
@@ -135,6 +138,9 @@
       (and (some? bbox?) (not (boolean? bbox?)))
       "Whether an SVG has a bounding box should be true or false"
 
+      (and (some? outline?) (not (boolean? outline?)))
+      "Whether an SVG has its texts as outlines should be true or false"
+
       :else
       (cond-> {}
         (some? file-format) (assoc :format (keyword file-format))
@@ -144,7 +150,8 @@
         (some? loops?)      (assoc :loop loops?)
         (some? audio?)      (assoc :audio audio?)
         (some? ids?)        (assoc :ids ids?)
-        (some? bbox?)       (assoc :bbox bbox?)))))
+        (some? bbox?)       (assoc :bbox bbox?)
+        (some? outline?)    (assoc :outline outline?)))))
 
 (defn- enabled?
   []

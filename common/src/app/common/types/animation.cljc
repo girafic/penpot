@@ -347,7 +347,9 @@
    ;; SVG: the names of the layers as their `id`s, and a bounding box (see
    ;; `timeline->svg`); absent is no
    [:ids {:optional true} :boolean]
-   [:bbox {:optional true} :boolean]])
+   [:bbox {:optional true} :boolean]
+   ;; SVG: texts as the outlines of their glyphs, not as text; absent is no
+   [:outline {:optional true} :boolean]])
 
 (def max-export-size-factor
   "The largest factor of the board an animation export takes as size."

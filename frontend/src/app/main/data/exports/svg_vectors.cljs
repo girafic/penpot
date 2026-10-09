@@ -8,11 +8,14 @@
   "The layers of an animated SVG export as vectors, as Figma writes an
   SVG: each layer as Penpot's SVG renderer draws it at rest, without the
   layers in it, which are layers of their own (see `cta/timeline->svg`),
-  its images and the fonts of its texts in the file as data URIs."
+  its images and the fonts of its texts in the file as data URIs, or its
+  texts as the outlines of their glyphs (see `outlined`)."
   (:require
    ["react-dom/server" :as rds]
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
+   [app.common.types.path :as path]
+   [app.common.types.text :as txt]
    [app.config :as cfg]
    [app.main.fonts :as fonts]
    [app.main.render :as render]
@@ -124,12 +127,72 @@
       [:svg
        [:& wrapper {:shape shape}]]]]))
 
+(def ^:private path-arity
+  "How many numbers each command of path data takes."
+  {"M" 2 "L" 2 "C" 6 "Z" 0})
+
+(defn- short-number
+  "`v`, a multiple of 0.01, as briefly as SVG takes it."
+  [v]
+  (let [text (str (/ (js/Math.round (* v 100)) 100))]
+    (cond
+      (str/starts-with? text "0.")  (subs text 1)
+      (str/starts-with? text "-0.") (str "-" (subs text 2))
+      :else text)))
+
+(defn compact-path
+  "The path data `d` (absolute `M` `L` `C` `Z`, as the SVG renderer
+  writes them) to 0.01 px, relative: a fraction of its length, the
+  outlines of glyphs most (see `outlined`). The points are rounded
+  before they are made relative, so no error adds up. `d` as it is when
+  it has other commands."
+  [d]
+  (let [tokens (re-seq #"[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?" d)
+        round  #(/ (js/Math.round (* % 100)) 100)]
+    (loop [tokens tokens
+           cmd    nil
+           [cx cy] [0 0]
+           [sx sy] [0 0]
+           out    []]
+      (if-let [token (first tokens)]
+        (cond
+          (contains? path-arity token)
+          (if (= "Z" token)
+            (recur (rest tokens) "Z" [sx sy] [sx sy] (conj out "z"))
+            (recur (rest tokens) token [cx cy] [sx sy] out))
+
+          (re-matches #"[A-Za-z]" token)
+          d
+
+          :else
+          (let [cmd     (if (= "Z" cmd) nil cmd)
+                n       (get path-arity cmd)
+                numbers (take n tokens)]
+            (if (or (nil? n) (< (count numbers) n))
+              d
+              (let [points (partition 2 (map #(round (js/parseFloat %)) numbers))
+                    [x y]  (last points)
+                    deltas (mapcat (fn [[px py]] [(round (- px cx)) (round (- py cy))]) points)]
+                (recur (drop n tokens)
+                       ;; numbers after an `M` are lines
+                       (if (= "M" cmd) "L" cmd)
+                       [x y]
+                       (if (= "M" cmd) [x y] [sx sy])
+                       (conj out (str (str/lower cmd) (str/join "," (map short-number deltas)))))))))
+        (str/join "" out)))))
+
+(defn- compact-paths
+  "`markup` with its path data compact (see `compact-path`)."
+  [markup]
+  (.replace markup (js/RegExp. " d=\"([^\"]*)\"" "g") (fn [_ d] (str " d=\"" (compact-path d) "\""))))
+
 (defn layer-markup
   "The SVG of the shape `id` of `objects` (see `without-layers`) at rest,
   as Penpot's SVG renderer draws it, its images embedded when their data
   URIs are cached (see `load-media`), without metadata, its `<use>`s
-  copies (see `inline-uses`). `animated` is what its animation plays
-  (see `rest-shape`)."
+  copies (see `inline-uses`), its path data compact (see
+  `compact-path`). `animated` is what its animation plays (see
+  `rest-shape`)."
   [objects id animated]
   (let [markup (rds/renderToStaticMarkup
                 (mf/element layer-svg* #js {:objects objects
@@ -137,7 +200,8 @@
     (cond-> (-> markup
                 (str/replace #"^<svg[^>]*>" "")
                 (str/replace #"</svg>$" "")
-                (inline-uses))
+                (inline-uses)
+                (compact-paths))
       (some trim-properties animated)
       (with-path-length id))))
 
@@ -214,3 +278,39 @@
         (comp (mapcat #(cfh/get-children-ids-with-self objects %))
               (filter #(= :text (get-in objects [% :type]))))
         ids))
+
+(defn text-fills
+  "The fills the text `shape` paints all its text with, which its
+  outline is painted with (see `outlined`); nil when it paints its text
+  in more than one way, which one outline cannot."
+  [shape]
+  (let [paints (into #{}
+                     (comp (remove #(str/blank? (:text %)))
+                           (map #(or (:fills %) (txt/get-default-text-fills))))
+                     (txt/node-seq txt/is-text-node? (:content shape)))]
+    (case (count paints)
+      0 (txt/get-default-text-fills)
+      1 (vec (first paints))
+      nil)))
+
+(defn outlined
+  "The text `shape` as a path, `content` the outlines of its glyphs on
+  the page (see `wasm.api/shape-to-path`), painted with `fills` (see
+  `text-fills`), as Penpot converts a text to a path: what an SVG of
+  outlined text draws of it."
+  [shape content fills]
+  (-> shape
+      (assoc :type :path :fills fills)
+      (dissoc :position-data :grow-type)
+      (d/without-keys [:x :y :width :height :rx :ry :r1 :r2 :r3 :r4 :metadata])
+      (path/update-geometry content)))
+
+(defn outlined-view
+  "The text `shape` outlined (see `outlined`) as the CSS of an SVG takes
+  it (see `cta/timeline->svg`): a path in the paint of its text, but on
+  the box of the text, so its animation turns and scales it around the
+  same pivot."
+  [shape content fills]
+  (-> shape
+      (assoc :type :path :fills fills :content content)
+      (dissoc :position-data :grow-type)))
