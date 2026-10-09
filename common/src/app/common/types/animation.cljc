@@ -532,20 +532,22 @@
 
 (defn export-layer-ids
   "Shape ids that become their own export layer: every tracked shape
-  plus its siblings, in paint order (see `painted-children`), each
-  before its descendants."
-  [objects board-id tracks]
-  (let [tracked (set (keys tracks))
-        parents (into #{} (keep #(get-in objects [% :parent-id]) tracked))
-        layer?  (into #{}
-                      (mapcat #(get-in objects [% :shapes] []))
-                      parents)]
-    (->> (tree-seq (fn [id] (seq (get-in objects [id :shapes])))
-                   (fn [id] (painted-children objects id))
-                   board-id)
-         (remove #{board-id})
-         (filter layer?)
-         vec)))
+  plus its siblings, and the children of `holders`, in paint order (see
+  `painted-children`), each before its descendants."
+  ([objects board-id tracks]
+   (export-layer-ids objects board-id tracks nil))
+  ([objects board-id tracks holders]
+   (let [tracked (set (keys tracks))
+         parents (into (set holders) (keep #(get-in objects [% :parent-id])) tracked)
+         layer?  (into #{}
+                       (mapcat #(get-in objects [% :shapes] []))
+                       parents)]
+     (->> (tree-seq (fn [id] (seq (get-in objects [id :shapes])))
+                    (fn [id] (painted-children objects id))
+                    board-id)
+          (remove #{board-id})
+          (filter layer?)
+          vec))))
 
 (defn make-timeline
   "Create a timeline for `board-id` (a top-level frame). The page-level
@@ -3772,7 +3774,9 @@
     (some? (:easing keyframe))          (easing->css (:easing keyframe))))
 
 (defn- track->keyframes-css
-  [timeline shape track kf-name origin rest-transform & {:keys [svg?]}]
+  "The `@keyframes` of `track` on `shape`. With `sized?`, an SVG plays its
+  width and height on its elements (see `svg-sized?`), not as a scale."
+  [timeline shape track kf-name origin rest-transform & {:keys [svg? sized?]}]
   (let [duration (max 1 (:duration timeline))
         sid      (:shape-id track)
         kfs      (:keyframes track)
@@ -3783,7 +3787,8 @@
                            kfs)
                      vec)
         stops    (for [t times]
-                   (let [values     (get (values-at timeline t) sid {})
+                   (let [values     (cond-> (get (values-at timeline t) sid {})
+                                      sized? (dissoc :width :height))
                          pct        (fmt (* 100.0 (/ (double t) duration)))
                          seg-timing (some #(when (= (:time %) t) (keyframe-timing %)) kfs)
                          decls      (cond-> (values->declarations shape values origin rest-transform svg?)
@@ -3812,10 +3817,12 @@
   `display`, if any (an inline element of a page takes no transform),
   and `:adjust`, if any, a function of a text and the timeline of its
   units (see `unit-timelines`) giving the one to play. With `:svg?`, the
-  declarations of the groups of an SVG (see `values->declarations`)."
+  declarations of the groups of an SVG (see `values->declarations`),
+  but the width and height of the shapes of `:sized`, which play on
+  their elements (see `svg-sized?`)."
   ([timeline objects]
    (timeline->css timeline objects nil))
-  ([timeline objects {:keys [ids selector origin transform units svg?]}]
+  ([timeline objects {:keys [ids selector origin transform units svg? sized]}]
    (let [timeline (-> timeline
                       (flatten-splits (or (:kinds units) #{}) (or (:texts units) (constantly true)))
                       (resolve-animations objects)
@@ -3862,7 +3869,8 @@
                                           (track->keyframes-css timeline shape track kf-name
                                                                 (position-origin timeline objects sid)
                                                                 (when transform (transform shape))
-                                                                :svg? svg?) "\n\n"
+                                                                :svg? svg?
+                                                                :sized? (contains? sized sid)) "\n\n"
                                           selector " {\n  animation: " kf-name " "
                                           duration "ms linear " iter ";\n"
                                           "  transform-origin: "
@@ -4916,19 +4924,6 @@
   [id]
   (str "penpot-clip-" id))
 
-(defn- svg-clip-paths
-  "The clip paths of the boards among `nodes` (see `layer-nodes`) that
-  clip layers, where they are in the SVG, whose origin is `ox`/`oy`."
-  [objects ox oy nodes]
-  (->> (rest (tree-seq :inner :inner {:inner nodes}))
-       (filter #(and (seq (:inner %)) (clipping-board? (get objects (:id %)))))
-       (map (fn [{:keys [id]}]
-              (str "<clipPath id=\"" (svg-escape (svg-clip-id id)) "\">"
-                   "<path transform=\"translate(" (fmt (- ox)) " " (fmt (- oy)) ")\" d=\""
-                   (path/content (canvas-outline (get objects id))) "\"/>"
-                   "</clipPath>")))
-       (str/join "")))
-
 (defn- unit-image-indexes
   "The indexes of the units of the text `text-id` that `images` has a
   picture of, in order: a unit of no ink has none."
@@ -4997,6 +4992,102 @@
                                          (:keyframes track))))
                  (into #{} (comp (filter #(svg-radius-properties (:property %))) (map :time)) (:keyframes track))))))
 
+(def ^:private svg-size-properties #{:width :height})
+
+(defn- unturned?
+  "Whether `shape` is neither turned nor flipped: its box is its selrect."
+  [shape]
+  (let [turn (mod (or (:rotation shape) 0) 360)]
+    (and (or (mth/almost-zero? turn) (mth/close? turn 360))
+         (or (nil? (:transform shape)) (gmt/unit? (:transform shape))))))
+
+(defn- plain-paint?
+  "Whether a fill or stroke paints a plain colour: gradients and images are
+  laid out over the shape at rest."
+  [paint]
+  (and (nil? (:fill-color-gradient paint)) (nil? (:fill-image paint))
+       (nil? (:stroke-color-gradient paint)) (nil? (:stroke-image paint))))
+
+(defn- svg-stroke-alignment
+  "Where the SVG renderer draws `stroke` of `shape`: centered when it
+  draws nothing or the shape is an open path."
+  [shape stroke]
+  (if (and (pos? (or (:stroke-width stroke) 0))
+           (not= :none (:stroke-style stroke :none))
+           (not (and (= :path (:type shape)) (path/shape-with-open-path? shape))))
+    (:stroke-alignment stroke :center)
+    :center))
+
+(defn svg-sized?
+  "Whether an SVG of vectors plays the width and height `track` animates
+  on `shape` on its elements, as the canvas resizes it (see
+  `svg-appearance-css`): an unturned rectangle, ellipse or board, its
+  corners alike (see `svg-even-corners?`), of one fill at most, in plain
+  colours and without an outer stroke, whose mask the SVG renderer
+  bounds. The layers in such a board follow it as their constraints and
+  layouts say (see `timeline->svg`). Otherwise width and height play as
+  a scale of its group, which stretches it."
+  [shape track]
+  (let [sr (:selrect shape)]
+    (boolean
+     (and (some #(svg-size-properties (:property %)) (:keyframes track))
+          (contains? #{:rect :circle :frame} (:type shape))
+          (unturned? shape)
+          (pos? (or (:width sr) 0))
+          (pos? (or (:height sr) 0))
+          (<= (count (:fills shape)) 1)
+          (every? plain-paint? (:fills shape))
+          (every? #(and (plain-paint? %) (not= :outer (svg-stroke-alignment shape %)))
+                  (:strokes shape))
+          (or (= :circle (:type shape)) (svg-even-corners? shape track))))))
+
+(defn svg-sized-ids
+  "The shapes whose width and height `timeline` (with its keyframes, see
+  `resolve-animations`) plays on their elements in an SVG of vectors
+  (see `svg-sized?`)."
+  [objects timeline]
+  (into #{}
+        (keep (fn [[id track]]
+                (when (some-> (get objects id) (svg-sized? track)) id)))
+        (:tracks timeline)))
+
+(defn- svg-holder-ids
+  "The boards among the shapes `sized` (see `svg-sized-ids`): the layers
+  in them follow them (see `svg-follow-css`)."
+  [objects sized]
+  (filterv #(= :frame (dm/get-in objects [% :type])) sized))
+
+(defn svg-export-layer-ids
+  "The layers of an SVG of vectors of `timeline` (with its keyframes, see
+  `resolve-animations`): its export layers (see `export-layer-ids`) and
+  the children of the boards whose size it plays on their elements (see
+  `svg-sized?`), which follow them."
+  [objects timeline]
+  (export-layer-ids objects (:board-id timeline) (:tracks timeline)
+                    (svg-holder-ids objects (svg-sized-ids objects timeline))))
+
+(defn- svg-clip-paths
+  "The clip paths of the boards `ids` that clip layers, where they are in
+  the SVG, whose origin is `ox`/`oy`: a rectangle when the board is one
+  (see `svg-even-corners?`, its track in `tracks`), whose size and
+  corners its CSS plays (see `svg-outline-elements`), else its outline."
+  [objects tracks ox oy ids]
+  (->> ids
+       (map (fn [id]
+              (let [shape (get objects id)
+                    move  (str "translate(" (fmt (- ox)) " " (fmt (- oy)) ")")]
+                (str "<clipPath id=\"" (svg-escape (svg-clip-id id)) "\">"
+                     (if (and (unturned? shape) (svg-even-corners? shape (get tracks id)))
+                       (let [{:keys [x y width height]} (:selrect shape)
+                             r (fmt (or (:r1 shape) 0))]
+                         (str "<rect transform=\"" move "\" x=\"" (fmt x) "\" y=\"" (fmt y)
+                              "\" width=\"" (fmt width) "\" height=\"" (fmt height)
+                              "\" rx=\"" r "\" ry=\"" r "\"/>"))
+                       (str "<path transform=\"" move "\" d=\""
+                            (path/content (canvas-outline shape)) "\"/>"))
+                     "</clipPath>"))))
+       (str/join "")))
+
 (defn- indexed-value
   "The value of a property at `index` in `values` (see `values-at`): by
   index for fills, strokes and shadows."
@@ -5014,11 +5105,75 @@
       [(str "stroke-dasharray: " (fmt length) " " (fmt (- 1 length)) ";")
        (str "stroke-dashoffset: " (fmt (- (+ trim-start trim-offset))) ";")])))
 
+(defn- svg-stroke-elements
+  "The elements of the stroke `index` of `shape` as the SVG renderer
+  draws its strokes, in reverse order, an inner or outer one twice as
+  wide and cut by a copy of the shape (its `<use>`s made copies, see
+  `app.main.data.exports.svg-vectors/inline-uses`): `:paint`, the one
+  painted, `:mask`, the stroke of the mask of an outer one, and
+  `:outline`, all that draw its outline."
+  [shape index]
+  (let [strokes (as-vec (:strokes shape))
+        group   (str ".strokes[id$=\"-" (:id shape) "\"] > :nth-child(" (- (count strokes) index) ")")]
+    (case (svg-stroke-alignment shape (get strokes index))
+      :inner
+      (let [paint (str group ".inner-stroke-shape > :not(defs)")]
+        {:paint paint
+         :outline [paint (str group ".inner-stroke-shape > defs > clipPath > *")]})
+
+      :outer
+      (let [outer (str group ".outer-stroke-shape")
+            paint (str outer " > [mask]")
+            mask  (str outer " > defs > mask > :first-child")]
+        {:paint paint
+         :mask mask
+         :outline [paint (str outer " > :not(defs):not([mask])") mask
+                   (str outer " > defs > mask > :last-child")]})
+
+      (let [paint (str group ".stroke-shape > :not(defs)")]
+        {:paint paint :outline [paint]}))))
+
+(defn- svg-outline-elements
+  "The elements that draw the outline of `shape` as the SVG renderer
+  draws it: its fill, its strokes (see `svg-stroke-elements`) and, of a
+  board, its clip and the one of the layers in it (see
+  `svg-clip-paths`)."
+  [shape]
+  (let [sid (:id shape)]
+    (-> [(str "[id=\"fills-" sid "\"] > :not(defs)")]
+        (cond-> (= :frame (:type shape))
+          (conj (str "[id=\"shape-" sid "\"] > defs > clipPath > rect")
+                (str "[id=\"" (svg-clip-id sid) "\"] > rect")))
+        (into (mapcat #(:outline (svg-stroke-elements shape %)))
+              (range (count (as-vec (:strokes shape))))))))
+
+(defn- svg-size-declarations
+  "The geometry of `shape` of the width and height in `values`, resized
+  around the pivot of `track` as the canvas resizes it, as an ellipse or
+  a rectangle has it; flipped, its box (its paint is plain, see
+  `svg-sized?`)."
+  [shape track values]
+  (when (some #(contains? values %) svg-size-properties)
+    (let [{:keys [x y width height]} (:selrect shape)
+          pivot   (origin-point shape (track-origin track))
+          span    (fn [from size pivot new-size]
+                    (let [start (- pivot (* (- pivot from) (/ new-size size)))]
+                      [(min start (+ start new-size)) (mth/abs new-size)]))
+          [nx nw] (span x width (:x pivot) (get values :width width))
+          [ny nh] (span y height (:y pivot) (get values :height height))
+          px      #(str (fmt %) "px")]
+      (if (= :circle (:type shape))
+        [(str "cx: " (px (+ nx (/ nw 2))) ";") (str "cy: " (px (+ ny (/ nh 2))) ";")
+         (str "rx: " (px (/ nw 2)) ";") (str "ry: " (px (/ nh 2)) ";")]
+        [(str "x: " (px nx) ";") (str "y: " (px ny) ";")
+         (str "width: " (px nw) ";") (str "height: " (px nh) ";")]))))
+
 (defn- svg-targets
   "What plays the appearance `props` animates on `shape` in an SVG of
-  vectors, by element: `[selectors declarations properties]` each, the
-  selectors of its elements as the SVG renderer draws them, the
-  declarations of the `values` of a stop and the properties they read."
+  vectors: `[selectors declarations properties]` each, the selectors of
+  its elements as the SVG renderer draws them, one each (see
+  `svg-appearance-css`), the declarations of the `values` of a stop and
+  the properties they read."
   [shape track props]
   (let [sid       (:id shape)
         text?     (= :text (:type shape))
@@ -5048,17 +5203,11 @@
         (when-not text?
           (mapcat
            (fn [index]
-             (let [stroke    (get strokes index)
-                   alignment (:stroke-alignment stroke :center)
-                   ;; inner and outer strokes are drawn twice as wide, then cut
-                   factor    (if (= :center alignment) 1 2)
-                   group     (str ".strokes[id$=\"-" sid "\"] > :nth-child(" (- (count strokes) index) ")")
-                   paint     (case alignment
-                               :inner (str group ".inner-stroke-shape > defs > [id^=\"stroke-shape\"]")
-                               :outer (str group ".outer-stroke-shape > use[mask]")
-                               (str group ".stroke-shape > :not(defs)"))
-                   width     #(when-let [w (indexed-value (:stroke-width %) index)]
-                                (str "stroke-width: " (fmt (* factor w)) ";"))]
+             (let [;; inner and outer strokes are drawn twice as wide, then cut
+                   factor (if (= :center (svg-stroke-alignment shape (get strokes index))) 1 2)
+                   {:keys [paint mask]} (svg-stroke-elements shape index)
+                   width  #(when-let [w (indexed-value (:stroke-width %) index)]
+                             (str "stroke-width: " (fmt (* factor w)) ";"))]
                (cond-> [[[paint]
                          (fn [values]
                            (let [color   (indexed-value (:stroke-color values) index)
@@ -5069,58 +5218,168 @@
                                (some? (width values)) (conj (width values)))))
                          (into svg-stroke-properties svg-trim-properties)]]
                  ;; the mask of an outer stroke is as wide
-                 (and (= :outer alignment) (contains? props :stroke-width))
-                 (conj [[(str group ".outer-stroke-shape > defs > mask > use:first-child")]
+                 (and (some? mask) (contains? props :stroke-width))
+                 (conj [[mask]
                         (fn [values] (keep identity [(width values)]))
                         #{:stroke-width}]))))
            (into (kf-index svg-stroke-properties)
                  (when trim? (range (count strokes))))))
         radius-targets
         (when (and (some svg-radius-properties props) (svg-even-corners? shape track))
-          [[[(str "[id=\"fills-" sid "\"] > rect")
-             (str ".strokes[id$=\"-" sid "\"] rect")
-             (str "[id=\"shape-" sid "\"] > defs > clipPath > rect")]
+          [[(svg-outline-elements shape)
             (fn [values]
               (when-let [r (some #(get values %) [:r1 :r2 :r3 :r4])]
                 [(str "rx: " (fmt r) "px;") (str "ry: " (fmt r) "px;")]))
-            svg-radius-properties]])]
-    (concat fill-targets (distinct stroke-targets) radius-targets)))
+            svg-radius-properties]])
+        size-targets
+        (when (svg-sized? shape track)
+          [[(svg-outline-elements shape)
+            (fn [values] (svg-size-declarations shape track values))
+            svg-size-properties]])]
+    (concat fill-targets stroke-targets radius-targets size-targets)))
+
+(defn- svg-iterations
+  "The CSS `animation-iteration-count` (and direction) of `timeline`."
+  [timeline]
+  (case (playback-mode timeline)
+    :loop      "infinite"
+    :ping-pong "infinite alternate"
+    "1 both"))
+
+(defn- svg-stop-css
+  "A stop at `time` of `duration` of a `@keyframes`: `decls`, and the
+  timing of the segment it starts, when it starts one."
+  [time duration decls timing]
+  (let [decls (cond-> (vec decls)
+                (and timing (< time duration))
+                (conj (str "animation-timing-function: " timing ";")))]
+    (str "  " (fmt (* 100.0 (/ (double time) duration))) "% { " (str/join " " decls) " }")))
+
+(defn- svg-animations-css
+  "The CSS of `animations`, `[selectors name keyframes]` each: their
+  `@keyframes`, then a rule of each element listing all its animations,
+  as a rule of its own would drop those of the others, and none with
+  reduced motion asked for."
+  [animations duration iterations]
+  (when (seq animations)
+    (let [elements (into [] (comp (mapcat first) (distinct)) animations)
+          names    (reduce (fn [names [selectors name]]
+                             (reduce #(update %1 %2 (fnil conj []) name) names selectors))
+                           {}
+                           animations)]
+      (str (str/join "\n\n" (map #(nth % 2) animations))
+           "\n\n"
+           (str/join "\n\n"
+                     (map (fn [selector]
+                            (str selector " {\n  animation: "
+                                 (str/join ", " (map #(str % " " duration "ms linear " iterations)
+                                                     (get names selector)))
+                                 ";\n}"))
+                          elements))
+           "\n\n@media (prefers-reduced-motion: reduce) {\n  "
+           (str/join ",\n  " elements)
+           " {\n    animation: none;\n  }\n}"))))
 
 (defn svg-appearance-css
-  "The CSS that plays the fills, strokes, corners and trim of the layers
-  of an SVG of vectors on their elements (see `timeline->svg`), as
-  Penpot's SVG renderer draws them: `fills-<id>` holds the fills (more
-  than one in a pattern, in reverse order), `strokes-…-<id>` the strokes,
-  in reverse order, an inner or outer one painted twice as wide. Corners
-  play when they are alike (see `svg-even-corners?`). `timeline` is the
-  one the exports play, cut to its duration (see `cut-timeline`)."
+  "The CSS that plays the fills, strokes, corners, trim and sizes of the
+  layers of an SVG of vectors on their elements (see `timeline->svg`),
+  as Penpot's SVG renderer draws them: `fills-<id>` holds the fills
+  (more than one in a pattern, in reverse order), `strokes-…-<id>` the
+  strokes, in reverse order, an inner or outer one painted twice as
+  wide. Corners play when they are alike (see `svg-even-corners?`),
+  sizes as `svg-sized?` says. `timeline` is the one the exports play,
+  cut to its duration (see `cut-timeline`). Nil without any."
   [timeline objects]
-  (let [duration (max 1 (:duration timeline))
-        iter     (case (playback-mode timeline)
-                   :loop      "infinite"
-                   :ping-pong "infinite alternate"
-                   "1 both")
-        appearance (some-fn svg-fill-properties svg-stroke-properties svg-radius-properties svg-trim-properties)]
-    (->> (for [[sid track] (:tracks timeline)
-               :let  [shape (get objects sid)
-                      props (into #{} (map :property) (:keyframes track))]
-               :when (and (some? shape) (some appearance props))
-               [n [selectors declarations reads]] (map-indexed vector (svg-targets shape track props))]
-           (let [kfs   (filterv #(reads (:property %)) (:keyframes track))
-                 times (vec (into (sorted-set 0 duration)
-                                  (comp (map :time) (filter #(<= 0 % duration)))
-                                  kfs))
-                 name  (str "penpot-svg-" sid "-" n)
-                 stops (for [t times]
-                         (let [values (get (values-at timeline t) sid {})
-                               timing (some #(when (= (:time %) t) (keyframe-timing %)) kfs)
-                               decls  (cond-> (vec (declarations values))
-                                        (and timing (< t duration))
-                                        (conj (str "animation-timing-function: " timing ";")))]
-                           (str "  " (fmt (* 100.0 (/ (double t) duration))) "% { " (str/join " " decls) " }")))]
+  (let [duration   (max 1 (:duration timeline))
+        appearance (some-fn svg-fill-properties svg-stroke-properties svg-radius-properties
+                            svg-trim-properties svg-size-properties)]
+    (svg-animations-css
+     (for [[sid track] (:tracks timeline)
+           :let  [shape (get objects sid)
+                  props (into #{} (map :property) (:keyframes track))]
+           :when (and (some? shape) (some appearance props))
+           [n [selectors declarations reads]] (map-indexed vector (svg-targets shape track props))
+           :let  [kfs (filterv #(reads (:property %)) (:keyframes track))]
+           :when (seq kfs)]
+       (let [name  (str "penpot-svg-" sid "-" n)
+             times (into (sorted-set 0 duration)
+                         (comp (map :time) (filter #(<= 0 % duration)))
+                         kfs)
+             stops (for [t times]
+                     (svg-stop-css t duration
+                                   (declarations (get (values-at timeline t) sid {}))
+                                   (some #(when (= (:time %) t) (keyframe-timing %)) kfs)))]
+         [selectors name (str "@keyframes " name " {\n" (str/join "\n" stops) "\n}")]))
+     duration
+     (svg-iterations timeline))))
+
+(defn- svg-follow-class
+  "The CSS class of the group that moves the layer `id` with the board it
+  is in (see `svg-follow-css`)."
+  [id]
+  (str "penpot-follow-" id))
+
+(defn- svg-matrix
+  "The transform of `modifiers` (on the page; none, nil) in the SVG, whose
+  origin is `ox`/`oy`: `[a b c d e f]`."
+  [modifiers ox oy]
+  (let [{:keys [a b c d e f]} (if (some? modifiers)
+                                (ctm/modifiers->transform modifiers)
+                                (gmt/matrix))]
+    [a b c d (- (+ (* a ox) (* c oy) e) ox) (- (+ (* b ox) (* d oy) f) oy)]))
+
+(defn- svg-follow-css
+  "How the layers among `ids` in the boards `holders`, whose size plays
+  on their elements (see `svg-sized?`), move with them, as the canvas
+  moves them as their constraints and layouts say: `propagate` gives a
+  modif-tree with the modifiers of what is in the shapes it modifies
+  (`app.common.geom.modifiers/set-objects-modifiers`), whose transforms
+  each layer goes through, in a group of its own (see
+  `svg-follow-class`), at the stops of the size of its board. `timeline`
+  is cut to its duration; the SVG starts at `ox`/`oy`. `{:css :ids}`,
+  the layers that move."
+  [timeline objects holders ids propagate ox oy]
+  (let [duration   (max 1 (:duration timeline))
+        iterations (svg-iterations timeline)
+        layer?     (set ids)
+        identity?  (fn [matrix] (every? true? (map mth/close? matrix [1 0 0 1 0 0])))
+        moves
+        (for [hid   holders
+              :let  [holder   (get objects hid)
+                     track    (dm/get-in timeline [:tracks hid])
+                     kfs      (filterv #(svg-size-properties (:property %)) (:keyframes track))
+                     children (filterv layer? (:shapes holder))]
+              :when (and (some? holder) (seq kfs) (seq children))
+              :let  [{:keys [width height]} (:selrect holder)
+                     pivot (origin-point holder (track-origin track))
+                     poses (for [t (into (sorted-set 0 duration)
+                                         (comp (map :time) (filter #(<= 0 % duration)))
+                                         kfs)]
+                             (let [values (get (values-at timeline t) hid {})
+                                   scale  (gpt/point (/ (get values :width width) width)
+                                                     (/ (get values :height height) height))]
+                               [t (propagate {hid {:modifiers (ctm/resize (ctm/empty) scale pivot)}}
+                                             objects)]))]
+              cid   children
+              :let  [matrices (mapv (fn [[t tree]] [t (svg-matrix (dm/get-in tree [cid :modifiers]) ox oy)])
+                                    poses)]
+              :when (not-every? (comp identity? second) matrices)]
+          (let [name     (str "penpot-follow-" cid)
+                selector (str "." (svg-follow-class cid))
+                stops    (for [[t matrix] matrices]
+                           (svg-stop-css t duration
+                                         [(str "transform: matrix(" (str/join ", " (map fmt matrix)) ");")]
+                                         (some #(when (= (:time %) t) (keyframe-timing %)) kfs)))]
+            [cid selector
              (str "@keyframes " name " {\n" (str/join "\n" stops) "\n}\n\n"
-                  (str/join ",\n" selectors) " {\n  animation: " name " " duration "ms linear " iter ";\n}")))
-         (str/join "\n\n"))))
+                  selector " {\n  transform-origin: 0 0;\n  animation: " name " " duration "ms linear "
+                  iterations ";\n}")]))]
+    {:ids (into #{} (map first) moves)
+     :css (when (seq moves)
+            (str (str/join "\n\n" (map #(nth % 2) moves))
+                 "\n\n@media (prefers-reduced-motion: reduce) {\n  "
+                 (str/join ",\n  " (map second moves))
+                 " {\n    animation: none;\n  }\n}"))}))
 
 (defn- svg-id-attr
   [svg-ids id]
@@ -5134,55 +5393,61 @@
   `images` has pictures of (see `timeline->svg`) holds, instead of its
   image, the picture of what is no unit and a group of each unit, which
   its CSS class animates. All images sit where they are in the SVG,
-  whose origin is `ox`/`oy`. A layer of `svg-ids` has that `id`."
-  [objects images svg-ids ox oy {:keys [id inner clip?]}]
+  whose origin is `ox`/`oy`. A layer of `svg-ids` has that `id`; one of
+  `follow` sits in a group that moves it with the board it is in (see
+  `svg-follow-css`)."
+  [{:keys [objects images svg-ids ox oy follow] :as ctx} {:keys [id inner clip?]}]
   (when-let [shape (get objects id)]
-    (let [inner   (str/join "" (keep #(emit-svg-node objects images svg-ids ox oy %) inner))
+    (let [inner   (str/join "" (keep #(emit-svg-node ctx %) inner))
           clipped #(if (and (seq inner) (clipping-board? shape))
                      (str "<g clip-path=\"url(#" (svg-escape (svg-clip-id id)) ")\">" % "</g>")
-                     %)]
-      (cond
-        clip?
-        (clipped inner)
+                     %)
+          svg
+          (cond
+            clip?
+            (clipped inner)
 
-        (seq (unit-image-indexes images id))
-        (let [opacity (or (:opacity shape) 1)]
-          (str "<g class=\"" (svg-escape (shape-css-class id)) "\""
-               (svg-id-attr svg-ids id)
-               (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
-               ">"
-               (some-> (get images [id :rest]) (svg-image))
-               (str/join "" (map (fn [k]
-                                   (str "<g class=\"" (svg-escape (unit-css-class id k)) "\">"
-                                        (svg-image (get images [id k]))
-                                        "</g>"))
-                                 (unit-image-indexes images id)))
-               inner
-               "</g>"))
+            (seq (unit-image-indexes images id))
+            (let [opacity (or (:opacity shape) 1)]
+              (str "<g class=\"" (svg-escape (shape-css-class id)) "\""
+                   (svg-id-attr svg-ids id)
+                   (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
+                   ">"
+                   (some-> (get images [id :rest]) (svg-image))
+                   (str/join "" (map (fn [k]
+                                       (str "<g class=\"" (svg-escape (unit-css-class id k)) "\">"
+                                            (svg-image (get images [id k]))
+                                            "</g>"))
+                                     (unit-image-indexes images id)))
+                   inner
+                   "</g>"))
 
-        :else
-        (let [img     (get images id)
-              sr      (:selrect shape)
-              ;; the image is opaque; an animated opacity overrides this
-              opacity (or (:opacity shape) 1)]
-          (str "<g class=\"" (svg-escape (shape-css-class id)) "\""
-               (svg-id-attr svg-ids id)
-               (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
-               ">"
-               (clipped
-                (str (if-let [markup (:markup img)]
-                       ;; its vectors
-                       (svg-vectors markup ox oy)
-                       ;; the picture of the shape as it is, turned, over its
-                       ;; box with shadows and blur (`:x :y` of the image), or
-                       ;; its box
-                       (str "<image href=\"" (svg-escape (or (:href img) ""))
-                            "\" x=\"" (fmt (or (:x img) (- (or (:x sr) 0) ox)))
-                            "\" y=\"" (fmt (or (:y img) (- (or (:y sr) 0) oy)))
-                            "\" width=\"" (fmt (or (:width img) (:width sr) 0))
-                            "\" height=\"" (fmt (or (:height img) (:height sr) 0)) "\"/>"))
-                     inner))
-               "</g>"))))))
+            :else
+            (let [img     (get images id)
+                  sr      (:selrect shape)
+                  ;; the image is opaque; an animated opacity overrides this
+                  opacity (or (:opacity shape) 1)]
+              (str "<g class=\"" (svg-escape (shape-css-class id)) "\""
+                   (svg-id-attr svg-ids id)
+                   (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
+                   ">"
+                   (clipped
+                    (str (if-let [markup (:markup img)]
+                           ;; its vectors
+                           (svg-vectors markup ox oy)
+                           ;; the picture of the shape as it is, turned, over its
+                           ;; box with shadows and blur (`:x :y` of the image), or
+                           ;; its box
+                           (str "<image href=\"" (svg-escape (or (:href img) ""))
+                                "\" x=\"" (fmt (or (:x img) (- (or (:x sr) 0) ox)))
+                                "\" y=\"" (fmt (or (:y img) (- (or (:y sr) 0) oy)))
+                                "\" width=\"" (fmt (or (:width img) (:width sr) 0))
+                                "\" height=\"" (fmt (or (:height img) (:height sr) 0)) "\"/>"))
+                         inner))
+                   "</g>")))]
+      (if (contains? follow id)
+        (str "<g class=\"" (svg-escape (svg-follow-class id)) "\">" svg "</g>")
+        svg))))
 
 (defn timeline->svg
   "Build an animated SVG: rest-pose `<image>` per export layer plus the
@@ -5190,34 +5455,44 @@
   layer follows the one it sits in and a board clips them; each turns
   and scales around its pivot in the SVG. `images` is `{shape-id {:href
   :x :y :width :height}}`; the board's own image, when there, goes below
-  them. A split text plays its units one by one when `images` has
-  pictures of them, `[text-id k]` of the unit `k` (see `unit-timelines`)
-  and, when it has ink (an underline), `[text-id :rest]` of what is no
-  unit, each over the box it covers (with the text turned); otherwise its
-  split animations play as animations of the whole text (see
-  `flatten-splits`). An entry of `images` with `:markup` instead holds the
-  vectors of its layer, the SVG of the shape at rest as it is on the page
-  (see `svg-vectors`), and `:fonts` (an option) the `@font-face` CSS of
-  their texts. Options, as Figma's: `:ids?`, the names of the layers and
-  of the board as their `id`s (see `svg-layer-ids`), and `:bbox?`, a
-  bounding box, an empty rectangle over the board, first."
+  them, all in a group that plays the board's own animation and has its
+  opacity, and the board clips them. A split text plays its units one by
+  one when `images` has pictures of them, `[text-id k]` of the unit `k`
+  (see `unit-timelines`) and, when it has ink (an underline), `[text-id
+  :rest]` of what is no unit, each over the box it covers (with the text
+  turned); otherwise its split animations play as animations of the
+  whole text (see `flatten-splits`). An entry of `images` with `:markup`
+  instead holds the vectors of its layer, the SVG of the shape at rest as
+  it is on the page (see `svg-vectors`), and `:fonts` (an option) the
+  `@font-face` CSS of their texts; the layers are then those of
+  `svg-export-layer-ids`. The width and height of a layer play on its
+  vectors when they can (see `svg-sized?`), and the layers in a board so
+  resized move with it as `:propagate` says (an option, see
+  `svg-follow-css`), else they keep their place. Options, as Figma's:
+  `:ids?`, the names of the layers and of the board as their `id`s (see
+  `svg-layer-ids`), and `:bbox?`, a bounding box, an empty rectangle over
+  the board, first."
   ([timeline objects images]
    (timeline->svg timeline objects images nil))
-  ([timeline objects images {:keys [ids? bbox? fonts]}]
+  ([timeline objects images {:keys [ids? bbox? fonts propagate]}]
    (let [unit-texts (unit-text-ids images)
          timeline (-> timeline
                       (flatten-splits #{:char :word :line} unit-texts)
                       (resolve-animations objects)
                       expand-loops)
          board-id (:board-id timeline)
-         bsr      (:selrect (get objects board-id))
+         board    (get objects board-id)
+         bsr      (:selrect board)
          width    (mth/round (or (:width bsr) 100))
          height   (mth/round (or (:height bsr) 100))
          ox       (or (:x bsr) 0)
          oy       (or (:y bsr) 0)
-        ;; SVG takes a share of `transform-origin` of the whole drawing
+         sized    (svg-sized-ids objects timeline)
+         holders  (svg-holder-ids objects sized)
+         ;; SVG takes a share of `transform-origin` of the whole drawing
          css      (timeline->css timeline objects
                                  {:svg? true
+                                  :sized sized
                                   :origin (fn [shape track]
                                             (let [[x y] (lottie-pivot shape ox oy (track-origin track))]
                                               (str (fmt x) "px " (fmt y) "px")))
@@ -5225,32 +5500,55 @@
                                            {:kinds #{:char :word :line}
                                             :texts unit-texts
                                             :selector (fn [text k] (str "." (unit-css-class (:id text) k)))
-                                           ;; each unit turns around the middle of its picture
+                                            ;; each unit turns around the middle of its picture
                                             :origin (fn [text k]
                                                       (let [{:keys [x y width height]} (get images [(:id text) k])]
                                                         (str (fmt (+ (or x 0) (/ (or width 0) 2))) "px "
                                                              (fmt (+ (or y 0) (/ (or height 0) 2))) "px")))
                                             :adjust (fn [text units] (turned-moves units (:rotation text)))})})
-         ids      (export-layer-ids objects board-id (:tracks timeline))
+         played   (-> timeline expand-paths cut-timeline)
+         ids      (export-layer-ids objects board-id (:tracks timeline) holders)
          nodes    (layer-nodes objects (set ids) board-id)
-         clips    (svg-clip-paths objects ox oy nodes)
+         follow   (when (some? propagate)
+                    (svg-follow-css played objects holders ids propagate ox oy))
+         clip?    (and (seq nodes) (clipping-board? board))
+         clips    (svg-clip-paths objects (:tracks timeline) ox oy
+                                  (cond-> (into []
+                                                (comp (filter #(and (seq (:inner %))
+                                                                    (clipping-board? (get objects (:id %)))))
+                                                      (map :id))
+                                                (rest (tree-seq :inner :inner {:inner nodes})))
+                                    clip? (conj board-id)))
          svg-ids  (when ids? (svg-layer-ids objects (cons board-id ids)))
          backdrop (when-let [img (get images board-id)]
                     (if-let [markup (:markup img)]
                       (str "<g" (svg-id-attr svg-ids board-id) ">" (svg-vectors markup ox oy) "</g>")
                       (str "<image" (svg-id-attr svg-ids board-id)
                            " href=\"" (svg-escape (:href img))
-                           "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>")))]
+                           "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>")))
+         layers   (str/join "" (keep #(emit-svg-node {:objects objects :images images :svg-ids svg-ids
+                                                      :ox ox :oy oy :follow (:ids follow)}
+                                                     %)
+                                     nodes))
+         opacity  (or (:opacity board) 1)
+         content  (str backdrop
+                       (if clip?
+                         (str "<g clip-path=\"url(#" (svg-escape (svg-clip-id board-id)) ")\">" layers "</g>")
+                         layers))]
      (str "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" width
           "\" height=\"" height "\" viewBox=\"0 0 " width " " height
           "\" overflow=\"hidden\">"
           (when (seq clips) (str "<defs>" clips "</defs>"))
           "<style>g { transform-box: view-box; }\n" (some-> fonts (str "\n")) css
-          (some->> (not-empty (svg-appearance-css (-> timeline expand-paths cut-timeline) objects))
-                   (str "\n\n"))
+          (some->> (svg-appearance-css played objects) (str "\n\n"))
+          (some->> (:css follow) (str "\n\n"))
           "</style>"
           (when bbox?
             (str "<rect width=\"" width "\" height=\"" height "\" fill=\"none\"/>"))
-          backdrop
-          (str/join "" (keep #(emit-svg-node objects images svg-ids ox oy %) nodes))
+          ;; the board's own animation and opacity, of all in it
+          (if (or (seq (dm/get-in timeline [:tracks board-id :keyframes])) (< opacity 1))
+            (str "<g class=\"" (svg-escape (shape-css-class board-id)) "\""
+                 (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
+                 ">" content "</g>")
+            content)
           "</svg>"))))

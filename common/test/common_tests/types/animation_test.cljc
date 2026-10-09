@@ -7,6 +7,7 @@
 (ns common-tests.types.animation-test
   (:require
    [app.common.data :as d]
+   [app.common.geom.modifiers :as cgm]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
@@ -846,8 +847,8 @@
                 bid' {:href "data:image/png;base64,CCC" :x 40 :y 10 :width 20 :height 20}}
         plain (cta/timeline->svg tl objects images)
         named (cta/timeline->svg tl objects images {:ids? true :bbox? true})]
-    (t/is (not (re-find #" id=" plain)) "no ids by default")
-    (t/is (not (re-find #"<rect" plain)) "nor a box")
+    (t/is (not (re-find #"<(g|image)[^>]* id=" plain)) "no ids by default")
+    (t/is (not (re-find #"<rect width=" plain)) "nor a box")
     (t/is (re-find #"<image id=\"_01_·_Intro\"" named) "the board, its name made an XML name")
     (t/is (re-find #"<g class=\"[^\"]+\" id=\"Card_front\"" named))
     (t/is (re-find #" id=\"Card_front_2\"" named) "the second of a name")
@@ -1033,6 +1034,137 @@
         svg     (cta/timeline->svg tl objects {})
         drawn   (fn [shape] (str/index-of svg (str "class=\"" (cta/shape-css-class (:id shape)) "\"")))]
     (t/is (< (drawn two) (drawn one)))))
+
+(defn- svg-board-with
+  "A board of 200 x 100 at 100,50 with `shapes` in it, as objects."
+  [board & shapes]
+  (let [bid (:id board)]
+    (into {bid (assoc board :shapes (mapv :id shapes))}
+          (map (fn [shape] [(:id shape) (assoc shape :parent-id bid :frame-id bid)]))
+          shapes)))
+
+(t/deftest an-svg-plays-sizes-on-the-vectors-that-can-take-them
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        rect   (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20 :r1 4 :r2 4 :r3 4 :r4 4
+                                 :fills [{:fill-color "#ff0000" :fill-opacity 1}]
+                                 :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                            :stroke-style :solid :stroke-alignment :inner}]})
+        sid    (:id rect)
+        track  {:keyframes [{:time 0 :property :width :value 40} {:time 1000 :property :width :value 80}]}
+        grow   #(-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                    (cta/add-keyframe (:id %) {:time 0 :property :width :value 40})
+                    (cta/add-keyframe (:id %) {:time 1000 :property :width :value 80}))]
+    (t/testing "which shapes"
+      (t/is (cta/svg-sized? rect track))
+      (t/is (cta/svg-sized? (assoc rect :type :circle :r1 0 :r2 0 :r3 0 :r4 0) track))
+      (t/is (not (cta/svg-sized? rect {:keyframes [{:time 0 :property :scale-x :value 2}]})) "a scale stays one")
+      (t/is (not (cta/svg-sized? (assoc rect :type :path) track)))
+      (t/is (not (cta/svg-sized? (assoc rect :rotation 30) track)) "turned")
+      (t/is (not (cta/svg-sized? (assoc rect :r2 0) track)) "uneven corners")
+      (t/is (not (cta/svg-sized? (update-in rect [:fills 0] assoc :fill-color-gradient {:type :linear}) track)))
+      (t/is (not (cta/svg-sized? (update rect :fills conj {:fill-color "#000000"}) track)) "two fills")
+      (t/is (not (cta/svg-sized? (assoc-in rect [:strokes 0 :stroke-alignment] :outer) track))
+            "an outer stroke, whose mask is bounded"))
+    (t/testing "a rectangle: its box, around its pivot, on all that draws its outline"
+      (let [svg (cta/timeline->svg (grow rect) (svg-board-with board rect) {})]
+        (t/is (re-find #"100% \{ x: -10px; y: 10px; width: 80px; height: 20px; \}" svg) "grown from its middle")
+        (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of its group")
+        (doseq [element [(str "[id=\"fills-" sid "\"] > :not(defs)")
+                         (str ".strokes[id$=\"-" sid "\"] > :nth-child(1).inner-stroke-shape > :not(defs)")
+                         (str ".strokes[id$=\"-" sid "\"] > :nth-child(1).inner-stroke-shape > defs > clipPath > *")]]
+          (t/is (str/includes? svg (str element " {\n  animation: penpot-svg-" sid "-0 ")) element))))
+    (t/testing "an ellipse"
+      (let [ellipse (cts/setup-shape {:type :circle :x 10 :y 10 :width 40 :height 20
+                                      :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+            svg     (cta/timeline->svg (grow ellipse) (svg-board-with board ellipse) {})]
+        (t/is (re-find #"100% \{ cx: 30px; cy: 20px; rx: 40px; ry: 10px; \}" svg))))
+    (t/testing "a path stretches, as before"
+      (let [svg (cta/timeline->svg (grow rect) (svg-board-with board (assoc rect :rotation 30)) {})]
+        (t/is (re-find #"scale\(2, 1\)" svg))))))
+
+(t/deftest an-svg-plays-all-the-animations-of-an-element
+  ;; A rule of its own of each would drop the others.
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        rect  (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20
+                                :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        sid   (:id rect)
+        tl    (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :fill-color :index 0 :value "#ff0000"})
+                  (cta/add-keyframe sid {:time 1000 :property :fill-color :index 0 :value "#0000ff"})
+                  (as-> tl (reduce #(cta/add-keyframe %1 sid {:time 1000 :property %2 :value 8})
+                                   tl [:r1 :r2 :r3 :r4])))
+        css   (cta/svg-appearance-css tl (svg-board-with board rect))
+        fill  (str "[id=\"fills-" sid "\"] > :not(defs)")]
+    (t/is (str/includes? css (str fill " {\n  animation: penpot-svg-" sid "-0 1000ms linear 1 both, penpot-svg-"
+                                  sid "-1 1000ms linear 1 both;\n}")))
+    (t/is (= 1 (count (re-seq (re-pattern (str "\\Q" fill " {\n  animation:\\E")) css))) "one rule")
+    (t/is (re-find #"@media \(prefers-reduced-motion: reduce\)" css) "at rest with reduced motion")))
+
+(t/deftest the-layers-in-a-board-follow-its-size
+  ;; A board of 100 wide grows to 140 from its middle: a layer kept to its
+  ;; left moves 20 to the left, one kept to its right 20 to the right, one
+  ;; kept to its middle stays.
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        card   (cts/setup-shape {:type :frame :x 100 :y 100 :width 100 :height 50})
+        left   (assoc (cts/setup-shape {:type :rect :x 110 :y 110 :width 10 :height 10})
+                      :constraints-h :left :constraints-v :top)
+        right  (assoc (cts/setup-shape {:type :rect :x 180 :y 110 :width 10 :height 10})
+                      :constraints-h :right :constraints-v :top)
+        middle (assoc (cts/setup-shape {:type :rect :x 145 :y 110 :width 10 :height 10})
+                      :constraints-h :center :constraints-v :top)
+        [bid cid lid rid mid] (map :id [board card left right middle])
+        objects {bid (assoc board :shapes [cid])
+                 cid (assoc card :parent-id bid :frame-id bid :shapes [lid rid mid])
+                 lid (assoc left :parent-id cid :frame-id cid)
+                 rid (assoc right :parent-id cid :frame-id cid)
+                 mid (assoc middle :parent-id cid :frame-id cid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe cid {:time 0 :property :width :value 100})
+                    (cta/add-keyframe cid {:time 1000 :property :width :value 140}))
+        svg     (cta/timeline->svg tl objects {} {:propagate cgm/set-objects-modifiers})
+        follow  #(str "penpot-follow-" %)]
+    (t/is (= [cid lid rid mid] (cta/svg-export-layer-ids objects (cta/resolve-animations tl objects)))
+          "what is in it, layers, though it stays")
+    (t/is (re-find (re-pattern (str "@keyframes " (follow lid) " \\{\n  0% \\{ transform: matrix\\(1, 0, 0, 1, 0, 0\\);[^\n]*\n"
+                                    "  100% \\{ transform: matrix\\(1, 0, 0, 1, -20, 0\\);"))
+                   svg))
+    (t/is (re-find (re-pattern (str "@keyframes " (follow rid) " \\{[^}]*\\}\n  100% \\{ transform: matrix\\(1, 0, 0, 1, 20, 0\\);"))
+                   svg))
+    (t/is (not (str/includes? svg (follow mid))) "one that stays has no group")
+    (t/is (re-find (re-pattern (str "class=\"" (cta/shape-css-class cid) "\".*<g class=\"" (follow lid)
+                                    "\"><g class=\"" (cta/shape-css-class lid) "\""))
+                   svg)
+          "its group in the board's")
+    (t/is (re-find (re-pattern (str "<clipPath id=\"penpot-clip-" cid "\"><rect transform=\"translate\\(0 0\\)\" "
+                                    "x=\"100\" y=\"100\" width=\"100\" height=\"50\" rx=\"0\" ry=\"0\"/>"))
+                   svg)
+          "its clip, which grows with it")
+    (t/is (str/includes? svg (str "[id=\"penpot-clip-" cid "\"] > rect {\n  animation:")))
+    (t/testing "without a way to know how they move, they keep their place"
+      (t/is (not (str/includes? (cta/timeline->svg tl objects {}) (follow lid)))))))
+
+(t/deftest an-svg-plays-the-animation-of-its-board
+  (let [board  (cts/setup-shape {:type :frame :x 100 :y 50 :width 200 :height 100 :opacity 0.5})
+        shape  (cts/setup-shape {:type :rect :x 110 :y 60 :width 20 :height 20})
+        [bid sid] (map :id [board shape])
+        objects (svg-board-with board shape)
+        images  {bid {:markup "<rect class=\"board\"/>"} sid {:markup "<rect class=\"layer\"/>"}}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe bid {:time 0 :property :x :value 100})
+                    (cta/add-keyframe bid {:time 1000 :property :x :value 140})
+                    (cta/add-keyframe sid {:time 0 :property :opacity :value 1}))
+        svg     (cta/timeline->svg tl objects images)]
+    (t/is (re-find (re-pattern (str "<g class=\"" (cta/shape-css-class bid) "\" opacity=\"0.5\">"
+                                    "<g><g transform=\"translate\\(-100 -50\\)\" fill=\"none\"><rect class=\"board\"/></g></g>"
+                                    "<g clip-path=\"url\\(#penpot-clip-" bid "\\)\"><g class=\"" (cta/shape-css-class sid) "\""))
+                   svg)
+          "the board and its layers, clipped by it, in a group of its opacity")
+    (t/is (re-find #"translate\(40px, 0px\)" svg) "which its animation moves")
+    (t/is (re-find #"transform-origin: 100px 50px;" svg) "around its middle")
+    (t/testing "a board that does not play keeps none"
+      (let [svg (cta/timeline->svg (cta/make-timeline {:board-id bid :duration 1000})
+                                   (assoc-in objects [bid :opacity] 1) images)]
+        (t/is (not (str/includes? svg (str "class=\"" (cta/shape-css-class bid) "\""))))))))
 
 (t/deftest track-origin-defaults-to-center
   (t/is (= {:x 0.5 :y 0.5} (cta/track-origin nil)))

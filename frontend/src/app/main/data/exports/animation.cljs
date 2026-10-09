@@ -12,6 +12,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.modifiers :as cgm]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
@@ -589,7 +590,8 @@
     vectors, see `app.main.data.exports.svg-vectors`);
   - `:svg/appearance`, what an SVG keeps as it rests (see
     `svg-static?`; its CSS plays the rest on its vectors);
-  - `:svg/size` and `:lottie/size`, an animated width or height;
+  - `:svg/size`, an animated width or height SVG plays as a stretch
+    (see `cta/svg-sized?`), and `:lottie/size`, any;
   - `:svg/blur`, an animated blur, which browsers draw stronger than the
     canvas, and `:lottie/blur`, a blur, which players draw at their own
     strength;
@@ -614,6 +616,14 @@
           idset     (set layer-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
           size?     (or (contains? animated :width) (contains? animated :height))
+          ;; SVG plays some on the vectors
+          stretch?  (boolean
+                     (some (fn [[id track]]
+                             (let [shape (get objects id)]
+                               (and (some? shape)
+                                    (some #(contains? #{:width :height} (:property %)) (:keyframes track))
+                                    (not (cta/svg-sized? shape track)))))
+                           (:tracks resolved)))
           units     (cta/unit-timelines resolved objects)
           table
           [[:lottie/text lottie-formats (some?* #(= :text (:type %)))]
@@ -629,7 +639,7 @@
            [:svg/appearance #{:svg}
             (boolean (some (fn [[id track]] (some-> (get objects id) (svg-static? track)))
                            (:tracks resolved)))]
-           [:svg/size #{:svg} size?]
+           [:svg/size #{:svg} stretch?]
            [:lottie/size lottie-formats size?]
            [:svg/blur #{:svg} (contains? animated :blur)]
            [:lottie/shadow lottie-formats
@@ -1792,10 +1802,10 @@
   texts. A layer at a time, as `collect-layer-images` takes them."
   [objects tl texts {:keys [yield cancelled? on-progress]}]
   (let [board-id (:board-id tl)
-        layers   (cta/export-layer-ids objects board-id (:tracks tl))
+        resolved (cta/resolve-animations tl objects)
+        layers   (cta/svg-export-layer-ids objects resolved)
         drawn    (into [board-id] (remove texts) layers)
         drawable (svgv/without-layers objects (set layers))
-        resolved (cta/resolve-animations tl objects)
         animated #(into #{} (map :property) (dm/get-in resolved [:tracks % :keyframes]))
         yield    (or yield default-yield)
         n        (count drawn)]
@@ -1833,7 +1843,10 @@
         ;; the pictures (or vectors) of the layers, then of the units of
         ;; split texts
         n-layers (if vectors?
-                   (count (remove texts (layer-ids-to-shoot objects tl nil)))
+                   (->> (cta/svg-export-layer-ids objects (cta/resolve-animations tl objects))
+                        (cons board-id)
+                        (remove texts)
+                        (count))
                    (count (layer-ids-to-shoot objects tl skip?)))
         total    (+ n-layers (unit-shot-count texts))
         pictures (phase-progress on-progress :layers)]
@@ -1869,7 +1882,8 @@
                                              :on-progress (fn [j _] (pictures (+ n-layers j) total))}))
             result (do (throw-if-cancelled cancelled?)
                        (markup-file tl objects board format (merge images units)
-                                    {:ids? ids? :bbox? bbox? :fonts (:fonts vectors)}))]
+                                    {:ids? ids? :bbox? bbox? :fonts (:fonts vectors)
+                                     :propagate cgm/set-objects-modifiers}))]
       (when on-progress
         (on-progress {:phase :write :current 1 :total 1}))
       (assoc result :name (or (:name board) (:name tl))))))

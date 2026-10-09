@@ -66,3 +66,19 @@
     (t/is (str/includes? (svgv/layer-markup objects (:id a) #{}) "feOffset") "at rest")
     (t/is (not (str/includes? (svgv/layer-markup objects (:id a) #{:shadow-offset-x}) "feOffset"))
           "played by CSS")))
+
+(t/deftest the-uses-of-a-layer-are-copies
+  ;; CSS plays on the elements, not on the copies a `<use>` draws.
+  (t/is (= "<g><defs><clipPath id=\"c\"><rect x=\"1\" style=\"stroke:red\"></rect></clipPath></defs><rect x=\"1\" clip-path=\"url(#c)\" style=\"fill:none;stroke:red\"></rect></g>"
+           (svgv/inline-uses (str "<g><defs><clipPath id=\"c\"><use href=\"#s\"></use></clipPath>"
+                                  "<rect x=\"1\" style=\"stroke:red\" id=\"s\"></rect></defs>"
+                                  "<use href=\"#s\" clip-path=\"url(#c)\" style=\"fill:none\"></use></g>")))
+        "the style of the element over the one of the use")
+  (doseq [alignment [:inner :outer]]
+    (let [a (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20
+                              :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                         :stroke-style :solid :stroke-alignment alignment}]})
+          {:keys [objects]} (board-with a)
+          markup (svgv/layer-markup objects (:id a) #{})]
+      (t/is (not (str/includes? markup "<use")) (name alignment))
+      (t/is (not (str/includes? markup "id=\"stroke-shape")) "nor what they used"))))

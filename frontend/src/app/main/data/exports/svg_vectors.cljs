@@ -72,6 +72,47 @@
                         #"<(path|rect|ellipse|circle|polygon|polyline|line) "
                         "<$1 pathLength=\"1\" ")))))
 
+(defn- merged-attrs
+  "The attributes of a copy of an element of the attributes
+  `element-attrs` a `<use>` of the attributes `use-attrs` draws: both,
+  the style of the element over the one of the `<use>`, which passes on
+  only what the element has not."
+  [element-attrs use-attrs]
+  (let [style-re #"(?:^| )style=\"([^\"]*)\""
+        style    (->> [use-attrs element-attrs]
+                      (keep #(second (re-find style-re %)))
+                      (remove str/blank?)
+                      (str/join ";"))]
+    (->> [(str/replace element-attrs style-re "")
+          (str/replace use-attrs style-re "")
+          (when-not (str/blank? style) (str "style=\"" style "\""))]
+         (map str/trim)
+         (remove str/blank?)
+         (str/join " "))))
+
+(defn inline-uses
+  "`markup` with each `<use>` of an element in it a copy of that element,
+  which goes: the elements an SVG draws are those its CSS animates (see
+  `cta/svg-appearance-css`), as Chrome and Firefox do not play the
+  animations of an element on the copies `<use>`s draw of it. The SVG
+  renderer draws inner and outer strokes so."
+  [markup]
+  (let [elements (into {}
+                       (map (fn [[whole tag before id after]]
+                              [id {:whole whole :tag tag :attrs (str before " " after)}]))
+                       (re-seq #"<(\w+) ((?:[^>]*? )?)id=\"([^\"]+)\"([^>]*)></\1>" markup))
+        used     (volatile! #{})
+        copied   (.replace markup
+                           (js/RegExp. "<use href=\"#([^\"]+)\"([^>]*)></use>" "g")
+                           (fn [whole id attrs]
+                             (if-let [{:keys [tag] element-attrs :attrs} (get elements id)]
+                               (do (vswap! used conj id)
+                                   (str "<" tag " " (merged-attrs element-attrs attrs) "></" tag ">"))
+                               whole)))]
+    (reduce (fn [markup id] (.join (.split markup (:whole (get elements id))) ""))
+            copied
+            @used)))
+
 (mf/defc ^:private layer-svg*
   [{:keys [objects shape]}]
   (let [wrapper (mf/with-memo [objects]
@@ -86,15 +127,17 @@
 (defn layer-markup
   "The SVG of the shape `id` of `objects` (see `without-layers`) at rest,
   as Penpot's SVG renderer draws it, its images embedded when their data
-  URIs are cached (see `load-media`), without metadata. `animated` is
-  what its animation plays (see `rest-shape`)."
+  URIs are cached (see `load-media`), without metadata, its `<use>`s
+  copies (see `inline-uses`). `animated` is what its animation plays
+  (see `rest-shape`)."
   [objects id animated]
   (let [markup (rds/renderToStaticMarkup
                 (mf/element layer-svg* #js {:objects objects
                                             :shape (rest-shape (get objects id) animated)}))]
     (cond-> (-> markup
                 (str/replace #"^<svg[^>]*>" "")
-                (str/replace #"</svg>$" ""))
+                (str/replace #"</svg>$" "")
+                (inline-uses))
       (some trim-properties animated)
       (with-path-length id))))
 
