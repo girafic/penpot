@@ -542,13 +542,26 @@
 (def ^:private lottie-formats
   #{:lottie :dotlottie})
 
-(def ^:private appearance-properties
-  "What the pictures of an SVG export keep as they rest: everything but
-  the moves, turns, scales, opacity and blur of a layer."
-  #{:r1 :r2 :r3 :r4 :fill-color :fill-opacity
-    :stroke-color :stroke-opacity :stroke-width
-    :shadow-offset-x :shadow-offset-y :shadow-blur :shadow-spread :shadow-color :shadow-opacity
-    :trim-start :trim-end :trim-offset :background-blur})
+(def ^:private svg-static-properties
+  "What an SVG of vectors keeps as it rests (see `cta/svg-appearance-css`):
+  the spread of shadows, which CSS has not (the background blur has an
+  issue of its own)."
+  #{:shadow-spread})
+
+(defn- svg-static?
+  "Whether `track` animates on `shape` what an SVG keeps as it rests:
+  `svg-static-properties`, the strokes and trim of a text, uneven corners
+  (see `cta/svg-even-corners?`) or the shadows of one with an inner
+  shadow, which CSS does not draw."
+  [shape track]
+  (let [props (into #{} (map :property) (:keyframes track))]
+    (boolean
+     (or (some svg-static-properties props)
+         (and (= :text (:type shape))
+              (some #{:stroke-color :stroke-opacity :stroke-width :trim-start :trim-end :trim-offset} props))
+         (and (some #{:r1 :r2 :r3 :r4} props) (not (cta/svg-even-corners? shape track)))
+         (and (some #{:shadow-offset-x :shadow-offset-y :shadow-blur :shadow-color :shadow-opacity} props)
+              (some #(= :inner-shadow (:style %)) (:shadow shape)))))))
 
 (defn- shown
   "The items of `items` (a shadow, a stroke, a blur, or a vector of them)
@@ -574,9 +587,8 @@
     masks or paints (see `cta/lottie-vector-layer?`); `:svg/units`, the
     units of split texts, which SVG has as pictures (its layers are
     vectors, see `app.main.data.exports.svg-vectors`);
-  - `:svg/appearance`, animated fills, strokes, corners, shadows or
-    trims, which SVG keeps as they rest (its CSS plays moves, turns,
-    scales, opacity and blur);
+  - `:svg/appearance`, what an SVG keeps as it rests (see
+    `svg-static?`; its CSS plays the rest on its vectors);
   - `:svg/size` and `:lottie/size`, an animated width or height;
   - `:svg/blur`, an animated blur, which browsers draw stronger than the
     canvas, and `:lottie/blur`, a blur, which players draw at their own
@@ -614,7 +626,9 @@
                                     (not (cta/lottie-vector-layer? objects idset id)))))
                            (cons board-id layer-ids)))]
            [:svg/units #{:svg} (boolean (seq units))]
-           [:svg/appearance #{:svg} (boolean (some appearance-properties animated))]
+           [:svg/appearance #{:svg}
+            (boolean (some (fn [[id track]] (some-> (get objects id) (svg-static? track)))
+                           (:tracks resolved)))]
            [:svg/size #{:svg} size?]
            [:lottie/size lottie-formats size?]
            [:svg/blur #{:svg} (contains? animated :blur)]

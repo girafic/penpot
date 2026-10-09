@@ -46,3 +46,23 @@
     (t/is (str/includes? markup "feGaussianBlur") "its blur, at rest")
     (t/is (not (str/includes? (svgv/layer-markup objects (:id a) #{:blur}) "feGaussianBlur"))
           "but the one CSS plays")))
+
+(t/deftest the-strokes-of-a-trimmed-layer-are-one-long
+  (let [a (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20
+                            :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                       :stroke-style :solid :stroke-alignment :center}]})
+        {:keys [objects]} (board-with a)
+        plain   (svgv/layer-markup objects (:id a) #{})
+        trimmed (svgv/layer-markup objects (:id a) #{:trim-end})]
+    (t/is (not (str/includes? plain "pathLength")))
+    (t/is (= 1 (count (re-seq #"pathLength=\"1\"" trimmed))) "its stroke, not its fill")))
+
+(t/deftest drop-shadows-css-plays-are-not-drawn
+  (let [shadow {:id (random-uuid) :offset-x 4 :offset-y 4 :blur 8 :spread 0 :hidden false
+                :color {:color "#000000" :opacity 0.3}}
+        a (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20
+                            :shadow [(assoc shadow :style :drop-shadow)]})
+        {:keys [objects]} (board-with a)]
+    (t/is (str/includes? (svgv/layer-markup objects (:id a) #{}) "feOffset") "at rest")
+    (t/is (not (str/includes? (svgv/layer-markup objects (:id a) #{:shadow-offset-x}) "feOffset"))
+          "played by CSS")))

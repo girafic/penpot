@@ -3609,6 +3609,17 @@
        (css-color (get-in shadow [:color :color])
                   (get-in shadow [:color :opacity]))))
 
+(defn- css-drop-shadow
+  "The CSS `drop-shadow()` of a drop shadow, as SVG plays it: its blur a
+  standard deviation, as the SVG renderer draws it; no spread."
+  [shadow]
+  (str "drop-shadow(" (fmt (:offset-x shadow)) "px "
+       (fmt (:offset-y shadow)) "px "
+       (fmt (/ (or (:blur shadow) 0) 2)) "px "
+       (css-color (get-in shadow [:color :color])
+                  (get-in shadow [:color :opacity]))
+       ")"))
+
 (def ^:private css-transform-properties
   "The properties the CSS of an animation plays through `transform`."
   #{:x :y :width :height :scale-x :scale-y :rotation})
@@ -3671,13 +3682,49 @@
       (contains? values :background-blur)
       (assoc :backdrop-blur (:background-blur values)))))
 
+(declare svg-group-declarations css-declarations)
+
 (defn- values->declarations
   "Build the CSS declarations (transform, opacity, fill, stroke, shadow,
   blur) for `shape` given the interpolated `values` at one keyframe stop
   (see `frame-values`). A `transform` only when the position, size, scale
   or rotation of the shape plays, as it replaces the one the shape has at
   rest: with `rest-transform`, that one of the code it plays in, kept
-  between its turn and its scale."
+  between its turn and its scale. For an SVG (`svg?`) the group of a
+  layer plays its transform, opacity, drop shadows and blur, as a CSS
+  `filter`; its fills, strokes, corners and trim play on its elements
+  (see `svg-appearance-css`)."
+  ([shape values origin rest-transform]
+   (values->declarations shape values origin rest-transform false))
+  ([shape values origin rest-transform svg?]
+   (if svg?
+     (svg-group-declarations shape values origin)
+     (css-declarations shape values origin rest-transform))))
+
+(defn- svg-group-declarations
+  [shape values origin]
+  (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity blur] :as frame}
+        (frame-values shape values origin)
+        shadows (when (contains? frame :box-shadow)
+                  (->> (apply-shadows (:shadow shape) values)
+                       (remove :hidden)
+                       (filter #(= :drop-shadow (:style %)))
+                       (map css-drop-shadow)))
+        filters (cond-> (vec shadows)
+                  (contains? frame :blur) (conj (str "blur(" (fmt blur) "px)")))]
+    (cond-> []
+      (contains? frame :translate-x)
+      (conj (str "transform: translate(" (fmt translate-x) "px, " (fmt translate-y) "px) "
+                 "rotate(" (fmt rotate) "deg) "
+                 "scale(" (fmt scale-x) ", " (fmt scale-y) ");"))
+
+      (contains? frame :opacity)
+      (conj (str "opacity: " (fmt opacity) ";"))
+
+      (or (contains? frame :box-shadow) (contains? frame :blur))
+      (conj (str "filter: " (if (seq filters) (str/join " " filters) "none") ";")))))
+
+(defn- css-declarations
   [shape values origin rest-transform]
   (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity border-radius
                 background-color border-color border-width box-shadow blur backdrop-blur]
@@ -3725,7 +3772,7 @@
     (some? (:easing keyframe))          (easing->css (:easing keyframe))))
 
 (defn- track->keyframes-css
-  [timeline shape track kf-name origin rest-transform]
+  [timeline shape track kf-name origin rest-transform & {:keys [svg?]}]
   (let [duration (max 1 (:duration timeline))
         sid      (:shape-id track)
         kfs      (:keyframes track)
@@ -3739,7 +3786,7 @@
                    (let [values     (get (values-at timeline t) sid {})
                          pct        (fmt (* 100.0 (/ (double t) duration)))
                          seg-timing (some #(when (= (:time %) t) (keyframe-timing %)) kfs)
-                         decls      (cond-> (values->declarations shape values origin rest-transform)
+                         decls      (cond-> (values->declarations shape values origin rest-transform svg?)
                                       (and seg-timing (< t duration))
                                       (conj (str "animation-timing-function: " seg-timing ";")))]
                      (str "  " pct "% { " (str/join " " decls) " }")))]
@@ -3764,10 +3811,11 @@
   text and its index), its `transform-origin` (of the same), its CSS
   `display`, if any (an inline element of a page takes no transform),
   and `:adjust`, if any, a function of a text and the timeline of its
-  units (see `unit-timelines`) giving the one to play."
+  units (see `unit-timelines`) giving the one to play. With `:svg?`, the
+  declarations of the groups of an SVG (see `values->declarations`)."
   ([timeline objects]
    (timeline->css timeline objects nil))
-  ([timeline objects {:keys [ids selector origin transform units]}]
+  ([timeline objects {:keys [ids selector origin transform units svg?]}]
    (let [timeline (-> timeline
                       (flatten-splits (or (:kinds units) #{}) (or (:texts units) (constantly true)))
                       (resolve-animations objects)
@@ -3813,7 +3861,8 @@
                                      (str comment "\n"
                                           (track->keyframes-css timeline shape track kf-name
                                                                 (position-origin timeline objects sid)
-                                                                (when transform (transform shape))) "\n\n"
+                                                                (when transform (transform shape))
+                                                                :svg? svg?) "\n\n"
                                           selector " {\n  animation: " kf-name " "
                                           duration "ms linear " iter ";\n"
                                           "  transform-origin: "
@@ -4929,6 +4978,150 @@
         (recur (next ids) (assoc used base n) (assoc out id unique)))
       out)))
 
+(def ^:private svg-fill-properties #{:fill-color :fill-opacity})
+(def ^:private svg-stroke-properties #{:stroke-color :stroke-opacity :stroke-width})
+(def ^:private svg-radius-properties #{:r1 :r2 :r3 :r4})
+(def ^:private svg-trim-properties #{:trim-start :trim-end :trim-offset})
+
+(defn svg-even-corners?
+  "Whether an SVG of vectors plays the corners `track` animates on
+  `shape` (see `svg-appearance-css`): a rectangle or board whose four
+  corners are alike at rest and at each keyframe, which the SVG renderer
+  draws as a `rect`."
+  [shape track]
+  (let [corners (fn [values] (map #(get values % (get shape % 0)) [:r1 :r2 :r3 :r4]))
+        even?   #(apply = (corners %))]
+    (and (contains? #{:rect :frame} (:type shape))
+         (even? {})
+         (every? (fn [time] (even? (into {} (keep (fn [kf] (when (= time (:time kf)) [(:property kf) (:value kf)])))
+                                         (:keyframes track))))
+                 (into #{} (comp (filter #(svg-radius-properties (:property %))) (map :time)) (:keyframes track))))))
+
+(defn- indexed-value
+  "The value of a property at `index` in `values` (see `values-at`): by
+  index for fills, strokes and shadows."
+  [v index]
+  (if (map? v) (get v index) v))
+
+(defn- svg-trim-declarations
+  "The dash of the strokes of a layer drawn from `:trim-start` to
+  `:trim-end` moved along by `:trim-offset` of `values`, on outlines of
+  length 1 (the vectors of the layer have a `pathLength` of 1)."
+  [values]
+  (when (some #(contains? values %) svg-trim-properties)
+    (let [{:keys [trim-start trim-end trim-offset]} (merge trim-properties (select-keys values svg-trim-properties))
+          length (mth/clamp (- trim-end trim-start) 0 1)]
+      [(str "stroke-dasharray: " (fmt length) " " (fmt (- 1 length)) ";")
+       (str "stroke-dashoffset: " (fmt (- (+ trim-start trim-offset))) ";")])))
+
+(defn- svg-targets
+  "What plays the appearance `props` animates on `shape` in an SVG of
+  vectors, by element: `[selectors declarations properties]` each, the
+  selectors of its elements as the SVG renderer draws them, the
+  declarations of the `values` of a stop and the properties they read."
+  [shape track props]
+  (let [sid       (:id shape)
+        text?     (= :text (:type shape))
+        fills     (as-vec (:fills shape))
+        strokes   (as-vec (:strokes shape))
+        kf-index  (fn [pset]
+                    (into (sorted-set)
+                          (comp (filter #(pset (:property %))) (map #(or (:index %) 0)))
+                          (:keyframes track)))
+        trim?     (some svg-trim-properties props)
+        fill-targets
+        (for [index (kf-index svg-fill-properties)
+              :when (or text? (< index (count fills)))]
+          [[(cond
+              text?               (str "[id=\"fills-" sid "\"] > text")
+              (<= (count fills) 1) (str "[id=\"fills-" sid "\"] > :not(defs)")
+              :else               (str "[id=\"shape-" sid "\"] > defs > pattern > g > :nth-child("
+                                       (- (count fills) index) ")"))]
+           (fn [values]
+             (let [color   (indexed-value (:fill-color values) index)
+                   opacity (indexed-value (:fill-opacity values) index)]
+               (cond-> []
+                 (some? color)   (conj (str "fill: " color ";"))
+                 (some? opacity) (conj (str "fill-opacity: " (fmt opacity) ";")))))
+           svg-fill-properties])
+        stroke-targets
+        (when-not text?
+          (mapcat
+           (fn [index]
+             (let [stroke    (get strokes index)
+                   alignment (:stroke-alignment stroke :center)
+                   ;; inner and outer strokes are drawn twice as wide, then cut
+                   factor    (if (= :center alignment) 1 2)
+                   group     (str ".strokes[id$=\"-" sid "\"] > :nth-child(" (- (count strokes) index) ")")
+                   paint     (case alignment
+                               :inner (str group ".inner-stroke-shape > defs > [id^=\"stroke-shape\"]")
+                               :outer (str group ".outer-stroke-shape > use[mask]")
+                               (str group ".stroke-shape > :not(defs)"))
+                   width     #(when-let [w (indexed-value (:stroke-width %) index)]
+                                (str "stroke-width: " (fmt (* factor w)) ";"))]
+               (cond-> [[[paint]
+                         (fn [values]
+                           (let [color   (indexed-value (:stroke-color values) index)
+                                 opacity (indexed-value (:stroke-opacity values) index)]
+                             (cond-> (vec (svg-trim-declarations values))
+                               (some? color)   (conj (str "stroke: " color ";"))
+                               (some? opacity) (conj (str "stroke-opacity: " (fmt opacity) ";"))
+                               (some? (width values)) (conj (width values)))))
+                         (into svg-stroke-properties svg-trim-properties)]]
+                 ;; the mask of an outer stroke is as wide
+                 (and (= :outer alignment) (contains? props :stroke-width))
+                 (conj [[(str group ".outer-stroke-shape > defs > mask > use:first-child")]
+                        (fn [values] (keep identity [(width values)]))
+                        #{:stroke-width}]))))
+           (into (kf-index svg-stroke-properties)
+                 (when trim? (range (count strokes))))))
+        radius-targets
+        (when (and (some svg-radius-properties props) (svg-even-corners? shape track))
+          [[[(str "[id=\"fills-" sid "\"] > rect")
+             (str ".strokes[id$=\"-" sid "\"] rect")
+             (str "[id=\"shape-" sid "\"] > defs > clipPath > rect")]
+            (fn [values]
+              (when-let [r (some #(get values %) [:r1 :r2 :r3 :r4])]
+                [(str "rx: " (fmt r) "px;") (str "ry: " (fmt r) "px;")]))
+            svg-radius-properties]])]
+    (concat fill-targets (distinct stroke-targets) radius-targets)))
+
+(defn svg-appearance-css
+  "The CSS that plays the fills, strokes, corners and trim of the layers
+  of an SVG of vectors on their elements (see `timeline->svg`), as
+  Penpot's SVG renderer draws them: `fills-<id>` holds the fills (more
+  than one in a pattern, in reverse order), `strokes-…-<id>` the strokes,
+  in reverse order, an inner or outer one painted twice as wide. Corners
+  play when they are alike (see `svg-even-corners?`). `timeline` is the
+  one the exports play, cut to its duration (see `cut-timeline`)."
+  [timeline objects]
+  (let [duration (max 1 (:duration timeline))
+        iter     (case (playback-mode timeline)
+                   :loop      "infinite"
+                   :ping-pong "infinite alternate"
+                   "1 both")
+        appearance (some-fn svg-fill-properties svg-stroke-properties svg-radius-properties svg-trim-properties)]
+    (->> (for [[sid track] (:tracks timeline)
+               :let  [shape (get objects sid)
+                      props (into #{} (map :property) (:keyframes track))]
+               :when (and (some? shape) (some appearance props))
+               [n [selectors declarations reads]] (map-indexed vector (svg-targets shape track props))]
+           (let [kfs   (filterv #(reads (:property %)) (:keyframes track))
+                 times (vec (into (sorted-set 0 duration)
+                                  (comp (map :time) (filter #(<= 0 % duration)))
+                                  kfs))
+                 name  (str "penpot-svg-" sid "-" n)
+                 stops (for [t times]
+                         (let [values (get (values-at timeline t) sid {})
+                               timing (some #(when (= (:time %) t) (keyframe-timing %)) kfs)
+                               decls  (cond-> (vec (declarations values))
+                                        (and timing (< t duration))
+                                        (conj (str "animation-timing-function: " timing ";")))]
+                           (str "  " (fmt (* 100.0 (/ (double t) duration))) "% { " (str/join " " decls) " }")))]
+             (str "@keyframes " name " {\n" (str/join "\n" stops) "\n}\n\n"
+                  (str/join ",\n" selectors) " {\n  animation: " name " " duration "ms linear " iter ";\n}")))
+         (str/join "\n\n"))))
+
 (defn- svg-id-attr
   [svg-ids id]
   (when-let [name (get svg-ids id)]
@@ -5024,7 +5217,8 @@
          oy       (or (:y bsr) 0)
         ;; SVG takes a share of `transform-origin` of the whole drawing
          css      (timeline->css timeline objects
-                                 {:origin (fn [shape track]
+                                 {:svg? true
+                                  :origin (fn [shape track]
                                             (let [[x y] (lottie-pivot shape ox oy (track-origin track))]
                                               (str (fmt x) "px " (fmt y) "px")))
                                   :units (when (seq unit-texts)
@@ -5051,7 +5245,10 @@
           "\" height=\"" height "\" viewBox=\"0 0 " width " " height
           "\" overflow=\"hidden\">"
           (when (seq clips) (str "<defs>" clips "</defs>"))
-          "<style>g { transform-box: view-box; }\n" (some-> fonts (str "\n")) css "</style>"
+          "<style>g { transform-box: view-box; }\n" (some-> fonts (str "\n")) css
+          (some->> (not-empty (svg-appearance-css (-> timeline expand-paths cut-timeline) objects))
+                   (str "\n\n"))
+          "</style>"
           (when bbox?
             (str "<rect width=\"" width "\" height=\"" height "\" fill=\"none\"/>"))
           backdrop

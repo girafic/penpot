@@ -1450,9 +1450,18 @@
   (t/is (= [] (issues-of :mp4)) "videos play as the canvas"))
 
 (t/deftest what-svg-keeps-as-it-rests
-  (t/is (= [:svg/appearance]
+  (t/is (= []
            (issues-of :svg :kfs [{:time 0 :property :fill-color :value "#ff0000"}
-                                 {:time 1000 :property :fill-color :value "#00ff00"}])))
+                                 {:time 1000 :property :fill-color :value "#00ff00"}]))
+        "a fill plays on its vectors")
+  (t/is (= [:svg/appearance]
+           (issues-of :svg :kfs [{:time 0 :property :shadow-spread :index 0 :value 0}
+                                 {:time 1000 :property :shadow-spread :index 0 :value 8}]))
+        "no spread of shadows")
+  (t/is (= [:svg/appearance]
+           (issues-of :svg :f #(assoc % :r1 4 :r2 4 :r3 0 :r4 0)
+                      :kfs [{:time 0 :property :r1 :value 4} {:time 1000 :property :r1 :value 12}]))
+        "nor uneven corners")
   (t/is (= [:svg/size :svg/blur]
            (issues-of :svg :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}
                                  {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}])))

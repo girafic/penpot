@@ -36,18 +36,41 @@
                      (seq (:shapes shape))
                      (update :shapes #(into [] (remove layer-ids) %))))))
 
+(def ^:private shadow-properties
+  #{:shadow-offset-x :shadow-offset-y :shadow-blur :shadow-spread :shadow-color :shadow-opacity})
+
+(def ^:private trim-properties
+  #{:trim-start :trim-end :trim-offset})
+
 (defn- rest-shape
   "`shape` as its layer draws it: without its opacity, which the group of
   the layer has, and without what the animation `animated` (properties)
-  plays over it, which would else show twice: a blur played by CSS on
-  top of its own. A board that hides its fill in exports, without it."
+  plays over it, which would else show twice: a blur or drop shadows
+  played by CSS on its group (see `cta/svg-appearance-css`). A board
+  that hides its fill in exports, without it."
   [shape animated]
   (cond-> (dissoc shape :opacity)
     (contains? animated :blur)
     (dissoc :blur)
 
+    (some shadow-properties animated)
+    (update :shadow (fn [shadows] (filterv #(= :inner-shadow (:style %)) shadows)))
+
     (:hide-fill-on-export shape)
     (assoc :fills [])))
+
+(defn with-path-length
+  "The `markup` of the shape `id` with the outlines its strokes are drawn
+  along of length 1 (`pathLength`), so its trim plays as their dash (see
+  `cta/svg-appearance-css`): those after the start of its strokes."
+  [markup id]
+  (let [start (str/index-of markup (str "-" id "\" class=\"strokes\""))]
+    (if (nil? start)
+      markup
+      (str (subs markup 0 start)
+           (str/replace (subs markup start)
+                        #"<(path|rect|ellipse|circle|polygon|polyline|line) "
+                        "<$1 pathLength=\"1\" ")))))
 
 (mf/defc ^:private layer-svg*
   [{:keys [objects shape]}]
@@ -69,9 +92,11 @@
   (let [markup (rds/renderToStaticMarkup
                 (mf/element layer-svg* #js {:objects objects
                                             :shape (rest-shape (get objects id) animated)}))]
-    (-> markup
-        (str/replace #"^<svg[^>]*>" "")
-        (str/replace #"</svg>$" ""))))
+    (cond-> (-> markup
+                (str/replace #"^<svg[^>]*>" "")
+                (str/replace #"</svg>$" ""))
+      (some trim-properties animated)
+      (with-path-length id))))
 
 (defn- image-urls
   "The URLs of the images the shapes of `objects` draw."

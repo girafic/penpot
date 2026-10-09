@@ -876,6 +876,58 @@
           "a layer in the group its CSS plays")
     (t/is (re-find #"<style>[^<]*@font-face \{ font-family: X; \}" svg) "the fonts of its texts")))
 
+(t/deftest an-svg-plays-fills-strokes-corners-and-trim-on-its-vectors
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        bid   (:id board)
+        shape (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20 :r1 2 :r2 2 :r3 2 :r4 2
+                                :fills [{:fill-color "#ff0000" :fill-opacity 1}]
+                                :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                           :stroke-style :solid :stroke-alignment :inner}]})
+        sid   (:id shape)
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :fill-color :index 0 :value "#ff0000"})
+                  (cta/add-keyframe sid {:time 1000 :property :fill-color :index 0 :value "#0000ff"})
+                  (cta/add-keyframe sid {:time 0 :property :stroke-width :index 0 :value 2})
+                  (cta/add-keyframe sid {:time 1000 :property :stroke-width :index 0 :value 6})
+                  (cta/add-keyframe sid {:time 0 :property :trim-end :value 0})
+                  (cta/add-keyframe sid {:time 1000 :property :trim-end :value 1})
+                  (as-> tl (reduce (fn [tl r]
+                                     (-> tl
+                                         (cta/add-keyframe sid {:time 0 :property r :value 2})
+                                         (cta/add-keyframe sid {:time 1000 :property r :value 10})))
+                                   tl
+                                   [:r1 :r2 :r3 :r4])))
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        css   (cta/svg-appearance-css tl objects)]
+    (t/is (re-find (re-pattern (str "\\[id=\"fills-" sid "\"\\] > :not\\(defs\\) \\{")) css) "its fill")
+    (t/is (re-find #"0% \{ fill: #ff0000;" css))
+    (t/is (re-find #"100% \{ fill: #0000ff;" css))
+    (t/is (re-find (re-pattern (str "\\.strokes\\[id\\$=\"-" sid "\"\\] > :nth-child\\(1\\)\\.inner-stroke-shape")) css)
+          "its inner stroke")
+    (t/is (re-find #"stroke-width: 12;" css) "twice as wide, cut to the outline")
+    (t/is (re-find #"stroke-dasharray: 0 1; stroke-dashoffset: 0;" css) "its trim, as a dash")
+    (t/is (re-find #"stroke-dasharray: 1 0;" css))
+    (t/is (re-find #"rx: 10px; ry: 10px;" css) "its corners, alike")
+    (t/is (cta/svg-even-corners? shape (get-in tl [:tracks sid])))
+    (t/is (not (cta/svg-even-corners? (assoc shape :r2 0) (get-in tl [:tracks sid]))) "uneven at rest")))
+
+(t/deftest an-svg-plays-drop-shadows-as-a-filter
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        bid   (:id board)
+        shape (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20
+                                :shadow [{:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 8
+                                          :spread 0 :hidden false :color {:color "#000000" :opacity 0.5}}]})
+        sid   (:id shape)
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :shadow-offset-y :index 0 :value 4})
+                  (cta/add-keyframe sid {:time 1000 :property :shadow-offset-y :index 0 :value 20}))
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        svg   (cta/timeline->svg tl objects {})]
+    (t/is (re-find #"filter: drop-shadow\(4px 20px 4px rgba\(0, 0, 0, 0.5\)\);" svg))
+    (t/is (not (re-find #"box-shadow" svg)) "no box shadow, which SVG has not")))
+
 (t/deftest timeline->svg-nests-child-layers
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
         a     (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 40})

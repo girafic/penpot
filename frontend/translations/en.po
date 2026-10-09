@@ -9071,10 +9071,10 @@ msgid "workspace.options.export.issue.svg-units.text"
 msgstr "A text animated by characters, words or lines has each of them as an image in %s, of how it rests: they blur when scaled up."
 
 msgid "workspace.options.export.issue.svg-appearance"
-msgstr "Fill, stroke and shadow animation · Left out of %s"
+msgstr "Some effects · Left out of %s"
 
 msgid "workspace.options.export.issue.svg-appearance.text"
-msgstr "Only moves, turns, scales, fades and blurs play in %s: fills, strokes, corners, shadows and trims stay as they rest."
+msgstr "The spread of shadows, inner shadows, uneven corners and the strokes of texts stay as they rest in %s. Fills, strokes, trims, even corners, drop shadows and blur play."
 
 msgid "workspace.options.export.issue.svg-size"
 msgstr "Size animation · Stretches in %s"
