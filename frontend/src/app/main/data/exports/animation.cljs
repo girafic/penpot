@@ -587,11 +587,10 @@
   otherwise than the canvas, by format, as the Animated export panel lists
   them: a vector of kinds each, the most telling first.
 
-  - `:lottie/text`, texts, which Lottie has as pictures, and
-    `:lottie/images`, layers that draw as pictures for their effects,
-    masks or paints (see `cta/lottie-vector-layer?`) (an SVG has its
-    layers and the units of split texts as vectors, see
-    `app.main.data.exports.svg-vectors`);
+  - `:lottie/images`, layers that draw as pictures for their effects,
+    masks or paints (see `cta/lottie-vector-layer?`; texts are the
+    outlines of their glyphs, see `outline-texts`, and an SVG has its
+    layers as vectors, see `app.main.data.exports.svg-vectors`);
   - `:svg/appearance`, what an SVG keeps as it rests (see
     `svg-static?`; its CSS plays the rest on its vectors; its texts
     outlined with `:outline` of its export settings, see
@@ -638,8 +637,7 @@
           text?     #(and (= :text (:type %)) (not (contains? pictured (:id %))))
           outlined? #(and outline? (text? %))
           table
-          [[:lottie/text lottie-formats (some?* #(= :text (:type %)))]
-           [:lottie/images lottie-formats
+          [[:lottie/images lottie-formats
             (boolean (some (fn [id]
                              (let [shape (get objects id)]
                                (and (some? shape)
@@ -1258,154 +1256,10 @@
         (remove (fn [[id _]] (decorated? (get objects id))))
         (cta/unit-timelines (cta/resolve-animations timeline objects) objects)))
 
-(defn- hidden-unit
-  "The unit `base` (see `cta/unit-timelines`) hidden, at rest."
-  [base]
-  (assoc base :dx 0 :dy 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 0 :blur 0))
-
-(defn- unit-shot-keys
-  "The pictures taken of a text of `units` (see `cta/unit-timelines`), in
-  order: each unit `k`, then `:rest`, the rest of the text."
-  [{:keys [bases]}]
-  (conj (vec (range (count bases))) :rest))
-
-(defn- unit-entries
-  "The units a text shows for its picture `k`: all of its `hidden` units
-  (see `hidden-unit`) but `k`, or all of them for `:rest`. Made for its
-  picture only: a text of n units has n pictures."
-  [hidden k]
-  (if (= :rest k)
-    hidden
-    (into [] (keep-indexed (fn [j base] (when (not= j k) base))) hidden)))
-
-(defn unit-shot-count
-  "How many pictures `collect-unit-images` takes of `texts`."
-  [texts]
-  (reduce + 0 (map (fn [[_ {:keys [bases]}]] (inc (count bases))) texts)))
-
-(defn- shoot-unit
-  "The picture (see `shoot-shape-at-rest`, uncropped) of the text `shape`
-  showing its units as `entries`: `{:bytes :rect}`."
-  [shape entries {:keys [apply-shape-properties render-shape-pixels get-shape-extrect]}]
-  (let [id (:id shape)]
-    (apply-shape-properties (assoc shape :opacity 1 :text-units entries) [:opacity :text-units])
-    {:bytes (render-shape-pixels id 1 :png)
-     :rect  (when get-shape-extrect (get-shape-extrect id))}))
-
 (defn- restore-units!
   "The text `shape` back at rest, its units as designed."
   [shape {:keys [apply-shape-properties]}]
   (apply-shape-properties (assoc shape :text-units []) [:opacity :text-units]))
-
-(defn crop-picture
-  "A promise of the picture `bytes` (PNG) over the box `rect` cropped to
-  its ink, `{:bytes :rect}`, or of nil when it has no ink."
-  [bytes rect]
-  (p/let [bitmap (js/createImageBitmap (js/Blob. #js [bytes] #js {:type "image/png"}))]
-    (let [w      (.-width bitmap)
-          h      (.-height bitmap)
-          canvas (js/OffscreenCanvas. (max 1 w) (max 1 h))
-          ctx    (.getContext canvas "2d")
-          _      (.drawImage ctx bitmap 0 0)
-          data   (.-data (.getImageData ctx 0 0 (max 1 w) (max 1 h)))
-          ;; the box of the pixels that are not transparent
-          [x0 y0 x1 y1]
-          (loop [i 0 x0 w y0 h x1 -1 y1 -1]
-            (if (< i (* w h))
-              (if (pos? (aget data (+ 3 (* 4 i))))
-                (let [x (mod i w) y (quot i w)]
-                  (recur (inc i) (min x0 x) (min y0 y) (max x1 x) (max y1 y)))
-                (recur (inc i) x0 y0 x1 y1))
-              [x0 y0 x1 y1]))]
-      (when (>= x1 0)
-        (let [cw  (inc (- x1 x0))
-              ch  (inc (- y1 y0))
-              sx  (if (pos? w) (/ (:width rect) w) 1)
-              sy  (if (pos? h) (/ (:height rect) h) 1)
-              out (js/OffscreenCanvas. cw ch)]
-          (.drawImage (.getContext out "2d") bitmap x0 y0 cw ch 0 0 cw ch)
-          (p/let [blob   (.convertToBlob out #js {:type "image/png"})
-                  buffer (.arrayBuffer blob)]
-            {:bytes (js/Uint8Array. buffer)
-             :rect  {:x (+ (:x rect) (* x0 sx))
-                     :y (+ (:y rect) (* y0 sy))
-                     :width (* cw sx)
-                     :height (* ch sy)}}))))))
-
-(defn collect-unit-images
-  "A promise of the pictures of the units of the texts `texts` (see
-  `unit-texts`) of `timeline`, each cropped to its ink (see
-  `crop-picture`), as `timeline->svg` and `timeline->lottie` take them:
-  `[text-id k]` of the unit `k`, `[text-id :rest]` of the rest of the
-  text; a unit of no ink has none. One picture at a time: the page gets
-  its turn (`yield`) after each, `on-progress` hears how many are taken
-  (see `unit-shot-count`), and it stops there when `cancelled?`, the text
-  back at rest."
-  [objects timeline texts {:keys [bridge yield cancelled? on-progress]
-                           :or {bridge (default-bridge)}}]
-  (let [board   (get objects (:board-id timeline))
-        ox      (or (:x (:selrect board)) 0)
-        oy      (or (:y (:selrect board)) 0)
-        crop    (or (:crop-picture bridge) crop-picture)
-        yield   (or yield default-yield)
-        ;; the hidden units of a text, once, shared by its pictures
-        steps   (into []
-                      (mapcat (fn [[text-id units]]
-                                (let [hidden (mapv hidden-unit (:bases units))]
-                                  (map (fn [k] [text-id k hidden]) (unit-shot-keys units)))))
-                      texts)
-        n       (count steps)
-        ;; the text whose units are shown as no design has them
-        current (atom nil)
-        shoot   (fn [shots [i [text-id k hidden]]]
-                  (throw-if-cancelled cancelled?)
-                  (let [shape (get objects text-id)]
-                    (when (not= text-id @current)
-                      (reset! current text-id)
-                      (when-let [clean-modifiers (:clean-modifiers bridge)]
-                        (clean-modifiers)))
-                    (let [shot (shoot-unit shape (unit-entries hidden k) bridge)]
-                      (when (= :rest k)
-                        (restore-units! shape bridge)
-                        (reset! current nil))
-                      (when on-progress
-                        (on-progress (inc i) n))
-                      (-> (yield)
-                          (.then (fn [_] (conj shots [[text-id k] shot])))))))]
-    ;; native promises: the callers chain them (`p/let` gives promesa's)
-    (-> (reduce (fn [p step] (.then p #(shoot % step)))
-                (js/Promise.resolve [])
-                (map-indexed vector steps))
-        (.catch (fn [cause]
-                  (when-let [text-id @current]
-                    (restore-units! (get objects text-id) bridge))
-                  (throw cause)))
-        (.then (fn [shots]
-                 (-> (js/Promise.all
-                      (into-array (map (fn [[_ {:keys [bytes rect]}]]
-                                         (when (and (some? bytes) (some? rect))
-                                           (crop bytes rect)))
-                                       shots)))
-                     (.then (fn [cropped] [shots (vec cropped)])))))
-        (.then
-         (fn [[shots cropped]]
-           (into {}
-                 (keep (fn [[[key _] picture]]
-                         (when-let [{:keys [bytes rect]} picture]
-                           (let [[text-id k] key
-                                 href (str "data:image/png;base64," (u8->base64 bytes))]
-                             [key {:href href
-                                   :x (- (:x rect) ox)
-                                   :y (- (:y rect) oy)
-                                   :width (:width rect)
-                                   :height (:height rect)
-                                   :bytes bytes
-                                   :id (str "img_" text-id "_" (if (keyword? k) (name k) k))
-                                   :w (mth/round (:width rect))
-                                   :h (mth/round (:height rect))
-                                   :p href
-                                   :e 1}]))))
-                 (map vector shots cropped)))))))
 
 (defn- rest-units
   "The units `bases` (see `cta/unit-timelines`) at rest, shown."
@@ -1422,8 +1276,9 @@
   (`bridge`, see `wasm.api/text-unit-outlines`), a text at a time, which
   it sets back at rest; the page gets its turn (`yield`) after each,
   `on-progress` hears how many are done, and it stops there when
-  `cancelled?`."
-  [objects timeline texts {:keys [bridge yield cancelled? on-progress]
+  `cancelled?`. For Lottie (`lottie?`), as `timeline->lottie` takes them:
+  `{:runs [{:content :fills}] :center}` on the page."
+  [objects timeline texts {:keys [bridge yield cancelled? on-progress lottie?]
                            :or {bridge (default-bridge)}}]
   (let [board    (get objects (:board-id timeline))
         ox       (or (:x (:selrect board)) 0)
@@ -1447,16 +1302,21 @@
                                    (text-unit-outlines text-id)
                                    (finally
                                      (restore-units! shape bridge)))
+                        drawing  (fn [runs center]
+                                   (if lottie?
+                                     {:runs (mapv (fn [{:keys [paragraph span content]}]
+                                                    {:content content
+                                                     :fills (svgv/span-fills shape paragraph span)})
+                                                  runs)
+                                      :center center}
+                                     {:markup (svgv/unit-markup shape runs (animated text-id))
+                                      :x (- (:x center) ox)
+                                      :y (- (:y center) oy)
+                                      :width 0
+                                      :height 0}))
                         images   (reduce (fn [images {:keys [unit center runs]}]
-                                           (let [markup (svgv/unit-markup shape runs (animated text-id))]
-                                             (if (some? unit)
-                                               (assoc images [text-id unit]
-                                                      {:markup markup
-                                                       :x (- (:x center) ox)
-                                                       :y (- (:y center) oy)
-                                                       :width 0
-                                                       :height 0})
-                                               (assoc images [text-id :rest] {:markup markup}))))
+                                           (assoc images [text-id (if (some? unit) unit :rest)]
+                                                  (drawing runs center)))
                                          images
                                          outlines)]
                     (when on-progress
@@ -1829,7 +1689,7 @@
 (defn- markup-file
   "A promise of the SVG, Lottie or dotLottie of the board `board` playing
   `tl`, with the pictures `images` (see `collect-layer-images` and
-  `collect-unit-images`): `{:status :ok :blob :ext :mtype}`. `svg-opts`
+  `collect-unit-vectors`): `{:status :ok :blob :ext :mtype}`. `svg-opts`
   go to `cta/timeline->svg`."
   [tl objects board format images svg-opts]
   (case format
@@ -1842,7 +1702,7 @@
 
     :lottie
     (let [assets (into {} (map (fn [[id img]]
-                                 [id (select-keys img [:id :w :h :p :e :x :y])]))
+                                 [id (select-keys img [:id :w :h :p :e :x :y :runs :center])]))
                        images)
           data   (cta/timeline->lottie tl objects assets)
           json   (js/JSON.stringify (clj->js data) nil 2)]
@@ -1855,12 +1715,16 @@
     :dotlottie
     (let [name      (or (:name board) (:name tl))
           file-name #(str (:id %) ".png")
+          ;; the outlines of the units of texts are no images
           assets    (into {} (map (fn [[id img]]
-                                    [id (-> (select-keys img [:id :w :h :x :y])
-                                            (assoc :u "/images/" :p (file-name img) :e 0))]))
+                                    [id (if (some? (:runs img))
+                                          (select-keys img [:runs :center])
+                                          (-> (select-keys img [:id :w :h :x :y])
+                                              (assoc :u "/images/" :p (file-name img) :e 0)))]))
                           images)
           data      (cta/timeline->lottie tl objects assets)
-          files     (into {} (map (fn [[_ img]] [(file-name img) (:bytes img)])) images)]
+          files     (into {} (keep (fn [[_ img]] (when (some? (:bytes img)) [(file-name img) (:bytes img)])))
+                          images)]
       (p/let [blob (lottie->dotlottie data (safe-filename name "") files
                                       (not= :once (cta/playback-mode tl)))]
         {:status :ok :blob blob :ext ".lottie" :mtype dotlottie-mtype}))))
@@ -1869,10 +1733,10 @@
   "`objects` with the texts in the board of `tl`, but the split texts of
   `texts` (their units play on their own), as the outlines of their
   glyphs at rest, which WASM gives through `bridge`: `[drawn view]`, the
-  objects an SVG draws (see `svgv/outlined`; a text that paints its text
-  in more than one way, see `svgv/text-fills`, as a group of paths, see
-  `svgv/outlined-group`) and the ones its CSS takes (see
-  `svgv/outlined-view`)."
+  objects an SVG draws (see `svgv/outlined`) and the ones its CSS and a
+  Lottie take (see `svgv/outlined-view`); a text that paints its text in
+  more than one way (see `svgv/text-fills`) is a group of paths in both
+  (see `svgv/outlined-group`)."
   [objects tl texts bridge]
   (let [{:keys [shape-to-path text-unit-outlines clean-modifiers]} bridge]
     (when clean-modifiers
@@ -1889,9 +1753,8 @@
                   (let [runs (when text-unit-outlines
                                (into [] (mapcat :runs) (text-unit-outlines id)))]
                     (if (seq runs)
-                      [(merge drawn (svgv/outlined-group shape runs))
-                       (assoc view id (svgv/outlined-view shape (:content (first runs))
-                                                          (svgv/span-fills shape 0 0)))]
+                      (let [group (svgv/outlined-group shape runs)]
+                        [(merge drawn group) (merge view group)])
                       both)))))
             [objects objects]
             (->> (cfh/get-children-ids-with-self objects (:board-id tl))
@@ -1942,16 +1805,19 @@
   (let [tl       (dwa/board-export-timeline page files board-id)
         objects  (:objects page)
         board    (get objects board-id)
-        ;; split texts play their units, each its own picture
+        ;; split texts play their units, each on its own
         texts    (unit-texts objects tl)
+        vectors? (= :svg format)
+        lottie?  (contains? #{:lottie :dotlottie} format)
+        ;; Lottie draws the other texts as the outlines of their glyphs
+        ;; (see `outline-texts`)
+        shapes   (if lottie? (second (outline-texts objects tl texts bridge)) objects)
         ;; Lottie draws the layers it can as vectors, SVG all (see
         ;; `vector-layers`)
-        layers   (set (cta/export-layer-ids objects board-id (:tracks tl)))
-        vectors? (= :svg format)
+        layers   (set (cta/export-layer-ids shapes board-id (:tracks tl)))
         skip?    #(or vectors?
                       (contains? texts %)
-                      (and (#{:lottie :dotlottie} format)
-                           (cta/lottie-vector-layer? objects layers %)))
+                      (and lottie? (cta/lottie-vector-layer? shapes layers %)))
         ;; the pictures (or vectors) of the layers, then of the units of
         ;; split texts
         n-layers (if vectors?
@@ -1959,9 +1825,9 @@
                         (cons board-id)
                         (remove texts)
                         (count))
-                   (count (layer-ids-to-shoot objects tl skip?)))
-        ;; SVG outlines a split text at once
-        total    (+ n-layers (if vectors? (count texts) (unit-shot-count texts)))
+                   (count (layer-ids-to-shoot shapes tl skip?)))
+        ;; the units of a split text are outlined at once
+        total    (+ n-layers (count texts))
         pictures (phase-progress on-progress :layers)]
     ;; the board at its end, where what comes in has come
     (when on-frame
@@ -1982,7 +1848,7 @@
             images  (if vectors?
                       (:images vectors)
                       (collect-layer-images
-                       objects tl
+                       shapes tl
                        {:bridge bridge
                         :time (or time 0)
                         :yield yield
@@ -1990,14 +1856,16 @@
                         :on-progress (fn [i _] (pictures i total))
                         :skip? skip?}))
             units  (do (throw-if-cancelled cancelled?)
-                       ((if vectors? collect-unit-vectors collect-unit-images)
+                       (collect-unit-vectors
                         objects tl texts
                         {:bridge bridge
                          :yield yield
+                         :lottie? lottie?
                          :cancelled? cancelled?
                          :on-progress (fn [j _] (pictures (+ n-layers j) total))}))
             result (do (throw-if-cancelled cancelled?)
-                       (markup-file tl (or (:objects vectors) objects) board format (merge images units)
+                       (markup-file tl (if lottie? shapes (or (:objects vectors) objects)) board format
+                                    (merge images units)
                                     {:ids? ids? :bbox? bbox? :fonts (:fonts vectors)
                                      :propagate cgm/set-objects-modifiers}))]
       (when on-progress

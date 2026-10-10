@@ -9055,12 +9055,6 @@ msgid_plural "workspace.options.export.issues-count"
 msgstr[0] "1 issue to review"
 msgstr[1] "%s issues to review"
 
-msgid "workspace.options.export.issue.lottie-text"
-msgstr "Text · Exported as an image"
-
-msgid "workspace.options.export.issue.lottie-text.text"
-msgstr "%s has each text as an image of how it rests: its font is not embedded, its fills and strokes don't animate, and it blurs when scaled up."
-
 msgid "workspace.options.export.issue.lottie-images"
 msgstr "Effects and masks · Exported as images"
 

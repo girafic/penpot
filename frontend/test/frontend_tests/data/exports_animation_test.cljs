@@ -1117,6 +1117,12 @@
                    (t/is (= {:x 70 :y 20 :width 0 :height 0} (dissoc (get images [tid 1]) :markup))
                          "the middle of its box, which it turns around")
                    (t/is (str/includes? (get-in images [[tid 1] :markup]) "<path"))))
+          (.then #(dea/collect-unit-vectors objects tl texts {:bridge bridge :yield (fn [] (js/Promise.resolve nil))
+                                                              :lottie? true}))
+          (.then (fn [images]
+                   (t/is (= {:x 70 :y 20} (get-in images [[tid 1] :center])) "for Lottie, on the page")
+                   (t/is (= [content] (mapv :content (get-in images [[tid 1] :runs]))))
+                   (t/is (some? (get-in images [[tid 1] :runs 0 :fills])) "in the fills of its span")))
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally #(done))))))
 
@@ -1137,75 +1143,7 @@
     (t/is (= [false false false false] (split? lined (with {:type :fade}))))
     (t/is (= {} (dea/export-issues objects nil)))))
 
-(t/deftest each-unit-of-a-split-text-is-its-own-picture
-  (let [{:keys [objects bid tid]} (text-board)
-        tl     (cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid
-                                  {:type :fade :split :word :start 0 :duration 500})
-        shots  (atom [])
-        bridge {:clean-modifiers (fn [])
-                :apply-shape-properties (fn [shape props]
-                                          (when (some #{:text-units} props)
-                                            (swap! shots conj (:text-units shape))))
-                :render-shape-pixels (fn [_ _ _] (js/Uint8Array. #js [137 80 78 71]))
-                :get-shape-extrect (fn [_] {:x 10 :y 10 :width 200 :height 20})
-                ;; as the browser crops each to its ink
-                :crop-picture (fn [bytes rect] (p/resolved {:bytes bytes :rect (update rect :x + 5)}))}
-        texts  (dea/unit-texts objects tl)]
-    (t/is (= #{tid} (set (keys texts))))
-    (t/async
-      done
-      (-> (dea/collect-unit-images objects tl texts {:bridge bridge :yield #(js/Promise.resolve nil)})
-          (p/then (fn [images]
-                    (t/is (= #{[tid 0] [tid 1] [tid 2] [tid :rest]} (set (keys images))))
-                    (t/is (= [15 10 200 20] ((juxt :x :y :width :height) (get images [tid 1])))
-                          "where its picture is, in the board")
-                    (let [[first-shot second-shot :as all] @shots]
-                      (t/is (= [3 7] (mapv :start first-shot)) "the first word alone: the others hidden")
-                      (t/is (every? #(zero? (:opacity %)) first-shot))
-                      (t/is (= [0 7] (mapv :start second-shot)))
-                      (t/is (= 3 (count (nth all 3))) "then all of them: what is no word")
-                      (t/is (= [[3 7] [0 7] [0 3] [0 3 7]] (mapv #(mapv :start %) (take 4 all)))
-                            "each picture hides the other units, the last all of them")
-                      (t/is (every? #(zero? (:opacity %)) (mapcat identity (take 4 all))))
-                      (t/is (= [] (last all)) "and the text back at rest"))))
-          (p/catch (fn [cause] (t/is (nil? cause) (str cause))))
-          (p/finally done)))))
-
-(t/deftest the-unit-pictures-stop-at-a-cancel-with-the-text-at-rest
-  (let [{:keys [objects bid tid]} (text-board)
-        tl       (cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid
-                                    {:type :fade :split :word :start 0 :duration 500})
-        shots    (atom [])
-        cancel?  (atom false)
-        progress (atom [])
-        bridge   {:clean-modifiers (fn [])
-                  :apply-shape-properties (fn [shape props]
-                                            (when (some #{:text-units} props)
-                                              (swap! shots conj (:text-units shape))))
-                  :render-shape-pixels (fn [_ _ _] (js/Uint8Array. #js [137 80 78 71]))
-                  :get-shape-extrect (fn [_] {:x 10 :y 10 :width 200 :height 20})
-                  :crop-picture (fn [bytes rect] (p/resolved {:bytes bytes :rect rect}))}
-        texts    (dea/unit-texts objects tl)]
-    (t/is (= 4 (dea/unit-shot-count texts)) "three words and the rest")
-    (t/async
-      done
-      (-> (dea/collect-unit-images objects tl texts
-                                   {:bridge bridge
-                                    :yield #(js/Promise.resolve nil)
-                                    :cancelled? #(deref cancel?)
-                                    ;; cancelled after the first picture
-                                    :on-progress (fn [i n]
-                                                   (swap! progress conj [i n])
-                                                   (reset! cancel? true))})
-          (.then (fn [_] (t/is false "it should stop")))
-          (.catch (fn [cause]
-                    (t/is (= :export-cancelled (:type (ex-data cause))))
-                    (t/is (= [[1 4]] @progress) "one picture of four")
-                    (t/is (= 2 (count @shots)) "one picture, then")
-                    (t/is (= [] (last @shots)) "the text back at rest")))
-          (.finally (finish done))))))
-
-(t/deftest a-markup-export-counts-the-unit-pictures
+(t/deftest a-markup-export-counts-its-pictures-and-split-texts
   (let [{:keys [objects bid tid]} (text-board)
         tl       (cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid
                                     {:type :fade :split :word :start 0 :duration 500})
@@ -1237,7 +1175,7 @@
     (t/async
       done
       (-> (export :lottie)
-          (.then #(counted % 4 "the pictures of the units of the text (the board is vectors)"))
+          (.then #(counted % 1 "the split text, outlined at once (the board is vectors)"))
           (.then #(export :svg))
           (.then #(counted % (+ 1 1) "the board, then the text, whose units are outlined at once"))
           (.catch (fn [cause] (t/is false (ex-message cause))))

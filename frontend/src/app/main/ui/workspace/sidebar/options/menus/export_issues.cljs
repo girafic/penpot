@@ -19,8 +19,7 @@
    [rumext.v2 :as mf]))
 
 (def ^:private issue-icons
-  {:lottie/text     i/text
-   :lottie/images   i/img
+  {:lottie/images   i/img
    :svg/appearance  i/drop-shadow
    :svg/size        i/size-horizontal
    :lottie/size     i/size-horizontal

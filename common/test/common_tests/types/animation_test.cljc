@@ -3402,6 +3402,37 @@
     (t/testing "without pictures, the text plays whole"
       (let [svg (cta/timeline->svg tl objects {})]
         (t/is (not (str/includes? svg "penpot-unit-")))))
+    (t/testing "Lottie: the outlines of the units, each a shape layer turning around the middle of its box"
+      (let [content (path/from-plain [{:command :move-to :params {:x 160 :y 200}}
+                                      {:command :line-to :params {:x 180 :y 200}}
+                                      {:command :line-to :params {:x 180 :y 220}}
+                                      {:command :close-path :params {}}])
+            red     [{:fill-color "#ff0000" :fill-opacity 1}]
+            assets  (into {[sid :rest] {:runs [{:content content :fills red}]}}
+                          (map (fn [k] [[sid k] {:runs [{:content content :fills red}]
+                                                 :center {:x (+ 170 (* 60 k)) :y 210}}]))
+                          (range 3))
+            L       (cta/timeline->lottie tl objects assets)
+            layer   (first (:layers L))
+            comp    (some #(when (= (:refId layer) (:id %)) %) (:assets L))]
+        (t/is (= 0 (:ty layer)) "a precomp")
+        (t/is (= [4 4 4 4] (mapv :ty (:layers comp))) "three words and the rest, as vectors")
+        (t/is (not-any? :p (:assets L)) "and no pictures")
+        (t/is (close-all? [130 110 0] (get-in comp [:layers 1 :ks :a :k])) "the second word around its middle")
+        (t/is (= "sh" (get-in comp [:layers 1 :shapes 0 :it 0 :ty])) "its outline")))
+    (t/testing "Lottie: a unit blurs as a layer blur of its radius"
+      (let [tl     (text-timeline board sid {:type :blur :start 0 :duration 600 :amount 8 :split :word :spread 1})
+            square (path/from-plain [{:command :move-to :params {:x 160 :y 200}}
+                                     {:command :line-to :params {:x 180 :y 200}}
+                                     {:command :close-path :params {}}])
+            L      (cta/timeline->lottie tl objects {[sid 0] {:runs [{:content square :fills []}]
+                                                              :center {:x 170 :y 210}}})
+            layer  (first (:layers L))
+            unit   (-> (some #(when (= (:refId layer) (:id %)) %) (:assets L)) :layers first)
+            blur   (get-in unit [:ef 0 :ef 0 :v])]
+        (t/is (= "ADBE Gaussian Blur 2" (get-in unit [:ef 0 :mn])))
+        (t/is (= 1 (:a blur)) "playing its keyframes")
+        (t/is (mth/close? (cta/lottie-blurriness 8) (get-in blur [:k 0 :s 0])) "from 8 px")))
     (t/testing "SVG: the vectors of the units, each turning around the middle of its box"
       (let [images {[sid :rest] {:markup "<path class=\"rest\"/>"}
                     [sid 0] {:markup "<path class=\"hi\"/>" :x 70 :y 110 :width 0 :height 0}

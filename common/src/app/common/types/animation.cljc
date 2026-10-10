@@ -4801,35 +4801,82 @@
   "The image layer of the unit `k` of a text, whose picture is `asset`
   (over its box in the board, see `timeline->lottie`), playing the
   keyframes of the unit, `track` (see `unit-timelines`): it moves by them
-  from where it rests and turns and scales around its middle."
+  from where it rests, turns and scales around its middle and blurs as
+  a layer blur of their radius."
   [name k asset track duration]
   (let [by-prop (group-by :property (:keyframes track))
         w       (double (or (:w asset) 0))
         h       (double (or (:h asset) 0))
         cx      (+ (or (:x asset) 0) (/ w 2))
-        cy      (+ (or (:y asset) 0) (/ h 2))]
-    {:ddd 0
-     :ty 2
-     :nm (str name " " (inc k))
-     :refId (:id asset)
-     :sr 1
-     :ks {:o (lottie-prop-1d (by-prop :opacity) (fn [v] (* 100.0 v)) 100.0)
-          :r (lottie-prop-1d (by-prop :rotation) identity 0)
-          :p {:s true
-              :x (lottie-prop-1d (by-prop :x) (fn [v] (+ cx v)) cx)
-              :y (lottie-prop-1d (by-prop :y) (fn [v] (+ cy v)) cy)}
-          :a {:a 0 :k [(/ w 2) (/ h 2) 0]}
-          :s (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y))}
-     :ao 0
-     :ip 0
-     :op (ms->frames duration)
-     :st 0
-     :bm 0}))
+        cy      (+ (or (:y asset) 0) (/ h 2))
+        blur    (lottie-blur-effect {} by-prop)]
+    (cond-> {:ddd 0
+             :ty 2
+             :nm (str name " " (inc k))
+             :refId (:id asset)
+             :sr 1
+             :ks {:o (lottie-prop-1d (by-prop :opacity) (fn [v] (* 100.0 v)) 100.0)
+                  :r (lottie-prop-1d (by-prop :rotation) identity 0)
+                  :p {:s true
+                      :x (lottie-prop-1d (by-prop :x) (fn [v] (+ cx v)) cx)
+                      :y (lottie-prop-1d (by-prop :y) (fn [v] (+ cy v)) cy)}
+                  :a {:a 0 :k [(/ w 2) (/ h 2) 0]}
+                  :s (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y))}
+             :ao 0
+             :ip 0
+             :op (ms->frames duration)
+             :st 0
+             :bm 0}
+      (some? blur) (assoc :ef blur))))
+
+(defn- lottie-run-groups
+  "The Lottie groups drawing the outlines of the glyphs of the text `text`,
+  its `runs` (`[{:content :fills}]`, on the page as they are, see
+  `timeline->lottie`), in the board at `ox`, `oy`: a path of each in its
+  fills, with the strokes of the text."
+  [text runs ox oy]
+  (into []
+        (mapcat (fn [{:keys [content fills]}]
+                  (lottie-vector-groups (path/update-geometry {:type :path :fills fills :strokes (:strokes text)}
+                                                              content)
+                                        {} ox oy)))
+        runs))
+
+(defn- lottie-unit-vector-layer
+  "The shape layer of the unit `k` of the text `text`, the outlines of its
+  glyphs `asset` (`{:runs :center}`, see `timeline->lottie`), playing the
+  keyframes of the unit, `track`: it moves by them from where it rests,
+  turns and scales around the centre of its box and blurs as a layer
+  blur of their radius."
+  [text k asset track duration ox oy]
+  (let [by-prop (group-by :property (:keyframes track))
+        cx      (- (get-in asset [:center :x] 0) ox)
+        cy      (- (get-in asset [:center :y] 0) oy)
+        blur    (lottie-blur-effect {} by-prop)]
+    (cond-> {:ddd 0
+             :ty 4
+             :nm (str (or (:name text) (:id text)) " " (inc k))
+             :sr 1
+             :ks {:o (lottie-prop-1d (by-prop :opacity) (fn [v] (* 100.0 v)) 100.0)
+                  :r (lottie-prop-1d (by-prop :rotation) identity 0)
+                  :p {:s true
+                      :x (lottie-prop-1d (by-prop :x) (fn [v] (+ cx v)) cx)
+                      :y (lottie-prop-1d (by-prop :y) (fn [v] (+ cy v)) cy)}
+                  :a {:a 0 :k [cx cy 0]}
+                  :s (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y))}
+             :ao 0
+             :shapes (lottie-run-groups text (:runs asset) ox oy)
+             :ip 0
+             :op (ms->frames duration)
+             :st 0
+             :bm 0}
+      (some? blur) (assoc :ef blur))))
 
 (defn- lottie-units-layer
   "A precomp layer of the text `shape` whose units play one by one (see
   `unit-timelines`), with the picture of each unit and of what is no unit
-  as assets (`[text-id k]`, `[text-id :rest]`): it moves, turns and fades
+  as assets (`[text-id k]`, `[text-id :rest]`), or the outlines of their
+  glyphs (see `lottie-unit-vector-layer`): it moves, turns and fades
   the text as its track says (its picture turned already, it turns by
   the animation only), and the units inside it play their own
   keyframes, their moves turned with the text. The precomp goes to
@@ -4844,11 +4891,22 @@
         layers   (cond-> (into []
                                (keep-indexed (fn [k unit-id]
                                                (when-let [asset (get assets [id k])]
-                                                 (lottie-unit-layer name k asset
-                                                                    (get-in units-tl [:tracks unit-id])
-                                                                    duration))))
+                                                 (let [track (get-in units-tl [:tracks unit-id])]
+                                                   (if (some? (:runs asset))
+                                                     (lottie-unit-vector-layer shape k asset track duration ox oy)
+                                                     (lottie-unit-layer name k asset track duration))))))
                                (:ids units))
-                   (some? rest)
+                   (some? (:runs rest))
+                   (conj {:ddd 0 :ty 4 :nm (str name " text") :sr 1
+                          :ks {:o {:a 0 :k 100}
+                               :r {:a 0 :k 0}
+                               :p {:a 0 :k [0 0 0]}
+                               :a {:a 0 :k [0 0 0]}
+                               :s {:a 0 :k [100 100 100]}}
+                          :ao 0 :shapes (lottie-run-groups shape (:runs rest) ox oy)
+                          :ip 0 :op (ms->frames duration) :st 0 :bm 0})
+
+                   (and (some? rest) (nil? (:runs rest)))
                    (conj {:ddd 0 :ty 2 :nm (str name " text") :refId (:id rest) :sr 1
                           :ks {:o {:a 0 :k 100}
                                :r {:a 0 :k 0}
@@ -4937,7 +4995,11 @@
   rectangles of their bounds. Layers holding layers become precomps (see
   `lottie-layers`). The markers become Lottie markers (see
   `lottie-markers`). Split animations play as animations of the whole
-  text (see `flatten-splits`)."
+  text (see `flatten-splits`), but when `assets` has pictures of its
+  units, `[text-id k]` (and `[text-id :rest]` of what is no unit), or
+  the outlines of their glyphs instead, `{:runs [{:content :fills}]
+  :center}` on the page, which they turn and scale around (see
+  `lottie-units-layer`)."
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]
@@ -4960,6 +5022,7 @@
                       (set (export-layer-ids objects board-id (:tracks timeline)))
                       (disj (set (keys (:tracks timeline))) board-id))
          {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets units)
+         ;; the pictures among them (the units of texts may be outlines)
          images    (map (fn [[_ asset]]
                           {:id (:id asset)
                            :w (:w asset)
@@ -4967,7 +5030,7 @@
                            :u (or (:u asset) "")
                            :p (:p asset)
                            :e (or (:e asset) 1)})
-                        assets)]
+                        (remove (comp :runs val) assets))]
      (cond-> (lottie-document timeline objects layers (concat images comps))
        (seq markers) (assoc :markers markers)))))
 
