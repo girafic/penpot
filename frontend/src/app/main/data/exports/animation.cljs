@@ -26,6 +26,7 @@
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.modifiers :as dwm]
    [app.main.store :as st]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.gesture :as wasm-gesture]
@@ -2071,6 +2072,21 @@
        (finish-export-state)]
       (conj (vec (notes-shown notes)) (finish-export-state)))))
 
+(defn restore-canvas!
+  "Show the animation at the playhead again after an export in place,
+  which rendered in full quality (see `begin-full-quality!`): fast if
+  the canvas was (`was-fast`), else in full quality. The preview poses
+  in fast mode, which the timeline dock settles only once the playhead,
+  the timeline or the shapes change, and an export changes none of
+  them: the canvas would draw no shadow or blur until the next edit."
+  [was-fast]
+  (st/emit! (dwa/apply-preview))
+  (if was-fast
+    (when-not (wasm-gesture/active?)
+      (wasm-gesture/try-begin-interactive-transform!)
+      (wasm.api/set-modifiers-start))
+    (st/emit! (dwm/settle-local-transform))))
+
 (defn- export-in-place
   "A promise of the export of the active board, or of the `:boards` of
   `params` into a ZIP named after the file (see `run-exports`), run in
@@ -2100,10 +2116,7 @@
         (.finally
          (fn []
            (reset! cancel-fn nil)
-           (st/emit! (dwa/apply-preview))
-           (when (and was-fast (not (wasm-gesture/active?)))
-             (wasm-gesture/try-begin-interactive-transform!)
-             (wasm.api/set-modifiers-start)))))))
+           (restore-canvas! was-fast))))))
 
 (defn export-animation
   "Export the animation of the active board, with the one of the

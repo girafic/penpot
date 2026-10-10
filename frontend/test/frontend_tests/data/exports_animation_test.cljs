@@ -20,7 +20,12 @@
    [app.main.data.exports.animation :as dea]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.lottie :as dwl]
+   [app.main.data.workspace.modifiers :as dwm]
+   [app.main.store :as st]
+   [app.render-wasm.api :as wasm.api]
+   [app.render-wasm.gesture :as wasm-gesture]
    [app.util.zip :as uz]
+   [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [clojure.string :as str]
    [frontend-tests.helpers.mock :as mock]
@@ -1029,6 +1034,29 @@
                           (t/is (= [:a] @calls) "the next one never starts")))
                 (.finally #(done')))))
         done))))
+
+(t/deftest the-canvas-shows-the-playhead-again-after-an-export-in-place
+  (let [seen  (atom [])
+        begun (atom 0)
+        sub   (rx/sub! (->> st/stream
+                            (rx/map ptk/type)
+                            (rx/filter #{::dwa/apply-preview ::dwm/settle-local-transform}))
+                       #(swap! seen conj %))]
+    (try
+      (with-redefs [wasm-gesture/active? (constantly false)
+                    wasm-gesture/try-begin-interactive-transform! #(swap! begun inc)
+                    wasm.api/set-modifiers-start (fn [])]
+        ;; the preview poses in fast mode, which nothing else settles
+        (dea/restore-canvas! false)
+        (t/is (= [::dwa/apply-preview ::dwm/settle-local-transform] @seen)
+              "posed, then in full quality")
+        (t/is (zero? @begun))
+        (reset! seen [])
+        (dea/restore-canvas! true)
+        (t/is (= [::dwa/apply-preview] @seen) "fast again, as before the export")
+        (t/is (= 1 @begun)))
+      (finally
+        (rx/dispose! sub)))))
 
 (t/deftest one-board-exports-as-it-is
   (let [seen (atom nil)]
