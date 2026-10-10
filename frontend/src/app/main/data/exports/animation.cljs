@@ -593,9 +593,9 @@
     layers and the units of split texts as vectors, see
     `app.main.data.exports.svg-vectors`);
   - `:svg/appearance`, what an SVG keeps as it rests (see
-    `svg-static?`; its CSS plays the rest on its vectors), and
-    `:svg/outline`, with its texts outlined (`:outline` of its export
-    settings), a text that cannot be (see `svgv/text-fills`);
+    `svg-static?`; its CSS plays the rest on its vectors; its texts
+    outlined with `:outline` of its export settings, see
+    `outline-texts`);
   - `:svg/size`, an animated width or height SVG plays as a stretch
     (see `cta/svg-sized?`), and `:lottie/size`, any;
   - `:svg/blur`, an animated blur, which browsers draw stronger than the
@@ -636,7 +636,7 @@
           outline?  (true? (get-in timeline [:export :outline]))
           pictured  (into #{} (comp (map key) (remove #(decorated? (get objects %)))) units)
           text?     #(and (= :text (:type %)) (not (contains? pictured (:id %))))
-          outlined? #(and outline? (text? %) (some? (svgv/text-fills %)))
+          outlined? #(and outline? (text? %))
           table
           [[:lottie/text lottie-formats (some?* #(= :text (:type %)))]
            [:lottie/images lottie-formats
@@ -652,9 +652,6 @@
                              (when-let [shape (get objects id)]
                                (svg-static? shape track (outlined? shape))))
                            (:tracks resolved)))]
-           [:svg/outline #{:svg}
-            (and outline?
-                 (some?* #(and (text? %) (nil? (svgv/text-fills %)))))]
            [:svg/size #{:svg} stretch?]
            [:lottie/size lottie-formats size?]
            [:svg/blur #{:svg} (contains? animated :blur)]
@@ -1870,24 +1867,32 @@
 
 (defn outline-texts
   "`objects` with the texts in the board of `tl`, but the split texts of
-  `texts` (their units play as pictures) and those that paint their text
-  in more than one way (see `svgv/text-fills`), as the outlines of their
+  `texts` (their units play on their own), as the outlines of their
   glyphs at rest, which WASM gives through `bridge`: `[drawn view]`, the
-  objects an SVG draws (see `svgv/outlined`) and the ones its CSS takes
-  (see `svgv/outlined-view`)."
+  objects an SVG draws (see `svgv/outlined`; a text that paints its text
+  in more than one way, see `svgv/text-fills`, as a group of paths, see
+  `svgv/outlined-group`) and the ones its CSS takes (see
+  `svgv/outlined-view`)."
   [objects tl texts bridge]
-  (let [{:keys [shape-to-path clean-modifiers]} bridge]
+  (let [{:keys [shape-to-path text-unit-outlines clean-modifiers]} bridge]
     (when clean-modifiers
       (clean-modifiers))
     (reduce (fn [[drawn view :as both] id]
-              (let [shape   (get objects id)
-                    fills   (svgv/text-fills shape)
-                    content (when (and (some? fills) shape-to-path)
-                              (shape-to-path id))]
-                (if (and (some? content) (pos? (count content)))
-                  [(assoc drawn id (svgv/outlined shape content fills))
-                   (assoc view id (svgv/outlined-view shape content fills))]
-                  both)))
+              (let [shape (get objects id)
+                    fills (svgv/text-fills shape)]
+                (if (some? fills)
+                  (let [content (when shape-to-path (shape-to-path id))]
+                    (if (and (some? content) (pos? (count content)))
+                      [(assoc drawn id (svgv/outlined shape content fills))
+                       (assoc view id (svgv/outlined-view shape content fills))]
+                      both))
+                  (let [runs (when text-unit-outlines
+                               (into [] (mapcat :runs) (text-unit-outlines id)))]
+                    (if (seq runs)
+                      [(merge drawn (svgv/outlined-group shape runs))
+                       (assoc view id (svgv/outlined-view shape (:content (first runs))
+                                                          (svgv/span-fills shape 0 0)))]
+                      both)))))
             [objects objects]
             (->> (cfh/get-children-ids-with-self objects (:board-id tl))
                  (filter #(let [shape (get objects %)]

@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::render::text_units::outline_layouts;
 use crate::shapes::{
     calculate_text_layout_data, page_matrix, stroke_to_path, transform_segments, Path, Segment,
-    ToPath, Type,
+    TextUnits, ToPath, Type,
 };
 use crate::{mem, with_current_shape, with_current_shape_mut};
 
@@ -245,9 +245,10 @@ fn push_word(bytes: &mut Vec<u8>, word: u32) {
 
 /// The outlines of the glyphs of the current text with its units, as it
 /// paints at rest (see `render::text_units::outline_layouts`), on the
-/// page: what an SVG draws of each unit of a split animation. Nothing for
-/// a shape that is no text or has no units. Little endian u32 words, the
-/// numbers f32: the piece count, then for each piece its unit (`u32::MAX`
+/// page: what an SVG draws of each unit of a split animation or, for a
+/// text with no units, all of its glyphs as those of no unit, by the span
+/// that paints them. Nothing for a shape that is no text. Little endian
+/// u32 words, the numbers f32: the piece count, then for each piece its unit (`u32::MAX`
 /// for the glyphs of no unit), the x and y of the centre of its box, its
 /// run count, then for each run the paragraph and the span that paint it,
 /// its segment count and its segments (as `current_to_path` writes them).
@@ -255,7 +256,12 @@ fn push_word(bytes: &mut Vec<u8>, word: u32) {
 pub extern "C" fn get_text_unit_outlines() -> *mut u8 {
     let mut bytes: Vec<u8> = Vec::new();
     with_current_shape!(state, |shape: &Shape| {
-        if let (Type::Text(stored), Some(units)) = (&shape.shape_type, &shape.text_units) {
+        let none = TextUnits {
+            line_count: 0,
+            units: Vec::new(),
+        };
+        if let Type::Text(stored) = &shape.shape_type {
+            let units = shape.text_units.as_ref().unwrap_or(&none);
             let content = stored.paint_content_for_selrect(shape.selrect());
             let mut groups = content.paragraph_builder_group_from_text(None);
             let sizes: Vec<usize> = groups.iter().map(Vec::len).collect();

@@ -792,6 +792,37 @@ mod tests {
             .all(|(paragraph, span, _)| (*paragraph, *span) == (0, 0)));
     }
 
+    #[test]
+    fn a_text_with_no_units_outlines_as_the_rest() {
+        let mut resources = RenderResources::try_new_headless().expect("headless resources");
+        let _guard = TestRenderResourcesGuard::install(&mut resources);
+        let shape = text_shape("Hello world", None);
+        let units = TextUnits {
+            line_count: 0,
+            units: vec![],
+        };
+        let content = shape.get_text_content();
+        let mut builders = content.paragraph_builder_group_from_text(None);
+        let sizes: Vec<usize> = builders.iter().map(Vec::len).collect();
+        let mut layout = calculate_text_layout_data(&shape, content, &mut builders, true);
+        let outlines = outline_layouts(content, &mut layout.paragraphs, &sizes, &units);
+
+        assert_eq!(outlines.len(), 1);
+        assert_eq!(outlines[0].unit, None, "all of it");
+        let bounds = outlines[0]
+            .runs
+            .iter()
+            .fold(Rect::new_empty(), |mut bounds, (_, _, path)| {
+                bounds.join(path.bounds());
+                bounds
+            });
+        let text = range_box(&shape, 0..11);
+        assert!(
+            bounds.left >= text.left - 1.0 && bounds.right <= text.right + 1.0,
+            "{bounds:?} along {text:?}"
+        );
+    }
+
     /// How many glyphs the laid out text of `shape` has.
     fn glyph_count(shape: &Shape) -> usize {
         let content = shape.get_text_content();

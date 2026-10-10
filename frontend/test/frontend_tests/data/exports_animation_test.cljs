@@ -1071,12 +1071,20 @@
                                   {:command :close-path :params {}}])
         asked   (atom [])
         bridge  {:shape-to-path (fn [id] (swap! asked conj id) content)
+                 :text-unit-outlines (fn [_] [{:unit nil :center {:x 0 :y 0}
+                                               :runs [{:paragraph 0 :span 0 :content content}
+                                                      {:paragraph 0 :span 1 :content content}]}])
                  :clean-modifiers #(swap! asked conj :clean)}
         [drawn view] (dea/outline-texts objects tl {} bridge)]
     (t/is (= [:clean tid] @asked) "at rest")
     (t/is (= [:path red] ((juxt :type :fills) (get drawn tid))) "a path in the paint of its text")
     (t/is (= (get-in objects [tid :selrect]) (get-in view [tid :selrect])) "its CSS on the box of the text")
-    (t/is (= mixed (first (dea/outline-texts mixed tl {} bridge))) "a text in several fills stays one")
+    (let [drawn (first (dea/outline-texts mixed tl {} bridge))
+          group (get drawn tid)]
+      (t/is (= :group (:type group)) "a text in several fills, a group")
+      (t/is (= [red [{:fill-color "#00ff00" :fill-opacity 1}]]
+               (mapv #(:fills (get drawn %)) (:shapes group)))
+            "of a path by span, in its fills"))
     (t/is (= objects (first (dea/outline-texts objects tl {tid :units} bridge)))
           "as one whose units play as pictures")
     (t/testing "its issues"
@@ -1085,9 +1093,6 @@
                         (cta/add-keyframe tid {:time 0 :property :stroke-width :index 0 :value 1})
                         (cta/add-keyframe tid {:time 1000 :property :stroke-width :index 0 :value 3}))
             svg     #(set (get (dea/export-issues %1 %2) :svg))]
-        (t/is (contains? (svg mixed (on tl)) :svg/outline))
-        (t/is (not (contains? (svg mixed tl) :svg/outline)) "only when asked")
-        (t/is (not (contains? (svg objects (on tl)) :svg/outline)))
         (t/is (contains? (svg objects stroked) :svg/appearance) "the strokes of a text stay")
         (t/is (not (contains? (svg objects (on stroked)) :svg/appearance)) "but of an outline")))))
 

@@ -16,6 +16,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.types.path :as path]
    [app.common.types.text :as txt]
+   [app.common.uuid :as uuid]
    [app.config :as cfg]
    [app.main.fonts :as fonts]
    [app.main.render :as render]
@@ -337,4 +338,23 @@
          (map (fn [{:keys [paragraph span content]}]
                 (layer-markup {id (outlined shape content (span-fills shape paragraph span))} id animated)))
          (str/join ""))))
+
+(defn outlined-group
+  "The text `shape` that paints its text in more than one way as a group
+  of paths, one by run of `runs` (see `wasm.api/text-unit-outlines`), each
+  the outlines of the glyphs a span paints in the fills of that span (see
+  `outlined`): `{id shape}` of the group, which keeps the opacity, the
+  shadows and the blur of the text, and its paths, which keep its strokes."
+  [shape runs]
+  (let [id       (:id shape)
+        children (mapv (fn [{:keys [paragraph span content]}]
+                         (-> (outlined shape content (span-fills shape paragraph span))
+                             (assoc :id (uuid/next) :parent-id id)
+                             (dissoc :opacity :shadow :blur :blend-mode)))
+                       runs)]
+    (into {id (-> shape
+                  (assoc :type :group :shapes (mapv :id children))
+                  (dissoc :content :position-data :grow-type :fills :strokes))}
+          (map (juxt :id identity))
+          children)))
 
