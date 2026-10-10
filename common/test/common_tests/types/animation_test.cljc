@@ -1490,6 +1490,19 @@
         (t/is (close-all? [100 10] (get-in (lottie-item (get-in layer [:shapes 0 :it]) "rc") [:s :k]))
               "its outline as it is")))))
 
+(t/deftest lottie-eases-scale-x-and-y-each-by-its-curve
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 50})
+        scale (fn [ease-y]
+                (get-in (lottie-of board shape [{:time 0 :property :scale-x :value 1 :easing :ease-in}
+                                                {:time 1000 :property :scale-x :value 2}
+                                                {:time 0 :property :scale-y :value 1 :easing ease-y}
+                                                {:time 1000 :property :scale-y :value 2}])
+                        [:layers 0 :ks :s :k]))]
+    (t/is (< 30 (count (scale :linear))) "taken as they go, 30 a second")
+    (t/is (= 2 (count (scale :ease-in))) "one curve eases both")
+    (t/is (close-all? [0.42 0] [(get-in (first (scale :ease-in)) [:o :x 0]) (get-in (first (scale :ease-in)) [:o :y 0])]))))
+
 (t/deftest the-lottie-layers-in-a-board-follow-its-size
   ;; As `the-layers-in-a-board-follow-its-size`: a board 100 wide grows to
   ;; 140 from its middle.

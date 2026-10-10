@@ -4082,44 +4082,6 @@
     1 {:a 0 :k (scalar-fn (:value (first kfs)))}
     {:a 1 :k (lottie-keyframes kfs (fn [v] [(scalar-fn v)]))}))
 
-(defn- lottie-pair-prop
-  "One 2D Lottie property from two (separate) 1D tracks, `a-kfs` and
-  `b-kfs`; `val-fn` gives the Lottie value of their values, `a` and `b`
-  when a track has none."
-  [a-kfs b-kfs a b val-fn]
-  (let [ak    (sort-keyframes a-kfs)
-        bk    (sort-keyframes b-kfs)
-        times (->> (concat ak bk) (map :time) distinct sort vec)
-        n     (count times)
-        at    (fn [kfs t] (some #(when (= (:time %) t) %) kfs))]
-    (if (< n 2)
-      ;; static for no keyframe or one instant (see `lottie-prop-1d`)
-      {:a 0 :k (val-fn (or (:value (first ak)) a) (or (:value (first bk)) b))}
-      {:a 1
-       :k (vec (map-indexed
-                (fn [i t]
-                  (let [va   (or (property-value-at ak t) a)
-                        vb   (or (property-value-at bk t) b)
-                        kf   (or (at ak t) (at bk t))
-                        base {:t (ms->frames t) :s (val-fn va vb)}]
-                    (cond
-                      (= i (dec n))
-                      base
-
-                      (= :step (:interpolation kf :linear))
-                      (assoc base :h 1)
-
-                      :else
-                      (let [[x1 y1 x2 y2] (easing->bezier-curve (:easing kf))]
-                        (assoc base :o {:x [x1] :y [y1]} :i {:x [x2] :y [y2]})))))
-                times))})))
-
-(defn- lottie-scale-prop
-  "Combine the (separate) scale-x and scale-y tracks into one 2D Lottie
-  scale property (percentages)."
-  [sx-kfs sy-kfs]
-  (lottie-pair-prop sx-kfs sy-kfs 1 1 (fn [x y] [(* 100.0 x) (* 100.0 y) 100])))
-
 (defn- lottie-stops-prop
   "A Lottie property playing `stops` (`[time keyframe value]` each, see
   `eased-stops`), `render` giving the Lottie value (`s`) of a value and
@@ -4143,6 +4105,32 @@
                        (let [[x1 y1 x2 y2] (easing->bezier-curve (:easing kf))]
                          (assoc base :o {:x [x1] :y [y1]} :i {:x [x2] :y [y2]}))))))
                 stops)})))
+
+(defn- lottie-pair-prop
+  "One 2D Lottie property from two (separate) 1D tracks, `a-kfs` and
+  `b-kfs`; `val-fn` gives the Lottie value of their values, `a` and `b`
+  when a track has none. Each eased by its own curve (see
+  `eased-stops`): a stretch where one curve can not ease both is taken
+  as it goes."
+  [a-kfs b-kfs a b val-fn]
+  (let [ak     (sort-keyframes a-kfs)
+        bk     (sort-keyframes b-kfs)
+        times  (->> (concat ak bk) (map :time) distinct sort vec)
+        values (fn [t] [(double (or (property-value-at ak t) a))
+                        (double (or (property-value-at bk t) b))])]
+    (if (< (count times) 2)
+      ;; static for no keyframe or one instant (see `lottie-prop-1d`)
+      {:a 0 :k (val-fn (or (:value (first ak)) a) (or (:value (first bk)) b))}
+      (lottie-stops-prop (map (fn [[t kf]] [t kf (values t)])
+                              (eased-stops values (concat ak bk) times))
+                         #(apply val-fn %)
+                         identity))))
+
+(defn- lottie-scale-prop
+  "Combine the (separate) scale-x and scale-y tracks into one 2D Lottie
+  scale property (percentages)."
+  [sx-kfs sy-kfs]
+  (lottie-pair-prop sx-kfs sy-kfs 1 1 (fn [x y] [(* 100.0 x) (* 100.0 y) 100])))
 
 (defn- lottie-eased-prop
   "A Lottie property of `value` (a time to a vector of numbers, as the
