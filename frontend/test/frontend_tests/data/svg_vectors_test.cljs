@@ -50,9 +50,13 @@
     (t/is (str/includes? markup "#ff0000"))
     (t/is (not (str/includes? markup "<image")) "no picture")
     (t/is (not (re-find #"opacity=\"0.5\"|opacity:0.5" markup)) "its group has the opacity")
-    (t/is (str/includes? markup "feGaussianBlur") "its blur, at rest")
+    (t/is (not (str/includes? markup "feGaussianBlur"))
+          "its blur on a filter of its own, as strong as on the canvas (see `cta/svg-smil-blur?`)")
     (t/is (not (str/includes? (svgv/layer-markup objects (:id a) (track-of :blur)) "feGaussianBlur"))
-          "but the one CSS plays")))
+          "one that plays too")
+    (t/is (str/includes? (svgv/layer-markup (update objects (:id a) assoc-in [:blur :hidden] true) (:id a) nil)
+                         "<rect")
+          "a hidden one, none")))
 
 (t/deftest the-strokes-of-a-trimmed-layer-are-one-long
   (let [a (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20

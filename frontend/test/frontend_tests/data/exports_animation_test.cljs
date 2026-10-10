@@ -1114,8 +1114,10 @@
           (.then (fn [images]
                    (t/is (= #{[tid 1] [tid :rest]} (set (keys images))))
                    (t/is (= [3 0] @shown) "its three words shown at rest, then set back")
-                   (t/is (= {:x 70 :y 20 :width 0 :height 0} (dissoc (get images [tid 1]) :markup))
+                   (t/is (= {:x 70 :y 20 :width 0 :height 0} (dissoc (get images [tid 1]) :markup :box))
                          "the middle of its box, which it turns around")
+                   (t/is (= {:x 20 :y 12 :width 10} (select-keys (get-in images [[tid 1] :box]) [:x :y :width]))
+                         "and what its glyphs cover, where its blur plays")
                    (t/is (str/includes? (get-in images [[tid 1] :markup]) "<path"))))
           (.then #(dea/collect-unit-vectors objects tl texts {:bridge bridge :yield (fn [] (js/Promise.resolve nil))
                                                               :lottie? true}))
@@ -1472,10 +1474,10 @@
            (issues-of :svg :f #(assoc % :r1 4 :r2 4 :r3 0 :r4 0)
                       :kfs [{:time 0 :property :r1 :value 4} {:time 1000 :property :r1 :value 12}]))
         "and uneven corners")
-  (t/is (= [:svg/blur]
+  (t/is (= []
            (issues-of :svg :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}
                                  {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}]))
-        "a rect changes its size")
+        "a rect changes its size, and blurs as the canvas")
   (t/is (= [:svg/size]
            (issues-of :svg :f #(assoc % :rotation 30)
                       :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))

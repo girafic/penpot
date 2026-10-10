@@ -1022,10 +1022,11 @@
                      {:time 0 :property :shadow-spread :index 1 :value 0}
                      {:time 1000 :property :shadow-spread :index 1 :value 6}])]
     (t/is (cta/svg-smil-shadows? shape track))
-    (t/is (str/includes? svg (str "<g class=\"penpot-smil-" sid "\" filter=\"url(#penpot-shadows-" sid
-                                  ")\"><rect class=\"me\"></rect></g>"))
+    (t/is (str/includes? svg (str "<g class=\"penpot-smil-" sid "\" filter=\"url(#penpot-effects-" sid
+                                  ")\"><g transform=\"translate(0 0)\"><g transform=\"translate(0 0)\" "
+                                  "fill=\"none\"><rect class=\"me\"></rect></g></g></g>"))
           "its vectors in a filter of its shadows")
-    (t/is (str/includes? svg (str "<filter id=\"penpot-shadows-" sid "\""))
+    (t/is (str/includes? svg (str "<filter id=\"penpot-effects-" sid "\""))
           "which plays them")
     (t/is (str/includes? svg (str "<animate attributeName=\"dy\" dur=\"1000ms\" fill=\"freeze\" calcMode=\"spline\" "
                                   "keyTimes=\"0;1\" keySplines=\"0.25 0.1 0.25 1\" values=\"4;20\"/>"))
@@ -1037,12 +1038,47 @@
     (t/is (str/includes? svg "<feComposite in2=\"a0\" operator=\"arithmetic\" k2=\"-1\" k3=\"1\"/>")
           "inside the shape")
     (t/is (= 1 (occurrences svg "<feMorphology")) "no spread of the drop shadow, which has none")
-    (t/is (str/includes? svg (str ".penpot-smil-" sid " { filter: url(#penpot-shadows-rest-" sid "); }"))
+    (t/is (str/includes? svg (str ".penpot-smil-" sid " { filter: url(#penpot-effects-rest-" sid "); }"))
           "at rest with reduced motion")
-    (t/is (str/includes? svg (str "<filter id=\"penpot-shadows-rest-" sid "\""))
+    (t/is (str/includes? svg (str "<filter id=\"penpot-effects-rest-" sid "\""))
           "a filter of its shadows as they are")
     (t/is (not (str/includes? svg "drop-shadow(")) "no CSS shadows")
     (t/is (not (str/includes? svg (str "penpot-anim-" sid))) "nor CSS animation, its group plays nothing")))
+
+(t/deftest an-svg-blurs-as-the-canvas
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        group   (cts/setup-shape {:type :group :x 10 :y 10 :width 60 :height 40})
+        inside  (cts/setup-shape {:type :rect :x 20 :y 20 :width 20 :height 20})
+        [bid gid iid] (map :id [board group inside])
+        objects {bid (assoc board :shapes [gid])
+                 gid (assoc group :parent-id bid :frame-id bid :shapes [iid]
+                            :blur {:id (uuid/next) :type :layer-blur :value 8 :hidden false})
+                 iid (assoc inside :parent-id gid :frame-id bid)}
+        images  {gid {:markup "<g class=\"group\"></g>"} iid {:markup "<rect class=\"inside\"></rect>"}}
+        moving  (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe gid {:time 0 :property :opacity :value 1})
+                    (cta/add-keyframe iid {:time 0 :property :x :value 20})
+                    (cta/add-keyframe iid {:time 1000 :property :x :value 60}))]
+    (t/testing "a blur as it is, as strong as on the canvas, over what the layer holds"
+      (let [svg (cta/timeline->svg moving objects images)]
+        (t/is (cta/svg-smil-blur? (get objects gid) nil))
+        (t/is (str/includes? svg (str "<filter id=\"penpot-effects-" gid "\"")))
+        (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"/>") "1/√3 of 8, and 0.5")
+        (t/is (re-find (re-pattern (str "filter=\"url\\(#penpot-effects-" gid "\\)\">.*class=\"group\".*"
+                                        "class=\"" (cta/shape-css-class iid) "\".*class=\"inside\""))
+                       svg)
+              "the layer in it blurred with it")
+        (t/is (not (str/includes? svg "blur(")) "no CSS blur")))
+    (t/testing "a blur that plays, by SMIL"
+      (let [tl  (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe gid {:time 0 :property :blur :value 8})
+                    (cta/add-keyframe gid {:time 1000 :property :blur :value 0}))
+            svg (cta/timeline->svg tl objects images)]
+        (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"><animate attributeName=\"stdDeviation\""))
+        (t/is (str/includes? svg ";0\"/></feGaussianBlur>") "none at the end")
+        (t/is (not (str/includes? svg (str "penpot-anim-" gid))) "its group plays nothing")))
+    (t/testing "no filter of a hidden blur"
+      (t/is (not (cta/svg-smil-blur? (assoc-in (get objects gid) [:blur :hidden] true) nil))))))
 
 (t/deftest smil-plays-holds-springs-spreads-and-ping-pongs
   (t/testing "a hold keeps its value to the end of its stretch"
@@ -3690,6 +3726,23 @@
                               objects)
                              (str "[id=\"fills-" sid "\"] > :not(defs) {"))
               "its fills play on its text or the outlines of its units")))))
+
+(t/deftest an-svg-blurs-the-units-of-a-text-as-the-canvas
+  (let [{:keys [board text objects]} (board-and-text "Hi you there")
+        sid    (:id text)
+        tl     (text-timeline board sid {:type :blur :start 0 :duration 600 :amount 8 :split :word :spread 1})
+        images (into {[sid :rest] {:markup "<path class=\"rest\"/>"}}
+                     (map (fn [k] [[sid k] {:markup "<path/>" :x (+ 70 (* 60 k)) :y 110 :width 0 :height 0
+                                            :box {:x (+ 50 (* 60 k)) :y 100 :width 40 :height 20}}]))
+                     (range 3))
+        svg    (cta/timeline->svg tl objects images)]
+    (t/is (str/includes? svg (str "<g class=\"" (cta/unit-css-class sid 1) "\" filter=\"url(#"
+                                  (cta/svg-unit-blur-id sid 1) ")\">"))
+          "each unit on a filter of its blur")
+    (t/is (str/includes? svg (str "<filter id=\"" (cta/svg-unit-blur-id sid 1) "\" x=\"")))
+    (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"><animate attributeName=\"stdDeviation\""))
+    (t/is (not (str/includes? svg "blur(")) "no CSS blur")
+    (t/is (str/includes? svg (str "  ." (cta/unit-css-class sid 1) " { filter: none; }")) "none with reduced motion")))
 
 (t/deftest export-sizes-take-what-people-type
   (t/is (= ["2" "3.5" "0.5" "0.125" "1"]

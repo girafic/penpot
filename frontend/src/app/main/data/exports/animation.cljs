@@ -13,11 +13,13 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.modifiers :as cgm]
+   [app.common.geom.rect :as grc]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
+   [app.common.types.path :as path]
    [app.common.types.stroke :as ctst]
    [app.main.data.event :as ev]
    [app.main.data.exports.svg-vectors :as svgv]
@@ -599,9 +601,8 @@
     `outline-texts`);
   - `:svg/size` and `:lottie/size`, an animated width or height they
     play as a stretch (see `cta/svg-sized?`, `cta/lottie-sized?`);
-  - `:svg/blur`, an animated blur, which browsers draw stronger than the
-    canvas, and `:lottie/blur`, a blur, which players draw at their own
-    strength;
+  - `:lottie/blur`, a blur, which players draw at their own strength (an
+    SVG blurs as the canvas, see `cta/svg-smil-blur?`);
   - `:lottie/shadow`, drop shadows (Lottie effects, without spread);
   - `:lottie/stroke`, a stroke Lottie draws otherwise (see
     `off-center-stroke?`);
@@ -674,7 +675,6 @@
                            (:tracks resolved)))]
            [:svg/size #{:svg} stretch?]
            [:lottie/size lottie-formats stretch?]
-           [:svg/blur #{:svg} (contains? animated :blur)]
            [:lottie/shadow lottie-formats
             (some?* (fn [shape] (some #(= :drop-shadow (:style %)) (shown (:shadow shape)))))]
            [:lottie/blur lottie-formats
@@ -1295,9 +1295,10 @@
 (defn collect-unit-vectors
   "A promise of the vectors of the units of the texts `texts` (see
   `unit-texts`) of `timeline` for an SVG, as `timeline->svg` takes them:
-  `[text-id k]` `{:markup :x :y :width :height}`, the outlines of the
-  glyphs of the unit `k` at rest (see `svgv/unit-markup`) and the centre
-  of its box in the SVG, which it turns and scales around, and `[text-id
+  `[text-id k]` `{:markup :x :y :width :height :box}`, the outlines of
+  the glyphs of the unit `k` at rest (see `svgv/unit-markup`), the
+  centre of its box in the SVG, which it turns and scales around, and
+  what they cover, where its blur plays (see `cta/svg-unit-blurs`), and `[text-id
   :rest]` `{:markup}`, the glyphs of no unit. WASM outlines them
   (`bridge`, see `wasm.api/text-unit-outlines`), a text at a time, which
   it sets back at rest; the page gets its turn (`yield`) after each,
@@ -1337,6 +1338,11 @@
                                      {:markup (svgv/unit-markup shape runs (dm/get-in resolved [:tracks text-id]))
                                       :x (- (:x center) ox)
                                       :y (- (:y center) oy)
+                                      ;; what its glyphs cover, where its blur plays
+                                      :box (when (seq runs)
+                                             (let [{:keys [x y width height]}
+                                                   (grc/join-rects (map #(path/calc-selrect (:content %)) runs))]
+                                               {:x (- x ox) :y (- y oy) :width width :height height}))
                                       :width 0
                                       :height 0}))
                         images   (reduce (fn [images {:keys [unit center runs]}]

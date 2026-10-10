@@ -23,7 +23,6 @@
    :svg/appearance  i/stroke-size
    :svg/size        i/size-horizontal
    :lottie/size     i/size-horizontal
-   :svg/blur        i/effects
    :lottie/shadow   i/drop-shadow
    :lottie/blur     i/effects
    :lottie/stroke   i/stroke-size

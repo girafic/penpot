@@ -48,17 +48,16 @@
 
 (defn- rest-shape
   "`shape` as its layer draws it: without its opacity, which the group of
-  the layer has, and without what its animation, `track`, plays over it,
-  which would else show twice: a blur played by CSS on its group, its
-  shadows (and blur) played by SMIL on a filter of their own (see
+  the layer has, and without what a filter of its own draws over it,
+  which would else show twice: its blur, as strong as on the canvas, and
+  the shadows its animation, `track`, plays (see `cta/svg-smil-blur?`,
   `cta/svg-smil-shadows?`). Its outline a path when SMIL plays its
   corners (see `cta/svg-smil-corners?`), which are not alike as it plays.
   A board that hides its fill in exports, without it."
   [shape track]
-  (let [animated (into #{} (map :property) (:keyframes track))
-        shadows? (cta/svg-smil-shadows? shape track)]
+  (let [shadows? (cta/svg-smil-shadows? shape track)]
     (cond-> (dissoc shape :opacity)
-      (or shadows? (contains? animated :blur))
+      (or shadows? (cta/svg-smil-blur? shape track))
       (dissoc :blur)
 
       shadows?

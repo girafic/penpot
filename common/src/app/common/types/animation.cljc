@@ -3719,9 +3719,10 @@
 
 (defn- svg-group-declarations
   "The declarations of the group of a layer of an SVG: a turned shape
-  scales along its own sides, as the canvas scales it."
+  scales along its own sides, as the canvas scales it. Its blur plays on
+  a filter (see `svg-effects-filter`)."
   [shape values origin]
-  (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity blur] :as frame}
+  (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity] :as frame}
         (frame-values shape values origin)
         turn (or (:rotation shape) 0)]
     (cond-> []
@@ -3734,10 +3735,7 @@
                         "rotate(" (fmt (- turn)) "deg);"))))
 
       (contains? frame :opacity)
-      (conj (str "opacity: " (fmt opacity) ";"))
-
-      (contains? frame :blur)
-      (conj (str "filter: blur(" (fmt blur) "px);")))))
+      (conj (str "opacity: " (fmt opacity) ";")))))
 
 (defn- css-declarations
   [shape values origin rest-transform]
@@ -3899,12 +3897,12 @@
 
 (defn- svg-group-plays?
   "Whether the group of a layer of an SVG plays any of `track` (see
-  `svg-group-declarations`): its place, scale, turn, opacity or blur, or
-  its size unless it plays on its elements (`sized?`)."
+  `svg-group-declarations`): its place, scale, turn or opacity, or its
+  size unless it plays on its elements (`sized?`)."
   [track sized?]
   (boolean
    (some (fn [{:keys [property]}]
-           (or (contains? #{:x :y :scale-x :scale-y :rotation :opacity :blur} property)
+           (or (contains? #{:x :y :scale-x :scale-y :rotation :opacity} property)
                (and (not sized?) (contains? #{:width :height} property))))
          (:keyframes track))))
 
@@ -3964,6 +3962,7 @@
                 (str "/* " (or (:name text) (str text-id)) ", unit " (inc k) " */\n"
                      (track->keyframes-css units-tl unit (get-in units-tl [:tracks unit-id]) kf-name
                                            (position-origin units-tl objects unit-id) nil
+                                           :svg? svg?
                                            :eased? svg?)
                      "\n\n"
                      selector " {\n"
@@ -4347,14 +4346,20 @@
   deviation of its Gaussian (`radius_to_sigma`): 1/√3 of it, plus 0.5."
   0.57735027)
 
+(defn blur-sigma
+  "The standard deviation of the Gaussian of a layer blur of `value` on
+  the canvas (render-wasm's `radius_to_sigma`): none without a value."
+  [value]
+  (if (pos? value)
+    (+ (* blur-sigma-scale value) 0.5)
+    0))
+
 (defn lottie-blurriness
   "The blurriness of a Lottie Gaussian blur as strong as the layer blur
   `value` on the canvas: lottie-web blurs by 0.3 of it as a standard
   deviation."
   [value]
-  (if (pos? value)
-    (/ (+ (* blur-sigma-scale value) 0.5) 0.3)
-    0))
+  (/ (blur-sigma value) 0.3))
 
 (defn lottie-blur-value
   "The value of a layer blur as strong as a Lottie Gaussian blur of
@@ -5745,14 +5750,33 @@
 
 (defn svg-smil-shadows?
   "Whether an SVG of vectors plays the shadows `track` animates on
-  `shape` by SMIL, on a filter of their own around its vectors (see
-  `svg-shadow-filter`), its vectors drawn without them: when it has
-  shadows to show. Its layer blur goes in that filter too, unless it
-  plays (by CSS, on the group of the layer)."
+  `shape` by SMIL, on a filter of their own around it and the layers in
+  it (see `svg-effects-filter`), its vectors drawn without them: when it
+  has shadows to show."
   [shape track]
   (boolean
    (and (some svg-shadow-properties (track-properties track))
         (some (complement :hidden) (as-vec (:shadow shape))))))
+
+(defn- blur-at
+  "The radius of the layer blur `blur` of a shape when its animation
+  gives it the value `v` (nil when it plays none): 0 when hidden or
+  none, as the canvas draws it (see `apply-blur`)."
+  [blur v]
+  (let [blur (if (some? v) (apply-blur blur v) blur)]
+    (if (and (some? blur) (not (:hidden blur)))
+      (or (:value blur) 0)
+      0)))
+
+(defn svg-smil-blur?
+  "Whether an SVG of vectors draws the layer blur of `shape` on a filter
+  of its own around it and the layers in it, as strong as the canvas
+  blurs (see `svg-effects-filter`), SMIL playing it as `track` animates
+  it (nil, none): a blur it shows or one that plays."
+  [shape track]
+  (boolean
+   (or (and (contains? (track-properties track) :blur) (not (:hidden (:blur shape))))
+       (pos? (blur-at (:blur shape) nil)))))
 
 (defn svg-smil-corners?
   "Whether an SVG of vectors plays the corners `track` animates on
@@ -5870,39 +5894,66 @@
   [[v]]
   (fmt v))
 
-(defn svg-shadows-id
-  "The id of the filter of the shadows of the layer `id` (see
-  `svg-shadow-filter`); `rest?`, of the one at rest."
+(defn svg-effects-id
+  "The id of the filter of the effects of the layer `id` (see
+  `svg-effects-filter`); `rest?`, of the one at rest."
   [id rest?]
-  (str (if rest? "penpot-shadows-rest-" "penpot-shadows-") id))
+  (str (if rest? "penpot-effects-rest-" "penpot-effects-") id))
 
-(defn- svg-shadow-filter
-  "The filter `id` of the shadows of `shape` as the SVG renderer draws
-  them (see `app.main.ui.shapes.filters`): its drop shadows under it, its
-  inner ones over it, the last first, then, with `blur?`, its layer blur.
-  With `timeline` (cut to its duration), SMIL plays their keyframes on
-  it; without, they rest. Its region, on the page, holds them as they
-  play."
-  [id shape timeline blur?]
+(defn- smil-attr
+  "The attribute `name` of a filter primitive, of `value` (a time to a
+  vector of numbers, `render` writing one) at 0, and its SMIL
+  `<animate>` when the keyframes `kfs` of `timeline` (cut to its
+  duration) play it: `{:attr :animate :points}`."
+  [timeline name value kfs render]
+  (let [points (when (and (some? timeline) (seq kfs))
+                 (smil-points value kfs (max 1 (:duration timeline))))]
+    {:attr    (str " " name "=\"" (render (value 0)) "\"")
+     :animate (when points (smil-animate timeline name points render))
+     :points  points}))
+
+(defn- smil-element
+  "The filter primitive `tag` of the attributes `attrs` and `props` (see
+  `smil-attr`), holding the `<animate>`s of those."
+  [tag attrs & props]
+  (let [animates (keep :animate props)]
+    (str "<" tag attrs (str/join "" (map :attr props))
+         (if (seq animates)
+           (str ">" (str/join "" animates) "</" tag ">")
+           "/>"))))
+
+(defn- svg-blur-primitive
+  "The `feGaussianBlur` of a layer blur of `radius` (a time to it) as
+  strong as the canvas blurs (see `blur-sigma`), SMIL playing the
+  keyframes `kfs` of `timeline`."
+  [timeline radius kfs]
+  (smil-element "feGaussianBlur" ""
+                (smil-attr timeline "stdDeviation" #(vector (blur-sigma (radius %))) kfs render-number)))
+
+(defn- svg-effects-filter
+  "The filter `id` of the effects of `shape` an SVG of vectors draws on
+  a filter of their own (see `svg-smil`): with `shadows?`, its shadows
+  as the SVG renderer draws them (see `app.main.ui.shapes.filters`), its
+  drop shadows under it, its inner ones over it, the last first; then,
+  with `blur?`, its layer blur, as strong as on the canvas (see
+  `blur-sigma`). With `timeline` (cut to its duration), SMIL plays their
+  keyframes on it; without, they rest. Its region, on the page, holds
+  them as they play, and `area` (a rect on the page), when given: what
+  the layers in it may cover."
+  [id shape timeline {:keys [shadows? blur? area]}]
   (let [sid      (:id shape)
         track    (dm/get-in timeline [:tracks sid])
         duration (max 1 (:duration timeline 1))
         values   (if (some? track) (shape-values timeline sid) (constantly {}))
         kfs      (filterv #(svg-shadow-properties (:property %)) (:keyframes track))
+        blur-kfs (filterv #(= :blur (:property %)) (:keyframes track))
         shadows  #(apply-shadows (:shadow shape) (values %))
+        radius   #(blur-at (:blur shape) (:blur (values %)))
         attr     (fn [index name props value render]
-                   (let [value  #(value (get (shadows %) index))
-                         kfs    (filterv #(and (props (:property %)) (= index (or (:index %) 0))) kfs)
-                         points (when (seq kfs) (smil-points value kfs duration))]
-                     {:attr (str " " name "=\"" (render (value 0)) "\"")
-                      :animate (when points (smil-animate timeline name points render))
-                      :points points}))
-        el       (fn [tag attrs & props]
-                   (let [animates (keep :animate props)]
-                     (str "<" tag attrs (str/join "" (map :attr props))
-                          (if (seq animates)
-                            (str ">" (str/join "" animates) "</" tag ">")
-                            "/>"))))
+                   (smil-attr timeline name #(value (get (shadows %) index))
+                              (filterv #(and (props (:property %)) (= index (or (:index %) 0))) kfs)
+                              render))
+        el       smil-element
         spread   (fn [index sign]
                    (attr index "radius" #{:shadow-spread}
                          (fn [s] [(max 0 (* sign (or (:spread s) 0)))])
@@ -5959,13 +6010,14 @@
                       (map-indexed (fn [k [index shadow]] [k index (:style shadow :drop-shadow)])))
         [prev drops] (chain "BackgroundImageFix" (filter #(= :drop-shadow (nth % 2)) shown) drop)
         [_ inners]   (chain "shape" (filter #(= :inner-shadow (nth % 2)) shown) inner)
-        blur     (:blur shape)
-        times    (into #{0 duration} (map :time) kfs)
+        times    (into #{0 duration} (map :time) (concat kfs blur-kfs))
         bounds   (grc/join-rects
-                  (map #(gsb/get-shape-filter-bounds (cond-> (assoc shape :shadow (shadows %))
-                                                       (not blur?) (dissoc :blur)))
-                       times))
-        ;; its strokes; its shadows are in its bounds
+                  (cond-> (mapv #(gsb/get-shape-filter-bounds
+                                  (cond-> (assoc shape :shadow (shadows %))
+                                    blur? (assoc :blur {:type :layer-blur :value (radius %) :hidden false})))
+                                times)
+                    (some? area) (conj area)))
+        ;; its strokes; its shadows and blur are in its bounds
         padding  (gsb/calculate-padding shape false true)
         px       (+ (:horizontal padding 0) 5)
         py       (+ (:vertical padding 0) 5)]
@@ -5973,13 +6025,45 @@
          "\" x=\"" (fmt (- (:x bounds) px)) "\" y=\"" (fmt (- (:y bounds) py))
          "\" width=\"" (fmt (+ (:width bounds) (* 2 px))) "\" height=\"" (fmt (+ (:height bounds) (* 2 py)))
          "\" filterUnits=\"userSpaceOnUse\" color-interpolation-filters=\"sRGB\">"
-         "<feFlood flood-opacity=\"0\" result=\"BackgroundImageFix\"/>"
-         drops
-         "<feBlend mode=\"normal\" in=\"SourceGraphic\" in2=\"" prev "\" result=\"shape\"/>"
-         inners
-         (when (and blur? (some? blur) (not (:hidden blur)) (pos? (or (:value blur) 0)))
-           (str "<feGaussianBlur stdDeviation=\"" (fmt (:value blur)) "\"/>"))
+         (when shadows?
+           (str "<feFlood flood-opacity=\"0\" result=\"BackgroundImageFix\"/>"
+                drops
+                "<feBlend mode=\"normal\" in=\"SourceGraphic\" in2=\"" prev "\" result=\"shape\"/>"
+                inners))
+         (when blur?
+           (svg-blur-primitive timeline radius blur-kfs))
          "</filter>")))
+
+(defn svg-unit-blur-id
+  "The id of the filter of the blur of the unit `k` of the text `text-id`
+  (see `svg-unit-blurs`)."
+  [text-id k]
+  (str "penpot-unit-blur-" text-id "-" k))
+
+(defn- svg-unit-blurs
+  "The filters of the blur of the units of the split texts `texts` (ids)
+  as `timeline` (cut to its duration) plays them (see `unit-timelines`),
+  as strong as on the canvas (see `blur-sigma`), each over the box of
+  its vectors in `images` (`:box`, in the SVG), else over `area`: `{[text-id
+  k] filter}`."
+  [timeline objects images texts area]
+  (into {}
+        (for [[text-id {units-tl :timeline ids :ids}] (select-keys (unit-timelines timeline objects) texts)
+              :let  [units-tl (cut-timeline units-tl)]
+              [k unit-id] (map-indexed vector ids)
+              :let  [kfs (filterv #(= :blur (:property %)) (dm/get-in units-tl [:tracks unit-id :keyframes]))
+                     img (get images [text-id k])]
+              :when (and (some? img) (some #(pos? (or (:value %) 0)) kfs))]
+          (let [values (shape-values units-tl unit-id)
+                margin (+ 2 (* 3 (blur-sigma (reduce max 0 (map :value kfs)))))
+                {:keys [x y width height]} (or (:box img) area)]
+            [[text-id k]
+             (str "<filter id=\"" (svg-escape (svg-unit-blur-id text-id k))
+                  "\" x=\"" (fmt (- x margin)) "\" y=\"" (fmt (- y margin))
+                  "\" width=\"" (fmt (+ width (* 2 margin))) "\" height=\"" (fmt (+ height (* 2 margin)))
+                  "\" filterUnits=\"userSpaceOnUse\" color-interpolation-filters=\"sRGB\">"
+                  (svg-blur-primitive units-tl #(or (:blur (values %)) 0) kfs)
+                  "</filter>")]))))
 
 (defn- render-corner-path
   "The outline of a rectangle `[x y width height r1 r2 r3 r4]` (its
@@ -6034,70 +6118,70 @@
 
 (defn- svg-smil
   "What SMIL plays on the vectors of the layers of `timeline` (cut to its
-  duration) that `images` has the vectors of (see `timeline->svg`), `{id
-  {:outline :filters}}`: the `<animate>` of the path of
-  the outline of each whose corners it plays (see `svg-smil-corners?`),
-  the filters of the shadows of each whose shadows it plays (see
-  `svg-smil-shadows?`), as they play and at rest, which reduced motion
-  shows (see `svg-smil-css`)."
-  [timeline objects images]
-  (reduce-kv
-   (fn [result sid track]
-     (let [vectors? (or (some? (dm/get-in images [sid :markup]))
+  duration), and of the board, that `images` has the vectors of (see
+  `timeline->svg`), `{id {:outline :filters}}`: the `<animate>` of the
+  path of the outline of each whose corners it plays (see
+  `svg-smil-corners?`), the filters of the effects of each that has
+  shadows it plays or a blur (see `svg-smil-shadows?`,
+  `svg-smil-blur?`), as they play and at rest, which reduced motion
+  shows (see `svg-smil-css`). Those of `wide` hold layers, which may go
+  over `area` (on the page)."
+  [timeline objects images wide area]
+  (reduce
+   (fn [result sid]
+     (let [track    (dm/get-in timeline [:tracks sid])
+           vectors? (or (some? (dm/get-in images [sid :markup]))
                         (some #(some? (:markup (get images [sid %]))) (unit-image-indexes images sid)))
-           shape   (when vectors? (get objects sid))
-           blur?   (not (contains? (track-properties track) :blur))
-           outline (when (and (some? shape) (svg-smil-corners? shape track))
-                     (svg-corner-path shape timeline))
-           filters (when (and (some? shape) (svg-smil-shadows? shape track))
-                     (str (svg-shadow-filter (svg-shadows-id sid false) shape timeline blur?)
-                          (svg-shadow-filter (svg-shadows-id sid true) shape nil blur?)))]
+           shape    (when vectors? (get objects sid))
+           shadows? (and (some? shape) (svg-smil-shadows? shape track))
+           blur?    (and (some? shape) (svg-smil-blur? shape track))
+           outline  (when (and (some? shape) (svg-smil-corners? shape track))
+                      (svg-corner-path shape timeline))
+           filters  (when (or shadows? blur?)
+                      (let [flags {:shadows? shadows? :blur? blur? :area (when (contains? wide sid) area)}]
+                        (str (svg-effects-filter (svg-effects-id sid false) shape timeline flags)
+                             (svg-effects-filter (svg-effects-id sid true) shape nil flags))))]
        (cond-> result
          (or (some? outline) (some? filters))
          (assoc sid (cond-> {}
                       (some? outline) (assoc :outline outline)
                       (some? filters) (assoc :filters filters))))))
    {}
-   (:tracks timeline)))
+   (into (set (keys (:tracks timeline))) (filter uuid?) (keys images))))
 
 (defn- svg-smil-css
-  "The CSS that shows the shadows of `smil` (see `svg-smil`) at rest with
-  reduced motion asked for, which SMIL does not heed; nil without any.
-  Their corners play still."
-  [smil]
-  (let [ids (into [] (keep (fn [[id {:keys [filters]}]] (when filters id))) smil)]
-    (when (seq ids)
-      (str "@media (prefers-reduced-motion: reduce) {\n"
-           (str/join "\n" (map (fn [id]
-                                 (str "  ." (svg-smil-class id) " { filter: url(#"
-                                      (svg-shadows-id id true) "); }"))
-                               ids))
-           "\n}"))))
+  "The CSS that shows the effects of `smil` (see `svg-smil`) at rest with
+  reduced motion asked for, which SMIL does not heed, and the units of
+  `unit-blurs` (see `svg-unit-blurs`) unblurred, as they rest; nil
+  without any. Their corners play still."
+  [smil unit-blurs]
+  (let [ids   (into [] (keep (fn [[id {:keys [filters]}]] (when filters id))) smil)
+        rules (concat (map (fn [id]
+                             (str "  ." (svg-smil-class id) " { filter: url(#"
+                                  (svg-effects-id id true) "); }"))
+                           ids)
+                      (map (fn [[text-id k]]
+                             (str "  ." (unit-css-class text-id k) " { filter: none; }"))
+                           (keys unit-blurs)))]
+    (when (seq rules)
+      (str "@media (prefers-reduced-motion: reduce) {\n" (str/join "\n" rules) "\n}"))))
 
 (defn- svg-smil-vectors
-  "The vectors `markup` of the layer `id` (see `svg-vectors`) with what
-  SMIL plays on them (see `svg-smil`): the path of their outline, and
-  their shadows on a filter of their own around them."
+  "The vectors `markup` of the layer `id` (see `svg-vectors`) with the
+  path of their outline SMIL plays (see `svg-smil`)."
   [{:keys [smil ox oy]} id markup]
-  (let [{:keys [outline filters]} (get smil id)
-        markup (cond-> markup (some? outline) (svg-smil-outline outline))]
-    (svg-vectors (if (some? filters)
-                   (str "<defs>" filters "</defs>"
-                        "<g class=\"" (svg-escape (svg-smil-class id))
-                        "\" filter=\"url(#" (svg-escape (svg-shadows-id id false)) ")\">"
-                        markup "</g>")
-                   markup)
-                 ox oy)))
+  (let [outline (dm/get-in smil [id :outline])]
+    (svg-vectors (cond-> markup (some? outline) (svg-smil-outline outline)) ox oy)))
 
-(defn- svg-smil-around
+(defn- svg-effects-around
   "`svg`, in the SVG, whose origin is `ox`/`oy`, on the filter of the
-  shadows of the layer `id` SMIL plays (see `svg-smil`), if any: the
-  units of a split text."
+  effects of the layer `id` (see `svg-smil`), if any: its vectors and the
+  layers in it, which it shadows and blurs as the canvas does."
   [{:keys [smil ox oy]} id svg]
   (if-let [filters (dm/get-in smil [id :filters])]
     (str "<g transform=\"translate(" (fmt (- ox)) " " (fmt (- oy)) ")\"><defs>" filters "</defs>"
          "<g class=\"" (svg-escape (svg-smil-class id))
-         "\" filter=\"url(#" (svg-escape (svg-shadows-id id false)) ")\">"
+         "\" filter=\"url(#" (svg-escape (svg-effects-id id false)) ")\">"
          "<g transform=\"translate(" (fmt ox) " " (fmt oy) ")\">" svg "</g></g></g>")
     svg))
 
@@ -6198,8 +6282,10 @@
   whose origin is `ox`/`oy`. A layer of `svg-ids` has that `id`; one of
   `follow` sits in a group that moves it with the board it is in (see
   `svg-follow-css`). SMIL plays what CSS can not on vectors (see
-  `svg-smil-vectors`)."
-  [{:keys [objects images svg-ids ox oy follow] :as ctx} {:keys [id inner clip?]}]
+  `svg-smil-vectors`), the effects of a layer around it and the layers
+  in it (see `svg-effects-around`) and the blur of the units of a text
+  (`unit-blurs`, see `svg-unit-blurs`)."
+  [{:keys [objects images svg-ids ox oy follow unit-blurs] :as ctx} {:keys [id inner clip?]}]
   (when-let [shape (get objects id)]
     (let [inner   (str/join "" (keep #(emit-svg-node ctx %) inner))
           clipped #(if (and (seq inner) (clipping-board? shape))
@@ -6216,15 +6302,20 @@
                    (svg-id-attr svg-ids id)
                    (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
                    ">"
-                   (svg-smil-around
+                   (svg-effects-around
                     ctx id
-                    (str (some-> (get images [id :rest]) (svg-drawing ox oy))
+                    (str (when-let [blurs (seq (keep #(get unit-blurs [id %]) (unit-image-indexes images id)))]
+                           (str "<defs>" (str/join "" blurs) "</defs>"))
+                         (some-> (get images [id :rest]) (svg-drawing ox oy))
                          (str/join "" (map (fn [k]
-                                             (str "<g class=\"" (svg-escape (unit-css-class id k)) "\">"
+                                             (str "<g class=\"" (svg-escape (unit-css-class id k)) "\""
+                                                  (when (contains? unit-blurs [id k])
+                                                    (str " filter=\"url(#" (svg-escape (svg-unit-blur-id id k)) ")\""))
+                                                  ">"
                                                   (svg-drawing (get images [id k]) ox oy)
                                                   "</g>"))
-                                           (unit-image-indexes images id)))))
-                   inner
+                                           (unit-image-indexes images id)))
+                         inner))
                    "</g>"))
 
             :else
@@ -6236,19 +6327,21 @@
                    (svg-id-attr svg-ids id)
                    (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
                    ">"
-                   (clipped
-                    (str (if-let [markup (:markup img)]
-                           ;; its vectors
-                           (svg-smil-vectors ctx id markup)
-                           ;; the picture of the shape as it is, turned, over its
-                           ;; box with shadows and blur (`:x :y` of the image), or
-                           ;; its box
-                           (str "<image href=\"" (svg-escape (or (:href img) ""))
-                                "\" x=\"" (fmt (or (:x img) (- (or (:x sr) 0) ox)))
-                                "\" y=\"" (fmt (or (:y img) (- (or (:y sr) 0) oy)))
-                                "\" width=\"" (fmt (or (:width img) (:width sr) 0))
-                                "\" height=\"" (fmt (or (:height img) (:height sr) 0)) "\"/>"))
-                         inner))
+                   (svg-effects-around
+                    ctx id
+                    (clipped
+                     (str (if-let [markup (:markup img)]
+                            ;; its vectors
+                            (svg-smil-vectors ctx id markup)
+                            ;; the picture of the shape as it is, turned, over its
+                            ;; box with shadows and blur (`:x :y` of the image), or
+                            ;; its box
+                            (str "<image href=\"" (svg-escape (or (:href img) ""))
+                                 "\" x=\"" (fmt (or (:x img) (- (or (:x sr) 0) ox)))
+                                 "\" y=\"" (fmt (or (:y img) (- (or (:y sr) 0) oy)))
+                                 "\" width=\"" (fmt (or (:width img) (:width sr) 0))
+                                 "\" height=\"" (fmt (or (:height img) (:height sr) 0)) "\"/>"))
+                          inner)))
                    "</g>")))]
       (if (contains? follow id)
         (str "<g class=\"" (svg-escape (svg-follow-class id)) "\">" svg "</g>")
@@ -6266,7 +6359,8 @@
   (see `unit-timelines`) and, when it has ink (an underline), `[text-id
   :rest]` of what is no unit, each over the box it covers (with the text
   turned), or their vectors (`:markup`, see `svg-vectors`), with the
-  middle of the box of a unit as `:x :y` of no size; otherwise its split
+  middle of the box of a unit as `:x :y` of no size and what its glyphs
+  cover as `:box`, where its blur plays (see `svg-unit-blurs`); otherwise its split
   animations play as animations of the whole text (see `flatten-splits`). An entry of `images` with `:markup`
   instead holds the vectors of its layer, the SVG of the shape at rest as
   it is on the page (see `svg-vectors`), and `:fonts` (an option) the
@@ -6313,9 +6407,15 @@
                                                              (fmt (+ (or y 0) (/ (or height 0) 2))) "px")))
                                             :adjust (fn [text units] (turned-moves units (:rotation text)))})})
          played   (-> timeline expand-paths cut-timeline)
-         smil     (svg-smil played objects images)
          ids      (export-layer-ids objects board-id (:tracks timeline) holders)
          nodes    (layer-nodes objects (set ids) board-id)
+         ;; the layers holding layers, which may go anywhere in the view
+         wide     (into #{board-id}
+                        (comp (filter (comp seq :inner)) (map :id))
+                        (tree-seq :inner :inner {:inner nodes}))
+         smil     (svg-smil played objects images wide
+                            {:x (- ox (/ width 2)) :y (- oy (/ height 2)) :width (* 2 width) :height (* 2 height)})
+         unit-blurs (svg-unit-blurs played objects images unit-texts {:x 0 :y 0 :width width :height height})
          follow   (when (some? propagate)
                     (svg-follow-css played objects holders ids propagate ox oy))
          clip?    (and (seq nodes) (clipping-board? board))
@@ -6335,14 +6435,17 @@
                            " href=\"" (svg-escape (:href img))
                            "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>")))
          layers   (str/join "" (keep #(emit-svg-node {:objects objects :images images :svg-ids svg-ids
-                                                      :ox ox :oy oy :follow (:ids follow) :smil smil}
+                                                      :ox ox :oy oy :follow (:ids follow) :smil smil
+                                                      :unit-blurs unit-blurs}
                                                      %)
                                      nodes))
          opacity  (or (:opacity board) 1)
-         content  (str backdrop
-                       (if clip?
-                         (str "<g clip-path=\"url(#" (svg-escape (svg-clip-id board-id)) ")\">" layers "</g>")
-                         layers))]
+         content  (svg-effects-around
+                   {:smil smil :ox ox :oy oy} board-id
+                   (str backdrop
+                        (if clip?
+                          (str "<g clip-path=\"url(#" (svg-escape (svg-clip-id board-id)) ")\">" layers "</g>")
+                          layers)))]
      (str "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" width
           "\" height=\"" height "\" viewBox=\"0 0 " width " " height
           "\" overflow=\"hidden\">"
@@ -6350,7 +6453,7 @@
           "<style>g { transform-box: view-box; }\n" (some-> fonts (str "\n")) css
           (some->> (svg-appearance-css played objects) (str "\n\n"))
           (some->> (:css follow) (str "\n\n"))
-          (some->> (svg-smil-css smil) (str "\n\n"))
+          (some->> (svg-smil-css smil unit-blurs) (str "\n\n"))
           "</style>"
           (when bbox?
             (str "<rect width=\"" width "\" height=\"" height "\" fill=\"none\"/>"))
