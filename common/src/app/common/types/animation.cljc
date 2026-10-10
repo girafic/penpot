@@ -5486,13 +5486,29 @@
   (export-layer-ids objects (:board-id timeline) (:tracks timeline)
                     (svg-holder-ids objects (svg-sized-ids objects timeline))))
 
+(defn- svg-clip-rest-id
+  [id]
+  (str "penpot-clip-rest-" id))
+
+(defn- svg-clipped-class
+  [id]
+  (str "penpot-clipped-" id))
+
+(defn- svg-clip-animated?
+  "Whether SMIL plays the corners of the clip of the board `id` (see
+  `svg-clip-paths`): an unturned one whose outline it plays (see
+  `svg-smil`)."
+  [objects smil id]
+  (and (some? (dm/get-in smil [id :outline]))
+       (unturned? (get objects id))))
+
 (defn- svg-clip-paths
   "The clip paths of the boards `ids` that clip layers, where they are in
   the SVG, whose origin is `ox`/`oy`: a rectangle when the board is one
   (see `svg-even-corners?`, its track in `tracks`), whose size and
   corners its CSS plays (see `svg-outline-elements`), else its outline,
   whose corners SMIL plays when it is unturned (the `:outline` of `smil`,
-  see `svg-smil`)."
+  see `svg-smil`), with one at rest for reduced motion then."
   [objects tracks smil ox oy ids]
   (->> ids
        (map (fn [id]
@@ -5509,8 +5525,21 @@
                          (str "<path transform=\"" move "\" d=\""
                               (path/content (canvas-outline shape)) "\""
                               (if (some? animate) (str ">" animate "</path>") "/>"))))
-                     "</clipPath>"))))
+                     "</clipPath>"
+                     ;; at rest, with reduced motion asked for (see `svg-clip-group`)
+                     (when (svg-clip-animated? objects smil id)
+                       (str "<clipPath id=\"" (svg-escape (svg-clip-rest-id id)) "\"><path transform=\"" move
+                            "\" d=\"" (path/content (canvas-outline shape)) "\"/></clipPath>"))))))
        (str/join "")))
+
+(defn- svg-clip-group
+  "`svg` kept to the outline of the board `id` (see `svg-clip-paths`), to
+  the one at rest with reduced motion asked for when SMIL plays its
+  corners (see `svg-smil-css`)."
+  [objects smil id svg]
+  (str "<g" (when (svg-clip-animated? objects smil id)
+              (str " class=\"" (svg-escape (svg-clipped-class id)) "\""))
+       " clip-path=\"url(#" (svg-escape (svg-clip-id id)) ")\">" svg "</g>"))
 
 (defn- indexed-value
   "The value of a property at `index` in `values` (see `values-at`): by
@@ -6116,6 +6145,14 @@
   [id]
   (str "penpot-smil-" id))
 
+(defn- svg-smil-anim-class
+  [id]
+  (str "penpot-smil-anim-" id))
+
+(defn- svg-smil-rest-class
+  [id]
+  (str "penpot-smil-rest-" id))
+
 (defn- svg-smil
   "What SMIL plays on the vectors of the layers of `timeline` (cut to its
   duration), and of the board, that `images` has the vectors of (see
@@ -6150,28 +6187,58 @@
    (into (set (keys (:tracks timeline))) (filter uuid?) (keys images))))
 
 (defn- svg-smil-css
-  "The CSS that shows the effects of `smil` (see `svg-smil`) at rest with
-  reduced motion asked for, which SMIL does not heed, and the units of
-  `unit-blurs` (see `svg-unit-blurs`) unblurred, as they rest; nil
-  without any. Their corners play still."
-  [smil unit-blurs]
+  "The CSS that shows what SMIL plays (see `svg-smil`) at rest with
+  reduced motion asked for, which SMIL does not heed: the effects of
+  `smil`, the copies at rest of the vectors whose corners it plays (see
+  `svg-smil-vectors`) and the clips of the boards `clipped` (see
+  `svg-clip-group`), and the units of `unit-blurs` (see
+  `svg-unit-blurs`) unblurred, as they rest; nil without any."
+  [smil unit-blurs clipped]
   (let [ids   (into [] (keep (fn [[id {:keys [filters]}]] (when filters id))) smil)
         rules (concat (map (fn [id]
                              (str "  ." (svg-smil-class id) " { filter: url(#"
                                   (svg-effects-id id true) "); }"))
                            ids)
+                      (mapcat (fn [[id {:keys [outline]}]]
+                                (when (some? outline)
+                                  [(str "  ." (svg-smil-anim-class id) " { display: none; }")
+                                   (str "  ." (svg-smil-rest-class id) " { display: inline; }")]))
+                              smil)
+                      (map (fn [id]
+                             (str "  ." (svg-clipped-class id) " { clip-path: url(#"
+                                  (svg-clip-rest-id id) "); }"))
+                           clipped)
                       (map (fn [[text-id k]]
                              (str "  ." (unit-css-class text-id k) " { filter: none; }"))
                            (keys unit-blurs)))]
     (when (seq rules)
       (str "@media (prefers-reduced-motion: reduce) {\n" (str/join "\n" rules) "\n}"))))
 
+(defn- svg-rest-copy
+  "`markup` without the marks of its outline (see `svg-smil-outline`),
+  its ids, and what refers to them, ending in `-rest`, so it draws beside
+  itself."
+  [markup]
+  (reduce (fn [markup id]
+            (-> markup
+                (str/replace (str "id=\"" id "\"") (str "id=\"" id "-rest\""))
+                (str/replace (str "#" id ")") (str "#" id "-rest)"))
+                (str/replace (str "#" id "\"") (str "#" id "-rest\""))))
+          (str/replace markup " data-penpot-outline=\"\"" "")
+          (distinct (map second (re-seq #" id=\"([^\"]+)\"" markup)))))
+
 (defn- svg-smil-vectors
   "The vectors `markup` of the layer `id` (see `svg-vectors`) with the
-  path of their outline SMIL plays (see `svg-smil`)."
+  path of their outline SMIL plays (see `svg-smil`), and beside them, for
+  reduced motion, which SMIL does not heed, a copy at rest (see
+  `svg-rest-copy`, `svg-smil-css`)."
   [{:keys [smil ox oy]} id markup]
-  (let [outline (dm/get-in smil [id :outline])]
-    (svg-vectors (cond-> markup (some? outline) (svg-smil-outline outline)) ox oy)))
+  (if-let [outline (dm/get-in smil [id :outline])]
+    (str "<g class=\"" (svg-escape (svg-smil-anim-class id)) "\">"
+         (svg-vectors (svg-smil-outline markup outline) ox oy) "</g>"
+         "<g class=\"" (svg-escape (svg-smil-rest-class id)) "\" display=\"none\">"
+         (svg-vectors (svg-rest-copy markup) ox oy) "</g>")
+    (svg-vectors markup ox oy)))
 
 (defn- svg-effects-around
   "`svg`, in the SVG, whose origin is `ox`/`oy`, on the filter of the
@@ -6289,7 +6356,7 @@
   (when-let [shape (get objects id)]
     (let [inner   (str/join "" (keep #(emit-svg-node ctx %) inner))
           clipped #(if (and (seq inner) (clipping-board? shape))
-                     (str "<g clip-path=\"url(#" (svg-escape (svg-clip-id id)) ")\">" % "</g>")
+                     (svg-clip-group objects (:smil ctx) id %)
                      %)
           svg
           (cond
@@ -6419,13 +6486,13 @@
          follow   (when (some? propagate)
                     (svg-follow-css played objects holders ids propagate ox oy))
          clip?    (and (seq nodes) (clipping-board? board))
-         clips    (svg-clip-paths objects (:tracks timeline) smil ox oy
-                                  (cond-> (into []
-                                                (comp (filter #(and (seq (:inner %))
-                                                                    (clipping-board? (get objects (:id %)))))
-                                                      (map :id))
-                                                (rest (tree-seq :inner :inner {:inner nodes})))
-                                    clip? (conj board-id)))
+         clip-ids (cond-> (into []
+                                (comp (filter #(and (seq (:inner %))
+                                                    (clipping-board? (get objects (:id %)))))
+                                      (map :id))
+                                (rest (tree-seq :inner :inner {:inner nodes})))
+                    clip? (conj board-id))
+         clips    (svg-clip-paths objects (:tracks timeline) smil ox oy clip-ids)
          svg-ids  (when ids? (svg-layer-ids objects (cons board-id ids)))
          backdrop (when-let [img (get images board-id)]
                     (if-let [markup (:markup img)]
@@ -6444,7 +6511,7 @@
                    {:smil smil :ox ox :oy oy} board-id
                    (str backdrop
                         (if clip?
-                          (str "<g clip-path=\"url(#" (svg-escape (svg-clip-id board-id)) ")\">" layers "</g>")
+                          (svg-clip-group objects smil board-id layers)
                           layers)))]
      (str "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" width
           "\" height=\"" height "\" viewBox=\"0 0 " width " " height
@@ -6453,7 +6520,9 @@
           "<style>g { transform-box: view-box; }\n" (some-> fonts (str "\n")) css
           (some->> (svg-appearance-css played objects) (str "\n\n"))
           (some->> (:css follow) (str "\n\n"))
-          (some->> (svg-smil-css smil unit-blurs) (str "\n\n"))
+          (some->> (svg-smil-css smil unit-blurs
+                                 (filterv #(svg-clip-animated? objects smil %) clip-ids))
+                   (str "\n\n"))
           "</style>"
           (when bbox?
             (str "<rect width=\"" width "\" height=\"" height "\" fill=\"none\"/>"))

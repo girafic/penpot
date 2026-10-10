@@ -1135,7 +1135,35 @@
                                   "C10,30 10,30 10,30L10,10C10,10 10,10 10,10Z;"
                                   "M20,10L50,10"))
           "of lines and curves, from square to a round top left corner")
-    (t/is (str/includes? svg "C10,14.477 14.477,10 20,10Z\"/>") "a quarter of a circle")))
+    (t/is (str/includes? svg "C10,14.477 14.477,10 20,10Z\"/>") "a quarter of a circle")
+    (t/is (str/includes? svg (str "<g class=\"penpot-smil-rest-" sid "\" display=\"none\">"))
+          "beside them, a copy at rest")
+    (t/is (str/includes? svg (str "  .penpot-smil-anim-" sid " { display: none; }"))
+          "which shows with reduced motion, as SMIL does not heed it")
+    (t/is (str/includes? svg (str "  .penpot-smil-rest-" sid " { display: inline; }")))))
+
+(t/deftest the-copy-at-rest-of-vectors-draws-beside-them
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        card  (cts/setup-shape {:type :frame :x 10 :y 10 :width 100 :height 60 :r1 0 :r2 0 :r3 0 :r4 0})
+        dot   (cts/setup-shape {:type :rect :x 20 :y 20 :width 10 :height 10})
+        [bid cid did] (map :id [board card dot])
+        objects {bid (assoc board :shapes [cid])
+                 cid (assoc card :parent-id bid :frame-id bid :shapes [did])
+                 did (assoc dot :parent-id cid :frame-id cid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe cid {:time 0 :property :r1 :value 0})
+                    (cta/add-keyframe cid {:time 1000 :property :r1 :value 20})
+                    (cta/add-keyframe did {:time 0 :property :x :value 20}))
+        markup  (str "<g id=\"g1\"><path d=\"M0\" data-penpot-outline=\"\" clip-path=\"url(#c1)\"></path>"
+                     "<clipPath id=\"c1\"></clipPath><use href=\"#c1\"></use></g>")
+        svg     (cta/timeline->svg tl objects {cid {:markup markup} did {:markup "<rect></rect>"}})]
+    (t/is (str/includes? svg (str "<g id=\"g1-rest\"><path d=\"M0\" clip-path=\"url(#c1-rest)\"></path>"
+                                  "<clipPath id=\"c1-rest\"></clipPath><use href=\"#c1-rest\"></use></g>"))
+          "its ids and what refers to them its own, without the marks of its outline")
+    (t/testing "the clip of the board, at rest with reduced motion"
+      (t/is (str/includes? svg (str "<clipPath id=\"penpot-clip-rest-" cid "\">")))
+      (t/is (str/includes? svg (str "<g class=\"penpot-clipped-" cid "\" clip-path=\"url(#penpot-clip-" cid ")\">")))
+      (t/is (str/includes? svg (str "  .penpot-clipped-" cid " { clip-path: url(#penpot-clip-rest-" cid "); }"))))))
 
 (t/deftest timeline->svg-nests-child-layers
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
