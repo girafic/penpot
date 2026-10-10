@@ -1480,9 +1480,14 @@
            (issues-of :svg :f #(assoc % :rotation 30)
                       :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
         "a turned one stretches")
-  (t/is (= [:lottie/size :lottie/blur]
+  (t/is (= [:lottie/blur]
            (issues-of :lottie :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}
-                                    {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}]))))
+                                    {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}]))
+        "in Lottie too")
+  (t/is (= [:lottie/size]
+           (issues-of :lottie :f #(assoc % :rotation 30)
+                      :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
+        "and a turned one stretches there too"))
 
 (t/deftest lottie-notes-its-effects
   (t/is (= [:lottie/shadow] (issues-of :lottie :f #(assoc % :shadow [shadow]))))

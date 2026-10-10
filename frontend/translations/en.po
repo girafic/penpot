@@ -9074,10 +9074,10 @@ msgid "workspace.options.export.issue.svg-size.text"
 msgstr "Width and height play as a scale of the layer, which stretches its strokes, corners and text. Rectangles, ellipses and boards that are not rotated, in plain colors, with equal corners and no outside stroke change their size instead."
 
 msgid "workspace.options.export.issue.lottie-size"
-msgstr "Size animation · May change in %s"
+msgstr "Size animation · Stretches in %s"
 
 msgid "workspace.options.export.issue.lottie-size.text"
-msgstr "Only ellipses and rectangles with equal corners animate their size in %s, from their top left corner. Other layers keep theirs."
+msgstr "Width and height play as a scale of the layer in %s, which stretches its strokes, corners and text. Rectangles, ellipses and boards that are not rotated, in plain colors and with equal corners change their size instead, the layers in a board moving as their constraints say."
 
 msgid "workspace.options.export.issue.svg-blur"
 msgstr "Blur animation · May change in %s"

@@ -1456,15 +1456,80 @@
         items (get-in L [:layers 0 :shapes 0 :it])
         rc    (lottie-item items "rc")]
     (t/is (= ["rc" "st" "fl" "tr"] (mapv :ty items)) "the stroke over the fill")
-    (t/testing "the size follows the width, from the top left corner, in the board"
+    (t/testing "the size follows the width around its middle, as the canvas resizes it, in the board"
       (t/is (close-all? [[100 50] [200 50]] (mapv :s (get-in rc [:s :k]))))
-      (t/is (close-all? [[100 125] [150 125]] (mapv :s (get-in rc [:p :k])))))
+      (t/is (close-all? [100 125] (get-in rc [:p :k])) "its middle stays"))
     (t/is (close? 8 (get-in rc [:r :k])))
     (t/is (= "d" (get-in (lottie-item items "st") [:d 0 :n])) "dashed")
     (t/is (close-all? [1 0 0 1] (get-in (lottie-item items "fl") [:c :k])))
     (t/testing "with an image of it, still vectors"
       (let [L (lottie-of board shape [] {(:id shape) {:id "img_0" :w 100 :h 50 :p "data:," :e 1}})]
         (t/is (= 4 (get-in L [:layers 0 :ty])))))))
+
+(t/deftest lottie-plays-sizes-as-the-canvas
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bar   (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 10
+                                :fills [{:fill-color "#00ff00" :fill-opacity 1}]})
+        [bid sid] (map :id [board bar])
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc bar :parent-id bid :frame-id bid)}
+        grow    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe sid {:time 0 :property :width :value 100})
+                    (cta/add-keyframe sid {:time 1000 :property :width :value 200}))]
+    (t/testing "a bar kept to its left grows to the right"
+      (let [L  (cta/timeline->lottie (assoc-in grow [:tracks sid :origin] {:x 0 :y 0.5}) objects)
+            rc (lottie-item (get-in L [:layers 0 :shapes 0 :it]) "rc")]
+        (t/is (close-all? [[100 10] [200 10]] (mapv :s (get-in rc [:s :k]))))
+        (t/is (close-all? [[150 105] [200 105]] (mapv :s (get-in rc [:p :k]))))
+        (t/is (close-all? [100 100 100] (get-in L [:layers 0 :ks :s :k])) "its layer as it is")))
+    (t/testing "a turned one stretches, as an SVG"
+      (let [L     (cta/timeline->lottie grow (update objects sid assoc :rotation 30))
+            layer (get-in L [:layers 0])]
+        (t/is (not (cta/lottie-sized? (assoc bar :rotation 30) (get-in grow [:tracks sid]))))
+        (t/is (close-all? [[100 100 100] [200 100 100]] (mapv :s (get-in layer [:ks :s :k]))))
+        (t/is (close-all? [100 10] (get-in (lottie-item (get-in layer [:shapes 0 :it]) "rc") [:s :k]))
+              "its outline as it is")))))
+
+(t/deftest the-lottie-layers-in-a-board-follow-its-size
+  ;; As `the-layers-in-a-board-follow-its-size`: a board 100 wide grows to
+  ;; 140 from its middle.
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        card   (cts/setup-shape {:type :frame :x 100 :y 100 :width 100 :height 50})
+        left   (assoc (cts/setup-shape {:type :rect :x 110 :y 110 :width 10 :height 10})
+                      :name "Left" :constraints-h :left :constraints-v :top)
+        right  (assoc (cts/setup-shape {:type :rect :x 180 :y 110 :width 10 :height 10})
+                      :name "Right" :constraints-h :right :constraints-v :top)
+        middle (assoc (cts/setup-shape {:type :rect :x 145 :y 110 :width 10 :height 10})
+                      :name "Middle" :constraints-h :center :constraints-v :top)
+        [bid cid lid rid mid] (map :id [board card left right middle])
+        objects {bid (assoc board :shapes [cid])
+                 cid (assoc card :parent-id bid :frame-id bid :shapes [lid rid mid])
+                 lid (assoc left :parent-id cid :frame-id cid)
+                 rid (assoc right :parent-id cid :frame-id cid)
+                 mid (assoc middle :parent-id cid :frame-id cid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe cid {:time 0 :property :width :value 100})
+                    (cta/add-keyframe cid {:time 1000 :property :width :value 140}))
+        L       (cta/timeline->lottie tl objects nil {:propagate cgm/set-objects-modifiers})
+        holder  (get-in L [:layers 0])
+        comp    (some #(when (= (:refId holder) (:id %)) %) (:assets L))
+        named   (fn [shape] (d/seek #(= (:name shape) (:nm %)) (:layers comp)))
+        null-of (fn [layer] (d/seek #(= (:parent layer) (:ind %)) (:layers comp)))]
+    (t/is (= [cid lid rid mid] (cta/lottie-export-layer-ids objects (cta/resolve-animations tl objects)))
+          "what is in it, layers, though it stays")
+    (t/is (= 0 (:ty holder)) "a precomp")
+    (t/is (close-all? [100 100 100] (get-in holder [:ks :s :k])) "which does not stretch")
+    (t/is (close-all? [100 80] (mapv #(get-in % [:s 0 :v 7 0]) (get-in holder [:masksProperties 0 :pt :k])))
+          "its clip grows with it")
+    (t/is (= 3 (:ty (null-of (named left)))) "a layer that moves, a child of a null layer")
+    (t/is (close-all? [[0 0 0] [-20 0 0]] (mapv :s (get-in (null-of (named left)) [:ks :p :k]))))
+    (t/is (close-all? [[0 0 0] [20 0 0]] (mapv :s (get-in (null-of (named right)) [:ks :p :k]))))
+    (t/is (nil? (:parent (named middle))) "one that stays, none")
+    (t/is (= 6 (count (:layers comp))) "three layers, two nulls and the board's own")
+    (t/testing "without a way to know how they move, they keep their place"
+      (let [L    (cta/timeline->lottie tl objects)
+            comp (some #(when (= (:refId (first (:layers L))) (:id %)) %) (:assets L))]
+        (t/is (not-any? #(= 3 (:ty %)) (:layers comp)))))))
 
 (defn- in-board
   "`objects` of `board` and `shapes` inside it, in stacking order (the

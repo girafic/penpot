@@ -3850,11 +3850,11 @@
     :else                               #(easing-progress (:easing keyframe) %)))
 
 (defn- eased-stops
-  "The stops of a CSS animation of `value` (a time to a vector of numbers,
-  see `value-numbers`) at `times` (sorted, from 0 to its end) of the
-  keyframes `kfs`, `[time timing]` each: the timing of the keyframe there
-  (see `keyframe-timing`) when the values to the next stop follow it,
-  else stops to it played linearly (see `sample-times`). A stretch cut
+  "The stops of an animation of `value` (a time to a vector of numbers,
+  see `value-numbers`) at `times` (sorted) of the keyframes `kfs`, `[time
+  keyframe]` each: the keyframe there that eases the stretch to the next
+  stop (see `keyframe-timing`) when its values follow it, else stops to
+  it played linearly (see `sample-times`), of no keyframe. A stretch cut
   by the keyframes of other properties is a part of the curves of those
   that go on through it, which no timing of its own eases."
   [value kfs times]
@@ -3862,7 +3862,7 @@
               (mapcat (fn [[t0 t1]]
                         (let [kf (d/seek #(and (= t0 (:time %)) (some? (keyframe-timing %))) kfs)]
                           (if (follows? value t0 t1 (keyframe-progress kf))
-                            [[t0 (some-> kf keyframe-timing)]]
+                            [[t0 kf]]
                             (map #(vector % nil) (sample-times t0 t1))))))
               (partition 2 1 times))
         [(peek times) nil]))
@@ -3886,7 +3886,8 @@
         values   (let [values (shape-values timeline sid)]
                    #(cond-> (values %) sized? (dissoc :width :height)))
         stops    (for [[t seg-timing] (if eased?
-                                        (eased-stops (comp value-numbers values) kfs times)
+                                        (map (fn [[t kf]] [t (some-> kf keyframe-timing)])
+                                             (eased-stops (comp value-numbers values) kfs times))
                                         (map (fn [t] [t (some #(when (= (:time %) t) (keyframe-timing %)) kfs)])
                                              times))]
                    (let [pct   (fmt (* 100.0 (/ (double t) duration)))
@@ -4014,6 +4015,11 @@
 ;; `lottie-vector-layer?`); other shapes as images or, without them, as a
 ;; rectangle of their bounds in their first fill colour.
 
+(def ^:private kappa
+  "How far the control points of a cubic curve of a quarter of a circle
+  are from its ends, by its radius."
+  0.5522847498)
+
 (def ^:private lottie-fps 60)
 
 (defn- ms->frames
@@ -4113,6 +4119,116 @@
   scale property (percentages)."
   [sx-kfs sy-kfs]
   (lottie-pair-prop sx-kfs sy-kfs 1 1 (fn [x y] [(* 100.0 x) (* 100.0 y) 100])))
+
+(defn- lottie-stops-prop
+  "A Lottie property playing `stops` (`[time keyframe value]` each, see
+  `eased-stops`), `render` giving the Lottie value (`s`) of a value and
+  `static` the one of the property when it keeps its first: each
+  keyframe eased by the curve of its keyframe, held for a hold, linear
+  without one."
+  [stops render static]
+  (let [n  (count stops)
+        v0 (render (nth (first stops) 2))]
+    (if (or (< n 2) (every? #(= v0 (render (nth % 2))) stops))
+      {:a 0 :k (static v0)}
+      {:a 1
+       :k (into []
+                (map-indexed
+                 (fn [i [t kf v]]
+                   (let [base {:t (ms->frames t) :s (render v)}]
+                     (cond
+                       (= i (dec n))                         base
+                       (= :step (:interpolation kf :linear)) (assoc base :h 1)
+                       :else
+                       (let [[x1 y1 x2 y2] (easing->bezier-curve (:easing kf))]
+                         (assoc base :o {:x [x1] :y [y1]} :i {:x [x2] :y [y2]}))))))
+                stops)})))
+
+(defn- lottie-eased-prop
+  "A Lottie property of `value` (a time to a vector of numbers, as the
+  canvas plays it) at the times of the keyframes `kfs`, eased as the
+  canvas eases each property (see `eased-stops`, `lottie-stops-prop`)."
+  [value kfs render static]
+  (let [times (vec (into (sorted-set) (map :time) kfs))]
+    (lottie-stops-prop (if (empty? times)
+                         [[0 nil (value 0)]]
+                         (map (fn [[t kf]] [t kf (value t)]) (eased-stops value kfs times)))
+                       render
+                       static)))
+
+(declare svg-sized? svg-sized-ids svg-holder-ids board-follow)
+
+(defn lottie-sized?
+  "Whether a Lottie export plays the width and height `track` animates on
+  `shape` on its outline, as the canvas resizes it, the layers in a board
+  following it, as an SVG does (see `svg-sized?`); else they stretch its
+  layer (see `lottie-stretched?`)."
+  [shape track]
+  (svg-sized? shape track))
+
+(defn- lottie-stretched?
+  "Whether the width and height `track` animates on `shape` stretch its
+  Lottie layer (see `lottie-sized?`)."
+  [shape track]
+  (boolean
+   (and (some #(#{:width :height} (:property %)) (:keyframes track))
+        (not (lottie-sized? shape track)))))
+
+(defn lottie-export-layer-ids
+  "The layers of a Lottie export of `timeline` (with its keyframes, see
+  `resolve-animations`): its export layers (see `export-layer-ids`) and
+  the children of the boards whose size it plays on their outlines (see
+  `lottie-sized?`), which follow them."
+  [objects timeline]
+  (export-layer-ids objects (:board-id timeline) (:tracks timeline)
+                    (svg-holder-ids objects (svg-sized-ids objects timeline))))
+
+(defn- lottie-box
+  "A function of a time to the box of `shape` then, resized by the width
+  and height `track` plays around its pivot, as the canvas resizes it,
+  in the board at `ox`, `oy`: `[left top width height radius]`, its
+  first radius clamped as Lottie clamps it."
+  [shape track ox oy]
+  (let [{:keys [x y width height]} (:selrect shape)
+        pivot  (origin-point shape (track-origin track))
+        values (shape-values {:tracks {(:id shape) track}} (:id shape))]
+    (fn [t]
+      (let [v (values t)
+            w (double (get v :width width))
+            h (double (get v :height height))
+            r (double (get v :r1 (or (:r1 shape) 0)))]
+        [(- (:x pivot) (* (- (:x pivot) x) (/ w width)) ox)
+         (- (:y pivot) (* (- (:y pivot) y) (/ h height)) oy)
+         w
+         h
+         (min r (/ (min w h) 2))]))))
+
+(defn- lottie-size-props
+  "The `:size` and `:center` Lottie properties of the outline of `shape`
+  whose width and height `track` plays on it (see `lottie-sized?`), in
+  the board at `ox`, `oy`: resized around its pivot (see `lottie-box`)."
+  [shape track ox oy]
+  (let [box (lottie-box shape track ox oy)
+        kfs (filterv #(#{:width :height} (:property %)) (:keyframes track))]
+    {:size   (lottie-eased-prop #(subvec (box %) 2 4) kfs identity identity)
+     :center (lottie-eased-prop (fn [t]
+                                  (let [[l tp w h] (box t)]
+                                    [(+ l (/ w 2)) (+ tp (/ h 2))]))
+                                kfs identity identity)}))
+
+(defn- lottie-rect-shape
+  "A Lottie path of a rectangle `[left top width height radius]`, its
+  corners alike: eight points, its corners curves (lines when square),
+  so it tweens with any other."
+  [[l t w h r]]
+  (let [k (* kappa r)
+        right  (+ l w)
+        bottom (+ t h)]
+    {:c true
+     :v [[(+ l r) t] [(- right r) t] [right (+ t r)] [right (- bottom r)]
+         [(- right r) bottom] [(+ l r) bottom] [l (- bottom r)] [l (+ t r)]]
+     :i [[(- k) 0] [0 0] [0 (- k)] [0 0] [k 0] [0 0] [0 k] [0 0]]
+     :o [[0 0] [k 0] [0 0] [0 k] [0 0] [(- k) 0] [0 0] [0 (- k)]]}))
 
 (defn- slot-kfs
   "Keyframes of `property` at `index` (nil = the unindexed property)."
@@ -4370,7 +4486,18 @@
          :x (lottie-prop-1d (by-prop :x) (fn [v] (+ (- (+ (:x origin) v) ox) dx)) px)
          :y (lottie-prop-1d (by-prop :y) (fn [v] (+ (- (+ (:y origin) v) oy) dy)) py)}
      :a {:a 0 :k [ax ay 0]}
-     :s (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y))}))
+     :s (if (lottie-stretched? shape track)
+          ;; its width and height stretch it (see `lottie-stretched?`)
+          (let [{:keys [width height]} (:selrect shape)
+                values (shape-values {:tracks {(:id shape) track}} (:id shape))]
+            (lottie-eased-prop (fn [t]
+                                 (let [v (values t)]
+                                   [(* 100.0 (axis-scale (or width 0) v :width :scale-x))
+                                    (* 100.0 (axis-scale (or height 0) v :height :scale-y))
+                                    100.0]))
+                               (filterv #(#{:width :height :scale-x :scale-y} (:property %)) (:keyframes track))
+                               identity identity))
+          (lottie-scale-prop (by-prop :scale-x) (by-prop :scale-y)))}))
 
 (defn- lottie-holder-ks
   "The transform of a precomp layer holding `shape` drawn as it is,
@@ -4541,16 +4668,16 @@
 (defn- lottie-outline
   "The outline of `shape` as Lottie items, in board coordinates (the
   board at `ox`, `oy`) and before it turns: the layer turns it. An
-  ellipse and a rectangle with one radius take their size (and radius)
-  from the keyframes, growing from the top left corner."
-  [shape by-prop ox oy]
+  ellipse and a rectangle with one radius take their radius from the
+  keyframes and their size from `sized` (see `lottie-size-props`), as
+  the canvas resizes them; without, the size they have (their layer
+  stretches, see `lottie-stretched?`)."
+  [shape by-prop ox oy sized]
   (let [{:keys [x y width height]} (:selrect shape)
         left   (- x ox)
         top    (- y oy)
-        size   (lottie-pair-prop (by-prop :width) (by-prop :height) width height
-                                 (fn [w h] [w h]))
-        center (lottie-pair-prop (by-prop :width) (by-prop :height) width height
-                                 (fn [w h] [(+ left (/ w 2)) (+ top (/ h 2))]))
+        size   (or (:size sized) {:a 0 :k [width height]})
+        center (or (:center sized) {:a 0 :k [(+ left (/ width 2)) (+ top (/ height 2))]})
         rotation (or (:rotation shape) 0)]
     (cond
       (= :circle (:type shape))
@@ -4576,12 +4703,13 @@
           (lottie-path-shapes (- ox) (- oy))))))
 
 (defn- lottie-vector-groups
-  "The Lottie groups drawing `shape` as vectors: its outline with its
-  strokes over its fills. A trim trims the strokes only, as the canvas
-  does: they get a trimmed copy of the outline."
-  [shape by-prop ox oy]
+  "The Lottie groups drawing `shape` as vectors: its outline (resized as
+  `sized` says, see `lottie-outline`) with its strokes over its fills. A
+  trim trims the strokes only, as the canvas does: they get a trimmed
+  copy of the outline."
+  [shape by-prop ox oy & [sized]]
   (let [{:keys [x y width height]} (:selrect shape)
-        outline (lottie-outline shape by-prop ox oy)
+        outline (lottie-outline shape by-prop ox oy sized)
         strokes (lottie-stroke-items shape by-prop)
         fills   (lottie-fill-items shape by-prop [(- x ox) (- y oy) width height])
         trim    (lottie-trim-item by-prop)]
@@ -4636,18 +4764,28 @@
 
 (defn- lottie-clip-mask
   "A Lottie mask keeping a layer to the outline of the board `shape`,
-  turned back by `rotation`, as much as the layer turns it."
-  [shape ox oy rotation]
+  turned back by `rotation`, as much as the layer turns it, resized as
+  the width and height `track` plays on it when it does (see
+  `lottie-sized?`)."
+  [shape ox oy rotation & [track]]
   (let [{:keys [x y width height]} (:selrect shape)
         center (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
         path   (first (lottie-turned-back (canvas-outline shape) rotation center ox oy))]
-    {:inv false :mode "a" :nm "clip" :pt (:ks path) :o {:a 0 :k 100} :x {:a 0 :k 0}}))
+    {:inv false :mode "a" :nm "clip"
+     :pt (if (and (some? track) (lottie-sized? shape track))
+           (lottie-eased-prop (lottie-box shape track ox oy)
+                              (filterv #(#{:width :height :r1} (:property %)) (:keyframes track))
+                              #(vector (lottie-rect-shape %))
+                              first)
+           (:ks path))
+     :o {:a 0 :k 100} :x {:a 0 :k 0}}))
 
 (defn- lottie-layer-groups
   "The Lottie groups drawing the layer `shape` as vectors: its own shape
-  with the keyframes of its track (see `lottie-vector-groups`) or, for a
-  group, its layers, and for a board, its layers over its own shape."
-  [objects layer-ids shape by-prop ox oy]
+  with the keyframes of its track (see `lottie-vector-groups`, `sized`
+  its size) or, for a group, its layers, and for a board, its layers
+  over its own shape."
+  [objects layer-ids shape by-prop ox oy & [sized]]
   (let [{:keys [x y width height]} (:selrect shape)
         center   (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
         rotation (or (:rotation shape) 0)
@@ -4657,8 +4795,8 @@
                                                             rotation center ox oy))))]
     (case (:type shape)
       :group (vec (children))
-      :frame (into (vec (children)) (lottie-vector-groups shape by-prop ox oy))
-      (lottie-vector-groups shape by-prop ox oy))))
+      :frame (into (vec (children)) (lottie-vector-groups shape by-prop ox oy sized))
+      (lottie-vector-groups shape by-prop ox oy sized))))
 
 (defn- lottie-placeholder-group
   "A rectangle of the bounds of `shape` in its first fill colour, for a
@@ -4691,6 +4829,7 @@
   [ind objects layer-ids shape track ox oy origin & {:keys [effects? mask?] :or {effects? true mask? true}}]
   (let [by-prop (group-by :property (:keyframes track))
         vector? (lottie-vector-layer? objects layer-ids (:id shape))
+        sized   (when (lottie-sized? shape track) (lottie-size-props shape track ox oy))
         effects (when effects?
                   (concat (when vector? (lottie-shadow-effects shape by-prop))
                           (lottie-blur-effect shape by-prop)))]
@@ -4702,7 +4841,7 @@
              :ks (lottie-ks shape track ox oy origin)
              :ao 0
              :shapes (if vector?
-                       (lottie-layer-groups objects layer-ids shape by-prop ox oy)
+                       (lottie-layer-groups objects layer-ids shape by-prop ox oy sized)
                        [(lottie-placeholder-group shape by-prop ox oy)])
              :ip 0
              :op (ms->frames (max 1 (:duration track 0)))
@@ -4712,7 +4851,7 @@
       (assoc :ef (vec effects))
 
       (and mask? vector? (= :frame (:type shape)) (not (true? (:show-content shape))))
-      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy (or (:rotation shape) 0))]))))
+      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy (or (:rotation shape) 0) track)]))))
 
 (defn- lottie-markers
   "The Lottie markers of the markers of `timeline`: each names the stretch
@@ -4778,8 +4917,37 @@
       (assoc :duration duration)))
 
 (defn- lottie-numbered
+  "`layers` numbered (`:ind`), each that follows the board it is in
+  (`::follow`) a child of the null layer that moves it (`::null`, see
+  `lottie-follow-null`)."
   [layers]
-  (into [] (map-indexed (fn [i layer] (assoc layer :ind (inc i)))) layers))
+  (let [numbered (into [] (map-indexed (fn [i layer] (assoc layer :ind (inc i)))) layers)
+        nulls    (into {} (keep #(when-let [id (::null %)] [id (:ind %)])) numbered)]
+    (mapv (fn [layer]
+            (cond-> (dissoc layer ::null ::follow)
+              (contains? nulls (::follow layer)) (assoc :parent (get nulls (::follow layer)))))
+          numbered)))
+
+(defn- lottie-follow-null
+  "A null layer that moves the layer of `shape` with the board it is in
+  as it resizes, by the matrices of `stops` (see `board-follow`): its
+  layer a child of it (see `lottie-numbered`)."
+  [{:keys [duration]} shape stops]
+  {:ddd 0
+   :ty 3
+   :nm (str (or (:name shape) (:id shape)) " follows")
+   :sr 1
+   :ks {:o {:a 0 :k 100}
+        :r {:a 0 :k 0}
+        :p (lottie-stops-prop stops (fn [[_ _ _ _ e f]] [e f 0]) identity)
+        :a {:a 0 :k [0 0 0]}
+        :s (lottie-stops-prop stops (fn [[a _ _ d]] [(* 100.0 a) (* 100.0 d) 100]) identity)}
+   :ao 0
+   :ip 0
+   :op (ms->frames duration)
+   :st 0
+   :bm 0
+   ::null (:id shape)})
 
 (defn- lottie-shape-layer
   "A layer drawing `shape` with `track`: as vectors when it can be, else
@@ -4799,8 +4967,12 @@
   layers, for the precomp (or the composition) that moves, fades and
   clips it."
   [ctx shape]
-  (let [track (update (lottie-track ctx (:id shape)) :keyframes
-                      #(into [] (remove (comp lottie-layer-properties :property)) %))]
+  (let [track (lottie-track ctx (:id shape))
+        ;; its holder stretches it, else it is resized as it plays (see
+        ;; `lottie-sized?`)
+        drop  (cond-> lottie-layer-properties
+                (not (lottie-sized? shape track)) (into #{:width :height}))
+        track (update track :keyframes #(into [] (remove (comp drop :property)) %))]
     (lottie-shape-layer ctx (assoc shape :opacity 1) track :effects? false :mask? false)))
 
 (defn- lottie-draws?
@@ -4857,9 +5029,10 @@
       (seq effects)
       (assoc :ef (vec effects))
 
-      ;; its outline as it is, turned, as what it holds
+      ;; its outline as it is, turned, as what it holds, resized as it
+      ;; plays
       (clipping-board? shape)
-      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy 0)]))))
+      (assoc :hasMask true :masksProperties [(lottie-clip-mask shape ox oy 0 track)]))))
 
 (defn- unit-text-ids
   "The texts `images` has pictures of the units of (`[text-id k]`, see
@@ -5034,15 +5207,21 @@
      :bm 0}))
 
 (defn- lottie-node-layers
-  "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first."
+  "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first,
+  each that follows the board it is in as it resizes (`:follow` of
+  `ctx`, see `board-follow`) with the null layer that moves it (see
+  `lottie-follow-null`)."
   [ctx nodes]
   (into []
-        (keep (fn [{:keys [id inner] :as node}]
-                (when-let [shape (get (:objects ctx) id)]
-                  (cond
-                    (contains? (:units ctx) id) (lottie-units-layer ctx shape)
-                    (seq inner)                 (lottie-precomp-layer ctx node)
-                    :else                       (lottie-shape-layer ctx shape (lottie-track ctx id))))))
+        (mapcat (fn [{:keys [id inner] :as node}]
+                  (when-let [shape (get (:objects ctx) id)]
+                    (let [layer (cond
+                                  (contains? (:units ctx) id) (lottie-units-layer ctx shape)
+                                  (seq inner)                 (lottie-precomp-layer ctx node)
+                                  :else                       (lottie-shape-layer ctx shape (lottie-track ctx id)))]
+                      (if-let [stops (get (:follow ctx) id)]
+                        [(assoc layer ::follow id) (lottie-follow-null ctx shape stops)]
+                        [layer])))))
         (rseq nodes)))
 
 (defn- lottie-layers
@@ -5050,12 +5229,15 @@
   the precomps they use: a layer with layers inside it, or a board that
   clips some, becomes a precomp (see `lottie-precomp-layer`). Layers not
   in the tree of the board go below the others, and the board draws
-  itself, and what is no layer, at the bottom."
-  [timeline objects layer-ids assets units]
+  itself, and what is no layer, at the bottom. The layers in a board
+  whose size plays on its outline follow it as `follow` says (see
+  `board-follow`)."
+  [timeline objects layer-ids assets units follow]
   (let [board-id (:board-id timeline)
         board    (get objects board-id)
         bsr      (:selrect board)
         ctx      {:objects objects
+                  :follow follow
                   :layer-ids layer-ids
                   :assets assets
                   :units units
@@ -5102,10 +5284,15 @@
   units, `[text-id k]` (and `[text-id :rest]` of what is no unit), or
   the outlines of their glyphs instead, `{:runs [{:content :fills}]
   :center}` on the page, which they turn and scale around (see
-  `lottie-units-layer`)."
+  `lottie-units-layer`). The width and height of a layer play on its
+  outline when they can (see `lottie-sized?`), the layers in such a
+  board moving with it as `:propagate` says (an option, see
+  `board-follow`), else they stretch it."
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]
+   (timeline->lottie timeline objects assets nil))
+  ([timeline objects assets {:keys [propagate]}]
    (let [markers    (lottie-markers timeline)
          unit-texts (unit-text-ids assets)
          resolved   (-> timeline
@@ -5121,10 +5308,17 @@
          ;; the layers the pictures were taken of, even when all draw as
          ;; vectors: a shape among them that is no Lottie content (with
          ;; effects, see `lottie-content?`) draws only as one
+         holders    (svg-holder-ids objects (svg-sized-ids objects timeline))
          layer-ids  (if (some? assets)
-                      (set (export-layer-ids objects board-id (:tracks timeline)))
-                      (disj (set (keys (:tracks timeline))) board-id))
-         {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets units)
+                      (set (lottie-export-layer-ids objects timeline))
+                      (-> (set (keys (:tracks timeline)))
+                          (disj board-id)
+                          (into (mapcat #(dm/get-in objects [% :shapes])) holders)))
+         bsr        (dm/get-in objects [board-id :selrect])
+         follow     (when (and (some? propagate) (seq holders))
+                      (into {} (board-follow timeline objects holders layer-ids propagate
+                                             (or (:x bsr) 0) (or (:y bsr) 0))))
+         {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets units follow)
          ;; the pictures among them (the units of texts may be outlines)
          images    (map (fn [[_ asset]]
                           {:id (:id asset)
@@ -5544,8 +5738,8 @@
                                (comp (map :time) (filter #(<= 0 % duration)))
                                kfs))
              values (shape-values timeline sid)
-             stops  (for [[t timing] (eased-stops #(value-numbers (select-keys (values %) reads)) kfs times)]
-                      (svg-stop-css t duration (declarations (values t)) timing))]
+             stops  (for [[t kf] (eased-stops #(value-numbers (select-keys (values %) reads)) kfs times)]
+                      (svg-stop-css t duration (declarations (values t)) (some-> kf keyframe-timing)))]
          [selectors name (str "@keyframes " name " {\n" (str/join "\n" stops) "\n}")]))
      duration
      (svg-iterations timeline))))
@@ -5799,11 +5993,6 @@
            (str "<feGaussianBlur stdDeviation=\"" (fmt (:value blur)) "\"/>"))
          "</filter>")))
 
-(def ^:private kappa
-  "How far the control points of a cubic curve of a quarter of a circle
-  are from its ends, by its radius."
-  0.5522847498)
-
 (defn- render-corner-path
   "The outline of a rectangle `[x y width height r1 r2 r3 r4]` (its
   corners clamped, see `svg-corner-path`) as lines and curves: no arcs,
@@ -5939,54 +6128,64 @@
                                 (gmt/matrix))]
     [a b c d (- (+ (* a ox) (* c oy) e) ox) (- (+ (* b ox) (* d oy) f) oy)]))
 
-(defn- svg-follow-css
+(defn board-follow
   "How the layers among `ids` in the boards `holders`, whose size plays
-  on their elements (see `svg-sized?`), move with them, as the canvas
+  on their outlines (see `svg-sized?`), move with them, as the canvas
   moves them as their constraints and layouts say: `propagate` gives a
   modif-tree with the modifiers of what is in the shapes it modifies
   (`app.common.geom.modifiers/set-objects-modifiers`), whose transforms
-  each layer goes through, in a group of its own (see
-  `svg-follow-class`), at the stops of the size of its board. `timeline`
-  is cut to its duration; the SVG starts at `ox`/`oy`. `{:css :ids}`,
-  the layers that move."
+  each layer goes through at the stops of the size of its board (see
+  `eased-stops`), in a space whose origin is `ox`/`oy` (see
+  `svg-matrix`). `[[layer-id [[time keyframe matrix]...]]...]`, the
+  layers that move."
+  [timeline objects holders ids propagate ox oy]
+  (let [duration  (max 1 (:duration timeline))
+        layer?    (set ids)
+        identity? (fn [matrix] (every? true? (map mth/close? matrix [1 0 0 1 0 0])))]
+    (for [hid   holders
+          :let  [holder   (get objects hid)
+                 track    (dm/get-in timeline [:tracks hid])
+                 kfs      (filterv #(svg-size-properties (:property %)) (:keyframes track))
+                 children (filterv layer? (:shapes holder))]
+          :when (and (some? holder) (seq kfs) (seq children))
+          :let  [{:keys [width height]} (:selrect holder)
+                 pivot  (origin-point holder (track-origin track))
+                 values (shape-values timeline hid)
+                 size   #(let [v (values %)] [(get v :width width) (get v :height height)])
+                 poses  (for [[t kf] (eased-stops #(mapv double (size %))
+                                                  kfs
+                                                  (vec (into (sorted-set 0 duration)
+                                                             (comp (map :time) (filter #(<= 0 % duration)))
+                                                             kfs)))]
+                          (let [[w h] (size t)]
+                            [t kf (propagate {hid {:modifiers (ctm/resize (ctm/empty)
+                                                                          (gpt/point (/ w width) (/ h height))
+                                                                          pivot)}}
+                                             objects)]))]
+          cid   children
+          :let  [stops (mapv (fn [[t kf tree]] [t kf (svg-matrix (dm/get-in tree [cid :modifiers]) ox oy)])
+                             poses)]
+          :when (not-every? (comp identity? peek) stops)]
+      [cid stops])))
+
+(defn- svg-follow-css
+  "How the layers among `ids` in the boards `holders` move with them (see
+  `board-follow`), each in a group of its own (see `svg-follow-class`).
+  `timeline` is cut to its duration; the SVG starts at `ox`/`oy`. `{:css
+  :ids}`, the layers that move."
   [timeline objects holders ids propagate ox oy]
   (let [duration   (max 1 (:duration timeline))
         iterations (svg-iterations timeline)
-        layer?     (set ids)
-        identity?  (fn [matrix] (every? true? (map mth/close? matrix [1 0 0 1 0 0])))
         moves
-        (for [hid   holders
-              :let  [holder   (get objects hid)
-                     track    (dm/get-in timeline [:tracks hid])
-                     kfs      (filterv #(svg-size-properties (:property %)) (:keyframes track))
-                     children (filterv layer? (:shapes holder))]
-              :when (and (some? holder) (seq kfs) (seq children))
-              :let  [{:keys [width height]} (:selrect holder)
-                     pivot (origin-point holder (track-origin track))
-                     values (shape-values timeline hid)
-                     size   #(let [v (values %)] [(get v :width width) (get v :height height)])
-                     poses (for [[t timing] (eased-stops #(mapv double (size %))
-                                                         kfs
-                                                         (vec (into (sorted-set 0 duration)
-                                                                    (comp (map :time) (filter #(<= 0 % duration)))
-                                                                    kfs)))]
-                             (let [[w h] (size t)]
-                               [t timing (propagate {hid {:modifiers (ctm/resize (ctm/empty)
-                                                                                 (gpt/point (/ w width) (/ h height))
-                                                                                 pivot)}}
-                                                    objects)]))]
-              cid   children
-              :let  [matrices (mapv (fn [[t timing tree]] [t timing (svg-matrix (dm/get-in tree [cid :modifiers]) ox oy)])
-                                    poses)]
-              :when (not-every? (comp identity? peek) matrices)]
+        (for [[cid stops] (board-follow timeline objects holders ids propagate ox oy)]
           (let [name     (str "penpot-follow-" cid)
                 selector (str "." (svg-follow-class cid))
-                stops    (for [[t timing matrix] matrices]
+                css      (for [[t kf matrix] stops]
                            (svg-stop-css t duration
                                          [(str "transform: matrix(" (str/join ", " (map fmt matrix)) ");")]
-                                         timing))]
+                                         (some-> kf keyframe-timing)))]
             [cid selector
-             (str "@keyframes " name " {\n" (str/join "\n" stops) "\n}\n\n"
+             (str "@keyframes " name " {\n" (str/join "\n" css) "\n}\n\n"
                   selector " {\n  transform-origin: 0 0;\n  animation: " name " " duration "ms linear "
                   iterations ";\n}")]))]
     {:ids (into #{} (map first) moves)

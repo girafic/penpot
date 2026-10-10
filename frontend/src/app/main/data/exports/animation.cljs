@@ -585,8 +585,8 @@
     `svg-static?`; its CSS plays the rest on its vectors; its texts
     outlined with `:outline` of its export settings, see
     `outline-texts`);
-  - `:svg/size`, an animated width or height SVG plays as a stretch
-    (see `cta/svg-sized?`), and `:lottie/size`, any;
+  - `:svg/size` and `:lottie/size`, an animated width or height they
+    play as a stretch (see `cta/svg-sized?`, `cta/lottie-sized?`);
   - `:svg/blur`, an animated blur, which browsers draw stronger than the
     canvas, and `:lottie/blur`, a blur, which players draw at their own
     strength;
@@ -610,8 +610,7 @@
           layer-ids (cta/export-layer-ids objects board-id (:tracks resolved))
           idset     (set layer-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
-          size?     (or (contains? animated :width) (contains? animated :height))
-          ;; SVG plays some on the vectors
+          ;; SVG and Lottie play some on the outlines
           stretch?  (boolean
                      (some (fn [[id track]]
                              (let [shape (get objects id)]
@@ -641,7 +640,7 @@
                                (svg-static? shape track (outlined? shape))))
                            (:tracks resolved)))]
            [:svg/size #{:svg} stretch?]
-           [:lottie/size lottie-formats size?]
+           [:lottie/size lottie-formats stretch?]
            [:svg/blur #{:svg} (contains? animated :blur)]
            [:lottie/shadow lottie-formats
             (some?* (fn [shape] (some #(= :drop-shadow (:style %)) (shown (:shadow shape)))))]
@@ -1315,10 +1314,11 @@
      (map-indexed vector texts))))
 
 (defn- layer-ids-to-shoot
-  "The export layers of `timeline` and its board, the pictures
+  "The layers of a Lottie export of `timeline` (see
+  `cta/lottie-export-layer-ids`) and its board, the pictures
   `collect-layer-images` takes, but those `skip?` is true of."
   [objects timeline skip?]
-  (cond->> (conj (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline))
+  (cond->> (conj (cta/lottie-export-layer-ids objects (cta/resolve-animations timeline objects))
                  (:board-id timeline))
     (some? skip?) (remove skip?)))
 
@@ -1678,12 +1678,13 @@
 (defn- markup-file
   "A promise of the SVG, Lottie or dotLottie of the board `board` playing
   `tl`, with the pictures `images` (see `collect-layer-images` and
-  `collect-unit-vectors`): `{:status :ok :blob :ext :mtype}`. `svg-opts`
-  go to `cta/timeline->svg`."
-  [tl objects board format images svg-opts]
+  `collect-unit-vectors`): `{:status :ok :blob :ext :mtype}`. `opts` go
+  to `cta/timeline->svg`, their `:propagate` to `cta/timeline->lottie`
+  too."
+  [tl objects board format images opts]
   (case format
     :svg
-    (let [svg (cta/timeline->svg tl objects images svg-opts)]
+    (let [svg (cta/timeline->svg tl objects images opts)]
       (js/Promise.resolve {:status :ok
                            :blob (wapi/create-blob svg "image/svg+xml")
                            :ext ".svg"
@@ -1693,7 +1694,7 @@
     (let [assets (into {} (map (fn [[id img]]
                                  [id (select-keys img [:id :w :h :p :e :x :y :runs :center])]))
                        images)
-          data   (cta/timeline->lottie tl objects assets)
+          data   (cta/timeline->lottie tl objects assets (select-keys opts [:propagate]))
           json   (js/JSON.stringify (clj->js data) nil 2)]
       (js/Promise.resolve {:status :ok
                            :blob (wapi/create-blob json "application/json")
@@ -1711,7 +1712,7 @@
                                           (-> (select-keys img [:id :w :h :x :y])
                                               (assoc :u "/images/" :p (file-name img) :e 0)))]))
                           images)
-          data      (cta/timeline->lottie tl objects assets)
+          data      (cta/timeline->lottie tl objects assets (select-keys opts [:propagate]))
           files     (into {} (keep (fn [[_ img]] (when (some? (:bytes img)) [(file-name img) (:bytes img)])))
                           images)]
       (p/let [blob (lottie->dotlottie data (safe-filename name "") files
@@ -1802,7 +1803,7 @@
         shapes   (if lottie? (second (outline-texts objects tl texts bridge)) objects)
         ;; Lottie draws the layers it can as vectors, SVG all (see
         ;; `vector-layers`)
-        layers   (set (cta/export-layer-ids shapes board-id (:tracks tl)))
+        layers   (set (cta/lottie-export-layer-ids shapes (cta/resolve-animations tl shapes)))
         skip?    #(or vectors?
                       (contains? texts %)
                       (and lottie? (cta/lottie-vector-layer? shapes layers %)))
