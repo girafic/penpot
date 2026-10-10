@@ -9067,12 +9067,6 @@ msgstr "Effects and masks · Exported as images"
 msgid "workspace.options.export.issue.lottie-images.text"
 msgstr "Layers with inner shadows, masks, image fills or gradient strokes are images in %s: their fills, strokes, shadows and blur don't animate, and they blur when scaled up."
 
-msgid "workspace.options.export.issue.svg-units"
-msgstr "Split text · Exported as images"
-
-msgid "workspace.options.export.issue.svg-units.text"
-msgstr "A text animated by characters, words or lines has each of them as an image in %s, of how it rests: they blur when scaled up."
-
 msgid "workspace.options.export.issue.svg-outline"
 msgstr "Text in several fills · Not outlined in %s"
 

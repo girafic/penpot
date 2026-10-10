@@ -52,6 +52,7 @@
    :render-shape-pixels wasm.api/render-shape-pixels
    :get-shape-extrect wasm.api/get-shape-extrect
    :shape-to-path wasm.api/shape-to-path
+   :text-unit-outlines wasm.api/text-unit-outlines
    :apply-shape-properties wasm.shape/apply-shape-properties!
    :set-modifiers-end wasm.api/set-modifiers-end
    :interactive? wasm-gesture/active?
@@ -588,9 +589,9 @@
 
   - `:lottie/text`, texts, which Lottie has as pictures, and
     `:lottie/images`, layers that draw as pictures for their effects,
-    masks or paints (see `cta/lottie-vector-layer?`); `:svg/units`, the
-    units of split texts, which SVG has as pictures (its layers are
-    vectors, see `app.main.data.exports.svg-vectors`);
+    masks or paints (see `cta/lottie-vector-layer?`) (an SVG has its
+    layers and the units of split texts as vectors, see
+    `app.main.data.exports.svg-vectors`);
   - `:svg/appearance`, what an SVG keeps as it rests (see
     `svg-static?`; its CSS plays the rest on its vectors), and
     `:svg/outline`, with its texts outlined (`:outline` of its export
@@ -646,7 +647,6 @@
                                     (not (contains? #{:text :image} (:type shape)))
                                     (not (cta/lottie-vector-layer? objects idset id)))))
                            (cons board-id layer-ids)))]
-           [:svg/units #{:svg} (boolean (seq units))]
            [:svg/appearance #{:svg}
             (boolean (some (fn [[id track]]
                              (when-let [shape (get objects id)]
@@ -1410,6 +1410,64 @@
                                    :e 1}]))))
                  (map vector shots cropped)))))))
 
+(defn- rest-units
+  "The units `bases` (see `cta/unit-timelines`) at rest, shown."
+  [bases]
+  (mapv #(assoc % :dx 0 :dy 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 1 :blur 0) bases))
+
+(defn collect-unit-vectors
+  "A promise of the vectors of the units of the texts `texts` (see
+  `unit-texts`) of `timeline` for an SVG, as `timeline->svg` takes them:
+  `[text-id k]` `{:markup :x :y :width :height}`, the outlines of the
+  glyphs of the unit `k` at rest (see `svgv/unit-markup`) and the centre
+  of its box in the SVG, which it turns and scales around, and `[text-id
+  :rest]` `{:markup}`, the glyphs of no unit. WASM outlines them
+  (`bridge`, see `wasm.api/text-unit-outlines`), a text at a time, which
+  it sets back at rest; the page gets its turn (`yield`) after each,
+  `on-progress` hears how many are done, and it stops there when
+  `cancelled?`."
+  [objects timeline texts {:keys [bridge yield cancelled? on-progress]
+                           :or {bridge (default-bridge)}}]
+  (let [board    (get objects (:board-id timeline))
+        ox       (or (:x (:selrect board)) 0)
+        oy       (or (:y (:selrect board)) 0)
+        resolved (cta/resolve-animations timeline objects)
+        animated #(into #{} (map :property) (dm/get-in resolved [:tracks % :keyframes]))
+        {:keys [apply-shape-properties text-unit-outlines clean-modifiers]} bridge
+        yield    (or yield default-yield)
+        n        (count texts)]
+    (when clean-modifiers
+      (clean-modifiers))
+    (reduce
+     (fn [p [i [text-id units]]]
+       (.then p (fn [images]
+                  (throw-if-cancelled cancelled?)
+                  (let [shape    (get objects text-id)
+                        outlines (try
+                                   (apply-shape-properties (assoc shape :opacity 1
+                                                                  :text-units (rest-units (:bases units)))
+                                                           [:opacity :text-units])
+                                   (text-unit-outlines text-id)
+                                   (finally
+                                     (restore-units! shape bridge)))
+                        images   (reduce (fn [images {:keys [unit center runs]}]
+                                           (let [markup (svgv/unit-markup shape runs (animated text-id))]
+                                             (if (some? unit)
+                                               (assoc images [text-id unit]
+                                                      {:markup markup
+                                                       :x (- (:x center) ox)
+                                                       :y (- (:y center) oy)
+                                                       :width 0
+                                                       :height 0})
+                                               (assoc images [text-id :rest] {:markup markup}))))
+                                         images
+                                         outlines)]
+                    (when on-progress
+                      (on-progress (inc i) n))
+                    (.then (yield) (fn [_] images))))))
+     (js/Promise.resolve {})
+     (map-indexed vector texts))))
+
 (defn- layer-ids-to-shoot
   "The export layers of `timeline` and its board, the pictures
   `collect-layer-images` takes, but those `skip?` is true of."
@@ -1897,7 +1955,8 @@
                         (remove texts)
                         (count))
                    (count (layer-ids-to-shoot objects tl skip?)))
-        total    (+ n-layers (unit-shot-count texts))
+        ;; SVG outlines a split text at once
+        total    (+ n-layers (if vectors? (count texts) (unit-shot-count texts)))
         pictures (phase-progress on-progress :layers)]
     ;; the board at its end, where what comes in has come
     (when on-frame
@@ -1926,11 +1985,12 @@
                         :on-progress (fn [i _] (pictures i total))
                         :skip? skip?}))
             units  (do (throw-if-cancelled cancelled?)
-                       (collect-unit-images objects tl texts
-                                            {:bridge bridge
-                                             :yield yield
-                                             :cancelled? cancelled?
-                                             :on-progress (fn [j _] (pictures (+ n-layers j) total))}))
+                       ((if vectors? collect-unit-vectors collect-unit-images)
+                        objects tl texts
+                        {:bridge bridge
+                         :yield yield
+                         :cancelled? cancelled?
+                         :on-progress (fn [j _] (pictures (+ n-layers j) total))}))
             result (do (throw-if-cancelled cancelled?)
                        (markup-file tl (or (:objects vectors) objects) board format (merge images units)
                                     {:ids? ids? :bbox? bbox? :fonts (:fonts vectors)

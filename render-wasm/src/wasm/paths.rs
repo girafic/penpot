@@ -5,7 +5,11 @@ use std::mem::size_of;
 use std::sync::{Mutex, OnceLock};
 
 use crate::error::{Error, Result};
-use crate::shapes::{stroke_to_path, Path, Segment, ToPath};
+use crate::render::text_units::outline_layouts;
+use crate::shapes::{
+    calculate_text_layout_data, page_matrix, stroke_to_path, transform_segments, Path, Segment,
+    ToPath, Type,
+};
 use crate::{mem, with_current_shape, with_current_shape_mut};
 
 const RAW_SEGMENT_DATA_SIZE: usize = size_of::<RawSegmentData>();
@@ -233,6 +237,63 @@ pub extern "C" fn current_to_path() -> *mut u8 {
     });
 
     mem::write_vec(result)
+}
+
+fn push_word(bytes: &mut Vec<u8>, word: u32) {
+    bytes.extend_from_slice(&word.to_le_bytes());
+}
+
+/// The outlines of the glyphs of the current text with its units, as it
+/// paints at rest (see `render::text_units::outline_layouts`), on the
+/// page: what an SVG draws of each unit of a split animation. Nothing for
+/// a shape that is no text or has no units. Little endian u32 words, the
+/// numbers f32: the piece count, then for each piece its unit (`u32::MAX`
+/// for the glyphs of no unit), the x and y of the centre of its box, its
+/// run count, then for each run the paragraph and the span that paint it,
+/// its segment count and its segments (as `current_to_path` writes them).
+#[no_mangle]
+pub extern "C" fn get_text_unit_outlines() -> *mut u8 {
+    let mut bytes: Vec<u8> = Vec::new();
+    with_current_shape!(state, |shape: &Shape| {
+        if let (Type::Text(stored), Some(units)) = (&shape.shape_type, &shape.text_units) {
+            let content = stored.paint_content_for_selrect(shape.selrect());
+            let mut groups = content.paragraph_builder_group_from_text(None);
+            let sizes: Vec<usize> = groups.iter().map(Vec::len).collect();
+            let mut layout = calculate_text_layout_data(shape, stored, &mut groups, true);
+            let outlines = outline_layouts(stored, &mut layout.paragraphs, &sizes, units);
+            let matrix = page_matrix(shape);
+
+            push_word(&mut bytes, outlines.len() as u32);
+            for outline in &outlines {
+                let center = matrix.map_point(outline.center);
+                push_word(
+                    &mut bytes,
+                    outline.unit.map_or(u32::MAX, |unit| unit as u32),
+                );
+                push_word(&mut bytes, center.x.to_bits());
+                push_word(&mut bytes, center.y.to_bits());
+                push_word(&mut bytes, outline.runs.len() as u32);
+                for (paragraph, span, path) in &outline.runs {
+                    let segments = transform_segments(
+                        Path::from_skia_path(path.clone()).segments().clone(),
+                        shape,
+                    );
+                    push_word(&mut bytes, *paragraph);
+                    push_word(&mut bytes, *span);
+                    push_word(&mut bytes, segments.len() as u32);
+                    for segment in segments {
+                        let raw: [u8; RAW_SEGMENT_DATA_SIZE] =
+                            RawSegmentData::from_segment(segment).into();
+                        bytes.extend_from_slice(&raw);
+                    }
+                }
+            }
+        }
+    });
+    if bytes.is_empty() {
+        push_word(&mut bytes, 0);
+    }
+    mem::write_bytes(bytes)
 }
 
 /// Converts a shape's stroke (at the given index) into a filled path.

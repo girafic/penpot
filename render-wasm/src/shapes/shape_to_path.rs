@@ -199,11 +199,18 @@ fn join_paths(path: Path, other: Path) -> Path {
     Path::new(segments).with_even_odd(is_even_odd)
 }
 
-fn transform_segments(segments: Vec<Segment>, shape: &Shape) -> Vec<Segment> {
+/// The matrix that takes `shape` from its own coordinates, as it is before
+/// it turns, to where it is on the page: it turns around its centre.
+pub fn page_matrix(shape: &Shape) -> skia_safe::Matrix {
     let mut matrix = shape.transform;
     let center = shape.center();
     matrix.post_translate(center);
     matrix.pre_translate(-center);
+    matrix
+}
+
+pub fn transform_segments(segments: Vec<Segment>, shape: &Shape) -> Vec<Segment> {
+    let matrix = page_matrix(shape);
 
     if !matrix.is_identity() {
         segments

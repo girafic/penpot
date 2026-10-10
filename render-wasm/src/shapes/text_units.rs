@@ -130,9 +130,11 @@ pub struct TextUnits {
 
 /// A piece of the laid out text that moves as one: a character or word
 /// unit, or a line that takes the pose of a line unit, by its UTF-16 range
-/// in the laid out text of its paragraph.
+/// in the laid out text of its paragraph; `unit` is the index of its unit
+/// among the units.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitPiece {
+    pub unit: usize,
     pub paragraph: usize,
     pub range: Range<usize>,
     pub pose: UnitPose,
@@ -186,10 +188,10 @@ impl TextUnits {
         browser: u8,
     ) -> Vec<UnitPiece> {
         let mut maps: HashMap<usize, Vec<usize>> = HashMap::new();
-        let mut line_poses: HashMap<u32, UnitPose> = HashMap::new();
+        let mut line_poses: HashMap<u32, (usize, UnitPose)> = HashMap::new();
         let mut pieces = Vec::new();
 
-        for unit in &self.units {
+        for (position, unit) in self.units.iter().enumerate() {
             match unit.kind {
                 UnitKind::Char | UnitKind::Word => {
                     let index = unit.index as usize;
@@ -202,6 +204,7 @@ impl TextUnits {
                     let range = map_range(map, unit.start, unit.end);
                     if !range.is_empty() {
                         pieces.push(UnitPiece {
+                            unit: position,
                             paragraph: index,
                             range,
                             pose: unit.pose,
@@ -209,7 +212,9 @@ impl TextUnits {
                     }
                 }
                 UnitKind::Line => {
-                    line_poses.entry(unit.index).or_insert(unit.pose);
+                    line_poses
+                        .entry(unit.index)
+                        .or_insert((position, unit.pose));
                 }
             }
         }
@@ -218,8 +223,9 @@ impl TextUnits {
             let last = self.line_count.max(1) - 1;
             for (line, (paragraph, range)) in non_blank_lines(layouts).into_iter().enumerate() {
                 let unit = (line as u32).min(last);
-                if let Some(pose) = line_poses.get(&unit) {
+                if let Some((position, pose)) = line_poses.get(&unit) {
                     pieces.push(UnitPiece {
+                        unit: *position,
                         paragraph,
                         range,
                         pose: *pose,
@@ -593,6 +599,7 @@ mod tests {
         assert_eq!(
             pieces(2, vec![unit(1)]),
             vec![UnitPiece {
+                unit: 0,
                 paragraph: 2,
                 range: 0..1,
                 pose: moved
@@ -603,11 +610,13 @@ mod tests {
             pieces(1, vec![unit(0)]),
             vec![
                 UnitPiece {
+                    unit: 0,
                     paragraph: 0,
                     range: 0..1,
                     pose: moved
                 },
                 UnitPiece {
+                    unit: 0,
                     paragraph: 2,
                     range: 0..1,
                     pose: moved
@@ -638,6 +647,7 @@ mod tests {
         assert_eq!(
             units.pieces(&text, &[], Browser::Chrome as u8),
             vec![UnitPiece {
+                unit: 0,
                 paragraph: 0,
                 range: 3..5,
                 pose: UnitPose::REST

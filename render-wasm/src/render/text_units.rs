@@ -17,12 +17,12 @@ use std::ops::Range;
 
 use skia_safe::{
     textlayout::{self, RectHeightStyle, RectWidthStyle, TextStyle},
-    BlurStyle, Canvas, MaskFilter, Matrix, Paint, Point, Rect,
+    BlurStyle, Canvas, MaskFilter, Matrix, Paint, Path, PathBuilder, Point, Rect,
 };
 
 use crate::globals::current_browser;
 use crate::performance;
-use crate::shapes::text_units::{TextUnits, UnitPose};
+use crate::shapes::text_units::{TextUnits, UnitPiece, UnitPose};
 use crate::shapes::{
     radius_to_sigma, Paragraph, ParagraphLayout, TextContent, TextDecorationSegment,
 };
@@ -279,6 +279,175 @@ fn paint_decoration(canvas: &Canvas, decoration: &TextDecorationSegment, placed:
     if rect.right > left {
         canvas.draw_rect(Rect::new(left, rect.top, rect.right, rect.bottom), &paint);
     }
+}
+
+/// The outlines of the glyphs of a piece of a text with units (see
+/// `outline_layouts`): the index of its unit among the units, none for the
+/// glyphs of no unit, the centre of its box at rest, which its pose turns
+/// and scales around (see `place`), and its glyphs by the span that paints
+/// them, `(paragraph, span, path)` with the positions of the span (see
+/// `TextSpan::paragraph_position`).
+pub struct PieceOutline {
+    pub unit: Option<usize>,
+    pub center: Point,
+    pub runs: Vec<(u32, u32, Path)>,
+}
+
+/// The outlines of the glyphs of the text `content` with `units`, as
+/// `paint_layouts` paints them at rest, by piece (see `PieceOutline`), in
+/// the coordinates of the text: `layouts` laid out from builder groups of
+/// `group_sizes` builders each, of which the first of each paragraph is
+/// outlined. None when the groups do not account for the layouts. A glyph
+/// with no outline (an emoji) is left out.
+pub fn outline_layouts(
+    content: &TextContent,
+    layouts: &mut [ParagraphLayout],
+    group_sizes: &[usize],
+    units: &TextUnits,
+) -> Vec<PieceOutline> {
+    let paragraphs = content.paragraphs();
+    if group_sizes.len() != paragraphs.len()
+        || group_sizes.contains(&0)
+        || group_sizes.iter().sum::<usize>() != layouts.len()
+    {
+        return Vec::new();
+    }
+
+    // where the first layout of each paragraph is
+    let firsts: Vec<usize> = group_sizes
+        .iter()
+        .scan(0, |start, &size| {
+            let first = *start;
+            *start += size;
+            Some(first)
+        })
+        .collect();
+    let pieces = {
+        let laid_out: Vec<&textlayout::Paragraph> =
+            firsts.iter().map(|&at| &layouts[at].paragraph).collect();
+        units.pieces(paragraphs, &laid_out, current_browser())
+    };
+
+    let mut outlines: Vec<PieceOutline> = Vec::new();
+    let mut rest: Vec<(u32, u32, Path)> = Vec::new();
+    for (index, &at) in firsts.iter().enumerate() {
+        let layout = &mut layouts[at];
+        let mine: Vec<&UnitPiece> = pieces
+            .iter()
+            .filter(|piece| piece.paragraph == index)
+            .collect();
+        let placed: Vec<Placed> = mine
+            .iter()
+            .map(|piece| place(layout, piece.range.clone(), &piece.pose))
+            .collect();
+        let (by_piece, at_rest) = outline_paragraph(&paragraphs[index], layout, &placed);
+        for ((piece, place), runs) in mine.iter().zip(&placed).zip(by_piece) {
+            if !runs.is_empty() {
+                outlines.push(PieceOutline {
+                    unit: Some(piece.unit),
+                    center: place.bounds.center(),
+                    runs,
+                });
+            }
+        }
+        rest.extend(at_rest);
+    }
+    if !rest.is_empty() {
+        outlines.push(PieceOutline {
+            unit: None,
+            center: Point::new(0.0, 0.0),
+            runs: rest,
+        });
+    }
+    outlines
+}
+
+/// The outlines of the glyphs of the laid out `paragraph`, of each of its
+/// `placed` pieces and of no piece, by span (see `PieceOutline`).
+#[allow(clippy::type_complexity)]
+fn outline_paragraph(
+    paragraph: &Paragraph,
+    layout: &mut ParagraphLayout,
+    placed: &[Placed],
+) -> (Vec<Vec<(u32, u32, Path)>>, Vec<(u32, u32, Path)>) {
+    let text = laid_out_text(paragraph);
+    let utf16_at = utf8_to_utf16(&text);
+    let utf16_len = utf16_at[text.len()];
+
+    let mut piece_at: Vec<Option<usize>> = vec![None; utf16_len];
+    for (index, piece) in placed.iter().enumerate() {
+        let end = piece.range.end.min(utf16_len);
+        for slot in &mut piece_at[piece.range.start.min(end)..end] {
+            *slot = Some(index);
+        }
+    }
+
+    // where each span starts in the laid out text (UTF-8), and its positions
+    let mut span_starts: Vec<(usize, u32, u32)> = Vec::new();
+    let mut at = 0;
+    for span in paragraph.children() {
+        span_starts.push((at, span.paragraph_position, span.span_position));
+        at += span.apply_text_transform().replace('\t', "\u{FFFC}").len();
+    }
+    let span_of = |cluster: usize| {
+        span_starts
+            .iter()
+            .rev()
+            .find(|(start, _, _)| *start <= cluster)
+            .or(span_starts.first())
+            .map(|(_, paragraph, span)| (*paragraph, *span))
+            .unwrap_or((0, 0))
+    };
+
+    let mut by_piece: Vec<Vec<(u32, u32, Path)>> = vec![Vec::new(); placed.len()];
+    let mut at_rest: Vec<(u32, u32, Path)> = Vec::new();
+    let origin = Point::new(layout.x, layout.y);
+    layout.paragraph.visit(|_, info| {
+        let Some(info) = info else {
+            return;
+        };
+        let glyphs = info.glyphs();
+        let positions = info.positions();
+        let clusters = info.utf8_starts();
+        let cluster_of = |glyph: usize| clusters.get(glyph).copied().unwrap_or(0) as usize;
+        let piece_of = |glyph: usize| {
+            utf16_at
+                .get(cluster_of(glyph))
+                .and_then(|&utf16| piece_at.get(utf16))
+                .copied()
+                .flatten()
+        };
+        let font = info.font();
+        let run_origin = origin + info.origin();
+
+        let mut start = 0;
+        while start < glyphs.len() {
+            let key = (piece_of(start), span_of(cluster_of(start)));
+            let mut end = start + 1;
+            while end < glyphs.len() && (piece_of(end), span_of(cluster_of(end))) == key {
+                end += 1;
+            }
+            let mut builder = PathBuilder::new();
+            let mut outlined = false;
+            for (glyph, position) in glyphs[start..end].iter().zip(&positions[start..end]) {
+                if let Some(path) = font.get_path(*glyph) {
+                    builder.add_path(&path.with_offset(run_origin + *position));
+                    outlined = true;
+                }
+            }
+            if outlined {
+                let (piece, (paragraph, span)) = key;
+                let run = (paragraph, span, builder.detach());
+                match piece {
+                    Some(index) => by_piece[index].push(run),
+                    None => at_rest.push(run),
+                }
+            }
+            start = end;
+        }
+    });
+
+    (by_piece, at_rest)
 }
 
 /// The text Skia lays out for `paragraph`: the spans with their text
@@ -563,6 +732,64 @@ mod tests {
                 assert_eq!(pixel(&moved, x, y + 20), pixel(&at_rest, x, y));
             }
         }
+    }
+
+    #[test]
+    fn the_glyphs_of_each_unit_outline_on_their_own() {
+        let mut resources = RenderResources::try_new_headless().expect("headless resources");
+        let _guard = TestRenderResourcesGuard::install(&mut resources);
+        let shape = text_shape("Hello world", None);
+        let world = range_box(&shape, 6..11);
+        let units = TextUnits {
+            line_count: 0,
+            units: vec![
+                unit(UnitKind::Char, 0, 1, UnitPose::REST),
+                unit(UnitKind::Word, 6, 11, UnitPose::REST),
+            ],
+        };
+        let content = shape.get_text_content();
+        let mut builders = content.paragraph_builder_group_from_text(None);
+        let sizes: Vec<usize> = builders.iter().map(Vec::len).collect();
+        let mut layout = calculate_text_layout_data(&shape, content, &mut builders, true);
+        let outlines = outline_layouts(content, &mut layout.paragraphs, &sizes, &units);
+
+        let units_of: Vec<Option<usize>> = outlines.iter().map(|outline| outline.unit).collect();
+        assert_eq!(
+            units_of,
+            vec![Some(0), Some(1), None],
+            "each unit, then the rest"
+        );
+        let bounds = |outline: &PieceOutline| {
+            outline
+                .runs
+                .iter()
+                .fold(Rect::new_empty(), |mut bounds, (_, _, path)| {
+                    bounds.join(path.bounds());
+                    bounds
+                })
+        };
+        let word = bounds(&outlines[1]);
+        assert!(
+            word.left >= world.left - 1.0 && word.right <= world.right + 1.0,
+            "{word:?} along {world:?}"
+        );
+        assert_eq!(
+            outlines[1].center,
+            world.center(),
+            "it poses around its box"
+        );
+        assert!(
+            bounds(&outlines[2]).right <= world.left,
+            "the rest is \"ello\" (and the space)"
+        );
+        assert!(
+            bounds(&outlines[0]).right <= bounds(&outlines[2]).left + 1.0,
+            "\"H\" before it"
+        );
+        assert!(outlines
+            .iter()
+            .flat_map(|outline| &outline.runs)
+            .all(|(paragraph, span, _)| (*paragraph, *span) == (0, 0)));
     }
 
     /// How many glyphs the laid out text of `shape` has.

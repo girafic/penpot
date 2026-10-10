@@ -314,3 +314,27 @@
   (-> shape
       (assoc :type :path :fills fills :content content)
       (dissoc :position-data :grow-type)))
+
+(defn span-fills
+  "The fills the span `span` of the paragraph `paragraph` of the text
+  `shape` paints with, as render-wasm counts them: the paragraphs that
+  have spans (see `wasm.api/fonts-from-text-content`)."
+  [shape paragraph span]
+  (let [paragraphs (filterv (comp seq :children)
+                            (get-in shape [:content :children 0 :children]))]
+    (or (get-in paragraphs [paragraph :children span :fills])
+        (txt/get-default-text-fills))))
+
+(defn unit-markup
+  "The SVG of a piece of the split text `shape`, its `runs` (see
+  `wasm.api/text-unit-outlines`): each the outlines of the glyphs a span
+  paints, a path of the text in the fills of the span (see `outlined`),
+  drawn at rest as `layer-markup` draws a layer, `animated` what the
+  animation of the text plays (see `rest-shape`)."
+  [shape runs animated]
+  (let [id (:id shape)]
+    (->> runs
+         (map (fn [{:keys [paragraph span content]}]
+                (layer-markup {id (outlined shape content (span-fills shape paragraph span))} id animated)))
+         (str/join ""))))
+

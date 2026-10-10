@@ -5000,6 +5000,15 @@
        "\" x=\"" (fmt (:x img)) "\" y=\"" (fmt (:y img))
        "\" width=\"" (fmt (:width img)) "\" height=\"" (fmt (:height img)) "\"/>"))
 
+(defn- svg-drawing
+  "What an entry of `images` draws (see `timeline->svg`): its vectors,
+  where they are in the SVG, whose origin is `ox`/`oy` (see
+  `svg-vectors`), or its picture."
+  [img ox oy]
+  (if-let [markup (:markup img)]
+    (svg-vectors markup ox oy)
+    (svg-image img)))
+
 (def ^:private svg-name-junk
   "What an XML name (an `id`) cannot hold."
   #"[\s\"'<>&#%/\\:;,()\[\]{}=+*!?@$^|~`]")
@@ -5236,8 +5245,9 @@
         (for [index (kf-index svg-fill-properties)
               :when (or text? (< index (count fills)))]
           [[(cond
-              text?               (str "[id=\"fills-" sid "\"] > text")
-              (<= (count fills) 1) (str "[id=\"fills-" sid "\"] > :not(defs)")
+              ;; its `text`, or the outlines of its units (see
+              ;; `timeline->svg`)
+              (or text? (<= (count fills) 1)) (str "[id=\"fills-" sid "\"] > :not(defs)")
               :else               (str "[id=\"shape-" sid "\"] > defs > pattern > g > :nth-child("
                                        (- (count fills) index) ")"))]
            (fn [values]
@@ -5461,10 +5471,10 @@
                    (svg-id-attr svg-ids id)
                    (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
                    ">"
-                   (some-> (get images [id :rest]) (svg-image))
+                   (some-> (get images [id :rest]) (svg-drawing ox oy))
                    (str/join "" (map (fn [k]
                                        (str "<g class=\"" (svg-escape (unit-css-class id k)) "\">"
-                                            (svg-image (get images [id k]))
+                                            (svg-drawing (get images [id k]) ox oy)
                                             "</g>"))
                                      (unit-image-indexes images id)))
                    inner
@@ -5508,8 +5518,9 @@
   one when `images` has pictures of them, `[text-id k]` of the unit `k`
   (see `unit-timelines`) and, when it has ink (an underline), `[text-id
   :rest]` of what is no unit, each over the box it covers (with the text
-  turned); otherwise its split animations play as animations of the
-  whole text (see `flatten-splits`). An entry of `images` with `:markup`
+  turned), or their vectors (`:markup`, see `svg-vectors`), with the
+  middle of the box of a unit as `:x :y` of no size; otherwise its split
+  animations play as animations of the whole text (see `flatten-splits`). An entry of `images` with `:markup`
   instead holds the vectors of its layer, the SVG of the shape at rest as
   it is on the page (see `svg-vectors`), and `:fonts` (an option) the
   `@font-face` CSS of their texts; the layers are then those of

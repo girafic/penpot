@@ -3371,7 +3371,25 @@
         (t/is (= 3 (count (:layers comp))) "the words only")))
     (t/testing "without pictures, the text plays whole"
       (let [svg (cta/timeline->svg tl objects {})]
-        (t/is (not (str/includes? svg "penpot-unit-")))))))
+        (t/is (not (str/includes? svg "penpot-unit-")))))
+    (t/testing "SVG: the vectors of the units, each turning around the middle of its box"
+      (let [images {[sid :rest] {:markup "<path class=\"rest\"/>"}
+                    [sid 0] {:markup "<path class=\"hi\"/>" :x 70 :y 110 :width 0 :height 0}
+                    [sid 1] {:markup "<path class=\"you\"/>" :x 130 :y 110 :width 0 :height 0}}
+            svg    (cta/timeline->svg tl objects images)]
+        (t/is (not (str/includes? svg "<image")))
+        (t/is (str/includes? svg (str "<g class=\"penpot-unit-" sid "-1\"><g transform=\"translate(-100 -100)\" "
+                                      "fill=\"none\"><path class=\"you\"/></g></g>")))
+        (t/is (str/includes? svg "<g transform=\"translate(-100 -100)\" fill=\"none\"><path class=\"rest\"/></g>")
+              "the rest at rest")
+        (t/is (str/includes? svg "transform-origin: 130px 110px;"))
+        (t/is (str/includes? (cta/svg-appearance-css
+                              (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                                  (cta/add-keyframe sid {:time 0 :property :fill-color :index 0 :value "#ff0000"})
+                                  (cta/add-keyframe sid {:time 1000 :property :fill-color :index 0 :value "#0000ff"}))
+                              objects)
+                             (str "[id=\"fills-" sid "\"] > :not(defs) {"))
+              "its fills play on its text or the outlines of its units")))))
 
 (t/deftest export-sizes-take-what-people-type
   (t/is (= ["2" "3.5" "0.5" "0.125" "1"]

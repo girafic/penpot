@@ -1091,6 +1091,30 @@
         (t/is (contains? (svg objects stroked) :svg/appearance) "the strokes of a text stay")
         (t/is (not (contains? (svg objects (on stroked)) :svg/appearance)) "but of an outline")))))
 
+(t/deftest an-svg-has-the-units-of-a-split-text-as-vectors
+  (let [{:keys [objects bid tid]} (text-board)
+        tl      (cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid
+                                   {:type :fade :split :word :start 0 :duration 500})
+        texts   (dea/unit-texts objects tl)
+        content (path/from-plain [{:command :move-to :params {:x 20 :y 12}}
+                                  {:command :line-to :params {:x 30 :y 12}}
+                                  {:command :close-path :params {}}])
+        shown   (atom [])
+        bridge  {:apply-shape-properties (fn [shape _] (swap! shown conj (count (:text-units shape))))
+                 :text-unit-outlines (fn [_] [{:unit 1 :center {:x 70 :y 20} :runs [{:paragraph 0 :span 0 :content content}]}
+                                              {:unit nil :center {:x 0 :y 0} :runs [{:paragraph 0 :span 0 :content content}]}])}]
+    (t/async
+      done
+      (-> (dea/collect-unit-vectors objects tl texts {:bridge bridge :yield #(js/Promise.resolve nil)})
+          (.then (fn [images]
+                   (t/is (= #{[tid 1] [tid :rest]} (set (keys images))))
+                   (t/is (= [3 0] @shown) "its three words shown at rest, then set back")
+                   (t/is (= {:x 70 :y 20 :width 0 :height 0} (dissoc (get images [tid 1]) :markup))
+                         "the middle of its box, which it turns around")
+                   (t/is (str/includes? (get-in images [[tid 1] :markup]) "<path"))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally #(done))))))
+
 (t/deftest markup-formats-note-the-split-text-they-play-whole
   ;; they play the units of a split text, but of one that underlines or
   ;; strikes some of its text
@@ -1188,22 +1212,29 @@
                   :apply-shape-properties (fn [_ _])
                   :render-shape-pixels (fn [_ _ _] (js/Uint8Array. #js [137 80 78 71]))
                   :get-shape-extrect (fn [_] {:x 10 :y 10 :width 200 :height 20})
-                  :crop-picture (fn [bytes rect] (p/resolved {:bytes bytes :rect rect}))}]
-    (t/async
-      done
-      (-> (:promise (dea/run-export {:page {:id (uuid/next) :objects objects :timelines {bid tl}}
-                                     :files {}
-                                     :board-id bid
-                                     :bridge bridge
-                                     :yield #(js/Promise.resolve nil)
-                                     :on-progress #(swap! progress conj %)}
-                                    {:format :svg}))
-          (.then (fn [result]
+                  :crop-picture (fn [bytes rect] (p/resolved {:bytes bytes :rect rect}))
+                  :text-unit-outlines (fn [_] [])}
+        export   (fn [format]
+                   (reset! progress [])
+                   (:promise (dea/run-export {:page {:id (uuid/next) :objects objects :timelines {bid tl}}
+                                              :files {}
+                                              :board-id bid
+                                              :bridge bridge
+                                              :yield #(js/Promise.resolve nil)
+                                              :on-progress #(swap! progress conj %)}
+                                             {:format format})))
+        counted  (fn [result total label]
                    (let [layers (filter #(= :layers (:phase %)) @progress)]
                      (t/is (= :ok (:status result)))
                      (t/is (= (count layers) (:total (first layers))) "every picture counted")
-                     (t/is (= (+ 1 4) (:total (first layers))) "the board, then the units of the text")
-                     (t/is (= :write (:phase (last @progress)))))))
+                     (t/is (= total (:total (first layers))) label)
+                     (t/is (= :write (:phase (last @progress))))))]
+    (t/async
+      done
+      (-> (export :lottie)
+          (.then #(counted % 4 "the pictures of the units of the text (the board is vectors)"))
+          (.then #(export :svg))
+          (.then #(counted % (+ 1 1) "the board, then the text, whose units are outlined at once"))
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally (finish done))))))
 

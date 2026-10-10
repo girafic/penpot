@@ -124,3 +124,22 @@
            (svgv/compact-path "M10.004,20L30,20.5C31,21,32,22,33.333,23Z M5,5L6,6")))
   (t/is (= "m.1,-.2l1,1" (svgv/compact-path "M0.1,-0.2 1.1,0.8")) "numbers after a move are lines")
   (t/is (= "M0,0A5,5,0,0,1,10,10" (svgv/compact-path "M0,0A5,5,0,0,1,10,10")) "other commands as they are"))
+
+(t/deftest a-span-paints-the-outlines-of-its-glyphs
+  (let [red   [{:fill-color "#ff0000" :fill-opacity 1}]
+        green [{:fill-color "#00ff00" :fill-opacity 1}]
+        text  (text-of ["Hi " red] ["you" green])
+        empty (update-in text [:content :children 0 :children] #(into [{:type "paragraph" :children []}] %))]
+    (t/is (= green (svgv/span-fills text 0 1)))
+    (t/is (= green (svgv/span-fills empty 0 1)) "as render-wasm counts paragraphs: those with spans")
+    (let [content (path/from-plain [{:command :move-to :params {:x 20 :y 12}}
+                                    {:command :line-to :params {:x 30 :y 12}}
+                                    {:command :close-path :params {}}])
+          {:keys [objects]} (board-with text)
+          markup (svgv/unit-markup (get objects (:id text)) [{:paragraph 0 :span 0 :content content}
+                                                             {:paragraph 0 :span 1 :content content}]
+                                   #{})]
+      (t/is (= 2 (count (re-seq #"<path" markup))) "a path by run")
+      (t/is (str/includes? markup "#ff0000"))
+      (t/is (str/includes? markup "#00ff00"))
+      (t/is (not (str/includes? markup "<text"))))))

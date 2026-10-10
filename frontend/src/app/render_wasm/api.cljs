@@ -2848,6 +2848,57 @@
         (mem/free)
         (throw cause)))))
 
+(def ^:private no-unit
+  "The unit `_get_text_unit_outlines` writes of the glyphs of no unit."
+  0xFFFFFFFF)
+
+(defn read-unit-outlines
+  "The outlines `_get_text_unit_outlines` wrote from the word `offset` of
+  the heap, `heapu32` and `heapf32` its views: `[{:unit :center :runs}]`,
+  `:unit` the index of the unit of each piece, nil for the glyphs of no
+  unit, `:center` the centre of its box on the page, `:runs` `[{:paragraph
+  :span :content}]`, the glyphs a span paints (see `text-unit-outlines`)."
+  [heapu32 heapf32 offset]
+  (let [read-runs
+        (fn [n at]
+          (loop [j 0 at at runs []]
+            (if (< j n)
+              (let [words (* (aget heapu32 (+ at 2)) path.impl/SEGMENT-U32-SIZE)]
+                (recur (inc j)
+                       (+ at 3 words)
+                       (conj runs {:paragraph (aget heapu32 at)
+                                   :span (aget heapu32 (inc at))
+                                   :content (path/from-bytes (mem/slice heapu32 (+ at 3) words))})))
+              [runs at])))]
+    (loop [i 0 at (inc offset) out []]
+      (if (< i (aget heapu32 offset))
+        (let [unit        (aget heapu32 at)
+              center      {:x (aget heapf32 (+ at 1)) :y (aget heapf32 (+ at 2))}
+              [runs next] (read-runs (aget heapu32 (+ at 3)) (+ at 4))]
+          (recur (inc i)
+                 next
+                 (conj out {:unit (when (not= no-unit unit) unit)
+                            :center center
+                            :runs runs})))
+        out))))
+
+(defn text-unit-outlines
+  "The outlines of the glyphs of the text `id` with the units it has (see
+  `set-shape-text-units`), by unit, at rest on the page: what an SVG draws
+  of each unit of a split animation (see `read-unit-outlines`)."
+  [id]
+  (when (initialized?)
+    (use-shape id)
+    (try
+      (let [offset   (-> (h/call wasm/internal-module "_get_text_unit_outlines")
+                         (mem/->offset-32))
+            outlines (read-unit-outlines (mem/get-heap-u32) (mem/get-heap-f32) offset)]
+        (mem/free)
+        outlines)
+      (catch :default cause
+        (mem/free)
+        (throw cause)))))
+
 (defn stroke-to-path
   "Converts a shape's stroke at the given index into a filled path.
    Returns a map {:content <PathData> :even-odd? <boolean>}, or nil when the
