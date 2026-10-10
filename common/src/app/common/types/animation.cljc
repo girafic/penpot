@@ -2531,13 +2531,23 @@
         sx       (axis-scale base-w values :width :scale-x)
         sy       (axis-scale base-h values :height :scale-y)
         target-r (get values :rotation base-r)
-        pivot    (or pivot (origin-point shape default-transform-origin))]
+        pivot    (or pivot (origin-point shape default-transform-origin))
+        ;; a scale scales what the shape holds, its strokes, shadows and
+        ;; text too, as the scale tool does and the exports play it; a
+        ;; width or height resizes it, its layers kept by their
+        ;; constraints
+        scale    (let [x (mth/abs (get values :scale-x 1))
+                       y (mth/abs (get values :scale-y 1))]
+                   (if (mth/close? x y) x (mth/sqrt (* x y))))]
     ;; The shape scales and turns around its pivot where it is, then
     ;; moves, like the CSS and Lottie exports: moving first would make it
     ;; turn around the place it left.
     (cond-> (ctm/empty)
       (has? values :scale-x :scale-y :width :height)
       (ctm/resize (gpt/point sx sy) pivot)
+
+      (and (has? values :scale-x :scale-y) (not (mth/close? scale 1)))
+      (ctm/scale-content scale)
 
       (has? values :rotation)
       (ctm/rotation pivot (- target-r base-r))

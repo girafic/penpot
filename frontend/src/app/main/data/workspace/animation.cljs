@@ -419,13 +419,18 @@
 
 (defn shape-at
   "`shape` as the animation shows it at `time`: moved, scaled and rotated,
-  with its animated opacity, fills, strokes, shadows and blur."
+  with its animated opacity, fills, strokes, shadows and blur. A scale
+  leaves its strokes, corners and text as they are, which the design
+  tab edits."
   [timeline objects shape time]
   (let [shape-id  (:id shape)
         modifiers (-> (update timeline :tracks select-keys [shape-id])
                       (cta/timeline->modif-tree objects time)
                       (dm/get-in [shape-id :modifiers]))]
-    (gsh/transform-shape shape modifiers)))
+    (gsh/transform-shape shape (cond-> modifiers
+                                 (some? modifiers)
+                                 (update :structure-child
+                                         (fn [ops] (filterv #(not= :scale-content (:type %)) ops)))))))
 
 (defn value->display
   "The value of `property` as shown to the user: scale and opacity as

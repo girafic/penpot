@@ -289,10 +289,17 @@
 
     (ctm/resize modifiers resize-vector resize-origin transform transform-inverse)))
 
+(defn- scales-content?
+  "Whether `modifiers` scale what the shape holds (see `ctm/scale-content`),
+  which then scales with it, as the scale tool scales it."
+  [modifiers]
+  (boolean (some #(= :scale-content (:type %)) (:structure-child modifiers))))
+
 (defn calc-child-modifiers
   [parent child modifiers ignore-constraints child-bounds parent-bounds transformed-parent-bounds]
 
-  (let [modifiers (ctm/select-child modifiers)
+  (let [ignore-constraints (or ignore-constraints (scales-content? modifiers))
+        modifiers (ctm/select-child modifiers)
 
         constraints-h
         (cond

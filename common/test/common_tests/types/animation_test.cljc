@@ -1508,6 +1508,36 @@
     (t/is (contains? (names {}) "blurred") "all vectors")
     (t/is (not (contains? (names nil) "blurred")) "without assets, the animated ones only")))
 
+(t/deftest a-scale-scales-what-a-board-holds
+  ;; as the scale tool does and the exports play it: a board scaled to half
+  ;; around its middle (150,150) halves the layer in it; a width resizes it,
+  ;; the layer kept by its constraints
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        card    (cts/setup-shape {:type :frame :x 100 :y 100 :width 100 :height 100})
+        dot     (assoc (cts/setup-shape {:type :rect :x 110 :y 110 :width 20 :height 20})
+                       :constraints-h :left :constraints-v :top)
+        [cid did] (map :id [card dot])
+        objects (in-board board [card] {cid [dot]})
+        posed   (fn [tl]
+                  (let [tree (cgm/set-objects-modifiers (cta/timeline->modif-tree tl objects 0) objects)]
+                    (:selrect (gsh/transform-shape (get objects did) (get-in tree [did :modifiers])))))
+        tl      (cta/make-timeline {:board-id (:id board) :duration 1000})
+        scaled  (posed (-> tl
+                           (cta/add-keyframe cid {:time 0 :property :scale-x :value 0.5})
+                           (cta/add-keyframe cid {:time 0 :property :scale-y :value 0.5})))
+        resized (posed (cta/add-keyframe tl cid {:time 0 :property :width :value 50}))]
+    (t/is (close-all? [130 130 10 10] ((juxt :x :y :width :height) scaled)) "scaled with it")
+    (t/is (close-all? [135 110 20 20] ((juxt :x :y :width :height) resized))
+          "kept to its left edge, as it is")
+    (t/is (some #(= :scale-content (:type %))
+                (:structure-child (get-in (cta/timeline->modif-tree
+                                           (-> tl
+                                               (cta/add-keyframe cid {:time 0 :property :scale-x :value 0.5})
+                                               (cta/add-keyframe cid {:time 0 :property :scale-y :value 0.5}))
+                                           objects 0)
+                                          [cid :modifiers])))
+          "its strokes, shadows and text too")))
+
 (t/deftest lottie-nests-precomps
   (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :fills []})
         outer   (cts/setup-shape {:type :frame :name "outer" :x 0 :y 0 :width 200 :height 200})
