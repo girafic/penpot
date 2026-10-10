@@ -9083,7 +9083,7 @@ msgid "workspace.options.export.issue.lottie-shadow"
 msgstr "Shadows · May change in %s"
 
 msgid "workspace.options.export.issue.lottie-shadow.text"
-msgstr "Shadows are blurred by %s effects, which each player softens at its own strength (lottie-web as the canvas). The shadows of groups and boards don't spread."
+msgstr "Shadows are blurred by %s effects, which each player softens at its own strength (lottie-web as the canvas)."
 
 msgid "workspace.options.export.issue.lottie-blur"
 msgstr "Blur · May change in %s"

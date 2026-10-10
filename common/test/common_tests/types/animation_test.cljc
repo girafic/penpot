@@ -2067,6 +2067,81 @@
     (t/is (= [0 (str "comp_" gid)] [(:ty layer) (:refId layer)]))
     (t/is (= 1 (get-in layer [:ks :o :a])) "it fades")))
 
+(defn- shadowed-group
+  "A board holding a group with `shadow`, which moves, holding a white
+  rectangle with a stroke 2 wide."
+  [shadow]
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        group (cts/setup-shape {:type :group :name "Group" :x 100 :y 100 :width 40 :height 40
+                                :shadow [shadow]})
+        rect  (cts/setup-shape {:type :rect :name "Rect" :x 100 :y 100 :width 40 :height 40
+                                :fills [{:fill-color "#ffffff" :fill-opacity 1}]
+                                :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2
+                                           :stroke-style :solid :stroke-alignment :center}]})
+        [bid gid rid] (map :id [board group rect])
+        objects {bid (assoc board :shapes [gid])
+                 gid (assoc group :parent-id bid :frame-id bid :shapes [rid])
+                 rid (assoc rect :parent-id gid :frame-id bid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe gid {:time 0 :property :x :value 100})
+                    (cta/add-keyframe gid {:time 1000 :property :x :value 140}))]
+    {:gid gid :L (cta/timeline->lottie tl objects)}))
+
+(defn- lottie-items-of
+  "The items of `shapes` (Lottie shape items), groups opened."
+  [shapes]
+  (mapcat #(if (= "gr" (:ty %)) (lottie-items-of (:it %)) [%]) shapes))
+
+(t/deftest lottie-spreads-the-drop-shadow-of-a-group
+  ;; As the canvas grows each shape in it: its silhouette, in layers of
+  ;; its own under it.
+  (let [shadow  {:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 6 :spread 4
+                 :hidden false :color {:color "#ff0000" :opacity 0.5}}
+        {:keys [gid L]} (shadowed-group shadow)
+        comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
+        [layer cast] (:layers L)
+        [moved] (:layers (comp (:refId cast)))
+        [sil]   (:layers (comp (:refId moved)))
+        items   (lottie-items-of (:shapes sil))
+        fill    (d/seek #(= "fl" (:ty %)) items)
+        strokes (filter #(= "st" (:ty %)) items)]
+    (t/is (not-any? #(= 25 (:ty %)) (:ef layer)) "no drop shadow effect, which does not spread")
+    (t/is (= [(str "drop_" gid "_0") (:ks layer)] [(:refId cast) (:ks cast)]) "moving with it")
+    (t/is (= "Gaussian Blur" (get-in cast [:ef 0 :nm])))
+    (t/is (close-all? [4 4 0] (get-in moved [:ks :p :k])) "moved by its offset")
+    (t/is (close? 50 (get-in moved [:ks :o :k])) "as opaque as it is")
+    (t/is (close-all? [1 0 0 1] (get-in fill [:c :k])) "in its colour")
+    (t/is (close? 100 (get-in fill [:o :k])))
+    (t/is (= [10.0] (mapv #(get-in % [:w :k]) strokes))
+          "grown by its stroke and spread, its own stroke no more")))
+
+(t/deftest lottie-spreads-a-group-in-as-it-erodes
+  (let [shadow  {:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 6 :spread -3
+                 :hidden false :color {:color "#000000" :opacity 1}}
+        {:keys [L]} (shadowed-group shadow)
+        comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
+        [_ cast] (:layers L)
+        [moved] (:layers (comp (:refId cast)))
+        [main cut sil] (:layers (comp (:refId moved)))
+        band    (d/seek #(= "st" (:ty %)) (lottie-items-of (:shapes cut)))]
+    (t/is (empty? (:shapes main)) "what it erodes is no more there")
+    (t/is (= [1 2] [(:td cut) (:tt sil)]) "an inverted matte of the band it takes off")
+    (t/is (close? 4 (get-in band [:w :k])) "as far as it reaches in past its stroke")
+    (t/is (not-any? #(= "st" (:ty %)) (lottie-items-of (:shapes sil))) "filled only")))
+
+(t/deftest lottie-spreads-the-inner-shadow-of-a-group
+  (let [shadow  {:id (uuid/next) :style :inner-shadow :offset-x 4 :offset-y 0 :blur 2 :spread 3
+                 :hidden false :color {:color "#000000" :opacity 1}}
+        {:keys [gid L]} (shadowed-group shadow)
+        comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
+        layer   (first (:layers L))
+        [_ shade] (:layers (comp (:refId layer)))
+        [moved _] (:layers (comp (:refId shade)))
+        [_ cut]  (:layers (comp (:refId moved)))]
+    (t/is (= (str "fx_" gid) (:refId layer)))
+    (t/is (str/starts-with? (:refId moved) "sil_") "cut by its silhouette")
+    (t/is (= 1 (:td cut)) "shrunk by its spread")))
+
 (defn- inner-shadow-card
   "A board holding a card board with an inner shadow and a fill, which
   moves, holding a rectangle that stays."

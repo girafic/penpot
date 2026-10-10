@@ -4530,7 +4530,8 @@
   keyframes of its index, as soft as on the canvas in lottie-web (see
   `blur-sigma`), in a region it does not cut (see `lottie-filter-size`).
   Lottie has no spread: a layer whose shadows spread casts them as
-  layers of its own (see `lottie-shadow-layers?`)."
+  layers of its own (see `lottie-shadow-layers?`,
+  `lottie-container-shadows`)."
   [shape by-prop]
   (->> (as-vec (:shadow shape))
        (map-indexed
@@ -5208,7 +5209,8 @@
         spread  (when grows?
                   (lottie-group "spread"
                                 (concat outline
-                                        [(merge {:ty "st" :nm "spread" :lc 2 :lj 2 :ml 4
+                                        ;; mitred, as the canvas strokes it
+                                        [(merge {:ty "st" :nm "spread" :lc 1 :lj 1 :ml 4
                                                  :w (lottie-prop-1d (kfs :shadow-spread) grow
                                                                     (grow (or (:spread shadow) 0)))}
                                                 paint)])))
@@ -5246,7 +5248,7 @@
                   (not erodes?) (assoc :ef [blur])
                   inner? (assoc :tt 1))]
     (if-not erodes?
-      layer
+      (assoc layer ::effect true)
       (let [ref  (str "shadow_" (:id shape) "_" index)
             cut  {:ddd 0 :ty 4 :nm (str name " spread") :sr 1 :ks ks :ao 0 :td 1
                   :shapes [(lottie-moved-group
@@ -5264,7 +5266,8 @@
          :ks lottie-identity-ks
          :ao 0 :w width :h height
          :ef [blur]
-         :ip 0 :op (ms->frames duration) :st 0 :bm 0}))))
+         :ip 0 :op (ms->frames duration) :st 0 :bm 0
+         ::effect true}))))
 
 (defn- lottie-matte-layer
   "The alpha matte (`td`) of the outline `outline` of `shape`, with the
@@ -5282,7 +5285,175 @@
    :ip 0
    :op (ms->frames duration)
    :st 0
-   :bm 0})
+   :bm 0
+   ::effect true})
+
+(def ^:private lottie-outline-types
+  "The kinds of Lottie items that are outlines (or trim them), which the
+  paints after them in their group draw."
+  #{"sh" "rc" "el" "sr" "tm"})
+
+(defn- lottie-rest-1d
+  "The value of the 1D Lottie property `prop` at rest: its first
+  keyframe when it plays."
+  [prop]
+  (if (= 1 (:a prop))
+    (let [s (:s (first (:k prop)))] (if (sequential? s) (first s) s))
+    (:k prop)))
+
+(defn- lottie-silhouette-group
+  "The Lottie group `group` as a silhouette in `paint`, grown by `spread`
+  (`{:rest :kfs}`, its value and keyframes), as `lottie-shadow-layer`
+  grows a shape: each group of outlines filled when it has fills, with a
+  stroke as wide as its strokes reach and the spread. With `cut?`, the
+  band a spread that erodes takes off its fills instead, nil where none
+  does."
+  [group paint {:keys [rest kfs] :as spread} cut?]
+  (let [items (:it group)
+        tr    (d/seek #(= "tr" (:ty %)) items)]
+    (if-not (some #(contains? lottie-outline-types (:ty %)) items)
+      (let [kids (into []
+                       (keep #(if (= "gr" (:ty %)) (lottie-silhouette-group % paint spread cut?) %))
+                       items)]
+        (when (or (not cut?) (some #(= "gr" (:ty %)) kids))
+          (assoc group :it kids :np (count kids))))
+      (let [fill    (d/seek #(contains? #{"fl" "gf"} (:ty %)) items)
+            strokes (filter #(contains? #{"st" "gs"} (:ty %)) items)
+            reach   (reduce max 0 (map #(/ (or (lottie-rest-1d (:w %)) 0) 2) strokes))
+            spreads (cons rest (map :value kfs))
+            grow    #(* 2.0 (max 0 (+ reach %)))
+            band    #(* 2.0 (max 0 (- (+ reach %))))
+            stroke  (fn [width]
+                      ;; mitred, as the canvas strokes it
+                      (cond-> (merge {:ty "st" :nm "spread" :lc 1 :lj 1 :ml 4
+                                      :w (lottie-prop-1d kfs width (width rest))}
+                                     paint)
+                        ;; a dashed outline with no fill casts dashes
+                        (and (nil? fill) (some? (:d (first strokes))))
+                        (assoc :d (:d (first strokes)))))
+            outline (filterv #(contains? lottie-outline-types (:ty %)) items)
+            it      (if cut?
+                      (when (and (some? fill) (some #(neg? (+ reach %)) spreads))
+                        (conj outline (stroke band)))
+                      (cond-> outline
+                        (some? fill)
+                        (conj (merge {:ty "fl" :nm "fill" :r (or (:r fill) 1)} paint))
+
+                        (some #(pos? (+ reach %)) spreads)
+                        (conj (stroke grow))))]
+        (when (some? it)
+          (let [it (cond-> it (some? tr) (conj tr))]
+            (assoc group :it it :np (count it))))))))
+
+(defn- lottie-outline-groups
+  "The Lottie groups `items` once for each group of outlines in them, in
+  the groups around it (and their transforms), each alone."
+  [items]
+  (into []
+        (mapcat (fn [item]
+                  (cond
+                    (not= "gr" (:ty item)) nil
+
+                    (some #(contains? lottie-outline-types (:ty %)) (:it item)) [item]
+
+                    :else
+                    (let [others (filterv #(not= "gr" (:ty %)) (:it item))]
+                      (map (fn [kid] (assoc item :it (into [kid] others) :np (inc (count others))))
+                           (lottie-outline-groups (:it item)))))))
+        items))
+
+(defn- lottie-silhouette-shape-layer
+  "The shape layer `layer` as a silhouette (see `lottie-silhouette-group`):
+  one layer, and, for each of its groups of outlines a spread erodes, a
+  layer of it alone under an inverted matte (`td`, `tt` 2) of the band
+  that spread takes off it, so that it does not cut the others, as the
+  canvas erodes each shape; but for a matte or a layer kept to one,
+  which only grows."
+  [layer paint spread]
+  (let [plain  (dissoc layer :ef)
+        grown  #(into [] (keep (fn [group] (lottie-silhouette-group group paint spread false))) %)
+        groups (lottie-outline-groups (:shapes layer))
+        cut?   #(some? (lottie-silhouette-group % paint spread true))]
+    (if (or (some? (:tt layer)) (some? (:td layer)) (not-any? cut? groups))
+      [(assoc plain :shapes (grown (:shapes layer)))]
+      (into [(assoc plain :shapes (grown (remove cut? groups)))]
+            (mapcat (fn [group]
+                      [(-> plain
+                           (dissoc :hasMask :masksProperties)
+                           (assoc :shapes [(lottie-silhouette-group group paint spread true)]
+                                  :td 1 :nm (str (:nm layer) " spread") ::extra true))
+                       (assoc plain :shapes (grown [group]) :tt 2 ::extra true)]))
+            (filter cut? groups)))))
+
+(declare lottie-silhouette-comp)
+
+(defn- lottie-silhouette
+  "The layers `layers` of a precomp as the silhouette a shadow of what
+  they draw casts, in `paint` (opaque) and grown or eroded by `spread`
+  (`{:rest :kfs}`): their vectors as `lottie-silhouette-group` grows
+  them, the pictures in `paint` where they are opaque (an alpha matte
+  over its colour), the precomps as silhouettes of theirs too (under ids
+  of `key`, see `lottie-silhouette-comp`), as they move and fade. The
+  shadows and blur of the layers are left out, as the canvas casts a
+  shadow of what is plain (the layers of effects, `::effect`), and a
+  matte keeps its alpha: what it keeps casts only as far as it is."
+  [{:keys [width height] :as ctx} layers paint spread key]
+  (let [convert (fn [layer]
+                  (cond
+                    (::effect layer)  []
+                    (some? (:td layer)) [(dissoc layer :ef)]
+                    (= 0 (:ty layer)) [(-> (dissoc layer :ef)
+                                           (assoc :refId (lottie-silhouette-comp ctx (:refId layer) paint spread key)))]
+                    (= 4 (:ty layer)) (lottie-silhouette-shape-layer layer paint spread)
+                    (and (= 2 (:ty layer)) (nil? (:tt layer)))
+                    [(assoc (dissoc layer :ef) :td 1)
+                     {:ddd 0 :ty 4 :nm (str (:nm layer) " colour") :sr 1 :ks lottie-identity-ks :ao 0 :tt 1
+                      :shapes [(lottie-group "colour"
+                                             [{:ty "rc" :nm "all" :d 1
+                                               :s {:a 0 :k [(* 3 width) (* 3 height)]}
+                                               :p {:a 0 :k [(/ width 2) (/ height 2)]}
+                                               :r {:a 0 :k 0}}
+                                              (merge {:ty "fl" :nm "fill" :r 1} paint)])]
+                      :ip (:ip layer) :op (:op layer) :st 0 :bm 0
+                      ::extra true}]
+                    :else [(dissoc layer :ef)]))
+        outs    (into [] (mapcat (fn [layer] (map #(vector layer %) (convert layer)))) layers)
+        ;; what the layers were numbered, now: the parents they follow
+        ind-of  (into {}
+                      (keep-indexed (fn [i [layer out]]
+                                      (when (and (some? (:ind layer)) (not (::extra out)))
+                                        [(:ind layer) (inc i)])))
+                      outs)]
+    (into []
+          (map-indexed (fn [i [_ out]]
+                         (let [parent (get ind-of (:parent out))]
+                           (cond-> (assoc (dissoc out ::extra :parent) :ind (inc i))
+                             (some? parent) (assoc :parent parent)))))
+          outs)))
+
+(defn- lottie-silhouette-comp
+  "The id of a precomp of the silhouette of the precomp `ref` (see
+  `lottie-silhouette`), made once for `key`: it goes to `comps`. `ref`
+  itself when there is no such precomp."
+  [{:keys [comps] :as ctx} ref paint spread key]
+  (let [id (str "sil_" key "_" ref)]
+    (cond
+      (some #(= id (:id %)) @comps) id
+
+      :else
+      (if-let [comp (d/seek #(= ref (:id %)) @comps)]
+        ;; before adding this precomp: the ones inside it add themselves
+        (let [layers (lottie-silhouette ctx (:layers comp) paint spread key)]
+          (vswap! comps conj {:id id :nm (str (:nm comp) " silhouette") :layers layers})
+          id)
+        ref))))
+
+(defn- lottie-spreads?
+  "Whether `shadow` spreads, at rest or as the keyframes `kfs` of its
+  spread play (out only, with `out?`)."
+  [shadow kfs & {:keys [out?]}]
+  (boolean (some #(if out? (pos? (or % 0)) (not (zero? (or % 0))))
+                 (cons (:spread shadow) (map :value kfs)))))
 
 (defn- lottie-inner-shadow-layers
   "The layers of the inner shadows of `shape` over its drawing (see
@@ -5379,8 +5550,9 @@
   matte of `content` moved by its offset, which it blurs as soft as on
   the canvas (see `lottie-gaussian-blur`), under a matte of `content`,
   which keeps it inside: as the canvas casts it inside the silhouette of
-  what the shape holds. Their precomps go to `comps`. Lottie can not grow
-  a silhouette: they do not spread."
+  what the shape holds. Its spread erodes the matte it is cut by, as a
+  silhouette (see `lottie-silhouette`), so it reaches in further; the
+  canvas spreads it in only. Their precomps go to `comps`."
   [{:keys [comps duration width height] :as ctx} shape content]
   (let [by-prop (group-by :property (:keyframes (lottie-track ctx (:id shape))))
         op      (ms->frames duration)
@@ -5393,6 +5565,14 @@
              (let [kfs    #(slot-kfs by-prop % index)
                    name   (str (or (:name shape) "layer") " inner shadow " (inc index))
                    ref    (str "inner_" (:id shape) "_" index)
+                   ;; what it is cut by, shrunk by its spread
+                   in     #(- (max 0 (or % 0)))
+                   cut    (if (lottie-spreads? shadow (kfs :shadow-spread) :out? true)
+                            (lottie-silhouette-comp ctx content {:c {:a 0 :k [0 0 0 1]} :o {:a 0 :k 100}}
+                                                    {:rest (in (:spread shadow))
+                                                     :kfs (mapv #(update % :value in) (kfs :shadow-spread))}
+                                                    ref)
+                            content)
                    offset (lottie-pair-prop (kfs :shadow-offset-x) (kfs :shadow-offset-y)
                                             (or (:offset-x shadow) 0) (or (:offset-y shadow) 0)
                                             (fn [x y] [x y 0]))
@@ -5406,13 +5586,14 @@
                            :ip 0 :op op :st 0 :bm 0}]
                (vswap! comps conj {:id ref :nm name
                                    :layers (lottie-numbered
-                                            [(assoc (layer (str name " moved") content (assoc lottie-identity-ks :p offset))
+                                            [(assoc (layer (str name " moved") cut (assoc lottie-identity-ks :p offset))
                                                     :td 1)
                                              colour])})
-               [(assoc (layer (str name " inside") content lottie-identity-ks) :td 1)
+               [(assoc (layer (str name " inside") content lottie-identity-ks) :td 1 ::effect true)
                 (assoc (layer name ref lottie-identity-ks)
                        :tt 1
-                       :ef [(lottie-gaussian-blur (kfs :shadow-blur) (or (:blur shadow) 0))])])))
+                       :ef [(lottie-gaussian-blur (kfs :shadow-blur) (or (:blur shadow) 0))]
+                       ::effect true)])))
           (->> (as-vec (:shadow shape))
                (map-indexed vector)
                (filter #(and (= :inner-shadow (:style (second %))) (not (:hidden (second %)))))))))
@@ -5689,29 +5870,95 @@
      :st 0
      :bm 0}))
 
+(defn- lottie-container-shadows
+  "The layers of the drop shadows of the group or board `shape` when one
+  spreads, which the drop shadow effect of Lottie does not (nil when
+  none does), under its layer `layer`, the first on top: each the
+  silhouette of what `layer` draws (see `lottie-silhouette`) in its
+  colour, moved by its offset, as opaque as it is and blurred as soft
+  as on the canvas, with the blur of `shape`, which `layer` moves, turns
+  and fades as its own; kept to the outline of a board that clips. As
+  the canvas grows each shape in it by its spread, and its own fills.
+  Their precomps go to `comps`."
+  [{:keys [comps width height duration] :as ctx} shape layer]
+  (let [id      (:id shape)
+        by-prop (group-by :property (:keyframes (lottie-track ctx id)))
+        shown   (->> (as-vec (:shadow shape))
+                     (map-indexed vector)
+                     (filter (comp drop-shadow? second)))]
+    (when (some (fn [[index shadow]] (lottie-spreads? shadow (slot-kfs by-prop :shadow-spread index))) shown)
+      (let [op      (ms->frames duration)
+            name    (or (:name shape) (str id))
+            drawn   (if (= 0 (:ty layer))
+                      (:layers (d/seek #(= (str "comp_" id) (:id %)) @comps))
+                      [(-> layer
+                           (dissoc :ef :hasMask :masksProperties)
+                           (assoc :ks lottie-identity-ks :ind 1))])
+            blur    (lottie-blur-effect shape by-prop)
+            precomp (fn [nm ref ks]
+                      {:ddd 0 :ty 0 :nm nm :refId ref :sr 1 :ks ks :ao 0 :w width :h height
+                       :ip 0 :op op :st 0 :bm 0})]
+        (mapv (fn [[index shadow]]
+                (let [kfs    #(slot-kfs by-prop % index)
+                      key    (str id "_" index)
+                      sname  (str name " drop shadow " (inc index))
+                      {:keys [o] :as paint} (lottie-shadow-paint shadow kfs)
+                      offset (lottie-pair-prop (kfs :shadow-offset-x) (kfs :shadow-offset-y)
+                                               (or (:offset-x shadow) 0) (or (:offset-y shadow) 0)
+                                               (fn [x y] [x y 0]))
+                      sref   (str "spread_" key)
+                      oref   (str "drop_" key)]
+                  ;; before adding these: the silhouettes inside add themselves
+                  (let [layers (lottie-silhouette ctx drawn (assoc paint :o {:a 0 :k 100})
+                                                  {:rest (or (:spread shadow) 0) :kfs (kfs :shadow-spread)}
+                                                  key)]
+                    (vswap! comps conj {:id sref :nm (str sname " silhouette") :layers layers}))
+                  (vswap! comps conj
+                          {:id oref :nm sname
+                           :layers [(cond-> (assoc (precomp (str sname " moved") sref
+                                                            (assoc lottie-identity-ks :p offset :o o))
+                                                   :ind 1)
+                                      (:hasMask layer)
+                                      (assoc :hasMask true :masksProperties (:masksProperties layer)))]})
+                  (assoc (precomp sname oref (:ks layer))
+                         :ef (into [(lottie-gaussian-blur (kfs :shadow-blur) (or (:blur shadow) 0))] blur)
+                         ::effect true)))
+              shown)))))
+
 (defn- lottie-node-layers
   "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first,
   each that follows the board it is in as it resizes (`:follow` of
   `ctx`, see `board-follow`) with the null layer that moves it (see
-  `lottie-follow-null`)."
+  `lottie-follow-null`); a group or board whose drop shadows spread
+  over the layers of those (see `lottie-container-shadows`)."
   [ctx nodes]
   (into []
         (mapcat (fn [{:keys [id inner] :as node}]
                   (when-let [shape (get (:objects ctx) id)]
-                    (let [track (lottie-track ctx id)
-                          layer (cond
-                                  (contains? (:units ctx) id) (lottie-units-layer ctx shape)
-                                  (or (seq inner)
-                                      (and (or (lottie-holds-inner-shadows? shape) (board-inner-shadows? shape))
-                                           (lottie-vector-layer? (:objects ctx) (:layer-ids ctx) id)))
-                                  (lottie-precomp-layer ctx node)
-                                  (and (lottie-vector-layer? (:objects ctx) (:layer-ids ctx) id)
-                                       (lottie-shadow-layers? shape track))
-                                  (lottie-effects-layer ctx shape)
-                                  :else                       (lottie-shape-layer ctx shape track))]
+                    (let [track   (lottie-track ctx id)
+                          vector? (lottie-vector-layer? (:objects ctx) (:layer-ids ctx) id)
+                          layer   (cond
+                                    (contains? (:units ctx) id) (lottie-units-layer ctx shape)
+                                    (or (seq inner)
+                                        (and (or (lottie-holds-inner-shadows? shape) (board-inner-shadows? shape))
+                                             vector?))
+                                    (lottie-precomp-layer ctx node)
+                                    (and vector? (lottie-shadow-layers? shape track))
+                                    (lottie-effects-layer ctx shape)
+                                    :else                       (lottie-shape-layer ctx shape track))
+                          shadows (when (and vector?
+                                             (contains? #{:group :frame} (:type shape))
+                                             (not (contains? (:units ctx) id)))
+                                    (lottie-container-shadows ctx shape layer))
+                          ;; its drop shadows are those layers
+                          layer   (if (seq shadows)
+                                    (let [ef (filterv #(not= 25 (:ty %)) (:ef layer))]
+                                      (if (seq ef) (assoc layer :ef ef) (dissoc layer :ef)))
+                                    layer)
+                          layers  (into [layer] shadows)]
                       (if-let [stops (get (:follow ctx) id)]
-                        [(assoc layer ::follow id) (lottie-follow-null ctx shape stops)]
-                        [layer])))))
+                        (conj (mapv #(assoc % ::follow id) layers) (lottie-follow-null ctx shape stops))
+                        layers)))))
         (rseq (vec nodes))))
 
 (defn- lottie-layers
@@ -5754,8 +6001,10 @@
         ;; its inner shadows over its drawing, under the layers
         inner    (when (and (some? content) (board-inner-shadows? board))
                    (lottie-inner-shadow-layers ctx board))]
-    {:layers (lottie-numbered (cond-> (into layers inner) (some? content) (conj content)))
-     :comps  @(:comps ctx)}))
+    ;; the layers of effects are none to tell (see `lottie-silhouette`)
+    {:layers (mapv #(dissoc % ::effect)
+                   (lottie-numbered (cond-> (into layers inner) (some? content) (conj content))))
+     :comps  (mapv (fn [comp] (update comp :layers (partial mapv #(dissoc % ::effect)))) @(:comps ctx))}))
 
 (defn timeline->lottie
   "Generate a Lottie (bodymovin) animation document (a plain map ready for
