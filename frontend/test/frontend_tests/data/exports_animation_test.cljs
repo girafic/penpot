@@ -1544,7 +1544,8 @@
                         (assoc mid (assoc mask :parent-id gid :frame-id bid))
                         (assoc-in [cid :parent-id] gid))]
         (t/is (has? (issues masked tl) :svg :mask))
-        (t/is (has? (issues masked tl) :lottie :mask))
+        (t/is (not (has? (issues masked tl) :lottie :mask)) "Lottie keeps it to its mask")
+        (t/is (not (has? (issues masked tl) :lottie :lottie/images)) "as vectors")
         (t/is (not (has? (issues masked tl) :webm :mask)) "a video draws as the canvas")
         (t/is (not (has? (issues objects tl) :svg :mask)))))
     (t/testing "a board that shows through"

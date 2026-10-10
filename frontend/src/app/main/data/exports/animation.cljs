@@ -516,7 +516,7 @@
     (nil? timeline) []
     render-wasm?    [:mp4 :webm :gif :avif :svg :lottie :dotlottie]
     :else
-    (let [ids   (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline))
+    (let [ids   (cta/lottie-export-layer-ids objects timeline)
           idset (set ids)]
       (if (every? #(cta/lottie-vector-layer? objects idset %) ids)
         [:lottie :dotlottie]
@@ -592,10 +592,11 @@
   otherwise than the canvas, by format, as the Animated export panel lists
   them: a vector of kinds each, the most telling first.
 
-  - `:lottie/images`, layers that draw as pictures for their effects,
-    masks or paints (see `cta/lottie-vector-layer?`; texts are the
-    outlines of their glyphs, see `outline-texts`, and an SVG has its
-    layers as vectors, see `app.main.data.exports.svg-vectors`);
+  - `:lottie/images`, layers that draw as pictures for their effects or
+    paints (see `cta/lottie-vector-layer?`, its layers those of
+    `cta/lottie-export-layer-ids`; texts are the outlines of their
+    glyphs, see `outline-texts`, and an SVG has its layers as vectors,
+    see `app.main.data.exports.svg-vectors`);
   - `:svg/appearance`, what an SVG keeps as it rests (see
     `svg-static?`; its CSS plays the rest on its vectors; its texts
     outlined with `:outline` of its export settings, see
@@ -605,8 +606,7 @@
   - `:lottie/blur`, a blur, which players draw at their own strength (an
     SVG blurs as the canvas, see `cta/svg-filter-blur?`);
   - `:lottie/shadow`, shadows, blurred by Lottie effects, which players
-    soften at their own strength (as the canvas in lottie-web), those of
-    groups and boards without spread (see `cta/lottie-shadow-layers?`);
+    soften at their own strength (as the canvas in lottie-web);
   - `:lottie/stroke`, a stroke Lottie draws otherwise (see
     `off-center-stroke?`);
   - `:background-blur` and `:blend-mode`, which no markup format plays
@@ -619,8 +619,9 @@
     their end bind to the board's: it stops at the end of a board that
     plays once and starts over with one that loops, unless its cycles
     fit the board's;
-  - `:mask`, a layer in a masked group, which the markup formats draw
-    on its own, unmasked (a mask that animates as a shape);
+  - `:mask`, a layer in a masked group, which an SVG draws on its own,
+    unmasked (a mask that animates as a shape); Lottie keeps it to its
+    mask (see `cta/lottie-export-layer-ids`);
   - `:gif/alpha` and `:mp4/alpha`, a board that shows through (see
     `see-through?`): GIF has no partial transparency, MP4 none at all."
   [objects timeline]
@@ -633,7 +634,9 @@
                          (remove :hidden))
           animated  (into #{} (comp (mapcat :keyframes) (map :property)) (vals (:tracks resolved)))
           layer-ids (cta/export-layer-ids objects board-id (:tracks resolved))
-          idset     (set layer-ids)
+          ;; Lottie has the layers in masked groups as layers too
+          lottie-ids (cta/lottie-export-layer-ids objects resolved)
+          lottie-set (set lottie-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
           ;; SVG and Lottie play some on the outlines
           stretch?  (boolean
@@ -669,8 +672,8 @@
                                (and (some? shape)
                                     (not (:hidden shape))
                                     (not (contains? #{:text :image} (:type shape)))
-                                    (not (cta/lottie-vector-layer? objects idset id)))))
-                           (cons board-id layer-ids)))]
+                                    (not (cta/lottie-vector-layer? objects lottie-set id)))))
+                           (cons board-id lottie-ids)))]
            [:svg/appearance #{:svg}
             (boolean (some (fn [[id track]]
                              (when-let [shape (get objects id)]
@@ -697,7 +700,7 @@
            [:no-audio #{:gif :avif :svg :lottie :dotlottie}
             (boolean (seq (:audio-clips timeline)))]
            [:copy-clock #{:gif :avif :svg :lottie :dotlottie} (boolean bound?)]
-           [:mask markup-formats (boolean masked?)]
+           [:mask #{:svg} (boolean masked?)]
            [:gif/alpha #{:gif} (boolean clear?)]
            [:mp4/alpha #{:mp4} (boolean clear?)]]]
       (reduce (fn [issues [kind formats on?]]

@@ -1901,6 +1901,14 @@
     (t/is (close? 4 (value "Distance")))
     (t/is (close? (* 4 (cta/blur-sigma 6)) (value "Softness")) "as soft as on the canvas, in lottie-web")
     (t/is (close? 127.5 (value "Opacity")))
+    (t/testing "in a region lottie-web does not cut it to, around the box of the shape"
+      ;; as far as it reaches: 4 down, 3 sigma of its blur, 2 more
+      (let [reach (+ 4 2 (* 3 (cta/blur-sigma 6)))
+            pct   #(d/parse-double (subs % 0 (dec (count %))))]
+        (t/is (close? (- (* 100 (/ reach 40))) (pct (get-in ef [:fs :y]))))
+        (t/is (close? (+ 100 (* 200 (/ reach 40))) (pct (get-in ef [:fs :height]))))
+        (t/is (close? (- (* 100 (/ (+ 2 (* 3 (cta/blur-sigma 6))) 40))) (pct (get-in ef [:fs :x])))
+              "less across")))
     (t/testing "an inner shadow draws vectors, on a group too"
       (let [inner   (assoc shadow :style :inner-shadow)
             group   (cts/setup-shape {:type :group :x 0 :y 0 :width 40 :height 40 :shadow [inner]})
@@ -2005,6 +2013,59 @@
     (t/is (= [(str "comp_" gid) 1] [(:refId moved) (:td moved)]))
     (t/is (close-all? [3 0 0] (get-in moved [:ks :p :k])) "moved by its offset")
     (t/is (= 2 (:tt colour)) "the colour of the shadow where it is not")))
+
+(defn- masked-reveal
+  "A board holding a masked group: a circle masks a bar and a dot."
+  []
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        group (cts/setup-shape {:type :group :name "Reveal" :x 100 :y 100 :width 100 :height 100
+                                :masked-group true})
+        mask  (cts/setup-shape {:type :circle :name "Mask" :x 100 :y 100 :width 100 :height 100
+                                :fills [{:fill-color "#ffffff" :fill-opacity 1}]
+                                :shadow [{:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 4
+                                          :spread 0 :hidden false :color {:color "#000000" :opacity 1}}]})
+        bar   (cts/setup-shape {:type :rect :name "Bar" :x 100 :y 130 :width 100 :height 40
+                                :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        dot   (cts/setup-shape {:type :rect :name "Dot" :x 140 :y 140 :width 20 :height 20
+                                :fills [{:fill-color "#0000ff" :fill-opacity 1}]})
+        [bid gid mid rid did] (map :id [board group mask bar dot])]
+    {:bid bid :gid gid :mid mid :rid rid :did did
+     :objects {bid (assoc board :shapes [gid])
+               gid (assoc group :parent-id bid :frame-id bid :shapes [mid rid did])
+               mid (assoc mask :parent-id gid :frame-id bid)
+               rid (assoc bar :parent-id gid :frame-id bid)
+               did (assoc dot :parent-id gid :frame-id bid)}}))
+
+(t/deftest lottie-keeps-what-a-masked-group-holds-to-its-mask
+  ;; A layer that moves in a masked group stays masked, as on the canvas.
+  (let [{:keys [bid gid mid rid did objects]} (masked-reveal)
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe rid {:time 0 :property :x :value 0})
+                    (cta/add-keyframe rid {:time 1000 :property :x :value 200}))
+        L       (cta/timeline->lottie tl objects)
+        comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
+        layer   (first (:layers L))
+        [matte content & more] (:layers (comp (:refId layer)))]
+    (t/is (= #{gid mid rid did} (set (cta/lottie-export-layer-ids objects tl))) "what it holds are layers")
+    (t/is (= (str "comp_" gid) (:refId layer)) "a precomp of the group")
+    (t/is (= ["Mask" 1] [(:nm matte) (:td matte)]) "its mask an alpha matte")
+    (t/is (nil? (:ef matte)) "without its shadow")
+    (t/is (= [(str "masked_" gid) 1] [(:refId content) (:tt content)]) "over the rest")
+    (t/is (empty? more))
+    (t/is (= ["Dot" "Bar"] (mapv :nm (:layers (comp (str "masked_" gid))))) "the top-most first")))
+
+(t/deftest lottie-draws-a-masked-group-as-vectors
+  ;; Not an image any more: its own animation plays on it.
+  (let [{:keys [bid gid objects]} (masked-reveal)
+        tl  (-> (cta/make-timeline {:board-id bid :duration 1000})
+                (cta/add-keyframe gid {:time 0 :property :opacity :value 0})
+                (cta/add-keyframe gid {:time 1000 :property :opacity :value 1}))
+        ids (set (cta/lottie-export-layer-ids objects tl))
+        L   (cta/timeline->lottie tl objects)
+        layer (first (:layers L))]
+    (t/is (cta/lottie-vector-layer? objects ids gid))
+    (t/is (= [0 (str "comp_" gid)] [(:ty layer) (:refId layer)]))
+    (t/is (= 1 (get-in layer [:ks :o :a])) "it fades")))
 
 (defn- inner-shadow-card
   "A board holding a card board with an inner shadow and a fill, which

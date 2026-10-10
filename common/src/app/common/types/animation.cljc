@@ -4187,13 +4187,34 @@
         (into boards)
         (into (comp (remove #{board-id}) (keep #(dm/get-in objects [% :parent-id]))) boards))))
 
+(defn- lottie-holders
+  "The shapes the layers in which are layers of a Lottie export of
+  `timeline`: those of `export-holders`, and the masked groups in its
+  board with what holds them, up to the board, so that a masked group is
+  a layer, and what it holds too, which its mask keeps to it as a matte
+  (see `lottie-masked-layers`)."
+  [objects timeline]
+  (let [board-id (:board-id timeline)
+        masked   (filterv #(true? (dm/get-in objects [% :masked-group]))
+                          (tree-seq #(seq (dm/get-in objects [% :shapes]))
+                                    #(dm/get-in objects [% :shapes])
+                                    board-id))
+        up       (fn [id]
+                   (->> (iterate #(dm/get-in objects [% :parent-id]) id)
+                        (take-while #(and (some? %) (contains? objects %)))
+                        (reduce (fn [ids id]
+                                  (cond-> (conj ids id) (= id board-id) (reduced)))
+                                [])))]
+    (into (set (export-holders objects timeline)) (mapcat up) masked)))
+
 (defn lottie-export-layer-ids
   "The layers of a Lottie export of `timeline` (with its keyframes, see
   `resolve-animations`): its export layers (see `export-layer-ids`) and
   the layers in the boards whose size it plays on their outlines (see
-  `lottie-sized?`) or that cast inner shadows (see `export-holders`)."
+  `lottie-sized?`), that cast inner shadows or that are masked groups or
+  hold them (see `lottie-holders`)."
   [objects timeline]
-  (export-layer-ids objects (:board-id timeline) (:tracks timeline) (export-holders objects timeline)))
+  (export-layer-ids objects (:board-id timeline) (:tracks timeline) (lottie-holders objects timeline)))
 
 (defn- lottie-box
   "A function of a time to the box of `shape` then, resized by the width
@@ -4487,11 +4508,29 @@
   [shadow]
   (and (= :drop-shadow (:style shadow)) (not (:hidden shadow))))
 
+(defn- lottie-filter-size
+  "The region of the filter of a Lottie drop shadow of `shadow` on
+  `shape` and the keyframes `kfs` of it (a function of a property), as
+  lottie-web takes it (`fs`): around the box of the shape as far as the
+  shadow reaches, moved and blurred. Without it lottie-web keeps the
+  shadow to the box of the shape."
+  [shape shadow kfs]
+  (let [{:keys [width height]} (:selrect shape)
+        values (fn [prop rest] (cons (or rest 0) (map :value (kfs prop))))
+        blur   (* 3 (blur-sigma (reduce max (values :shadow-blur (:blur shadow)))))
+        reach  (fn [prop rest] (+ 2 blur (reduce max (map mth/abs (values prop rest)))))
+        pct    (fn [reach size] (* 100.0 (/ reach (max 1 (or size 0)))))
+        mx     (pct (reach :shadow-offset-x (:offset-x shadow)) width)
+        my     (pct (reach :shadow-offset-y (:offset-y shadow)) height)]
+    {:x (str (- mx) "%") :y (str (- my) "%")
+     :width (str (+ 100 (* 2 mx)) "%") :height (str (+ 100 (* 2 my)) "%")}))
+
 (defn- lottie-shadow-effects
   "Lottie drop shadows of the drop shadows of `shape`, each with the
   keyframes of its index, as soft as on the canvas in lottie-web (see
-  `blur-sigma`). Lottie has no spread: a layer whose shadows spread
-  casts them as layers of its own (see `lottie-shadow-layers?`)."
+  `blur-sigma`), in a region it does not cut (see `lottie-filter-size`).
+  Lottie has no spread: a layer whose shadows spread casts them as
+  layers of its own (see `lottie-shadow-layers?`)."
   [shape by-prop]
   (->> (as-vec (:shadow shape))
        (map-indexed
@@ -4502,6 +4541,7 @@
                   y        (or (:offset-y shadow) 0)
                   offset   #(apply lottie-pair-1d (kfs :shadow-offset-x) (kfs :shadow-offset-y) x y %&)]
               {:ty 25 :nm "Drop Shadow" :en 1 :np 8
+               :fs (lottie-filter-size shape shadow kfs)
                :ef [{:ty 2 :nm "Shadow Color"
                      :v (lottie-color-prop (kfs :shadow-color)
                                            (hex->rgb01 (or (dm/get-in shadow [:color :color]) "#000000")))}
@@ -4657,10 +4697,13 @@
   (case (:type shape)
     (:rect :circle) true
     (:path :bool)   (some? (:content shape))
-    :group          (and (not (:masked-group shape))
-                         (every? #(or (contains? layer-ids %)
-                                      (lottie-content? objects layer-ids (get objects %)))
-                                 (:shapes shape)))
+    ;; a masked group is a precomp of its layers (see
+    ;; `lottie-masked-layers`)
+    :group          (if (:masked-group shape)
+                      (every? #(contains? layer-ids %) (:shapes shape))
+                      (every? #(or (contains? layer-ids %)
+                                   (lottie-content? objects layer-ids (get objects %)))
+                              (:shapes shape)))
     :frame          (every? #(or (contains? layer-ids %)
                                  (lottie-content? objects layer-ids (get objects %)))
                             (:shapes shape))
@@ -4669,10 +4712,11 @@
 (defn- lottie-content?
   "Whether `shape`, drawn inside a layer, draws as Lottie vectors (a hidden
   one draws nothing). Effects go with a whole layer, so no shadow nor blur,
-  and no board clipping its content."
+  no board clipping its content and no mask."
   [objects layer-ids shape]
   (or (true? (:hidden shape))
       (and (some? shape)
+           (not (:masked-group shape))
            (lottie-paints? shape)
            (every? :hidden (as-vec (:shadow shape)))
            (or (nil? (:blur shape)) (:hidden (:blur shape)))
@@ -4689,8 +4733,9 @@
   are all the layers of the export): a rectangle, ellipse, path or
   boolean, or a group or board of such, with flat or gradient fills, flat
   strokes, and shadows and blur of its own at most (see
-  `lottie-shadow-layers?`, `lottie-inner-shadow-mattes`). Anything else
-  draws as an image (see `timeline->lottie`)."
+  `lottie-shadow-layers?`, `lottie-inner-shadow-mattes`), or a masked
+  group of layers (see `lottie-masked-layers`). Anything else draws as
+  an image (see `timeline->lottie`)."
   [objects layer-ids id]
   (let [shape (get objects id)]
     (and (some? shape)
@@ -5372,21 +5417,54 @@
                (map-indexed vector)
                (filter #(and (= :inner-shadow (:style (second %))) (not (:hidden (second %)))))))))
 
+(defn- lottie-masked-layers
+  "The layers of the masked group `shape` in its precomp, the top-most
+  first: its mask, the bottom-most of what it holds, an alpha matte
+  (`td`) over a precomp of the others, `inner` but the mask (see
+  `layer-nodes`), which keeps them to it (`tt`), as the canvas does. The
+  mask draws without its shadows and blur, as the canvas draws it; the
+  layers it holds are layers (see `lottie-holders`). The precomp goes to
+  `comps`."
+  [{:keys [objects comps duration width height] :as ctx} shape inner]
+  (let [mask-id (first (:shapes shape))
+        node    (d/seek #(= mask-id (:id %)) inner)
+        plain   (update-in ctx [:objects mask-id] dissoc :shadow :blur)
+        drawn   (cond
+                  (some? node)                (lottie-node-layers plain [node])
+                  (contains? objects mask-id) [(lottie-shape-layer plain (get-in plain [:objects mask-id])
+                                                                   (lottie-track ctx mask-id))])
+        matte   (d/seek (complement ::null) drawn)
+        ref     (str "masked_" (:id shape))
+        name    (or (:name shape) ref)]
+    ;; before adding this precomp: the ones inside it add themselves
+    (let [layers (lottie-numbered (lottie-node-layers ctx (filterv #(not= mask-id (:id %)) inner)))]
+      (vswap! comps conj {:id ref :nm (str name " content") :layers layers}))
+    (cond-> []
+      (some? matte) (conj (-> matte (dissoc :ef) (assoc :td 1)))
+      :always       (conj (cond-> {:ddd 0 :ty 0 :nm (str name " content") :refId ref :sr 1
+                                   :ks lottie-identity-ks :ao 0 :w width :h height
+                                   :ip 0 :op (ms->frames duration) :st 0 :bm 0}
+                            (some? matte) (assoc :tt 1)))
+      :always       (into (filter ::null) drawn))))
+
 (defn- lottie-precomp-layer
   "A precomp layer of the node `id` (see `layer-nodes`): it moves, turns,
   fades and clips its layers, with the shape's own drawing at the
   bottom, all drawn as they are, turned (see `lottie-holder-ks`): the
   inner shadows of a board over its drawing (see
   `lottie-inner-shadow-layers`), those of a group over all (in a precomp
-  around theirs, see `lottie-inner-shadow-mattes`). The precomps go to
-  `comps`."
+  around theirs, see `lottie-inner-shadow-mattes`); a masked group keeps
+  its layers to its mask (see `lottie-masked-layers`). The precomps go
+  to `comps`."
   [{:keys [objects layer-ids timeline duration width height ox oy comps] :as ctx}
    {:keys [id inner clip?]}]
   (let [shape   (get objects id)
+        masked? (and (not clip?) (true? (:masked-group shape)))
         track   (if clip?
                   {:shape-id id :keyframes [] :duration duration}
                   (lottie-track ctx id))
         content (when (and (not clip?)
+                           (not masked?)
                            (or (contains? (:assets ctx) id)
                                (lottie-draws? objects layer-ids shape)))
                   (lottie-content-layer ctx shape))
@@ -5394,11 +5472,13 @@
         ;; before adding this precomp: the ones inside it add themselves;
         ;; a board casts its inner shadows over its drawing, under what it
         ;; holds
-        layers  (lottie-numbered (cond-> (lottie-node-layers ctx inner)
-                                   (and (some? content) (not clip?) (board-inner-shadows? shape))
-                                   (into (lottie-inner-shadow-layers ctx shape))
+        layers  (lottie-numbered (if masked?
+                                   (lottie-masked-layers ctx shape inner)
+                                   (cond-> (lottie-node-layers ctx inner)
+                                     (and (some? content) (not clip?) (board-inner-shadows? shape))
+                                     (into (lottie-inner-shadow-layers ctx shape))
 
-                                   (some? content) (conj content)))
+                                     (some? content) (conj content))))
         by-prop (group-by :property (:keyframes track))
         effects (when-not clip?
                   (concat (when (lottie-vector-layer? objects layer-ids id)
@@ -5726,7 +5806,7 @@
                       (set (lottie-export-layer-ids objects timeline))
                       (-> (set (keys (:tracks timeline)))
                           (disj board-id)
-                          (into (mapcat #(dm/get-in objects [% :shapes])) (export-holders objects timeline))))
+                          (into (mapcat #(dm/get-in objects [% :shapes])) (lottie-holders objects timeline))))
          bsr        (dm/get-in objects [board-id :selrect])
          follow     (when (and (some? propagate) (seq holders))
                       (into {} (board-follow timeline objects holders layer-ids propagate
