@@ -946,6 +946,46 @@
      :shape shape
      :svg (cta/timeline->svg tl objects {sid {:markup markup}})}))
 
+(defn- turn-css
+  "The CSS of a rectangle playing `keyframes`, in an SVG with `svg?`."
+  [keyframes svg?]
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        bid     (:id board)
+        shape   (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20})
+        sid     (:id shape)
+        tl      (reduce #(cta/add-keyframe %1 sid %2)
+                        (cta/make-timeline {:board-id bid :duration 2000})
+                        keyframes)
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}]
+    (if svg?
+      (cta/timeline->svg tl objects {sid {:markup "<rect></rect>"}})
+      (cta/timeline->css tl objects))))
+
+(t/deftest an-svg-eases-each-property-by-its-own-curve
+  (let [turn [{:time 0 :property :rotation :value 0 :easing :ease-in-out}
+              {:time 2000 :property :rotation :value 180}]]
+    (t/testing "a turn eased through a keyframe of the place, taken as it goes"
+      (let [svg (turn-css (into turn [{:time 0 :property :x :value 0 :easing :linear}
+                                      {:time 1000 :property :x :value 100}])
+                          true)]
+        (t/is (< 30 (occurrences svg "% {")) "30 a second where one timing can not ease both")
+        (t/is (str/includes? svg "50% { transform: translate(90px, 0px) rotate(90deg)")
+              "half way at half the time")
+        (t/is (str/includes? svg "75% { transform: translate(90px, 0px) rotate(156.837deg)")
+              "eased in and out, more than three quarters at three quarters")))
+    (t/testing "both on one curve, as it is"
+      (let [svg (turn-css (into turn [{:time 0 :property :x :value 0 :easing :ease-in-out}
+                                      {:time 2000 :property :x :value 100}])
+                          true)]
+        (t/is (= 2 (occurrences svg "% {")))
+        (t/is (str/includes? svg "animation-timing-function: ease-in-out;"))))
+    (t/testing "the code of a page, a stop by keyframe"
+      (t/is (= 3 (occurrences (turn-css (into turn [{:time 0 :property :x :value 0 :easing :linear}
+                                                    {:time 1000 :property :x :value 100}])
+                                        false)
+                              "% {"))))))
+
 (t/deftest an-svg-plays-shadows-by-smil
   (let [{:keys [sid svg shape track]}
         (shadow-svg [{:time 0 :property :shadow-offset-y :index 0 :value 4 :easing :ease}

@@ -3771,10 +3771,94 @@
     (= :step (:interpolation keyframe)) "steps(1, end)"
     (some? (:easing keyframe))          (easing->css (:easing keyframe))))
 
+(defn- shape-values
+  "A function of a time to the values of the shape `sid` then as
+  `timeline` plays it (see `values-at`), keeping those it gave."
+  [timeline sid]
+  (let [timeline (update timeline :tracks select-keys [sid])
+        cache    (volatile! {})]
+    (fn [t]
+      (or (get @cache t)
+          (let [v (get (values-at timeline t) sid {})]
+            (vswap! cache assoc t v)
+            v)))))
+
+(defn- value-numbers
+  "The numbers of `values` (see `values-at`), in an order of their own: a
+  colour as its channels, an indexed value by index."
+  [values]
+  (into []
+        (mapcat (fn [[_ v]]
+                  (cond
+                    (number? v)                                [(double v)]
+                    (and (string? v) (str/starts-with? v "#")) (mapv double (clr/hex->rgb v))
+                    (map? v)                                   (value-numbers v)
+                    :else                                      [])))
+        (sort-by (comp str key) values)))
+
+(def ^:private eased-samples-per-second
+  "How often an export takes the values of a stretch it can not ease as
+  the canvas does (see `eased-stops`)."
+  30)
+
+(defn- follows?
+  "Whether `value` (a time to a vector of numbers) goes from `t0` to `t1`
+  as `progress` (of the share of the way) eases it: within 1% of its
+  change a quarter, half and three quarters of the way."
+  [value t0 t1 progress]
+  (let [v0 (value t0)
+        v1 (value t1)]
+    (every? (fn [p]
+              (let [e (progress p)]
+                (every? true? (map (fn [a b actual]
+                                     (<= (mth/abs (- actual (+ a (* e (- b a)))))
+                                         (max 0.01 (* 0.01 (mth/abs (- b a))))))
+                                   v0 v1 (value (+ t0 (* p (- t1 t0))))))))
+            [0.25 0.5 0.75])))
+
+(defn- sample-times
+  "The times from `t0` to `t1` (but it) an export takes values at to play
+  the stretch between linearly, 30 a second (see
+  `eased-samples-per-second`), 4 at least."
+  [t0 t1]
+  (let [n (max 4 (mth/ceil (* (- t1 t0) 0.001 eased-samples-per-second)))]
+    (map #(+ t0 (* % (/ (- t1 t0) n))) (range n))))
+
+(defn- keyframe-progress
+  "The eased progress, of the share of the way, of the stretch from
+  `keyframe` as its CSS timing plays it (see `keyframe-timing`); linear
+  without one."
+  [keyframe]
+  (cond
+    (nil? keyframe)                     identity
+    (= :step (:interpolation keyframe)) #(if (< % 1) 0 1)
+    :else                               #(easing-progress (:easing keyframe) %)))
+
+(defn- eased-stops
+  "The stops of a CSS animation of `value` (a time to a vector of numbers,
+  see `value-numbers`) at `times` (sorted, from 0 to its end) of the
+  keyframes `kfs`, `[time timing]` each: the timing of the keyframe there
+  (see `keyframe-timing`) when the values to the next stop follow it,
+  else stops to it played linearly (see `sample-times`). A stretch cut
+  by the keyframes of other properties is a part of the curves of those
+  that go on through it, which no timing of its own eases."
+  [value kfs times]
+  (conj (into []
+              (mapcat (fn [[t0 t1]]
+                        (let [kf (d/seek #(and (= t0 (:time %)) (some? (keyframe-timing %))) kfs)]
+                          (if (follows? value t0 t1 (keyframe-progress kf))
+                            [[t0 (some-> kf keyframe-timing)]]
+                            (map #(vector % nil) (sample-times t0 t1))))))
+              (partition 2 1 times))
+        [(peek times) nil]))
+
 (defn- track->keyframes-css
   "The `@keyframes` of `track` on `shape`. With `sized?`, an SVG plays its
-  width and height on its elements (see `svg-sized?`), not as a scale."
-  [timeline shape track kf-name origin rest-transform & {:keys [svg? sized?]}]
+  width and height on its elements (see `svg-sized?`), not as a scale.
+  With `eased?`, as the canvas eases each property (see `eased-stops`);
+  else a stop of each keyframe, which code reads best, its timing that
+  of the stretch to the next."
+  [timeline shape track kf-name origin rest-transform & {:keys [svg? sized? eased?]}]
   (let [duration (max 1 (:duration timeline))
         sid      (:shape-id track)
         kfs      (:keyframes track)
@@ -3784,14 +3868,16 @@
                            (comp (map :time) (filter #(<= % duration)))
                            kfs)
                      vec)
-        stops    (for [t times]
-                   (let [values     (cond-> (get (values-at timeline t) sid {})
-                                      sized? (dissoc :width :height))
-                         pct        (fmt (* 100.0 (/ (double t) duration)))
-                         seg-timing (some #(when (= (:time %) t) (keyframe-timing %)) kfs)
-                         decls      (cond-> (values->declarations shape values origin rest-transform svg?)
-                                      (and seg-timing (< t duration))
-                                      (conj (str "animation-timing-function: " seg-timing ";")))]
+        values   (let [values (shape-values timeline sid)]
+                   #(cond-> (values %) sized? (dissoc :width :height)))
+        stops    (for [[t seg-timing] (if eased?
+                                        (eased-stops (comp value-numbers values) kfs times)
+                                        (map (fn [t] [t (some #(when (= (:time %) t) (keyframe-timing %)) kfs)])
+                                             times))]
+                   (let [pct   (fmt (* 100.0 (/ (double t) duration)))
+                         decls (cond-> (values->declarations shape (values t) origin rest-transform svg?)
+                                 (and seg-timing (< t duration))
+                                 (conj (str "animation-timing-function: " seg-timing ";")))]
                      (str "  " pct "% { " (str/join " " decls) " }")))]
     (str "@keyframes " kf-name " {\n" (str/join "\n" stops) "\n}")))
 
@@ -3829,7 +3915,8 @@
   declarations of the groups of an SVG (see `values->declarations`), of
   those that play any (see `svg-group-plays?`), but the width and height
   of the shapes of `:sized`, which play on their elements (see
-  `svg-sized?`)."
+  `svg-sized?`), each property eased as the canvas eases it (see
+  `eased-stops`)."
   ([timeline objects]
    (timeline->css timeline objects nil))
   ([timeline objects {:keys [ids selector origin transform units svg? sized]}]
@@ -3860,7 +3947,8 @@
                [selector
                 (str "/* " (or (:name text) (str text-id)) ", unit " (inc k) " */\n"
                      (track->keyframes-css units-tl unit (get-in units-tl [:tracks unit-id]) kf-name
-                                           (position-origin units-tl objects unit-id) nil)
+                                           (position-origin units-tl objects unit-id) nil
+                                           :eased? svg?)
                      "\n\n"
                      selector " {\n"
                      (when-let [display (:display units)]
@@ -3881,6 +3969,7 @@
                                                                 (position-origin timeline objects sid)
                                                                 (when transform (transform shape))
                                                                 :svg? svg?
+                                                                :eased? svg?
                                                                 :sized? (contains? sized sid)) "\n\n"
                                           selector " {\n  animation: " kf-name " "
                                           duration "ms linear " iter ";\n"
@@ -5435,14 +5524,13 @@
            [n [selectors declarations reads]] (map-indexed vector (svg-targets shape track props))
            :let  [kfs (filterv #(reads (:property %)) (:keyframes track))]
            :when (seq kfs)]
-       (let [name  (str "penpot-svg-" sid "-" n)
-             times (into (sorted-set 0 duration)
-                         (comp (map :time) (filter #(<= 0 % duration)))
-                         kfs)
-             stops (for [t times]
-                     (svg-stop-css t duration
-                                   (declarations (get (values-at timeline t) sid {}))
-                                   (some #(when (= (:time %) t) (keyframe-timing %)) kfs)))]
+       (let [name   (str "penpot-svg-" sid "-" n)
+             times  (vec (into (sorted-set 0 duration)
+                               (comp (map :time) (filter #(<= 0 % duration)))
+                               kfs))
+             values (shape-values timeline sid)
+             stops  (for [[t timing] (eased-stops #(value-numbers (select-keys (values %) reads)) kfs times)]
+                      (svg-stop-css t duration (declarations (values t)) timing))]
          [selectors name (str "@keyframes " name " {\n" (str/join "\n" stops) "\n}")]))
      duration
      (svg-iterations timeline))))
@@ -5481,11 +5569,6 @@
         (some svg-radius-properties (track-properties track))
         (not (svg-even-corners? shape track)))))
 
-(def ^:private smil-samples-per-second
-  "How often SMIL takes the value of a stretch it can not curve as it
-  plays (see `smil-stretch`)."
-  30)
-
 (def ^:private smil-linear [0 0 1 1])
 
 (defn- smil-curve
@@ -5506,33 +5589,21 @@
   `t0` to `t1` of the keyframes `kfs`: `[[time numbers curve]...]`, a point
   and the curve to the next. One when the values between follow the curve
   of the keyframe at `t0` (see `smil-curve`), two that hold the first value
-  for a hold, else samples."
+  for a hold, else samples (see `sample-times`)."
   [value kfs t0 t1]
-  (let [v0     (value t0)
-        v1     (value t1)
-        tol    (mapv #(max 0.01 (* 0.01 (mth/abs (- %2 %1)))) v0 v1)
-        fits?  (fn [f]
-                 (every? (fn [p]
-                           (every? true? (map (fn [a e t] (<= (mth/abs (- a e)) t))
-                                              (value (+ t0 (* p (- t1 t0)))) (f p) tol)))
-                         [0.25 0.5 0.75]))
-        curve  (smil-curve kfs t0)]
+  (let [v0    (value t0)
+        curve (smil-curve kfs t0)]
     (cond
-      (and (some? curve)
-           (fits? (fn [p] (let [e (cubic-bezier curve p)] (mapv #(+ %1 (* e (- %2 %1))) v0 v1)))))
+      (and (some? curve) (follows? value t0 t1 #(cubic-bezier curve %)))
       [[t0 v0 curve]]
 
-      (fits? (constantly v0))
-      (if (= v0 v1)
+      (follows? value t0 t1 (constantly 0))
+      (if (= v0 (value t1))
         [[t0 v0 smil-linear]]
         [[t0 v0 smil-linear] [(max (/ (+ t0 t1) 2) (- t1 0.5)) v0 smil-linear]])
 
       :else
-      (let [n (max 4 (mth/ceil (* (- t1 t0) 0.001 smil-samples-per-second)))]
-        (mapv (fn [i]
-                (let [t (+ t0 (* i (/ (- t1 t0) n)))]
-                  [t (value t) smil-linear]))
-              (range n))))))
+      (mapv (fn [t] [t (value t) smil-linear]) (sample-times t0 t1)))))
 
 (defn- smil-points
   "The points SMIL plays `value` (a time to a vector of numbers) of the
@@ -5584,18 +5655,6 @@
            (str/join ";" (map #(str/join " " (map fmt (nth % 2))) (butlast points)))
            "\" values=\"" (str/join ";" (map #(render (second %)) points)) "\"/>"))))
 
-(defn- smil-values
-  "A function of a time to the values of the shape `sid` then as
-  `timeline` plays it (see `values-at`), keeping those it gave."
-  [timeline sid]
-  (let [timeline (update timeline :tracks select-keys [sid])
-        cache    (volatile! {})]
-    (fn [t]
-      (or (get @cache t)
-          (let [v (get (values-at timeline t) sid {})]
-            (vswap! cache assoc t v)
-            v)))))
-
 (def ^:private svg-hard-alpha
   "The color matrix of the alpha of the source, opaque wherever it shows."
   "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0")
@@ -5631,7 +5690,7 @@
   (let [sid      (:id shape)
         track    (dm/get-in timeline [:tracks sid])
         duration (max 1 (:duration timeline 1))
-        values   (if (some? track) (smil-values timeline sid) (constantly {}))
+        values   (if (some? track) (shape-values timeline sid) (constantly {}))
         kfs      (filterv #(svg-shadow-properties (:property %)) (:keyframes track))
         shadows  #(apply-shadows (:shadow shape) (values %))
         attr     (fn [index name props value render]
@@ -5758,7 +5817,7 @@
   [shape timeline]
   (let [sid      (:id shape)
         {:keys [x y width height]} (:selrect shape)
-        values   (smil-values timeline sid)
+        values   (shape-values timeline sid)
         kfs      (filterv #(svg-radius-properties (:property %)) (dm/get-in timeline [:tracks sid :keyframes]))
         value    (fn [t]
                    (let [vs (values t)]
@@ -5889,24 +5948,28 @@
               :when (and (some? holder) (seq kfs) (seq children))
               :let  [{:keys [width height]} (:selrect holder)
                      pivot (origin-point holder (track-origin track))
-                     poses (for [t (into (sorted-set 0 duration)
-                                         (comp (map :time) (filter #(<= 0 % duration)))
-                                         kfs)]
-                             (let [values (get (values-at timeline t) hid {})
-                                   scale  (gpt/point (/ (get values :width width) width)
-                                                     (/ (get values :height height) height))]
-                               [t (propagate {hid {:modifiers (ctm/resize (ctm/empty) scale pivot)}}
-                                             objects)]))]
+                     values (shape-values timeline hid)
+                     size   #(let [v (values %)] [(get v :width width) (get v :height height)])
+                     poses (for [[t timing] (eased-stops #(mapv double (size %))
+                                                         kfs
+                                                         (vec (into (sorted-set 0 duration)
+                                                                    (comp (map :time) (filter #(<= 0 % duration)))
+                                                                    kfs)))]
+                             (let [[w h] (size t)]
+                               [t timing (propagate {hid {:modifiers (ctm/resize (ctm/empty)
+                                                                                 (gpt/point (/ w width) (/ h height))
+                                                                                 pivot)}}
+                                                    objects)]))]
               cid   children
-              :let  [matrices (mapv (fn [[t tree]] [t (svg-matrix (dm/get-in tree [cid :modifiers]) ox oy)])
+              :let  [matrices (mapv (fn [[t timing tree]] [t timing (svg-matrix (dm/get-in tree [cid :modifiers]) ox oy)])
                                     poses)]
-              :when (not-every? (comp identity? second) matrices)]
+              :when (not-every? (comp identity? peek) matrices)]
           (let [name     (str "penpot-follow-" cid)
                 selector (str "." (svg-follow-class cid))
-                stops    (for [[t matrix] matrices]
+                stops    (for [[t timing matrix] matrices]
                            (svg-stop-css t duration
                                          [(str "transform: matrix(" (str/join ", " (map fmt matrix)) ");")]
-                                         (some #(when (= (:time %) t) (keyframe-timing %)) kfs)))]
+                                         timing))]
             [cid selector
              (str "@keyframes " name " {\n" (str/join "\n" stops) "\n}\n\n"
                   selector " {\n  transform-origin: 0 0;\n  animation: " name " " duration "ms linear "
