@@ -4162,14 +4162,38 @@
    (and (some #(#{:width :height} (:property %)) (:keyframes track))
         (not (lottie-sized? shape track)))))
 
+(defn- board-inner-shadows?
+  "Whether the board `shape` casts an inner shadow, which the canvas
+  casts inside its fills, under the layers in it."
+  [shape]
+  (and (= :frame (:type shape))
+       (some #(and (= :inner-shadow (:style %)) (not (:hidden %))) (as-vec (:shadow shape)))
+       (some (complement :hidden) (as-vec (:fills shape)))))
+
+(defn export-holders
+  "The shapes the layers in which are layers of an SVG or Lottie export of
+  `timeline` (see `export-layer-ids`): the boards whose size it plays on
+  their outlines, which they follow (see `svg-sized?`), and the boards of
+  `objects` in its board, it too, that cast an inner shadow (see
+  `board-inner-shadows?`) and what holds them, so the shadow goes between
+  a board and what is in it."
+  [objects timeline]
+  (let [board-id (:board-id timeline)
+        boards   (filterv #(board-inner-shadows? (get objects %))
+                          (tree-seq #(seq (dm/get-in objects [% :shapes]))
+                                    #(dm/get-in objects [% :shapes])
+                                    board-id))]
+    (-> (svg-holder-ids objects (svg-sized-ids objects timeline))
+        (into boards)
+        (into (comp (remove #{board-id}) (keep #(dm/get-in objects [% :parent-id]))) boards))))
+
 (defn lottie-export-layer-ids
   "The layers of a Lottie export of `timeline` (with its keyframes, see
   `resolve-animations`): its export layers (see `export-layer-ids`) and
-  the children of the boards whose size it plays on their outlines (see
-  `lottie-sized?`), which follow them."
+  the layers in the boards whose size it plays on their outlines (see
+  `lottie-sized?`) or that cast inner shadows (see `export-holders`)."
   [objects timeline]
-  (export-layer-ids objects (:board-id timeline) (:tracks timeline)
-                    (svg-holder-ids objects (svg-sized-ids objects timeline))))
+  (export-layer-ids objects (:board-id timeline) (:tracks timeline) (export-holders objects timeline)))
 
 (defn- lottie-box
   "A function of a time to the box of `shape` then, resized by the width
@@ -4664,15 +4688,13 @@
   "Whether the layer `id` of a Lottie export draws as vectors (`layer-ids`
   are all the layers of the export): a rectangle, ellipse, path or
   boolean, or a group or board of such, with flat or gradient fills, flat
-  strokes, and drop shadows and blur of its own at most, inner shadows
-  too but on a group or board. Anything else draws as an image (see
-  `timeline->lottie`)."
+  strokes, and shadows and blur of its own at most (see
+  `lottie-shadow-layers?`, `lottie-inner-shadow-mattes`). Anything else
+  draws as an image (see `timeline->lottie`)."
   [objects layer-ids id]
   (let [shape (get objects id)]
     (and (some? shape)
          (lottie-paints? shape)
-         (or (contains? lottie-leaf-types (:type shape))
-             (every? #(or (drop-shadow? %) (:hidden %)) (as-vec (:shadow shape))))
          (lottie-outline? objects layer-ids shape))))
 
 (defn- lottie-path-shapes
@@ -5068,15 +5090,15 @@
   `track` animates, as layers of their own, around its drawing in a
   precomp (see `lottie-effects-layer`): a rectangle, ellipse, path or
   boolean with an inner shadow, for which Lottie has no effect, or a
-  drop shadow that spreads, which its effect does not."
+  drop shadow that spreads, out or in, which its effect does not."
   [shape track]
   (boolean
    (and (contains? lottie-leaf-types (:type shape))
         (let [shown (into [] (remove :hidden) (as-vec (:shadow shape)))]
           (or (some #(= :inner-shadow (:style %)) shown)
-              (some #(pos? (or (:spread %) 0)) shown)
+              (some #(not (zero? (or (:spread %) 0))) shown)
               (and (seq shown)
-                   (some #(and (= :shadow-spread (:property %)) (pos? (or (:value %) 0)))
+                   (some #(and (= :shadow-spread (:property %)) (not (zero? (or (:value %) 0))))
                          (:keyframes track))))))))
 
 (defn- stroke-reach
@@ -5089,6 +5111,9 @@
                       (/ (or (:stroke-width stroke) 0) 2))))
              max 0
              (remove :hidden (as-vec (:strokes shape)))))
+
+(def ^:private lottie-identity-ks
+  {:o {:a 0 :k 100} :r {:a 0 :k 0} :p {:a 0 :k [0 0 0]} :a {:a 0 :k [0 0 0]} :s {:a 0 :k [100 100 100]}})
 
 (defn- lottie-shadow-paint
   "The colour and opacity (`:c :o`) of the paint of a shadow `shadow` of
@@ -5114,15 +5139,24 @@
   reach), grown by its spread; an inner shadow is what lies outside the
   outline, grown in by its spread, under a matte of the outline (the
   layer before it, see `lottie-matte-layer`), which keeps it inside.
-  The board is at `ox`, `oy`."
-  [shape by-prop outline ks ox oy duration index shadow]
+  A drop shadow that spreads in is a precomp of its silhouette cut by an
+  inverted matte of the band its spread takes off along the outline,
+  which it blurs once cut, as the canvas erodes it before it blurs (its
+  precomp goes to `comps`). The board is at `ox`, `oy`, `width` by
+  `height`."
+  [{:keys [comps width height]} shape by-prop outline ks ox oy duration index shadow]
   (let [kfs     #(slot-kfs by-prop % index)
-        paint   (lottie-shadow-paint shadow kfs)
+        ;; opaque: its fill and spread overlap; the layer has its opacity
+        paint   (assoc (lottie-shadow-paint shadow kfs) :o {:a 0 :k 100})
+        opacity (:o (lottie-shadow-paint shadow kfs))
         inner?  (= :inner-shadow (:style shadow))
         reach   (if inner? 0 (stroke-reach shape))
         spreads (cons (or (:spread shadow) 0) (map :value (kfs :shadow-spread)))
-        grows?  (or (pos? reach) (some pos? spreads))
-        width   #(* 2.0 (+ reach (max 0 %)))
+        fills?  (seq (remove :hidden (as-vec (:fills shape))))
+        grows?  (some #(pos? (+ reach %)) spreads)
+        erodes? (and (not inner?) fills? (some #(neg? (+ reach %)) spreads))
+        grow    #(* 2.0 (max 0 (+ reach %)))
+        band    #(* 2.0 (max 0 (- (+ reach %))))
         offset  (lottie-pair-prop (kfs :shadow-offset-x) (kfs :shadow-offset-y)
                                   (or (:offset-x shadow) 0) (or (:offset-y shadow) 0)
                                   (fn [x y] [x y]))
@@ -5130,8 +5164,8 @@
                   (lottie-group "spread"
                                 (concat outline
                                         [(merge {:ty "st" :nm "spread" :lc 2 :lj 2 :ml 4
-                                                 :w (lottie-prop-1d (kfs :shadow-spread) width
-                                                                    (width (or (:spread shadow) 0)))}
+                                                 :w (lottie-prop-1d (kfs :shadow-spread) grow
+                                                                    (grow (or (:spread shadow) 0)))}
                                                 paint)])))
         cast    (if inner?
                   ;; around the outline, as far as it may show moved and blurred
@@ -5149,21 +5183,43 @@
                                             :r {:a 0 :k 0}}]
                                           outline
                                           [(merge {:ty "fl" :nm "outside" :r 2} paint)])))
-                  (when (seq (remove :hidden (as-vec (:fills shape))))
-                    (lottie-group "silhouette" (concat outline [(merge {:ty "fl" :nm "fill" :r (fill-rule shape)} paint)]))))]
-    (cond-> {:ddd 0
-             :ty 4
-             :nm (str (or (:name shape) "layer") (if inner? " inner shadow " " drop shadow ") (inc index))
-             :sr 1
-             :ks ks
-             :ao 0
-             :shapes [(lottie-moved-group "shadow" (keep identity [spread cast]) offset)]
-             :ef [(lottie-gaussian-blur (kfs :shadow-blur) (or (:blur shadow) 0))]
-             :ip 0
-             :op (ms->frames duration)
-             :st 0
-             :bm 0}
-      inner? (assoc :tt 1))))
+                  (when fills?
+                    (lottie-group "silhouette" (concat outline [(merge {:ty "fl" :nm "fill" :r (fill-rule shape)} paint)]))))
+        name    (str (or (:name shape) "layer") (if inner? " inner shadow " " drop shadow ") (inc index))
+        blur    (lottie-gaussian-blur (kfs :shadow-blur) (or (:blur shadow) 0))
+        layer   (cond-> {:ddd 0
+                         :ty 4
+                         :nm name
+                         :sr 1
+                         :ks (assoc ks :o opacity)
+                         :ao 0
+                         :shapes [(lottie-moved-group "shadow" (keep identity [spread cast]) offset)]
+                         :ip 0
+                         :op (ms->frames duration)
+                         :st 0
+                         :bm 0}
+                  (not erodes?) (assoc :ef [blur])
+                  inner? (assoc :tt 1))]
+    (if-not erodes?
+      layer
+      (let [ref  (str "shadow_" (:id shape) "_" index)
+            cut  {:ddd 0 :ty 4 :nm (str name " spread") :sr 1 :ks ks :ao 0 :td 1
+                  :shapes [(lottie-moved-group
+                            "spread"
+                            [(lottie-group "band"
+                                           (concat outline
+                                                   [{:ty "st" :nm "band" :lc 2 :lj 2 :ml 4
+                                                     :c {:a 0 :k [0 0 0 1]} :o {:a 0 :k 100}
+                                                     :w (lottie-prop-1d (kfs :shadow-spread) band
+                                                                        (band (or (:spread shadow) 0)))}]))]
+                            offset)]
+                  :ip 0 :op (ms->frames duration) :st 0 :bm 0}]
+        (vswap! comps conj {:id ref :nm name :layers (lottie-numbered [cut (assoc layer :tt 2)])})
+        {:ddd 0 :ty 0 :nm name :refId ref :sr 1
+         :ks lottie-identity-ks
+         :ao 0 :w width :h height
+         :ef [blur]
+         :ip 0 :op (ms->frames duration) :st 0 :bm 0}))))
 
 (defn- lottie-matte-layer
   "The alpha matte (`td`) of the outline `outline` of `shape`, with the
@@ -5182,6 +5238,26 @@
    :op (ms->frames duration)
    :st 0
    :bm 0})
+
+(defn- lottie-inner-shadow-layers
+  "The layers of the inner shadows of `shape` over its drawing (see
+  `lottie-content-layer`), the first on top: each a matte of its outline
+  and what lies outside it, moved and blurred (see
+  `lottie-shadow-layer`)."
+  [{:keys [objects timeline duration ox oy] :as ctx} shape]
+  (let [ctrack  (lottie-content-track ctx shape)
+        cby     (group-by :property (:keyframes ctrack))
+        origin  (position-origin timeline objects (:id shape))
+        ks      (lottie-ks (assoc shape :opacity 1) ctrack ox oy origin)
+        sized   (when (lottie-sized? shape ctrack) (lottie-size-props shape ctrack ox oy))
+        outline (lottie-outline shape cby ox oy sized)]
+    (into []
+          (mapcat (fn [[index s]]
+                    [(lottie-matte-layer shape outline ks duration)
+                     (lottie-shadow-layer ctx shape cby outline ks ox oy duration index s)]))
+          (->> (as-vec (:shadow shape))
+               (map-indexed vector)
+               (filter #(and (= :inner-shadow (:style (second %))) (not (:hidden (second %)))))))))
 
 (defn- lottie-effects-layer
   "A precomp layer of the layer `shape` that casts its shadows as layers
@@ -5203,17 +5279,17 @@
         shown   (->> (as-vec (:shadow shape))
                      (map-indexed vector)
                      (remove (comp :hidden second)))
-        shadow  #(lottie-shadow-layer shape cby outline ks ox oy duration %1 %2)
-        inners  (mapcat (fn [[index s]]
-                          [(lottie-matte-layer shape outline ks duration) (shadow index s)])
-                        (filter #(= :inner-shadow (:style (second %))) shown))
+        shadow  #(lottie-shadow-layer ctx shape cby outline ks ox oy duration %1 %2)
+        inners  (lottie-inner-shadow-layers ctx shape)
         drops   (map (fn [[index s]] (shadow index s))
                      (filter #(= :drop-shadow (:style (second %) :drop-shadow)) shown))
         ref     (str "comp_" id)
         by-prop (group-by :property (:keyframes track))
-        blur    (lottie-blur-effect shape by-prop)]
-    (vswap! comps conj {:id ref :nm name
-                        :layers (lottie-numbered (concat inners [(lottie-content-layer ctx shape)] drops))})
+        blur    (lottie-blur-effect shape by-prop)
+        ;; before adding this precomp: the precomps of its shadows add
+        ;; themselves (`vswap!` reads the comps before its arguments)
+        layers  (lottie-numbered (concat inners [(lottie-content-layer ctx shape)] drops))]
+    (vswap! comps conj {:id ref :nm name :layers layers})
     (cond-> {:ddd 0
              :ty 0
              :nm name
@@ -5242,11 +5318,68 @@
 
 (declare lottie-node-layers)
 
+(defn- lottie-holds-inner-shadows?
+  "Whether the group `shape` has an inner shadow to show, which a Lottie
+  export casts inside what it holds (see `lottie-inner-shadow-mattes`), as
+  the SVG renderer does. A board casts it inside its fills, under what it
+  holds (see `board-inner-shadows?`)."
+  [shape]
+  (and (= :group (:type shape))
+       (some #(and (= :inner-shadow (:style %)) (not (:hidden %))) (as-vec (:shadow shape)))))
+
+(defn- lottie-inner-shadow-mattes
+  "The layers of the inner shadows of the group `shape` over what it
+  holds, the precomp `content` (see `lottie-precomp-layer`), the first
+  on top: each a precomp of the colour of the shadow cut by an inverted
+  matte of `content` moved by its offset, which it blurs as soft as on
+  the canvas (see `lottie-gaussian-blur`), under a matte of `content`,
+  which keeps it inside: as the canvas casts it inside the silhouette of
+  what the shape holds. Their precomps go to `comps`. Lottie can not grow
+  a silhouette: they do not spread."
+  [{:keys [comps duration width height] :as ctx} shape content]
+  (let [by-prop (group-by :property (:keyframes (lottie-track ctx (:id shape))))
+        op      (ms->frames duration)
+        layer   (fn [name ref ks]
+                  {:ddd 0 :ty 0 :nm name :refId ref :sr 1 :ks ks :ao 0
+                   :w width :h height :ip 0 :op op :st 0 :bm 0})]
+    (into []
+          (mapcat
+           (fn [[index shadow]]
+             (let [kfs    #(slot-kfs by-prop % index)
+                   name   (str (or (:name shape) "layer") " inner shadow " (inc index))
+                   ref    (str "inner_" (:id shape) "_" index)
+                   offset (lottie-pair-prop (kfs :shadow-offset-x) (kfs :shadow-offset-y)
+                                            (or (:offset-x shadow) 0) (or (:offset-y shadow) 0)
+                                            (fn [x y] [x y 0]))
+                   colour {:ddd 0 :ty 4 :nm (str name " colour") :sr 1 :ks lottie-identity-ks :ao 0 :tt 2
+                           :shapes [(lottie-group "colour"
+                                                  [{:ty "rc" :nm "all" :d 1
+                                                    :s {:a 0 :k [(* 3 width) (* 3 height)]}
+                                                    :p {:a 0 :k [(/ width 2) (/ height 2)]}
+                                                    :r {:a 0 :k 0}}
+                                                   (merge {:ty "fl" :nm "fill" :r 1} (lottie-shadow-paint shadow kfs))])]
+                           :ip 0 :op op :st 0 :bm 0}]
+               (vswap! comps conj {:id ref :nm name
+                                   :layers (lottie-numbered
+                                            [(assoc (layer (str name " moved") content (assoc lottie-identity-ks :p offset))
+                                                    :td 1)
+                                             colour])})
+               [(assoc (layer (str name " inside") content lottie-identity-ks) :td 1)
+                (assoc (layer name ref lottie-identity-ks)
+                       :tt 1
+                       :ef [(lottie-gaussian-blur (kfs :shadow-blur) (or (:blur shadow) 0))])])))
+          (->> (as-vec (:shadow shape))
+               (map-indexed vector)
+               (filter #(and (= :inner-shadow (:style (second %))) (not (:hidden (second %)))))))))
+
 (defn- lottie-precomp-layer
   "A precomp layer of the node `id` (see `layer-nodes`): it moves, turns,
   fades and clips its layers, with the shape's own drawing at the
-  bottom, all drawn as they are, turned (see `lottie-holder-ks`). The
-  precomp itself goes to `comps`."
+  bottom, all drawn as they are, turned (see `lottie-holder-ks`): the
+  inner shadows of a board over its drawing (see
+  `lottie-inner-shadow-layers`), those of a group over all (in a precomp
+  around theirs, see `lottie-inner-shadow-mattes`). The precomps go to
+  `comps`."
   [{:keys [objects layer-ids timeline duration width height ox oy comps] :as ctx}
    {:keys [id inner clip?]}]
   (let [shape   (get objects id)
@@ -5258,8 +5391,13 @@
                                (lottie-draws? objects layer-ids shape)))
                   (lottie-content-layer ctx shape))
         ref     (str "comp_" id)
-        ;; before adding this precomp: the ones inside it add themselves
+        ;; before adding this precomp: the ones inside it add themselves;
+        ;; a board casts its inner shadows over its drawing, under what it
+        ;; holds
         layers  (lottie-numbered (cond-> (lottie-node-layers ctx inner)
+                                   (and (some? content) (not clip?) (board-inner-shadows? shape))
+                                   (into (lottie-inner-shadow-layers ctx shape))
+
                                    (some? content) (conj content)))
         by-prop (group-by :property (:keyframes track))
         effects (when-not clip?
@@ -5270,7 +5408,18 @@
     (cond-> {:ddd 0
              :ty 0
              :nm (or (:name shape) ref)
-             :refId ref
+             :refId (if (and (not clip?) (lottie-holds-inner-shadows? shape))
+                      (let [fx     (str "fx_" id)
+                            ;; before adding this precomp: the ones of its
+                            ;; shadows add themselves
+                            layers (lottie-numbered
+                                    (conj (lottie-inner-shadow-mattes ctx shape ref)
+                                          {:ddd 0 :ty 0 :nm (or (:name shape) ref) :refId ref :sr 1
+                                           :ks lottie-identity-ks :ao 0 :w width :h height
+                                           :ip 0 :op (ms->frames duration) :st 0 :bm 0}))]
+                        (vswap! comps conj {:id fx :nm (str (or (:name shape) ref) " effects") :layers layers})
+                        fx)
+                      ref)
              :sr 1
              :ks (lottie-holder-ks shape track ox oy (position-origin timeline objects id))
              :ao 0
@@ -5472,7 +5621,10 @@
                     (let [track (lottie-track ctx id)
                           layer (cond
                                   (contains? (:units ctx) id) (lottie-units-layer ctx shape)
-                                  (seq inner)                 (lottie-precomp-layer ctx node)
+                                  (or (seq inner)
+                                      (and (or (lottie-holds-inner-shadows? shape) (board-inner-shadows? shape))
+                                           (lottie-vector-layer? (:objects ctx) (:layer-ids ctx) id)))
+                                  (lottie-precomp-layer ctx node)
                                   (and (lottie-vector-layer? (:objects ctx) (:layer-ids ctx) id)
                                        (lottie-shadow-layers? shape track))
                                   (lottie-effects-layer ctx shape)
@@ -5480,7 +5632,7 @@
                       (if-let [stops (get (:follow ctx) id)]
                         [(assoc layer ::follow id) (lottie-follow-null ctx shape stops)]
                         [layer])))))
-        (rseq nodes)))
+        (rseq (vec nodes))))
 
 (defn- lottie-layers
   "The layers of the composition of `timeline`, the top-most first, and
@@ -5518,8 +5670,11 @@
         content  (when (and (some? board)
                             (or (contains? assets board-id)
                                 (lottie-draws? objects layer-ids board)))
-                   (lottie-content-layer ctx board))]
-    {:layers (lottie-numbered (cond-> layers (some? content) (conj content)))
+                   (lottie-content-layer ctx board))
+        ;; its inner shadows over its drawing, under the layers
+        inner    (when (and (some? content) (board-inner-shadows? board))
+                   (lottie-inner-shadow-layers ctx board))]
+    {:layers (lottie-numbered (cond-> (into layers inner) (some? content) (conj content)))
      :comps  @(:comps ctx)}))
 
 (defn timeline->lottie
@@ -5571,7 +5726,7 @@
                       (set (lottie-export-layer-ids objects timeline))
                       (-> (set (keys (:tracks timeline)))
                           (disj board-id)
-                          (into (mapcat #(dm/get-in objects [% :shapes])) holders)))
+                          (into (mapcat #(dm/get-in objects [% :shapes])) (export-holders objects timeline))))
          bsr        (dm/get-in objects [board-id :selrect])
          follow     (when (and (some? propagate) (seq holders))
                       (into {} (board-follow timeline objects holders layer-ids propagate
@@ -5745,11 +5900,10 @@
 (defn svg-export-layer-ids
   "The layers of an SVG of vectors of `timeline` (with its keyframes, see
   `resolve-animations`): its export layers (see `export-layer-ids`) and
-  the children of the boards whose size it plays on their elements (see
-  `svg-sized?`), which follow them."
+  the layers in the boards whose size it plays on their elements (see
+  `svg-sized?`) or that cast inner shadows (see `export-holders`)."
   [objects timeline]
-  (export-layer-ids objects (:board-id timeline) (:tracks timeline)
-                    (svg-holder-ids objects (svg-sized-ids objects timeline))))
+  (export-layer-ids objects (:board-id timeline) (:tracks timeline) (export-holders objects timeline)))
 
 (defn- svg-clip-rest-id
   [id]
@@ -6233,8 +6387,9 @@
   `blur-sigma`). With `timeline` (cut to its duration), SMIL plays their
   keyframes on it; without, they rest. Its region, on the page, holds
   them as they play, and `area` (a rect on the page), when given: what
-  the layers in it may cover."
-  [id shape timeline {:keys [shadows? blur? area]}]
+  the layers in it may cover. Of its shadows, those of `styles` (both
+  kinds by default)."
+  [id shape timeline {:keys [shadows? blur? area styles] :or {styles #{:drop-shadow :inner-shadow}}}]
   (let [sid      (:id shape)
         track    (dm/get-in timeline [:tracks sid])
         duration (max 1 (:duration timeline 1))
@@ -6302,7 +6457,8 @@
                       (map-indexed vector)
                       (remove (comp :hidden second))
                       reverse
-                      (map-indexed (fn [k [index shadow]] [k index (:style shadow :drop-shadow)])))
+                      (map-indexed (fn [k [index shadow]] [k index (:style shadow :drop-shadow)]))
+                      (filter #(contains? styles (nth % 2))))
         [prev drops] (chain "BackgroundImageFix" (filter #(= :drop-shadow (nth % 2)) shown) drop)
         [_ inners]   (chain "shape" (filter #(= :inner-shadow (nth % 2)) shown) inner)
         times    (into #{0 duration} (map :time) (concat kfs blur-kfs))
@@ -6411,6 +6567,16 @@
   [id]
   (str "penpot-smil-" id))
 
+(defn- svg-inner-id
+  "The id of the filter of the inner shadows of the board `id` (see
+  `svg-smil`); `rest?`, of the one at rest."
+  [id rest?]
+  (str (if rest? "penpot-inner-rest-" "penpot-inner-") id))
+
+(defn- svg-smil-inner-class
+  [id]
+  (str "penpot-smil-inner-" id))
+
 (defn- svg-smil-anim-class
   [id]
   (str "penpot-smil-anim-" id))
@@ -6436,19 +6602,32 @@
            vectors? (or (some? (dm/get-in images [sid :markup]))
                         (some #(some? (:markup (get images [sid %]))) (unit-image-indexes images sid)))
            shape    (when vectors? (get objects sid))
-           shadows? (and (some? shape) (svg-filter-shadows? shape track))
+           ;; a board casts its inner shadows inside its fills, under what
+           ;; it holds: on a filter of its vectors (see `svg-smil-vectors`)
+           board?   (and (some? shape) (board-inner-shadows? shape))
+           drops    (if board? #{:drop-shadow} #{:drop-shadow :inner-shadow})
+           shadows? (and (some? shape)
+                         (svg-filter-shadows? shape track)
+                         (some #(and (not (:hidden %)) (contains? drops (:style % :drop-shadow)))
+                               (as-vec (:shadow shape))))
            blur?    (and (some? shape) (svg-filter-blur? shape track))
            outline  (when (and (some? shape) (svg-smil-corners? shape track))
                       (svg-corner-path shape timeline))
            filters  (when (or shadows? blur?)
-                      (let [flags {:shadows? shadows? :blur? blur? :area (when (contains? wide sid) area)}]
+                      (let [flags {:shadows? shadows? :blur? blur? :styles drops
+                                   :area (when (contains? wide sid) area)}]
                         (str (svg-effects-filter (svg-effects-id sid false) shape timeline flags)
-                             (svg-effects-filter (svg-effects-id sid true) shape nil flags))))]
+                             (svg-effects-filter (svg-effects-id sid true) shape nil flags))))
+           inner    (when board?
+                      (let [flags {:shadows? true :styles #{:inner-shadow}}]
+                        (str (svg-effects-filter (svg-inner-id sid false) shape timeline flags)
+                             (svg-effects-filter (svg-inner-id sid true) shape nil flags))))]
        (cond-> result
-         (or (some? outline) (some? filters))
+         (or (some? outline) (some? filters) (some? inner))
          (assoc sid (cond-> {}
                       (some? outline) (assoc :outline outline)
-                      (some? filters) (assoc :filters filters))))))
+                      (some? filters) (assoc :filters filters)
+                      (some? inner)   (assoc :inner inner))))))
    {}
    (into (set (keys (:tracks timeline))) (filter uuid?) (keys images))))
 
@@ -6465,6 +6644,11 @@
                              (str "  ." (svg-smil-class id) " { filter: url(#"
                                   (svg-effects-id id true) "); }"))
                            ids)
+                      (keep (fn [[id {:keys [inner]}]]
+                              (when (some? inner)
+                                (str "  ." (svg-smil-inner-class id) " { filter: url(#"
+                                     (svg-inner-id id true) "); }")))
+                            smil)
                       (mapcat (fn [[id {:keys [outline]}]]
                                 (when (some? outline)
                                   [(str "  ." (svg-smil-anim-class id) " { display: none; }")
@@ -6499,12 +6683,20 @@
   reduced motion, which SMIL does not heed, a copy at rest (see
   `svg-rest-copy`, `svg-smil-css`)."
   [{:keys [smil ox oy]} id markup]
-  (if-let [outline (dm/get-in smil [id :outline])]
-    (str "<g class=\"" (svg-escape (svg-smil-anim-class id)) "\">"
-         (svg-vectors (svg-smil-outline markup outline) ox oy) "</g>"
-         "<g class=\"" (svg-escape (svg-smil-rest-class id)) "\" display=\"none\">"
-         (svg-vectors (svg-rest-copy markup) ox oy) "</g>")
-    (svg-vectors markup ox oy)))
+  (let [{:keys [outline inner]} (get smil id)
+        ;; the inner shadows of a board on a filter around its vectors
+        inside (fn [markup defs?]
+                 (if (some? inner)
+                   (str (when defs? (str "<defs>" inner "</defs>"))
+                        "<g class=\"" (svg-escape (svg-smil-inner-class id))
+                        "\" filter=\"url(#" (svg-escape (svg-inner-id id false)) ")\">" markup "</g>")
+                   markup))]
+    (if (some? outline)
+      (str "<g class=\"" (svg-escape (svg-smil-anim-class id)) "\">"
+           (svg-vectors (inside (svg-smil-outline markup outline) true) ox oy) "</g>"
+           "<g class=\"" (svg-escape (svg-smil-rest-class id)) "\" display=\"none\">"
+           (svg-vectors (inside (svg-rest-copy markup) false) ox oy) "</g>")
+      (svg-vectors (inside markup true) ox oy))))
 
 (defn- svg-effects-around
   "`svg`, in the SVG, whose origin is `ox`/`oy`, on the filter of the
@@ -6740,7 +6932,7 @@
                                                              (fmt (+ (or y 0) (/ (or height 0) 2))) "px")))
                                             :adjust (fn [text units] (turned-moves units (:rotation text)))})})
          played   (-> timeline expand-paths cut-timeline)
-         ids      (export-layer-ids objects board-id (:tracks timeline) holders)
+         ids      (export-layer-ids objects board-id (:tracks timeline) (export-holders objects timeline))
          nodes    (layer-nodes objects (set ids) board-id)
          ;; the layers holding layers, which may go anywhere in the view
          wide     (into #{board-id}

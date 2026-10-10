@@ -1901,15 +1901,14 @@
     (t/is (close? 4 (value "Distance")))
     (t/is (close? (* 4 (cta/blur-sigma 6)) (value "Softness")) "as soft as on the canvas, in lottie-web")
     (t/is (close? 127.5 (value "Opacity")))
-    (t/testing "an inner shadow on a group draws no vectors"
+    (t/testing "an inner shadow draws vectors, on a group too"
       (let [inner   (assoc shadow :style :inner-shadow)
             group   (cts/setup-shape {:type :group :x 0 :y 0 :width 40 :height 40 :shadow [inner]})
             objects (-> (in-board board [group])
                         (update (:id group) assoc :shapes [(:id shape)])
-                        (assoc (:id shape) (assoc shape :parent-id (:id group) :frame-id (:id board))))]
-        (t/is (cta/lottie-vector-layer? (in-board board [(assoc shape :shadow [inner])]) #{(:id shape)} (:id shape))
-              "but on a rectangle")
-        (t/is (not (cta/lottie-vector-layer? objects #{(:id group)} (:id group))))))))
+                        (assoc (:id shape) (assoc shape :shadow [] :parent-id (:id group) :frame-id (:id board))))]
+        (t/is (cta/lottie-vector-layer? (in-board board [(assoc shape :shadow [inner])]) #{(:id shape)} (:id shape)))
+        (t/is (cta/lottie-vector-layer? objects #{(:id group)} (:id group)))))))
 
 (t/deftest lottie-plays-corners-not-alike-as-a-path
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
@@ -1955,7 +1954,102 @@
       (t/is (nil? (:ef content)) "no effects of its own")
       (t/is (close? 6 (:k (:w (item dropped "st")))) "twice its spread")
       (t/is (close-all? [0 0 0 0.5] (mapv #(* % 1.0) (conj (vec (take 3 (get-in (item dropped "fl") [:c :k]))) 0.5))))
-      (t/is (close? 50 (get-in (item dropped "fl") [:o :k]))))))
+      (t/is (close? 100 (get-in (item dropped "fl") [:o :k])) "opaque, where its spread overlaps it")
+      (t/is (close? 50 (get-in dropped [:ks :o :k])) "the layer of its opacity"))))
+
+(t/deftest a-lottie-drop-shadow-spreads-in
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        drop   {:id (uuid/next) :style :drop-shadow :offset-x 0 :offset-y 4 :blur 6 :spread -4
+                :hidden false :color {:color "#000000" :opacity 0.5}}
+        shape  (cts/setup-shape {:type :rect :x 100 :y 100 :width 40 :height 40 :shadow [drop]
+                                 :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        L      (lottie-of board shape [{:time 0 :property :x :value 100}
+                                       {:time 1000 :property :x :value 140}])
+        comp   #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
+        layers (:layers (comp (:refId (first (:layers L)))))
+        shadow (peek layers)
+        [cut silhouette] (:layers (comp (:refId shadow)))
+        band   (d/seek #(= "st" (:ty %)) (tree-seq :it :it (get-in cut [:shapes 0])))]
+    (t/is (cta/lottie-shadow-layers? shape nil) "a spread in")
+    (t/is (= 0 (:ty shadow)) "a precomp of its shadow")
+    (t/is (= [400 300] [(:w shadow) (:h shadow)]) "as large as the board")
+    (t/is (= "Gaussian Blur" (get-in shadow [:ef 0 :nm])) "which it blurs once cut")
+    (t/is (= [1 2] [(:td cut) (:tt silhouette)]) "its silhouette cut by an inverted matte")
+    (t/is (close? 8 (get-in band [:w :k])) "of the band its spread takes off")
+    (t/is (nil? (:ef silhouette)))))
+
+(t/deftest lottie-casts-the-inner-shadows-of-a-group-inside-what-it-holds
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        inner   {:id (uuid/next) :style :inner-shadow :offset-x 3 :offset-y 0 :blur 4 :spread 0
+                 :hidden false :color {:color "#ff0000" :opacity 1}}
+        group   (cts/setup-shape {:type :group :x 100 :y 100 :width 40 :height 40 :shadow [inner]})
+        rect    (cts/setup-shape {:type :rect :x 100 :y 100 :width 40 :height 40
+                                  :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        [bid gid rid] (map :id [board group rect])
+        objects {bid (assoc board :shapes [gid])
+                 gid (assoc group :parent-id bid :frame-id bid :shapes [rid])
+                 rid (assoc rect :parent-id gid :frame-id bid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe gid {:time 0 :property :x :value 100})
+                    (cta/add-keyframe gid {:time 1000 :property :x :value 140}))
+        L       (cta/timeline->lottie tl objects)
+        comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
+        layer   (first (:layers L))
+        [inside shadow content] (:layers (comp (:refId layer)))
+        [moved colour] (:layers (comp (:refId shadow)))]
+    (t/is (= (str "fx_" gid) (:refId layer)) "a precomp of its effects")
+    (t/is (= [(str "comp_" gid) 1] [(:refId inside) (:td inside)]) "a matte of what it holds")
+    (t/is (= 1 (:tt shadow)) "keeps its shadow inside")
+    (t/is (= "Gaussian Blur" (get-in shadow [:ef 0 :nm])))
+    (t/is (= (str "comp_" gid) (:refId content)) "over what it holds")
+    (t/is (= [(str "comp_" gid) 1] [(:refId moved) (:td moved)]))
+    (t/is (close-all? [3 0 0] (get-in moved [:ks :p :k])) "moved by its offset")
+    (t/is (= 2 (:tt colour)) "the colour of the shadow where it is not")))
+
+(defn- inner-shadow-card
+  "A board holding a card board with an inner shadow and a fill, which
+  moves, holding a rectangle that stays."
+  []
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        card  (cts/setup-shape {:type :frame :x 100 :y 100 :width 160 :height 100
+                                :fills [{:fill-color "#34c759" :fill-opacity 1}]
+                                :shadow [{:id (uuid/next) :style :inner-shadow :offset-x 0 :offset-y 8 :blur 10
+                                          :spread 0 :hidden false :color {:color "#003300" :opacity 0.9}}]})
+        kid   (cts/setup-shape {:type :rect :x 110 :y 110 :width 40 :height 40
+                                :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        [bid cid kid-id] (map :id [board card kid])]
+    {:bid bid :cid cid :kid kid-id
+     :objects {bid (assoc board :shapes [cid])
+               cid (assoc card :parent-id bid :frame-id bid :shapes [kid-id])
+               kid-id (assoc kid :parent-id cid :frame-id cid)}
+     :tl (-> (cta/make-timeline {:board-id bid :duration 1000})
+             (cta/add-keyframe cid {:time 0 :property :x :value 100})
+             (cta/add-keyframe cid {:time 1000 :property :x :value 140}))}))
+
+(t/deftest a-board-casts-its-inner-shadow-under-what-it-holds
+  ;; As the canvas does: inside its fills, under the layers in it.
+  (let [{:keys [bid cid kid objects tl]} (inner-shadow-card)]
+    (t/is (= [cid kid] (cta/lottie-export-layer-ids objects (cta/resolve-animations tl objects)))
+          "what it holds a layer, though it stays")
+    (t/is (= [cid kid] (cta/svg-export-layer-ids objects (cta/resolve-animations tl objects))))
+    (t/testing "Lottie"
+      (let [L      (cta/timeline->lottie tl objects)
+            layer  (first (:layers L))
+            comp   (some #(when (= (:refId layer) (:id %)) %) (:assets L))]
+        (t/is (= (str "comp_" cid) (:refId layer)))
+        (t/is (= ["Rectangle" 1 1] (mapv #(or (:td %) (:tt %) (:nm %)) (take 3 (:layers comp))))
+              "what it holds, then the matte of its outline and its shadow")
+        (t/is (= 4 (count (:layers comp))) "over its drawing")))
+    (t/testing "SVG"
+      (let [svg (cta/timeline->svg tl objects {bid {:markup "<rect class=\"board\"></rect>"}
+                                               cid {:markup "<rect class=\"card\"></rect>"}
+                                               kid {:markup "<rect class=\"kid\"></rect>"}})]
+        (t/is (str/includes? svg (str "<g class=\"penpot-smil-inner-" cid "\" filter=\"url(#penpot-inner-" cid
+                                      ")\"><rect class=\"card\"></rect></g>"))
+              "its shadow on its vectors")
+        (t/is (re-find (re-pattern (str "penpot-inner-" cid "\\)\">.*</g></g>.*class=\"kid\"")) svg)
+              "under what it holds")
+        (t/is (not (str/includes? svg (str "penpot-effects-" cid))) "none around them")))))
 
 (t/deftest a-lottie-drop-shadow-moves-straight
   ;; Its effect has a direction and a distance, which turn around the

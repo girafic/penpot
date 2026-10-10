@@ -604,8 +604,8 @@
   - `:lottie/blur`, a blur, which players draw at their own strength (an
     SVG blurs as the canvas, see `cta/svg-filter-blur?`);
   - `:lottie/shadow`, shadows, blurred by Lottie effects, which players
-    soften at their own strength (as the canvas in lottie-web), a spread
-    inward left out (see `cta/lottie-shadow-layers?`);
+    soften at their own strength (as the canvas in lottie-web), those of
+    groups and boards without spread (see `cta/lottie-shadow-layers?`);
   - `:lottie/stroke`, a stroke Lottie draws otherwise (see
     `off-center-stroke?`);
   - `:background-blur` and `:blend-mode`, which no markup format plays
