@@ -1917,8 +1917,8 @@ impl Shape {
         }
     }
 
-    /// Shadows of the given style that the masked-group layer filter must
-    /// carry, bottom-most first, already converted to device space.
+    /// Shadows of the given style that a group's layer filter must carry,
+    /// bottom-most first, already converted to device space.
     ///
     /// Containers use the stricter `is_perceptible_at_scale_for` floor: a
     /// shadow too small to see is not worth a filter pass.
@@ -2003,6 +2003,41 @@ impl Shape {
         }
 
         filter
+    }
+
+    /// A plain group with a visible inner shadow. The SVG renderer casts it
+    /// over everything the group holds, so the renderer draws the children
+    /// into a layer filtered by [`Self::group_inner_shadow_layer_filter`].
+    ///
+    /// Keyed on the shape alone: the layer is opened and restored on
+    /// different walker passes, between which fast mode or zoom can change.
+    pub fn has_group_inner_shadow_layer(&self) -> bool {
+        matches!(self.shape_type, Type::Group(Group { masked: false }))
+            && self.inner_shadows_visible().next().is_some()
+    }
+
+    /// Image filter for the layer that holds a plain group's children: the
+    /// source graphic with the group's inner shadows over it, as in the
+    /// masked-group filter, already in device space.
+    pub fn group_inner_shadow_layer_filter(
+        &self,
+        scale: f32,
+        skip_shadows: bool,
+    ) -> Option<skia::ImageFilter> {
+        if skip_shadows || !self.has_group_inner_shadow_layer() {
+            return None;
+        }
+
+        let mut layers: Vec<Option<skia::ImageFilter>> = vec![None];
+        for shadow in self.masked_group_layer_shadows(scale, ShadowStyle::Inner) {
+            layers.push(shadow.get_inner_shadow_filter());
+        }
+
+        if layers.len() > 1 {
+            skia::image_filters::merge(layers, None)
+        } else {
+            None
+        }
     }
 
     /// Checks if this shape has visual effects that might extend its bounds beyond selrect
@@ -2447,6 +2482,57 @@ mod tests {
 
         assert!(shape.masked_group_layer_filter(1.0, false, false).is_some());
         assert!(shape.masked_group_layer_filter(0.1, false, false).is_none());
+    }
+
+    #[test]
+    fn a_plain_group_layers_its_inner_shadows() {
+        let mut shape = masked_group_with(vec![inner_shadow(4.0, (8.0, 8.0))], None);
+        shape.set_shape_type(Type::Group(Group { masked: false }));
+
+        assert!(shape.has_group_inner_shadow_layer());
+        assert!(shape.group_inner_shadow_layer_filter(1.0, false).is_some());
+        // Fast mode drops the filter, but the layer stays for the exit pass.
+        assert!(shape.group_inner_shadow_layer_filter(1.0, true).is_none());
+        assert!(shape.has_group_inner_shadow_layer());
+
+        // An inner shadow stays inside the content: the source graphic
+        // bounds the result.
+        let bounds = shape
+            .group_inner_shadow_layer_filter(1.0, false)
+            .expect("inner shadow filter")
+            .compute_fast_bounds(unit_rect());
+        assert!(bounds.left <= unit_rect().left);
+        assert!(bounds.right >= unit_rect().right);
+    }
+
+    #[test]
+    fn only_a_plain_group_with_a_visible_inner_shadow_gets_the_layer() {
+        let mut drops = masked_group_with(vec![drop_shadow(4.0, 0.0, (8.0, 8.0))], None);
+        drops.set_shape_type(Type::Group(Group { masked: false }));
+        assert!(!drops.has_group_inner_shadow_layer());
+
+        let mut hidden = masked_group_with(
+            vec![Shadow::new(
+                skia::Color::BLACK,
+                4.0,
+                0.0,
+                (8.0, 8.0),
+                ShadowStyle::Inner,
+                true,
+            )],
+            None,
+        );
+        hidden.set_shape_type(Type::Group(Group { masked: false }));
+        assert!(!hidden.has_group_inner_shadow_layer());
+
+        // A masked group carries its inner shadows in its own layer filter.
+        let masked = masked_group_with(vec![inner_shadow(4.0, (8.0, 8.0))], None);
+        assert!(!masked.has_group_inner_shadow_layer());
+        assert!(masked.group_inner_shadow_layer_filter(1.0, false).is_none());
+
+        let mut rect = masked_group_with(vec![inner_shadow(4.0, (8.0, 8.0))], None);
+        rect.set_shape_type(Type::Rect(Rect::default()));
+        assert!(!rect.has_group_inner_shadow_layer());
     }
 
     #[test]

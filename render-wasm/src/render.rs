@@ -3164,6 +3164,12 @@ impl RenderState {
             }
         } else {
             // !visited_mask
+            // Pairs with the layer the walker opens for a plain group's inner
+            // shadows, inside the group's own opacity layer closed below.
+            if element.has_group_inner_shadow_layer() {
+                self.surfaces.canvas(target_surface).restore();
+            }
+
             if let Type::Group(group) = element.shape_type {
                 // When we're dealing with masked groups we need to
                 // do a separate extra step to draw the mask (the last
@@ -4301,6 +4307,25 @@ impl RenderState {
                     .clear(skia::Color::TRANSPARENT);
             } else if visited_children {
                 self.draw_shape_surface_stack_into(Some(element), target_surface);
+            }
+
+            // A plain group casts its inner shadows over everything it holds,
+            // as the SVG renderer's group filter does, so its children are drawn
+            // into a layer that adds them. Opened after the group's own drop
+            // shadows to keep those out of it; `render_shape_exit` restores it.
+            if !can_flatten && element.has_group_inner_shadow_layer() {
+                let (skip_shadows, _) = self.masked_group_layer_skips();
+                let filter = element.group_inner_shadow_layer_filter(scale, skip_shadows);
+                let canvas = self.surfaces.canvas(target_surface);
+                // Unconditional, as for masked groups: fast mode or zoom can
+                // change before the exit pass.
+                if let Some(filter) = filter {
+                    let mut paint = skia::Paint::default();
+                    paint.set_image_filter(filter);
+                    canvas.save_layer(&skia::canvas::SaveLayerRec::default().paint(&paint));
+                } else {
+                    canvas.save();
+                }
             }
 
             // Skip nested state updates for flattened containers
