@@ -151,6 +151,35 @@
     (t/is (mth/close? 200.0 (double (-> shape' :selrect :width)) 0.01))
     (t/is (mth/close? 80.0 (double (-> shape' :selrect :height)) 0.01))))
 
+(t/deftest a-turned-shape-resizes-along-its-sides
+  ;; As its width changes in the design tab: no skew.
+  (let [rect   (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 40})
+        shape  (gsh/transform-shape rect (ctm/rotation (ctm/empty) (gpt/point 50 20) 30))
+        sid    (:id shape)
+        tl     (-> (mk-timeline)
+                   (cta/add-keyframe sid {:time 0 :property :width :value 100})
+                   (cta/add-keyframe sid {:time 1000 :property :width :value 200}))
+        mods   (get-in (cta/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
+        shape' (gsh/transform-shape shape mods)]
+    (t/is (mth/close? 30.0 (double (:rotation shape)) 0.01))
+    (t/is (mth/close? 200.0 (double (-> shape' :selrect :width)) 0.01))
+    (t/is (mth/close? 40.0 (double (-> shape' :selrect :height)) 0.01))
+    (t/is (mth/close? 30.0 (double (:rotation shape')) 0.01) "still turned as it was")
+    (t/is (mth/close? 50.0 (double (:x (gsh/shape->center shape'))) 0.01) "around its middle")))
+
+(t/deftest an-svg-stretches-a-turned-layer-along-its-sides
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        rect    (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 40})
+                    (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 150 120) 30)))
+        [bid sid] (map :id [board rect])
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe sid {:time 0 :property :width :value 100})
+                    (cta/add-keyframe sid {:time 1000 :property :width :value 200}))
+        svg     (cta/timeline->svg tl {bid (assoc board :shapes [sid])
+                                       sid (assoc rect :parent-id bid :frame-id bid)}
+                                   {sid {:markup "<rect></rect>"}})]
+    (t/is (str/includes? svg "100% { transform: translate(0px, 0px) rotate(0deg) rotate(30deg) scale(2, 1) rotate(-30deg); }"))))
+
 (t/deftest opacity-is-a-change-property-modifier
   ;; Opacity must ride the modifier pipeline (so it works in the WASM
   ;; renderer via set-shape-opacity, and in SVG/export via transform-shape).

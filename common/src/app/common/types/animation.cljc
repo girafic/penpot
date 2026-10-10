@@ -2535,6 +2535,7 @@
         sy       (axis-scale base-h values :height :scale-y)
         target-r (get values :rotation base-r)
         pivot    (or pivot (origin-point shape default-transform-origin))
+        turned?  (and (some? (:transform shape)) (not (gmt/unit? (:transform shape))))
         ;; a scale scales what the shape holds, its strokes, shadows and
         ;; text too, as the scale tool does and the exports play it; a
         ;; width or height resizes it, its layers kept by their
@@ -2544,9 +2545,17 @@
                    (if (mth/close? x y) x (mth/sqrt (* x y))))]
     ;; The shape scales and turns around its pivot where it is, then
     ;; moves, like the CSS and Lottie exports: moving first would make it
-    ;; turn around the place it left.
+    ;; turn around the place it left. A turned one scales along its own
+    ;; sides, as its width and height change in the design tab.
     (cond-> (ctm/empty)
-      (has? values :scale-x :scale-y :width :height)
+      (and (has? values :scale-x :scale-y :width :height) turned?)
+      (ctm/resize (gpt/point sx sy)
+                  (gmt/transform-point-center pivot (gpt/point (+ base-x (/ base-w 2)) (+ base-y (/ base-h 2)))
+                                              (:transform shape))
+                  (:transform shape)
+                  (:transform-inverse shape))
+
+      (and (has? values :scale-x :scale-y :width :height) (not turned?))
       (ctm/resize (gpt/point sx sy) pivot)
 
       (and (has? values :scale-x :scale-y) (not (mth/close? scale 1)))
@@ -3709,14 +3718,20 @@
      (css-declarations shape values origin rest-transform))))
 
 (defn- svg-group-declarations
+  "The declarations of the group of a layer of an SVG: a turned shape
+  scales along its own sides, as the canvas scales it."
   [shape values origin]
   (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity blur] :as frame}
-        (frame-values shape values origin)]
+        (frame-values shape values origin)
+        turn (or (:rotation shape) 0)]
     (cond-> []
       (contains? frame :translate-x)
       (conj (str "transform: translate(" (fmt translate-x) "px, " (fmt translate-y) "px) "
                  "rotate(" (fmt rotate) "deg) "
-                 "scale(" (fmt scale-x) ", " (fmt scale-y) ");"))
+                 (if (mth/almost-zero? (mod turn 360))
+                   (str "scale(" (fmt scale-x) ", " (fmt scale-y) ");")
+                   (str "rotate(" (fmt turn) "deg) scale(" (fmt scale-x) ", " (fmt scale-y) ") "
+                        "rotate(" (fmt (- turn)) "deg);"))))
 
       (contains? frame :opacity)
       (conj (str "opacity: " (fmt opacity) ";"))
