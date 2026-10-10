@@ -603,7 +603,9 @@
     play as a stretch (see `cta/svg-sized?`, `cta/lottie-sized?`);
   - `:lottie/blur`, a blur, which players draw at their own strength (an
     SVG blurs as the canvas, see `cta/svg-filter-blur?`);
-  - `:lottie/shadow`, drop shadows (Lottie effects, without spread);
+  - `:lottie/shadow`, shadows, blurred by Lottie effects, which players
+    soften at their own strength (as the canvas in lottie-web), a spread
+    inward left out (see `cta/lottie-shadow-layers?`);
   - `:lottie/stroke`, a stroke Lottie draws otherwise (see
     `off-center-stroke?`);
   - `:background-blur` and `:blend-mode`, which no markup format plays
@@ -676,7 +678,7 @@
            [:svg/size #{:svg} stretch?]
            [:lottie/size lottie-formats stretch?]
            [:lottie/shadow lottie-formats
-            (some?* (fn [shape] (some #(= :drop-shadow (:style %)) (shown (:shadow shape)))))]
+            (some?* (fn [shape] (seq (shown (:shadow shape)))))]
            [:lottie/blur lottie-formats
             (or (contains? animated :blur)
                 (some?* (fn [shape] (some #(pos? (:value % 0)) (shown (:blur shape))))))]

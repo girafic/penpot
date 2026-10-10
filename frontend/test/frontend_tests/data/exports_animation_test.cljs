@@ -1532,8 +1532,8 @@
 (t/deftest lottie-notes-its-effects
   (t/is (= [:lottie/shadow] (issues-of :lottie :f #(assoc % :shadow [shadow]))))
   (t/is (= [] (issues-of :lottie :f #(assoc % :shadow [(assoc shadow :hidden true)]))) "a hidden one draws nothing")
-  (t/is (= [:lottie/images] (issues-of :dotlottie :f #(assoc % :shadow [(assoc shadow :style :inner-shadow)])))
-        "an inner shadow makes the layer an image")
+  (t/is (= [:lottie/shadow] (issues-of :dotlottie :f #(assoc % :shadow [(assoc shadow :style :inner-shadow)])))
+        "an inner shadow casts as layers, no image")
   (t/is (= [:lottie/blur] (issues-of :lottie :f #(assoc % :blur {:id (uuid/next) :type :layer-blur :value 4 :hidden false}))))
   (t/is (= [:lottie/stroke]
            (issues-of :lottie :f #(assoc % :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2

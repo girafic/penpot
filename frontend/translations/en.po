@@ -9059,7 +9059,7 @@ msgid "workspace.options.export.issue.lottie-images"
 msgstr "Effects and masks · Exported as images"
 
 msgid "workspace.options.export.issue.lottie-images.text"
-msgstr "Layers with inner shadows, masks, image fills or gradient strokes are images in %s: their fills, strokes, shadows and blur don't animate, and they blur when scaled up."
+msgstr "Groups and boards with inner shadows, and layers with masks, image fills or gradient strokes are images in %s: their fills, strokes, shadows and blur don't animate, and they blur when scaled up."
 
 msgid "workspace.options.export.issue.svg-appearance"
 msgstr "Strokes of texts · Left out of %s"
@@ -9080,10 +9080,10 @@ msgid "workspace.options.export.issue.lottie-size.text"
 msgstr "Width and height play as a scale of the layer in %s, which stretches its strokes, corners and text. Rectangles, ellipses and boards that are not rotated, in plain colors and with equal corners change their size instead, the layers in a board moving as their constraints say."
 
 msgid "workspace.options.export.issue.lottie-shadow"
-msgstr "Drop shadow · May change in %s"
+msgstr "Shadows · May change in %s"
 
 msgid "workspace.options.export.issue.lottie-shadow.text"
-msgstr "Drop shadows play as %s effects without spread, which each player draws its own way. A moving shadow swings around the layer."
+msgstr "Shadows are blurred by %s effects, which each player softens at its own strength (lottie-web as the canvas). A shadow that spreads inward keeps the size of its layer."
 
 msgid "workspace.options.export.issue.lottie-blur"
 msgstr "Blur · May change in %s"

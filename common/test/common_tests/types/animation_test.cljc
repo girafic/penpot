@@ -1899,12 +1899,80 @@
     (t/is (= 25 (:ty ef)))
     (t/is (close? 180 (value "Direction")) "down")
     (t/is (close? 4 (value "Distance")))
-    (t/is (close? 12 (value "Softness")))
+    (t/is (close? (* 4 (cta/blur-sigma 6)) (value "Softness")) "as soft as on the canvas, in lottie-web")
     (t/is (close? 127.5 (value "Opacity")))
-    (t/testing "an inner shadow, or a text inside, draws no vectors"
+    (t/testing "an inner shadow on a group draws no vectors"
       (let [inner   (assoc shadow :style :inner-shadow)
-            objects (in-board board [(assoc shape :shadow [inner])])]
-        (t/is (not (cta/lottie-vector-layer? objects #{(:id shape)} (:id shape))))))))
+            group   (cts/setup-shape {:type :group :x 0 :y 0 :width 40 :height 40 :shadow [inner]})
+            objects (-> (in-board board [group])
+                        (update (:id group) assoc :shapes [(:id shape)])
+                        (assoc (:id shape) (assoc shape :parent-id (:id group) :frame-id (:id board))))]
+        (t/is (cta/lottie-vector-layer? (in-board board [(assoc shape :shadow [inner])]) #{(:id shape)} (:id shape))
+              "but on a rectangle")
+        (t/is (not (cta/lottie-vector-layer? objects #{(:id group)} (:id group))))))))
+
+(t/deftest lottie-plays-corners-not-alike-as-a-path
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape (cts/setup-shape {:type :rect :x 100 :y 100 :width 80 :height 40 :r1 0 :r2 0 :r3 0 :r4 0
+                                :fills [{:fill-color "#00ff00" :fill-opacity 1}]})
+        L     (lottie-of board shape [{:time 0 :property :r1 :value 0 :easing :ease-in-out}
+                                      {:time 1000 :property :r1 :value 20}])
+        items (get-in L [:layers 0 :shapes 0 :it])
+        sh    (lottie-item items "sh")]
+    (t/is (nil? (lottie-item items "rc")) "no rectangle of one radius")
+    (t/is (= 1 (get-in sh [:ks :a])))
+    (t/is (close-all? [100 100] (get-in sh [:ks :k 0 :s 0 :v 0])) "square at first")
+    (t/is (close-all? [120 100] (get-in sh [:ks :k 1 :s 0 :v 0])) "its top left corner round at last")
+    (t/is (close-all? [180 100] (get-in sh [:ks :k 1 :s 0 :v 1])) "but the top right one")
+    (t/is (close? 0.42 (get-in sh [:ks :k 0 :o :x 0])) "as it eases")))
+
+(t/deftest lottie-casts-inner-and-spread-shadows-as-layers
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        drop   {:id (uuid/next) :style :drop-shadow :offset-x 0 :offset-y 4 :blur 6 :spread 3
+                :hidden false :color {:color "#000000" :opacity 0.5}}
+        inner  {:id (uuid/next) :style :inner-shadow :offset-x 2 :offset-y 0 :blur 4 :spread 0
+                :hidden false :color {:color "#ff0000" :opacity 1}}
+        shape  (cts/setup-shape {:type :rect :x 100 :y 100 :width 40 :height 40 :shadow [drop inner]
+                                 :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        L      (lottie-of board shape [{:time 0 :property :x :value 100}
+                                       {:time 1000 :property :x :value 140}])
+        layer  (first (:layers L))
+        comp   (some #(when (= (:refId layer) (:id %)) %) (:assets L))
+        [matte cast content dropped] (:layers comp)
+        group  #(get-in % [:shapes 0])
+        item   (fn [layer ty] (d/seek #(= ty (:ty %)) (tree-seq :it :it (group layer))))]
+    (t/is (cta/lottie-shadow-layers? shape nil))
+    (t/is (= 0 (:ty layer)) "a precomp that moves it")
+    (t/is (= 1 (get-in L [:layers 0 :ks :p :x :a])))
+    (t/is (= [4 4 4 4] (mapv :ty (:layers comp))))
+    (t/testing "its inner shadow, over it, kept inside by a matte of its outline"
+      (t/is (= 1 (:td matte)))
+      (t/is (= 1 (:tt cast)))
+      (t/is (= 2 (:r (item cast "fl"))) "what is outside its outline")
+      (t/is (close-all? [2 0] (get-in (group cast) [:it (dec (count (:it (group cast)))) :p :k])) "moved by its offset")
+      (t/is (close? (cta/lottie-blurriness 4) (get-in cast [:ef 0 :ef 0 :v :k])) "blurred as on the canvas"))
+    (t/testing "its drawing, then its drop shadow under it, grown by its spread"
+      (t/is (nil? (:ef content)) "no effects of its own")
+      (t/is (close? 6 (:k (:w (item dropped "st")))) "twice its spread")
+      (t/is (close-all? [0 0 0 0.5] (mapv #(* % 1.0) (conj (vec (take 3 (get-in (item dropped "fl") [:c :k]))) 0.5))))
+      (t/is (close? 50 (get-in (item dropped "fl") [:o :k]))))))
+
+(t/deftest a-lottie-drop-shadow-moves-straight
+  ;; Its effect has a direction and a distance, which turn around the
+  ;; layer as they tween.
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shadow {:id (uuid/next) :style :drop-shadow :offset-x -4 :offset-y 4 :blur 0 :spread 0
+                :hidden false :color {:color "#000000" :opacity 1}}
+        shape  (cts/setup-shape {:type :rect :x 0 :y 0 :width 40 :height 40 :shadow [shadow]
+                                 :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        L      (lottie-of board shape [{:time 0 :property :shadow-offset-x :index 0 :value -4}
+                                       {:time 1000 :property :shadow-offset-x :index 0 :value 4}])
+        ef     (first (:ef (first (:layers L))))
+        dirs   (mapv #(get-in % [:s 0]) (get-in (d/seek #(= "Direction" (:nm %)) (:ef ef)) [:v :k]))]
+    (t/is (< 2 (count dirs)) "taken as it goes")
+    (t/is (close? 225 (mod (first dirs) 360)) "down left")
+    (t/is (close? 135 (mod (peek dirs) 360)) "down right")
+    (t/is (every? (fn [[a b]] (< (abs (- b a)) 10)) (partition 2 1 dirs)) "the short way, through down")))
 
 (t/deftest lottie-writes-one-keyframe-as-a-value
   ;; players draw no layer with an animated value of one keyframe

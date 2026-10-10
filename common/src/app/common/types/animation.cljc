@@ -4143,7 +4143,8 @@
                        render
                        static)))
 
-(declare svg-sized? svg-sized-ids svg-holder-ids board-follow)
+(declare svg-sized? svg-sized-ids svg-holder-ids board-follow svg-stroke-alignment svg-even-corners?
+         unturned?)
 
 (defn lottie-sized?
   "Whether a Lottie export plays the width and height `track` animates on
@@ -4203,19 +4204,55 @@
                                     [(+ l (/ w 2)) (+ tp (/ h 2))]))
                                 kfs identity identity)}))
 
-(defn- lottie-rect-shape
-  "A Lottie path of a rectangle `[left top width height radius]`, its
-  corners alike: eight points, its corners curves (lines when square),
-  so it tweens with any other."
-  [[l t w h r]]
-  (let [k (* kappa r)
+(defn- lottie-rect-shape4
+  "A Lottie path of a rectangle `[left top width height r1 r2 r3 r4]`
+  (top left, top right, bottom right, bottom left): eight points, its
+  corners curves (lines when square), so it tweens with any other."
+  [[l t w h r1 r2 r3 r4]]
+  (let [k      #(* kappa %)
         right  (+ l w)
         bottom (+ t h)]
     {:c true
-     :v [[(+ l r) t] [(- right r) t] [right (+ t r)] [right (- bottom r)]
-         [(- right r) bottom] [(+ l r) bottom] [l (- bottom r)] [l (+ t r)]]
-     :i [[(- k) 0] [0 0] [0 (- k)] [0 0] [k 0] [0 0] [0 k] [0 0]]
-     :o [[0 0] [k 0] [0 0] [0 k] [0 0] [(- k) 0] [0 0] [0 (- k)]]}))
+     :v [[(+ l r1) t] [(- right r2) t] [right (+ t r2)] [right (- bottom r3)]
+         [(- right r3) bottom] [(+ l r4) bottom] [l (- bottom r4)] [l (+ t r1)]]
+     :i [[(- (k r1)) 0] [0 0] [0 (- (k r2))] [0 0] [(k r3) 0] [0 0] [0 (k r4)] [0 0]]
+     :o [[0 0] [(k r2) 0] [0 0] [0 (k r3)] [0 0] [(- (k r4)) 0] [0 0] [0 (- (k r1))]]}))
+
+(defn- lottie-rect-shape
+  "A Lottie path of a rectangle `[left top width height radius]`, its
+  corners alike (see `lottie-rect-shape4`)."
+  [[l t w h r]]
+  (lottie-rect-shape4 [l t w h r r r r]))
+
+(defn- lottie-corners-path
+  "The Lottie path (`sh`) of the outline of the rectangle or board
+  `shape`, in the board at `ox`, `oy`, before it turns, whose corners not
+  alike the keyframes `kfs` play, as the canvas clamps them."
+  [shape kfs ox oy]
+  (let [{:keys [x y width height]} (:selrect shape)
+        sid    (:id shape)
+        values (shape-values {:tracks {sid {:shape-id sid :keyframes kfs}}} sid)
+        value  (fn [t]
+                 (let [v (values t)]
+                   (into [(- x ox) (- y oy) width height]
+                         (gco/shape-corners-4 {:width width :height height
+                                               :r1 (get v :r1 (or (:r1 shape) 0))
+                                               :r2 (get v :r2 (or (:r2 shape) 0))
+                                               :r3 (get v :r3 (or (:r3 shape) 0))
+                                               :r4 (get v :r4 (or (:r4 shape) 0))}))))]
+    {:ty "sh" :nm "outline"
+     :ks (lottie-eased-prop #(mapv double (value %))
+                            (filterv #(#{:r1 :r2 :r3 :r4} (:property %)) kfs)
+                            #(vector (lottie-rect-shape4 %))
+                            first)}))
+
+(defn- lottie-corners-play?
+  "Whether the keyframes `kfs` play corners of the rectangle or board
+  `shape` that are not alike (see `svg-even-corners?`)."
+  [shape kfs]
+  (and (contains? #{:rect :frame} (:type shape))
+       (some #(#{:r1 :r2 :r3 :r4} (:property %)) kfs)
+       (not (svg-even-corners? shape {:keyframes kfs}))))
 
 (defn- slot-kfs
   "Keyframes of `property` at `index` (nil = the unindexed property)."
@@ -4367,32 +4404,60 @@
   [blurriness]
   (max 0 (/ (- (* 0.3 blurriness) 0.5) blur-sigma-scale)))
 
+(defn- lottie-gaussian-blur
+  "A Lottie Gaussian blur as strong as a layer blur of `value` and the
+  keyframes `kfs` of it on the canvas, as After Effects and lottie-web
+  take it: its blurriness (see `lottie-blurriness`) in both dimensions,
+  edges not repeated."
+  [kfs value]
+  {:ty 29
+   :nm "Gaussian Blur"
+   :mn "ADBE Gaussian Blur 2"
+   :np 5
+   :en 1
+   :ef [{:ty 0 :nm "Blurriness" :mn "ADBE Gaussian Blur 2-0001"
+         :v (lottie-prop-1d kfs lottie-blurriness (lottie-blurriness (or value 0)))}
+        {:ty 7 :nm "Blur Dimensions" :mn "ADBE Gaussian Blur 2-0002" :v {:a 0 :k 1}}
+        {:ty 7 :nm "Repeat Edge Pixels" :mn "ADBE Gaussian Blur 2-0003" :v {:a 0 :k 0}}]})
+
 (defn- lottie-blur-effect
-  "A Lottie Gaussian blur of the layer blur of `shape` and its keyframes,
-  as After Effects and lottie-web take it: its blurriness (see
-  `lottie-blurriness`) in both dimensions, edges not repeated. None of a
-  hidden blur, which stays hidden as it plays."
+  "A Lottie Gaussian blur of the layer blur of `shape` and its keyframes
+  (see `lottie-gaussian-blur`). None of a hidden blur, which stays hidden
+  as it plays."
   [shape by-prop]
   (let [blur (:blur shape)
         kfs  (by-prop :blur)]
     (when (and (not (:hidden blur)) (or (seq kfs) (some? blur)))
-      [{:ty 29
-        :nm "Gaussian Blur"
-        :mn "ADBE Gaussian Blur 2"
-        :np 5
-        :en 1
-        :ef [{:ty 0 :nm "Blurriness" :mn "ADBE Gaussian Blur 2-0001"
-              :v (lottie-prop-1d kfs lottie-blurriness (lottie-blurriness (or (:value blur) 0)))}
-             {:ty 7 :nm "Blur Dimensions" :mn "ADBE Gaussian Blur 2-0002" :v {:a 0 :k 1}}
-             {:ty 7 :nm "Repeat Edge Pixels" :mn "ADBE Gaussian Blur 2-0003" :v {:a 0 :k 0}}]}])))
+      [(lottie-gaussian-blur kfs (:value blur))])))
+
+(defn- unwrap-angles
+  "`stops` (`[time keyframe [degrees]]` each) turning the short way from
+  one to the next, by whole turns."
+  [stops]
+  (reduce (fn [out [t kf [v]]]
+            (let [prev (some-> (peek out) (nth 2) first)
+                  v    (if (nil? prev) v (+ v (* 360 (mth/round (/ (- prev v) 360)))))]
+              (conj out [t kf [v]])))
+          []
+          stops))
 
 (defn- lottie-pair-1d
-  "A 1D Lottie property of two 1D tracks (see `lottie-pair-prop`), `val-fn`
-  giving its value of theirs."
-  [a-kfs b-kfs a b val-fn]
-  (let [prop (lottie-pair-prop a-kfs b-kfs a b (fn [va vb] [(val-fn va vb)]))]
-    (cond-> prop
-      (zero? (:a prop)) (update :k first))))
+  "A 1D Lottie property of two 1D tracks, `val-fn` giving its value of
+  theirs, `a` and `b` when a track has none: taken as it goes where it
+  is no straight function of theirs (see `eased-stops`), as the direction
+  and distance of a shadow of its offsets, which so moves straight;
+  with `angle?`, degrees, turning the short way."
+  [a-kfs b-kfs a b val-fn & {:keys [angle?]}]
+  (let [ak    (sort-keyframes a-kfs)
+        bk    (sort-keyframes b-kfs)
+        times (->> (concat ak bk) (map :time) distinct sort vec)
+        value (fn [t] [(double (val-fn (or (property-value-at ak t) a) (or (property-value-at bk t) b)))])]
+    (if (< (count times) 2)
+      {:a 0 :k (val-fn (or (:value (first ak)) a) (or (:value (first bk)) b))}
+      (let [stops (map (fn [[t kf]] [t kf (value t)]) (eased-stops value (concat ak bk) times))
+            prop  (lottie-stops-prop (cond-> (vec stops) angle? unwrap-angles) identity identity)]
+        (cond-> prop
+          (zero? (:a prop)) (update :k first))))))
 
 (defn- drop-shadow?
   [shadow]
@@ -4400,7 +4465,9 @@
 
 (defn- lottie-shadow-effects
   "Lottie drop shadows of the drop shadows of `shape`, each with the
-  keyframes of its index. Lottie has no spread."
+  keyframes of its index, as soft as on the canvas in lottie-web (see
+  `blur-sigma`). Lottie has no spread: a layer whose shadows spread
+  casts them as layers of its own (see `lottie-shadow-layers?`)."
   [shape by-prop]
   (->> (as-vec (:shadow shape))
        (map-indexed
@@ -4409,7 +4476,7 @@
             (let [kfs      #(slot-kfs by-prop % index)
                   x        (or (:offset-x shadow) 0)
                   y        (or (:offset-y shadow) 0)
-                  offset   #(lottie-pair-1d (kfs :shadow-offset-x) (kfs :shadow-offset-y) x y %)]
+                  offset   #(apply lottie-pair-1d (kfs :shadow-offset-x) (kfs :shadow-offset-y) x y %&)]
               {:ty 25 :nm "Drop Shadow" :en 1 :np 8
                :ef [{:ty 2 :nm "Shadow Color"
                      :v (lottie-color-prop (kfs :shadow-color)
@@ -4418,10 +4485,11 @@
                      :v (lottie-prop-1d (kfs :shadow-opacity) (fn [v] (* 255.0 v))
                                         (* 255.0 (or (dm/get-in shadow [:color :opacity]) 1)))}
                     ;; 0 is up, 90 to the right
-                    {:ty 0 :nm "Direction" :v (offset (fn [dx dy] (mth/degrees (mth/atan2 dx (- dy)))))}
+                    {:ty 0 :nm "Direction" :v (offset (fn [dx dy] (mth/degrees (mth/atan2 dx (- dy)))) :angle? true)}
                     {:ty 0 :nm "Distance" :v (offset mth/hypot)}
+                    ;; lottie-web blurs by a quarter of it, as a deviation
                     {:ty 0 :nm "Softness"
-                     :v (lottie-prop-1d (kfs :shadow-blur) (fn [v] (* 2.0 v)) (* 2.0 (or (:blur shadow) 0)))}
+                     :v (lottie-prop-1d (kfs :shadow-blur) #(* 4.0 (blur-sigma %)) (* 4.0 (blur-sigma (or (:blur shadow) 0))))}
                     {:ty 7 :nm "Shadow Only" :v {:a 0 :k 0}}]}))))
        (remove nil?)
        (vec)))
@@ -4587,17 +4655,24 @@
            (or (not= :frame (:type shape)) (true? (:show-content shape)))
            (lottie-outline? objects layer-ids shape))))
 
+(def ^:private lottie-leaf-types
+  "The kinds of layers whose shadows Lottie can cast as layers of their
+  own (see `lottie-shadow-layers?`): what has an outline of its own."
+  #{:rect :circle :path :bool})
+
 (defn lottie-vector-layer?
   "Whether the layer `id` of a Lottie export draws as vectors (`layer-ids`
   are all the layers of the export): a rectangle, ellipse, path or
   boolean, or a group or board of such, with flat or gradient fills, flat
-  strokes, and drop shadows and blur of its own at most. Anything else
-  draws as an image (see `timeline->lottie`)."
+  strokes, and drop shadows and blur of its own at most, inner shadows
+  too but on a group or board. Anything else draws as an image (see
+  `timeline->lottie`)."
   [objects layer-ids id]
   (let [shape (get objects id)]
     (and (some? shape)
          (lottie-paints? shape)
-         (every? #(or (drop-shadow? %) (:hidden %)) (as-vec (:shadow shape)))
+         (or (contains? lottie-leaf-types (:type shape))
+             (every? #(or (drop-shadow? %) (:hidden %)) (as-vec (:shadow shape))))
          (lottie-outline? objects layer-ids shape))))
 
 (defn- lottie-path-shapes
@@ -4664,9 +4739,11 @@
   ellipse and a rectangle with one radius take their radius from the
   keyframes and their size from `sized` (see `lottie-size-props`), as
   the canvas resizes them; without, the size they have (their layer
-  stretches, see `lottie-stretched?`)."
+  stretches, see `lottie-stretched?`). A rectangle whose corners play,
+  not alike, is a path of them (see `lottie-corners-path`)."
   [shape by-prop ox oy sized]
-  (let [{:keys [x y width height]} (:selrect shape)
+  (let [kfs    (into [] cat (vals by-prop))
+        {:keys [x y width height]} (:selrect shape)
         left   (- x ox)
         top    (- y oy)
         size   (or (:size sized) {:a 0 :k [width height]})
@@ -4677,9 +4754,12 @@
       [{:ty "el" :nm "ellipse" :d 1 :s size :p center}]
 
       (and (contains? #{:rect :frame} (:type shape))
-           (= (:r1 shape) (:r2 shape) (:r3 shape) (:r4 shape)))
+           (svg-even-corners? shape {:keyframes kfs}))
       [{:ty "rc" :nm "rect" :d 1 :s size :p center
         :r (lottie-prop-1d (by-prop :r1) identity (or (:r1 shape) 0))}]
+
+      (lottie-corners-play? shape kfs)
+      [(lottie-corners-path shape kfs ox oy)]
 
       (contains? #{:rect :frame} (:type shape))
       (-> (assoc shape :type :rect)
@@ -4765,11 +4845,20 @@
         center (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
         path   (first (lottie-turned-back (canvas-outline shape) rotation center ox oy))]
     {:inv false :mode "a" :nm "clip"
-     :pt (if (and (some? track) (lottie-sized? shape track))
+     :pt (cond
+           (and (some? track) (lottie-sized? shape track))
            (lottie-eased-prop (lottie-box shape track ox oy)
                               (filterv #(#{:width :height :r1} (:property %)) (:keyframes track))
                               #(vector (lottie-rect-shape %))
                               first)
+
+           ;; corners not alike that play, where it is unturned
+           (and (some? track)
+                (lottie-corners-play? shape (:keyframes track))
+                (or (unturned? shape) (mth/close? rotation (or (:rotation shape) 0))))
+           (:ks (lottie-corners-path shape (:keyframes track) ox oy))
+
+           :else
            (:ks path))
      :o {:a 0 :k 100} :x {:a 0 :k 0}}))
 
@@ -4955,18 +5044,190 @@
       (shape->lottie-layer 0 objects layer-ids shape track ox oy origin
                            :effects? effects? :mask? mask?))))
 
-(defn- lottie-content-layer
-  "The layer drawing `shape` itself and the shapes inside it that are no
-  layers, for the precomp (or the composition) that moves, fades and
-  clips it."
+(defn- lottie-content-track
+  "The track of the drawing of `shape` in the precomp (or the
+  composition) that moves, fades and clips it: but what that does."
   [ctx shape]
   (let [track (lottie-track ctx (:id shape))
         ;; its holder stretches it, else it is resized as it plays (see
         ;; `lottie-sized?`)
         drop  (cond-> lottie-layer-properties
-                (not (lottie-sized? shape track)) (into #{:width :height}))
-        track (update track :keyframes #(into [] (remove (comp drop :property)) %))]
-    (lottie-shape-layer ctx (assoc shape :opacity 1) track :effects? false :mask? false)))
+                (not (lottie-sized? shape track)) (into #{:width :height}))]
+    (update track :keyframes #(into [] (remove (comp drop :property)) %))))
+
+(defn- lottie-content-layer
+  "The layer drawing `shape` itself and the shapes inside it that are no
+  layers, for the precomp (or the composition) that moves, fades and
+  clips it."
+  [ctx shape]
+  (lottie-shape-layer ctx (assoc shape :opacity 1) (lottie-content-track ctx shape)
+                      :effects? false :mask? false))
+
+(defn lottie-shadow-layers?
+  "Whether a Lottie export casts the shadows of the layer `shape`, which
+  `track` animates, as layers of their own, around its drawing in a
+  precomp (see `lottie-effects-layer`): a rectangle, ellipse, path or
+  boolean with an inner shadow, for which Lottie has no effect, or a
+  drop shadow that spreads, which its effect does not."
+  [shape track]
+  (boolean
+   (and (contains? lottie-leaf-types (:type shape))
+        (let [shown (into [] (remove :hidden) (as-vec (:shadow shape)))]
+          (or (some #(= :inner-shadow (:style %)) shown)
+              (some #(pos? (or (:spread %) 0)) shown)
+              (and (seq shown)
+                   (some #(and (= :shadow-spread (:property %)) (pos? (or (:value %) 0)))
+                         (:keyframes track))))))))
+
+(defn- stroke-reach
+  "How far the strokes of `shape` reach out of its outline."
+  [shape]
+  (transduce (map (fn [stroke]
+                    (case (svg-stroke-alignment shape stroke)
+                      :outer  (or (:stroke-width stroke) 0)
+                      :inner  0
+                      (/ (or (:stroke-width stroke) 0) 2))))
+             max 0
+             (remove :hidden (as-vec (:strokes shape)))))
+
+(defn- lottie-shadow-paint
+  "The colour and opacity (`:c :o`) of the paint of a shadow `shadow` of
+  the keyframes `kfs` (a function of a property)."
+  [shadow kfs]
+  {:c (lottie-color-prop (kfs :shadow-color) (hex->rgb01 (or (dm/get-in shadow [:color :color]) "#000000")))
+   :o (lottie-prop-1d (kfs :shadow-opacity) (fn [v] (* 100.0 v))
+                      (* 100.0 (or (dm/get-in shadow [:color :opacity]) 1)))})
+
+(defn- lottie-moved-group
+  "A Lottie group of `items` that `offset` (a 2D property) moves."
+  [name items offset]
+  (update (lottie-group name items) :it
+          (fn [it] (assoc-in it [(dec (count it)) :p] offset))))
+
+(defn- lottie-shadow-layer
+  "A layer of the shadow `index` of the drawing of `shape` in the precomp
+  of its effects (see `lottie-effects-layer`), with the transform `ks` of
+  that drawing, its outline `outline` (see `lottie-outline`) and the
+  keyframes `by-prop`, moved by its offset and blurred as soft as on the
+  canvas (see `lottie-gaussian-blur`). A drop shadow casts its silhouette
+  (its outline, filled when it has fills, and as far as its strokes
+  reach), grown by its spread; an inner shadow is what lies outside the
+  outline, grown in by its spread, under a matte of the outline (the
+  layer before it, see `lottie-matte-layer`), which keeps it inside.
+  The board is at `ox`, `oy`."
+  [shape by-prop outline ks ox oy duration index shadow]
+  (let [kfs     #(slot-kfs by-prop % index)
+        paint   (lottie-shadow-paint shadow kfs)
+        inner?  (= :inner-shadow (:style shadow))
+        reach   (if inner? 0 (stroke-reach shape))
+        spreads (cons (or (:spread shadow) 0) (map :value (kfs :shadow-spread)))
+        grows?  (or (pos? reach) (some pos? spreads))
+        width   #(* 2.0 (+ reach (max 0 %)))
+        offset  (lottie-pair-prop (kfs :shadow-offset-x) (kfs :shadow-offset-y)
+                                  (or (:offset-x shadow) 0) (or (:offset-y shadow) 0)
+                                  (fn [x y] [x y]))
+        spread  (when grows?
+                  (lottie-group "spread"
+                                (concat outline
+                                        [(merge {:ty "st" :nm "spread" :lc 2 :lj 2 :ml 4
+                                                 :w (lottie-prop-1d (kfs :shadow-spread) width
+                                                                    (width (or (:spread shadow) 0)))}
+                                                paint)])))
+        cast    (if inner?
+                  ;; around the outline, as far as it may show moved and blurred
+                  (let [{:keys [x y width height]} (:selrect shape)
+                        far    (+ 20
+                                  (* 3 (blur-sigma (reduce max (or (:blur shadow) 0) (map :value (kfs :shadow-blur)))))
+                                  (reduce max 0 (map mth/abs (concat [(or (:offset-x shadow) 0) (or (:offset-y shadow) 0)]
+                                                                     (map :value (kfs :shadow-offset-x))
+                                                                     (map :value (kfs :shadow-offset-y)))))
+                                  (reduce max 0 spreads))]
+                    (lottie-group "outside"
+                                  (concat [{:ty "rc" :nm "around" :d 1
+                                            :s {:a 0 :k [(+ width (* 2 far)) (+ height (* 2 far))]}
+                                            :p {:a 0 :k [(+ (- x ox) (/ width 2)) (+ (- y oy) (/ height 2))]}
+                                            :r {:a 0 :k 0}}]
+                                          outline
+                                          [(merge {:ty "fl" :nm "outside" :r 2} paint)])))
+                  (when (seq (remove :hidden (as-vec (:fills shape))))
+                    (lottie-group "silhouette" (concat outline [(merge {:ty "fl" :nm "fill" :r (fill-rule shape)} paint)]))))]
+    (cond-> {:ddd 0
+             :ty 4
+             :nm (str (or (:name shape) "layer") (if inner? " inner shadow " " drop shadow ") (inc index))
+             :sr 1
+             :ks ks
+             :ao 0
+             :shapes [(lottie-moved-group "shadow" (keep identity [spread cast]) offset)]
+             :ef [(lottie-gaussian-blur (kfs :shadow-blur) (or (:blur shadow) 0))]
+             :ip 0
+             :op (ms->frames duration)
+             :st 0
+             :bm 0}
+      inner? (assoc :tt 1))))
+
+(defn- lottie-matte-layer
+  "The alpha matte (`td`) of the outline `outline` of `shape`, with the
+  transform `ks`, which keeps the layer after it inside (`tt`)."
+  [shape outline ks duration]
+  {:ddd 0
+   :ty 4
+   :nm (str (or (:name shape) "layer") " outline")
+   :sr 1
+   :ks ks
+   :ao 0
+   :td 1
+   :shapes [(lottie-group "outline" (concat outline [{:ty "fl" :nm "matte" :r (fill-rule shape)
+                                                      :c {:a 0 :k [0 0 0 1]} :o {:a 0 :k 100}}]))]
+   :ip 0
+   :op (ms->frames duration)
+   :st 0
+   :bm 0})
+
+(defn- lottie-effects-layer
+  "A precomp layer of the layer `shape` that casts its shadows as layers
+  of their own (see `lottie-shadow-layers?`): its drawing (see
+  `lottie-content-layer`), its inner shadows over it and its drop
+  shadows under it, the first of each on top (see `lottie-shadow-layer`),
+  which it moves, turns, fades and blurs as its track says, as the
+  canvas blurs a shape with its shadows. The precomp goes to `comps`."
+  [{:keys [objects timeline duration width height ox oy comps] :as ctx} shape]
+  (let [id      (:id shape)
+        name    (or (:name shape) (str id))
+        track   (lottie-track ctx id)
+        ctrack  (lottie-content-track ctx shape)
+        cby     (group-by :property (:keyframes ctrack))
+        origin  (position-origin timeline objects id)
+        ks      (lottie-ks (assoc shape :opacity 1) ctrack ox oy origin)
+        sized   (when (lottie-sized? shape ctrack) (lottie-size-props shape ctrack ox oy))
+        outline (lottie-outline shape cby ox oy sized)
+        shown   (->> (as-vec (:shadow shape))
+                     (map-indexed vector)
+                     (remove (comp :hidden second)))
+        shadow  #(lottie-shadow-layer shape cby outline ks ox oy duration %1 %2)
+        inners  (mapcat (fn [[index s]]
+                          [(lottie-matte-layer shape outline ks duration) (shadow index s)])
+                        (filter #(= :inner-shadow (:style (second %))) shown))
+        drops   (map (fn [[index s]] (shadow index s))
+                     (filter #(= :drop-shadow (:style (second %) :drop-shadow)) shown))
+        ref     (str "comp_" id)
+        by-prop (group-by :property (:keyframes track))
+        blur    (lottie-blur-effect shape by-prop)]
+    (vswap! comps conj {:id ref :nm name
+                        :layers (lottie-numbered (concat inners [(lottie-content-layer ctx shape)] drops))})
+    (cond-> {:ddd 0
+             :ty 0
+             :nm name
+             :refId ref
+             :sr 1
+             :ks (lottie-holder-ks shape track ox oy origin)
+             :ao 0
+             :w width
+             :h height
+             :ip 0
+             :op (ms->frames duration)
+             :st 0
+             :bm 0}
+      (seq blur) (assoc :ef (vec blur)))))
 
 (defn- lottie-draws?
   "Whether the content layer of `shape` draws anything: paint of its own
@@ -5208,10 +5469,14 @@
   (into []
         (mapcat (fn [{:keys [id inner] :as node}]
                   (when-let [shape (get (:objects ctx) id)]
-                    (let [layer (cond
+                    (let [track (lottie-track ctx id)
+                          layer (cond
                                   (contains? (:units ctx) id) (lottie-units-layer ctx shape)
                                   (seq inner)                 (lottie-precomp-layer ctx node)
-                                  :else                       (lottie-shape-layer ctx shape (lottie-track ctx id)))]
+                                  (and (lottie-vector-layer? (:objects ctx) (:layer-ids ctx) id)
+                                       (lottie-shadow-layers? shape track))
+                                  (lottie-effects-layer ctx shape)
+                                  :else                       (lottie-shape-layer ctx shape track))]
                       (if-let [stops (get (:follow ctx) id)]
                         [(assoc layer ::follow id) (lottie-follow-null ctx shape stops)]
                         [layer])))))
