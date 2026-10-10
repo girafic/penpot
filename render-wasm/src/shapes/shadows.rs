@@ -93,7 +93,7 @@ impl Shadow {
             (sigma, sigma),
             self.color,
             None,
-            None,
+            self.spread_erode(None),
             None,
         );
 
@@ -102,6 +102,16 @@ impl Shadow {
         }
 
         filter
+    }
+
+    /// The erosion of `input` (the source when `None`) by a negative
+    /// spread, which a drop shadow casts smaller than its shape, as the
+    /// SVG renderer draws it (an erode before the blur). `None` for any
+    /// other spread.
+    pub fn spread_erode(&self, input: Option<ImageFilter>) -> Option<ImageFilter> {
+        (self.spread < 0.)
+            .then(|| image_filters::erode((-self.spread, -self.spread), input, None))
+            .flatten()
     }
 
     pub fn get_inner_shadow_paint(
@@ -221,6 +231,33 @@ mod tests {
             assert!((device.offset.0 - original.offset.0 * scale).abs() < 0.001);
             assert!((device.offset.1 - original.offset.1 * scale).abs() < 0.001);
         }
+    }
+
+    /// The shadow-only pixels of a 40x40 square at 30,30 drawn with the drop
+    /// shadow filter of `shadow`, at `(x, y)`: its alpha.
+    fn shadow_alpha_at(shadow: &Shadow, x: i32, y: i32) -> u8 {
+        let mut surface = skia::surfaces::raster_n32_premul((100, 100)).unwrap();
+        let mut paint = skia::Paint::default();
+        paint.set_image_filter(shadow.get_drop_shadow_filter());
+        surface
+            .canvas()
+            .draw_rect(skia::Rect::from_xywh(30.0, 30.0, 40.0, 40.0), &paint);
+        let mut pixels = [0u8; 4];
+        let info = skia::ImageInfo::new_n32_premul((1, 1), None);
+        assert!(surface.read_pixels(&info, &mut pixels, 4, (x, y)));
+        pixels[3]
+    }
+
+    #[test]
+    fn a_negative_spread_casts_a_smaller_shadow() {
+        let plain = shadow(0.0, 0.0, 0.0, 0.0);
+        let inset = shadow(0.0, -6.0, 0.0, 0.0);
+        assert_eq!(255, shadow_alpha_at(&plain, 33, 50), "the square's edge");
+        assert_eq!(0, shadow_alpha_at(&inset, 33, 50), "eroded by 6");
+        assert_eq!(255, shadow_alpha_at(&inset, 37, 50), "but inside");
+        assert!(inset.spread_erode(None).is_some());
+        assert!(plain.spread_erode(None).is_none());
+        assert!(shadow(0.0, 4.0, 0.0, 0.0).spread_erode(None).is_none());
     }
 
     /// Scaling the radius instead would apply the affine constant once at

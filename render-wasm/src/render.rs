@@ -3661,10 +3661,21 @@ impl RenderState {
             return Ok(());
         }
 
-        // blur=0 at high zoom: draw directly on DropShadows with geometric spread (no filter).
+        // A negative spread erodes the silhouette before it blurs (see
+        // `Shadow::spread_erode`); a positive one grows it geometrically.
+        let spread_erode = transformed_shadow.spread_erode(None);
+
+        // blur=0 at high zoom: draw directly on DropShadows with geometric spread (no filter
+        // but the erosion of a negative spread).
         if scale > 1.0 && shadow.blur <= 0.0 {
             let drop_canvas = self.surfaces.canvas(SurfaceId::DropShadows);
-            drop_canvas.save();
+            if let Some(erode) = &spread_erode {
+                let mut erode_paint = skia::Paint::default();
+                erode_paint.set_image_filter(erode.clone());
+                drop_canvas.save_layer(&skia::canvas::SaveLayerRec::default().paint(&erode_paint));
+            } else {
+                drop_canvas.save();
+            }
             //drop_canvas.scale((scale, scale));
             //drop_canvas.translate(translation);
 
@@ -3689,12 +3700,13 @@ impl RenderState {
             return Ok(());
         }
 
-        // Create filter with blur only (no offset, no spread - handled geometrically)
+        // Create filter with blur only (no offset, no positive spread - handled geometrically),
+        // over the erosion of a negative spread
         let blur_only_filter = if transformed_shadow.blur > 0.0 {
             let sigma = radius_to_sigma(transformed_shadow.blur);
-            Some(skia::image_filters::blur((sigma, sigma), None, None, None))
+            skia::image_filters::blur((sigma, sigma), None, spread_erode.clone(), None)
         } else {
-            None
+            spread_erode.clone()
         };
 
         let mut shadow_paint = skia::Paint::default();
