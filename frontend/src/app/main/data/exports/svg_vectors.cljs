@@ -50,14 +50,14 @@
   "`shape` as its layer draws it: without its opacity, which the group of
   the layer has, and without what a filter of its own draws over it,
   which would else show twice: its blur, as strong as on the canvas, and
-  the shadows its animation, `track`, plays (see `cta/svg-smil-blur?`,
-  `cta/svg-smil-shadows?`). Its outline a path when SMIL plays its
+  the shadows its animation, `track`, plays (see `cta/svg-filter-blur?`,
+  `cta/svg-filter-shadows?`). Its outline a path when SMIL plays its
   corners (see `cta/svg-smil-corners?`), which are not alike as it plays.
   A board that hides its fill in exports, without it."
   [shape track]
-  (let [shadows? (cta/svg-smil-shadows? shape track)]
+  (let [shadows? (cta/svg-filter-shadows? shape track)]
     (cond-> (dissoc shape :opacity)
-      (or shadows? (cta/svg-smil-blur? shape track))
+      (or shadows? (cta/svg-filter-blur? shape track))
       (dissoc :blur)
 
       shadows?

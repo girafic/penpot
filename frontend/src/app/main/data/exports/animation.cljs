@@ -552,7 +552,7 @@
   strokes and trim of a text not `outlined?` (see `outline-texts`),
   which the SVG renderer draws as text. CSS plays the rest on its
   vectors, SMIL its shadows and the corners CSS can not (see
-  `cta/svg-smil-shadows?`, `cta/svg-smil-corners?`)."
+  `cta/svg-filter-shadows?`, `cta/svg-smil-corners?`)."
   [shape track outlined?]
   (boolean
    (and (= :text (:type shape))
@@ -602,7 +602,7 @@
   - `:svg/size` and `:lottie/size`, an animated width or height they
     play as a stretch (see `cta/svg-sized?`, `cta/lottie-sized?`);
   - `:lottie/blur`, a blur, which players draw at their own strength (an
-    SVG blurs as the canvas, see `cta/svg-smil-blur?`);
+    SVG blurs as the canvas, see `cta/svg-filter-blur?`);
   - `:lottie/shadow`, drop shadows (Lottie effects, without spread);
   - `:lottie/stroke`, a stroke Lottie draws otherwise (see
     `off-center-stroke?`);

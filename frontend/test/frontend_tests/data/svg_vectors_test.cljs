@@ -51,7 +51,7 @@
     (t/is (not (str/includes? markup "<image")) "no picture")
     (t/is (not (re-find #"opacity=\"0.5\"|opacity:0.5" markup)) "its group has the opacity")
     (t/is (not (str/includes? markup "feGaussianBlur"))
-          "its blur on a filter of its own, as strong as on the canvas (see `cta/svg-smil-blur?`)")
+          "its blur on a filter of its own, as strong as on the canvas (see `cta/svg-filter-blur?`)")
     (t/is (not (str/includes? (svgv/layer-markup objects (:id a) (track-of :blur)) "feGaussianBlur"))
           "one that plays too")
     (t/is (str/includes? (svgv/layer-markup (update objects (:id a) assoc-in [:blur :hidden] true) (:id a) nil)
@@ -68,17 +68,25 @@
     (t/is (not (str/includes? plain "pathLength")))
     (t/is (= 1 (count (re-seq #"pathLength=\"1\"" trimmed))) "its stroke, not its fill")))
 
-(t/deftest the-shadows-smil-plays-are-not-drawn
+(t/deftest the-effects-of-a-layer-are-not-drawn-in-it
+  ;; A filter of its own draws them, as soft as the canvas does (see
+  ;; `cta/svg-filter-shadows?`).
   (let [shadow {:id (random-uuid) :offset-x 4 :offset-y 4 :blur 8 :spread 0 :hidden false
                 :color {:color "#000000" :opacity 0.3}}
         a (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20
                             :shadow [(assoc shadow :style :drop-shadow) (assoc shadow :style :inner-shadow)]
                             :blur {:id (random-uuid) :type :layer-blur :value 4 :hidden false}})
         {:keys [objects]} (board-with a)
+        rest   (svgv/layer-markup objects (:id a) nil)
         played (svgv/layer-markup objects (:id a) (track-of :shadow-offset-x))]
-    (t/is (str/includes? (svgv/layer-markup objects (:id a) nil) "feOffset") "at rest")
-    (t/is (not (str/includes? played "feOffset")) "played by SMIL, inner ones too")
-    (t/is (not (str/includes? played "feGaussianBlur")) "the blur with them, on top")))
+    (t/is (not (str/includes? rest "feOffset")) "its shadows at rest")
+    (t/is (not (str/includes? played "feOffset")) "and played, inner ones too")
+    (t/is (not (str/includes? played "feGaussianBlur")) "the blur with them, on top")
+    (t/is (str/includes? (svgv/layer-markup (update objects (:id a) assoc :shadow [(assoc shadow :hidden true)]
+                                                    :blur nil)
+                                            (:id a) nil)
+                         "<rect")
+          "hidden ones, none")))
 
 (t/deftest corners-smil-plays-are-a-marked-path
   (let [a (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20 :r1 0 :r2 0 :r3 0 :r4 0

@@ -1021,7 +1021,7 @@
                      {:time 1000 :property :shadow-offset-y :index 0 :value 20}
                      {:time 0 :property :shadow-spread :index 1 :value 0}
                      {:time 1000 :property :shadow-spread :index 1 :value 6}])]
-    (t/is (cta/svg-smil-shadows? shape track))
+    (t/is (cta/svg-filter-shadows? shape track))
     (t/is (str/includes? svg (str "<g class=\"penpot-smil-" sid "\" filter=\"url(#penpot-effects-" sid
                                   ")\"><g transform=\"translate(0 0)\"><g transform=\"translate(0 0)\" "
                                   "fill=\"none\"><rect class=\"me\"></rect></g></g></g>"))
@@ -1045,6 +1045,15 @@
     (t/is (not (str/includes? svg "drop-shadow(")) "no CSS shadows")
     (t/is (not (str/includes? svg (str "penpot-anim-" sid))) "nor CSS animation, its group plays nothing")))
 
+(t/deftest an-svg-shadows-as-soft-as-the-canvas
+  (let [{:keys [sid svg shape track]} (shadow-svg [{:time 0 :property :opacity :value 1}])]
+    (t/is (cta/svg-filter-shadows? shape track) "shadows that do not play too")
+    (t/is (str/includes? svg (str "<filter id=\"penpot-effects-" sid "\"")))
+    (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"/>") "the drop shadow of 8: 1/√3 of it and 0.5")
+    (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"2.809\"/>") "the inner one of 4")
+    (t/is (not (cta/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))
+          "none of hidden ones")))
+
 (t/deftest an-svg-blurs-as-the-canvas
   (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
         group   (cts/setup-shape {:type :group :x 10 :y 10 :width 60 :height 40})
@@ -1061,7 +1070,7 @@
                     (cta/add-keyframe iid {:time 1000 :property :x :value 60}))]
     (t/testing "a blur as it is, as strong as on the canvas, over what the layer holds"
       (let [svg (cta/timeline->svg moving objects images)]
-        (t/is (cta/svg-smil-blur? (get objects gid) nil))
+        (t/is (cta/svg-filter-blur? (get objects gid) nil))
         (t/is (str/includes? svg (str "<filter id=\"penpot-effects-" gid "\"")))
         (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"/>") "1/√3 of 8, and 0.5")
         (t/is (re-find (re-pattern (str "filter=\"url\\(#penpot-effects-" gid "\\)\">.*class=\"group\".*"
@@ -1078,7 +1087,7 @@
         (t/is (str/includes? svg ";0\"/></feGaussianBlur>") "none at the end")
         (t/is (not (str/includes? svg (str "penpot-anim-" gid))) "its group plays nothing")))
     (t/testing "no filter of a hidden blur"
-      (t/is (not (cta/svg-smil-blur? (assoc-in (get objects gid) [:blur :hidden] true) nil))))))
+      (t/is (not (cta/svg-filter-blur? (assoc-in (get objects gid) [:blur :hidden] true) nil))))))
 
 (t/deftest smil-plays-holds-springs-spreads-and-ping-pongs
   (t/testing "a hold keeps its value to the end of its stretch"
@@ -1107,7 +1116,7 @@
                                     "keySplines=\"0.25 0.1 0.25 1;0.75 0 0.75 0.9\" values=\"4;20;4\"/>")))))
   (t/testing "no SMIL of hidden shadows"
     (let [{:keys [shape track]} (shadow-svg [{:time 0 :property :shadow-offset-y :index 0 :value 4}])]
-      (t/is (not (cta/svg-smil-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))))))
+      (t/is (not (cta/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))))))
 
 (t/deftest an-svg-plays-corners-not-alike-by-smil
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100 :r1 0 :r2 0 :r3 0 :r4 0})

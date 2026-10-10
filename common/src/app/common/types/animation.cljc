@@ -5777,15 +5777,14 @@
   [track]
   (into #{} (map :property) (:keyframes track)))
 
-(defn svg-smil-shadows?
-  "Whether an SVG of vectors plays the shadows `track` animates on
-  `shape` by SMIL, on a filter of their own around it and the layers in
-  it (see `svg-effects-filter`), its vectors drawn without them: when it
-  has shadows to show."
-  [shape track]
-  (boolean
-   (and (some svg-shadow-properties (track-properties track))
-        (some (complement :hidden) (as-vec (:shadow shape))))))
+(defn svg-filter-shadows?
+  "Whether an SVG of vectors draws the shadows of `shape` on a filter of
+  their own around it and the layers in it, as the canvas shadows a
+  group or board with what it holds, and as soft (see
+  `svg-effects-filter`), SMIL playing those `track` animates, its
+  vectors drawn without them: when it has shadows to show."
+  [shape _track]
+  (boolean (some (complement :hidden) (as-vec (:shadow shape)))))
 
 (defn- blur-at
   "The radius of the layer blur `blur` of a shape when its animation
@@ -5797,7 +5796,7 @@
       (or (:value blur) 0)
       0)))
 
-(defn svg-smil-blur?
+(defn svg-filter-blur?
   "Whether an SVG of vectors draws the layer blur of `shape` on a filter
   of its own around it and the layers in it, as strong as the canvas
   blurs (see `svg-effects-filter`), SMIL playing it as `track` animates
@@ -5962,8 +5961,9 @@
 (defn- svg-effects-filter
   "The filter `id` of the effects of `shape` an SVG of vectors draws on
   a filter of their own (see `svg-smil`): with `shadows?`, its shadows
-  as the SVG renderer draws them (see `app.main.ui.shapes.filters`), its
-  drop shadows under it, its inner ones over it, the last first; then,
+  as the SVG renderer draws them (see `app.main.ui.shapes.filters`), as
+  soft as on the canvas (see `blur-sigma`), its drop shadows under it,
+  its inner ones over it, the last first; then,
   with `blur?`, its layer blur, as strong as on the canvas (see
   `blur-sigma`). With `timeline` (cut to its duration), SMIL plays their
   keyframes on it; without, they rest. Its region, on the page, holds
@@ -5995,7 +5995,8 @@
                             (attr index "dx" #{:shadow-offset-x} (fn [s] [(or (:offset-x s) 0)]) render-number)
                             (attr index "dy" #{:shadow-offset-y} (fn [s] [(or (:offset-y s) 0)]) render-number))
                         (el "feGaussianBlur" ""
-                            (attr index "stdDeviation" #{:shadow-blur} (fn [s] [(/ (or (:blur s) 0) 2)]) render-number))))
+                            (attr index "stdDeviation" #{:shadow-blur} (fn [s] [(blur-sigma (or (:blur s) 0))])
+                                  render-number))))
         color    (fn [index]
                    (el "feColorMatrix" " type=\"matrix\""
                        (attr index "values" #{:shadow-color :shadow-opacity} svg-shadow-color render-color-matrix)))
@@ -6159,8 +6160,8 @@
   `timeline->svg`), `{id {:outline :filters}}`: the `<animate>` of the
   path of the outline of each whose corners it plays (see
   `svg-smil-corners?`), the filters of the effects of each that has
-  shadows it plays or a blur (see `svg-smil-shadows?`,
-  `svg-smil-blur?`), as they play and at rest, which reduced motion
+  shadows it plays or a blur (see `svg-filter-shadows?`,
+  `svg-filter-blur?`), as they play and at rest, which reduced motion
   shows (see `svg-smil-css`). Those of `wide` hold layers, which may go
   over `area` (on the page)."
   [timeline objects images wide area]
@@ -6170,8 +6171,8 @@
            vectors? (or (some? (dm/get-in images [sid :markup]))
                         (some #(some? (:markup (get images [sid %]))) (unit-image-indexes images sid)))
            shape    (when vectors? (get objects sid))
-           shadows? (and (some? shape) (svg-smil-shadows? shape track))
-           blur?    (and (some? shape) (svg-smil-blur? shape track))
+           shadows? (and (some? shape) (svg-filter-shadows? shape track))
+           blur?    (and (some? shape) (svg-filter-blur? shape track))
            outline  (when (and (some? shape) (svg-smil-corners? shape track))
                       (svg-corner-path shape timeline))
            filters  (when (or shadows? blur?)
