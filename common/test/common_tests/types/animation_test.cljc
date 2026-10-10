@@ -1085,6 +1085,14 @@
       (let [svg (cta/timeline->svg (grow rect) (svg-board-with board (assoc rect :rotation 30)) {})]
         (t/is (re-find #"scale\(2, 1\)" svg))))))
 
+(defn- occurrences
+  "How many times `part` is in `text`."
+  [text part]
+  (loop [from 0 n 0]
+    (if-let [at (str/index-of text part from)]
+      (recur (+ at (count part)) (inc n))
+      n)))
+
 (t/deftest an-svg-plays-all-the-animations-of-an-element
   ;; A rule of its own of each would drop the others.
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
@@ -1100,7 +1108,7 @@
         fill  (str "[id=\"fills-" sid "\"] > :not(defs)")]
     (t/is (str/includes? css (str fill " {\n  animation: penpot-svg-" sid "-0 1000ms linear 1 both, penpot-svg-"
                                   sid "-1 1000ms linear 1 both;\n}")))
-    (t/is (= 1 (count (re-seq (re-pattern (str "\\Q" fill " {\n  animation:\\E")) css))) "one rule")
+    (t/is (= 1 (occurrences css (str fill " {\n  animation:"))) "one rule")
     (t/is (re-find #"@media \(prefers-reduced-motion: reduce\)" css) "at rest with reduced motion")))
 
 (t/deftest the-layers-in-a-board-follow-its-size

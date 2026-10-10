@@ -243,7 +243,8 @@
                        (thj/wait-until #(get-in @st/state [:export-tab :cancelling?]))))
               (.then (fn [_]
                        (p/resolve starting nil)
-                       (thj/wait-until #(= :cancelled (status)))))
+                       ;; and its message has come, which the channel brings later
+                       (thj/wait-until #(and (= :cancelled (status)) (= :cancelled (last (types heard)))))))
               (.then (fn [_]
                        (t/is (= [0 0] [@exports @downloads]) "no export, no download")
                        (t/is (= :cancelled (last (types heard))))))
@@ -303,7 +304,8 @@
           (-> (thj/wait-until #(= :exporting (status)))
               (.then (fn [_]
                        ((:post @ws) {:type :cancel})
-                       (thj/wait-until #(= :cancelled (status)))))
+                       ;; and its message has come, which the channel brings later
+                       (thj/wait-until #(and (= :cancelled (status)) (= :cancelled (last (types heard)))))))
               (.then (fn [_] (t/is (= :cancelled (last (types heard))))))
               (.catch fail!)
               (.finally #(end! scene done'))))
