@@ -30,7 +30,11 @@
    :background-blur i/effects
    :blend-mode      i/layers
    :split-text      i/text
-   :no-audio        i/volume-off})
+   :no-audio        i/volume-off
+   :copy-clock      i/component-copy
+   :mask            i/mask
+   :gif/alpha       i/rgba
+   :mp4/alpha       i/rgba})
 
 (defn issue-texts
   "What the list says of an issue `kind` (see `dea/export-issues`), in the

@@ -1489,6 +1489,44 @@
                       :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
         "and a turned one stretches there too"))
 
+(t/deftest the-issues-of-copies-masks-and-transparency
+  (let [{:keys [objects bid cid]} (test-objects)
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000 :playback :loop})
+                    (cta/add-keyframe cid {:time 0 :property :x :value 10})
+                    (cta/add-keyframe cid {:time 1000 :property :x :value 50}))
+        issues  #(dea/export-issues %1 %2)
+        has?    (fn [issues format kind] (boolean (some #{kind} (get issues format))))]
+    (t/testing "a copy looping on its own clock"
+      (t/is (has? (issues objects (assoc tl :copy-loops [700])) :svg :copy-clock)
+            "starts over with the board, its loops not fitting")
+      (t/is (has? (issues objects (assoc tl :copy-loops [700])) :gif :copy-clock))
+      (t/is (not (has? (issues objects (assoc tl :copy-loops [700])) :mp4 :copy-clock)) "a video ends")
+      (t/is (not (has? (issues objects (assoc tl :copy-loops [500])) :svg :copy-clock)) "they fit")
+      (t/is (has? (issues objects (assoc tl :copy-loops [500] :playback :once)) :lottie :copy-clock)
+            "it stops at the end of a board that plays once"))
+    (t/testing "a layer in a masked group"
+      (let [mask    (cts/setup-shape {:type :rect :x 0 :y 0 :width 30 :height 30})
+            group   (cts/setup-shape {:type :group :x 0 :y 0 :width 30 :height 30})
+            [mid gid] (map :id [mask group])
+            masked  (-> objects
+                        (assoc-in [bid :shapes] [gid])
+                        (assoc gid (assoc group :parent-id bid :frame-id bid :shapes [mid cid] :masked-group true))
+                        (assoc mid (assoc mask :parent-id gid :frame-id bid))
+                        (assoc-in [cid :parent-id] gid))]
+        (t/is (has? (issues masked tl) :svg :mask))
+        (t/is (has? (issues masked tl) :lottie :mask))
+        (t/is (not (has? (issues masked tl) :webm :mask)) "a video draws as the canvas")
+        (t/is (not (has? (issues objects tl) :svg :mask)))))
+    (t/testing "a board that shows through"
+      (let [clear (update objects bid assoc :fills [])]
+        (t/is (has? (issues clear tl) :gif :gif/alpha))
+        (t/is (has? (issues clear tl) :mp4 :mp4/alpha))
+        (t/is (not (has? (issues clear tl) :webm :mp4/alpha)) "WebM keeps it")
+        (t/is (has? (issues (update objects bid assoc :hide-fill-on-export true) tl) :mp4 :mp4/alpha))
+        (t/is (not (has? (issues objects tl) :gif :gif/alpha)) "an opaque fill")
+        (t/is (has? (issues (assoc-in objects [bid :fills 0 :fill-opacity] 0.5) tl) :gif :gif/alpha)
+              "a fill one sees through")))))
+
 (t/deftest lottie-notes-its-effects
   (t/is (= [:lottie/shadow] (issues-of :lottie :f #(assoc % :shadow [shadow]))))
   (t/is (= [] (issues-of :lottie :f #(assoc % :shadow [(assoc shadow :hidden true)]))) "a hidden one draws nothing")

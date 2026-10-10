@@ -292,6 +292,7 @@
         x-at   #(get-in (cta/values-at (cta/expand-loops tl) %) [copy-rect :x])]
     (t/is (= [1000 :loop] [(:duration host) (:playback host)])
           "a board without tracks keeps time with its copies")
+    (t/is (= [1000] (:copy-loops tl)) "the cycles of the copies that loop")
     (t/is (mth/close? (+ 10 dx 12.5) (x-at 250)))
     (let [longer (cltl/with-instance-tracks (assoc host :duration 3000) copies objects)]
       ;; in a board that plays 3 s, the copy plays its second second as

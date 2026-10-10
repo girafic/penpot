@@ -488,7 +488,9 @@
   `cta/text-unit-entries`), or, with `text-split` `:whole`, play as
   animations of the whole text, as the markup exports play them (see
   `cta/flatten-splits`). A shape `timeline` animates itself keeps that
-  animation."
+  animation. `:copy-loops` holds the cycles (ms) of the copies that loop,
+  whose clock the exports bind to the board's (see
+  `app.main.data.exports.animation/export-issues`)."
   [timeline copies objects & {:keys [text-split]}]
   (reduce
    (fn [timeline copy]
@@ -502,16 +504,19 @@
                     (-> cta/expand-paths cta/expand-springs cta/expand-ping-pong))
            loop?  (= :loop (cta/playback-mode copy))
            period (:duration copy)]
-       (update timeline :tracks
-               (fn [tracks]
-                 (reduce-kv (fn [tracks id track]
-                              (cond-> tracks
-                                (not (contains? tracks id))
-                                (assoc id (cond-> track
-                                            loop?                     (cta/loop-track period)
-                                            (seq (:animations track)) (assoc :split-clock clock)))))
-                            tracks
-                            (:tracks copy))))))
+       (cond-> timeline
+         loop? (update :copy-loops (fnil conj []) period)
+         :always
+         (update :tracks
+                 (fn [tracks]
+                   (reduce-kv (fn [tracks id track]
+                                (cond-> tracks
+                                  (not (contains? tracks id))
+                                  (assoc id (cond-> track
+                                              loop?                     (cta/loop-track period)
+                                              (seq (:animations track)) (assoc :split-clock clock)))))
+                              tracks
+                              (:tracks copy)))))))
    timeline
    copies))
 

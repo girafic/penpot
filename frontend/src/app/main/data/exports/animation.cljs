@@ -572,6 +572,18 @@
       (contains? ctst/stroke-caps-marker (:stroke-cap-start stroke))
       (contains? ctst/stroke-caps-marker (:stroke-cap-end stroke))))
 
+(defn- see-through?
+  "Whether `board` shows what is under it where nothing covers it: no fill
+  paints it opaque, or it hides its fill in exports."
+  [board]
+  (or (true? (:hide-fill-on-export board))
+      (not-any? (fn [{:keys [fill-color fill-opacity fill-color-gradient]}]
+                  (and (mth/close? 1 (or fill-opacity 1))
+                       (or (some? fill-color)
+                           (and (some? fill-color-gradient)
+                                (every? #(mth/close? 1 (or (:opacity %) 1)) (:stops fill-color-gradient))))))
+                (:fills board))))
+
 (defn export-issues
   "What the export of `timeline` (of the shapes of `objects`) plays
   otherwise than the canvas, by format, as the Animated export panel lists
@@ -597,7 +609,16 @@
     (in SVG a layer blends only within itself);
   - `:split-text`, a split text played whole (one that underlines or
     strikes some of its text, see `unit-texts`), and `:no-audio`, for the
-    formats without the sound of its audio clips."
+    formats without the sound of its audio clips;
+  - `:copy-clock`, a component copy looping on its own clock (see
+    `cltl/with-instance-tracks`), which the formats that loop or rest at
+    their end bind to the board's: it stops at the end of a board that
+    plays once and starts over with one that loops, unless its cycles
+    fit the board's;
+  - `:mask`, a layer in a masked group, which the markup formats draw
+    on its own, unmasked (a mask that animates as a shape);
+  - `:gif/alpha` and `:mp4/alpha`, a board that shows through (see
+    `see-through?`): GIF has no partial transparency, MP4 none at all."
   [objects timeline]
   (if (nil? timeline)
     {}
@@ -625,6 +646,18 @@
           pictured  (into #{} (comp (map key) (remove #(decorated? (get objects %)))) units)
           text?     #(and (= :text (:type %)) (not (contains? pictured (:id %))))
           outlined? #(and outline? (text? %))
+          ;; copies looping on their own clock (see `cltl/with-instance-tracks`)
+          duration  (max 1 (:duration timeline 0))
+          bound?    (some (fn [cycle]
+                            (or (= :once (cta/playback-mode timeline))
+                                (let [n (/ duration (max 1 cycle))]
+                                  (> (mth/abs (- n (mth/round n))) 0.01))))
+                          (:copy-loops timeline))
+          masked?   (some (fn [id]
+                            (some #(true? (dm/get-in objects [% :masked-group]))
+                                  (cfh/get-parent-ids objects id)))
+                          layer-ids)
+          clear?    (some-> (get objects board-id) see-through?)
           table
           [[:lottie/images lottie-formats
             (boolean (some (fn [id]
@@ -659,7 +692,11 @@
            [:split-text whole-text-formats
             (boolean (some (fn [[id _]] (decorated? (get objects id))) units))]
            [:no-audio #{:gif :avif :svg :lottie :dotlottie}
-            (boolean (seq (:audio-clips timeline)))]]]
+            (boolean (seq (:audio-clips timeline)))]
+           [:copy-clock #{:gif :avif :svg :lottie :dotlottie} (boolean bound?)]
+           [:mask markup-formats (boolean masked?)]
+           [:gif/alpha #{:gif} (boolean clear?)]
+           [:mp4/alpha #{:mp4} (boolean clear?)]]]
       (reduce (fn [issues [kind formats on?]]
                 (if on?
                   (reduce #(update %1 %2 (fnil conj []) kind) issues formats)

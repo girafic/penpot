@@ -9127,6 +9127,30 @@ msgstr "Audio · Left out of %s"
 msgid "workspace.options.export.issue.no-audio.text"
 msgstr "%s has no sound: the audio clips of the timeline aren't in the file."
 
+msgid "workspace.options.export.issue.copy-clock"
+msgstr "Component loops · Bound to the board in %s"
+
+msgid "workspace.options.export.issue.copy-clock.text"
+msgstr "Copies of components that loop on their own clock play within the animation of the board in %s: they stop at its end, or start over with it when it loops and their loops don't fit into it."
+
+msgid "workspace.options.export.issue.mask"
+msgstr "Masks · Left out of %s"
+
+msgid "workspace.options.export.issue.mask.text"
+msgstr "Layers that animate inside a masked group aren't masked in %s, and a mask that animates shows as a shape."
+
+msgid "workspace.options.export.issue.gif-alpha"
+msgstr "Transparency · Hard edges in %s"
+
+msgid "workspace.options.export.issue.gif-alpha.text"
+msgstr "%s has no partial transparency: where the board shows through, edges, shadows and fades are either opaque or clear."
+
+msgid "workspace.options.export.issue.mp4-alpha"
+msgstr "Transparency · Left out of %s"
+
+msgid "workspace.options.export.issue.mp4-alpha.text"
+msgstr "%s has no transparency: where the board shows through, the video is white. WebM keeps it."
+
 msgid "workspace.options.export.include-audio"
 msgstr "Include audio"
 
