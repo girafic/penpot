@@ -9062,10 +9062,10 @@ msgid "workspace.options.export.issue.lottie-images.text"
 msgstr "Layers with inner shadows, masks, image fills or gradient strokes are images in %s: their fills, strokes, shadows and blur don't animate, and they blur when scaled up."
 
 msgid "workspace.options.export.issue.svg-appearance"
-msgstr "Some effects · Left out of %s"
+msgstr "Strokes of texts · Left out of %s"
 
 msgid "workspace.options.export.issue.svg-appearance.text"
-msgstr "The spread of shadows, inner shadows, uneven corners and the strokes of texts stay as they rest in %s. Fills, strokes, trims, even corners, drop shadows and blur play."
+msgstr "The strokes and trims of texts stay as they rest in %s, unless \"Outline text\" is on. Fills, strokes, trims, corners, shadows and blur play."
 
 msgid "workspace.options.export.issue.svg-size"
 msgstr "Size animation · Stretches in %s"

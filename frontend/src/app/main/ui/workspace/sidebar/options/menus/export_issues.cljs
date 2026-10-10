@@ -20,7 +20,7 @@
 
 (def ^:private issue-icons
   {:lottie/images   i/img
-   :svg/appearance  i/drop-shadow
+   :svg/appearance  i/stroke-size
    :svg/size        i/size-horizontal
    :lottie/size     i/size-horizontal
    :svg/blur        i/effects

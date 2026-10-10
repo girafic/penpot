@@ -22,6 +22,9 @@
    [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
+   [app.common.geom.shapes.bounds :as gsb]
+   [app.common.geom.shapes.corners :as gco]
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.audio-clip :as ctau]
@@ -3623,17 +3626,6 @@
        (css-color (get-in shadow [:color :color])
                   (get-in shadow [:color :opacity]))))
 
-(defn- css-drop-shadow
-  "The CSS `drop-shadow()` of a drop shadow, as SVG plays it: its blur a
-  standard deviation, as the SVG renderer draws it; no spread."
-  [shadow]
-  (str "drop-shadow(" (fmt (:offset-x shadow)) "px "
-       (fmt (:offset-y shadow)) "px "
-       (fmt (/ (or (:blur shadow) 0) 2)) "px "
-       (css-color (get-in shadow [:color :color])
-                  (get-in shadow [:color :opacity]))
-       ")"))
-
 (def ^:private css-transform-properties
   "The properties the CSS of an animation plays through `transform`."
   #{:x :y :width :height :scale-x :scale-y :rotation})
@@ -3705,9 +3697,10 @@
   or rotation of the shape plays, as it replaces the one the shape has at
   rest: with `rest-transform`, that one of the code it plays in, kept
   between its turn and its scale. For an SVG (`svg?`) the group of a
-  layer plays its transform, opacity, drop shadows and blur, as a CSS
-  `filter`; its fills, strokes, corners and trim play on its elements
-  (see `svg-appearance-css`)."
+  layer plays its transform, opacity and blur, as a CSS `filter`; its
+  fills, strokes, corners and trim play on its elements (see
+  `svg-appearance-css`), its shadows and the corners CSS can not play by
+  SMIL (see `svg-smil`)."
   ([shape values origin rest-transform]
    (values->declarations shape values origin rest-transform false))
   ([shape values origin rest-transform svg?]
@@ -3718,14 +3711,7 @@
 (defn- svg-group-declarations
   [shape values origin]
   (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity blur] :as frame}
-        (frame-values shape values origin)
-        shadows (when (contains? frame :box-shadow)
-                  (->> (apply-shadows (:shadow shape) values)
-                       (remove :hidden)
-                       (filter #(= :drop-shadow (:style %)))
-                       (map css-drop-shadow)))
-        filters (cond-> (vec shadows)
-                  (contains? frame :blur) (conj (str "blur(" (fmt blur) "px)")))]
+        (frame-values shape values origin)]
     (cond-> []
       (contains? frame :translate-x)
       (conj (str "transform: translate(" (fmt translate-x) "px, " (fmt translate-y) "px) "
@@ -3735,8 +3721,8 @@
       (contains? frame :opacity)
       (conj (str "opacity: " (fmt opacity) ";"))
 
-      (or (contains? frame :box-shadow) (contains? frame :blur))
-      (conj (str "filter: " (if (seq filters) (str/join " " filters) "none") ";")))))
+      (contains? frame :blur)
+      (conj (str "filter: blur(" (fmt blur) "px);")))))
 
 (defn- css-declarations
   [shape values origin rest-transform]
@@ -3809,6 +3795,17 @@
                      (str "  " pct "% { " (str/join " " decls) " }")))]
     (str "@keyframes " kf-name " {\n" (str/join "\n" stops) "\n}")))
 
+(defn- svg-group-plays?
+  "Whether the group of a layer of an SVG plays any of `track` (see
+  `svg-group-declarations`): its place, scale, turn, opacity or blur, or
+  its size unless it plays on its elements (`sized?`)."
+  [track sized?]
+  (boolean
+   (some (fn [{:keys [property]}]
+           (or (contains? #{:x :y :scale-x :scale-y :rotation :opacity :blur} property)
+               (and (not sized?) (contains? #{:width :height} property))))
+         (:keyframes track))))
+
 (defn timeline->css
   "Generate a CSS string (`@keyframes` blocks + per-shape `animation`
   rules) for `timeline`, using the base geometry from `objects`. Pure.
@@ -3829,9 +3826,10 @@
   `display`, if any (an inline element of a page takes no transform),
   and `:adjust`, if any, a function of a text and the timeline of its
   units (see `unit-timelines`) giving the one to play. With `:svg?`, the
-  declarations of the groups of an SVG (see `values->declarations`),
-  but the width and height of the shapes of `:sized`, which play on
-  their elements (see `svg-sized?`)."
+  declarations of the groups of an SVG (see `values->declarations`), of
+  those that play any (see `svg-group-plays?`), but the width and height
+  of the shapes of `:sized`, which play on their elements (see
+  `svg-sized?`)."
   ([timeline objects]
    (timeline->css timeline objects nil))
   ([timeline objects {:keys [ids selector origin transform units svg? sized]}]
@@ -3872,6 +3870,7 @@
          rules    (into []
                         (keep (fn [[sid track]]
                                 (when-let [shape (and (or (nil? ids) (contains? ids sid))
+                                                      (or (not svg?) (svg-group-plays? track (contains? sized sid)))
                                                       (get objects sid))]
                                   (let [kf-name  (str "penpot-anim-" sid)
                                         selector (selector shape)
@@ -5200,8 +5199,10 @@
   "The clip paths of the boards `ids` that clip layers, where they are in
   the SVG, whose origin is `ox`/`oy`: a rectangle when the board is one
   (see `svg-even-corners?`, its track in `tracks`), whose size and
-  corners its CSS plays (see `svg-outline-elements`), else its outline."
-  [objects tracks ox oy ids]
+  corners its CSS plays (see `svg-outline-elements`), else its outline,
+  whose corners SMIL plays when it is unturned (the `:outline` of `smil`,
+  see `svg-smil`)."
+  [objects tracks smil ox oy ids]
   (->> ids
        (map (fn [id]
               (let [shape (get objects id)
@@ -5213,8 +5214,10 @@
                          (str "<rect transform=\"" move "\" x=\"" (fmt x) "\" y=\"" (fmt y)
                               "\" width=\"" (fmt width) "\" height=\"" (fmt height)
                               "\" rx=\"" r "\" ry=\"" r "\"/>"))
-                       (str "<path transform=\"" move "\" d=\""
-                            (path/content (canvas-outline shape)) "\"/>"))
+                       (let [animate (when (unturned? shape) (dm/get-in smil [id :outline]))]
+                         (str "<path transform=\"" move "\" d=\""
+                              (path/content (canvas-outline shape)) "\""
+                              (if (some? animate) (str ">" animate "</path>") "/>"))))
                      "</clipPath>"))))
        (str/join "")))
 
@@ -5444,6 +5447,409 @@
      duration
      (svg-iterations timeline))))
 
+;; What CSS can not play on the vectors of an SVG, SMIL plays: inner
+;; shadows and the spread of shadows (on a filter of the shadows), and
+;; corners not alike (on the path of the outline).
+
+(def ^:private svg-shadow-properties
+  #{:shadow-offset-x :shadow-offset-y :shadow-blur :shadow-spread :shadow-color :shadow-opacity})
+
+(defn- track-properties
+  [track]
+  (into #{} (map :property) (:keyframes track)))
+
+(defn svg-smil-shadows?
+  "Whether an SVG of vectors plays the shadows `track` animates on
+  `shape` by SMIL, on a filter of their own around its vectors (see
+  `svg-shadow-filter`), its vectors drawn without them: when it has
+  shadows to show. Its layer blur goes in that filter too, unless it
+  plays (by CSS, on the group of the layer)."
+  [shape track]
+  (boolean
+   (and (some svg-shadow-properties (track-properties track))
+        (some (complement :hidden) (as-vec (:shadow shape))))))
+
+(defn svg-smil-corners?
+  "Whether an SVG of vectors plays the corners `track` animates on
+  `shape` by SMIL, on the path of its outline (see `svg-corner-path`): a
+  rectangle or board whose corners are not alike (see
+  `svg-even-corners?`), drawn as a path (the elements of its outline
+  marked `data-penpot-outline`, see `svg-smil-outline`)."
+  [shape track]
+  (boolean
+   (and (contains? #{:rect :frame} (:type shape))
+        (some svg-radius-properties (track-properties track))
+        (not (svg-even-corners? shape track)))))
+
+(def ^:private smil-samples-per-second
+  "How often SMIL takes the value of a stretch it can not curve as it
+  plays (see `smil-stretch`)."
+  30)
+
+(def ^:private smil-linear [0 0 1 1])
+
+(defn- smil-curve
+  "The curve (SMIL `keySplines`) of the stretch of `kfs` from `from`: the
+  easing of the keyframe there when SMIL takes its control points (within
+  0 and 1), linear without one; nil for a spring, a curve out of them or
+  a hold."
+  [kfs from]
+  (if-let [kf (d/seek #(= from (:time %)) kfs)]
+    (when-not (= :step (:interpolation kf))
+      (let [curve (easing-curve (:easing kf))]
+        (when (and (some? curve) (every? #(<= 0 % 1) curve))
+          curve)))
+    smil-linear))
+
+(defn- smil-stretch
+  "The points SMIL plays `value` (a time to a vector of numbers) by from
+  `t0` to `t1` of the keyframes `kfs`: `[[time numbers curve]...]`, a point
+  and the curve to the next. One when the values between follow the curve
+  of the keyframe at `t0` (see `smil-curve`), two that hold the first value
+  for a hold, else samples."
+  [value kfs t0 t1]
+  (let [v0     (value t0)
+        v1     (value t1)
+        tol    (mapv #(max 0.01 (* 0.01 (mth/abs (- %2 %1)))) v0 v1)
+        fits?  (fn [f]
+                 (every? (fn [p]
+                           (every? true? (map (fn [a e t] (<= (mth/abs (- a e)) t))
+                                              (value (+ t0 (* p (- t1 t0)))) (f p) tol)))
+                         [0.25 0.5 0.75]))
+        curve  (smil-curve kfs t0)]
+    (cond
+      (and (some? curve)
+           (fits? (fn [p] (let [e (cubic-bezier curve p)] (mapv #(+ %1 (* e (- %2 %1))) v0 v1)))))
+      [[t0 v0 curve]]
+
+      (fits? (constantly v0))
+      (if (= v0 v1)
+        [[t0 v0 smil-linear]]
+        [[t0 v0 smil-linear] [(max (/ (+ t0 t1) 2) (- t1 0.5)) v0 smil-linear]])
+
+      :else
+      (let [n (max 4 (mth/ceil (* (- t1 t0) 0.001 smil-samples-per-second)))]
+        (mapv (fn [i]
+                (let [t (+ t0 (* i (/ (- t1 t0) n)))]
+                  [t (value t) smil-linear]))
+              (range n))))))
+
+(defn- smil-points
+  "The points SMIL plays `value` (a time to a vector of numbers) of the
+  keyframes `kfs` by over `duration` (see `smil-stretch`): the stretches
+  between their times within it, 0 and `duration`, then the end."
+  [value kfs duration]
+  (let [value #(mapv double (value %))
+        times (vec (into (sorted-set 0 duration)
+                         (comp (map :time) (filter #(<= 0 % duration)))
+                         kfs))]
+    (conj (into [] (mapcat (fn [[t0 t1]] (smil-stretch value kfs t0 t1))) (partition 2 1 times))
+          [duration (value duration) nil])))
+
+(defn- smil-mirrored
+  "`points` (see `smil-points`) played forth and back over twice
+  `duration`, as CSS alternates a ping-pong: each stretch back by its
+  curve reversed."
+  [points duration]
+  (let [n     (dec (count points))
+        rev   (fn [[x1 y1 x2 y2]] [(- 1 x2) (- 1 y2) (- 1 x1) (- 1 y1)])
+        curve #(nth (nth points %) 2)]
+    (into (conj (pop points) (assoc (peek points) 2 (rev (curve (dec n)))))
+          (map (fn [i]
+                 (let [[t v] (nth points i)]
+                   [(- (* 2 duration) t) v (when (pos? i) (rev (curve (dec i))))])))
+          (range (dec n) -1 -1))))
+
+(defn- smil-fraction
+  [v]
+  (let [r (mth/precision v 6)]
+    (if (== r (mth/round r)) (str (long r)) (str r))))
+
+(defn- smil-animate
+  "The SMIL `<animate>` of the attribute `attr` playing `points` (see
+  `smil-points`) as `timeline` plays (its duration and playback, as its
+  CSS, see `svg-iterations`), `render` writing the numbers of a value;
+  nil when it keeps its first one."
+  [timeline attr points render]
+  (when (not-every? #(= (second (first points)) (second %)) points)
+    (let [duration (max 1 (:duration timeline))
+          mode     (playback-mode timeline)
+          points   (if (= :ping-pong mode) (smil-mirrored points duration) points)
+          total    (if (= :ping-pong mode) (* 2 duration) duration)]
+      (str "<animate attributeName=\"" attr "\" dur=\"" (fmt total) "ms\""
+           (if (= :once mode) " fill=\"freeze\"" " repeatCount=\"indefinite\"")
+           " calcMode=\"spline\" keyTimes=\""
+           (str/join ";" (map #(smil-fraction (/ (first %) total)) points))
+           "\" keySplines=\""
+           (str/join ";" (map #(str/join " " (map fmt (nth % 2))) (butlast points)))
+           "\" values=\"" (str/join ";" (map #(render (second %)) points)) "\"/>"))))
+
+(defn- smil-values
+  "A function of a time to the values of the shape `sid` then as
+  `timeline` plays it (see `values-at`), keeping those it gave."
+  [timeline sid]
+  (let [timeline (update timeline :tracks select-keys [sid])
+        cache    (volatile! {})]
+    (fn [t]
+      (or (get @cache t)
+          (let [v (get (values-at timeline t) sid {})]
+            (vswap! cache assoc t v)
+            v)))))
+
+(def ^:private svg-hard-alpha
+  "The color matrix of the alpha of the source, opaque wherever it shows."
+  "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0")
+
+(defn- svg-shadow-color
+  [shadow]
+  (let [{:keys [color opacity]} (:color shadow)
+        [r g b] (clr/hex->rgb (or color "#000000"))]
+    [(/ r 255.0) (/ g 255.0) (/ b 255.0) (double (or opacity 1))]))
+
+(defn- render-color-matrix
+  [[r g b a]]
+  (str "0 0 0 0 " (fmt r) " 0 0 0 0 " (fmt g) " 0 0 0 0 " (fmt b) " 0 0 0 " (fmt a) " 0"))
+
+(defn- render-number
+  [[v]]
+  (fmt v))
+
+(defn svg-shadows-id
+  "The id of the filter of the shadows of the layer `id` (see
+  `svg-shadow-filter`); `rest?`, of the one at rest."
+  [id rest?]
+  (str (if rest? "penpot-shadows-rest-" "penpot-shadows-") id))
+
+(defn- svg-shadow-filter
+  "The filter `id` of the shadows of `shape` as the SVG renderer draws
+  them (see `app.main.ui.shapes.filters`): its drop shadows under it, its
+  inner ones over it, the last first, then, with `blur?`, its layer blur.
+  With `timeline` (cut to its duration), SMIL plays their keyframes on
+  it; without, they rest. Its region, on the page, holds them as they
+  play."
+  [id shape timeline blur?]
+  (let [sid      (:id shape)
+        track    (dm/get-in timeline [:tracks sid])
+        duration (max 1 (:duration timeline 1))
+        values   (if (some? track) (smil-values timeline sid) (constantly {}))
+        kfs      (filterv #(svg-shadow-properties (:property %)) (:keyframes track))
+        shadows  #(apply-shadows (:shadow shape) (values %))
+        attr     (fn [index name props value render]
+                   (let [value  #(value (get (shadows %) index))
+                         kfs    (filterv #(and (props (:property %)) (= index (or (:index %) 0))) kfs)
+                         points (when (seq kfs) (smil-points value kfs duration))]
+                     {:attr (str " " name "=\"" (render (value 0)) "\"")
+                      :animate (when points (smil-animate timeline name points render))
+                      :points points}))
+        el       (fn [tag attrs & props]
+                   (let [animates (keep :animate props)]
+                     (str "<" tag attrs (str/join "" (map :attr props))
+                          (if (seq animates)
+                            (str ">" (str/join "" animates) "</" tag ">")
+                            "/>"))))
+        spread   (fn [index sign]
+                   (attr index "radius" #{:shadow-spread}
+                         (fn [s] [(max 0 (* sign (or (:spread s) 0)))])
+                         render-number))
+        spreads? (fn [{:keys [points attr]}]
+                   (or (some #(pos? (first (second %))) points)
+                       (not= attr " radius=\"0\"")))
+        common   (fn [index]
+                   (str (el "feOffset" ""
+                            (attr index "dx" #{:shadow-offset-x} (fn [s] [(or (:offset-x s) 0)]) render-number)
+                            (attr index "dy" #{:shadow-offset-y} (fn [s] [(or (:offset-y s) 0)]) render-number))
+                        (el "feGaussianBlur" ""
+                            (attr index "stdDeviation" #{:shadow-blur} (fn [s] [(/ (or (:blur s) 0) 2)]) render-number))))
+        color    (fn [index]
+                   (el "feColorMatrix" " type=\"matrix\""
+                       (attr index "values" #{:shadow-color :shadow-opacity} svg-shadow-color render-color-matrix)))
+        drop     (fn [prev [k index]]
+                   (let [alpha  (str "a" k)
+                         dilate (spread index 1)
+                         erode  (spread index -1)]
+                     (str (el "feColorMatrix" (str " in=\"SourceAlpha\" type=\"matrix\" values=\"" svg-hard-alpha
+                                                   "\" result=\"" alpha "\""))
+                          (when (spreads? dilate)
+                            (el "feMorphology" (str " in=\"" alpha "\" operator=\"dilate\"") dilate))
+                          (when (spreads? erode)
+                            (el "feMorphology" (str (when-not (spreads? dilate) (str " in=\"" alpha "\""))
+                                                    " operator=\"erode\"")
+                                erode))
+                          (common index)
+                          (color index)
+                          (el "feBlend" (str " mode=\"normal\" in2=\"" prev "\" result=\"s" k "\"")))))
+        inner    (fn [prev [k index]]
+                   (let [alpha (str "a" k)
+                         erode (spread index 1)]
+                     (str (el "feColorMatrix" (str " in=\"SourceAlpha\" type=\"matrix\" values=\"" svg-hard-alpha
+                                                   "\" result=\"" alpha "\""))
+                          (when (spreads? erode)
+                            (el "feMorphology" (str " in=\"" alpha "\" operator=\"erode\"") erode))
+                          (common index)
+                          (el "feComposite" (str " in2=\"" alpha "\" operator=\"arithmetic\" k2=\"-1\" k3=\"1\""))
+                          (color index)
+                          (el "feBlend" (str " mode=\"normal\" in2=\"" prev "\" result=\"s" k "\"")))))
+        ;; each over the one before: `[result markup]`
+        chain    (fn [prev items f]
+                   (reduce (fn [[prev markup] [k :as item]]
+                             [(str "s" k) (str markup (f prev item))])
+                           [prev ""]
+                           items))
+        ;; as the renderer: its last shadow first
+        shown    (->> (as-vec (:shadow shape))
+                      (map-indexed vector)
+                      (remove (comp :hidden second))
+                      reverse
+                      (map-indexed (fn [k [index shadow]] [k index (:style shadow :drop-shadow)])))
+        [prev drops] (chain "BackgroundImageFix" (filter #(= :drop-shadow (nth % 2)) shown) drop)
+        [_ inners]   (chain "shape" (filter #(= :inner-shadow (nth % 2)) shown) inner)
+        blur     (:blur shape)
+        times    (into #{0 duration} (map :time) kfs)
+        bounds   (grc/join-rects
+                  (map #(gsb/get-shape-filter-bounds (cond-> (assoc shape :shadow (shadows %))
+                                                       (not blur?) (dissoc :blur)))
+                       times))
+        ;; its strokes; its shadows are in its bounds
+        padding  (gsb/calculate-padding shape false true)
+        px       (+ (:horizontal padding 0) 5)
+        py       (+ (:vertical padding 0) 5)]
+    (str "<filter id=\"" (svg-escape id)
+         "\" x=\"" (fmt (- (:x bounds) px)) "\" y=\"" (fmt (- (:y bounds) py))
+         "\" width=\"" (fmt (+ (:width bounds) (* 2 px))) "\" height=\"" (fmt (+ (:height bounds) (* 2 py)))
+         "\" filterUnits=\"userSpaceOnUse\" color-interpolation-filters=\"sRGB\">"
+         "<feFlood flood-opacity=\"0\" result=\"BackgroundImageFix\"/>"
+         drops
+         "<feBlend mode=\"normal\" in=\"SourceGraphic\" in2=\"" prev "\" result=\"shape\"/>"
+         inners
+         (when (and blur? (some? blur) (not (:hidden blur)) (pos? (or (:value blur) 0)))
+           (str "<feGaussianBlur stdDeviation=\"" (fmt (:value blur)) "\"/>"))
+         "</filter>")))
+
+(def ^:private kappa
+  "How far the control points of a cubic curve of a quarter of a circle
+  are from its ends, by its radius."
+  0.5522847498)
+
+(defn- render-corner-path
+  "The outline of a rectangle `[x y width height r1 r2 r3 r4]` (its
+  corners clamped, see `svg-corner-path`) as lines and curves: no arcs,
+  whose radii WebKit does not tween."
+  [[x y w h r1 r2 r3 r4]]
+  (let [k     (- 1 kappa)
+        right (+ x w)
+        bottom (+ y h)
+        pt    #(str (fmt %1) "," (fmt %2))]
+    (str "M" (pt (+ x r1) y)
+         "L" (pt (- right r2) y)
+         "C" (pt (- right (* k r2)) y) " " (pt right (+ y (* k r2))) " " (pt right (+ y r2))
+         "L" (pt right (- bottom r3))
+         "C" (pt right (- bottom (* k r3))) " " (pt (- right (* k r3)) bottom) " " (pt (- right r3) bottom)
+         "L" (pt (+ x r4) bottom)
+         "C" (pt (+ x (* k r4)) bottom) " " (pt x (- bottom (* k r4))) " " (pt x (- bottom r4))
+         "L" (pt x (+ y r1))
+         "C" (pt x (+ y (* k r1))) " " (pt (+ x (* k r1)) y) " " (pt (+ x r1) y)
+         "Z")))
+
+(defn- svg-corner-path
+  "The `<animate>` of the path of the outline of `shape` whose corners
+  `timeline` (cut to its duration) plays (see `svg-smil-corners?`), in
+  its own space (its turn is the `transform` of the path): its box at
+  rest, its corners clamped as the canvas clamps them."
+  [shape timeline]
+  (let [sid      (:id shape)
+        {:keys [x y width height]} (:selrect shape)
+        values   (smil-values timeline sid)
+        kfs      (filterv #(svg-radius-properties (:property %)) (dm/get-in timeline [:tracks sid :keyframes]))
+        value    (fn [t]
+                   (let [vs (values t)]
+                     (into [x y width height]
+                           (gco/shape-corners-4 {:width width :height height
+                                                 :r1 (get vs :r1 (or (:r1 shape) 0))
+                                                 :r2 (get vs :r2 (or (:r2 shape) 0))
+                                                 :r3 (get vs :r3 (or (:r3 shape) 0))
+                                                 :r4 (get vs :r4 (or (:r4 shape) 0))}))))]
+    (smil-animate timeline "d" (smil-points value kfs (max 1 (:duration timeline))) render-corner-path)))
+
+(defn- svg-smil-outline
+  "`markup` with the `<animate>` `animate` in the elements of the outline
+  of its shape, as the frontend marked them (`data-penpot-outline`)."
+  [markup animate]
+  (str/replace markup #"<path ([^>]*?) ?data-penpot-outline=\"\"([^>]*)></path>"
+               (str "<path $1$2>" animate "</path>")))
+
+(defn- svg-smil-class
+  [id]
+  (str "penpot-smil-" id))
+
+(defn- svg-smil
+  "What SMIL plays on the vectors of the layers of `timeline` (cut to its
+  duration) that `images` has the vectors of (see `timeline->svg`), `{id
+  {:outline :filters}}`: the `<animate>` of the path of
+  the outline of each whose corners it plays (see `svg-smil-corners?`),
+  the filters of the shadows of each whose shadows it plays (see
+  `svg-smil-shadows?`), as they play and at rest, which reduced motion
+  shows (see `svg-smil-css`)."
+  [timeline objects images]
+  (reduce-kv
+   (fn [result sid track]
+     (let [vectors? (or (some? (dm/get-in images [sid :markup]))
+                        (some #(some? (:markup (get images [sid %]))) (unit-image-indexes images sid)))
+           shape   (when vectors? (get objects sid))
+           blur?   (not (contains? (track-properties track) :blur))
+           outline (when (and (some? shape) (svg-smil-corners? shape track))
+                     (svg-corner-path shape timeline))
+           filters (when (and (some? shape) (svg-smil-shadows? shape track))
+                     (str (svg-shadow-filter (svg-shadows-id sid false) shape timeline blur?)
+                          (svg-shadow-filter (svg-shadows-id sid true) shape nil blur?)))]
+       (cond-> result
+         (or (some? outline) (some? filters))
+         (assoc sid (cond-> {}
+                      (some? outline) (assoc :outline outline)
+                      (some? filters) (assoc :filters filters))))))
+   {}
+   (:tracks timeline)))
+
+(defn- svg-smil-css
+  "The CSS that shows the shadows of `smil` (see `svg-smil`) at rest with
+  reduced motion asked for, which SMIL does not heed; nil without any.
+  Their corners play still."
+  [smil]
+  (let [ids (into [] (keep (fn [[id {:keys [filters]}]] (when filters id))) smil)]
+    (when (seq ids)
+      (str "@media (prefers-reduced-motion: reduce) {\n"
+           (str/join "\n" (map (fn [id]
+                                 (str "  ." (svg-smil-class id) " { filter: url(#"
+                                      (svg-shadows-id id true) "); }"))
+                               ids))
+           "\n}"))))
+
+(defn- svg-smil-vectors
+  "The vectors `markup` of the layer `id` (see `svg-vectors`) with what
+  SMIL plays on them (see `svg-smil`): the path of their outline, and
+  their shadows on a filter of their own around them."
+  [{:keys [smil ox oy]} id markup]
+  (let [{:keys [outline filters]} (get smil id)
+        markup (cond-> markup (some? outline) (svg-smil-outline outline))]
+    (svg-vectors (if (some? filters)
+                   (str "<defs>" filters "</defs>"
+                        "<g class=\"" (svg-escape (svg-smil-class id))
+                        "\" filter=\"url(#" (svg-escape (svg-shadows-id id false)) ")\">"
+                        markup "</g>")
+                   markup)
+                 ox oy)))
+
+(defn- svg-smil-around
+  "`svg`, in the SVG, whose origin is `ox`/`oy`, on the filter of the
+  shadows of the layer `id` SMIL plays (see `svg-smil`), if any: the
+  units of a split text."
+  [{:keys [smil ox oy]} id svg]
+  (if-let [filters (dm/get-in smil [id :filters])]
+    (str "<g transform=\"translate(" (fmt (- ox)) " " (fmt (- oy)) ")\"><defs>" filters "</defs>"
+         "<g class=\"" (svg-escape (svg-smil-class id))
+         "\" filter=\"url(#" (svg-escape (svg-shadows-id id false)) ")\">"
+         "<g transform=\"translate(" (fmt ox) " " (fmt oy) ")\">" svg "</g></g></g>")
+    svg))
+
 (defn- svg-follow-class
   "The CSS class of the group that moves the layer `id` with the board it
   is in (see `svg-follow-css`)."
@@ -5526,7 +5932,8 @@
   its CSS class animates. All images sit where they are in the SVG,
   whose origin is `ox`/`oy`. A layer of `svg-ids` has that `id`; one of
   `follow` sits in a group that moves it with the board it is in (see
-  `svg-follow-css`)."
+  `svg-follow-css`). SMIL plays what CSS can not on vectors (see
+  `svg-smil-vectors`)."
   [{:keys [objects images svg-ids ox oy follow] :as ctx} {:keys [id inner clip?]}]
   (when-let [shape (get objects id)]
     (let [inner   (str/join "" (keep #(emit-svg-node ctx %) inner))
@@ -5544,12 +5951,14 @@
                    (svg-id-attr svg-ids id)
                    (when (< opacity 1) (str " opacity=\"" (fmt opacity) "\""))
                    ">"
-                   (some-> (get images [id :rest]) (svg-drawing ox oy))
-                   (str/join "" (map (fn [k]
-                                       (str "<g class=\"" (svg-escape (unit-css-class id k)) "\">"
-                                            (svg-drawing (get images [id k]) ox oy)
-                                            "</g>"))
-                                     (unit-image-indexes images id)))
+                   (svg-smil-around
+                    ctx id
+                    (str (some-> (get images [id :rest]) (svg-drawing ox oy))
+                         (str/join "" (map (fn [k]
+                                             (str "<g class=\"" (svg-escape (unit-css-class id k)) "\">"
+                                                  (svg-drawing (get images [id k]) ox oy)
+                                                  "</g>"))
+                                           (unit-image-indexes images id)))))
                    inner
                    "</g>"))
 
@@ -5565,7 +5974,7 @@
                    (clipped
                     (str (if-let [markup (:markup img)]
                            ;; its vectors
-                           (svg-vectors markup ox oy)
+                           (svg-smil-vectors ctx id markup)
                            ;; the picture of the shape as it is, turned, over its
                            ;; box with shadows and blur (`:x :y` of the image), or
                            ;; its box
@@ -5639,12 +6048,13 @@
                                                              (fmt (+ (or y 0) (/ (or height 0) 2))) "px")))
                                             :adjust (fn [text units] (turned-moves units (:rotation text)))})})
          played   (-> timeline expand-paths cut-timeline)
+         smil     (svg-smil played objects images)
          ids      (export-layer-ids objects board-id (:tracks timeline) holders)
          nodes    (layer-nodes objects (set ids) board-id)
          follow   (when (some? propagate)
                     (svg-follow-css played objects holders ids propagate ox oy))
          clip?    (and (seq nodes) (clipping-board? board))
-         clips    (svg-clip-paths objects (:tracks timeline) ox oy
+         clips    (svg-clip-paths objects (:tracks timeline) smil ox oy
                                   (cond-> (into []
                                                 (comp (filter #(and (seq (:inner %))
                                                                     (clipping-board? (get objects (:id %)))))
@@ -5654,12 +6064,13 @@
          svg-ids  (when ids? (svg-layer-ids objects (cons board-id ids)))
          backdrop (when-let [img (get images board-id)]
                     (if-let [markup (:markup img)]
-                      (str "<g" (svg-id-attr svg-ids board-id) ">" (svg-vectors markup ox oy) "</g>")
+                      (str "<g" (svg-id-attr svg-ids board-id) ">"
+                           (svg-smil-vectors {:smil smil :ox ox :oy oy} board-id markup) "</g>")
                       (str "<image" (svg-id-attr svg-ids board-id)
                            " href=\"" (svg-escape (:href img))
                            "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>")))
          layers   (str/join "" (keep #(emit-svg-node {:objects objects :images images :svg-ids svg-ids
-                                                      :ox ox :oy oy :follow (:ids follow)}
+                                                      :ox ox :oy oy :follow (:ids follow) :smil smil}
                                                      %)
                                      nodes))
          opacity  (or (:opacity board) 1)
@@ -5674,6 +6085,7 @@
           "<style>g { transform-box: view-box; }\n" (some-> fonts (str "\n")) css
           (some->> (svg-appearance-css played objects) (str "\n\n"))
           (some->> (:css follow) (str "\n\n"))
+          (some->> (svg-smil-css smil) (str "\n\n"))
           "</style>"
           (when bbox?
             (str "<rect width=\"" width "\" height=\"" height "\" fill=\"none\"/>"))

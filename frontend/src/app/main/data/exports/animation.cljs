@@ -545,28 +545,18 @@
 (def ^:private lottie-formats
   #{:lottie :dotlottie})
 
-(def ^:private svg-static-properties
-  "What an SVG of vectors keeps as it rests (see `cta/svg-appearance-css`):
-  the spread of shadows, which CSS has not (the background blur has an
-  issue of its own)."
-  #{:shadow-spread})
-
 (defn- svg-static?
-  "Whether `track` animates on `shape` what an SVG keeps as it rests:
-  `svg-static-properties`, the strokes and trim of a text not
-  `outlined?` (see `outline-texts`), uneven corners (see
-  `cta/svg-even-corners?`) or the shadows of one with an inner shadow,
-  which CSS does not draw."
+  "Whether `track` animates on `shape` what an SVG keeps as it rests: the
+  strokes and trim of a text not `outlined?` (see `outline-texts`),
+  which the SVG renderer draws as text. CSS plays the rest on its
+  vectors, SMIL its shadows and the corners CSS can not (see
+  `cta/svg-smil-shadows?`, `cta/svg-smil-corners?`)."
   [shape track outlined?]
-  (let [props (into #{} (map :property) (:keyframes track))]
-    (boolean
-     (or (some svg-static-properties props)
-         (and (= :text (:type shape))
-              (not outlined?)
-              (some #{:stroke-color :stroke-opacity :stroke-width :trim-start :trim-end :trim-offset} props))
-         (and (some #{:r1 :r2 :r3 :r4} props) (not (cta/svg-even-corners? shape track)))
-         (and (some #{:shadow-offset-x :shadow-offset-y :shadow-blur :shadow-color :shadow-opacity} props)
-              (some #(= :inner-shadow (:style %)) (:shadow shape)))))))
+  (boolean
+   (and (= :text (:type shape))
+        (not outlined?)
+        (some #(#{:stroke-color :stroke-opacity :stroke-width :trim-start :trim-end :trim-offset} (:property %))
+              (:keyframes track)))))
 
 (defn- shown
   "The items of `items` (a shadow, a stroke, a blur, or a vector of them)
@@ -1284,7 +1274,6 @@
         ox       (or (:x (:selrect board)) 0)
         oy       (or (:y (:selrect board)) 0)
         resolved (cta/resolve-animations timeline objects)
-        animated #(into #{} (map :property) (dm/get-in resolved [:tracks % :keyframes]))
         {:keys [apply-shape-properties text-unit-outlines clean-modifiers]} bridge
         yield    (or yield default-yield)
         n        (count texts)]
@@ -1309,7 +1298,7 @@
                                                      :fills (svgv/span-fills shape paragraph span)})
                                                   runs)
                                       :center center}
-                                     {:markup (svgv/unit-markup shape runs (animated text-id))
+                                     {:markup (svgv/unit-markup shape runs (dm/get-in resolved [:tracks text-id]))
                                       :x (- (:x center) ox)
                                       :y (- (:y center) oy)
                                       :width 0
@@ -1779,7 +1768,6 @@
                         (outline-texts objects tl texts (or bridge (default-bridge)))
                         [objects objects])
         drawable (svgv/without-layers shapes (set layers))
-        animated #(into #{} (map :property) (dm/get-in resolved [:tracks % :keyframes]))
         yield    (or yield default-yield)
         n        (count drawn)]
     (p/let [_     (svgv/load-media objects)
@@ -1789,7 +1777,7 @@
             (reduce (fn [p [i id]]
                       (.then p (fn [images]
                                  (throw-if-cancelled cancelled?)
-                                 (let [markup (svgv/layer-markup drawable id (animated id))]
+                                 (let [markup (svgv/layer-markup drawable id (dm/get-in resolved [:tracks id]))]
                                    (when on-progress (on-progress (inc i) n))
                                    (.then (yield) (fn [_] (assoc images id {:markup markup})))))))
                     (js/Promise.resolve {})

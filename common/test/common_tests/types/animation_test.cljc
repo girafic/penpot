@@ -916,21 +916,121 @@
     (t/is (cta/svg-even-corners? shape (get-in tl [:tracks sid])))
     (t/is (not (cta/svg-even-corners? (assoc shape :r2 0) (get-in tl [:tracks sid]))) "uneven at rest")))
 
-(t/deftest an-svg-plays-drop-shadows-as-a-filter
+(defn- occurrences
+  "How many times `part` is in `text`."
+  [text part]
+  (loop [from 0 n 0]
+    (if-let [at (str/index-of text part from)]
+      (recur (+ at (count part)) (inc n))
+      n)))
+
+(defn- shadow-svg
+  "The SVG of a rectangle with a drop and an inner shadow, the vectors of
+  `markup`, playing `keyframes` (on the rectangle) as `settings` say."
+  [keyframes & {:keys [settings markup] :or {markup "<rect class=\"me\"></rect>"}}]
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
         bid   (:id board)
         shape (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20
                                 :shadow [{:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 8
-                                          :spread 0 :hidden false :color {:color "#000000" :opacity 0.5}}]})
+                                          :spread 0 :hidden false :color {:color "#000000" :opacity 0.5}}
+                                         {:id (uuid/next) :style :inner-shadow :offset-x 0 :offset-y 0 :blur 4
+                                          :spread 0 :hidden false :color {:color "#ff0000" :opacity 1}}]})
         sid   (:id shape)
-        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
-                  (cta/add-keyframe sid {:time 0 :property :shadow-offset-y :index 0 :value 4})
-                  (cta/add-keyframe sid {:time 1000 :property :shadow-offset-y :index 0 :value 20}))
+        tl    (reduce #(cta/add-keyframe %1 sid %2)
+                      (cta/make-timeline (merge {:board-id bid :duration 1000} settings))
+                      keyframes)
         objects {bid (assoc board :shapes [sid])
-                 sid (assoc shape :parent-id bid :frame-id bid)}
-        svg   (cta/timeline->svg tl objects {})]
-    (t/is (re-find #"filter: drop-shadow\(4px 20px 4px rgba\(0, 0, 0, 0.5\)\);" svg))
-    (t/is (not (re-find #"box-shadow" svg)) "no box shadow, which SVG has not")))
+                 sid (assoc shape :parent-id bid :frame-id bid)}]
+    {:sid sid
+     :track (get-in tl [:tracks sid])
+     :shape shape
+     :svg (cta/timeline->svg tl objects {sid {:markup markup}})}))
+
+(t/deftest an-svg-plays-shadows-by-smil
+  (let [{:keys [sid svg shape track]}
+        (shadow-svg [{:time 0 :property :shadow-offset-y :index 0 :value 4 :easing :ease}
+                     {:time 1000 :property :shadow-offset-y :index 0 :value 20}
+                     {:time 0 :property :shadow-spread :index 1 :value 0}
+                     {:time 1000 :property :shadow-spread :index 1 :value 6}])]
+    (t/is (cta/svg-smil-shadows? shape track))
+    (t/is (str/includes? svg (str "<g class=\"penpot-smil-" sid "\" filter=\"url(#penpot-shadows-" sid
+                                  ")\"><rect class=\"me\"></rect></g>"))
+          "its vectors in a filter of its shadows")
+    (t/is (str/includes? svg (str "<filter id=\"penpot-shadows-" sid "\""))
+          "which plays them")
+    (t/is (str/includes? svg (str "<animate attributeName=\"dy\" dur=\"1000ms\" fill=\"freeze\" calcMode=\"spline\" "
+                                  "keyTimes=\"0;1\" keySplines=\"0.25 0.1 0.25 1\" values=\"4;20\"/>"))
+          "its drop shadow moving down as it eases")
+    (t/is (str/includes? svg (str "<feMorphology in=\"a0\" operator=\"erode\" radius=\"0\"><animate "
+                                  "attributeName=\"radius\""))
+          "its inner shadow spreading, the first the renderer draws")
+    (t/is (str/includes? svg "values=\"0;6\"/></feMorphology>"))
+    (t/is (str/includes? svg "<feComposite in2=\"a0\" operator=\"arithmetic\" k2=\"-1\" k3=\"1\"/>")
+          "inside the shape")
+    (t/is (= 1 (occurrences svg "<feMorphology")) "no spread of the drop shadow, which has none")
+    (t/is (str/includes? svg (str ".penpot-smil-" sid " { filter: url(#penpot-shadows-rest-" sid "); }"))
+          "at rest with reduced motion")
+    (t/is (str/includes? svg (str "<filter id=\"penpot-shadows-rest-" sid "\""))
+          "a filter of its shadows as they are")
+    (t/is (not (str/includes? svg "drop-shadow(")) "no CSS shadows")
+    (t/is (not (str/includes? svg (str "penpot-anim-" sid))) "nor CSS animation, its group plays nothing")))
+
+(t/deftest smil-plays-holds-springs-spreads-and-ping-pongs
+  (t/testing "a hold keeps its value to the end of its stretch"
+    (let [{:keys [svg]} (shadow-svg [{:time 0 :property :shadow-offset-x :index 0 :value 4 :interpolation :step}
+                                     {:time 1000 :property :shadow-offset-x :index 0 :value 12}])]
+      (t/is (str/includes? svg "attributeName=\"dx\" dur=\"1000ms\" fill=\"freeze\" calcMode=\"spline\" keyTimes=\"0;0.9995;1\""))
+      (t/is (str/includes? svg "values=\"4;4;12\""))))
+  (t/testing "a spring, which keySplines can not curve, as samples"
+    (let [{:keys [svg]} (shadow-svg [{:time 0 :property :shadow-blur :index 0 :value 0
+                                      :easing {:type :spring :stiffness 300 :damping 10 :mass 1}}
+                                     {:time 1000 :property :shadow-blur :index 0 :value 20}])
+          [_ times] (re-find #"attributeName=\"stdDeviation\"[^>]*keyTimes=\"([^\"]*)\"" svg)]
+      (t/is (some? times))
+      (t/is (<= 30 (count (str/split times #";"))) "30 a second")))
+  (t/testing "a spread from in to out, on both"
+    (let [{:keys [svg]} (shadow-svg [{:time 0 :property :shadow-spread :index 0 :value -4}
+                                     {:time 1000 :property :shadow-spread :index 0 :value 4}])]
+      (t/is (str/includes? svg "operator=\"dilate\""))
+      (t/is (str/includes? svg "operator=\"erode\""))))
+  (t/testing "ping-pong, forth and back, each stretch back by its curve reversed"
+    (let [{:keys [svg]} (shadow-svg [{:time 0 :property :shadow-offset-y :index 0 :value 4 :easing :ease}
+                                     {:time 1000 :property :shadow-offset-y :index 0 :value 20}]
+                                    :settings {:playback :ping-pong})]
+      (t/is (str/includes? svg (str "<animate attributeName=\"dy\" dur=\"2000ms\" repeatCount=\"indefinite\" "
+                                    "calcMode=\"spline\" keyTimes=\"0;0.5;1\" "
+                                    "keySplines=\"0.25 0.1 0.25 1;0.75 0 0.75 0.9\" values=\"4;20;4\"/>")))))
+  (t/testing "no SMIL of hidden shadows"
+    (let [{:keys [shape track]} (shadow-svg [{:time 0 :property :shadow-offset-y :index 0 :value 4}])]
+      (t/is (not (cta/svg-smil-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))))))
+
+(t/deftest an-svg-plays-corners-not-alike-by-smil
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100 :r1 0 :r2 0 :r3 0 :r4 0})
+        bid   (:id board)
+        shape (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20 :r1 0 :r2 0 :r3 0 :r4 0})
+        child (cts/setup-shape {:type :rect :x 20 :y 20 :width 10 :height 10})
+        sid   (:id shape)
+        cid   (:id child)
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :r1 :value 0 :easing :ease-in-out})
+                  (cta/add-keyframe sid {:time 1000 :property :r1 :value 10})
+                  (cta/add-keyframe cid {:time 0 :property :x :value 20}))
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid :shapes [cid])
+                 cid (assoc child :parent-id sid :frame-id bid)}
+        markup  "<path d=\"M10,10 h40\" data-penpot-outline=\"\" fill=\"red\"></path><path d=\"M0,0\"></path>"
+        svg     (cta/timeline->svg tl objects {sid {:markup markup} cid {:markup "<rect></rect>"}})]
+    (t/is (cta/svg-smil-corners? shape (get-in tl [:tracks sid])))
+    (t/is (not (cta/svg-smil-corners? (assoc shape :type :circle) (get-in tl [:tracks sid]))))
+    (t/is (str/includes? svg "<path d=\"M10,10 h40\" fill=\"red\"><animate attributeName=\"d\" dur=\"1000ms\"")
+          "on the elements of its outline")
+    (t/is (str/includes? svg "<path d=\"M0,0\"></path>") "but not the others")
+    (t/is (str/includes? svg "keySplines=\"0.42 0 0.58 1\"") "as it eases")
+    (t/is (str/includes? svg (str "values=\"M10,10L50,10C50,10 50,10 50,10L50,30C50,30 50,30 50,30L10,30"
+                                  "C10,30 10,30 10,30L10,10C10,10 10,10 10,10Z;"
+                                  "M20,10L50,10"))
+          "of lines and curves, from square to a round top left corner")
+    (t/is (str/includes? svg "C10,14.477 14.477,10 20,10Z\"/>") "a quarter of a circle")))
 
 (t/deftest timeline->svg-nests-child-layers
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
@@ -1084,14 +1184,6 @@
     (t/testing "a path stretches, as before"
       (let [svg (cta/timeline->svg (grow rect) (svg-board-with board (assoc rect :rotation 30)) {})]
         (t/is (re-find #"scale\(2, 1\)" svg))))))
-
-(defn- occurrences
-  "How many times `part` is in `text`."
-  [text part]
-  (loop [from 0 n 0]
-    (if-let [at (str/index-of text part from)]
-      (recur (+ at (count part)) (inc n))
-      n)))
 
 (t/deftest an-svg-plays-all-the-animations-of-an-element
   ;; A rule of its own of each would drop the others.

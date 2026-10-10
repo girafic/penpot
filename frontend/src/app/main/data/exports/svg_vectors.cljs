@@ -14,12 +14,15 @@
    ["react-dom/server" :as rds]
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
+   [app.common.types.animation :as cta]
    [app.common.types.path :as path]
+   [app.common.types.shape.radius :as ctsr]
    [app.common.types.text :as txt]
    [app.common.uuid :as uuid]
    [app.config :as cfg]
    [app.main.fonts :as fonts]
    [app.main.render :as render]
+   [app.main.ui.shapes.attrs :as attrs]
    [app.main.ui.shapes.embed :as embed]
    [app.main.ui.shapes.export :as export]
    [app.main.ui.shapes.text.fontfaces :as ff]
@@ -40,28 +43,45 @@
                      (seq (:shapes shape))
                      (update :shapes #(into [] (remove layer-ids) %))))))
 
-(def ^:private shadow-properties
-  #{:shadow-offset-x :shadow-offset-y :shadow-blur :shadow-spread :shadow-color :shadow-opacity})
-
 (def ^:private trim-properties
   #{:trim-start :trim-end :trim-offset})
 
 (defn- rest-shape
   "`shape` as its layer draws it: without its opacity, which the group of
-  the layer has, and without what the animation `animated` (properties)
-  plays over it, which would else show twice: a blur or drop shadows
-  played by CSS on its group (see `cta/svg-appearance-css`). A board
-  that hides its fill in exports, without it."
-  [shape animated]
-  (cond-> (dissoc shape :opacity)
-    (contains? animated :blur)
-    (dissoc :blur)
+  the layer has, and without what its animation, `track`, plays over it,
+  which would else show twice: a blur played by CSS on its group, its
+  shadows (and blur) played by SMIL on a filter of their own (see
+  `cta/svg-smil-shadows?`). Its outline a path when SMIL plays its
+  corners (see `cta/svg-smil-corners?`), which are not alike as it plays.
+  A board that hides its fill in exports, without it."
+  [shape track]
+  (let [animated (into #{} (map :property) (:keyframes track))
+        shadows? (cta/svg-smil-shadows? shape track)]
+    (cond-> (dissoc shape :opacity)
+      (or shadows? (contains? animated :blur))
+      (dissoc :blur)
 
-    (some shadow-properties animated)
-    (update :shadow (fn [shadows] (filterv #(= :inner-shadow (:style %)) shadows)))
+      shadows?
+      (assoc :shadow [])
 
-    (:hide-fill-on-export shape)
-    (assoc :fills [])))
+      ;; corners alike draw as a `rect`
+      (and (cta/svg-smil-corners? shape track) (ctsr/all-equal? shape))
+      (as-> shape (assoc shape
+                         :r1 (or (:r1 shape) 0) :r2 (or (:r2 shape) 0) :r3 (or (:r3 shape) 0)
+                         :r4 (+ (or (:r4 shape) 0) 0.0001)))
+
+      (:hide-fill-on-export shape)
+      (assoc :fills []))))
+
+(defn- mark-outline
+  "`markup` with the elements of the outline of `shape` (see
+  `rest-shape`) marked, which SMIL plays the corners on (see
+  `cta/svg-smil-corners?`)."
+  [markup shape]
+  (if-let [d (.-d (attrs/get-border-props shape))]
+    (let [attr (str " d=\"" d "\"")]
+      (.join (.split markup attr) (str attr " data-penpot-outline=\"\"")))
+    markup))
 
 (defn with-path-length
   "The `markup` of the shape `id` with the outlines its strokes are drawn
@@ -192,19 +212,21 @@
   as Penpot's SVG renderer draws it, its images embedded when their data
   URIs are cached (see `load-media`), without metadata, its `<use>`s
   copies (see `inline-uses`), its path data compact (see
-  `compact-path`). `animated` is what its animation plays (see
-  `rest-shape`)."
-  [objects id animated]
-  (let [markup (rds/renderToStaticMarkup
-                (mf/element layer-svg* #js {:objects objects
-                                            :shape (rest-shape (get objects id) animated)}))]
+  `compact-path`). `track` is its animation (see `rest-shape`)."
+  [objects id track]
+  (let [shape  (rest-shape (get objects id) track)
+        markup (rds/renderToStaticMarkup
+                (mf/element layer-svg* #js {:objects objects :shape shape}))]
     (cond-> (-> markup
                 (str/replace #"^<svg[^>]*>" "")
                 (str/replace #"</svg>$" "")
                 (inline-uses)
                 (compact-paths))
-      (some trim-properties animated)
-      (with-path-length id))))
+      (some #(trim-properties (:property %)) (:keyframes track))
+      (with-path-length id)
+
+      (cta/svg-smil-corners? (get objects id) track)
+      (mark-outline shape))))
 
 (defn- image-urls
   "The URLs of the images the shapes of `objects` draw."
@@ -330,13 +352,13 @@
   "The SVG of a piece of the split text `shape`, its `runs` (see
   `wasm.api/text-unit-outlines`): each the outlines of the glyphs a span
   paints, a path of the text in the fills of the span (see `outlined`),
-  drawn at rest as `layer-markup` draws a layer, `animated` what the
-  animation of the text plays (see `rest-shape`)."
-  [shape runs animated]
+  drawn at rest as `layer-markup` draws a layer, `track` the animation
+  of the text (see `rest-shape`)."
+  [shape runs track]
   (let [id (:id shape)]
     (->> runs
          (map (fn [{:keys [paragraph span content]}]
-                (layer-markup {id (outlined shape content (span-fills shape paragraph span))} id animated)))
+                (layer-markup {id (outlined shape content (span-fills shape paragraph span))} id track)))
          (str/join ""))))
 
 (defn outlined-group
