@@ -1079,6 +1079,33 @@
      :objects {bid (assoc board :shapes [(:id text)])
                (:id text) (assoc text :parent-id bid :frame-id bid)}}))
 
+(t/deftest an-export-in-place-waits-for-the-faces-of-its-texts
+  ;; A file just opened may still load them: an export would keep the
+  ;; faces at hand meanwhile, glyphs missing.
+  (t/async
+    done
+    (let [{:keys [objects bid tid]} (text-board)
+          checks (atom 0)
+          relaid (atom [])
+          wait   #(apply dea/texts-laid-out objects [bid] :relayout (fn [id] (swap! relaid conj id)) %&)]
+      (-> (wait :pending (fn [_] (if (< (swap! checks inc) 3) #{"face"} #{})))
+          (.then (fn [_]
+                   (t/is (= 3 @checks) "until the faces are there")
+                   (t/is (= [tid] @relaid) "laid out again with them")
+                   (reset! relaid [])
+                   (wait :pending (constantly #{}))))
+          (.then (fn [_]
+                   (t/is (empty? @relaid) "nothing to wait for, nothing laid out")
+                   (wait :pending (constantly #{"face"}) :timeout-ms 120)))
+          (.then (fn [_]
+                   (t/is (= [tid] @relaid) "given up on, laid out with what it has")
+                   (-> (wait :pending (constantly #{"face"}) :cancelled? (constantly true))
+                       (.then (constantly :waited))
+                       (.catch #(:type (ex-data %))))))
+          (.then (fn [outcome] (t/is (= :export-cancelled outcome) "cancelled meanwhile")))
+          (.catch (fn [cause] (t/is false (str "failed: " cause))))
+          (.finally (finish done))))))
+
 (defn- words-use
   "A use of a style of `entry`."
   [entry]

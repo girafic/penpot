@@ -29,6 +29,7 @@
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.store :as st]
    [app.render-wasm.api :as wasm.api]
+   [app.render-wasm.api.fonts :as wasm.fonts]
    [app.render-wasm.gesture :as wasm-gesture]
    [app.render-wasm.modifiers :as wasm.modifiers]
    [app.render-wasm.shape :as wasm.shape]
@@ -43,6 +44,8 @@
    [promesa.core :as p]))
 
 (defonce ^:private cancel-fn (atom nil))
+
+(declare text-faces-pending)
 
 (defn default-bridge
   []
@@ -59,7 +62,10 @@
    :apply-shape-properties wasm.shape/apply-shape-properties!
    :set-modifiers-end wasm.api/set-modifiers-end
    :interactive? wasm-gesture/active?
-   :end-interactive wasm-gesture/try-end-interactive-transform!})
+   :end-interactive wasm-gesture/try-end-interactive-transform!
+   ;; none without WASM, which lays out no text then
+   :text-faces-pending #(if (wasm.api/initialized?) (text-faces-pending %) #{})
+   :relayout-text wasm.fonts/force-update-text-layout})
 
 (defn- property-ops
   [modif-tree]
@@ -2075,6 +2081,62 @@
        (finish-export-state)]
       (conj (vec (notes-shown notes)) (finish-export-state)))))
 
+(def ^:private fonts-wait-ms
+  "How long an export in place waits for the faces of its texts (see
+  `texts-laid-out`) before it goes on without them."
+  10000)
+
+(defn text-faces-pending
+  "The keys of the faces the texts `texts` lay out with, their own and the
+  fallbacks of what they write (emoji, Noto), that WASM has neither
+  stored yet nor given up on (see `wasm.fonts/font-ready?`)."
+  [texts]
+  (into #{}
+        (comp (mapcat (fn [{:keys [content]}]
+                        (concat (wasm.fonts/get-content-fonts content)
+                                (wasm.api/fonts-from-text-content content false))))
+              (map wasm.fonts/make-font-data)
+              (remove wasm.fonts/font-ready?)
+              (map wasm.fonts/font-data-key))
+        texts))
+
+(defn texts-laid-out
+  "A promise resolved once WASM has the faces that the texts in the
+  boards `board-ids` of `objects` lay out with (see `text-faces-pending`)
+  and they are laid out again with them, or after `timeout-ms`. A file
+  just opened may still be loading them: its texts draw in the faces at
+  hand meanwhile, which an export would keep, in another weight, with
+  glyphs missing. It checks every few ms, and rejects with
+  `:export-cancelled` once `cancelled?` is true. `pending` and `relayout`
+  are those of the bridge (see `default-bridge`): it waits for nothing
+  without them."
+  [objects board-ids & {:keys [timeout-ms cancelled? pending relayout]
+                        :or {timeout-ms fonts-wait-ms}}]
+  (let [pending  (or pending (constantly #{}))
+        relayout (or relayout (constantly nil))
+        texts    (into []
+                       (comp (mapcat #(cfh/get-children-with-self objects %))
+                             (filter cfh/text-shape?)
+                             (remove :hidden))
+                       board-ids)
+        deadline (+ (js/Date.now) timeout-ms)]
+    (if (empty? (pending texts))
+      (js/Promise.resolve nil)
+      (js/Promise.
+       (fn [resolve reject]
+         (letfn [(check []
+                   (cond
+                     (and (some? cancelled?) (cancelled?))
+                     (reject (ex-info "cancelled" {:type :export-cancelled}))
+
+                     (or (empty? (pending texts)) (> (js/Date.now) deadline))
+                     (do (run! (comp relayout :id) texts)
+                         (resolve nil))
+
+                     :else
+                     (js/setTimeout check 50)))]
+           (check)))))))
+
 (defn restore-canvas!
   "Show the animation at the playhead again after an export in place,
   which rendered in full quality (see `begin-full-quality!`): fast if
@@ -2094,23 +2156,37 @@
   "A promise of the export of the active board, or of the `:boards` of
   `params` into a ZIP named after the file (see `run-exports`), run in
   the workspace tab, downloaded: the canvas renders in full quality
-  meanwhile and shows the animation at the playhead again after."
+  meanwhile and shows the animation at the playhead again after. It
+  starts once its texts are laid out with their faces (see
+  `texts-laid-out`)."
   [state params]
-  (let [bridge   (or (:bridge params) (default-bridge))
-        was-fast (begin-full-quality! bridge)
-        boards   (or (not-empty (:boards params))
-                     [{:board-id (dwa/active-board-id state) :scale (or (:scale params) 1)}])
-        {:keys [promise cancel]}
-        (run-exports {:page (dsh/lookup-page state)
-                      :files (dsh/lookup-libraries state)
-                      :time (dwa/playhead state)
-                      :bridge bridge
-                      :on-progress #(st/emit! (set-export-progress %))}
-                     (dissoc params :bridge :boards :scale)
-                     boards
-                     (:name (dsh/lookup-file state)))]
-    (reset! cancel-fn cancel)
-    (-> promise
+  (let [bridge    (or (:bridge params) (default-bridge))
+        was-fast  (begin-full-quality! bridge)
+        boards    (or (not-empty (:boards params))
+                      [{:board-id (dwa/active-board-id state) :scale (or (:scale params) 1)}])
+        page      (dsh/lookup-page state)
+        cancelled (atom false)]
+    ;; cancelled while it waits for the faces
+    (reset! cancel-fn #(reset! cancelled true))
+    (-> (texts-laid-out (:objects page) (map :board-id boards)
+                        :cancelled? #(deref cancelled)
+                        :pending (:text-faces-pending bridge)
+                        :relayout (:relayout-text bridge))
+        (.then
+         (fn [_]
+           (when @cancelled
+             (throw (ex-info "cancelled" {:type :export-cancelled})))
+           (let [{:keys [promise cancel]}
+                 (run-exports {:page page
+                               :files (dsh/lookup-libraries state)
+                               :time (dwa/playhead state)
+                               :bridge bridge
+                               :on-progress #(st/emit! (set-export-progress %))}
+                              (dissoc params :bridge :boards :scale)
+                              boards
+                              (:name (dsh/lookup-file state)))]
+             (reset! cancel-fn cancel)
+             promise)))
         (.then
          (fn [result]
            (when (= :ok (:status result))
