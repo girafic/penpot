@@ -61,7 +61,7 @@ $header-height: $ruler-height + $row-height;
     inset: 0;
     block-size: auto;
     border-top: none;
-    z-index: var(--z-index-guides);
+    z-index: var(--timeline-maximized-z);
   }
 
   // Auto-keyframe on: every edit records keyframes, the playhead and a bar

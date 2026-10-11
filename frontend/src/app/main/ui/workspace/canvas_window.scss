@@ -10,19 +10,20 @@
 
 // The window around the canvas, over its edges: its border and shadow,
 // and what moves and resizes it. Clicks pass to the canvas but on those.
+// The sizes of its border and bar come inline from where the canvas is
+// laid out under them (see `cw/canvas-box`), so they never drift apart.
 .window {
   position: fixed;
-  z-index: calc(var(--z-index-guides) + 2);
+  z-index: calc(var(--timeline-maximized-z) + 2);
   box-sizing: border-box;
   overflow: hidden;
-  border: $b-1 solid var(--panel-border-color);
+  border: var(--canvas-window-border) solid var(--panel-border-color);
   border-radius: $br-12;
   box-shadow: var(--el-shadow-dark);
   pointer-events: none;
 }
 
-// The bar on top of the window that moves it, above the canvas, as tall
-// as `cw/bar-height`.
+// The bar on top of the window that moves it, above the canvas.
 .bar {
   position: absolute;
   inset-block-start: 0;
@@ -30,9 +31,9 @@
   display: grid;
   place-items: center;
   box-sizing: border-box;
-  block-size: $sz-16;
+  block-size: var(--canvas-window-bar);
   background-color: var(--color-background-primary);
-  border-block-end: $b-1 solid var(--panel-border-color);
+  border-block-end: var(--canvas-window-border) solid var(--panel-border-color);
   cursor: grab;
   touch-action: none;
   pointer-events: auto;
@@ -62,8 +63,8 @@
   inset-inline-end: $sz-12;
   display: grid;
   place-items: center;
-  inline-size: $sz-16;
-  block-size: $sz-16;
+  inline-size: var(--canvas-window-bar);
+  block-size: var(--canvas-window-bar);
   padding: 0;
   border: none;
   background-color: transparent;

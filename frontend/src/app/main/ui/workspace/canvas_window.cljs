@@ -183,7 +183,10 @@
            :style #js {"left" (dm/str (:x frame) "px")
                        "top" (dm/str (:y frame) "px")
                        "width" (dm/str (:w frame) "px")
-                       "height" (dm/str (:h frame) "px")}}
+                       "height" (dm/str (:h frame) "px")
+                       ;; as `canvas-box` lays the canvas out under them
+                       "--canvas-window-bar" (dm/str bar-height "px")
+                       "--canvas-window-border" (dm/str border "px")}}
      [:div {:class (stl/css :bar)
             :data-mode "move"
             :title (tr "workspace.animation.canvas-window-move")

@@ -16,6 +16,12 @@
   // size themselves from it, so they end above the bottom dock.
   --workspace-height: 100vh;
 
+  // The maximized timeline over the panels, and over it the canvas in its
+  // window (`.workspace-content.pip`) and the frame of that window
+  // (`canvas_window.scss`): one step each, under what opens over them,
+  // modals, popovers and menus.
+  --timeline-maximized-z: var(--z-index-guides);
+
   inline-size: 100vw;
   block-size: 100vh;
   max-block-size: 100vh;
@@ -59,8 +65,8 @@
 .workspace-content.pip {
   position: fixed;
 
-  // just over the maximized timeline, under its popovers, modals and menus
-  z-index: calc(var(--z-index-guides) + 1);
+  // just over the maximized timeline (see `.workspace`)
+  z-index: calc(var(--timeline-maximized-z) + 1);
   overflow: hidden;
   border-end-start-radius: calc(#{$br-12} - #{$b-1});
   border-end-end-radius: calc(#{$br-12} - #{$b-1});
