@@ -1952,13 +1952,17 @@
                             :else
                             (st/emit! (dwsh/update-shapes [id] #(assoc % :grids value))))))}
 
+                ;; not enumerable, as `parent` and `children`: the timeline
+                ;; leads back to the board, and serializing it would never end
                 {:name "timeline"
+                 :enumerable false
                  :get
                  (fn [_]
                    (when (contains? (:timelines (u/locate-page file-id page-id)) id)
                      (motion/timeline-proxy plugin-id file-id page-id id)))}
 
                 {:name "animatedCopies"
+                 :enumerable false
                  :get
                  (fn [_]
                    (motion/animated-copies plugin-id file-id page-id id))}

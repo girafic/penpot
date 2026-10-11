@@ -120,6 +120,29 @@
             (t/is (empty? (stored-timelines store context)))
             (t/is (nil? (.-timeline board)))))))))
 
+(t/deftest a-board-with-a-timeline-serializes
+  ;; The timeline of a board and what is in it lead back to the board. As
+  ;; `parent` and `children`, those links are not enumerable, so a plugin
+  ;; that sends a board to its UI (`structuredClone`, as the MCP server's
+  ;; results go) is done with it instead of following them for ever.
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[_ ^js context] (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js timeline (.addTimeline board #js {:duration 1000})]
+        (.addKeyframe timeline rect #js {:property "x" :time 0 :value 0})
+        (.addAnimation timeline rect #js {:type "fade" :start 0 :duration 300})
+        (t/is (not (.includes (js/Object.keys board) "timeline")))
+        (t/is (not (.includes (js/Object.keys timeline) "board")))
+        (t/is (some? (js/structuredClone board)) "as a plugin sends it to its UI")
+        (t/is (some? (js/structuredClone #js [board timeline (aget (.-keyframes timeline) 0)])))
+        (t/is (str/includes? (js/JSON.stringify timeline) "\"property\":\"x\"")
+              "the timeline with its keyframes")
+        (t/testing "the links are there to follow"
+          (t/is (= (aget board "$id") (aget (.-board timeline) "$id")))
+          (t/is (= (aget rect "$id") (aget (.-shape (aget (.-keyframes timeline) 0)) "$id")))
+          (t/is (= (aget rect "$id") (aget (.-shape (aget (.-animations timeline) 0)) "$id"))))))))
+
 (t/deftest keyframes-animate-the-layers
   (thw/with-wasm-mocks*
     (fn []

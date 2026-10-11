@@ -440,8 +440,11 @@
       :id
       {:get #(dm/str id)}
 
+      ;; not enumerable: the shape leads back here through its board's
+      ;; timeline, and serializing it would never end
       :shape
-      {:get #(shape-proxy plugin-id file-id page-id shape-id)}
+      {:enumerable false
+       :get #(shape-proxy plugin-id file-id page-id shape-id)}
 
       :property
       {:get #(some-> (locate) :property property-names)}
@@ -809,8 +812,11 @@
       :id
       {:get #(dm/str id)}
 
+      ;; not enumerable: the shape leads back here through its board's
+      ;; timeline, and serializing it would never end
       :shape
-      {:get #(shape-proxy plugin-id file-id page-id shape-id)}
+      {:enumerable false
+       :get #(shape-proxy plugin-id file-id page-id shape-id)}
 
       :type
       {:get #(some-> (locate) :type name)}
@@ -1265,8 +1271,11 @@
       :id
       {:get #(dm/str id)}
 
+      ;; not enumerable: the shape leads back here through its board's
+      ;; timeline, and serializing it would never end
       :shape
-      {:get #(shape-proxy plugin-id file-id page-id shape-id)}
+      {:enumerable false
+       :get #(shape-proxy plugin-id file-id page-id shape-id)}
 
       ;; while its style is in the file or in a library of it
       :style
@@ -1358,8 +1367,11 @@
       :$page {:enumerable false :get (constantly page-id)}
       :$id {:enumerable false :get (constantly board-id)}
 
+      ;; not enumerable: the board leads back here, and serializing it
+      ;; would never end
       :board
-      {:get #(shape-proxy plugin-id file-id page-id board-id)}
+      {:enumerable false
+       :get #(shape-proxy plugin-id file-id page-id board-id)}
 
       :name
       {:get #(:name (locate))
