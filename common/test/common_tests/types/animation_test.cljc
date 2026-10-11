@@ -907,7 +907,30 @@
     (t/is (re-find (re-pattern (str "<g class=\"" (cta/shape-css-class sid) "\"><g transform=\"translate\\(-100 -50\\)\" fill=\"none\"><rect class=\"layer\"/>"))
                    svg)
           "a layer in the group its CSS plays")
-    (t/is (re-find #"<style>[^<]*@font-face \{ font-family: X; \}" svg) "the fonts of its texts")))
+    (t/is (re-find #"<style><!\[CDATA\[[^<]*@font-face \{ font-family: X; \}" svg) "the fonts of its texts")))
+
+(t/deftest an-svg-is-xml-whatever-the-names
+  ;; An SVG is XML: a name with `&` or `<`, or one that ends a CSS
+  ;; comment, breaks no file.
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 100})
+        shape   (cts/setup-shape {:type :rect :name "Q&A <x> */ b { color: red }" :x 10 :y 10 :width 20 :height 20
+                                  :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        [bid sid] (map :id [board shape])
+        objects {bid (assoc board :shapes [sid])
+                 sid (assoc shape :parent-id bid :frame-id bid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe sid {:time 0 :property :x :value 10})
+                    (cta/add-keyframe sid {:time 1000 :property :x :value 50}))
+        svg     (cta/timeline->svg tl objects {bid {:markup "<rect/>"} sid {:markup "<rect/>"}}
+                                   {:fonts "@font-face { font-family: 'R&D Sans'; }"})
+        style   (second (re-find #"<style><!\[CDATA\[([\s\S]*)\]\]></style>" svg))]
+    (t/is (some? style) "its CSS as character data")
+    (t/is (str/includes? style "/* Q&A <x> * / b { color: red } */") "a name that ends no comment")
+    (t/is (str/includes? style "'R&D Sans'"))
+    #?(:clj
+       (t/is (some? (.parse (.newDocumentBuilder (javax.xml.parsers.DocumentBuilderFactory/newInstance))
+                            (java.io.ByteArrayInputStream. (.getBytes ^String svg "UTF-8"))))
+             "well-formed"))))
 
 (t/deftest an-svg-plays-fills-strokes-corners-and-trim-on-its-vectors
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})

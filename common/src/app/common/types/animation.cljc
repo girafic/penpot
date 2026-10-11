@@ -3906,6 +3906,12 @@
                (and (not sized?) (contains? #{:width :height} property))))
          (:keyframes track))))
 
+(defn- css-comment
+  "A CSS comment of `text`, which can not end it early (a name with `*/`
+  would go on as CSS)."
+  [text]
+  (str "/* " (str/replace (str text) "*/" "* /") " */"))
+
 (defn timeline->css
   "Generate a CSS string (`@keyframes` blocks + per-shape `animation`
   rules) for `timeline`, using the base geometry from `objects`. Pure.
@@ -3959,7 +3965,7 @@
                    selector ((:selector units) text k)
                    unit     (unit-shape units-tl objects unit-id)]
                [selector
-                (str "/* " (or (:name text) (str text-id)) ", unit " (inc k) " */\n"
+                (str (css-comment (str (or (:name text) text-id) ", unit " (inc k))) "\n"
                      (track->keyframes-css units-tl unit (get-in units-tl [:tracks unit-id]) kf-name
                                            (position-origin units-tl objects unit-id) nil
                                            :svg? svg?
@@ -3977,7 +3983,7 @@
                                                       (get objects sid))]
                                   (let [kf-name  (str "penpot-anim-" sid)
                                         selector (selector shape)
-                                        comment  (str "/* " (or (:name shape) (str sid)) " */")]
+                                        comment  (css-comment (or (:name shape) sid))]
                                     [selector
                                      (str comment "\n"
                                           (track->keyframes-css timeline shape track kf-name
@@ -7201,6 +7207,12 @@
         (str "<g class=\"" (svg-escape (svg-follow-class id)) "\">" svg "</g>")
         svg))))
 
+(defn- svg-style
+  "An SVG `<style>` of `css`, as character data: an SVG is XML, where a
+  name with `&` or `<` in a comment, or a font family, would end it."
+  [css]
+  (str "<style><![CDATA[" (str/replace css "]]>" "]]]]><![CDATA[>") "]]></style>"))
+
 (defn timeline->svg
   "Build an animated SVG: rest-pose `<image>` per export layer plus the
   CSS from `timeline->css`. The layers nest as `layer-nodes` says, so a
@@ -7304,13 +7316,13 @@
           "\" height=\"" height "\" viewBox=\"0 0 " width " " height
           "\" overflow=\"hidden\">"
           (when (seq clips) (str "<defs>" clips "</defs>"))
-          "<style>g { transform-box: view-box; }\n" (some-> fonts (str "\n")) css
-          (some->> (svg-appearance-css played objects) (str "\n\n"))
-          (some->> (:css follow) (str "\n\n"))
-          (some->> (svg-smil-css smil unit-blurs
-                                 (filterv #(svg-clip-animated? objects smil %) clip-ids))
-                   (str "\n\n"))
-          "</style>"
+          (svg-style
+           (str "g { transform-box: view-box; }\n" (some-> fonts (str "\n")) css
+                (some->> (svg-appearance-css played objects) (str "\n\n"))
+                (some->> (:css follow) (str "\n\n"))
+                (some->> (svg-smil-css smil unit-blurs
+                                       (filterv #(svg-clip-animated? objects smil %) clip-ids))
+                         (str "\n\n"))))
           (when bbox?
             (str "<rect width=\"" width "\" height=\"" height "\" fill=\"none\"/>"))
           ;; the board's own animation and opacity, of all in it
