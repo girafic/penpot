@@ -1374,7 +1374,7 @@
   {::mf/private true
    ::mf/wrap [mf/memo]}
   [{:keys [timeline playing? recording? full-quality? audio-muted? clip clip-count unit zoom on-zoom-change
-           row-height on-row-height-change maximized?]}]
+           row-height on-row-height-change maximized? canvas-hidden?]}]
   (let [duration (:duration timeline)
         playback (cta/playback-mode timeline)
         autoplay? (cta/autoplay? timeline)
@@ -1422,6 +1422,9 @@
 
         on-toggle-maximized
         (mf/use-fn #(st/emit! (dwa/toggle-timeline-maximized)))
+
+        on-toggle-canvas
+        (mf/use-fn #(st/emit! (dwa/toggle-canvas-window)))
 
         on-close
         (mf/use-fn #(st/emit! (dwa/close-timeline)))]
@@ -1537,6 +1540,16 @@
                 :style #js {"--zoom-fill" (dm/str (zoom->slider zoom) "%")}
                 :aria-label (tr "workspace.animation.zoom")
                 :on-change on-zoom-change}]]
+      ;; maximized, the canvas in its small window or out of sight
+      (when maximized?
+        [:button {:type "button"
+                  :class (stl/css-case :ctrl-btn true :toggle-btn true :active (not canvas-hidden?))
+                  :title (if canvas-hidden?
+                           (tr "workspace.animation.canvas-window-show")
+                           (tr "workspace.animation.canvas-window-hide"))
+                  :aria-pressed (not canvas-hidden?)
+                  :on-click on-toggle-canvas}
+         [:> i/icon* {:icon-id (if canvas-hidden? i/hide i/shown)}]])
       ;; over the whole workspace, as Ctrl + Space does
       [:button {:type "button"
                 :class (stl/css-case :ctrl-btn true :toggle-btn true :active maximized?)
@@ -1640,6 +1653,7 @@
         ;; over the whole workspace; docked without a board to show, so
         ;; one can be picked on the canvas
         maximized? (and (some? timeline) (dwa/timeline-maximized? anim))
+        canvas-hidden? (dwa/canvas-window-hidden? anim)
         ;; as tall as the user made the rows (see `lanes/row-height`)
         row-height (mth/clamp (or (dwa/row-height anim) lanes/default-row-height)
                               lanes/default-row-height
@@ -3227,7 +3241,8 @@
                        :on-zoom-change on-zoom-change
                        :row-height row-height
                        :on-row-height-change on-row-height-change
-                       :maximized? maximized?}]
+                       :maximized? maximized?
+                       :canvas-hidden? canvas-hidden?}]
          [:> playhead-follower* {:scroll-ref scroll-ref
                                  :geo-ref geo-ref
                                  :zoom zoom

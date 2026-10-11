@@ -60,6 +60,9 @@
 (def ^:private ref:canvas-window
   (l/derived dwa/canvas-window refs/workspace-animation))
 
+(def ^:private ref:canvas-window-hidden
+  (l/derived dwa/canvas-window-hidden? refs/workspace-animation))
+
 (defn- use-timeline-visible?
   "Whether the animation timeline is docked under the workspace."
   [layout]
@@ -96,6 +99,8 @@
         pip?           (and timeline? maximized?)
         ;; where its window is: where the user left it, or as they drag it
         stored-frame   (mf/deref ref:canvas-window)
+        ;; hidden, it stays where it is, out of sight
+        hidden?        (mf/deref ref:canvas-window-hidden)
         drag-frame*    (mf/use-state nil)
         [vw vh]        (cw/use-window-size)
         frame          (when pip?
@@ -133,7 +138,7 @@
 
      [:section
       {:key (dm/str "workspace-" page-id)
-       :class (stl/css-case :workspace-content true :pip pip?)
+       :class (stl/css-case :workspace-content true :pip pip? :pip-hidden (and pip? hidden?))
        :style (when (some? frame)
                 #js {"left" (dm/str (:x frame) "px")
                      "top" (dm/str (:y frame) "px")

@@ -2179,6 +2179,29 @@
     (effect [_ _ _]
       (swap! storage/user assoc ::canvas-window frame))))
 
+(defn canvas-window-hidden?
+  "Whether the canvas window over the maximized timeline is hidden, as the
+  user last left it."
+  [anim]
+  (if (contains? anim :canvas-window-hidden?)
+    (true? (:canvas-window-hidden? anim))
+    (true? (get storage/user ::canvas-window-hidden))))
+
+(defn toggle-canvas-window
+  "Hide the canvas window over the maximized timeline, or show it again.
+  Kept for the next time."
+  []
+  (ptk/reify ::toggle-canvas-window
+    ptk/UpdateEvent
+    (update [_ state]
+      (update state :workspace-animation
+              #(assoc % :canvas-window-hidden? (not (canvas-window-hidden? %)))))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (swap! storage/user assoc ::canvas-window-hidden
+             (canvas-window-hidden? (:workspace-animation state))))))
+
 (defn toggle-timeline-maximized
   "Let the timeline dock cover the whole workspace, or dock it back. Out
   of motion mode, enter it with the dock maximized."

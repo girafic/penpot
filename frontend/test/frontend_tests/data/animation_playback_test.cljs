@@ -197,6 +197,19 @@
     (t/is (nil? (dwa/canvas-window {:canvas-window nil})) "put back where it starts")
     (swap! storage/user assoc ::dwa/canvas-window before)))
 
+(t/deftest the-canvas-window-hides-and-shows-again
+  (let [before (get @storage/user ::dwa/canvas-window-hidden)
+        _      (swap! storage/user dissoc ::dwa/canvas-window-hidden)
+        event  (dwa/toggle-canvas-window)
+        state  (ptk/update event {})]
+    (t/is (not (dwa/canvas-window-hidden? {})) "shown at first")
+    (ptk/effect event state (rx/empty))
+    (t/is (dwa/canvas-window-hidden? (:workspace-animation state)))
+    (t/is (dwa/canvas-window-hidden? {}) "the next time too")
+    (let [state' (ptk/update (dwa/toggle-canvas-window) state)]
+      (t/is (not (dwa/canvas-window-hidden? (:workspace-animation state'))) "and back"))
+    (swap! storage/user assoc ::dwa/canvas-window-hidden before)))
+
 (t/deftest a-board-with-only-clips-plays
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 100})
         id    (:id board)

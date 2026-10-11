@@ -39,6 +39,27 @@
   }
 }
 
+// The button at the right of the bar, before the corner, that hides
+// the window.
+.hide-btn {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: $sz-12;
+  display: grid;
+  place-items: center;
+  inline-size: $sz-16;
+  block-size: $sz-16;
+  padding: 0;
+  border: none;
+  background-color: transparent;
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-foreground-primary);
+  }
+}
+
 // Its corners, which resize it.
 .corner {
   position: absolute;

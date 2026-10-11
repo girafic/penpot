@@ -7664,6 +7664,12 @@ msgstr "Move the preview (double-click to put it back)"
 msgid "workspace.animation.canvas-window-resize"
 msgstr "Resize the preview"
 
+msgid "workspace.animation.canvas-window-hide"
+msgstr "Hide the preview"
+
+msgid "workspace.animation.canvas-window-show"
+msgstr "Show the preview"
+
 msgid "workspace.animation.maximize"
 msgstr "Maximize timeline (%s)"
 

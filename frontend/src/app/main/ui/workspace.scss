@@ -62,6 +62,14 @@
   border: $b-1 solid var(--panel-border-color);
   border-radius: $br-12;
   box-shadow: var(--el-shadow-dark);
+
+  // Hidden by the user: the canvas keeps its size and its renderer, out
+  // of sight, so it shows again as it was. Clipped away, as the titles of
+  // its boards show whatever the visibility of the canvas.
+  &.pip-hidden {
+    clip-path: inset(50%);
+    pointer-events: none;
+  }
 }
 
 .history-debug-overlay {
