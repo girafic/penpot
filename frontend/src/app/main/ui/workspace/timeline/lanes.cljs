@@ -476,7 +476,9 @@
    :accent       "var(--color-accent-primary)"
    :accent-muted "var(--color-accent-primary-muted)"
    :bar          "var(--timeline-bar-color)"
-   :on-accent    "var(--color-static-white)"
+   ;; text and grips on the accent, as on a primary button: dark on the
+   ;; light accent of the dark theme, light on the dark one of the light
+   :on-accent    "var(--color-background-secondary)"
    :playhead     "var(--timeline-playhead-color)"
    :marker       "var(--color-accent-info)"
    :snap         "var(--color-accent-warning)"
@@ -827,8 +829,9 @@
                                     grip-h (* 0.4 height)]
                                 (fill-round-rect! ctx ink (+ x0 6) grip-y 2 grip-h 1)
                                 (fill-round-rect! ctx ink (- x1 8) grip-y 2 grip-h 1))))
-                    ;; white with the outline of the theme's strongest ink,
-                    ;; so they show on the bar and on the row in both themes
+                    ;; in the ink on the accent with the outline of the
+                    ;; theme's strongest ink, so they show on the bar and on
+                    ;; the row in both themes
                     (when (or active? hovered?)
                       (doseq [grip-x (fade-grips geo clip)]
                         (.beginPath ctx)
