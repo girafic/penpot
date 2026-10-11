@@ -2185,6 +2185,26 @@
     (t/is (close? 4 (get-in band [:w :k])) "as far as it reaches in past its stroke")
     (t/is (not-any? #(= "st" (:ty %)) (lottie-items-of (:shapes sil))) "filled only")))
 
+(t/deftest lottie-spreads-a-masked-group-past-its-mask
+  ;; As the canvas spreads what its mask keeps: the matte grows too.
+  (let [{:keys [bid gid objects]} (masked-reveal)
+        shadow  {:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 6 :spread 5
+                 :hidden false :color {:color "#000000" :opacity 1}}
+        objects (assoc-in objects [gid :shadow] [shadow])
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe gid {:time 0 :property :x :value 100})
+                    (cta/add-keyframe gid {:time 1000 :property :x :value 140}))
+        L       (alottie/timeline->lottie tl objects)
+        comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
+        [_ cast] (:layers L)
+        [moved] (:layers (comp (:refId cast)))
+        [matte content] (:layers (comp (:refId moved)))
+        grown   (d/seek #(= "st" (:ty %)) (lottie-items-of (:shapes matte)))]
+    (t/is (= ["Mask" 1] [(:nm matte) (:td matte)]) "its mask still a matte")
+    (t/is (close? 10 (get-in grown [:w :k])) "grown by the spread")
+    (t/is (= [(str "sil_" gid "_0_masked_" gid) 1] [(:refId content) (:tt content)])
+          "over the silhouette of what it holds")))
+
 (t/deftest lottie-spreads-the-inner-shadow-of-a-group
   (let [shadow  {:id (uuid/next) :style :inner-shadow :offset-x 4 :offset-y 0 :blur 2 :spread 3
                  :hidden false :color {:color "#000000" :opacity 1}}

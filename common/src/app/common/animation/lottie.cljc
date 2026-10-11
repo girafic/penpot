@@ -1295,13 +1295,16 @@
   over its colour), the precomps as silhouettes of theirs too (under ids
   of `key`, see `lottie-silhouette-comp`), as they move and fade. The
   shadows and blur of the layers are left out, as the canvas casts a
-  shadow of what is plain (the layers of effects, `::effect`), and a
-  matte keeps its alpha: what it keeps casts only as far as it is."
+  shadow of what is plain (the layers of effects, `::effect`). The
+  matte of a mask grows too, as the canvas spreads what a mask keeps,
+  past the mask (an approximation where the two outlines cross); a
+  picture that is one keeps its alpha."
   [{:keys [width height] :as ctx} layers paint spread key]
   (let [convert (fn [layer]
                   (cond
                     (::effect layer)  []
-                    (some? (:td layer)) [(dissoc layer :ef)]
+                    (and (some? (:td layer)) (not (contains? #{0 4} (:ty layer))))
+                    [(dissoc layer :ef)]
                     (= 0 (:ty layer)) [(-> (dissoc layer :ef)
                                            (assoc :refId (lottie-silhouette-comp ctx (:refId layer) paint spread key)))]
                     (= 4 (:ty layer)) (lottie-silhouette-shape-layer layer paint spread)
