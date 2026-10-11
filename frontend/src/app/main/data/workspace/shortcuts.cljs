@@ -732,9 +732,12 @@
                            :fn #(when (features/active-feature? @st/state "animation/v1")
                                   (st/emit! (dwa/toggle-motion-mode)))}
 
-   ;; Ctrl on macOS too, where Cmd + Space opens Spotlight; as in Blender
-   :toggle-timeline-maximized {:tooltip (ds/command->tooltip "ctrl+space")
-                               :command "ctrl+space"
+   ;; Ctrl on macOS too, where Cmd + Space opens Spotlight; as in Blender.
+   ;; Shift + Space too, for where the system takes Ctrl + Space (the
+   ;; input sources of macOS, the input methods of Windows)
+   :toggle-timeline-maximized {:tooltip (str (ds/command->tooltip "ctrl+space") ", "
+                                             (ds/command->tooltip "shift+space"))
+                               :command ["ctrl+space" "shift+space"]
                                :subsections [:generic :basics]
                                :section [:workspace :basics]
                                :fn #(when (features/active-feature? @st/state "animation/v1")

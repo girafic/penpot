@@ -6,6 +6,7 @@
 
 (ns frontend-tests.data.animation-playback-test
   (:require
+   ["jsdom" :refer [JSDOM]]
    [app.common.geom.point :as gpt]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
@@ -18,8 +19,10 @@
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.pages :as dwp]
+   [app.main.data.workspace.shortcuts :as wsc]
    [app.main.data.workspace.viewport :as dwv]
    [app.main.data.workspace.zoom :as dwz]
+   [app.main.ui.workspace.timeline.keys :as tlk]
    [app.render-wasm.modifiers :as wasm.modifiers]
    [app.util.audio :as audio]
    [app.util.storage :as storage]
@@ -146,6 +149,27 @@
            :files {file-id {:id file-id
                             :data {:pages-index {page-id {:id page-id
                                                           :objects {board-id board}}}}}})))
+
+(t/deftest shift-space-maximizes-the-timeline-too
+  ;; For where the system takes Ctrl + Space, as macOS does to switch
+  ;; input sources; and it plays nothing, as Space does.
+  (let [{:keys [command tooltip]} (get wsc/shortcuts :toggle-timeline-maximized)
+        window (.-window (JSDOM. "<div></div>"))
+        div    (.. window -document (querySelector "div"))
+        node   (unchecked-get js/globalThis "Node")
+        key    (fn [mods]
+                 (doto (clj->js (merge {:key " " :code "Space"} mods))
+                   (unchecked-set "target" div)))]
+    (t/is (= ["ctrl+space" "shift+space"] command))
+    (t/is (= 2 (count (re-seq #"Space" tooltip))) "both told")
+    ;; what tells a text field needs the `Node` of a DOM
+    (unchecked-set js/globalThis "Node" (.-Node window))
+    (try
+      (t/is (tlk/plain-space? (key {})) "Space plays")
+      (t/is (not (tlk/plain-space? (key {:shiftKey true}))))
+      (t/is (not (tlk/plain-space? (key {:ctrlKey true}))))
+      (finally
+        (unchecked-set js/globalThis "Node" node)))))
 
 (t/deftest the-timeline-maximizes-with-a-board-to-show
   ;; Without one, it stays docked, so a board can be picked on the

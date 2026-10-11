@@ -31,7 +31,8 @@
 (defn plain-space?
   "Unmodified Space, outside a text field. Key repeat does not count, so
   holding Space does not toggle on every repeat. Ctrl + Space, on macOS
-  too, maximizes the timeline (see `dwa/toggle-timeline-maximized`)."
+  too, and Shift + Space maximize the timeline (see
+  `dwa/toggle-timeline-maximized`)."
   [^js event]
   (let [native (if (fn? (.-getBrowserEvent event))
                  (.getBrowserEvent event)
