@@ -2161,17 +2161,18 @@
   the workspace tab, downloaded: the canvas renders in full quality
   meanwhile and shows the animation at the playhead again after. It
   starts once its texts are laid out with their faces (see
-  `texts-laid-out`)."
+  `texts-laid-out`), with the file as it is then: what was edited
+  meanwhile goes along, as WASM draws it so."
   [state params]
   (let [bridge    (or (:bridge params) (default-bridge))
         was-fast  (begin-full-quality! bridge)
         boards    (or (not-empty (:boards params))
                       [{:board-id (dwa/active-board-id state) :scale (or (:scale params) 1)}])
-        page      (dsh/lookup-page state)
+        page-id   (:current-page-id state)
         cancelled (atom false)]
     ;; cancelled while it waits for the faces
     (reset! cancel-fn #(reset! cancelled true))
-    (-> (texts-laid-out (:objects page) (map :board-id boards)
+    (-> (texts-laid-out (:objects (dsh/lookup-page state page-id)) (map :board-id boards)
                         :cancelled? #(deref cancelled)
                         :pending (:text-faces-pending bridge)
                         :relayout (:relayout-text bridge))
@@ -2179,8 +2180,9 @@
          (fn [_]
            (when @cancelled
              (throw (ex-info "cancelled" {:type :export-cancelled})))
-           (let [{:keys [promise cancel]}
-                 (run-exports {:page page
+           (let [state @st/state
+                 {:keys [promise cancel]}
+                 (run-exports {:page (dsh/lookup-page state page-id)
                                :files (dsh/lookup-libraries state)
                                :time (dwa/playhead state)
                                :bridge bridge

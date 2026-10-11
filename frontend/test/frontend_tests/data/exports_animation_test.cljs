@@ -28,6 +28,7 @@
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [clojure.string :as str]
+   [frontend-tests.helpers.export-job :as thj]
    [frontend-tests.helpers.mock :as mock]
    [potok.v2.core :as ptk]
    [promesa.core :as p]))
@@ -1105,6 +1106,47 @@
           (.then (fn [outcome] (t/is (= :export-cancelled outcome) "cancelled meanwhile")))
           (.catch (fn [cause] (t/is false (str "failed: " cause))))
           (.finally (finish done))))))
+
+(t/deftest an-export-in-place-exports-the-file-as-the-wait-leaves-it
+  ;; What is edited while it waits for the faces of its texts goes along,
+  ;; as WASM draws it so.
+  (t/async
+    done
+    (let [{:keys [objects bid tid]} (text-board)
+          [file-id page-id] [(uuid/next) (uuid/next)]
+          before  @st/state
+          checks  (atom 0)
+          seen    (atom nil)
+          pending (fn [_]
+                    (let [n (swap! checks inc)]
+                      (when (= n 2)
+                        (swap! st/state assoc-in [:files file-id :data :pages-index page-id :objects tid :name]
+                               "Edited"))
+                      (if (< n 3) #{"face"} #{})))]
+      (swap! st/state assoc
+             :current-file-id file-id
+             :current-page-id page-id
+             :files {file-id {:id file-id :name "File"
+                              :data {:pages-index {page-id {:id page-id :objects objects}}}}})
+      (mock/with-mocks
+        {dea/run-exports (fn [ctx _ _ _]
+                           (reset! seen (:page ctx))
+                           {:promise (js/Promise.resolve {:status :nothing}) :cancel (fn [])})}
+        (fn [done']
+          (st/emit! (dea/export-animation {:format :svg
+                                           :boards [{:board-id bid :scale 1}]
+                                           :bridge {:text-faces-pending pending
+                                                    :relayout-text (fn [_])}}))
+          (-> (thj/wait-until #(some? @seen))
+              (.then (fn [_]
+                       (t/is (= 3 @checks) "after the faces")
+                       (t/is (= "Edited" (get-in @seen [:objects tid :name])) "the file as it is then")))
+              (.catch (fn [cause] (t/is false (str "failed: " cause))))
+              (.finally (fn []
+                          (reset! st/state before)
+                          (done')
+                          nil))))
+        done))))
 
 (defn- words-use
   "A use of a style of `entry`."
