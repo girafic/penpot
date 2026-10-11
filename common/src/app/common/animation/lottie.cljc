@@ -1073,6 +1073,14 @@
 (def ^:private lottie-identity-ks
   {:o {:a 0 :k 100} :r {:a 0 :k 0} :p {:a 0 :k [0 0 0]} :a {:a 0 :k [0 0 0]} :s {:a 0 :k [100 100 100]}})
 
+(defn- add-comp!
+  "Add the precomp `comp` to `comps`, its id: once its layers are made,
+  which add the precomps inside it first, as a function evaluates its
+  arguments before (`vswap!` would read `comps` before them)."
+  [comps comp]
+  (vswap! comps conj comp)
+  (:id comp))
+
 (defn- lottie-shadow-paint
   "The colour and opacity (`:c :o`) of the paint of a shadow `shadow` of
   the keyframes `kfs` (a function of a property)."
@@ -1173,7 +1181,7 @@
                                                                         (band (or (:spread shadow) 0)))}]))]
                             offset)]
                   :ip 0 :op (ms->frames duration) :st 0 :bm 0}]
-        (vswap! comps conj {:id ref :nm name :layers (lottie-numbered [cut (assoc layer :tt 2)])})
+        (add-comp! comps {:id ref :nm name :layers (lottie-numbered [cut (assoc layer :tt 2)])})
         {:ddd 0 :ty 0 :nm name :refId ref :sr 1
          :ks lottie-identity-ks
          :ao 0 :w width :h height
@@ -1354,9 +1362,8 @@
 
       :else
       (if-let [comp (d/seek #(= ref (:id %)) @comps)]
-        ;; before adding this precomp: the ones inside it add themselves
         (let [layers (lottie-silhouette ctx (:layers comp) paint spread key)]
-          (vswap! comps conj {:id id :nm (str (:nm comp) " silhouette") :layers layers})
+          (add-comp! comps {:id id :nm (str (:nm comp) " silhouette") :layers layers})
           id)
         ref))))
 
@@ -1409,15 +1416,14 @@
                      (remove (comp :hidden second)))
         shadow  #(lottie-shadow-layer ctx shape cby outline ks ox oy duration %1 %2)
         inners  (lottie-inner-shadow-layers ctx shape)
-        drops   (map (fn [[index s]] (shadow index s))
-                     (filter #(= :drop-shadow (:style (second %) :drop-shadow)) shown))
+        drops   (into [] (comp (filter #(= :drop-shadow (:style (second %) :drop-shadow)))
+                               (map (fn [[index s]] (shadow index s))))
+                      shown)
         ref     (str "comp_" id)
         by-prop (group-by :property (:keyframes track))
         blur    (lottie-blur-effect shape by-prop)
-        ;; before adding this precomp: the precomps of its shadows add
-        ;; themselves (`vswap!` reads the comps before its arguments)
         layers  (lottie-numbered (concat inners [(lottie-content-layer ctx shape)] drops))]
-    (vswap! comps conj {:id ref :nm name :layers layers})
+    (add-comp! comps {:id ref :nm name :layers layers})
     (cond-> {:ddd 0
              :ty 0
              :nm name
@@ -1496,11 +1502,11 @@
                                                     :r {:a 0 :k 0}}
                                                    (merge {:ty "fl" :nm "fill" :r 1} (lottie-shadow-paint shadow kfs))])]
                            :ip 0 :op op :st 0 :bm 0}]
-               (vswap! comps conj {:id ref :nm name
-                                   :layers (lottie-numbered
-                                            [(assoc (layer (str name " moved") cut (assoc lottie-identity-ks :p offset))
-                                                    :td 1)
-                                             colour])})
+               (add-comp! comps {:id ref :nm name
+                                 :layers (lottie-numbered
+                                          [(assoc (layer (str name " moved") cut (assoc lottie-identity-ks :p offset))
+                                                  :td 1)
+                                           colour])})
                [(assoc (layer (str name " inside") content lottie-identity-ks) :td 1 ::effect true)
                 (assoc (layer name ref lottie-identity-ks)
                        :tt 1
@@ -1529,9 +1535,8 @@
         matte   (d/seek (complement ::null) drawn)
         ref     (str "masked_" (:id shape))
         name    (or (:name shape) ref)]
-    ;; before adding this precomp: the ones inside it add themselves
     (let [layers (lottie-numbered (lottie-node-layers ctx (filterv #(not= mask-id (:id %)) inner)))]
-      (vswap! comps conj {:id ref :nm (str name " content") :layers layers}))
+      (add-comp! comps {:id ref :nm (str name " content") :layers layers}))
     (cond-> []
       (some? matte) (conj (-> matte (dissoc :ef) (assoc :td 1)))
       :always       (conj (cond-> {:ddd 0 :ty 0 :nm (str name " content") :refId ref :sr 1
@@ -1562,7 +1567,6 @@
                                (lottie-draws? objects layer-ids shape)))
                   (lottie-content-layer ctx shape))
         ref     (str "comp_" id)
-        ;; before adding this precomp: the ones inside it add themselves;
         ;; a board casts its inner shadows over its drawing, under what it
         ;; holds
         layers  (lottie-numbered (if masked?
@@ -1577,20 +1581,18 @@
                   (concat (when (lottie-vector-layer? objects layer-ids id)
                             (lottie-shadow-effects shape by-prop))
                           (lottie-blur-effect shape by-prop)))]
-    (vswap! comps conj {:id ref :nm (or (:name shape) ref) :layers layers})
+    (add-comp! comps {:id ref :nm (or (:name shape) ref) :layers layers})
     (cond-> {:ddd 0
              :ty 0
              :nm (or (:name shape) ref)
              :refId (if (and (not clip?) (lottie-holds-inner-shadows? shape))
                       (let [fx     (str "fx_" id)
-                            ;; before adding this precomp: the ones of its
-                            ;; shadows add themselves
                             layers (lottie-numbered
                                     (conj (lottie-inner-shadow-mattes ctx shape ref)
                                           {:ddd 0 :ty 0 :nm (or (:name shape) ref) :refId ref :sr 1
                                            :ks lottie-identity-ks :ao 0 :w width :h height
                                            :ip 0 :op (ms->frames duration) :st 0 :bm 0}))]
-                        (vswap! comps conj {:id fx :nm (str (or (:name shape) ref) " effects") :layers layers})
+                        (add-comp! comps {:id fx :nm (str (or (:name shape) ref) " effects") :layers layers})
                         fx)
                       ref)
              :sr 1
@@ -1728,7 +1730,7 @@
                                :s {:a 0 :k [100 100 100]}}
                           :ao 0 :ip 0 :op (ms->frames duration) :st 0 :bm 0}))
         ref      (str "comp_" id)]
-    (vswap! comps conj {:id ref :nm name :layers (lottie-numbered layers)})
+    (add-comp! comps {:id ref :nm name :layers (lottie-numbered layers)})
     {:ddd 0
      :ty 0
      :nm name
@@ -1781,18 +1783,17 @@
                                                (fn [x y] [x y 0]))
                       sref   (str "spread_" key)
                       oref   (str "drop_" key)]
-                  ;; before adding these: the silhouettes inside add themselves
                   (let [layers (lottie-silhouette ctx drawn (assoc paint :o {:a 0 :k 100})
                                                   {:rest (or (:spread shadow) 0) :kfs (kfs :shadow-spread)}
                                                   key)]
-                    (vswap! comps conj {:id sref :nm (str sname " silhouette") :layers layers}))
-                  (vswap! comps conj
-                          {:id oref :nm sname
-                           :layers [(cond-> (assoc (precomp (str sname " moved") sref
-                                                            (assoc lottie-identity-ks :p offset :o o))
-                                                   :ind 1)
-                                      (:hasMask layer)
-                                      (assoc :hasMask true :masksProperties (:masksProperties layer)))]})
+                    (add-comp! comps {:id sref :nm (str sname " silhouette") :layers layers}))
+                  (add-comp! comps
+                             {:id oref :nm sname
+                              :layers [(cond-> (assoc (precomp (str sname " moved") sref
+                                                               (assoc lottie-identity-ks :p offset :o o))
+                                                      :ind 1)
+                                         (:hasMask layer)
+                                         (assoc :hasMask true :masksProperties (:masksProperties layer)))]})
                   (assoc (precomp sname oref (:ks layer))
                          :ef (into [(lottie-gaussian-blur (kfs :shadow-blur) (or (:blur shadow) 0))] blur)
                          ::effect true)))
