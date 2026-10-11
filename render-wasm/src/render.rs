@@ -3093,11 +3093,7 @@ impl RenderState {
                     }
                 }
 
-                let mut paint = skia::Paint::default();
-                if let Some(filter) = filter {
-                    paint.set_image_filter(filter);
-                }
-
+                let paint = masked_group_layer_paint(element, filter);
                 let layer_rec = skia::canvas::SaveLayerRec::default().paint(&paint);
                 self.surfaces.canvas(target_surface).save_layer(&layer_rec);
             }
@@ -3123,9 +3119,7 @@ impl RenderState {
         let needs_layer = element.needs_layer();
 
         if needs_layer {
-            let mut paint = skia::Paint::default();
-            paint.set_blend_mode(element.blend_mode().into());
-            paint.set_alpha_f(element.opacity());
+            let mut paint = shape_layer_paint(element);
 
             // Skip frame-level blur in fast mode (pan/zoom).
             if !self.options.is_fast_mode() {
@@ -5038,6 +5032,33 @@ fn close_group_inner_shadow_layer(canvas: &skia::Canvas, element: &Shape) {
     }
 }
 
+/// Paint for the layer that wraps a masked group: its shadows and blur
+/// (`filter`, see `Shape::masked_group_layer_filter`), then its opacity and
+/// blend mode, in the order of the SVG renderer (filter, mask, opacity), so
+/// a see-through group shows no shadow through what it holds and blends
+/// with what lies under it.
+fn masked_group_layer_paint(element: &Shape, filter: Option<skia::ImageFilter>) -> skia::Paint {
+    let mut paint = skia::Paint::default();
+    if let Some(filter) = filter {
+        paint.set_image_filter(filter);
+    }
+    paint.set_alpha_f(element.opacity());
+    paint.set_blend_mode(element.blend_mode().into());
+    paint
+}
+
+/// Paint for the layer of a shape that needs one (see `Shape::needs_layer`):
+/// its opacity and blend mode, but for a masked group, whose outer layer
+/// applies them (see `masked_group_layer_paint`).
+fn shape_layer_paint(element: &Shape) -> skia::Paint {
+    let mut paint = skia::Paint::default();
+    if !element.is_masked_group() {
+        paint.set_blend_mode(element.blend_mode().into());
+        paint.set_alpha_f(element.opacity());
+    }
+    paint
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5078,6 +5099,44 @@ mod tests {
             close_group_inner_shadow_layer(canvas, &group);
             assert_eq!(canvas.save_count(), base, "back where it was");
         }
+    }
+
+    /// As the walker draws it: what the group holds in the inner layer, in
+    /// the layer that casts its shadow.
+    fn masked_group_pixel(group: &Shape) -> skia::Color {
+        let mut surface = skia::surfaces::raster_n32_premul((100, 100)).expect("surface");
+        let canvas = surface.canvas();
+        let filter = group.masked_group_layer_filter(1.0, false, false);
+        let outer = masked_group_layer_paint(group, filter);
+        canvas.save_layer(&skia::canvas::SaveLayerRec::default().paint(&outer));
+        let inner = shape_layer_paint(group);
+        canvas.save_layer(&skia::canvas::SaveLayerRec::default().paint(&inner));
+        let mut red = skia::Paint::default();
+        red.set_color(skia::Color::RED);
+        canvas.draw_rect(Rect::from_xywh(30.0, 30.0, 40.0, 40.0), &red);
+        canvas.restore();
+        canvas.restore();
+        let image = surface.image_snapshot();
+        let pixmap = image.peek_pixels().expect("pixels");
+        pixmap.get_color((50, 50))
+    }
+
+    #[test]
+    fn a_see_through_masked_group_shows_no_shadow_through_what_it_holds() {
+        let mut group = shadowed_group(ShadowStyle::Drop);
+        group.set_shape_type(Type::Group(Group { masked: true }));
+        group.set_opacity(0.5);
+
+        let pixel = masked_group_pixel(&group);
+        assert!(
+            (pixel.a() as i32 - 128).abs() <= 1,
+            "as see-through as the group: {pixel:?}"
+        );
+        assert_eq!(
+            (pixel.r(), pixel.g(), pixel.b()),
+            (255, 0, 0),
+            "red, not darkened by the shadow under it"
+        );
     }
 
     #[test]
