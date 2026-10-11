@@ -53,13 +53,15 @@ $header-height: $ruler-height + $row-height;
 
   // Over the whole workspace, the sidebars too, like a maximized area in
   // Blender (Ctrl + Space). Its row of the grid stays, so the canvas
-  // under it keeps its size; its popovers and menus still show over it.
+  // under it keeps its size. Over the panels, under what opens over them:
+  // its own popovers, the modals and the menus still show over it and
+  // over the canvas window (see `.workspace-content.pip`).
   &.maximized {
     position: fixed;
     inset: 0;
     block-size: auto;
     border-top: none;
-    z-index: var(--z-index-set);
+    z-index: var(--z-index-guides);
   }
 
   // Auto-keyframe on: every edit records keyframes, the playhead and a bar

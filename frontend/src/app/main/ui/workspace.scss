@@ -57,7 +57,9 @@
 // the user moves and resizes it.
 .workspace-content.pip {
   position: fixed;
-  z-index: calc(var(--z-index-set) + 1);
+
+  // just over the maximized timeline, under its popovers, modals and menus
+  z-index: calc(var(--z-index-guides) + 1);
   overflow: hidden;
   border: $b-1 solid var(--panel-border-color);
   border-radius: $br-12;
