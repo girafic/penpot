@@ -890,7 +890,14 @@
     (t/is (re-find #" id=\"Card_front_2\"" named) "the second of a name")
     (t/is (re-find #"<rect width=\"200\" height=\"100\" fill=\"none\"/>" named))
     (t/is (= {aid "x" bid' "x_2"} (asvg/svg-layer-ids {aid {:name "x"} bid' {:name "x"}} [aid bid'])))
-    (t/is (= {aid "a_b_c"} (asvg/svg-layer-ids {aid {:name "a b<c"}} [aid])))))
+    (t/is (= {aid "a_b_c"} (asvg/svg-layer-ids {aid {:name "a b<c"}} [aid])))
+    (let [[a b c] (repeatedly 3 uuid/next)]
+      (t/is (= {a "Card" b "Card_2" c "Card_3"}
+               (asvg/svg-layer-ids {a {:name "Card"} b {:name "Card_2"} c {:name "Card"}} [a b c]))
+            "unlike any id before it"))
+    (t/is (= {aid "Größe_a_b_c_"} (asvg/svg-layer-ids {aid {:name "Größe a’b—c…"}} [aid]))
+          "letters of any script, no punctuation an XML name can not hold")
+    (t/is (= {aid "_1x"} (asvg/svg-layer-ids {aid {:name "1x"}} [aid])) "no digit first")))
 
 (t/deftest timeline->svg-draws-the-vectors-of-its-layers
   (let [board (cts/setup-shape {:type :frame :x 100 :y 50 :width 200 :height 100})

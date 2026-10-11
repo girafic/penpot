@@ -70,25 +70,29 @@
     (svg-vectors markup ox oy)
     (svg-image img)))
 
-(def ^:private svg-name-junk
-  "What an XML name (an `id`) cannot hold."
-  #"[\s\"'<>&#%/\\:;,()\[\]{}=+*!?@$^|~`]")
+(defn- svg-name
+  "`name` as an XML name (an `id`): but letters, marks, digits, `_`, `.`,
+  `-` and `·`, what it holds as `_`, and `_` before it when it starts
+  with a digit, `.` or `-`, which can not start one."
+  [name]
+  (let [name #?(:clj  (str/replace name #"[^\p{L}\p{M}\p{Nd}_.\-\u00B7]" "_")
+                :cljs (.replace name (js/RegExp. "[^\\p{L}\\p{M}\\p{Nd}_.\\-\\u00B7]" "gu") "_"))]
+    (if (re-find #"^[0-9.-]" name) (str "_" name) name)))
 
 (defn svg-layer-ids
   "The `id`s of the layers `ids` (shape ids) in an SVG export, by shape
-  id, as Figma writes them: their names, what an XML name cannot hold as
-  `_`, with `_` before a name that cannot start one, the second layer of
-  a name `<name>_2` and so on."
+  id, as Figma writes them: their names as XML names (see `svg-name`),
+  the second layer of a name `<name>_2` and so on, each unlike the ids
+  before it."
   [objects ids]
-  (loop [ids  (seq ids)
-         used {}
-         out  {}]
+  (loop [ids   (seq ids)
+         taken #{}
+         out   {}]
     (if-let [id (first ids)]
-      (let [base  (let [name (str/replace (str (or (not-empty (:name (get objects id))) "layer")) svg-name-junk "_")]
-                    (if (re-find #"^[0-9.-]" name) (str "_" name) name))
-            n     (inc (get used base 0))
-            unique (if (= 1 n) base (str base "_" n))]
-        (recur (next ids) (assoc used base n) (assoc out id unique)))
+      (let [base   (svg-name (str (or (not-empty (:name (get objects id))) "layer")))
+            unique (d/seek #(not (contains? taken %))
+                           (cons base (map #(str base "_" %) (iterate inc 2))))]
+        (recur (next ids) (conj taken unique) (assoc out id unique)))
       out)))
 
 (def ^:private svg-fill-properties #{:fill-color :fill-opacity})
