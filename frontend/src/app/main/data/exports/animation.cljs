@@ -1826,7 +1826,7 @@
         drawable (svgv/without-layers shapes (set layers))
         yield    (or yield default-yield)
         n        (count drawn)]
-    (p/let [_     (svgv/load-media objects)
+    (p/let [_     (svgv/load-media objects board-id)
             ;; but those of the split texts, whose units are pictures
             fonts (svgv/fonts-css (apply dissoc shapes (keys texts)) drawn)
             images

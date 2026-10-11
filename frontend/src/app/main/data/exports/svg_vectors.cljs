@@ -227,29 +227,34 @@
       (cta/svg-smil-corners? (get objects id) track)
       (mark-outline shape))))
 
+(def ^:private media-fetches
+  "How many images `load-media` fetches at once."
+  4)
+
 (defn- image-urls
-  "The URLs of the images the shapes of `objects` draw."
-  [objects]
-  (->> (vals objects)
+  "The URLs of the images the shapes in the board `board-id` of `objects`
+  draw, but the hidden ones."
+  [objects board-id]
+  (->> (cfh/get-children-with-self objects board-id)
+       (remove (some-fn nil? :hidden))
        (mapcat (fn [shape]
-                 (cond-> []
+                 (cond-> (into [] (keep :fill-image) (:fills shape))
                    (= :image (:type shape)) (conj (:metadata shape))
                    (some? (:fill-image shape)) (conj (:fill-image shape)))))
-       (concat (->> (vals objects)
-                    (mapcat :fills)
-                    (keep :fill-image)))
        (map cfg/resolve-file-media)
        (distinct)))
 
 (defn load-media
-  "A promise resolved once the images the shapes of `objects` draw are
-  cached as data URIs, which the SVG renderer then embeds (see
-  `layer-markup`); one that fails stays a link."
-  [objects]
+  "A promise resolved once the images the shapes in the board `board-id`
+  of `objects` draw are cached as data URIs, which the SVG renderer then
+  embeds (see `layer-markup`), a few at a time; one that fails stays a
+  link."
+  [objects board-id]
   (js/Promise.
    (fn [resolve _]
-     (->> (rx/from (image-urls objects))
-          (rx/merge-map #(rx/catch (http/fetch-data-uri %) (fn [_] (rx/empty))))
+     (->> (rx/from (image-urls objects board-id))
+          (rx/map (fn [url] (rx/catch (fn [_] (rx/empty)) (http/fetch-data-uri url))))
+          (rx/merge-all media-fetches)
           (rx/reduce (constantly nil) nil)
           (rx/subs! resolve (fn [_] (resolve nil)))))))
 

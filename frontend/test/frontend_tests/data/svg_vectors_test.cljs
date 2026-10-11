@@ -8,10 +8,14 @@
   (:require
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
+   [app.common.uuid :as uuid]
    [app.main.data.exports.svg-vectors :as svgv]
    [app.main.ui.shapes.text.fontfaces :as ff]
+   [app.util.http :as http]
+   [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [frontend-tests.helpers.mock :as mock]))
 
 (defn- board-with
   "A board holding `shapes`."
@@ -175,3 +179,27 @@
       (t/is (str/includes? markup "#ff0000"))
       (t/is (str/includes? markup "#00ff00"))
       (t/is (not (str/includes? markup "<text"))))))
+
+(t/deftest media-loads-for-the-board-alone-a-few-at-a-time
+  ;; Not every image of the page, all at once, for one board.
+  (let [image   #(cts/setup-shape {:type :rect :x % :y 10 :width 20 :height 20 :hidden %2
+                                   :fills [{:fill-opacity 1
+                                            :fill-image {:id (uuid/next) :width 10 :height 10
+                                                         :mtype "image/png"}}]})
+        [b1 b2] (repeatedly 2 #(cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100}))
+        hidden  (image 0 true)
+        shown   (mapv #(image (* 20 %) false) (range 6))
+        other   (image 0 false)
+        in      (fn [board kids] (map (fn [k] [(:id k) (assoc k :parent-id (:id board) :frame-id (:id board))]) kids))
+        objects (-> {(:id b1) (assoc b1 :shapes (mapv :id (cons hidden shown)))
+                     (:id b2) (assoc b2 :shapes [(:id other)])}
+                    (into (in b1 (cons hidden shown)))
+                    (into (in b2 [other])))
+        id-of   #(str (get-in % [:fills 0 :fill-image :id]))
+        fetched (atom [])]
+    ;; fetches that never end, counted as they start
+    (with-redefs [http/fetch-data-uri (mock/stub (fn [uri] (rx/create (fn [_] (swap! fetched conj uri) nil))))]
+      (svgv/load-media objects (:id b1)))
+    (t/is (= 4 (count @fetched)) "four at a time, the others when those are done")
+    (t/is (every? (fn [uri] (some #(str/includes? uri (id-of %)) shown)) @fetched)
+          "of the shapes it shows, not of the hidden one nor of the other board")))
