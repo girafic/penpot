@@ -7,7 +7,9 @@
 (ns frontend-tests.ui.canvas-window-test
   (:require
    [app.main.ui.workspace.canvas-window :as cw]
-   [cljs.test :as t :include-macros true]))
+   [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.dom :as thd]
+   [rumext.v2 :as mf]))
 
 (def ^:private frame {:x 1000 :y 600 :w 400 :h 252})
 
@@ -53,3 +55,42 @@
   ;; The bar covers none of the board fitted in it.
   (t/is (= {:x 1001 :y 617 :w 398 :h 234} (cw/canvas-box frame)))
   (t/is (= (+ (:y frame) 1 cw/bar-height) (:y (cw/canvas-box frame)))))
+
+(defn- drag!
+  "Press the element `node` of the DOM of `window` at `from`, move the
+  pointer to `to` and let go, as the browser tells a drag."
+  [window node [x0 y0] [x1 y1]]
+  (let [pointer (fn [type x y]
+                  (thd/act #(.dispatchEvent node (new (.-MouseEvent window) type
+                                                      #js {:bubbles true :clientX x :clientY y}))))]
+    (pointer "pointerdown" x0 y0)
+    (pointer "pointermove" x1 y1)
+    (thd/act #(.dispatchEvent node (new (.-Event window) "lostpointercapture" #js {:bubbles true})))))
+
+(t/deftest a-drag-that-goes-nowhere-leaves-no-frame-behind
+  ;; Where the window showed while dragged is dropped, so it shows where
+  ;; it was left, where a double click puts it back and where it follows
+  ;; the browser window.
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      ;; jsdom captures no pointer
+      (unchecked-set (.. window -HTMLElement -prototype) "setPointerCapture" (fn [_]))
+      (let [changes (atom [])
+            commits (atom [])
+            render! (fn [frame]
+                      (reset! changes [])
+                      (thd/render! root (mf/element cw/canvas-window*
+                                                    #js {:frame frame
+                                                         :onChange #(swap! changes conj %)
+                                                         :onCommit #(swap! commits conj [%1 %2])})))
+            small   (assoc frame :w cw/min-width :h cw/min-height)]
+        (render! frame)
+        (drag! window (.querySelector document "[data-mode=move]") [1100 605] [1100 605])
+        (t/is (= [frame nil] @changes) "its bar let go where it was pressed")
+        (render! small)
+        (drag! window (.querySelector document "[data-mode=top-left]") [1000 600] [1010 610])
+        (t/is (= [small nil] @changes) "a corner of the smallest window pushed in")
+        (t/is (empty? @commits) "nothing kept")
+        (render! frame)
+        (drag! window (.querySelector document "[data-mode=move]") [1100 605] [1080 600])
+        (t/is (= [[(cw/moved frame -20 -5) false]] @commits) "a drag that goes somewhere kept")))))

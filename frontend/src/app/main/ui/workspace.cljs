@@ -128,6 +128,12 @@
            (reset! palete-size size)))
 
         node-ref (use-resize-observer on-resize)]
+
+    ;; the window gone while dragged, it shows next where it was left
+    (mf/with-effect [pip? hidden?]
+      (when (or (not pip?) hidden?)
+        (reset! drag-frame* nil)))
+
     [:*
      (when (not ^boolean hide-ui?)
        [:> palette* {:layout layout

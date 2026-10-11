@@ -127,8 +127,9 @@
   "The window at `frame` the canvas shows in (see `canvas-box`): its
   border, the bar on top that moves it (a double click puts it back
   where it starts), with a button that hides it, and its corners that
-  resize it: `on-change` with the frame as they drag, `on-commit` with
-  it once they let go, and whether its size changed."
+  resize it: `on-change` with the frame as they drag (nil once they let
+  go where they started), `on-commit` with it once they let go, and
+  whether its size changed."
   [{:keys [frame on-change on-commit]}]
   (let [drag-ref (mf/use-ref nil)
 
@@ -163,8 +164,10 @@
          (fn [_]
            (when-let [drag (mf/ref-val drag-ref)]
              (mf/set-ref-val! drag-ref nil)
-             (when-let [[frame resized?] (drag-commit drag)]
-               (on-commit frame resized?)))))
+             (if-let [[frame resized?] (drag-commit drag)]
+               (on-commit frame resized?)
+               ;; nothing changed: not even where it showed while dragged
+               (on-change nil)))))
 
         on-reset
         (mf/use-fn
