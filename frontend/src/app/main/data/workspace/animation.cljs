@@ -2082,6 +2082,22 @@
        (rx/timeout 1500 (rx/of nil))
        (rx/map (constantly event))))
 
+(defn- fit-view
+  "`view` with its vbox as large as the canvas `vport` shows at its zoom,
+  around the same centre, as a resized canvas keeps it (see
+  `dwv/update-viewport-size`): the canvas need not be as large as when
+  the view was kept, as when the timeline was maximized out of motion
+  mode, before its dock took its room."
+  [{:keys [vbox zoom] :as view} {:keys [width height] :as vport}]
+  (if (or (nil? vbox) (nil? vport) (not (pos? zoom)))
+    view
+    (let [width'  (/ width zoom)
+          height' (/ height zoom)]
+      (assoc view :vbox (-> vbox
+                            (update :x + (/ (- (:width vbox) width') 2))
+                            (update :y + (/ (- (:height vbox) height') 2))
+                            (assoc :width width' :height height'))))))
+
 (defn- restore-view
   "The canvas back where it was before the timeline was maximized (see
   `toggle-timeline-maximized`), unless it is maximized again."
@@ -2092,7 +2108,7 @@
       (let [view (dm/get-in state [:workspace-animation :restore-view])]
         (cond-> (update state :workspace-animation dissoc :restore-view)
           (and (some? view) (not (timeline-maximized? (:workspace-animation state))))
-          (update :workspace-local merge view))))
+          (update :workspace-local #(merge % (fit-view view (:vport %)))))))
 
     ptk/EffectEvent
     (effect [_ state _]

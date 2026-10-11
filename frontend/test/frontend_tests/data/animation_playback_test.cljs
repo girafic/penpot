@@ -170,6 +170,18 @@
                        (done))))
       (rx/push! stream (dwv/update-viewport-size :both {:width 1000 :height 800})))))
 
+(t/deftest the-docked-timeline-fits-the-canvas-back-in-less-room
+  ;; Maximized out of motion mode, the canvas was kept before the dock
+  ;; took its room: back, it shows as much as it now can, at the zoom it
+  ;; had, around the same centre.
+  (let [state    {:workspace-layout #{:animation-timeline}
+                  :workspace-local {:vport {:width 1000 :height 600}}
+                  :workspace-animation {:restore-view (assoc canvas-view :zoom 2 :zoom-inverse 0.5)}}
+        restored (:workspace-local (ptk/update (#'dwa/restore-view) state))]
+    (t/is (= {:x 250 :y 250 :width 500 :height 300} (:vbox restored)))
+    (t/is (= 2 (:zoom restored)))
+    (t/is (= {:width 1000 :height 600} (:vport restored)))))
+
 (t/deftest the-canvas-window-stays-where-it-was-left
   (let [before (get @storage/user ::dwa/canvas-window)
         frame  {:x 100 :y 200 :w 300 :h 200}
