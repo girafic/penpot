@@ -208,10 +208,22 @@
     (effect [_ state _]
       (dwvw/maybe-sync-workspace-local-viewport! state))))
 
+(defn- center-if-out-of-view
+  "Move the canvas to the comment `thread` when it is out of view."
+  [thread]
+  (ptk/reify ::center-if-out-of-view
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [vbox (dm/get-in state [:workspace-local :vbox])]
+        (if (and (some? vbox) (not (grc/contains-point? vbox (:position thread))))
+          (rx/of (center-to-comment-thread thread))
+          (rx/empty))))))
+
 (defn open-thread-moment
   "Open a comment `thread` about a moment of the animation from the
   timeline: the moment shows, and the canvas moves to the thread when it
-  is out of view. A maximized timeline docks so that the thread shows."
+  is out of view. A maximized timeline docks so that the thread shows,
+  and the canvas moves to it as it is back, not as it was in its window."
   [thread]
   (dm/assert!
    "expected valid comment thread"
@@ -220,16 +232,12 @@
   (ptk/reify ::open-thread-moment
     ptk/WatchEvent
     (watch [_ state _]
-      (let [vbox (dm/get-in state [:workspace-local :vbox])]
-        (rx/concat
-         (if (dwa/timeline-maximized? (:workspace-animation state))
-           (rx/of (dwa/dock-timeline))
-           (rx/empty))
-         (if (and (some? vbox) (not (grc/contains-point? vbox (:position thread))))
-           (rx/of (center-to-comment-thread thread))
-           (rx/empty))
-         (rx/of (with-meta (dcmt/open-thread thread) {::ev/origin "timeline"})
-                (show-moment thread (:animation-time thread))))))))
+      (rx/concat
+       (if (dwa/timeline-maximized? (:workspace-animation state))
+         (rx/of (dwa/dock-timeline (center-if-out-of-view thread)))
+         (rx/of (center-if-out-of-view thread)))
+       (rx/of (with-meta (dcmt/open-thread thread) {::ev/origin "timeline"})
+              (show-moment thread (:animation-time thread)))))))
 
 (defn- set-comment-thread
   "Stores the comment thread in the workspace state so its bubble re-renders."

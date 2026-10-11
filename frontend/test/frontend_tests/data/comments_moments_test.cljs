@@ -10,6 +10,7 @@
   (:require
    [app.common.files.changes-builder :as pcb]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.test-helpers.compositions :as tho]
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
@@ -21,6 +22,7 @@
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.data.workspace.selection :as dws]
+   [app.main.data.workspace.viewport :as dwv]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [potok.v2.core :as ptk]))
@@ -105,26 +107,74 @@
              (emitted (dwcm/show-moment (assoc thread :frame-id uuid/zero) 400) state))
           "nothing for a thread out of the boards")))
 
+(defn- thread-on
+  "A comment thread at 300,200 on board A of `file`, about 400 ms."
+  [file]
+  {:id (random-uuid)
+   :page-id (:id (thf/current-page file))
+   :file-id (:id file)
+   :project-id (random-uuid)
+   :owner-id (random-uuid)
+   :file-name "file"
+   :seqn 1
+   :content "here"
+   :participants #{}
+   :created-at (ct/now)
+   :modified-at (ct/now)
+   :position (gpt/point 300 200)
+   :animation-time 400})
+
 (t/deftest opening-a-thread-from-the-maximized-timeline-docks-it
   (let [file   (animated-file)
         state  (workspace-state file)
-        thread {:id (random-uuid)
-                :page-id (:id (thf/current-page file))
-                :file-id (:id file)
-                :project-id (random-uuid)
-                :owner-id (random-uuid)
-                :file-name "file"
-                :seqn 1
-                :content "here"
-                :participants #{}
-                :created-at (ct/now)
-                :modified-at (ct/now)
-                :position (gpt/point 300 200)
-                :animation-time 400}
+        thread (thread-on file)
         docks? #(= ::dwa/dock-timeline (first (emitted (dwcm/open-thread-moment thread) %)))]
     (t/is (docks? (assoc-in state [:workspace-animation :maximized?] true))
           "the thread shows on the canvas the timeline covered")
     (t/is (not (docks? state)) "docked, it stays")))
+
+(t/deftest a-thread-opened-from-the-maximized-timeline-shows-on-the-docked-canvas
+  ;; The canvas in its small window shows the thread, but docked it goes
+  ;; back where it was before, where the thread is out of view: it moves
+  ;; to the thread then.
+  (t/async done
+    (let [file   (animated-file)
+          thread (thread-on file)
+          state  (-> (workspace-state file)
+                     (assoc :workspace-local {:vbox (grc/make-rect 100 100 400 300)
+                                              :vport {:width 400 :height 300}
+                                              :zoom 1 :zoom-inverse 1})
+                     (assoc-in [:workspace-animation :maximized?] true)
+                     (assoc-in [:workspace-animation :restore-view]
+                               {:vbox (grc/make-rect 1000 1000 800 600) :zoom 1 :zoom-inverse 1}))
+          dock   (first (filter #(= ::dwa/dock-timeline (ptk/type %))
+                                (let [events (atom [])]
+                                  (->> (ptk/watch (dwcm/open-thread-moment thread) state (rx/empty))
+                                       (rx/subs! #(swap! events conj %)))
+                                  @events)))
+          resize (dwv/update-viewport-size :both {:width 800 :height 600})
+          ;; as the store goes: the dock, the canvas taking its size
+          state' (->> (ptk/update dock state) (ptk/update resize))
+          stream (rx/subject)
+          events (atom [])]
+      (->> (ptk/watch dock (ptk/update dock state) stream)
+           (rx/subs! #(swap! events conj %)
+                     (fn [cause] (t/is false (str cause)) (done))
+                     (fn []
+                       (let [[restore then] @events
+                             restored (ptk/update restore state')
+                             centred  (reduce #(ptk/update %2 %1) restored
+                                              (let [out (atom [])]
+                                                (->> (ptk/watch then restored (rx/empty))
+                                                     (rx/subs! #(swap! out conj %)))
+                                                @out))
+                             vbox     (get-in centred [:workspace-local :vbox])]
+                         (t/is (not (grc/contains-point? (get-in restored [:workspace-local :vbox])
+                                                         (:position thread)))
+                               "back where it was, the thread out of view")
+                         (t/is (grc/contains-point? vbox (:position thread)) "then it shows"))
+                       (done))))
+      (rx/push! stream resize))))
 
 (t/deftest timestamps-in-comments-read-as-their-labels
   (let [content (str "Here " (dcmt/timestamp-token 1250 "1.25 s")

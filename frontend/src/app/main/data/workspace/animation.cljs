@@ -2116,18 +2116,22 @@
 
 (defn dock-timeline
   "Dock the maximized timeline back (see `toggle-timeline-maximized`), so
-  the canvas shows what opens there, back where it was."
-  []
-  (ptk/reify ::dock-timeline
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-animation dissoc :maximized?))
+  the canvas shows what opens there, back where it was; then the event
+  `then`, if any, on the canvas as it is back."
+  ([] (dock-timeline nil))
+  ([then]
+   (ptk/reify ::dock-timeline
+     ptk/UpdateEvent
+     (update [_ state]
+       (update state :workspace-animation dissoc :maximized?))
 
-    ptk/WatchEvent
-    (watch [_ state stream]
-      (if (some? (dm/get-in state [:workspace-animation :restore-view]))
-        (after-viewport-resize stream (restore-view))
-        (rx/empty)))))
+     ptk/WatchEvent
+     (watch [_ state stream]
+       (rx/concat
+        (if (some? (dm/get-in state [:workspace-animation :restore-view]))
+          (after-viewport-resize stream (restore-view))
+          (rx/empty))
+        (if (some? then) (rx/of then) (rx/empty)))))))
 
 (defn- maximize-timeline
   "Let the timeline dock cover the whole workspace, the canvas in a small
