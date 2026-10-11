@@ -6496,7 +6496,9 @@
   strokes, in reverse order, an inner or outer one painted twice as
   wide. Corners play when they are alike (see `svg-even-corners?`),
   sizes as `svg-sized?` says. `timeline` is the one the exports play,
-  cut to its duration (see `cut-timeline`). Nil without any."
+  cut to its duration (see `cut-timeline`). Nil without any. A frontend
+  test matches its selectors against what the SVG renderer draws
+  (`svg-vectors-test`), which may change upstream."
   [timeline objects]
   (let [duration   (max 1 (:duration timeline))
         appearance (some-fn svg-fill-properties svg-stroke-properties svg-radius-properties

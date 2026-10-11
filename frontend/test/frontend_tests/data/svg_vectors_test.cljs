@@ -6,6 +6,8 @@
 
 (ns frontend-tests.data.svg-vectors-test
   (:require
+   ["jsdom" :refer [JSDOM]]
+   [app.common.types.animation :as cta]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
@@ -203,3 +205,87 @@
     (t/is (= 4 (count @fetched)) "four at a time, the others when those are done")
     (t/is (every? (fn [uri] (some #(str/includes? uri (id-of %)) shown)) @fetched)
           "of the shapes it shows, not of the hidden one nor of the other board")))
+
+(defn- contract-board
+  "A board holding a rect with two fills and an inner, an outer and a
+  center stroke, an ellipse, and a board that clips, their fills,
+  strokes, trim, corners and sizes playing."
+  []
+  (let [stroke  (fn [alignment color]
+                  {:stroke-color color :stroke-opacity 1 :stroke-width 4
+                   :stroke-style :solid :stroke-alignment alignment})
+        board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300
+                                  :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        rect    (cts/setup-shape {:type :rect :x 20 :y 20 :width 120 :height 80 :r1 8 :r2 8 :r3 8 :r4 8
+                                  :fills [{:fill-color "#ff0000" :fill-opacity 1}
+                                          {:fill-color "#00ff00" :fill-opacity 0.5}]
+                                  :strokes [(stroke :inner "#000000") (stroke :outer "#0000ff")
+                                            (stroke :center "#ff00ff")]})
+        ellipse (cts/setup-shape {:type :circle :x 180 :y 20 :width 80 :height 80
+                                  :fills [{:fill-color "#ffcc00" :fill-opacity 1}]
+                                  :strokes [(stroke :center "#333333")]})
+        card    (cts/setup-shape {:type :frame :x 20 :y 140 :width 160 :height 100 :r1 12 :r2 12 :r3 12 :r4 12
+                                  :show-content false
+                                  :fills [{:fill-color "#34c759" :fill-opacity 1}]})
+        kid     (cts/setup-shape {:type :rect :x 30 :y 150 :width 40 :height 40
+                                  :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        [bid rid eid cid kid-id] (map :id [board rect ellipse card kid])
+        kf      (fn [tl id property index from to]
+                  (-> tl
+                      (cta/add-keyframe id (cond-> {:time 0 :property property :value from}
+                                             (some? index) (assoc :index index)))
+                      (cta/add-keyframe id (cond-> {:time 1000 :property property :value to}
+                                             (some? index) (assoc :index index)))))]
+    {:bid bid
+     :objects {bid (assoc board :shapes [rid eid cid])
+               rid (assoc rect :parent-id bid :frame-id bid)
+               eid (assoc ellipse :parent-id bid :frame-id bid)
+               cid (assoc card :parent-id bid :frame-id bid :shapes [kid-id])
+               kid-id (assoc kid :parent-id cid :frame-id cid)}
+     :tl (-> (cta/make-timeline {:board-id bid :duration 1000})
+             (kf rid :fill-color 0 "#ff0000" "#880000")
+             (kf rid :fill-color 1 "#00ff00" "#008800")
+             (kf rid :stroke-color 0 "#000000" "#444444")
+             (kf rid :stroke-width 1 4 8)
+             (kf rid :stroke-color 2 "#ff00ff" "#880088")
+             (kf rid :trim-end nil 1 0.5)
+             ;; corners alike play as CSS
+             (kf rid :r1 nil 8 20) (kf rid :r2 nil 8 20) (kf rid :r3 nil 8 20) (kf rid :r4 nil 8 20)
+             (kf eid :fill-opacity 0 1 0.5)
+             (kf eid :width nil 80 120)
+             (kf cid :r1 nil 12 24) (kf cid :r2 nil 12 24) (kf cid :r3 nil 12 24) (kf cid :r4 nil 12 24)
+             (kf cid :width nil 160 200))}))
+
+(t/deftest the-css-of-an-svg-finds-what-the-svg-renderer-draws
+  ;; The CSS that plays the fills, strokes, trim, corners and sizes of an
+  ;; SVG of vectors picks their elements by how Penpot's SVG renderer
+  ;; draws them: every selector it writes finds one in the SVG it makes.
+  (let [{:keys [bid objects tl]} (contract-board)
+        resolved (cta/resolve-animations tl objects)
+        layers   (cta/svg-export-layer-ids objects resolved)
+        drawable (svgv/without-layers objects (set layers))
+        images   (into {}
+                       (map (fn [id] [id {:markup (svgv/layer-markup drawable id (get-in resolved [:tracks id]))}]))
+                       (cons bid layers))
+        svg      (cta/timeline->svg tl objects images {})
+        document (.. (JSDOM. svg #js {:contentType "image/svg+xml"}) -window -document)
+        style    (.-textContent (.querySelector document "style"))
+        selectors (map second (re-seq #"(?m)^([^@\s{}][^{}\n]*) \{\n  animation: penpot-svg-" style))]
+    (doseq [[part what] [["> defs > pattern > g > :nth-child(" "the fills in a pattern"]
+                         ["[id=\"fills-" "a fill"]
+                         [".inner-stroke-shape > :not(defs)" "an inner stroke"]
+                         [".inner-stroke-shape > defs > clipPath > *" "the clip of an inner stroke"]
+                         [".outer-stroke-shape > [mask]" "an outer stroke"]
+                         [".outer-stroke-shape > defs > mask > :first-child" "the mask of an outer stroke"]
+                         [".outer-stroke-shape > :not(defs):not([mask])" "the outline of an outer stroke"]
+                         [".stroke-shape > :not(defs)" "a center stroke"]
+                         ["> defs > clipPath > rect" "the clip of a board"]
+                         ["[id=\"penpot-clip-" "the clip of the layers in a board"]]]
+      (t/is (some #(str/includes? % part) selectors) (str what " plays")))
+    (doseq [selector selectors]
+      (t/is (pos? (.-length (.querySelectorAll document selector))) selector))
+    (t/testing "the outlines of trimmed strokes are of length 1"
+      (let [painted (.querySelectorAll document (str ".strokes[id$=\"-" (first layers) "\"] path, "
+                                                     ".strokes[id$=\"-" (first layers) "\"] rect"))]
+        (t/is (pos? (.-length painted)))
+        (t/is (every? #(= "1" (.getAttribute % "pathLength")) (array-seq painted)))))))

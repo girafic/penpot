@@ -85,10 +85,13 @@
 (defn with-path-length
   "The `markup` of the shape `id` with the outlines its strokes are drawn
   along of length 1 (`pathLength`), so its trim plays as their dash (see
-  `cta/svg-appearance-css`): those after the start of its strokes."
+  `cta/svg-appearance-css`): those after the start of its strokes, the
+  group of class `strokes` whose id ends in it, whatever the order of
+  its attributes."
   [markup id]
-  (let [start (str/index-of markup (str "-" id "\" class=\"strokes\""))]
-    (if (nil? start)
+  (let [start (.search markup (js/RegExp. (str "<g(?=[^>]*\\sclass=\"(?:[^\"]*\\s)?strokes(?:\\s[^\"]*)?\")"
+                                               "(?=[^>]*\\sid=\"[^\"]*-" id "\")")))]
+    (if (neg? start)
       markup
       (str (subs markup 0 start)
            (str/replace (subs markup start)
