@@ -10,6 +10,7 @@
    [app.common.types.audio-clip :as ctau]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.animation-mode :as dwam]
    [app.main.ui.workspace.timeline :as timeline]
    [cljs.test :as t :include-macros true]
    [potok.v2.core :as ptk]))
@@ -260,3 +261,17 @@
     (t/is (= -900 (timeline/content-start (ctau/add-audio-clip tl {:audio-id (uuid/next) :name "a.mp3"
                                                                    :source-duration 3000 :start -900})))
           "an audio clip")))
+
+(t/deftest the-dock-targets-the-board-of-the-selection
+  ;; The same board for the store (`dwam/active-board-id`) and the dock,
+  ;; so the dock maximizes only with a timeline to show.
+  (let [[board-a board-b rect] [(uuid/next) (uuid/next) (uuid/next)]
+        objects {uuid/zero {:id uuid/zero :type :frame :shapes [board-a board-b]}
+                 board-a {:id board-a :type :frame :parent-id uuid/zero :frame-id uuid/zero :shapes [rect]}
+                 board-b {:id board-b :type :frame :parent-id uuid/zero :frame-id uuid/zero}
+                 rect    {:id rect :type :rect :parent-id board-a :frame-id board-a}}
+        anim    {:board-id board-b}]
+    (t/is (= board-a (dwam/target-board-id objects [rect] anim)) "the board of what is selected")
+    (t/is (= board-a (dwam/target-board-id objects [board-a] anim)) "a selected board itself")
+    (t/is (= board-b (dwam/target-board-id objects [] anim)) "the last one, nothing selected")
+    (t/is (nil? (dwam/selection-board-id objects [])))))

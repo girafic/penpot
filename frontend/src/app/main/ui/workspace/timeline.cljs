@@ -27,6 +27,7 @@
    [app.main.data.shortcuts :as ds]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.animation-mode :as dwam]
    [app.main.data.workspace.audio :as dwaa]
    [app.main.data.workspace.clipboard :as dwcp]
    [app.main.data.workspace.comments :as dwcm]
@@ -1622,9 +1623,8 @@
 
         ;; The dock targets the board (top-level frame) of the selection,
         ;; and keeps the last one while nothing is selected.
-        sel-board-id (when-let [sid (first selected)]
-                       (cfh/get-shape-id-root-frame objects sid))
-        board-id   (or sel-board-id (:board-id anim))
+        sel-board-id (dwam/selection-board-id objects selected)
+        board-id   (dwam/target-board-id objects selected anim)
         board      (get objects board-id)
         ;; A board without animation shows a new empty timeline; the
         ;; first edit stores it.

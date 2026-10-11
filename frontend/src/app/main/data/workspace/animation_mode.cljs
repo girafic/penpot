@@ -11,7 +11,6 @@
   `app.main.data.workspace.animation`, so that what draws the canvas (its
   rulers, see `app.render-wasm.rulers-state`) can ask too."
   (:require
-   [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.main.data.helpers :as dsh]))
 
@@ -20,23 +19,29 @@
   [state]
   (contains? (:workspace-layout state) :animation-timeline))
 
-(defn- selection-board-id
-  "The board (top-level frame) of the current selection: the selected
-  board itself, or the root frame containing the selected shapes. `nil`
-  when nothing is selected."
-  [state]
-  (let [objects  (dsh/lookup-page-objects state)
-        selected (dsh/lookup-selected state)]
-    (when-let [shape-id (first selected)]
-      (cfh/get-shape-id-root-frame objects shape-id))))
+(defn selection-board-id
+  "The board (top-level frame) of the selection `selected` (ids) of the
+  page `objects`: the selected board itself, or the root frame holding
+  the selected shapes. `nil` when nothing is selected."
+  [objects selected]
+  (when-let [shape-id (first selected)]
+    (cfh/get-shape-id-root-frame objects shape-id)))
 
-(defn active-board-id
-  "The board the timeline dock currently targets: the board of the
+(defn target-board-id
+  "The board the timeline dock targets for the selection `selected` of
+  the page `objects` and the animation state `anim`: the board of the
   selection or, when nothing is selected, the last targeted one (see
   `set-active-board`), so the timeline stays visible and playable."
+  [objects selected anim]
+  (or (selection-board-id objects selected)
+      (:board-id anim)))
+
+(defn active-board-id
+  "The board the timeline dock currently targets (see `target-board-id`)."
   [state]
-  (or (selection-board-id state)
-      (dm/get-in state [:workspace-animation :board-id])))
+  (target-board-id (dsh/lookup-page-objects state)
+                   (dsh/lookup-selected state)
+                   (:workspace-animation state)))
 
 (defn timeline-maximized?
   "Whether the timeline dock covers the whole workspace, the sidebars
