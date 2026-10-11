@@ -211,7 +211,7 @@
 (defn open-thread-moment
   "Open a comment `thread` about a moment of the animation from the
   timeline: the moment shows, and the canvas moves to the thread when it
-  is out of view."
+  is out of view. A maximized timeline docks so that the thread shows."
   [thread]
   (dm/assert!
    "expected valid comment thread"
@@ -222,6 +222,9 @@
     (watch [_ state _]
       (let [vbox (dm/get-in state [:workspace-local :vbox])]
         (rx/concat
+         (if (dwa/timeline-maximized? (:workspace-animation state))
+           (rx/of (dwa/dock-timeline))
+           (rx/empty))
          (if (and (some? vbox) (not (grc/contains-point? vbox (:position thread))))
            (rx/of (center-to-comment-thread thread))
            (rx/empty))

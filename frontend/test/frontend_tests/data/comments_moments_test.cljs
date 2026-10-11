@@ -14,6 +14,7 @@
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
+   [app.common.time :as ct]
    [app.common.types.animation :as cta]
    [app.common.uuid :as uuid]
    [app.main.data.comments :as dcmt]
@@ -103,6 +104,27 @@
     (t/is (= []
              (emitted (dwcm/show-moment (assoc thread :frame-id uuid/zero) 400) state))
           "nothing for a thread out of the boards")))
+
+(t/deftest opening-a-thread-from-the-maximized-timeline-docks-it
+  (let [file   (animated-file)
+        state  (workspace-state file)
+        thread {:id (random-uuid)
+                :page-id (:id (thf/current-page file))
+                :file-id (:id file)
+                :project-id (random-uuid)
+                :owner-id (random-uuid)
+                :file-name "file"
+                :seqn 1
+                :content "here"
+                :participants #{}
+                :created-at (ct/now)
+                :modified-at (ct/now)
+                :position (gpt/point 300 200)
+                :animation-time 400}
+        docks? #(= ::dwa/dock-timeline (first (emitted (dwcm/open-thread-moment thread) %)))]
+    (t/is (docks? (assoc-in state [:workspace-animation :maximized?] true))
+          "the thread shows on the canvas the timeline covered")
+    (t/is (not (docks? state)) "docked, it stays")))
 
 (t/deftest timestamps-in-comments-read-as-their-labels
   (let [content (str "Here " (dcmt/timestamp-token 1250 "1.25 s")

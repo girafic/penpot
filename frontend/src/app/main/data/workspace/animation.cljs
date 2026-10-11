@@ -2062,6 +2062,15 @@
         (rx/of (layout/toggle-layout-flag :animation-timeline :force? true)
                (layout/set-options-mode :design))))))
 
+(defn dock-timeline
+  "Dock the maximized timeline back (see `toggle-timeline-maximized`), so
+  the canvas shows what opens there."
+  []
+  (ptk/reify ::dock-timeline
+    ptk/UpdateEvent
+    (update [_ state]
+      (update state :workspace-animation dissoc :maximized?))))
+
 (defn timeline-maximized?
   "Whether the timeline dock covers the whole workspace, the sidebars
   too, like a maximized area in Blender; `anim` is the
