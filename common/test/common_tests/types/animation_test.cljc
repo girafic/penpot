@@ -2124,12 +2124,13 @@
     (t/is (= 1 (get-in layer [:ks :o :a])) "it fades")))
 
 (defn- shadowed-group
-  "A board holding a group with `shadow`, which moves, holding a white
-  rectangle with a stroke 2 wide."
-  [shadow]
+  "A board holding a group with `shadow` (and the attributes `attrs`),
+  which moves, holding a white rectangle with a stroke 2 wide."
+  [shadow & {:as attrs}]
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
-        group (cts/setup-shape {:type :group :name "Group" :x 100 :y 100 :width 40 :height 40
-                                :shadow [shadow]})
+        group (cts/setup-shape (merge {:type :group :name "Group" :x 100 :y 100 :width 40 :height 40
+                                       :shadow [shadow]}
+                                      attrs))
         rect  (cts/setup-shape {:type :rect :name "Rect" :x 100 :y 100 :width 40 :height 40
                                 :fills [{:fill-color "#ffffff" :fill-opacity 1}]
                                 :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2
@@ -2170,6 +2171,24 @@
     (t/is (close? 100 (get-in fill [:o :k])))
     (t/is (= [10.0] (mapv #(get-in % [:w :k]) strokes))
           "grown by its stroke and spread, its own stroke no more")))
+
+(t/deftest lottie-fades-a-group-with-the-shadows-it-spreads
+  ;; As the canvas: its shadows do not show through it.
+  (let [shadow  {:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 6 :spread 4
+                 :hidden false :color {:color "#000000" :opacity 1}}
+        {:keys [gid L]} (shadowed-group shadow :opacity 0.5)
+        comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
+        [faded & more] (:layers L)
+        [layer cast]   (:layers (comp (:refId faded)))]
+    (t/is (= (str "faded_" gid) (:refId faded)) "both in a precomp")
+    (t/is (close? 50 (get-in faded [:ks :o :k])) "which fades them together")
+    (t/is (= ["Board"] (mapv :nm more)) "over the board")
+    (t/is (= ["Group" (str "drop_" gid "_0")] [(:nm layer) (:refId cast)]) "the group over its shadow")
+    (t/is (every? #(close? 100 (get-in % [:ks :o :k])) [layer cast]) "opaque in it")
+    (t/testing "an opaque one keeps its layers as they are"
+      (let [{:keys [gid L]} (shadowed-group shadow)
+            [layer cast] (:layers L)]
+        (t/is (= ["Group" (str "drop_" gid "_0")] [(:nm layer) (:refId cast)]))))))
 
 (t/deftest lottie-spreads-a-group-in-as-it-erodes
   (let [shadow  {:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 6 :spread -3

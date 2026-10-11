@@ -1782,6 +1782,27 @@
                          ::effect true)))
               shown)))))
 
+(defn- lottie-see-through?
+  "Whether the layer `layer` is less than opaque, at rest or as it plays."
+  [layer]
+  (let [o (get-in layer [:ks :o])]
+    (or (= 1 (:a o)) (< (or (:k o) 100) 100))))
+
+(defn- lottie-faded-layers
+  "A precomp layer of the layer `layer` of `shape` over the layers of its
+  drop shadows `shadows` (see `lottie-container-shadows`), which fades
+  and blends them together as `layer` would: in Lottie a layer that fades
+  over the layers of its shadows lets them show through it, which the
+  canvas does not. The precomp goes to `comps`."
+  [{:keys [comps width height duration]} shape layer shadows]
+  (let [name  (str (or (:name shape) (:id shape)) " with shadows")
+        ref   (str "faded_" (:id shape))
+        solid #(-> % (assoc-in [:ks :o] {:a 0 :k 100}) (assoc :bm 0))]
+    (add-comp! comps {:id ref :nm name :layers (lottie-numbered (mapv solid (cons layer shadows)))})
+    {:ddd 0 :ty 0 :nm name :refId ref :sr 1
+     :ks (assoc lottie-identity-ks :o (get-in layer [:ks :o] {:a 0 :k 100}))
+     :ao 0 :w width :h height :ip 0 :op (ms->frames duration) :st 0 :bm (or (:bm layer) 0)}))
+
 (defn- lottie-node-layers
   "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first,
   each that follows the board it is in as it resizes (`:follow` of
@@ -1812,7 +1833,9 @@
                                     (let [ef (filterv #(not= 25 (:ty %)) (:ef layer))]
                                       (if (seq ef) (assoc layer :ef ef) (dissoc layer :ef)))
                                     layer)
-                          layers  (into [layer] shadows)]
+                          layers  (if (and (seq shadows) (lottie-see-through? layer))
+                                    [(lottie-faded-layers ctx shape layer shadows)]
+                                    (into [layer] shadows))]
                       (if-let [stops (get (:follow ctx) id)]
                         (conj (mapv #(assoc % ::follow id) layers) (lottie-follow-null ctx shape stops))
                         layers)))))
