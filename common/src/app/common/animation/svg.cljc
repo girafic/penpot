@@ -99,14 +99,6 @@
 (def ^:private svg-stroke-properties #{:stroke-color :stroke-opacity :stroke-width})
 (def ^:private svg-trim-properties #{:trim-start :trim-end :trim-offset})
 
-(defn svg-export-layer-ids
-  "The layers of an SVG of vectors of `timeline` (with its keyframes, see
-  `resolve-animations`): its export layers (see `export-layer-ids`) and
-  the layers in the boards whose size it plays on their elements (see
-  `svg-sized?`) or that cast inner shadows (see `export-holders`)."
-  [objects timeline]
-  (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline) (aexp/export-holders objects timeline)))
-
 (defn- svg-clip-rest-id
   [id]
   (str "penpot-clip-rest-" id))
@@ -1092,7 +1084,7 @@
   instead holds the vectors of its layer, the SVG of the shape at rest as
   it is on the page (see `svg-vectors`), and `:fonts` (an option) the
   `@font-face` CSS of their texts; the layers are then those of
-  `svg-export-layer-ids`. The width and height of a layer play on its
+  `aexp/export-layer-ids`. The width and height of a layer play on its
   vectors when they can (see `svg-sized?`), and the layers in a board so
   resized move with it as `:propagate` says (an option, see
   `svg-follow-css`), else they keep their place. Options, as Figma's:
@@ -1134,7 +1126,7 @@
                                                                   (acss/fmt (+ (or y 0) (/ (or height 0) 2))) "px")))
                                                  :adjust (fn [text units] (aexp/turned-moves units (:rotation text)))})})
          played   (-> timeline cta/expand-paths cta/cut-timeline)
-         ids      (cta/export-layer-ids objects board-id (:tracks timeline) (aexp/export-holders objects timeline))
+         ids      (aexp/export-layer-ids objects timeline)
          nodes    (aexp/layer-nodes objects (set ids) board-id)
          ;; the layers holding layers, which may go anywhere in the view
          wide     (into #{board-id}

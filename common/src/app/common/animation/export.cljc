@@ -63,6 +63,15 @@
         (into (comp (remove #{board-id}) (keep #(dm/get-in objects [% :parent-id]))) boards)
         (into (mapcat up) masked))))
 
+(defn export-layer-ids
+  "The layers of an SVG or Lottie export of `timeline` (with its
+  keyframes, see `cta/resolve-animations`): its tracked shapes and their
+  siblings (see `cta/export-layer-ids`), and the layers in the shapes of
+  `export-holders`."
+  [objects timeline]
+  (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline)
+                        (export-holders objects timeline)))
+
 (def blur-sigma-scale
   "How render-wasm turns the value of a layer blur into the standard
   deviation of its Gaussian (`radius_to_sigma`): 1/√3 of it, plus 0.5."

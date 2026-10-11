@@ -525,7 +525,7 @@
     (nil? timeline) []
     render-wasm?    [:mp4 :webm :gif :avif :svg :lottie :dotlottie]
     :else
-    (let [ids   (alottie/lottie-export-layer-ids objects timeline)
+    (let [ids   (aexp/export-layer-ids objects timeline)
           idset (set ids)]
       (if (every? #(alottie/lottie-vector-layer? objects idset %) ids)
         [:lottie :dotlottie]
@@ -603,7 +603,7 @@
 
   - `:lottie/images`, layers that draw as pictures for their effects or
     paints (see `alottie/lottie-vector-layer?`, its layers those of
-    `alottie/lottie-export-layer-ids`; texts are the outlines of their
+    `aexp/export-layer-ids`; texts are the outlines of their
     glyphs, see `outline-texts`, and an SVG has its layers as vectors,
     see `app.main.data.exports.svg-vectors`);
   - `:svg/appearance`, what an SVG keeps as it rests (see
@@ -640,7 +640,7 @@
                          (remove :hidden))
           animated  (into #{} (comp (mapcat :keyframes) (map :property)) (vals (:tracks resolved)))
           ;; the layers in masked groups are layers too
-          lottie-ids (alottie/lottie-export-layer-ids objects resolved)
+          lottie-ids (aexp/export-layer-ids objects resolved)
           lottie-set (set lottie-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
           ;; SVG and Lottie play some on the outlines
@@ -1364,10 +1364,10 @@
 
 (defn- layer-ids-to-shoot
   "The layers of a Lottie export of `timeline` (see
-  `alottie/lottie-export-layer-ids`) and its board, the pictures
+  `aexp/export-layer-ids`) and its board, the pictures
   `collect-layer-images` takes, but those `skip?` is true of."
   [objects timeline skip?]
-  (cond->> (conj (alottie/lottie-export-layer-ids objects (cta/resolve-animations timeline objects))
+  (cond->> (conj (aexp/export-layer-ids objects (cta/resolve-animations timeline objects))
                  (:board-id timeline))
     (some? skip?) (remove skip?)))
 
@@ -1834,7 +1834,7 @@
   [objects tl texts {:keys [yield cancelled? on-progress outline? bridge]}]
   (let [board-id (:board-id tl)
         resolved (cta/resolve-animations tl objects)
-        layers   (asvg/svg-export-layer-ids objects resolved)
+        layers   (aexp/export-layer-ids objects resolved)
         drawn    (into [board-id] (remove texts) layers)
         [shapes view] (if outline?
                         (outline-texts objects tl texts (or bridge (default-bridge)))
@@ -1874,14 +1874,14 @@
         shapes   (if lottie? (second (outline-texts objects tl texts bridge)) objects)
         ;; Lottie draws the layers it can as vectors, SVG all (see
         ;; `vector-layers`)
-        layers   (set (alottie/lottie-export-layer-ids shapes (cta/resolve-animations tl shapes)))
+        layers   (set (aexp/export-layer-ids shapes (cta/resolve-animations tl shapes)))
         skip?    #(or vectors?
                       (contains? texts %)
                       (and lottie? (alottie/lottie-vector-layer? shapes layers %)))
         ;; the pictures (or vectors) of the layers, then of the units of
         ;; split texts
         n-layers (if vectors?
-                   (->> (asvg/svg-export-layer-ids objects (cta/resolve-animations tl objects))
+                   (->> (aexp/export-layer-ids objects (cta/resolve-animations tl objects))
                         (cons board-id)
                         (remove texts)
                         (count))

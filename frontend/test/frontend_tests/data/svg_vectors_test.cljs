@@ -7,6 +7,7 @@
 (ns frontend-tests.data.svg-vectors-test
   (:require
    ["jsdom" :refer [JSDOM]]
+   [app.common.animation.export :as aexp]
    [app.common.animation.svg :as asvg]
    [app.common.types.animation :as cta]
    [app.common.types.path :as path]
@@ -263,7 +264,7 @@
   ;; draws them: every selector it writes finds one in the SVG it makes.
   (let [{:keys [bid objects tl]} (contract-board)
         resolved (cta/resolve-animations tl objects)
-        layers   (asvg/svg-export-layer-ids objects resolved)
+        layers   (aexp/export-layer-ids objects resolved)
         drawable (svgv/without-layers objects (set layers))
         images   (into {}
                        (map (fn [id] [id {:markup (svgv/layer-markup drawable id (get-in resolved [:tracks id]))}]))

@@ -168,15 +168,6 @@
    (and (some #(#{:width :height} (:property %)) (:keyframes track))
         (not (lottie-sized? shape track)))))
 
-(defn lottie-export-layer-ids
-  "The layers of a Lottie export of `timeline` (with its keyframes, see
-  `resolve-animations`): its export layers (see `export-layer-ids`) and
-  the layers in the boards whose size it plays on their outlines (see
-  `lottie-sized?`), that cast inner shadows or that are masked groups or
-  hold them (see `export-holders`)."
-  [objects timeline]
-  (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline) (aexp/export-holders objects timeline)))
-
 (defn- lottie-box
   "A function of a time to the box of `shape` then, resized by the width
   and height `track` plays around its pivot, as the canvas resizes it,
@@ -1932,7 +1923,7 @@
          ;; effects, see `lottie-content?`) draws only as one
          holders    (aexp/svg-holder-ids objects (aexp/svg-sized-ids objects timeline))
          layer-ids  (if (some? assets)
-                      (set (lottie-export-layer-ids objects timeline))
+                      (set (aexp/export-layer-ids objects timeline))
                       (-> (set (keys (:tracks timeline)))
                           (disj board-id)
                           (into (mapcat #(dm/get-in objects [% :shapes])) (aexp/export-holders objects timeline))))

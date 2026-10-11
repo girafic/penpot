@@ -778,6 +778,40 @@
         ids   (cta/export-layer-ids objects bid tracks)]
     (t/is (= [aid cid bid-b] ids))))
 
+(t/deftest an-export-takes-the-layers-in-what-holds-them
+  ;; One list for SVG and Lottie: the shapes in a board whose size plays,
+  ;; in a board with an inner shadow and in a masked group are layers too.
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        sized  (cts/setup-shape {:type :frame :x 10 :y 10 :width 100 :height 50})
+        left   (cts/setup-shape {:type :rect :x 20 :y 20 :width 10 :height 10})
+        shaded (cts/setup-shape {:type :frame :x 150 :y 10 :width 100 :height 50
+                                 :fills [{:fill-color "#34c759" :fill-opacity 1}]
+                                 :shadow [{:id (uuid/next) :style :inner-shadow :offset-x 0 :offset-y 8 :blur 10
+                                           :spread 0 :hidden false :color {:color "#003300" :opacity 0.9}}]})
+        inner  (cts/setup-shape {:type :rect :x 160 :y 20 :width 10 :height 10})
+        group  (cts/setup-shape {:type :group :x 10 :y 100 :width 100 :height 100 :masked-group true})
+        mask   (cts/setup-shape {:type :circle :x 10 :y 100 :width 100 :height 100})
+        bar    (cts/setup-shape {:type :rect :x 10 :y 130 :width 100 :height 40})
+        still  (cts/setup-shape {:type :rect :x 300 :y 200 :width 10 :height 10})
+        [bid sid lid hid kid gid mid rid tid] (map :id [board sized left shaded inner group mask bar still])
+        objects {bid (assoc board :shapes [sid hid gid tid])
+                 sid (assoc sized :parent-id bid :frame-id bid :shapes [lid])
+                 lid (assoc left :parent-id sid :frame-id sid)
+                 hid (assoc shaded :parent-id bid :frame-id bid :shapes [kid])
+                 kid (assoc inner :parent-id hid :frame-id hid)
+                 gid (assoc group :parent-id bid :frame-id bid :shapes [mid rid])
+                 mid (assoc mask :parent-id gid :frame-id bid)
+                 rid (assoc bar :parent-id gid :frame-id bid)
+                 tid (assoc still :parent-id bid :frame-id bid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe sid {:time 0 :property :width :value 100})
+                    (cta/add-keyframe sid {:time 1000 :property :width :value 140}))
+        ids     (aexp/export-layer-ids objects (cta/resolve-animations tl objects))]
+    (t/is (= [sid lid hid kid gid mid rid tid] ids) "each before what it holds")
+    (t/is (= #{sid hid gid tid}
+             (set (cta/export-layer-ids objects bid (:tracks tl))))
+          "without what holds them, only the siblings of what moves")))
+
 (t/deftest timeline->lottie-with-assets-uses-image-layers
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 800 :height 600})
         bid   (:id board)
@@ -1402,7 +1436,7 @@
                     (cta/add-keyframe cid {:time 1000 :property :width :value 140}))
         svg     (asvg/timeline->svg tl objects {} {:propagate cgm/set-objects-modifiers})
         follow  #(str "penpot-follow-" %)]
-    (t/is (= [cid lid rid mid] (asvg/svg-export-layer-ids objects (cta/resolve-animations tl objects)))
+    (t/is (= [cid lid rid mid] (aexp/export-layer-ids objects (cta/resolve-animations tl objects)))
           "what is in it, layers, though it stays")
     (t/is (re-find (re-pattern (str "@keyframes " (follow lid) " \\{\n  0% \\{ transform: matrix\\(1, 0, 0, 1, 0, 0\\);[^\n]*\n"
                                     "  100% \\{ transform: matrix\\(1, 0, 0, 1, -20, 0\\);"))
@@ -1635,7 +1669,7 @@
         comp    (some #(when (= (:refId holder) (:id %)) %) (:assets L))
         named   (fn [shape] (d/seek #(= (:name shape) (:nm %)) (:layers comp)))
         null-of (fn [layer] (d/seek #(= (:parent layer) (:ind %)) (:layers comp)))]
-    (t/is (= [cid lid rid mid] (alottie/lottie-export-layer-ids objects (cta/resolve-animations tl objects)))
+    (t/is (= [cid lid rid mid] (aexp/export-layer-ids objects (cta/resolve-animations tl objects)))
           "what is in it, layers, though it stays")
     (t/is (= 0 (:ty holder)) "a precomp")
     (t/is (close-all? [100 100 100] (get-in holder [:ks :s :k])) "which does not stretch")
@@ -2080,7 +2114,7 @@
         comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
         layer   (first (:layers L))
         [matte content & more] (:layers (comp (:refId layer)))]
-    (t/is (= #{gid mid rid did} (set (alottie/lottie-export-layer-ids objects tl))) "what it holds are layers")
+    (t/is (= #{gid mid rid did} (set (aexp/export-layer-ids objects tl))) "what it holds are layers")
     (t/is (= (str "comp_" gid) (:refId layer)) "a precomp of the group")
     (t/is (= ["Mask" 1] [(:nm matte) (:td matte)]) "its mask an alpha matte")
     (t/is (nil? (:ef matte)) "without its shadow")
@@ -2094,7 +2128,7 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe rid {:time 0 :property :x :value 0})
                     (cta/add-keyframe rid {:time 1000 :property :x :value 200}))
-        ids     (asvg/svg-export-layer-ids objects tl)
+        ids     (aexp/export-layer-ids objects tl)
         images  (into {}
                       (map (fn [id] [id {:markup (str "<rect class=\"" (get-in objects [id :name] "board") "\"/>")}]))
                       (cons bid ids))
@@ -2116,7 +2150,7 @@
         tl  (-> (cta/make-timeline {:board-id bid :duration 1000})
                 (cta/add-keyframe gid {:time 0 :property :opacity :value 0})
                 (cta/add-keyframe gid {:time 1000 :property :opacity :value 1}))
-        ids (set (alottie/lottie-export-layer-ids objects tl))
+        ids (set (aexp/export-layer-ids objects tl))
         L   (alottie/timeline->lottie tl objects)
         layer (first (:layers L))]
     (t/is (alottie/lottie-vector-layer? objects ids gid))
@@ -2260,9 +2294,8 @@
 (t/deftest a-board-casts-its-inner-shadow-under-what-it-holds
   ;; As the canvas does: inside its fills, under the layers in it.
   (let [{:keys [bid cid kid objects tl]} (inner-shadow-card)]
-    (t/is (= [cid kid] (alottie/lottie-export-layer-ids objects (cta/resolve-animations tl objects)))
+    (t/is (= [cid kid] (aexp/export-layer-ids objects (cta/resolve-animations tl objects)))
           "what it holds a layer, though it stays")
-    (t/is (= [cid kid] (asvg/svg-export-layer-ids objects (cta/resolve-animations tl objects))))
     (t/testing "Lottie"
       (let [L      (alottie/timeline->lottie tl objects)
             layer  (first (:layers L))
