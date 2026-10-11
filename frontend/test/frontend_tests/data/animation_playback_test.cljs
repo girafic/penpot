@@ -92,6 +92,15 @@
     (t/is (true? (dwa/audio-muted? {})) "the next time too")
     (swap! storage/user assoc ::dwa/audio-muted before)))
 
+(t/deftest the-rows-stay-as-tall-as-made
+  (let [before (get @storage/user ::dwa/row-height)
+        event  (dwa/set-row-height 44)
+        state  (ptk/update event {})]
+    (ptk/effect event state (rx/empty))
+    (t/is (= 44 (dwa/row-height (:workspace-animation state))))
+    (t/is (= 44 (dwa/row-height {})) "the next time too")
+    (swap! storage/user assoc ::dwa/row-height before)))
+
 (t/deftest a-board-with-only-clips-plays
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 100})
         id    (:id board)

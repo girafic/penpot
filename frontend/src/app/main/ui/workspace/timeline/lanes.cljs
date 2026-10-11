@@ -45,7 +45,14 @@
   "The ruler and the row of the markers, above the rows (`$header-height`)."
   52)
 
-(def row-height 28)
+(def default-row-height
+  "Height of a row as it starts (`$row-height`), and of the row of the
+  markers, which stays so (see `header-height`)."
+  28)
+
+(def max-row-height
+  "The tallest the rows get (see `row-height`)."
+  72)
 
 (def ^:private bar-inset
   "Room above and below a bar or a block in its row."
@@ -79,6 +86,13 @@
 
 ;; GEOMETRY
 
+(defn row-height
+  "Height of the rows of `geo`, which the user makes taller up to
+  `max-row-height` (see `dwa/row-height`): their bars and blocks grow
+  with them, their keyframes stay in their middle."
+  [geo]
+  (get geo :row-height default-row-height))
+
 (defn axis-width
   "Pixels the time axis takes in a view `width` wide, labels included, at
   `zoom` (1 fits it in the view)."
@@ -108,30 +122,32 @@
 
 (defn row-y
   "Top of the row at `index` on the canvas."
-  [{:keys [scroll-y]} index]
-  (- (+ header-height (* index row-height)) scroll-y))
+  [{:keys [scroll-y] :as geo} index]
+  (- (+ header-height (* index (row-height geo))) scroll-y))
 
 (defn row-index
   "Index of the row at `y` of the canvas (past the last one under the
   rows), nil above the rows."
-  [{:keys [scroll-y]} y]
+  [{:keys [scroll-y] :as geo} y]
   (when (>= y header-height)
-    (int (mth/floor (/ (+ (- y header-height) scroll-y) row-height)))))
+    (int (mth/floor (/ (+ (- y header-height) scroll-y) (row-height geo))))))
 
 (defn visible-rows
   "`[start end]` indices of the rows in view, with `overscan` more on each
   side. `end` may be past the last row."
-  [{:keys [height scroll-y]} overscan]
-  [(int (max 0 (- (mth/floor (/ scroll-y row-height)) overscan)))
-   (int (max 0 (+ (mth/ceil (/ (+ scroll-y (- height header-height)) row-height))
-                  overscan)))])
+  [{:keys [height scroll-y] :as geo} overscan]
+  (let [row-height (row-height geo)]
+    [(int (max 0 (- (mth/floor (/ scroll-y row-height)) overscan)))
+     (int (max 0 (+ (mth/ceil (/ (+ scroll-y (- height header-height)) row-height))
+                    overscan)))]))
 
 (defn scroll-to-rows
   "Where the rows scroll to (a `:scroll-y`) so that the first of the rows
   at `indices` is in the middle of the view, or nil while one of them is
   in view."
-  [{:keys [height scroll-y]} indices]
-  (let [rows-height (- height header-height)
+  [{:keys [height scroll-y] :as geo} indices]
+  (let [row-height  (row-height geo)
+        rows-height (- height header-height)
         in-view?    (fn [index]
                       (let [top (- (* index row-height) scroll-y)]
                         (and (>= top 0) (<= (+ top row-height) rows-height))))]
@@ -167,7 +183,7 @@
   [geo from to y]
   (let [[x0 x1] (segment-ends geo from to)
         cx      (+ x0 (/ (max 0 (- x1 x0)) 2))]
-    {:x (- cx 10) :y (+ y 4) :width 20 :height 20}))
+    {:x (- cx 10) :y (+ y (/ (- (row-height geo) 20) 2)) :width 20 :height 20}))
 
 (defn in-rect?
   [{:keys [x y width height]} px py]
@@ -204,7 +220,7 @@
                     :property (:property row)
                     :index (:index row)
                     :locked? locked?)]
-    (if-let [keyframe (keyframe-at geo keyframes x y (+ top (/ row-height 2)))]
+    (if-let [keyframe (keyframe-at geo keyframes x y (+ top (/ (row-height geo) 2)))]
       (assoc base :type :keyframe :keyframe keyframe)
       (or (some (fn [[from to]]
                   (let [button  (easing-button geo from to top)
@@ -284,7 +300,7 @@
   (let [index (row-index geo y)]
     (if-let [row (get rows index)]
       (let [top  (row-y geo index)
-            bar? (<= bar-inset (- y top) (- row-height bar-inset))
+            bar? (<= bar-inset (- y top) (- (row-height geo) bar-inset))
             base {:row index :shape-id (:id row)}]
         (case (:type row)
           :layer
@@ -338,7 +354,7 @@
                                         (< (+ (time->x geo (:start clip)) 10) x
                                            (- (time->x geo (ctau/clip-end clip)) 10))
                                         (<= (mth/abs (- y (volume-y (+ top bar-inset)
-                                                                    (- row-height (* 2 bar-inset))
+                                                                    (- (row-height geo) (* 2 bar-inset))
                                                                     clip)))
                                             volume-reach)))
                                  (rseq (:clips row))))
@@ -374,13 +390,13 @@
                 (filter #(= :animation (:type (second %))))
                 (keep (fn [[index {:keys [id animation]}]]
                         (when-not (:locked animation)
-                          (let [top (+ (* index row-height) bar-inset)]
+                          (let [top (+ (* index (row-height geo)) bar-inset)]
                             {:shape-id     id
                              :animation-id (:id animation)
                              :left         (x (:start animation))
                              :right        (x (cta/animation-end animation))
                              :top          top
-                             :bottom       (- (+ top row-height) (* 2 bar-inset))})))))
+                             :bottom       (- (+ top (row-height geo)) (* 2 bar-inset))})))))
           rows)))
 
 (defn bar-boxes
@@ -393,12 +409,12 @@
           (comp (map-indexed vector)
                 (keep (fn [[index {:keys [type id range]}]]
                         (when (and (= :layer type) (some? range))
-                          (let [top (+ (* index row-height) bar-inset)]
+                          (let [top (+ (* index (row-height geo)) bar-inset)]
                             {:shape-id id
                              :left     (x (first range))
                              :right    (x (second range))
                              :top      top
-                             :bottom   (- (+ top row-height) (* 2 bar-inset))})))))
+                             :bottom   (- (+ top (row-height geo)) (* 2 bar-inset))})))))
           rows)))
 
 (defn clip-boxes
@@ -411,14 +427,14 @@
           (comp (map-indexed vector)
                 (filter #(= :audio (:type (second %))))
                 (mapcat (fn [[index row]]
-                          (let [top (+ (* index row-height) bar-inset)]
+                          (let [top (+ (* index (row-height geo)) bar-inset)]
                             (keep (fn [clip]
                                     (when-not (:locked clip)
                                       {:clip-id (:id clip)
                                        :left    (x (:start clip))
                                        :right   (x (ctau/clip-end clip))
                                        :top     top
-                                       :bottom  (- (+ top row-height) (* 2 bar-inset))}))
+                                       :bottom  (- (+ top (row-height geo)) (* 2 bar-inset))}))
                                   (:clips row))))))
           rows)))
 
@@ -432,6 +448,7 @@
               (filter #(= :property (:type (second %))))
               (mapcat (fn [[index row]]
                         (let [{:keys [keyframes locked?]} (property-lane timeline row)
+                              row-height (row-height geo)
                               cy (+ (* index row-height) (/ row-height 2))]
                           (when-not locked?
                             (map (fn [keyframe]
@@ -560,7 +577,7 @@
   (let [x0     (time->x geo start)
         x1     (max (time->x geo end) (+ x0 min-bar-width))
         top    (+ y bar-inset)
-        height (- row-height (* 2 bar-inset))]
+        height (- (row-height geo) (* 2 bar-inset))]
     (fill-round-rect! ctx fill x0 top (- x1 x0) height 6)
     (when grips?
       (faded! ctx (if hovered? 1 0.6)
@@ -579,7 +596,7 @@
   (let [x0     (time->x geo start)
         x1     (max (time->x geo end) (+ x0 min-bar-width))
         top    (+ y bar-inset)
-        height (- row-height (* 2 bar-inset))]
+        height (- (row-height geo) (* 2 bar-inset))]
     (.beginPath ctx)
     (.roundRect ctx (- x0 1) (- top 1) (+ (- x1 x0) 2) (+ height 2) 7)
     (set! (.-strokeStyle ctx) color)
@@ -626,7 +643,7 @@
   [^js ctx geo {:keys [timeline selected-kfs easing]} palette row y color hover]
   (let [{:keys [keyframes locked? hidden?]} (property-lane timeline row)
         shape-id (:id row)
-        cy       (+ y (/ row-height 2))
+        cy       (+ y (/ (row-height geo) 2))
         width    (:width geo)
         segments (partition 2 1 keyframes)
 
@@ -759,7 +776,7 @@
   (let [x0      (time->x geo (:start clip))
         x1      (max (time->x geo (ctau/clip-end clip)) (+ x0 min-bar-width))
         top     (+ y bar-inset)
-        height  (- row-height (* 2 bar-inset))
+        height  (- (row-height geo) (* 2 bar-inset))
         active? (contains? selected-clips (:id clip))
         ink     (if active? (:on-accent palette) (:fg-strong palette))
         peaks   (waveform (:audio-id clip))]
@@ -869,7 +886,7 @@
                                            (= :animation (:type hover))
                                            (not (:locked animation)))]
                     (draw-block-label! ctx ((:animation-label scene) animation) ink font
-                                       x0 x1 (+ y (/ row-height 2)))
+                                       x0 x1 (+ y (/ (row-height geo) 2)))
                     (when (contains? (:selected-anims scene)
                                      {:shape-id (:id row) :animation-id (:id animation)})
                       (outline-bar! ctx geo y (:start animation) (cta/animation-end animation)
@@ -887,7 +904,7 @@
       ;; collapsed, an overview of all the clips, each a slim bar
       :audio-group
       (when (:collapsed? row)
-        (let [mid (+ y (/ row-height 2))]
+        (let [mid (+ y (/ (row-height geo) 2))]
           (doseq [clip (:clips row)
                   :let [x0 (time->x geo (:start clip))
                         x1 (max (time->x geo (ctau/clip-end clip)) (+ x0 2))]
@@ -918,7 +935,7 @@
                           (= index hover-row)
                           (:bg-hover palette))]
             :when (some? color)]
-      (fill-rect! ctx color 0 (row-y geo index) width row-height))
+      (fill-rect! ctx color 0 (row-y geo index) width (row-height geo)))
 
     ;; Under the bars and keyframes: before the start, where something
     ;; lies there, and past the duration, up to the right edge so no row

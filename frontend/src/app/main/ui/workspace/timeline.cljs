@@ -125,6 +125,11 @@
   "Largest horizontal zoom of the time axis (1 fits the duration)."
   20)
 
+(def ^:private row-height-per-pixel
+  "How many px taller a pixel of Alt + wheel makes the rows, up the
+  wheel; down it, shorter."
+  0.05)
+
 (def ^:private zoom-per-pixel
   "How much a pixel of Ctrl/Cmd + wheel zooms, as much as on the canvas
   (see `app.main.ui.workspace.viewport.actions/scale-per-pixel`)."
@@ -626,7 +631,7 @@
 (defn- row-style
   "Where the label of the row at `row-index` is, among the labels."
   [row-index]
-  #js {"top" (dm/str (* row-index lanes/row-height) "px")})
+  #js {"top" (dm/str "calc(var(--timeline-row-height) * " row-index ")")})
 
 (mf/defc layer-row*
   "The label of a layer of the board, in a tree like the layers panel. Its
@@ -1367,7 +1372,8 @@
 (mf/defc toolbar*
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [timeline playing? recording? full-quality? audio-muted? clip clip-count unit zoom on-zoom-change]}]
+  [{:keys [timeline playing? recording? full-quality? audio-muted? clip clip-count unit zoom on-zoom-change
+           row-height on-row-height-change]}]
   (let [duration (:duration timeline)
         playback (cta/playback-mode timeline)
         autoplay? (cta/autoplay? timeline)
@@ -1501,6 +1507,20 @@
         [:span {:class (stl/css :clip-name)} (tr "workspace.animation.clips-selected" clip-count)]])
 
      [:div {:class (stl/css :toolbar-end)}
+      [:div {:class (stl/css :row-height-control)
+             :title (tr "workspace.animation.row-height")}
+       [:> i/icon* {:icon-id i/text-lineheight :size "s"}]
+       [:input {:type "range"
+                :class (stl/css :zoom-slider :row-height-slider)
+                :min lanes/default-row-height
+                :max lanes/max-row-height
+                :step 1
+                :value row-height
+                :style #js {"--zoom-fill" (dm/str (* 100 (/ (- row-height lanes/default-row-height)
+                                                            (- lanes/max-row-height lanes/default-row-height)))
+                                                  "%")}
+                :aria-label (tr "workspace.animation.row-height")
+                :on-change on-row-height-change}]]
       [:input {:type "range"
                :class (stl/css :zoom-slider)
                :min 0
@@ -1602,6 +1622,10 @@
         playing?   (get anim :playing? false)
         unit       (dwa/time-unit anim)
         recording? (get anim :auto-keyframe? false)
+        ;; as tall as the user made the rows (see `lanes/row-height`)
+        row-height (mth/clamp (or (dwa/row-height anim) lanes/default-row-height)
+                              lanes/default-row-height
+                              lanes/max-row-height)
         duration   (get clock :duration 1000)
 
         selected-kfs (get anim :selected-kfs #{})
@@ -1774,6 +1798,39 @@
                (slider->zoom)
                (set-zoom))))
 
+        ;; Where the rows scroll to once they are laid out taller or
+        ;; shorter, so that the row at `y` of the view stays there.
+        row-anchor-ref (mf/use-ref nil)
+
+        set-row-height
+        (mf/use-fn
+         (mf/deps row-height)
+         (fn [height y]
+           (let [height (mth/clamp (mth/round height) lanes/default-row-height lanes/max-row-height)]
+             (when (not= height row-height)
+               (when-let [^js node (mf/ref-val scroll-ref)]
+                 (let [offset (max 0 (- y lanes/header-height))]
+                   (mf/set-ref-val! row-anchor-ref
+                                    (- (* (+ (.-scrollTop node) offset) (/ height row-height))
+                                       offset))))
+               (st/emit! (dwa/set-row-height height))))))
+
+        ;; The row height of the last render, for the wheel (see
+        ;; `zoom-state-ref`).
+        row-state-ref (mf/use-ref nil)
+        _             (mf/set-ref-val! row-state-ref {:row-height row-height
+                                                      :set-row-height set-row-height})
+
+        ;; the slider keeps the top row in place
+        on-row-height-change
+        (mf/use-fn
+         (mf/deps set-row-height)
+         (fn [event]
+           (-> (dom/get-target event)
+               (dom/get-value)
+               (d/parse-double lanes/default-row-height)
+               (set-row-height lanes/header-height))))
+
         ;; Layer tree of the board, like the layers panel.
         expanded*  (mf/use-state {})
         expanded   (deref expanded*)
@@ -1799,7 +1856,7 @@
         ;; What the view scrolls over: the rows under the ruler and the
         ;; markers.
         content-height (+ lanes/header-height
-                          (* row-count lanes/row-height))
+                          (* row-count row-height))
 
         ;; The values at the playhead of the properties with a label, so
         ;; scrubbing does not work them out for the whole board.
@@ -2066,6 +2123,7 @@
         _          (mf/set-ref-val! geo-ref (assoc (mf/ref-val geo-ref)
                                                    :width (max 0 (- view-width lanes/label-width))
                                                    :height view-height
+                                                   :row-height row-height
                                                    :span span
                                                    :origin origin
                                                    :axis-width axis-width))
@@ -3021,6 +3079,12 @@
               (when (some? scroll-y)
                 (set! (.-scrollTop node) scroll-y)))))))
 
+    (mf/with-layout-effect [row-height]
+      (when-let [top (mf/ref-val row-anchor-ref)]
+        (mf/set-ref-val! row-anchor-ref nil)
+        (when-let [^js node (mf/ref-val scroll-ref)]
+          (set! (.-scrollTop node) top))))
+
     ;; The labels, the markers and the lanes where the timeline is
     ;; scrolled to, after each render.
     (mf/with-layout-effect nil
@@ -3042,12 +3106,17 @@
 
     ;; Ctrl/Cmd + wheel, and a pinch on a trackpad, zoom the time axis
     ;; like the canvas: out when scrolled down, by the pixels scrolled,
-    ;; once per frame. The listener is not passive, so it can stop the
-    ;; browser zoom.
+    ;; once per frame. Alt + wheel makes the rows taller up the wheel,
+    ;; shorter down it, keeping the one under the pointer there. The
+    ;; listener is not passive, so it can stop the browser zoom.
     (mf/with-effect [(some? timeline)]
       (when-let [node (mf/ref-val scroll-ref)]
         (let [scale (volatile! 1)
               frame (volatile! nil)
+              ;; the pixels scrolled with Alt not yet applied, and where
+              rows-delta (volatile! 0)
+              rows-y     (volatile! 0)
+              rows-frame (volatile! nil)
 
               zoom!
               (fn []
@@ -3056,22 +3125,43 @@
                   (set-zoom (* zoom @scale))
                   (vreset! scale 1)))
 
+              rows!
+              (fn []
+                (let [{:keys [row-height set-row-height]} (mf/ref-val row-state-ref)
+                      step (mth/round (* row-height-per-pixel @rows-delta))]
+                  (vreset! rows-frame nil)
+                  (when-not (zero? step)
+                    (vreset! rows-delta 0)
+                    (set-row-height (- row-height step) @rows-y))))
+
               on-wheel
               (fn [^js event]
                 ;; the wheel fields are on the native event only
                 (let [event (.getBrowserEvent event)]
-                  (when (or (kbd/ctrl? event) (kbd/meta? event))
-                    (dom/prevent-default event)
-                    (let [wheel ^js (nw/normalize-wheel event)
-                          delta (+ (.-pixelX wheel) (.-pixelY wheel))
-                          step  (+ 1 (mth/abs (* zoom-per-pixel delta)))]
-                      (vswap! scale * (if (pos? delta) (/ 1 step) step))
-                      (when (nil? @frame)
-                        (vreset! frame (js/requestAnimationFrame zoom!)))))))
+                  (cond
+                    (or (kbd/ctrl? event) (kbd/meta? event))
+                    (do
+                      (dom/prevent-default event)
+                      (let [wheel ^js (nw/normalize-wheel event)
+                            delta (+ (.-pixelX wheel) (.-pixelY wheel))
+                            step  (+ 1 (mth/abs (* zoom-per-pixel delta)))]
+                        (vswap! scale * (if (pos? delta) (/ 1 step) step))
+                        (when (nil? @frame)
+                          (vreset! frame (js/requestAnimationFrame zoom!)))))
+
+                    (kbd/alt? event)
+                    (do
+                      (dom/prevent-default event)
+                      (let [wheel ^js (nw/normalize-wheel event)]
+                        (vswap! rows-delta + (.-pixelX wheel) (.-pixelY wheel))
+                        (vreset! rows-y (- (.-clientY event) (:top (dom/get-bounding-rect node))))
+                        (when (nil? @rows-frame)
+                          (vreset! rows-frame (js/requestAnimationFrame rows!))))))))
 
               key (events/listen node "wheel" on-wheel #js {:passive false})]
           #(do (events/unlistenByKey key)
-               (some-> @frame js/cancelAnimationFrame)))))
+               (some-> @frame js/cancelAnimationFrame)
+               (some-> @rows-frame js/cancelAnimationFrame)))))
 
     ;; The dock sits in its own row of the workspace grid. Its height is
     ;; shared with the sidebars through a CSS variable on the workspace
@@ -3085,6 +3175,7 @@
     [:*
      [:section {:class (stl/css-case :timeline-dock true :recording recording?)
                 :ref dock-ref
+                :style #js {"--timeline-row-height" (dm/str row-height "px")}
                 :tab-index -1
                 :on-key-down on-key-down
                 :on-drag-over on-drag-over
@@ -3106,7 +3197,9 @@
                        :clip-count (count selected-clips)
                        :unit unit
                        :zoom zoom
-                       :on-zoom-change on-zoom-change}]
+                       :on-zoom-change on-zoom-change
+                       :row-height row-height
+                       :on-row-height-change on-row-height-change}]
          [:> playhead-follower* {:scroll-ref scroll-ref
                                  :geo-ref geo-ref
                                  :zoom zoom

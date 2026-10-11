@@ -241,3 +241,26 @@
   (t/is (= [[512 712 33 51]]
            (mapv (juxt :left :right :top :bottom) (lanes/animation-boxes geo scene)))
         "but the locked ones"))
+
+;; Rows made 48 px tall: their tops at 52, 100, 148, 196 and 244, their
+;; middles 24 below, their bars from 5 to 43 px in them.
+(t/deftest taller-rows-grow-their-bars
+  (let [tall (assoc geo :row-height 48)]
+    (t/is (= 28 (lanes/row-height geo)) "as tall as they start")
+    (t/is (= 196 (lanes/row-y tall 3)))
+    (t/is (= 2 (lanes/row-index tall 150)))
+    (t/is (= [0 6] (lanes/visible-rows tall 0)))
+    (t/is (= 284 (lanes/scroll-to-rows tall [8])))
+    (t/is (= {:type :bar :row 0 :mode :move} (hit-at tall 250 90)) "lower in its bar")
+    (t/is (= {:type :row :row 0} (hit-at tall 250 98)) "under its bar")
+    (t/is (= {:type :keyframe :row 3 :locked? false :time 100} (hit-at tall 112 220))
+          "the keyframes in the middle")
+    (t/is (= {:type :easing :row 3 :locked? false :from 100} (hit-at tall 212 215))
+          "and the easing button")
+    (t/is (= {:type :segment :row 3 :locked? false :from 100} (hit-at tall 212 205)))
+    (t/is (= [[112 412 5 43]]
+             (mapv (juxt :left :right :top :bottom) (lanes/bar-boxes tall scene))))
+    (t/is (= [[512 712 53 91]]
+             (mapv (juxt :left :right :top :bottom) (lanes/animation-boxes tall scene))))
+    (let [{:keys [top bottom]} (first (lanes/keyframe-boxes tall scene))]
+      (t/is (< 160 top 168 bottom 176) "in the middle of the fourth row"))))

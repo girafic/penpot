@@ -30,6 +30,9 @@ $header-height: $ruler-height + $row-height;
   --timeline-bar-color: color-mix(in hsl, var(--color-foreground-secondary) 25%, transparent);
   --timeline-playhead-color: var(--color-accent-primary);
 
+  // How tall the rows are, as the user made them (see `lanes/row-height`).
+  --timeline-row-height: #{$row-height};
+
   grid-area: bottom-dock;
   position: relative;
   block-size: var(--workspace-bottom-dock-height);
@@ -214,12 +217,24 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
-// Right end of the toolbar: timeline zoom and close.
+// Right end of the toolbar: the height of the rows, timeline zoom and
+// close.
 .toolbar-end {
   display: flex;
   align-items: center;
   gap: deprecated.$s-8;
   margin-inline-start: auto;
+}
+
+.row-height-control {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+  color: var(--color-foreground-secondary);
+}
+
+.row-height-control .row-height-slider {
+  inline-size: 72px;
 }
 
 // The settings of the selected audio clip (see `clip-bar*`).
@@ -412,11 +427,13 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
-// The markers above the layers, under the ruler, across the view.
+// The markers above the layers, under the ruler, across the view, as tall
+// as the rows start, however tall they are.
 .row.marker-row {
   inset-block-start: $ruler-height;
   inset-inline: 0;
   inline-size: auto;
+  block-size: $row-height;
   border-bottom: 1px solid var(--panel-border-color);
 
   .row-label {
@@ -557,7 +574,7 @@ $header-height: $ruler-height + $row-height;
   position: absolute;
   display: flex;
   inline-size: $track-label-width;
-  block-size: $row-height;
+  block-size: var(--timeline-row-height);
   background-color: var(--color-background-primary);
   pointer-events: auto;
 
@@ -702,7 +719,7 @@ $header-height: $ruler-height + $row-height;
 .lane-drop {
   position: absolute;
   inset-inline: 0;
-  block-size: $row-height;
+  block-size: var(--timeline-row-height);
   border-block-start: 2px solid var(--color-accent-primary);
   pointer-events: none;
   z-index: 1;

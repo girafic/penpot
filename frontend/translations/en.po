@@ -7652,6 +7652,9 @@ msgstr "Scale"
 msgid "workspace.animation.zoom"
 msgstr "Zoom"
 
+msgid "workspace.animation.row-height"
+msgstr "Row height"
+
 msgid "workspace.animation.prev-keyframe"
 msgstr "Previous keyframe"
 

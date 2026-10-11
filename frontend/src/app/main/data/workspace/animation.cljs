@@ -332,6 +332,26 @@
     (effect [_ state _]
       (swap! storage/user assoc ::full-quality (dm/get-in state [:workspace-animation :full-quality?])))))
 
+(defn row-height
+  "How tall the rows of the timeline are, in px, as the user last made
+  them; nil while they are as tall as they start (see
+  `timeline.lanes/row-height`)."
+  [anim]
+  (or (:row-height anim) (get storage/user ::row-height)))
+
+(defn set-row-height
+  "Make the rows of the timeline, and the bars in them, `height` px tall.
+  The choice is kept for the next time."
+  [height]
+  (ptk/reify ::set-row-height
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-animation :row-height] height))
+
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (swap! storage/user assoc ::row-height height))))
+
 (defn- item-at
   [items index]
   (get (if (vector? items) items (vec items)) index))
