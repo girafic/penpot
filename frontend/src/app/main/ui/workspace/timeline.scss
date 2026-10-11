@@ -51,6 +51,17 @@ $header-height: $ruler-height + $row-height;
     outline: none;
   }
 
+  // Over the whole workspace, the sidebars too, like a maximized area in
+  // Blender (Ctrl + Space). Its row of the grid stays, so the canvas
+  // under it keeps its size; its popovers and menus still show over it.
+  &.maximized {
+    position: fixed;
+    inset: 0;
+    block-size: auto;
+    border-top: none;
+    z-index: var(--z-index-set);
+  }
+
   // Auto-keyframe on: every edit records keyframes, the playhead and a bar
   // across the top of the timeline show it in red.
   &.recording {
@@ -217,8 +228,8 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
-// Right end of the toolbar: the height of the rows, timeline zoom and
-// close.
+// Right end of the toolbar: the height of the rows, timeline zoom,
+// maximize and close.
 .toolbar-end {
   display: flex;
   align-items: center;

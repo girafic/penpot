@@ -6331,6 +6331,9 @@ msgstr "Toggle layers"
 msgid "shortcuts.toggle-motion-mode"
 msgstr "Toggle motion mode"
 
+msgid "shortcuts.toggle-timeline-maximized"
+msgstr "Maximize timeline"
+
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:193
 #, unused
 msgid "shortcuts.toggle-layout-flex"
@@ -7654,6 +7657,12 @@ msgstr "Zoom"
 
 msgid "workspace.animation.row-height"
 msgstr "Row height"
+
+msgid "workspace.animation.maximize"
+msgstr "Maximize timeline (%s)"
+
+msgid "workspace.animation.restore-size"
+msgstr "Restore timeline (%s)"
 
 msgid "workspace.animation.prev-keyframe"
 msgstr "Previous keyframe"

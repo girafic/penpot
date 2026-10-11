@@ -33,6 +33,7 @@
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shapes :as dwsh]
+   [app.main.data.workspace.shortcuts :as sc]
    [app.main.data.workspace.undo :as dwu]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -1373,7 +1374,7 @@
   {::mf/private true
    ::mf/wrap [mf/memo]}
   [{:keys [timeline playing? recording? full-quality? audio-muted? clip clip-count unit zoom on-zoom-change
-           row-height on-row-height-change]}]
+           row-height on-row-height-change maximized?]}]
   (let [duration (:duration timeline)
         playback (cta/playback-mode timeline)
         autoplay? (cta/autoplay? timeline)
@@ -1418,6 +1419,9 @@
 
         on-toggle-autoplay
         (mf/use-fn #(st/emit! (dwa/toggle-autoplay)))
+
+        on-toggle-maximized
+        (mf/use-fn #(st/emit! (dwa/toggle-timeline-maximized)))
 
         on-close
         (mf/use-fn #(st/emit! (dwa/close-timeline)))]
@@ -1531,6 +1535,15 @@
                :title (tr "workspace.animation.zoom")
                :aria-label (tr "workspace.animation.zoom")
                :on-change on-zoom-change}]
+      ;; over the whole workspace, as Ctrl + Space does
+      [:button {:type "button"
+                :class (stl/css-case :ctrl-btn true :toggle-btn true :active maximized?)
+                :title (if maximized?
+                         (tr "workspace.animation.restore-size" (sc/get-tooltip :toggle-timeline-maximized))
+                         (tr "workspace.animation.maximize" (sc/get-tooltip :toggle-timeline-maximized)))
+                :aria-pressed maximized?
+                :on-click on-toggle-maximized}
+       [:> i/icon* {:icon-id i/expand}]]
       [:button {:class (stl/css :close-btn)
                 :title (tr "labels.close")
                 :on-click on-close}
@@ -1622,6 +1635,9 @@
         playing?   (get anim :playing? false)
         unit       (dwa/time-unit anim)
         recording? (get anim :auto-keyframe? false)
+        ;; over the whole workspace; docked without a board to show, so
+        ;; one can be picked on the canvas
+        maximized? (and (some? timeline) (dwa/timeline-maximized? anim))
         ;; as tall as the user made the rows (see `lanes/row-height`)
         row-height (mth/clamp (or (dwa/row-height anim) lanes/default-row-height)
                               lanes/default-row-height
@@ -3173,17 +3189,20 @@
         #(dom/unset-css-property! workspace "--workspace-bottom-dock-height")))
 
     [:*
-     [:section {:class (stl/css-case :timeline-dock true :recording recording?)
+     [:section {:class (stl/css-case :timeline-dock true
+                                     :recording recording?
+                                     :maximized maximized?)
                 :ref dock-ref
                 :style #js {"--timeline-row-height" (dm/str row-height "px")}
                 :tab-index -1
                 :on-key-down on-key-down
                 :on-drag-over on-drag-over
                 :on-drop on-drop}
-      [:div {:class (stl/css :resize-area)
-             :on-pointer-down on-resize-start
-             :on-lost-pointer-capture on-resize-end
-             :on-pointer-move on-resize-move}]
+      (when-not maximized?
+        [:div {:class (stl/css :resize-area)
+               :on-pointer-down on-resize-start
+               :on-lost-pointer-capture on-resize-end
+               :on-pointer-move on-resize-move}])
       (if (nil? timeline)
         [:> empty-state*]
         [:*
@@ -3199,7 +3218,8 @@
                        :zoom zoom
                        :on-zoom-change on-zoom-change
                        :row-height row-height
-                       :on-row-height-change on-row-height-change}]
+                       :on-row-height-change on-row-height-change
+                       :maximized? maximized?}]
          [:> playhead-follower* {:scroll-ref scroll-ref
                                  :geo-ref geo-ref
                                  :zoom zoom

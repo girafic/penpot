@@ -2038,9 +2038,14 @@
 
 (defn close-timeline
   "Leave motion mode. The timeline dock clears the preview when it
-  unmounts."
+  unmounts, and opens docked again the next time (see
+  `toggle-timeline-maximized`)."
   []
   (ptk/reify ::close-timeline
+    ptk/UpdateEvent
+    (update [_ state]
+      (update state :workspace-animation dissoc :maximized?))
+
     ptk/WatchEvent
     (watch [_ _ _]
       (rx/of (layout/remove-layout-flag :animation-timeline)))))
@@ -2056,6 +2061,31 @@
         (rx/of (close-timeline))
         (rx/of (layout/toggle-layout-flag :animation-timeline :force? true)
                (layout/set-options-mode :design))))))
+
+(defn timeline-maximized?
+  "Whether the timeline dock covers the whole workspace, the sidebars
+  too, like a maximized area in Blender; `anim` is the
+  `:workspace-animation` state."
+  [anim]
+  (true? (:maximized? anim)))
+
+(defn toggle-timeline-maximized
+  "Let the timeline dock cover the whole workspace, or dock it back. Out
+  of motion mode, enter it with the dock maximized."
+  []
+  (ptk/reify ::toggle-timeline-maximized
+    ptk/UpdateEvent
+    (update [_ state]
+      (if (and (motion-mode? state)
+               (timeline-maximized? (:workspace-animation state)))
+        (update state :workspace-animation dissoc :maximized?)
+        (assoc-in state [:workspace-animation :maximized?] true)))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (motion-mode? state)
+        (rx/empty)
+        (rx/of (toggle-motion-mode))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CANVAS KEYFRAMES (motion mode)

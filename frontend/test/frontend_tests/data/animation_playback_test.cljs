@@ -101,6 +101,25 @@
     (t/is (= 44 (dwa/row-height {})) "the next time too")
     (swap! storage/user assoc ::dwa/row-height before)))
 
+(t/deftest the-timeline-maximizes-in-motion-mode
+  (let [motion     {:workspace-layout #{:animation-timeline}}
+        toggle     #(ptk/update (dwa/toggle-timeline-maximized) %)
+        maximized? #(dwa/timeline-maximized? (:workspace-animation %))
+        types      (fn [state]
+                     (let [types (atom [])]
+                       (->> (ptk/watch (dwa/toggle-timeline-maximized) state (rx/empty))
+                            (rx/subs! #(swap! types conj (ptk/type %))))
+                       @types))]
+    (t/is (maximized? (toggle motion)))
+    (t/is (not (maximized? (toggle (toggle motion)))) "and back")
+    (t/is (= [] (types motion)))
+    (t/testing "out of motion mode, it enters it maximized"
+      (t/is (maximized? (toggle {})))
+      (t/is (maximized? (toggle {:workspace-animation {:maximized? true}})))
+      (t/is (= [::dwa/toggle-motion-mode] (types {}))))
+    (t/is (not (maximized? (ptk/update (dwa/close-timeline) (toggle motion))))
+          "leaving motion mode docks it again")))
+
 (t/deftest a-board-with-only-clips-plays
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 100})
         id    (:id board)
