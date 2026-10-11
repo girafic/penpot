@@ -1225,6 +1225,57 @@
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally #(done))))))
 
+(defn- unit-vectors-outcome
+  "How `dea/collect-unit-vectors` of `args` ends: `:done`, the type of
+  what stopped it or the message of what failed. Outside the body of
+  `t/async`, which compiles to an async function that awaits the promise
+  of a `let`."
+  [& args]
+  (-> (apply dea/collect-unit-vectors args)
+      (.then (constantly :done))
+      (.catch (fn [cause] (or (:type (ex-data cause)) (ex-message cause))))))
+
+(t/deftest the-units-of-split-texts-stop-at-a-cancel-with-the-text-at-rest
+  ;; Cancelled between two texts, or failing in one, it leaves no text
+  ;; with its units shown.
+  (let [{:keys [objects bid tid]} (text-board)
+        other   (uuid/next)
+        objects (-> objects
+                    (update-in [bid :shapes] conj other)
+                    (assoc other (assoc (get objects tid) :id other)))
+        split   {:type :fade :split :word :start 0 :duration 500}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-animation tid split)
+                    (cta/add-animation other split))
+        texts   (dea/unit-texts objects tl)
+        shown   (atom [])
+        cancel  (atom false)
+        show    (fn [shape _] (swap! shown conj [(:id shape) (count (:text-units shape))]))
+        ;; cancelled once the first text is done
+        cancelling {:bridge {:apply-shape-properties show :text-unit-outlines (fn [_] [])}
+                    :cancelled? #(deref cancel)
+                    :yield (fn [] (reset! cancel true) (js/Promise.resolve nil))}
+        failing {:bridge {:apply-shape-properties show
+                          :text-unit-outlines (fn [_] (throw (js/Error. "no outlines")))}
+                 :yield #(js/Promise.resolve nil)}]
+    (t/async
+      done
+      (-> (unit-vectors-outcome objects tl texts cancelling)
+          (.then (fn [result]
+                   (let [[[first-id shown-units] [same-id rest-units] :as calls] @shown]
+                     (t/is (= 2 (count texts)))
+                     (t/is (= :export-cancelled result))
+                     (t/is (= 2 (count calls)) "the next text never shown")
+                     (t/is (= first-id same-id))
+                     (t/is (= [3 0] [shown-units rest-units]) "the one done set back at rest"))
+                   (reset! shown [])
+                   (unit-vectors-outcome objects tl texts failing)))
+          (.then (fn [result]
+                   (t/is (= "no outlines" result) "a failure goes on")
+                   (t/is (= 0 (second (peek @shown))) "the text set back at rest all the same")))
+          (.catch (fn [cause] (t/is false (str "failed: " cause))))
+          (.finally (fn [] (done) nil))))))
+
 (t/deftest markup-formats-note-the-split-text-they-play-whole
   ;; they play the units of a split text, but of one that underlines or
   ;; strikes some of its text
