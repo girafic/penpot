@@ -12,6 +12,7 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.main.data.exports.animation :as dea]
+   [app.main.data.exports.animation-job :as job]
    [app.main.data.exports.animation-workspace :as deaw]
    [app.main.data.exports.assets :as de]
    [app.main.data.workspace.animation :as dwa]
@@ -155,10 +156,11 @@
         ;; MP4 and WebM carry the sound of the audio clips, unless left out
         audio?    (get export :audio true)
         ;; SVG: the names of the layers as ids, a bounding box, texts as
-        ;; the outlines of their glyphs
-        ids?      (get export :ids false)
-        bbox?     (get export :bbox false)
-        outline?  (get export :outline false)
+        ;; the outlines of their glyphs (see `job/svg-options`)
+        svg-opts  (into {} (map (fn [[option key]] [option (get export key false)])) job/svg-options)
+        ids?      (:ids? svg-opts)
+        bbox?     (:bbox? svg-opts)
+        outline?  (:outline? svg-opts)
         clips?    (boolean (some #(seq (:audio-clips (get timelines %))) board-ids))
         support*  (mf/use-state {:mp4 true :webm true :avif true})
         support   (deref support*)
@@ -276,15 +278,13 @@
         (mf/use-fn
          (mf/deps format quality fps scale loop? audio? ids? bbox? outline? several? export-boards)
          (fn []
-           (deaw/export-from-panel! (cond-> {:format format
-                                             :quality quality
-                                             :fps fps
-                                             :scale scale
-                                             :loop? loop?
-                                             :audio? audio?
-                                             :ids? ids?
-                                             :bbox? bbox?
-                                             :outline? outline?}
+           (deaw/export-from-panel! (cond-> (merge {:format format
+                                                    :quality quality
+                                                    :fps fps
+                                                    :scale scale
+                                                    :loop? loop?
+                                                    :audio? audio?}
+                                                   svg-opts)
                                       several? (assoc :boards export-boards)))))
 
         on-cancel

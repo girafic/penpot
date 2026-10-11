@@ -404,9 +404,9 @@
   "Whether an SVG of vectors draws the shadows of `shape` on a filter of
   their own around it and the layers in it, as the canvas shadows a
   group or board with what it holds, and as soft (see
-  `svg-effects-filter`), SMIL playing those `track` animates, its
+  `svg-effects-filter`), SMIL playing those its track animates, its
   vectors drawn without them: when it has shadows to show."
-  [shape _track]
+  [shape]
   (boolean (some (complement :hidden) (cta/as-vec (:shadow shape)))))
 
 (defn- blur-at
@@ -811,7 +811,7 @@
            board?   (and (some? shape) (aexp/board-inner-shadows? shape))
            drops    (if board? #{:drop-shadow} #{:drop-shadow :inner-shadow})
            shadows? (and (some? shape)
-                         (svg-filter-shadows? shape track)
+                         (svg-filter-shadows? shape)
                          (some #(and (not (:hidden %)) (contains? drops (:style % :drop-shadow)))
                                (cta/as-vec (:shadow shape))))
            blur?    (and (some? shape) (svg-filter-blur? shape track))

@@ -1055,7 +1055,7 @@
                      {:time 1000 :property :shadow-offset-y :index 0 :value 20}
                      {:time 0 :property :shadow-spread :index 1 :value 0}
                      {:time 1000 :property :shadow-spread :index 1 :value 6}])]
-    (t/is (asvg/svg-filter-shadows? shape track))
+    (t/is (asvg/svg-filter-shadows? shape))
     (t/is (str/includes? svg (str "<g class=\"penpot-smil-" sid "\" filter=\"url(#penpot-effects-" sid
                                   ")\"><g transform=\"translate(0 0)\"><g transform=\"translate(0 0)\" "
                                   "fill=\"none\"><rect class=\"me\"></rect></g></g></g>"))
@@ -1081,11 +1081,11 @@
 
 (t/deftest an-svg-shadows-as-soft-as-the-canvas
   (let [{:keys [sid svg shape track]} (shadow-svg [{:time 0 :property :opacity :value 1}])]
-    (t/is (asvg/svg-filter-shadows? shape track) "shadows that do not play too")
+    (t/is (asvg/svg-filter-shadows? shape) "shadows that do not play too")
     (t/is (str/includes? svg (str "<filter id=\"penpot-effects-" sid "\"")))
     (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"/>") "the drop shadow of 8: 1/√3 of it and 0.5")
     (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"2.809\"/>") "the inner one of 4")
-    (t/is (not (asvg/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))
+    (t/is (not (asvg/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true)))))
           "none of hidden ones")))
 
 (t/deftest an-svg-blurs-as-the-canvas
@@ -1150,7 +1150,7 @@
                                     "keySplines=\"0.25 0.1 0.25 1;0.75 0 0.75 0.9\" values=\"4;20;4\"/>")))))
   (t/testing "no SMIL of hidden shadows"
     (let [{:keys [shape track]} (shadow-svg [{:time 0 :property :shadow-offset-y :index 0 :value 4}])]
-      (t/is (not (asvg/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))))))
+      (t/is (not (asvg/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true)))))))))
 
 (t/deftest an-svg-plays-corners-not-alike-by-smil
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100 :r1 0 :r2 0 :r3 0 :r4 0})

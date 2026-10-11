@@ -55,7 +55,7 @@
   corners (see `asvg/svg-smil-corners?`), which are not alike as it plays.
   A board that hides its fill in exports, without it."
   [shape track]
-  (let [shadows? (asvg/svg-filter-shadows? shape track)]
+  (let [shadows? (asvg/svg-filter-shadows? shape)]
     (cond-> (dissoc shape :opacity)
       (or shadows? (asvg/svg-filter-blur? shape track))
       (dissoc :blur)

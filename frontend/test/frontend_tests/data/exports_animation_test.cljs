@@ -1254,7 +1254,6 @@
                   :apply-shape-properties (fn [_ _])
                   :render-shape-pixels (fn [_ _ _] (js/Uint8Array. #js [137 80 78 71]))
                   :get-shape-extrect (fn [_] {:x 10 :y 10 :width 200 :height 20})
-                  :crop-picture (fn [bytes rect] (p/resolved {:bytes bytes :rect rect}))
                   :text-unit-outlines (fn [_] [])}
         export   (fn [format]
                    (reset! progress [])

@@ -943,76 +943,6 @@
              (when (some? tokens)
                {:applied-tokens tokens})))))
 
-(defn- parse-animation*
-  [props before-start?]
-  (let [type      (some-> (obj/get props "type") keyword)
-        direction (d/nilv (obj/get props "direction") "in")
-        start     (d/nilv (obj/get props "start") 0)
-        duration  (obj/get props "duration")
-        easing    (some-> (obj/get props "easing") (parse-easing false))
-        numbers   (->> ["amount" "offsetX" "offsetY"]
-                       (keep #(when-let [v (obj/get props %)] [% v]))
-                       (into {}))
-        split     (parse-split (obj/get props "split"))
-        spread    (obj/get props "spread")
-        order     (obj/get props "order")
-        seed      (obj/get props "seed")
-        tokens    (when (contains? cta/animation-types type)
-                    (parse-entry-tokens (obj/get props "appliedTokens") type))]
-    (cond
-      (not (contains? cta/animation-types type))
-      "The type should be one of 'fade', 'move', 'scale', 'rotate' or 'blur'"
-
-      (not (contains? #{"in" "out"} direction))
-      "The direction should be 'in' or 'out'"
-
-      (not (if before-start? (valid-timeline-time? start) (valid-time? start)))
-      (if before-start?
-        "The start should be a number of milliseconds"
-        "The start should be a number of milliseconds from 0")
-
-      (and (some? duration) (not (and (sm/valid-safe-number? duration) (pos? duration))))
-      "The duration should be a number of milliseconds above 0"
-
-      (and (some? (obj/get props "easing")) (nil? easing))
-      "Not a valid easing"
-
-      (not (every? sm/valid-safe-number? (vals numbers)))
-      "The amount and offsets should be numbers"
-
-      (= ::invalid split)
-      "The split should be 'char', 'word' or 'line'"
-
-      (and (nil? split) (some some? [spread order seed]))
-      "The spread, order and seed go with a split"
-
-      (and (some? spread) (not (valid-spread? spread)))
-      "The spread should be a number from 0 to 1"
-
-      (and (some? order) (not (valid-order? order)))
-      "The order should be 'forward', 'backward', 'center', 'edges' or 'random'"
-
-      (and (some? seed) (not (sm/valid-safe-int? seed)))
-      "The seed should be a whole number"
-
-      (string? tokens)
-      tokens
-
-      :else
-      (cond-> {:type type
-               :direction (keyword direction)
-               :start (mth/round start)}
-        (some? duration)              (assoc :duration (mth/round duration))
-        (some? easing)                (merge easing)
-        (contains? numbers "amount")  (assoc :amount (get numbers "amount"))
-        (contains? numbers "offsetX") (assoc :offset-x (get numbers "offsetX"))
-        (contains? numbers "offsetY") (assoc :offset-y (get numbers "offsetY"))
-        (some? split)                 (assoc :split split)
-        (some? spread)                (assoc :spread spread)
-        (some? order)                 (assoc :order (keyword order))
-        (some? seed)                  (assoc :seed seed)
-        (seq tokens)                  (assoc :applied-tokens tokens)))))
-
 (defn- parse-animation
   "The preset animation the object `props` of the plugin API describes,
   or a string saying what is wrong with it. With `before-start?`, one of
@@ -1021,7 +951,73 @@
   ([props]
    (parse-animation props false))
   ([props before-start?]
-   (parse-animation* props before-start?)))
+   (let [type      (some-> (obj/get props "type") keyword)
+         direction (d/nilv (obj/get props "direction") "in")
+         start     (d/nilv (obj/get props "start") 0)
+         duration  (obj/get props "duration")
+         easing    (some-> (obj/get props "easing") (parse-easing false))
+         numbers   (->> ["amount" "offsetX" "offsetY"]
+                        (keep #(when-let [v (obj/get props %)] [% v]))
+                        (into {}))
+         split     (parse-split (obj/get props "split"))
+         spread    (obj/get props "spread")
+         order     (obj/get props "order")
+         seed      (obj/get props "seed")
+         tokens    (when (contains? cta/animation-types type)
+                     (parse-entry-tokens (obj/get props "appliedTokens") type))]
+     (cond
+       (not (contains? cta/animation-types type))
+       "The type should be one of 'fade', 'move', 'scale', 'rotate' or 'blur'"
+
+       (not (contains? #{"in" "out"} direction))
+       "The direction should be 'in' or 'out'"
+
+       (not (if before-start? (valid-timeline-time? start) (valid-time? start)))
+       (if before-start?
+         "The start should be a number of milliseconds"
+         "The start should be a number of milliseconds from 0")
+
+       (and (some? duration) (not (and (sm/valid-safe-number? duration) (pos? duration))))
+       "The duration should be a number of milliseconds above 0"
+
+       (and (some? (obj/get props "easing")) (nil? easing))
+       "Not a valid easing"
+
+       (not (every? sm/valid-safe-number? (vals numbers)))
+       "The amount and offsets should be numbers"
+
+       (= ::invalid split)
+       "The split should be 'char', 'word' or 'line'"
+
+       (and (nil? split) (some some? [spread order seed]))
+       "The spread, order and seed go with a split"
+
+       (and (some? spread) (not (valid-spread? spread)))
+       "The spread should be a number from 0 to 1"
+
+       (and (some? order) (not (valid-order? order)))
+       "The order should be 'forward', 'backward', 'center', 'edges' or 'random'"
+
+       (and (some? seed) (not (sm/valid-safe-int? seed)))
+       "The seed should be a whole number"
+
+       (string? tokens)
+       tokens
+
+       :else
+       (cond-> {:type type
+                :direction (keyword direction)
+                :start (mth/round start)}
+         (some? duration)              (assoc :duration (mth/round duration))
+         (some? easing)                (merge easing)
+         (contains? numbers "amount")  (assoc :amount (get numbers "amount"))
+         (contains? numbers "offsetX") (assoc :offset-x (get numbers "offsetX"))
+         (contains? numbers "offsetY") (assoc :offset-y (get numbers "offsetY"))
+         (some? split)                 (assoc :split split)
+         (some? spread)                (assoc :spread spread)
+         (some? order)                 (assoc :order (keyword order))
+         (some? seed)                  (assoc :seed seed)
+         (seq tokens)                  (assoc :applied-tokens tokens))))))
 
 (defn- parse-entry-keyframe
   "The keyframe of a keyframe entry of `property` that the object `props`
