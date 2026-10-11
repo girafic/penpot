@@ -237,14 +237,15 @@ $header-height: $ruler-height + $row-height;
   margin-inline-start: auto;
 }
 
-.row-height-control {
+// A slider of the toolbar with the icon of what it sets.
+.slider-control {
   display: flex;
   align-items: center;
   gap: deprecated.$s-4;
   color: var(--color-foreground-secondary);
 }
 
-.row-height-control .row-height-slider {
+.slider-control .row-height-slider {
   inline-size: 72px;
 }
 

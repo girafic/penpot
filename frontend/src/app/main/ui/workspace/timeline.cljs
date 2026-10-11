@@ -1511,7 +1511,7 @@
         [:span {:class (stl/css :clip-name)} (tr "workspace.animation.clips-selected" clip-count)]])
 
      [:div {:class (stl/css :toolbar-end)}
-      [:div {:class (stl/css :row-height-control)
+      [:div {:class (stl/css :slider-control)
              :title (tr "workspace.animation.row-height")}
        [:> i/icon* {:icon-id i/text-lineheight :size "s"}]
        [:input {:type "range"
@@ -1525,16 +1525,18 @@
                                                   "%")}
                 :aria-label (tr "workspace.animation.row-height")
                 :on-change on-row-height-change}]]
-      [:input {:type "range"
-               :class (stl/css :zoom-slider)
-               :min 0
-               :max 100
-               :step 1
-               :value (zoom->slider zoom)
-               :style #js {"--zoom-fill" (dm/str (zoom->slider zoom) "%")}
-               :title (tr "workspace.animation.zoom")
-               :aria-label (tr "workspace.animation.zoom")
-               :on-change on-zoom-change}]
+      [:div {:class (stl/css :slider-control)
+             :title (tr "workspace.animation.zoom")}
+       [:> i/icon* {:icon-id i/search :size "s"}]
+       [:input {:type "range"
+                :class (stl/css :zoom-slider)
+                :min 0
+                :max 100
+                :step 1
+                :value (zoom->slider zoom)
+                :style #js {"--zoom-fill" (dm/str (zoom->slider zoom) "%")}
+                :aria-label (tr "workspace.animation.zoom")
+                :on-change on-zoom-change}]]
       ;; over the whole workspace, as Ctrl + Space does
       [:button {:type "button"
                 :class (stl/css-case :ctrl-btn true :toggle-btn true :active maximized?)
