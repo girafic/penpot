@@ -66,6 +66,26 @@
      :w w'
      :h h'}))
 
+(defn drag-commit
+  "What letting go of the drag `drag` (`{:mode :frame :last}`, see
+  `canvas-window-handles*`) commits: `[frame resized?]`, the frame where
+  it went and whether its size changed; nil for a click that moved
+  nothing, so a window where it starts stays there, following the corner
+  of the browser window."
+  [{:keys [mode frame last]}]
+  (when (not= frame last)
+    [last (not= mode :move)]))
+
+(defn reset-refit
+  "How the board fits again in the window at `frame` put back where it
+  starts in a browser window `vw` × `vh` (see `dwa/set-canvas-window`):
+  once the window has its new size; not at all when its size stays, as
+  when it was only moved."
+  [{:keys [w h]} vw vh]
+  (let [start (clamp-frame (start-frame vw vh) vw vh)]
+    (when (or (not= w (:w start)) (not= h (:h start)))
+      :after-resize)))
+
 (defn use-window-size
   "`[width height]` of the browser window, as it resizes."
   []
@@ -121,12 +141,17 @@
         (mf/use-fn
          (mf/deps on-commit)
          (fn [_]
-           (when-let [{:keys [mode last]} (mf/ref-val drag-ref)]
+           (when-let [drag (mf/ref-val drag-ref)]
              (mf/set-ref-val! drag-ref nil)
-             (on-commit last (not= mode :move)))))
+             (when-let [[frame resized?] (drag-commit drag)]
+               (on-commit frame resized?)))))
 
         on-reset
-        (mf/use-fn #(st/emit! (dwa/set-canvas-window nil :after-resize)))
+        (mf/use-fn
+         (mf/deps frame)
+         (fn [_]
+           (st/emit! (dwa/set-canvas-window nil (reset-refit frame (.-innerWidth js/window)
+                                                             (.-innerHeight js/window))))))
 
         on-hide
         (mf/use-fn #(st/emit! (dwa/toggle-canvas-window)))]

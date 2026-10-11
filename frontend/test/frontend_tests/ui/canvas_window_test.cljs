@@ -31,3 +31,20 @@
   (t/is (= {:x 0 :y 0 :w 400 :h 252} (cw/clamp-frame (cw/moved frame -2000 -2000) 1600 1000)))
   (t/is (= {:x 10 :y 10 :w 568 :h 368} (cw/clamp-frame {:x 10 :y 10 :w 900 :h 900} 600 400))
         "no larger than the browser window"))
+
+(t/deftest a-click-on-its-bar-commits-nothing
+  ;; A window where it starts stays there, following the corner of the
+  ;; browser window.
+  (t/is (nil? (cw/drag-commit {:mode :move :frame frame :last frame})))
+  (t/is (= [(cw/moved frame 10 0) false]
+           (cw/drag-commit {:mode :move :frame frame :last (cw/moved frame 10 0)}))
+        "moved")
+  (t/is (= [(cw/resized frame :top-left -10 -10) true]
+           (cw/drag-commit {:mode :top-left :frame frame :last (cw/resized frame :top-left -10 -10)}))
+        "resized"))
+
+(t/deftest put-back-it-fits-the-board-again-when-its-size-changes
+  (t/is (nil? (cw/reset-refit frame 1600 1000)) "only moved, the board fits as it did")
+  (t/is (= :after-resize (cw/reset-refit (assoc frame :w 600) 1600 1000)))
+  (t/is (nil? (cw/reset-refit {:x 0 :y 0 :w 368 :h 252} 400 1000))
+        "as large as it starts in a narrow browser window"))
