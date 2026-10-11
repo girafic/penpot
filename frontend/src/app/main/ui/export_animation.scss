@@ -54,6 +54,18 @@
   background-size: px2rem(16) px2rem(16);
 }
 
+// as wide as it may be, as high as its aspect ratio says (see
+// `lottie-preview*`)
+.lottie-preview {
+  inline-size: 100%;
+  max-block-size: 60vh;
+
+  // no line box below it
+  svg {
+    display: block;
+  }
+}
+
 // at most its own size: a small file is not blown up
 .preview {
   display: block;

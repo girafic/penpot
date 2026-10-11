@@ -2258,7 +2258,7 @@ msgstr "Loading the file…"
 
 #: src/app/main/ui/export_animation.cljs
 msgid "export-animation.no-preview"
-msgstr "Lottie files have no preview here yet."
+msgstr "This Lottie file can't be played here."
 
 #: src/app/main/ui/export_animation.cljs
 msgid "export-animation.preview-alt"

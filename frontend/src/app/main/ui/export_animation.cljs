@@ -9,6 +9,7 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.math :as mth]
+   [app.config :as cf]
    [app.main.data.exports.animation :as dea]
    [app.main.data.exports.animation-job :as job]
    [app.main.data.exports.animation-tab :as dat]
@@ -16,8 +17,10 @@
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
+   [app.util.modules :as mod]
    [cuerdas.core :as str]
    [okulary.core :as l]
+   [promesa.core :as p]
    [rumext.v2 :as mf]))
 
 (def ^:private ref:export-tab
@@ -35,11 +38,13 @@
 (defn preview-kind
   "How the Done page plays a file of the extension `ext`: as a video, as
   an image (GIF, AVIF and SVG animate there; an SVG runs no script in
-  an image), or not (`:none`: Lottie, for want of a player)."
+  an image), in lottie-web (a Lottie or dotLottie, see
+  `lottie-preview*`), the files of a ZIP, or not (`:none`)."
   [ext]
   (case ext
     (".mp4" ".webm")        :video
     (".gif" ".avif" ".svg") :image
+    (".json" ".lottie")     :lottie
     ".zip"                  :zip
     :none))
 
@@ -155,6 +160,47 @@
               :role "img"
               :aria-label (tr "export-animation.frame-alt")}]))
 
+(mf/defc lottie-preview*
+  "The Lottie at `url` (of a dotLottie, its Lottie with its images in it,
+  see `dea/dotlottie-preview`) played by lottie-web, its SVG renderer,
+  which the export draws its effects for, loaded here alone
+  (`js/lottie.js`, see `scripts/build-libs.js`); a note when it can not."
+  [{:keys [url name]}]
+  (let [node-ref (mf/use-ref nil)
+        size*    (mf/use-state nil)
+        failed*  (mf/use-state false)]
+    (mf/with-effect [url]
+      (let [anim  (atom nil)
+            live? (atom true)]
+        (-> (p/let [module (mod/import (cf/resolve-href "js/lottie.js"))
+                    data   (p/-> (js/fetch url) (.json))]
+              (when-let [node (and @live? (mf/ref-val node-ref))]
+                (reset! size* [(.-w ^js data) (.-h ^js data)])
+                (reset! anim (.loadAnimation (unchecked-get module "default")
+                                             #js {:container node
+                                                  :renderer "svg"
+                                                  :loop true
+                                                  :autoplay true
+                                                  :animationData data}))))
+            (p/catch (fn [_]
+                       (when @live?
+                         (reset! failed* true)))))
+        (fn []
+          (reset! live? false)
+          (some-> ^js @anim (.destroy)))))
+
+    (if @failed*
+      [:p {:class (stl/css :note)} (tr "export-animation.no-preview")]
+      [:div {:class (stl/css :preview-frame)}
+       [:div {:ref node-ref
+              :class (stl/css :lottie-preview)
+              :role "img"
+              :aria-label (tr "export-animation.preview-alt" name)
+              ;; at most its own size, as the other previews
+              :style (when-let [[w h] @size*]
+                       #js {:aspectRatio (str w " / " h)
+                            :maxWidth (str w "px")})}]])))
+
 (mf/defc export-page*
   "The export tab, for the job of the query params `query`."
   {::mf/lazy-load true}
@@ -181,7 +227,7 @@
     [:main {:class (stl/css :export-page)}
      [:section {:class (stl/css-case :export-card true
                                      :export-card-wide (or (some? (:frame view))
-                                                           (contains? #{:video :image}
+                                                           (contains? #{:video :image :lottie}
                                                                       (get-in view [:preview :kind]))))}
       [:h1 {:class (stl/css :title)} (tr "export-animation.title")]
       [:p {:class (stl/css :status) :role "status" :aria-live "polite"}
@@ -218,6 +264,8 @@
                     [:img {:class (stl/css :preview)
                            :src url
                            :alt (tr "export-animation.preview-alt" name)}]])
+          :lottie (when url
+                    [:> lottie-preview* {:url url :name name}])
           :zip [:p {:class (stl/css :note)}
                 (tr "export-animation.zip-files" (count files) (str/join ", " files))]
           [:p {:class (stl/css :note)} (tr "export-animation.no-preview")]))

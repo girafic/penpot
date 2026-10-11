@@ -1724,12 +1724,32 @@
                 files)
         (p/then (fn [_] (uz/close writer))))))
 
+(defn dotlottie-preview
+  "The Lottie document `data` of a dotLottie, whose images are files of
+  its archive (see `lottie->dotlottie`), with the pictures `images` (see
+  `collect-layer-images`) as data URIs in it instead, as a Lottie has
+  them: what the export tab plays of it, without the archive."
+  [data images]
+  (let [hrefs (into {}
+                    (keep (fn [[_ img]]
+                            (when (and (some? (:bytes img)) (some? (:p img)))
+                              [(str (:id img) ".png") (:p img)])))
+                    images)]
+    (update data :assets
+            (fn [assets]
+              (mapv (fn [asset]
+                      (if-let [href (get hrefs (:p asset))]
+                        (assoc asset :u "" :p href :e 1)
+                        asset))
+                    assets)))))
+
 (defn- markup-file
   "A promise of the SVG, Lottie or dotLottie of the board `board` playing
   `tl`, with the pictures `images` (see `collect-layer-images` and
-  `collect-unit-vectors`): `{:status :ok :blob :ext :mtype}`. `opts` go
-  to `asvg/timeline->svg`, their `:propagate` to `alottie/timeline->lottie`
-  too."
+  `collect-unit-vectors`): `{:status :ok :blob :ext :mtype}`, a dotLottie
+  with `:preview-blob`, the Lottie the export tab plays of it (see
+  `dotlottie-preview`). `opts` go to `asvg/timeline->svg`, their
+  `:propagate` to `alottie/timeline->lottie` too."
   [tl objects board format images opts]
   (case format
     :svg
@@ -1766,7 +1786,9 @@
                           images)]
       (p/let [blob (lottie->dotlottie data (safe-filename name "") files
                                       (not= :once (cta/playback-mode tl)))]
-        {:status :ok :blob blob :ext ".lottie" :mtype dotlottie-mtype}))))
+        {:status :ok :blob blob :ext ".lottie" :mtype dotlottie-mtype
+         :preview-blob (wapi/create-blob (js/JSON.stringify (clj->js (dotlottie-preview data images)))
+                                         "application/json")}))))
 
 (defn outline-texts
   "`objects` with the texts in the board of `tl`, but the split texts of

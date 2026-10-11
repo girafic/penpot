@@ -222,6 +222,7 @@ async function generateManifest() {
         "./js/main.js": "./js/main.js?version=" + VERSION_TAG,
         "./js/render.js": "./js/render.js?version=" + VERSION_TAG,
         "./js/render-wasm.js": "./js/render-wasm.js?version=" + VERSION_TAG,
+        "./js/lottie.js": "./js/lottie.js?version=" + VERSION_TAG,
         "./js/rasterizer.js": "./js/rasterizer.js?version=" + VERSION_TAG,
         "./js/main-dashboard.js":
           "./js/main-dashboard.js?version=" + VERSION_TAG,

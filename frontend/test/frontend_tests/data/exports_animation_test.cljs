@@ -976,6 +976,16 @@
           (p/catch (fn [cause] (t/is (nil? cause))))
           (p/finally (fn [] (done)))))))
 
+(t/deftest a-dotlottie-plays-in-the-tab-with-its-images-in-it
+  ;; lottie-web plays a Lottie, not the archive: its images as data URIs
+  (let [data   {:assets [{:id "img_a" :w 10 :h 10 :u "/images/" :p "img_a.png" :e 0}
+                         {:id "comp_x" :layers []}]}
+        images {:a {:id "img_a" :bytes (js/Uint8Array. #js [1]) :p "data:image/png;base64,AQ==" :e 1}
+                :t {:runs [] :center {:x 0 :y 0}}}
+        doc    (dea/dotlottie-preview data images)]
+    (t/is (= {:id "img_a" :w 10 :h 10 :u "" :p "data:image/png;base64,AQ==" :e 1} (first (:assets doc))))
+    (t/is (= {:id "comp_x" :layers []} (second (:assets doc))) "its precomps as they are")))
+
 (t/deftest several-boards-export-into-one-zip
   (t/async
     done

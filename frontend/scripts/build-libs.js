@@ -57,7 +57,19 @@ const config = {
   plugins: [fixReactVirtualized, rebuildNotify, watchExtraDirPlugin],
 };
 
+// The Lottie player of the Done page of the export tab, loaded there
+// alone (see `app.main.ui.export-animation`): lottie-web's SVG renderer,
+// with the effects the Lottie export draws its shadows and blur by.
+const lottieConfig = {
+  entryPoints: ["lottie-web/build/player/esm/lottie_svg.min.js"],
+  bundle: true,
+  format: "esm",
+  minify: true,
+  outfile: "resources/public/js/lottie.js",
+};
+
 async function watch() {
+  await esbuild.build(lottieConfig);
   let ctx = await esbuild.context(config);
   return ctx.watch();
 }
@@ -67,4 +79,5 @@ if (process.argv.includes("--watch")) {
 } else {
   const localConfig = { ...config, minify: true };
   await esbuild.build(localConfig);
+  await esbuild.build(lottieConfig);
 }

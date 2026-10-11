@@ -144,7 +144,8 @@
 (defn- finished
   "The export ended with `result` (see `dea/run-export`): downloaded,
   kept for Download again and for its preview (an object URL of its
-  blob, revoked when the tab closes), told to the workspace."
+  blob, or of the Lottie of a dotLottie, `:preview-blob`, revoked when
+  the tab closes), told to the workspace."
   [result]
   (ptk/reify ::finished
     ptk/UpdateEvent
@@ -169,7 +170,7 @@
     ptk/EffectEvent
     (effect [_ _ _]
       (when (= :ok (:status result))
-        (let [url (wapi/create-uri (:blob result))]
+        (let [url (wapi/create-uri (or (:preview-blob result) (:blob result)))]
           (swap! live assoc :result result :preview-url url)
           (st/emit! (preview-ready url)))
         (dea/download-result result)

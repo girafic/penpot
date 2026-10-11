@@ -97,7 +97,7 @@
   (t/is (= [:video :video] (map uea/preview-kind [".mp4" ".webm"])))
   (t/is (= [:image :image :image] (map uea/preview-kind [".gif" ".avif" ".svg"]))
         "an animated image; an SVG runs no script there")
-  (t/is (= [:none :none] (map uea/preview-kind [".json" ".lottie"])) "no Lottie player yet"))
+  (t/is (= [:lottie :lottie] (map uea/preview-kind [".json" ".lottie"])) "in lottie-web"))
 
 ;; THE TAB, AGAINST A STAND-IN OF THE WORKSPACE
 
@@ -458,11 +458,41 @@
           (-> (thj/wait-until #(= :done (status)))
               (.then (fn [_]
                        (t/is (= 1 @made) "one URL of the file")
-                       (t/is (= {:kind :none :url "blob:preview" :name "Hero.json"}
+                       (t/is (= {:kind :lottie :url "blob:preview" :name "Hero.json"}
                                 (:preview (uea/page-state (:export-tab @st/state))))
-                             "a Lottie: no player yet")
+                             "a Lottie, played in lottie-web")
                        (st/emit! (dat/finalize))
                        (t/is (= ["blob:preview"] @mock/revoked-uris) "gone with the tab")))
+              (.catch fail!)
+              (.finally #(end! scene done'))))
+        done))))
+
+(t/deftest a-dotlottie-plays-its-lottie
+  ;; lottie-web plays the Lottie of a dotLottie (see
+  ;; `dea/dotlottie-preview`), not the archive it downloads
+  (t/async
+    done
+    (let [{:keys [bundle] :as scene} (job-scene :saved)
+          archive (js/Blob. #js ["zip"])
+          lottie  (js/Blob. #js ["{}"])
+          made    (atom [])]
+      (mock/with-mocks
+        {dv/load-bundle (fn [_] (rx/of bundle))
+         dea/run-export (fn [_ _] {:promise (js/Promise.resolve
+                                             (assoc (ok-result) :ext ".lottie" :blob archive :preview-blob lottie))
+                                   :cancel (fn [])})
+         dea/download-result (fn [_] nil)
+         wapi/create-uri (mock/stub (fn [blob] (swap! made conj blob) "blob:preview"))
+         wapi/revoke-uri (mock/stub mock/revoke-uri-mock)}
+        (fn [done']
+          (start! scene)
+          (-> (thj/wait-until #(= :done (status)))
+              (.then (fn [_]
+                       (t/is (= [lottie] @made) "a URL of its Lottie")
+                       (t/is (= :lottie (get-in (uea/page-state (:export-tab @st/state)) [:preview :kind])))
+                       (t/is (= (.-size archive) (get-in @st/state [:export-tab :result :size]))
+                             "the size of what it downloads")
+                       (st/emit! (dat/finalize))))
               (.catch fail!)
               (.finally #(end! scene done'))))
         done))))
