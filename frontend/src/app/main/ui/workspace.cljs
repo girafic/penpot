@@ -24,6 +24,7 @@
    [app.main.ui.hooks :as hooks]
    [app.main.ui.hooks.resize :refer [use-resize-observer]]
    [app.main.ui.modal :refer [modal-container*]]
+   [app.main.ui.workspace.canvas-window :as cw]
    [app.main.ui.workspace.colorpicker]
    [app.main.ui.workspace.components-debugger :refer [components-debugger*]]
    [app.main.ui.workspace.context-menu :refer [context-menu*]]
@@ -55,6 +56,9 @@
 
 (def ^:private ref:timeline-maximized
   (l/derived dwa/timeline-maximized? refs/workspace-animation))
+
+(def ^:private ref:canvas-window
+  (l/derived dwa/canvas-window refs/workspace-animation))
 
 (defn- use-timeline-visible?
   "Whether the animation timeline is docked under the workspace."
@@ -90,6 +94,23 @@
         ;; the canvas in a small window over the maximized timeline, with
         ;; neither its toolbar nor its rulers
         pip?           (and timeline? maximized?)
+        ;; where its window is: where the user left it, or as they drag it
+        stored-frame   (mf/deref ref:canvas-window)
+        drag-frame*    (mf/use-state nil)
+        [vw vh]        (cw/use-window-size)
+        frame          (when pip?
+                         (cw/clamp-frame (or (deref drag-frame*) stored-frame (cw/start-frame vw vh))
+                                         vw vh))
+
+        on-frame-change
+        (mf/use-fn #(reset! drag-frame* %))
+
+        on-frame-commit
+        (mf/use-fn
+         (mf/deps vw vh)
+         (fn [frame resized?]
+           (reset! drag-frame* nil)
+           (st/emit! (dwa/set-canvas-window (cw/clamp-frame frame vw vh) (when resized? :now)))))
 
         on-resize
         (mf/use-fn
@@ -113,7 +134,17 @@
      [:section
       {:key (dm/str "workspace-" page-id)
        :class (stl/css-case :workspace-content true :pip pip?)
+       :style (when (some? frame)
+                #js {"left" (dm/str (:x frame) "px")
+                     "top" (dm/str (:y frame) "px")
+                     "width" (dm/str (:w frame) "px")
+                     "height" (dm/str (:h frame) "px")})
        :ref node-ref}
+
+      (when (some? frame)
+        [:> cw/canvas-window-handles* {:frame frame
+                                       :on-change on-frame-change
+                                       :on-commit on-frame-commit}])
 
       [:section {:class (stl/css :workspace-viewport)}
        (when (dbg/enabled? :coordinates)

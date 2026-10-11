@@ -53,12 +53,10 @@
 // Over the maximized timeline (see `timeline.scss`), the canvas in a
 // window of its own, fitted to the board the timeline shows (see
 // `dwa/toggle-timeline-maximized`), so its animation shows as it plays.
+// Where it is comes inline (see `app.main.ui.workspace.canvas-window`):
+// the user moves and resizes it.
 .workspace-content.pip {
   position: fixed;
-  inset-inline-end: $sz-16;
-  inset-block-end: $sz-16;
-  inline-size: $sz-400;
-  block-size: $sz-252;
   z-index: calc(var(--z-index-set) + 1);
   overflow: hidden;
   border: $b-1 solid var(--panel-border-color);

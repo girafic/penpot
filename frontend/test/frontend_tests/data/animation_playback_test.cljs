@@ -170,6 +170,21 @@
                        (done))))
       (rx/push! stream (dwv/update-viewport-size :both {:width 1000 :height 800})))))
 
+(t/deftest the-canvas-window-stays-where-it-was-left
+  (let [before (get @storage/user ::dwa/canvas-window)
+        frame  {:x 100 :y 200 :w 300 :h 200}
+        state  {:workspace-animation {:board-id (uuid/next)}}
+        event  (dwa/set-canvas-window frame :now)
+        state' (ptk/update event state)
+        types  #(mapv ptk/type @(watched (dwa/set-canvas-window frame %) state (rx/empty)))]
+    (ptk/effect event state' (rx/empty))
+    (t/is (= frame (dwa/canvas-window (:workspace-animation state'))))
+    (t/is (= frame (dwa/canvas-window {})) "the next time too")
+    (t/is (= [::dwz/fit-to-shapes] (types :now)) "resized, the board fits in it again")
+    (t/is (= [] (types nil)) "moved, it stays as it is")
+    (t/is (nil? (dwa/canvas-window {:canvas-window nil})) "put back where it starts")
+    (swap! storage/user assoc ::dwa/canvas-window before)))
+
 (t/deftest a-board-with-only-clips-plays
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 100})
         id    (:id board)

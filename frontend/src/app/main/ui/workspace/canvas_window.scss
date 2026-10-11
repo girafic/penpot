@@ -1,0 +1,73 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "ds/_utils.scss" as *;
+@use "ds/_sizes.scss" as *;
+@use "ds/_borders.scss" as *;
+
+// The bar on top of the canvas window that moves it, over the canvas.
+.bar {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  display: grid;
+  place-items: center;
+  block-size: $sz-16;
+  background-color: var(--color-background-primary);
+  border-block-end: $b-1 solid var(--panel-border-color);
+  cursor: grab;
+  z-index: 2;
+  touch-action: none;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.grip {
+  inline-size: $sz-28;
+  block-size: px2rem(4);
+  border-radius: $br-4;
+  background-color: var(--color-foreground-secondary);
+  opacity: 0.6;
+
+  .bar:hover & {
+    opacity: 1;
+  }
+}
+
+// Its corners, which resize it.
+.corner {
+  position: absolute;
+  inline-size: $sz-12;
+  block-size: $sz-12;
+  z-index: 3;
+  touch-action: none;
+}
+
+.top-left {
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  cursor: nwse-resize;
+}
+
+.top-right {
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  cursor: nesw-resize;
+}
+
+.bottom-left {
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  cursor: nesw-resize;
+}
+
+.bottom-right {
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  cursor: nwse-resize;
+}

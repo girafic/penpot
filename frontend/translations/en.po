@@ -7658,6 +7658,12 @@ msgstr "Zoom"
 msgid "workspace.animation.row-height"
 msgstr "Row height"
 
+msgid "workspace.animation.canvas-window-move"
+msgstr "Move the preview (double-click to put it back)"
+
+msgid "workspace.animation.canvas-window-resize"
+msgstr "Resize the preview"
+
 msgid "workspace.animation.maximize"
 msgstr "Maximize timeline (%s)"
 

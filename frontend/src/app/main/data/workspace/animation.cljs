@@ -2132,6 +2132,37 @@
         (after-viewport-resize stream (dwz/fit-to-shapes #{board-id}))
         (rx/empty)))))
 
+(defn canvas-window
+  "Where the canvas window over the maximized timeline is (see
+  `app.main.ui.workspace.canvas-window`), as the user last left it; nil
+  where it starts."
+  [anim]
+  (if (contains? anim :canvas-window)
+    (:canvas-window anim)
+    (get storage/user ::canvas-window)))
+
+(defn set-canvas-window
+  "Put the canvas window at `frame` (nil: where it starts), the board the
+  timeline shows fitted in it again with `refit`: `:now`, or
+  `:after-resize`, once it has its new size. Kept for the next time."
+  [frame refit]
+  (ptk/reify ::set-canvas-window
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-animation :canvas-window] frame))
+
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [board-id (active-board-id state)]
+        (cond
+          (or (nil? refit) (nil? board-id)) (rx/empty)
+          (= refit :now) (rx/of (dwz/fit-to-shapes #{board-id}))
+          :else (after-viewport-resize stream (dwz/fit-to-shapes #{board-id})))))
+
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (swap! storage/user assoc ::canvas-window frame))))
+
 (defn toggle-timeline-maximized
   "Let the timeline dock cover the whole workspace, or dock it back. Out
   of motion mode, enter it with the dock maximized."
