@@ -60,9 +60,18 @@
   "The row of the issues of the export in the format `format-label`, the
   issue `kinds` (see `dea/export-issues`), when there are any."
   [{:keys [kinds format-label]}]
-  (let [place* (mf/use-state nil)
-        place  (deref place*)
-        close  (mf/use-fn #(reset! place* nil))
+  (let [place*      (mf/use-state nil)
+        place       (deref place*)
+        open?       (some? place)
+        pill-ref    (mf/use-ref nil)
+        popover-ref (mf/use-ref nil)
+
+        ;; the focus back on the pill, as a dialog closing gives it back
+        close
+        (mf/use-fn
+         (fn []
+           (reset! place* nil)
+           (some-> (mf/ref-val pill-ref) (dom/focus!))))
 
         on-open
         (mf/use-fn
@@ -80,17 +89,23 @@
              (dom/stop-propagation event)
              (close))))]
 
+    ;; the focus in the dialog once it opens, not again as it renders
+    (mf/with-effect [open?]
+      (when open?
+        (some-> (mf/ref-val popover-ref) (dom/focus!))))
+
     (when (seq kinds)
       [:div {:class (stl/css :issues-row)}
        [:span {:class (stl/css :issues-label)} (tr "workspace.options.export.issues")]
        [:button {:type "button"
+                 :ref pill-ref
                  :class (stl/css :issues-pill)
                  :aria-haspopup "dialog"
-                 :aria-expanded (some? place)
+                 :aria-expanded open?
                  :on-click on-open}
         (tr "workspace.options.export.issues-count" (c (count kinds)))]
 
-       (when (some? place)
+       (when open?
          [:*
           [:div {:class (stl/css :issues-backdrop)
                  :on-pointer-down close}]
@@ -98,7 +113,7 @@
                  :role "dialog"
                  :aria-label (tr "workspace.options.export.issues")
                  :tab-index -1
-                 :ref #(some-> % (dom/focus!))
+                 :ref popover-ref
                  :style (clj->js (update-vals place #(dm/str % "px")))
                  :on-key-down on-key-down}
            [:div {:class (stl/css :issues-header)}
