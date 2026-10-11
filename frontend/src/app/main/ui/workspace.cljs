@@ -13,6 +13,7 @@
    [app.main.data.persistence :as dps]
    [app.main.data.plugins :as dpl]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.features :as features]
    [app.main.fonts :as fonts]
    [app.main.refs :as refs]
@@ -52,6 +53,9 @@
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
+(def ^:private ref:timeline-maximized
+  (l/derived dwa/timeline-maximized? refs/workspace-animation))
+
 (defn- use-timeline-visible?
   "Whether the animation timeline is docked under the workspace."
   [layout]
@@ -82,6 +86,10 @@
         textpalette?   (:textpalette layout)
         hide-ui?       (:hide-ui layout)
         timeline?      (use-timeline-visible? layout)
+        maximized?     (mf/deref ref:timeline-maximized)
+        ;; the canvas in a small window over the maximized timeline, with
+        ;; neither its toolbar nor its rulers
+        pip?           (and timeline? maximized?)
 
         on-resize
         (mf/use-fn
@@ -104,7 +112,7 @@
 
      [:section
       {:key (dm/str "workspace-" page-id)
-       :class (stl/css :workspace-content)
+       :class (stl/css-case :workspace-content true :pip pip?)
        :ref node-ref}
 
       [:section {:class (stl/css :workspace-viewport)}
@@ -121,7 +129,7 @@
          :page page
          :wglobal wglobal
          :selected selected
-         :layout layout
+         :layout (cond-> layout pip? (conj :hide-ui))
          :palete-size
          (when (and (or colorpalette? textpalette?) (not hide-ui?))
            @palete-size)}]]]

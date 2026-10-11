@@ -17,6 +17,8 @@
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.pages :as dwp]
+   [app.main.data.workspace.viewport :as dwv]
+   [app.main.data.workspace.zoom :as dwz]
    [app.render-wasm.modifiers :as wasm.modifiers]
    [app.util.audio :as audio]
    [app.util.storage :as storage]
@@ -101,24 +103,72 @@
     (t/is (= 44 (dwa/row-height {})) "the next time too")
     (swap! storage/user assoc ::dwa/row-height before)))
 
+(defn- watched
+  "The events `event` emits on `state` as `stream` goes, in an atom."
+  [event state stream]
+  (let [events (atom [])]
+    (->> (ptk/watch event state stream)
+         (rx/subs! #(swap! events conj %)))
+    events))
+
 (t/deftest the-timeline-maximizes-in-motion-mode
-  (let [motion     {:workspace-layout #{:animation-timeline}}
-        toggle     #(ptk/update (dwa/toggle-timeline-maximized) %)
-        maximized? #(dwa/timeline-maximized? (:workspace-animation %))
-        types      (fn [state]
-                     (let [types (atom [])]
-                       (->> (ptk/watch (dwa/toggle-timeline-maximized) state (rx/empty))
-                            (rx/subs! #(swap! types conj (ptk/type %))))
-                       @types))]
-    (t/is (maximized? (toggle motion)))
-    (t/is (not (maximized? (toggle (toggle motion)))) "and back")
-    (t/is (= [] (types motion)))
-    (t/testing "out of motion mode, it enters it maximized"
-      (t/is (maximized? (toggle {})))
-      (t/is (maximized? (toggle {:workspace-animation {:maximized? true}})))
-      (t/is (= [::dwa/toggle-motion-mode] (types {}))))
-    (t/is (not (maximized? (ptk/update (dwa/close-timeline) (toggle motion))))
-          "leaving motion mode docks it again")))
+  (let [motion    {:workspace-layout #{:animation-timeline}}
+        maximized (assoc-in motion [:workspace-animation :maximized?] true)
+        types     #(mapv ptk/type @(watched (dwa/toggle-timeline-maximized) % (rx/empty)))]
+    (t/is (= [::dwa/maximize-timeline] (types motion)))
+    (t/is (= [::dwa/dock-timeline] (types maximized)) "and back")
+    (t/is (= [::dwa/toggle-motion-mode ::dwa/maximize-timeline] (types {}))
+          "out of motion mode, it enters it maximized")
+    (t/is (= ::dwa/dock-timeline
+             (ptk/type (first @(watched (dwa/close-timeline) maximized (rx/empty)))))
+          "leaving motion mode docks it again")
+    (t/is (not (dwa/timeline-maximized?
+                (:workspace-animation (ptk/update (dwa/dock-timeline) maximized)))))))
+
+(def ^:private canvas-view
+  {:vbox {:x 0 :y 0 :width 1000 :height 800} :zoom 1 :zoom-inverse 1})
+
+(t/deftest the-maximized-timeline-fits-the-board-in-the-canvas
+  ;; The canvas goes into a small window over it: once the window has its
+  ;; size, the board the timeline shows fits in it.
+  (t/async done
+    (let [state  {:workspace-layout #{:animation-timeline}
+                  :workspace-local canvas-view
+                  :workspace-animation {:board-id (uuid/next)}}
+          event  (first @(watched (dwa/toggle-timeline-maximized) state (rx/empty)))
+          state' (ptk/update event state)
+          stream (rx/subject)
+          types  (atom [])]
+      (t/is (dwa/timeline-maximized? (:workspace-animation state')))
+      (t/is (= canvas-view (get-in state' [:workspace-animation :restore-view])) "where the canvas was")
+      (->> (ptk/watch event state' stream)
+           (rx/subs! #(swap! types conj (ptk/type %))
+                     (fn [cause] (t/is false (str cause)) (done))
+                     (fn []
+                       (t/is (= [::dwz/fit-to-shapes] @types))
+                       (done))))
+      (rx/push! stream (dwv/update-viewport-size :both {:width 400 :height 252})))))
+
+(t/deftest the-docked-timeline-puts-the-canvas-back
+  (t/async done
+    (let [state  {:workspace-layout #{:animation-timeline}
+                  :workspace-local (assoc-in canvas-view [:vbox :x] 640)
+                  :workspace-animation {:maximized? true :restore-view canvas-view}}
+          state' (ptk/update (dwa/dock-timeline) state)
+          stream (rx/subject)
+          events (atom [])]
+      (->> (ptk/watch (dwa/dock-timeline) state' stream)
+           (rx/subs! #(swap! events conj %)
+                     (fn [cause] (t/is false (str cause)) (done))
+                     (fn []
+                       (let [restored (ptk/update (first @events) state')]
+                         (t/is (= canvas-view (:workspace-local restored)) "where it was")
+                         (t/is (nil? (get-in restored [:workspace-animation :restore-view])))
+                         (t/is (= (:workspace-local state)
+                                  (:workspace-local (ptk/update (first @events) state)))
+                               "not while it is maximized again"))
+                       (done))))
+      (rx/push! stream (dwv/update-viewport-size :both {:width 1000 :height 800})))))
 
 (t/deftest a-board-with-only-clips-plays
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 100})

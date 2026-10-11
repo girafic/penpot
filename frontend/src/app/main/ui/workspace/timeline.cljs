@@ -3181,6 +3181,12 @@
                (some-> @frame js/cancelAnimationFrame)
                (some-> @rows-frame js/cancelAnimationFrame)))))
 
+    ;; Maximized with no board to show, it docks, so one can be picked on
+    ;; the canvas.
+    (mf/with-effect [(some? timeline) (dwa/timeline-maximized? anim)]
+      (when (and (nil? timeline) (dwa/timeline-maximized? anim))
+        (st/emit! (dwa/dock-timeline))))
+
     ;; The dock sits in its own row of the workspace grid. Its height is
     ;; shared with the sidebars through a CSS variable on the workspace
     ;; node (see workspace.scss), capped at half of the window.

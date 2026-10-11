@@ -51,6 +51,12 @@
 (defn from-store
   [state]
   (let [layout (:workspace-layout state)
+        ;; the canvas in a small window over the maximized timeline has
+        ;; no rulers (see `app.main.ui.workspace/workspace-content*`)
+        layout (cond-> layout
+                 (and (contains? layout :animation-timeline)
+                      (dm/get-in state [:workspace-animation :maximized?]))
+                 (conj :hide-ui))
         file-id (:current-file-id state)
         page-id (:current-page-id state)
         objects (dsh/lookup-page-objects state file-id page-id)

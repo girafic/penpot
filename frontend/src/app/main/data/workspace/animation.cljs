@@ -33,6 +33,9 @@
    [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.undo :as dwu]
+   [app.main.data.workspace.viewport :as dwv]
+   [app.main.data.workspace.viewport-wasm :as dwvw]
+   [app.main.data.workspace.zoom :as dwz]
    [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.streams :as ms]
@@ -2036,19 +2039,18 @@
       (rx/of (pause)
              (dwm/clear-local-transform)))))
 
+(declare dock-timeline)
+
 (defn close-timeline
   "Leave motion mode. The timeline dock clears the preview when it
   unmounts, and opens docked again the next time (see
   `toggle-timeline-maximized`)."
   []
   (ptk/reify ::close-timeline
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-animation dissoc :maximized?))
-
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (layout/remove-layout-flag :animation-timeline)))))
+      (rx/of (dock-timeline)
+             (layout/remove-layout-flag :animation-timeline)))))
 
 (defn toggle-motion-mode
   "Enter or leave motion mode: the timeline dock, plus the motion panel
@@ -2062,39 +2064,90 @@
         (rx/of (layout/toggle-layout-flag :animation-timeline :force? true)
                (layout/set-options-mode :design))))))
 
+(defn timeline-maximized?
+  "Whether the timeline dock covers the whole workspace, the sidebars
+  too, like a maximized area in Blender, with the canvas in a small
+  window over it; `anim` is the `:workspace-animation` state."
+  [anim]
+  (true? (:maximized? anim)))
+
+(defn- after-viewport-resize
+  "`event` once the canvas has taken its new size (its resize observer
+  tells, see `dwv/update-viewport-size`), or after a while without one."
+  [stream event]
+  (->> stream
+       (rx/filter (ptk/type? ::dwv/update-viewport-size))
+       (rx/debounce 120)
+       (rx/take 1)
+       (rx/timeout 1500 (rx/of nil))
+       (rx/map (constantly event))))
+
+(defn- restore-view
+  "The canvas back where it was before the timeline was maximized (see
+  `toggle-timeline-maximized`), unless it is maximized again."
+  []
+  (ptk/reify ::restore-view
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [view (dm/get-in state [:workspace-animation :restore-view])]
+        (cond-> (update state :workspace-animation dissoc :restore-view)
+          (and (some? view) (not (timeline-maximized? (:workspace-animation state))))
+          (update :workspace-local merge view))))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (dwvw/maybe-sync-workspace-local-viewport! state))))
+
 (defn dock-timeline
   "Dock the maximized timeline back (see `toggle-timeline-maximized`), so
-  the canvas shows what opens there."
+  the canvas shows what opens there, back where it was."
   []
   (ptk/reify ::dock-timeline
     ptk/UpdateEvent
     (update [_ state]
-      (update state :workspace-animation dissoc :maximized?))))
+      (update state :workspace-animation dissoc :maximized?))
 
-(defn timeline-maximized?
-  "Whether the timeline dock covers the whole workspace, the sidebars
-  too, like a maximized area in Blender; `anim` is the
-  `:workspace-animation` state."
-  [anim]
-  (true? (:maximized? anim)))
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (if (some? (dm/get-in state [:workspace-animation :restore-view]))
+        (after-viewport-resize stream (restore-view))
+        (rx/empty)))))
+
+(defn- maximize-timeline
+  "Let the timeline dock cover the whole workspace, the canvas in a small
+  window over it fitted to the active board, once the window has its
+  size; where the canvas was is kept to go back to (see `dock-timeline`)."
+  []
+  (ptk/reify ::maximize-timeline
+    ptk/UpdateEvent
+    (update [_ state]
+      (-> state
+          (assoc-in [:workspace-animation :maximized?] true)
+          (update-in [:workspace-animation :restore-view]
+                     #(or % (select-keys (:workspace-local state) [:vbox :zoom :zoom-inverse])))))
+
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (if-let [board-id (active-board-id state)]
+        (after-viewport-resize stream (dwz/fit-to-shapes #{board-id}))
+        (rx/empty)))))
 
 (defn toggle-timeline-maximized
   "Let the timeline dock cover the whole workspace, or dock it back. Out
   of motion mode, enter it with the dock maximized."
   []
   (ptk/reify ::toggle-timeline-maximized
-    ptk/UpdateEvent
-    (update [_ state]
-      (if (and (motion-mode? state)
-               (timeline-maximized? (:workspace-animation state)))
-        (update state :workspace-animation dissoc :maximized?)
-        (assoc-in state [:workspace-animation :maximized?] true)))
-
     ptk/WatchEvent
     (watch [_ state _]
-      (if (motion-mode? state)
-        (rx/empty)
-        (rx/of (toggle-motion-mode))))))
+      (cond
+        (not (motion-mode? state))
+        (rx/of (toggle-motion-mode) (maximize-timeline))
+
+        (timeline-maximized? (:workspace-animation state))
+        (rx/of (dock-timeline))
+
+        :else
+        (rx/of (maximize-timeline))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CANVAS KEYFRAMES (motion mode)

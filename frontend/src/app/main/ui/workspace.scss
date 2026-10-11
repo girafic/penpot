@@ -6,6 +6,7 @@
 
 @use "ds/_utils.scss" as *;
 @use "ds/_sizes.scss" as *;
+@use "ds/_borders.scss" as *;
 @use "ds/mixins.scss" as *;
 
 .workspace {
@@ -47,6 +48,22 @@
   padding: 0;
   margin: 0;
   grid-area: viewport;
+}
+
+// Over the maximized timeline (see `timeline.scss`), the canvas in a
+// window of its own, fitted to the board the timeline shows (see
+// `dwa/toggle-timeline-maximized`), so its animation shows as it plays.
+.workspace-content.pip {
+  position: fixed;
+  inset-inline-end: $sz-16;
+  inset-block-end: $sz-16;
+  inline-size: $sz-400;
+  block-size: $sz-252;
+  z-index: calc(var(--z-index-set) + 1);
+  overflow: hidden;
+  border: $b-1 solid var(--panel-border-color);
+  border-radius: $br-12;
+  box-shadow: var(--el-shadow-dark);
 }
 
 .history-debug-overlay {
