@@ -99,6 +99,7 @@
 (def ^:icon-id close "close")
 (def ^:icon-id close-small "close-small")
 (def ^:icon-id code "code")
+(def ^:icon-id collapse "collapse")
 (def ^:icon-id column "column")
 (def ^:icon-id column-reverse "column-reverse")
 (def ^:icon-id comments "comments")

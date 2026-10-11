@@ -1545,7 +1545,7 @@
                          (tr "workspace.animation.maximize" (sc/get-tooltip :toggle-timeline-maximized)))
                 :aria-pressed maximized?
                 :on-click on-toggle-maximized}
-       [:> i/icon* {:icon-id i/expand}]]
+       [:> i/icon* {:icon-id (if maximized? i/collapse i/expand)}]]
       [:button {:class (stl/css :close-btn)
                 :title (tr "labels.close")
                 :on-click on-close}
