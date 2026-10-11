@@ -6,7 +6,6 @@
 
 (ns frontend-tests.data.animation-playback-test
   (:require
-   ["jsdom" :refer [JSDOM]]
    [app.common.geom.point :as gpt]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
@@ -28,6 +27,7 @@
    [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.dom :as thd]
    [potok.v2.core :as ptk]))
 
 (defn- steps
@@ -150,26 +150,21 @@
                             :data {:pages-index {page-id {:id page-id
                                                           :objects {board-id board}}}}}})))
 
-(t/deftest shift-space-maximizes-the-timeline-too
+(t/deftest alt-shift-m-maximizes-the-timeline-too
   ;; For where the system takes Ctrl + Space, as macOS does to switch
-  ;; input sources; and it plays nothing, as Space does.
-  (let [{:keys [command tooltip]} (get wsc/shortcuts :toggle-timeline-maximized)
-        window (.-window (JSDOM. "<div></div>"))
-        div    (.. window -document (querySelector "div"))
-        node   (unchecked-get js/globalThis "Node")
-        key    (fn [mods]
-                 (doto (clj->js (merge {:key " " :code "Space"} mods))
-                   (unchecked-set "target" div)))]
-    (t/is (= ["ctrl+space" "shift+space"] command))
-    (t/is (= 2 (count (re-seq #"Space" tooltip))) "both told")
-    ;; what tells a text field needs the `Node` of a DOM
-    (unchecked-set js/globalThis "Node" (.-Node window))
-    (try
-      (t/is (tlk/plain-space? (key {})) "Space plays")
-      (t/is (not (tlk/plain-space? (key {:shiftKey true}))))
-      (t/is (not (tlk/plain-space? (key {:ctrlKey true}))))
-      (finally
-        (unchecked-set js/globalThis "Node" node)))))
+  ;; input sources: a key without Space, which pans and moves an area
+  ;; selection whatever is held with it. Ctrl + Space plays nothing.
+  (let [{:keys [command tooltip]} (get wsc/shortcuts :toggle-timeline-maximized)]
+    (t/is (= ["ctrl+space" "alt+shift+m"] command))
+    (t/is (not-any? #(re-find #"shift\+space" %) command) "nothing a pan with Shift held sends")
+    (t/is (and (re-find #"Space" tooltip) (re-find #"M" tooltip)) "both told")
+    (thd/with-dom
+      (fn [{:keys [document]}]
+        (let [key (fn [mods]
+                    (doto (clj->js (merge {:key " " :code "Space"} mods))
+                      (unchecked-set "target" (.createElement document "div"))))]
+          (t/is (tlk/plain-space? (key {})) "Space plays")
+          (t/is (not (tlk/plain-space? (key {:ctrlKey true})))))))))
 
 (t/deftest the-timeline-maximizes-with-a-board-to-show
   ;; Without one, it stays docked, so a board can be picked on the
