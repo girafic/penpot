@@ -7,6 +7,7 @@
 (ns frontend-tests.data.svg-vectors-test
   (:require
    ["jsdom" :refer [JSDOM]]
+   [app.common.animation.svg :as asvg]
    [app.common.types.animation :as cta]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
@@ -57,7 +58,7 @@
     (t/is (not (str/includes? markup "<image")) "no picture")
     (t/is (not (re-find #"opacity=\"0.5\"|opacity:0.5" markup)) "its group has the opacity")
     (t/is (not (str/includes? markup "feGaussianBlur"))
-          "its blur on a filter of its own, as strong as on the canvas (see `cta/svg-filter-blur?`)")
+          "its blur on a filter of its own, as strong as on the canvas (see `asvg/svg-filter-blur?`)")
     (t/is (not (str/includes? (svgv/layer-markup objects (:id a) (track-of :blur)) "feGaussianBlur"))
           "one that plays too")
     (t/is (str/includes? (svgv/layer-markup (update objects (:id a) assoc-in [:blur :hidden] true) (:id a) nil)
@@ -76,7 +77,7 @@
 
 (t/deftest the-effects-of-a-layer-are-not-drawn-in-it
   ;; A filter of its own draws them, as soft as the canvas does (see
-  ;; `cta/svg-filter-shadows?`).
+  ;; `asvg/svg-filter-shadows?`).
   (let [shadow {:id (random-uuid) :offset-x 4 :offset-y 4 :blur 8 :spread 0 :hidden false
                 :color {:color "#000000" :opacity 0.3}}
         a (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20
@@ -262,12 +263,12 @@
   ;; draws them: every selector it writes finds one in the SVG it makes.
   (let [{:keys [bid objects tl]} (contract-board)
         resolved (cta/resolve-animations tl objects)
-        layers   (cta/svg-export-layer-ids objects resolved)
+        layers   (asvg/svg-export-layer-ids objects resolved)
         drawable (svgv/without-layers objects (set layers))
         images   (into {}
                        (map (fn [id] [id {:markup (svgv/layer-markup drawable id (get-in resolved [:tracks id]))}]))
                        (cons bid layers))
-        svg      (cta/timeline->svg tl objects images {})
+        svg      (asvg/timeline->svg tl objects images {})
         document (.. (JSDOM. svg #js {:contentType "image/svg+xml"}) -window -document)
         style    (.-textContent (.querySelector document "style"))
         selectors (map second (re-seq #"(?m)^([^@\s{}][^{}\n]*) \{\n  animation: penpot-svg-" style))]

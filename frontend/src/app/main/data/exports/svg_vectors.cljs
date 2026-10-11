@@ -7,14 +7,14 @@
 (ns app.main.data.exports.svg-vectors
   "The layers of an animated SVG export as vectors, as Figma writes an
   SVG: each layer as Penpot's SVG renderer draws it at rest, without the
-  layers in it, which are layers of their own (see `cta/timeline->svg`),
+  layers in it, which are layers of their own (see `asvg/timeline->svg`),
   its images and the fonts of its texts in the file as data URIs, or its
   texts as the outlines of their glyphs (see `outlined`)."
   (:require
    ["react-dom/server" :as rds]
+   [app.common.animation.svg :as asvg]
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
-   [app.common.types.animation :as cta]
    [app.common.types.path :as path]
    [app.common.types.shape.radius :as ctsr]
    [app.common.types.text :as txt]
@@ -50,21 +50,21 @@
   "`shape` as its layer draws it: without its opacity, which the group of
   the layer has, and without what a filter of its own draws over it,
   which would else show twice: its blur, as strong as on the canvas, and
-  the shadows its animation, `track`, plays (see `cta/svg-filter-blur?`,
-  `cta/svg-filter-shadows?`). Its outline a path when SMIL plays its
-  corners (see `cta/svg-smil-corners?`), which are not alike as it plays.
+  the shadows its animation, `track`, plays (see `asvg/svg-filter-blur?`,
+  `asvg/svg-filter-shadows?`). Its outline a path when SMIL plays its
+  corners (see `asvg/svg-smil-corners?`), which are not alike as it plays.
   A board that hides its fill in exports, without it."
   [shape track]
-  (let [shadows? (cta/svg-filter-shadows? shape track)]
+  (let [shadows? (asvg/svg-filter-shadows? shape track)]
     (cond-> (dissoc shape :opacity)
-      (or shadows? (cta/svg-filter-blur? shape track))
+      (or shadows? (asvg/svg-filter-blur? shape track))
       (dissoc :blur)
 
       shadows?
       (assoc :shadow [])
 
       ;; corners alike draw as a `rect`
-      (and (cta/svg-smil-corners? shape track) (ctsr/all-equal? shape))
+      (and (asvg/svg-smil-corners? shape track) (ctsr/all-equal? shape))
       (as-> shape (assoc shape
                          :r1 (or (:r1 shape) 0) :r2 (or (:r2 shape) 0) :r3 (or (:r3 shape) 0)
                          :r4 (+ (or (:r4 shape) 0) 0.0001)))
@@ -75,7 +75,7 @@
 (defn- mark-outline
   "`markup` with the elements of the outline of `shape` (see
   `rest-shape`) marked, which SMIL plays the corners on (see
-  `cta/svg-smil-corners?`)."
+  `asvg/svg-smil-corners?`)."
   [markup shape]
   (if-let [d (.-d (attrs/get-border-props shape))]
     (let [attr (str " d=\"" d "\"")]
@@ -85,7 +85,7 @@
 (defn with-path-length
   "The `markup` of the shape `id` with the outlines its strokes are drawn
   along of length 1 (`pathLength`), so its trim plays as their dash (see
-  `cta/svg-appearance-css`): those after the start of its strokes, the
+  `asvg/svg-appearance-css`): those after the start of its strokes, the
   group of class `strokes` whose id ends in it, whatever the order of
   its attributes."
   [markup id]
@@ -119,7 +119,7 @@
 (defn inline-uses
   "`markup` with each `<use>` of an element in it a copy of that element,
   which goes: the elements an SVG draws are those its CSS animates (see
-  `cta/svg-appearance-css`), as Chrome and Firefox do not play the
+  `asvg/svg-appearance-css`), as Chrome and Firefox do not play the
   animations of an element on the copies `<use>`s draw of it. The SVG
   renderer draws inner and outer strokes so."
   [markup]
@@ -227,7 +227,7 @@
       (some #(trim-properties (:property %)) (:keyframes track))
       (with-path-length id)
 
-      (cta/svg-smil-corners? (get objects id) track)
+      (asvg/svg-smil-corners? (get objects id) track)
       (mark-outline shape))))
 
 (def ^:private media-fetches
@@ -337,7 +337,7 @@
 
 (defn outlined-view
   "The text `shape` outlined (see `outlined`) as the CSS of an SVG takes
-  it (see `cta/timeline->svg`): a path in the paint of its text, but on
+  it (see `asvg/timeline->svg`): a path in the paint of its text, but on
   the box of the text, so its animation turns and scales it around the
   same pivot."
   [shape content fills]

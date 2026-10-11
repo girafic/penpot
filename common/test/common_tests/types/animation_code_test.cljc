@@ -6,6 +6,7 @@
 
 (ns common-tests.types.animation-code-test
   (:require
+   [app.common.animation.css :as acss]
    [app.common.files.changes-builder :as pcb]
    [app.common.logic.timelines :as cltl]
    [app.common.test-helpers.components :as thc]
@@ -261,11 +262,11 @@
         (t/is (cstr/includes? react ">{\"there\"}</motion.span>"))
         (t/is (cstr/includes? react "{\" \"}") "the space between them as it is")))
     (t/testing "the CSS, a rule by unit"
-      (let [css (cta/timeline->css (:timeline code) (:objects page)
-                                   {:units {:kinds #{:word}
-                                            :selector (fn [_ k] (str ".title .penpot-unit-" k))
-                                            :origin (constantly "50% 50%")
-                                            :display "inline-block"}})]
+      (let [css (acss/timeline->css (:timeline code) (:objects page)
+                                    {:units {:kinds #{:word}
+                                             :selector (fn [_ k] (str ".title .penpot-unit-" k))
+                                             :origin (constantly "50% 50%")
+                                             :display "inline-block"}})]
         (t/is (= 3 (count (re-seq #"@keyframes penpot-unit-" css))))
         (t/is (cstr/includes? css ".title .penpot-unit-1 {\n  display: inline-block;"))))
     (t/testing "the texts the code cannot play so play whole"
@@ -378,8 +379,8 @@
                               (cta/add-keyframe (thi/id :a) {:time 100 :property :x :value 20 :easing spring})
                               (cta/add-keyframe (thi/id :a) {:time 500 :property :x :value 60})))
         {:keys [stiffness damping]} (cta/spring-over spring 400)]
-    (t/is (cstr/includes? native (str "x: { type: \"spring\", stiffness: " (cta/format-number stiffness)
-                                      ", damping: " (cta/format-number damping)
+    (t/is (cstr/includes? native (str "x: { type: \"spring\", stiffness: " (acss/format-number stiffness)
+                                      ", damping: " (acss/format-number damping)
                                       ", mass: 1, delay: 0.1 }")))
     (t/is (cstr/includes? native "animate={{ x: 40 }}"))
     (t/is (not (cstr/includes? (react-of #(-> %

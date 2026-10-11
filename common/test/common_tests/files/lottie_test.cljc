@@ -6,6 +6,7 @@
 
 (ns common-tests.files.lottie-test
   (:require
+   [app.common.animation.lottie :as alottie]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.lottie :as lottie]
    [app.common.math :as mth]
@@ -277,7 +278,7 @@
                                  :blur {:id (uuid/next) :type :layer-blur :value 8 :hidden false}})
         tl     (cta/add-keyframe (cta/make-timeline {:board-id (:id board) :duration 1000})
                                  (:id shape) {:time 0 :property :opacity :value 1})
-        doc    (cta/timeline->lottie tl {(:id board) board (:id shape) shape})
+        doc    (alottie/timeline->lottie tl {(:id board) board (:id shape) shape})
         box    (shape-named (lottie/lottie->shapes doc {:x 0 :y 0}) "Box")]
     (t/is (mth/close? 8 (get-in box [:blur :value]) 0.001))))
 
@@ -290,7 +291,7 @@
                    (cta/add-keyframe (:id shape) {:time 1000 :property :x :value 400})
                    (cta/add-keyframe (:id shape) {:time 0 :property :opacity :value 1})
                    (cta/add-keyframe (:id shape) {:time 1000 :property :opacity :value 0}))
-        doc    (cta/timeline->lottie tl {(:id board) board (:id shape) shape})
+        doc    (alottie/timeline->lottie tl {(:id board) board (:id shape) shape})
         result (lottie/lottie->shapes doc {:x 0 :y 0})
         box    (shape-named result "Box")
         xs     (cta/property-keyframes (:timeline result) (:id box) :x)]

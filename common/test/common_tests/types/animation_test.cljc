@@ -6,6 +6,10 @@
 
 (ns common-tests.types.animation-test
   (:require
+   [app.common.animation.css :as acss]
+   [app.common.animation.export :as aexp]
+   [app.common.animation.lottie :as alottie]
+   [app.common.animation.svg :as asvg]
    [app.common.data :as d]
    [app.common.geom.modifiers :as cgm]
    [app.common.geom.point :as gpt]
@@ -175,9 +179,9 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe sid {:time 0 :property :width :value 100})
                     (cta/add-keyframe sid {:time 1000 :property :width :value 200}))
-        svg     (cta/timeline->svg tl {bid (assoc board :shapes [sid])
-                                       sid (assoc rect :parent-id bid :frame-id bid)}
-                                   {sid {:markup "<rect></rect>"}})]
+        svg     (asvg/timeline->svg tl {bid (assoc board :shapes [sid])
+                                        sid (assoc rect :parent-id bid :frame-id bid)}
+                                    {sid {:markup "<rect></rect>"}})]
     (t/is (str/includes? svg "100% { transform: translate(0px, 0px) rotate(0deg) rotate(30deg) scale(2, 1) rotate(-30deg); }"))))
 
 (t/deftest opacity-is-a-change-property-modifier
@@ -212,10 +216,10 @@
         (t/is (empty? (:tracks tl3)))))))
 
 (t/deftest easing->css-output
-  (t/is (= "linear" (cta/easing->css :linear)))
-  (t/is (= "ease-in-out" (cta/easing->css :ease-in-out)))
+  (t/is (= "linear" (acss/easing->css :linear)))
+  (t/is (= "ease-in-out" (acss/easing->css :ease-in-out)))
   (t/is (= "cubic-bezier(0.42, 0, 0.58, 1)"
-           (cta/easing->css {:type :bezier :curve [0.42 0.0 0.58 1.0]}))))
+           (acss/easing->css {:type :bezier :curve [0.42 0.0 0.58 1.0]}))))
 
 (t/deftest timeline->css-output
   (let [shape (cts/setup-shape {:type :rect :x 10 :y 20 :width 100 :height 100})
@@ -226,7 +230,7 @@
                   (cta/add-keyframe sid {:time 1000 :property :x :value (+ bx 100)})
                   (cta/add-keyframe sid {:time 0 :property :opacity :value 1})
                   (cta/add-keyframe sid {:time 1000 :property :opacity :value 0}))
-        css   (cta/timeline->css tl {sid shape})]
+        css   (acss/timeline->css tl {sid shape})]
     (t/is (re-find #"@keyframes penpot-anim-" css))
     (t/is (re-find #"\.penpot-shape-" css))
     (t/is (re-find #"translate\(100px, 0px\)" css))
@@ -345,22 +349,22 @@
                   (cta/add-keyframe sid {:time 0 :property :x :value 0})
                   (cta/add-keyframe sid {:time 1000 :property :x :value 100}))
         rest  {:transform (constantly "matrix(0.866, 0.5, -0.5, 0.866, 0, 0)")}]
-    (t/is (not (str/includes? (cta/timeline->css fade {sid shape} rest) "transform:"))
+    (t/is (not (str/includes? (acss/timeline->css fade {sid shape} rest) "transform:"))
           "a fade leaves the transform of the shape at rest alone")
-    (t/is (str/includes? (cta/timeline->css move {sid shape} rest)
+    (t/is (str/includes? (acss/timeline->css move {sid shape} rest)
                          "transform: translate(100px, 0px) rotate(0deg) matrix(0.866, 0.5, -0.5, 0.866, 0, 0) scale(1, 1);")
           "a move plays on top of it")
-    (t/is (str/includes? (cta/timeline->css move {sid shape})
+    (t/is (str/includes? (acss/timeline->css move {sid shape})
                          "transform: translate(100px, 0px) rotate(0deg) scale(1, 1);")
           "without one, as before")))
 
 (t/deftest frame-values-are-what-css-plays
   (let [shape  (cts/setup-shape {:type :rect :x 10 :y 20 :width 100 :height 50})
         origin {:x 0 :y 0}]
-    (t/is (= {:opacity 0.5} (cta/frame-values shape {:opacity 0.5} origin))
+    (t/is (= {:opacity 0.5} (acss/frame-values shape {:opacity 0.5} origin))
           "no transform while none of its properties plays")
     (let [{:keys [translate-x translate-y rotate scale-x scale-y]}
-          (cta/frame-values shape {:x 40 :width 200} origin)]
+          (acss/frame-values shape {:x 40 :width 200} origin)]
       (t/is (== 30 translate-x))
       (t/is (== 0 translate-y))
       (t/is (== 0 rotate))
@@ -384,7 +388,7 @@
         tl    (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
                   (cta/add-keyframe sid {:time 0 :property :x :value 0 :easing :linear})
                   (cta/add-keyframe sid {:time 2000 :property :x :value 200}))
-        css   (cta/timeline->css tl {sid shape})]
+        css   (acss/timeline->css tl {sid shape})]
     (t/is (re-find #"100% \{[^}]*translate\(100px, 0px\)" css)
           "the end, on the way to the keyframe past it")
     (t/is (not (re-find #"200%" css)) "no stop past the end")))
@@ -398,8 +402,8 @@
         tl  (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
                 (cta/add-keyframe (:id a) {:time 0 :property :opacity :value 0})
                 (cta/add-keyframe (:id b) {:time 0 :property :opacity :value 0}))
-        css (cta/timeline->css tl {(:id a) a (:id b) b})]
-    (t/is (not= (cta/shape-css-class (:id a)) (cta/shape-css-class (:id b))))
+        css (acss/timeline->css tl {(:id a) a (:id b) b})]
+    (t/is (not= (acss/shape-css-class (:id a)) (acss/shape-css-class (:id b))))
     (t/is (= 2 (count (set (re-seq #"@keyframes (\S+)" css)))))))
 
 (t/deftest timeline->css-writes-fill-stroke-shadow-blur
@@ -422,7 +426,7 @@
                   (cta/add-keyframe sid {:time 1000 :property :shadow-offset-x :index 0 :value 10})
                   (cta/add-keyframe sid {:time 0 :property :blur :value 0})
                   (cta/add-keyframe sid {:time 1000 :property :blur :value 4}))
-        css   (cta/timeline->css tl {sid shape})]
+        css   (acss/timeline->css tl {sid shape})]
     (t/is (re-find #"background-color: #ff0000;" css))
     (t/is (re-find #"border-width: 8px;" css))
     (t/is (re-find #"box-shadow:" css))
@@ -439,7 +443,7 @@
                   (cta/add-keyframe sid {:time 1000 :property :x :value (+ bx 300)})
                   (cta/add-keyframe sid {:time 0 :property :opacity :value 1})
                   (cta/add-keyframe sid {:time 1000 :property :opacity :value 0}))
-        L     (cta/timeline->lottie tl {bid board sid shape})
+        L     (alottie/timeline->lottie tl {bid board sid shape})
         layer (first (:layers L))
         ks    (:ks layer)]
     (t/is (= "5.7.0" (:v L)))
@@ -472,7 +476,7 @@
                   (cta/add-keyframe sid {:time 1000 :property :stroke-width :index 0 :value 8})
                   (cta/add-keyframe sid {:time 0 :property :blur :value 0})
                   (cta/add-keyframe sid {:time 1000 :property :blur :value 6}))
-        L     (cta/timeline->lottie tl {bid board sid shape})
+        L     (alottie/timeline->lottie tl {bid board sid shape})
         layer (first (:layers L))
         items (get-in layer [:shapes 0 :it])
         fill  (d/seek #(= "fl" (:ty %)) items)
@@ -791,7 +795,7 @@
         objects {bid (assoc board :shapes [sid])
                  sid (assoc shape :parent-id bid :frame-id bid)}
         assets {sid {:id "img_0" :w 200 :h 100 :p "data:image/png;base64,AAA" :e 1}}
-        L     (cta/timeline->lottie tl objects assets)
+        L     (alottie/timeline->lottie tl objects assets)
         layer (first (:layers L))]
     (t/is (= 2 (:ty layer)))
     (t/is (= "img_0" (:refId layer)))
@@ -805,9 +809,9 @@
     (t/testing "embedded, or a file in a dotLottie archive"
       (t/is (= {:u "" :p "data:image/png;base64,AAA" :e 1}
                (select-keys (get-in L [:assets 0]) [:u :p :e])))
-      (let [archived (cta/timeline->lottie tl objects
-                                           {sid {:id "img_0" :w 200 :h 100
-                                                 :u "/images/" :p "img_0.png" :e 0}})]
+      (let [archived (alottie/timeline->lottie tl objects
+                                               {sid {:id "img_0" :w 200 :h 100
+                                                     :u "/images/" :p "img_0.png" :e 0}})]
         (t/is (= {:u "/images/" :p "img_0.png" :e 0}
                  (select-keys (get-in archived [:assets 0]) [:u :p :e])))))
     (t/testing "a timeline keeps dotLottie as its export format"
@@ -826,7 +830,7 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe sid {:time 0 :property :x :value 10})
                     (cta/add-keyframe sid {:time 1000 :property :x :value 50}))
-        L       (cta/timeline->lottie tl objects {sid {:id "img_0" :w 50 :h 20 :p "data:," :e 1}})
+        L       (alottie/timeline->lottie tl objects {sid {:id "img_0" :w 50 :h 20 :p "data:," :e 1}})
         layer   (first (:layers L))]
     (t/is (= 2 (:ty layer)))
     (t/is (= 50.0 (double (get-in layer [:ks :o :k]))))))
@@ -839,8 +843,8 @@
                  sid (assoc shape :parent-id bid :frame-id bid)}
         tl      (-> (cta/make-timeline {:board-id bid :duration 500})
                     (cta/add-keyframe sid {:time 0 :property :x :value 10}))]
-    (t/is (re-find (re-pattern (str "class=\"" (cta/shape-css-class sid) "\" opacity=\"0.5\""))
-                   (cta/timeline->svg tl objects {})))))
+    (t/is (re-find (re-pattern (str "class=\"" (acss/shape-css-class sid) "\" opacity=\"0.5\""))
+                   (asvg/timeline->svg tl objects {})))))
 
 (t/deftest timeline->svg-wraps-images-and-css
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
@@ -854,10 +858,10 @@
         objects {bid (assoc board :shapes [sid])
                  sid (assoc shape :parent-id bid :frame-id bid)}
         images {sid {:href "data:image/png;base64,AAA" :x 10 :y 10 :width 20 :height 20}}
-        svg   (cta/timeline->svg tl objects images)]
+        svg   (asvg/timeline->svg tl objects images)]
     (t/is (re-find #"<svg" svg))
     (t/is (re-find #"@keyframes" svg))
-    (t/is (re-find (re-pattern (str "class=\"" (cta/shape-css-class sid) "\"")) svg))
+    (t/is (re-find (re-pattern (str "class=\"" (acss/shape-css-class sid) "\"")) svg))
     (t/is (re-find #"translate\(40px, 0px\)" svg))
     (t/is (re-find #"linear infinite;" svg))
     (t/is (re-find #"overflow=\"hidden\"" svg))))
@@ -877,16 +881,16 @@
         images {bid {:href "data:image/png;base64,AAA"}
                 aid {:href "data:image/png;base64,BBB" :x 10 :y 10 :width 20 :height 20}
                 bid' {:href "data:image/png;base64,CCC" :x 40 :y 10 :width 20 :height 20}}
-        plain (cta/timeline->svg tl objects images)
-        named (cta/timeline->svg tl objects images {:ids? true :bbox? true})]
+        plain (asvg/timeline->svg tl objects images)
+        named (asvg/timeline->svg tl objects images {:ids? true :bbox? true})]
     (t/is (not (re-find #"<(g|image)[^>]* id=" plain)) "no ids by default")
     (t/is (not (re-find #"<rect width=" plain)) "nor a box")
     (t/is (re-find #"<image id=\"_01_·_Intro\"" named) "the board, its name made an XML name")
     (t/is (re-find #"<g class=\"[^\"]+\" id=\"Card_front\"" named))
     (t/is (re-find #" id=\"Card_front_2\"" named) "the second of a name")
     (t/is (re-find #"<rect width=\"200\" height=\"100\" fill=\"none\"/>" named))
-    (t/is (= {aid "x" bid' "x_2"} (cta/svg-layer-ids {aid {:name "x"} bid' {:name "x"}} [aid bid'])))
-    (t/is (= {aid "a_b_c"} (cta/svg-layer-ids {aid {:name "a b<c"}} [aid])))))
+    (t/is (= {aid "x" bid' "x_2"} (asvg/svg-layer-ids {aid {:name "x"} bid' {:name "x"}} [aid bid'])))
+    (t/is (= {aid "a_b_c"} (asvg/svg-layer-ids {aid {:name "a b<c"}} [aid])))))
 
 (t/deftest timeline->svg-draws-the-vectors-of-its-layers
   (let [board (cts/setup-shape {:type :frame :x 100 :y 50 :width 200 :height 100})
@@ -900,11 +904,11 @@
                  sid (assoc shape :parent-id bid :frame-id bid)}
         images {bid {:markup "<rect class=\"board\"/>"}
                 sid {:markup "<rect class=\"layer\"/>"}}
-        svg   (cta/timeline->svg tl objects images {:fonts "@font-face { font-family: X; }"})]
+        svg   (asvg/timeline->svg tl objects images {:fonts "@font-face { font-family: X; }"})]
     (t/is (not (re-find #"<image" svg)) "no pictures")
     (t/is (re-find #"<g transform=\"translate\(-100 -50\)\" fill=\"none\"><rect class=\"board\"/></g>" svg)
           "the board where it is in the SVG, drawn where it is on the page")
-    (t/is (re-find (re-pattern (str "<g class=\"" (cta/shape-css-class sid) "\"><g transform=\"translate\\(-100 -50\\)\" fill=\"none\"><rect class=\"layer\"/>"))
+    (t/is (re-find (re-pattern (str "<g class=\"" (acss/shape-css-class sid) "\"><g transform=\"translate\\(-100 -50\\)\" fill=\"none\"><rect class=\"layer\"/>"))
                    svg)
           "a layer in the group its CSS plays")
     (t/is (re-find #"<style><!\[CDATA\[[^<]*@font-face \{ font-family: X; \}" svg) "the fonts of its texts")))
@@ -921,8 +925,8 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe sid {:time 0 :property :x :value 10})
                     (cta/add-keyframe sid {:time 1000 :property :x :value 50}))
-        svg     (cta/timeline->svg tl objects {bid {:markup "<rect/>"} sid {:markup "<rect/>"}}
-                                   {:fonts "@font-face { font-family: 'R&D Sans'; }"})
+        svg     (asvg/timeline->svg tl objects {bid {:markup "<rect/>"} sid {:markup "<rect/>"}}
+                                    {:fonts "@font-face { font-family: 'R&D Sans'; }"})
         style   (second (re-find #"<style><!\[CDATA\[([\s\S]*)\]\]></style>" svg))]
     (t/is (some? style) "its CSS as character data")
     (t/is (str/includes? style "/* Q&A <x> * / b { color: red } */") "a name that ends no comment")
@@ -955,7 +959,7 @@
                                    [:r1 :r2 :r3 :r4])))
         objects {bid (assoc board :shapes [sid])
                  sid (assoc shape :parent-id bid :frame-id bid)}
-        css   (cta/svg-appearance-css tl objects)]
+        css   (asvg/svg-appearance-css tl objects)]
     (t/is (re-find (re-pattern (str "\\[id=\"fills-" sid "\"\\] > :not\\(defs\\) \\{")) css) "its fill")
     (t/is (re-find #"0% \{ fill: #ff0000;" css))
     (t/is (re-find #"100% \{ fill: #0000ff;" css))
@@ -965,8 +969,8 @@
     (t/is (re-find #"stroke-dasharray: 0 1; stroke-dashoffset: 0;" css) "its trim, as a dash")
     (t/is (re-find #"stroke-dasharray: 1 0;" css))
     (t/is (re-find #"rx: 10px; ry: 10px;" css) "its corners, alike")
-    (t/is (cta/svg-even-corners? shape (get-in tl [:tracks sid])))
-    (t/is (not (cta/svg-even-corners? (assoc shape :r2 0) (get-in tl [:tracks sid]))) "uneven at rest")))
+    (t/is (aexp/svg-even-corners? shape (get-in tl [:tracks sid])))
+    (t/is (not (aexp/svg-even-corners? (assoc shape :r2 0) (get-in tl [:tracks sid]))) "uneven at rest")))
 
 (defn- occurrences
   "How many times `part` is in `text`."
@@ -996,7 +1000,7 @@
     {:sid sid
      :track (get-in tl [:tracks sid])
      :shape shape
-     :svg (cta/timeline->svg tl objects {sid {:markup markup}})}))
+     :svg (asvg/timeline->svg tl objects {sid {:markup markup}})}))
 
 (defn- turn-css
   "The CSS of a rectangle playing `keyframes`, in an SVG with `svg?`."
@@ -1011,8 +1015,8 @@
         objects {bid (assoc board :shapes [sid])
                  sid (assoc shape :parent-id bid :frame-id bid)}]
     (if svg?
-      (cta/timeline->svg tl objects {sid {:markup "<rect></rect>"}})
-      (cta/timeline->css tl objects))))
+      (asvg/timeline->svg tl objects {sid {:markup "<rect></rect>"}})
+      (acss/timeline->css tl objects))))
 
 (t/deftest an-svg-eases-each-property-by-its-own-curve
   (let [turn [{:time 0 :property :rotation :value 0 :easing :ease-in-out}
@@ -1044,7 +1048,7 @@
                      {:time 1000 :property :shadow-offset-y :index 0 :value 20}
                      {:time 0 :property :shadow-spread :index 1 :value 0}
                      {:time 1000 :property :shadow-spread :index 1 :value 6}])]
-    (t/is (cta/svg-filter-shadows? shape track))
+    (t/is (asvg/svg-filter-shadows? shape track))
     (t/is (str/includes? svg (str "<g class=\"penpot-smil-" sid "\" filter=\"url(#penpot-effects-" sid
                                   ")\"><g transform=\"translate(0 0)\"><g transform=\"translate(0 0)\" "
                                   "fill=\"none\"><rect class=\"me\"></rect></g></g></g>"))
@@ -1070,11 +1074,11 @@
 
 (t/deftest an-svg-shadows-as-soft-as-the-canvas
   (let [{:keys [sid svg shape track]} (shadow-svg [{:time 0 :property :opacity :value 1}])]
-    (t/is (cta/svg-filter-shadows? shape track) "shadows that do not play too")
+    (t/is (asvg/svg-filter-shadows? shape track) "shadows that do not play too")
     (t/is (str/includes? svg (str "<filter id=\"penpot-effects-" sid "\"")))
     (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"/>") "the drop shadow of 8: 1/√3 of it and 0.5")
     (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"2.809\"/>") "the inner one of 4")
-    (t/is (not (cta/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))
+    (t/is (not (asvg/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))
           "none of hidden ones")))
 
 (t/deftest an-svg-blurs-as-the-canvas
@@ -1092,12 +1096,12 @@
                     (cta/add-keyframe iid {:time 0 :property :x :value 20})
                     (cta/add-keyframe iid {:time 1000 :property :x :value 60}))]
     (t/testing "a blur as it is, as strong as on the canvas, over what the layer holds"
-      (let [svg (cta/timeline->svg moving objects images)]
-        (t/is (cta/svg-filter-blur? (get objects gid) nil))
+      (let [svg (asvg/timeline->svg moving objects images)]
+        (t/is (asvg/svg-filter-blur? (get objects gid) nil))
         (t/is (str/includes? svg (str "<filter id=\"penpot-effects-" gid "\"")))
         (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"/>") "1/√3 of 8, and 0.5")
         (t/is (re-find (re-pattern (str "filter=\"url\\(#penpot-effects-" gid "\\)\">.*class=\"group\".*"
-                                        "class=\"" (cta/shape-css-class iid) "\".*class=\"inside\""))
+                                        "class=\"" (acss/shape-css-class iid) "\".*class=\"inside\""))
                        svg)
               "the layer in it blurred with it")
         (t/is (not (str/includes? svg "blur(")) "no CSS blur")))
@@ -1105,12 +1109,12 @@
       (let [tl  (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe gid {:time 0 :property :blur :value 8})
                     (cta/add-keyframe gid {:time 1000 :property :blur :value 0}))
-            svg (cta/timeline->svg tl objects images)]
+            svg (asvg/timeline->svg tl objects images)]
         (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"><animate attributeName=\"stdDeviation\""))
         (t/is (str/includes? svg ";0\"/></feGaussianBlur>") "none at the end")
         (t/is (not (str/includes? svg (str "penpot-anim-" gid))) "its group plays nothing")))
     (t/testing "no filter of a hidden blur"
-      (t/is (not (cta/svg-filter-blur? (assoc-in (get objects gid) [:blur :hidden] true) nil))))))
+      (t/is (not (asvg/svg-filter-blur? (assoc-in (get objects gid) [:blur :hidden] true) nil))))))
 
 (t/deftest smil-plays-holds-springs-spreads-and-ping-pongs
   (t/testing "a hold keeps its value to the end of its stretch"
@@ -1139,7 +1143,7 @@
                                     "keySplines=\"0.25 0.1 0.25 1;0.75 0 0.75 0.9\" values=\"4;20;4\"/>")))))
   (t/testing "no SMIL of hidden shadows"
     (let [{:keys [shape track]} (shadow-svg [{:time 0 :property :shadow-offset-y :index 0 :value 4}])]
-      (t/is (not (cta/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))))))
+      (t/is (not (asvg/svg-filter-shadows? (update shape :shadow (partial mapv #(assoc % :hidden true))) track))))))
 
 (t/deftest an-svg-plays-corners-not-alike-by-smil
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100 :r1 0 :r2 0 :r3 0 :r4 0})
@@ -1156,9 +1160,9 @@
                  sid (assoc shape :parent-id bid :frame-id bid :shapes [cid])
                  cid (assoc child :parent-id sid :frame-id bid)}
         markup  "<path d=\"M10,10 h40\" data-penpot-outline=\"\" fill=\"red\"></path><path d=\"M0,0\"></path>"
-        svg     (cta/timeline->svg tl objects {sid {:markup markup} cid {:markup "<rect></rect>"}})]
-    (t/is (cta/svg-smil-corners? shape (get-in tl [:tracks sid])))
-    (t/is (not (cta/svg-smil-corners? (assoc shape :type :circle) (get-in tl [:tracks sid]))))
+        svg     (asvg/timeline->svg tl objects {sid {:markup markup} cid {:markup "<rect></rect>"}})]
+    (t/is (asvg/svg-smil-corners? shape (get-in tl [:tracks sid])))
+    (t/is (not (asvg/svg-smil-corners? (assoc shape :type :circle) (get-in tl [:tracks sid]))))
     (t/is (str/includes? svg "<path d=\"M10,10 h40\" fill=\"red\"><animate attributeName=\"d\" dur=\"1000ms\"")
           "on the elements of its outline")
     (t/is (str/includes? svg "<path d=\"M0,0\"></path>") "but not the others")
@@ -1188,7 +1192,7 @@
                     (cta/add-keyframe did {:time 0 :property :x :value 20}))
         markup  (str "<g id=\"g1\"><path d=\"M0\" data-penpot-outline=\"\" clip-path=\"url(#c1)\"></path>"
                      "<clipPath id=\"c1\"></clipPath><use href=\"#c1\"></use></g>")
-        svg     (cta/timeline->svg tl objects {cid {:markup markup} did {:markup "<rect></rect>"}})]
+        svg     (asvg/timeline->svg tl objects {cid {:markup markup} did {:markup "<rect></rect>"}})]
     (t/is (str/includes? svg (str "<g id=\"g1-rest\"><path d=\"M0\" clip-path=\"url(#c1-rest)\"></path>"
                                   "<clipPath id=\"c1-rest\"></clipPath><use href=\"#c1-rest\"></use></g>"))
           "its ids and what refers to them its own, without the marks of its outline")
@@ -1212,9 +1216,9 @@
                  cid (assoc c :parent-id aid :frame-id bid)}
         images {aid {:href "data:image/png;base64,AAA" :x 10 :y 10 :width 40 :height 40}
                 cid {:href "data:image/png;base64,BBB" :x 12 :y 12 :width 8 :height 8}}
-        svg   (cta/timeline->svg tl objects images)
-        parent-class (cta/shape-css-class aid)
-        child-class  (cta/shape-css-class cid)]
+        svg   (asvg/timeline->svg tl objects images)
+        parent-class (acss/shape-css-class aid)
+        child-class  (acss/shape-css-class cid)]
     (t/is (re-find (re-pattern (str parent-class "\".*" child-class)) svg))
     (t/is (re-find #"x=\"12\" y=\"12\"" svg) "where it is in the SVG")))
 
@@ -1233,10 +1237,10 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 500})
                     (cta/add-keyframe cid {:time 0 :property :opacity :value 0})
                     (cta/add-keyframe did {:time 0 :property :x :value 30}))
-        svg     (cta/timeline->svg tl objects {})
+        svg     (asvg/timeline->svg tl objects {})
         clip    #(str "clip-path=\"url\\(#penpot-clip-" % "\\)\"")]
-    (t/is (re-find (re-pattern (str (cta/shape-css-class cid) "\".*" (clip cid) ".*" (clip hid)
-                                    ".*" (cta/shape-css-class did)))
+    (t/is (re-find (re-pattern (str (acss/shape-css-class cid) "\".*" (clip cid) ".*" (clip hid)
+                                    ".*" (acss/shape-css-class did)))
                    svg))
     (t/is (re-find (re-pattern (str "<clipPath id=\"penpot-clip-" cid "\">")) svg))
     (t/is (re-find (re-pattern (str "<clipPath id=\"penpot-clip-" hid "\">")) svg))
@@ -1252,8 +1256,8 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 500})
                     (cta/add-keyframe sid {:time 0 :property :rotation :value 0})
                     (cta/add-keyframe sid {:time 500 :property :rotation :value 90}))]
-    (t/is (re-find #"transform-origin: 70px 60px;" (cta/timeline->svg tl objects {})))
-    (t/is (re-find #"transform-origin: 50% 50%;" (cta/timeline->css tl objects)) "unlike CSS")))
+    (t/is (re-find #"transform-origin: 70px 60px;" (asvg/timeline->svg tl objects {})))
+    (t/is (re-find #"transform-origin: 50% 50%;" (acss/timeline->css tl objects)) "unlike CSS")))
 
 (t/deftest the-pictures-of-turned-layers-sit-where-they-are
   ;; A rect of 100 x 50 at 100,100 turned a quarter, its pivot on its top
@@ -1273,12 +1277,12 @@
                     (cta/set-track-origin sid 0 0))
         box     {:x 125 :y 75 :width 50 :height 100}]
     (t/testing "SVG: the image on its box, turning around the turned pivot"
-      (let [svg (cta/timeline->svg tl objects {sid (assoc box :href "data:,")})]
+      (let [svg (asvg/timeline->svg tl objects {sid (assoc box :href "data:,")})]
         (t/is (re-find #"x=\"125\" y=\"75\" width=\"50\" height=\"100\"" svg))
         (t/is (re-find #"transform-origin: 175px 75px;" svg))))
     (t/testing "Lottie: an image layer turns only as much as the animation turns it"
-      (let [L     (cta/timeline->lottie tl objects {sid {:id "img_0" :w 50 :h 100 :x 125 :y 75
-                                                         :p "data:," :e 1}})
+      (let [L     (alottie/timeline->lottie tl objects {sid {:id "img_0" :w 50 :h 100 :x 125 :y 75
+                                                             :p "data:," :e 1}})
             layer (first (:layers L))
             close (fn [a b] (every? true? (map mth/close? a b)))]
         (t/is (= 2 (:ty layer)))
@@ -1299,8 +1303,8 @@
         tl      (reduce #(cta/add-keyframe %1 (:id %2) {:time 0 :property :opacity :value 1})
                         (cta/make-timeline {:board-id bid :duration 500})
                         [one two])
-        svg     (cta/timeline->svg tl objects {})
-        drawn   (fn [shape] (str/index-of svg (str "class=\"" (cta/shape-css-class (:id shape)) "\"")))]
+        svg     (asvg/timeline->svg tl objects {})
+        drawn   (fn [shape] (str/index-of svg (str "class=\"" (acss/shape-css-class (:id shape)) "\"")))]
     (t/is (< (drawn two) (drawn one)))))
 
 (defn- svg-board-with
@@ -1323,18 +1327,18 @@
                     (cta/add-keyframe (:id %) {:time 0 :property :width :value 40})
                     (cta/add-keyframe (:id %) {:time 1000 :property :width :value 80}))]
     (t/testing "which shapes"
-      (t/is (cta/svg-sized? rect track))
-      (t/is (cta/svg-sized? (assoc rect :type :circle :r1 0 :r2 0 :r3 0 :r4 0) track))
-      (t/is (not (cta/svg-sized? rect {:keyframes [{:time 0 :property :scale-x :value 2}]})) "a scale stays one")
-      (t/is (not (cta/svg-sized? (assoc rect :type :path) track)))
-      (t/is (not (cta/svg-sized? (assoc rect :rotation 30) track)) "turned")
-      (t/is (not (cta/svg-sized? (assoc rect :r2 0) track)) "uneven corners")
-      (t/is (not (cta/svg-sized? (update-in rect [:fills 0] assoc :fill-color-gradient {:type :linear}) track)))
-      (t/is (not (cta/svg-sized? (update rect :fills conj {:fill-color "#000000"}) track)) "two fills")
-      (t/is (not (cta/svg-sized? (assoc-in rect [:strokes 0 :stroke-alignment] :outer) track))
+      (t/is (aexp/svg-sized? rect track))
+      (t/is (aexp/svg-sized? (assoc rect :type :circle :r1 0 :r2 0 :r3 0 :r4 0) track))
+      (t/is (not (aexp/svg-sized? rect {:keyframes [{:time 0 :property :scale-x :value 2}]})) "a scale stays one")
+      (t/is (not (aexp/svg-sized? (assoc rect :type :path) track)))
+      (t/is (not (aexp/svg-sized? (assoc rect :rotation 30) track)) "turned")
+      (t/is (not (aexp/svg-sized? (assoc rect :r2 0) track)) "uneven corners")
+      (t/is (not (aexp/svg-sized? (update-in rect [:fills 0] assoc :fill-color-gradient {:type :linear}) track)))
+      (t/is (not (aexp/svg-sized? (update rect :fills conj {:fill-color "#000000"}) track)) "two fills")
+      (t/is (not (aexp/svg-sized? (assoc-in rect [:strokes 0 :stroke-alignment] :outer) track))
             "an outer stroke, whose mask is bounded"))
     (t/testing "a rectangle: its box, around its pivot, on all that draws its outline"
-      (let [svg (cta/timeline->svg (grow rect) (svg-board-with board rect) {})]
+      (let [svg (asvg/timeline->svg (grow rect) (svg-board-with board rect) {})]
         (t/is (re-find #"100% \{ x: -10px; y: 10px; width: 80px; height: 20px; \}" svg) "grown from its middle")
         (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of its group")
         (doseq [element [(str "[id=\"fills-" sid "\"] > :not(defs)")
@@ -1344,10 +1348,10 @@
     (t/testing "an ellipse"
       (let [ellipse (cts/setup-shape {:type :circle :x 10 :y 10 :width 40 :height 20
                                       :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
-            svg     (cta/timeline->svg (grow ellipse) (svg-board-with board ellipse) {})]
+            svg     (asvg/timeline->svg (grow ellipse) (svg-board-with board ellipse) {})]
         (t/is (re-find #"100% \{ cx: 30px; cy: 20px; rx: 40px; ry: 10px; \}" svg))))
     (t/testing "a path stretches, as before"
-      (let [svg (cta/timeline->svg (grow rect) (svg-board-with board (assoc rect :rotation 30)) {})]
+      (let [svg (asvg/timeline->svg (grow rect) (svg-board-with board (assoc rect :rotation 30)) {})]
         (t/is (re-find #"scale\(2, 1\)" svg))))))
 
 (t/deftest an-svg-plays-all-the-animations-of-an-element
@@ -1361,7 +1365,7 @@
                   (cta/add-keyframe sid {:time 1000 :property :fill-color :index 0 :value "#0000ff"})
                   (as-> tl (reduce #(cta/add-keyframe %1 sid {:time 1000 :property %2 :value 8})
                                    tl [:r1 :r2 :r3 :r4])))
-        css   (cta/svg-appearance-css tl (svg-board-with board rect))
+        css   (asvg/svg-appearance-css tl (svg-board-with board rect))
         fill  (str "[id=\"fills-" sid "\"] > :not(defs)")]
     (t/is (str/includes? css (str fill " {\n  animation: penpot-svg-" sid "-0 1000ms linear 1 both, penpot-svg-"
                                   sid "-1 1000ms linear 1 both;\n}")))
@@ -1389,9 +1393,9 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe cid {:time 0 :property :width :value 100})
                     (cta/add-keyframe cid {:time 1000 :property :width :value 140}))
-        svg     (cta/timeline->svg tl objects {} {:propagate cgm/set-objects-modifiers})
+        svg     (asvg/timeline->svg tl objects {} {:propagate cgm/set-objects-modifiers})
         follow  #(str "penpot-follow-" %)]
-    (t/is (= [cid lid rid mid] (cta/svg-export-layer-ids objects (cta/resolve-animations tl objects)))
+    (t/is (= [cid lid rid mid] (asvg/svg-export-layer-ids objects (cta/resolve-animations tl objects)))
           "what is in it, layers, though it stays")
     (t/is (re-find (re-pattern (str "@keyframes " (follow lid) " \\{\n  0% \\{ transform: matrix\\(1, 0, 0, 1, 0, 0\\);[^\n]*\n"
                                     "  100% \\{ transform: matrix\\(1, 0, 0, 1, -20, 0\\);"))
@@ -1399,8 +1403,8 @@
     (t/is (re-find (re-pattern (str "@keyframes " (follow rid) " \\{[^}]*\\}\n  100% \\{ transform: matrix\\(1, 0, 0, 1, 20, 0\\);"))
                    svg))
     (t/is (not (str/includes? svg (follow mid))) "one that stays has no group")
-    (t/is (re-find (re-pattern (str "class=\"" (cta/shape-css-class cid) "\".*<g class=\"" (follow lid)
-                                    "\"><g class=\"" (cta/shape-css-class lid) "\""))
+    (t/is (re-find (re-pattern (str "class=\"" (acss/shape-css-class cid) "\".*<g class=\"" (follow lid)
+                                    "\"><g class=\"" (acss/shape-css-class lid) "\""))
                    svg)
           "its group in the board's")
     (t/is (re-find (re-pattern (str "<clipPath id=\"penpot-clip-" cid "\"><rect transform=\"translate\\(0 0\\)\" "
@@ -1409,7 +1413,7 @@
           "its clip, which grows with it")
     (t/is (str/includes? svg (str "[id=\"penpot-clip-" cid "\"] > rect {\n  animation:")))
     (t/testing "without a way to know how they move, they keep their place"
-      (t/is (not (str/includes? (cta/timeline->svg tl objects {}) (follow lid)))))))
+      (t/is (not (str/includes? (asvg/timeline->svg tl objects {}) (follow lid)))))))
 
 (t/deftest an-svg-plays-the-animation-of-its-board
   (let [board  (cts/setup-shape {:type :frame :x 100 :y 50 :width 200 :height 100 :opacity 0.5})
@@ -1421,18 +1425,18 @@
                     (cta/add-keyframe bid {:time 0 :property :x :value 100})
                     (cta/add-keyframe bid {:time 1000 :property :x :value 140})
                     (cta/add-keyframe sid {:time 0 :property :opacity :value 1}))
-        svg     (cta/timeline->svg tl objects images)]
-    (t/is (re-find (re-pattern (str "<g class=\"" (cta/shape-css-class bid) "\" opacity=\"0.5\">"
+        svg     (asvg/timeline->svg tl objects images)]
+    (t/is (re-find (re-pattern (str "<g class=\"" (acss/shape-css-class bid) "\" opacity=\"0.5\">"
                                     "<g><g transform=\"translate\\(-100 -50\\)\" fill=\"none\"><rect class=\"board\"/></g></g>"
-                                    "<g clip-path=\"url\\(#penpot-clip-" bid "\\)\"><g class=\"" (cta/shape-css-class sid) "\""))
+                                    "<g clip-path=\"url\\(#penpot-clip-" bid "\\)\"><g class=\"" (acss/shape-css-class sid) "\""))
                    svg)
           "the board and its layers, clipped by it, in a group of its opacity")
     (t/is (re-find #"translate\(40px, 0px\)" svg) "which its animation moves")
     (t/is (re-find #"transform-origin: 100px 50px;" svg) "around its middle")
     (t/testing "a board that does not play keeps none"
-      (let [svg (cta/timeline->svg (cta/make-timeline {:board-id bid :duration 1000})
-                                   (assoc-in objects [bid :opacity] 1) images)]
-        (t/is (not (str/includes? svg (str "class=\"" (cta/shape-css-class bid) "\""))))))))
+      (let [svg (asvg/timeline->svg (cta/make-timeline {:board-id bid :duration 1000})
+                                    (assoc-in objects [bid :opacity] 1) images)]
+        (t/is (not (str/includes? svg (str "class=\"" (acss/shape-css-class bid) "\""))))))))
 
 (t/deftest track-origin-defaults-to-center
   (t/is (= {:x 0.5 :y 0.5} (cta/track-origin nil)))
@@ -1478,7 +1482,7 @@
                   (cta/set-track-origin sid 0 1)
                   (cta/add-keyframe sid {:time 0 :property :scale-x :value 1})
                   (cta/add-keyframe sid {:time 1000 :property :scale-x :value 2}))
-        css   (cta/timeline->css tl {sid shape})]
+        css   (acss/timeline->css tl {sid shape})]
     (t/is (re-find #"transform-origin: 0% 100%;" css))))
 
 (t/deftest timeline->lottie-anchor-follows-origin
@@ -1489,7 +1493,7 @@
         tl    (-> (cta/make-timeline {:board-id bid :name "Anim" :duration 1000})
                   (cta/set-track-origin sid 0 0)
                   (cta/add-keyframe sid {:time 0 :property :x :value 100}))
-        L     (cta/timeline->lottie tl {bid board sid shape})
+        L     (alottie/timeline->lottie tl {bid board sid shape})
         ks    (:ks (first (:layers L)))]
     (t/is (= [100.0 100.0 0] (get-in ks [:a :k])))))
 
@@ -1532,9 +1536,9 @@
         tl  (reduce #(cta/add-keyframe %1 sid %2)
                     (cta/make-timeline {:board-id bid :duration 1000})
                     (or (seq kfs) [{:time 0 :property :opacity :value 1}]))]
-    (cta/timeline->lottie tl {bid (assoc board :shapes [sid])
-                              sid (assoc shape :parent-id bid :frame-id bid)}
-                          assets)))
+    (alottie/timeline->lottie tl {bid (assoc board :shapes [sid])
+                                  sid (assoc shape :parent-id bid :frame-id bid)}
+                              assets)))
 
 (defn- lottie-item
   [items ty]
@@ -1573,15 +1577,15 @@
                     (cta/add-keyframe sid {:time 0 :property :width :value 100})
                     (cta/add-keyframe sid {:time 1000 :property :width :value 200}))]
     (t/testing "a bar kept to its left grows to the right"
-      (let [L  (cta/timeline->lottie (assoc-in grow [:tracks sid :origin] {:x 0 :y 0.5}) objects)
+      (let [L  (alottie/timeline->lottie (assoc-in grow [:tracks sid :origin] {:x 0 :y 0.5}) objects)
             rc (lottie-item (get-in L [:layers 0 :shapes 0 :it]) "rc")]
         (t/is (close-all? [[100 10] [200 10]] (mapv :s (get-in rc [:s :k]))))
         (t/is (close-all? [[150 105] [200 105]] (mapv :s (get-in rc [:p :k]))))
         (t/is (close-all? [100 100 100] (get-in L [:layers 0 :ks :s :k])) "its layer as it is")))
     (t/testing "a turned one stretches, as an SVG"
-      (let [L     (cta/timeline->lottie grow (update objects sid assoc :rotation 30))
+      (let [L     (alottie/timeline->lottie grow (update objects sid assoc :rotation 30))
             layer (get-in L [:layers 0])]
-        (t/is (not (cta/lottie-sized? (assoc bar :rotation 30) (get-in grow [:tracks sid]))))
+        (t/is (not (alottie/lottie-sized? (assoc bar :rotation 30) (get-in grow [:tracks sid]))))
         (t/is (close-all? [[100 100 100] [200 100 100]] (mapv :s (get-in layer [:ks :s :k]))))
         (t/is (close-all? [100 10] (get-in (lottie-item (get-in layer [:shapes 0 :it]) "rc") [:s :k]))
               "its outline as it is")))))
@@ -1619,12 +1623,12 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe cid {:time 0 :property :width :value 100})
                     (cta/add-keyframe cid {:time 1000 :property :width :value 140}))
-        L       (cta/timeline->lottie tl objects nil {:propagate cgm/set-objects-modifiers})
+        L       (alottie/timeline->lottie tl objects nil {:propagate cgm/set-objects-modifiers})
         holder  (get-in L [:layers 0])
         comp    (some #(when (= (:refId holder) (:id %)) %) (:assets L))
         named   (fn [shape] (d/seek #(= (:name shape) (:nm %)) (:layers comp)))
         null-of (fn [layer] (d/seek #(= (:parent layer) (:ind %)) (:layers comp)))]
-    (t/is (= [cid lid rid mid] (cta/lottie-export-layer-ids objects (cta/resolve-animations tl objects)))
+    (t/is (= [cid lid rid mid] (alottie/lottie-export-layer-ids objects (cta/resolve-animations tl objects)))
           "what is in it, layers, though it stays")
     (t/is (= 0 (:ty holder)) "a precomp")
     (t/is (close-all? [100 100 100] (get-in holder [:ks :s :k])) "which does not stretch")
@@ -1636,7 +1640,7 @@
     (t/is (nil? (:parent (named middle))) "one that stays, none")
     (t/is (= 6 (count (:layers comp))) "three layers, two nulls and the board's own")
     (t/testing "without a way to know how they move, they keep their place"
-      (let [L    (cta/timeline->lottie tl objects)
+      (let [L    (alottie/timeline->lottie tl objects)
             comp (some #(when (= (:refId (first (:layers L))) (:id %)) %) (:assets L))]
         (t/is (not-any? #(= 3 (:ty %)) (:layers comp)))))))
 
@@ -1661,7 +1665,7 @@
   (let [tl (reduce #(cta/add-keyframe %1 (:id %2) {:time 0 :property :opacity :value 1})
                    (cta/make-timeline {:board-id (:id board) :duration 1000})
                    animated)]
-    (cta/timeline->lottie tl objects)))
+    (alottie/timeline->lottie tl objects)))
 
 (t/deftest lottie-lists-the-top-most-layer-first
   (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
@@ -1757,7 +1761,7 @@
                     (cta/add-keyframe (:id card) {:time 1000 :property :y :value 20})
                     (cta/add-keyframe (:id moving) {:time 0 :property :x :value 30})
                     (cta/add-keyframe (:id moving) {:time 1000 :property :x :value 60}))
-        L       (cta/timeline->lottie tl objects)
+        L       (alottie/timeline->lottie tl objects)
         [layer] (:layers L)
         comp    (d/seek #(= (:refId layer) (:id %)) (:assets L))
         [top content] (:layers comp)]
@@ -1813,20 +1817,20 @@
         tl      (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
                     (cta/add-keyframe sid {:time 0 :property :stroke-width :index 1 :value 2})
                     (cta/add-keyframe sid {:time 1000 :property :stroke-width :index 1 :value 4}))
-        [layer] (:layers (cta/timeline->lottie tl objects))
+        [layer] (:layers (alottie/timeline->lottie tl objects))
         strokes (filterv #(= "st" (:ty %)) (get-in layer [:shapes 0 :it]))]
     (t/is (= ["stroke 1"] (mapv :nm strokes)) "the stroke shown")
     (t/is (= 1 (get-in strokes [0 :w :a])) "with the keyframes of its index")
     (t/is (nil? (:ef layer)) "no blur")
     (t/testing "a blur shown, as After Effects and lottie-web take it"
-      (let [[layer] (:layers (cta/timeline->lottie tl (assoc-in objects [sid :blur :hidden] false)))
+      (let [[layer] (:layers (alottie/timeline->lottie tl (assoc-in objects [sid :blur :hidden] false)))
             [blur]  (:ef layer)]
         (t/is (= ["Blurriness" "Blur Dimensions" "Repeat Edge Pixels"] (mapv :nm (:ef blur))))
         ;; render-wasm blurs by a standard deviation of 1/√3 of it plus 0.5,
         ;; lottie-web by 0.3 of the blurriness
         (t/is (close? (/ (+ (/ 8 (mth/sqrt 3)) 0.5) 0.3) (get-in blur [:ef 0 :v :k])))
-        (t/is (close? 8 (cta/lottie-blur-value (cta/lottie-blurriness 8))))
-        (t/is (zero? (cta/lottie-blurriness 0)))))))
+        (t/is (close? 8 (alottie/lottie-blur-value (alottie/lottie-blurriness 8))))
+        (t/is (zero? (alottie/lottie-blurriness 0)))))))
 
 (t/deftest lottie-without-pictures-has-the-layers-it-would-have-with
   ;; a still sibling with a blur, which the board cannot draw, is a layer
@@ -1839,7 +1843,7 @@
         objects (in-board board [moving blurred])
         tl      (cta/add-keyframe (cta/make-timeline {:board-id (:id board) :duration 1000})
                                   (:id moving) {:time 0 :property :opacity :value 1})
-        names   #(set (map :nm (:layers (cta/timeline->lottie tl objects %))))]
+        names   #(set (map :nm (:layers (alottie/timeline->lottie tl objects %))))]
     (t/is (contains? (names {}) "blurred") "all vectors")
     (t/is (not (contains? (names nil) "blurred")) "without assets, the animated ones only")))
 
@@ -1922,15 +1926,15 @@
     (t/is (= 25 (:ty ef)))
     (t/is (close? 180 (value "Direction")) "down")
     (t/is (close? 4 (value "Distance")))
-    (t/is (close? (* 4 (cta/blur-sigma 6)) (value "Softness")) "as soft as on the canvas, in lottie-web")
+    (t/is (close? (* 4 (aexp/blur-sigma 6)) (value "Softness")) "as soft as on the canvas, in lottie-web")
     (t/is (close? 127.5 (value "Opacity")))
     (t/testing "in a region lottie-web does not cut it to, around the box of the shape"
       ;; as far as it reaches: 4 down, 3 sigma of its blur, 2 more
-      (let [reach (+ 4 2 (* 3 (cta/blur-sigma 6)))
+      (let [reach (+ 4 2 (* 3 (aexp/blur-sigma 6)))
             pct   #(d/parse-double (subs % 0 (dec (count %))))]
         (t/is (close? (- (* 100 (/ reach 40))) (pct (get-in ef [:fs :y]))))
         (t/is (close? (+ 100 (* 200 (/ reach 40))) (pct (get-in ef [:fs :height]))))
-        (t/is (close? (- (* 100 (/ (+ 2 (* 3 (cta/blur-sigma 6))) 40))) (pct (get-in ef [:fs :x])))
+        (t/is (close? (- (* 100 (/ (+ 2 (* 3 (aexp/blur-sigma 6))) 40))) (pct (get-in ef [:fs :x])))
               "less across")))
     (t/testing "an inner shadow draws vectors, on a group too"
       (let [inner   (assoc shadow :style :inner-shadow)
@@ -1938,8 +1942,8 @@
             objects (-> (in-board board [group])
                         (update (:id group) assoc :shapes [(:id shape)])
                         (assoc (:id shape) (assoc shape :shadow [] :parent-id (:id group) :frame-id (:id board))))]
-        (t/is (cta/lottie-vector-layer? (in-board board [(assoc shape :shadow [inner])]) #{(:id shape)} (:id shape)))
-        (t/is (cta/lottie-vector-layer? objects #{(:id group)} (:id group)))))))
+        (t/is (alottie/lottie-vector-layer? (in-board board [(assoc shape :shadow [inner])]) #{(:id shape)} (:id shape)))
+        (t/is (alottie/lottie-vector-layer? objects #{(:id group)} (:id group)))))))
 
 (t/deftest lottie-plays-corners-not-alike-as-a-path
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
@@ -1971,7 +1975,7 @@
         [matte cast content dropped] (:layers comp)
         group  #(get-in % [:shapes 0])
         item   (fn [layer ty] (d/seek #(= ty (:ty %)) (tree-seq :it :it (group layer))))]
-    (t/is (cta/lottie-shadow-layers? shape nil))
+    (t/is (alottie/lottie-shadow-layers? shape nil))
     (t/is (= 0 (:ty layer)) "a precomp that moves it")
     (t/is (= 1 (get-in L [:layers 0 :ks :p :x :a])))
     (t/is (= [4 4 4 4] (mapv :ty (:layers comp))))
@@ -1980,7 +1984,7 @@
       (t/is (= 1 (:tt cast)))
       (t/is (= 2 (:r (item cast "fl"))) "what is outside its outline")
       (t/is (close-all? [2 0] (get-in (group cast) [:it (dec (count (:it (group cast)))) :p :k])) "moved by its offset")
-      (t/is (close? (cta/lottie-blurriness 4) (get-in cast [:ef 0 :ef 0 :v :k])) "blurred as on the canvas"))
+      (t/is (close? (alottie/lottie-blurriness 4) (get-in cast [:ef 0 :ef 0 :v :k])) "blurred as on the canvas"))
     (t/testing "its drawing, then its drop shadow under it, grown by its spread"
       (t/is (nil? (:ef content)) "no effects of its own")
       (t/is (close? 6 (:k (:w (item dropped "st")))) "twice its spread")
@@ -2001,7 +2005,7 @@
         shadow (peek layers)
         [cut silhouette] (:layers (comp (:refId shadow)))
         band   (d/seek #(= "st" (:ty %)) (tree-seq :it :it (get-in cut [:shapes 0])))]
-    (t/is (cta/lottie-shadow-layers? shape nil) "a spread in")
+    (t/is (alottie/lottie-shadow-layers? shape nil) "a spread in")
     (t/is (= 0 (:ty shadow)) "a precomp of its shadow")
     (t/is (= [400 300] [(:w shadow) (:h shadow)]) "as large as the board")
     (t/is (= "Gaussian Blur" (get-in shadow [:ef 0 :nm])) "which it blurs once cut")
@@ -2023,7 +2027,7 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe gid {:time 0 :property :x :value 100})
                     (cta/add-keyframe gid {:time 1000 :property :x :value 140}))
-        L       (cta/timeline->lottie tl objects)
+        L       (alottie/timeline->lottie tl objects)
         comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
         layer   (first (:layers L))
         [inside shadow content] (:layers (comp (:refId layer)))
@@ -2065,11 +2069,11 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe rid {:time 0 :property :x :value 0})
                     (cta/add-keyframe rid {:time 1000 :property :x :value 200}))
-        L       (cta/timeline->lottie tl objects)
+        L       (alottie/timeline->lottie tl objects)
         comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
         layer   (first (:layers L))
         [matte content & more] (:layers (comp (:refId layer)))]
-    (t/is (= #{gid mid rid did} (set (cta/lottie-export-layer-ids objects tl))) "what it holds are layers")
+    (t/is (= #{gid mid rid did} (set (alottie/lottie-export-layer-ids objects tl))) "what it holds are layers")
     (t/is (= (str "comp_" gid) (:refId layer)) "a precomp of the group")
     (t/is (= ["Mask" 1] [(:nm matte) (:td matte)]) "its mask an alpha matte")
     (t/is (nil? (:ef matte)) "without its shadow")
@@ -2083,10 +2087,10 @@
         tl  (-> (cta/make-timeline {:board-id bid :duration 1000})
                 (cta/add-keyframe gid {:time 0 :property :opacity :value 0})
                 (cta/add-keyframe gid {:time 1000 :property :opacity :value 1}))
-        ids (set (cta/lottie-export-layer-ids objects tl))
-        L   (cta/timeline->lottie tl objects)
+        ids (set (alottie/lottie-export-layer-ids objects tl))
+        L   (alottie/timeline->lottie tl objects)
         layer (first (:layers L))]
-    (t/is (cta/lottie-vector-layer? objects ids gid))
+    (t/is (alottie/lottie-vector-layer? objects ids gid))
     (t/is (= [0 (str "comp_" gid)] [(:ty layer) (:refId layer)]))
     (t/is (= 1 (get-in layer [:ks :o :a])) "it fades")))
 
@@ -2108,7 +2112,7 @@
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
                     (cta/add-keyframe gid {:time 0 :property :x :value 100})
                     (cta/add-keyframe gid {:time 1000 :property :x :value 140}))]
-    {:gid gid :L (cta/timeline->lottie tl objects)}))
+    {:gid gid :L (alottie/timeline->lottie tl objects)}))
 
 (defn- lottie-items-of
   "The items of `shapes` (Lottie shape items), groups opened."
@@ -2188,11 +2192,11 @@
 (t/deftest a-board-casts-its-inner-shadow-under-what-it-holds
   ;; As the canvas does: inside its fills, under the layers in it.
   (let [{:keys [bid cid kid objects tl]} (inner-shadow-card)]
-    (t/is (= [cid kid] (cta/lottie-export-layer-ids objects (cta/resolve-animations tl objects)))
+    (t/is (= [cid kid] (alottie/lottie-export-layer-ids objects (cta/resolve-animations tl objects)))
           "what it holds a layer, though it stays")
-    (t/is (= [cid kid] (cta/svg-export-layer-ids objects (cta/resolve-animations tl objects))))
+    (t/is (= [cid kid] (asvg/svg-export-layer-ids objects (cta/resolve-animations tl objects))))
     (t/testing "Lottie"
-      (let [L      (cta/timeline->lottie tl objects)
+      (let [L      (alottie/timeline->lottie tl objects)
             layer  (first (:layers L))
             comp   (some #(when (= (:refId layer) (:id %)) %) (:assets L))]
         (t/is (= (str "comp_" cid) (:refId layer)))
@@ -2200,9 +2204,9 @@
               "what it holds, then the matte of its outline and its shadow")
         (t/is (= 4 (count (:layers comp))) "over its drawing")))
     (t/testing "SVG"
-      (let [svg (cta/timeline->svg tl objects {bid {:markup "<rect class=\"board\"></rect>"}
-                                               cid {:markup "<rect class=\"card\"></rect>"}
-                                               kid {:markup "<rect class=\"kid\"></rect>"}})]
+      (let [svg (asvg/timeline->svg tl objects {bid {:markup "<rect class=\"board\"></rect>"}
+                                                cid {:markup "<rect class=\"card\"></rect>"}
+                                                kid {:markup "<rect class=\"kid\"></rect>"}})]
         (t/is (str/includes? svg (str "<g class=\"penpot-smil-inner-" cid "\" filter=\"url(#penpot-inner-" cid
                                       ")\"><rect class=\"card\"></rect></g>"))
               "its shadow on its vectors")
@@ -2426,7 +2430,7 @@
         tl  (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
                 (cta/add-animation sid {:type :fade :duration 400}))]
     (t/is (some? (get-in (cta/timeline->modif-tree tl objects 0) [sid :modifiers])))
-    (t/is (re-find #"opacity" (cta/timeline->css tl objects)))))
+    (t/is (re-find #"opacity" (acss/timeline->css tl objects)))))
 
 (t/deftest modifiers-give-the-shape-at-a-time
   ;; The design tab shows the shape at the playhead this way.
@@ -2477,7 +2481,7 @@
                 (cta/add-animation sid {:type :fade :duration 400}))
         aid (:id (first (get-in tl [:tracks sid :animations])))
         at  #(get (values-at %1 objects %2) sid)]
-    (t/is (re-find #"rotate\(90deg\)" (cta/timeline->css tl objects)))
+    (t/is (re-find #"rotate\(90deg\)" (acss/timeline->css tl objects)))
 
     (t/testing "a hidden property"
       (let [tl2 (cta/toggle-slot-flag tl sid :hidden :rotation)]
@@ -2487,7 +2491,7 @@
         (t/is (close? 0 (:opacity (at tl2 0))))
         ;; still there to show and edit
         (t/is (= 2 (count (cta/property-keyframes tl2 sid :rotation))))
-        (t/is (not (re-find #"rotate\(90deg\)" (cta/timeline->css tl2 objects))))))
+        (t/is (not (re-find #"rotate\(90deg\)" (acss/timeline->css tl2 objects))))))
 
     (t/testing "a hidden animation"
       (let [tl2 (cta/toggle-animation-flag tl sid aid :hidden)]
@@ -2669,7 +2673,7 @@
                   (cta/add-keyframe sid {:time 0 :property :x :value 0 :easing (spring-preset :quick)})
                   (cta/add-keyframe sid {:time 500 :property :x :value 50 :interpolation :step})
                   (cta/add-keyframe sid {:time 1000 :property :x :value 100}))
-        css   (cta/timeline->css tl {sid shape})]
+        css   (acss/timeline->css tl {sid shape})]
     (t/is (re-find #"animation-timing-function: linear\(0 0%, " css))
     (t/is (re-find #"animation-timing-function: steps\(1, end\)" css))))
 
@@ -2685,7 +2689,7 @@
     (t/is (> (count kfs) 2))
     (t/is (not-any? #(= :spring (:type (:easing %))) kfs))
     (t/is (= [0 1000] [(:time (first kfs)) (:time (last kfs))]))
-    (t/is (map? (cta/timeline->lottie tl {bid board sid shape})))))
+    (t/is (map? (alottie/timeline->lottie tl {bid board sid shape})))))
 
 (t/deftest spring-bounce-round-trips
   (let [gentle (spring-preset :gentle)
@@ -2791,10 +2795,10 @@
       (t/is (= (cta/timeline->modif-tree written objects time)
                (cta/timeline->modif-tree styled objects time))
             (str "t=" time)))
-    (t/is (= (cta/timeline->css written objects) (cta/timeline->css styled objects)))
-    (t/is (= (cta/timeline->svg written objects {}) (cta/timeline->svg styled objects {})))
-    (t/is (= (mapv :ks (:layers (cta/timeline->lottie written objects nil)))
-             (mapv :ks (:layers (cta/timeline->lottie styled objects nil)))))))
+    (t/is (= (acss/timeline->css written objects) (acss/timeline->css styled objects)))
+    (t/is (= (asvg/timeline->svg written objects {}) (asvg/timeline->svg styled objects {})))
+    (t/is (= (mapv :ks (:layers (alottie/timeline->lottie written objects nil)))
+             (mapv :ks (:layers (alottie/timeline->lottie styled objects nil)))))))
 
 (t/deftest a-style-use-stretches-its-entries-to-its-duration
   (let [{:keys [board rect objects]} (board-and-rect)
@@ -2841,7 +2845,7 @@
       (let [tl (cta/toggle-animation-flag tl sid uid :hidden)]
         (t/is (cta/valid-timeline? tl))
         (t/is (nil? (get (values-at tl objects 300) sid)))
-        (t/is (not (re-find #"opacity" (cta/timeline->css tl objects))))))
+        (t/is (not (re-find #"opacity" (acss/timeline->css tl objects))))))
     (t/testing "a locked one is kept from edits"
       (let [tl (cta/toggle-animation-flag tl sid uid :locked)]
         (t/is (= [uid] (mapv :id (get-in (cta/remove-track tl sid) [:tracks sid :animations]))))
@@ -3037,15 +3041,15 @@
 
 (t/deftest timeline->css-plays-once
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10})
-        css   (cta/timeline->css (fade-timeline shape :once) {(:id shape) shape})]
+        css   (acss/timeline->css (fade-timeline shape :once) {(:id shape) shape})]
     ;; keeping the last frame
     (t/is (re-find #"linear 1 both;" css))
     (t/testing "no shape, no CSS"
-      (t/is (= "" (cta/timeline->css (fade-timeline shape :once) {}))))))
+      (t/is (= "" (acss/timeline->css (fade-timeline shape :once) {}))))))
 
 (t/deftest timeline->css-alternates-in-ping-pong
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10})
-        css   (cta/timeline->css (fade-timeline shape :ping-pong) {(:id shape) shape})]
+        css   (acss/timeline->css (fade-timeline shape :ping-pong) {(:id shape) shape})]
     (t/is (re-find #"linear infinite alternate;" css))))
 
 (t/deftest expand-ping-pong-plays-the-timeline-backwards-after-it
@@ -3089,7 +3093,7 @@
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 100})
         shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10})
         tl    (assoc (fade-timeline shape :ping-pong) :board-id (:id board))
-        L     (cta/timeline->lottie tl {(:id board) board (:id shape) shape})]
+        L     (alottie/timeline->lottie tl {(:id board) board (:id shape) shape})]
     (t/is (= 120.0 (:op L)))                        ; 2000ms @ 60fps
     (t/is (= [[100.0] [0.0] [100.0]]
              (mapv :s (get-in L [:layers 0 :ks :o :k]))))))
@@ -3288,12 +3292,12 @@
                   (cta/add-keyframe sid {:time 1000 :property :opacity :value 1})
                   (cta/add-marker {:time 500 :name "loop"})
                   (cta/add-marker {:time 0 :name "intro"}))
-        L     (cta/timeline->lottie tl {bid board sid shape})]
+        L     (alottie/timeline->lottie tl {bid board sid shape})]
     ;; each up to the next, the last to the end and not past it on the way back
     (t/is (= ["intro" "loop"] (mapv :cm (:markers L))))
     (t/is (close-all? [[0 30] [30 30]] (mapv (juxt :tm :dr) (:markers L))))
     (t/testing "no markers, none in the document"
-      (t/is (not (contains? (cta/timeline->lottie (dissoc tl :markers) {bid board sid shape}) :markers))))))
+      (t/is (not (contains? (alottie/timeline->lottie (dissoc tl :markers) {bid board sid shape}) :markers))))))
 
 (t/deftest shift-keyframes-moves-them-together
   (let [sid (uuid/next)
@@ -3816,9 +3820,9 @@
 (defn- markup-of
   "The CSS, SVG and Lottie exports of `timeline`."
   [timeline objects]
-  [(cta/timeline->css timeline objects)
-   (cta/timeline->svg timeline objects {})
-   (cta/timeline->lottie timeline objects nil)])
+  [(acss/timeline->css timeline objects)
+   (asvg/timeline->svg timeline objects {})
+   (alottie/timeline->lottie timeline objects nil)])
 
 (t/deftest markup-exports-play-split-animations-whole
   (let [{:keys [board text objects]} (board-and-text "Hi you there")
@@ -3929,7 +3933,7 @@
       (let [objects (assoc-in objects [sid :blur] {:id (uuid/next) :type :layer-blur :value 4 :hidden false})]
         (t/is (= 12 (:value (blur-at tl objects sid 0))))
         (t/is (= 4 (:value (blur-at tl objects sid 500))))))
-    (t/is (str/includes? (cta/timeline->css tl objects) "filter: blur(") "CSS blurs it")))
+    (t/is (str/includes? (acss/timeline->css tl objects) "filter: blur(") "CSS blurs it")))
 
 (t/deftest the-units-of-a-text-blur
   (let [{:keys [board text objects]} (board-and-text "Hi you")
@@ -4006,14 +4010,14 @@
                      (map (fn [k] [[sid k] {:href "data:," :x (+ 50 (* 60 k)) :y 100 :width 40 :height 20}]))
                      (range 3))]
     (t/testing "SVG: a group by unit in the text, its CSS turning it around its middle"
-      (let [svg (cta/timeline->svg tl objects images)]
+      (let [svg (asvg/timeline->svg tl objects images)]
         (t/is (= 3 (count (re-seq #"<g class=\"penpot-unit-" svg))))
         (t/is (str/includes? svg (str ".penpot-unit-" sid "-1 {")))
         (t/is (str/includes? svg "transform-origin: 130px 110px;") "the middle of the second word")
         (t/is (= 3 (count (re-seq #"@keyframes penpot-unit-" svg))))))
     (t/testing "Lottie: the text a precomp of its units"
       (let [assets (update-vals images #(assoc % :id (str "img_" (:x %)) :w (:width %) :h (:height %) :e 1 :p "data:,"))
-            L      (cta/timeline->lottie tl objects assets)
+            L      (alottie/timeline->lottie tl objects assets)
             layer  (first (:layers L))
             comp   (some #(when (= (:refId layer) (:id %)) %) (:assets L))]
         (t/is (= 0 (:ty layer)) "a precomp")
@@ -4024,16 +4028,16 @@
               "the first word from 20 px under the middle of its picture")))
     (t/testing "a text with no ink besides its units has no picture of the rest"
       (let [images (dissoc images [sid :rest])
-            svg    (cta/timeline->svg tl objects images)
+            svg    (asvg/timeline->svg tl objects images)
             assets (update-vals images #(assoc % :id (str "img_" (:x %)) :w (:width %) :h (:height %) :e 1 :p "data:,"))
-            L      (cta/timeline->lottie tl objects assets)
+            L      (alottie/timeline->lottie tl objects assets)
             layer  (first (:layers L))
             comp   (some #(when (= (:refId layer) (:id %)) %) (:assets L))]
         (t/is (= 3 (count (re-seq #"<g class=\"penpot-unit-" svg))))
         (t/is (= 3 (count (re-seq #"<image " svg))) "the words only")
         (t/is (= 3 (count (:layers comp))) "the words only")))
     (t/testing "without pictures, the text plays whole"
-      (let [svg (cta/timeline->svg tl objects {})]
+      (let [svg (asvg/timeline->svg tl objects {})]
         (t/is (not (str/includes? svg "penpot-unit-")))))
     (t/testing "Lottie: the outlines of the units, each a shape layer turning around the middle of its box"
       (let [content (path/from-plain [{:command :move-to :params {:x 160 :y 200}}
@@ -4045,7 +4049,7 @@
                           (map (fn [k] [[sid k] {:runs [{:content content :fills red}]
                                                  :center {:x (+ 170 (* 60 k)) :y 210}}]))
                           (range 3))
-            L       (cta/timeline->lottie tl objects assets)
+            L       (alottie/timeline->lottie tl objects assets)
             layer   (first (:layers L))
             comp    (some #(when (= (:refId layer) (:id %)) %) (:assets L))]
         (t/is (= 0 (:ty layer)) "a precomp")
@@ -4058,26 +4062,26 @@
             square (path/from-plain [{:command :move-to :params {:x 160 :y 200}}
                                      {:command :line-to :params {:x 180 :y 200}}
                                      {:command :close-path :params {}}])
-            L      (cta/timeline->lottie tl objects {[sid 0] {:runs [{:content square :fills []}]
-                                                              :center {:x 170 :y 210}}})
+            L      (alottie/timeline->lottie tl objects {[sid 0] {:runs [{:content square :fills []}]
+                                                                  :center {:x 170 :y 210}}})
             layer  (first (:layers L))
             unit   (-> (some #(when (= (:refId layer) (:id %)) %) (:assets L)) :layers first)
             blur   (get-in unit [:ef 0 :ef 0 :v])]
         (t/is (= "ADBE Gaussian Blur 2" (get-in unit [:ef 0 :mn])))
         (t/is (= 1 (:a blur)) "playing its keyframes")
-        (t/is (mth/close? (cta/lottie-blurriness 8) (get-in blur [:k 0 :s 0])) "from 8 px")))
+        (t/is (mth/close? (alottie/lottie-blurriness 8) (get-in blur [:k 0 :s 0])) "from 8 px")))
     (t/testing "SVG: the vectors of the units, each turning around the middle of its box"
       (let [images {[sid :rest] {:markup "<path class=\"rest\"/>"}
                     [sid 0] {:markup "<path class=\"hi\"/>" :x 70 :y 110 :width 0 :height 0}
                     [sid 1] {:markup "<path class=\"you\"/>" :x 130 :y 110 :width 0 :height 0}}
-            svg    (cta/timeline->svg tl objects images)]
+            svg    (asvg/timeline->svg tl objects images)]
         (t/is (not (str/includes? svg "<image")))
         (t/is (str/includes? svg (str "<g class=\"penpot-unit-" sid "-1\"><g transform=\"translate(-100 -100)\" "
                                       "fill=\"none\"><path class=\"you\"/></g></g>")))
         (t/is (str/includes? svg "<g transform=\"translate(-100 -100)\" fill=\"none\"><path class=\"rest\"/></g>")
               "the rest at rest")
         (t/is (str/includes? svg "transform-origin: 130px 110px;"))
-        (t/is (str/includes? (cta/svg-appearance-css
+        (t/is (str/includes? (asvg/svg-appearance-css
                               (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
                                   (cta/add-keyframe sid {:time 0 :property :fill-color :index 0 :value "#ff0000"})
                                   (cta/add-keyframe sid {:time 1000 :property :fill-color :index 0 :value "#0000ff"}))
@@ -4093,14 +4097,14 @@
                      (map (fn [k] [[sid k] {:markup "<path/>" :x (+ 70 (* 60 k)) :y 110 :width 0 :height 0
                                             :box {:x (+ 50 (* 60 k)) :y 100 :width 40 :height 20}}]))
                      (range 3))
-        svg    (cta/timeline->svg tl objects images)]
-    (t/is (str/includes? svg (str "<g class=\"" (cta/unit-css-class sid 1) "\" filter=\"url(#"
-                                  (cta/svg-unit-blur-id sid 1) ")\">"))
+        svg    (asvg/timeline->svg tl objects images)]
+    (t/is (str/includes? svg (str "<g class=\"" (asvg/unit-css-class sid 1) "\" filter=\"url(#"
+                                  (asvg/svg-unit-blur-id sid 1) ")\">"))
           "each unit on a filter of its blur")
-    (t/is (str/includes? svg (str "<filter id=\"" (cta/svg-unit-blur-id sid 1) "\" x=\"")))
+    (t/is (str/includes? svg (str "<filter id=\"" (asvg/svg-unit-blur-id sid 1) "\" x=\"")))
     (t/is (str/includes? svg "<feGaussianBlur stdDeviation=\"5.119\"><animate attributeName=\"stdDeviation\""))
     (t/is (not (str/includes? svg "blur(")) "no CSS blur")
-    (t/is (str/includes? svg (str "  ." (cta/unit-css-class sid 1) " { filter: none; }")) "none with reduced motion")))
+    (t/is (str/includes? svg (str "  ." (asvg/unit-css-class sid 1) " { filter: none; }")) "none with reduced motion")))
 
 (t/deftest export-sizes-take-what-people-type
   (t/is (= ["2" "3.5" "0.5" "0.125" "1"]
@@ -4179,7 +4183,7 @@
         tl    (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
                   (cta/add-keyframe sid {:time -500 :property :x :value 0 :easing :ease-in})
                   (cta/add-keyframe sid {:time 500 :property :x :value 100}))
-        css   (cta/timeline->css tl {sid shape})
+        css   (acss/timeline->css tl {sid shape})
         at-0  (x-at tl sid 0)]
     (t/is (not (re-find #"-[0-9.]+%" css)) "no stop before the start")
     (let [[_ x] (re-find #"\n  0% \{[^}]*translate\(([-0-9.]+)px, 0px\)[^}]*cubic-bezier" css)]

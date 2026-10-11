@@ -23,6 +23,7 @@
   rotation around the anchor, its opacity. The in and out points of a
   layer are held opacity keyframes."
   (:require
+   [app.common.animation.lottie :as alottie]
    [app.common.data :as d]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
@@ -479,7 +480,7 @@
                 29 (assoc acc :blur {:id (uuid/next)
                                      :type :layer-blur
                                      :value (if-let [blurriness (get v "Blurriness")]
-                                              (cta/lottie-blur-value (scalar (rest-value blurriness 0)))
+                                              (alottie/lottie-blur-value (scalar (rest-value blurriness 0)))
                                               (scalar (rest-value (get v "Sigma") 0)))
                                      :hidden false})
                 (do (ctx :skip :effect) acc))))

@@ -11,6 +11,7 @@
   animated component copies on their own clock, as the view mode does,
   with the classes the HTML of the Inspect gives the shapes."
   (:require
+   [app.common.animation.css :as acss]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.logic.timelines :as cltl]
@@ -73,7 +74,7 @@
 
 (def ^:private unit-options
   "How the CSS of the Inspect plays the units of a text (see
-  `cta/timeline->css`): characters and words, the classes its HTML gives
+  `acss/timeline->css`): characters and words, the classes its HTML gives
   them, each turning around its middle, as blocks in the line, which CSS
   can transform."
   {:kinds #{:char :word}
@@ -95,7 +96,7 @@
                  :units (assoc unit-options :texts #(code-units? (get objects %)))}]
     (some->> (seq codes)
              (mapcat (fn [{:keys [timeline copies]}] (cons timeline (map :timeline copies))))
-             (map #(cta/timeline->css % objects options))
+             (map #(acss/timeline->css % objects options))
              (remove str/blank?)
              (seq)
              (str/join "\n\n"))))

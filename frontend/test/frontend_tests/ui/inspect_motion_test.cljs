@@ -8,6 +8,7 @@
   "The animation of the selection in the Inspect (Penpot Motion): its
   code, from the code model of its boards."
   (:require
+   [app.common.animation.css :as acss]
    [app.common.files.changes-builder :as pcb]
    [app.common.geom.matrix :as gmt]
    [app.common.test-helpers.components :as cthc]
@@ -78,8 +79,8 @@
         main    (cthi/id :main)
         objects (:objects page)
         ids     (into #{main} (get-in objects [main :shapes]))]
-    (t/is (= (cta/timeline->css (get-in page [:timelines main]) objects
-                                {:ids ids :selector cgm/code-selector})
+    (t/is (= (acss/timeline->css (get-in page [:timelines main]) objects
+                                 {:ids ids :selector cgm/code-selector})
              (cgm/animation-css page files ids))
           "a board with no rest transform: today's output")))
 

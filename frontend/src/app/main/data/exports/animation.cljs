@@ -9,6 +9,9 @@
    ["./avif.js" :as avif]
    ["gifenc" :as gifenc]
    ["mediabunny" :as mb]
+   [app.common.animation.export :as aexp]
+   [app.common.animation.lottie :as alottie]
+   [app.common.animation.svg :as asvg]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
@@ -522,9 +525,9 @@
     (nil? timeline) []
     render-wasm?    [:mp4 :webm :gif :avif :svg :lottie :dotlottie]
     :else
-    (let [ids   (cta/lottie-export-layer-ids objects timeline)
+    (let [ids   (alottie/lottie-export-layer-ids objects timeline)
           idset (set ids)]
-      (if (every? #(cta/lottie-vector-layer? objects idset %) ids)
+      (if (every? #(alottie/lottie-vector-layer? objects idset %) ids)
         [:lottie :dotlottie]
         []))))
 
@@ -548,7 +551,7 @@
 
 (def markup-formats
   "The formats written as markup over pictures of the layers (see
-  `cta/timeline->svg` and `cta/timeline->lottie`)."
+  `asvg/timeline->svg` and `alottie/timeline->lottie`)."
   #{:svg :lottie :dotlottie})
 
 (def ^:private lottie-formats
@@ -559,7 +562,7 @@
   strokes and trim of a text not `outlined?` (see `outline-texts`),
   which the SVG renderer draws as text. CSS plays the rest on its
   vectors, SMIL its shadows and the corners CSS can not (see
-  `cta/svg-filter-shadows?`, `cta/svg-smil-corners?`)."
+  `asvg/svg-filter-shadows?`, `asvg/svg-smil-corners?`)."
   [shape track outlined?]
   (boolean
    (and (= :text (:type shape))
@@ -599,8 +602,8 @@
   them: a vector of kinds each, the most telling first.
 
   - `:lottie/images`, layers that draw as pictures for their effects or
-    paints (see `cta/lottie-vector-layer?`, its layers those of
-    `cta/lottie-export-layer-ids`; texts are the outlines of their
+    paints (see `alottie/lottie-vector-layer?`, its layers those of
+    `alottie/lottie-export-layer-ids`; texts are the outlines of their
     glyphs, see `outline-texts`, and an SVG has its layers as vectors,
     see `app.main.data.exports.svg-vectors`);
   - `:svg/appearance`, what an SVG keeps as it rests (see
@@ -608,9 +611,9 @@
     outlined with `:outline` of its export settings, see
     `outline-texts`);
   - `:svg/size` and `:lottie/size`, an animated width or height they
-    play as a stretch (see `cta/svg-sized?`, `cta/lottie-sized?`);
+    play as a stretch (see `aexp/svg-sized?`, `alottie/lottie-sized?`);
   - `:lottie/blur`, a blur, which players draw at their own strength (an
-    SVG blurs as the canvas, see `cta/svg-filter-blur?`);
+    SVG blurs as the canvas, see `asvg/svg-filter-blur?`);
   - `:lottie/shadow`, shadows, blurred by Lottie effects, which players
     soften at their own strength (as the canvas in lottie-web);
   - `:lottie/stroke`, a stroke Lottie draws otherwise (see
@@ -627,7 +630,7 @@
     fit the board's;
   - `:mask`, a layer in a masked group, which an SVG draws on its own,
     unmasked (a mask that animates as a shape); Lottie keeps it to its
-    mask (see `cta/lottie-export-layer-ids`);
+    mask (see `alottie/lottie-export-layer-ids`);
   - `:gif/alpha` and `:mp4/alpha`, a board that shows through (see
     `see-through?`): GIF has no partial transparency, MP4 none at all."
   [objects timeline]
@@ -641,7 +644,7 @@
           animated  (into #{} (comp (mapcat :keyframes) (map :property)) (vals (:tracks resolved)))
           layer-ids (cta/export-layer-ids objects board-id (:tracks resolved))
           ;; Lottie has the layers in masked groups as layers too
-          lottie-ids (cta/lottie-export-layer-ids objects resolved)
+          lottie-ids (alottie/lottie-export-layer-ids objects resolved)
           lottie-set (set lottie-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
           ;; SVG and Lottie play some on the outlines
@@ -650,7 +653,7 @@
                              (let [shape (get objects id)]
                                (and (some? shape)
                                     (some #(contains? #{:width :height} (:property %)) (:keyframes track))
-                                    (not (cta/svg-sized? shape track)))))
+                                    (not (aexp/svg-sized? shape track)))))
                            (:tracks resolved)))
           units     (cta/unit-timelines resolved objects)
           ;; the texts an SVG outlines, but those whose units play as
@@ -678,7 +681,7 @@
                                (and (some? shape)
                                     (not (:hidden shape))
                                     (not (contains? #{:text :image} (:type shape)))
-                                    (not (cta/lottie-vector-layer? objects lottie-set id)))))
+                                    (not (alottie/lottie-vector-layer? objects lottie-set id)))))
                            (cons board-id lottie-ids)))]
            [:svg/appearance #{:svg}
             (boolean (some (fn [[id track]]
@@ -1310,7 +1313,7 @@
   `[text-id k]` `{:markup :x :y :width :height :box}`, the outlines of
   the glyphs of the unit `k` at rest (see `svgv/unit-markup`), the
   centre of its box in the SVG, which it turns and scales around, and
-  what they cover, where its blur plays (see `cta/svg-unit-blurs`), and `[text-id
+  what they cover, where its blur plays (see `asvg/svg-unit-blurs`), and `[text-id
   :rest]` `{:markup}`, the glyphs of no unit. WASM outlines them
   (`bridge`, see `wasm.api/text-unit-outlines`), a text at a time, which
   it sets back at rest; the page gets its turn (`yield`) after each,
@@ -1370,10 +1373,10 @@
 
 (defn- layer-ids-to-shoot
   "The layers of a Lottie export of `timeline` (see
-  `cta/lottie-export-layer-ids`) and its board, the pictures
+  `alottie/lottie-export-layer-ids`) and its board, the pictures
   `collect-layer-images` takes, but those `skip?` is true of."
   [objects timeline skip?]
-  (cond->> (conj (cta/lottie-export-layer-ids objects (cta/resolve-animations timeline objects))
+  (cond->> (conj (alottie/lottie-export-layer-ids objects (cta/resolve-animations timeline objects))
                  (:board-id timeline))
     (some? skip?) (remove skip?)))
 
@@ -1734,12 +1737,12 @@
   "A promise of the SVG, Lottie or dotLottie of the board `board` playing
   `tl`, with the pictures `images` (see `collect-layer-images` and
   `collect-unit-vectors`): `{:status :ok :blob :ext :mtype}`. `opts` go
-  to `cta/timeline->svg`, their `:propagate` to `cta/timeline->lottie`
+  to `asvg/timeline->svg`, their `:propagate` to `alottie/timeline->lottie`
   too."
   [tl objects board format images opts]
   (case format
     :svg
-    (let [svg (cta/timeline->svg tl objects images opts)]
+    (let [svg (asvg/timeline->svg tl objects images opts)]
       (js/Promise.resolve {:status :ok
                            :blob (wapi/create-blob svg "image/svg+xml")
                            :ext ".svg"
@@ -1749,7 +1752,7 @@
     (let [assets (into {} (map (fn [[id img]]
                                  [id (select-keys img [:id :w :h :p :e :x :y :runs :center])]))
                        images)
-          data   (cta/timeline->lottie tl objects assets (select-keys opts [:propagate]))
+          data   (alottie/timeline->lottie tl objects assets (select-keys opts [:propagate]))
           json   (js/JSON.stringify (clj->js data) nil 2)]
       (js/Promise.resolve {:status :ok
                            :blob (wapi/create-blob json "application/json")
@@ -1767,7 +1770,7 @@
                                           (-> (select-keys img [:id :w :h :x :y])
                                               (assoc :u "/images/" :p (file-name img) :e 0)))]))
                           images)
-          data      (cta/timeline->lottie tl objects assets (select-keys opts [:propagate]))
+          data      (alottie/timeline->lottie tl objects assets (select-keys opts [:propagate]))
           files     (into {} (keep (fn [[_ img]] (when (some? (:bytes img)) [(file-name img) (:bytes img)])))
                           images)]
       (p/let [blob (lottie->dotlottie data (safe-filename name "") files
@@ -1818,7 +1821,7 @@
   [objects tl texts {:keys [yield cancelled? on-progress outline? bridge]}]
   (let [board-id (:board-id tl)
         resolved (cta/resolve-animations tl objects)
-        layers   (cta/svg-export-layer-ids objects resolved)
+        layers   (asvg/svg-export-layer-ids objects resolved)
         drawn    (into [board-id] (remove texts) layers)
         [shapes view] (if outline?
                         (outline-texts objects tl texts (or bridge (default-bridge)))
@@ -1858,14 +1861,14 @@
         shapes   (if lottie? (second (outline-texts objects tl texts bridge)) objects)
         ;; Lottie draws the layers it can as vectors, SVG all (see
         ;; `vector-layers`)
-        layers   (set (cta/lottie-export-layer-ids shapes (cta/resolve-animations tl shapes)))
+        layers   (set (alottie/lottie-export-layer-ids shapes (cta/resolve-animations tl shapes)))
         skip?    #(or vectors?
                       (contains? texts %)
-                      (and lottie? (cta/lottie-vector-layer? shapes layers %)))
+                      (and lottie? (alottie/lottie-vector-layer? shapes layers %)))
         ;; the pictures (or vectors) of the layers, then of the units of
         ;; split texts
         n-layers (if vectors?
-                   (->> (cta/svg-export-layer-ids objects (cta/resolve-animations tl objects))
+                   (->> (asvg/svg-export-layer-ids objects (cta/resolve-animations tl objects))
                         (cons board-id)
                         (remove texts)
                         (count))
@@ -1923,7 +1926,7 @@
   `:webm` `:gif` `:avif` `:svg` `:lottie` `:dotlottie`), with
   `:quality` `:fps` `:scale` `:loop?`, `:audio?` (the sound of its
   clips in MP4 and WebM, true by default), and for SVG `:ids?`,
-  `:bbox?` (see `cta/timeline->svg`) and `:outline?`, its texts as the
+  `:bbox?` (see `asvg/timeline->svg`) and `:outline?`, its texts as the
   outlines of their glyphs (see `outline-texts`). `ctx` holds `page`
   `files` `board-id`, the `:time` the shapes show (undone for the
   pictures of the markup exports), and may replace the `:bridge` to

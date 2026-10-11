@@ -10,6 +10,8 @@
   `commit-timeline`) so they are undoable & synced; playhead / playback
   state is transient and lives under `:workspace-animation`."
   (:require
+   [app.common.animation.css :as acss]
+   [app.common.animation.lottie :as alottie]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
@@ -2186,7 +2188,7 @@
     (effect [_ state _]
       (when-let [tl (export-timeline state :text-split :whole)]
         (let [objects (dsh/lookup-page-objects state)
-              css     (cta/timeline->css tl objects)
+              css     (acss/timeline->css tl objects)
               blob    (wapi/create-blob css "text/css")]
           (dom/trigger-download (safe-filename (:name tl) ".css") blob))))))
 
@@ -2199,7 +2201,7 @@
     (effect [_ state _]
       (when-let [tl (export-timeline state :text-split :whole)]
         (let [objects (dsh/lookup-page-objects state)
-              data    (cta/timeline->lottie tl objects)
+              data    (alottie/timeline->lottie tl objects)
               json    (js/JSON.stringify (clj->js data) nil 2)
               blob    (wapi/create-blob json "application/json")]
           (dom/trigger-download (safe-filename (:name tl) ".json") blob))))))

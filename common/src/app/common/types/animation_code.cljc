@@ -11,6 +11,7 @@
   React), its timeline and the plugin API read, so they cannot drift
   apart. Pure, for the workspace, the view mode and the plugins alike."
   (:require
+   [app.common.animation.css :as acss]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.logic.timelines :as cltl]
@@ -330,7 +331,7 @@
 
 (def ^:private react-values
   "The values of motion.dev a layer animates, in this order: their names,
-  the properties behind each and the key of `cta/frame-values` they show."
+  the properties behind each and the key of `acss/frame-values` they show."
   [["x" #{:x} :translate-x]
    ["y" #{:y} :translate-y]
    ["rotate" #{:rotation} :rotate]
@@ -353,7 +354,7 @@
 
 (defn- react-number
   [v]
-  (cta/format-number v))
+  (acss/format-number v))
 
 (defn- react-time
   "A share of a clock, `times` of motion.dev: rounded to 4 decimals, a
@@ -421,12 +422,12 @@
             (partition 2 1 times))))
 
 (defn- frame-at
-  "The frame values (see `cta/frame-values`) of `layer` at `time` of the
+  "The frame values (see `acss/frame-values`) of `layer` at `time` of the
   played `timeline`."
   [timeline objects {:keys [id shape]} time]
-  (cta/frame-values shape
-                    (get (cta/values-at timeline time) id {})
-                    (cta/position-origin timeline objects id)))
+  (acss/frame-values shape
+                     (get (cta/values-at timeline time) id {})
+                     (cta/position-origin timeline objects id)))
 
 (defn- repeat-of
   "The repeat options of a clock: none playing once, forever in a loop,
@@ -663,7 +664,7 @@
   "The animation of the boards of `codes` (see `cltl/code-timelines`; one
   or several) as React code for motion.dev: one component by board, one
   `motion.div` by animated layer (those of `ids` only when given), its
-  class from `class-name` (`cta/shape-css-class` of its id by default) and
+  class from `class-name` (`acss/shape-css-class` of its id by default) and
   each value with its keyframes, `times` and an easing by segment, the
   clock of the layer (a copy's, its main's) repeating it. A value that is
   one spring segment on a clock playing once is a spring of motion.dev,
@@ -672,7 +673,7 @@
   nothing animates."
   [codes objects & {:keys [ids class-name]}]
   (let [codes      (if (map? codes) [codes] codes)
-        class-name (or class-name #(cta/shape-css-class (:id %)))
+        class-name (or class-name #(acss/shape-css-class (:id %)))
         names      (component-names (map #(get objects (:board-id %)) codes))
         boards     (into [] (keep identity)
                          (map #(react-board %1 %2 objects ids class-name) codes names))]
