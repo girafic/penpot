@@ -29,6 +29,7 @@
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
+   [app.main.data.workspace.animation-mode :as dwam]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.layout :as layout]
    [app.main.data.workspace.modifiers :as dwm]
@@ -80,23 +81,10 @@
   [state]
   (get (dsh/lookup-page state) :timelines))
 
-(defn- selection-board-id
-  "The board (top-level frame) of the current selection: the selected
-  board itself, or the root frame containing the selected shapes. `nil`
-  when nothing is selected."
-  [state]
-  (let [objects  (dsh/lookup-page-objects state)
-        selected (dsh/lookup-selected state)]
-    (when-let [shape-id (first selected)]
-      (cfh/get-shape-id-root-frame objects shape-id))))
-
-(defn active-board-id
-  "The board the timeline dock currently targets: the board of the
-  selection or, when nothing is selected, the last targeted one (see
-  `set-active-board`), so the timeline stays visible and playable."
-  [state]
-  (or (selection-board-id state)
-      (dm/get-in state [:workspace-animation :board-id])))
+(dm/export dwam/motion-mode?)
+(dm/export dwam/active-board-id)
+(dm/export dwam/timeline-maximized?)
+(dm/export dwam/canvas-in-window?)
 
 (defn current-timeline
   "The timeline of the active board (timelines are keyed by board-id)."
@@ -497,7 +485,7 @@
           (distinct)
           (sort)))))
 
-(declare apply-preview motion-mode? select-keyframe set-playhead set-keyframe-value
+(declare apply-preview select-keyframe set-playhead set-keyframe-value
          store-keyframe-selection)
 
 (defn commit-timeline
@@ -1833,11 +1821,6 @@
     (effect [_ state _]
       (follow-audio! state))))
 
-(defn motion-mode?
-  "Whether the workspace is in motion mode, with the timeline dock."
-  [state]
-  (contains? (:workspace-layout state) :animation-timeline))
-
 (defn- selected-elsewhere?
   "Out of motion mode, where the title of a board plays its animation
   (see `toggle-board-play`), whether something else than that board is
@@ -2064,13 +2047,6 @@
         (rx/of (layout/toggle-layout-flag :animation-timeline :force? true)
                (layout/set-options-mode :design))))))
 
-(defn timeline-maximized?
-  "Whether the timeline dock covers the whole workspace, the sidebars
-  too, like a maximized area in Blender, with the canvas in a small
-  window over it; `anim` is the `:workspace-animation` state."
-  [anim]
-  (true? (:maximized? anim)))
-
 (defn- after-viewport-resize
   "`event` once the canvas has taken its new size (its resize observer
   tells, see `dwv/update-viewport-size`), or after a while without one."
@@ -2100,15 +2076,26 @@
 
 (defn- restore-view
   "The canvas back where it was before the timeline was maximized (see
-  `toggle-timeline-maximized`), unless it is maximized again."
+  `toggle-timeline-maximized`), on the page it was on. Maximized again
+  before (the canvas still taking its size), the view stays kept for the
+  next time it docks."
   []
   (ptk/reify ::restore-view
     ptk/UpdateEvent
     (update [_ state]
-      (let [view (dm/get-in state [:workspace-animation :restore-view])]
-        (cond-> (update state :workspace-animation dissoc :restore-view)
-          (and (some? view) (not (timeline-maximized? (:workspace-animation state))))
-          (update :workspace-local #(merge % (fit-view view (:vport %)))))))
+      (let [anim (:workspace-animation state)
+            view (:restore-view anim)]
+        (cond
+          (timeline-maximized? anim)
+          state
+
+          (not= (:page-id view) (:current-page-id state))
+          (update state :workspace-animation dissoc :restore-view)
+
+          :else
+          (-> state
+              (update :workspace-animation dissoc :restore-view)
+              (update :workspace-local #(merge % (fit-view (dissoc view :page-id) (:vport %))))))))
 
     ptk/EffectEvent
     (effect [_ state _]
@@ -2136,20 +2123,24 @@
 (defn- maximize-timeline
   "Let the timeline dock cover the whole workspace, the canvas in a small
   window over it fitted to the active board, once the window has its
-  size; where the canvas was is kept to go back to (see `dock-timeline`)."
+  size; where the canvas was is kept to go back to (see `dock-timeline`).
+  Nothing without a board on the page for the timeline to show."
   []
   (ptk/reify ::maximize-timeline
     ptk/UpdateEvent
     (update [_ state]
-      (-> state
-          (assoc-in [:workspace-animation :maximized?] true)
-          (update-in [:workspace-animation :restore-view]
-                     #(or % (select-keys (:workspace-local state) [:vbox :zoom :zoom-inverse])))))
+      (if (nil? (dsh/lookup-shape state (active-board-id state)))
+        state
+        (-> state
+            (assoc-in [:workspace-animation :maximized?] true)
+            (update-in [:workspace-animation :restore-view]
+                       #(or % (-> (select-keys (:workspace-local state) [:vbox :zoom :zoom-inverse])
+                                  (assoc :page-id (:current-page-id state))))))))
 
     ptk/WatchEvent
     (watch [_ state stream]
-      (if-let [board-id (active-board-id state)]
-        (after-viewport-resize stream (dwz/fit-to-shapes #{board-id}))
+      (if (canvas-in-window? state)
+        (after-viewport-resize stream (dwz/fit-to-shapes #{(active-board-id state)}))
         (rx/empty)))))
 
 (defn canvas-window

@@ -16,6 +16,7 @@
    [app.common.types.tokens-lib :as ctob]
    [app.config :as cf]
    [app.main.data.helpers :as dsh]
+   [app.main.data.workspace.animation-mode :as dwam]
    [app.main.data.workspace.tokens.selected-set :as dwts]
    [app.main.store :as st]
    [app.main.streams :as ms]
@@ -167,6 +168,11 @@
   "Transient timeline-animation state (playhead, playing?, selected
   keyframe, targeted board)."
   (l/derived :workspace-animation st/state))
+
+(def canvas-in-window
+  "Whether the canvas is in its small window over the maximized timeline
+  (see `dwam/canvas-in-window?`)."
+  (l/derived dwam/canvas-in-window? st/state))
 
 (def export-animation
   "Transient animation export progress."

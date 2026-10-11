@@ -618,6 +618,9 @@
            :workspace-versions)
           (update :workspace-global dissoc :read-only? :preview-id :default-font)
           (assoc-in [:workspace-global :options-mode] :design)
+          ;; the timeline opens docked in the next file, the view of this
+          ;; one not to be put back there
+          (update :workspace-animation dissoc :maximized? :restore-view)
           (update :files d/update-vals #(dissoc % :data))))
 
     ;; the sound of a timeline playing stops with the workspace, and its

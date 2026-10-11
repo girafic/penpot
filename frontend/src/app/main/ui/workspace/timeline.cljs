@@ -1652,7 +1652,7 @@
         recording? (get anim :auto-keyframe? false)
         ;; over the whole workspace; docked without a board to show, so
         ;; one can be picked on the canvas
-        maximized? (and (some? timeline) (dwa/timeline-maximized? anim))
+        maximized? (mf/deref refs/canvas-in-window)
         canvas-hidden? (dwa/canvas-window-hidden? anim)
         ;; as tall as the user made the rows (see `lanes/row-height`)
         row-height (mth/clamp (or (dwa/row-height anim) lanes/default-row-height)

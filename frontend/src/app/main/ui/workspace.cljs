@@ -54,9 +54,6 @@
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
-(def ^:private ref:timeline-maximized
-  (l/derived dwa/timeline-maximized? refs/workspace-animation))
-
 (def ^:private ref:canvas-window
   (l/derived dwa/canvas-window refs/workspace-animation))
 
@@ -93,10 +90,10 @@
         textpalette?   (:textpalette layout)
         hide-ui?       (:hide-ui layout)
         timeline?      (use-timeline-visible? layout)
-        maximized?     (mf/deref ref:timeline-maximized)
+        in-window?     (mf/deref refs/canvas-in-window)
         ;; the canvas in a small window over the maximized timeline, with
         ;; neither its toolbar nor its rulers
-        pip?           (and timeline? maximized?)
+        pip?           (and timeline? in-window?)
         ;; where its window is: where the user left it, or as they drag it
         stored-frame   (mf/deref ref:canvas-window)
         ;; hidden, it stays where it is, out of sight

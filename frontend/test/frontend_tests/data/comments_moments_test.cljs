@@ -146,7 +146,8 @@
                                               :zoom 1 :zoom-inverse 1})
                      (assoc-in [:workspace-animation :maximized?] true)
                      (assoc-in [:workspace-animation :restore-view]
-                               {:vbox (grc/make-rect 1000 1000 800 600) :zoom 1 :zoom-inverse 1}))
+                               {:vbox (grc/make-rect 1000 1000 800 600) :zoom 1 :zoom-inverse 1
+                                :page-id (:id (thf/current-page file))}))
           dock   (first (filter #(= ::dwa/dock-timeline (ptk/type %))
                                 (let [events (atom [])]
                                   (->> (ptk/watch (dwcm/open-thread-moment thread) state (rx/empty))

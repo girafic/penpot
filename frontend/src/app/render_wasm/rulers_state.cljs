@@ -13,6 +13,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
    [app.main.data.helpers :as dsh]
+   [app.main.data.workspace.animation-mode :as dwam]
    [app.util.color :as uc]
    [app.util.dom :as dom]))
 
@@ -54,8 +55,7 @@
         ;; the canvas in a small window over the maximized timeline has
         ;; no rulers (see `app.main.ui.workspace/workspace-content*`)
         layout (cond-> layout
-                 (and (contains? layout :animation-timeline)
-                      (dm/get-in state [:workspace-animation :maximized?]))
+                 (dwam/canvas-in-window? state)
                  (conj :hide-ui))
         file-id (:current-file-id state)
         page-id (:current-page-id state)

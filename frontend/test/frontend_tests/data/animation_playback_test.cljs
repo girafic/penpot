@@ -13,6 +13,7 @@
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.helpers :as dsh]
+   [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.modifiers :as dwm]
@@ -128,19 +129,56 @@
 (def ^:private canvas-view
   {:vbox {:x 0 :y 0 :width 1000 :height 800} :zoom 1 :zoom-inverse 1})
 
+(def ^:private page-id (uuid/next))
+
+(def ^:private kept-view
+  "`canvas-view` as maximizing keeps it, with its page."
+  (assoc canvas-view :page-id page-id))
+
+(defn- with-board
+  "`state` on a page `page-id` holding a board `board-id`."
+  [state board-id]
+  (let [file-id (uuid/next)
+        board   (cts/setup-shape {:id board-id :type :frame :x 0 :y 0 :width 100 :height 100})]
+    (assoc state
+           :current-file-id file-id
+           :current-page-id page-id
+           :files {file-id {:id file-id
+                            :data {:pages-index {page-id {:id page-id
+                                                          :objects {board-id board}}}}}})))
+
+(t/deftest the-timeline-maximizes-with-a-board-to-show
+  ;; Without one, it stays docked, so a board can be picked on the
+  ;; canvas, and the canvas is no window.
+  (let [board-id (uuid/next)
+        motion   {:workspace-layout #{:animation-timeline}
+                  :workspace-animation {:board-id board-id}}
+        maximize (first @(watched (dwa/toggle-timeline-maximized) (with-board motion board-id) (rx/empty)))
+        with     (ptk/update maximize (with-board motion board-id))
+        without  (ptk/update maximize (with-board motion (uuid/next)))]
+    (t/is (dwa/canvas-in-window? with))
+    (t/is (not (dwa/timeline-maximized? (:workspace-animation without))))
+    (t/is (not (dwa/canvas-in-window? without)))
+    (t/is (not (dwa/canvas-in-window? (update with :workspace-layout disj :animation-timeline)))
+          "nor out of motion mode")
+    (t/is (not (dwa/canvas-in-window? (assoc-in with [:workspace-animation :board-id] (uuid/next))))
+          "nor once its board is gone")))
+
 (t/deftest the-maximized-timeline-fits-the-board-in-the-canvas
   ;; The canvas goes into a small window over it: once the window has its
   ;; size, the board the timeline shows fits in it.
   (t/async done
-    (let [state  {:workspace-layout #{:animation-timeline}
-                  :workspace-local canvas-view
-                  :workspace-animation {:board-id (uuid/next)}}
+    (let [board-id (uuid/next)
+          state  (with-board {:workspace-layout #{:animation-timeline}
+                              :workspace-local canvas-view
+                              :workspace-animation {:board-id board-id}}
+                   board-id)
           event  (first @(watched (dwa/toggle-timeline-maximized) state (rx/empty)))
           state' (ptk/update event state)
           stream (rx/subject)
           types  (atom [])]
       (t/is (dwa/timeline-maximized? (:workspace-animation state')))
-      (t/is (= canvas-view (get-in state' [:workspace-animation :restore-view])) "where the canvas was")
+      (t/is (= kept-view (get-in state' [:workspace-animation :restore-view])) "where the canvas was")
       (->> (ptk/watch event state' stream)
            (rx/subs! #(swap! types conj (ptk/type %))
                      (fn [cause] (t/is false (str cause)) (done))
@@ -152,8 +190,9 @@
 (t/deftest the-docked-timeline-puts-the-canvas-back
   (t/async done
     (let [state  {:workspace-layout #{:animation-timeline}
+                  :current-page-id page-id
                   :workspace-local (assoc-in canvas-view [:vbox :x] 640)
-                  :workspace-animation {:maximized? true :restore-view canvas-view}}
+                  :workspace-animation {:maximized? true :restore-view kept-view}}
           state' (ptk/update (dwa/dock-timeline) state)
           stream (rx/subject)
           events (atom [])]
@@ -164,9 +203,11 @@
                        (let [restored (ptk/update (first @events) state')]
                          (t/is (= canvas-view (:workspace-local restored)) "where it was")
                          (t/is (nil? (get-in restored [:workspace-animation :restore-view])))
-                         (t/is (= (:workspace-local state)
-                                  (:workspace-local (ptk/update (first @events) state)))
-                               "not while it is maximized again"))
+                         (let [again (ptk/update (first @events) state)]
+                           (t/is (= (:workspace-local state) (:workspace-local again))
+                                 "not while it is maximized again")
+                           (t/is (= kept-view (get-in again [:workspace-animation :restore-view]))
+                                 "kept for the next time it docks")))
                        (done))))
       (rx/push! stream (dwv/update-viewport-size :both {:width 1000 :height 800})))))
 
@@ -175,12 +216,31 @@
   ;; took its room: back, it shows as much as it now can, at the zoom it
   ;; had, around the same centre.
   (let [state    {:workspace-layout #{:animation-timeline}
+                  :current-page-id page-id
                   :workspace-local {:vport {:width 1000 :height 600}}
-                  :workspace-animation {:restore-view (assoc canvas-view :zoom 2 :zoom-inverse 0.5)}}
+                  :workspace-animation {:restore-view (assoc kept-view :zoom 2 :zoom-inverse 0.5)}}
         restored (:workspace-local (ptk/update (#'dwa/restore-view) state))]
     (t/is (= {:x 250 :y 250 :width 500 :height 300} (:vbox restored)))
     (t/is (= 2 (:zoom restored)))
-    (t/is (= {:width 1000 :height 600} (:vport restored)))))
+    (t/is (= {:width 1000 :height 600} (:vport restored)))
+    (t/is (not (contains? restored :page-id)))))
+
+(t/deftest another-file-opens-with-the-timeline-docked
+  (let [state  {:workspace-animation {:maximized? true :restore-view kept-view :board-id page-id}}
+        state' (ptk/update (dw/finalize-workspace (uuid/next) (uuid/next)) state)]
+    (t/is (not (dwa/timeline-maximized? (:workspace-animation state'))))
+    (t/is (nil? (get-in state' [:workspace-animation :restore-view])) "nor the view of this one kept")))
+
+(t/deftest the-canvas-goes-back-only-on-its-page
+  ;; Another page shows since it was maximized: its view stays.
+  (let [local {:vbox {:x 640 :y 0 :width 1000 :height 800} :vport {:width 1000 :height 800} :zoom 1}
+        state {:workspace-layout #{:animation-timeline}
+               :current-page-id (uuid/next)
+               :workspace-local local
+               :workspace-animation {:restore-view kept-view}}
+        state' (ptk/update (#'dwa/restore-view) state)]
+    (t/is (= local (:workspace-local state')))
+    (t/is (nil? (get-in state' [:workspace-animation :restore-view])) "nor is the view kept")))
 
 (t/deftest the-canvas-window-stays-where-it-was-left
   (let [before (get @storage/user ::dwa/canvas-window)
