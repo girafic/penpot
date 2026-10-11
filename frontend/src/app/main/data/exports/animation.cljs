@@ -1724,6 +1724,12 @@
                 files)
         (p/then (fn [_] (uz/close writer))))))
 
+(defn- dotlottie-image-name
+  "The name of the file of the picture `img` (see `collect-layer-images`)
+  in the archive of a dotLottie."
+  [img]
+  (str (:id img) ".png"))
+
 (defn dotlottie-preview
   "The Lottie document `data` of a dotLottie, whose images are files of
   its archive (see `lottie->dotlottie`), with the pictures `images` (see
@@ -1733,7 +1739,7 @@
   (let [hrefs (into {}
                     (keep (fn [[_ img]]
                             (when (and (some? (:bytes img)) (some? (:p img)))
-                              [(str (:id img) ".png") (:p img)])))
+                              [(dotlottie-image-name img) (:p img)])))
                     images)]
     (update data :assets
             (fn [assets]
@@ -1747,9 +1753,10 @@
   "A promise of the SVG, Lottie or dotLottie of the board `board` playing
   `tl`, with the pictures `images` (see `collect-layer-images` and
   `collect-unit-vectors`): `{:status :ok :blob :ext :mtype}`, a dotLottie
-  with `:preview-blob`, the Lottie the export tab plays of it (see
-  `dotlottie-preview`). `opts` go to `asvg/timeline->svg`, their
-  `:propagate` to `alottie/timeline->lottie` too."
+  with `:preview?` in `opts` with `:preview-blob` too, the Lottie the
+  export tab plays of it (see `dotlottie-preview`): a copy of its
+  pictures, made only for the tab. `opts` go to `asvg/timeline->svg`,
+  their `:propagate` to `alottie/timeline->lottie` too."
   [tl objects board format images opts]
   (case format
     :svg
@@ -1773,22 +1780,22 @@
     ;; the images go into the archive, next to the document
     :dotlottie
     (let [name      (or (:name board) (:name tl))
-          file-name #(str (:id %) ".png")
           ;; the outlines of the units of texts are no images
           assets    (into {} (map (fn [[id img]]
                                     [id (if (some? (:runs img))
                                           (select-keys img [:runs :center])
                                           (-> (select-keys img [:id :w :h :x :y])
-                                              (assoc :u "/images/" :p (file-name img) :e 0)))]))
+                                              (assoc :u "/images/" :p (dotlottie-image-name img) :e 0)))]))
                           images)
           data      (alottie/timeline->lottie tl objects assets (select-keys opts [:propagate]))
-          files     (into {} (keep (fn [[_ img]] (when (some? (:bytes img)) [(file-name img) (:bytes img)])))
+          files     (into {} (keep (fn [[_ img]] (when (some? (:bytes img)) [(dotlottie-image-name img) (:bytes img)])))
                           images)]
       (p/let [blob (lottie->dotlottie data (safe-filename name "") files
                                       (not= :once (cta/playback-mode tl)))]
-        {:status :ok :blob blob :ext ".lottie" :mtype dotlottie-mtype
-         :preview-blob (wapi/create-blob (js/JSON.stringify (clj->js (dotlottie-preview data images)))
-                                         "application/json")}))))
+        (cond-> {:status :ok :blob blob :ext ".lottie" :mtype dotlottie-mtype}
+          (:preview? opts)
+          (assoc :preview-blob (wapi/create-blob (js/JSON.stringify (clj->js (dotlottie-preview data images)))
+                                                 "application/json")))))))
 
 (defn outline-texts
   "`objects` with the texts in the board of `tl`, but the split texts of
@@ -1861,7 +1868,7 @@
   `opts` (see `run-export`): the pictures of its layers one at a time,
   so it stops between them when `cancelled?`."
   [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled? ids? bbox?
-           outline?]}]
+           outline? preview?]}]
   (let [tl       (dwa/board-export-timeline page files board-id)
         objects  (:objects page)
         board    (get objects board-id)
@@ -1927,7 +1934,8 @@
                        (markup-file tl (if lottie? shapes (or (:objects vectors) objects)) board format
                                     (merge images units)
                                     {:ids? ids? :bbox? bbox? :fonts (:fonts vectors)
-                                     :propagate cgm/set-objects-modifiers}))]
+                                     :propagate cgm/set-objects-modifiers
+                                     :preview? preview?}))]
       (when on-progress
         (on-progress {:phase :write :current 1 :total 1}))
       (assoc result :name (or (:name board) (:name tl))))))
@@ -1942,8 +1950,9 @@
   `:bbox?` (see `asvg/timeline->svg`) and `:outline?`, its texts as the
   outlines of their glyphs (see `outline-texts`). `ctx` holds `page`
   `files` `board-id`, the `:time` the shapes show (undone for the
-  pictures of the markup exports), and may replace the `:bridge` to
-  WASM, `:decode`,
+  pictures of the markup exports), `:preview?` for the Lottie the export
+  tab plays of a dotLottie (see `markup-file`), and may replace the
+  `:bridge` to WASM, `:decode`,
   `:yield` and the GIF encoder (`:gif-encoder` `:quantize`
   `:apply-palette`, see `encode-gif`); `:on-progress` hears `{:phase
   :current :total}` (see `progress-percent`), `:on-frame` the pictures
@@ -2022,8 +2031,10 @@
                             (when @cancelled?
                               (throw (ex-info "cancelled" {:type :export-cancelled})))
                             (let [{:keys [promise cancel]}
+                                  ;; a ZIP has nothing to preview
                                   (run-export (assoc ctx
                                                      :board-id board-id
+                                                     :preview? false
                                                      :on-progress #(when on-progress
                                                                      (on-progress (assoc % :board i :boards n))))
                                               (assoc params :scale scale))]

@@ -242,6 +242,8 @@
           (dea/run-exports (cond-> {:page page
                                     :files files
                                     :bridge (tab-bridge)
+                                    ;; the tab plays what it exported
+                                    :preview? true
                                     :on-progress #(st/emit! (progress %))}
                              ;; the pictures come from WASM
                              (:wasm? params) (assoc :on-frame show-frame!))

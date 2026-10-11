@@ -986,6 +986,30 @@
     (t/is (= {:id "img_a" :w 10 :h 10 :u "" :p "data:image/png;base64,AQ==" :e 1} (first (:assets doc))))
     (t/is (= {:id "comp_x" :layers []} (second (:assets doc))) "its precomps as they are")))
 
+(t/deftest a-dotlottie-makes-its-preview-only-for-the-tab
+  ;; The Lottie the export tab plays holds a copy of every picture: made
+  ;; only when asked for, not for a download.
+  (t/async
+    done
+    (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 80 :name "Hero"})
+          rect   (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20})
+          bid    (:id board)
+          rid    (:id rect)
+          objs   {bid (assoc board :shapes [rid])
+                  rid (assoc rect :parent-id bid :frame-id bid)}
+          tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                     (cta/add-keyframe rid {:time 0 :property :x :value 10})
+                     (cta/add-keyframe rid {:time 1000 :property :x :value 60}))
+          export #(#'dea/markup-file tl objs board :dotlottie {} %)]
+      (-> (js/Promise.all #js [(export {}) (export {:preview? true})])
+          (.then (fn [[download tab]]
+                   (t/is (= :ok (:status download)))
+                   (t/is (nil? (:preview-blob download)) "none for a download")
+                   (t/is (instance? js/Blob (:preview-blob tab)) "the tab gets it")))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          ;; never `done` itself: it would adopt the promise of the next test
+          (.finally (fn [] (done)))))))
+
 (t/deftest several-boards-export-into-one-zip
   (t/async
     done
@@ -993,8 +1017,8 @@
           calls    (atom [])
           progress (atom [])]
       (mock/with-mocks
-        {dea/run-export (fn [{:keys [board-id on-progress]} params]
-                          (swap! calls conj [board-id (:scale params) (:format params)])
+        {dea/run-export (fn [{:keys [board-id on-progress preview?]} params]
+                          (swap! calls conj [board-id (:scale params) (:format params) preview?])
                           (on-progress {:phase :capture :current 1 :total 2})
                           {:promise (js/Promise.resolve
                                      (if (= board-id c)
@@ -1003,12 +1027,13 @@
                                          (= board-id b) (assoc :fitted [100 50]))))
                            :cancel (fn [])})}
         (fn [done']
-          (-> (:promise (dea/run-exports {:on-progress #(swap! progress conj %)}
+          (-> (:promise (dea/run-exports {:on-progress #(swap! progress conj %) :preview? true}
                                          {:format :gif}
                                          [{:board-id a :scale 2} {:board-id b :scale 1} {:board-id c :scale 0.5}]
                                          "Deck"))
               (.then (fn [result]
-                       (t/is (= [[a 2 :gif] [b 1 :gif] [c 0.5 :gif]] @calls) "one after another, each at its scale")
+                       (t/is (= [[a 2 :gif false] [b 1 :gif false] [c 0.5 :gif false]] @calls)
+                             "one after another, each at its scale, with nothing to preview in a ZIP")
                        (t/is (= [13 47 80] (mapv dea/progress-percent @progress)) "each board its share")
                        (t/is (= ["Deck" ".zip" "application/zip"] ((juxt :name :ext :mtype) result)))
                        (t/is (= ["Hero.gif" "Hero-2.gif"] (:files result))
