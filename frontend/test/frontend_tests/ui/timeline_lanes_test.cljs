@@ -264,3 +264,13 @@
              (mapv (juxt :left :right :top :bottom) (lanes/animation-boxes tall scene))))
     (let [{:keys [top bottom]} (first (lanes/keyframe-boxes tall scene))]
       (t/is (< 160 top 168 bottom 176) "in the middle of the fourth row"))))
+
+(t/deftest taller-rows-keep-the-row-under-the-pointer
+  ;; The middle of the fourth row, at the top, twice as tall.
+  (let [y (+ lanes/header-height (* 3 28) 14)]
+    (t/is (= 98 (lanes/row-anchored-scroll 0 y 28 56)) "it stays under the pointer")
+    (t/is (= (- y lanes/header-height)
+             (- (+ (* 3 56) 28) (lanes/row-anchored-scroll 0 y 28 56)))
+          "where it was in the view"))
+  (t/is (= 200 (lanes/row-anchored-scroll 100 10 28 56)) "from the header, the top row stays")
+  (t/is (= 50 (lanes/row-anchored-scroll 100 10 56 28)) "shorter too"))

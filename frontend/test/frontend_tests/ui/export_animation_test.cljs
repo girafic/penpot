@@ -13,13 +13,17 @@
    [app.main.data.viewer :as dv]
    [app.main.store :as st]
    [app.main.ui.export-animation :as uea]
+   [app.util.i18n :refer [tr]]
+   [app.util.modules]
    [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.dom :as thd]
    [frontend-tests.helpers.export-job :as thj]
    [frontend-tests.helpers.mock :as mock]
    [potok.v2.core :as ptk]
-   [promesa.core :as p]))
+   [promesa.core :as p]
+   [rumext.v2 :as mf]))
 
 (t/deftest the-pictures-of-the-frames-show-the-board
   (let [selrect {:x 100 :y 200 :width 400 :height 200}]
@@ -573,3 +577,83 @@
                    (t/is (= ["export-animation.stale"] (:text (uea/page-state (:export-tab @st/state)))))))
           (.catch fail!)
           (.finally #(end! scene done))))))
+
+(def ^:private lottie-url
+  "A Lottie 100 × 50, as the export tab gets one."
+  "data:application/json,%7B%22w%22%3A100%2C%22h%22%3A50%7D")
+
+(defn- lottie-player
+  "lottie-web as `js/lottie.js` gives it: the options of each animation it
+  loads into `loaded`, a destroyed one counted in `destroyed`."
+  [loaded destroyed]
+  #js {:default #js {:loadAnimation (fn [opts]
+                                      (swap! loaded conj opts)
+                                      #js {:destroy #(swap! destroyed inc)})}})
+
+(t/deftest the-lottie-preview-tells-when-it-can-not-play
+  (t/async
+    done
+    (mock/with-mocks
+      {app.util.modules/import (mock/stub (fn [_] (js/Promise.reject (js/Error. "offline"))))}
+      (fn [done']
+        (-> (thd/with-dom
+              (fn [{:keys [root document]}]
+                (thd/render! root (mf/element uea/lottie-preview* #js {:url lottie-url :name "Hero"}))
+                (.then (thd/settle)
+                       (fn [_]
+                         (t/is (= (tr "export-animation.no-preview")
+                                  (some-> (.querySelector document "p") .-textContent))
+                               "a note")
+                         (t/is (nil? (.querySelector document "[role=img]")) "in place of the player")))))
+            (.catch (fn [cause] (t/is false (ex-message cause))))
+            (.finally (fn [] (done')))))
+      done)))
+
+(t/deftest the-lottie-preview-plays-and-goes-with-the-page
+  (t/async
+    done
+    (let [loaded    (atom [])
+          destroyed (atom 0)]
+      (mock/with-mocks
+        {app.util.modules/import (mock/stub (fn [_] (js/Promise.resolve (lottie-player loaded destroyed))))}
+        (fn [done']
+          (-> (thd/with-dom
+                (fn [{:keys [root document]}]
+                  (thd/render! root (mf/element uea/lottie-preview* #js {:url lottie-url :name "Hero"}))
+                  (.then (thd/settle)
+                         (fn [_]
+                           (let [node (.querySelector document "[role=img]")]
+                             (t/is (= 1 (count @loaded)) "lottie-web plays it")
+                             (t/is (= node (.-container ^js (first @loaded))) "in the preview")
+                             (t/is (= "100 / 50" (.. node -style -aspectRatio)) "at its own proportions"))
+                           (thd/render! root nil)
+                           (t/is (= 1 @destroyed) "and lets it go with the page")))))
+              (.catch (fn [cause] (t/is false (ex-message cause))))
+              (.finally (fn [] (done')))))
+        done))))
+
+(t/deftest the-lottie-preview-plays-nothing-once-gone
+  ;; The page closed while lottie-web loaded: nothing plays where it was.
+  (t/async
+    done
+    (let [loaded    (atom [])
+          destroyed (atom 0)
+          resolve!  (atom nil)]
+      (mock/with-mocks
+        {app.util.modules/import (mock/stub (fn [_] (js/Promise. (fn [resolve] (reset! resolve! resolve)))))}
+        (fn [done']
+          (-> (thd/with-dom
+                (fn [{:keys [root]}]
+                  (thd/render! root (mf/element uea/lottie-preview* #js {:url lottie-url :name "Hero"}))
+                  (-> (thd/settle)
+                      (.then (fn [_]
+                               (t/is (fn? @resolve!) "lottie-web asked for")
+                               (thd/render! root nil)
+                               (@resolve! (lottie-player loaded destroyed))
+                               (thd/settle)))
+                      (.then (fn [_]
+                               (t/is (empty? @loaded))
+                               (t/is (zero? @destroyed)))))))
+              (.catch (fn [cause] (t/is false (ex-message cause))))
+              (.finally (fn [] (done')))))
+        done))))

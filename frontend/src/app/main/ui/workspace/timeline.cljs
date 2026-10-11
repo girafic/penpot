@@ -1841,10 +1841,8 @@
            (let [height (mth/clamp (mth/round height) lanes/default-row-height lanes/max-row-height)]
              (when (not= height row-height)
                (when-let [^js node (mf/ref-val scroll-ref)]
-                 (let [offset (max 0 (- y lanes/header-height))]
-                   (mf/set-ref-val! row-anchor-ref
-                                    (- (* (+ (.-scrollTop node) offset) (/ height row-height))
-                                       offset))))
+                 (mf/set-ref-val! row-anchor-ref
+                                  (lanes/row-anchored-scroll (.-scrollTop node) y row-height height)))
                (st/emit! (dwa/set-row-height height))))))
 
         ;; The row height of the last render, for the wheel (see

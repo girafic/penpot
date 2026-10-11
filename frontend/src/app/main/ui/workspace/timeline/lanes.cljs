@@ -93,6 +93,15 @@
   [geo]
   (get geo :row-height default-row-height))
 
+(defn row-anchored-scroll
+  "Where rows scrolled to `scroll-top` scroll to once they are `height`
+  tall instead of `old-height`, so that what is at `y` of the view (the
+  pointer, say) stays there; above the rows, in the header, the top row
+  stays."
+  [scroll-top y old-height height]
+  (let [offset (max 0 (- y header-height))]
+    (- (* (+ scroll-top offset) (/ height old-height)) offset)))
+
 (defn axis-width
   "Pixels the time axis takes in a view `width` wide, labels included, at
   `zoom` (1 fits it in the view)."

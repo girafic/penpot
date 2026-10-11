@@ -8,7 +8,9 @@
   (:require
    [app.main.ui.workspace.sidebar.options.menus.export-issues :as issues]
    [app.main.ui.workspace.sidebar.options.menus.exports :as exp]
-   [cljs.test :as t :include-macros true]))
+   [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.dom :as thd]
+   [rumext.v2 :as mf]))
 
 (def ^:private board {:id :board :type :frame})
 (def ^:private timeline {:board-id :board :tracks {}})
@@ -79,3 +81,24 @@
     (t/is (= :close (issues/next-focus buttons :more false)) "round")
     (t/is (= :more (issues/next-focus buttons :close true)) "round, going back")
     (t/is (nil? (issues/next-focus [] :dialog false)) "none")))
+
+(t/deftest the-issues-keep-the-focus-where-it-is
+  ;; The list takes the focus once as it opens, keeps it where the user
+  ;; put it as the issues are worked out again, and gives it back to its
+  ;; pill as it closes.
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [render! #(thd/render! root (mf/element issues/export-issues* #js {:kinds % :formatLabel "SVG"}))
+            pill    #(.querySelector document "button[aria-haspopup]")
+            popover #(.querySelector document "[role=dialog]")]
+        (render! [:no-audio :blend-mode])
+        (thd/click! window (pill))
+        (t/is (some? (popover)) "it opens")
+        (t/is (= (popover) (.-activeElement document)) "with the focus")
+        (let [close (.querySelector (popover) "button")]
+          (.focus close)
+          (render! [:no-audio])
+          (t/is (= close (.-activeElement document)) "the issues again, the focus stays"))
+        (thd/key-down! window (popover) "Escape")
+        (t/is (nil? (popover)) "Esc closes it")
+        (t/is (= (pill) (.-activeElement document)) "the focus back on its pill")))))
