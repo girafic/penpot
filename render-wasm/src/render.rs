@@ -3166,9 +3166,7 @@ impl RenderState {
             // !visited_mask
             // Pairs with the layer the walker opens for a plain group's inner
             // shadows, inside the group's own opacity layer closed below.
-            if element.has_group_inner_shadow_layer() {
-                self.surfaces.canvas(target_surface).restore();
-            }
+            close_group_inner_shadow_layer(self.surfaces.canvas(target_surface), element);
 
             if let Type::Group(group) = element.shape_type {
                 // When we're dealing with masked groups we need to
@@ -4313,19 +4311,14 @@ impl RenderState {
             // as the SVG renderer's group filter does, so its children are drawn
             // into a layer that adds them. Opened after the group's own drop
             // shadows to keep those out of it; `render_shape_exit` restores it.
-            if !can_flatten && element.has_group_inner_shadow_layer() {
+            if !can_flatten {
                 let (skip_shadows, _) = self.masked_group_layer_skips();
-                let filter = element.group_inner_shadow_layer_filter(scale, skip_shadows);
-                let canvas = self.surfaces.canvas(target_surface);
-                // Unconditional, as for masked groups: fast mode or zoom can
-                // change before the exit pass.
-                if let Some(filter) = filter {
-                    let mut paint = skia::Paint::default();
-                    paint.set_image_filter(filter);
-                    canvas.save_layer(&skia::canvas::SaveLayerRec::default().paint(&paint));
-                } else {
-                    canvas.save();
-                }
+                open_group_inner_shadow_layer(
+                    self.surfaces.canvas(target_surface),
+                    element,
+                    scale,
+                    skip_shadows,
+                );
             }
 
             // Skip nested state updates for flattened containers
@@ -5014,10 +5007,97 @@ impl RenderState {
     }
 }
 
+/// Opens the layer a plain group's children are drawn into, whose filter
+/// casts its inner shadows over them (see
+/// `Shape::has_group_inner_shadow_layer`): a plain `save` when fast mode or
+/// zoom skip the shadows (`skip_shadows`), so that
+/// `close_group_inner_shadow_layer` pairs with it whatever they are by then.
+/// Nothing for any other shape.
+fn open_group_inner_shadow_layer(
+    canvas: &skia::Canvas,
+    element: &Shape,
+    scale: f32,
+    skip_shadows: bool,
+) {
+    if !element.has_group_inner_shadow_layer() {
+        return;
+    }
+    if let Some(filter) = element.group_inner_shadow_layer_filter(scale, skip_shadows) {
+        let mut paint = skia::Paint::default();
+        paint.set_image_filter(filter);
+        canvas.save_layer(&skia::canvas::SaveLayerRec::default().paint(&paint));
+    } else {
+        canvas.save();
+    }
+}
+
+/// Closes the layer `open_group_inner_shadow_layer` opened for `element`.
+fn close_group_inner_shadow_layer(canvas: &skia::Canvas, element: &Shape) {
+    if element.has_group_inner_shadow_layer() {
+        canvas.restore();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shapes::{Frame, Group, Rect as RectType};
+    use crate::shapes::{Frame, Group, Rect as RectType, Shadow, ShadowStyle};
+
+    fn shadowed_group(style: ShadowStyle) -> Shape {
+        let mut group = Shape::new(Uuid::new_v4());
+        group.set_shape_type(Type::Group(Group { masked: false }));
+        group.set_selrect(0.0, 0.0, 100.0, 100.0);
+        group.add_shadow(Shadow::new(
+            skia::Color::BLACK,
+            4.0,
+            0.0,
+            (8.0, 8.0),
+            style,
+            false,
+        ));
+        group
+    }
+
+    /// The walker opens the layer on one pass and closes it on a later one,
+    /// between which fast mode or the zoom may change: the save stack must
+    /// come back to where it was whatever they were at each.
+    #[test]
+    fn the_inner_shadow_layer_of_a_plain_group_is_balanced() {
+        let group = shadowed_group(ShadowStyle::Inner);
+        let mut surface = skia::surfaces::raster_n32_premul((100, 100)).expect("surface");
+        let canvas = surface.canvas();
+        let base = canvas.save_count();
+
+        for (scale, skip_shadows) in [(1.0, false), (1.0, true), (0.05, false), (4.0, false)] {
+            open_group_inner_shadow_layer(canvas, &group, scale, skip_shadows);
+            assert_eq!(
+                canvas.save_count(),
+                base + 1,
+                "a layer or a save at {scale}, {skip_shadows}"
+            );
+            close_group_inner_shadow_layer(canvas, &group);
+            assert_eq!(canvas.save_count(), base, "back where it was");
+        }
+    }
+
+    #[test]
+    fn no_inner_shadow_layer_for_other_shapes() {
+        let mut surface = skia::surfaces::raster_n32_premul((100, 100)).expect("surface");
+        let canvas = surface.canvas();
+        let base = canvas.save_count();
+
+        let mut masked = shadowed_group(ShadowStyle::Inner);
+        masked.set_shape_type(Type::Group(Group { masked: true }));
+        let mut rect = shadowed_group(ShadowStyle::Inner);
+        rect.set_shape_type(Type::Rect(RectType::default()));
+
+        for shape in [shadowed_group(ShadowStyle::Drop), masked, rect] {
+            open_group_inner_shadow_layer(canvas, &shape, 1.0, false);
+            assert_eq!(canvas.save_count(), base, "none for {:?}", shape.shape_type);
+            close_group_inner_shadow_layer(canvas, &shape);
+            assert_eq!(canvas.save_count(), base);
+        }
+    }
 
     fn frame(clip: bool) -> Shape {
         let mut shape = Shape::new(Uuid::new_v4());
