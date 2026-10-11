@@ -48,3 +48,8 @@
   (t/is (= :after-resize (cw/reset-refit (assoc frame :w 600) 1600 1000)))
   (t/is (nil? (cw/reset-refit {:x 0 :y 0 :w 368 :h 252} 400 1000))
         "as large as it starts in a narrow browser window"))
+
+(t/deftest the-canvas-is-under-the-bar-of-its-window
+  ;; The bar covers none of the board fitted in it.
+  (t/is (= {:x 1001 :y 617 :w 398 :h 234} (cw/canvas-box frame)))
+  (t/is (= (+ (:y frame) 1 cw/bar-height) (:y (cw/canvas-box frame)))))

@@ -136,17 +136,12 @@
      [:section
       {:key (dm/str "workspace-" page-id)
        :class (stl/css-case :workspace-content true :pip pip? :pip-hidden (and pip? hidden?))
-       :style (when (some? frame)
-                #js {"left" (dm/str (:x frame) "px")
-                     "top" (dm/str (:y frame) "px")
-                     "width" (dm/str (:w frame) "px")
-                     "height" (dm/str (:h frame) "px")})
+       :style (when-let [{:keys [x y w h]} (some-> frame cw/canvas-box)]
+                #js {"left" (dm/str x "px")
+                     "top" (dm/str y "px")
+                     "width" (dm/str w "px")
+                     "height" (dm/str h "px")})
        :ref node-ref}
-
-      (when (some? frame)
-        [:> cw/canvas-window-handles* {:frame frame
-                                       :on-change on-frame-change
-                                       :on-commit on-frame-commit}])
 
       [:section {:class (stl/css :workspace-viewport)}
        (when (dbg/enabled? :coordinates)
@@ -169,6 +164,13 @@
 
      (when ^boolean timeline?
        [:> timeline*])
+
+     ;; the window around the canvas over the maximized timeline, with
+     ;; what moves, resizes and hides it; none while it is hidden
+     (when (and (some? frame) (not hidden?))
+       [:> cw/canvas-window* {:frame frame
+                              :on-change on-frame-change
+                              :on-commit on-frame-commit}])
 
      (when-not hide-ui?
        [:> sidebar* {:layout layout

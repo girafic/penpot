@@ -7,10 +7,12 @@
 (ns app.main.ui.workspace.canvas-window
   "The canvas in a small window over the maximized timeline (see
   `dwa/toggle-timeline-maximized`): where it is, as `{:x :y :w :h}` px of
-  the browser window, and the bar and the corners that move and resize it
-  and the button that hides it."
+  the browser window, where the canvas is in it, and the window around
+  it: its bar and corners that move and resize it and the button that
+  hides it."
   (:require-macros [app.main.style :as stl])
   (:require
+   [app.common.data.macros :as dm]
    [app.common.math :as mth]
    [app.main.data.workspace.animation :as dwa]
    [app.main.store :as st]
@@ -22,6 +24,15 @@
 
 (def ^:private margin
   "Room between the window and the edges of the browser window."
+  16)
+
+(def ^:private border
+  "The width of the border of the window, px."
+  1)
+
+(def bar-height
+  "The height of the bar on top of the window that moves it, px: the
+  canvas is under it."
   16)
 
 (def min-width 200)
@@ -66,9 +77,18 @@
      :w w'
      :h h'}))
 
+(defn canvas-box
+  "Where the canvas is in the window at `frame`: inside its border, under
+  its bar, so the board fitted in it shows whole."
+  [{:keys [x y w h]}]
+  {:x (+ x border)
+   :y (+ y border bar-height)
+   :w (- w (* 2 border))
+   :h (- h (* 2 border) bar-height)})
+
 (defn drag-commit
   "What letting go of the drag `drag` (`{:mode :frame :last}`, see
-  `canvas-window-handles*`) commits: `[frame resized?]`, the frame where
+  `canvas-window*`) commits: `[frame resized?]`, the frame where
   it went and whether its size changed; nil for a click that moved
   nothing, so a window where it starts stays there, following the corner
   of the browser window."
@@ -103,11 +123,11 @@
    ["bottom-left" (stl/css :corner :bottom-left)]
    ["bottom-right" (stl/css :corner :bottom-right)]])
 
-(mf/defc canvas-window-handles*
-  "The bar on top of the window that moves it (a double click puts it
-  back where it starts), with a button that hides it, and its corners
-  that resize it, for the window
-  at `frame`: `on-change` with the frame as they drag, `on-commit` with
+(mf/defc canvas-window*
+  "The window at `frame` the canvas shows in (see `canvas-box`): its
+  border, the bar on top that moves it (a double click puts it back
+  where it starts), with a button that hides it, and its corners that
+  resize it: `on-change` with the frame as they drag, `on-commit` with
   it once they let go, and whether its size changed."
   [{:keys [frame on-change on-commit]}]
   (let [drag-ref (mf/use-ref nil)
@@ -156,7 +176,11 @@
         on-hide
         (mf/use-fn #(st/emit! (dwa/toggle-canvas-window)))]
 
-    [:*
+    [:div {:class (stl/css :window)
+           :style #js {"left" (dm/str (:x frame) "px")
+                       "top" (dm/str (:y frame) "px")
+                       "width" (dm/str (:w frame) "px")
+                       "height" (dm/str (:h frame) "px")}}
      [:div {:class (stl/css :bar)
             :data-mode "move"
             :title (tr "workspace.animation.canvas-window-move")
