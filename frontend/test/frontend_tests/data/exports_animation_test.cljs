@@ -18,6 +18,7 @@
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.exports.animation :as dea]
+   [app.main.data.exports.animation-tab :as dat]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.lottie :as dwl]
    [app.main.data.workspace.modifiers :as dwm]
@@ -1009,6 +1010,19 @@
           (.catch (fn [cause] (t/is false (ex-message cause))))
           ;; never `done` itself: it would adopt the promise of the next test
           (.finally (fn [] (done)))))))
+
+(t/deftest the-export-tab-asks-for-the-lottie-it-plays
+  ;; lottie-web plays no dotLottie archive: the tab plays the Lottie made
+  ;; for it (see `dea/markup-file`), which it asks for.
+  (let [live @@#'dat/live
+        seen (atom nil)]
+    (with-redefs [dea/run-exports (fn [ctx _ _ _]
+                                    (reset! seen ctx)
+                                    {:promise (js/Promise.resolve {:status :nothing}) :cancel (fn [])})
+                  dat/tab-bridge  (constantly {})]
+      (#'dat/run-job {:format :dotlottie :board-id (uuid/next) :scale 1} {:objects {}} {}))
+    (reset! @#'dat/live live)
+    (t/is (true? (:preview? @seen)))))
 
 (t/deftest several-boards-export-into-one-zip
   (t/async
