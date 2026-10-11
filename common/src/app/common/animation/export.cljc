@@ -38,19 +38,30 @@
 (defn export-holders
   "The shapes the layers in which are layers of an SVG or Lottie export of
   `timeline` (see `export-layer-ids`): the boards whose size it plays on
-  their outlines, which they follow (see `svg-sized?`), and the boards of
+  their outlines, which they follow (see `svg-sized?`); the boards of
   `objects` in its board, it too, that cast an inner shadow (see
   `board-inner-shadows?`) and what holds them, so the shadow goes between
-  a board and what is in it."
+  a board and what is in it; and the masked groups in it with what holds
+  them, up to the board, so that a masked group is a layer and what it
+  holds too, which its mask keeps to it (an SVG `<mask>` or a Lottie
+  matte)."
   [objects timeline]
   (let [board-id (:board-id timeline)
-        boards   (filterv #(board-inner-shadows? (get objects %))
-                          (tree-seq #(seq (dm/get-in objects [% :shapes]))
-                                    #(dm/get-in objects [% :shapes])
-                                    board-id))]
+        tree     (tree-seq #(seq (dm/get-in objects [% :shapes]))
+                           #(dm/get-in objects [% :shapes])
+                           board-id)
+        boards   (filterv #(board-inner-shadows? (get objects %)) tree)
+        masked   (filterv #(true? (dm/get-in objects [% :masked-group])) tree)
+        up       (fn [id]
+                   (->> (iterate #(dm/get-in objects [% :parent-id]) id)
+                        (take-while #(and (some? %) (contains? objects %)))
+                        (reduce (fn [ids id]
+                                  (cond-> (conj ids id) (= id board-id) (reduced)))
+                                [])))]
     (-> (svg-holder-ids objects (svg-sized-ids objects timeline))
         (into boards)
-        (into (comp (remove #{board-id}) (keep #(dm/get-in objects [% :parent-id]))) boards))))
+        (into (comp (remove #{board-id}) (keep #(dm/get-in objects [% :parent-id]))) boards)
+        (into (mapcat up) masked))))
 
 (def blur-sigma-scale
   "How render-wasm turns the value of a layer blur into the standard

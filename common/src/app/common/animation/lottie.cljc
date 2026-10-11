@@ -168,34 +168,14 @@
    (and (some #(#{:width :height} (:property %)) (:keyframes track))
         (not (lottie-sized? shape track)))))
 
-(defn- lottie-holders
-  "The shapes the layers in which are layers of a Lottie export of
-  `timeline`: those of `export-holders`, and the masked groups in its
-  board with what holds them, up to the board, so that a masked group is
-  a layer, and what it holds too, which its mask keeps to it as a matte
-  (see `lottie-masked-layers`)."
-  [objects timeline]
-  (let [board-id (:board-id timeline)
-        masked   (filterv #(true? (dm/get-in objects [% :masked-group]))
-                          (tree-seq #(seq (dm/get-in objects [% :shapes]))
-                                    #(dm/get-in objects [% :shapes])
-                                    board-id))
-        up       (fn [id]
-                   (->> (iterate #(dm/get-in objects [% :parent-id]) id)
-                        (take-while #(and (some? %) (contains? objects %)))
-                        (reduce (fn [ids id]
-                                  (cond-> (conj ids id) (= id board-id) (reduced)))
-                                [])))]
-    (into (set (aexp/export-holders objects timeline)) (mapcat up) masked)))
-
 (defn lottie-export-layer-ids
   "The layers of a Lottie export of `timeline` (with its keyframes, see
   `resolve-animations`): its export layers (see `export-layer-ids`) and
   the layers in the boards whose size it plays on their outlines (see
   `lottie-sized?`), that cast inner shadows or that are masked groups or
-  hold them (see `lottie-holders`)."
+  hold them (see `export-holders`)."
   [objects timeline]
-  (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline) (lottie-holders objects timeline)))
+  (cta/export-layer-ids objects (:board-id timeline) (:tracks timeline) (aexp/export-holders objects timeline)))
 
 (defn- lottie-box
   "A function of a time to the box of `shape` then, resized by the width
@@ -1522,7 +1502,7 @@
   (`td`) over a precomp of the others, `inner` but the mask (see
   `layer-nodes`), which keeps them to it (`tt`), as the canvas does. The
   mask draws without its shadows and blur, as the canvas draws it; the
-  layers it holds are layers (see `lottie-holders`). The precomp goes to
+  layers it holds are layers (see `aexp/export-holders`). The precomp goes to
   `comps`."
   [{:keys [objects comps duration width height] :as ctx} shape inner]
   (let [mask-id (first (:shapes shape))
@@ -1929,7 +1909,7 @@
                       (set (lottie-export-layer-ids objects timeline))
                       (-> (set (keys (:tracks timeline)))
                           (disj board-id)
-                          (into (mapcat #(dm/get-in objects [% :shapes])) (lottie-holders objects timeline))))
+                          (into (mapcat #(dm/get-in objects [% :shapes])) (aexp/export-holders objects timeline))))
          bsr        (dm/get-in objects [board-id :selrect])
          follow     (when (and (some? propagate) (seq holders))
                       (into {} (aexp/board-follow timeline objects holders layer-ids propagate

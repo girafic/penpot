@@ -952,6 +952,37 @@
   (when-let [name (get svg-ids id)]
     (str " id=\"" (svg-escape name) "\"")))
 
+(defn- svg-mask-id
+  [id]
+  (str "penpot-mask-" id))
+
+(declare emit-svg-node)
+
+(defn- svg-masked
+  "What the masked group `shape` holds, the layers `inner` (see
+  `layer-nodes`) kept to its mask, the bottom-most of them, an alpha
+  `<mask>` drawn without its shadows and blur, as the canvas draws it;
+  one region around the board (`width` by `height` of `ctx`) as large as
+  the layers may move. The layers it holds are layers (see
+  `aexp/export-holders`)."
+  [{:keys [width height] :as ctx} shape inner]
+  (let [mask-id (first (:shapes shape))
+        node    (d/seek #(= mask-id (:id %)) inner)
+        content (str/join "" (keep #(emit-svg-node ctx %) (remove #(= mask-id (:id %)) inner)))]
+    (if (nil? node)
+      content
+      (let [plain (-> ctx
+                      (update-in [:objects mask-id] dissoc :shadow :blur)
+                      ;; nor the filters of its effects (see `svg-smil`)
+                      (update-in [:smil mask-id] dissoc :filters :inner))
+            mid   (svg-escape (svg-mask-id (:id shape)))]
+        (str "<defs><mask id=\"" mid "\" mask-type=\"alpha\" style=\"mask-type: alpha\""
+             " maskUnits=\"userSpaceOnUse\" x=\"" (acss/fmt (- width)) "\" y=\"" (acss/fmt (- height))
+             "\" width=\"" (acss/fmt (* 3 width)) "\" height=\"" (acss/fmt (* 3 height)) "\">"
+             (emit-svg-node plain node)
+             "</mask></defs>"
+             "<g mask=\"url(#" mid ")\">" content "</g>")))))
+
 (defn- emit-svg-node
   "The SVG of a node of `layer-nodes`: a layer is a group its CSS class
   animates, holding its image and the layers inside it, which so follow
@@ -964,11 +995,15 @@
   `svg-follow-css`). SMIL plays what CSS can not on vectors (see
   `svg-smil-vectors`), the effects of a layer around it and the layers
   in it (see `svg-effects-around`) and the blur of the units of a text
-  (`unit-blurs`, see `svg-unit-blurs`)."
-  [{:keys [objects images svg-ids ox oy follow unit-blurs] :as ctx} {:keys [id inner clip?]}]
+  (`unit-blurs`, see `svg-unit-blurs`). A masked group keeps the layers
+  it holds to its mask (see `svg-masked`)."
+  [{:keys [objects images svg-ids ox oy follow unit-blurs] :as ctx} {:keys [id clip?] :as node}]
   (when-let [shape (get objects id)]
-    (let [inner   (str/join "" (keep #(emit-svg-node ctx %) inner))
-          clipped #(if (and (seq inner) (aexp/clipping-board? shape))
+    (let [masked? (and (not clip?) (true? (:masked-group shape)))
+          inner   (if masked?
+                    (svg-masked ctx shape (:inner node))
+                    (str/join "" (keep #(emit-svg-node ctx %) (:inner node))))
+          clipped #(if (and (seq (:inner node)) (aexp/clipping-board? shape))
                      (svg-clip-group objects (:smil ctx) id %)
                      %)
           svg
@@ -1010,12 +1045,18 @@
                    (svg-effects-around
                     ctx id
                     (clipped
-                     (str (if-let [markup (:markup img)]
+                     (str (cond
+                            ;; what it holds draws it
+                            masked? nil
+
+                            (some? (:markup img))
                             ;; its vectors
-                            (svg-smil-vectors ctx id markup)
+                            (svg-smil-vectors ctx id (:markup img))
+
                             ;; the picture of the shape as it is, turned, over its
                             ;; box with shadows and blur (`:x :y` of the image), or
                             ;; its box
+                            :else
                             (str "<image href=\"" (svg-escape (or (:href img) ""))
                                  "\" x=\"" (acss/fmt (or (:x img) (- (or (:x sr) 0) ox)))
                                  "\" y=\"" (acss/fmt (or (:y img) (- (or (:y sr) 0) oy)))
@@ -1122,7 +1163,7 @@
                            "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>")))
          layers   (str/join "" (keep #(emit-svg-node {:objects objects :images images :svg-ids svg-ids
                                                       :ox ox :oy oy :follow (:ids follow) :smil smil
-                                                      :unit-blurs unit-blurs}
+                                                      :unit-blurs unit-blurs :width width :height height}
                                                      %)
                                      nodes))
          opacity  (or (:opacity board) 1)

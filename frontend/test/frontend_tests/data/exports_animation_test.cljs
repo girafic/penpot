@@ -1662,11 +1662,9 @@
                         (assoc gid (assoc group :parent-id bid :frame-id bid :shapes [mid cid] :masked-group true))
                         (assoc mid (assoc mask :parent-id gid :frame-id bid))
                         (assoc-in [cid :parent-id] gid))]
-        (t/is (has? (issues masked tl) :svg :mask))
-        (t/is (not (has? (issues masked tl) :lottie :mask)) "Lottie keeps it to its mask")
-        (t/is (not (has? (issues masked tl) :lottie :lottie/images)) "as vectors")
-        (t/is (not (has? (issues masked tl) :webm :mask)) "a video draws as the canvas")
-        (t/is (not (has? (issues objects tl) :svg :mask)))))
+        (t/is (not-any? #(has? (issues masked tl) % :mask) [:svg :lottie :webm])
+              "an SVG and a Lottie keep it to its mask, a video draws as the canvas")
+        (t/is (not (has? (issues masked tl) :lottie :lottie/images)) "as vectors")))
     (t/testing "a board that shows through"
       (let [clear (update objects bid assoc :fills [])]
         (t/is (has? (issues clear tl) :gif :gif/alpha))

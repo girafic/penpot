@@ -2088,6 +2088,28 @@
     (t/is (empty? more))
     (t/is (= ["Dot" "Bar"] (mapv :nm (:layers (comp (str "masked_" gid))))) "the top-most first")))
 
+(t/deftest an-svg-keeps-what-a-masked-group-holds-to-its-mask
+  ;; As Lottie does: its mask an alpha mask over the layers it holds.
+  (let [{:keys [bid gid rid objects]} (masked-reveal)
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe rid {:time 0 :property :x :value 0})
+                    (cta/add-keyframe rid {:time 1000 :property :x :value 200}))
+        ids     (asvg/svg-export-layer-ids objects tl)
+        images  (into {}
+                      (map (fn [id] [id {:markup (str "<rect class=\"" (get-in objects [id :name] "board") "\"/>")}]))
+                      (cons bid ids))
+        svg     (asvg/timeline->svg tl objects images)
+        mask    (second (re-find (re-pattern (str "<mask id=\"penpot-mask-" gid "\"[^>]*>([\\s\\S]*?)</mask>")) svg))
+        content (subs svg (str/index-of svg (str "<g mask=\"url(#penpot-mask-" gid ")\">")))]
+    (t/is (= 4 (count ids)) "the group and what it holds are layers")
+    (t/is (re-find #"mask-type=\"alpha\"" svg) "an alpha mask")
+    (t/is (str/includes? mask "class=\"Mask\"") "of its mask")
+    (t/is (not (str/includes? mask "filter=")) "without its shadow")
+    (t/is (and (str/includes? content "class=\"Bar\"") (str/includes? content "class=\"Dot\""))
+          "over the others")
+    (t/is (not (str/includes? content "class=\"Mask\"")) "its mask no shape of its own")
+    (t/is (not (str/includes? svg "class=\"Reveal\"")) "the group drawn by what it holds")))
+
 (t/deftest lottie-draws-a-masked-group-as-vectors
   ;; Not an image any more: its own animation plays on it.
   (let [{:keys [bid gid objects]} (masked-reveal)

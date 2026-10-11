@@ -31,7 +31,6 @@
    :split-text      i/text
    :no-audio        i/volume-off
    :copy-clock      i/component-copy
-   :mask            i/mask
    :gif/alpha       i/rgba
    :mp4/alpha       i/rgba})
 

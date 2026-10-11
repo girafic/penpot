@@ -628,9 +628,6 @@
     their end bind to the board's: it stops at the end of a board that
     plays once and starts over with one that loops, unless its cycles
     fit the board's;
-  - `:mask`, a layer in a masked group, which an SVG draws on its own,
-    unmasked (a mask that animates as a shape); Lottie keeps it to its
-    mask (see `alottie/lottie-export-layer-ids`);
   - `:gif/alpha` and `:mp4/alpha`, a board that shows through (see
     `see-through?`): GIF has no partial transparency, MP4 none at all."
   [objects timeline]
@@ -642,8 +639,7 @@
                          (filter some?)
                          (remove :hidden))
           animated  (into #{} (comp (mapcat :keyframes) (map :property)) (vals (:tracks resolved)))
-          layer-ids (cta/export-layer-ids objects board-id (:tracks resolved))
-          ;; Lottie has the layers in masked groups as layers too
+          ;; the layers in masked groups are layers too
           lottie-ids (alottie/lottie-export-layer-ids objects resolved)
           lottie-set (set lottie-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
@@ -669,10 +665,6 @@
                                 (let [n (/ duration (max 1 cycle))]
                                   (> (mth/abs (- n (mth/round n))) 0.01))))
                           (:copy-loops timeline))
-          masked?   (some (fn [id]
-                            (some #(true? (dm/get-in objects [% :masked-group]))
-                                  (cfh/get-parent-ids objects id)))
-                          layer-ids)
           clear?    (some-> (get objects board-id) see-through?)
           table
           [[:lottie/images lottie-formats
@@ -709,7 +701,6 @@
            [:no-audio #{:gif :avif :svg :lottie :dotlottie}
             (boolean (seq (:audio-clips timeline)))]
            [:copy-clock #{:gif :avif :svg :lottie :dotlottie} (boolean bound?)]
-           [:mask #{:svg} (boolean masked?)]
            [:gif/alpha #{:gif} (boolean clear?)]
            [:mp4/alpha #{:mp4} (boolean clear?)]]]
       (reduce (fn [issues [kind formats on?]]
