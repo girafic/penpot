@@ -55,6 +55,19 @@
       {:right right :top (- (:top rect) 12)}
       {:right right :bottom (- height (:bottom rect) 12)})))
 
+(defn next-focus
+  "The button of `buttons` Tab moves the focus to from the `active`
+  element of a dialog: round them, back with `back?` (Shift + Tab); from
+  the dialog itself, the first, or the last going back."
+  [buttons active back?]
+  (let [total (count buttons)
+        index (.indexOf buttons active)]
+    (when (pos? total)
+      (nth buttons (cond
+                     (neg? index) (if back? (dec total) 0)
+                     back?        (mod (dec index) total)
+                     :else        (mod (inc index) total))))))
+
 (mf/defc export-issues*
   "The row of the issues of the export in the format `format-label`, the
   issue `kinds` (see `dea/export-issues`), when there are any."
@@ -80,13 +93,23 @@
                  row    (dom/get-bounding-rect (dom/get-parent target))]
              (swap! place* #(when (nil? %) (popover-place rect (:left row)))))))
 
+        ;; Tab goes round the buttons of the list: the workspace would
+        ;; take it for the next layer and keep the focus where it is
         on-key-down
         (mf/use-fn
          (mf/deps close)
          (fn [event]
-           (when (kbd/esc? event)
-             (dom/stop-propagation event)
-             (close))))]
+           (cond
+             (kbd/esc? event)
+             (do (dom/stop-propagation event)
+                 (close))
+
+             (kbd/tab? event)
+             (let [buttons (vec (dom/query-all (mf/ref-val popover-ref) "button"))]
+               (dom/stop-propagation event)
+               (dom/prevent-default event)
+               (some-> (next-focus buttons (dom/get-active) (kbd/shift? event))
+                       (dom/focus!))))))]
 
     ;; the focus in the dialog once it opens, not again as it renders
     (mf/with-effect [open?]

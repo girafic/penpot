@@ -6,6 +6,7 @@
 
 (ns frontend-tests.ui.exports-menu-test
   (:require
+   [app.main.ui.workspace.sidebar.options.menus.export-issues :as issues]
    [app.main.ui.workspace.sidebar.options.menus.exports :as exp]
    [cljs.test :as t :include-macros true]))
 
@@ -70,3 +71,11 @@
     (t/is (= "512w" (last (labels "w512"))))
     (t/is (= 8 (count (labels "nonsense"))))))
 
+(t/deftest tab-goes-round-the-buttons-of-the-issues
+  (let [buttons [:close :more]]
+    (t/is (= :close (issues/next-focus buttons :dialog false)) "from the dialog, the first")
+    (t/is (= :more (issues/next-focus buttons :dialog true)) "or the last, going back")
+    (t/is (= :more (issues/next-focus buttons :close false)))
+    (t/is (= :close (issues/next-focus buttons :more false)) "round")
+    (t/is (= :more (issues/next-focus buttons :close true)) "round, going back")
+    (t/is (nil? (issues/next-focus [] :dialog false)) "none")))
