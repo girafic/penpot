@@ -208,6 +208,27 @@
     (t/is (every? (fn [uri] (some #(str/includes? uri (id-of %)) shown)) @fetched)
           "of the shapes it shows, not of the hidden one nor of the other board")))
 
+(t/deftest media-loads-but-what-a-hidden-group-holds
+  ;; It draws none of it.
+  (let [image   #(cts/setup-shape {:type :rect :x % :y 10 :width 20 :height 20
+                                   :fills [{:fill-opacity 1
+                                            :fill-image {:id (uuid/next) :width 10 :height 10
+                                                         :mtype "image/png"}}]})
+        board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        group   (cts/setup-shape {:type :group :x 0 :y 10 :width 20 :height 20 :hidden true})
+        inside  (image 0)
+        shown   (image 40)
+        [bid gid iid sid] (map :id [board group inside shown])
+        objects {bid (assoc board :shapes [gid sid])
+                 gid (assoc group :parent-id bid :frame-id bid :shapes [iid])
+                 iid (assoc inside :parent-id gid :frame-id bid)
+                 sid (assoc shown :parent-id bid :frame-id bid)}
+        fetched (atom [])]
+    (with-redefs [http/fetch-data-uri (mock/stub (fn [uri] (rx/create (fn [_] (swap! fetched conj uri) nil))))]
+      (svgv/load-media objects bid))
+    (t/is (= 1 (count @fetched)))
+    (t/is (str/includes? (first @fetched) (str (get-in shown [:fills 0 :fill-image :id]))))))
+
 (defn- contract-board
   "A board holding a rect with two fills and an inner, an outer and a
   center stroke, an ellipse, and a board that clips, their fills,

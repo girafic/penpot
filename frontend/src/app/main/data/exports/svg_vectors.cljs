@@ -236,10 +236,12 @@
 
 (defn- image-urls
   "The URLs of the images the shapes in the board `board-id` of `objects`
-  draw, but the hidden ones."
+  draw, but the hidden ones and what they hold."
   [objects board-id]
-  (->> (cfh/get-children-with-self objects board-id)
-       (remove (some-fn nil? :hidden))
+  (->> (cfh/get-children-ids objects board-id {:ignore-children-fn #(:hidden (get objects %))})
+       (cons board-id)
+       (keep (d/getf objects))
+       (remove :hidden)
        (mapcat (fn [shape]
                  (cond-> (into [] (keep :fill-image) (:fills shape))
                    (= :image (:type shape)) (conj (:metadata shape))
