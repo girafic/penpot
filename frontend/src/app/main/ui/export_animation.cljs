@@ -175,13 +175,14 @@
         (-> (p/let [module (mod/import (cf/resolve-href "js/lottie.js"))
                     data   (p/-> (js/fetch url) (.json))]
               (when-let [node (and @live? (mf/ref-val node-ref))]
-                (reset! size* [(.-w ^js data) (.-h ^js data)])
-                (reset! anim (.loadAnimation (unchecked-get module "default")
-                                             #js {:container node
-                                                  :renderer "svg"
-                                                  :loop true
-                                                  :autoplay true
-                                                  :animationData data}))))
+                (let [^js lottie (unchecked-get module "default")]
+                  (reset! size* [(.-w ^js data) (.-h ^js data)])
+                  (reset! anim (.loadAnimation lottie
+                                               #js {:container node
+                                                    :renderer "svg"
+                                                    :loop true
+                                                    :autoplay true
+                                                    :animationData data})))))
             (p/catch (fn [_]
                        (when @live?
                          (reset! failed* true)))))
