@@ -778,10 +778,10 @@
 (defn- at-now
   "`clip`, but the one of a recording in progress (with its
   `:recording-since`, see `dwar/with-recording-clip`) as long as it has
-  lasted at `now` (`Date.now`)."
+  lasted at `now` (`Date.now`) past its pre-roll (its `:offset`)."
   [clip now]
   (if-let [since (:recording-since clip)]
-    (assoc clip :duration (max ctau/min-clip-duration (- (or now since) since)))
+    (assoc clip :duration (max ctau/min-clip-duration (- (or now since) since (:offset clip))))
     clip))
 
 (defn- draw-clip!

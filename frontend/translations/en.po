@@ -8166,6 +8166,27 @@ msgstr "Record audio from the microphone, from the playhead"
 msgid "workspace.animation.stop-audio-recording"
 msgstr "Stop recording"
 
+msgid "workspace.animation.recording-options"
+msgstr "Recording options"
+
+msgid "workspace.animation.recording-pre-roll"
+msgstr "Pre-roll"
+
+msgid "workspace.animation.recording-pre-roll-off"
+msgstr "Off"
+
+msgid "workspace.animation.recording-microphone-label"
+msgstr "Microphone"
+
+msgid "workspace.animation.recording-system-microphone"
+msgstr "System default"
+
+msgid "workspace.animation.recording-microphone"
+msgstr "Microphone %s"
+
+msgid "workspace.animation.recording-quiet"
+msgstr "Mute other clips while recording"
+
 msgid "workspace.animation.remove-audio"
 msgstr "Remove audio"
 

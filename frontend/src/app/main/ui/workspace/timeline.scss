@@ -210,6 +210,33 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
+// The options of recording, a narrow arrow beside the microphone.
+.mic-options-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 16px;
+  block-size: 32px;
+  margin-inline-start: -4px;
+  padding: 0;
+  border: none;
+  border-radius: deprecated.$br-4;
+  background-color: transparent;
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+
+  &:hover,
+  &.active {
+    background-color: var(--color-background-tertiary);
+    color: var(--color-accent-primary);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
 .rec-dot {
   inline-size: 8px;
   block-size: 8px;

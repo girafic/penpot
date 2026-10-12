@@ -1,0 +1,48 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+// The options of recording: above the button that opens them, as the
+// timeline is at the bottom of the window.
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-set);
+}
+
+.popover {
+  position: fixed;
+  z-index: var(--z-index-set);
+  display: flex;
+  flex-direction: column;
+  gap: deprecated.$s-12;
+  inline-size: 260px;
+  padding: deprecated.$s-12;
+  border: 1px solid var(--panel-border-color);
+  border-radius: deprecated.$br-8;
+  background-color: var(--color-background-primary);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+  transform: translate(-50%, calc(-100% - 8px));
+  outline: none;
+}
+
+.title {
+  font-size: deprecated.$fs-12;
+  font-weight: deprecated.$fw700;
+  color: var(--color-foreground-primary);
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: deprecated.$s-4;
+}
+
+.label {
+  font-size: deprecated.$fs-11;
+  color: var(--color-foreground-secondary);
+}

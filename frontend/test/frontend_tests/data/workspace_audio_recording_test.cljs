@@ -11,8 +11,11 @@
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.types.animation :as cta]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.audio :as dwaa]
    [app.main.data.workspace.audio-recording :as dwar]
+   [app.main.ui.workspace.timeline.recording-options :as rom]
+   [app.util.audio :as audio]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
@@ -112,11 +115,12 @@
           added   (atom nil)]
       (mock/with-mocks
         {dwar/supported?        (constantly true)
-         dwar/open-microphone!  #(js/Promise.resolve (fake-mic stopped))
+         dwar/open-microphone!  (fn [_] (js/Promise.resolve (fake-mic stopped)))
          dwar/make-recorder     (fn [_] (fake-recorder))
-         dwaa/add-audio-files   (mock/stub (fn [board-id files time lane]
-                                             (reset! added [board-id (map #(.-name %) files) time lane])
-                                             (ptk/data-event ::added)))}
+         ;; called with options (variadic)
+         dwaa/add-audio-files   (fn [board-id files time lane & {:keys [trim]}]
+                                  (reset! added [board-id (map #(.-name %) files) time lane trim])
+                                  (ptk/data-event ::added))}
         (fn [done']
           (ths/run-store
            store done'
@@ -126,10 +130,12 @@
                 (->> stream
                      (rx/filter (ptk/type? :app.main.data.workspace.audio-recording/recording-started))
                      (rx/take 1)
+                     ;; longer than a clip at least (see `ctau/min-clip-duration`)
+                     (rx/delay 30)
                      (rx/map (fn [_] (dwar/stop-audio-recording))))))
             (dwar/toggle-audio-recording)]
            (fn [state]
-             (t/is (= [(cthi/id :board-a) ["Recording 1.webm"] 300 nil]
+             (t/is (= [(cthi/id :board-a) ["Recording 1.webm"] 300 nil 0]
                       @added)
                    "from the playhead, as it was when it started")
              (t/is (nil? (dwar/recording state)) "done")
@@ -143,7 +149,7 @@
     (let [store (store-at 0)]
       (mock/with-mocks
         {dwar/supported?       (constantly true)
-         dwar/open-microphone! #(js/Promise.reject #js {:name "NotAllowedError"})}
+         dwar/open-microphone! (fn [_] (js/Promise.reject #js {:name "NotAllowedError"}))}
         (fn [done']
           (ths/run-store
            store done'
@@ -172,3 +178,67 @@
           "on a lane of its own, as its clip will")
     (t/is (= dwar/recording-audio-id (:audio-id clip)))
     (t/is (nil? (dwar/waveform dwar/recording-audio-id)) "no waveform but while it records")))
+
+(t/deftest a-pre-roll-plays-before-where-the-clip-goes
+  (t/is (= [1500 500] (dwar/pre-roll-from 1500 4000 1000)))
+  (t/is (= [600 0] (dwar/pre-roll-from 600 4000 1000)) "from 0 at most")
+  (t/is (= [0 0] (dwar/pre-roll-from 4000 4000 2000)) "at the end, from the start, as playback starts over")
+  (t/is (= [1500 1500] (dwar/pre-roll-from 1500 4000 0)) "none"))
+
+(t/deftest microphones-without-labels-are-numbered
+  (let [options (rom/microphone-options [{:id "a" :label "USB mic"} {:id "b" :label nil}])]
+    (t/is (= ["system" "a" "b"] (mapv :id options)) "the system's first")
+    (t/is (= "USB mic" (:label (second options))))
+    (t/is (= (tr "workspace.animation.recording-microphone" 2) (:label (last options))))))
+
+(t/deftest stopped-in-its-pre-roll-a-recording-adds-nothing
+  ;; Its clip would go after where it stopped: none, and the playhead back
+  ;; where it would have gone.
+  (t/async
+    done
+    (let [store   (store-at 900)
+          added   (atom nil)
+          started (atom nil)]
+      (ptk/emit! store #(-> %
+                            (assoc-in [:workspace-animation :playing?] false)
+                            (assoc-in [:workspace-animation :recording-options] {:pre-roll 500})))
+      (mock/with-mocks
+        {dwar/supported?        (constantly true)
+         dwar/open-microphone!  (fn [_] (js/Promise.resolve (fake-mic (atom 0))))
+         dwar/make-recorder     (fn [_] (fake-recorder))
+         dwa/play               (fn [] (ptk/data-event ::played))
+         dwaa/add-audio-files   (fn [& args] (reset! added args) (ptk/data-event ::added))}
+        (fn [done']
+          (ths/run-store
+           store done'
+           [(ptk/reify ::stop-in-pre-roll
+              ptk/WatchEvent
+              (watch [_ _ stream]
+                (->> stream
+                     (rx/filter (ptk/type? :app.main.data.workspace.audio-recording/recording-started))
+                     (rx/take 1)
+                     (rx/tap #(reset! started (dwar/recording @store)))
+                     ;; once playback has started, within the pre-roll
+                     (rx/delay 30)
+                     (rx/map (fn [_] (dwar/stop-audio-recording))))))
+            (dwar/toggle-audio-recording)]
+           (fn [state]
+             (t/is (= [900 500] ((juxt :start :offset) @started)) "where its clip goes, past a pre-roll")
+             (t/is (nil? @added) "nothing added")
+             (t/is (= 900 (get-in state [:workspace-animation :playhead])))
+             (t/is (nil? (dwar/recording state))))
+           (fn [stream]
+             (->> stream
+                  (rx/filter (ptk/type? :app.main.data.workspace.audio-recording/recording-cleared))
+                  (rx/take 1)
+                  (rx/delay 20)))))
+        done))))
+
+(t/deftest the-other-clips-keep-quiet-while-it-records
+  (let [store  (store-at 0)
+        sounds (atom [])]
+    (with-redefs [audio/follow! (mock/stub (fn [_ _ _ sounding?] (swap! sounds conj sounding?)))]
+      (ptk/emit! store (dwa/set-playhead 100))
+      (ptk/emit! store #(assoc-in % [:workspace-animation :audio-recording] {:start 0 :since 0 :quiet? true}))
+      (ptk/emit! store (dwa/set-playhead 200))
+      (t/is (= [true false] @sounds) "playing, then quiet"))))

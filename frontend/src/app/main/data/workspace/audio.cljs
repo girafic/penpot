@@ -105,19 +105,22 @@
 (defn- new-clips
   "The clips of the `added` files, each with its `:audio-id`, one after
   the other from `time`, on `lane` when given (else on a free one, see
-  `ctau/add-audio-clip`)."
-  [added time lane]
+  `ctau/add-audio-clip`), each without its first `trim` ms (from a
+  recording, the pre-roll before where it goes, see
+  `app.main.data.workspace.audio-recording`)."
+  [added time lane trim]
   (first
    (reduce (fn [[clips start] {:keys [audio-id name duration]}]
-             [(conj clips (cond-> {:id (uuid/next)
-                                   :audio-id audio-id
-                                   :name name
-                                   :source-duration duration
-                                   :start start
-                                   :offset 0
-                                   :duration duration}
-                            (some? lane) (assoc :lane lane)))
-              (+ start duration)])
+             (let [offset (min (or trim 0) (- duration ctau/min-clip-duration))]
+               [(conj clips (cond-> {:id (uuid/next)
+                                     :audio-id audio-id
+                                     :name name
+                                     :source-duration duration
+                                     :start start
+                                     :offset offset
+                                     :duration (- duration offset)}
+                              (some? lane) (assoc :lane lane)))
+                (+ start (- duration offset))]))
            [[] (js/Math.round time)]
            added)))
 
@@ -136,7 +139,7 @@
   `board-id` of the page `page-id`, as `add-audio-files` says, in one
   change: nothing but a notice when the board, or its page, is no longer
   there."
-  [page-id board-id added time lane]
+  [page-id board-id added time lane trim]
   (ptk/reify ::commit-clips
     ptk/WatchEvent
     (watch [it state _]
@@ -147,7 +150,7 @@
           (rx/of (ntf/error (tr "workspace.audio.board-gone")))
           (let [timelines (:timelines (dsh/lookup-page state))
                 timeline  (-> (dwa/board-timeline timelines (get objects board-id))
-                              (with-clips (new-clips added time lane) (contains? timelines board-id)))]
+                              (with-clips (new-clips added time lane trim) (contains? timelines board-id)))]
             (rx/of (dwa/commit-timeline it state board-id timeline))))))))
 
 (defn- upload-error
@@ -177,9 +180,10 @@
   that is no audio, does not decode or lasts longer than
   `ctau/max-audio-duration`, which is not uploaded. Once every upload is
   done, all the clips go in one change, one undo. The duration of the
-  timeline stays (see `with-clips`). `:decode` replaces `audio/decode` in
-  tests."
-  [board-id files time lane & {:keys [decode]}]
+  timeline stays (see `with-clips`). `:trim` leaves out the first ms of
+  each (the pre-roll of a recording). `:decode` replaces `audio/decode`
+  in tests."
+  [board-id files time lane & {:keys [decode trim]}]
   (ptk/reify ::add-audio-files
     ptk/WatchEvent
     (watch [_ state _]
@@ -207,7 +211,7 @@
                                                        (audio/remember! id buffer)
                                                        (assoc item :audio-id id))))))
                            (rx/reduce conj [])
-                           (rx/map #(commit-clips page-id board-id % time lane))
+                           (rx/map #(commit-clips page-id board-id % time lane trim))
                            (rx/catch upload-error))
                       ;; the notice of an error has taken its place
                       (rx/of (ntf/hide :tag ::uploading)))))))))))))

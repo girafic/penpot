@@ -20,6 +20,7 @@
    [app.main.data.workspace.audio :as dwaa]
    [app.util.audio :as audio]
    [app.util.i18n :refer [tr]]
+   [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
    [potok.v2.core :as ptk]))
@@ -84,23 +85,91 @@
 
 (defn recording
   "The recording in progress: `{:board-id :pending? true}` while the
-  browser asks for the microphone, then `{:board-id :start :since}`, where
-  it started on the timeline (ms) and when (`Date.now`); nil without."
+  browser asks for the microphone, then `{:board-id :start :offset :since
+  :quiet?}`: where its clip goes on the timeline (ms), how much of it
+  plays before, as a pre-roll (see `recording-options`), when it started
+  recording (`Date.now`), and whether the other clips keep quiet
+  meanwhile; nil without."
   [state]
   (dm/get-in state [:workspace-animation :audio-recording]))
 
+;; OPTIONS
+
+(def pre-rolls
+  "The pre-rolls a recording takes, in ms: how long the animation plays
+  before where its clip goes, so one comes in on time."
+  [0 1000 2000 3000])
+
+(def ^:private default-options
+  {:pre-roll 0 :device-id nil :quiet? false})
+
+(defn recording-options
+  "How sound records, as last chosen: `:pre-roll` (ms, see `pre-rolls`),
+  `:device-id` (the microphone, nil for the one of the system) and
+  `:quiet?` (whether the other clips keep quiet meanwhile)."
+  [state]
+  (merge default-options
+         (get storage/user ::options)
+         (dm/get-in state [:workspace-animation :recording-options])))
+
+(defn set-recording-options
+  "Change the `options` of recording (see `recording-options`), kept for
+  the next time."
+  [options]
+  (ptk/reify ::set-recording-options
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-animation :recording-options]
+                (merge (recording-options state)
+                       (select-keys options (keys default-options)))))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (swap! storage/user assoc ::options (recording-options state)))))
+
+(defn list-microphones!
+  "A promise of the microphones of the browser, `[{:id :label}]`, labelled
+  once it has been allowed to use one (else nil labels); none without."
+  []
+  (if (and (exists? js/navigator)
+           (some? (.-mediaDevices js/navigator))
+           (fn? (.. js/navigator -mediaDevices -enumerateDevices)))
+    (-> (.enumerateDevices (.-mediaDevices js/navigator))
+        (.then (fn [devices]
+                 (into []
+                       (comp (filter #(= "audioinput" (.-kind ^js %)))
+                             ;; the system's own is the default
+                             (remove #(contains? #{"default" "communications"} (.-deviceId ^js %)))
+                             (map (fn [^js device]
+                                    {:id (.-deviceId device)
+                                     :label (not-empty (.-label device))})))
+                       devices)))
+        (.catch (constantly [])))
+    (js/Promise.resolve [])))
+
 (defonce ^:private current
-  ;; the recorder recording, `{:recorder :discard?}`
+  ;; the recorder recording, `{:recorder :discard? :stop-meter}`
   (atom nil))
 
 (defn open-microphone!
-  "A promise of the stream of the microphone, once the user allows it
-  (replaced in tests)."
-  []
-  (.getUserMedia (.-mediaDevices js/navigator)
-                 #js {:audio #js {:echoCancellation true
-                                  :noiseSuppression true
-                                  :autoGainControl true}}))
+  "A promise of the stream of the microphone `device-id` (nil for the one
+  of the system), once the user allows it; of the system's one when that
+  one is gone (replaced in tests)."
+  [device-id]
+  (let [ask (fn [device-id]
+              (.getUserMedia (.-mediaDevices js/navigator)
+                             #js {:audio (cond-> #js {:echoCancellation true
+                                                      :noiseSuppression true
+                                                      :autoGainControl true}
+                                           (some? device-id)
+                                           (doto (unchecked-set "deviceId" #js {:exact device-id})))}))]
+    (if (nil? device-id)
+      (ask nil)
+      (.catch (ask device-id)
+              (fn [^js cause]
+                (if (contains? #{"OverconstrainedError" "NotFoundError"} (.-name cause))
+                  (ask nil)
+                  (js/Promise.reject cause)))))))
 
 (defn make-recorder
   "A `MediaRecorder` of `stream`, in the first type the browser records
@@ -209,17 +278,19 @@
 
 (defn with-recording-clip
   "`timeline` with a clip of the recording `rec` (see `recording`), as the
-  timeline dock shows it while it records: where it started, on the lane
-  its clip goes to (see `ctau/add-audio-clip`), locked, its
-  `:recording-since` when it started, which the dock draws it as long
-  since (see `app.main.ui.workspace.timeline.lanes`)."
-  [timeline {:keys [start since]}]
+  timeline dock shows it while it records: where its clip goes, past its
+  pre-roll (its `:offset`), on the lane its clip goes to (see
+  `ctau/add-audio-clip`), locked, its `:recording-since` when it started,
+  which the dock draws it as long since (see
+  `app.main.ui.workspace.timeline.lanes`)."
+  [timeline {:keys [start offset since]}]
   (-> timeline
       (ctau/add-audio-clip {:id recording-clip-id
                             :audio-id recording-audio-id
                             :name (recording-name timeline)
                             :source-duration ctau/max-audio-duration
                             :start start
+                            :offset (or offset 0)
                             :duration ctau/min-clip-duration
                             :locked true})
       (update-in [:audio-clips recording-clip-id] assoc :recording-since since)))
@@ -232,29 +303,42 @@
       (update state :workspace-animation dissoc :audio-recording))))
 
 (defn- recording-started
-  "The recording of the board `board-id` records since `since`
-  (`Date.now`): from where playback started when it started it
-  (`play-start?`), else from the playhead."
-  [board-id play-start? since]
+  "The recording `rec` of the board `board-id` records (see `recording`)."
+  [board-id rec]
   (ptk/reify ::recording-started
     ptk/UpdateEvent
     (update [_ state]
-      (let [anim (:workspace-animation state)]
-        (assoc-in state [:workspace-animation :audio-recording]
-                  {:board-id board-id
-                   :start (if play-start? (get anim :play-start 0) (get anim :playhead 0))
-                   :since since})))))
+      (assoc-in state [:workspace-animation :audio-recording] (assoc rec :board-id board-id)))))
+
+(defn pre-roll-from
+  "Where playback starts for a recording whose clip goes at `playhead`
+  (from 0 when it is at the end of the timeline of `duration`, as playback
+  starts over) with a `pre-roll` (ms) before: `[start from]`, where the
+  clip goes and where playback starts."
+  [playhead duration pre-roll]
+  (let [start (if (>= playhead duration) 0 playhead)]
+    [start (max 0 (- start (or pre-roll 0)))]))
 
 (defn- recording-began
-  "The recorder records since `since`: the animation plays along, from the
-  playhead, unless it plays already."
-  [board-id since]
+  "The recorder records since `since`: the animation plays along from the
+  playhead, its pre-roll before (see `pre-roll-from`), unless it plays
+  already (then from where it is). The other clips keep quiet meanwhile
+  when `quiet?`."
+  [board-id since pre-roll quiet?]
   (ptk/reify ::recording-began
     ptk/WatchEvent
     (watch [_ state _]
-      (if (dm/get-in state [:workspace-animation :playing?])
-        (rx/of (recording-started board-id false since))
-        (rx/of (dwa/play) (recording-started board-id true since))))))
+      (let [anim (:workspace-animation state)]
+        (if (:playing? anim)
+          (rx/of (recording-started board-id {:start (get anim :playhead 0) :offset 0
+                                              :since since :quiet? quiet?}))
+          (let [duration     (or (:duration (dwa/current-timeline state)) 0)
+                [start from] (pre-roll-from (get anim :playhead 0) duration pre-roll)]
+            ;; quiet first, before playback sounds
+            (rx/of (recording-started board-id {:start start :offset (- start from)
+                                                :since since :quiet? quiet?})
+                   (dwa/set-playhead from)
+                   (dwa/play))))))))
 
 (defn- recording-stopped
   "Add the recording `blob` of the recorder type `mime` to the timeline of
@@ -264,15 +348,23 @@
   (ptk/reify ::recording-stopped
     ptk/WatchEvent
     (watch [_ state _]
-      (let [{:keys [board-id start]} (recording state)]
-        (if (or (nil? board-id) (nil? start))
+      (let [{:keys [board-id start offset since]} (recording state)
+            offset (or offset 0)]
+        (cond
+          (or (nil? board-id) (nil? start))
           (rx/of (recording-cleared))
+
+          ;; stopped in its pre-roll: nothing where its clip goes
+          (< (- (js/Date.now) since offset) ctau/min-clip-duration)
+          (rx/of (dwa/pause) (recording-cleared) (dwa/set-playhead start))
+
+          :else
           (let [timeline (dm/get-in (dsh/lookup-page state) [:timelines board-id])
                 file     (recording-file blob mime (recording-name timeline))]
             (rx/of (dwa/pause)
                    (recording-cleared)
                    (dwa/set-playhead start)
-                   (dwaa/add-audio-files board-id [file] start nil))))))))
+                   (dwaa/add-audio-files board-id [file] start nil :trim offset))))))))
 
 (defn stop-audio-recording
   "Stop recording: its clip goes on the timeline (see `recording-stopped`),
@@ -291,8 +383,10 @@
   "Record sound from the microphone into the timeline of the active board,
   once the user allows it, from the playhead, the animation playing
   along: until stopped (see `stop-audio-recording`), the timeline closed
-  or `ctau/max-audio-duration`; dropped when the workspace closes. A
-  notice when the browser does not record, or the microphone does not."
+  or `ctau/max-audio-duration`; dropped when the workspace closes. As
+  `recording-options` say: from the microphone chosen, after a pre-roll,
+  the other clips quiet. A notice when the browser does not record, or
+  the microphone does not."
   []
   (ptk/reify ::start-audio-recording
     ptk/UpdateEvent
@@ -316,7 +410,7 @@
           (rx/empty)
 
           :else
-          (->> (rx/from (open-microphone!))
+          (->> (rx/from (open-microphone! (:device-id (recording-options state))))
                (rx/mapcat
                 (fn [mic]
                   (let [recorder (make-recorder mic)
@@ -327,9 +421,10 @@
                           (rx/map (fn [event]
                                     (cond
                                       (= :started event)
-                                      (let [since (js/Date.now)]
+                                      (let [since (js/Date.now)
+                                            {:keys [pre-roll quiet?]} (recording-options state)]
                                         (swap! current assoc :stop-meter (start-meter! mic since))
-                                        (recording-began board-id since))
+                                        (recording-began board-id since pre-roll quiet?))
 
                                       (:discard? @current)
                                       (recording-cleared)

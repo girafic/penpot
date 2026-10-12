@@ -173,6 +173,26 @@
            (after commit-of-clips?)))
         done))))
 
+(t/deftest a-recording-leaves-out-its-pre-roll
+  ;; Its first ms play before where its clip goes (see
+  ;; `dwar/pre-roll-from`): the clip starts past them in its file.
+  (t/async
+    done
+    (let [store (store-of (setup-file))
+          id    (uuid/next)]
+      (mock/with-mocks
+        {rp/cmd! (uploads (atom []) [id])}
+        (fn [done']
+          (ths/run-store
+           store done'
+           [(dwaa/add-audio-files (cthi/id :board-a) [(audio-file "take.webm" :type "audio/webm" :ms 2500)] 1200 nil
+                                  :decode decode :trim 1000)]
+           (fn [state]
+             (let [[clip] (clips-of state :board-a)]
+               (t/is (= [1200 1000 1500 2500] ((juxt :start :offset :duration :source-duration) clip)))))
+           (after commit-of-clips?)))
+        done))))
+
 (t/deftest files-dropped-together-make-one-change
   (t/async
     done

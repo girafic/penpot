@@ -286,13 +286,17 @@
 
 (defn- follow-audio!
   "Keep the sound of the timeline playing with the picture (see
-  `audio/follow!`): silent while paused or muted."
+  `audio/follow!`): silent while paused or muted, and while sound records
+  with the clips kept quiet (`:quiet?` of the recording, see
+  `app.main.data.workspace.audio-recording`)."
   [state]
   (let [anim (:workspace-animation state)]
     (audio/follow! (playback-timeline state)
                    (playhead state)
                    (get anim :direction 1)
-                   (and (:playing? anim) (not (audio-muted? anim))))))
+                   (and (:playing? anim)
+                        (not (audio-muted? anim))
+                        (not (true? (dm/get-in anim [:audio-recording :quiet?])))))))
 
 (defn toggle-audio-muted
   "Play the sound of the audio clips in the workspace, or not. The choice

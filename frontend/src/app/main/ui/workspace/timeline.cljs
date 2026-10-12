@@ -51,6 +51,7 @@
    [app.main.ui.workspace.timeline.easing :refer [easing-editor*]]
    [app.main.ui.workspace.timeline.keys :as tlk]
    [app.main.ui.workspace.timeline.lanes :as lanes]
+   [app.main.ui.workspace.timeline.recording-options :refer [recording-options*]]
    [app.util.audio :as audio]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
@@ -1403,16 +1404,19 @@
       [:> i/icon* {:icon-id i/fit-content}]]]))
 
 (mf/defc recording-time*
-  "How long the recording of sound has lasted since `since`
-  (`Date.now`), as minutes and seconds."
+  "How long the recording of sound that started at `since` (`Date.now`)
+  has lasted where its clip goes, past its pre-roll of `offset` ms, as
+  minutes and seconds; during its pre-roll, the seconds left, counting
+  down."
   {::mf/private true}
-  [{:keys [since]}]
+  [{:keys [since offset]}]
   (let [now* (mf/use-state #(js/Date.now))
-        secs (max 0 (quot (- @now* since) 1000))]
+        ms   (- @now* since (or offset 0))
+        secs (if (neg? ms) (js/Math.ceil (/ (- ms) 1000)) (quot ms 1000))]
     (mf/with-effect [since]
       (let [timer (js/setInterval #(reset! now* (js/Date.now)) 250)]
         #(js/clearInterval timer)))
-    [:span (dm/str (quot secs 60) ":" (.padStart (str (mod secs 60)) 2 "0"))]))
+    [:span (dm/str (when (neg? ms) "\u2212") (quot secs 60) ":" (.padStart (str (mod secs 60)) 2 "0"))]))
 
 (mf/defc toolbar*
   {::mf/private true
@@ -1440,6 +1444,19 @@
         on-toggle-audio-recording
         (mf/use-fn #(do (audio/unlock!)
                         (st/emit! (dwar/toggle-audio-recording))))
+
+        ;; the options of recording, above the button that opens them
+        options-anchor* (mf/use-state nil)
+        options-anchor  (deref options-anchor*)
+
+        on-recording-options
+        (mf/use-fn
+         (fn [event]
+           (let [rect (dom/get-bounding-rect (dom/get-current-target event))]
+             (reset! options-anchor* {:top (:top rect) :left (:left rect) :width (:width rect)}))))
+
+        on-close-recording-options
+        (mf/use-fn #(reset! options-anchor* nil))
 
         on-stop
         (mf/use-fn #(st/emit! (dwa/stop)))
@@ -1532,7 +1549,18 @@
                 :on-click on-toggle-audio-recording}
        [:> i/icon* {:icon-id i/microphone}]
        (when-let [since (:since audio-recording)]
-         [:> recording-time* {:since since}])]]
+         [:> recording-time* {:since since :offset (:offset audio-recording)}])]
+      [:button {:type "button"
+                :class (stl/css-case :mic-options-btn true :active (some? options-anchor))
+                :title (tr "workspace.animation.recording-options")
+                :aria-haspopup "dialog"
+                :aria-expanded (some? options-anchor)
+                :disabled (some? audio-recording)
+                :on-click on-recording-options}
+       [:> i/icon* {:icon-id i/arrow-down :size "s"}]]
+      (when (some? options-anchor)
+        [:> recording-options* {:anchor options-anchor
+                                :on-close on-close-recording-options}])]
 
      [:button {:type "button"
                :class (stl/css-case :rec-btn true :active recording?)
