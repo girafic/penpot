@@ -1069,6 +1069,14 @@
                    (fetch-image shape-id id thumbnail?))))
              (types.fills/get-image-ids fills))))))
 
+(defn set-shape-text-fills-override
+  "Paint every span of the current text with `fills` in place of its own,
+  while an animation of its fills plays (Penpot Motion); none paints them
+  with their own again. Their pictures are not fetched: an animation plays
+  colours."
+  [fills]
+  (props/write-shape-text-fills-override! fills))
+
 (defn- stroke-image-ids
   [strokes]
   (into []

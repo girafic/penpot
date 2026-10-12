@@ -166,7 +166,13 @@
         (api/set-shape-transform v)
 
         :fills
-        (api/set-shape-fills id v false)
+        (if (cfh/text-shape? shape)
+          ;; a text paints its glyphs in the fills of its spans: those its
+          ;; animation gives paint them all while it plays, and its rest,
+          ;; no fills of its own, its spans again
+          (do (api/set-shape-fills id v false)
+              (api/set-shape-text-fills-override v))
+          (api/set-shape-fills id v false))
 
         :strokes
         (into [] (api/set-shape-strokes id v false))

@@ -186,6 +186,24 @@
                                     {sid {:markup "<rect></rect>"}})]
     (t/is (str/includes? svg "100% { transform: translate(0px, 0px) rotate(0deg) rotate(30deg) scale(2, 1) rotate(-30deg); }"))))
 
+(t/deftest a-text-plays-its-fill-on-the-fills-of-its-spans
+  ;; A text has no fills of its own: it paints its glyphs in those of its
+  ;; spans, which its animated fill takes from the first.
+  (let [blue  [{:fill-color "#0000ff" :fill-opacity 0.5}]
+        text  (cts/setup-shape {:type :text :x 0 :y 0 :width 100 :height 20
+                                :content {:type "root"
+                                          :children [{:type "paragraph-set"
+                                                      :children [{:type "paragraph"
+                                                                  :children [{:text "Hi" :fills blue}]}]}]}})
+        tid   (:id text)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe tid {:time 0 :property :fill-color :index 0 :value "#ff0000"})
+                  (cta/add-keyframe tid {:time 1000 :property :fill-color :index 0 :value "#00ff00"}))
+        mods  (get-in (cta/timeline->modif-tree tl {tid text} 1000) [tid :modifiers])
+        fills (some #(when (= :fills (:property %)) (:value %)) (:structure-parent mods))]
+    (t/is (= blue (cta/paint-fills text)))
+    (t/is (= [{:fill-color "#00ff00" :fill-opacity 0.5}] fills) "its colour on the fill of its span")))
+
 (t/deftest opacity-is-a-change-property-modifier
   ;; Opacity must ride the modifier pipeline (so it works in the WASM
   ;; renderer via set-shape-opacity, and in SVG/export via transform-shape).

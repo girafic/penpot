@@ -338,6 +338,10 @@ pub fn try_paint_from_layout_cache(
     }
 
     let text_content = shape.get_text_content();
+    // their paint is baked in: fills an animation gives paint fresh ones
+    if text_content.fills_override().is_some() {
+        return Ok(false);
+    }
     let cache_usable = if layout_cache_rotation_only {
         text_content.layout_cache_versions_match()
     } else {

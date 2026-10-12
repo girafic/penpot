@@ -714,6 +714,15 @@ impl Shape {
         self.fills.push(f);
     }
 
+    /// For a text, paint its spans with `fills` in place of their own while
+    /// an animation of its fills plays (see `TextContent::set_fills_override`);
+    /// `None`, or no fills, paints them with their own again.
+    pub fn set_text_fills_override(&mut self, fills: Option<Vec<Fill>>) {
+        if let Type::Text(ref mut text) = self.shape_type {
+            text.set_fills_override(fills.filter(|fills| !fills.is_empty()));
+        }
+    }
+
     pub fn clear_fills(&mut self) {
         self.fills.clear();
     }

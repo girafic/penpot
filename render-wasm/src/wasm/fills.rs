@@ -112,6 +112,29 @@ pub extern "C" fn set_shape_fills() -> Result<()> {
     Ok(())
 }
 
+/// The fills of the current text that paint its spans in place of their own,
+/// as `set_shape_fills` reads them, while an animation of them plays.
+#[no_mangle]
+#[wasm_error]
+pub extern "C" fn set_shape_text_fills_override() -> Result<()> {
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        let bytes = mem::bytes();
+        let num_fills = bytes.first().copied().unwrap_or(0) as usize;
+        let fills = read_fills_from_bytes(&bytes[4..], num_fills);
+        shape.set_text_fills_override(Some(fills));
+        mem::free_bytes()?;
+    });
+    Ok(())
+}
+
+/// The spans of the current text painted with their own fills again.
+#[no_mangle]
+pub extern "C" fn clear_shape_text_fills_override() {
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        shape.set_text_fills_override(None);
+    });
+}
+
 #[no_mangle]
 pub extern "C" fn add_shape_fill() {
     with_current_shape_mut!(state, |shape: &mut Shape| {

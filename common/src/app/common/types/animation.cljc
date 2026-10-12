@@ -31,6 +31,7 @@
    [app.common.types.shape.interactions :as cti]
    [app.common.types.shape.layout :as ctl]
    [app.common.types.shape.radius :as ctsr]
+   [app.common.types.text :as txt]
    [app.common.types.text-units :as tu]
    [app.common.types.token :as cto]
    [app.common.uuid :as uuid]
@@ -2423,6 +2424,17 @@
        items
        by-field))))
 
+(defn paint-fills
+  "The fills `shape` paints in, which an animation of its fills plays on: a
+  text has none of its own, it paints its glyphs in those of its spans, the
+  ones of the first (which its design tab shows), played on all of them
+  (render-wasm paints its spans with them, see
+  `app.render-wasm.api/set-shape-text-fills-override`)."
+  [shape]
+  (if (= :text (:type shape))
+    (or (some :fills (txt/node-seq txt/is-text-node? (:content shape))) [])
+    (:fills shape)))
+
 (defn apply-fills
   [fills values]
   (patch-indexed fills
@@ -2580,7 +2592,7 @@
       (ctm/change-property :r4 (:r4 values))
 
       (has? values :fill-color :fill-opacity)
-      (ctm/change-property :fills (apply-fills (:fills shape) values))
+      (ctm/change-property :fills (apply-fills (paint-fills shape) values))
 
       (has? values :stroke-color :stroke-opacity :stroke-width)
       (ctm/change-property :strokes (apply-strokes (:strokes shape) values))

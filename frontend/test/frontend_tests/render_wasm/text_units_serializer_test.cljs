@@ -11,7 +11,8 @@
    [app.common.types.shape :as cts]
    [app.render-wasm.api :as api]
    [app.render-wasm.shape :as shape]
-   [cljs.test :as t :include-macros true]))
+   [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.mock :as mock]))
 
 (defn- view
   [^js bytes]
@@ -88,3 +89,20 @@
       (let [^js v (view (sr-tu/entries->bytes (entries :line)))]
         (t/is (= [1 1] [(.getUint32 v 0 true) (.getUint32 v 4 true)]))
         (t/is (= [2 0] [(.getUint8 v 8) (.getUint32 v 12 true)]))))))
+
+(t/deftest the-animated-fills-of-a-text-paint-its-spans
+  ;; A text paints its glyphs in the fills of its spans: those its
+  ;; animation gives paint them all, its rest (no fills of its own) their
+  ;; own again.
+  (let [override (atom ::none)
+        red      [{:fill-color "#ff0000" :fill-opacity 1}]]
+    (with-redefs [api/initialized?                  (constantly true)
+                  api/set-shape-fills               (mock/stub (fn [& _] nil))
+                  api/set-shape-text-fills-override #(reset! override %)]
+      (#'shape/set-wasm-attr! {:id (random-uuid) :type :text :fills red} :fills)
+      (t/is (= red @override))
+      (#'shape/set-wasm-attr! {:id (random-uuid) :type :text :fills nil} :fills)
+      (t/is (empty? @override) "at rest, none: its spans in their own")
+      (reset! override ::none)
+      (#'shape/set-wasm-attr! {:id (random-uuid) :type :rect :fills red} :fills)
+      (t/is (= ::none @override) "a shape paints its own fills"))))

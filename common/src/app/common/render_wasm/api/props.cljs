@@ -51,6 +51,20 @@
       (h/call wasm/internal-module "_set_shape_fills")
       fills)))
 
+(defn write-shape-text-fills-override!
+  "Serializes `fills` (records, as `write-shape-fills!`) as the ones that
+  paint every span of the current text in place of its own while an
+  animation of its fills plays; none paints the spans with their own
+  again."
+  [fills]
+  (if (empty? fills)
+    (h/call wasm/internal-module "_clear_shape_text_fills_override")
+    (let [fills  (types.fills/coerce fills)
+          offset (mem/alloc->offset-32 (types.fills/get-byte-size fills))
+          heap   (mem/get-heap-u32)]
+      (types.fills/write-to fills heap offset)
+      (h/call wasm/internal-module "_set_shape_text_fills_override"))))
+
 (defn write-shape-strokes!
   "Serializes the stroke vector (records only, like `write-shape-fills!`);
   image stroke BYTES are host-specific, so callers load images after. Returns

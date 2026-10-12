@@ -424,6 +424,10 @@ pub struct TextContent {
     /// into cached Skia paragraphs. Kept across move clones so paint can
     /// translate glyphs + shaders together. See `cached_layout_paint_offset`.
     layout_paint_origin: Option<Point>,
+    /// Fills that paint every span in place of its own, while an animation of
+    /// the fills of the text plays (Penpot Motion): the glyphs keep their
+    /// layout, only their paint changes.
+    fills_override: Option<Vec<shapes::Fill>>,
 }
 
 impl PartialEq for TextContent {
@@ -433,6 +437,7 @@ impl PartialEq for TextContent {
             && self.grow_type == other.grow_type
             && self.size == other.size
             && self.layout == other.layout
+            && self.fills_override == other.fills_override
     }
 }
 
@@ -448,6 +453,7 @@ impl TextContent {
             layout_version: 0,
             layout_width: None,
             layout_paint_origin: None,
+            fills_override: None,
         }
     }
 
@@ -464,7 +470,18 @@ impl TextContent {
             layout_version: 0,
             layout_width: None,
             layout_paint_origin: None,
+            fills_override: self.fills_override.clone(),
         }
+    }
+
+    /// Paint every span with `fills` in place of its own (see
+    /// `fills_override`), or with its own again when `None`.
+    pub fn set_fills_override(&mut self, fills: Option<Vec<shapes::Fill>>) {
+        self.fills_override = fills;
+    }
+
+    pub fn fills_override(&self) -> Option<&[shapes::Fill]> {
+        self.fills_override.as_deref()
     }
 
     pub fn bounds(&self) -> Rect {
@@ -842,6 +859,9 @@ impl TextContent {
 
     /// Maximum number of stacked fills across every span in this text block.
     pub fn max_fill_layers(&self) -> usize {
+        if let Some(fills) = &self.fills_override {
+            return fills.len();
+        }
         self.paragraphs()
             .iter()
             .flat_map(|p| p.children())
@@ -915,6 +935,18 @@ impl TextContent {
             let mut builder = ParagraphBuilder::new(&paragraph_style, fonts);
             let mut has_text = false;
             for span in paragraph.children() {
+                // the fills an animation of the text paints it in, if any
+                let overridden: TextSpan;
+                let span: &TextSpan = match &self.fills_override {
+                    Some(fills) => {
+                        overridden = TextSpan {
+                            fills: fills.clone(),
+                            ..span.clone()
+                        };
+                        &overridden
+                    }
+                    None => span,
+                };
                 let text_style = if let Some((layer, image_id)) = opaque_image_layer {
                     let mut style = span.to_style(
                         &self.bounds(),
@@ -1351,6 +1383,7 @@ impl Default for TextContent {
             layout_version: 0,
             layout_width: None,
             layout_paint_origin: None,
+            fills_override: None,
         }
     }
 }
@@ -2223,6 +2256,20 @@ mod tests {
         let mut content = TextContent::new(bounds, GrowType::Fixed);
         content.add_paragraph(test_paragraph(&["hello"]));
         content
+    }
+
+    #[test]
+    fn a_fills_override_paints_every_span_until_cleared() {
+        let mut content = sample_text_content();
+        let before = content.clone();
+        let red = shapes::Fill::Solid(shapes::SolidColor(skia::Color::RED));
+        content.set_fills_override(Some(vec![red.clone(), red]));
+        assert_eq!(content.max_fill_layers(), 2);
+        assert!(content != before, "a change, which paints again");
+        let rebound = content.new_bounds(Rect::from_xywh(0.0, 0.0, 300.0, 100.0));
+        assert_eq!(rebound.fills_override().map(|fills| fills.len()), Some(2));
+        content.set_fills_override(None);
+        assert!(content == before);
     }
 
     #[test]
