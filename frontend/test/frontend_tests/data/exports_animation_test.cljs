@@ -1692,14 +1692,18 @@
            (issues-of :svg :f #(assoc % :rotation 30)
                       :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
         "a turned one resizes on its outline (see `aexp/svg-outline-sized?`)")
-  (t/is (= [:svg/size]
+  (t/is (= []
            (issues-of :svg :f #(assoc % :rotation 30 :type :circle)
                       :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
-        "a turned ellipse stretches")
-  (t/is (= [:svg/size]
+        "a turned ellipse resizes on its element (see `aexp/svg-box-sized?`)")
+  (t/is (= []
            (issues-of :svg :f #(assoc % :fills [{:fill-color "#ffffff" :fill-opacity 0.5} {:fill-color "#000000" :fill-opacity 1}])
                       :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
-        "and two fills, laid out over its box at rest")
+        "and two fills, laid over its box as it plays")
+  (t/is (= [:svg/size]
+           (issues-of :svg :f #(assoc % :fills [{:fill-image {:id (uuid/next) :width 10 :height 10 :mtype "image/png"}}])
+                      :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
+        "an image stretches, which keeps the size it rests at")
   (t/is (= [:lottie/blur]
            (issues-of :lottie :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}
                                     {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}]))

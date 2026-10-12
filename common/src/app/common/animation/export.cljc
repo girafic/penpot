@@ -244,21 +244,64 @@
                   (:strokes shape))
           (or (= :circle (:type shape)) (svg-even-corners? shape track))))))
 
+(defn- unflipped?
+  "Whether `shape` is turned at most, not flipped (turned by half a turn
+  when flipped both ways)."
+  [shape]
+  (let [{:keys [a b c d]} (or (:transform shape) (gmt/matrix))]
+    (pos? (- (* a d) (* b c)))))
+
+(defn- box-paints?
+  "Whether the fills of `shape` paint over its box as its width and height
+  play in an SVG of vectors: but images, which keep the size they rest
+  at, the pattern of more than one or of a gradient laid over the box of
+  the element it fills (see `asvg/svg-sized-paint`); of a turned path, a
+  plain colour at most, as the pattern of a path turns with it."
+  [shape]
+  (let [fills (:fills shape)]
+    (and (not-any? :fill-image fills)
+         (or (not (contains? #{:path :bool} (:type shape)))
+             (unturned? shape)
+             (and (<= (count fills) 1) (every? plain-paint? fills))))))
+
+(defn svg-box-sized?
+  "Whether an SVG of vectors plays the width and height `track` animates
+  on `shape` on its elements as `svg-sized?` does, which Lottie shares,
+  where only an SVG can: a rectangle (unturned, its corners alike) or an
+  ellipse (turned too, in its own space) whose fills paint over its box
+  (see `box-paints?`) or with an outer stroke, the masks of which an SVG
+  lays over what it covers as it plays (see `asvg/svg-sized-paint`)."
+  [shape track]
+  (let [sr (:selrect shape)]
+    (boolean
+     (and (some #(svg-size-properties (:property %)) (:keyframes track))
+          (not (svg-sized? shape track))
+          (case (:type shape)
+            :rect   (and (unturned? shape) (svg-even-corners? shape track))
+            :circle (unflipped? shape)
+            false)
+          (pos? (or (:width sr) 0))
+          (pos? (or (:height sr) 0))
+          (box-paints? shape)
+          (every? plain-paint? (:strokes shape))))))
+
 (defn svg-outline-sized?
   "Whether an SVG of vectors plays the width and height `track` animates
   on `shape` on the path of its outline, by SMIL, as the canvas resizes it
   (see `asvg/svg-smil`), its strokes as wide, when it can not on its
-  elements (see `svg-sized?`): a path, a boolean with its outline, or a
-  rectangle (turned, or its corners not alike as they play, drawn as a
-  path), of one fill at most, in plain colours and without an outer
-  stroke, which the SVG renderer bounds by its box at rest (a pattern, a
-  mask). Otherwise width and height play as a scale of its group, which
+  elements (see `svg-sized?`, `svg-box-sized?`): a path, a boolean with
+  its outline, or a rectangle (turned, or its corners not alike as they
+  play, drawn as a path), whose fills paint over its box (see
+  `box-paints?`), its strokes in plain colours, the masks of outer ones
+  laid over what it covers as it plays (see `asvg/svg-sized-paint`).
+  Otherwise width and height play as a scale of its group, which
   stretches it, its strokes too."
   [shape track]
   (let [sr (:selrect shape)]
     (boolean
      (and (some #(svg-size-properties (:property %)) (:keyframes track))
           (not (svg-sized? shape track))
+          (not (svg-box-sized? shape track))
           (case (:type shape)
             :path true
             :bool (some? (:content shape))
@@ -266,10 +309,8 @@
             false)
           (pos? (or (:width sr) 0))
           (pos? (or (:height sr) 0))
-          (<= (count (:fills shape)) 1)
-          (every? plain-paint? (:fills shape))
-          (every? #(and (plain-paint? %) (not= :outer (svg-stroke-alignment shape %)))
-                  (:strokes shape))))))
+          (box-paints? shape)
+          (every? plain-paint? (:strokes shape))))))
 
 (defn svg-sized-ids
   "The shapes whose width and height `timeline` (with its keyframes, see

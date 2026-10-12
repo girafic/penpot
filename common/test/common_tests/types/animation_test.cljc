@@ -173,10 +173,13 @@
     (t/is (mth/close? 50.0 (double (:x (gsh/shape->center shape'))) 0.01) "around its middle")))
 
 (t/deftest an-svg-stretches-a-turned-layer-along-its-sides
-  ;; An ellipse: a turned rectangle resizes on its outline (see
-  ;; `an-svg-resizes-a-turned-rectangle-on-its-outline`).
+  ;; An ellipse of an image, which keeps the size it rests at: a turned
+  ;; rectangle resizes on its outline, an ellipse of other fills on its
+  ;; element (see `an-svg-resizes-a-turned-rectangle-on-its-outline`,
+  ;; `an-svg-plays-sizes-where-lottie-can-not`).
   (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
-        rect    (-> (cts/setup-shape {:type :circle :x 100 :y 100 :width 100 :height 40})
+        rect    (-> (cts/setup-shape {:type :circle :x 100 :y 100 :width 100 :height 40
+                                      :fills [{:fill-image {:id (uuid/next) :width 10 :height 10 :mtype "image/png"}}]})
                     (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 150 120) 30)))
         [bid sid] (map :id [board rect])
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
@@ -1454,6 +1457,72 @@
     (t/testing "a path stretches, as before"
       (let [svg (asvg/timeline->svg (grow rect) (svg-board-with board (assoc rect :rotation 30)) {})]
         (t/is (re-find #"scale\(2, 1\)" svg))))))
+
+(t/deftest an-svg-plays-sizes-where-lottie-can-not
+  ;; On its elements, as the canvas resizes it, where Lottie stretches it:
+  ;; its fills over its box as it plays, the masks of its outer strokes
+  ;; over all it covers, a turned ellipse in its own space.
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        rect    (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20 :r1 0 :r2 0 :r3 0 :r4 0
+                                  :fills [{:fill-color "#ffffff" :fill-opacity 0.5}
+                                          {:fill-color "#ff0000" :fill-opacity 1}]})
+        sid     (:id rect)
+        track   {:keyframes [{:time 0 :property :width :value 40} {:time 1000 :property :width :value 80}]}
+        grow    #(-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                     (cta/add-keyframe (:id %) {:time 0 :property :width :value 40 :easing :linear})
+                     (cta/add-keyframe (:id %) {:time 1000 :property :width :value 80}))
+        outer   (assoc rect
+                       :fills [{:fill-color "#ff0000" :fill-opacity 1}]
+                       :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 3
+                                  :stroke-style :solid :stroke-alignment :outer}])
+        ellipse (-> (cts/setup-shape {:type :circle :x 100 :y 100 :width 100 :height 40
+                                      :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+                    (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 150 120) 30)))]
+    (t/testing "which shapes"
+      (t/is (aexp/svg-box-sized? rect track) "two fills")
+      (t/is (not (alottie/lottie-sized? rect track)) "which Lottie stretches")
+      (t/is (aexp/svg-box-sized? (assoc rect :fills [{:fill-color-gradient {:type :linear}}]) track) "a gradient")
+      (t/is (aexp/svg-box-sized? outer track) "an outer stroke")
+      (t/is (aexp/svg-box-sized? ellipse track) "a turned ellipse")
+      (t/is (not (aexp/svg-box-sized? (assoc rect :fills [{:fill-image {:id (uuid/next) :width 10 :height 10}}]) track))
+            "not an image, which keeps the size it rests at")
+      (t/is (not (aexp/svg-box-sized? (gsh/transform-shape ellipse (ctm/resize (ctm/empty) (gpt/point -1 1) (gpt/point 150 120)))
+                                      track))
+            "nor a flipped ellipse")
+      (t/is (not (aexp/svg-box-sized? (assoc rect :r2 4) track)) "nor uneven corners, which its outline plays")
+      (t/is (not (aexp/svg-box-sized? (assoc rect :fills [{:fill-color "#ff0000" :fill-opacity 1}]) track))
+            "nor what `svg-sized?` takes"))
+    (t/testing "two fills: their pattern over the box of what they fill, which grows"
+      (let [markup (str "<g id=\"shape-" sid "\"><defs><pattern patternUnits=\"userSpaceOnUse\" x=\"10\" y=\"10\""
+                        " width=\"40\" height=\"20\" id=\"fill-0-render-1\"><g><rect width=\"40\" height=\"20\""
+                        " style=\"fill:#ff0000\"></rect><rect width=\"40\" height=\"20\" style=\"fill:#ffffff\"></rect>"
+                        "</g></pattern></defs><g class=\"fills\" id=\"fills-" sid "\"><rect x=\"10\" y=\"10\" width=\"40\""
+                        " height=\"20\" fill=\"url(#fill-0-render-1)\"></rect></g></g>")
+            svg    (asvg/timeline->svg (grow rect) (svg-board-with board rect) {sid {:markup markup}})]
+        (t/is (str/includes? svg (str "<pattern patternUnits=\"objectBoundingBox\" patternContentUnits=\"objectBoundingBox\""
+                                      " x=\"0\" y=\"0\" width=\"1\" height=\"1\" id=\"fill-0-render-1\">")))
+        (t/is (= 2 (occurrences svg "<rect width=\"1\" height=\"1\" style=")) "each fill over all of it")
+        (t/is (re-find #"100% \{ x: -10px; y: 10px; width: 80px; height: 20px; \}" svg) "its box grows from its middle")
+        (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of its group")))
+    (t/testing "an outer stroke: its mask over all its box covers as it plays, and around"
+      (let [oid    (:id outer)
+            markup (str "<g id=\"shape-" oid "\"><g class=\"fills\" id=\"fills-" oid "\"><rect x=\"10\" y=\"10\""
+                        " width=\"40\" height=\"20\" style=\"fill:#ff0000\"></rect></g><g id=\"strokes-r-" oid "\""
+                        " class=\"strokes\"><g class=\"outer-stroke-shape\"><defs><mask id=\"outer-stroke-render-2-" oid
+                        "-0\" x=\"7\" y=\"7\" width=\"46\" height=\"26\" maskUnits=\"userSpaceOnUse\"></mask></defs>"
+                        "</g></g></g>")
+            svg    (asvg/timeline->svg (grow outer) (svg-board-with board outer) {oid {:markup markup}})]
+        ;; from -10 to 70 as it grows, its stroke 3 wide, a miter 4 times
+        (t/is (str/includes? svg (str "<mask id=\"outer-stroke-render-2-" oid "-0\" x=\"-22\" y=\"-2\""
+                                      " width=\"104\" height=\"44\" maskUnits=\"userSpaceOnUse\">")))))
+    (t/testing "a turned ellipse: its box in its own space, which its element turns"
+      (let [eid (:id ellipse)
+            tl  (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                    (cta/add-keyframe eid {:time 0 :property :width :value 100 :easing :linear})
+                    (cta/add-keyframe eid {:time 1000 :property :width :value 200}))
+            svg (asvg/timeline->svg tl (svg-board-with board ellipse) {eid {:markup "<ellipse></ellipse>"}})]
+        (t/is (re-find #"100% \{ cx: 150px; cy: 120px; rx: 100px; ry: 20px; \}" svg))
+        (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of its group")))))
 
 (t/deftest an-svg-plays-all-the-animations-of-an-element
   ;; A rule of its own of each would drop the others.
@@ -4401,10 +4470,15 @@
         svg   (asvg/timeline->svg tl (svg-board-with board shape)
                                   {sid {:markup (str "<path d=\"" (:content shape) "\" data-penpot-outline=\"\" fill=\"#000000\"></path>")}})]
     (t/is (aexp/svg-outline-sized? shape track))
-    (t/is (not (aexp/svg-outline-sized? (assoc shape :fills [{:fill-color-gradient {:type :linear}}]) track))
-          "not a gradient, laid out over its box at rest")
-    (t/is (not (aexp/svg-outline-sized? (assoc-in shape [:strokes 0 :stroke-alignment] :outer) track))
-          "nor an outer stroke, whose mask is bounded")
+    (t/is (aexp/svg-outline-sized? (assoc shape :fills [{:fill-color-gradient {:type :linear}}]) track)
+          "a gradient, laid over its box as it plays")
+    (t/is (aexp/svg-outline-sized? (assoc-in shape [:strokes 0 :stroke-alignment] :outer) track)
+          "an outer stroke, its mask over all it covers")
+    (t/is (not (aexp/svg-outline-sized? (-> shape
+                                            (assoc :fills [{:fill-color-gradient {:type :linear}}])
+                                            (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 130 130) 30)))
+                                        track))
+          "not a gradient of a turned path, its pattern turned with it")
     (t/is (not (aexp/svg-outline-sized? (assoc shape :type :circle) track)))
     (t/is (str/includes? svg "<animate attributeName=\"d\"") "on its outline")
     (t/is (str/includes? svg "values=\"M110,110L150,110C160,120,160,140,150,150L110,110Z;")

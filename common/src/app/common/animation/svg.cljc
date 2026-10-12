@@ -304,7 +304,7 @@
                 [(str "rx: " (acss/fmt r) "px;") (str "ry: " (acss/fmt r) "px;")]))
             aexp/svg-radius-properties]])
         size-targets
-        (when (aexp/svg-sized? shape track)
+        (when (or (aexp/svg-sized? shape track) (aexp/svg-box-sized? shape track))
           [[(svg-outline-elements shape)
             (fn [values] (svg-size-declarations shape track values))
             aexp/svg-size-properties]])]
@@ -359,7 +359,7 @@
   (more than one in a pattern, in reverse order), `strokes-…-<id>` the
   strokes, in reverse order, an inner or outer one painted twice as
   wide. Corners play when they are alike (see `svg-even-corners?`),
-  sizes as `svg-sized?` says. `timeline` is the one the exports play,
+  sizes as `svg-sized?` and `svg-box-sized?` say. `timeline` is the one the exports play,
   cut to its duration (see `cut-timeline`). Nil without any. A frontend
   test matches its selectors against what the SVG renderer draws
   (`svg-vectors-test`), which may change upstream."
@@ -811,6 +811,85 @@
                                   (mapv d/parse-double (re-seq path-number (str (path/transform-content (:content shape) m)))))))
                       #(render-path-numbers d %))))))
 
+(defn- svg-sized-region
+  "The region `[x y width height]` the masks of the outer strokes of
+  `shape` take as `timeline` (cut to its duration) plays its width and
+  height on its elements (see `aexp/svg-box-sized?`,
+  `aexp/svg-outline-sized?`): what its box covers as it plays, in its own
+  space and on the page (an element turned by a `transform` of its own
+  has its mask in its own space, a path not), and around it as far as
+  its strokes reach (their miters, four times as wide as they are at
+  their widest). Its easings may go past its keyframes: it is sampled
+  between them too."
+  [shape timeline]
+  (let [sid      (:id shape)
+        track    (dm/get-in timeline [:tracks sid])
+        values   (acss/shape-values timeline sid)
+        origin   (cta/track-origin track)
+        duration (max 1 (:duration timeline))
+        times    (into (sorted-set duration)
+                       (concat (map #(* duration (/ % 120)) (range 120))
+                               (keep #(when (<= 0 (:time %) duration) (:time %)) (:keyframes track))))
+        {:keys [x y width height]} (:selrect shape)
+        turn     (when-let [transform (:transform shape)]
+                   (gmt/transform-in (gpt/point (+ x (/ width 2)) (+ y (/ height 2))) transform))
+        strokes  (cta/as-vec (:strokes shape))
+        corners  (fn [t]
+                   (let [[bx by bw bh] (outline-size shape origin (values t))
+                         own (for [px [bx (+ bx bw)] py [by (+ by bh)]] (gpt/point px py))]
+                     (cond-> own (some? turn) (concat (map #(gpt/transform % turn) own)))))
+        widest   (reduce max 0
+                         (for [t times index (range (count strokes))]
+                           (or (indexed-value (:stroke-width (values t)) index)
+                               (:stroke-width (get strokes index))
+                               0)))
+        pad      (* 4 widest)
+        box      (grc/points->rect (mapcat corners times))]
+    [(- (:x box) pad) (- (:y box) pad) (+ (:width box) (* 2 pad)) (+ (:height box) (* 2 pad))]))
+
+(defn- svg-box-pattern
+  "`markup` with the pattern `pattern-id` laid over the box of the element
+  it fills (in units of that box), so it stays over it as its width and
+  height play: the pattern of the fills of a shape, of rectangles over
+  its box at rest, each a fill (a gradient in units of its rectangle),
+  as the SVG renderer draws more than one fill or a gradient."
+  [markup pattern-id]
+  (let [at    (str/index-of markup (str " id=\"" pattern-id "\""))
+        start (some->> at (str/last-index-of markup "<pattern "))
+        end   (some->> at (str/index-of markup "</pattern>"))
+        box   #"patternUnits=\"userSpaceOnUse\" x=\"[^\"]*\" y=\"[^\"]*\" width=\"[^\"]*\" height=\"[^\"]*\""
+        whole (when (and start end) (subs markup start end))]
+    (if (and (some? whole) (re-find box whole))
+      (str (subs markup 0 start)
+           (-> whole
+               (str/replace box (str "patternUnits=\"objectBoundingBox\" patternContentUnits=\"objectBoundingBox\""
+                                     " x=\"0\" y=\"0\" width=\"1\" height=\"1\""))
+               (str/replace #"<rect width=\"[^\"]*\" height=\"[^\"]*\"" "<rect width=\"1\" height=\"1\""))
+           (subs markup end))
+      markup)))
+
+(defn- svg-sized-paint
+  "The vectors `markup` of the layer `sid`, whose width and height play on
+  its elements (see `aexp/svg-box-sized?`, `aexp/svg-outline-sized?`),
+  with the pattern of its fills over its box as it plays (see
+  `svg-box-pattern`) and the masks of its outer strokes, bounded to its
+  box at rest by the SVG renderer, over `region` (see
+  `svg-sized-region`), when it has any."
+  [markup sid region]
+  (let [pattern-id (second (re-find (re-pattern (str "id=\"fills-" sid "\"><\\w+ [^>]*?fill=\"url\\(#([^)\"]+)\\)\""))
+                                    markup))
+        [x y w h]  region]
+    (cond-> markup
+      (some? pattern-id)
+      (svg-box-pattern pattern-id)
+
+      (some? region)
+      (str/replace (re-pattern (str "<mask id=\"(outer-stroke-[^\"]*-" sid "(?:-\\d+)?)\" x=\"[^\"]*\" y=\"[^\"]*\""
+                                    " width=\"[^\"]*\" height=\"[^\"]*\""))
+                   (fn [[_ id]]
+                     (str "<mask id=\"" id "\" x=\"" (acss/fmt x) "\" y=\"" (acss/fmt y)
+                          "\" width=\"" (acss/fmt w) "\" height=\"" (acss/fmt h) "\""))))))
+
 (defn- svg-smil-outline
   "`markup` with the `<animate>` `animate` in the elements of the outline
   of its shape, as the frontend marked them (`data-penpot-outline`)."
@@ -869,6 +948,13 @@
            outline  (when (and (some? shape)
                                (or (svg-smil-corners? shape track) (aexp/svg-outline-sized? shape track)))
                       (svg-outline-path shape timeline))
+           ;; its fills and the masks of its outer strokes over its box
+           ;; as its size plays on its elements (see `svg-sized-paint`)
+           paint    (when (and (some? shape)
+                               (or (aexp/svg-box-sized? shape track) (aexp/svg-outline-sized? shape track)))
+                      {:region (when (some #(= :outer (aexp/svg-stroke-alignment shape %))
+                                           (cta/as-vec (:strokes shape)))
+                                 (svg-sized-region shape timeline))})
            filters  (when (or shadows? blur?)
                       (let [flags {:shadows? shadows? :blur? blur? :styles drops
                                    :area (when (contains? wide sid) area)}]
@@ -879,11 +965,12 @@
                         (str (svg-effects-filter (svg-inner-id sid false) shape timeline flags)
                              (svg-effects-filter (svg-inner-id sid true) shape nil flags))))]
        (cond-> result
-         (or (some? outline) (some? filters) (some? inner))
+         (or (some? outline) (some? filters) (some? inner) (some? paint))
          (assoc sid (cond-> {}
                       (some? outline) (assoc :outline outline)
                       (some? filters) (assoc :filters filters)
-                      (some? inner)   (assoc :inner inner))))))
+                      (some? inner)   (assoc :inner inner)
+                      (some? paint)   (assoc :paint paint))))))
    {}
    (into (set (keys (:tracks timeline))) (filter uuid?) (keys images))))
 
@@ -939,7 +1026,9 @@
   reduced motion, which SMIL does not heed, a copy at rest (see
   `svg-rest-copy`, `svg-smil-css`)."
   [{:keys [smil ox oy]} id markup]
-  (let [{:keys [outline inner]} (get smil id)
+  (let [{:keys [outline inner paint]} (get smil id)
+        markup (cond-> markup
+                 (some? paint) (svg-sized-paint id (:region paint)))
         ;; the inner shadows of a board on a filter around its vectors
         inside (fn [markup defs?]
                  (if (some? inner)
@@ -1169,13 +1258,14 @@
          sized    (aexp/svg-sized-ids objects timeline)
          holders  (aexp/svg-holder-ids objects sized)
          ;; SVG takes a share of `transform-origin` of the whole drawing
-         ;; the layers SMIL resizes on their outlines (vectors only): no
-         ;; scale of their groups either
+         ;; the layers SMIL resizes on their outlines, and those CSS
+         ;; resizes on their elements where only an SVG can (vectors
+         ;; only): no scale of their groups either
          outlined (into #{}
                         (keep (fn [[id track]]
-                                (when (and (some? (dm/get-in images [id :markup]))
-                                           (some-> (get objects id) (aexp/svg-outline-sized? track)))
-                                  id)))
+                                (when-let [shape (when (some? (dm/get-in images [id :markup])) (get objects id))]
+                                  (when (or (aexp/svg-outline-sized? shape track) (aexp/svg-box-sized? shape track))
+                                    id))))
                         (:tracks timeline))
          css      (acss/timeline->css timeline objects
                                       {:svg? true

@@ -339,3 +339,40 @@
                                                      ".strokes[id$=\"-" (first layers) "\"] rect"))]
         (t/is (pos? (.-length painted)))
         (t/is (every? #(= "1" (.getAttribute % "pathLength")) (array-seq painted)))))))
+
+(t/deftest a-shape-resized-on-its-elements-paints-over-its-box
+  ;; As the SVG renderer draws it: its fills (a gradient, more than one)
+  ;; in a pattern over the box of what they fill, the mask of its outer
+  ;; stroke over all it covers as it plays (see `asvg/svg-sized-paint`).
+  (let [rect     (cts/setup-shape {:type :rect :x 20 :y 20 :width 120 :height 80
+                                   :fills [{:fill-color-gradient {:type :linear :start-x 0 :start-y 0.5 :end-x 1 :end-y 0.5
+                                                                  :width 1
+                                                                  :stops [{:color "#ff0000" :opacity 1 :offset 0}
+                                                                          {:color "#0000ff" :opacity 1 :offset 1}]}}
+                                           {:fill-color "#00ff00" :fill-opacity 0.5}]
+                                   :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 4
+                                              :stroke-style :solid :stroke-alignment :outer}]})
+        rid      (:id rect)
+        {:keys [bid objects]} (board-with rect)
+        tl       (-> (cta/make-timeline {:board-id bid :duration 1000})
+                     (cta/add-keyframe rid {:time 0 :property :width :value 120})
+                     (cta/add-keyframe rid {:time 1000 :property :width :value 240}))
+        resolved (cta/resolve-animations tl objects)
+        layers   (aexp/export-layer-ids objects resolved)
+        drawable (svgv/without-layers objects (set layers))
+        images   (into {}
+                       (map (fn [id] [id {:markup (svgv/layer-markup drawable id (get-in resolved [:tracks id]))}]))
+                       (cons bid layers))
+        document (.. (JSDOM. (asvg/timeline->svg tl objects images {}) #js {:contentType "image/svg+xml"})
+                     -window -document)
+        pattern  (.querySelector document (str "[id=\"shape-" rid "\"] > defs > pattern"))
+        mask     (.querySelector document (str "mask[id$=\"-" rid "-0\"]"))
+        attrs    (fn [node names] (mapv #(.getAttribute node %) names))]
+    (t/is (aexp/svg-box-sized? rect (get-in resolved [:tracks rid])))
+    (t/is (= ["objectBoundingBox" "objectBoundingBox" "0" "0" "1" "1"]
+             (attrs pattern ["patternUnits" "patternContentUnits" "x" "y" "width" "height"])))
+    (t/is (= [["1" "1"] ["1" "1"]] (map #(attrs % ["width" "height"]) (array-seq (.querySelectorAll pattern "rect"))))
+          "each fill over all of it")
+    ;; from 20 to 140 it grows to -40 to 200 around its middle, its
+    ;; stroke 4 wide, a miter 4 times
+    (t/is (= ["-56" "4" "272" "112"] (attrs mask ["x" "y" "width" "height"])))))

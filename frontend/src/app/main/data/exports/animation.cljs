@@ -645,7 +645,7 @@
           lottie-set (set lottie-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
           ;; SVG and Lottie play some on the outlines, SVG more (see
-          ;; `aexp/svg-outline-sized?`)
+          ;; `aexp/svg-outline-sized?`, `aexp/svg-box-sized?`)
           stretch?  (fn [svg?]
                       (boolean
                        (some (fn [[id track]]
@@ -653,7 +653,8 @@
                                  (and (some? shape)
                                       (some #(contains? #{:width :height} (:property %)) (:keyframes track))
                                       (not (aexp/svg-sized? shape track))
-                                      (not (and svg? (aexp/svg-outline-sized? shape track))))))
+                                      (not (and svg? (or (aexp/svg-outline-sized? shape track)
+                                                         (aexp/svg-box-sized? shape track)))))))
                              (:tracks resolved))))
           units     (cta/unit-timelines resolved objects)
           ;; the texts an SVG outlines, but those whose units play as
