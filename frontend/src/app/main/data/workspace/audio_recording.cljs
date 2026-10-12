@@ -84,12 +84,12 @@
      (tr "workspace.audio.recording-failed"))))
 
 (defn recording
-  "The recording in progress: `{:board-id :pending? true}` while the
-  browser asks for the microphone, then `{:board-id :start :offset :since
-  :quiet?}`: where its clip goes on the timeline (ms), how much of it
-  plays before, as a pre-roll (see `recording-options`), when it started
-  recording (`Date.now`), and whether the other clips keep quiet
-  meanwhile; nil without."
+  "The recording in progress: `{:board-id :page-id :pending? true}` while
+  the browser asks for the microphone, then `{:board-id :page-id :start
+  :offset :since :quiet?}`: where its clip goes on the timeline of the
+  board on that page (ms), how much of it plays before, as a pre-roll
+  (see `recording-options`), when it started recording (`Date.now`), and
+  whether the other clips keep quiet meanwhile; nil without."
   [state]
   (dm/get-in state [:workspace-animation :audio-recording]))
 
@@ -147,9 +147,21 @@
         (.catch (constantly [])))
     (js/Promise.resolve [])))
 
+(def recording-limit
+  "The longest a recording records, in ms: a second short of
+  `ctau/max-audio-duration`, so what an encoder pads on and a late timer
+  keep it a file a clip plays (see `dwaa/prepare`)."
+  (- ctau/max-audio-duration 1000))
+
 (defonce ^:private current
   ;; the recorder recording, `{:recorder :discard? :stop-meter}`
   (atom nil))
+
+(defn- release!
+  "Stop the tracks of the stream `mic`: the microphone is free again."
+  [^js mic]
+  (doseq [track (.getTracks mic)]
+    (.stop ^js track)))
 
 (defn open-microphone!
   "A promise of the stream of the microphone `device-id` (nil for the one
@@ -303,12 +315,14 @@
       (update state :workspace-animation dissoc :audio-recording))))
 
 (defn- recording-started
-  "The recording `rec` of the board `board-id` records (see `recording`)."
-  [board-id rec]
+  "The recording `rec` of the board `board-id` of the page `page-id`
+  records (see `recording`)."
+  [board-id page-id rec]
   (ptk/reify ::recording-started
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-animation :audio-recording] (assoc rec :board-id board-id)))))
+      (assoc-in state [:workspace-animation :audio-recording]
+                (assoc rec :board-id board-id :page-id page-id)))))
 
 (defn pre-roll-from
   "Where playback starts for a recording whose clip goes at `playhead`
@@ -324,47 +338,50 @@
   playhead, its pre-roll before (see `pre-roll-from`), unless it plays
   already (then from where it is). The other clips keep quiet meanwhile
   when `quiet?`."
-  [board-id since pre-roll quiet?]
+  [board-id page-id since pre-roll quiet?]
   (ptk/reify ::recording-began
     ptk/WatchEvent
     (watch [_ state _]
       (let [anim (:workspace-animation state)]
         (if (:playing? anim)
-          (rx/of (recording-started board-id {:start (get anim :playhead 0) :offset 0
-                                              :since since :quiet? quiet?}))
+          (rx/of (recording-started board-id page-id {:start (get anim :playhead 0) :offset 0
+                                                      :since since :quiet? quiet?}))
           (let [duration     (or (:duration (dwa/current-timeline state)) 0)
                 [start from] (pre-roll-from (get anim :playhead 0) duration pre-roll)]
             ;; quiet first, before playback sounds
-            (rx/of (recording-started board-id {:start start :offset (- start from)
-                                                :since since :quiet? quiet?})
+            (rx/of (recording-started board-id page-id {:start start :offset (- start from)
+                                                        :since since :quiet? quiet?})
                    (dwa/set-playhead from)
                    (dwa/play))))))))
 
 (defn- recording-stopped
   "Add the recording `blob` of the recorder type `mime` to the timeline of
-  its board, where it started, as a dropped file is; playback stops, at
-  its start, to hear it."
+  its board, on its page whatever page shows now, where it started, as a
+  dropped file is; playback stops, at its start, to hear it (on its page
+  still). Nothing without a file open any more."
   [blob mime]
   (ptk/reify ::recording-stopped
     ptk/WatchEvent
     (watch [_ state _]
-      (let [{:keys [board-id start offset since]} (recording state)
-            offset (or offset 0)]
+      (let [{:keys [board-id page-id start offset since]} (recording state)
+            offset (or offset 0)
+            here?  (= page-id (:current-page-id state))
+            ;; to hear it, where it stopped
+            stop   (fn [& events]
+                     (apply rx/of (dwa/pause) (recording-cleared)
+                            (cond-> (vec events) here? (conj (dwa/set-playhead start)))))]
         (cond
-          (or (nil? board-id) (nil? start))
+          (or (nil? board-id) (nil? start) (nil? (:current-file-id state)))
           (rx/of (recording-cleared))
 
           ;; stopped in its pre-roll: nothing where its clip goes
           (< (- (js/Date.now) since offset) ctau/min-clip-duration)
-          (rx/of (dwa/pause) (recording-cleared) (dwa/set-playhead start))
+          (stop)
 
           :else
-          (let [timeline (dm/get-in (dsh/lookup-page state) [:timelines board-id])
+          (let [timeline (dm/get-in (dsh/lookup-page state page-id) [:timelines board-id])
                 file     (recording-file blob mime (recording-name timeline))]
-            (rx/of (dwa/pause)
-                   (recording-cleared)
-                   (dwa/set-playhead start)
-                   (dwaa/add-audio-files board-id [file] start nil :trim offset))))))))
+            (stop (dwaa/add-audio-files board-id [file] start nil :trim offset :page-id page-id))))))))
 
 (defn stop-audio-recording
   "Stop recording: its clip goes on the timeline (see `recording-stopped`),
@@ -375,15 +392,18 @@
      ptk/EffectEvent
      (effect [_ _ _]
        (when-let [{:keys [^js recorder]} @current]
-         (swap! current assoc :discard? discard?)
+         ;; dropped once, dropped: a later stop keeps it not
+         (swap! current update :discard? #(or % discard?))
          (when (not= "inactive" (.-state recorder))
            (.stop recorder)))))))
 
 (defn start-audio-recording
   "Record sound from the microphone into the timeline of the active board,
   once the user allows it, from the playhead, the animation playing
-  along: until stopped (see `stop-audio-recording`), the timeline closed
-  or `ctau/max-audio-duration`; dropped when the workspace closes. As
+  along: until stopped (see `stop-audio-recording`), its timeline closed,
+  its page left (its clip goes on it all the same) or `recording-limit`;
+  dropped when the workspace closes, while the browser asks for the
+  microphone too (the microphone it gives then freed at once). As
   `recording-options` say: from the microphone chosen, after a pre-roll,
   the other clips quiet. A notice when the browser does not record, or
   the microphone does not."
@@ -394,11 +414,12 @@
       (let [board-id (dwa/active-board-id state)]
         (cond-> state
           (and (some? board-id) (nil? (recording state)) (nil? @current) (supported?))
-          (assoc-in [:workspace-animation :audio-recording] {:board-id board-id :pending? true}))))
+          (assoc-in [:workspace-animation :audio-recording]
+                    {:board-id board-id :page-id (:current-page-id state) :pending? true}))))
 
     ptk/WatchEvent
     (watch [_ state stream]
-      (let [{:keys [board-id pending?]} (recording state)]
+      (let [{:keys [board-id page-id pending?]} (recording state)]
         (cond
           (nil? (dwa/active-board-id state))
           (rx/empty)
@@ -410,42 +431,64 @@
           (rx/empty)
 
           :else
-          (->> (rx/from (open-microphone! (:device-id (recording-options state))))
-               (rx/mapcat
-                (fn [mic]
-                  (let [recorder (make-recorder mic)
-                        _        (reset! current {:recorder recorder})
-                        events   (rx/share (record recorder mic))]
-                    (rx/merge
-                     (->> events
-                          (rx/map (fn [event]
-                                    (cond
-                                      (= :started event)
-                                      (let [since (js/Date.now)
-                                            {:keys [pre-roll quiet?]} (recording-options state)]
-                                        (swap! current assoc :stop-meter (start-meter! mic since))
-                                        (recording-began board-id since pre-roll quiet?))
+          (let [mic-p  (open-microphone! (:device-id (recording-options state)))
+                gone?  (volatile! false)
+                ;; the browser answered, either way
+                asked  (->> (rx/from mic-p) (rx/catch (fn [_] (rx/of nil))) (rx/take 1))
+                ;; what ends it but the user: the timeline closed or its
+                ;; page left keep it, the workspace closed drops it
+                keeps  (rx/filter #(contains? #{:app.main.data.workspace.animation/close-timeline
+                                                :app.main.data.workspace.pages/finalize-page}
+                                              (ptk/type %))
+                                  stream)
+                drops  (rx/filter (ptk/type? :app.main.data.workspace/finalize-workspace) stream)]
+            ;; a microphone given once it ended: freed at once
+            (.then mic-p #(when @gone? (release! %)) (constantly nil))
+            (rx/merge
+             ;; ended while the browser asks: no recording
+             (->> (rx/merge keeps drops)
+                  (rx/take 1)
+                  (rx/take-until asked)
+                  (rx/map (fn [_]
+                            (vreset! gone? true)
+                            (recording-cleared))))
+             (->> (rx/from mic-p)
+                  (rx/filter (fn [_] (not @gone?)))
+                  (rx/mapcat
+                   (fn [mic]
+                     (let [recorder (make-recorder mic)
+                           _        (reset! current {:recorder recorder})
+                           events   (rx/share (record recorder mic))
+                           ended    (rx/filter #(not= :started %) events)]
+                       (rx/merge
+                        (->> events
+                             (rx/map (fn [event]
+                                       (cond
+                                         (= :started event)
+                                         (let [since (js/Date.now)
+                                               {:keys [pre-roll quiet?]} (recording-options state)]
+                                           (swap! current assoc :stop-meter (start-meter! mic since))
+                                           (recording-began board-id page-id since pre-roll quiet?))
 
-                                      (:discard? @current)
-                                      (recording-cleared)
+                                         (:discard? @current)
+                                         (recording-cleared)
 
-                                      :else
-                                      (recording-stopped event (.-mimeType recorder))))))
-                     ;; what stops it but the user
-                     (->> (rx/merge (rx/map (constantly false) (rx/timer ctau/max-audio-duration))
-                                    (rx/map (constantly false)
-                                            (rx/filter (ptk/type? :app.main.data.workspace.animation/close-timeline) stream))
-                                    (rx/map (constantly true)
-                                            (rx/filter (ptk/type? :app.main.data.workspace/finalize-workspace) stream)))
-                          (rx/take 1)
-                          (rx/take-until (rx/filter #(not= :started %) events))
-                          (rx/map stop-audio-recording))))))
-               (rx/catch (fn [cause]
-                           (rx/of (recording-cleared) (microphone-error cause))))
-               (rx/finalize (fn []
-                              (when-let [stop-meter (:stop-meter @current)]
-                                (stop-meter))
-                              (reset! current nil)))))))))
+                                         :else
+                                         (recording-stopped event (.-mimeType recorder))))))
+                        (->> (rx/merge (rx/timer recording-limit) keeps)
+                             (rx/take 1)
+                             (rx/take-until ended)
+                             (rx/map (fn [_] (stop-audio-recording))))
+                        (->> drops
+                             (rx/take 1)
+                             (rx/take-until ended)
+                             (rx/map (fn [_] (stop-audio-recording true))))))))
+                  (rx/catch (fn [cause]
+                              (rx/of (recording-cleared) (microphone-error cause))))
+                  (rx/finalize (fn []
+                                 (when-let [stop-meter (:stop-meter @current)]
+                                   (stop-meter))
+                                 (reset! current nil)))))))))))
 
 (defn toggle-audio-recording
   "Start recording sound into the timeline, or stop; nothing while the

@@ -492,24 +492,32 @@
 (declare apply-preview select-keyframe set-playhead set-keyframe-value
          store-keyframe-selection)
 
-(defn commit-timeline
+(defn commit-page-timeline
   "Commit `timeline` (or, when nil, delete it) as the timeline keyed by
-  `board-id` on the current page, optionally in the `undo-group` of
-  another change (so both undo together). Only what changed is sent (see
+  `board-id` on the page `page-id` of the current file, which need not
+  be the current page, optionally in the `undo-group` of another change
+  (so both undo together). Only what changed is sent (see
   `pcb/change-timeline`), so edits other users make meanwhile to other
   layers are kept; nothing, when nothing changed."
-  ([it state board-id timeline]
-   (commit-timeline it state board-id timeline nil))
-  ([it state board-id timeline undo-group]
-   (let [page    (dsh/lookup-page state)
-         changes (-> (pcb/empty-changes it)
-                     (pcb/with-page page)
+  ([it state page-id board-id timeline]
+   (commit-page-timeline it state page-id board-id timeline nil))
+  ([it state page-id board-id timeline undo-group]
+   (let [changes (-> (pcb/empty-changes it)
+                     (pcb/with-page (dsh/lookup-page state page-id))
                      (pcb/change-timeline board-id timeline))]
      (if (empty? (:redo-changes changes))
        (ptk/data-event ::timeline-unchanged {})
        (dch/commit-changes
         (cond-> changes
           (some? undo-group) (assoc :undo-group undo-group)))))))
+
+(defn commit-timeline
+  "Commit `timeline` as the timeline keyed by `board-id` on the current
+  page (see `commit-page-timeline`)."
+  ([it state board-id timeline]
+   (commit-timeline it state board-id timeline nil))
+  ([it state board-id timeline undo-group]
+   (commit-page-timeline it state (:current-page-id state) board-id timeline undo-group)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TIMELINE CRUD

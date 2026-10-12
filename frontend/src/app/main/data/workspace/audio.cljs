@@ -137,21 +137,22 @@
 (defn- commit-clips
   "Add the clips of the `added` files to the timeline of the board
   `board-id` of the page `page-id`, as `add-audio-files` says, in one
-  change: nothing but a notice when the board, or its page, is no longer
-  there."
+  change, whatever page shows meanwhile: nothing but a notice when the
+  board, or its page, is no longer there."
   [page-id board-id added time lane trim]
   (ptk/reify ::commit-clips
     ptk/WatchEvent
     (watch [it state _]
-      (let [objects (dsh/lookup-page-objects state)]
-        (if (or (not= page-id (:current-page-id state))
+      (let [page    (when (some? page-id) (dsh/lookup-page state page-id))
+            objects (:objects page)]
+        (if (or (nil? page)
                 (not (contains? objects board-id))
                 (not (cfh/root-frame? objects board-id)))
           (rx/of (ntf/error (tr "workspace.audio.board-gone")))
-          (let [timelines (:timelines (dsh/lookup-page state))
+          (let [timelines (:timelines page)
                 timeline  (-> (dwa/board-timeline timelines (get objects board-id))
                               (with-clips (new-clips added time lane trim) (contains? timelines board-id)))]
-            (rx/of (dwa/commit-timeline it state board-id timeline))))))))
+            (rx/of (dwa/commit-page-timeline it state page-id board-id timeline))))))))
 
 (defn- upload-error
   [cause]
@@ -180,15 +181,16 @@
   that is no audio, does not decode or lasts longer than
   `ctau/max-audio-duration`, which is not uploaded. Once every upload is
   done, all the clips go in one change, one undo. The duration of the
-  timeline stays (see `with-clips`). `:trim` leaves out the first ms of
-  each (the pre-roll of a recording). `:decode` replaces `audio/decode`
-  in tests."
-  [board-id files time lane & {:keys [decode trim]}]
+  timeline stays (see `with-clips`), on its page, the current one or
+  `:page-id`, whatever page shows once they are uploaded. `:trim` leaves
+  out the first ms of each (the pre-roll of a recording). `:decode`
+  replaces `audio/decode` in tests."
+  [board-id files time lane & {:keys [decode trim page-id]}]
   (ptk/reify ::add-audio-files
     ptk/WatchEvent
     (watch [_ state _]
       (let [file-id (:current-file-id state)
-            page-id (:current-page-id state)
+            page-id (or page-id (:current-page-id state))
             decode  (or decode audio/decode)]
         (->> (rx/from (p/all (map #(prepare % decode) files)))
              (rx/mapcat

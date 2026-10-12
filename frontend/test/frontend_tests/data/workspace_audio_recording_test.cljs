@@ -11,12 +11,15 @@
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.types.animation :as cta]
+   [app.common.types.audio-clip :as ctau]
+   [app.common.uuid :as uuid]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.audio :as dwaa]
    [app.main.data.workspace.audio-recording :as dwar]
    [app.main.ui.workspace.timeline.recording-options :as rom]
    [app.util.audio :as audio]
    [app.util.i18n :refer [tr]]
+   [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.mock :as mock]
@@ -207,7 +210,7 @@
          dwar/open-microphone!  (fn [_] (js/Promise.resolve (fake-mic (atom 0))))
          dwar/make-recorder     (fn [_] (fake-recorder))
          dwa/play               (fn [] (ptk/data-event ::played))
-         dwaa/add-audio-files   (fn [& args] (reset! added args) (ptk/data-event ::added))}
+         dwaa/add-audio-files   (fn [_ _ _ _ & _] (reset! added true) (ptk/data-event ::added))}
         (fn [done']
           (ths/run-store
            store done'
@@ -242,3 +245,197 @@
       (ptk/emit! store #(assoc-in % [:workspace-animation :audio-recording] {:start 0 :since 0 :quiet? true}))
       (ptk/emit! store (dwa/set-playhead 200))
       (t/is (= [true false] @sounds) "playing, then quiet"))))
+
+;; HOW A RECORDING ENDS
+
+(t/deftest a-recording-stops-before-a-clip-would-be-too-long
+  ;; What an encoder pads on keeps it a file a clip plays (see
+  ;; `dwaa/prepare`).
+  (t/is (< dwar/recording-limit ctau/max-audio-duration)))
+
+(defn- record-until
+  "Record on `store` with the microphone `mic` until `stop` (an event)
+  comes `delay` ms after the recording records (without, while the
+  browser asks for the microphone, `then` called after), then `check`
+  the state, what `add-audio-files` got (its options, `:board-id` and
+  `:time`, nil when not called)
+  and whether a recorder was made; `open` opens the microphone (a
+  promise of `mic` by default)."
+  [done store {:keys [stop delay check open mic then]}]
+  (let [added (atom nil)
+        made  (atom false)]
+    (mock/with-mocks
+      {dwar/supported?       (constantly true)
+       dwar/open-microphone! (or open (fn [_] (js/Promise.resolve mic)))
+       dwar/make-recorder    (fn [_] (reset! made true) (fake-recorder))
+       dwa/play              (fn [] (ptk/data-event ::played))
+       ;; as it is called: four arguments, then options
+       dwaa/add-audio-files  (fn [board-id _ time _ & {:as opts}]
+                               (reset! added (assoc opts :board-id board-id :time time))
+                               (ptk/data-event ::added))}
+      (fn [done']
+        (ths/run-store
+         store done'
+         [(ptk/reify ::stop-it
+            ptk/WatchEvent
+            (watch [_ _ stream]
+              (if (some? delay)
+                (->> stream
+                     (rx/filter (ptk/type? :app.main.data.workspace.audio-recording/recording-started))
+                     (rx/take 1)
+                     (rx/delay delay)
+                     (rx/map (constantly stop)))
+                ;; once it hears, before the browser answers
+                (rx/concat
+                 (->> stream
+                      (rx/filter (ptk/type? :app.main.data.workspace.audio-recording/start-audio-recording))
+                      (rx/take 1)
+                      (rx/delay 10)
+                      (rx/map (constantly stop)))
+                 (->> (rx/timer 10)
+                      (rx/tap (fn [_] (when then (then))))
+                      (rx/ignore))))))
+          (dwar/start-audio-recording)]
+         (fn [state] (check state @added @made))
+         (fn [stream]
+           (->> stream
+                (rx/filter (ptk/type? :app.main.data.workspace.audio-recording/recording-cleared))
+                (rx/take 1)
+                (rx/delay 30)))))
+      done)))
+
+(t/deftest closing-the-timeline-keeps-what-it-recorded
+  (t/async
+    done
+    (let [stopped (atom 0)]
+      (record-until
+       done (store-at 300)
+       {:mic   (fake-mic stopped)
+        :stop  (ptk/data-event :app.main.data.workspace.animation/close-timeline)
+        :delay 30
+        :check (fn [state added _]
+                 (t/is (some? added) "its clip added")
+                 (t/is (nil? (dwar/recording state)))
+                 (t/is (pos? @stopped) "the microphone free again"))}))))
+
+(t/deftest closing-the-workspace-drops-what-it-recorded
+  (t/async
+    done
+    (let [stopped (atom 0)]
+      (record-until
+       done (store-at 300)
+       {:mic   (fake-mic stopped)
+        :stop  (ptk/data-event :app.main.data.workspace/finalize-workspace)
+        :delay 30
+        :check (fn [state added _]
+                 (t/is (nil? added) "nothing added")
+                 (t/is (nil? (dwar/recording state)))
+                 (t/is (pos? @stopped) "the microphone free again"))}))))
+
+(t/deftest closing-the-workspace-while-the-browser-asks-records-nothing
+  ;; The microphone it gives afterwards is freed at once.
+  (t/async
+    done
+    (let [stopped (atom 0)
+          give    (atom nil)]
+      (record-until
+       done (store-at 300)
+       {:open  (fn [_] (js/Promise. (fn [resolve _] (reset! give resolve))))
+        :stop  (ptk/data-event :app.main.data.workspace/finalize-workspace)
+        :then  #(@give (fake-mic stopped))
+        :check (fn [state added made]
+                 (t/is (nil? (dwar/recording state)) "it asks no more")
+                 (t/is (nil? added))
+                 (t/is (not made) "no recorder")
+                 (t/is (pos? @stopped) "the microphone given freed"))}))))
+
+(t/deftest a-recording-left-for-another-page-goes-on-its-own
+  (t/async
+    done
+    (let [store   (store-at 300)
+          page-id (:current-page-id @store)]
+      (record-until
+       done store
+       {:mic   (fake-mic (atom 0))
+        :stop  (ptk/reify ::other-page
+                 ptk/UpdateEvent
+                 (update [_ state] (assoc state :current-page-id (uuid/next)))
+                 ptk/WatchEvent
+                 (watch [_ _ _] (rx/of (ptk/data-event :app.main.data.workspace.pages/finalize-page))))
+        :delay 30
+        :check (fn [_ added _]
+                 (t/is (= page-id (:page-id added)) "on the page it started on"))}))))
+
+;; MICROPHONES AND OPTIONS
+
+(defn- with-media-devices
+  "Call `f` with `devices` as the `navigator.mediaDevices` of the page; a
+  promise of what it gives, the navigator as it was after."
+  [devices f]
+  (let [saved (js/Object.getOwnPropertyDescriptor js/globalThis "navigator")
+        put   #(js/Object.defineProperty js/globalThis "navigator" %)
+        back  #(if (some? saved) (put saved) (js-delete js/globalThis "navigator"))]
+    (put #js {:value #js {:mediaDevices devices} :configurable true :writable true})
+    (-> (js/Promise.resolve (f))
+        (.then (fn [v] (back) v) (fn [e] (back) (js/Promise.reject e))))))
+
+(defn- error-named [name] (doto (js/Error. name) (unchecked-set "name" name)))
+
+(t/deftest a-microphone-gone-falls-back-to-the-system-one
+  (t/async
+    done
+    (let [asked (atom [])
+          media #js {:getUserMedia
+                     (fn [constraints]
+                       (let [device (some-> (.. constraints -audio -deviceId) .-exact)]
+                         (swap! asked conj device)
+                         (if (some? device)
+                           (js/Promise.reject (error-named "OverconstrainedError"))
+                           (js/Promise.resolve :system))))}]
+      (-> (with-media-devices media #(dwar/open-microphone! "gone"))
+          (.then (fn [mic]
+                   (t/is (= :system mic))
+                   (t/is (= ["gone" nil] @asked))))
+          (.catch (fn [e] (t/is false (str e))))
+          (.then (fn [_] (done) nil))))))
+
+(t/deftest a-microphone-denied-is-not-asked-again
+  (t/async
+    done
+    (let [asked (atom 0)
+          media #js {:getUserMedia (fn [_] (swap! asked inc) (js/Promise.reject (error-named "NotAllowedError")))}]
+      (-> (with-media-devices media #(dwar/open-microphone! "usb"))
+          (.then (fn [_] (t/is false "allowed")))
+          (.catch (fn [e]
+                    (t/is (= "NotAllowedError" (.-name e)))
+                    (t/is (= 1 @asked))))
+          (.then (fn [_] (done) nil))))))
+
+(t/deftest the-microphones-are-the-inputs-of-the-browser
+  (t/async
+    done
+    (let [device (fn [kind id label] #js {:kind kind :deviceId id :label label})
+          media  #js {:enumerateDevices
+                      (fn []
+                        (js/Promise.resolve
+                         #js [(device "audioinput" "default" "Default")
+                              (device "audioinput" "communications" "Communications")
+                              (device "videoinput" "cam" "Camera")
+                              (device "audioinput" "a" "USB mic")
+                              (device "audioinput" "b" "")]))}]
+      (-> (with-media-devices media dwar/list-microphones!)
+          (.then (fn [mics]
+                   (t/is (= [{:id "a" :label "USB mic"} {:id "b" :label nil}] mics)
+                         "but the system's own, unlabelled before one is allowed")))
+          (.catch (fn [e] (t/is false (str e))))
+          (.then (fn [_] (done) nil))))))
+
+(t/deftest the-options-of-recording-are-kept
+  (let [store (store-at 0)]
+    (ptk/emit! store (dwar/set-recording-options {:pre-roll 2000 :bogus 1}))
+    (t/is (= {:pre-roll 2000 :device-id nil :quiet? false}
+             (select-keys (dwar/recording-options @store) [:pre-roll :device-id :quiet? :bogus]))
+          "the ones it knows, over the defaults")
+    (t/is (= 2000 (:pre-roll (get @storage/user :app.main.data.workspace.audio-recording/options)))
+          "for the next time")
+    (ptk/emit! store (dwar/set-recording-options {:pre-roll 0}))))

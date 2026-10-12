@@ -16,6 +16,7 @@
    [app.common.types.audio-clip :as ctau]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
+   [app.main.data.helpers :as dsh]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.audio :as dwaa]
    [app.main.data.workspace.clipboard :as dwcp]
@@ -190,6 +191,28 @@
            (fn [state]
              (let [[clip] (clips-of state :board-a)]
                (t/is (= [1200 1000 1500 2500] ((juxt :start :offset :duration :source-duration) clip)))))
+           (after commit-of-clips?)))
+        done))))
+
+(t/deftest audio-goes-on-its-page-whatever-page-shows
+  ;; A recording left for another page goes on its own (see
+  ;; `dwar/start-audio-recording`).
+  (t/async
+    done
+    (let [store (store-of (cthf/add-sample-page (setup-file) :page-2))
+          id    (uuid/next)]
+      (mock/with-mocks
+        {rp/cmd! (uploads (atom []) [id])}
+        (fn [done']
+          (ths/run-store
+           store done'
+           [(dwaa/add-audio-files (cthi/id :board-a) [(audio-file "take.webm" :type "audio/webm" :ms 1500)] 100 nil
+                                  :decode decode :page-id (cthi/id :page-1))]
+           (fn [state]
+             (t/is (= (cthi/id :page-2) (:current-page-id state)) "another page shows")
+             (let [timeline (get-in (dsh/lookup-page state (cthi/id :page-1)) [:timelines (cthi/id :board-a)])]
+               (t/is (= [[id 100 1500]] (mapv (juxt :audio-id :start :duration) (ctau/audio-clips timeline)))
+                     "on the board of its page")))
            (after commit-of-clips?)))
         done))))
 
