@@ -1011,6 +1011,16 @@
           ;; never `done` itself: it would adopt the promise of the next test
           (.finally (fn [] (done)))))))
 
+(t/deftest one-export-runs-at-a-time-in-the-workspace
+  ;; The canvas draws the frames of one: a second waits for nothing.
+  (let [types (fn [state]
+                (let [out (atom [])]
+                  (->> (ptk/watch (dea/export-animation {:format :mp4}) state (rx/empty))
+                       (rx/subs! #(swap! out conj (ptk/type %))))
+                  @out))]
+    (t/is (= [::dea/start-export-animation] (types {})))
+    (t/is (= [] (types {:export-animation {:in-progress true}})) "not while one runs")))
+
 (t/deftest the-export-tab-asks-for-the-lottie-it-plays
   ;; lottie-web plays no dotLottie archive: the tab plays the Lottie made
   ;; for it (see `dea/markup-file`), which it asks for.

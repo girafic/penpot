@@ -2226,14 +2226,25 @@
            (reset! cancel-fn nil)
            (restore-canvas! was-fast))))))
 
+(declare start-export-animation)
+
 (defn export-animation
   "Export the animation of the active board, with the one of the
   component copies in it (see `dwa/export-timeline`), as `format`
   (`:mp4` `:webm` `:gif` `:avif` `:svg` `:lottie` `:dotlottie`); with
   the sound of its audio clips for MP4 and WebM unless `:audio?` is
-  false."
-  [{:keys [format] :as params}]
+  false. Nothing while one runs: the canvas draws the frames of one."
+  [params]
   (ptk/reify ::export-animation
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if (dm/get-in state [:export-animation :in-progress])
+        (rx/empty)
+        (rx/of (start-export-animation params))))))
+
+(defn- start-export-animation
+  [{:keys [format] :as params}]
+  (ptk/reify ::start-export-animation
     ptk/UpdateEvent
     (update [_ state]
       (assoc state :export-animation {:in-progress true
