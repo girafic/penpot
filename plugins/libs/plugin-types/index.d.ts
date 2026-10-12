@@ -4705,7 +4705,7 @@ export interface MarkerProps {
  * `speed`, on a lane of the timeline dock. Times are in milliseconds:
  * `start`, `duration` and the fades of the timeline, `offset` and
  * `sourceDuration` of the file. A locked clip takes no change but its
- * unlocking.
+ * unlocking and a new `name`.
  */
 export interface AudioClip {
   /**
@@ -4714,9 +4714,18 @@ export interface AudioClip {
   readonly id: string;
 
   /**
-   * The name of its file.
+   * The name of its file, shown on the clip and on its lane. Setting it
+   * renames the file, as a double click on its lane does: all the clips
+   * that play it take the name (trimmed), locked ones too. A blank name
+   * is not valid.
+   *
+   * @example
+   * ```js
+   * const [clip] = board.timeline.audioClips;
+   * clip.name = 'Voice-over';
+   * ```
    */
-  readonly name: string;
+  name: string;
 
   /**
    * How long its whole file plays.

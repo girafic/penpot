@@ -1031,6 +1031,24 @@
         (set! (.-lane clip) 2)
         (t/is (= 2 (.-lane clip)) "onto an empty one")))))
 
+(t/deftest a-clip-renames-its-file
+  ;; All the clips that play it, a locked one too; another file stays.
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[file clip-id other-id] (audio-file-of :other? true)
+            _                       (setup file true)
+            ^js timeline            (.-timeline (shape-of file :board-a))
+            by-id                   (fn [id] (some #(when (= (str id) (.-id ^js %)) %) (.-audioClips timeline)))
+            ^js clip                (by-id clip-id)
+            ^js right               (.split clip 1500)
+            names                   #(mapv (fn [^js c] (.-name c)) [clip right (by-id other-id)])]
+        (set! (.-locked right) true)
+        (set! (.-name clip) "  Drums ")
+        (t/is (= ["Drums" "Drums" "voice.wav"] (names)))
+        (t/is (thrown? js/Error (set! (.-name clip) " ")) "not blank")
+        (t/is (thrown? js/Error (set! (.-name clip) 7)))
+        (t/is (= ["Drums" "Drums" "voice.wav"] (names)))))))
+
 (t/deftest audio-clips-need-motion
   (thw/with-wasm-mocks*
     (fn []

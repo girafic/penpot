@@ -17841,7 +17841,7 @@ AudioClip:
     `speed`, on a lane of the timeline dock. Times are in milliseconds:
     `start`, `duration` and the fades of the timeline, `offset` and
     `sourceDuration` of the file. A locked clip takes no change but its
-    unlocking.
+    unlocking and a new `name`.
 
     ```
     interface AudioClip {
@@ -17874,10 +17874,18 @@ AudioClip:
         The id of the clip.
       name: |-
         ```
-        readonly name: string
+        name: string
         ```
 
-        The name of its file.
+        The name of its file, shown on the clip and on its lane. Setting it
+        renames the file, as a double click on its lane does: all the clips
+        that play it take the name (trimmed), locked ones too. A blank name
+        is not valid.
+
+        Example
+        ```
+        const [clip] = board.timeline.audioClips;clip.name = 'Voice-over';
+        ```
       sourceDuration: |-
         ```
         readonly sourceDuration: number

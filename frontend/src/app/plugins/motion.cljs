@@ -577,8 +577,16 @@
       :id
       {:get #(dm/str id)}
 
+      ;; the name of its file: setting it renames the file, as a double
+      ;; click on its lane does, on all its clips, locked ones too
       :name
-      {:get #(:name (locate))}
+      {:get #(:name (locate))
+       :set
+       (fn [value]
+         (if (not (valid-name? value))
+           (u/not-valid plugin-id :name value)
+           (write-timeline! plugin-id file-id page-id board-id :name
+                            #(ctau/rename-audio-file % (:audio-id (locate)) value))))}
 
       :sourceDuration
       {:get #(:source-duration (locate))}
