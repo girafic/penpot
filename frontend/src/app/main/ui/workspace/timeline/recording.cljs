@@ -12,6 +12,7 @@
   `app.main.data.workspace.audio-recording`)."
   (:require-macros [app.main.style :as stl])
   (:require
+   [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.main.data.workspace.audio-recording :as dwar]
    [app.main.store :as st]
@@ -28,6 +29,15 @@
   [ms]
   (let [secs (if (neg? ms) (js/Math.ceil (/ (- ms) 1000)) (quot ms 1000))]
     (dm/str (when (neg? ms) "−") (quot secs 60) ":" (.padStart (str (mod secs 60)) 2 "0"))))
+
+(defn recording-row-index
+  "The index among the rows of the timeline dock `rows` of the one that
+  shows the recording in progress (see `dwar/with-recording-clip`): its
+  lane, or the group of the audio lanes while it is folded; nil without."
+  [rows]
+  (let [recording? (fn [row] (some #(= dwar/recording-clip-id (:id %)) (:clips row)))]
+    (or (d/index-of-pred rows #(and (= :audio (:type %)) (recording? %)))
+        (d/index-of-pred rows #(and (= :audio-group (:type %)) (:collapsed? %) (recording? %))))))
 
 (mf/defc recording-time*
   "How long the recording that started at `since` (`Date.now`) has lasted

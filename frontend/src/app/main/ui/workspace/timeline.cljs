@@ -52,7 +52,7 @@
    [app.main.ui.workspace.timeline.easing :refer [easing-editor*]]
    [app.main.ui.workspace.timeline.keys :as tlk]
    [app.main.ui.workspace.timeline.lanes :as lanes]
-   [app.main.ui.workspace.timeline.recording :refer [recording-controls*]]
+   [app.main.ui.workspace.timeline.recording :refer [recording-controls* recording-row-index]]
    [app.util.audio :as audio]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
@@ -3229,6 +3229,16 @@
       (when (some? (:since audio-recording))
         (let [timer (js/setInterval draw-lanes 50)]
           #(js/clearInterval timer))))
+
+    ;; As it starts, the rows scroll to its lane, unless it is in view:
+    ;; the lanes of audio come after those of the layers.
+    (mf/with-layout-effect [(:since audio-recording)]
+      (when (some? (:since audio-recording))
+        (when-let [^js node (mf/ref-val scroll-ref)]
+          (when-let [index (recording-row-index rows)]
+            (let [geo (assoc (mf/ref-val geo-ref) :scroll-y (.-scrollTop node))]
+              (when-let [scroll-y (lanes/scroll-to-rows geo [index])]
+                (set! (.-scrollTop node) scroll-y)))))))
 
     ;; Maximized with no board to show, it docks, so one can be picked on
     ;; the canvas.

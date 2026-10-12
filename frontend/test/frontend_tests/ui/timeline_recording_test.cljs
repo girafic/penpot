@@ -6,6 +6,7 @@
 
 (ns frontend-tests.ui.timeline-recording-test
   (:require
+   [app.main.data.workspace.audio-recording :as dwar]
    [app.main.ui.workspace.timeline.recording :as rec]
    [app.main.ui.workspace.timeline.recording-options :refer [recording-options*]]
    [cljs.test :as t :include-macros true]
@@ -33,3 +34,17 @@
           (t/is (= dialog (.-activeElement document)) "focused")
           (thd/key-down! window dialog "Escape")
           (t/is (= 1 @closed) "Escape closes them"))))))
+
+(t/deftest the-rows-find-the-lane-of-a-recording
+  ;; Where they scroll to as it starts: its lane, or the group of the audio
+  ;; lanes while it is folded.
+  (let [rec   {:id dwar/recording-clip-id}
+        beat  {:id (random-uuid)}
+        rows  [{:type :layer} {:type :property}
+               {:type :audio-group :collapsed? false :clips [beat rec]}
+               {:type :audio :clips [beat]} {:type :audio :clips [rec]}]]
+    (t/is (= 4 (rec/recording-row-index rows)))
+    (t/is (= 1 (rec/recording-row-index [{:type :layer}
+                                         {:type :audio-group :collapsed? true :clips [beat rec]}]))
+          "folded")
+    (t/is (nil? (rec/recording-row-index (pop rows))) "none without a recording")))
