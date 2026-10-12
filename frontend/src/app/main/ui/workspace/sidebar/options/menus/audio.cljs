@@ -5,16 +5,18 @@
 ;; Copyright (c) KALEIDOS INC
 
 (ns app.main.ui.workspace.sidebar.options.menus.audio
-  "The audio of a board in the design tab, in motion mode, as Figma shows
-  it: a row by audio lane of its timeline, named after its file, which
-  selects its clips in the timeline dock, plays or mutes them and removes
-  them; the add button picks audio files to add at the playhead."
+  "The audio of a board in the design tab, in motion mode: a row by audio
+  lane of its timeline, named after its file (a double click renames
+  it), which selects its clips in the timeline dock, plays or mutes them
+  and removes them; the add button picks audio files to add at the
+  playhead."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.audio :as dwaa]
    [app.main.store :as st]
+   [app.main.ui.components.editable-label :refer [editable-label*]]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
@@ -37,9 +39,24 @@
   {::mf/private true}
   [{:keys [row selected]}]
   (let [{:keys [lane name clips]} row
-        clip-ids (mapv :id clips)
-        muted?   (every? :muted clips)
-        picked?  (every? #(contains? selected %) clip-ids)
+        clip-ids  (mapv :id clips)
+        muted?    (every? :muted clips)
+        picked?   (every? #(contains? selected %) clip-ids)
+        renaming* (mf/use-state false)
+        renaming? (deref renaming*)
+
+        on-start-rename
+        (mf/use-fn #(reset! renaming* true))
+
+        on-cancel-rename
+        (mf/use-fn #(reset! renaming* false))
+
+        on-rename
+        (mf/use-fn
+         (mf/deps lane)
+         (fn [value]
+           (reset! renaming* false)
+           (st/emit! (dwaa/rename-lane lane value))))
 
         on-select
         (mf/use-fn
@@ -57,15 +74,25 @@
          #(st/emit! (dwaa/remove-lane-clips lane)))]
 
     [:div {:class (stl/css :audio-lane)}
-     [:button {:type "button"
-               :class (stl/css-case :audio-name true
-                                    :selected picked?
-                                    :muted muted?)
-               :title name
-               :aria-pressed picked?
-               :on-click on-select}
-      [:> i/icon* {:icon-id (if muted? i/volume-off i/volume) :size "s"}]
-      [:span {:class (stl/css :audio-label)} name]]
+     (if renaming?
+       [:div {:class (stl/css-case :audio-name true :renaming true)}
+        [:> i/icon* {:icon-id (if muted? i/volume-off i/volume) :size "s"}]
+        [:> editable-label* {:value name
+                             :display-value name
+                             :is-editing true
+                             :class-input (stl/css :audio-name-input)
+                             :on-change on-rename
+                             :on-cancel on-cancel-rename}]]
+       [:button {:type "button"
+                 :class (stl/css-case :audio-name true
+                                      :selected picked?
+                                      :muted muted?)
+                 :title name
+                 :aria-pressed picked?
+                 :on-click on-select
+                 :on-double-click on-start-rename}
+        [:> i/icon* {:icon-id (if muted? i/volume-off i/volume) :size "s"}]
+        [:span {:class (stl/css :audio-label)} name]])
      [:div {:class (stl/css :audio-actions)}
       [:> icon-button* {:variant "ghost"
                         :aria-label (if muted?

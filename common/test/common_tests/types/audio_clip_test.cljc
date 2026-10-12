@@ -128,6 +128,17 @@
         (t/is (not (:locked (ctau/get-audio-clip unlocked id))))
         (t/is (= 0 (:start (ctau/get-audio-clip (ctau/move-audio-clip unlocked id 0) id))))))))
 
+(t/deftest a-file-takes-the-name-it-is-given
+  ;; All its clips, a locked one too, as a locked layer takes a new name;
+  ;; those of other files stay.
+  (let [a     (clip :start 0 :duration 1000)
+        b     (clip :audio-id (:audio-id a) :start 2000 :duration 1000 :locked true)
+        other (clip :name "drums.wav" :start 0 :duration 1000)
+        tl    (timeline-with 5000 a b other)
+        names #(mapv (comp :name (partial the-clip %)) [a b other])]
+    (t/is (= ["Voice" "Voice" "drums.wav"] (names (ctau/rename-audio-file tl (:audio-id a) "  Voice "))))
+    (t/is (= tl (ctau/rename-audio-file tl (:audio-id a) " ")) "not blank")))
+
 (t/deftest edits-of-a-clip
   (let [c  (clip :start 1000 :duration 2000)
         tl (timeline-with 5000 c)

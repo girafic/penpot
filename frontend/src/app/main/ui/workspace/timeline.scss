@@ -786,6 +786,21 @@ $header-height: $ruler-height + $row-height;
 
 // The label of a lane of audio clips, in the colour of their bars (see
 // `lanes/palette`).
+// renaming a lane: its name an input in its label
+.audio-rename {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-inline-size: 0;
+  block-size: 100%;
+  cursor: text;
+}
+
+.audio-rename-input {
+  block-size: 22px;
+  border-radius: deprecated.$br-4;
+}
+
 .audio-icon {
   display: grid;
   place-items: center;

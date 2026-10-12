@@ -41,6 +41,7 @@
    [app.main.store :as st]
    [app.main.ui.components.color-input :refer [color-input*]]
    [app.main.ui.components.context-menu-a11y :refer [context-menu*]]
+   [app.main.ui.components.editable-label :refer [editable-label*]]
    [app.main.ui.components.numeric-input :as deprecated-input]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.foundations.assets.icon :as i]
@@ -817,8 +818,9 @@
 
 (mf/defc audio-row*
   "The label of a lane of audio clips (see `dwaa/audio-rows`), the name of
-  the file it plays, which a drag up or down puts at another place among
-  the lanes (`on-drag-down`), with the buttons of a layer row: its sound, which mutes all its clips or plays
+  the file it plays (a double click renames it), which a drag up or down
+  puts at another place among the lanes (`on-drag-down`), with the
+  buttons of a layer row: its sound, which mutes all its clips or plays
   them (`muted?` when all are muted), and its lock (`locked?` when all
   are locked). A drop of audio files on it adds them on this lane."
   {::mf/private true
@@ -826,6 +828,21 @@
   [{:keys [row-index lane number name muted? locked? hovered? on-hover on-drag-down]}]
   (let [[on-pointer-enter on-pointer-leave] (use-row-hover row-index on-hover)
         label (if (str/blank? name) (tr "workspace.animation.audio-lane" number) name)
+        renaming* (mf/use-state false)
+        renaming? (deref renaming*)
+
+        on-start-rename
+        (mf/use-fn #(reset! renaming* true))
+
+        on-cancel-rename
+        (mf/use-fn #(reset! renaming* false))
+
+        on-rename
+        (mf/use-fn
+         (mf/deps lane)
+         (fn [value]
+           (reset! renaming* false)
+           (st/emit! (dwaa/rename-lane lane value))))
 
         on-pointer-down
         (mf/use-fn
@@ -852,8 +869,21 @@
             :on-pointer-down on-pointer-down}
       [:span {:class (stl/css :audio-icon)}
        [:> i/icon* {:icon-id i/volume :size "s"}]]
-      [:span {:class (stl/css :property-name) :title label}
-       label]
+      (if renaming?
+        ;; neither a drag of the lane nor the keys of the dock meanwhile
+        [:span {:class (stl/css :audio-rename)
+                :on-pointer-down dom/stop-propagation
+                :on-key-down dom/stop-propagation}
+         [:> editable-label* {:value name
+                              :display-value label
+                              :is-editing true
+                              :class-input (stl/css :audio-rename-input)
+                              :on-change on-rename
+                              :on-cancel on-cancel-rename}]]
+        [:span {:class (stl/css :property-name)
+                :title label
+                :on-double-click on-start-rename}
+         label])
       [:> row-toggles* {:hidden? muted?
                         :locked? locked?
                         :visibility-icon (if muted? i/volume-off i/volume)

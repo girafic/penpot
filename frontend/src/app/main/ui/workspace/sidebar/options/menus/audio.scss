@@ -70,6 +70,17 @@
   }
 }
 
+// renaming: the name an input in the row
+.renaming {
+  padding-inline-end: 0;
+  cursor: text;
+}
+
+.audio-name-input {
+  height: $sz-24;
+  border-radius: $br-4;
+}
+
 .audio-label {
   overflow: hidden;
   text-overflow: ellipsis;

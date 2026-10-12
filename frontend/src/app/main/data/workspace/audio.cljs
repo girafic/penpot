@@ -689,6 +689,18 @@
   (edit-clips (fn [timeline]
                 (reduce #(ctau/set-audio-clip-muted %1 %2 muted?) timeline (lane-clip-ids timeline lane)))))
 
+(defn rename-lane
+  "Name the files the audio `lane` of the timeline in the dock plays
+  `name`, on all their clips (see `ctau/rename-audio-file`), in one undo
+  step: what editing the name of its row does."
+  [lane name]
+  (edit-clips (fn [timeline]
+                (reduce #(ctau/rename-audio-file %1 %2 name)
+                        timeline
+                        (into #{}
+                              (comp (filter #(= lane (:lane %))) (map :audio-id))
+                              (vals (:audio-clips timeline)))))))
+
 (defn remove-lane-clips
   "Remove the clips on the audio `lane` of the timeline in the dock, in
   one undo step: what the remove button of its row in the design tab

@@ -718,6 +718,23 @@
          (t/is (= [nil true nil] (states state :locked)) "one undo a step")
          (t/is (= [true nil nil] (states state :muted))))))))
 
+(t/deftest the-row-of-a-lane-renames-its-file
+  (t/async
+    done
+    (let [voice        (uuid/next)
+          [clips file] (with-clips {:lane 0 :audio-id voice} {:lane 0 :audio-id voice :start 1200 :locked true}
+                         {:lane 1})
+          names        (fn [state]
+                         (let [timeline (timeline-of state :board-a)]
+                           (mapv #(:name (ctau/get-audio-clip timeline (:id %))) clips)))]
+      (run-clip-edits
+       done file
+       [(dwaa/rename-lane 0 "Voice-over")]
+       (fn [state]
+         (t/is (= ["Voice-over" "Voice-over" "x"] (names state)) "all the clips of its file, a locked one too"))
+       (fn [state]
+         (t/is (= ["x" "x" "x"] (names state)) "one undo"))))))
+
 (t/deftest the-group-of-the-lanes-mutes-and-locks-all
   (t/async
     done

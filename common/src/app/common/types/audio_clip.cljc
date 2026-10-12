@@ -19,13 +19,14 @@
   `app.common.types.animation/audio-plan`. Adding, moving or trimming a
   clip never changes the length of the timeline, which is also its loop
   period and its export length; `fit-duration-to-audio` does, when asked.
-  A locked clip takes no edit but its unlocking."
+  A locked clip takes no edit but its unlocking and a new name."
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.math :as mth]
    [app.common.schema :as sm]
-   [app.common.uuid :as uuid]))
+   [app.common.uuid :as uuid]
+   [cuerdas.core :as str]))
 
 (def max-audio-duration
   "The longest audio file a clip may play, in ms: 5 minutes, about 115 MB
@@ -271,9 +272,21 @@
   [timeline clip-id fade-in fade-out]
   (edit-clip timeline clip-id #(assoc % :fade-in fade-in :fade-out fade-out)))
 
+(defn rename-audio-file
+  "`timeline` with the clips that play the file `audio-id` named `name`,
+  trimmed (nothing when blank): the name shown on them and on their
+  lane. Locked ones too, as a locked layer takes a new name."
+  [timeline audio-id name]
+  (let [name (str/trim (or name ""))]
+    (if (str/blank? name)
+      timeline
+      (update timeline :audio-clips
+              (fn [clips]
+                (d/update-vals clips #(cond-> % (= audio-id (:audio-id %)) (assoc :name name))))))))
+
 (defn set-audio-clip-locked
-  "`timeline` with the clip `clip-id` locked or not: the one change a
-  locked clip takes."
+  "`timeline` with the clip `clip-id` locked or not: with a new name (see
+  `rename-audio-file`), the one change a locked clip takes."
   [timeline clip-id locked?]
   (if (some? (get-audio-clip timeline clip-id))
     (update-in timeline [:audio-clips clip-id]
