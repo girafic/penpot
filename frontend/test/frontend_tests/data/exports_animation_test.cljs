@@ -1670,6 +1670,23 @@
   (t/is (= [] (issues-of :lottie)) "a plain rect is a vector")
   (t/is (= [] (issues-of :mp4)) "videos play as the canvas"))
 
+(t/deftest an-svg-resizes-a-group-on-its-layers
+  ;; Not a stretch: its layers resize as on the canvas (see
+  ;; `aexp/svg-expand-group-sizes`); Lottie stretches it still.
+  (let [{:keys [objects bid cid]} (test-objects)
+        gid     (uuid/next)
+        objects (-> objects
+                    (assoc gid (cts/setup-shape {:id gid :type :group :x 10 :y 10 :width 20 :height 20
+                                                 :shapes [cid] :parent-id bid :frame-id bid}))
+                    (assoc-in [bid :shapes] [gid])
+                    (assoc-in [cid :parent-id] gid))
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe gid {:time 0 :property :width :value 20})
+                    (cta/add-keyframe gid {:time 1000 :property :width :value 40}))
+        issues  (dea/export-issues objects tl)]
+    (t/is (= [] (get issues :svg [])))
+    (t/is (some #{:lottie/size} (get issues :lottie [])))))
+
 (t/deftest what-svg-keeps-as-it-rests
   (t/is (= []
            (issues-of :svg :kfs [{:time 0 :property :fill-color :value "#ff0000"}

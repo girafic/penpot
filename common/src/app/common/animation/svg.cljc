@@ -1247,6 +1247,8 @@
          timeline (-> timeline
                       (cta/flatten-splits #{:char :word :line} unit-texts)
                       (cta/resolve-animations objects)
+                      ;; the size of a group on its layers (see `aexp/svg-expand-group-sizes`)
+                      (aexp/svg-expand-group-sizes objects)
                       cta/expand-loops)
          board-id (:board-id timeline)
          board    (get objects board-id)
@@ -1269,7 +1271,10 @@
                         (:tracks timeline))
          css      (acss/timeline->css timeline objects
                                       {:svg? true
-                                       :sized (into sized outlined)
+                                       :sized (-> sized
+                                                  (into outlined)
+                                                  ;; groups resize on their layers
+                                                  (into (aexp/svg-sized-groups timeline)))
                                        :origin (fn [shape track]
                                                  (let [[x y] (aexp/lottie-pivot shape ox oy (cta/track-origin track))]
                                                    (str (acss/fmt x) "px " (acss/fmt y) "px")))

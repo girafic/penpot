@@ -645,17 +645,22 @@
           lottie-set (set lottie-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
           ;; SVG and Lottie play some on the outlines, SVG more (see
-          ;; `aexp/svg-outline-sized?`, `aexp/svg-box-sized?`)
+          ;; `aexp/svg-outline-sized?`, `aexp/svg-box-sized?`), and the
+          ;; size of a group on its layers (see `aexp/svg-expand-group-sizes`)
+          svg-tl    (aexp/svg-expand-group-sizes resolved objects)
           stretch?  (fn [svg?]
-                      (boolean
-                       (some (fn [[id track]]
-                               (let [shape (get objects id)]
-                                 (and (some? shape)
-                                      (some #(contains? #{:width :height} (:property %)) (:keyframes track))
-                                      (not (aexp/svg-sized? shape track))
-                                      (not (and svg? (or (aexp/svg-outline-sized? shape track)
-                                                         (aexp/svg-box-sized? shape track)))))))
-                             (:tracks resolved))))
+                      (let [tl     (if svg? svg-tl resolved)
+                            groups (if svg? (aexp/svg-sized-groups svg-tl) #{})]
+                        (boolean
+                         (some (fn [[id track]]
+                                 (let [shape (get objects id)]
+                                   (and (some? shape)
+                                        (some #(contains? #{:width :height} (:property %)) (:keyframes track))
+                                        (not (contains? groups id))
+                                        (not (aexp/svg-sized? shape track))
+                                        (not (and svg? (or (aexp/svg-outline-sized? shape track)
+                                                           (aexp/svg-box-sized? shape track)))))))
+                               (:tracks tl)))))
           units     (cta/unit-timelines resolved objects)
           ;; the texts an SVG outlines, but those whose units play as
           ;; pictures (see `outline-texts`, `unit-texts`)
@@ -1880,6 +1885,10 @@
         ;; split texts play their units, each on its own
         texts    (unit-texts objects tl)
         vectors? (= :svg format)
+        ;; an SVG plays the size of a group on its layers (see
+        ;; `aexp/svg-expand-group-sizes`): they are layers then; the
+        ;; canvas, which resizes them with the group, plays `tl`
+        mtl      (cond-> tl vectors? (aexp/svg-expand-group-sizes objects))
         lottie?  (contains? #{:lottie :dotlottie} format)
         ;; Lottie draws the other texts as the outlines of their glyphs
         ;; (see `outline-texts`)
@@ -1893,7 +1902,7 @@
         ;; the pictures (or vectors) of the layers, then of the units of
         ;; split texts
         n-layers (if vectors?
-                   (->> (aexp/export-layer-ids objects (cta/resolve-animations tl objects))
+                   (->> (aexp/export-layer-ids objects (cta/resolve-animations mtl objects))
                         (cons board-id)
                         (remove texts)
                         (count))
@@ -1911,7 +1920,7 @@
             ;; only a picture to look at
             (.catch (constantly nil)))))
     (p/let [vectors (when vectors?
-                      (vector-layers objects tl texts
+                      (vector-layers objects mtl texts
                                      {:yield yield
                                       :outline? outline?
                                       :bridge bridge
@@ -1936,7 +1945,7 @@
                          :cancelled? cancelled?
                          :on-progress (fn [j _] (pictures (+ n-layers j) total))}))
             result (do (throw-if-cancelled cancelled?)
-                       (markup-file tl (if lottie? shapes (or (:objects vectors) objects)) board format
+                       (markup-file mtl (if lottie? shapes (or (:objects vectors) objects)) board format
                                     (merge images units)
                                     {:ids? ids? :bbox? bbox? :fonts (:fonts vectors)
                                      :propagate cgm/set-objects-modifiers

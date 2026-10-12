@@ -18,7 +18,8 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.modifiers :as ctm]
-   [app.common.types.path :as path]))
+   [app.common.types.path :as path]
+   [app.common.uuid :as uuid]))
 
 (def kappa
   "How far the control points of a cubic curve of a quarter of a circle
@@ -311,6 +312,100 @@
           (pos? (or (:height sr) 0))
           (box-paints? shape)
           (every? plain-paint? (:strokes shape))))))
+
+(def ^:private geometry-properties
+  "The properties that move, turn or resize a layer."
+  #{:x :y :width :height :scale-x :scale-y :rotation})
+
+(defn- expand-group-size
+  "`timeline` with the width and height `timeline` animates on the group
+  `gid` also on its layers, as the canvas resizes them with it: each
+  takes them scaled to its own size, from the same keyframes (times and
+  easings) and around the pivot of the group, which its own becomes (a
+  share of its box, past it too). Nil when it can not: the group is no
+  plain one (a masked group, a turned one, one that scales), or a layer
+  of it moves, turns or resizes on its own, is turned (the canvas skews
+  it) or has no size along an axis that plays."
+  [timeline objects gid]
+  (let [group    (get objects gid)
+        track    (dm/get-in timeline [:tracks gid])
+        kfs      (:keyframes track)
+        sizes    (filterv #(svg-size-properties (:property %)) kfs)
+        animated (into #{} (map :property) sizes)
+        {:keys [x y width height]} (:selrect group)
+        origin   (cta/track-origin track)
+        px       (+ x (* width (:x origin)))
+        py       (+ y (* height (:y origin)))
+        kids     (mapv #(get objects %) (:shapes group))
+        sized?   (fn [sr]
+                   (and (or (not (animated :width)) (pos? (or (:width sr) 0)))
+                        (or (not (animated :height)) (pos? (or (:height sr) 0)))))]
+    (when (and (= :group (:type group))
+               (not (:masked-group group))
+               (seq sizes)
+               (not-any? #(contains? #{:scale-x :scale-y} (:property %)) kfs)
+               (unturned? group)
+               (sized? (:selrect group))
+               (seq kids)
+               (every? (fn [kid]
+                         (and (some? kid)
+                              (unturned? kid)
+                              (sized? (:selrect kid))
+                              (not-any? #(geometry-properties (:property %))
+                                        (dm/get-in timeline [:tracks (:id kid) :keyframes]))))
+                       kids))
+      (reduce (fn [timeline kid]
+                (let [sr     (:selrect kid)
+                      share  (fn [pivot from size]
+                               (if (pos? (or size 0)) (/ (- pivot from) size) 0.5))
+                      scaled (mapv (fn [kf]
+                                     (let [[base own] (if (= :width (:property kf))
+                                                        [width (:width sr)]
+                                                        [height (:height sr)])]
+                                       (assoc kf :id (uuid/next) :value (* own (/ (:value kf) base)))))
+                                   sizes)]
+                  (update-in timeline [:tracks (:id kid)]
+                             (fn [kt]
+                               (-> (or kt {:shape-id (:id kid) :keyframes []})
+                                   (update :keyframes #(cta/sort-keyframes (into (or % []) scaled)))
+                                   (assoc :origin {:x (share px (:x sr) (:width sr))
+                                                   :y (share py (:y sr) (:height sr))}))))))
+              timeline
+              kids))))
+
+(defn svg-expand-group-sizes
+  "`timeline` (its animations resolved into keyframes, see
+  `cta/resolve-animations`) with the width and height it plays on groups
+  also on their layers, as the canvas resizes them with the group (see
+  `expand-group-size`), the layers in groups inside them too: an SVG of
+  vectors then resizes each on its elements as it can, its strokes as
+  wide, where a scale of the group would stretch them all. Those groups
+  keep their keyframes (they are layers still) but play no size (see
+  `svg-sized-groups`). Once only: a timeline so expanded stays."
+  [timeline objects]
+  (if (contains? timeline ::sized-groups)
+    timeline
+    (let [;; looping sizes unrolled first, so the layers repeat them too
+          timeline (-> timeline (cta/resolve-animations objects) cta/expand-loops)
+          board-id (:board-id timeline)
+          ;; the outer groups first: they give those inside them a size
+          ids      (rest (tree-seq #(seq (dm/get-in objects [% :shapes]))
+                                   #(dm/get-in objects [% :shapes])
+                                   board-id))]
+      (reduce (fn [timeline id]
+                (if-let [expanded (when (some #(svg-size-properties (:property %))
+                                              (dm/get-in timeline [:tracks id :keyframes]))
+                                    (expand-group-size timeline objects id))]
+                  (update expanded ::sized-groups conj id)
+                  timeline))
+              (assoc timeline ::sized-groups #{})
+              ids))))
+
+(defn svg-sized-groups
+  "The groups whose size `timeline` plays on their layers (see
+  `svg-expand-group-sizes`), not on themselves."
+  [timeline]
+  (get timeline ::sized-groups #{}))
 
 (defn svg-sized-ids
   "The shapes whose width and height `timeline` (with its keyframes, see

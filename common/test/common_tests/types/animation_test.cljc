@@ -1524,6 +1524,84 @@
         (t/is (re-find #"100% \{ cx: 150px; cy: 120px; rx: 100px; ry: 20px; \}" svg))
         (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of its group")))))
 
+(defn- group-of
+  "A group of `shapes` in `board`, as objects: `[objects group]`."
+  [board & shapes]
+  (let [bid   (:id board)
+        gid   (uuid/next)
+        rect  (gsh/shapes->rect shapes)
+        group (cts/setup-shape {:id gid :type :group :x (:x rect) :y (:y rect)
+                                :width (:width rect) :height (:height rect)
+                                :shapes (mapv :id shapes)})]
+    [(into {bid (assoc board :shapes [gid])
+            gid (assoc group :parent-id bid :frame-id bid)}
+           (map (fn [shape] [(:id shape) (assoc shape :parent-id gid :frame-id bid)]))
+           shapes)
+     group]))
+
+(t/deftest an-svg-resizes-a-group-on-its-layers
+  ;; As the canvas resizes them with it, around its pivot: their strokes
+  ;; and corners stay, where a scale of the group stretches them.
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        rect   #(cts/setup-shape {:type :rect :x %1 :y 10 :width 40 :height 20 :r1 4 :r2 4 :r3 4 :r4 4
+                                  :fills [{:fill-color "#ff0000" :fill-opacity 1}]
+                                  :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2
+                                             :stroke-style :solid :stroke-alignment :inner}]})
+        a      (rect 0)
+        b      (rect 60)
+        [objects group] (group-of board a b)
+        gid    (:id group)
+        grow   (fn [objects]
+                 (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                     (cta/add-keyframe gid {:time 0 :property :width :value 100 :easing :ease-out})
+                     (cta/add-keyframe gid {:time 1000 :property :width :value 200})
+                     (cta/resolve-animations objects)))
+        tl     (aexp/svg-expand-group-sizes (grow objects) objects)
+        kfs    (fn [id] (mapv (juxt :time (comp double :value) :easing) (get-in tl [:tracks id :keyframes])))]
+    (t/testing "its layers take its size, scaled to theirs, around its pivot"
+      (t/is (= #{gid} (aexp/svg-sized-groups tl)))
+      (t/is (= [[0 40.0 :ease-out] [1000 80.0 nil]] (kfs (:id a))) "the same keyframes and easings")
+      (t/is (= [[0 40.0 :ease-out] [1000 80.0 nil]] (kfs (:id b))))
+      (t/is (= {:x 1.25 :y 0.5} (get-in tl [:tracks (:id a) :origin])) "the middle of the group, past its box")
+      (t/is (= {:x -0.25 :y 0.5} (get-in tl [:tracks (:id b) :origin])))
+      (t/is (= 2 (count (get-in tl [:tracks gid :keyframes]))) "the group keeps its own, a layer still")
+      (t/is (= tl (aexp/svg-expand-group-sizes tl objects)) "once only"))
+    (t/testing "where it can not, it stretches as before"
+      (let [moved (-> (grow objects)
+                      (assoc-in [:tracks (:id a)] {:shape-id (:id a)
+                                                   :keyframes [{:id (uuid/next) :time 0 :property :x :value 0}
+                                                               {:id (uuid/next) :time 1000 :property :x :value 20}]}))]
+        (t/is (empty? (aexp/svg-sized-groups (aexp/svg-expand-group-sizes moved objects)))
+              "a layer that moves on its own"))
+      (let [turned (update objects (:id b) gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 80 20) 30))]
+        (t/is (empty? (aexp/svg-sized-groups (aexp/svg-expand-group-sizes (grow turned) turned)))
+              "a turned layer, which the canvas skews"))
+      (let [masked (assoc-in objects [gid :masked-group] true)]
+        (t/is (empty? (aexp/svg-sized-groups (aexp/svg-expand-group-sizes (grow masked) masked)))
+              "a masked group")))
+    (t/testing "the SVG: its layers resize, the group scales not"
+      (let [svg (asvg/timeline->svg (grow objects) objects
+                                    {(:id a) {:markup "<rect></rect>"} (:id b) {:markup "<rect></rect>"}
+                                     gid {:markup "<g></g>"}})]
+        (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of the group")
+        (t/is (re-find #"100% \{ x: -50px; y: 10px; width: 80px; height: 20px; \}" svg) "the first, from the middle of the group")
+        (t/is (re-find #"100% \{ x: 70px; y: 10px; width: 80px; height: 20px; \}" svg) "the second")))))
+
+(t/deftest an-svg-resizes-the-groups-in-a-group
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        rect  (cts/setup-shape {:type :rect :x 0 :y 0 :width 40 :height 20
+                                :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        [inner-objects inner] (group-of board rect)
+        [objects outer] (group-of board inner)
+        objects (merge inner-objects objects
+                       {(:id inner) (assoc inner :parent-id (:id outer) :frame-id (:id board))})
+        tl    (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                  (cta/add-keyframe (:id outer) {:time 0 :property :height :value 20})
+                  (cta/add-keyframe (:id outer) {:time 1000 :property :height :value 60})
+                  (aexp/svg-expand-group-sizes objects))]
+    (t/is (= #{(:id outer) (:id inner)} (aexp/svg-sized-groups tl)))
+    (t/is (= [20.0 60.0] (mapv (comp double :value) (get-in tl [:tracks (:id rect) :keyframes]))))))
+
 (t/deftest an-svg-plays-all-the-animations-of-an-element
   ;; A rule of its own of each would drop the others.
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
