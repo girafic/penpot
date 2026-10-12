@@ -244,6 +244,33 @@
                   (:strokes shape))
           (or (= :circle (:type shape)) (svg-even-corners? shape track))))))
 
+(defn svg-outline-sized?
+  "Whether an SVG of vectors plays the width and height `track` animates
+  on `shape` on the path of its outline, by SMIL, as the canvas resizes it
+  (see `asvg/svg-smil`), its strokes as wide, when it can not on its
+  elements (see `svg-sized?`): a path, a boolean with its outline, or a
+  rectangle (turned, or its corners not alike as they play, drawn as a
+  path), of one fill at most, in plain colours and without an outer
+  stroke, which the SVG renderer bounds by its box at rest (a pattern, a
+  mask). Otherwise width and height play as a scale of its group, which
+  stretches it, its strokes too."
+  [shape track]
+  (let [sr (:selrect shape)]
+    (boolean
+     (and (some #(svg-size-properties (:property %)) (:keyframes track))
+          (not (svg-sized? shape track))
+          (case (:type shape)
+            :path true
+            :bool (some? (:content shape))
+            :rect true
+            false)
+          (pos? (or (:width sr) 0))
+          (pos? (or (:height sr) 0))
+          (<= (count (:fills shape)) 1)
+          (every? plain-paint? (:fills shape))
+          (every? #(and (plain-paint? %) (not= :outer (svg-stroke-alignment shape %)))
+                  (:strokes shape))))))
+
 (defn svg-sized-ids
   "The shapes whose width and height `timeline` (with its keyframes, see
   `resolve-animations`) plays on their elements in an SVG of vectors

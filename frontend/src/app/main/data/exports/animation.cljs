@@ -559,15 +559,16 @@
 
 (defn- svg-static?
   "Whether `track` animates on `shape` what an SVG keeps as it rests: the
-  strokes and trim of a text not `outlined?` (see `outline-texts`),
-  which the SVG renderer draws as text. CSS plays the rest on its
-  vectors, SMIL its shadows and the corners CSS can not (see
-  `asvg/svg-filter-shadows?`, `asvg/svg-smil-corners?`)."
+  trim of a text not `outlined?` (see `outline-texts`), which the SVG
+  renderer draws as text, which takes no length of its path. CSS plays
+  the rest on its vectors, the strokes of a text too, SMIL its shadows
+  and what CSS can not on outlines (see `asvg/svg-filter-shadows?`,
+  `asvg/svg-smil-corners?`, `aexp/svg-outline-sized?`)."
   [shape track outlined?]
   (boolean
    (and (= :text (:type shape))
         (not outlined?)
-        (some #(#{:stroke-color :stroke-opacity :stroke-width :trim-start :trim-end :trim-offset} (:property %))
+        (some #(#{:trim-start :trim-end :trim-offset} (:property %))
               (:keyframes track)))))
 
 (defn- shown
@@ -643,14 +644,17 @@
           lottie-ids (aexp/export-layer-ids objects resolved)
           lottie-set (set lottie-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
-          ;; SVG and Lottie play some on the outlines
-          stretch?  (boolean
-                     (some (fn [[id track]]
-                             (let [shape (get objects id)]
-                               (and (some? shape)
-                                    (some #(contains? #{:width :height} (:property %)) (:keyframes track))
-                                    (not (aexp/svg-sized? shape track)))))
-                           (:tracks resolved)))
+          ;; SVG and Lottie play some on the outlines, SVG more (see
+          ;; `aexp/svg-outline-sized?`)
+          stretch?  (fn [svg?]
+                      (boolean
+                       (some (fn [[id track]]
+                               (let [shape (get objects id)]
+                                 (and (some? shape)
+                                      (some #(contains? #{:width :height} (:property %)) (:keyframes track))
+                                      (not (aexp/svg-sized? shape track))
+                                      (not (and svg? (aexp/svg-outline-sized? shape track))))))
+                             (:tracks resolved))))
           units     (cta/unit-timelines resolved objects)
           ;; the texts an SVG outlines, but those whose units play as
           ;; pictures (see `outline-texts`, `unit-texts`)
@@ -680,8 +684,8 @@
                              (when-let [shape (get objects id)]
                                (svg-static? shape track (outlined? shape))))
                            (:tracks resolved)))]
-           [:svg/size #{:svg} stretch?]
-           [:lottie/size lottie-formats stretch?]
+           [:svg/size #{:svg} (stretch? true)]
+           [:lottie/size lottie-formats (stretch? false)]
            [:lottie/shadow lottie-formats
             (some?* (fn [shape] (seq (shown (:shadow shape)))))]
            [:lottie/blur lottie-formats

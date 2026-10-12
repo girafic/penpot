@@ -12,6 +12,7 @@
   texts as the outlines of their glyphs (see `outlined`)."
   (:require
    ["react-dom/server" :as rds]
+   [app.common.animation.export :as aexp]
    [app.common.animation.svg :as asvg]
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
@@ -46,14 +47,22 @@
 (def ^:private trim-properties
   #{:trim-start :trim-end :trim-offset})
 
+(defn- smil-outline?
+  "Whether SMIL plays on the outline of `shape` what `track` animates:
+  its corners (see `asvg/svg-smil-corners?`) or its size (see
+  `aexp/svg-outline-sized?`)."
+  [shape track]
+  (boolean (and (some? shape)
+                (or (asvg/svg-smil-corners? shape track) (aexp/svg-outline-sized? shape track)))))
+
 (defn- rest-shape
   "`shape` as its layer draws it: without its opacity, which the group of
   the layer has, and without what a filter of its own draws over it,
   which would else show twice: its blur, as strong as on the canvas, and
   the shadows its animation, `track`, plays (see `asvg/svg-filter-blur?`,
   `asvg/svg-filter-shadows?`). Its outline a path when SMIL plays its
-  corners (see `asvg/svg-smil-corners?`), which are not alike as it plays.
-  A board that hides its fill in exports, without it."
+  corners or its size on it (see `smil-outline?`), as corners not alike
+  as it plays draw. A board that hides its fill in exports, without it."
   [shape track]
   (let [shadows? (asvg/svg-filter-shadows? shape)]
     (cond-> (dissoc shape :opacity)
@@ -64,7 +73,7 @@
       (assoc :shadow [])
 
       ;; corners alike draw as a `rect`
-      (and (asvg/svg-smil-corners? shape track) (ctsr/all-equal? shape))
+      (and (smil-outline? shape track) (= :rect (:type shape)) (ctsr/all-equal? shape))
       (as-> shape (assoc shape
                          :r1 (or (:r1 shape) 0) :r2 (or (:r2 shape) 0) :r3 (or (:r3 shape) 0)
                          :r4 (+ (or (:r4 shape) 0) 0.0001)))
@@ -74,10 +83,13 @@
 
 (defn- mark-outline
   "`markup` with the elements of the outline of `shape` (see
-  `rest-shape`) marked, which SMIL plays the corners on (see
-  `asvg/svg-smil-corners?`)."
+  `rest-shape`) marked, which SMIL plays the corners or the size on (see
+  `smil-outline?`): the path of a rectangle, or of a path, its fill and
+  the strokes along it, as the SVG renderer writes them."
   [markup shape]
-  (if-let [d (.-d (attrs/get-border-props shape))]
+  (if-let [d (if (contains? #{:path :bool} (:type shape))
+               (some-> (:content shape) str)
+               (.-d (attrs/get-border-props shape)))]
     (let [attr (str " d=\"" d "\"")]
       (.join (.split markup attr) (str attr " data-penpot-outline=\"\"")))
     markup))
@@ -223,12 +235,11 @@
                 (str/replace #"^<svg[^>]*>" "")
                 (str/replace #"</svg>$" "")
                 (inline-uses)
+                ;; marked as the renderer writes it, before it is made compact
+                (cond-> (smil-outline? (get objects id) track) (mark-outline shape))
                 (compact-paths))
       (some #(trim-properties (:property %)) (:keyframes track))
-      (with-path-length id)
-
-      (asvg/svg-smil-corners? (get objects id) track)
-      (mark-outline shape))))
+      (with-path-length id))))
 
 (def ^:private media-fetches
   "How many images `load-media` fetches at once."

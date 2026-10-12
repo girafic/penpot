@@ -13,6 +13,8 @@
    [app.common.animation.export :as aexp]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.geom.matrix :as gmt]
+   [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes.bounds :as gsb]
    [app.common.geom.shapes.corners :as gco]
@@ -266,31 +268,34 @@
                  (some? color)   (conj (str "fill: " color ";"))
                  (some? opacity) (conj (str "fill-opacity: " (acss/fmt opacity) ";")))))
            svg-fill-properties])
+        ;; a text draws its strokes along its glyphs, each line or run in a
+        ;; group of its own: its trim stays as it rests, as a `text` takes
+        ;; no length of its path
         stroke-targets
-        (when-not text?
-          (mapcat
-           (fn [index]
-             (let [;; inner and outer strokes are drawn twice as wide, then cut
-                   factor (if (= :center (aexp/svg-stroke-alignment shape (get strokes index))) 1 2)
-                   {:keys [paint mask]} (svg-stroke-elements shape index)
-                   width  #(when-let [w (indexed-value (:stroke-width %) index)]
-                             (str "stroke-width: " (acss/fmt (* factor w)) ";"))]
-               (cond-> [[[paint]
-                         (fn [values]
-                           (let [color   (indexed-value (:stroke-color values) index)
-                                 opacity (indexed-value (:stroke-opacity values) index)]
-                             (cond-> (vec (svg-trim-declarations values))
-                               (some? color)   (conj (str "stroke: " color ";"))
-                               (some? opacity) (conj (str "stroke-opacity: " (acss/fmt opacity) ";"))
-                               (some? (width values)) (conj (width values)))))
-                         (into svg-stroke-properties svg-trim-properties)]]
-                 ;; the mask of an outer stroke is as wide
-                 (and (some? mask) (contains? props :stroke-width))
-                 (conj [[mask]
-                        (fn [values] (keep identity [(width values)]))
-                        #{:stroke-width}]))))
-           (into (kf-index svg-stroke-properties)
-                 (when trim? (range (count strokes))))))
+        (mapcat
+         (fn [index]
+           (let [;; inner and outer strokes are drawn twice as wide, then cut
+                 factor (if (= :center (aexp/svg-stroke-alignment shape (get strokes index))) 1 2)
+                 {:keys [paint mask]} (svg-stroke-elements shape index)
+                 width  #(when-let [w (indexed-value (:stroke-width %) index)]
+                           (str "stroke-width: " (acss/fmt (* factor w)) ";"))]
+             (cond-> [[[paint]
+                       (fn [values]
+                         (let [color   (indexed-value (:stroke-color values) index)
+                               opacity (indexed-value (:stroke-opacity values) index)]
+                           (cond-> (if text? [] (vec (svg-trim-declarations values)))
+                             (some? color)   (conj (str "stroke: " color ";"))
+                             (some? opacity) (conj (str "stroke-opacity: " (acss/fmt opacity) ";"))
+                             (some? (width values)) (conj (width values)))))
+                       (cond-> svg-stroke-properties (not text?) (into svg-trim-properties))]]
+               ;; the mask of an outer stroke is as wide
+               (and (some? mask) (contains? props :stroke-width))
+               (conj [[mask]
+                      (fn [values] (keep identity [(width values)]))
+                      #{:stroke-width}]))))
+         (filter #(< % (count strokes))
+                 (into (kf-index svg-stroke-properties)
+                       (when (and trim? (not text?)) (range (count strokes))))))
         radius-targets
         (when (and (some aexp/svg-radius-properties props) (aexp/svg-even-corners? shape track))
           [[(svg-outline-elements shape)
@@ -423,7 +428,7 @@
 
 (defn svg-smil-corners?
   "Whether an SVG of vectors plays the corners `track` animates on
-  `shape` by SMIL, on the path of its outline (see `svg-corner-path`): a
+  `shape` by SMIL, on the path of its outline (see `svg-outline-path`): a
   rectangle or board whose corners are not alike (see
   `svg-even-corners?`), drawn as a path (the elements of its outline
   marked `data-penpot-outline`, see `svg-smil-outline`)."
@@ -714,7 +719,7 @@
 
 (defn- render-corner-path
   "The outline of a rectangle `[x y width height r1 r2 r3 r4]` (its
-  corners clamped, see `svg-corner-path`) as lines and curves: no arcs,
+  corners clamped, see `svg-outline-path`) as lines and curves: no arcs,
   whose radii WebKit does not tween."
   [[x y w h r1 r2 r3 r4]]
   (let [k     (- 1 aexp/kappa)
@@ -732,25 +737,79 @@
          "C" (pt x (+ y (* k r1))) " " (pt (+ x (* k r1)) y) " " (pt (+ x r1) y)
          "Z")))
 
-(defn- svg-corner-path
-  "The `<animate>` of the path of the outline of `shape` whose corners
-  `timeline` (cut to its duration) plays (see `svg-smil-corners?`), in
-  its own space (its turn is the `transform` of the path): its box at
-  rest, its corners clamped as the canvas clamps them."
+(def ^:private path-number
+  #"-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+
+(defn- render-path-numbers
+  "The path data `d` with its numbers, in order, those of `numbers`."
+  [d numbers]
+  (let [numbers (volatile! (seq numbers))]
+    (str/replace d path-number (fn [_]
+                                 (let [n (first @numbers)]
+                                   (vswap! numbers next)
+                                   (acss/fmt n))))))
+
+(defn- outline-size
+  "The box `[x y width height]` of `shape` (in its own space, its turn
+  aside) its width and height `values` give, resized around its pivot
+  `origin` (a share of its box), as the canvas resizes it (see
+  `cta/shape->modifiers`)."
+  [shape origin values]
+  (let [{:keys [x y width height]} (:selrect shape)
+        w (double (get values :width width))
+        h (double (get values :height height))
+        px (+ x (* width (:x origin)))
+        py (+ y (* height (:y origin)))]
+    [(- px (* w (:x origin))) (- py (* h (:y origin))) w h]))
+
+(defn- svg-outline-path
+  "The `<animate>` of the path of the outline of `shape` whose corners or
+  size `timeline` (cut to its duration) plays (see `svg-smil-corners?`,
+  `aexp/svg-outline-sized?`): a rectangle in its own space (its turn is
+  the `transform` of the path), its corners clamped as the canvas clamps
+  them; a path resized along its own sides around its pivot, as the
+  canvas resizes it, its strokes as wide."
   [shape timeline]
-  (let [sid      (:id shape)
-        {:keys [x y width height]} (:selrect shape)
-        values   (acss/shape-values timeline sid)
-        kfs      (filterv #(aexp/svg-radius-properties (:property %)) (dm/get-in timeline [:tracks sid :keyframes]))
-        value    (fn [t]
-                   (let [vs (values t)]
-                     (into [x y width height]
-                           (gco/shape-corners-4 {:width width :height height
-                                                 :r1 (get vs :r1 (or (:r1 shape) 0))
-                                                 :r2 (get vs :r2 (or (:r2 shape) 0))
-                                                 :r3 (get vs :r3 (or (:r3 shape) 0))
-                                                 :r4 (get vs :r4 (or (:r4 shape) 0))}))))]
-    (smil-animate timeline "d" (smil-points value kfs (max 1 (:duration timeline))) render-corner-path)))
+  (let [sid    (:id shape)
+        track  (dm/get-in timeline [:tracks sid])
+        values (acss/shape-values timeline sid)
+        origin (cta/track-origin track)
+        sized? (aexp/svg-outline-sized? shape track)
+        kfs    (filterv #(or (aexp/svg-radius-properties (:property %))
+                             (and sized? (aexp/svg-size-properties (:property %))))
+                        (:keyframes track))
+        points #(smil-points % kfs (max 1 (:duration timeline)))]
+    (if (contains? #{:rect :frame} (:type shape))
+      (smil-animate timeline "d"
+                    (points (fn [t]
+                              (let [vs (values t)
+                                    [x y w h] (if sized? (outline-size shape origin vs) (outline-size shape origin {}))]
+                                (into [x y w h]
+                                      (gco/shape-corners-4 {:width w :height h
+                                                            :r1 (get vs :r1 (or (:r1 shape) 0))
+                                                            :r2 (get vs :r2 (or (:r2 shape) 0))
+                                                            :r3 (get vs :r3 (or (:r3 shape) 0))
+                                                            :r4 (get vs :r4 (or (:r4 shape) 0))})))))
+                    render-corner-path)
+      ;; a path: its points resized as the canvas resizes it, along its own
+      ;; sides when it is turned
+      (let [d      (str (:content shape))
+            {:keys [x y width height]} (:selrect shape)
+            center (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
+            pivot  (gpt/point (+ x (* width (:x origin))) (+ y (* height (:y origin))))
+            turn   (:transform shape)
+            unturn (:transform-inverse shape)]
+        (smil-animate timeline "d"
+                      (points (fn [t]
+                                (let [vs (values t)
+                                      sx (/ (double (get vs :width width)) width)
+                                      sy (/ (double (get vs :height height)) height)
+                                      m  (cond->> (gmt/scale-matrix (gpt/point sx sy) pivot)
+                                           (and (some? turn) (some? unturn))
+                                           (#(gmt/multiply (gmt/transform-in center turn) %
+                                                           (gmt/transform-in center unturn))))]
+                                  (mapv d/parse-double (re-seq path-number (str (path/transform-content (:content shape) m)))))))
+                      #(render-path-numbers d %))))))
 
 (defn- svg-smil-outline
   "`markup` with the `<animate>` `animate` in the elements of the outline
@@ -807,8 +866,9 @@
                          (some #(and (not (:hidden %)) (contains? drops (:style % :drop-shadow)))
                                (cta/as-vec (:shadow shape))))
            blur?    (and (some? shape) (svg-filter-blur? shape track))
-           outline  (when (and (some? shape) (svg-smil-corners? shape track))
-                      (svg-corner-path shape timeline))
+           outline  (when (and (some? shape)
+                               (or (svg-smil-corners? shape track) (aexp/svg-outline-sized? shape track)))
+                      (svg-outline-path shape timeline))
            filters  (when (or shadows? blur?)
                       (let [flags {:shadows? shadows? :blur? blur? :styles drops
                                    :area (when (contains? wide sid) area)}]
@@ -1109,9 +1169,17 @@
          sized    (aexp/svg-sized-ids objects timeline)
          holders  (aexp/svg-holder-ids objects sized)
          ;; SVG takes a share of `transform-origin` of the whole drawing
+         ;; the layers SMIL resizes on their outlines (vectors only): no
+         ;; scale of their groups either
+         outlined (into #{}
+                        (keep (fn [[id track]]
+                                (when (and (some? (dm/get-in images [id :markup]))
+                                           (some-> (get objects id) (aexp/svg-outline-sized? track)))
+                                  id)))
+                        (:tracks timeline))
          css      (acss/timeline->css timeline objects
                                       {:svg? true
-                                       :sized sized
+                                       :sized (into sized outlined)
                                        :origin (fn [shape track]
                                                  (let [[x y] (aexp/lottie-pivot shape ox oy (cta/track-origin track))]
                                                    (str (acss/fmt x) "px " (acss/fmt y) "px")))

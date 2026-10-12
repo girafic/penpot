@@ -1248,9 +1248,13 @@
             stroked (-> tl
                         (cta/add-keyframe tid {:time 0 :property :stroke-width :index 0 :value 1})
                         (cta/add-keyframe tid {:time 1000 :property :stroke-width :index 0 :value 3}))
+            trimmed (-> tl
+                        (cta/add-keyframe tid {:time 0 :property :trim-end :value 0})
+                        (cta/add-keyframe tid {:time 1000 :property :trim-end :value 1}))
             svg     #(set (get (dea/export-issues %1 %2) :svg))]
-        (t/is (contains? (svg objects stroked) :svg/appearance) "the strokes of a text stay")
-        (t/is (not (contains? (svg objects (on stroked)) :svg/appearance)) "but of an outline")))))
+        (t/is (not (contains? (svg objects stroked) :svg/appearance)) "the strokes of a text play on its glyphs")
+        (t/is (contains? (svg objects trimmed) :svg/appearance) "its trim stays, a text takes no length")
+        (t/is (not (contains? (svg objects (on trimmed)) :svg/appearance)) "but of an outline")))))
 
 (t/deftest an-svg-has-the-units-of-a-split-text-as-vectors
   (let [{:keys [objects bid tid]} (text-board)
@@ -1684,10 +1688,18 @@
            (issues-of :svg :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}
                                  {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}]))
         "a rect changes its size, and blurs as the canvas")
-  (t/is (= [:svg/size]
+  (t/is (= []
            (issues-of :svg :f #(assoc % :rotation 30)
                       :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
-        "a turned one stretches")
+        "a turned one resizes on its outline (see `aexp/svg-outline-sized?`)")
+  (t/is (= [:svg/size]
+           (issues-of :svg :f #(assoc % :rotation 30 :type :circle)
+                      :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
+        "a turned ellipse stretches")
+  (t/is (= [:svg/size]
+           (issues-of :svg :f #(assoc % :fills [{:fill-color "#ffffff" :fill-opacity 0.5} {:fill-color "#000000" :fill-opacity 1}])
+                      :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]))
+        "and two fills, laid out over its box at rest")
   (t/is (= [:lottie/blur]
            (issues-of :lottie :kfs [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}
                                     {:time 0 :property :blur :value 0} {:time 1000 :property :blur :value 4}]))

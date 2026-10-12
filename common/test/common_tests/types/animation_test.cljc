@@ -172,8 +172,10 @@
     (t/is (mth/close? 50.0 (double (:x (gsh/shape->center shape'))) 0.01) "around its middle")))
 
 (t/deftest an-svg-stretches-a-turned-layer-along-its-sides
+  ;; An ellipse: a turned rectangle resizes on its outline (see
+  ;; `an-svg-resizes-a-turned-rectangle-on-its-outline`).
   (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
-        rect    (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 40})
+        rect    (-> (cts/setup-shape {:type :circle :x 100 :y 100 :width 100 :height 40})
                     (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 150 120) 30)))
         [bid sid] (map :id [board rect])
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
@@ -1024,6 +1026,30 @@
     (t/is (re-find #"rx: 10px; ry: 10px;" css) "its corners, alike")
     (t/is (aexp/svg-even-corners? shape (get-in tl [:tracks sid])))
     (t/is (not (aexp/svg-even-corners? (assoc shape :r2 0) (get-in tl [:tracks sid]))) "uneven at rest")))
+
+(t/deftest an-svg-plays-the-strokes-of-a-text-on-its-glyphs
+  ;; The SVG renderer strokes its glyphs in a group by line or run: their
+  ;; colour and width play there; its trim stays, a `text` takes no
+  ;; length of its path.
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        text  (cts/setup-shape {:type :text :x 10 :y 10 :width 100 :height 30
+                                :strokes [{:stroke-color "#ff0000" :stroke-opacity 1 :stroke-width 2
+                                           :stroke-style :solid :stroke-alignment :center}]})
+        [bid tid] (map :id [board text])
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe tid {:time 0 :property :stroke-color :index 0 :value "#ff0000"})
+                  (cta/add-keyframe tid {:time 1000 :property :stroke-color :index 0 :value "#00ff00"})
+                  (cta/add-keyframe tid {:time 0 :property :stroke-width :index 0 :value 2})
+                  (cta/add-keyframe tid {:time 1000 :property :stroke-width :index 0 :value 6})
+                  (cta/add-keyframe tid {:time 0 :property :trim-end :value 0})
+                  (cta/add-keyframe tid {:time 1000 :property :trim-end :value 1}))
+        css   (asvg/svg-appearance-css tl {bid (assoc board :shapes [tid])
+                                           tid (assoc text :parent-id bid :frame-id bid)})]
+    (t/is (re-find (re-pattern (str "\\.strokes\\[id\\$=\"-" tid "\"\\] > :nth-child\\(1\\)\\.stroke-shape > :not\\(defs\\)"))
+                   css)
+          "in each group of its strokes")
+    (t/is (re-find #"100% \{ stroke: #00ff00; stroke-width: 6; \}" css))
+    (t/is (not (str/includes? css "stroke-dasharray")) "not its trim")))
 
 (defn- occurrences
   "How many times `part` is in `text`."
@@ -4335,3 +4361,49 @@
     (t/testing "on each round of a loop, from the start of the round"
       (let [tl (with-clips (assoc (mk-timeline) :playback :loop) clip)]
         (t/is (= [[100 300 200]] (plan tl 900 300)))))))
+
+(t/deftest an-svg-resizes-a-path-on-its-outline
+  ;; As the canvas resizes it: its points along its own sides, around its
+  ;; pivot, its stroke as wide; not a scale of its group, which would
+  ;; widen its stroke too.
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        shape (path-shape {:strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 4
+                                      :stroke-style :solid :stroke-alignment :center}]})
+        sid   (:id shape)
+        w     (get-in shape [:selrect :width])
+        left  (- (get-in shape [:selrect :x]) (/ w 2))
+        tl    (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :width :value w :easing :linear})
+                  (cta/add-keyframe sid {:time 1000 :property :width :value (* 2 w)}))
+        track (get-in tl [:tracks sid])
+        svg   (asvg/timeline->svg tl (svg-board-with board shape)
+                                  {sid {:markup (str "<path d=\"" (:content shape) "\" data-penpot-outline=\"\" fill=\"#000000\"></path>")}})]
+    (t/is (aexp/svg-outline-sized? shape track))
+    (t/is (not (aexp/svg-outline-sized? (assoc shape :fills [{:fill-color-gradient {:type :linear}}]) track))
+          "not a gradient, laid out over its box at rest")
+    (t/is (not (aexp/svg-outline-sized? (assoc-in shape [:strokes 0 :stroke-alignment] :outer) track))
+          "nor an outer stroke, whose mask is bounded")
+    (t/is (not (aexp/svg-outline-sized? (assoc shape :type :circle) track)))
+    (t/is (str/includes? svg "<animate attributeName=\"d\"") "on its outline")
+    (t/is (str/includes? svg "values=\"M110,110L150,110C160,120,160,140,150,150L110,110Z;")
+          "from as it is")
+    (t/is (str/includes? svg (str ";M" (acss/fmt left) ",110L")) "to twice as wide, around its middle")
+    (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of its group")))
+
+(t/deftest an-svg-resizes-a-turned-rectangle-on-its-outline
+  ;; Drawn as a path in its own space, its turn the transform of the path.
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        rect  (assoc (cts/setup-shape {:type :rect :x 10 :y 10 :width 40 :height 20 :r1 0 :r2 0 :r3 0 :r4 0
+                                       :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+                     :rotation 30)
+        sid   (:id rect)
+        tl    (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :width :value 40 :easing :linear})
+                  (cta/add-keyframe sid {:time 1000 :property :width :value 80}))
+        svg   (asvg/timeline->svg tl (svg-board-with board rect)
+                                  {sid {:markup "<path d=\"M10,10 h40\" data-penpot-outline=\"\" fill=\"red\"></path>"}})]
+    (t/is (not (aexp/svg-sized? rect (get-in tl [:tracks sid]))) "not on its element")
+    (t/is (aexp/svg-outline-sized? rect (get-in tl [:tracks sid])))
+    (t/is (str/includes? svg ";M-10,10L70,10") "twice as wide, around its middle")
+    (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of its group")))
+

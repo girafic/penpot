@@ -109,6 +109,33 @@
     (t/is (<= 3 (count (re-seq #"<path [^>]*data-penpot-outline=\"\"" markup)))
           "its fill, its stroke and what cuts it, marked")))
 
+(t/deftest a-path-resized-is-marked-for-smil
+  ;; SMIL plays its size on its outline: its fill and its stroke, and what
+  ;; cuts an inner one, marked.
+  (let [p (cts/setup-shape {:type :path
+                            :content (path/content [{:command :move-to :params {:x 10 :y 10}}
+                                                    {:command :line-to :params {:x 50 :y 10}}
+                                                    {:command :line-to :params {:x 50 :y 40}}
+                                                    {:command :close-path :params {}}])
+                            :fills [{:fill-color "#ff0000" :fill-opacity 1}]
+                            :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                       :stroke-style :solid :stroke-alignment :inner}]})
+        {:keys [objects]} (board-with p)
+        track  {:keyframes [{:time 0 :property :width :value 40} {:time 1000 :property :width :value 80}]}
+        markup (svgv/layer-markup objects (:id p) track)]
+    (t/is (<= 3 (count (re-seq #"<path [^>]*data-penpot-outline=\"\"" markup))))
+    (t/is (not (str/includes? (svgv/layer-markup objects (:id p) nil) "data-penpot-outline")) "not at rest")))
+
+(t/deftest a-turned-rect-resized-draws-as-a-marked-path
+  (let [a (assoc (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20 :r1 0 :r2 0 :r3 0 :r4 0
+                                   :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+                 :rotation 30)
+        {:keys [objects]} (board-with a)
+        track  {:keyframes [{:time 0 :property :width :value 20} {:time 1000 :property :width :value 40}]}
+        markup (svgv/layer-markup objects (:id a) track)]
+    (t/is (not (str/includes? markup "<rect")) "a path")
+    (t/is (re-find #"<path [^>]*data-penpot-outline=\"\"" markup) "marked")))
+
 (t/deftest the-uses-of-a-layer-are-copies
   ;; CSS plays on the elements, not on the copies a `<use>` draws.
   (t/is (= "<g><defs><clipPath id=\"c\"><rect x=\"1\" style=\"stroke:red\"></rect></clipPath></defs><rect x=\"1\" clip-path=\"url(#c)\" style=\"fill:none;stroke:red\"></rect></g>"
