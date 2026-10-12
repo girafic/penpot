@@ -4,6 +4,8 @@
 //
 // Copyright (c) KALEIDOS INC
 
+@use "ds/_borders.scss" as ds-borders;
+@use "ds/_sizes.scss" as ds-sizes;
 @use "ds/spacing.scss" as *;
 @use "ds/z-index.scss" as *;
 @use "refactor/common-refactor.scss" as deprecated;
@@ -172,68 +174,6 @@ $header-height: $ruler-height + $row-height;
   &.active {
     background-color: color-mix(in hsl, var(--color-accent-error) 15%, transparent);
     color: var(--color-accent-error);
-  }
-}
-
-// Sound from the microphone: red while it records, with how long.
-.mic-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: deprecated.$s-4;
-  min-inline-size: 32px;
-  block-size: 32px;
-  padding: 0;
-  border: none;
-  border-radius: deprecated.$br-8;
-  background-color: transparent;
-  color: var(--color-foreground-secondary);
-  font-size: deprecated.$fs-11;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-
-  &:hover {
-    background-color: var(--color-background-tertiary);
-    color: var(--color-accent-primary);
-  }
-
-  &.pending {
-    opacity: 0.6;
-    cursor: wait;
-  }
-
-  &.recording,
-  &.recording:hover {
-    padding: 0 deprecated.$s-8 0 deprecated.$s-4;
-    background-color: color-mix(in hsl, var(--color-accent-error) 15%, transparent);
-    color: var(--color-accent-error);
-  }
-}
-
-// The options of recording, a narrow arrow beside the microphone.
-.mic-options-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  inline-size: 16px;
-  block-size: 32px;
-  margin-inline-start: -4px;
-  padding: 0;
-  border: none;
-  border-radius: deprecated.$br-4;
-  background-color: transparent;
-  color: var(--color-foreground-secondary);
-  cursor: pointer;
-
-  &:hover,
-  &.active {
-    background-color: var(--color-background-tertiary);
-    color: var(--color-accent-primary);
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
   }
 }
 
@@ -811,9 +751,7 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
-// The label of a lane of audio clips, in the colour of their bars (see
-// `lanes/palette`).
-// renaming a lane: its name an input in its label
+// Renaming a lane: its name an input in its label.
 .audio-rename {
   display: flex;
   flex: 1;
@@ -824,10 +762,12 @@ $header-height: $ruler-height + $row-height;
 }
 
 .audio-rename-input {
-  block-size: 22px;
-  border-radius: deprecated.$br-4;
+  block-size: ds-sizes.$sz-24;
+  border-radius: ds-borders.$br-4;
 }
 
+// The label of a lane of audio clips, in the colour of their bars (see
+// `lanes/palette`).
 .audio-icon {
   display: grid;
   place-items: center;

@@ -4,7 +4,8 @@
 //
 // Copyright (c) KALEIDOS INC
 
-@use "refactor/common-refactor.scss" as deprecated;
+@use "ds/_borders.scss" as *;
+@use "ds/_sizes.scss" as *;
 
 // The options of recording: above the button that opens them, as the
 // timeline is at the bottom of the window.
@@ -19,30 +20,27 @@
   z-index: var(--z-index-set);
   display: flex;
   flex-direction: column;
-  gap: deprecated.$s-12;
-  inline-size: 260px;
-  padding: deprecated.$s-12;
-  border: 1px solid var(--panel-border-color);
-  border-radius: deprecated.$br-8;
+  gap: var(--sp-m);
+  inline-size: $sz-252;
+  padding: var(--sp-m);
+  border: $b-1 solid var(--panel-border-color);
+  border-radius: $br-8;
   background-color: var(--color-background-primary);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
-  transform: translate(-50%, calc(-100% - 8px));
+  box-shadow: var(--el-shadow-dark);
+  transform: translate(-50%, calc(-100% - var(--sp-s)));
   outline: none;
 }
 
 .title {
-  font-size: deprecated.$fs-12;
-  font-weight: deprecated.$fw700;
   color: var(--color-foreground-primary);
 }
 
 .row {
   display: flex;
   flex-direction: column;
-  gap: deprecated.$s-4;
+  gap: var(--sp-xs);
 }
 
 .label {
-  font-size: deprecated.$fs-11;
   color: var(--color-foreground-secondary);
 }

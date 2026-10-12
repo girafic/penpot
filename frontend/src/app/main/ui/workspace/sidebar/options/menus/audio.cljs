@@ -20,6 +20,7 @@
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.workspace.timeline.audio-lane :refer [use-lane-rename]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [okulary.core :as l]
@@ -42,21 +43,7 @@
         clip-ids  (mapv :id clips)
         muted?    (every? :muted clips)
         picked?   (every? #(contains? selected %) clip-ids)
-        renaming* (mf/use-state false)
-        renaming? (deref renaming*)
-
-        on-start-rename
-        (mf/use-fn #(reset! renaming* true))
-
-        on-cancel-rename
-        (mf/use-fn #(reset! renaming* false))
-
-        on-rename
-        (mf/use-fn
-         (mf/deps lane)
-         (fn [value]
-           (reset! renaming* false)
-           (st/emit! (dwaa/rename-lane lane value))))
+        [renaming? on-start-rename on-cancel-rename on-rename] (use-lane-rename lane)
 
         on-select
         (mf/use-fn

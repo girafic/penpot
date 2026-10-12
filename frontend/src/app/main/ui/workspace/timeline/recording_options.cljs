@@ -17,6 +17,8 @@
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
    [app.main.ui.ds.controls.select :refer [select*]]
    [app.main.ui.ds.controls.switch :refer [switch*]]
+   [app.main.ui.ds.foundations.typography :as t]
+   [app.main.ui.ds.foundations.typography.text :refer [text*]]
    [app.main.ui.hooks :as hooks]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
@@ -48,7 +50,8 @@
   them."
   [{:keys [anchor on-close]}]
   (let [{:keys [pre-roll device-id quiet?]} (mf/deref ref:options)
-        container (hooks/use-portal-container :popup)
+        container   (hooks/use-portal-container :popup)
+        popover-ref (mf/use-ref nil)
         devices* (mf/use-state nil)
         devices  (deref devices*)
 
@@ -71,6 +74,10 @@
            (when (kbd/esc? event)
              (on-close))))]
 
+    ;; focused, so Escape closes it at once
+    (mf/with-effect []
+      (some-> (mf/ref-val popover-ref) (dom/focus!)))
+
     (mf/with-effect []
       (let [live? (volatile! true)]
         (.then (dwar/list-microphones!) #(when @live? (reset! devices* %)))
@@ -81,16 +88,19 @@
       [:*
        [:div {:class (stl/css :backdrop) :on-pointer-down on-close}]
        [:div {:class (stl/css :popover)
+              :ref popover-ref
               :role "dialog"
               :aria-label (tr "workspace.animation.recording-options")
               :tab-index -1
               :style #js {"top" (dm/str (:top anchor) "px")
                           "left" (dm/str (+ (:left anchor) (/ (:width anchor) 2)) "px")}
               :on-key-down on-key-down}
-        [:span {:class (stl/css :title)} (tr "workspace.animation.recording-options")]
+        [:> text* {:as "span" :typography t/headline-small :class (stl/css :title)}
+         (tr "workspace.animation.recording-options")]
 
         [:div {:class (stl/css :row)}
-         [:span {:class (stl/css :label)} (tr "workspace.animation.recording-pre-roll")]
+         [:> text* {:as "span" :typography t/body-small :class (stl/css :label)}
+          (tr "workspace.animation.recording-pre-roll")]
          [:> radio-buttons* {:name "recording-pre-roll"
                              :selected (str pre-roll)
                              :extended true
@@ -104,7 +114,8 @@
                              :on-change on-pre-roll}]]
 
         [:div {:class (stl/css :row)}
-         [:span {:class (stl/css :label)} (tr "workspace.animation.recording-microphone-label")]
+         [:> text* {:as "span" :typography t/body-small :class (stl/css :label)}
+          (tr "workspace.animation.recording-microphone-label")]
          ;; listed once the browser gives them; a choice gone keeps the system's
          (when (some? devices)
            (let [options (microphone-options devices)]

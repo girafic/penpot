@@ -1,0 +1,76 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "ds/_borders.scss" as *;
+@use "ds/_sizes.scss" as *;
+@use "ds/typography.scss" as t;
+
+// The microphone and, right beside it, the arrow of its options.
+.controls {
+  display: inline-flex;
+  align-items: center;
+}
+
+// Red while it records, with how long.
+.mic-btn {
+  @include t.use-typography("body-small");
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-xs);
+  min-inline-size: $sz-32;
+  block-size: $sz-32;
+  padding: 0;
+  border: none;
+  border-radius: $br-8;
+  background-color: transparent;
+  color: var(--color-foreground-secondary);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-tertiary);
+    color: var(--color-accent-primary);
+  }
+
+  &.pending {
+    opacity: 0.6;
+    cursor: wait;
+  }
+
+  &.recording,
+  &.recording:hover {
+    padding-inline: var(--sp-xs) var(--sp-s);
+    background-color: color-mix(in hsl, var(--color-accent-error) 15%, transparent);
+    color: var(--color-accent-error);
+  }
+}
+
+.options-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: $sz-16;
+  block-size: $sz-32;
+  padding: 0;
+  border: none;
+  border-radius: $br-4;
+  background-color: transparent;
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+
+  &:hover,
+  &.active {
+    background-color: var(--color-background-tertiary);
+    color: var(--color-accent-primary);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}

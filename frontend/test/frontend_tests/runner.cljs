@@ -124,6 +124,7 @@
    [frontend-tests.ui.team-container-test]
    [frontend-tests.ui.text-units-svg-test]
    [frontend-tests.ui.timeline-lanes-test]
+   [frontend-tests.ui.timeline-recording-test]
    [frontend-tests.ui.timeline-selection-test]
    [frontend-tests.util-clipboard-test]
    [frontend-tests.util-object-test]
@@ -269,6 +270,7 @@
    'frontend-tests.ui.team-container-test
    'frontend-tests.ui.text-units-svg-test
    'frontend-tests.ui.timeline-lanes-test
+   'frontend-tests.ui.timeline-recording-test
    'frontend-tests.ui.timeline-selection-test
    'frontend-tests.util-clipboard-test
    'frontend-tests.util-object-test

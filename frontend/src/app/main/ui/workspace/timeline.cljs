@@ -48,10 +48,11 @@
    [app.main.ui.ds.utilities.swatch :refer [swatch*]]
    [app.main.ui.hooks.resize :as r]
    [app.main.ui.workspace.sidebar.options.menus.motion :as motion]
+   [app.main.ui.workspace.timeline.audio-lane :refer [use-lane-rename]]
    [app.main.ui.workspace.timeline.easing :refer [easing-editor*]]
    [app.main.ui.workspace.timeline.keys :as tlk]
    [app.main.ui.workspace.timeline.lanes :as lanes]
-   [app.main.ui.workspace.timeline.recording-options :refer [recording-options*]]
+   [app.main.ui.workspace.timeline.recording :refer [recording-controls*]]
    [app.util.audio :as audio]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
@@ -829,21 +830,7 @@
   [{:keys [row-index lane number name muted? locked? hovered? on-hover on-drag-down]}]
   (let [[on-pointer-enter on-pointer-leave] (use-row-hover row-index on-hover)
         label (if (str/blank? name) (tr "workspace.animation.audio-lane" number) name)
-        renaming* (mf/use-state false)
-        renaming? (deref renaming*)
-
-        on-start-rename
-        (mf/use-fn #(reset! renaming* true))
-
-        on-cancel-rename
-        (mf/use-fn #(reset! renaming* false))
-
-        on-rename
-        (mf/use-fn
-         (mf/deps lane)
-         (fn [value]
-           (reset! renaming* false)
-           (st/emit! (dwaa/rename-lane lane value))))
+        [renaming? on-start-rename on-cancel-rename on-rename] (use-lane-rename lane)
 
         on-pointer-down
         (mf/use-fn
@@ -1403,21 +1390,6 @@
                :on-click on-fit}
       [:> i/icon* {:icon-id i/fit-content}]]]))
 
-(mf/defc recording-time*
-  "How long the recording of sound that started at `since` (`Date.now`)
-  has lasted where its clip goes, past its pre-roll of `offset` ms, as
-  minutes and seconds; during its pre-roll, the seconds left, counting
-  down."
-  {::mf/private true}
-  [{:keys [since offset]}]
-  (let [now* (mf/use-state #(js/Date.now))
-        ms   (- @now* since (or offset 0))
-        secs (if (neg? ms) (js/Math.ceil (/ (- ms) 1000)) (quot ms 1000))]
-    (mf/with-effect [since]
-      (let [timer (js/setInterval #(reset! now* (js/Date.now)) 250)]
-        #(js/clearInterval timer)))
-    [:span (dm/str (when (neg? ms) "\u2212") (quot secs 60) ":" (.padStart (str (mod secs 60)) 2 "0"))]))
-
 (mf/defc toolbar*
   {::mf/private true
    ::mf/wrap [mf/memo]}
@@ -1439,24 +1411,6 @@
 
         on-toggle-recording
         (mf/use-fn #(st/emit! (dwa/toggle-auto-keyframe)))
-
-        ;; the animation plays along, with its sound
-        on-toggle-audio-recording
-        (mf/use-fn #(do (audio/unlock!)
-                        (st/emit! (dwar/toggle-audio-recording))))
-
-        ;; the options of recording, above the button that opens them
-        options-anchor* (mf/use-state nil)
-        options-anchor  (deref options-anchor*)
-
-        on-recording-options
-        (mf/use-fn
-         (fn [event]
-           (let [rect (dom/get-bounding-rect (dom/get-current-target event))]
-             (reset! options-anchor* {:top (:top rect) :left (:left rect) :width (:width rect)}))))
-
-        on-close-recording-options
-        (mf/use-fn #(reset! options-anchor* nil))
 
         on-stop
         (mf/use-fn #(st/emit! (dwa/stop)))
@@ -1538,29 +1492,7 @@
                   :on-click on-toggle-audio}
          [:> i/icon* {:icon-id (if audio-muted? i/volume-off i/volume)}]])
       ;; sound from the microphone into the timeline, from the playhead
-      [:button {:type "button"
-                :class (stl/css-case :mic-btn true
-                                     :pending (true? (:pending? audio-recording))
-                                     :recording (some? (:since audio-recording)))
-                :title (if (some? audio-recording)
-                         (tr "workspace.animation.stop-audio-recording")
-                         (tr "workspace.animation.record-audio"))
-                :aria-pressed (some? audio-recording)
-                :on-click on-toggle-audio-recording}
-       [:> i/icon* {:icon-id i/microphone}]
-       (when-let [since (:since audio-recording)]
-         [:> recording-time* {:since since :offset (:offset audio-recording)}])]
-      [:button {:type "button"
-                :class (stl/css-case :mic-options-btn true :active (some? options-anchor))
-                :title (tr "workspace.animation.recording-options")
-                :aria-haspopup "dialog"
-                :aria-expanded (some? options-anchor)
-                :disabled (some? audio-recording)
-                :on-click on-recording-options}
-       [:> i/icon* {:icon-id i/arrow-down :size "s"}]]
-      (when (some? options-anchor)
-        [:> recording-options* {:anchor options-anchor
-                                :on-close on-close-recording-options}])]
+      [:> recording-controls* {:recording audio-recording}]]
 
      [:button {:type "button"
                :class (stl/css-case :rec-btn true :active recording?)
@@ -3291,8 +3223,6 @@
                (some-> @frame js/cancelAnimationFrame)
                (some-> @rows-frame js/cancelAnimationFrame)))))
 
-    ;; Maximized with no board to show, it docks, so one can be picked on
-    ;; the canvas.
     ;; While sound records, its clip grows: the lanes draw again
     ;; meanwhile, whether the animation plays or not.
     (mf/with-effect [(:since audio-recording)]
@@ -3300,6 +3230,8 @@
         (let [timer (js/setInterval draw-lanes 50)]
           #(js/clearInterval timer))))
 
+    ;; Maximized with no board to show, it docks, so one can be picked on
+    ;; the canvas.
     (mf/with-effect [(some? timeline) (dwa/timeline-maximized? anim)]
       (when (and (nil? timeline) (dwa/timeline-maximized? anim))
         (st/emit! (dwa/dock-timeline))))
