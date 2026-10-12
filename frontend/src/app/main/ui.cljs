@@ -61,16 +61,17 @@
       (fn []
         (st/emit! (dtm/finalize-team team-id)))))
 
-  (if-not (uuid? team-id)
-    nil
-    (let [{:keys [permissions] :as team} (mf/deref refs/team)]
-      (when (= team-id (:id team))
-        [:> (mf/provider ctx/current-team-id) {:value team-id}
-         [:> (mf/provider ctx/permissions) {:value permissions}
-          [:> (mf/provider ctx/can-edit?) {:value (:can-edit permissions)}
-           ;; The `:key` is mandatory here because we want to reinitialize
-           ;; all dom tree instead of simple rerender.
-           [:* {:key (str team-id)} children]]]]))))
+  ;; The hooks first, whatever the team id: React needs the same ones on
+  ;; every render, and the id of a route is no uuid for a moment while it
+  ;; changes. Without one, nothing renders.
+  (let [{:keys [permissions] :as team} (mf/deref refs/team)]
+    (when (and (uuid? team-id) (= team-id (:id team)))
+      [:> (mf/provider ctx/current-team-id) {:value team-id}
+       [:> (mf/provider ctx/permissions) {:value permissions}
+        [:> (mf/provider ctx/can-edit?) {:value (:can-edit permissions)}
+         ;; The `:key` is mandatory here because we want to reinitialize
+         ;; all dom tree instead of simple rerender.
+         [:* {:key (str team-id)} children]]]])))
 
 (mf/defc page*
   {::mf/props :obj

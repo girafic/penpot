@@ -121,6 +121,7 @@
    [frontend-tests.ui.routes-test]
    [frontend-tests.ui.settings-password-schema-test]
    [frontend-tests.ui.settings-shortcuts-test]
+   [frontend-tests.ui.team-container-test]
    [frontend-tests.ui.text-units-svg-test]
    [frontend-tests.ui.timeline-lanes-test]
    [frontend-tests.ui.timeline-selection-test]
@@ -265,6 +266,7 @@
    'frontend-tests.text-editor-paste-guard-test
    'frontend-tests.ui.settings-password-schema-test
    'frontend-tests.ui.settings-shortcuts-test
+   'frontend-tests.ui.team-container-test
    'frontend-tests.ui.text-units-svg-test
    'frontend-tests.ui.timeline-lanes-test
    'frontend-tests.ui.timeline-selection-test
