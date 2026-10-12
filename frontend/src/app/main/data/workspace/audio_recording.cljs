@@ -18,6 +18,7 @@
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.audio :as dwaa]
+   [app.util.audio :as audio]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
@@ -140,6 +141,89 @@
            (.stop recorder))
          (release))))))
 
+(def recording-clip-id
+  "The id of the clip the timeline dock shows of the recording in
+  progress (see `with-recording-clip`)."
+  #uuid "00000000-0000-0000-0000-0000000ec0d1")
+
+(def recording-audio-id
+  "The `:audio-id` of the clip of the recording in progress: its waveform
+  is the one measured as it records (see `waveform`)."
+  #uuid "00000000-0000-0000-0000-0000000ec0d2")
+
+(defonce ^:private live
+  ;; the waveform of the recording in progress (see `start-meter!`):
+  ;; `{:data :filled :peak}`, the min and max of each `audio/peak-ms` of it
+  ;; in `data`, `filled` of them so far
+  (atom nil))
+
+(defn- start-meter!
+  "Measure the sound of `mic` as it records since `since` (`Date.now`),
+  through the context of live playback (made by the button that starts
+  it, see `audio/unlock!`): its waveform grows (see `waveform`). A
+  function that stops it; nil without a context."
+  [^js mic since]
+  (when-let [^js ctx (audio/unlock!)]
+    (let [source   (.createMediaStreamSource ctx mic)
+          analyser (.createAnalyser ctx)
+          buckets  (js/Math.ceil (/ ctau/max-audio-duration audio/peak-ms))
+          data     (js/Float32Array. (* 2 buckets))
+          samples  (js/Float32Array. 2048)
+          measure  (fn []
+                     (.getFloatTimeDomainData analyser samples)
+                     (let [[lo hi] (loop [i 0 lo 0 hi 0]
+                                     (if (< i (.-length samples))
+                                       (let [v (aget samples i)]
+                                         (recur (inc i) (min lo v) (max hi v)))
+                                       [lo hi]))
+                           until   (min buckets (js/Math.floor (/ (- (js/Date.now) since) audio/peak-ms)))]
+                       ;; what the last look heard, over the time since it
+                       (swap! live (fn [{:keys [filled peak] :as state}]
+                                     (loop [b filled]
+                                       (when (< b until)
+                                         (aset data (* 2 b) lo)
+                                         (aset data (inc (* 2 b)) hi)
+                                         (recur (inc b))))
+                                     (assoc state
+                                            :filled (max filled until)
+                                            :peak (max peak (- lo) hi))))))
+          timer    (do (set! (.-fftSize analyser) 2048)
+                       (.connect source analyser)
+                       (reset! live {:data data :filled 0 :peak 0})
+                       (js/setInterval measure 40))]
+      (fn []
+        (js/clearInterval timer)
+        (.disconnect source)
+        (reset! live nil)))))
+
+(defn waveform
+  "The waveform of the file `audio-id`, as `audio/waveform` gives it, and
+  of the recording in progress so far (see `recording-audio-id`)."
+  [audio-id]
+  (if (= audio-id recording-audio-id)
+    (when-let [{:keys [^js data filled peak]} @live]
+      {:bucket-ms audio/peak-ms
+       :channels [(.subarray data 0 (* 2 filled))]
+       :peak peak})
+    (audio/waveform audio-id)))
+
+(defn with-recording-clip
+  "`timeline` with a clip of the recording `rec` (see `recording`), as the
+  timeline dock shows it while it records: where it started, on the lane
+  its clip goes to (see `ctau/add-audio-clip`), locked, its
+  `:recording-since` when it started, which the dock draws it as long
+  since (see `app.main.ui.workspace.timeline.lanes`)."
+  [timeline {:keys [start since]}]
+  (-> timeline
+      (ctau/add-audio-clip {:id recording-clip-id
+                            :audio-id recording-audio-id
+                            :name (recording-name timeline)
+                            :source-duration ctau/max-audio-duration
+                            :start start
+                            :duration ctau/min-clip-duration
+                            :locked true})
+      (update-in [:audio-clips recording-clip-id] assoc :recording-since since)))
+
 (defn- recording-cleared
   []
   (ptk/reify ::recording-cleared
@@ -148,9 +232,10 @@
       (update state :workspace-animation dissoc :audio-recording))))
 
 (defn- recording-started
-  "The recording of the board `board-id` records: from where playback
-  started when it started it (`play-start?`), else from the playhead."
-  [board-id play-start?]
+  "The recording of the board `board-id` records since `since`
+  (`Date.now`): from where playback started when it started it
+  (`play-start?`), else from the playhead."
+  [board-id play-start? since]
   (ptk/reify ::recording-started
     ptk/UpdateEvent
     (update [_ state]
@@ -158,18 +243,18 @@
         (assoc-in state [:workspace-animation :audio-recording]
                   {:board-id board-id
                    :start (if play-start? (get anim :play-start 0) (get anim :playhead 0))
-                   :since (js/Date.now)})))))
+                   :since since})))))
 
 (defn- recording-began
-  "The recorder records: the animation plays along, from the playhead,
-  unless it plays already."
-  [board-id]
+  "The recorder records since `since`: the animation plays along, from the
+  playhead, unless it plays already."
+  [board-id since]
   (ptk/reify ::recording-began
     ptk/WatchEvent
     (watch [_ state _]
       (if (dm/get-in state [:workspace-animation :playing?])
-        (rx/of (recording-started board-id false))
-        (rx/of (dwa/play) (recording-started board-id true))))))
+        (rx/of (recording-started board-id false since))
+        (rx/of (dwa/play) (recording-started board-id true since))))))
 
 (defn- recording-stopped
   "Add the recording `blob` of the recorder type `mime` to the timeline of
@@ -241,9 +326,16 @@
                      (->> events
                           (rx/map (fn [event]
                                     (cond
-                                      (= :started event)       (recording-began board-id)
-                                      (:discard? @current)     (recording-cleared)
-                                      :else                    (recording-stopped event (.-mimeType recorder))))))
+                                      (= :started event)
+                                      (let [since (js/Date.now)]
+                                        (swap! current assoc :stop-meter (start-meter! mic since))
+                                        (recording-began board-id since))
+
+                                      (:discard? @current)
+                                      (recording-cleared)
+
+                                      :else
+                                      (recording-stopped event (.-mimeType recorder))))))
                      ;; what stops it but the user
                      (->> (rx/merge (rx/map (constantly false) (rx/timer ctau/max-audio-duration))
                                     (rx/map (constantly false)
@@ -255,7 +347,10 @@
                           (rx/map stop-audio-recording))))))
                (rx/catch (fn [cause]
                            (rx/of (recording-cleared) (microphone-error cause))))
-               (rx/finalize #(reset! current nil))))))))
+               (rx/finalize (fn []
+                              (when-let [stop-meter (:stop-meter @current)]
+                                (stop-meter))
+                              (reset! current nil)))))))))
 
 (defn toggle-audio-recording
   "Start recording sound into the timeline, or stop; nothing while the

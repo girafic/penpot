@@ -157,3 +157,18 @@
                   (rx/take 1)
                   (rx/delay 20)))))
         done))))
+
+(t/deftest a-recording-shows-as-a-clip-of-its-own-as-it-records
+  ;; Where it started, on the lane its clip goes to, locked; the dock
+  ;; draws it as long as it has lasted, with the waveform measured.
+  (let [beat     {:id (random-uuid) :audio-id (random-uuid) :name "beat.mp3"
+                  :source-duration 2000 :start 0 :offset 0 :duration 2000 :lane 0}
+        timeline (-> (cta/make-timeline {:board-id (random-uuid) :duration 1000})
+                     (assoc-in [:audio-clips (:id beat)] beat))
+        clip     (get-in (dwar/with-recording-clip timeline {:start 300 :since 1000})
+                         [:audio-clips dwar/recording-clip-id])]
+    (t/is (= [300 1 "Recording 1" true 1000]
+             ((juxt :start :lane :name :locked :recording-since) clip))
+          "on a lane of its own, as its clip will")
+    (t/is (= dwar/recording-audio-id (:audio-id clip)))
+    (t/is (nil? (dwar/waveform dwar/recording-audio-id)) "no waveform but while it records")))

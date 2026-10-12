@@ -1898,10 +1898,16 @@
         expanded   (deref expanded*)
         ;; the layers, then the lanes of the audio clips
         audio-collapsed? (true? (:audio-collapsed? anim))
-        rows       (mf/with-memo [objects board-id timeline expanded copy-ends audio-collapsed?]
+        ;; the recording of sound, a clip of its own as it records
+        audio-recording (when (some? (dm/get-in anim [:audio-recording :since]))
+                          (:audio-recording anim))
+        rows       (mf/with-memo [objects board-id timeline expanded copy-ends audio-collapsed? audio-recording]
                      (when (some? timeline)
                        (into (timeline-rows objects board-id timeline expanded copy-ends)
-                             (dwaa/audio-rows timeline :collapsed? audio-collapsed?))))
+                             (dwaa/audio-rows (cond-> timeline
+                                                (some? audio-recording)
+                                                (dwar/with-recording-clip audio-recording))
+                                              :collapsed? audio-collapsed?))))
 
         ;; The selection of the last render and the layers newly selected,
         ;; which the rows scroll to once they show (see the effects).
@@ -2370,7 +2376,7 @@
                                               :selected-anims selected-anims
                                               :selection selection
                                               :selected-tracks (selected-tracks timeline objects rows selection)
-                                              :waveform audio/waveform
+                                              :waveform dwar/waveform
                                               :problem clip-problem
                                               :audio-version audio-version})
 
@@ -2386,6 +2392,7 @@
                  (lanes/draw! canvas geo
                               (assoc (mf/ref-val scene-ref)
                                      :playhead (deref ref:playhead)
+                                     :now (js/Date.now)
                                      :hover (mf/ref-val hover-ref)
                                      :hover-row (mf/ref-val hover-row-ref)
                                      :marquee (when (= :marquee (:kind press)) (:rect press)))
@@ -3227,6 +3234,13 @@
 
     ;; Maximized with no board to show, it docks, so one can be picked on
     ;; the canvas.
+    ;; While sound records, its clip grows: the lanes draw again
+    ;; meanwhile, whether the animation plays or not.
+    (mf/with-effect [(:since audio-recording)]
+      (when (some? (:since audio-recording))
+        (let [timer (js/setInterval draw-lanes 50)]
+          #(js/clearInterval timer))))
+
     (mf/with-effect [(some? timeline) (dwa/timeline-maximized? anim)]
       (when (and (nil? timeline) (dwa/timeline-maximized? anim))
         (st/emit! (dwa/dock-timeline))))

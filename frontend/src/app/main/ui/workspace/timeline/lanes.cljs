@@ -775,6 +775,15 @@
   (set! (.-lineWidth ctx) 1)
   (faded! ctx 0.8 #(.stroke ctx)))
 
+(defn- at-now
+  "`clip`, but the one of a recording in progress (with its
+  `:recording-since`, see `dwar/with-recording-clip`) as long as it has
+  lasted at `now` (`Date.now`)."
+  [clip now]
+  (if-let [since (:recording-since clip)]
+    (assoc clip :duration (max ctau/min-clip-duration (- (or now since) since)))
+    clip))
+
 (defn- draw-clip!
   "The audio `clip` in the row with its top at `y`: a bar over its span
   with its waveform (diagonal lines until its file is decoded, in the
@@ -789,42 +798,50 @@
         top     (+ y bar-inset)
         height  (- (row-height geo) (* 2 bar-inset))
         active? (contains? selected-clips (:id clip))
+        ;; one recording: in the colour of a record button, without a
+        ;; volume to show yet
+        rec?    (some? (:recording-since clip))
         ink     (if active? (:on-accent palette) (:fg-strong palette))
         peaks   (waveform (:audio-id clip))]
     (when (and (< x0 (:width geo)) (pos? x1))
       (faded! ctx (if (:muted clip) 0.4 1)
               (fn []
-                (fill-round-rect! ctx (if active? (:accent palette) (:audio palette)) x0 top (- x1 x0) height 6)
+                (if rec?
+                  (faded! ctx 0.3 #(fill-round-rect! ctx (:error palette) x0 top (- x1 x0) height 6))
+                  (fill-round-rect! ctx (if active? (:accent palette) (:audio palette)) x0 top (- x1 x0) height 6))
                 (.save ctx)
                 (.beginPath ctx)
                 (.roundRect ctx x0 top (- x1 x0) height 6)
                 (.clip ctx)
                 (if (some? peaks)
                   (faded! ctx 0.8 #(draw-waveform! ctx geo peaks clip x0 x1 (+ top 3) (- (+ top height) 3)
-                                                   (if active? (:on-accent palette) (:wave palette))))
+                                                   (cond rec?    (:error palette)
+                                                         active? (:on-accent palette)
+                                                         :else   (:wave palette))))
                   (let [silent? (and (some? problem) (some? (problem clip)))]
                     (faded! ctx (if silent? 0.8 0.5)
                             #(draw-hatching! ctx (if silent? (:error palette) (:wave palette))
                                              x0 top (- x1 x0) height))))
-                (let [vy  (volume-y top height clip)
-                      xi  (time->x geo (+ (:start clip) (or (:fade-in clip) 0)))
-                      xo  (time->x geo (- (ctau/clip-end clip) (or (:fade-out clip) 0)))
-                      on? (and (= :volume (:mode hover)) (= (:id clip) (:id (:clip hover))))]
-                  ;; quieter than full: the room above the line shaded
-                  (when (>= vy (+ top 3.5))
-                    (faded! ctx 0.3 #(fill-rect! ctx fade-shade x0 top (- x1 x0) (- vy top))))
-                  (when (:fade-in clip)
-                    (draw-fade! ctx ink x0 xi vy (+ top height)))
-                  (when (:fade-out clip)
-                    (draw-fade! ctx ink x1 xo vy (+ top height)))
-                  ;; the volume line between the fades, bolder under the pointer
-                  (.beginPath ctx)
-                  (.moveTo ctx (if (:fade-in clip) xi x0) vy)
-                  (.lineTo ctx (if (:fade-out clip) xo x1) vy)
-                  ;; louder than its file: orange
-                  (set! (.-strokeStyle ctx) (if (> (or (:volume clip) 1) 1) (:snap palette) ink))
-                  (set! (.-lineWidth ctx) (if on? 2 1))
-                  (faded! ctx (if (or on? active?) 0.9 0.5) #(.stroke ctx)))
+                (when-not rec?
+                  (let [vy  (volume-y top height clip)
+                        xi  (time->x geo (+ (:start clip) (or (:fade-in clip) 0)))
+                        xo  (time->x geo (- (ctau/clip-end clip) (or (:fade-out clip) 0)))
+                        on? (and (= :volume (:mode hover)) (= (:id clip) (:id (:clip hover))))]
+                    ;; quieter than full: the room above the line shaded
+                    (when (>= vy (+ top 3.5))
+                      (faded! ctx 0.3 #(fill-rect! ctx fade-shade x0 top (- x1 x0) (- vy top))))
+                    (when (:fade-in clip)
+                      (draw-fade! ctx ink x0 xi vy (+ top height)))
+                    (when (:fade-out clip)
+                      (draw-fade! ctx ink x1 xo vy (+ top height)))
+                    ;; the volume line between the fades, bolder under the pointer
+                    (.beginPath ctx)
+                    (.moveTo ctx (if (:fade-in clip) xi x0) vy)
+                    (.lineTo ctx (if (:fade-out clip) xo x1) vy)
+                    ;; louder than its file: orange
+                    (set! (.-strokeStyle ctx) (if (> (or (:volume clip) 1) 1) (:snap palette) ink))
+                    (set! (.-lineWidth ctx) (if on? 2 1))
+                    (faded! ctx (if (or on? active?) 0.9 0.5) #(.stroke ctx))))
                 ;; the end of the timeline cuts it: what is past it plays not
                 (let [xd (time->x geo duration)]
                   (when (< xd x1)
@@ -911,13 +928,13 @@
 
       :audio
       (doseq [clip (:clips row)]
-        (draw-clip! ctx geo scene palette font y clip))
+        (draw-clip! ctx geo scene palette font y (at-now clip (:now scene))))
 
       ;; collapsed, an overview of all the clips, each a slim bar
       :audio-group
       (when (:collapsed? row)
         (let [mid (+ y (/ (row-height geo) 2))]
-          (doseq [clip (:clips row)
+          (doseq [clip (map #(at-now % (:now scene)) (:clips row))
                   :let [x0 (time->x geo (:start clip))
                         x1 (max (time->x geo (ctau/clip-end clip)) (+ x0 2))]
                   :when (and (< x0 (:width geo)) (pos? x1))]
