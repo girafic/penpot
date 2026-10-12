@@ -123,6 +123,9 @@
 
         modifiers         (mf/deref refs/workspace-modifiers)
         text-modifiers    (mf/deref refs/workspace-text-modifier)
+        ;; the canvas in its small window over the maximized timeline
+        ;; shows the animation alone, without what edits it
+        in-window?        (mf/deref refs/canvas-in-window)
 
         objects-modified  (mf/with-memo [base-objects text-modifiers modifiers]
                             (apply-modifiers-to-selected selected base-objects text-modifiers modifiers))
@@ -232,11 +235,12 @@
                                      (contains? layout :display-comments))
         show-cursor-tooltip?     tooltip
         show-draw-area?          drawing-obj
-        show-gradient-handlers?  (= (count selected) 1)
+        show-gradient-handlers?  (and (= (count selected) 1) (not in-window?))
         show-grids?              (contains? layout :display-guides)
 
-        show-frame-outline?      (= transform :move)
+        show-frame-outline?      (and (= transform :move) (not in-window?))
         show-outlines?           (and (nil? transform)
+                                      (not in-window?)
                                       (not edition)
                                       (not drawing-obj)
                                       (not (#{:path :curve} drawing-tool)))
@@ -251,7 +255,7 @@
         show-grid-editor?        (and editing-shape (ctl/grid-layout? editing-shape))
         show-presence?           page-id
         show-prototypes?         (= options-mode :prototype)
-        show-selection-handlers? (and (seq selected) (not show-text-editor?))
+        show-selection-handlers? (and (seq selected) (not show-text-editor?) (not in-window?))
         show-snap-distance?      (and (contains? layout :dynamic-alignment)
                                       (= transform :move)
                                       (seq selected))
@@ -267,7 +271,8 @@
         show-selrect?            (and selrect (or (empty? drawing) path-editing?) (not text-editing?))
         show-measures?           (and (not transform)
                                       (not path-editing?)
-                                      (or show-distances? mode-inspect? read-only?))
+                                      (or show-distances? mode-inspect? read-only?)
+                                      (not in-window?))
         show-artboard-names?     (contains? layout :display-artboard-names)
         hide-ui?                 (contains? layout :hide-ui)
         show-rulers?             (and (contains? layout :rulers) (not hide-ui?))
@@ -281,11 +286,13 @@
         first-shape              (first selected-shapes)
 
         show-add-variant?        (and single-select?
+                                      (not in-window?)
                                       (or (ctk/is-variant-container? first-shape)
                                           (ctk/is-variant? first-shape)))
 
         show-padding?
         (and (nil? transform)
+             (not in-window?)
              single-select?
              (= (:type first-shape) :frame)
              (= (:layout first-shape) :flex)
@@ -293,6 +300,7 @@
 
         show-margin?
         (and (nil? transform)
+             (not in-window?)
              single-select?
              (= (:layout selected-frame) :flex)
              (zero? (:rotation first-shape)))
@@ -519,7 +527,8 @@
                   (not text-editing?)
                   (not edition)
                   (not read-only?)
-                  (not mode-inspect?))
+                  (not mode-inspect?)
+                  (not in-window?))
          [:> msr/selection-size-badge*
           {:shapes selected-shapes
            :zoom zoom}])
@@ -581,15 +590,16 @@
            :is-alt @alt?
            :is-shift @shift?}])
 
-       [:> widgets/frame-titles*
-        {:objects base-objects
-         :selected selected
-         :zoom zoom
-         :is-show-artboard-names show-artboard-names?
-         :on-frame-enter on-frame-enter
-         :on-frame-leave on-frame-leave
-         :on-frame-select on-frame-select
-         :focus focus}]
+       (when-not in-window?
+         [:> widgets/frame-titles*
+          {:objects base-objects
+           :selected selected
+           :zoom zoom
+           :is-show-artboard-names show-artboard-names?
+           :on-frame-enter on-frame-enter
+           :on-frame-leave on-frame-leave
+           :on-frame-select on-frame-select
+           :focus focus}])
 
        (when show-prototypes?
          [:> widgets/frame-flows*
@@ -765,12 +775,13 @@
               :shape frame
               :view-only true}]))]
 
-       [:g.scrollbar-wrapper {:clipPath "url(#clip-handlers)"}
-        [:> scroll-bars/viewport-scrollbars*
-         {:objects base-objects
-          :zoom zoom
-          :vbox vbox
-          :bottom-padding (when palete-size (+ palete-size 8))}]]]]]))
+       (when-not in-window?
+         [:g.scrollbar-wrapper {:clipPath "url(#clip-handlers)"}
+          [:> scroll-bars/viewport-scrollbars*
+           {:objects base-objects
+            :zoom zoom
+            :vbox vbox
+            :bottom-padding (when palete-size (+ palete-size 8))}]])]]]))
 
 (mf/defc viewport*
   [{:keys [file page] :as props}]

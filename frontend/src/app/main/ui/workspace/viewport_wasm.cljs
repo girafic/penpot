@@ -214,6 +214,9 @@
         focus             (mf/deref refs/workspace-focus-selected)
         wasm-modifiers    (mf/deref refs/workspace-wasm-modifiers)
         workspace-editor-state (mf/deref refs/workspace-editor-state)
+        ;; the canvas in its small window over the maximized timeline
+        ;; shows the animation alone, without what edits it
+        in-window?        (mf/deref refs/canvas-in-window)
 
         file-id           (get file :id)
         vern              (get file :vern)
@@ -385,11 +388,12 @@
                                      (contains? layout :display-comments))
         show-cursor-tooltip?     tooltip
         show-draw-area?          drawing-obj
-        show-gradient-handlers?  (= (count selected) 1)
+        show-gradient-handlers?  (and (= (count selected) 1) (not in-window?))
         show-grids?              (and (contains? layout :display-guides) (not page-transition?))
 
-        show-frame-outline?      (and (= transform :move) (not panning) (not page-transition?))
+        show-frame-outline?      (and (= transform :move) (not panning) (not page-transition?) (not in-window?))
         show-outlines?           (and (nil? transform)
+                                      (not in-window?)
                                       (not panning)
                                       (not edition)
                                       (not drawing-obj)
@@ -409,7 +413,7 @@
         show-grid-editor?        (and editing-shape (ctl/grid-layout? editing-shape) (not page-transition?))
         show-presence?           (and page-id (not page-transition?))
         show-prototypes?         (and (= options-mode :prototype) (not page-transition?))
-        show-selection-handlers? (and (seq selected) (not show-text-editor?) (not page-transition?))
+        show-selection-handlers? (and (seq selected) (not show-text-editor?) (not page-transition?) (not in-window?))
         show-snap-distance?      (and (contains? layout :dynamic-alignment)
                                       (= transform :move)
                                       (seq selected)
@@ -423,7 +427,8 @@
         show-measures?           (and (not transform)
                                       (not path-editing?)
                                       (or show-distances? mode-inspect? read-only?)
-                                      (not page-transition?))
+                                      (not page-transition?)
+                                      (not in-window?))
         show-artboard-names?     (and (contains? layout :display-artboard-names) (not page-transition?))
         hide-ui?                 (contains? layout :hide-ui)
 
@@ -453,10 +458,11 @@
         first-shape (first selected-shapes)
 
         show-add-variant?        (and single-select?
+                                      (not in-window?)
                                       (or (ctk/is-variant-container? first-shape)
                                           (ctk/is-variant? first-shape)))
 
-        show-scrollbar?          (not page-transition?)
+        show-scrollbar?          (and (not page-transition?) (not in-window?))
 
         add-variant
         (mf/use-fn
@@ -466,6 +472,7 @@
 
         show-padding?
         (and (nil? transform)
+             (not in-window?)
              single-select?
              (= (:type first-shape) :frame)
              (= (:layout first-shape) :flex)
@@ -473,6 +480,7 @@
 
         show-margin?
         (and (nil? transform)
+             (not in-window?)
              single-select?
              (= (:layout selected-frame) :flex)
              (zero? (:rotation first-shape)))
@@ -857,7 +865,8 @@
                   (not edition)
                   (not read-only?)
                   (not mode-inspect?)
-                  (not page-transition?))
+                  (not page-transition?)
+                  (not in-window?))
          [:> msr/selection-size-badge*
           {:shapes selected-shapes
            :zoom zoom}])
@@ -899,7 +908,7 @@
            :is-alt @alt?
            :is-shift @shift?}])
 
-       (when-not shapes-loading?
+       (when (and (not shapes-loading?) (not in-window?))
          [:> widgets/frame-titles*
           {:objects objects-modified
            :selected selected

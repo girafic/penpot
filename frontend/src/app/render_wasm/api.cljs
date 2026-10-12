@@ -36,6 +36,7 @@
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
    [app.main.data.render-wasm :as drw]
+   [app.main.data.workspace.animation-mode :as dwam]
    [app.main.data.workspace.texts-v3 :as texts]
    [app.main.refs :as refs]
    [app.main.router :as rt]
@@ -2436,7 +2437,11 @@
     (bit-or 2r00000000000000000000000000000001)
     (text-editor-wasm?)
     (bit-or 2r00000000000000000000000000000100)
-    (contains? cf/flags :render-wasm-info)
+    ;; not over the canvas in its small window over the maximized
+    ;; timeline, which shows the animation alone (it sets the options
+    ;; again as it resizes, see `resize-canvas!`)
+    (and (contains? cf/flags :render-wasm-info)
+         (not (dwam/canvas-in-window? @st/state)))
     (bit-or 2r00000000000000000000000000001000)))
 
 (defn set-render-options!
