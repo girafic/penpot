@@ -227,6 +227,7 @@
 (def ^:icon-id percentage "percentage")
 (def ^:icon-id ping-pong "ping-pong")
 (def ^:icon-id picker "picker")
+(def ^:icon-id picture-in-picture "picture-in-picture")
 (def ^:icon-id pin "pin")
 (def ^:icon-id play "play")
 (def ^:icon-id puzzle "puzzle")

@@ -1582,7 +1582,8 @@
                            (tr "workspace.animation.canvas-window-hide"))
                   :aria-pressed (not canvas-hidden?)
                   :on-click on-toggle-canvas}
-         [:> i/icon* {:icon-id (if canvas-hidden? i/hide i/shown)}]])
+         ;; the canvas in a small window: on while it shows (see `:active`)
+         [:> i/icon* {:icon-id i/picture-in-picture}]])
       ;; over the whole workspace, as Ctrl + Space does
       [:button {:type "button"
                 :class (stl/css-case :ctrl-btn true :toggle-btn true :active maximized?)
