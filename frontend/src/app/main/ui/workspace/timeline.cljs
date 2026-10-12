@@ -1531,7 +1531,8 @@
                 :on-change on-row-height-change}]]
       [:div {:class (stl/css :slider-control)
              :title (tr "workspace.animation.zoom")}
-       [:> i/icon* {:icon-id i/search :size "s"}]
+       ;; the icon of the row height, across: the width of the time
+       [:> i/icon* {:icon-id i/text-lineheight :size "s" :class (stl/css :zoom-icon)}]
        [:input {:type "range"
                 :class (stl/css :zoom-slider)
                 :min 0

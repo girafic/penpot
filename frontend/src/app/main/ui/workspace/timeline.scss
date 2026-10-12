@@ -251,6 +251,11 @@ $header-height: $ruler-height + $row-height;
   inline-size: 72px;
 }
 
+// The zoom of the time: the icon of the row height, across.
+.zoom-icon {
+  transform: rotate(90deg);
+}
+
 // The settings of the selected audio clip (see `clip-bar*`).
 .clip-bar {
   display: flex;
