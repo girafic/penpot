@@ -433,3 +433,32 @@
 (t/deftest nothing-animates-no-react
   (let [[objects code] (board-scene identity)]
     (t/is (nil? (ctac/motion-react code objects)))))
+
+(t/deftest a-text-plays-its-colour-in-the-code
+  ;; Its glyphs paint in the fills of its spans: `color` in CSS and React,
+  ;; not a background, and the stroke of its glyphs, not a border.
+  (let [file  (-> (thf/sample-file :file1)
+                  (tho/add-frame :board :x 0 :y 0 :width 400 :height 300)
+                  (tho/add-text :title "Hi" :text-params {:parent-label :board}))
+        board (thi/id :board)
+        tid   (thi/id :title)
+        tl    (-> (cta/make-timeline {:board-id board :duration 1000})
+                  (cta/add-keyframe tid {:time 0 :property :fill-color :index 0 :value "#ff0000"})
+                  (cta/add-keyframe tid {:time 1000 :property :fill-color :index 0 :value "#00ff00"}))
+        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page (thf/current-page file))
+                                          (pcb/set-timeline board tl)))
+        page  (thf/current-page file)
+        code  (cltl/code-timelines page {} board)
+        react (ctac/motion-react code (:objects page))
+        css   (acss/timeline->css tl (:objects page))]
+    (t/is (cstr/includes? react "color: [\"#ff0000\"") "its colour in React")
+    (t/is (not (cstr/includes? react "backgroundColor")))
+    (t/is (re-find #"color: #00ff00;" css) "and in CSS")
+    (t/is (not (cstr/includes? css "background-color")))
+    (t/is (= {:text-stroke-width 4}
+             (select-keys (acss/frame-values (assoc (get (:objects page) tid) :strokes [{:stroke-color "#000000" :stroke-width 2}])
+                                             {:stroke-width {0 4}} {:x 0 :y 0})
+                          [:text-stroke-width :border-width]))
+          "the stroke of its glyphs")))
+

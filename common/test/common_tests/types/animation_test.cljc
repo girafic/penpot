@@ -23,6 +23,7 @@
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
+   [app.common.types.text :as txt]
    [app.common.types.text-units :as tu]
    [app.common.uuid :as uuid]
    [clojure.string :as str]
@@ -202,7 +203,10 @@
         mods  (get-in (cta/timeline->modif-tree tl {tid text} 1000) [tid :modifiers])
         fills (some #(when (= :fills (:property %)) (:value %)) (:structure-parent mods))]
     (t/is (= blue (cta/paint-fills text)))
-    (t/is (= [{:fill-color "#00ff00" :fill-opacity 0.5}] fills) "its colour on the fill of its span")))
+    (t/is (= [{:fill-color "#00ff00" :fill-opacity 0.5}] fills) "its colour on the fill of its span")
+    (t/is (= txt/default-text-fills
+             (cta/paint-fills (assoc-in text [:content :children 0 :children 0 :children 0] {:text "Hi"})))
+          "spans without fills paint in those of a text by default")))
 
 (t/deftest opacity-is-a-change-property-modifier
   ;; Opacity must ride the modifier pipeline (so it works in the WASM

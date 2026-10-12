@@ -347,6 +347,17 @@
    ["filter" #{:blur} :blur]
    ["backdropFilter" #{:background-blur} :backdrop-blur]])
 
+(def ^:private text-react-values
+  "`react-values` of a text, which paints its glyphs in its fills and
+  strokes: its colour and the stroke of its glyphs."
+  (mapv (fn [[value-name _ _ :as entry]]
+          (case value-name
+            "backgroundColor" ["color" #{:fill-color :fill-opacity} :color]
+            "borderColor"     ["WebkitTextStrokeColor" #{:stroke-color :stroke-opacity} :text-stroke-color]
+            "borderWidth"     ["WebkitTextStrokeWidth" #{:stroke-width} :text-stroke-width]
+            entry))
+        react-values))
+
 (def ^:private segment-samples
   "The steps a segment takes when the properties behind a value ease it
   apart (see `value-segments`)."
@@ -370,7 +381,7 @@
   [value v]
   (case value
     "borderRadius" (str "\"" (str/join " " (map #(str (react-number %) "px") v)) "\"")
-    ("backgroundColor" "borderColor" "boxShadow") (str "\"" v "\"")
+    ("backgroundColor" "borderColor" "boxShadow" "color" "WebkitTextStrokeColor") (str "\"" v "\"")
     ("filter" "backdropFilter") (str "\"blur(" (react-number v) "px)\"")
     (react-number v)))
 
@@ -502,7 +513,7 @@
                                                      (str "ease: [" (str/join ", " eases) "]")]
                                                     repeats))
                                          " }")}))))))
-           react-values))))
+           (if (= :text (:type (:shape layer))) text-react-values react-values)))))
 
 (defn- merge-scale
   "`values` with `scaleX` and `scaleY` as one `scale` when they play

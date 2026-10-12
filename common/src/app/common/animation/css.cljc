@@ -101,7 +101,9 @@
   from its rest pose, when its position, size, scale or rotation plays;
   then, for the properties `values` holds, `:opacity`, `:border-radius`
   (the four corners in px), `:background-color` and `:border-color` (CSS
-  colours of the first solid fill and stroke), `:border-width` (px),
+  colours of the first solid fill and stroke), `:border-width` (px) (of a
+  text, `:color`, `:text-stroke-color` and `:text-stroke-width`: it paints
+  its glyphs in the fills of its spans, see `cta/paint-fills`),
   `:box-shadow` (the CSS of its visible shadows), `:blur` and
   `:backdrop-blur` (px). `origin` is where its positions count from (see
   `position-origin`)."
@@ -110,7 +112,8 @@
         base-x  (:x selrect)
         base-y  (:y selrect)
         base-r  (or (:rotation shape) 0)
-        fills   (cta/apply-fills (:fills shape) values)
+        text?   (= :text (:type shape))
+        fills   (cta/apply-fills (cta/paint-fills shape) values)
         strokes (cta/apply-strokes (:strokes shape) values)
         shadows (cta/apply-shadows (:shadow shape) values)
         fill    (d/seek cta/solid-color-fill? fills)
@@ -131,13 +134,13 @@
                              (get values :r3 (:r3 shape)) (get values :r4 (:r4 shape))])
 
       (and fill (cta/has? values :fill-color :fill-opacity))
-      (assoc :background-color (css-color (:fill-color fill) (or (:fill-opacity fill) 1)))
+      (assoc (if text? :color :background-color) (css-color (:fill-color fill) (or (:fill-opacity fill) 1)))
 
       (and stroke (cta/has? values :stroke-color :stroke-opacity))
-      (assoc :border-color (css-color (:stroke-color stroke) (or (:stroke-opacity stroke) 1)))
+      (assoc (if text? :text-stroke-color :border-color) (css-color (:stroke-color stroke) (or (:stroke-opacity stroke) 1)))
 
       (and stroke (contains? values :stroke-width))
-      (assoc :border-width (or (:stroke-width stroke) 0))
+      (assoc (if text? :text-stroke-width :border-width) (or (:stroke-width stroke) 0))
 
       (cta/has? values :shadow-offset-x :shadow-offset-y :shadow-blur
                 :shadow-spread :shadow-color :shadow-opacity)
@@ -195,7 +198,8 @@
 (defn- css-declarations
   [shape values origin rest-transform]
   (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity border-radius
-                background-color border-color border-width box-shadow blur backdrop-blur]
+                background-color border-color border-width box-shadow blur backdrop-blur
+                color text-stroke-color text-stroke-width]
          :as frame}
         (frame-values shape values origin)]
     (cond-> []
@@ -221,6 +225,15 @@
 
       (contains? frame :border-width)
       (conj (str "border-width: " (fmt border-width) "px;"))
+
+      (contains? frame :color)
+      (conj (str "color: " color ";"))
+
+      (contains? frame :text-stroke-color)
+      (conj (str "-webkit-text-stroke-color: " text-stroke-color ";"))
+
+      (contains? frame :text-stroke-width)
+      (conj (str "-webkit-text-stroke-width: " (fmt text-stroke-width) "px;"))
 
       (contains? frame :box-shadow)
       (conj (str "box-shadow: " box-shadow ";"))

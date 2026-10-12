@@ -2427,12 +2427,14 @@
 (defn paint-fills
   "The fills `shape` paints in, which an animation of its fills plays on: a
   text has none of its own, it paints its glyphs in those of its spans, the
-  ones of the first (which its design tab shows), played on all of them
-  (render-wasm paints its spans with them, see
+  ones of the first (which its design tab shows), or the default ones of a
+  text when its spans have none, played on all of them (render-wasm paints
+  its spans with them, see
   `app.render-wasm.api/set-shape-text-fills-override`)."
   [shape]
   (if (= :text (:type shape))
-    (or (some :fills (txt/node-seq txt/is-text-node? (:content shape))) [])
+    (or (some :fills (txt/node-seq txt/is-text-node? (:content shape)))
+        txt/default-text-fills)
     (:fills shape)))
 
 (defn apply-fills
