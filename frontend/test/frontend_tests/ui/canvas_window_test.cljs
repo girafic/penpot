@@ -53,7 +53,7 @@
 
 (t/deftest the-canvas-is-under-the-bar-of-its-window
   ;; The bar covers none of the board fitted in it.
-  (t/is (= {:x 1001 :y 617 :w 398 :h 234} (cw/canvas-box frame)))
+  (t/is (= {:x 1001 :y 625 :w 398 :h 226} (cw/canvas-box frame)))
   (t/is (= (+ (:y frame) 1 cw/bar-height) (:y (cw/canvas-box frame)))))
 
 (defn- drag!

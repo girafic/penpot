@@ -32,8 +32,9 @@
 
 (def bar-height
   "The height of the bar on top of the window that moves it, px: the
-  canvas is under it."
-  16)
+  canvas is under it. Room for its close button, as wide around its
+  cross as the corner that resizes the window is."
+  24)
 
 (def min-width 200)
 (def min-height 126)

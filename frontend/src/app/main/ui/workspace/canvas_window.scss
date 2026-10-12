@@ -55,15 +55,16 @@
   }
 }
 
-// The button at the right of the bar, before the corner, that hides
-// the window: wider than the bar is high, to hit it at once.
+// The button at the right of the bar that hides the window: as high as
+// the bar, its cross about as far from the top as from the right, clear
+// of the corner that resizes the window.
 .hide-btn {
   position: absolute;
   inset-block-start: 0;
-  inset-inline-end: $sz-12;
+  inset-inline-end: px2rem(6);
   display: grid;
   place-items: center;
-  inline-size: $sz-28;
+  inline-size: var(--canvas-window-bar);
   block-size: var(--canvas-window-bar);
   padding: 0;
   border: none;
