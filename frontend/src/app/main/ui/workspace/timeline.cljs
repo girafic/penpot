@@ -29,6 +29,7 @@
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.animation-mode :as dwam]
    [app.main.data.workspace.audio :as dwaa]
+   [app.main.data.workspace.audio-recording :as dwar]
    [app.main.data.workspace.clipboard :as dwcp]
    [app.main.data.workspace.comments :as dwcm]
    [app.main.data.workspace.modifiers :as dwm]
@@ -1371,11 +1372,23 @@
                :on-click on-fit}
       [:> i/icon* {:icon-id i/fit-content}]]]))
 
+(mf/defc recording-time*
+  "How long the recording of sound has lasted since `since`
+  (`Date.now`), as minutes and seconds."
+  {::mf/private true}
+  [{:keys [since]}]
+  (let [now* (mf/use-state #(js/Date.now))
+        secs (max 0 (quot (- @now* since) 1000))]
+    (mf/with-effect [since]
+      (let [timer (js/setInterval #(reset! now* (js/Date.now)) 250)]
+        #(js/clearInterval timer)))
+    [:span (dm/str (quot secs 60) ":" (.padStart (str (mod secs 60)) 2 "0"))]))
+
 (mf/defc toolbar*
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [timeline playing? recording? full-quality? audio-muted? clip clip-count unit zoom on-zoom-change
-           row-height on-row-height-change maximized? canvas-hidden?]}]
+  [{:keys [timeline playing? recording? full-quality? audio-muted? audio-recording clip clip-count unit zoom
+           on-zoom-change row-height on-row-height-change maximized? canvas-hidden?]}]
   (let [duration (:duration timeline)
         playback (cta/playback-mode timeline)
         autoplay? (cta/autoplay? timeline)
@@ -1392,6 +1405,11 @@
 
         on-toggle-recording
         (mf/use-fn #(st/emit! (dwa/toggle-auto-keyframe)))
+
+        ;; the animation plays along, with its sound
+        on-toggle-audio-recording
+        (mf/use-fn #(do (audio/unlock!)
+                        (st/emit! (dwar/toggle-audio-recording))))
 
         on-stop
         (mf/use-fn #(st/emit! (dwa/stop)))
@@ -1471,7 +1489,20 @@
                            (tr "workspace.animation.mute"))
                   :aria-pressed (not audio-muted?)
                   :on-click on-toggle-audio}
-         [:> i/icon* {:icon-id (if audio-muted? i/volume-off i/volume)}]])]
+         [:> i/icon* {:icon-id (if audio-muted? i/volume-off i/volume)}]])
+      ;; sound from the microphone into the timeline, from the playhead
+      [:button {:type "button"
+                :class (stl/css-case :mic-btn true
+                                     :pending (true? (:pending? audio-recording))
+                                     :recording (some? (:since audio-recording)))
+                :title (if (some? audio-recording)
+                         (tr "workspace.animation.stop-audio-recording")
+                         (tr "workspace.animation.record-audio"))
+                :aria-pressed (some? audio-recording)
+                :on-click on-toggle-audio-recording}
+       [:> i/icon* {:icon-id i/microphone}]
+       (when-let [since (:since audio-recording)]
+         [:> recording-time* {:since since}])]]
 
      [:button {:type "button"
                :class (stl/css-case :rec-btn true :active recording?)
@@ -3232,6 +3263,7 @@
                        :recording? recording?
                        :full-quality? (dwa/full-quality? anim)
                        :audio-muted? (dwa/audio-muted? anim)
+                       :audio-recording (:audio-recording anim)
                        :clip (when (= 1 (count selected-clips))
                                (some->> selected-clip (ctau/get-audio-clip timeline)))
                        :clip-count (count selected-clips)

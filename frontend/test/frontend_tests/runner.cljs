@@ -27,6 +27,7 @@
    [frontend-tests.data.uploads-test]
    [frontend-tests.data.viewer-playback-test]
    [frontend-tests.data.viewer-test]
+   [frontend-tests.data.workspace-audio-recording-test]
    [frontend-tests.data.workspace-audio-test]
    [frontend-tests.data.workspace-colors-test]
    [frontend-tests.data.workspace-comments-test]
@@ -170,6 +171,7 @@
    'frontend-tests.data.uploads-test
    'frontend-tests.data.viewer-playback-test
    'frontend-tests.data.viewer-test
+   'frontend-tests.data.workspace-audio-recording-test
    'frontend-tests.data.workspace-audio-test
    'frontend-tests.data.workspace-colors-test
    'frontend-tests.data.workspace-comments-test

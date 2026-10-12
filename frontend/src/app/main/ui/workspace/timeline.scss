@@ -175,6 +175,41 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
+// Sound from the microphone: red while it records, with how long.
+.mic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: deprecated.$s-4;
+  min-inline-size: 32px;
+  block-size: 32px;
+  padding: 0;
+  border: none;
+  border-radius: deprecated.$br-8;
+  background-color: transparent;
+  color: var(--color-foreground-secondary);
+  font-size: deprecated.$fs-11;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-tertiary);
+    color: var(--color-accent-primary);
+  }
+
+  &.pending {
+    opacity: 0.6;
+    cursor: wait;
+  }
+
+  &.recording,
+  &.recording:hover {
+    padding: 0 deprecated.$s-8 0 deprecated.$s-4;
+    background-color: color-mix(in hsl, var(--color-accent-error) 15%, transparent);
+    color: var(--color-accent-error);
+  }
+}
+
 .rec-dot {
   inline-size: 8px;
   block-size: 8px;

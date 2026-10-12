@@ -8064,6 +8064,21 @@ msgstr "The board is gone, so the audio was not added."
 msgid "workspace.audio.upload-not-enabled"
 msgstr "Audio upload is not enabled on this server."
 
+msgid "workspace.audio.microphone-denied"
+msgstr "Penpot may not use the microphone. Allow it in your browser to record audio."
+
+msgid "workspace.audio.microphone-missing"
+msgstr "No microphone was found to record from."
+
+msgid "workspace.audio.microphone-busy"
+msgstr "The microphone is in use by another app."
+
+msgid "workspace.audio.recording-failed"
+msgstr "The recording failed."
+
+msgid "workspace.audio.recording-unsupported"
+msgstr "This browser cannot record audio."
+
 msgid "workspace.audio.drop-on-a-board"
 msgstr "Drop audio onto a board."
 
@@ -8144,6 +8159,12 @@ msgstr "Audio"
 
 msgid "workspace.animation.add-audio"
 msgstr "Add audio"
+
+msgid "workspace.animation.record-audio"
+msgstr "Record audio from the microphone, from the playhead"
+
+msgid "workspace.animation.stop-audio-recording"
+msgstr "Stop recording"
 
 msgid "workspace.animation.remove-audio"
 msgstr "Remove audio"
