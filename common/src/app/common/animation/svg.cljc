@@ -1150,9 +1150,13 @@
                     (if-let [markup (:markup img)]
                       (str "<g" (svg-id-attr svg-ids board-id) ">"
                            (svg-smil-vectors {:smil smil :ox ox :oy oy} board-id markup) "</g>")
+                      ;; the picture over the box it covers, as a layer's: a
+                      ;; board's shadow or what reaches past it widen it
                       (str "<image" (svg-id-attr svg-ids board-id)
                            " href=\"" (svg-escape (:href img))
-                           "\" x=\"0\" y=\"0\" width=\"" width "\" height=\"" height "\"/>")))
+                           "\" x=\"" (acss/fmt (or (:x img) 0)) "\" y=\"" (acss/fmt (or (:y img) 0))
+                           "\" width=\"" (acss/fmt (or (:width img) width))
+                           "\" height=\"" (acss/fmt (or (:height img) height)) "\"/>")))
          layers   (str/join "" (keep #(emit-svg-node {:objects objects :images images :svg-ids svg-ids
                                                       :ox ox :oy oy :follow (:ids follow) :smil smil
                                                       :unit-blurs unit-blurs :width width :height height}

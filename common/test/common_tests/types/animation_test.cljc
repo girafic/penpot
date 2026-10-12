@@ -933,6 +933,18 @@
           "letters of any script, no punctuation an XML name can not hold")
     (t/is (= {aid "_1x"} (asvg/svg-layer-ids {aid {:name "1x"}} [aid])) "no digit first")))
 
+(t/deftest timeline->svg-lays-the-picture-of-the-board-over-its-box
+  ;; A board's shadow widens its picture past it: drawn into the board,
+  ;; the picture would be squashed.
+  (let [board (cts/setup-shape {:type :frame :x 100 :y 50 :width 200 :height 100})
+        bid   (:id board)
+        tl    (cta/make-timeline {:board-id bid :duration 1000})
+        svg   #(asvg/timeline->svg tl {bid board} {bid %})]
+    (t/is (str/includes? (svg {:href "data:image/png;base64,AAA" :x -8 :y -4 :width 220 :height 130})
+                         "x=\"-8\" y=\"-4\" width=\"220\" height=\"130\""))
+    (t/is (str/includes? (svg {:href "data:image/png;base64,AAA"}) "x=\"0\" y=\"0\" width=\"200\" height=\"100\"")
+          "the board, without a box")))
+
 (t/deftest timeline->svg-draws-the-vectors-of-its-layers
   (let [board (cts/setup-shape {:type :frame :x 100 :y 50 :width 200 :height 100})
         bid   (:id board)
