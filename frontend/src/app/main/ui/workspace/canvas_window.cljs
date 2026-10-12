@@ -203,7 +203,7 @@
                 :on-pointer-down dom/stop-propagation
                 :on-double-click dom/stop-propagation
                 :on-click on-hide}
-       [:> i/icon* {:icon-id i/close-small :size "s"}]]]
+       [:> i/icon* {:icon-id i/close}]]]
      (for [[corner class] corners]
        [:div {:key corner
               :class class

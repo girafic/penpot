@@ -56,22 +56,24 @@
 }
 
 // The button at the right of the bar, before the corner, that hides
-// the window.
+// the window: wider than the bar is high, to hit it at once.
 .hide-btn {
   position: absolute;
   inset-block-start: 0;
   inset-inline-end: $sz-12;
   display: grid;
   place-items: center;
-  inline-size: var(--canvas-window-bar);
+  inline-size: $sz-28;
   block-size: var(--canvas-window-bar);
   padding: 0;
   border: none;
+  border-radius: $br-4;
   background-color: transparent;
   color: var(--color-foreground-secondary);
   cursor: pointer;
 
   &:hover {
+    background-color: var(--color-background-tertiary);
     color: var(--color-foreground-primary);
   }
 }
