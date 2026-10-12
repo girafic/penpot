@@ -422,7 +422,9 @@
                               (device "audioinput" "communications" "Communications")
                               (device "videoinput" "cam" "Camera")
                               (device "audioinput" "a" "USB mic")
-                              (device "audioinput" "b" "")]))}]
+                              (device "audioinput" "b" "")
+                              ;; hidden until one is allowed
+                              (device "audioinput" "" "")]))}]
       (-> (with-media-devices media dwar/list-microphones!)
           (.then (fn [mics]
                    (t/is (= [{:id "a" :label "USB mic"} {:id "b" :label nil}] mics)

@@ -129,7 +129,8 @@
 
 (defn list-microphones!
   "A promise of the microphones of the browser, `[{:id :label}]`, labelled
-  once it has been allowed to use one (else nil labels); none without."
+  once it has been allowed to use one (else nil labels); none without,
+  nor before a browser that hides them until then gives their ids."
   []
   (if (and (exists? js/navigator)
            (some? (.-mediaDevices js/navigator))
@@ -139,7 +140,7 @@
                  (into []
                        (comp (filter #(= "audioinput" (.-kind ^js %)))
                              ;; the system's own is the default
-                             (remove #(contains? #{"default" "communications"} (.-deviceId ^js %)))
+                             (remove #(contains? #{"" "default" "communications"} (.-deviceId ^js %)))
                              (map (fn [^js device]
                                     {:id (.-deviceId device)
                                      :label (not-empty (.-label device))})))
