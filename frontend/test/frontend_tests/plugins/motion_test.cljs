@@ -143,6 +143,22 @@
           (t/is (= (aget rect "$id") (aget (.-shape (aget (.-keyframes timeline) 0)) "$id")))
           (t/is (= (aget rect "$id") (aget (.-shape (aget (.-animations timeline) 0)) "$id"))))))))
 
+(t/deftest a-layer-turns-and-scales-around-its-origin
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js timeline         (.addTimeline board)
+            origin               #(js->clj (.originOf timeline rect) :keywordize-keys true)]
+        (t/is (= {:x 0.5 :y 0.5} (origin)) "its center at first")
+        (.setOrigin timeline rect #js {:x 0 :y 0.5})
+        (t/is (= {:x 0 :y 0.5} (:origin (stored-track store context board rect))) "as the pivot of the Design tab")
+        (t/is (= {:x 0 :y 0.5} (origin)))
+        (t/is (thrown? js/Error (.setOrigin timeline rect #js {:x 2 :y 0})) "within its box")
+        (t/is (thrown? js/Error (.setOrigin timeline rect "left")))
+        (.setOrigin timeline rect #js {:x 0.5 :y 0.5})
+        (t/is (nil? (:origin (stored-track store context board rect))) "its center again, as unset")))))
+
 (t/deftest keyframes-animate-the-layers
   (thw/with-wasm-mocks*
     (fn []

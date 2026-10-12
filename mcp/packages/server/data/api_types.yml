@@ -16481,6 +16481,8 @@ Timeline:
             index?: number,
         ): string | number | null;
         clear(shape: Shape): void;
+        originOf(shape: Shape): { x: number; y: number };
+        setOrigin(shape: Shape, origin: { x: number; y: number }): void;
         toCSS(): string;
         toJSON(): TimelineJson;
         toReact(): string;
@@ -16853,6 +16855,46 @@ Timeline:
         * shape: Shape
 
         Returns void
+      originOf: |-
+        ```
+        originOf(shape: Shape): { x: number; y: number }
+        ```
+
+        The point `shape` turns and scales around, as a share of its box:
+        `{ x: 0.5, y: 0.5 }`, its center, until `setOrigin` sets another.
+
+        Parameters
+
+        * shape: Shape
+
+          The board or a layer inside it.
+
+        Returns { x: number; y: number }
+      setOrigin: |-
+        ```
+        setOrigin(shape: Shape, origin: { x: number; y: number }): void
+        ```
+
+        Sets the point `shape` turns and scales around, as a share of its box,
+        as the pivot of the Design tab does in motion mode: `{ x: 0, y: 0.5 }`
+        is the middle of its left side. Its `rotation`, `scaleX` and `scaleY`
+        keyframes play around it.
+
+        Parameters
+
+        * shape: Shape
+
+          The board or a layer inside it.
+        * origin: { x: number; y: number }
+
+          Its `x` and `y`, each from 0 to 1.
+
+        Returns void
+
+        Example
+        ```
+        timeline.setOrigin(door, { x: 0, y: 0.5 });timeline.addKeyframe(door, { property: 'scaleX', time: 0, value: 1 });timeline.addKeyframe(door, { property: 'scaleX', time: 600, value: 0 });
+        ```
       toCSS: |-
         ```
         toCSS(): string

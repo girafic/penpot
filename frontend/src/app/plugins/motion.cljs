@@ -1659,6 +1659,23 @@
         (when-let [shape-id (layer :clear shape)]
           (write! :clear #(cta/remove-track % shape-id))))
 
+      ;; The point a layer turns and scales around, as a share of its box,
+      ;; as the Pivot of the Design tab sets it in motion mode
+      :originOf
+      (fn [shape]
+        (when-let [shape-id (layer :originOf shape)]
+          (let [{:keys [x y]} (cta/track-origin (dm/get-in (locate) [:tracks shape-id]))]
+            #js {:x x :y y})))
+
+      :setOrigin
+      (fn [shape origin]
+        (when-let [shape-id (layer :setOrigin shape)]
+          (let [x (when (object? origin) (obj/get origin "x"))
+                y (when (object? origin) (obj/get origin "y"))]
+            (if (and (number? x) (number? y) (<= 0 x 1) (<= 0 y 1))
+              (write! :setOrigin #(cta/set-track-origin % shape-id x y))
+              (u/not-valid plugin-id :setOrigin "The origin should be { x, y }, each from 0 to 1")))))
+
       ;; As copying the animation of a layer on the canvas and pasting it
       ;; onto others, in the boards of the page they are in.
       :copyAnimation

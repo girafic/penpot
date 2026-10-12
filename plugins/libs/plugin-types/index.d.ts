@@ -4035,6 +4035,30 @@ export interface Timeline {
   clear(shape: Shape): void;
 
   /**
+   * The point `shape` turns and scales around, as a share of its box:
+   * `{ x: 0.5, y: 0.5 }`, its center, until `setOrigin` sets another.
+   * @param shape The board or a layer inside it.
+   */
+  originOf(shape: Shape): { x: number; y: number };
+
+  /**
+   * Sets the point `shape` turns and scales around, as a share of its box,
+   * as the pivot of the Design tab does in motion mode: `{ x: 0, y: 0.5 }`
+   * is the middle of its left side. Its `rotation`, `scaleX` and `scaleY`
+   * keyframes play around it.
+   * @param shape The board or a layer inside it.
+   * @param origin Its `x` and `y`, each from 0 to 1.
+   *
+   * @example
+   * ```js
+   * timeline.setOrigin(door, { x: 0, y: 0.5 });
+   * timeline.addKeyframe(door, { property: 'scaleX', time: 0, value: 1 });
+   * timeline.addKeyframe(door, { property: 'scaleX', time: 600, value: 0 });
+   * ```
+   */
+  setOrigin(shape: Shape, origin: { x: number; y: number }): void;
+
+  /**
    * The animation as CSS, as the Motion tab of Inspect gives it with the
    * board selected: `@keyframes` and the `animation` rules of the layers,
    * with the classes the code of Inspect gives them (see
