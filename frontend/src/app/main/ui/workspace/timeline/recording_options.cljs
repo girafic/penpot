@@ -74,9 +74,12 @@
            (when (kbd/esc? event)
              (on-close))))]
 
-    ;; focused, so Escape closes it at once
+    ;; focused, so Escape closes it at once; closed, the focus goes back
+    ;; to what opened it
     (mf/with-effect []
-      (some-> (mf/ref-val popover-ref) (dom/focus!)))
+      (let [opener (dom/get-active)]
+        (some-> (mf/ref-val popover-ref) (dom/focus!))
+        #(some-> opener (dom/focus!))))
 
     (mf/with-effect []
       (let [live? (volatile! true)]

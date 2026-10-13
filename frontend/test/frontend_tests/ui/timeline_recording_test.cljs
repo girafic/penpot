@@ -48,3 +48,21 @@
                                          {:type :audio-group :collapsed? true :clips [beat rec]}]))
           "folded")
     (t/is (nil? (rec/recording-row-index (pop rows))) "none without a recording")))
+
+(t/deftest closed-the-options-give-the-focus-back
+  ;; To the button that opened them, as a dialog does.
+  (thd/with-dom
+    (fn [{:keys [root document window]}]
+      (let [opener (.createElement document "button")
+            open?  (atom true)
+            render (fn render []
+                     (thd/render! root (when @open?
+                                         (mf/element recording-options*
+                                                     #js {:anchor {:top 500 :left 100 :width 20}
+                                                          :onClose #(do (reset! open? false) (render))}))))]
+        (.appendChild (.-body document) opener)
+        (.focus opener)
+        (render)
+        (thd/key-down! window (.querySelector document "[role=dialog]") "Escape")
+        (t/is (nil? (.querySelector document "[role=dialog]")) "closed")
+        (t/is (= opener (.-activeElement document)) "the focus back")))))
