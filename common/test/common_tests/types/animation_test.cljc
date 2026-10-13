@@ -1556,28 +1556,28 @@
                      (cta/add-keyframe gid {:time 0 :property :width :value 100 :easing :ease-out})
                      (cta/add-keyframe gid {:time 1000 :property :width :value 200})
                      (cta/resolve-animations objects)))
-        tl     (aexp/svg-expand-group-sizes (grow objects) objects)
+        tl     (aexp/expand-group-sizes (grow objects) objects)
         kfs    (fn [id] (mapv (juxt :time (comp double :value) :easing) (get-in tl [:tracks id :keyframes])))]
     (t/testing "its layers take its size, scaled to theirs, around its pivot"
-      (t/is (= #{gid} (aexp/svg-sized-groups tl)))
+      (t/is (= #{gid} (aexp/sized-groups tl)))
       (t/is (= [[0 40.0 :ease-out] [1000 80.0 nil]] (kfs (:id a))) "the same keyframes and easings")
       (t/is (= [[0 40.0 :ease-out] [1000 80.0 nil]] (kfs (:id b))))
       (t/is (= {:x 1.25 :y 0.5} (get-in tl [:tracks (:id a) :origin])) "the middle of the group, past its box")
       (t/is (= {:x -0.25 :y 0.5} (get-in tl [:tracks (:id b) :origin])))
       (t/is (= 2 (count (get-in tl [:tracks gid :keyframes]))) "the group keeps its own, a layer still")
-      (t/is (= tl (aexp/svg-expand-group-sizes tl objects)) "once only"))
+      (t/is (= tl (aexp/expand-group-sizes tl objects)) "once only"))
     (t/testing "where it can not, it stretches as before"
       (let [moved (-> (grow objects)
                       (assoc-in [:tracks (:id a)] {:shape-id (:id a)
                                                    :keyframes [{:id (uuid/next) :time 0 :property :x :value 0}
                                                                {:id (uuid/next) :time 1000 :property :x :value 20}]}))]
-        (t/is (empty? (aexp/svg-sized-groups (aexp/svg-expand-group-sizes moved objects)))
+        (t/is (empty? (aexp/sized-groups (aexp/expand-group-sizes moved objects)))
               "a layer that moves on its own"))
       (let [turned (update objects (:id b) gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 80 20) 30))]
-        (t/is (empty? (aexp/svg-sized-groups (aexp/svg-expand-group-sizes (grow turned) turned)))
+        (t/is (empty? (aexp/sized-groups (aexp/expand-group-sizes (grow turned) turned)))
               "a turned layer, which the canvas skews"))
       (let [masked (assoc-in objects [gid :masked-group] true)]
-        (t/is (empty? (aexp/svg-sized-groups (aexp/svg-expand-group-sizes (grow masked) masked)))
+        (t/is (empty? (aexp/sized-groups (aexp/expand-group-sizes (grow masked) masked)))
               "a masked group")))
     (t/testing "the SVG: its layers resize, the group scales not"
       (let [svg (asvg/timeline->svg (grow objects) objects
@@ -1598,8 +1598,8 @@
         tl    (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
                   (cta/add-keyframe (:id outer) {:time 0 :property :height :value 20})
                   (cta/add-keyframe (:id outer) {:time 1000 :property :height :value 60})
-                  (aexp/svg-expand-group-sizes objects))]
-    (t/is (= #{(:id outer) (:id inner)} (aexp/svg-sized-groups tl)))
+                  (aexp/expand-group-sizes objects))]
+    (t/is (= #{(:id outer) (:id inner)} (aexp/sized-groups tl)))
     (t/is (= [20.0 60.0] (mapv (comp double :value) (get-in tl [:tracks (:id rect) :keyframes]))))))
 
 (t/deftest an-svg-plays-all-the-animations-of-an-element
@@ -1837,6 +1837,28 @@
         (t/is (close-all? [[100 100 100] [200 100 100]] (mapv :s (get-in layer [:ks :s :k]))))
         (t/is (close-all? [100 10] (get-in (lottie-item (get-in layer [:shapes 0 :it]) "rc") [:s :k]))
               "its outline as it is")))))
+
+(t/deftest lottie-resizes-a-group-on-its-layers
+  ;; As an SVG does (see `an-svg-resizes-a-group-on-its-layers`): its
+  ;; rectangles resize, around its middle, its layer scales not.
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        rect   #(cts/setup-shape {:type :rect :x %1 :y 10 :width 40 :height 20
+                                  :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        [objects group] (group-of board (rect 0) (rect 60))
+        tl     (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                   (cta/add-keyframe (:id group) {:time 0 :property :width :value 100 :easing :linear})
+                   (cta/add-keyframe (:id group) {:time 1000 :property :width :value 200}))
+        L      (alottie/timeline->lottie tl objects)
+        layers (into (vec (:layers L)) (mapcat :layers) (:assets L))
+        ;; the rectangles that resize, not the one of the board
+        rcs    (->> layers
+                    (keep #(some-> (get-in % [:shapes 0 :it]) (lottie-item "rc")))
+                    (filter #(= 1 (get-in % [:s :a]))))]
+    (t/is (= 2 (count rcs)) "a layer each")
+    (t/is (every? #(close-all? [[40 20] [80 20]] (mapv :s (get-in % [:s :k]))) rcs) "each its size")
+    (t/is (= #{[-10 20] [110 20]} (into #{} (map #(mapv mth/round (:s (last (get-in % [:p :k]))))) rcs))
+          "around the middle of the group, 50: -50..30 and 70..150")
+    (t/is (not-any? #(= 1 (get-in % [:ks :s :a])) layers) "no layer stretches")))
 
 (t/deftest lottie-eases-scale-x-and-y-each-by-its-curve
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})

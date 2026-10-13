@@ -645,12 +645,12 @@
           lottie-set (set lottie-ids)
           some?*    (fn [pred] (boolean (some pred shapes)))
           ;; SVG and Lottie play some on the outlines, SVG more (see
-          ;; `aexp/svg-outline-sized?`, `aexp/svg-box-sized?`), and the
-          ;; size of a group on its layers (see `aexp/svg-expand-group-sizes`)
-          svg-tl    (aexp/svg-expand-group-sizes resolved objects)
+          ;; `aexp/svg-outline-sized?`, `aexp/svg-box-sized?`), and both
+          ;; the size of a group on its layers (see `aexp/expand-group-sizes`)
+          sized-tl  (aexp/expand-group-sizes resolved objects)
           stretch?  (fn [svg?]
-                      (let [tl     (if svg? svg-tl resolved)
-                            groups (if svg? (aexp/svg-sized-groups svg-tl) #{})]
+                      (let [tl     sized-tl
+                            groups (aexp/sized-groups sized-tl)]
                         (boolean
                          (some (fn [[id track]]
                                  (let [shape (get objects id)]
@@ -1885,17 +1885,17 @@
         ;; split texts play their units, each on its own
         texts    (unit-texts objects tl)
         vectors? (= :svg format)
-        ;; an SVG plays the size of a group on its layers (see
-        ;; `aexp/svg-expand-group-sizes`): they are layers then; the
-        ;; canvas, which resizes them with the group, plays `tl`
-        mtl      (cond-> tl vectors? (aexp/svg-expand-group-sizes objects))
         lottie?  (contains? #{:lottie :dotlottie} format)
         ;; Lottie draws the other texts as the outlines of their glyphs
         ;; (see `outline-texts`)
         shapes   (if lottie? (second (outline-texts objects tl texts bridge)) objects)
+        ;; SVG and Lottie play the size of a group on its layers (see
+        ;; `aexp/expand-group-sizes`): they are layers then; the canvas,
+        ;; which resizes them with the group, plays `tl`
+        mtl      (cond-> tl (or vectors? lottie?) (aexp/expand-group-sizes shapes))
         ;; Lottie draws the layers it can as vectors, SVG all (see
         ;; `vector-layers`)
-        layers   (set (aexp/export-layer-ids shapes (cta/resolve-animations tl shapes)))
+        layers   (set (aexp/export-layer-ids shapes (cta/resolve-animations mtl shapes)))
         skip?    #(or vectors?
                       (contains? texts %)
                       (and lottie? (alottie/lottie-vector-layer? shapes layers %)))
@@ -1906,7 +1906,7 @@
                         (cons board-id)
                         (remove texts)
                         (count))
-                   (count (layer-ids-to-shoot shapes tl skip?)))
+                   (count (layer-ids-to-shoot shapes mtl skip?)))
         ;; the units of a split text are outlined at once
         total    (+ n-layers (count texts))
         pictures (phase-progress on-progress :layers)]
@@ -1929,7 +1929,7 @@
             images  (if vectors?
                       (:images vectors)
                       (collect-layer-images
-                       shapes tl
+                       shapes mtl
                        {:bridge bridge
                         :time (or time 0)
                         :yield yield

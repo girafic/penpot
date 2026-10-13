@@ -373,15 +373,16 @@
               timeline
               kids))))
 
-(defn svg-expand-group-sizes
+(defn expand-group-sizes
   "`timeline` (its animations resolved into keyframes, see
   `cta/resolve-animations`) with the width and height it plays on groups
   also on their layers, as the canvas resizes them with the group (see
   `expand-group-size`), the layers in groups inside them too: an SVG of
-  vectors then resizes each on its elements as it can, its strokes as
-  wide, where a scale of the group would stretch them all. Those groups
-  keep their keyframes (they are layers still) but play no size (see
-  `svg-sized-groups`). Once only: a timeline so expanded stays."
+  vectors or a Lottie then resizes each as it can, its strokes as wide,
+  where a scale of the group would stretch them all. Those groups keep
+  their keyframes (they are layers still) but play no size, their tracks
+  marked (see `sized-on-layers?`, `sized-groups`). Once only: a timeline
+  so expanded stays."
   [timeline objects]
   (if (contains? timeline ::sized-groups)
     timeline
@@ -396,16 +397,26 @@
                 (if-let [expanded (when (some #(svg-size-properties (:property %))
                                               (dm/get-in timeline [:tracks id :keyframes]))
                                     (expand-group-size timeline objects id))]
-                  (update expanded ::sized-groups conj id)
+                  (-> expanded
+                      (update ::sized-groups conj id)
+                      (assoc-in [:tracks id ::sized-on-layers] true))
                   timeline))
               (assoc timeline ::sized-groups #{})
               ids))))
 
-(defn svg-sized-groups
+(defn sized-on-layers?
+  "Whether the group of `track` plays its width and height on its layers,
+  not on itself (see `expand-group-sizes`)."
+  [track]
+  (true? (::sized-on-layers track)))
+
+(defn sized-groups
   "The groups whose size `timeline` plays on their layers (see
-  `svg-expand-group-sizes`), not on themselves."
+  `expand-group-sizes`), not on themselves."
   [timeline]
-  (get timeline ::sized-groups #{}))
+  (into #{}
+        (keep (fn [[id track]] (when (sized-on-layers? track) id)))
+        (:tracks timeline)))
 
 (defn svg-sized-ids
   "The shapes whose width and height `timeline` (with its keyframes, see

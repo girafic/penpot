@@ -162,10 +162,12 @@
 
 (defn- lottie-stretched?
   "Whether the width and height `track` animates on `shape` stretch its
-  Lottie layer (see `lottie-sized?`)."
+  Lottie layer (see `lottie-sized?`): not those of a group that plays
+  them on its layers (see `aexp/expand-group-sizes`)."
   [shape track]
   (boolean
    (and (some #(#{:width :height} (:property %)) (:keyframes track))
+        (not (aexp/sized-on-layers? track))
         (not (lottie-sized? shape track)))))
 
 (defn- lottie-box
@@ -1900,7 +1902,8 @@
   `lottie-units-layer`). The width and height of a layer play on its
   outline when they can (see `lottie-sized?`), the layers in such a
   board moving with it as `:propagate` says (an option, see
-  `board-follow`), else they stretch it."
+  `board-follow`), those of a group on its layers (see
+  `aexp/expand-group-sizes`), else they stretch it."
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]
@@ -1910,7 +1913,9 @@
          unit-texts (aexp/unit-text-ids assets)
          resolved   (-> timeline
                         (cta/flatten-splits #{:char :word :line} unit-texts)
-                        (cta/resolve-animations objects))
+                        (cta/resolve-animations objects)
+                        ;; the size of a group on its layers (see `aexp/expand-group-sizes`)
+                        (aexp/expand-group-sizes objects))
          ;; Lottie has no ping-pong, so the way back is part of the document.
          expand     #(-> % cta/expand-paths cta/expand-springs cta/cut-timeline cta/expand-ping-pong)
          units      (into {}
