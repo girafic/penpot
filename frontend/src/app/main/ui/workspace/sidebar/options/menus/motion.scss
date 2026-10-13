@@ -109,6 +109,10 @@
   color: var(--color-foreground-secondary);
 }
 
+.stagger-row {
+  grid-column: 1 / -1;
+}
+
 .animations-list {
   grid-column: 1 / -1;
   display: flex;

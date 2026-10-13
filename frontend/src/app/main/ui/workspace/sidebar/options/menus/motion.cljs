@@ -1042,13 +1042,14 @@
              (style-label style)])])]]
 
      (when (> (count ids) 1)
-       [:> animation-row* {:label (tr "workspace.animation.stagger")}
-        [:> numeric-input* {:text-icon "ms"
-                            :property (tr "workspace.animation.stagger")
-                            :min 0
-                            :step 10
-                            :value stagger
-                            :on-change on-stagger}]])
+       [:div {:class (stl/css :stagger-row)}
+        [:> animation-row* {:label (tr "workspace.animation.stagger")}
+         [:> numeric-input* {:text-icon "ms"
+                             :property (tr "workspace.animation.stagger")
+                             :min 0
+                             :step 10
+                             :value stagger
+                             :on-change on-stagger}]]])
 
      (when (seq animations)
        [:div {:class (stl/css :animations-list)}
