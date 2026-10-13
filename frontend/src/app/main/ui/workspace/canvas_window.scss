@@ -56,12 +56,13 @@
 }
 
 // The button at the right of the bar that hides the window: as high as
-// the bar, its cross about as far from the top as from the right, clear
-// of the corner that resizes the window.
+// the bar, its cross about as far from the top as from the right. Over
+// the corner that resizes the window, which keeps its outer 6 px.
 .hide-btn {
   position: absolute;
+  z-index: 2;
   inset-block-start: 0;
-  inset-inline-end: px2rem(6);
+  inset-inline-end: $sz-6;
   display: grid;
   place-items: center;
   inline-size: var(--canvas-window-bar);
