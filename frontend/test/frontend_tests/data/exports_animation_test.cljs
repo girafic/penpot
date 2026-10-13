@@ -1593,6 +1593,76 @@
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally (finish done))))))
 
+(defn- group-scene
+  "A board holding a group of a rect and `other` (at 40,10, 20 x 20),
+  the group growing from 50 to 100 px wide, on a page of its own; the
+  bridge to a fake WASM of `export-scene`."
+  [other]
+  (let [{:keys [bridge calls]} (export-scene 500)
+        board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 80
+                                :fills [{:fill-color "#112233" :fill-opacity 1}]})
+        rect  (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20
+                                :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        other (cts/setup-shape (merge {:x 40 :y 10 :width 20 :height 20} other))
+        gid   (uuid/next)
+        group (cts/setup-shape {:id gid :type :group :x 10 :y 10 :width 50 :height 20
+                                :shapes [(:id rect) (:id other)]})
+        [bid rid oid] (map :id [board rect other])
+        tl    (-> (cta/make-timeline {:board-id bid :duration 500})
+                  (cta/add-keyframe gid {:time 0 :property :width :value 50})
+                  (cta/add-keyframe gid {:time 500 :property :width :value 100}))]
+    {:page {:id (uuid/next)
+            :objects {bid (assoc board :shapes [gid])
+                      gid (assoc group :parent-id bid :frame-id bid)
+                      rid (assoc rect :parent-id gid :frame-id bid)
+                      oid (assoc other :parent-id gid :frame-id bid)}
+            :timelines {bid tl}}
+     :bid bid :gid gid :rid rid :oid oid
+     :calls calls
+     :bridge bridge}))
+
+(t/deftest a-lottie-export-resizes-a-group-on-its-layers
+  ;; Its layers are pictured on their own, as the document draws them,
+  ;; and resize; its layer scales not.
+  (t/async
+    done
+    (let [scene    (group-scene {:type :image :metadata {:id (uuid/next) :width 20 :height 20 :mtype "image/png"}})
+          progress (atom [])
+          {:keys [promise]} (dea/run-export (export-ctx scene :on-progress #(swap! progress conj %))
+                                            {:format :lottie})]
+      (-> promise
+          (.then (fn [result] (.then (.text (:blob result)) #(js->clj (js/JSON.parse %) :keywordize-keys true))))
+          (.then (fn [doc]
+                   (let [layers (into (vec (:layers doc)) (mapcat :layers) (:assets doc))
+                         rcs    (->> layers
+                                     (keep #(some (fn [item] (when (= "rc" (:ty item)) item))
+                                                  (get-in % [:shapes 0 :it])))
+                                     (filter #(= 1 (get-in % [:s :a]))))]
+                     (t/is (some #{[:pixels (:oid scene)]} @(:calls scene)) "the image pictured on its own")
+                     (t/is (not (some #{[:pixels (:gid scene)]} @(:calls scene))) "not the group, its layers baked in")
+                     (t/is (= 1 (count rcs)) "the rect resizes")
+                     (t/is (= 0 (get-in (d/seek #(= "Group" (:nm %)) layers) [:ks :s :a])) "the group scales not")
+                     (t/is (= 1 (get-in (d/seek #(= 2 (:ty %)) layers) [:ks :s :a]))
+                           "the image stretches on its own")
+                     (t/is (= (count (filter #(= [:pixels] (take 1 %)) (filter vector? @(:calls scene))))
+                              (:total (last (filter #(= :layers (:phase %)) @progress))))
+                           "as many pictures as it counts"))))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
+(t/deftest an-svg-export-resizes-a-group-on-its-layers
+  (t/async
+    done
+    (let [scene (group-scene {:type :rect :fills [{:fill-color "#00ff00" :fill-opacity 1}]})
+          {:keys [promise]} (dea/run-export (export-ctx scene) {:format :svg})]
+      (-> promise
+          (.then (fn [result] (.text (:blob result))))
+          (.then (fn [svg]
+                   (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of the group")
+                   (t/is (re-find #"width: 40px" svg) "its rects resize")))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
 (t/deftest an-export-of-a-board-that-plays-nothing-is-nothing
   (t/async
     done

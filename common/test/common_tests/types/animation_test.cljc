@@ -1587,6 +1587,28 @@
         (t/is (re-find #"100% \{ x: -50px; y: 10px; width: 80px; height: 20px; \}" svg) "the first, from the middle of the group")
         (t/is (re-find #"100% \{ x: 70px; y: 10px; width: 80px; height: 20px; \}" svg) "the second")))))
 
+(t/deftest a-group-stretches-while-a-layer-of-it-splits
+  ;; A text turning word by word turns around its own pivot: the group
+  ;; keeps stretching, before its splits play whole (they are left on it)
+  ;; and after (they turn it), as the exports play them.
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        text  (cts/setup-shape {:type :text :x 0 :y 0 :width 100 :height 20
+                                :content {:type "root"
+                                          :children [{:type "paragraph-set"
+                                                      :children [{:type "paragraph"
+                                                                  :children [{:text "Hi there"}]}]}]}})
+        rect  (cts/setup-shape {:type :rect :x 120 :y 0 :width 40 :height 20
+                                :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        [objects group] (group-of board text rect)
+        tl    (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                  (cta/add-keyframe (:id group) {:time 0 :property :width :value 160})
+                  (cta/add-keyframe (:id group) {:time 1000 :property :width :value 320})
+                  (cta/add-animation (:id text) {:type :rotate :split :word}))]
+    (t/is (empty? (aexp/sized-groups (aexp/expand-group-sizes tl objects)))
+          "its splits left on it")
+    (t/is (empty? (aexp/sized-groups (aexp/expand-group-sizes (cta/flatten-splits tl) objects)))
+          "played whole: it turns")))
+
 (t/deftest an-svg-resizes-the-groups-in-a-group
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
         rect  (cts/setup-shape {:type :rect :x 0 :y 0 :width 40 :height 20

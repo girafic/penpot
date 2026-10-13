@@ -648,19 +648,18 @@
           ;; `aexp/svg-outline-sized?`, `aexp/svg-box-sized?`), and both
           ;; the size of a group on its layers (see `aexp/expand-group-sizes`)
           sized-tl  (aexp/expand-group-sizes resolved objects)
+          groups    (aexp/sized-groups sized-tl)
           stretch?  (fn [svg?]
-                      (let [tl     sized-tl
-                            groups (aexp/sized-groups sized-tl)]
-                        (boolean
-                         (some (fn [[id track]]
-                                 (let [shape (get objects id)]
-                                   (and (some? shape)
-                                        (some #(contains? #{:width :height} (:property %)) (:keyframes track))
-                                        (not (contains? groups id))
-                                        (not (aexp/svg-sized? shape track))
-                                        (not (and svg? (or (aexp/svg-outline-sized? shape track)
-                                                           (aexp/svg-box-sized? shape track)))))))
-                               (:tracks tl)))))
+                      (boolean
+                       (some (fn [[id track]]
+                               (let [shape (get objects id)]
+                                 (and (some? shape)
+                                      (some #(contains? #{:width :height} (:property %)) (:keyframes track))
+                                      (not (contains? groups id))
+                                      (not (aexp/svg-sized? shape track))
+                                      (not (and svg? (or (aexp/svg-outline-sized? shape track)
+                                                         (aexp/svg-box-sized? shape track)))))))
+                             (:tracks sized-tl))))
           units     (cta/unit-timelines resolved objects)
           ;; the texts an SVG outlines, but those whose units play as
           ;; pictures (see `outline-texts`, `unit-texts`)
@@ -1890,9 +1889,13 @@
         ;; (see `outline-texts`)
         shapes   (if lottie? (second (outline-texts objects tl texts bridge)) objects)
         ;; SVG and Lottie play the size of a group on its layers (see
-        ;; `aexp/expand-group-sizes`): they are layers then; the canvas,
-        ;; which resizes them with the group, plays `tl`
-        mtl      (cond-> tl (or vectors? lottie?) (aexp/expand-group-sizes shapes))
+        ;; `aexp/expand-group-sizes`), once its split animations play as
+        ;; they play them (whole, but those of `texts`): they are layers
+        ;; then; the canvas, which resizes them with the group, plays `tl`
+        mtl      (cond-> tl
+                   (or vectors? lottie?)
+                   (-> (cta/flatten-splits #{:char :word :line} #(contains? texts %))
+                       (aexp/expand-group-sizes shapes)))
         ;; Lottie draws the layers it can as vectors, SVG all (see
         ;; `vector-layers`)
         layers   (set (aexp/export-layer-ids shapes (cta/resolve-animations mtl shapes)))

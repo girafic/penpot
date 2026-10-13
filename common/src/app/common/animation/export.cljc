@@ -324,8 +324,9 @@
   easings) and around the pivot of the group, which its own becomes (a
   share of its box, past it too). Nil when it can not: the group is no
   plain one (a masked group, a turned one, one that scales), or a layer
-  of it moves, turns or resizes on its own, is turned (the canvas skews
-  it) or has no size along an axis that plays."
+  of it moves, turns or resizes on its own (split animations left on it
+  may too), is turned (the canvas skews it) or has no size along an axis
+  that plays."
   [timeline objects gid]
   (let [group    (get objects gid)
         track    (dm/get-in timeline [:tracks gid])
@@ -348,11 +349,14 @@
                (sized? (:selrect group))
                (seq kids)
                (every? (fn [kid]
-                         (and (some? kid)
-                              (unturned? kid)
-                              (sized? (:selrect kid))
-                              (not-any? #(geometry-properties (:property %))
-                                        (dm/get-in timeline [:tracks (:id kid) :keyframes]))))
+                         (let [kt (dm/get-in timeline [:tracks (:id kid)])]
+                           (and (some? kid)
+                                (unturned? kid)
+                                (sized? (:selrect kid))
+                                ;; split animations not played whole yet
+                                ;; may move it
+                                (empty? (:animations kt))
+                                (not-any? #(geometry-properties (:property %)) (:keyframes kt)))))
                        kids))
       (reduce (fn [timeline kid]
                 (let [sr     (:selrect kid)
@@ -381,10 +385,12 @@
   vectors or a Lottie then resizes each as it can, its strokes as wide,
   where a scale of the group would stretch them all. Those groups keep
   their keyframes (they are layers still) but play no size, their tracks
-  marked (see `sized-on-layers?`, `sized-groups`). Once only: a timeline
+  marked (see `sized-on-layers?`, `sized-groups`). Its split animations
+  should play as the export plays them first (see `cta/flatten-splits`):
+  a layer with some left keeps its group stretched. Once only: a timeline
   so expanded stays."
   [timeline objects]
-  (if (contains? timeline ::sized-groups)
+  (if (::groups-expanded timeline)
     timeline
     (let [;; looping sizes unrolled first, so the layers repeat them too
           timeline (-> timeline (cta/resolve-animations objects) cta/expand-loops)
@@ -397,11 +403,9 @@
                 (if-let [expanded (when (some #(svg-size-properties (:property %))
                                               (dm/get-in timeline [:tracks id :keyframes]))
                                     (expand-group-size timeline objects id))]
-                  (-> expanded
-                      (update ::sized-groups conj id)
-                      (assoc-in [:tracks id ::sized-on-layers] true))
+                  (assoc-in expanded [:tracks id ::sized-on-layers] true)
                   timeline))
-              (assoc timeline ::sized-groups #{})
+              (assoc timeline ::groups-expanded true)
               ids))))
 
 (defn sized-on-layers?
