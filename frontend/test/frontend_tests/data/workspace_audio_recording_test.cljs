@@ -349,6 +349,38 @@
                  (t/is (not made) "no recorder")
                  (t/is (pos? @stopped) "the microphone given freed"))}))))
 
+(t/deftest a-recording-at-its-limit-keeps-what-it-recorded
+  ;; It stops by itself, short of what a clip plays, and its clip is
+  ;; added.
+  (t/async
+    done
+    (let [saved dwar/recording-limit
+          _     (set! dwar/recording-limit 40)]
+      (record-until
+       (fn [] (set! dwar/recording-limit saved) (done))
+       (store-at 300)
+       {:mic   (fake-mic (atom 0))
+        :stop  (ptk/data-event ::nothing)
+        :delay 5000
+        :check (fn [state added _]
+                 (t/is (some? added) "its clip added")
+                 (t/is (nil? (dwar/recording state))))}))))
+
+(t/deftest a-microphone-denied-once-it-ended-tells-nothing
+  ;; Ended while the browser asked, then denied: no notice, as on the
+  ;; dashboard.
+  (t/async
+    done
+    (let [deny (atom nil)]
+      (record-until
+       done (store-at 300)
+       {:open  (fn [_] (js/Promise. (fn [_ reject] (reset! deny reject))))
+        :stop  (ptk/data-event :app.main.data.workspace/finalize-workspace)
+        :then  #(@deny (doto (js/Error. "NotAllowedError") (unchecked-set "name" "NotAllowedError")))
+        :check (fn [state _ _]
+                 (t/is (nil? (dwar/recording state)))
+                 (t/is (nil? (get-in state [:notification :content])) "no notice"))}))))
+
 (t/deftest a-recording-left-for-another-page-goes-on-its-own
   (t/async
     done

@@ -201,7 +201,7 @@
   (rx/create
    (fn [subs]
      (let [chunks  #js []
-           release (fn [] (doseq [track (.getTracks stream)] (.stop ^js track)))]
+           release #(release! stream)]
        (set! (.-ondataavailable recorder)
              (fn [^js event]
                (when (pos? (.. event -data -size))
@@ -484,8 +484,11 @@
                              (rx/take 1)
                              (rx/take-until ended)
                              (rx/map (fn [_] (stop-audio-recording true))))))))
+                  ;; ended while the browser asked: nothing to tell
                   (rx/catch (fn [cause]
-                              (rx/of (recording-cleared) (microphone-error cause))))
+                              (if @gone?
+                                (rx/empty)
+                                (rx/of (recording-cleared) (microphone-error cause)))))
                   (rx/finalize (fn []
                                  (when-let [stop-meter (:stop-meter @current)]
                                    (stop-meter))
