@@ -671,6 +671,17 @@
         computed))))
 
 #_:clj-kondo/ignore
+(defn snap-pixel-preview?
+  "Whether `set-wasm-modifiers` rounds the shapes it shows to the pixel
+  grid: as the layout asks, but never for the animation (with
+  `animation-preview?`), which plays where its keyframes put it, as in
+  view mode and the exports; rounded, a small layer that scales or moves
+  jumps from pixel to pixel and off its center."
+  [state ignore-snap-pixel animation-preview?]
+  (and (not ignore-snap-pixel)
+       (not animation-preview?)
+       (contains? (:workspace-layout state) :snap-pixel-grid)))
+
 (defn set-wasm-modifiers
   "Preview `modif-tree` on the canvas. With `skip-selrect?` the selection
   rect is left as it is (the animation preview moves shapes that may not
@@ -712,7 +723,7 @@
           (wasm.api/set-modifiers-full-quality full-quality?))
         (let [modif-tree   (shown state)
               over-motion? (not (identical? modif-tree edit-tree))
-              snap-pixel?  (and (not ignore-snap-pixel) (contains? (:workspace-layout state) :snap-pixel-grid))
+              snap-pixel?  (snap-pixel-preview? state ignore-snap-pixel animation-preview?)
               translation? (every? #(ctm/only-move? (:modifiers %)) (vals modif-tree))]
 
           (if translation?

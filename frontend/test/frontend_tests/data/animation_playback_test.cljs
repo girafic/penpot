@@ -506,3 +506,12 @@
     (t/is (= [] (units state a)))
     (t/is (seq (units state b)) "the other texts play on")
     (t/is (seq (units (update state :workspace-local dissoc :edition) a)) "out of edition, posed")))
+
+(t/deftest the-animation-preview-is-not-rounded-to-the-pixel-grid
+  ;; a small layer that scales would jump from pixel to pixel and off its
+  ;; center (see `dwm/snap-pixel-preview?`)
+  (let [state {:workspace-layout #{:snap-pixel-grid}}]
+    (t/is (true? (dwm/snap-pixel-preview? state false false)) "an edit snaps")
+    (t/is (false? (dwm/snap-pixel-preview? state false true)) "the animation does not")
+    (t/is (false? (dwm/snap-pixel-preview? state true false)))
+    (t/is (false? (dwm/snap-pixel-preview? {:workspace-layout #{}} false false)))))
