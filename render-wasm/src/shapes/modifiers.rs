@@ -251,9 +251,12 @@ fn propagate_transform(
 
     let mut transform = entry.transform;
 
-    // Only check the text layout when the width/height changes
-    if !is_close_to(shape_bounds_before.width(), shape_bounds_after.width())
-        || !is_close_to(shape_bounds_before.height(), shape_bounds_after.height())
+    // Only check the text layout when the width/height changes. A text whose
+    // content scales keeps its layout and scales as a whole, so its box
+    // follows the transform as it is (see `Shape::apply_rigid_transform`).
+    if (!is_close_to(shape_bounds_before.width(), shape_bounds_after.width())
+        || !is_close_to(shape_bounds_before.height(), shape_bounds_after.height()))
+        && !shapes.has_scale_content(&shape.id)
     {
         if let Type::Text(text_content) = &shape.shape_type {
             let width_changed =
@@ -621,6 +624,167 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.len(), 1);
+    }
+
+    fn scaled_text_state(scale_content: bool) -> (State, Uuid, Matrix) {
+        let text_id = Uuid::new_v4();
+        let mut state = State::new();
+        state.shapes.initialize(10);
+        {
+            // the box first: a text lays itself out as its box is set
+            let shape = state.shapes.add_shape(text_id);
+            shape.set_selrect(10.0, 20.0, 110.0, 60.0);
+            shape.set_shape_type(Type::Text(TextContent::new(
+                math::Rect::from_xywh(10.0, 20.0, 100.0, 40.0),
+                GrowType::AutoWidth,
+            )));
+        }
+        if scale_content {
+            state
+                .shapes
+                .set_scale_content(HashMap::from([(text_id, 0.7_f32)]));
+        }
+
+        // scale Y to half around the top left corner
+        let mut scale = Matrix::scale((1.0, 0.5));
+        scale.post_translate(Point::new(10.0, 20.0));
+        scale.pre_translate(Point::new(-10.0, -20.0));
+        (state, text_id, scale)
+    }
+
+    #[test]
+    fn test_propagate_content_scaled_text_follows_the_transform() {
+        let (state, text_id, scale) = scaled_text_state(true);
+        let entry = TransformEntry::from_input(text_id, scale);
+        let result = propagate_modifiers(&state, &[entry], PixelPrecision::Disabled).unwrap();
+        let transform = result
+            .iter()
+            .find(|entry| entry.id == text_id)
+            .map(|entry| entry.transform)
+            .unwrap();
+
+        // the auto-width text is not resized back to its laid out size
+        let bounds = state
+            .shapes
+            .get_raw(&text_id)
+            .unwrap()
+            .bounds()
+            .transform(&transform);
+        assert!(is_close_to(bounds.width(), 100.0));
+        assert!(is_close_to(bounds.height(), 20.0));
+        assert!(is_close_to(bounds.min_y(), 20.0));
+    }
+
+    #[test]
+    fn test_content_scaled_text_scales_as_a_whole() {
+        let (mut state, text_id, scale) = scaled_text_state(true);
+        state
+            .shapes
+            .set_modifiers(HashMap::from([(text_id, scale)]));
+
+        // its box keeps the size it is laid out at, the scale is in its transform
+        let shape = state.shapes.get(&text_id).unwrap();
+        assert!(is_close_to(shape.selrect.width(), 100.0));
+        assert!(is_close_to(shape.selrect.height(), 40.0));
+        assert!(is_close_to(shape.transform.scale_y(), 0.5));
+        let bounds = shape.bounds();
+        assert!(is_close_to(bounds.min_y(), 20.0));
+        assert!(is_close_to(bounds.max_y(), 40.0));
+    }
+
+    #[test]
+    fn test_content_scaled_text_follows_its_scaled_parent() {
+        let parent_id = Uuid::new_v4();
+        let text_id = Uuid::new_v4();
+        let mut state = State::new();
+        state.shapes.initialize(10);
+        {
+            // the box first: a text lays itself out as its box is set
+            let text = state.shapes.add_shape(text_id);
+            text.set_selrect(10.0, 20.0, 110.0, 60.0);
+            text.set_shape_type(Type::Text(TextContent::new(
+                math::Rect::from_xywh(10.0, 20.0, 100.0, 40.0),
+                GrowType::AutoWidth,
+            )));
+            text.set_parent(parent_id);
+
+            let parent = state.shapes.add_shape(parent_id);
+            parent.set_shape_type(Type::Group(Group::default()));
+            parent.add_child(text_id);
+            parent.set_selrect(0.0, 0.0, 200.0, 100.0);
+        }
+        // the parent scales Y to half around its top: only it has a modifier,
+        // its content (the text too) scales
+        state
+            .shapes
+            .set_scale_content(HashMap::from([(parent_id, 0.5_f32), (text_id, 0.5)]));
+        state
+            .shapes
+            .set_modifiers(HashMap::from([(parent_id, Matrix::scale((1.0, 0.5)))]));
+
+        let text = state.shapes.get(&text_id).unwrap();
+        assert!(is_close_to(text.selrect.height(), 40.0));
+        assert!(is_close_to(text.transform.scale_y(), 0.5));
+        let bounds = text.bounds();
+        assert!(is_close_to(bounds.min_y(), 10.0));
+        assert!(is_close_to(bounds.max_y(), 30.0));
+    }
+
+    #[test]
+    fn test_content_scaled_text_scales_with_its_board() {
+        let board_id = Uuid::new_v4();
+        let text_id = Uuid::new_v4();
+        let mut state = State::new();
+        state.shapes.initialize(10);
+        {
+            // the box first: a text lays itself out as its box is set
+            let text = state.shapes.add_shape(text_id);
+            text.set_selrect(10.0, 20.0, 110.0, 60.0);
+            text.set_shape_type(Type::Text(TextContent::new(
+                math::Rect::from_xywh(10.0, 20.0, 100.0, 40.0),
+                GrowType::AutoWidth,
+            )));
+            text.set_parent(board_id);
+
+            let board = state.shapes.add_shape(board_id);
+            board.set_shape_type(Type::Frame(Frame::default()));
+            board.add_child(text_id);
+            board.set_selrect(0.0, 0.0, 200.0, 100.0);
+        }
+        // the board scales Y to half around its top: a text pinned to the top
+        // of a board would only stay, but a content scale scales it with it
+        state
+            .shapes
+            .set_scale_content(HashMap::from([(board_id, 0.5_f32), (text_id, 0.5)]));
+        let entry = TransformEntry::from_input(board_id, Matrix::scale((1.0, 0.5)));
+        let result = propagate_modifiers(&state, &[entry], PixelPrecision::Disabled).unwrap();
+        let transform = result
+            .iter()
+            .find(|entry| entry.id == text_id)
+            .map(|entry| entry.transform)
+            .unwrap();
+
+        let bounds = state
+            .shapes
+            .get_raw(&text_id)
+            .unwrap()
+            .bounds()
+            .transform(&transform);
+        assert!(is_close_to(bounds.height(), 20.0));
+        assert!(is_close_to(bounds.min_y(), 10.0));
+    }
+
+    #[test]
+    fn test_resized_text_is_laid_out_again() {
+        // without a content scale, the same transform resizes the box
+        let (mut state, text_id, scale) = scaled_text_state(false);
+        state
+            .shapes
+            .set_modifiers(HashMap::from([(text_id, scale)]));
+
+        let shape = state.shapes.get(&text_id).unwrap();
+        assert!(is_close_to(shape.selrect.height(), 20.0));
+        assert!(shape.transform.is_identity());
     }
 
     #[test]

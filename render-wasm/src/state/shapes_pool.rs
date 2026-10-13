@@ -5,6 +5,7 @@ use std::iter;
 use crate::performance;
 use crate::shapes;
 use crate::shapes::Shape;
+use crate::shapes::Type;
 use crate::uuid::Uuid;
 
 use crate::shapes::StructureEntry;
@@ -185,15 +186,44 @@ impl ShapesPoolImpl {
             // Check if we have a cached modified version
             if let Some(cell) = self.modified_shape_cache.get(&idx) {
                 Some(cell.get_or_init(|| {
-                    let mut modified_shape =
-                        shape.transformed(self.modifiers.get(&idx), self.structure.get(&idx));
+                    // a text whose content scales keeps its layout at rest and
+                    // scales as a whole: its font sizes are not changed and its
+                    // box does not grow or shrink (see `apply_rigid_transform`)
+                    let scaled = self.scale_content.contains_key(&idx);
+                    let rigid_text = matches!(shape.shape_type, Type::Text(_)) && scaled;
+
+                    // a layer scaled with its board has no modifier of its
+                    // own: it follows the nearest ancestor's, as a layer that
+                    // needs no modification does
+                    let transform = self.modifiers.get(&idx).copied().or_else(|| {
+                        if scaled {
+                            self.find_nearest_ancestor_modifier(idx)
+                        } else {
+                            None
+                        }
+                    });
+
+                    let mut modified_shape = if rigid_text {
+                        let mut rigid = shape.clone();
+                        // as `scale_content` does: it scales with its parent,
+                        // whatever its constraints say
+                        rigid.ignore_constraints = true;
+                        if let Some(transform) = transform.as_ref() {
+                            rigid.apply_rigid_transform(transform);
+                        }
+                        rigid
+                    } else {
+                        shape.transformed(transform.as_ref(), self.structure.get(&idx))
+                    };
 
                     if self.to_update_bool(&modified_shape) {
                         math_bools::update_bool_to_path(&mut modified_shape, self);
                     }
 
-                    if let Some(scale) = self.scale_content.get(&idx) {
-                        modified_shape.scale_content(*scale);
+                    if !rigid_text {
+                        if let Some(scale) = self.scale_content.get(&idx) {
+                            modified_shape.scale_content(*scale);
+                        }
                     }
                     modified_shape
                 }))
@@ -372,6 +402,14 @@ impl ShapesPoolImpl {
                 self.modified_shape_cache.insert(idx, OnceCell::new());
             }
         }
+    }
+
+    /// Whether the content of `id` scales in the modifiers being applied
+    /// (an animated scale or the scale tool, on it or on an ancestor).
+    pub fn has_scale_content(&self, id: &Uuid) -> bool {
+        self.uuid_to_idx
+            .get(id)
+            .is_some_and(|idx| self.scale_content.contains_key(idx))
     }
 
     pub fn set_scale_content(&mut self, scale_content: HashMap<Uuid, f32>) {

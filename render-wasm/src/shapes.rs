@@ -1726,6 +1726,40 @@ impl Shape {
         }
     }
 
+    /// Applies `transform` as a whole: the shape keeps the size of its box
+    /// and its content, and the scale, rotation or skew of `transform` go
+    /// into `self.transform` around the moved center. A text whose content
+    /// is scaled (an animation, the scale tool) so draws its layout at rest
+    /// scaled as a whole, instead of growing or shrinking its box and laying
+    /// the text out again at another size.
+    pub fn apply_rigid_transform(&mut self, transform: &Matrix) {
+        if math::is_move_only_matrix(transform) {
+            self.apply_transform(transform);
+            return;
+        }
+
+        let center = self.selrect.center();
+        let moved = transform.map_point(center);
+        let (dx, dy) = (moved.x - center.x, moved.y - center.y);
+
+        let mut linear = *transform;
+        linear.set_translate_x(0.0);
+        linear.set_translate_y(0.0);
+        self.transform = Matrix::concat(&linear, &self.transform);
+        self.selrect = math::Rect::from_xywh(
+            self.selrect.left + dx,
+            self.selrect.top + dy,
+            self.selrect.width(),
+            self.selrect.height(),
+        );
+        self.invalidate_extrect();
+        self.invalidate_bounds();
+
+        if let Type::Text(text) = &mut self.shape_type {
+            text.transform(&Matrix::translate((dx, dy)));
+        }
+    }
+
     pub fn apply_structure(&mut self, structure: &Vec<StructureEntry>) {
         let mut result = IndexSet::<Uuid>::from_iter(self.children.iter().copied());
         let mut to_remove = HashSet::<&Uuid>::new();
@@ -2199,6 +2233,50 @@ mod tests {
 
     fn any_shape() -> Shape {
         Shape::new(Uuid::nil())
+    }
+
+    #[test]
+    fn rigid_transform_keeps_the_box_and_scales_it_as_a_whole() {
+        // the box first: a text lays itself out as its box is set, and the
+        // test only checks the geometry
+        let mut shape = any_shape();
+        shape.set_selrect(10.0, 20.0, 110.0, 60.0);
+        shape.set_shape_type(Type::Text(TextContent::new(
+            math::Rect::from_xywh(10.0, 20.0, 100.0, 40.0),
+            GrowType::AutoWidth,
+        )));
+
+        // scale Y to half around the top left corner, as a pivot of (0, 0)
+        let mut transform = Matrix::scale((1.0, 0.5));
+        transform.post_translate(Point::new(10.0, 20.0));
+        transform.pre_translate(Point::new(-10.0, -20.0));
+        let before = shape.bounds().transform(&transform);
+
+        shape.apply_rigid_transform(&transform);
+
+        // the box keeps its size, the scale goes into the transform
+        assert!(math::is_close_to(shape.selrect.width(), 100.0));
+        assert!(math::is_close_to(shape.selrect.height(), 40.0));
+        assert!(math::is_close_to(shape.transform.scale_y(), 0.5));
+        assert!(math::is_close_to(shape.transform.scale_x(), 1.0));
+        // and the shape covers what the transform makes of it
+        let after = shape.bounds();
+        assert!(math::is_close_to(after.min_x(), before.min_x()));
+        assert!(math::is_close_to(after.min_y(), before.min_y()));
+        assert!(math::is_close_to(after.max_x(), before.max_x()));
+        assert!(math::is_close_to(after.max_y(), before.max_y()));
+        assert!(math::is_close_to(after.min_y(), 20.0));
+        assert!(math::is_close_to(after.max_y(), 40.0));
+    }
+
+    #[test]
+    fn rigid_transform_of_a_move_only_moves() {
+        let mut shape = any_shape();
+        shape.set_selrect(0.0, 0.0, 10.0, 10.0);
+        shape.apply_rigid_transform(&Matrix::translate((5.0, 7.0)));
+        assert!(math::is_close_to(shape.selrect.left, 5.0));
+        assert!(math::is_close_to(shape.selrect.top, 7.0));
+        assert!(shape.transform.is_identity());
     }
 
     #[test]
