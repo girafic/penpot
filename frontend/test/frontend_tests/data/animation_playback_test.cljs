@@ -515,3 +515,16 @@
     (t/is (false? (dwm/snap-pixel-preview? state false true)) "the animation does not")
     (t/is (false? (dwm/snap-pixel-preview? state true false)))
     (t/is (false? (dwm/snap-pixel-preview? {:workspace-layout #{}} false false)))))
+
+(t/deftest times-show-in-frames-too
+  (t/is (= 30 (dwa/frame-rate nil)) "as the export panel offers it")
+  (t/is (= 24 (dwa/frame-rate (assoc (cta/make-timeline {:board-id (uuid/next)}) :export {:fps 24}))))
+  (t/is (= 37.5 (dwa/time->frames 1250 30)))
+  (t/is (= 1250 (dwa/frames->time 37.5 30)))
+  (t/is (= 1233 (dwa/frame-time 1240 30)) "on the nearest whole frame")
+  (t/is (= "37.5 f" (dwa/format-time 1250 :frames 30)))
+  (t/is (= "1.25 s" (dwa/format-time 1250 :s 30)))
+  (t/is (= "1250 ms" (dwa/format-time 1250 :ms)))
+  (let [next-unit #(dwa/time-unit (:workspace-animation (ptk/update (dwa/toggle-time-unit)
+                                                                    {:workspace-animation {:time-unit %}})))]
+    (t/is (= [:s :frames :ms] (mapv next-unit [:ms :s :frames])) "the unit button goes round")))

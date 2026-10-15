@@ -282,6 +282,16 @@
   (t/is (= 100 (timeline/nudge-step (key-event "ArrowRight" :shift? true))))
   (t/is (= -100 (timeline/nudge-step (key-event "ArrowLeft" :shift? true)))))
 
+(t/deftest in-frames-an-arrow-nudges-onto-frames
+  ;; at 30 fps a frame lasts 33.3 ms: the step counts from the frame
+  ;; nearest to where the selection starts, so it lands on frames
+  (let [nudge #(+ 67 (timeline/nudge-step (apply key-event %) :frames 30 67))]
+    (t/is (= 100 (nudge ["ArrowRight"])) "frame 2 to 3")
+    (t/is (= 33 (nudge ["ArrowLeft"])) "back to frame 1")
+    (t/is (= 400 (nudge ["ArrowRight" :shift? true])) "10 frames on")
+    (t/is (= 10 (timeline/nudge-step (key-event "ArrowRight") :frames 30 nil))
+          "nothing selected to count from")))
+
 (t/deftest the-axis-reaches-the-end-of-what-is-past-the-timeline
   (let [tl (-> (cta/make-timeline {:board-id (uuid/next) :duration 2000})
                (cta/add-keyframe shape-a {:time 2500 :property :x :value 0}))]

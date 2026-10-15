@@ -237,11 +237,44 @@
   (cond-> (dissoc anim :preview :direction)
     (:playing? anim) (assoc :playhead (get anim :play-start 0))))
 
+(def time-units
+  "The units the timeline shows times in, in the order its unit button
+  goes through them (see `toggle-time-unit`)."
+  [:ms :s :frames])
+
 (defn time-unit
-  "How the timeline shows times, `:ms` or `:s`, as the user last chose;
-  `anim` is the `:workspace-animation` state."
+  "How the timeline shows times, `:ms`, `:s` or `:frames` (see
+  `frame-rate`), as the user last chose; `anim` is the
+  `:workspace-animation` state."
   [anim]
   (or (:time-unit anim) (get storage/user ::time-unit :ms)))
+
+(def default-frame-rate
+  "Frames per second of a timeline whose export sets none, as the export
+  panel offers it."
+  30)
+
+(defn frame-rate
+  "Frames per second the timeline `timeline` counts frames in: the frame
+  rate it is exported with (see `cta/schema:export`), so that a frame of
+  the timeline is a frame of the video."
+  [timeline]
+  (or (dm/get-in timeline [:export :fps]) default-frame-rate))
+
+(defn time->frames
+  "`time` (ms) in frames at `fps`, to a tenth of a frame."
+  [time fps]
+  (mth/precision (/ (* time fps) 1000) 1))
+
+(defn frames->time
+  "The time (ms) of the frame `frames` at `fps`."
+  [frames fps]
+  (mth/round (/ (* frames 1000) fps)))
+
+(defn frame-time
+  "`time` (ms) on the nearest whole frame at `fps`."
+  [time fps]
+  (frames->time (mth/round (/ (* time fps) 1000)) fps))
 
 (defn format-seconds
   "`time` (ms) in seconds, to the millisecond: `1.25`."
@@ -250,21 +283,26 @@
 
 (defn format-time
   "`time` (ms) in the time `unit` of the timeline (see `time-unit`):
-  `1250 ms` or `1.25 s`."
-  [time unit]
-  (if (= unit :s)
-    (dm/str (format-seconds time) " s")
-    (dm/str time " ms")))
+  `1250 ms`, `1.25 s` or, at `fps` frames per second, `37.5 f`."
+  ([time unit]
+   (format-time time unit default-frame-rate))
+  ([time unit fps]
+   (case unit
+     :s      (dm/str (format-seconds time) " s")
+     :frames (dm/str (time->frames time fps) " f")
+     (dm/str time " ms"))))
 
 (defn toggle-time-unit
-  "Show the times of the timeline in seconds instead of milliseconds, or
-  back. The choice is kept for the next time."
+  "Show the times of the timeline in the next unit of `time-units`:
+  milliseconds, seconds, frames and milliseconds again. The choice is
+  kept for the next time."
   []
   (ptk/reify ::toggle-time-unit
     ptk/UpdateEvent
     (update [_ state]
-      (let [unit (if (= :s (time-unit (:workspace-animation state))) :ms :s)]
-        (assoc-in state [:workspace-animation :time-unit] unit)))
+      (let [unit (time-unit (:workspace-animation state))
+            next (or (second (drop-while #(not= unit %) time-units)) (first time-units))]
+        (assoc-in state [:workspace-animation :time-unit] next)))
 
     ptk/EffectEvent
     (effect [_ state _]

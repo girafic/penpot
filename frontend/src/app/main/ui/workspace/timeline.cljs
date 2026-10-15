@@ -119,18 +119,31 @@
   {:width (mth/floor (.-width rect))
    :height (mth/floor (.-height rect))})
 
+(def ^:private frame-tick-steps
+  "Candidate spacings (frames) between the labelled ticks of the ruler,
+  in frames (see `dwa/time-units`)."
+  [1 2 5 10 15 30 60 150 300 600 1800 3600 18000])
+
 (defn- tick-step
-  [duration width]
-  (let [px-per-ms (/ width (max 1 duration))]
-    (or (d/seek #(>= (* % px-per-ms) min-tick-spacing) tick-steps)
-        (peek tick-steps))))
+  "The spacing (ms) between the labelled ticks of the ruler of a
+  `duration` drawn `width` pixels wide: whole frames at `fps` in
+  frames."
+  [duration width unit fps]
+  (let [px-per-ms (/ width (max 1 duration))
+        steps     (if (= unit :frames)
+                    (map #(/ (* % 1000) fps) frame-tick-steps)
+                    tick-steps)]
+    (or (d/seek #(>= (* % px-per-ms) min-tick-spacing) steps)
+        (last steps))))
 
 (defn- format-tick
   "Like Figma: whole seconds as `1s` and, below one-second steps, the
   milliseconds into the current second (`1s 100ms 200ms …`), or in
-  seconds (`1s 1.1s 1.2s …`) when those are the time `unit`."
-  [time step unit]
+  seconds (`1s 1.1s 1.2s …`) when those are the time `unit`; in frames,
+  the frame at `fps` (`0f 15f 30f …`)."
+  [time step unit fps]
   (cond
+    (= unit :frames)        (dm/str (mth/round (/ (* time fps) 1000)) "f")
     (zero? (mod time 1000)) (dm/str (quot time 1000) "s")
     (= unit :s)             (dm/str (dwa/format-seconds time) "s")
     (< step 1000)           (dm/str (mod time 1000) "ms")
@@ -243,10 +256,36 @@
 
 (defn nudge-step
   "How far, in ms, an arrow key `event` moves the selected keyframes or
-  clip: 10 ms, 100 ms with Shift, back with the left arrow."
-  [event]
-  (* (if (kbd/left-arrow? event) -1 1)
-     (if (kbd/shift? event) 100 10)))
+  clip: 10 ms, 100 ms with Shift, back with the left arrow. In frames
+  (`unit`, see `dwa/time-units`), a frame or 10 at `fps`, counted from
+  the frame nearest to `start`, where the selection starts, so that it
+  lands on frames although a frame lasts no whole number of ms."
+  ([event]
+   (nudge-step event :ms nil nil))
+  ([event unit fps start]
+   (let [sign (if (kbd/left-arrow? event) -1 1)]
+     (if (and (= unit :frames) (some? start))
+       (let [frames (* sign (if (kbd/shift? event) 10 1))
+             frame  (mth/round (/ (* start fps) 1000))]
+         (- (dwa/frames->time (+ frame frames) fps) start))
+       (* sign (if (kbd/shift? event) 100 10))))))
+
+(defn- selection-start
+  "Where `selection` (see `dwaa/selection-of`) starts in `timeline`: its
+  earliest keyframe, animation or clip; nil when it holds none."
+  [timeline {:keys [kfs anims clips]}]
+  (let [times (concat
+               (keep (fn [{:keys [shape-id keyframe-id]}]
+                       (:time (d/seek #(= keyframe-id (:id %))
+                                      (dm/get-in timeline [:tracks shape-id :keyframes]))))
+                     kfs)
+               (keep (fn [{:keys [shape-id animation-id]}]
+                       (:start (d/seek #(= animation-id (:id %))
+                                       (dm/get-in timeline [:tracks shape-id :animations]))))
+                     anims)
+               (keep #(:start (ctau/get-audio-clip timeline %)) clips))]
+    (when (seq times)
+      (reduce min times))))
 
 (defn dock-key-action
   "What a key `event` does in the focused dock (but in a text field, which
@@ -1108,7 +1147,7 @@
     [:div {:class (stl/css :marker)
            :data-marker-id (dm/str id)
            :style #js {"left" (time->pct time duration origin)}
-           :title (dm/str name " · " (dwa/format-time time (:unit snap)))
+           :title (dm/str name " · " (dwa/format-time time (:unit snap) (:fps snap)))
            :on-pointer-down on-pointer-down
            :on-pointer-move on-pointer-move
            :on-pointer-up on-pointer-up
@@ -1132,7 +1171,7 @@
   "A comment thread about a moment of the animation, as the avatar of its
   author at the moment: a click opens it and shows the moment."
   {::mf/private true}
-  [{:keys [thread duration origin unit open?]}]
+  [{:keys [thread duration origin unit fps open?]}]
   (let [time  (:animation-time thread)
         owner (dcm/get-owner thread)
 
@@ -1151,7 +1190,7 @@
               :data-testid (dm/str "timeline-comment-" (:seqn thread))
               :style #js {"left" (time->pct time duration origin)}
               :title (dm/str (tr "labels.comment") " #" (:seqn thread)
-                             " · " (dwa/format-time time unit))
+                             " · " (dwa/format-time time unit fps))
               :on-pointer-down dom/stop-propagation
               :on-double-click dom/stop-propagation
               :on-click on-click}
@@ -1165,7 +1204,7 @@
   comments show on the canvas and as their filters let them (see
   `dcm/apply-filters`)."
   {::mf/private true}
-  [{:keys [board-id objects duration origin unit]}]
+  [{:keys [board-id objects duration origin unit fps]}]
   (let [threads-map (mf/deref refs/threads)
         local       (mf/deref refs/comments-local)
         profile     (mf/deref refs/profile)
@@ -1191,6 +1230,7 @@
                           :duration duration
                           :origin origin
                           :unit unit
+                          :fps fps
                           :open? (= (:id thread) (:open local))}]))))
 
 (mf/defc marker-row*
@@ -1271,9 +1311,26 @@
 
 (mf/defc current-time*
   {::mf/private true}
-  [{:keys [unit]}]
+  [{:keys [unit fps]}]
   (let [playhead (mf/deref ref:playhead)]
-    [:span {:class (stl/css :current-time)} (dwa/format-time playhead unit)]))
+    [:span {:class (stl/css :current-time)} (dwa/format-time playhead unit fps)]))
+
+(defn- time->field
+  "`time` (ms) as a field of the dock shows it in `unit`, in frames at
+  `fps` (see `dwa/time-units`)."
+  [time unit fps]
+  (case unit
+    :s      (/ time 1000)
+    :frames (dwa/time->frames time fps)
+    time))
+
+(defn- field->time
+  "The time (ms) a field of the dock in `unit` holds as `value`."
+  [value unit fps]
+  (case unit
+    :s      (mth/round (* value 1000))
+    :frames (dwa/frames->time value fps)
+    value))
 
 (mf/defc playhead-follower*
   "While a zoomed timeline plays, pages the view to keep the playhead
@@ -1318,20 +1375,20 @@
   mutes and locks its lane, its menu the clip. A locked clip only shows
   them."
   {::mf/private true}
-  [{:keys [clip unit]}]
+  [{:keys [clip unit fps]}]
   (let [clip-id  (:id clip)
         volume   (mth/round (* 100 (or (:volume clip) 1)))
         locked?  (true? (:locked clip))
-        seconds? (= unit :s)
         fade-in  (or (:fade-in clip) 0)
         fade-out (or (:fade-out clip) 0)
+        step     (case unit :s 0.1 :frames 1 10)
 
         on-fade
         (mf/use-fn
-         (mf/deps clip-id seconds? fade-in fade-out)
+         (mf/deps clip-id unit fps fade-in fade-out)
          (fn [which value]
            (when (number? value)
-             (let [ms (max 0 (if seconds? (mth/round (* value 1000)) value))]
+             (let [ms (max 0 (field->time value unit fps))]
                (st/emit! (if (= which :in)
                            (dwaa/set-clip-fades clip-id ms fade-out)
                            (dwaa/set-clip-fades clip-id fade-in ms)))))))
@@ -1415,8 +1472,8 @@
       [:label (tr "workspace.animation.clip-fade-in-short")]
       [:> deprecated-input/numeric-input* {:key (dm/str "in-" (name unit))
                                            :min 0
-                                           :step (if seconds? 0.1 10)
-                                           :value (if seconds? (/ fade-in 1000) fade-in)
+                                           :step step
+                                           :value (time->field fade-in unit fps)
                                            :is-disabled locked?
                                            :on-change on-fade-in}]]
      [:div {:class (stl/css :duration-field :fade-field)
@@ -1424,8 +1481,8 @@
       [:label (tr "workspace.animation.clip-fade-out-short")]
       [:> deprecated-input/numeric-input* {:key (dm/str "out-" (name unit))
                                            :min 0
-                                           :step (if seconds? 0.1 10)
-                                           :value (if seconds? (/ fade-out 1000) fade-out)
+                                           :step step
+                                           :value (time->field fade-out unit fps)
                                            :is-disabled locked?
                                            :on-change on-fade-out}]]
      [:button {:type "button"
@@ -1443,12 +1500,11 @@
 (mf/defc toolbar*
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [timeline playing? recording? full-quality? audio-muted? audio-recording clip clip-count unit zoom
+  [{:keys [timeline playing? recording? full-quality? audio-muted? audio-recording clip clip-count unit fps zoom
            on-zoom-change row-height on-row-height-change maximized? canvas-hidden?]}]
   (let [duration (:duration timeline)
         playback (cta/playback-mode timeline)
         autoplay? (cta/autoplay? timeline)
-        seconds? (= unit :s)
 
         ;; a page may start sound only from a user gesture: this one
         on-toggle-play
@@ -1468,13 +1524,13 @@
         ;; Like the numeric inputs of the sidebar: a typed duration applies
         ;; on Enter or when leaving the field, so playback does not stop at
         ;; the first digit; the arrows change it by a step (10 steps with
-        ;; Shift) right away: 1 ms, or 0.1 s in seconds.
+        ;; Shift) right away: 1 ms, 0.1 s in seconds or a frame.
         on-duration-change
         (mf/use-fn
-         (mf/deps seconds?)
+         (mf/deps unit fps)
          (fn [value]
            (when (number? value)
-             (st/emit! (dwa/set-duration (if seconds? (mth/round (* value 1000)) value))))))
+             (st/emit! (dwa/set-duration (field->time value unit fps))))))
 
         on-toggle-unit
         (mf/use-fn #(st/emit! (dwa/toggle-time-unit)))
@@ -1552,15 +1608,22 @@
       [:span {:class (stl/css :rec-dot)}]
       (tr "workspace.animation.rec")]
 
-     [:> current-time* {:unit unit}]
+     [:> current-time* {:unit unit :fps fps}]
 
      [:div {:class (stl/css :duration-field)}
       [:label (tr "workspace.animation.duration")]
-      (if seconds?
+      (case unit
+        :s
         [:> deprecated-input/numeric-input* {:key "s"
                                              :min 0.001
                                              :step 0.1
                                              :value (/ duration 1000)
+                                             :on-change on-duration-change}]
+        :frames
+        [:> deprecated-input/numeric-input* {:key "frames"
+                                             :min 1
+                                             :step 1
+                                             :value (dwa/time->frames duration fps)
                                              :on-change on-duration-change}]
         [:> deprecated-input/numeric-input* {:key "ms"
                                              :min 1
@@ -1570,16 +1633,17 @@
                                              :on-change on-duration-change}])
       [:button {:type "button"
                 :class (stl/css :unit-btn)
-                :title (if seconds?
-                         (tr "workspace.animation.show-milliseconds")
-                         (tr "workspace.animation.show-seconds"))
+                :title (case unit
+                         :ms (tr "workspace.animation.show-seconds")
+                         :s  (tr "workspace.animation.show-frames" fps)
+                         (tr "workspace.animation.show-milliseconds"))
                 :on-click on-toggle-unit}
-       (if seconds? "s" "ms")]]
+       (case unit :s "s" :frames "f" "ms")]]
 
      ;; the settings of one clip; of several, how many
      (cond
        (some? clip)
-       [:> clip-bar* {:clip clip :unit unit}]
+       [:> clip-bar* {:clip clip :unit unit :fps fps}]
 
        (> clip-count 1)
        [:div {:class (stl/css :clip-bar)}
@@ -1669,16 +1733,16 @@
 (defn- lanes-title
   "The tooltip of what a `lanes/hit` is on, with times in `unit`; for an
   audio clip that stays silent, why."
-  [{:keys [type keyframe animation clip mode]} unit]
+  [{:keys [type keyframe animation clip mode]} unit fps]
   (case type
-    :keyframe  (dwa/format-time (:time keyframe) unit)
+    :keyframe  (dwa/format-time (:time keyframe) unit fps)
     :easing    (tr "workspace.animation.easing")
     :animation (motion/animation-label animation)
     :audio     (case mode
                  :fade-in  (tr "workspace.animation.clip-fade-in-time"
-                               (dwa/format-time (or (:fade-in clip) 0) unit))
+                               (dwa/format-time (or (:fade-in clip) 0) unit fps))
                  :fade-out (tr "workspace.animation.clip-fade-out-time"
-                               (dwa/format-time (or (:fade-out clip) 0) unit))
+                               (dwa/format-time (or (:fade-out clip) 0) unit fps))
                  :volume   (tr "workspace.animation.clip-volume-at"
                                (dm/str (mth/round (* 100 (or (:volume clip) 1))) "%"))
                  (if-let [problem (clip-problem clip)]
@@ -1722,6 +1786,7 @@
         playhead   (get anim :playhead 0)
         playing?   (get anim :playing? false)
         unit       (dwa/time-unit anim)
+        fps        (dwa/frame-rate timeline)
         recording? (get anim :auto-keyframe? false)
         ;; over the whole workspace; docked without a board to show, so
         ;; one can be picked on the canvas
@@ -1815,13 +1880,13 @@
                      (:zoom axis-lock)
                      (content-zoom duration zoom span))
         axis-width (lanes/axis-width view-width axis-zoom)
-        tick       (tick-step span axis-width)
+        tick       (tick-step span axis-width unit fps)
 
         tick-label
         (mf/use-fn
-         (mf/deps tick unit)
+         (mf/deps tick unit fps)
          (fn [time]
-           (format-tick time tick unit)))
+           (format-tick time tick unit fps)))
 
         ;; Drags snap to the playhead, the keyframes and the ends of the
         ;; animations and of the timeline, unless Ctrl/Cmd is held; a line
@@ -1831,7 +1896,9 @@
         _              (mf/set-ref-val! snap-state-ref {:timeline timeline
                                                         :playhead playhead
                                                         :span span
-                                                        :axis-width axis-width})
+                                                        :axis-width axis-width
+                                                        :unit unit
+                                                        :fps fps})
         snap-line*     (mf/use-state nil)
         snap-line      (deref snap-line*)
 
@@ -1849,6 +1916,16 @@
         (mf/use-fn
          (fn [time]
            (reset! snap-line* time)))
+
+        ;; In frames, the playhead and the dragged keyframes land on whole
+        ;; frames when they snap to nothing, unless Ctrl/Cmd is held.
+        frame-snap
+        (mf/use-fn
+         (fn [time event]
+           (let [{:keys [unit fps]} (mf/ref-val snap-state-ref)]
+             (if (and (= unit :frames) (not (kbd/mod? event)))
+               (dwa/frame-time time fps)
+               time))))
 
         snap-span
         (mf/use-fn
@@ -1868,11 +1945,12 @@
              (if (some? d) [(+ start d) (+ end d)] [start end]))))
 
         snap
-        (mf/with-memo [unit]
+        (mf/with-memo [unit fps]
           {:timeline #(:timeline (mf/ref-val snap-state-ref))
            :target snap-target
            :show show-snap
-           :unit unit})
+           :unit unit
+           :fps fps})
 
         ;; Scroll position to apply once the new zoom is laid out.
         anchor-ref (mf/use-ref nil)
@@ -2258,7 +2336,7 @@
            (let [t      (pointer->time event (axis-rect) span origin)
                  target (snap-target t event {:playhead? false})]
              (show-snap target)
-             (st/emit! (dwa/set-playhead (or target t))))))
+             (st/emit! (dwa/set-playhead (or target (frame-snap t event)))))))
 
         ;; Dragging the end of the timeline, on the background of the rows
         ;; (see `lanes/hit`), changes its duration, as one undo step. The
@@ -2487,13 +2565,13 @@
 
         update-hover!
         (mf/use-fn
-         (mf/deps unit set-hover-row draw-lanes)
+         (mf/deps unit fps set-hover-row draw-lanes)
          (fn [target]
            (when (not= (hover-key target) (hover-key (mf/ref-val hover-ref)))
              (mf/set-ref-val! hover-ref target)
              (when-let [^js canvas (mf/ref-val canvas-ref)]
                (set! (.. canvas -style -cursor) (lanes-cursor target))
-               (set! (.-title canvas) (or (lanes-title target unit) "")))
+               (set! (.-title canvas) (or (lanes-title target unit fps) "")))
              (set-hover-row (:row target))
              (draw-lanes))))
 
@@ -2751,7 +2829,7 @@
                        ;; axis too, which then grows before 0 (see `content-start`)
                        t    (+ from (mth/round (* (- x (:x0 press)) (/ span (max 1 axis-width)))))
                        to   (snap-target t event {:keyframe-ids (into #{} (map :keyframe-id) moving)})
-                       dt   (- (or to t) from)]
+                       dt   (- (or to (frame-snap t event)) from)]
                    (mf/set-ref-val! press-ref (assoc press :moved? true))
                    (show-snap to)
                    (st/emit! (if (pos? (dwaa/selection-count others))
@@ -2920,7 +2998,7 @@
         ;; after it.
         on-key-down
         (mf/use-fn
-         (mf/deps selected-kfs selected-clip selected-anims selection timeline)
+         (mf/deps selected-kfs selected-clip selected-anims selection timeline unit fps)
          (fn [event]
            (when-not (tlk/editing-text? event)
              (when-let [action (dock-key-action event selected-kfs selected-clip selected-anims)]
@@ -2938,16 +3016,16 @@
                                                (dwaa/delete-selection)
                                                (dwaa/delete-selected-clips)))
                  :nudge-clip       (st/emit! (if (whole-selection? selection)
-                                               (dwaa/nudge-selection (nudge-step event))
-                                               (dwaa/nudge-selected-clips (nudge-step event))))
+                                               (dwaa/nudge-selection (nudge-step event unit fps (selection-start timeline selection)))
+                                               (dwaa/nudge-selected-clips (nudge-step event unit fps (selection-start timeline selection)))))
                  :delete-keyframes (st/emit! (if (whole-selection? selection)
                                                (dwaa/delete-selection)
                                                (dwa/delete-selected-keyframes)))
                  :copy-selection   (st/emit! (dwaa/copy-selection))
                  :cut-selection    (st/emit! (dwaa/cut-selection))
                  :shift-keyframes  (st/emit! (if (whole-selection? selection)
-                                               (dwaa/nudge-selection (nudge-step event))
-                                               (dwa/shift-selected-keyframes (nudge-step event)))))))))
+                                               (dwaa/nudge-selection (nudge-step event unit fps (selection-start timeline selection)))
+                                               (dwa/shift-selected-keyframes (nudge-step event unit fps (selection-start timeline selection))))))))))
 
         ;; A locked property or animation keeps its keyframes, loop and span.
         menu-locked?
@@ -3337,6 +3415,7 @@
                                (some->> selected-clip (ctau/get-audio-clip timeline)))
                        :clip-count (count selected-clips)
                        :unit unit
+                       :fps fps
                        :zoom zoom
                        :on-zoom-change on-zoom-change
                        :row-height row-height
@@ -3387,7 +3466,8 @@
                                    :objects objects
                                    :duration span
                                    :origin origin
-                                   :unit unit}]]]
+                                   :unit unit
+                                   :fps fps}]]]
 
               [:div {:class (stl/css :ruler-corner)}
                [:button {:type "button"

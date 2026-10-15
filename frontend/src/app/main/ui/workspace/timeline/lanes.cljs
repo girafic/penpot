@@ -1049,12 +1049,15 @@
     (set! (.-font ctx) (dm/str "10px " font))
     (set! (.-textAlign ctx) "left")
     (set! (.-textBaseline ctx) "top")
-    ;; From a tick before the view, whose label may reach into it.
-    (let [from (max (* half (mth/ceil (/ origin half)))
-                    (- (* half (mth/floor (/ (x->time geo 0) half))) tick))
-          to   (min end (+ (x->time geo width) half))]
-      (doseq [time (range from (+ to (/ half 2)) half)]
-        (let [major? (zero? (mod time tick))
+    ;; From a tick before the view, whose label may reach into it. By
+    ;; their index, every other one labelled: a tick of frames lasts no
+    ;; whole number of ms.
+    (let [from (max (mth/ceil (/ origin half))
+                    (- (mth/floor (/ (x->time geo 0) half)) 2))
+          to   (mth/floor (/ (min end (+ (x->time geo width) half)) half))]
+      (doseq [i (range from (inc to))]
+        (let [time   (* i half)
+              major? (even? i)
               x      (crisp (time->x geo time) dpr)]
           (fill-rect! ctx (if major? (:fg palette) (:border palette)) x 0 1 (if major? 7 4))
           (when (and major? (< time end))

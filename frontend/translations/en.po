@@ -6723,6 +6723,10 @@ msgstr "Show times in seconds"
 msgid "workspace.animation.show-milliseconds"
 msgstr "Show times in milliseconds"
 
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.show-frames"
+msgstr "Show times in frames (%s fps, the frame rate of the export)"
+
 msgid "workspace.animation.collapse-all"
 msgstr "Collapse all layers"
 

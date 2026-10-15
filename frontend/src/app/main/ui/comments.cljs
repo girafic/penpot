@@ -133,6 +133,11 @@
   `dwa/time-unit`): it does not change as the animation plays."
   (l/derived dwa/time-unit refs/workspace-animation =))
 
+(def ^:private ref:frame-rate
+  "The frames per second the timeline counts frames in (see
+  `dwa/frame-rate`)."
+  (l/derived #(dwa/frame-rate (dwa/current-timeline %)) st/state =))
+
 (defn- current-text-node*
   "Retrieves the text node and the offset that the cursor is positioned on"
   [node anchor-node]
@@ -239,7 +244,8 @@
   {::mf/private true}
   [{:keys [time on-show-time]}]
   (let [unit  (mf/deref ref:time-unit)
-        label (dwa/format-time time unit)
+        fps   (mf/deref ref:frame-rate)
+        label (dwa/format-time time unit fps)
 
         on-click
         (mf/use-fn
@@ -263,7 +269,8 @@
   {::mf/private true}
   [{:keys [time on-show-time on-remove]}]
   (let [unit  (mf/deref ref:time-unit)
-        label (dwa/format-time time unit)
+        fps   (mf/deref ref:frame-rate)
+        label (dwa/format-time time unit fps)
 
         on-click
         (mf/use-fn
@@ -783,10 +790,11 @@
   []
   (let [mentions-s (mf/use-ctx mentions-context)
         unit       (mf/deref ref:time-unit)
+        fps        (mf/deref ref:frame-rate)
 
         handle-pointer-down
         (mf/use-fn
-         (mf/deps unit)
+         (mf/deps unit fps)
          (fn [event]
            ;; the caret stays in the input
            (dom/prevent-default event)
@@ -794,7 +802,7 @@
            (let [time (dwa/playhead @st/state)]
              (rx/push! mentions-s {:type :insert-timestamp
                                    :data {:time time
-                                          :label (dwa/format-time time unit)}}))))
+                                          :label (dwa/format-time time unit fps)}}))))
 
         handle-key-down
         (mf/use-fn
