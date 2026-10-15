@@ -990,3 +990,50 @@
             (done))
           300))
        50))))
+
+(t/deftest test-group-mask-mode
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store   (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context "00000000-0000-0000-0000-000000000000")
+            _       (set! st/state store)
+            _       (ptk/emit! store #(assoc-in % [:plugins :flags "00000000-0000-0000-0000-000000000000" :throw-validation-errors] true))
+            ^js file  (. context -currentFile)
+            ^js page  (. context -currentPage)
+            ^js inner (.createRectangle context)
+            ^js outer (.createRectangle context)
+            _       (.resize inner 10 10)
+            _       (set! (.-x inner) 20)
+            _       (set! (.-y inner) 20)
+            _       (.resize outer 100 100)
+            ^js group (.group context #js [inner outer])
+            objects #(get-in @store [:files (aget file "$id") :data :pages-index (aget page "$id") :objects])
+            stored  #(get (objects) (aget group "$id"))
+            mask    #(get (objects) (first (:shapes (stored))))]
+
+        (t/testing "a group that is not a mask"
+          (t/is (nil? (.-maskMode group)))
+          (t/is (thrown? js/Error (set! (.-maskMode group) "luma"))))
+
+        (.makeMask group)
+
+        (t/testing "a mask keeps by its opacity first"
+          (t/is (m/close? 10 (:width (mask))) "the small layer masks")
+          (t/is (m/close? 10 (:width (stored))))
+          (t/is (= "alpha" (.-maskMode group)))
+          (t/is (not (contains? (stored) :mask-mode))))
+
+        (t/testing "an inverted mask spans all the layers of its group"
+          (set! (.-maskMode group) "luma-inverted")
+          (t/is (= "luma-inverted" (.-maskMode group)))
+          (t/is (= :luma-inverted (:mask-mode (stored))))
+          (t/is (m/close? 100 (:width (stored)))))
+
+        (t/testing "back to alpha the group spans its mask"
+          (set! (.-maskMode group) "alpha")
+          (t/is (not (contains? (stored) :mask-mode)))
+          (t/is (m/close? (:width (mask)) (:width (stored)))))
+
+        (t/testing "an unknown mode"
+          (t/is (thrown? js/Error (set! (.-maskMode group) "lumen")))
+          (t/is (= "alpha" (.-maskMode group))))))))

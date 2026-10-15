@@ -1968,6 +1968,35 @@
                    :else
                    (st/emit! (dw/reorder-children file-id page-id (:id shape) ids)))))}))
 
+         (cond-> (cfh/group-shape? data)
+           (crc/add-properties!
+            {:name "maskMode"
+             :get
+             (fn [self]
+               (let [shape (u/proxy->shape self)]
+                 (when (cfh/mask-shape? shape)
+                   (d/name (cts/mask-mode shape)))))
+
+             :set
+             (fn [self value]
+               (let [shape (u/proxy->shape self)
+                     mode  (when (string? value) (keyword value))]
+                 (cond
+                   (not (cfh/mask-shape? shape))
+                   (u/not-valid plugin-id :maskMode "The group is not a mask")
+
+                   (not (contains? cts/mask-modes mode))
+                   (u/not-valid plugin-id :maskMode value)
+
+                   (not (r/check-permission plugin-id "content:write"))
+                   (u/not-valid plugin-id :maskMode "Plugin doesn't have 'content:write' permission")
+
+                   (not (u/page-active? page-id))
+                   (u/not-valid plugin-id :maskMode "Cannot modify a page that is not currently active")
+
+                   :else
+                   (st/emit! (dwg/set-mask-mode (:id shape) mode)))))}))
+
          (cond-> (cfh/frame-shape? data)
            (-> (crc/add-properties!
                 {:name "clipContent"

@@ -2574,6 +2574,19 @@ export interface Group extends ShapeBase {
    * Removes the mask from the group.
    */
   removeMask(): void;
+
+  /**
+   * How the mask of the group keeps its other layers (see `MaskMode`), or
+   * `null` when the group is not a mask. Setting it on a group that is not
+   * a mask is not valid. Requires `content:write` permission to set.
+   *
+   * @example
+   * ```js
+   * group.makeMask();
+   * group.maskMode = 'luma-inverted';
+   * ```
+   */
+  maskMode: MaskMode | null;
 }
 
 /**
@@ -3496,6 +3509,19 @@ export interface LocalStorage {
    */
   getKeys(): string[];
 }
+
+/**
+ * How the mask of a masked group, its bottom-most layer, keeps the other
+ * layers of the group, as the track mattes of motion tools do:
+ * - `alpha`: where the mask is, by its opacity (the default).
+ * - `alpha-inverted`: where the mask is not.
+ * - `luma`: where the mask is bright, by its luminance.
+ * - `luma-inverted`: where the mask is dark.
+ *
+ * An inverted mask keeps what is outside it, so its group spans all its
+ * layers instead of only the mask.
+ */
+export type MaskMode = 'alpha' | 'alpha-inverted' | 'luma' | 'luma-inverted';
 
 /**
  * It takes the user from one board to the destination set in the interaction.
