@@ -227,14 +227,79 @@
                      group-tr]}
         result (lottie/lottie->shapes
                 (document [{:ty 5 :ind 1 :nm "Title" :ks rest-ks :ip 0 :op 60}
-                           (layer 2 "Matte" [(rect-group [0 0 10 10] [0 0 0 1])] :td 1)
                            (layer 3 "Matted" [(rect-group [0 0 10 10] [1 0 0 1])] :tt 1)
                            (layer 4 "Morph" [morph])])
                 {:x 0 :y 0})]
-    (t/is (= {:text 1 :matte 2 :path-morph 1} (:skipped result)))
-    (t/is (nil? (shape-named result "Matte")) "a matte is not drawn")
-    (t/is (some? (shape-named result "Matted")))
+    (t/is (= {:text 1 :matte 1 :path-morph 1} (:skipped result))
+          "a track matte under a text, which a board cannot show")
+    (t/is (some? (shape-named result "Matted")) "drawn whole")
     (t/is (= :path (:type (shape-named result "Morph"))) "at its first keyframe")))
+
+(defn- matte-document
+  "A matte (a black and white ellipse) over a matted square, kept to it
+  by the track matte `tt`."
+  [tt & {:as opts}]
+  (document [(layer 1 "Matte" [{:ty "gr" :nm "Spot"
+                                :it [{:ty "el" :nm "Spot path" :s (static [20 20]) :p (static [50 50])}
+                                     {:ty "fl" :c (static [1 1 1 1]) :o (static 100)}
+                                     group-tr]}]
+                    :td 1)
+             (merge (layer 2 "Matted" [(rect-group [10 10 80 80] [1 0 0 1])] :tt tt) opts)]))
+
+(t/deftest track-mattes-become-masked-groups
+  (doseq [[tt mode bounds'] [[1 nil [40 40 20 20]]
+                             [2 :alpha-inverted [10 10 80 80]]
+                             [3 :luma [40 40 20 20]]
+                             [4 :luma-inverted [10 10 80 80]]]]
+    (let [result (lottie/lottie->shapes (matte-document tt) {:x 0 :y 0})
+          board  (first (:shapes result))
+          group  (shape-named result "Matted matte")
+          spot   (shape-named result "Matte")
+          square (shape-named result "Matted")]
+      (t/testing (str "tt " tt)
+        (t/is (empty? (:skipped result)))
+        (t/is (= :group (:type group)))
+        (t/is (true? (:masked-group group)))
+        (t/is (= mode (:mask-mode group)))
+        (t/is (= bounds' (bounds group)) "the matte, or all of it when inverted")
+        (t/is (= [(:id group) (:id group)] [(:parent-id spot) (:parent-id square)]))
+        (t/is (< (.indexOf (:shapes result) spot) (.indexOf (:shapes result) square))
+              "the matte at the bottom, as the mask")
+        (t/is (= [(:id board) (:id board) (:id board)] (map :frame-id [group spot square]))
+              "in the board: a group is no frame")))))
+
+(t/deftest a-track-matte-by-its-index
+  (let [doc    (-> (matte-document 1 :tp 1)
+                   (update :layers #(into [(first %) (layer 3 "Between" [(rect-group [0 0 5 5] [0 0 1 1])])]
+                                          (rest %))))
+        result (lottie/lottie->shapes doc {:x 0 :y 0})]
+    (t/is (empty? (:skipped result)))
+    (t/is (= (:id (shape-named result "Matted matte")) (:parent-id (shape-named result "Matte"))))
+    (t/is (= (:id (first (:shapes result))) (:parent-id (shape-named result "Between"))))))
+
+(t/deftest a-matted-parent-keeps-no-matte
+  (let [doc    (-> (matte-document 1)
+                   (update :layers conj (layer 3 "Child" [(rect-group [0 0 5 5] [0 0 1 1])] :parent 2)))
+        result (lottie/lottie->shapes doc {:x 0 :y 0})]
+    (t/is (= {:matte 1} (:skipped result)) "its children would be kept to it too")
+    (t/is (nil? (shape-named result "Matted matte")))
+    (t/is (nil? (shape-named result "Matte")) "the matte draws nothing")))
+
+(t/deftest a-matte-goes-into-a-file
+  (let [file    (thf/sample-file :file1)
+        page    (thf/current-page file)
+        result  (lottie/lottie->shapes (matte-document 4) {:x 0 :y 0})
+        board   (first (:shapes result))
+        changes (as-> (-> (pcb/empty-changes nil (:id page))
+                          (pcb/with-page page)
+                          (pcb/with-objects (:objects page))) changes
+                  (reduce pcb/add-object changes (:shapes result))
+                  (pcb/change-timeline changes (:id board) (:timeline result)))
+        page'   (thf/current-page (thf/apply-changes file changes))
+        group   (get (:objects page') (:id (shape-named result "Matted matte")))]
+    (t/is (= :luma-inverted (:mask-mode group)))
+    (t/is (= (:id (shape-named result "Matte")) (first (:shapes group))) "the mask")
+    (t/is (every? cts/valid-shape? (vals (:objects page'))))))
 
 (t/deftest gradients-move-with-their-layer
   (let [ramp   {:ty "gr" :nm "Ramp"
@@ -297,6 +362,27 @@
         doc    (alottie/timeline->lottie tl {(:id board) board (:id shape) shape})
         box    (shape-named (lottie/lottie->shapes doc {:x 0 :y 0}) "Box")]
     (t/is (mth/close? 8 (get-in box [:blur :value]) 0.001))))
+
+(t/deftest exported-masks-come-back-with-their-mode
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :name "Board"})
+        group  (cts/setup-shape {:type :group :x 100 :y 100 :width 200 :height 100 :name "Masked"})
+        mask   (cts/setup-shape {:type :circle :x 100 :y 100 :width 200 :height 100 :name "Mask"
+                                 :fills [{:fill-color "#ffffff" :fill-opacity 1}]})
+        shape  (cts/setup-shape {:type :rect :x 50 :y 50 :width 300 :height 200 :name "Box"
+                                 :fills [{:fill-color "#336699" :fill-opacity 1}]})
+        [bid gid mid sid] (map :id [board group mask shape])
+        objects {bid (assoc board :shapes [gid])
+                 gid (assoc group :parent-id bid :frame-id bid :shapes [mid sid]
+                            :masked-group true :mask-mode :luma)
+                 mid (assoc mask :parent-id gid :frame-id bid)
+                 sid (assoc shape :parent-id gid :frame-id bid)}
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe sid {:time 0 :property :x :value 50})
+                   (cta/add-keyframe sid {:time 1000 :property :x :value 100}))
+        result (lottie/lottie->shapes (alottie/timeline->lottie tl objects) {:x 0 :y 0})
+        masked (some #(when (:masked-group %) %) (:shapes result))]
+    (t/is (some? masked))
+    (t/is (= :luma (:mask-mode masked)))))
 
 (t/deftest exported-animations-come-back
   (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300 :name "Board"})

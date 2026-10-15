@@ -1493,7 +1493,7 @@
                (map-indexed vector)
                (filter #(and (= :inner-shadow (:style (second %))) (not (:hidden (second %)))))))))
 
-(def ^:private lottie-track-mattes
+(def lottie-track-mattes
   "The track matte (`tt`) of each mask mode (see `cts/mask-modes`)."
   {:alpha 1 :alpha-inverted 2 :luma 3 :luma-inverted 4})
 

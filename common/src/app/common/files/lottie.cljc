@@ -11,8 +11,8 @@
 
   It reads what the layers draw: the paths, rectangles and ellipses of
   shape layers with their fills, gradients, strokes and trims, images,
-  solids, precompositions, null layers and parents, a clip mask, drop
-  shadows and blur. It animates the layers, their groups and their
+  solids, precompositions, null layers and parents, a clip mask, track
+  mattes (as masked groups, see `add-layer`), drop shadows and blur. It animates the layers, their groups and their
   paints, with the easing and the motion paths of the keyframes. What a
   Penpot board cannot show is left out and counted (see `lottie->shapes`).
 
@@ -25,12 +25,14 @@
   (:require
    [app.common.animation.lottie :as alottie]
    [app.common.data :as d]
+   [app.common.files.helpers :as cfh]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
-   [app.common.uuid :as uuid]))
+   [app.common.uuid :as uuid]
+   [clojure.set :as set]))
 
 ;; --- Values -----------------------------------------------------------------
 
@@ -741,9 +743,13 @@
         roles   (cond-> roles (and effects? parent? (empty? roles)) (conj :effects))]
     {:on-node on-node :roles roles}))
 
-(defn- add-layer
+(declare add-layer)
+
+(defn- add-layer*
   "Add the shapes of `layer` (with the layers it parents, `children`) to
   the board `parent-id`; `parent-m` takes its parent's space to the board.
+  A matte (`td`) draws nothing itself, but as the mask of the layer it
+  keeps (`::as-matte`, see `add-layer`).
 
   The layer's node, a board centred on its anchor (or, for a single shape
   that turns or scales only around its middle, the shape), carries the
@@ -761,7 +767,8 @@
         fades?    (animated? (:o tr))
         span?     (span? ctx layer)
         parent?   (boolean (seq children))
-        own-nodes (layer-shape-nodes ctx layer m)
+        hidden?   (and (some? (:td layer)) (not= 0 (:td layer)) (not (::as-matte layer)))
+        own-nodes (if hidden? [] (layer-shape-nodes ctx layer m))
         single    (when (and (= 1 (count own-nodes)) (= :drawable (:kind (first own-nodes))))
                     (first own-nodes))
         turns?    (or (animated? (:s tr)) (animated? (or (:r tr) (:rz tr))))
@@ -791,7 +798,8 @@
                           (recur (rest roles) (:id board) (conj acc board)))
                         acc))
             drawing (or (:id (peek boards)) id)]
-        (add-own-drawing ctx layer own-nodes drawing m)
+        (when-not hidden?
+          (add-own-drawing ctx layer own-nodes drawing m))
         (doseq [[child grandchildren] children]
           (add-layer ctx child grandchildren id m))
 
@@ -830,6 +838,74 @@
 (def ^:private unsupported-layers
   {5 :text 6 :audio 7 :video-placeholder 13 :camera 15 :data})
 
+(def ^:private track-matte-modes
+  "The mask mode (see `cts/mask-modes`) of each track matte `tt`."
+  (set/map-invert alottie/lottie-track-mattes))
+
+(defn- matte-group
+  "The masked group `id` around `box`, keeping its layers as `mode` says."
+  [id name parent-id {:keys [x0 y0 x1 y1]} mode]
+  (cts/setup-shape
+   (cond-> {:type :group
+            :id id
+            :name (str (or name "Layer") " matte")
+            :x x0 :y y0 :width (max 0.01 (- x1 x0)) :height (max 0.01 (- y1 y0))
+            :parent-id parent-id
+            :frame-id parent-id
+            :shapes []
+            :masked-group true}
+     (not= :alpha mode) (assoc :mask-mode mode))))
+
+(defn- add-layer
+  "Add `layer` (see `add-layer*`), kept to its track matte (`::matte`,
+  see `with-mattes`) when it has one: a masked group (see
+  `cts/mask-modes`) with the matte at the bottom as its mask, as its `tt`
+  says, and the layer over it. The group spans the matte, or both with
+  an inverted matte. A layer that parents others keeps none: they would
+  be kept to it too."
+  [ctx layer children parent-id parent-m]
+  (let [matte (::matte layer)]
+    (cond
+      (nil? matte)
+      (add-layer* ctx layer children parent-id parent-m)
+
+      (or (seq children) (contains? unsupported-layers (:ty matte)))
+      (do (ctx :skip :matte)
+          (add-layer* ctx layer children parent-id parent-m))
+
+      :else
+      (let [id    (uuid/next)
+            mode  (get track-matte-modes (:tt layer))
+            slot  (ctx :reserve)
+            ;; a matte kept to a matte of its own draws whole
+            _     (when (:tt matte) (ctx :skip :matte))
+            _     (add-layer* ctx (assoc matte ::as-matte true) [] id parent-m)
+            start (ctx :count)
+            _     (add-layer* ctx layer [] id parent-m)
+            mask  (selrect-box (ctx :shape-at (inc slot)))
+            box   (if (contains? cfh/inverted-mask-modes mode)
+                    (merge-boxes mask (selrect-box (ctx :shape-at start)))
+                    mask)]
+        (ctx :place slot (matte-group id (:nm layer) parent-id box mode))))))
+
+(defn- with-mattes
+  "`layers`, the top-most first, each matted one (`tt`) with its track
+  matte (`::matte`): the layer of its `tp`, or else the one right above
+  it. Only a matte of the same parent, which moves the same way."
+  [layers]
+  (let [by-ind (into {} (keep (fn [l] (when (some? (:ind l)) [(:ind l) l]))) layers)]
+    (into []
+          (map-indexed
+           (fn [i layer]
+             (let [matte (when (contains? track-matte-modes (:tt layer))
+                           (if (some? (:tp layer))
+                             (get by-ind (:tp layer))
+                             (when (pos? i) (nth layers (dec i)))))]
+               (cond-> layer
+                 (and (some? matte) (= (:parent matte) (:parent layer)))
+                 (assoc ::matte matte)))))
+          layers)))
+
 (defn- layer-tree
   "The layers of a composition as a tree by their parents, each a pair of
   the layer and its children, the bottom-most first."
@@ -849,9 +925,10 @@
   [ctx layer]
   (cond
     (:hd layer) false
-    (:td layer) (do (ctx :skip :matte) false)
+    ;; a matte draws as the mask of the layer it keeps (see `add-layer`)
+    (and (some? (:td layer)) (not= 0 (:td layer))) false
     (contains? unsupported-layers (:ty layer)) (do (ctx :skip (unsupported-layers (:ty layer))) false)
-    :else (do (when (:tt layer) (ctx :skip :matte))
+    :else (do (when (and (:tt layer) (nil? (::matte layer))) (ctx :skip :matte))
               (when (:tm layer) (ctx :skip :time-remap))
               (when (and (some? (:sr layer)) (not= 1 (:sr layer))) (ctx :skip :time-stretch))
               (when (= 1 (:ddd layer)) (ctx :skip :three-d))
@@ -878,7 +955,7 @@
       (ctx :skip :missing-precomp))
     (ctx :with-offset offset
          (fn []
-           (doseq [[layer children] (prune ctx (layer-tree layers))]
+           (doseq [[layer children] (prune ctx (layer-tree (with-mattes layers)))]
              (add-layer ctx layer children parent-id m))))))
 
 ;; --- Document
@@ -895,6 +972,18 @@
                     (or (= 1 e) (re-find #"^data:" p)) (assoc :data-uri p)
                     (not (or (= 1 e) (re-find #"^data:" p))) (assoc :path (str (or u "") p))))))
         (:assets doc)))
+
+(defn- with-frame-ids
+  "`shapes`, parents before their children, each with the board it is in
+  as its frame: a group is none (see `matte-group`)."
+  [shapes]
+  (first
+   (reduce (fn [[acc frames] shape]
+             (let [frame-id (get frames (:parent-id shape) (:parent-id shape))]
+               [(conj acc (assoc shape :frame-id frame-id))
+                (assoc frames (:id shape) (if (= :group (:type shape)) frame-id (:id shape)))]))
+           [[] {}]
+           shapes)))
 
 (defn lottie->shapes
   "The shapes and the timeline of the Lottie document `doc` (parsed JSON
@@ -934,6 +1023,8 @@
                                     (vswap! state update :shapes conj nil)
                                     slot)
                      :place       (vswap! state assoc-in [:shapes (first args)] (second args))
+                     :count       (count (:shapes @state))
+                     :shape-at    (get (:shapes @state) (first args))
                      :box-since   (box-since (first args))
                      :time        (time (first args))
                      :image       (get images (first args))
@@ -971,6 +1062,6 @@
                              (cta/add-marker timeline {:time (time (scalar tm)) :name (str cm)}))
                            timeline
                            (:markers doc))]
-      {:shapes   (into [board] (remove nil?) shapes)
+      {:shapes   (with-frame-ids (into [board] (remove nil?) shapes))
        :timeline (assoc timeline :duration (time comp-op))
        :skipped  skipped})))
