@@ -509,7 +509,8 @@
   the layers that animate show, and the ones holding them (see
   `animated-ids`), under the row of the board, which always does: a layer
   gets its row with its first animation. Animated layers start expanded;
-  `expanded` holds the ones the user toggled. A component copy playing
+  `expanded` holds the ones the user toggled, or is `:all` to open them
+  all (see `filter-rows`). A component copy playing
   the animation of its main, which ends at the time `copy-ends` gives
   for it, has a bar over it, `:copy`, and keeps its layers folded away
   unless the board animates them. The layers out of the board that its
@@ -532,7 +533,9 @@
                                    (filter #(contains? playing %) (reverse (:shapes shape))))
                       animations (dm/get-in timeline [:tracks id :animations])
                       slots      (track-slots (dm/get-in timeline [:tracks id :keyframes]))
-                      expanded?  (and (not folded?) (get expanded id (contains? playing id)))]
+                      expanded?  (and (not folded?)
+                                      (or (= :all expanded)
+                                          (get expanded id (contains? playing id))))]
                   (cons {:type :layer
                          :id id
                          :depth depth
@@ -554,6 +557,53 @@
                       (let [[row & rows] (walk id 1)]
                         (cons (assoc row :outside? true) rows))))
             outside))))
+
+(defn- row-label
+  "What the row `row` of `timeline-rows` is named in the dock."
+  [{:keys [type shape property index animation]}]
+  (case type
+    :layer     (:name shape)
+    :property  (labels/property-label property index)
+    :animation (labels/animation-label animation)
+    nil))
+
+(defn filter-rows
+  "The `rows` (see `timeline-rows`, all layers open) named by every word
+  of `query`, ignoring case, with the names of the layers holding them
+  (\"pos\" or \"pos x\" for Position X, \"dot pos\" for the position of
+  the layer Dot), and the layers holding them, as the search of Blender's
+  dope sheet: properties, preset animations, or layers, which keep all
+  their rows. The board, the first row, and the rows of the audio lanes
+  always stay."
+  [rows query]
+  (let [words   (into [] (remove str/empty?) (str/split (str/lower (str/trim query)) #"\s+"))
+        match?  (fn [row stack]
+                  (let [text (str/lower (str/join " " (keep row-label (conj (mapv :row stack) row))))]
+                    (every? #(str/includes? text %) words)))
+        layered #{:layer :property :animation}]
+    (if (empty? words)
+      rows
+      (loop [rows rows, stack [], out []]
+        (if-let [{:keys [type depth] :as row} (first rows)]
+          (if-not (contains? layered type)
+            (recur (rest rows) stack (conj out row))
+            ;; the open layers above, each with whether it matched and
+            ;; whether it is out yet
+            (let [stack    (filterv #(< (:depth (:row %)) depth) stack)
+                  matched? (or (zero? depth) (match? row stack) (some :matched? stack))]
+              (if (= :layer type)
+                (let [entry {:row row :matched? (and (pos? depth) (match? row stack))}]
+                  (if (or (zero? depth) (:matched? entry))
+                    (recur (rest rows)
+                           (conj (mapv #(assoc % :out? true) stack) (assoc entry :out? true))
+                           (into out (comp (remove :out?) (map :row)) (conj stack entry)))
+                    (recur (rest rows) (conj stack entry) out)))
+                (if matched?
+                  (recur (rest rows)
+                         (mapv #(assoc % :out? true) stack)
+                         (conj (into out (comp (remove :out?) (map :row)) stack) row))
+                  (recur (rest rows) stack out)))))
+          out)))))
 
 (defn expand-to
   "`expanded` (see `timeline-rows`) with the closed parents of the layers
@@ -2024,13 +2074,35 @@
         ;; the recording of sound, a clip of its own as it records
         audio-recording (when (some? (dm/get-in anim [:audio-recording :since]))
                           (:audio-recording anim))
-        rows       (mf/with-memo [objects board-id timeline expanded copy-ends audio-collapsed? audio-recording]
+        ;; What the rows are filtered by (see `filter-rows`): while it
+        ;; holds something, every layer is open.
+        row-filter* (mf/use-state "")
+        row-filter  (deref row-filter*)
+        filtering?  (not (str/blank? row-filter))
+
+        on-row-filter-change
+        (mf/use-fn
+         (fn [event]
+           (reset! row-filter* (dom/get-target-val event))))
+
+        on-row-filter-key-down
+        (mf/use-fn
+         (fn [event]
+           (when (kbd/esc? event)
+             (dom/stop-propagation event)
+             (if (str/blank? (dom/get-target-val event))
+               (dom/blur! (dom/get-target event))
+               (reset! row-filter* "")))))
+
+        rows       (mf/with-memo [objects board-id timeline expanded copy-ends audio-collapsed? audio-recording
+                                  row-filter filtering?]
                      (when (some? timeline)
-                       (into (timeline-rows objects board-id timeline expanded copy-ends)
-                             (dwaa/audio-rows (cond-> timeline
-                                                (some? audio-recording)
-                                                (dwar/with-recording-clip audio-recording))
-                                              :collapsed? audio-collapsed?))))
+                       (-> (timeline-rows objects board-id timeline (if filtering? :all expanded) copy-ends)
+                           (filter-rows row-filter)
+                           (into (dwaa/audio-rows (cond-> timeline
+                                                    (some? audio-recording)
+                                                    (dwar/with-recording-clip audio-recording))
+                                                  :collapsed? audio-collapsed?)))))
 
         ;; The selection of the last render and the layers newly selected,
         ;; which the rows scroll to once they show (see the effects).
@@ -3476,7 +3548,20 @@
                                   (tr "workspace.animation.expand-all")
                                   (tr "workspace.animation.collapse-all"))
                          :on-click on-toggle-all-layers}
-                [:> i/icon* {:icon-id (if collapsed? i/arrow-right i/arrow-down) :size "s"}]]]
+                [:> i/icon* {:icon-id (if collapsed? i/arrow-right i/arrow-down) :size "s"}]]
+               ;; Shows only the properties, animations or layers named so,
+               ;; as the search of Blender's dope sheet.
+               [:label {:class (stl/css-case :row-filter true :active filtering?)
+                        :title (tr "workspace.animation.filter-rows-hint")}
+                [:> i/icon* {:icon-id i/search :size "s" :class (stl/css :row-filter-icon)}]
+                [:input {:type "text"
+                         :class (stl/css :row-filter-input)
+                         :placeholder (tr "workspace.animation.filter-rows")
+                         :aria-label (tr "workspace.animation.filter-rows")
+                         :spell-check false
+                         :value row-filter
+                         :on-change on-row-filter-change
+                         :on-key-down on-row-filter-key-down}]]]
 
               [:& (mf/provider snap-context) {:value snap}
                [:> marker-row* {:markers (:markers timeline)

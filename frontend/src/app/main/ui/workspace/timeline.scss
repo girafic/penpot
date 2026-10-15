@@ -384,6 +384,49 @@ $header-height: $ruler-height + $row-height;
   border-bottom: 1px solid var(--panel-border-color);
 }
 
+// Filters the rows by the names of their properties, animations and
+// layers (see `filter-rows`).
+.row-filter {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: deprecated.$s-4;
+  min-inline-size: 0;
+  block-size: deprecated.$s-20;
+  margin-inline-end: deprecated.$s-8;
+  padding-inline: deprecated.$s-4;
+  border-radius: deprecated.$br-4;
+  color: var(--color-foreground-secondary);
+  cursor: text;
+
+  &:hover,
+  &:focus-within,
+  &.active {
+    background-color: var(--color-background-tertiary);
+  }
+}
+
+.row-filter-icon {
+  flex: none;
+}
+
+.row-filter-input {
+  flex: 1;
+  min-inline-size: 0;
+  block-size: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: none;
+  font-size: deprecated.$fs-11;
+  color: var(--color-foreground-primary);
+
+  &::placeholder {
+    color: var(--color-foreground-secondary);
+  }
+}
+
 // In the accent colour, with a ring of the background that keeps it apart
 // from the filled track, so it shows in both themes.
 @mixin zoom-thumb {

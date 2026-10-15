@@ -170,6 +170,40 @@
                                                                     {} {}))))
           "none without one")))
 
+(t/deftest the-rows-filter-by-name
+  ;; As the search of Blender's dope sheet: the properties, animations or
+  ;; layers named so, with the layers holding them; all layers open.
+  (let [board    (uuid/next)
+        group    (uuid/next)
+        dot      (uuid/next)
+        title    (uuid/next)
+        objects  {uuid/zero {:id uuid/zero :parent-id uuid/zero :shapes [board]}
+                  board     {:id board :name "Board" :parent-id uuid/zero :shapes [group title]}
+                  group     {:id group :name "Card" :parent-id board :shapes [dot]}
+                  dot       {:id dot :name "Dot" :parent-id group}
+                  title     {:id title :name "Title" :parent-id board}}
+        timeline (-> (cta/make-timeline {:board-id board})
+                     (cta/add-keyframe dot {:time 0 :property :x :value 0})
+                     (cta/add-keyframe dot {:time 0 :property :opacity :value 1})
+                     (cta/add-animation title {:type :fade :start 0 :duration 300}))
+        rows     (conj (timeline/timeline-rows objects board timeline {group false} {})
+                       {:type :audio-group})
+        all      (conj (timeline/timeline-rows objects board timeline :all {}) {:type :audio-group})
+        shown    #(mapv (fn [{:keys [type id property]}] (or property (when (= :audio-group type) :audio) id))
+                        (timeline/filter-rows all %))]
+    (t/is (= rows (timeline/filter-rows rows "  ")) "nothing to filter by")
+    (t/is (empty? (filter #(= dot (:id %)) rows)) "the card is folded: the dot has no row")
+    (t/is (= [board group dot :x :audio] (shown "POS")) "a property, under its folded layer")
+    (t/is (= [board title :fade :audio]
+             (mapv (fn [{:keys [type id animation]}]
+                     (case type :animation (:type animation) :audio-group :audio id))
+                   (timeline/filter-rows all "fade")))
+          "an animation")
+    (t/is (= [board group dot :x :opacity :audio] (shown "card")) "a layer, with all its rows")
+    (t/is (= [board :audio] (shown "nothing like it")))
+    (t/is (= [board group dot :x :audio] (shown "pos x")) "every word")
+    (t/is (= [board group dot :opacity :audio] (shown "dot OPAC")) "with the names of the layers")))
+
 (t/deftest the-dock-follows-a-layer-out-of-its-board
   (let [[board-a board-b loose] [(uuid/next) (uuid/next) (uuid/next)]
         objects   {uuid/zero {:id uuid/zero :type :frame :shapes [board-a board-b loose]}

@@ -6727,6 +6727,16 @@ msgstr "Show times in milliseconds"
 msgid "workspace.animation.show-frames"
 msgstr "Show times in frames (%s fps, the frame rate of the export)"
 
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.filter-rows"
+msgstr "Filter"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.filter-rows-hint"
+msgstr ""
+"Show only the properties, animations and layers whose name holds this "
+"text (Esc clears it)"
+
 msgid "workspace.animation.collapse-all"
 msgstr "Collapse all layers"
 
