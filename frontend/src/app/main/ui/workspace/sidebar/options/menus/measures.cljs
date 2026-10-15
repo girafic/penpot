@@ -341,6 +341,7 @@
                                                (dwa/display->value property display))))))]
     [:div {:class (stl/css :position)}
      [:div {:class (stl/css-case :x-position true
+                                 :with-keyframe true
                                  :disabled (nil? kf-x))
             :title (tr "workspace.animation.scale")}
       [:span {:class (stl/css :icon-text)} "↔"]
@@ -348,7 +349,8 @@
                                            :is-disabled (nil? kf-x)
                                            :on-change #(on-scale :scale-x kf-x %)
                                            :class (stl/css :numeric-input)
-                                           :value (dwa/value->display :scale-x sx)}]]
+                                           :value (dwa/value->display :scale-x sx)}]
+      [:> keyframe-diamond* {:properties [:scale-x]}]]
      [:div {:class (stl/css-case :y-position true
                                  :with-keyframe true
                                  :disabled (nil? kf-y))
@@ -359,7 +361,7 @@
                                            :on-change #(on-scale :scale-y kf-y %)
                                            :class (stl/css :numeric-input)
                                            :value (dwa/value->display :scale-y sy)}]
-      [:> keyframe-diamond* {:properties [:scale-x :scale-y]}]]]))
+      [:> keyframe-diamond* {:properties [:scale-y]}]]]))
 
 (mf/defc measures-section*
   {::mf/private true
@@ -748,19 +750,24 @@
        [:div {:class (stl/css :size)}
         (if token-numeric-inputs
           [:*
-           [:> numeric-input-wrapper*
-            {:disabled disabled-width-sizing?
-             :on-change on-width-change
-             :on-detach on-detach-token
-             :icon i/character-w
-             :min 0.01
-             :attr :width
-             :property (tr "workspace.options.width")
-             :applied-token (get applied-tokens :width)
-             :placeholder (if (or (= :multiple (get applied-tokens :width))
-                                  (= :multiple (get values :width)))
-                            (tr "settings.multiple") "--")
-             :value (get values :width)}]
+           [:div {:class (stl/css-case :width true
+                                       :with-keyframe (some? motion-id)
+                                       :disabled disabled-width-sizing?)}
+            [:> numeric-input-wrapper*
+             {:disabled disabled-width-sizing?
+              :on-change on-width-change
+              :on-detach on-detach-token
+              :icon i/character-w
+              :min 0.01
+              :attr :width
+              :property (tr "workspace.options.width")
+              :applied-token (get applied-tokens :width)
+              :placeholder (if (or (= :multiple (get applied-tokens :width))
+                                   (= :multiple (get values :width)))
+                             (tr "settings.multiple") "--")
+              :value (get values :width)}]
+            (when motion-id
+              [:> keyframe-diamond* {:properties [:width]}])]
 
            [:div {:class (stl/css-case :height true
                                        :with-keyframe (some? motion-id)
@@ -777,10 +784,11 @@
               :applied-token (get applied-tokens :height)
               :value (get values :height)}]
             (when motion-id
-              [:> keyframe-diamond* {:properties [:width :height]}])]]
+              [:> keyframe-diamond* {:properties [:height]}])]]
 
           [:*
            [:div {:class (stl/css-case :width true
+                                       :with-keyframe (some? motion-id)
                                        :disabled disabled-width-sizing?)
                   :title (tr "workspace.options.width")}
             [:span {:class (stl/css :icon-text)} "W"]
@@ -791,7 +799,9 @@
               :on-change on-width-change
               :is-disabled disabled-width-sizing?
               :class (stl/css :numeric-input)
-              :value (:width values)}]]
+              :value (:width values)}]
+            (when motion-id
+              [:> keyframe-diamond* {:properties [:width]}])]
            [:div {:class (stl/css-case :height true
                                        :with-keyframe (some? motion-id)
                                        :disabled disabled-height-sizing?)
@@ -805,7 +815,7 @@
                                                  :class (stl/css :numeric-input)
                                                  :value (:height values)}]
             (when motion-id
-              [:> keyframe-diamond* {:properties [:width :height]}])]])
+              [:> keyframe-diamond* {:properties [:height]}])]])
 
         [:> icon-button* {:variant "ghost"
                           :tooltip-placement "top-left"
@@ -822,18 +832,23 @@
        [:div {:class (stl/css :position)}
         (if token-numeric-inputs
           [:*
-           [:> numeric-input-wrapper*
-            {:disabled disabled-position?
-             :on-change on-pos-x-change
-             :on-detach on-detach-token
-             :icon i/character-x
-             :attr :x
-             :property (tr "workspace.options.x")
-             :applied-token (get applied-tokens :x)
-             :placeholder (if (or (= :multiple (get applied-tokens :x))
-                                  (= :multiple (get values :x)))
-                            (tr "settings.multiple") "--")
-             :value (get values :x)}]
+           [:div {:class (stl/css-case :x-position true
+                                       :with-keyframe (some? motion-id)
+                                       :disabled disabled-position?)}
+            [:> numeric-input-wrapper*
+             {:disabled disabled-position?
+              :on-change on-pos-x-change
+              :on-detach on-detach-token
+              :icon i/character-x
+              :attr :x
+              :property (tr "workspace.options.x")
+              :applied-token (get applied-tokens :x)
+              :placeholder (if (or (= :multiple (get applied-tokens :x))
+                                   (= :multiple (get values :x)))
+                             (tr "settings.multiple") "--")
+              :value (get values :x)}]
+            (when motion-id
+              [:> keyframe-diamond* {:properties [:x]}])]
            [:div {:class (stl/css-case :y-position true
                                        :with-keyframe (some? motion-id)
                                        :disabled disabled-position?)}
@@ -851,10 +866,11 @@
                              (tr "settings.multiple") "--")
               :value (get values :y)}]
             (when motion-id
-              [:> keyframe-diamond* {:properties [:x :y]}])]]
+              [:> keyframe-diamond* {:properties [:y]}])]]
 
           [:*
            [:div {:class (stl/css-case :x-position true
+                                       :with-keyframe (some? motion-id)
                                        :disabled disabled-position?)
                   :title (tr "workspace.options.x")}
             [:span {:class (stl/css :icon-text)} "X"]
@@ -863,7 +879,9 @@
                                                  :on-change on-pos-x-change
                                                  :is-disabled disabled-position?
                                                  :class (stl/css :numeric-input)
-                                                 :value (:x values)}]]
+                                                 :value (:x values)}]
+            (when motion-id
+              [:> keyframe-diamond* {:properties [:x]}])]
 
            [:div {:class (stl/css-case :y-position true
                                        :with-keyframe (some? motion-id)
@@ -877,7 +895,7 @@
                                                  :class (stl/css :numeric-input)
                                                  :value (:y values)}]
             (when motion-id
-              [:> keyframe-diamond* {:properties [:x :y]}])]])])
+              [:> keyframe-diamond* {:properties [:y]}])]])])
 
      (when motion-id
        [:> scale-fields* {:shape-id motion-id}])

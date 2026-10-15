@@ -802,3 +802,21 @@
                "the layer as it was")
          (t/is (= (get-in page [:timelines (cthi/id :board-b)]) (timeline-of state :board-b))
                "and the other uses"))))))
+
+(t/deftest a-diamond-keys-its-property-alone
+  ;; The design tab has a diamond for each of X, Y, W, H and the scales,
+  ;; which keys only its own property.
+  (t/async
+    done
+    (let [store   (store-of (setup-file))
+          keyed   (fn [state]
+                    (into (sorted-set)
+                          (map :property)
+                          (get-in (timeline-of state :board-a) [:tracks (cthi/id :r1) :keyframes])))]
+      (ths/run-store
+       store done
+       [(select [:r1])
+        (dwa/toggle-keyframes (cthi/id :r1) [:y])
+        (dwa/toggle-keyframes (cthi/id :r1) [:width])]
+       (fn [state]
+         (t/is (= #{:width :y} (keyed state)) "Y and W, not X or H"))))))
