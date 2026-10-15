@@ -275,3 +275,14 @@
     (t/is (= board-a (dwam/target-board-id objects [board-a] anim)) "a selected board itself")
     (t/is (= board-b (dwam/target-board-id objects [] anim)) "the last one, nothing selected")
     (t/is (nil? (dwam/selection-board-id objects [])))))
+
+(t/deftest the-view-never-reaches-past-its-scroll
+  ;; The content box of the scroll is fractional at a browser zoom; the
+  ;; view takes it rounded down, so it never overflows the scroll and
+  ;; brings in scrollbars that would shrink it (the timeline shook).
+  (t/is (= {:width 1162 :height 621}
+           (timeline/scroll-view-size #js {:width 1162.92 :height 621.54}))
+        "rounded down, not to the nearest pixel")
+  (t/is (= {:width 1512 :height 820}
+           (timeline/scroll-view-size #js {:width 1512 :height 820}))
+        "whole pixels as they are"))

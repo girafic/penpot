@@ -106,6 +106,18 @@
   "Minimum distance (px) between two labelled ticks."
   64)
 
+(defn scroll-view-size
+  "The size of the view of the timeline in its scroll, from the content
+  box `rect` of the scroll (its scrollbars left out): in whole pixels
+  rounded down. `clientWidth` and `clientHeight` round to the nearest
+  pixel, so at a browser zoom the view reached a fraction of a pixel past
+  the scroll and overflowed it: scrollbars that take room (macOS with a
+  mouse) came in, shrank the scroll and went again, over and over, and
+  the timeline shook."
+  [^js rect]
+  {:width (mth/floor (.-width rect))
+   :height (mth/floor (.-height rect))})
+
 (defn- tick-step
   [duration width]
   (let [px-per-ms (/ width (max 1 duration))]
@@ -1721,26 +1733,30 @@
              (dom/stop-propagation event)
              (on-close-easing))))
 
-        ;; The view of the rows and the time axis, which it fills at zoom 1.
+        ;; The view of the rows and the time axis, which it fills at zoom 1
+        ;; (see `scroll-view-size`).
         view-size*  (mf/use-state nil)
         view-size   (deref view-size*)
         view-width  (get view-size :width 0)
         view-height (get view-size :height 0)
 
-        observe-view
-        (r/use-resize-observer
-         (fn [_ {:keys [width height]}]
-           (let [size {:width width :height height}]
-             (swap! view-size* #(if (= % size) % size)))))
-
-        scroll-ref (mf/use-ref nil)
+        scroll-ref   (mf/use-ref nil)
+        observer-ref (mf/use-ref nil)
 
         on-scroll-node
         (mf/use-fn
-         (mf/deps observe-view)
          (fn [node]
            (mf/set-ref-val! scroll-ref node)
-           (observe-view node)))
+           (some-> ^js (mf/ref-val observer-ref) (.disconnect))
+           (mf/set-ref-val! observer-ref nil)
+           (when (some? node)
+             (let [observer
+                   (js/ResizeObserver.
+                    (fn [entries]
+                      (let [size (scroll-view-size (.-contentRect ^js (aget entries 0)))]
+                        (swap! view-size* #(if (= % size) % size)))))]
+               (.observe observer node)
+               (mf/set-ref-val! observer-ref observer)))))
 
         ;; Horizontal zoom of the time axis.
         zoom*      (mf/use-state 1)
