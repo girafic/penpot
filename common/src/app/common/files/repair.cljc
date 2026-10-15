@@ -9,6 +9,7 @@
    [app.common.data :as d]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
+   [app.common.files.tokens :as cfo]
    [app.common.logging :as log]
    [app.common.path-names :as cpn]
    [app.common.types.component :as ctk]
@@ -44,29 +45,25 @@
 
 (defmethod repair-error :parent-not-found
   [_ {:keys [shape page-id] :as error} file-data _]
-  (let [repair-shape
-        (fn [shape]
-          ;; Set parent to root frame.
-          (log/debug :hint "  -> set to " :parent-id uuid/zero)
-          (assoc shape :parent-id uuid/zero))]
-
-    (log/debug :hint "repairing shape :parent-not-found" :id (:id shape) :name (:name shape) :page-id page-id)
-    (-> (pcb/empty-changes nil page-id)
-        (pcb/with-file-data file-data)
-        (pcb/update-shapes [(:id shape)] repair-shape))))
+  ;; Move the shape to the root frame. `:mov-objects` adds it to the
+  ;; root's children list when applied, so several repairs on the same
+  ;; root do not overwrite each other
+  (log/debug :hint "repairing shape :parent-not-found" :id (:id shape) :name (:name shape) :page-id page-id)
+  (log/debug :hint "  -> set to " :parent-id uuid/zero)
+  (-> (pcb/empty-changes nil page-id)
+      (pcb/with-file-data file-data)
+      (pcb/change-parent uuid/zero [shape] nil {:allow-altering-copies true})))
 
 (defmethod repair-error :child-not-in-parent
   [_ {:keys [shape page-id] :as error} file-data _]
-  (let [repair-shape
-        (fn [parent-shape]
-          ;; Add shape to parent's children list
-          (log/debug :hint "  -> add children to" :parent-id (:id parent-shape))
-          (update parent-shape :shapes conj (:id shape)))]
-
-    (log/debug :hint "repairing shape :child-not-in-parent" :id (:id shape) :name (:name shape) :page-id page-id)
-    (-> (pcb/empty-changes nil page-id)
-        (pcb/with-file-data file-data)
-        (pcb/update-shapes [(:parent-id shape)] repair-shape))))
+  ;; Add the shape to its parent's children list. `:mov-objects` adds it
+  ;; when applied, so several repairs on the same parent do not
+  ;; overwrite each other
+  (log/debug :hint "repairing shape :child-not-in-parent" :id (:id shape) :name (:name shape) :page-id page-id)
+  (log/debug :hint "  -> add children to" :parent-id (:parent-id shape))
+  (-> (pcb/empty-changes nil page-id)
+      (pcb/with-file-data file-data)
+      (pcb/change-parent (:parent-id shape) [shape] nil {:allow-altering-copies true})))
 
 (defmethod repair-error :duplicated-children
   [_ {:keys [shape page-id] :as error} file-data _]
@@ -782,6 +779,16 @@
     (-> (pcb/empty-changes nil page-id)
         (pcb/with-file-data file-data)
         (pcb/update-shapes [(:id shape)] repair-shape))))
+
+(defmethod repair-error :missing-tokens-status
+  [_ _ file-data _]
+  (let [tokens-lib (cfo/get-tokens-lib file-data)
+        tokens-status (cfo/make-tokens-status-from-lib tokens-lib)]
+    (log/debug :hint "repairing shape :tokens-status-missing")
+    (log/debug :hint "  -> add a tokens-status generated from the library")
+    (-> (pcb/empty-changes nil)
+        (pcb/with-library-data file-data)
+        (pcb/set-tokens-status tokens-status))))
 
 (defmethod repair-error :default
   [_ error file _]

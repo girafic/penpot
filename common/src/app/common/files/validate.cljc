@@ -73,7 +73,8 @@
     :variant-main-bad-name
     :variant-main-bad-variant-name
     :variant-component-bad-name
-    :variant-component-bad-id})
+    :variant-component-bad-id
+    :missing-tokens-status})
 
 (def ^:private schema:error
   [:map {:title "ValidationError"}
@@ -116,6 +117,19 @@
                  m))
              {}
              objects))
+
+(defn- listed-in-parent?
+  "Check if `parent` lists `shape-id` in its `:shapes`. A `nil` parent
+  lists nothing.
+
+  Fast path: O(1) set lookup when `*children-sets*` is pre-computed for
+  the current page. Falls back to an O(k) linear scan via `some` when
+  the var is unbound (e.g. in isolated single-shape validation calls
+  outside a full page pass)."
+  [parent shape-id]
+  (if-let [cs *children-sets*]
+    (contains? (get cs (:id parent)) shape-id)
+    (some #(= shape-id %) (:shapes parent))))
 
 (defn- find-ref-shape*
   "Cached wrapper around `ctf/find-ref-shape` with `:include-deleted? true`.
@@ -194,13 +208,7 @@
                     shape file page)
       (do
         (when-not (cfh/root? shape)
-          ;; Fast path: O(1) set lookup when `*children-sets*` is pre-computed
-          ;; for the current page.  Falls back to an O(k) linear scan via
-          ;; `some` when the var is unbound (e.g. in isolated single-shape
-          ;; validation calls outside a full page pass).
-          (when-not (if-let [cs *children-sets*]
-                      (contains? (get cs (:id parent)) shape-id)
-                      (some #(= shape-id %) (:shapes parent)))
+          (when-not (listed-in-parent? parent shape-id)
             (report-error :child-not-in-parent
                           (str/ffmt "Shape % not in parent's children list" shape-id)
                           shape file page)))
@@ -796,9 +804,10 @@
     (check-variant-component component file)))
 
 (defn- get-orphan-shapes
-  "Return the ids of shapes whose parent does not exist in the objects
-  map (i.e. shapes unreachable from the root traversal). The root
-  shape itself is excluded since it is always validated separately.
+  "Return the ids of shapes unreachable from the root traversal: shapes
+  whose parent does not exist in the objects map, or whose parent exists
+  but does not list them in its `:shapes`. The root shape itself is
+  excluded since it is always validated separately.
 
   Implemented with `reduce-kv` rather than a `map`/`filter` pipeline.
   The previous implementation mapped over `objects` and returned a
@@ -809,12 +818,25 @@
   [{:keys [objects] :as _page}]
   (persistent!
    (reduce-kv (fn [result id shape]
+                ;; A missing parent is `nil`, which lists nothing, so this
+                ;; also covers shapes whose parent does not exist
                 (if (and (not (cfh/root? shape))
-                         (not (contains? objects (:parent-id shape))))
+                         (not (listed-in-parent? (get objects (:parent-id shape)) id)))
                   (conj! result id)
                   result))
               (transient [])
               objects)))
+
+(defn check-tokens
+  "Check tokens in the file. The internal structure should be correct because
+   of the schemas and protocol functions. But we need to check for the case that
+   the tokens-status is missing due to a migration or import bug."
+  [{:keys [data] :as file}]
+  (when (and (some? (:tokens-lib data))
+             (nil? (:tokens-status data)))
+    (report-error :missing-tokens-status
+                  "Tokens library is present but tokens-status is missing"
+                  nil file nil)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PUBLIC API: VALIDATION FUNCTIONS
@@ -852,6 +874,8 @@
          (check-component component file))
        nil
        (:components data))
+
+      (check-tokens file)
 
       (-> *errors* deref not-empty))))
 

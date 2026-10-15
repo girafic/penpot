@@ -96,12 +96,24 @@ enabled with <code class="language-bash">enable-email-whitelist</code> flag. For
 autoenable it when <code class="language-bash">PENPOT_REGISTRATION_DOMAIN_WHITELIST</code> is set with
 not-empty content.
 
-Penpot also comes with an option to completely disable the registration process;
-for this, use the following flag:
+Penpot also comes with an option to disable public registration. Users with a
+valid and active team invitation can still register an account when password
+login is enabled. The invitation must still exist in the database and its
+validity period must not have ended. To disable public registration, use the
+following flag:
 
 ```bash
 PENPOT_FLAGS: [...] disable-registration
 ```
+
+For invitation-based registration, keep the password login flag enabled:
+
+```bash
+PENPOT_FLAGS: [...] disable-registration enable-login-with-password
+```
+
+The `disable-login-with-password` flag still disables password-based login and
+registration, including password-based registration through an invitation.
 
 This option is only recommended for demo instances, not for production environments.
 
@@ -310,6 +322,37 @@ PENPOT_LDAP_ATTRS_FULLNAME: cn
 PENPOT_LDAP_ATTRS_PHOTO: jpegPhoto
 ```
 
+### Account lockout
+
+__Since version 2.19.0__
+
+Account lockout is disabled by default. Backend administrators can enable it by
+adding the <code class="language-bash">enable-account-lockout</code> flag:
+
+```bash
+PENPOT_FLAGS: [...] enable-account-lockout
+```
+
+When enabled, Penpot locks an existing account after 5 failed password or LDAP
+login attempts within 15 minutes. It only applies to the password and LDAP
+logins; OIDC and the other authentication providers are not affected. The
+defaults can be changed with:
+
+```bash
+# Backend
+PENPOT_LOGIN_LOCKOUT_MAX_ATTEMPTS: 5
+PENPOT_LOGIN_LOCKOUT_WINDOW: 15m
+```
+
+While the account is locked, login returns HTTP 429 with a `Retry-After`
+header and a JSON error with the code `account-locked` and the remaining
+seconds in `ttl`.
+
+Redis must be available. If Redis fails, login continues without lockout
+checks. This feature prevents repeated password guessing, but anyone who knows
+an email address can lock that account by failing the configured number of
+attempts.
+
 ## Penpot URI
 
 You will need to set the <code class="language-bash">PENPOT_PUBLIC_URI</code> environment variable in case you go to serve Penpot to the users;
@@ -329,6 +372,49 @@ PENPOT_PUBLIC_URI: https://penpot.mycompany.com
 If you're using the official <code class="language-bash">docker-compose.yml</code> you only need to configure the
 <code class="language-bash">PENPOT_PUBLIC_URI</code> envvar in the top of the file.
 
+### Serve Penpot from a subpath
+
+Penpot can be served from a subpath such as `https://mycompany.com/penpot/`.
+Set `PENPOT_PUBLIC_URI` to the complete public URL, including the subpath and its
+trailing slash:
+
+```bash
+PENPOT_PUBLIC_URI: https://mycompany.com/penpot/
+```
+
+Your reverse proxy or Ingress must also:
+
+- Route requests under `/penpot/` to the Penpot frontend.
+- Remove the `/penpot` prefix before forwarding each request. The frontend
+  continues to serve its internal routes from `/`.
+- Preserve WebSocket upgrade headers for notifications and other services that
+  use WebSockets.
+
+Changing only `PENPOT_PUBLIC_URI` is not enough. Without the matching proxy
+rewrite, static assets, API calls, and WebSocket connections will use routes that
+the frontend does not recognize.
+
+#### Migrate an existing installation to a subpath
+
+Moving an installation from `/` to a subpath does not require a database or
+asset migration. Users, teams, projects, files, and uploaded assets remain in
+the existing storage.
+
+Before changing the public URL:
+
+1. Back up the database, assets, and current deployment configuration.
+2. Configure the proxy or Ingress route and prefix rewrite.
+3. Update `PENPOT_PUBLIC_URI` for every Penpot component that uses it.
+4. Keep the existing `PENPOT_SECRET_KEY`, database, and asset storage
+   configuration.
+5. Restart or redeploy Penpot and verify login, static assets, API requests,
+   WebSockets, file editing, and image uploads through the new URL.
+
+Existing bookmarks and integrations that use the previous root URL must be
+updated. You may also configure a redirect from the previous URL. If the scheme
+or hostname changes in addition to the path, review your authentication provider
+callback URLs and cookie settings. Active users may need to sign in again.
+
 <p class="advice">
     If you plan to serve Penpot under different domain than `localhost` without HTTPS,
     you need to disable the `secure` flag on cookies, with the `disable-secure-session-cookies` flag.
@@ -343,9 +429,13 @@ By default, <code class="language-bash">smtp</code> flag is disabled, the email 
 printed to the console, which means that the emails will be shown in the stdout.
 
 Note that if you plan to invite members to a team, it is recommended that you enable SMTP
-as they will need to login to their account after receiving the invite link sent an in email.
-It is currently not possible to just add someone to a team without them accepting an
-invitation email.
+as they will need to login to their account after receiving the invite link sent in an email.
+
+There is one exception: with the `disable-email-verification` flag set, inviting an email
+that already has a profile adds that user to the team directly, without sending any
+invitation email and without requiring acceptance. Emails without an existing profile
+still follow the normal invitation flow. See the
+[`disable-email-verification` flag][11] description for more detail.
 
 If you have an SMTP service, uncomment the appropriate settings section in
 <code class="language-bash">docker-compose.yml</code> and configure those
@@ -402,7 +492,8 @@ This is an example of a demo configuration:
 PENPOT_FLAGS: disable-registration enable-demo-users enable-demo-warning
 ```
 
-**disable-registration** prevents any user from registering in the platform.
+**disable-registration** prevents public registration in the platform, while
+valid team invitations can still create accounts when password login is enabled.
 **enable-demo-users** creates users with a default expiration time of 7 days, and
 once expired they are completely deleted with all the generated content.
 From the registration page, there is a link with a `Create demo account` which creates one of these
@@ -574,6 +665,16 @@ In a high-availability (HA) scenario, managing the state outside of replicas is 
 - Valkey: Penpot only needs one Valkey instance to function correctly. Due to the nature of the data it manages, replication isn't even essential.
 - User media storage: This should not be configured with local storage but rather with centralized storage, such as Kubernetes PVC or S3.
 
+### Draining a backend instance
+
+To restart one backend without affecting ongoing clients, take it out of the
+load balancer first. From the backend REPL, run `(app.srepl.main/set-offline)`.
+The `/readyz` endpoint then answers `503 OFFLINE`, so the load balancer stops
+sending new requests to that instance while the requests already in flight
+finish normally. Wait for the traffic to drop, restart the process, and the
+instance comes back online on its own. To undo the drain without a restart,
+run `(app.srepl.main/set-online)`. Drain one instance at a time.
+
 ## Backend
 
 This section enumerates the backend only configuration variables.
@@ -598,6 +699,44 @@ And configure it:
 # Backend
 PENPOT_SECRET_KEY: my-super-secure-key
 ```
+
+### Session expiration
+
+__Since version 2.19.0__
+
+User sessions are stored server-side and expire on two independent conditions: an
+**idle timeout** and an **absolute maximum lifetime**. Both are backend only.
+
+```bash
+# Backend
+# Idle timeout: the session stops working after this much inactivity.
+# Default: 168h
+PENPOT_AUTH_TOKEN_COOKIE_MAX_AGE: 168h
+
+# Absolute maximum lifetime from the moment the session was created,
+# regardless of activity. Default: 720h
+PENPOT_AUTH_TOKEN_COOKIE_MAX_AGE_ABSOLUTE: 720h
+```
+
+Durations use the `<number><unit>` form with hour, minute or second units,
+for example `168h`, `30m` or `90s` (day units like `7d` are not accepted).
+
+While a user is active the session is automatically renewed every 6 hours (not
+configurable). Renewal extends the cookie, but never the absolute maximum. The
+backend checks the idle timeout on every request, measured from the last
+renewal: once it passes, the session stops working at once, even for a copied
+token. A daily task (`session-gc`) then deletes the sessions that have exceeded
+either window. Legacy v1 sessions and the old `http_session` table are no
+longer used.
+
+Sessions created before 2.19.0 carry no `:exp` in their token; they are still
+removed by the 30-day `created_at` cleanup and acquire `:exp` on their next
+renewal.
+
+The `secure` and `same-site` attributes of the session cookie are controlled by
+the `disable-secure-session-cookies`, `strict-session-cookies` and `enable-cors`
+flags, and by whether `PENPOT_PUBLIC_URI` is served over HTTPS. See
+[Penpot URI](#penpot-uri).
 
 ### Database
 
@@ -806,8 +945,8 @@ PENPOT_MCP_URI: http://penpot-mcp:4401
 PENPOT_MCP_URI_WS: http://penpot-mcp:4402
 ```
 
-- `PENPOT_MCP_URI`: The URI of the MCP server, used for the streamable HTTP and SSE
-  endpoints.
+- `PENPOT_MCP_URI`: The URI of the MCP server, used for the Streamable HTTP
+  endpoint.
 - `PENPOT_MCP_URI_WS`: The URI of the MCP server used for the websocket connection.
 
 The defaults match the service name used in the official `docker-compose.yaml`. Change
@@ -844,6 +983,13 @@ for the user:
   <code class="language-bash">penpot-mcp</code> service. Check the [MCP section][8] to get more detail.
 - <code class="language-bash">enable-prepl-server</code>: enables PREPL server, used by manage.py and other additional
   tools to communicate internally with Penpot backend. Check the [CLI section][5] to get more detail.
+- `disable-email-verification`: skips the email verification step on registration, making
+  newly registered profiles active immediately without any verification email. It also
+  changes the team invitation flow: inviting an email that already has a profile adds that
+  user to the team directly, without sending an invitation email (check the
+  [email configuration section][10] for more detail). Note that registering with an email
+  that already has an inactive profile is rejected as "email already exists" while this
+  flag is set. Not recommended for production environments.
 
 __Since version 1.13.0__
 
@@ -870,3 +1016,5 @@ __Since version 2.0.0__
 [7]: /technical-guide/integration/#access-tokens
 [8]: /mcp/
 [9]: /technical-guide/developer/subsystems/link-preview/
+[10]: /technical-guide/configuration/#email-configuration
+[11]: /technical-guide/configuration/#other-flags

@@ -83,6 +83,7 @@ opencode.json
 /web
 /library/target/
 /library/*.zip
+/library/.shadow-cljs
 /external
 /penpot-nitrate
 /test-results/
@@ -90,7 +91,9 @@ opencode.json
 /blob-report/
 /playwright/.cache/
 /render-wasm/target/
+/render-wasm/.render-wasm-build.lock
 /media-processor/dist/
+/media-processor/target/
 /**/node_modules
 /**/.yarn/*
 /.pnpm-store
@@ -99,12 +102,17 @@ opencode.json
 *.iml
 /.claude
 /CLAUDE.md
+/CLAUDE.local.md
 /.playwright-mcp
 /.devenv/mcp/
 /opencode.json
 /.agents/plans
+/.agents/local/
+/AGENTS.local.md
 /.opencode/reports
 /.opencode/prompts
 /.ci-logs
+/tmp/
 /.codex/
 /tools/__pycache__
+/scripts/__pycache__

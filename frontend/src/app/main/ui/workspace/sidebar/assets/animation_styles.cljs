@@ -16,7 +16,7 @@
    [app.common.types.animation-style :as ctas]
    [app.main.data.modal :as modal]
    [app.main.data.workspace.animation :as dwa]
-   [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.animation-styles :as dwas]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu* dropdown-menu-item*]]
@@ -85,8 +85,8 @@
                 :title (tr "workspace.assets.animation-styles.delete-used-title")
                 :message (tr "workspace.assets.animation-styles.delete-used-message")
                 :accept-label (tr "labels.delete")
-                :on-accept #(st/emit! (dwl/delete-animation-style id))}))
-    (st/emit! (dwl/delete-animation-style id))))
+                :on-accept #(st/emit! (dwas/delete-animation-style id))}))
+    (st/emit! (dwas/delete-animation-style id))))
 
 ;; EDITOR
 
@@ -149,7 +149,7 @@
         (mf/use-fn
          (mf/deps file-id)
          (fn [style']
-           (st/emit! (dwl/update-animation-style style' file-id))))
+           (st/emit! (dwas/update-animation-style style' file-id))))
 
         on-entry-change
         (mf/use-fn
@@ -301,7 +301,7 @@
              (st/emit! (set-renaming nil))
              (when-not (or (str/blank? value)
                            (= value (cpn/merge-path-item (:path style) (:name style))))
-               (st/emit! (dwl/rename-animation-style file-id id value))))))
+               (st/emit! (dwas/rename-animation-style file-id id value))))))
 
         on-rename-key-down
         (mf/use-fn
@@ -418,7 +418,7 @@
          (mf/deps file-id)
          (fn [names]
            (on-clear-selection)
-           (st/emit! (dwl/rename-animation-styles file-id names))))
+           (st/emit! (dwas/rename-animation-styles file-id names))))
 
         grouped
         (mf/use-fn
@@ -468,7 +468,7 @@
           (cmm/make-delete-asset-group-fn
            {:assets styles
             :on-clear-selection on-clear-selection
-            :delete-events #(map (fn [style] (dwl/delete-animation-style (:id style))) %)}))
+            :delete-events #(map (fn [style] (dwas/delete-animation-style (:id style))) %)}))
 
         on-context-menu
         (mf/use-fn
@@ -491,7 +491,7 @@
         (mf/use-fn (mf/deps menu-id) #(st/emit! (set-editing menu-id)))
 
         on-duplicate
-        (mf/use-fn (mf/deps file-id menu-id) #(st/emit! (dwl/duplicate-animation-style file-id menu-id)))
+        (mf/use-fn (mf/deps file-id menu-id) #(st/emit! (dwas/duplicate-animation-style file-id menu-id)))
 
         on-delete
         (mf/use-fn

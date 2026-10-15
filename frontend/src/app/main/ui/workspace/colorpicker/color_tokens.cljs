@@ -139,10 +139,10 @@
 
         on-token-pill-click
         (mf/use-fn
-         (mf/deps selected-shapes)
+         (mf/deps selected-shapes color-origin)
          (fn [event token]
            (dom/stop-propagation event)
-           (when (seq selected-shapes)
+           (when (or (= color-origin :canvas) (seq selected-shapes))
              (on-token-change event token))))
 
         create-token-on-set
@@ -310,6 +310,7 @@
                    :variant "comfortable"
                    :class (stl/css :search-input)
                    :default-value filter-term
+                   :auto-focus true
                    :on-change on-filter-tokens}]
        (if (seq sorted-tokens)
          [:div {:class (stl/css :color-tokens-inputs)}

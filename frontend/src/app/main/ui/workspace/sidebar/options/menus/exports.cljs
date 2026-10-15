@@ -672,7 +672,9 @@
       [:> title-bar* {:collapsable  has-exports?
                       :collapsed    (not open?)
                       :on-collapsed toggle-content
-                      :title        (tr (if (> (count ids) 1) "workspace.options.export-multiple" "workspace.options.export"))
+                      :title        (if (> (count ids) 1)
+                                      (tr "workspace.options.export-multiple")
+                                      (tr "workspace.options.export"))
                       :class        (stl/css-case :title-spacing-export (not has-exports?))}
        (when (or (nil? animated-board) (= tab "static"))
          [:> icon-button* {:variant "ghost"

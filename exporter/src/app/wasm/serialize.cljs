@@ -23,18 +23,18 @@
 (defn set-shape!
   "Serializes a single shape into the WASM design state. The host-independent
   properties (base props, children, blur, shadows, svg-attrs, mask, bool-type,
-  path geometry, grow-type) go through the shared `serialize-shape!` — the same
+  path geometry, grow-type) go through the shared `serialize-shape` — the same
   code the workspace's `set-object` uses, so the two can't drift. Only the
   host-specific parts are handled here: fills/strokes (image bytes are provisioned
   separately) and text content (fonts provisioned separately)."
   [shape]
-  (let [type (get shape :type)]
-    (serialize-shape/serialize-shape! shape)
-    (props/write-shape-fills! (get shape :fills))
+  (let [prepared (serialize-shape/serialize-shape shape)
+        type (:type prepared)]
+    (props/write-shape-fills! (:fills prepared))
     (when-not (= type :group)
-      (props/write-shape-strokes! (get shape :strokes)))
+      (props/write-shape-strokes! (:strokes prepared)))
     (when (= type :text)
-      (text/set-shape-text! (get shape :content)))))
+      (text/set-shape-text! (:content prepared)))))
 
 (defn serialize-scene!
   "Loads every shape of an `objects` map into the WASM design state. Resets the

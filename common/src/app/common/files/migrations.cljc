@@ -13,6 +13,7 @@
    [app.common.files.comp-processors :as cfcp]
    [app.common.files.defaults :as cfd]
    [app.common.files.helpers :as cfh]
+   [app.common.files.tokens :as cfo]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
@@ -34,7 +35,9 @@
    [app.common.types.shape.shadow :as ctss]
    [app.common.types.shape.text :as ctst]
    [app.common.types.text :as types.text]
+   [app.common.types.token :as ctt]
    [app.common.types.tokens-lib :as ctob]
+   [app.common.types.variant :as ctv]
    [app.common.uuid :as uuid]
    [clojure.set :as set]
    [cuerdas.core :as str]))
@@ -1998,6 +2001,222 @@
         (update :pages-index d/update-vals update-container)
         (d/update-when :components d/update-vals update-container))))
 
+(defmethod migrate-data "0027-separate-tokens-status"
+  [data _]
+  (if-let [tokens-lib (:tokens-lib data)]
+    (assoc data :tokens-status
+           (cfo/make-tokens-status-from-lib tokens-lib))
+    data))
+
+(defmethod migrate-data "0028-normalize-constrained-values"
+  ;; Existing files can contain values outside the limits now shared by the UI
+  ;; and file schemas. Normalize them before checking the migrated file.
+  [data _]
+  (letfn [(clamp-minimum [value minimum]
+            (if (number? value)
+              (max value minimum)
+              value))
+
+          (positive-or-default [value default]
+            (if (and (number? value) (not (pos? value)))
+              default
+              value))
+
+          (clamp-attrs [value attrs]
+            (reduce #(d/update-when %1 %2 clamp-minimum 0) value attrs))
+
+          (repair-vector [value repair-item]
+            (if (vector? value)
+              (mapv repair-item value)
+              value))
+
+          (repair-grid-params [params type]
+            (cond
+              (= type :square)
+              (d/update-when params :size clamp-minimum 0.01)
+
+              (#{:row :column} type)
+              (d/update-when params :size clamp-minimum 1)
+
+              :else
+              params))
+
+          (repair-grid [grid]
+            (d/update-when grid :params repair-grid-params (:type grid)))
+
+          (repair-default-grids [grids]
+            (-> grids
+                (d/update-when :square repair-grid-params :square)
+                (d/update-when :row repair-grid-params :row)
+                (d/update-when :column repair-grid-params :column)))
+
+          (repair-grid-track [track]
+            (d/update-when track :value clamp-minimum 0))
+
+          (repair-export [export]
+            (d/update-when export :scale positive-or-default 1))
+
+          (repair-stroke [stroke]
+            (clamp-attrs stroke [:stroke-width
+                                 :stroke-width-top
+                                 :stroke-width-right
+                                 :stroke-width-bottom
+                                 :stroke-width-left]))
+
+          (repair-shadow [shadow]
+            (d/update-when shadow :blur clamp-minimum 0))
+
+          (repair-blur [blur]
+            (d/update-when blur :value clamp-minimum 0))
+
+          (repair-shape [shape]
+            (-> shape
+                (clamp-attrs [:r1 :r2 :r3 :r4
+                              :layout-item-min-w :layout-item-max-w
+                              :layout-item-min-h :layout-item-max-h])
+                (d/update-when :layout-gap clamp-attrs [:row-gap :column-gap])
+                (d/update-when :layout-padding clamp-attrs [:p1 :p2 :p3 :p4])
+                (d/update-when :layout-grid-rows repair-vector repair-grid-track)
+                (d/update-when :layout-grid-columns repair-vector repair-grid-track)
+                (d/update-when :strokes repair-vector repair-stroke)
+                (d/update-when :shadow repair-vector repair-shadow)
+                (d/update-when :blur repair-blur)
+                (d/update-when :background-blur repair-blur)
+                (d/update-when :exports repair-vector repair-export)
+                (d/update-when :grids repair-vector repair-grid)))
+
+          (truncate-property-text [value]
+            (if (and (string? value)
+                     (> (count value) ctv/property-max-length))
+              (subs value 0 ctv/property-max-length)
+              value))
+
+          (repair-variant-property [property]
+            (-> property
+                (d/update-when :name truncate-property-text)
+                (d/update-when :value truncate-property-text)))
+
+          (repair-container [container]
+            (-> container
+                (d/update-when :objects d/update-vals repair-shape)
+                (d/update-when :variant-properties repair-vector repair-variant-property)))
+
+          (repair-page [page]
+            (-> page
+                (repair-container)
+                (d/update-when :default-grids repair-default-grids)))]
+
+    (-> data
+        (update :pages-index d/update-vals repair-page)
+        (d/update-when :components d/update-vals repair-container))))
+
+(defmethod migrate-data "0029-move-background-blur-out-of-blur"
+  ;; Before background blur got its own attribute, `:blur` accepted a
+  ;; `:background-blur` type, so the editor and the plugin API saved those maps
+  ;; under `:blur`. Once the shape schema was tightened, such files fail
+  ;; validation; move the map to the `:background-blur` attribute. When the
+  ;; shape already has a `:background-blur`, keep it and drop the mis-typed one.
+  [data _]
+  (letfn [(repair-shape [shape]
+            (if (= :background-blur (get-in shape [:blur :type]))
+              (if (contains? shape :background-blur)
+                (dissoc shape :blur)
+                (-> shape
+                    (dissoc :blur)
+                    (assoc :background-blur (:blur shape))))
+              shape))
+
+          (repair-container [container]
+            (d/update-when container :objects d/update-vals repair-shape))]
+
+    (-> data
+        (update :pages-index d/update-vals repair-container)
+        (d/update-when :components d/update-vals repair-container))))
+
+(defmethod migrate-data "0030-remove-stroke-per-side-attr"
+  ;; Individual stroke widths shipped with a `:stroke-per-side` boolean on every
+  ;; stroke, telling the renderer and the CSS generator whether the four side
+  ;; widths were meaningful. Comparing the sides answers that on its own, so
+  ;; the attribute was dropped from the closed stroke schema and the toggle
+  ;; became ephemeral editor state. Files written while it was still persisted
+  ;; fail validation with an `:malli.core/extra-key` error; drop the attribute
+  ;; and keep the side widths, which hold the real design data.
+  [data _]
+  (letfn [(repair-shape [shape]
+            (d/update-when shape :strokes d/update-vals #(dissoc % :stroke-per-side)))
+
+          (repair-container [container]
+            (d/update-when container :objects d/update-vals repair-shape))]
+
+    (-> data
+        (update :pages-index d/update-vals repair-container)
+        (d/update-when :components d/update-vals repair-container))))
+
+(defmethod migrate-data "0031-migrate-stroke-width-token-attr"
+  ;; Stroke width tokens used to be applied to the single `:stroke-width` token
+  ;; attribute, replaced by the four per-side attributes. The editor reads only
+  ;; the new keys, so a file written before the change keeps the token on
+  ;; `:stroke-width` and the token looks unapplied even though its value is
+  ;; still set. Copy the legacy reference to every side (matching how applying
+  ;; the token resolves all sides) and drop the old key. A side that already
+  ;; carries a reference wins over the recycled global one.
+  [data _]
+  (letfn [(repair-shape [shape]
+            (let [applied (:applied-tokens shape)
+                  token   (:stroke-width applied)]
+              (if (some? token)
+                (update shape :applied-tokens
+                        (fn [applied]
+                          (-> (zipmap ctt/per-side-stroke-width-keys (repeat token))
+                              (merge applied)
+                              (dissoc :stroke-width))))
+                shape)))
+
+          (repair-container [container]
+            (d/update-when container :objects d/update-vals repair-shape))]
+
+    (-> data
+        (update :pages-index d/update-vals repair-container)
+        (d/update-when :components d/update-vals repair-container))))
+
+;; A shape can point to an existing parent that does not list it in its
+;; `:shapes`. Such shapes are unreachable from the root, and operations
+;; that walk the tree through `:shapes` miss them; e.g. deleting a variant
+;; also deleted its container, which looked empty, and left the other
+;; variants pointing to a deleted parent. Add them back to their parent.
+(defmethod migrate-data "0032-fix-children-not-in-parent"
+  [data _]
+  (letfn [(get-unlisted-children [objects]
+            ;; Returns a {parent-id -> [child-id]} map
+            (let [listed (reduce-kv (fn [result id shape]
+                                      (if-let [shapes (not-empty (:shapes shape))]
+                                        (assoc result id (set shapes))
+                                        result))
+                                    {}
+                                    objects)]
+              (reduce-kv (fn [result id shape]
+                           (let [parent-id (:parent-id shape)]
+                             (if (and (not (cfh/root? shape))
+                                      (contains? objects parent-id)
+                                      (not (contains? (get listed parent-id) id)))
+                               (update result parent-id (fnil conj []) id)
+                               result)))
+                         {}
+                         objects)))
+
+          (fix-objects [objects]
+            (reduce-kv (fn [objects parent-id child-ids]
+                         (update-in objects [parent-id :shapes] (fnil into []) child-ids))
+                       objects
+                       (get-unlisted-children objects)))
+
+          (update-container [container]
+            (d/update-when container :objects fix-objects))]
+
+    (-> data
+        (update :pages-index d/update-vals update-container)
+        (d/update-when :components d/update-vals update-container))))
+
 (def available-migrations
   (into (d/ordered-set)
         ["legacy-2"
@@ -2081,4 +2300,10 @@
          "0023-repair-token-themes-with-inexistent-sets"
          "0024b-fix-stroke-cap-placement"
          "0025-repair-empty-text-content"
-         "0026-fix-svg-raw-shapes-uuids"]))
+         "0026-fix-svg-raw-shapes-uuids"
+         "0027-separate-tokens-status"
+         "0028-normalize-constrained-values"
+         "0029-move-background-blur-out-of-blur"
+         "0030-remove-stroke-per-side-attr"
+         "0031-migrate-stroke-width-token-attr"
+         "0032-fix-children-not-in-parent"]))

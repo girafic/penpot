@@ -1,5 +1,5 @@
 ---
-title: 1.4 Install with Kubernetes
+title: 1.3 Install with Kubernetes
 desc: Learn how to install and configure Penpot on your Kubernetes cluster using Helm. Our technical guide provides step-by-step instructions for setup.
 ---
 
@@ -95,6 +95,22 @@ file itself, which you can use as a basis for creating your own settings.
 
 You can also consult the list of parameters on the
 <a href="https://artifacthub.io/packages/helm/penpot/penpot#parameters" target="_blank">ArtifactHub page of the project</a>.
+
+### Serve Penpot from a subpath
+
+The chart serves Penpot from `/` by default and can also expose it from a
+subpath. The required values depend on whether the cluster uses an Ingress
+controller or Gateway API.
+
+See
+<a href="https://artifacthub.io/packages/helm/penpot/penpot#serving-penpot-from-a-subpath" target="_blank">Serving Penpot from a subpath</a>
+in the Helm chart documentation for the current configuration examples.
+
+When moving an existing release to a subpath, keep the existing database,
+assets, and secret key settings. No data migration is required. Follow the
+migration considerations in the [Penpot URI](/technical-guide/configuration/#penpot-uri)
+section and verify the
+installation through its new public URL after running `helm upgrade`.
 
 ### Using OpenShift?
 

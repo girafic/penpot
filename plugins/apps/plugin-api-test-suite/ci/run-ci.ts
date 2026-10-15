@@ -1,9 +1,10 @@
-import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Page } from 'playwright';
+import { TEMPORARY_PREFIX } from '../src/framework/temporary';
 import type { CoverageReport, TestResult } from '../src/framework/types';
+import { startStaticServer, type StaticServer } from './static-server.ts';
 
 // Out-of-sandbox CI driver (Node + Playwright). Injects the prebuilt
 // `headless.js` bundle (built from the in-sandbox entry `src/ci/headless.ts` —
@@ -19,8 +20,9 @@ import type { CoverageReport, TestResult } from '../src/framework/types';
 //   the given substring (case-insensitive).
 //   Optional env: RENDER_WASM — force the workspace renderer (`true`/`false`).
 //
-// - MOCKED (`MOCK_BACKEND=1`): serves the prebuilt frontend bundle via the e2e
-//   static server and intercepts every backend RPC with Playwright `page.route`,
+// - MOCKED (`MOCK_BACKEND=1`): serves the prebuilt frontend bundle with the
+//   zero-dependency static server in `ci/static-server.ts` and intercepts
+//   every backend RPC with Playwright `page.route`,
 //   reusing the frontend e2e mock fixtures. No backend/login needed. Validates
 //   the frontend Plugin API binding + in-memory store only; results that depend
 //   on real backend behaviour are not faithfully reproduced, so those tests are
@@ -30,9 +32,20 @@ const here = dirname(fileURLToPath(import.meta.url));
 // here = <root>/plugins/apps/plugin-api-test-suite/ci
 const repoRoot = resolve(here, '../../../../');
 const frontendDir = resolve(repoRoot, 'frontend');
+const staticRoot = resolve(frontendDir, 'resources/public');
 const e2eDataDir = resolve(frontendDir, 'playwright/data');
 
+// Console prefixes Penpot's error handler prints for failures the app did not
+// expect (`frontend/src/app/main/errors.cljs`). The store swallows these, so
+// the console is the only place a test can observe them. "Plugin Error" and
+// "Network Error" are left out: tests provoke both on purpose.
+const APP_ERROR_RE =
+  /^(Internal Error|Unexpected Error|Assertion Error|Uncaught Exception|Uncaught Rejection):/;
+
 const MOCKED = !!process.env['MOCK_BACKEND'];
+
+// Limit for the whole run; each test also has its own 15s limit in the runner.
+const RUN_TIMEOUT_MS = 300000;
 const MOCK_BASE_URL = 'http://localhost:3000';
 const apiUrl = MOCKED
   ? MOCK_BASE_URL
@@ -43,12 +56,13 @@ const headlessBundlePath = resolve(
   '../../../dist/apps/plugin-api-test-suite/headless.js',
 );
 
-// Source the permissions from the same manifest the real plugin ships with, so
-// the CI sandbox never drifts from what users actually grant.
+// Source the permissions and scope from the same manifest the real plugin ships
+// with, so the CI sandbox never drifts from what users actually grant.
 const manifestPath = resolve(here, '../public/manifest.json');
-const PERMISSIONS: string[] = (
-  JSON.parse(readFileSync(manifestPath, 'utf-8')) as { permissions: string[] }
-).permissions;
+const MANIFEST = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+  permissions: string[];
+  scope?: string;
+};
 
 function cleanId(id: string): string {
   return id.replace('~u', '');
@@ -85,7 +99,70 @@ async function login() {
   if (!authToken)
     throw new Error('Login failed: no auth-token cookie returned');
 
-  return { authToken, defaultProjectId: loginData['~:default-project-id'] };
+  return {
+    authToken,
+    defaultProjectId: loginData['~:default-project-id'],
+    defaultTeamId: cleanId(loginData['~:default-team-id']),
+  };
+}
+
+// Calls a backend RPC with plain JSON in and out. Commands without a result
+// answer with an empty body.
+async function rpc<T>(
+  authToken: string,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<T> {
+  const response = await fetch(`${apiUrl}/api/main/methods/${method}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      cookie: authToken,
+    },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    throw new Error(`${method} failed with status ${response.status}`);
+  }
+  const body = await response.text();
+  return (body ? JSON.parse(body) : undefined) as T;
+}
+
+// Deletes the teams the tests created, with their projects and files.
+async function deleteTemporaryTeams(authToken: string): Promise<number> {
+  const teams = await rpc<{ id: string; name: string }[]>(
+    authToken,
+    'get-teams',
+    {},
+  );
+  const temporary = teams.filter((team) =>
+    team.name.startsWith(TEMPORARY_PREFIX),
+  );
+  for (const team of temporary) {
+    await rpc(authToken, 'delete-team', { id: team.id });
+  }
+  return temporary.length;
+}
+
+// Deletes the projects the tests created (see `src/framework/temporary.ts`),
+// with the files in them.
+async function deleteTemporaryProjects(
+  authToken: string,
+  teamId: string,
+): Promise<number> {
+  const projects = await rpc<
+    { id: string; name: string; deletedAt?: string | null }[]
+  >(authToken, 'get-projects', { 'team-id': teamId });
+  // Projects already in the trash are listed too; skip them.
+  const temporary = projects.filter(
+    (project) =>
+      !project.deletedAt && project.name.startsWith(TEMPORARY_PREFIX),
+  );
+  for (const project of temporary) {
+    await rpc(authToken, 'delete-project', { id: project.id });
+  }
+  return temporary.length;
 }
 
 async function createFile(
@@ -121,11 +198,10 @@ async function createFile(
   return (await response.json()) as FileRpc;
 }
 
-function getFileUrl(file: FileRpc): string {
-  const projectId = cleanId(file['~:project-id']);
+function getFileUrl(file: FileRpc, teamId: string): string {
   const fileId = cleanId(file['~:id']);
   const pageId = cleanId(file['~:data']['~:pages'][0]);
-  return `${apiUrl}/#/workspace/${projectId}/${fileId}?page-id=${pageId}`;
+  return `${apiUrl}/?screen=workspace&team-id=${teamId}&file-id=${fileId}&page-id=${pageId}`;
 }
 
 // --- Mocked mode setup -------------------------------------------------------
@@ -179,16 +255,15 @@ async function waitForServer(url: string, timeoutMs = 30000): Promise<void> {
   }
 }
 
-function startE2eServer(): ChildProcess {
-  // Reuse the frontend e2e static server: it serves frontend/resources/public
-  // on port 3000, which is also the host the app opens its notifications
-  // WebSocket against (ws://localhost:3000/ws/notifications) — so the WS mock
-  // below matches without extra config.
-  const child = spawn('node', ['scripts/e2e-server.js'], {
-    cwd: frontendDir,
-    stdio: 'inherit',
-  });
-  return child;
+function startE2eServer(): Promise<StaticServer> {
+  // Serve the prebuilt bundle from `frontend/resources/public` on port 3000,
+  // which is also the host the app opens its notifications WebSocket against
+  // (ws://localhost:3000/ws/notifications) — so the WS mock below matches
+  // without extra config. This used to shell out to the express-based
+  // `frontend/scripts/e2e-server.js`, but that resolves `express` from
+  // `frontend/node_modules`, which the CI jobs never install (only
+  // `plugins/` deps), so the driver crashed before serving anything.
+  return startStaticServer(staticRoot, 3000);
 }
 
 // Install the frontend e2e WebSocket mock so the workspace's notifications
@@ -337,19 +412,21 @@ function printReport(
 async function main() {
   const bundle = readFileSync(headlessBundlePath, 'utf-8');
 
-  let server: ChildProcess | undefined;
+  let server: StaticServer | undefined;
   let fileUrl: string;
   let authToken: string | undefined;
+  let teamId: string | undefined;
 
   if (MOCKED) {
-    server = startE2eServer();
+    server = await startE2eServer();
     await waitForServer(MOCK_BASE_URL);
     fileUrl = mockedFileUrl();
   } else {
     const session = await login();
     authToken = session.authToken;
+    teamId = session.defaultTeamId;
     const file = await createFile(authToken, session.defaultProjectId);
-    fileUrl = getFileUrl(file);
+    fileUrl = getFileUrl(file, session.defaultTeamId);
   }
 
   const renderWasm = process.env['RENDER_WASM'];
@@ -392,13 +469,36 @@ async function main() {
   let fatal: string | null = null;
 
   console.log('\nRunning tests:');
+  // Errors the app reported since the previous test result.
+  let appErrors: string[] = [];
+  const takeAppErrors = (): string => {
+    const detail = appErrors.join('; ');
+    appErrors = [];
+    return detail;
+  };
+
   const done = new Promise<void>((resolvePromise) => {
+    page.on('pageerror', (err) => {
+      appErrors.push(`Uncaught ${err.message}`);
+    });
     page.on('console', (msg) => {
       const text = msg.text();
+      if (APP_ERROR_RE.test(text)) {
+        appErrors.push(text.split('\n')[0]!.trim());
+      }
       if (text.startsWith('__TEST_RESULT__ ')) {
         const result: TestResult = JSON.parse(
           text.slice('__TEST_RESULT__ '.length),
         );
+        // Errors buffered so far belong to the test this result closes.
+        const reported = takeAppErrors();
+        if (reported) {
+          result.error =
+            result.status === 'fail' && result.error
+              ? `${result.error} — Penpot also reported: ${reported}`
+              : `Penpot reported an error during the test: ${reported}`;
+          result.status = 'fail';
+        }
         results.push(result);
         // Print each result as it streams in so the run shows live progress
         // instead of staying silent until it finishes.
@@ -437,7 +537,7 @@ async function main() {
   );
 
   await page.evaluate(
-    ({ code, permissions }) => {
+    ({ code, permissions, scope }) => {
       (
         globalThis as unknown as { ɵloadPlugin: (m: unknown) => void }
       ).ɵloadPlugin({
@@ -447,23 +547,45 @@ async function main() {
         icon: '',
         description: '',
         permissions,
+        scope,
       });
     },
-    { code: injectedCode, permissions: PERMISSIONS },
+    {
+      code: injectedCode,
+      permissions: MANIFEST.permissions,
+      scope: MANIFEST.scope,
+    },
   );
 
-  await Promise.race([
-    done,
-    new Promise<void>((_, reject) =>
-      setTimeout(
-        () => reject(new Error('Timed out waiting for test results')),
-        120000,
+  try {
+    await Promise.race([
+      done,
+      new Promise<void>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Timed out waiting for test results')),
+          RUN_TIMEOUT_MS,
+        ),
       ),
-    ),
-  ]);
+    ]);
+  } finally {
+    await browser.close();
+    await server?.close();
 
-  await browser.close();
-  server?.kill();
+    // Runs after a timeout too, so an interrupted run leaves nothing behind.
+    if (authToken && teamId) {
+      try {
+        const projects = await deleteTemporaryProjects(authToken, teamId);
+        const teams = await deleteTemporaryTeams(authToken);
+        if (projects > 0 || teams > 0) {
+          console.log(
+            `\nDeleted ${projects} temporary project(s) and ${teams} team(s).`,
+          );
+        }
+      } catch (err) {
+        console.warn(`\nCould not delete temporary data: ${String(err)}`);
+      }
+    }
+  }
 
   printReport(results, coverage, skipped);
 

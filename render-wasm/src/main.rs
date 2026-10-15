@@ -379,6 +379,7 @@ pub extern "C" fn set_view_end() -> Result<()> {
 pub extern "C" fn set_modifiers_start() -> Result<()> {
     performance::begin_measure!("set_modifiers_start");
     let render_state = get_render_state();
+    render_state.moving_extrects.clear();
     let fast = render_state.options.transform_fast_mode();
     render_state.options.set_fast_mode(fast);
     render_state.options.set_interactive_transform(true);
@@ -395,6 +396,7 @@ pub extern "C" fn set_modifiers_start() -> Result<()> {
 pub extern "C" fn set_modifiers_end() -> Result<()> {
     performance::begin_measure!("set_modifiers_end");
     let render_state = get_render_state();
+    render_state.moving_extrects.clear();
     render_state.options.set_fast_mode(false);
     render_state.options.set_interactive_transform(false);
     render_state.options.set_transform_full_quality(false);

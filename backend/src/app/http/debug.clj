@@ -25,6 +25,7 @@
    [app.config :as cf]
    [app.db :as db]
    [app.features.file-migrations :as feat.fmig]
+   [app.health :as health]
    [app.http.session :as session]
    [app.redis :as rds]
    [app.rpc.commands.auth :as auth]
@@ -375,7 +376,9 @@
                                 ::bfc/project-id project-id
                                 ::bfc/team-id (:id team)
                                 ::bfc/input path
-                                ::bfc/import-max-object-size (cf/get :binfile-import-max-object-size)
+                                ::bfc/import-max-binary-entry-size (cf/get :binfile-import-max-binary-entry-size)
+                                ::bfc/import-max-text-entry-size (cf/get :binfile-import-max-text-entry-size)
+                                ::bfc/import-max-text-total-size (cf/get :binfile-import-max-text-total-size)
                                 ::bfc/import-max-zip-entries (cf/get :binfile-import-max-zip-entries))]
           (bf.v3/import-files! cfg)
           {::yres/status  200
@@ -634,7 +637,9 @@
                         ::bfc/input path
                         ::bfc/team-id (:id team)
                         ::bfc/features (cfeat/get-team-enabled-features cf/flags team)
-                        ::bfc/import-max-object-size (cf/get :binfile-import-max-object-size)
+                        ::bfc/import-max-binary-entry-size (cf/get :binfile-import-max-binary-entry-size)
+                        ::bfc/import-max-text-entry-size (cf/get :binfile-import-max-text-entry-size)
+                        ::bfc/import-max-text-total-size (cf/get :binfile-import-max-text-total-size)
                         ::bfc/import-max-zip-entries (cf/get :binfile-import-max-zip-entries))]
 
       (if (= format :binfile-v3)
@@ -671,7 +676,7 @@
                         (contains? params :block)
                         (do
                           (db/update! conn :profile {:is-blocked true} {:id (:id profile)})
-                          (db/delete! conn :http-session {:profile-id (:id profile)})
+                          (session/invalidate-all cfg (:id profile))
 
                           {::yres/status  200
                            ::yres/headers {"content-type" "text/plain"}
@@ -853,17 +858,23 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn health-handler
-  "Mainly a task that performs a health check."
+  "Mainly a task that performs a health check. When the instance is marked
+  as offline (see `app.health`), it reports the instance as unavailable
+  without querying the database, so the load balancer drains it while the
+  requests in flight are still served."
   [{:keys [::db/pool]} _]
-  (try
-    (db/exec-one! pool ["select count(*) as count from server_prop;"])
-    {::yres/status 200
-     ::yres/body "OK"}
-    (catch Throwable cause
-      (l/warn :hint "unable to execute query on health handler"
-              :cause cause)
-      {::yres/status 503
-       ::yres/body "KO"})))
+  (if (health/online?)
+    (try
+      (db/exec-one! pool ["select count(*) as count from server_prop;"])
+      {::yres/status 200
+       ::yres/body "OK"}
+      (catch Throwable cause
+        (l/warn :hint "unable to execute query on health handler"
+                :cause cause)
+        {::yres/status 503
+         ::yres/body "KO"}))
+    {::yres/status 503
+     ::yres/body "OFFLINE"}))
 
 (defn changelog-handler
   [_ _]

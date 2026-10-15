@@ -9,19 +9,19 @@
    [app.common.data :as d]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
+   [app.common.files.tokens :as cfo]
    [app.common.logging :as l]
    [app.common.logic.timelines :as cltl]
    [app.common.time :as ct]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
    [app.common.types.token :as ctt]
-   [app.common.types.tokens-lib :as ctob]
    [app.config :as cf]
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
    [app.main.data.style-dictionary :as sd]
    [app.main.data.tokenscript :as ts]
-   [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.animation-styles :as dwas]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.thumbnails :as dwt]
    [app.main.data.workspace.tokens.application :as dwta]
@@ -137,8 +137,27 @@
                update-infos)))
           shapes-update-info))
 
+(defn- update-canvas-background
+  "Set the background of `page-id` to the resolved value of its linked
+  color token, when that value differs from the current background."
+  [page-id resolved-tokens]
+  (ptk/reify ::update-canvas-background
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [page       (dsh/lookup-page state page-id)
+            token-name (:background-token page)
+            color      (some-> (get-in resolved-tokens [token-name :resolved-value])
+                               (dwta/value->color)
+                               (:color))]
+        (when (and (some? color) (not= color (:background page)))
+          (rx/of (dch/commit-changes
+                  (-> (pcb/empty-changes it)
+                      (pcb/with-page page)
+                      (pcb/mod-page {:background color})))))))))
+
 (defn propagate-tokens
-  "Propagate tokens values to all shapes where they are applied"
+  "Propagate tokens values to all shapes and page backgrounds where they
+  are applied"
   [state resolved-tokens]
   (let [file-id         (get state :current-file-id)
         current-page-id (get state :current-page-id)
@@ -174,6 +193,9 @@
                (when (seq observable) (apply rx/merge observable))
                (when (seq normal) (rx/concat-all (rx/of normal)))
 
+               (when (:background-token page)
+                 (rx/of (update-canvas-background page-id resolved-tokens)))
+
                (->> (rx/from frame-ids)
                     (rx/mapcat (fn [frame-id]
                                  (rx/of (dwt/clear-thumbnail file-id page-id frame-id "frame")
@@ -189,13 +211,23 @@
             (let [elapsed (tpoint)]
               (l/inf :status "END" :hint "propagate-tokens" :elapsed elapsed)))))))
 
+(defn- active-tokens-tree
+  "The tokens of the active sets of the current file, nil when it has no
+  tokens."
+  [state]
+  (let [tokens-lib    (dsh/lookup-tokens-lib state)
+        tokens-status (dsh/lookup-tokens-status state)]
+    (when (and tokens-lib tokens-status)
+      (cfo/get-tokens-in-active-sets tokens-status tokens-lib))))
+
 (defn- resolve-tokens
   "The tokens of `tokens-tree` resolved, as a stream of one map by name:
   with tokenscript or with Style Dictionary."
   [tokens-tree]
   (if (contains? cf/flags :tokenscript)
     (rx/of (-> (ts/resolve-tokens tokens-tree)
-               (d/update-vals #(update % :resolved-value ts/tokenscript-symbols->penpot-unit))))
+               (d/update-vals #(update % :resolved-value
+                                       (partial ts/resolved-value->penpot-unit (:type %))))))
     (sd/resolve-tokens tokens-tree)))
 
 (defn- commit-token-timelines
@@ -225,7 +257,7 @@
         changed (ctas/token-resolved-styles styles values)]
     (rx/concat
      (when (seq changed)
-       (rx/of (dwl/update-animation-styles changed file-id)))
+       (rx/of (dwas/update-animation-styles changed file-id)))
      (rx/of (commit-token-timelines values)))))
 
 (defn- commit-token-styles
@@ -245,9 +277,7 @@
   (ptk/reify ::propagate-style-tokens
     ptk/WatchEvent
     (watch [_ state _]
-      (when-let [tokens-tree (-> (dsh/lookup-file-data state)
-                                 (get :tokens-lib)
-                                 (ctob/get-tokens-in-active-sets))]
+      (when-let [tokens-tree (active-tokens-tree state)]
         (->> (resolve-tokens tokens-tree)
              (rx/map commit-token-styles))))))
 
@@ -256,9 +286,7 @@
   (ptk/reify ::propagate-workspace-tokens
     ptk/WatchEvent
     (watch [_ state _]
-      (when-let [tokens-tree (-> (dsh/lookup-file-data state)
-                                 (get :tokens-lib)
-                                 (ctob/get-tokens-in-active-sets))]
+      (when-let [tokens-tree (active-tokens-tree state)]
         (->> (resolve-tokens tokens-tree)
              (rx/mapcat
               (fn [sd-tokens]

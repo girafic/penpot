@@ -19,7 +19,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.animation :as dwa]
-   [app.main.data.workspace.libraries :as dwl]
+   [app.main.data.workspace.animation-styles :as dwas]
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu* dropdown-menu-item*]]
@@ -689,7 +689,7 @@
   `on-change-start` and ends with `on-change-end`. Its remove button,
   `on-remove`, is disabled when nil; a `read-only` one shows them
   disabled. Its values come from a layer that uses the style (see
-  `dwl/update-style-from-layer`)."
+  `dwas/update-style-from-layer`)."
   [{:keys [entry on-change on-remove on-change-start on-change-end read-only]}]
   (let [{:keys [start duration keyframes]} entry
         read-only?      (true? read-only)
@@ -802,7 +802,7 @@
         on-update-style
         (mf/use-fn
          (mf/deps shape-id id)
-         #(st/emit! (dwl/update-style-from-layer shape-id id)))]
+         #(st/emit! (dwas/update-style-from-layer shape-id id)))]
 
     [:div {:class (stl/css :animation-item)}
      [:> prototype-pill* {:title (animation-label animation)

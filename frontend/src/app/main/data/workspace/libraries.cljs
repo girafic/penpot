@@ -16,11 +16,10 @@
    [app.common.logging :as log]
    [app.common.logic.libraries :as cll]
    [app.common.logic.shapes :as cls]
+   [app.common.logic.tokens :as clo]
    [app.common.logic.variants :as clv]
    [app.common.path-names :as cpn]
    [app.common.time :as ct]
-   [app.common.types.animation :as cta]
-   [app.common.types.animation-style :as ctas]
    [app.common.types.color :as ctc]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
@@ -39,7 +38,6 @@
    [app.main.data.modal :as modal]
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace :as-alias dw]
-   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.groups :as dwg]
    [app.main.data.workspace.notifications :as-alias dwn]
    [app.main.data.workspace.pages :as-alias dwpg]
@@ -49,6 +47,7 @@
    [app.main.data.workspace.specialized-panel :as dwsp]
    [app.main.data.workspace.thumbnails :as dwt]
    [app.main.data.workspace.thumbnails-wasm :as dwt.wasm]
+   [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.data.workspace.transforms :as dwtr]
    [app.main.data.workspace.undo :as dwu]
    [app.main.data.workspace.wasm-text :as dwwt]
@@ -391,284 +390,6 @@
         (rx/of (dch/commit-changes changes))))))
 
 
-;; --- Animation styles
-
-(defn add-animation-style
-  "Add the animation style `style` to the current file."
-  [style]
-  (let [style (-> (update style :id #(or % (uuid/next)))
-                  (ctas/check-animation-style))]
-    (ptk/reify ::add-animation-style
-      ev/Event
-      (-data [_] {:id (:id style)})
-
-      ptk/WatchEvent
-      (watch [it _ _]
-        (rx/of (dch/commit-changes (-> (pcb/empty-changes it)
-                                       (pcb/add-animation-style style))))))))
-
-(defn- commit-animation-styles
-  "Commit `changes` to the animation styles of the current file together
-  with the sync of their uses in it (see `cll/generate-sync-timelines`),
-  `styles` being its styles after them: the uses of the style
-  `asset-id`, or of every style when nil. One change set, so one undo
-  step, and the canvas shows it."
-  [changes state styles asset-id]
-  (let [file-id   (:current-file-id state)
-        libraries (assoc-in (dsh/lookup-libraries state) [file-id :data :animation-styles] styles)
-        changes   (cll/generate-sync-timelines changes file-id asset-id file-id libraries)]
-    (rx/of (dch/commit-changes changes)
-           (dwa/apply-preview))))
-
-(defn- end-style-preview
-  "`state` without the preview of a style being edited (see
-  `dwa/preview-animation-style`): what follows commits it."
-  [state]
-  (d/update-when state :workspace-animation dissoc :style-preview))
-
-(defn- local-style
-  "The animation style `id` of the current file, the file `file-id`; nil
-  for a style of another file."
-  [state file-id id]
-  (when (= file-id (:current-file-id state))
-    (ctas/get-animation-style (dsh/lookup-file-data state) id)))
-
-(defn update-animation-style
-  "Change the animation style `style` of the current file, the file
-  `file-id`, and sync its uses, in one undo step. A style that is not one
-  of the current file changes nothing."
-  [style file-id]
-  (assert (uuid? file-id) "expected valid uuid for `file-id`")
-  (let [style (ctas/check-animation-style style)]
-    (ptk/reify ::update-animation-style
-      ev/Event
-      (-data [_] {:id (:id style)})
-
-      ptk/UpdateEvent
-      (update [_ state]
-        (end-style-preview state))
-
-      ptk/WatchEvent
-      (watch [it state _]
-        (when (some? (local-style state file-id (:id style)))
-          (let [data (dsh/lookup-file-data state)]
-            (-> (pcb/empty-changes it)
-                (pcb/with-library-data data)
-                (pcb/update-animation-style style)
-                (commit-animation-styles state (assoc (:animation-styles data) (:id style) style) (:id style)))))))))
-
-(defn update-style-from-layer
-  "Save what the shape `shape-id` plays now into the animation style of
-  the current file its use `use-id` plays (see `ctas/update-from-track`):
-  the style takes its presets, the entries of its uses and its rows of
-  keyframes, a use of it takes their place, and every use of the style in
-  the file follows, in one undo step. Refused, with a message, when they
-  hold more entries or keyframes than a style does; a use of a style of a
-  library changes nothing."
-  [shape-id use-id]
-  (ptk/reify ::update-style-from-layer
-    ptk/WatchEvent
-    (watch [it state _]
-      (let [file-id  (:current-file-id state)
-            data     (dsh/lookup-file-data state)
-            page     (dsh/lookup-page state)
-            tl       (when (dwa/motion? state) (dwa/shape-timeline state shape-id))
-            use      (cta/get-animation tl shape-id use-id)
-            style    (when (and (cta/style-use? use) (= file-id (:style-ref-file use)))
-                       (dm/get-in data [:animation-styles (:style-ref-id use)]))
-            result   (when (some? style)
-                       (ctas/update-from-track (cta/get-track tl shape-id) use-id
-                                               (cta/rest-pose tl (:objects page) shape-id)
-                                               style file-id))]
-        (cond
-          (nil? result)
-          (rx/empty)
-
-          (= :too-many-entries (:error result))
-          (rx/of (ntf/warn (tr "workspace.animation.style-too-many-entries"
-                               cta/max-style-entries (:count result))))
-
-          (= :too-many-keyframes (:error result))
-          (rx/of (ntf/warn (tr "workspace.animation.style-too-many-keyframes"
-                               cta/max-style-keyframes (:count result))))
-
-          (some? (:error result))
-          (rx/empty)
-
-          :else
-          (let [style     (ctas/check-animation-style (:style result))
-                board-id  (:board-id tl)
-                tl'       (assoc-in tl [:tracks shape-id] (:track result))
-                styles    (assoc (:animation-styles data) (:id style) style)
-                ;; the sync starts from the new track, which already plays
-                ;; the new style, so it writes only the other uses
-                libraries (-> (dsh/lookup-libraries state)
-                              (assoc-in [file-id :data :animation-styles] styles)
-                              (assoc-in [file-id :data :pages-index (:id page) :timelines board-id] tl'))
-                changes   (-> (pcb/empty-changes it)
-                              (pcb/with-library-data data)
-                              (pcb/update-animation-style style)
-                              (pcb/with-page page)
-                              (pcb/set-timeline-track board-id shape-id (:track result))
-                              (cll/generate-sync-timelines file-id (:id style) file-id libraries))]
-            (rx/of (dch/commit-changes changes)
-                   (dwa/apply-preview))))))))
-
-(defn update-animation-styles
-  "Change the animation styles `styles` of the current file, the file
-  `file-id`, and sync the uses of all its styles, in one change set: the
-  styles its design tokens set (see `ctas/token-resolved-styles` and
-  `ctas/token-renamed-styles`). Styles of other files are left out."
-  [styles file-id]
-  (assert (uuid? file-id) "expected valid uuid for `file-id`")
-  (let [styles (mapv ctas/check-animation-style styles)]
-    (ptk/reify ::update-animation-styles
-      ptk/WatchEvent
-      (watch [it state _]
-        (let [local (filterv #(some? (local-style state file-id (:id %))) styles)]
-          (when (seq local)
-            (let [data    (dsh/lookup-file-data state)
-                  changes (reduce pcb/update-animation-style
-                                  (-> (pcb/empty-changes it)
-                                      (pcb/with-library-data data))
-                                  local)
-                  styles' (reduce #(assoc %1 (:id %2) %2) (:animation-styles data) local)]
-              (commit-animation-styles changes state styles' nil))))))))
-
-(defn- renamed
-  "`style` named `new-name`, which puts it in groups when it has slashes."
-  [style new-name]
-  (let [[path name] (cpn/split-group-name new-name)]
-    (assoc style :path path :name name)))
-
-(defn rename-animation-style
-  "Rename the animation style `id` of the current file, the file
-  `file-id`, and its uses."
-  [file-id id new-name]
-  (assert (uuid? file-id) "expected valid uuid for `file-id`")
-  (assert (uuid? id) "expected valid uuid for `id`")
-  (ptk/reify ::rename-animation-style
-    ev/Event
-    (-data [_] {:id id :name new-name})
-
-    ptk/WatchEvent
-    (watch [_ state _]
-      (when-let [style (local-style state file-id id)]
-        (when-not (str/blank? new-name)
-          (rx/of (update-animation-style (renamed style new-name) file-id)))))))
-
-(defn rename-animation-styles
-  "Rename several animation styles of the current file, the file
-  `file-id`, at once: `names` holds the new name, with its groups, of
-  each, by id. As grouping, renaming a group or ungrouping does: one
-  change set, one sync, one undo step."
-  [file-id names]
-  (assert (uuid? file-id) "expected valid uuid for `file-id`")
-  (ptk/reify ::rename-animation-styles
-    ptk/WatchEvent
-    (watch [it state _]
-      (let [data   (dsh/lookup-file-data state)
-            styles (into []
-                         (keep (fn [[id new-name]]
-                                 (when-let [style (local-style state file-id id)]
-                                   (when-not (str/blank? new-name)
-                                     (renamed style new-name)))))
-                         names)]
-        (when (seq styles)
-          (-> (reduce pcb/update-animation-style
-                      (-> (pcb/empty-changes it)
-                          (pcb/with-library-data data))
-                      styles)
-              (commit-animation-styles state
-                                       (into (:animation-styles data) (map (juxt :id identity)) styles)
-                                       nil)))))))
-
-(defn duplicate-animation-style
-  "Add a copy of the animation style `style-id` of the current file, the
-  file `file-id`, with entries of its own."
-  [file-id style-id]
-  (assert (uuid? file-id) "expected valid uuid for `file-id`")
-  (assert (uuid? style-id) "expected valid uuid for `style-id`")
-  (ptk/reify ::duplicate-animation-style
-    ptk/WatchEvent
-    (watch [_ state _]
-      (when-let [style (local-style state file-id style-id)]
-        (rx/of (add-animation-style
-                (-> style
-                    (assoc :id (uuid/next))
-                    (dissoc :modified-at)
-                    (update :entries (partial mapv #(assoc % :id (uuid/next)))))))))))
-
-(defn delete-animation-style
-  "Delete the animation style `id` of the current file; its uses turn into
-  their presets in the same undo step."
-  [id]
-  (assert (uuid? id) "expected valid uuid for `id`")
-  (ptk/reify ::delete-animation-style
-    ev/Event
-    (-data [_] {:id id})
-
-    ptk/UpdateEvent
-    (update [_ state]
-      (end-style-preview state))
-
-    ptk/WatchEvent
-    (watch [it state _]
-      (let [data (dsh/lookup-file-data state)]
-        (when (some? (ctas/get-animation-style data id))
-          (-> (pcb/empty-changes it)
-              (pcb/with-library-data data)
-              (pcb/delete-animation-style id)
-              (commit-animation-styles state (dissoc (:animation-styles data) id) id)))))))
-
-(defn- drifted-uses?
-  "Whether a use of a style of the current file differs from it on some
-  page (see `ctas/drifted?`)."
-  [state]
-  (let [file-id (:current-file-id state)
-        data    (dsh/lookup-file-data state)
-        styles  (:animation-styles data)]
-    (some (fn [page]
-            (some #(ctas/drifted? % file-id styles) (vals (:timelines page))))
-          (vals (:pages-index data)))))
-
-(defn repair-local-style-uses
-  "Sync the uses of the animation styles of the current file that differ
-  from their style, as when a whole track was written with old entries
-  after the style changed (see `ctas/drifted?`). It brings the file back
-  to what it should be, so no undo step. Nothing when no use drifted or
-  the file cannot be edited."
-  []
-  (ptk/reify ::repair-local-style-uses
-    ptk/WatchEvent
-    (watch [it state _]
-      (when (and (dm/get-in state [:permissions :can-edit])
-                 (drifted-uses? state))
-        (let [file-id (:current-file-id state)
-              changes (cll/generate-sync-timelines (pcb/empty-changes it) file-id nil file-id
-                                                   (dsh/lookup-libraries state))]
-          (when (seq (:redo-changes changes))
-            (rx/of (dch/commit-changes (assoc changes :save-undo? false))
-                   (dwa/apply-preview))))))))
-
-(defn touches-local-styles?
-  "Whether `changes` (of the file `file-id`) edit an animation style, or
-  write a track, or its animations, holding a use of a style of that
-  file: after them a use may differ from its style (see
-  `repair-local-style-uses`)."
-  [file-id changes]
-  (letfn [(local-use? [animation]
-            (and (cta/style-use? animation)
-                 (= file-id (:style-ref-file animation))))]
-    (some (fn [{:keys [type params animations]}]
-            (case type
-              :mod-animation-style           true
-              :set-timeline-track            (some local-use? (:animations params))
-              :set-timeline-track-animations (some local-use? animations)
-              :set-timeline                  (some local-use? (mapcat :animations (vals (:tracks params))))
-              false))
-          changes)))
-
 (defn- add-component2
   "This is the second step of the component creation."
   ([selected]
@@ -811,7 +532,8 @@
              (-> (pcb/empty-changes it nil)
                  (cll/generate-duplicate-component library component-id new-component-id))]
          (rx/of
-          (ptk/data-event :layout/update {:ids [(:id main-instance)]})
+          (ptk/data-event :layout/update {:page-id (:main-instance-page (get-in library [:data :components component-id]))
+                                          :ids [(:id main-instance)]})
           (dch/commit-changes changes)))))))
 
 (defn delete-component
@@ -936,6 +658,7 @@
                      (merge (meta it))))
                 (dwu/start-undo-transaction undo-id)
                 (dch/commit-changes changes)
+                (dwtp/propagate-workspace-tokens)  ;; Make the new instance get the token values from the current file, not from the component's library
                 (ptk/data-event :layout/update {:ids [(:id new-shape)]})
                 (dws/select-shapes (d/ordered-set (:id new-shape)))
                 (when start-move?
@@ -1119,7 +842,11 @@
          (rx/merge
           (->> (rx/of library-id)
                (rx/delay 5000)
-               (rx/map fetch-library-thumbnails)))
+               (rx/map fetch-library-thumbnails))
+          (when (ch/tokens-lib-changed? changes)
+            (rx/of (dwtp/propagate-workspace-tokens)))
+          (when (ch/notifiable-token-change-occured? changes)
+            (rx/of (ntf/info (tr "workspace.tokens.notifications.source-sets-or-themes-updated")))))
 
          (rx/take-until stopper-s))))))
 
@@ -1324,6 +1051,17 @@
                  second)
             0)))))
 
+(defn component-swap-nesting-loop?
+  [objects shape library-data component-id]
+  (let [component (ctkl/get-component library-data component-id true)
+        page      (ctf/get-component-page library-data component)
+        root      (ctf/get-component-root library-data component)]
+    (and page
+         root
+         (cfh/components-nesting-loop?
+          (cfh/get-children-with-self (:objects page) (:id root))
+          (cfh/get-parents-with-self objects (:parent-id shape))))))
+
 (defn component-swap
   "Swaps a component with another one"
   [shape file-id id-new-component keep-touched?]
@@ -1378,9 +1116,10 @@
         (rx/of
          (dwu/start-undo-transaction undo-id)
          (dch/commit-changes changes)
+         (dwtp/propagate-workspace-tokens)  ;; Make the new instance get the token values from the current file, not from the component's library
          (when (and (features/active-feature? state "render-wasm/v1")
                     (seq new-text-ids))
-           (dwwt/resize-wasm-text-all new-text-ids))
+           (dwwt/resize-wasm-text-all new-text-ids {:skip-component-sync? true}))
          (ptk/data-event :layout/update {:ids update-layout-ids :undo-group undo-group})
          (dwu/commit-undo-transaction undo-id)
          (dws/select-shape (:id new-shape) false))))))
@@ -1632,6 +1371,9 @@
                                #(do (apply st/emit! (map (fn [library]
                                                            (sync-file file-id (:id library)))
                                                          libraries-with-changes))
+                                    ;; Launch a local tokens propagation, so that the copies have the token values
+                                    ;; with the local tokens status, not the one coming from the external library.
+                                    (st/emit! (dwtp/propagate-workspace-tokens))
                                     (st/emit! (ntf/hide)))
 
                                do-dismiss
@@ -1684,8 +1426,8 @@
        (launch-component-sync component-id file-id undo-group)))))
 
 (defn watch-component-changes
-  "Watch the state for changes that affect to any main instance. If a change is detected will throw
-  an update-component-sync, so changes are immediately propagated to the component and copies."
+  "Watch the state for changes that affect to any main instance. If a change is detected will call
+   component-changed, so changes are immediately propagated to the component and copies."
   []
   (ptk/reify ::watch-component-changes
     ptk/WatchEvent
@@ -1738,12 +1480,17 @@
                  (rx/filter (complement :skip-component-sync?))
                  ;; Keep waits pending while component changes are checked.
                  (rx/map start-sync-barrier)
-                 (rx/observe-on :async))
+                 (rx/share))
 
-            get-component-events
-            (fn [[event old-data]]
-              (let [{:keys [file-id changes save-undo? undo-group]} event
-                    changed-components
+            ;; Buffers commits until a timer turn passes with no new ones. The
+            ;; debounce timer (not a microtask) queues behind any timers already
+            ;; due, so a burst of commits is inspected as one batch in one task.
+            commit-batches-s
+            (rx/buffer-until (rx/debounce 0 commits-s) commits-s)
+
+            get-component-changes
+            (fn [old-data {:keys [file-id changes save-undo? undo-group]}]
+              (let [changed-components
                     (when (and old-data
                                (or (nil? file-id) (= file-id (:id old-data))))
                       (into #{}
@@ -1751,29 +1498,39 @@
                             changes))]
                 (cond
                   (empty? changed-components)
-                  (rx/empty)
+                  nil
 
                   save-undo?
                   (do
                     (log/info :hint "detected component changes"
                               :ids (map str changed-components)
                               :undo-group undo-group)
-                    (->> (rx/from changed-components)
-                         (rx/map #(component-changed
-                                   % (:id old-data) undo-group))))
+                    (map #(vector ::component-changed % undo-group)
+                         changed-components))
 
                   :else
                   ;; Undos only bump :modified-at.
-                  (->> (rx/from changed-components)
-                       (rx/map touch-component)))))
+                  (map #(vector ::touch-component %) changed-components))))
+
+            ;; One event per distinct component change in the batch
+            get-component-events
+            (fn [batch old-data]
+              (->> batch
+                   (mapcat #(get-component-changes old-data (first %)))
+                   (distinct)
+                   (map (fn [[type component-id undo-group]]
+                          (if (= type ::component-changed)
+                            (component-changed component-id (:id old-data) undo-group)
+                            (touch-component component-id))))
+                   (rx/from)))
 
             component-events-s
-            (->> commits-s
+            (->> commit-batches-s
                  (rx/with-latest-from workspace-buffer-s)
                  (rx/mapcat
-                  (fn [[[event task] old-data]]
-                    (->> (get-component-events [event old-data])
-                         (rx/finalize #(finish-sync-barrier! task)))))
+                  (fn [[batch old-data]]
+                    (->> (get-component-events batch old-data)
+                         (rx/finalize #(run! (comp finish-sync-barrier! second) batch)))))
                  ;; Close barriers left behind when the page shuts down.
                  (rx/finalize #(wrf/finish-tasks! @pending-sync-barriers*))
                  (rx/share))
@@ -1816,6 +1573,47 @@
                      (rx/map render-component-thumbnail-event)))
 
                (rx/take-until stopper-s)))))))
+
+(defn sync-tokens-status-with-lib
+  []
+  (ptk/reify ::sync-tokens-status-with-lib
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [tokens-lib    (dsh/lookup-tokens-lib state)
+            tokens-status (dsh/lookup-tokens-status state)]
+        (when (and tokens-lib tokens-status)
+          (let [data    (dsh/lookup-file-data state)
+                changes (-> (pcb/empty-changes)
+                            (pcb/with-library-data data)
+                            (clo/generate-sync-tokens-status-with-lib tokens-status tokens-lib))]
+            (rx/of (dch/commit-changes changes))))))))
+
+(defn watch-token-changes
+  "Watch the state for changes that affect the tokens library. If a change is detected,
+   launches a sync-tokens-status event so the tokens-status is kept in sync with the library."
+  []
+  (ptk/reify ::watch-token-changes
+    ptk/WatchEvent
+    (watch [_ _ stream]
+      (let [stopper-s
+            (->> stream
+                 (rx/map ptk/type)
+                 (rx/filter (fn [event-type]
+                              (or (= ::dwpg/finalize-page event-type)
+                                  (= ::watch-token-changes event-type)))))
+
+            changes-s
+            (->> stream
+                 (rx/filter dch/commit?)
+                 (rx/map deref)
+                 (rx/filter #(= :local (:source %)))
+                 (rx/observe-on :async))]
+
+        (->> changes-s
+             (rx/filter (comp ch/tokens-lib-changed? :changes))
+             (rx/debounce 5000)
+             (rx/map (fn [_] (sync-tokens-status-with-lib)))
+             (rx/take-until stopper-s))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Backend interactions
@@ -1862,6 +1660,7 @@
                    (map #(assoc % :library-of file-id))
                    (d/index-by :id))))))
 
+
 (defn- load-library-file
   [file-id library-id]
   (ptk/reify ::load-library-file
@@ -1871,8 +1670,9 @@
         (rx/merge
          (->> (rp/cmd! :get-file {:id library-id :features features})
               (rx/merge-map fpmap/resolve-file)
-              (rx/map (fn [file]
-                        (libraries-fetched file-id [file]))))
+              (rx/mapcat (fn [file]
+                           (rx/of
+                            (libraries-fetched file-id [file])))))
          (->> (rp/cmd! :get-file-object-thumbnails {:file-id library-id :tag "component"})
               (rx/map (fn [thumbnails]
                         (fn [state]
@@ -1881,10 +1681,10 @@
 
 (defn link-file-to-library
   [file-id library-id]
-  (ptk/reify ::attach-library
+  (ptk/reify ::link-file-to-library
     ev/Event
     (-data [_]
-      {::ev/name "attach-library"
+      {::ev/name "link-file-to-library"
        :file-id file-id
        :library-id library-id})
 
@@ -1901,23 +1701,22 @@
                                   (map first)
                                   set)]
         (rx/concat
-         (rx/merge
-          (->> (rp/cmd! :link-file-to-library {:file-id file-id :library-id library-id})
-               (rx/merge-map (fn [libraries-to-load]
-                               (as-> libraries-to-load $
-                                 (remove loaded-libraries $)
-                                 (conj $ library-id)
-                                 (map #(load-library-file file-id %) $))))
-               (rx/catch (fn [cause]
-                           (let [error (ex-data cause)]
-                             (if (= (:code error) :circular-library-reference)
-                               (rx/of (ntf/error (tr "errors.circular-library-reference")))
-                               (rx/throw cause)))))))
-         (rx/of (ptk/reify ::attach-library-finished))
+         (->> (rp/cmd! :link-file-to-library {:file-id file-id :library-id library-id})
+              (rx/merge-map (fn [libraries-to-load]
+                              (as-> libraries-to-load $
+                                (remove loaded-libraries $)
+                                (conj $ library-id)
+                                (map #(load-library-file file-id %) $))))
+              (rx/catch (fn [cause]
+                          (let [error (ex-data cause)]
+                            (if (= (:code error) :circular-library-reference)
+                              (rx/of (ntf/error (tr "errors.circular-library-reference")))
+                              (rx/throw cause))))))
+         (rx/of (ptk/reify ::link-file-to-library-finished))
          (when (pos? variants-count)
            (->> (rp/cmd! :get-library-usage {:file-id library-id})
                 (rx/map (fn [library-usage]
-                          (ev/event {::ev/name "attach-library-variants"
+                          (ev/event {::ev/name "link-file-to-library-variants"
                                      :file-id file-id
                                      :library-id library-id
                                      :variants-count variants-count

@@ -53,10 +53,13 @@
                           (or (str/starts-with? url "http://")
                               (str/starts-with? url "https://"))))))
        (rx/mapcat (fn [item]
+                    ;; The upload commands use closed params schemas, so
+                    ;; drop the svg-only attrs (:href :width :height) that
+                    ;; `svg/collect-images` attaches.
                     (->> (rp/cmd! (if (contains? item :content)
                                     :upload-file-media-object
                                     :create-file-media-object-from-url)
-                                  (dissoc item :href))
+                                  (dissoc item :href :width :height))
                          ;; When the image uploaded fail we skip the shape
                          ;; returning `nil` will afterward not create the shape.
                          (rx/catch #(rx/of nil))
@@ -90,7 +93,7 @@
                                  (ctst/top-nested-frame objects position)
                                  base-id)
 
-               parent-id       (if (or selected-frame? (empty? selected))
+               parent-id       (if (or selected-frame? (empty? selected) (nil? base))
                                  frame-id
                                  base-id)
 

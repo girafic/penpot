@@ -9,12 +9,13 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.render-wasm.api.select :as wselect]
+   [app.common.render-wasm.svg-derived :as svg-derived]
    [app.common.transit :as t]
    [app.common.types.shape :as shape]
    [app.common.types.shape.layout :as ctl]
    [app.main.refs :as refs]
    [app.render-wasm.api :as api]
-   [app.render-wasm.svg-filters :as svg-filters]
    [beicon.v2.core :as rx]
    [cljs.core :as c]
    [cuerdas.core :as str]))
@@ -130,8 +131,8 @@
   [shape k]
   (when (api/initialized?)
     (let [shape (case k
-                  :svg-attrs (svg-filters/apply-svg-derived (assoc shape :svg-attrs (get shape :svg-attrs)))
-                  (:fills :blur :shadow) (svg-filters/apply-svg-derived shape)
+                  :svg-attrs (svg-derived/apply-svg-derived (assoc shape :svg-attrs (get shape :svg-attrs)))
+                  (:fills :blur :shadow) (svg-derived/apply-svg-derived shape)
                   shape)
           v  (get shape k)
           id (get shape :id)]
@@ -334,7 +335,7 @@
   (let [shape-id (dm/get-prop shape :id)]
     (if (shape-in-current-page? shape-id)
       (do
-        (api/use-shape shape-id)
+        (wselect/use-shape shape-id)
         (->> properties
              (mapcat #(set-wasm-attr! shape %))
              (d/index-by :key :callback)
@@ -349,7 +350,7 @@
   [shape properties]
   (when (and (api/initialized?) (seq properties)
              (shape-in-current-page? (dm/get-prop shape :id)))
-    (api/use-shape (dm/get-prop shape :id))
+    (wselect/use-shape (dm/get-prop shape :id))
     (doseq [property properties]
       (set-wasm-attr! shape property))))
 
@@ -360,7 +361,7 @@
   not waited for."
   [shape properties]
   (when (and (api/initialized?) (some? shape) (seq properties))
-    (api/use-shape (dm/get-prop shape :id))
+    (wselect/use-shape (dm/get-prop shape :id))
     (doseq [property properties]
       (set-wasm-attr! shape property))))
 
@@ -380,10 +381,15 @@
 ;; `conj` empty set initialization
 (def conj* (fnil conj (d/ordered-set)))
 
+(defn- track-change!
+  [self k]
+  (when-let [changes shape/*shape-changes*]
+    (let [id (:id self)]
+      (.set changes id (conj* (.get changes id) k)))))
+
 (defn- impl-assoc
   [self k v]
-  (when shape/*shape-changes*
-    (vswap! shape/*shape-changes* update (:id self) conj* k))
+  (track-change! self k)
 
   (case k
     :id
@@ -411,8 +417,7 @@
 
 (defn- impl-dissoc
   [self k]
-  (when shape/*shape-changes*
-    (vswap! shape/*shape-changes* update (:id self) conj* k))
+  (track-change! self k)
 
   (case k
     :id

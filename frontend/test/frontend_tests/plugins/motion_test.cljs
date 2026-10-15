@@ -20,6 +20,7 @@
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.tokens-lib :as ctob]
+   [app.common.types.tokens-status :as ctos]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.repo :as rp]
@@ -1184,13 +1185,15 @@
       (ctht/update-tokens-lib
        #(-> %
             (ctob/add-set (ctob/make-token-set :id (cthi/new-id! :motion-set) :name "motion"))
-            (ctob/add-theme (ctob/make-token-theme :name "theme" :sets #{"motion"}))
-            (ctob/set-active-themes #{"/theme"})
+            (ctob/add-theme (ctob/make-token-theme :id (cthi/new-id! :motion-theme)
+                                                   :name "theme" :sets #{"motion"}))
             (ctob/add-token (cthi/id :motion-set)
                             (ctob/make-token :name "motion.base" :type :duration :value "300ms"))
             (ctob/add-token (cthi/id :motion-set)
                             (ctob/make-token :name "ease.spring" :type :spring
-                                             :value {:stiffness 120 :damping 14 :mass 1}))))))
+                                             :value {:stiffness 120 :damping 14 :mass 1}))))
+      (ctht/update-tokens-status
+       #(ctos/set-tokens-status % #{(cthi/id :motion-theme)} #{(cthi/id :motion-set)}))))
 
 (t/deftest presets-and-keyframes-bind-tokens
   (t/async

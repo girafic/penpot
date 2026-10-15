@@ -11,12 +11,13 @@ Center](https://help.penpot.app/).
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
+- [AI-Assisted Contributions](#ai-assisted-contributions)
 - [Reporting Bugs](#reporting-bugs)
 - [Pull Requests](#pull-requests)
   - [Workflow](#workflow)
   - [Branch naming](#branch-naming)
   - [Format](#format)
-    - [Title format](#title-format)
+    - [Title format](#title)
     - [Description](#description)
   - [Review process](#review-process)
   - [What we won't accept](#what-we-wont-accept)
@@ -38,11 +39,38 @@ Center](https://help.penpot.app/).
 - **Issue tracker**: We use [GitHub Issues](https://github.com/penpot/penpot/issues)
   for public bugs and [Taiga](https://tree.taiga.io/project/penpot/) for
   internal project management. Changelog entries reference both.
+- **AI coding agents**: guidance lives in `AGENTS.md` and the skills in
+  `.agents/skills/`, which Codex, opencode, Cursor, Zed, Amp, omp and pi read
+  without setup. Claude Code reads `AGENTS.md` from 2.1.277, but only in a
+  project that has no instruction file of its own, so keep no `CLAUDE.md`,
+  `.claude/CLAUDE.md` or `CLAUDE.local.md` in your checkout: any one of them
+  hides this repository's guidance from your session. Skills still load from
+  `.claude/skills` alone, so link it once per clone with
+  `mkdir -p .claude && ln -s ../.agents/skills .claude/skills`, or with
+  `npx skills add ./.agents/skills --agent claude-code`. Below 2.1.277, and
+  on Bedrock, Vertex and Foundry where the fallback has not arrived, add
+  `ln -s AGENTS.md CLAUDE.md` and remove it once your client has the
+  feature. Personal instructions belong in `AGENTS.local.md`, personal
+  skills in `.agents/local/skills/`, and personal Claude steering in
+  `.claude/rules/*.md`, which Claude loads beside the project instructions
+  without switching the fallback off. Every one of these paths is
+  gitignored.
+
+## AI-Assisted Contributions
+
+We support the responsible use of AI tools in the development process. However, all contributions to Penpot - including issues, pull requests, and any other submissions - must meet a reasonable standard of quality, accuracy, and human oversight.
+
+If AI-assisted content is used, it must be carefully reviewed and verified by a human before submission. Contributions that don't meet these standards may be rejected or closed without detailed review or a reply.
 
 ## Reporting Bugs
 
 Report bugs via [GitHub Issues](https://github.com/penpot/penpot/issues).
 Before filing, search existing issues to avoid duplicates.
+
+> **Note:** Every new issue starts under the `needs triage` label until the
+> product team reviews it. Issues under `needs triage` or `internal` are not
+> open to contributions — do not start work on them. Wait for a maintainer to
+> confirm it in the issue itself.
 
 Include the following when possible:
 
@@ -84,7 +112,7 @@ Branch names are not enforced, but we recommend the following:
   and no slashes (e.g. `fix-ellipse-icon-typo`, `feat-auto-link-libraries`).
 
 Since PRs are squash-merged, the branch name does not survive into the
-commit history — what matters is the [PR title](#title-format).
+commit history — what matters is the [PR title](#title).
 
 ### Format
 
@@ -96,7 +124,7 @@ commit history — what matters is the [PR title](#title-format).
 Pull request titles **must** follow the same convention as commit subjects:
 
 ```
-:emoji: Subject line (imperative, capitalized, no period, <=70 chars)
+:emoji: Subject line (imperative, capitalized, no period, <=80 chars)
 ```
 
 Read [Creating Commits](./.serena/memories/workflow/creating-commits.md)
@@ -129,7 +157,7 @@ for more concrete information.
   force-push during review, as it breaks comment threads.
 - PRs require at least **one approval** before merge.
 - We use **squash-merge** by default. The PR title becomes the final
-  commit message, so follow the [title format](#title-format) above.
+  commit message, so follow the [title format](#title) above.
 
 ### What we won't accept
 
@@ -141,10 +169,15 @@ To save time on both sides, please avoid submitting PRs that:
 - Submit AI-generated code without human review.
 - Skip local syntax and formatting checks before submitting.
 - Skip the [discussion step](#workflow) for non-bug-fix changes.
+- Open a PR for an issue under `needs triage` or `internal`. We may close
+  these PRs without review, without an explanation and without a reply.
 
 ### Good first issues
 
 We use the `good first issue` label to mark issues appropriate for newcomers.
+An issue is open to contributions only after a maintainer says so in the issue
+itself. Issues under `needs triage` or `internal` stay closed, however simple
+they look.
 
 ## Commit Guidelines
 
@@ -187,11 +220,17 @@ Commit messages must follow this format:
 - Capitalize the first letter of the subject
 - Add clear and concise description on the body
 - Do not end the subject with a period
-- Keep the subject to **70 characters** or fewer
-- **Wrap body lines at 76 characters or fewer** (trailers and URLs excepted)
+- Keep the subject to **80 characters** or fewer
+  (`Merge`/`Revert`/`Reapply` commits skip this limit, since git prepends
+  those prefixes to an existing subject)
+- **Wrap body lines at 80 characters or fewer** (trailers and URLs excepted)
 - Separate the subject from the body with a **blank line**
+- Never add a `Co-authored-by` trailer — it is forbidden and fails
+  `./scripts/check-commit`
 
 You can check a commit against these rules with `./scripts/check-commit`.
+CI runs the same script on every new commit in
+`.github/workflows/commit-checker.yml`, so violations fail the build.
 
 ### Examples
 

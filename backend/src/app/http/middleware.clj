@@ -237,7 +237,7 @@
     (-> (assoc "access-control-allow-origin" origin)
         (assoc "access-control-allow-credentials" "true")
         (assoc "access-control-allow-methods" "GET,POST,DELETE,OPTIONS,PUT,HEAD,PATCH")
-        (assoc "access-control-expose-headers" "content-type")
+        (assoc "access-control-expose-headers" "content-type, retry-after, x-rate-limit-remaining, x-rate-limit-reset")
         (assoc "access-control-allow-headers" "x-frontend-version, x-client, content-type, accept"))))
 
 (defn wrap-cors
@@ -306,16 +306,15 @@
             (let [decode-fn (get decoders type)]
               (if (or (= type :cookie) (= type :bearer))
                 (let [metadata (tokens/decode-header token)]
-                  ;; NOTE: we only proceed to decode claims on new
-                  ;; cookie tokens. The old cookies dont need to be
-                  ;; decoded because they use the token string as ID
+                  ;; NOTE: only current (kid=1/ver=1) cookie tokens carry
+                  ;; decodable claims. Anything else is left unauthenticated.
                   (if (and (= (:kid metadata) 1)
                            (= (:ver metadata) 1)
                            (some? decode-fn))
                     (assoc request ::http/auth-data (assoc auth
                                                            :claims (decode-fn token)
                                                            :metadata metadata))
-                    (assoc request ::http/auth-data (assoc auth :metadata {:ver 0}))))
+                    request))
 
                 (if decode-fn
                   (assoc request ::http/auth-data (assoc auth :claims (decode-fn token)))

@@ -13,7 +13,6 @@
    [app.common.schema :as sm]
    [app.common.spec :as us]
    [app.common.time :as ct]
-   [app.common.uri :as u]
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.db :as db]
@@ -92,12 +91,12 @@
         (handle-response-transformation request mdata)
         (handle-before-comple-hook mdata))))
 
-(defn- make-rpc-handler
+(defn make-rpc-handler
   "Ring handler that dispatches cmd requests and convert between
   internal async flow into ring async flow."
   [methods]
   (let [methods (update-vals methods peek)]
-    (fn [{:keys [params path-params method] :as request}]
+    (fn [{:keys [path-params method] :as request}]
       (let [handler-name (:method-name path-params)
             etag         (yreq/get-header request "if-none-match")
             session-id   (yreq/get-header request "x-session-id")
@@ -111,7 +110,7 @@
 
             ip-addr      (inet/parse-request request)
 
-            data         (-> params
+            data         (-> {}
                              (assoc ::handler-name handler-name)
                              (assoc ::ip-addr ip-addr)
                              (assoc ::request-at (ct/now))
@@ -218,17 +217,6 @@
       f)
     f))
 
-(defn- wrap-spec-conform
-  [_ f mdata]
-  ;; NOTE: skip spec conform operation on rpc methods that already
-  ;; uses malli validation mechanism.
-  (if (contains? mdata ::sm/params)
-    f
-    (if-let [spec (ex/ignoring (s/spec (::sv/spec mdata)))]
-      (fn [cfg params]
-        (f cfg (us/conform spec params)))
-      f)))
-
 (defn- wrap-params-validation
   [_ f mdata]
   (if-let [schema (::sm/params mdata)]
@@ -237,16 +225,15 @@
           decode   (sm/decoder schema sm/json-transformer)
           encode   (sm/encoder schema sm/json-transformer)]
       (fn [cfg params]
-        (let [params (decode params)]
-          (if (validate params)
-            (let [result (f cfg params)]
+        (let [request-params (-> params meta ::http/request :params decode)]
+          (if (validate request-params)
+            (let [result (f cfg (merge params (d/without-qualified request-params)))]
               (if (instance? clojure.lang.IObj result)
                 (vary-meta result assoc :encode/json encode)
                 result))
-            (let [params (d/without-qualified params)]
-              (ex/raise :type :validation
-                        :code :params-validation
-                        ::sm/explain (explain params)))))))
+            (ex/raise :type :validation
+                      :code :params-validation
+                      ::sm/explain (explain request-params))))))
     f))
 
 
@@ -346,10 +333,9 @@
     (wrap-metrics cfg $ mdata)
     (rlimit/wrap cfg $ mdata)
     (wrap-audit cfg $ mdata)
-    (wrap-spec-conform cfg $ mdata)
+    (wrap-nitrate-sso cfg $ mdata)
     (wrap-params-validation cfg $ mdata)
-    (wrap-authentication cfg $ mdata)
-    (wrap-nitrate-sso cfg $ mdata)))
+    (wrap-authentication cfg $ mdata)))
 
 (defn- wrap-management
   [cfg f mdata]
@@ -359,12 +345,9 @@
     (climit/wrap cfg $ mdata)
     (wrap-metrics cfg $ mdata)
     (wrap-audit cfg $ mdata)
-    (wrap-spec-conform cfg $ mdata)
+    (wrap-nitrate-sso cfg $ mdata)
     (wrap-params-validation cfg $ mdata)
-    (wrap-authentication cfg $ mdata)
-    (wrap-nitrate-sso cfg $ mdata)))
-
-
+    (wrap-authentication cfg $ mdata)))
 
 (defn- process-method
   [cfg wrap-fn [f mdata]]
@@ -396,6 +379,7 @@
           'app.rpc.commands.files-update
           'app.rpc.commands.files-snapshot
           'app.rpc.commands.files-thumbnails
+          'app.rpc.commands.jobs
           'app.rpc.commands.ldap
           'app.rpc.commands.management
           'app.rpc.commands.media
@@ -442,7 +426,8 @@
 (defn- resolve-management-methods
   [cfg]
   (let [cfg  (assoc cfg ::module "management" ::type "command" ::metrics-id :rpc-management-timing)
-        mods (cond->> (list 'app.rpc.management.exporter)
+        mods (cond->> (list 'app.rpc.management.exporter
+                            'app.rpc.management.jobs)
                (contains? cf/flags :admin-console)
                (cons 'app.rpc.management.nitrate))]
 
@@ -498,42 +483,40 @@
 
 (defmethod ig/init-key ::routes
   [_ {:keys [::methods ::management-methods ::setup/shared-keys] :as cfg}]
+  ["/api"
+   ["/management"
+    ["/methods/:method-name"
+     {:middleware [[mw/shared-key-auth shared-keys]
+                   [session/authz cfg]]
+      :handler (make-rpc-handler management-methods)}]
 
-  (let [public-uri (cf/get :public-uri)]
-    ["/api"
-     ["/management"
-      ["/methods/:method-name"
-       {:middleware [[mw/shared-key-auth shared-keys]
-                     [session/authz cfg]]
-        :handler (make-rpc-handler management-methods)}]
+    (doc/routes :methods management-methods
+                :label "management"
+                :base-uri (cf/get-public-uri "api/management")
+                :description "MANAGEMENT API")]
 
-      (doc/routes :methods management-methods
-                  :label "management"
-                  :base-uri (u/join public-uri "/api/management")
-                  :description "MANAGEMENT API")]
+   ["/main"
+    ["/methods/:method-name"
+     {:middleware [[mw/cors]
+                   [sec/client-header-check]
+                   [session/authz cfg]
+                   [actoken/authz cfg]]
+      :handler (make-rpc-handler methods)}]
 
-     ["/main"
-      ["/methods/:method-name"
-       {:middleware [[mw/cors]
-                     [sec/client-header-check]
-                     [session/authz cfg]
-                     [actoken/authz cfg]]
-        :handler (make-rpc-handler methods)}]
+    (doc/routes :methods methods
+                :label "main"
+                :base-uri (cf/get-public-uri "api/main")
+                :description "MAIN API")]
 
-      (doc/routes :methods methods
-                  :label "main"
-                  :base-uri (u/join public-uri "/api/main")
-                  :description "MAIN API")]
+   ;; BACKWARD COMPATIBILITY
+   ["/_doc" {:handler (redirect (cf/get-public-uri "api/main/doc"))}]
+   ["/doc" {:handler (redirect (cf/get-public-uri "api/main/doc"))}]
+   ["/openapi" {:handler (redirect (cf/get-public-uri "api/main/doc/openapi"))}]
+   ["/openapi.join" {:handler (redirect (cf/get-public-uri "api/main/doc/openapi.json"))}]
 
-     ;; BACKWARD COMPATIBILITY
-     ["/_doc" {:handler (redirect (u/join public-uri "/api/main/doc"))}]
-     ["/doc" {:handler (redirect (u/join public-uri "/api/main/doc"))}]
-     ["/openapi" {:handler (redirect (u/join public-uri "/api/main/doc/openapi"))}]
-     ["/openapi.join" {:handler (redirect (u/join public-uri "/api/main/doc/openapi.json"))}]
-
-     ["/rpc/command/:method-name"
-      {:middleware [[mw/cors]
-                    [sec/client-header-check]
-                    [session/authz cfg]
-                    [actoken/authz cfg]]
-       :handler (make-rpc-handler methods)}]]))
+   ["/rpc/command/:method-name"
+    {:middleware [[mw/cors]
+                  [sec/client-header-check]
+                  [session/authz cfg]
+                  [actoken/authz cfg]]
+     :handler (make-rpc-handler methods)}]])

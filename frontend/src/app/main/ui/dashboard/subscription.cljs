@@ -252,12 +252,12 @@
         subscription-type     (if nitrate? (:type nitrate-license) (get-subscription-type subscription))
         subscription-is-trial (= "trialing" (:status (if nitrate? nitrate-license subscription)))
         go-to-subscription    (mf/use-fn #(st/emit! (rt/nav :settings-subscription)))]
-    [:div {:class (stl/css :nitrate-current-plan)}
-     [:div {:class (stl/css :nitrate-current-plan-label)}
+    [:button {:class (stl/css :nitrate-current-plan)
+              :type "button"
+              :on-click go-to-subscription}
+     [:span {:class (stl/css :nitrate-current-plan-label)}
       (tr "subscription.current-plan.title")]
-     [:button {:class (stl/css :nitrate-current-plan-text)
-               :type "button"
-               :on-click go-to-subscription}
+     [:span {:class (stl/css :nitrate-current-plan-text)}
       (case subscription-type
         "professional" (tr "subscription.current-plan.professional")
         "unlimited" (if subscription-is-trial
@@ -279,6 +279,7 @@
          (fn []
            (st/emit! (ev/event {::ev/name "open-subscription-management"
                                 ::ev/origin "dashboard"
+                                :deployment (if cf/saas? "saas" "selfhost")
                                 :section "team-settings"}))
            (let [href (-> (rt/get-current-href)
                           (rt/encode-url))

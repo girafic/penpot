@@ -15,6 +15,7 @@
    [app.common.files.migrations :as fmg]
    [app.common.files.validate :as fval]
    [app.common.logging :as l]
+   [app.common.media :as cm]
    [app.common.schema :as sm]
    [app.common.time :as ct]
    [app.common.types.file :as ctf]
@@ -27,6 +28,8 @@
    [app.features.file-migrations :as fmigr]
    [app.loggers.audit :as-alias audit]
    [app.loggers.webhooks :as-alias webhooks]
+   [app.media.svg :as svg]
+   [app.storage :as sto]
    [app.util.blob :as blob]
    [app.util.pointer-map :as pmap]
    [app.worker :as-alias wrk]
@@ -50,9 +53,37 @@
 (def temp-file-threshold
   (* 1024 1024 2))
 
-;; A maximum (storage) object size allowed: 100MiB
-(def ^:const max-object-size
+;; Maximum size allowed for a single binary entry during binfile
+;; import: 100MiB. Covers the storage blobs (`objects/` entries in v3,
+;; streams in v1), whose declared size and hash are verified against the
+;; imported bytes. Legitimate media objects fit comfortably below this;
+;; anything larger is rejected instead of being buffered into memory.
+(def ^:const default-max-binary-entry-size
   (* 1024 1024 100))
+
+;; Maximum decompressed size allowed for a single JSON/text zip entry
+;; (manifest, files, pages, shapes, colors, components, typographies,
+;; tokens, plugin-data) during binfile import: 20MiB. Legitimate entries
+;; are KB-sized, so this is deliberately much lower than
+;; default-max-binary-entry-size and bounds the DEFLATE amplification of any
+;; single entry.
+(def ^:const default-max-text-entry-size
+  (* 1024 1024 20))
+
+;; Maximum total decompressed size allowed for all JSON/text zip entries
+;; combined within a single import job: 500MiB. Bounds the case where many
+;; entries, each individually under default-max-text-entry-size, still sum
+;; to an unreasonable total. Set this high because legitimate giant
+;; exports exist: hundreds of thousands of KB-sized entries (pages,
+;; shapes) that never trip the per-entry cap but sum past 400MiB. The
+;; per-entry cap still bounds single-entry DEFLATE amplification, so this
+;; only moves the cumulative ceiling.
+(def ^:const default-max-text-total-size
+  (* 1024 1024 500))
+
+;; Maximum number of entries allowed in the import zip: 500,000.
+(def ^:const default-max-zip-entries
+  (* 500 1000))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -343,8 +374,13 @@
           fpr.can_edit
      from file_profile_rel as fpr
     inner join file as f on (f.id = fpr.file_id)
+    inner join project as p on (p.id = f.project_id)
     where fpr.file_id = ?
       and fpr.profile_id = ?
+      and exists (select 1
+                    from team_profile_rel as tpr
+                   where tpr.team_id = p.team_id
+                     and tpr.profile_id = fpr.profile_id)
    union all
    select tpr.is_owner,
           tpr.is_admin,
@@ -360,8 +396,13 @@
           ppr.can_edit
      from project_profile_rel as ppr
     inner join file as f on (f.project_id = ppr.project_id)
+    inner join project as p on (p.id = ppr.project_id)
     where f.id = ?
-      and ppr.profile_id = ?")
+      and ppr.profile_id = ?
+      and exists (select 1
+                    from team_profile_rel as tpr
+                   where tpr.team_id = p.team_id
+                     and tpr.profile_id = ppr.profile_id)")
 
 (defn- get-file-permissions*
   [conn profile-id file-id]
@@ -651,10 +692,16 @@
             data
             library-ids)))
 
-(defn disable-database-timeouts!
+(def ^:const import-transaction-timeout-ms
+  "Ceiling for binfile import transactions (20 minutes). Interpolated
+  directly into SQL: compile-time constant, never user input."
+  (* 20 60 1000))
+
+(defn configure-database-timeouts!
   [cfg]
   (let [conn (db/get-connection cfg)]
-    (db/exec-one! conn ["SET LOCAL idle_in_transaction_session_timeout = 0"])
+    (db/exec-one! conn [(str "SET LOCAL idle_in_transaction_session_timeout = "
+                             import-transaction-timeout-ms)])
     (db/exec-one! conn ["SET CONSTRAINTS ALL DEFERRED"])))
 
 (defn process-file
@@ -872,6 +919,7 @@
     (weak/loadable-weak-value-map library-ids load-fn {id file})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; EXTERNAL LIBRARY RESOLUTION HELPERS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -914,3 +962,116 @@
   [cfg team-id slug]
   (->> (get-shared-files-for-team cfg team-id)
        (filter #(= slug (slugify-name (:name %))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; SVG IMPORT SANITIZATION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def svg-content-type
+  "Canonical content type of SVG media objects."
+  "image/svg+xml")
+
+(defn normalize-content-type
+  "Canonicalize a stored content-type: lowercase, trimmed,
+  parameters after `;` dropped. Returns nil for missing or unusable
+  values so ancient bundle entries without content-type keep passing
+  through untouched."
+  [ctype]
+  (when (string? ctype)
+    (let [clean (-> ctype
+                    (str/split #";" 2)
+                    (first)
+                    (str/trim)
+                    (str/lower))]
+      (when-not (str/empty? clean)
+        clean))))
+
+(defn svg-object?
+  "True when the storage `object` claims the canonical SVG content
+  type. Expects an already normalized object (see
+  `normalize-content-type`): every import path normalizes the
+  metadata right after reading it, so the comparison stays an exact
+  match in a single place."
+  [object]
+  (= svg-content-type (:content-type object)))
+
+(def schema:content-type
+  "Typed content-type for binfile storage objects: a member of
+  `cm/storage-object-types`. Values are canonicalized with
+  `normalize-content-type` before validation, so legacy spellings
+  keep importing while unknown types are rejected."
+  [::sm/one-of {:format :string} cm/storage-object-types])
+
+(defn check-storage-content-type
+  "Check an imported storage `object` (already normalized, see
+  `normalize-content-type`) against `cm/storage-object-types`.
+  Returns nil when the type is allowed; raises `:type :validation`
+  with `:code :media-type-not-allowed` (same as the upload path)
+  when it is missing or unknown, so crafted bundles fail closed."
+  [object]
+  (when-not (contains? cm/storage-object-types (:content-type object))
+    (ex/raise :type :validation
+              :code :media-type-not-allowed
+              :hint "storage object declares an unknown content-type"
+              :content-type (:content-type object))))
+
+(defn sanitize-imported-svg
+  "Sanitize the raw `bytes` of an imported storage `object` when it
+  holds an SVG document. Expects an already normalized object (see
+  `normalize-content-type`); returns nil when the object is not an
+  SVG.
+
+  Otherwise returns a map with the sanitized `:bytes`, their `:size`
+  and their blake2b `:hash`, ready to persist with `sto/put-object!`.
+
+  Raises a `:validation` exception when the SVG cannot be parsed, the
+  same error the upload path reports."
+  [object ^bytes raw]
+  (when (svg-object? object)
+    (let [sanitized (svg/sanitize-svg (String. ^bytes raw "UTF-8"))
+          bytes     (.getBytes ^String sanitized "UTF-8")]
+      {:bytes bytes
+       :size  (alength ^bytes bytes)
+       :hash  (sto/calculate-hash (java.io.ByteArrayInputStream. bytes))})))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; REQUEST CFG
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn resolve-export-type
+  "The canonical export type of a request on the legacy RPC: an explicit
+  `type` wins, and the deprecated boolean flags are translated. The
+  creation command of a job does not need it, because it asks the caller
+  for the type instead of guessing it."
+  [{:keys [type include-libraries embed-assets]}]
+  (cond
+    (some? type)              type
+    (true? include-libraries) :include-libraries
+    (true? embed-assets)      :merge-libraries
+    :else                     :detach-libraries))
+
+(defn export-cfg
+  "The domain cfg of an export: the frozen set of files and how their
+  libraries are handled."
+  [cfg {:keys [ids export-type]}]
+  (-> cfg
+      (assoc ::ids ids)
+      (assoc ::export-type export-type)))
+
+(defn import-cfg
+  "The domain cfg of an import: the destination team/profile/project, the
+  name, the input and the anti-zip-bomb limits. The caller resolves the
+  team, because what allows it to import there differs between the RPC and
+  a job; what both must share is fixed here."
+  [cfg {:keys [profile-id project-id team name input]}]
+  (-> cfg
+      (assoc ::features (cfeat/get-team-enabled-features cf/flags team))
+      (assoc ::project-id project-id)
+      (assoc ::profile-id profile-id)
+      (assoc ::team-id (:id team))
+      (assoc ::name name)
+      (assoc ::input input)
+      (assoc ::import-max-binary-entry-size (cf/get :binfile-import-max-binary-entry-size))
+      (assoc ::import-max-text-entry-size (cf/get :binfile-import-max-text-entry-size))
+      (assoc ::import-max-text-total-size (cf/get :binfile-import-max-text-total-size))
+      (assoc ::import-max-zip-entries (cf/get :binfile-import-max-zip-entries))))

@@ -431,7 +431,7 @@ fn outline_paragraph(
             let mut outlined = false;
             for (glyph, position) in glyphs[start..end].iter().zip(&positions[start..end]) {
                 if let Some(path) = font.get_path(*glyph) {
-                    builder.add_path(&path.with_offset(run_origin + *position));
+                    builder.add_path(&path.with_offset(run_origin + *position), None);
                     outlined = true;
                 }
             }

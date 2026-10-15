@@ -14,6 +14,7 @@
    [app.common.types.components-list :as ctkl]
    [app.main.data.event :as ev]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation-styles :as dwas]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
@@ -23,7 +24,8 @@
    [app.main.store :as st]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.context :as ctx]
-   [app.main.ui.icons :as deprecated-icon]
+   [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
+   [app.main.ui.ds.tooltip :refer [tooltip*]]
    [app.main.ui.workspace.sidebar.assets.animation-styles :refer [animation-styles-section*]]
    [app.main.ui.workspace.sidebar.assets.colors :refer [colors-section*]]
    [app.main.ui.workspace.sidebar.assets.common :as cmm]
@@ -78,7 +80,7 @@
 
 (mf/defc file-library-title*
   {::mf/private true}
-  [{:keys [is-open is-local file-id page-id file-name]}]
+  [{:keys [is-open is-local file-id page-id file-name is-tokens-source]}]
   (let [router     (mf/deref refs/router)
         team-id    (mf/use-ctx ctx/current-team-id)
         url        (rt/resolve-uri router :workspace
@@ -95,7 +97,15 @@
         (mf/use-fn
          (fn [ev]
            (dom/stop-propagation ev)
-           (st/emit! (ev/event {::ev/name "navigate-to-library-file"}))))]
+           (st/emit! (ev/event {::ev/name "navigate-to-library-file"}))))
+
+        tokens-source-icon
+        (when is-tokens-source
+          (mf/html [:> tooltip* {:content (tr "workspace.tokens.current-tokens-source-tooltip")}
+                    [:span {:class (stl/css :tokens-source-icon-wrapper)}
+                     [:> icon* {:icon-id i/tokens
+                                :size "m"
+                                :class (stl/css :tokens-source-icon)}]]]))]
 
     [:div {:class (stl/css-case
                    :library-title true
@@ -105,17 +115,24 @@
                      :on-collapsed   toggle-open
                      :title          (if is-local
                                        (mf/html [:div {:class (stl/css :special-title)}
-                                                 (tr "workspace.assets.local-library")])
+                                                 [:span {:class (stl/css :special-title-text)}
+                                                  (tr "workspace.assets.local-library")]
+                                                 tokens-source-icon])
                                        ;; Do we need to add shared info here?
                                        (mf/html [:div {:class (stl/css :special-title)}
-                                                 file-name]))}
+                                                 [:span {:class (stl/css :special-title-text)}
+                                                  file-name]
+                                                 tokens-source-icon]))}
       (when-not ^boolean is-local
         [:span {:title (tr "workspace.assets.open-library")}
          [:a {:class (stl/css :file-link)
               :href url
               :target "_blank"
               :on-click on-click}
-          deprecated-icon/open-link]])]]))
+          [:> icon* {:icon-id i/open-link
+                     :size "m"
+                     :class (stl/css :file-link-icon)}]]])]]))
+
 
 (defn- extend-selected
   [selected type asset-groups asset-id file-id]
@@ -253,7 +270,7 @@
              (run! st/emit! (map #(dwl/delete-typography %)
                                  (:typographies selected)))
              ;; their uses turn into presets in the same step
-             (run! st/emit! (map #(dwl/delete-animation-style %)
+             (run! st/emit! (map #(dwas/delete-animation-style %)
                                  (:animation-styles selected)))
 
              (when (or (seq (:components selected))
@@ -336,13 +353,15 @@
                    (not ^boolean show-typography?)
                    (not ^boolean show-animation-styles?))
           [:div  {:class (stl/css :asset-title)}
-           [:span {:class (stl/css :no-found-icon)}
-            deprecated-icon/search]
+           [:span {:class (stl/css :no-found-icon-wrapper)}
+            [:> icon* {:icon-id i/search
+                       :size "l"
+                       :class (stl/css :no-found-icon)}]]
            [:span {:class (stl/css :no-found-text)}
             (tr "workspace.assets.not-found")]])])]))
 
 (mf/defc file-library*
-  [{:keys [file is-local is-default-open filters]}]
+  [{:keys [file is-local is-default-open filters is-tokens-source]}]
   (let [file-id      (:id file)
         file-name    (:name file)
         page-id      (dm/get-in file [:data :pages 0])
@@ -425,7 +444,8 @@
        :page-id page-id
        :file-name file-name
        :is-open open?
-       :is-local is-local}]
+       :is-local is-local
+       :is-tokens-source is-tokens-source}]
 
      (when ^boolean open?
        [:> file-library-content*

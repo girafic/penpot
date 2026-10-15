@@ -16,9 +16,10 @@
    [rumext.v2 :as mf]))
 
 (t/deftest the-team-container-renders-whatever-the-team-id
-  ;; It calls the same React hooks on every render, as React needs: a
-  ;; team id that is no uuid between two that are, as a route has while
-  ;; it changes, renders nothing, then the team again.
+  ;; It calls the same React hooks on every render, as React needs: the
+  ;; id of a team that is not loaded yet, as a route has while it
+  ;; changes, renders nothing, then the team again. (An id that is no
+  ;; uuid raises `:invalid-team-id`.)
   (let [team-id (uuid/next)]
     (with-redefs [refs/team (atom {:id team-id :permissions {:can-edit true}})
                   st/emit!  mock/noop]
@@ -30,7 +31,7 @@
                 shown?  #(some? (.querySelector document "p"))]
             (render! team-id)
             (t/is (shown?))
-            (render! nil)
-            (t/is (not (shown?)) "none without a team")
+            (render! (uuid/next))
+            (t/is (not (shown?)) "none for a team not loaded")
             (render! team-id)
             (t/is (shown?) "the team again")))))))

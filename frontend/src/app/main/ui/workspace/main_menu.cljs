@@ -870,7 +870,7 @@
                                                                :submenu-item true
                                                                :disabled (not can-open?))
                                     :on-key-down on-key-down}
-            [:span {:class (stl/css :item-name)} name]
+            [:span {:class (stl/css :item-name :plugin-name) :title name} name]
             (when-not can-open?
               [:span {:title (tr "workspace.plugins.error.need-editor")}
                [:> icon* {:icon-id i/help
@@ -1069,7 +1069,7 @@
     [:*
      [:> icon-button* {:variant "ghost"
                        :aria-pressed show-menu?
-                       :aria-label (tr "shortcut-subsection.main-menu")
+                       :aria-label (tr "shortcuts.subsection.main-menu")
                        :on-click toggle-menu
                        :icon i/menu}]
 

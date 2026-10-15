@@ -507,8 +507,26 @@
    {:name "0154-add-upload-session-chunk-table"
     :fn (mg/resource "app/migrations/sql/0154-add-upload-session-chunk-table.sql")}
 
-   {:name "0155-add-comment-thread-animation-time"
-    :fn (mg/resource "app/migrations/sql/0155-add-comment-thread-animation-time.sql")}])
+   {:name "0154-add-job-table"
+    :fn (mg/resource "app/migrations/sql/0154-add-job-table.sql")}
+
+   {:name "0155-normalize-storage-object-metadata"
+    :fn (mg/resource "app/migrations/sql/0155-normalize-storage-object-metadata.sql")}
+
+   {:name "0155-drop-http-session-table"
+    :fn (mg/resource "app/migrations/sql/0155-drop-http-session-table.sql")}
+
+   {:name "0156-add-storage-object-json-dedup-index"
+    :fn (mg/resource "app/migrations/sql/0156-add-storage-object-json-dedup-index.sql")}
+
+   {:name "0153-del-orphan-profile-rels-after-team-leave"
+    :fn (mg/resource "app/migrations/sql/0153-del-orphan-profile-rels-after-team-leave.sql")}
+
+   {:name "0154-del-legacy-file-object-thumbnail-table"
+    :fn (mg/resource "app/migrations/sql/0154-del-legacy-file-object-thumbnail-table.sql")}
+
+   {:name "0157-add-comment-thread-animation-time"
+    :fn (mg/resource "app/migrations/sql/0157-add-comment-thread-animation-time.sql")}])
 
 (defn apply-migrations!
   [pool name migrations]

@@ -16,8 +16,10 @@
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
    [app.common.types.tokens-lib :as ctob]
+   [app.common.types.tokens-status :as ctos]
    [app.main.data.changes :as dch]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.animation-styles :as dwas]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.tokens.propagation :as dwtp]
@@ -236,7 +238,7 @@
        store done
        [(watch-undo-stack)
         (count-commits commits)
-        (dwl/update-animation-style (style :pop 2) (:id file))]
+        (dwas/update-animation-style (style :pop 2) (:id file))]
        (fn [state]
          (t/is (= 1 @commits) "the style and its uses in one change set")
          (t/is (= [600 1300] ((juxt :duration cta/animation-end) (first (animations-of state :board-a :r2)))))
@@ -254,7 +256,7 @@
       (ths/run-store
        store done
        [(watch-undo-stack)
-        (dwl/update-animation-style (style :pop 2) (:id file))
+        (dwas/update-animation-style (style :pop 2) (:id file))
         dwu/undo]
        (fn [state]
          (t/is (= (:entries (style :pop)) (:entries (get (styles-of state) (cthi/id :pop)))))
@@ -270,8 +272,8 @@
       (ths/run-store
        store done
        [(count-commits commits)
-        (dwl/update-animation-style (style :pop 2) (random-uuid))
-        (dwl/update-animation-style (assoc (style :pop 2) :id (random-uuid)) (:id file))]
+        (dwas/update-animation-style (style :pop 2) (random-uuid))
+        (dwas/update-animation-style (assoc (style :pop 2) :id (random-uuid)) (:id file))]
        (fn [state]
          (t/is (= 0 @commits))
          (t/is (= (:entries (style :pop)) (:entries (get (styles-of state) (cthi/id :pop))))))))))
@@ -289,8 +291,8 @@
        store done
        [(watch-undo-stack)
         (count-commits commits)
-        (dwl/rename-animation-styles (:id file)
-                                     (into {} (map (fn [l] [(cthi/id l) (str "Cards / " (name l) "!")])) labels))]
+        (dwas/rename-animation-styles (:id file)
+                                      (into {} (map (fn [l] [(cthi/id l) (str "Cards / " (name l) "!")])) labels))]
        (fn [state]
          (t/is (= 1 @commits) "the styles and the uses in one change set")
          (t/is (= #{"Cards"} (into #{} (map :path) (vals (styles-of state)))))
@@ -305,7 +307,7 @@
           store (store-of file)]
       (ths/run-store
        store done
-       [(dwl/delete-animation-style (cthi/id :pop))]
+       [(dwas/delete-animation-style (cthi/id :pop))]
        (fn [state]
          (t/is (empty? (styles-of state)))
          (t/is (= [[:fade 200] [:scale 300]] (mapv (juxt :type :start) (animations-of state :board-a :r2)))))))))
@@ -320,7 +322,7 @@
       (ths/run-store
        store done
        [(watch-undo-stack)
-        (dwl/delete-animation-style (cthi/id :pop))
+        (dwas/delete-animation-style (cthi/id :pop))
         dwu/undo]
        (fn [state]
          (t/is (contains? (styles-of state) (cthi/id :pop)))
@@ -362,7 +364,7 @@
        store done
        [(watch-undo-stack)
         (count-commits commits)
-        (dwl/repair-local-style-uses)]
+        (dwas/repair-local-style-uses)]
        (fn [state]
          (t/is (= 1 @commits))
          (t/is (empty? (get-in state [:workspace-undo :items])) "a repair is no undo step")
@@ -379,7 +381,7 @@
       (ths/run-store
        store done
        [(count-commits commits)
-        (dwl/repair-local-style-uses)]
+        (dwas/repair-local-style-uses)]
        (fn [_]
          (t/is (= 0 @commits)))))))
 
@@ -387,11 +389,11 @@
   (let [file-id (random-uuid)
         use     (assoc (ctas/make-use (style :pop) file-id 0) :id (random-uuid))
         track   {:shape-id (random-uuid) :keyframes [] :animations [use]}]
-    (t/is (dwl/touches-local-styles? file-id [{:type :mod-animation-style}]))
-    (t/is (dwl/touches-local-styles? file-id [{:type :set-timeline-track :params track}]))
-    (t/is (dwl/touches-local-styles? file-id [{:type :set-timeline-track-animations :animations [use]}]))
-    (t/is (not (dwl/touches-local-styles? (random-uuid) [{:type :set-timeline-track :params track}])))
-    (t/is (not (dwl/touches-local-styles? file-id [{:type :mod-obj}])))))
+    (t/is (dwas/touches-local-styles? file-id [{:type :mod-animation-style}]))
+    (t/is (dwas/touches-local-styles? file-id [{:type :set-timeline-track :params track}]))
+    (t/is (dwas/touches-local-styles? file-id [{:type :set-timeline-track-animations :animations [use]}]))
+    (t/is (not (dwas/touches-local-styles? (random-uuid) [{:type :set-timeline-track :params track}])))
+    (t/is (not (dwas/touches-local-styles? file-id [{:type :mod-obj}])))))
 
 (t/deftest previewing-a-style-commits-nothing
   (t/async
@@ -428,7 +430,7 @@
         (select [:r2])
         (dwa/preview-animation-style (style :pop 2))
         (dwa/preview-animation-style (style :pop 3))
-        (dwl/update-animation-style (style :pop 3) (:id file))]
+        (dwas/update-animation-style (style :pop 3) (:id file))]
        (fn [state]
          (t/is (= 1 @commits))
          (t/is (= 1 (count (get-in state [:workspace-undo :items]))))
@@ -485,17 +487,19 @@
   "`file` with a token set, active through a theme, of the `tokens`
   (`[name type value]`)."
   [file tokens]
-  (ctht/update-tokens-lib
-   (ctht/add-tokens-lib file)
-   (fn [lib]
-     (reduce (fn [lib [token-name type value]]
-               (ctob/add-token lib (cthi/id :motion-set)
-                               (ctob/make-token :name token-name :type type :value value)))
-             (-> lib
-                 (ctob/add-set (ctob/make-token-set :id (cthi/new-id! :motion-set) :name "motion"))
-                 (ctob/add-theme (ctob/make-token-theme :name "theme" :sets #{"motion"}))
-                 (ctob/set-active-themes #{"/theme"}))
-             tokens))))
+  (-> (ctht/add-tokens-lib file)
+      (ctht/update-tokens-lib
+       (fn [lib]
+         (reduce (fn [lib [token-name type value]]
+                   (ctob/add-token lib (cthi/id :motion-set)
+                                   (ctob/make-token :name token-name :type type :value value)))
+                 (-> lib
+                     (ctob/add-set (ctob/make-token-set :id (cthi/new-id! :motion-set) :name "motion"))
+                     (ctob/add-theme (ctob/make-token-theme :id (cthi/new-id! :motion-theme)
+                                                            :name "theme" :sets #{"motion"})))
+                 tokens)))
+      (ctht/update-tokens-status
+       #(ctos/set-tokens-status % #{(cthi/id :motion-theme)} #{(cthi/id :motion-set)}))))
 
 (defn- bind-entry
   "`file` with the entry `n` of its style `label` binding `tokens`."
@@ -521,7 +525,7 @@
       (ths/run-store
        store done
        [(count-commits commits)
-        (dwl/update-animation-styles [(style :pop 2) (style :zoom 2)] (:id file))]
+        (dwas/update-animation-styles [(style :pop 2) (style :zoom 2)] (:id file))]
        (fn [state]
          (t/is (= 1 @commits))
          (t/is (= [600 600] (mapv #(-> (styles-of state) (get (cthi/id %)) :entries first :duration)
@@ -767,7 +771,7 @@
       (ths/run-store
        store done
        [(count-commits commits)
-        (dwl/update-style-from-layer (cthi/id :r1) use-id)]
+        (dwas/update-style-from-layer (cthi/id :r1) use-id)]
        (fn [state]
          (let [entries (:entries (get (styles-of state) (cthi/id :pop)))]
            (t/is (= 1 @commits) "one change set")
@@ -790,7 +794,7 @@
       (ths/run-store
        store done
        [(watch-undo-stack)
-        (dwl/update-style-from-layer (cthi/id :r1) use-id)
+        (dwas/update-style-from-layer (cthi/id :r1) use-id)
         dwu/undo]
        (fn [state]
          (t/is (= (:entries (style :pop)) (:entries (get (styles-of state) (cthi/id :pop)))))

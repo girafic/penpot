@@ -10,6 +10,7 @@
   keyframes."
   (:require
    [app.common.data :as d]
+   [app.common.files.tokens :as cfo]
    [app.common.types.tokens-lib :as ctob]
    [app.config :as cf]
    [app.main.data.style-dictionary :as sd]
@@ -32,15 +33,16 @@
   its context (`app.main.ui.context/active-tokens-by-type`). Tokenscript
   resolves once per change of the tokens."
   []
-  (let [tokens-lib   (mf/deref refs/tokens-lib)
-        tokenscript? (contains? cf/flags :tokenscript)
-        active       (mf/with-memo [tokens-lib]
-                       (if (some? tokens-lib)
-                         (ctob/get-tokens-in-active-sets tokens-lib)
-                         {}))
-        by-script    (mf/with-memo [active tokenscript?]
-                       (when tokenscript?
-                         (d/update-vals (ts/resolve-tokens active) #(update % :resolved-value plain-value))))
-        resolved     (sd/use-resolved-tokens (if tokenscript? {} active))]
+  (let [tokens-lib    (mf/deref refs/tokens-lib)
+        tokens-status (mf/deref refs/tokens-status)
+        tokenscript?  (contains? cf/flags :tokenscript)
+        active        (mf/with-memo [tokens-lib tokens-status]
+                        (if (and (some? tokens-lib) (some? tokens-status))
+                          (cfo/get-tokens-in-active-sets tokens-status tokens-lib)
+                          {}))
+        by-script     (mf/with-memo [active tokenscript?]
+                        (when tokenscript?
+                          (d/update-vals (ts/resolve-tokens active) #(update % :resolved-value plain-value))))
+        resolved      (sd/use-resolved-tokens (if tokenscript? {} active))]
     (mf/with-memo [resolved by-script]
       (ctob/group-by-type (or by-script resolved)))))

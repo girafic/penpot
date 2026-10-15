@@ -168,8 +168,10 @@ impl TextUnits {
         }
 
         let units = bytes[Self::HEADER_SIZE..size]
-            .chunks_exact(Self::ENTRY_SIZE)
-            .map(parse_unit)
+            .as_chunks::<{ Self::ENTRY_SIZE }>()
+            .0
+            .iter()
+            .map(|entry| parse_unit(entry))
             .collect::<Result<Vec<_>>>()?;
 
         Ok(Some(Self { line_count, units }))

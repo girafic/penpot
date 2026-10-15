@@ -18,6 +18,7 @@
    [app.common.geom.modifiers :as cgm]
    [app.common.geom.rect :as grc]
    [app.common.math :as mth]
+   [app.common.render-wasm.api.select :as wselect]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
@@ -56,7 +57,7 @@
    :propagate-modifiers wasm.api/propagate-modifiers
    :set-structure-modifiers wasm.api/set-structure-modifiers
    :clean-modifiers wasm.api/clean-modifiers
-   :use-shape wasm.api/use-shape
+   :use-shape wselect/use-shape
    :set-shape-hidden wasm.api/set-shape-hidden
    :render-shape-pixels wasm.api/render-shape-pixels
    :get-shape-extrect wasm.api/get-shape-extrect

@@ -1,5 +1,5 @@
 ---
-title: 1.3  Install with Docker
+title: 1.2  Install with Docker
 desc: This Penpot technical guide covers self-hosting, Docker installation, configuration, updates, backups, and proxy setup with NGINX and Caddy. Try Penpot!
 ---
 
@@ -83,7 +83,10 @@ Penpot provides a script (`manage.py`) with some administrative tasks to perform
 flag set in the docker-compose.yaml file. For older versions of docker-compose.yaml file,
 this flag is set in the backend service.
 
-For instance, if  the registration is disabled, the only way to create a new user is with this script:
+For users who do not have a team invitation, if public registration is disabled, the
+way to create a new user is with this script. Users with a valid and active team
+invitation can register through the invitation link when password login is enabled.
+The invitation must still exist and must not have expired.
 
 ```bash
 docker exec -ti penpot-penpot-backend-1 python3 manage.py create-profile
@@ -95,6 +98,10 @@ or
 docker exec -ti penpot-penpot-backend-1 python3 manage.py create-profile --skip-tutorial --skip-walkthrough
 ```
 
+**NOTE:** profiles created with this command have no verified email. If the
+`disable-email-verification` flag is set, inviting these users to a team adds them to it
+directly, without sending any invitation email, so SMTP is not required for this flow.
+Check the [Configuration][1] section for more detail.
 
 **NOTE:** the exact container name depends on your docker version and platform.
 For example it could be <code class="language-bash">penpot-penpot-backend-1</code> or <code class="language-bash">penpot_penpot-backend-1</code>.
@@ -115,7 +122,90 @@ This will fetch the latest images. When you do <code class="language-bash">docke
     It is strongly recommended to update the Penpot version in small increments, rather than updating between two distant versions.
 </p>
 
-**Important: Upgrade from version 1.x to 2.0**
+#### Upgrade to 2.18
+
+This version deploys a new service, **`penpot-admin-console`**, in the official `docker-compose.yaml`
+example. If you maintain your own compose file, you need to replicate the following changes manually:
+
+**1. Add the `enable-admin-console` flag**
+
+**NOTE:** Enabling the Admin Console is not required in this version, but it will be in a future release.
+We recommend setting it up now to avoid a more complex upgrade later.
+
+This step (the `enable-admin-console` flag) only applies to this version 2.18. In a future release, the
+Admin Console will be enabled by default and this flag will be removed. If you're upgrading directly to a
+version where the flag has already been removed, skip step 1 and go straight to steps 2–4, which remain
+required.
+
+Wherever you set `PENPOT_FLAGS` (frontend and backend):
+
+```diff
+- PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
++ PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp enable-admin-console
+```
+
+**2. Add the new `penpot-admin-console` service**
+
+```yaml
+  penpot-admin-console:
+    image: "penpotapp/admin-console:2.18"
+    restart: always
+
+    depends_on:
+      penpot-postgres:
+        condition: service_healthy
+
+    networks:
+      - penpot
+
+    environment:
+      PENPOT_PUBLIC_URI: http://localhost:9001
+      PENPOT_SECRET_KEY: change-this-insecure-key
+      PENPOT_DATABASE_URI: postgresql://penpot-postgres/penpot
+      PENPOT_DATABASE_USERNAME: penpot
+      PENPOT_DATABASE_PASSWORD: penpot
+
+      # Don't touch it; this uses an internal docker network to
+      # communicate with the frontend.
+      PENPOT_INTERNAL_URI: http://penpot-frontend:8080
+```
+> Use the same `PENPOT_PUBLIC_URI`, `PENPOT_SECRET_KEY`, and database credentials you already have configured for `penpot-backend`.
+
+**3. Update `penpot-frontend`**
+
+- Add `penpot-admin-console` to `depends_on`.
+- Add the following environment variable:
+
+```diff
+    environment:
+      PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp enable-admin-console
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: 367001600
+      PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE: 367001600
+      PENPOT_PUBLIC_URI: http://localhost:9001
++
++     # Don't touch it; this uses an internal docker network to
++     # communicate with the admin-console.
++     PENPOT_ADMIN_CONSOLE_URI: http://penpot-admin-console:3000
+```
+
+**4. Update `penpot-backend`**
+
+Add the same variable:
+
+```diff
+    environment:
+      PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp enable-admin-console
+      PENPOT_PUBLIC_URI: http://localhost:9001
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: 367001600
+      PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE: 367001600
+      PENPOT_SECRET_KEY: change-this-insecure-key
++
++     # Don't touch it; this uses an internal docker network to
++     # communicate with the admin-console.
++     PENPOT_ADMIN_CONSOLE_URI: http://penpot-admin-console:3000
+```
+
+#### Upgrade from version 1.x to 2.0
 
 The migration to version 2.0, due to the incorporation of the new v2 components, includes
 an additional process that runs automatically as soon as the application starts. If your
@@ -226,6 +316,52 @@ server {
 ```
 
 For full documentation, go to the [official website][2]
+
+#### Serve Penpot from a subpath with NGINX
+
+First, set the complete public URL in `docker-compose.yaml`:
+
+```yaml
+PENPOT_PUBLIC_URI: https://mycompany.com/penpot/
+```
+
+Then route the subpath to the Penpot frontend and remove the prefix before
+forwarding the request:
+
+```nginx
+server {
+  listen 443 ssl;
+  server_name mycompany.com;
+
+  client_max_body_size 367001600;
+
+  # Configure TLS and logs following your organization's practices.
+  ssl_certificate /path/to/fullchain;
+  ssl_certificate_key /path/to/privkey;
+
+  location = /penpot {
+    return 301 /penpot/;
+  }
+
+  location /penpot/ {
+    rewrite ^/penpot/(.*)$ /$1 break;
+
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Scheme $scheme;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_redirect off;
+    proxy_pass http://localhost:9001;
+  }
+}
+```
+
+This single location also covers the API and WebSocket endpoints because NGINX
+forwards them after removing `/penpot`. Keep the trailing slash in
+`PENPOT_PUBLIC_URI`.
 
 ### Example with CADDY SERVER
 

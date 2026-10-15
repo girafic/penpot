@@ -92,7 +92,7 @@
    [:typographies {:optional true} schema:typographies]
    [:animation-styles {:optional true} schema:animation-styles]
    [:plugin-data {:optional true} schema:plugin-data]
-   [:tokens-source {:optional true} ::sm/uuid]                ;; Forward-compat: UUID of external library containing tokens-lib (full support in follow-up PR)
+   [:tokens-source {:optional true} ::sm/uuid]                ;; The tokens-lib may be in this file or in an external library
    [:tokens-lib {:optional true} ctob/schema:tokens-lib]
    [:tokens-status {:optional true} ctos/schema:tokens-status]])
 

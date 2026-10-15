@@ -16,9 +16,11 @@
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.db :as db]
+   [app.metrics :as mtx]
    [app.storage.fs :as sfs]
    [app.storage.impl :as impl]
    [app.storage.s3 :as ss3]
+   [app.storage.schema :as stsch]
    [cuerdas.core :as str]
    [datoteka.fs :as fs]
    [integrant.core :as ig])
@@ -36,28 +38,25 @@
       nil)))
 
 (def default-bucket
-  "file-media-object")
+  stsch/default-bucket)
 
 (def tempfile-bucket
   "Bucket name for temporary file uploads (10-minute expiry)."
-  "tempfile")
+  stsch/tempfile-bucket)
 
 (def upload-session-bucket
   "Bucket name for chunked-upload chunks."
-  "upload-session")
+  stsch/upload-session-bucket)
+
+(def job-resource-bucket
+  "Bucket for storage objects referenced by job.resource_id (the
+  unified jobs substrate): transient artifacts owned by their job row,
+  reclaimed by storage-gc-touched (via the jobs GC touch) once no job
+  row references them anymore."
+  stsch/job-resource-bucket)
 
 (def valid-buckets
-  #{"file-media-object"
-    "team-font-variant"
-    "file-object-thumbnail"
-    "file-thumbnail"
-    "profile"
-    "organization"
-    tempfile-bucket
-    upload-session-bucket
-    "file-data"
-    "file-data-fragment"
-    "file-change"})
+  stsch/metadata-buckets)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Storage Module State
@@ -75,6 +74,7 @@
   [:map {:title "storage"}
    [::backends schema:backends]
    [::backend [:enum :s3 :fs]]
+   [::mtx/metrics ::mtx/metrics]
    ::db/pool])
 
 (def valid-storage?
@@ -116,18 +116,37 @@
              params
              params))
 
+;; Matches both metadata encodings while Transit rows still exist. The
+;; UNION ALL keeps each branch indexable: migration 0068 covers the legacy
+;; "~:" keys and 0156 covers the plain JSON keys. Phase 3 drops the legacy
+;; branch once no "~:" rows remain.
+(def ^:private sql:get-database-object-by-hash
+  "(
+     select * from storage_object
+      where (metadata->>'~:hash') = ?
+        and (metadata->>'~:bucket') = ?
+        and backend = ?
+        and deleted_at is null
+        and status = 'valid'
+      limit 1
+   ) union all (
+     select * from storage_object
+      where (metadata->>'hash') = ?
+        and (metadata->>'bucket') = ?
+        and backend = ?
+        and deleted_at is null
+        and status = 'valid'
+      limit 1
+   ) limit 1")
+
+;; NOTE: metadata is left encoded; row->storage-object is responsible for
+;; decoding it.
 (defn- get-database-object-by-hash
   [connectable backend bucket hash]
-  (let [sql (str "select * from storage_object "
-                 " where (metadata->>'~:hash') = ? "
-                 "   and (metadata->>'~:bucket') = ? "
-                 "   and backend = ?"
-                 "   and deleted_at is null"
-                 "   and status = 'valid'"
-                 " limit 1")]
-    ;; NOTE: metadata is left encoded; row->storage-object is
-    ;; responsible for decoding it.
-    (db/exec-one! connectable [sql hash bucket (name backend)])))
+  (let [backend (name backend)]
+    (db/exec-one! connectable [sql:get-database-object-by-hash
+                               hash bucket backend
+                               hash bucket backend])))
 
 (defn- promote-object!
   [storage object]
@@ -145,7 +164,7 @@
     res))
 
 (defn row->storage-object [res]
-  (let [mdata (or (some-> (:metadata res) (db/decode-transit-pgobject)) {})]
+  (let [mdata (or (some-> (:metadata res) (stsch/decode-metadata)) {})]
     (impl/storage-object
      (:id res)
      (:size res)
@@ -184,6 +203,26 @@
 (dm/export impl/wrap-with-hash)
 (dm/export impl/object?)
 
+(defn- emit-op!
+  "Record a logical storage operation. Recording never fails: metrics
+  must not change storage behavior."
+  ([storage op bucket]
+   (emit-op! storage op bucket nil))
+  ([storage op bucket object]
+   (mtx/run! (::mtx/metrics storage)
+             :id :storage-operations :inc 1
+             :labels [op
+                      (mtx/label bucket "unknown")
+                      (mtx/label (or (some-> object :backend) (::backend storage))
+                                 "unknown")])))
+
+(defn- emit-dedup!
+  "Record a deduplication outcome. Recording never fails."
+  [storage result bucket]
+  (mtx/run! (::mtx/metrics storage)
+            :id :storage-dedup :inc 1
+            :labels [(name result) (mtx/label bucket "unknown")]))
+
 (defn get-object
   [storage id]
   (assert (valid-storage? storage))
@@ -206,28 +245,39 @@
                      (or touched-at (ct/now))
                      touched-at)
 
-        backend'   (impl/resolve-backend storage backend)]
+        backend'   (impl/resolve-backend storage backend)
+
+        bucket     (:bucket mdata)
+        ;; `job-resource` objects belong to one profile, so they are
+        ;; never shared: a dedup hit would hand the artifact of one
+        ;; profile to the job of another.
+        dedupable? (and (::deduplicate? params)
+                        (:hash mdata)
+                        (some? bucket)
+                        (not= tempfile-bucket bucket)
+                        (not= upload-session-bucket bucket)
+                        (not= job-resource-bucket bucket))
+
+        hit        (when dedupable?
+                     (get-database-object-by-hash pool backend bucket (:hash mdata)))]
 
     ;; NOTE: for now we don't reuse the deleted objects, but in futute
     ;; we can consider reusing deleted objects if we found a duplicated
     ;; one and is marked for deletion but still not deleted.
 
-    ;; PHASE 1: deduplication lookup.
-    (if-some [hit (when (and (::deduplicate? params)
-                             (:hash mdata)
-                             (:bucket mdata)
-                             (not= tempfile-bucket (:bucket mdata))
-                             (not= upload-session-bucket (:bucket mdata)))
-                    (get-database-object-by-hash pool backend
-                                                 (:bucket mdata)
-                                                 (:hash mdata)))]
+    ;; PHASE 1: deduplication lookup (see `dedupable?` and `hit` above).
+    (if-some [hit hit]
 
       ;; PHASE 2: an existing reference is found: reuse or repair it.
+      ;; The `exists` op is emitted only after a successful probe so every
+      ;; count stays paired with its `hit`/`repair` outcome.
       (if (impl/exists-object? backend' hit)
 
         ;; PHASE 2a: healthy reference. Optionally refresh touched_at
         ;; and reuse the object as it is.
         (do
+          (emit-op! storage "exists" bucket)
+          (emit-dedup! storage :hit bucket)
           (when touch
             (db/update! pool :storage-object
                         {:touched-at touched-at}
@@ -246,6 +296,9 @@
                  :id (:id object)
                  :backend (name backend))
           (impl/put-object backend' object content)
+          (emit-op! storage "exists" bucket)
+          (emit-op! storage "repair" bucket)
+          (emit-dedup! storage :repair bucket)
           (promote-object! storage object)
           object))
 
@@ -257,26 +310,30 @@
                                {:id id
                                 :size (impl/get-size content)
                                 :backend (name backend)
-                                :metadata (db/tjson mdata)
+                                :metadata (stsch/encode-metadata mdata)
                                 :deleted-at expired-at
                                 :touched-at touched-at
                                 :status "pending"})
             object (row->storage-object row)]
         (impl/put-object backend' object content)
+        (emit-op! storage "put" bucket)
+        (emit-dedup! storage (if dedupable? :miss :skip) bucket)
         (promote-object! storage object)
         object))))
 
 (defn touch-object!
-  "Mark object as touched."
-  [storage object-or-id]
+  "Mark object as touched. Takes the object id (UUID). The metric labels
+  come from the updated row itself (RETURNING); no row, no metric."
+  [storage id]
   (assert (valid-storage? storage))
-  (let [id (if (impl/object? object-or-id) (:id object-or-id) object-or-id)
-        ds (db/get-connectable storage)]
-    (-> (db/update! ds :storage-object
-                    {:touched-at (ct/now)}
-                    {:id id})
-        (db/get-update-count)
-        (pos?))))
+  (let [ds  (db/get-connectable storage)
+        res (db/update! ds :storage-object
+                        {:touched-at (ct/now)}
+                        {:id id}
+                        {::db/return-keys [:id :backend :metadata]})]
+    (when-some [object (some-> res row->storage-object)]
+      (emit-op! storage "touch" (-> object meta :bucket) object))
+    (some? res)))
 
 (defn get-object-data
   "Return an input stream instance of the object content."
@@ -285,8 +342,10 @@
   (assert (valid-storage? storage))
   (when (or (nil? (:expired-at object))
             (ct/is-after? (:expired-at object) (ct/now)))
-    (-> (impl/resolve-backend storage (:backend object))
-        (impl/get-object-data object))))
+    (let [result (-> (impl/resolve-backend storage (:backend object))
+                     (impl/get-object-data object))]
+      (emit-op! storage "get-data" (-> object meta :bucket) object)
+      result)))
 
 (defn get-object-bytes
   "Returns a byte array of object content."
@@ -294,8 +353,10 @@
   (assert (valid-storage? storage))
   (when (or (nil? (:expired-at object))
             (ct/is-after? (:expired-at object) (ct/now)))
-    (-> (impl/resolve-backend storage (:backend object))
-        (impl/get-object-bytes object))))
+    (let [result (-> (impl/resolve-backend storage (:backend object))
+                     (impl/get-object-bytes object))]
+      (emit-op! storage "get-bytes" (-> object meta :bucket) object)
+      result)))
 
 (defn get-object-url
   ([storage object]
@@ -319,14 +380,21 @@
       (-> (impl/get-object-url backend object nil) file-url->path))))
 
 (defn del-object!
-  [storage object-or-id]
+  "Mark the object as deleted (soft delete: the backend content is
+  removed by the GC). Takes the object id (UUID). Only a live row
+  (deleted_at IS NULL) is deleted, so a repeated call is a no-op that
+  returns false. The metric labels come from the updated row itself
+  (RETURNING); no row, no metric."
+  [storage id]
   (assert (valid-storage? storage))
-  (let [id  (if (impl/object? object-or-id) (:id object-or-id) object-or-id)
-        ds  (db/get-connectable storage)
+  (let [ds  (db/get-connectable storage)
         res (db/update! ds :storage-object
                         {:deleted-at (ct/now)}
-                        {:id id})]
-    (pos? (db/get-update-count res))))
+                        ["id = ? AND deleted_at IS NULL" id]
+                        {::db/return-keys [:id :backend :metadata]})]
+    (when-some [object (some-> res row->storage-object)]
+      (emit-op! storage "del" (-> object meta :bucket) object))
+    (some? res)))
 
 (dm/export impl/calculate-hash)
 (dm/export impl/get-hash)

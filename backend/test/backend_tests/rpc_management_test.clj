@@ -88,8 +88,7 @@
                     (configure-storage-backend))
 
         sobject (sto/put-object! storage {::sto/content (sto/content "content")
-                                          :content-type "text/plain"
-                                          :other "data"})
+                                          :content-type "text/plain"})
         profile (th/create-profile* 1 {:is-active true})
         project (th/create-project* 1 {:team-id (:default-team-id profile)
                                        :profile-id (:id profile)})
@@ -203,8 +202,7 @@
   (let [storage (-> (:app.storage/storage th/*system*)
                     (configure-storage-backend))
         sobject (sto/put-object! storage {::sto/content (sto/content "content")
-                                          :content-type "text/plain"
-                                          :other "data"})
+                                          :content-type "text/plain"})
         profile (th/create-profile* 1 {:is-active true})
 
         project (th/create-project* 1 {:team-id (:default-team-id profile)
@@ -224,7 +222,7 @@
                                                :media-id (:id sobject)})]
 
     (th/mark-file-deleted* {:id (:id file2)})
-    (sto/del-object! storage sobject)
+    (sto/del-object! storage (:id sobject))
 
     (let [data {::th/type :duplicate-file
                 ::rpc/profile-id (:id profile)
@@ -260,8 +258,7 @@
                     (configure-storage-backend))
 
         sobject (sto/put-object! storage {::sto/content (sto/content "content")
-                                          :content-type "text/plain"
-                                          :other "data"})
+                                          :content-type "text/plain"})
 
         profile (th/create-profile* 1 {:is-active true})
         project (th/create-project* 1 {:team-id (:default-team-id profile)
@@ -324,8 +321,7 @@
   (let [storage (-> (:app.storage/storage th/*system*)
                     (configure-storage-backend))
         sobject (sto/put-object! storage {::sto/content (sto/content "content")
-                                          :content-type "text/plain"
-                                          :other "data"})
+                                          :content-type "text/plain"})
         profile (th/create-profile* 1 {:is-active true})
         project (th/create-project* 1 {:team-id (:default-team-id profile)
                                        :profile-id (:id profile)})
