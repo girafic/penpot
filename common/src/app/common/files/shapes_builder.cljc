@@ -83,6 +83,7 @@
 (declare create-svg-root)
 (declare create-svg-children)
 (declare parse-svg-element)
+(declare resolve-element-name)
 
 (defn- process-gradient-stops
   "Processes gradient stops to extract stop-color and stop-opacity from style attributes
@@ -191,6 +192,97 @@
                   defs)]
       result)))
 
+(defn- url-id
+  "The id of the `url(#id)` reference in `s`."
+  [s]
+  (some->> s (str) (re-find #"url\(\s*['\"]?#([^)'\"\s]+)") (second)))
+
+(defn mask-id
+  "The id of the mask the element with `attrs` refers to."
+  [{:keys [mask style]}]
+  (or (url-id mask)
+      (cond
+        (string? style) (some->> style (re-find #"(?:^|;)\s*mask\s*:\s*([^;]+)") (second) (url-id))
+        (map? style)    (url-id (:mask style)))))
+
+(defn- white?
+  [color]
+  (contains? #{"white" "#fff" "#ffffff"} (str/lower (str/trim (str color)))))
+
+(defn- filter-kind
+  "What the filter `node` does to the drawing of a mask, as the SVG
+  exports of Penpot write it: `:white` or `:black` (it floods it with
+  the colour), `:invert` (it inverts its colours); nil for others."
+  [node]
+  (let [prims  (filterv map? (:content node))
+        flood  (some #(when (= :feFlood (:tag %)) (str/lower (str (get-in % [:attrs :flood-color])))) prims)
+        matrix (some #(when (= :feColorMatrix (:tag %)) (mapv mth/round (csvg/parse-numbers (get-in % [:attrs :values])))) prims)]
+    (cond
+      (and (= [:feFlood :feComposite] (mapv :tag prims)) (white? flood))
+      :white
+
+      (and (= [:feFlood :feComposite] (mapv :tag prims)) (contains? #{"black" "#000" "#000000"} flood))
+      :black
+
+      (and (= [:feColorMatrix] (mapv :tag prims)) (= [-1 0 0 0 1 0 -1 0 0 1 0 0 -1 0 1 0 0 0 1 0] matrix))
+      :invert
+
+      :else nil)))
+
+(defn- mask-content
+  "The mask mode (see `cts/mask-modes`) of the `<mask>` node `mask`, and
+  the nodes it draws: as its mask type says (luminance by default), or
+  as the SVG exports of Penpot write the modes (a drawing a filter turns
+  white for alpha; a white rect under it, the drawing turned black or
+  its colours inverted, for the inverted ones)."
+  [mask defs]
+  (let [content  (filterv map? (:content mask))
+        attrs    (:attrs mask)
+        type     (str/lower (str (or (:mask-type attrs)
+                                     (some->> (:style attrs) (str) (re-find #"mask-type\s*:\s*(\w+)") (second))
+                                     "luminance")))
+        filtered (fn [node]
+                   (when (= :g (:tag node))
+                     (some->> (url-id (get-in node [:attrs :filter])) (get defs) (filter-kind))))
+        [base drawn] content
+        on-white? (and (= 2 (count content)) (= :rect (:tag base)) (white? (get-in base [:attrs :fill])))]
+    (cond
+      (and on-white? (= :black (filtered drawn)))  [:alpha-inverted (:content drawn)]
+      (and on-white? (= :invert (filtered drawn))) [:luma-inverted (:content drawn)]
+      (and (= 1 (count content)) (= :white (filtered base))) [:alpha (:content base)]
+      (= "alpha" type)                              [:alpha content]
+      :else                                         [:luma content])))
+
+(defn- mask-groups
+  "The SVG `node` with each element a `<mask>` of `defs` masks held by a
+  masked group: the drawing of the mask at the bottom, in the space of
+  the element (its transform moves to the group), and the element over
+  it, without its mask."
+  [defs node]
+  (if-not (map? node)
+    node
+    (let [node (cond-> node (seq (:content node)) (update :content #(mapv (partial mask-groups defs) %)))
+          mask (get defs (mask-id (:attrs node)))]
+      (if (and (= :mask (:tag mask))
+               (not= "objectBoundingBox" (get-in mask [:attrs :maskContentUnits])))
+        (let [[mode content] (mask-content mask defs)
+              content        (filterv map? content)
+              attrs          (:attrs node)]
+          (cond-> {:tag :g
+                   :attrs (select-keys attrs [:transform])
+                   ::mask-mode mode
+                   ::name (resolve-element-name (:tag node) attrs)
+                   :content [(if (= 1 (count content))
+                               (first content)
+                               {:tag :g :attrs {} :content content})
+                             (-> node
+                                 (update :attrs dissoc :mask :transform)
+                                 (update-in [:attrs :style]
+                                            #(if (string? %) (str/replace % #"(?:^|;)\s*mask\s*:[^;]*" "") %)))]}
+            (contains? node ::element-key)
+            (assoc ::mask-of (::element-key node))))
+        node))))
+
 (defn create-svg-shapes
   ([svg-data pos objects frame-id parent-id selected center?]
    (create-svg-shapes (uuid/next) svg-data pos objects frame-id parent-id selected center?))
@@ -241,7 +333,9 @@
 
          svg-data   (-> svg-data
                         (assoc :defs def-nodes)
-                        (assoc :content (into [background] (:content svg-data))))
+                        (assoc :content (into [background]
+                                              (map (partial mask-groups def-nodes))
+                                              (:content svg-data))))
 
          root-shape (create-svg-root id frame-id parent-id svg-data)
          root-id    (:id root-shape)
@@ -314,8 +408,10 @@
                          (assoc :parent-id parent-id)
                          ;; which element made it, for an importer that
                          ;; tags the elements (see `app.common.files.svg-animation`)
-                         (cond-> (contains? svg-element ::element-key)
-                           (vary-meta assoc ::element-key (::element-key svg-element))))
+                         (cond-> (and (map? svg-element) (contains? svg-element ::element-key))
+                           (vary-meta assoc ::element-key (::element-key svg-element)))
+                         (cond-> (and (map? svg-element) (contains? svg-element ::mask-of))
+                           (vary-meta assoc ::mask-of (::mask-of svg-element))))
             children (conj children shape)
             unames   (conj unames (:name shape))]
 
@@ -530,7 +626,125 @@
            (assoc :svg-viewbox rect)
            (assoc :svg-attrs props))))))
 
+(defn- fraction
+  "The number of the SVG length `s` (`50%` is 0.5), `default` for none."
+  [s default]
+  (let [s (str/trim (str s))]
+    (some-> (if (str/ends-with? s "%")
+              (some-> (d/parse-double (subs s 0 (dec (count s)))) (/ 100))
+              (d/parse-double s default))
+            (double))))
+
+(defn- gradient-fill
+  "The Penpot gradient of the SVG `<linearGradient>` or `<radialGradient>`
+  `node` on `shape`, its points relative to the box of the shape; nil for
+  one with a transform. `offset` takes the user space of the SVG to the
+  one of the shapes."
+  [node shape offset]
+  (let [attrs (:attrs node)
+        user? (= "userSpaceOnUse" (:gradientUnits attrs))
+        {:keys [x y width height]} (:selrect shape)
+        rel-x #(if user? (/ (- (+ % (:x offset 0)) x) (max width 1e-6)) %)
+        rel-y #(if user? (/ (- (+ % (:y offset 0)) y) (max height 1e-6)) %)
+        stops (into []
+                    (keep (fn [{:keys [tag attrs]}]
+                            (let [color (str/trim (str (:stop-color attrs "#000000")))]
+                              (when (and (= :stop tag) (clr/color-string? color))
+                                {:offset  (mth/clamp (fraction (:offset attrs) 0) 0 1)
+                                 :color   (clr/parse color)
+                                 :opacity (mth/clamp (fraction (:stop-opacity attrs) 1) 0 1)}))))
+                    (:content node))
+        moved? (let [t (str/trim (str (:gradientTransform attrs)))]
+                 (and (not (str/blank? t)) (not (gmt/base? (csvg/parse-transform t)))))]
+    (when (and (seq stops) (not moved?))
+      (case (:tag node)
+        :linearGradient
+        {:type :linear
+         :start-x (rel-x (fraction (:x1 attrs) 0)) :start-y (rel-y (fraction (:y1 attrs) 0))
+         :end-x (rel-x (fraction (:x2 attrs) 1)) :end-y (rel-y (fraction (:y2 attrs) 0))
+         :width 1 :stops stops}
+
+        :radialGradient
+        (let [cx (rel-x (fraction (:cx attrs) 0.5))
+              cy (rel-y (fraction (:cy attrs) 0.5))
+              r  (fraction (:r attrs) 0.5)]
+          {:type :radial
+           :start-x cx :start-y cy :end-x cx :end-y (+ cy (if user? (/ r (max height 1e-6)) r))
+           :width 1 :stops stops})
+
+        nil))))
+
+(defn- style-value
+  "The value of the CSS property `css-name` (`prop` once parsed) in the
+  style `style` of an element, parsed or as text."
+  [style css-name prop]
+  (if (map? style)
+    (get style prop)
+    (some->> (str style)
+             (re-find (re-pattern (str "(?:^|;)\\s*" css-name "\\s*:\\s*([^;]+)")))
+             (second)
+             (str/trim))))
+
+(defn- pattern-paint
+  "The fill and its opacity of the SVG `<pattern>` `node` that is one
+  rect covering it all, as the SVG exports of Penpot write a fill; nil
+  for other patterns."
+  [node]
+  (let [drawn (loop [nodes (filterv map? (:content node))]
+                (if (and (= 1 (count nodes)) (= :g (:tag (first nodes))))
+                  (recur (filterv map? (:content (first nodes))))
+                  nodes))
+        {:keys [tag attrs]} (first drawn)
+        size  #(d/parse-double (get %1 %2) 0)]
+    (when (and (= 1 (count drawn)) (= :rect tag)
+               (zero? (size attrs :x)) (zero? (size attrs :y))
+               (>= (size attrs :width) (* 0.99 (size (:attrs node) :width)))
+               (>= (size attrs :height) (* 0.99 (size (:attrs node) :height))))
+      [(or (style-value (:style attrs) "fill" :fill) (:fill attrs))
+       (d/parse-double (or (style-value (:style attrs) "fill-opacity" :fillOpacity) (:fill-opacity attrs)) 1)])))
+
+(defn- paint-fill
+  "The fill of the SVG paint `paint` on `shape`, through a pattern or a
+  gradient of `defs` it refers to (see `pattern-paint`)."
+  [paint shape defs offset depth]
+  (let [paint (str/trim (str paint))
+        id    (url-id paint)
+        node  (when (some? id) (get defs id))]
+    (cond
+      (clr/color-string? paint)
+      {:fill-color (clr/parse paint)}
+
+      (and (= :pattern (:tag node)) (< depth 3))
+      (when-let [[inner opacity] (pattern-paint node)]
+        (some-> (paint-fill inner shape defs offset (inc depth))
+                (update :fill-opacity #(* (or % 1) opacity))))
+
+      (contains? #{:linearGradient :radialGradient} (:tag node))
+      (some->> (gradient-fill node shape offset) (hash-map :fill-color-gradient))
+
+      :else nil)))
+
+(declare setup-solid-fill)
+
 (defn setup-fill
+  ([shape]
+   (setup-fill shape (:svg-defs shape) nil))
+  ([shape defs offset]
+   (let [paint (or (dm/get-in shape [:svg-attrs :style :fill]) (dm/get-in shape [:svg-attrs :fill]))
+         fill  (when (some? (url-id paint)) (paint-fill paint shape defs offset 0))]
+     (if (some? fill)
+       ;; a gradient, or the colour of a pattern of a Penpot export
+       (-> shape
+           (update :svg-attrs dissoc :fill :fillOpacity)
+           (update-in [:svg-attrs :style] dissoc :fill :fillOpacity)
+           (assoc :fills [(update fill :fill-opacity
+                                  #(* (or % 1)
+                                      (d/parse-double (or (dm/get-in shape [:svg-attrs :style :fillOpacity])
+                                                          (dm/get-in shape [:svg-attrs :fillOpacity]))
+                                                      1)))]))
+       (setup-solid-fill shape)))))
+
+(defn- setup-solid-fill
   [shape]
   (let [color-attr  (str/trim (dm/get-in shape [:svg-attrs :fill]))
         color-attr  (if (= color-attr "currentColor") clr/black color-attr)
@@ -702,7 +916,7 @@
   ;; think we should handle this case early and avoid some code
   ;; execution
 
-  (let [name         (resolve-element-name tag attrs)
+  (let [name         (or (::name element) (resolve-element-name tag attrs))
         att-refs     (csvg/find-attr-references attrs)
         defs         (get svg-data :defs)
         valid-refs   (filter-valid-def-references att-refs defs)
@@ -751,7 +965,7 @@
         (when (some? shape)
           [(-> shape
                (assoc :svg-defs (select-keys defs references))
-               (setup-fill)
+               (setup-fill defs svg-data)
                (setup-stroke)
                (setup-opacity)
                (setup-other)
@@ -760,7 +974,11 @@
                                       (dissoc attrs :style)
                                       attrs)))
                (cond-> ^boolean hidden
-                 (assoc :hidden true)))
+                 (assoc :hidden true))
+               (cond-> (some? (::mask-mode element))
+                 (assoc :masked-group true))
+               (cond-> (contains? #{:alpha-inverted :luma :luma-inverted} (::mask-mode element))
+                 (assoc :mask-mode (::mask-mode element))))
 
            (cond->> (:content element)
              (contains? csvg/parent-tags tag)

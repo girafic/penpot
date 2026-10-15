@@ -91,3 +91,110 @@
 
         ;; stroke-style is not set at import time (nil means default solid rendering)
         (t/is (nil? (:stroke-style stroke)))))))
+
+;; --- Masks
+
+(defn- svg-with
+  [& content]
+  {:name "masked" :tag :svg
+   :attrs {:viewBox "0 0 100 100" :width "100" :height "100"}
+   :content (vec content)})
+
+(defn- masked-shapes
+  "The masked group of the SVG `svg-data` and its children, by name."
+  [svg-data]
+  (let [[_ children] (sb/create-svg-shapes svg-data {:x 0 :y 0} {} nil nil #{} false)
+        group (some #(when (:masked-group %) %) children)]
+    [group (filterv #(= (:id group) (:parent-id %)) children)]))
+
+(def ^:private spot
+  {:tag :circle :attrs {:id "spot" :cx "50" :cy "50" :r "20" :fill "white"} :content []})
+
+(def ^:private square
+  {:tag :rect :attrs {:id "square" :x "10" :y "10" :width "80" :height "80" :fill "red"
+                      :mask "url(#m)" :transform "translate(5 5)"}
+   :content []})
+
+(t/deftest a-mask-makes-a-masked-group
+  (let [[group [mask content]]
+        (masked-shapes (svg-with {:tag :defs :attrs {} :content [{:tag :mask :attrs {:id "m"} :content [spot]}]}
+                                 square))]
+    (t/is (some? group))
+    (t/is (= :luma (:mask-mode group)) "an SVG mask keeps by luminance by default")
+    (t/is (= "square" (:name group)) "named after the element it masks")
+    (t/is (= ["spot" "square"] (mapv :name [mask content])) "its drawing at the bottom")
+    (t/is (= 15.0 (+ (:x content) 0.0)) "the element where its transform puts it")
+    (t/is (= 35.0 (+ (:x mask) 0.0)) "the mask in the space of the element")))
+
+(t/deftest an-alpha-mask-keeps-by-opacity
+  (let [[group] (masked-shapes (svg-with {:tag :defs :attrs {}
+                                          :content [{:tag :mask :attrs {:id "m" :mask-type "alpha"} :content [spot]}]}
+                                         square))]
+    (t/is (true? (:masked-group group)))
+    (t/is (not (contains? group :mask-mode)))))
+
+(t/deftest the-masks-of-penpot-exports-come-back-with-their-mode
+  (doseq [[flood mode] [[{:tag :feFlood :attrs {:flood-color "black"} :content []} :alpha-inverted]
+                        [{:tag :feColorMatrix :attrs {:type "matrix" :values "-1 0 0 0 1  0 -1 0 0 1  0 0 -1 0 1  0 0 0 1 0"} :content []}
+                         :luma-inverted]]]
+    (let [filter  {:tag :filter :attrs {:id "f"}
+                   :content (if (= :feFlood (:tag flood))
+                              [flood {:tag :feComposite :attrs {:in "flood" :in2 "SourceGraphic" :operator "in"} :content []}]
+                              [flood])}
+          mask    {:tag :mask :attrs {:id "m" :mask-type "luminance"}
+                   :content [{:tag :rect :attrs {:x "-100" :y "-100" :width "300" :height "300" :fill "white"} :content []}
+                             {:tag :g :attrs {:filter "url(#f)"} :content [spot]}]}
+          [group [mask-shape]] (masked-shapes (svg-with {:tag :defs :attrs {} :content [filter mask]} square))]
+      (t/testing (name mode)
+        (t/is (= mode (:mask-mode group)))
+        (t/is (= "spot" (:name mask-shape)) "the drawing, not the white region"))))
+  (let [filter {:tag :filter :attrs {:id "f"}
+                :content [{:tag :feFlood :attrs {:flood-color "white"} :content []}
+                          {:tag :feComposite :attrs {:in "FloodResult" :in2 "SourceGraphic" :operator "in"} :content []}]}
+        mask   {:tag :mask :attrs {:id "m"} :content [{:tag :g :attrs {:filter "url(#f)"} :content [spot]}]}
+        [group] (masked-shapes (svg-with {:tag :defs :attrs {} :content [filter mask]} square))]
+    (t/is (true? (:masked-group group)))
+    (t/is (not (contains? group :mask-mode)) "a drawing turned white masks by its opacity")))
+
+;; --- Gradient and pattern fills
+
+(defn- filled
+  "The fills of the rect `rect` in an SVG with `defs`."
+  [defs rect]
+  (let [[_ children] (sb/create-svg-shapes (svg-with {:tag :defs :attrs {} :content defs} rect)
+                                           {:x 0 :y 0} {} nil nil #{} false)]
+    (:fills (some #(when (= "box" (:name %)) %) children))))
+
+(def ^:private ramp
+  {:tag :linearGradient :attrs {:id "g" :x1 "0" :y1 "0.5" :x2 "1" :y2 "0.5"}
+   :content [{:tag :stop :attrs {:offset "0" :stop-color "#ff0000"} :content []}
+             {:tag :stop :attrs {:offset "100%" :stop-color "#0000ff" :stop-opacity "0.5"} :content []}]})
+
+(t/deftest a-gradient-fill-becomes-a-penpot-gradient
+  (let [[fill] (filled [ramp] {:tag :rect :attrs {:id "box" :x "10" :y "10" :width "80" :height "40" :fill "url(#g)"} :content []})]
+    (t/is (= {:type :linear :start-x 0.0 :start-y 0.5 :end-x 1.0 :end-y 0.5 :width 1
+              :stops [{:offset 0.0 :color "#ff0000" :opacity 1.0} {:offset 1.0 :color "#0000ff" :opacity 0.5}]}
+             (update (:fill-color-gradient fill) :start-x double)))
+    (t/is (= 1.0 (double (:fill-opacity fill))))))
+
+(t/deftest a-gradient-in-user-space-is-measured-on-the-shape
+  (let [g      (-> ramp
+                   (assoc-in [:attrs :gradientUnits] "userSpaceOnUse")
+                   (assoc-in [:attrs :x1] "10") (assoc-in [:attrs :x2] "90")
+                   (assoc-in [:attrs :y1] "30") (assoc-in [:attrs :y2] "30"))
+        [fill] (filled [g] {:tag :rect :attrs {:id "box" :x "10" :y "10" :width "80" :height "40" :fill "url(#g)"} :content []})
+        {:keys [start-x start-y end-x]} (:fill-color-gradient fill)]
+    (t/is (= [0.0 0.5 1.0] (mapv double [start-x start-y end-x])))))
+
+(t/deftest the-pattern-fills-of-penpot-exports-come-back
+  (let [pattern (fn [style]
+                  {:tag :pattern :attrs {:id "p" :patternUnits "userSpaceOnUse" :x "10" :y "10" :width "80" :height "40"}
+                   :content [{:tag :g :attrs {}
+                              :content [{:tag :rect :attrs {:width "80" :height "40" :style style} :content []}]}]})
+        rect    {:tag :rect :attrs {:id "box" :x "10" :y "10" :width "80" :height "40" :fill "url(#p)"} :content []}]
+    (t/is (= [{:fill-color "#336699" :fill-opacity 0.5}]
+             (mapv #(update % :fill-opacity double) (filled [(pattern "fill:#336699;fill-opacity:0.5")] rect)))
+          "a colour")
+    (t/is (= :linear (get-in (first (filled [ramp (pattern "fill:url(#g);fill-opacity:1")] rect))
+                             [:fill-color-gradient :type]))
+          "a gradient")))

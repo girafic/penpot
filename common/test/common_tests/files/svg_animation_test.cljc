@@ -145,6 +145,35 @@
                                 (el :animate {:attributeName "x" :to "20" :dur "1s" :begin "click"}))))]
     (t/is (= {:path-morph 1 :interactive 1} (:skipped result)))))
 
+(t/deftest raw-elements-are-no-frames
+  ;; an element the import keeps as SVG, with elements in it
+  (let [file    (thf/sample-file :file1)
+        page    (thf/current-page file)
+        result  (import (svg (el :pattern {:id "dots" :width "10" :height "10"}
+                                 (el :g {} (el :rect {:width "5" :height "5"})))
+                             (el :rect {:id "box" :width "20" :height "20"}
+                                 (el :animate {:attributeName "opacity" :to "0" :dur "1s"}))))
+        board   (first (:shapes result))
+        changes (as-> (-> (pcb/empty-changes nil (:id page))
+                          (pcb/with-page page)
+                          (pcb/with-objects (:objects page))) changes
+                  (reduce pcb/add-object changes (:shapes result))
+                  (pcb/change-timeline changes (:id board) (:timeline result)))]
+    (t/is (some? (thf/apply-changes file changes)) "a valid file")))
+
+(t/deftest nested-defs-keep-their-definitions
+  (let [result (import (svg (el :defs {}
+                                (el :mask {:id "m"}
+                                    (el :g {}
+                                        (el :defs {} (el :linearGradient {:id "g" :x2 "1"}
+                                                         (el :stop {:offset "0" :stop-color "#ffffff"})
+                                                         (el :stop {:offset "1" :stop-color "#000000"})))
+                                        (el :rect {:id "band" :width "100" :height "100" :fill "url(#g)"}))))
+                            (el :rect {:id "box" :width "100" :height "100" :fill "#ff0000" :mask "url(#m)"}
+                                (el :animate {:attributeName "opacity" :to "0" :dur "1s"}))))]
+    (t/is (= :linear (get-in (named result "band") [:fills 0 :fill-color-gradient :type]))
+          "the gradient of the mask, in defs in defs")))
+
 (t/deftest the-board-goes-into-a-file
   (let [file    (thf/sample-file :file1)
         page    (thf/current-page file)

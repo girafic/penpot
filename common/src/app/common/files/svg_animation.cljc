@@ -31,6 +31,7 @@
   play is left out and counted (see `svg->shapes`)."
   (:require
    [app.common.data :as d]
+   [app.common.files.helpers :as cfh]
    [app.common.files.shapes-builder :as sb]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
@@ -1111,13 +1112,17 @@
 ;; --- Building the board -----------------------------------------------------
 
 (defn- fix-groups
-  "`shapes` with the selrects of their groups made of their children."
+  "`shapes` with the selrects of their groups made of their children, of
+  their masks for masked groups that keep what is in them."
   [shapes]
   (let [children (group-by :parent-id shapes)
         updated  (reduce (fn [objects shape]
                            (if (and (= :group (:type shape)) (seq (get children (:id shape))))
                              (let [kids (map #(get objects (:id %)) (get children (:id shape)))]
-                               (assoc objects (:id shape) (gsh/update-group-selrect shape kids)))
+                               (assoc objects (:id shape)
+                                      (if (cfh/mask-bounds-shape? shape)
+                                        (gsh/update-mask-selrect shape kids)
+                                        (gsh/update-group-selrect shape kids))))
                              objects))
                          (into {} (map (juxt :id identity)) shapes)
                          (reverse shapes))]
@@ -1125,13 +1130,13 @@
 
 (defn- with-frame-ids
   "`shapes`, parents before their children, each with the board it is in
-  as its frame: a group is none."
+  as its frame: only a board is one."
   [shapes]
   (first
    (reduce (fn [[acc frames] shape]
              (let [frame-id (get frames (:parent-id shape) (:parent-id shape))]
                [(conj acc (assoc shape :frame-id frame-id))
-                (assoc frames (:id shape) (if (= :group (:type shape)) frame-id (:id shape)))]))
+                (assoc frames (:id shape) (if (= :frame (:type shape)) (:id shape) frame-id))]))
            [[] {}]
            shapes)))
 
@@ -1299,15 +1304,25 @@
 
 (defn- transforms
   "The own transform (`:own`) of each element of the SVG `root`, by its
-  key, and the one of its ancestors (`:parent-m`)."
+  key, and the one of its ancestors (`:parent-m`); the drawing of a mask
+  in the space of the element it masks."
   [root]
-  (let [acc (volatile! {})]
+  (let [acc    (volatile! {})
+        ids    (volatile! {})
+        masked (volatile! [])]
     (letfn [(walk [node parent-m]
-              (let [own (csvg/parse-transform (get-in node [:attrs :transform]))]
+              (let [own (csvg/parse-transform (get-in node [:attrs :transform]))
+                    m   (gmt/multiply parent-m own)]
                 (vswap! acc assoc (::sb/element-key node) {:own own :parent-m parent-m})
+                (when-let [id (get-in node [:attrs :id])] (vswap! ids assoc id node))
+                (when-let [mask (sb/mask-id (:attrs node))] (vswap! masked conj [mask m]))
                 (doseq [child (:content node) :when (element? child)]
-                  (walk child (gmt/multiply parent-m own)))))]
+                  (walk child m))))]
       (walk root (gmt/matrix))
+      (doseq [[id m] @masked
+              child (:content (get @ids id))
+              :when (element? child)]
+        (walk child m))
       @acc)))
 
 (def ^:private node-properties
@@ -1380,9 +1395,35 @@
                              :else (clean % cascaded)))
                     content)))))
 
+(defn- hoist-defs
+  "The SVG `root` with the content of all its `<defs>` in one at its end:
+  they draw nothing, and in place the static import makes layers of them
+  as large as the SVG, which would make the boards of the elements they
+  are in as large too. The import finds definitions by their ids
+  anywhere."
+  [root]
+  (let [defs (volatile! [])
+        walk (fn walk [node]
+               (update node :content
+                       (fn [content]
+                         (into []
+                               (keep (fn [child]
+                                       (cond
+                                         (not (element? child)) child
+                                         (= :defs (:tag child))
+                                         ;; the defs in it first, which the walk hoists
+                                         (let [inner (:content (walk child))]
+                                           (vswap! defs into (filter element?) inner)
+                                           nil)
+                                         :else (walk child))))
+                               content))))
+        root (walk root)]
+    (cond-> root
+      (seq @defs) (update :content conj {:tag :defs :attrs {} :content @defs}))))
+
 (defn- read-svg
-  "The parsed SVG `svg-data` cleaned (see `clean`), with the specs of its
-  animations and the transforms of its elements."
+  "The parsed SVG `svg-data` cleaned (see `clean` and `hoist-defs`), with
+  the specs of its animations and the transforms of its elements."
   [ctx svg-data]
   (let [idx      (index svg-data)
         sheet    (stylesheet (str/join "\n" (:css idx)))
@@ -1392,7 +1433,7 @@
                       (map expand-steps)
                       (map #(cond-> % (= :transform (:property %)) (transform-spec)))
                       (vec))
-        root     (clean (:root idx) cascaded)]
+        root     (hoist-defs (clean (:root idx) cascaded))]
     {:idx idx :specs specs :root root :own-of (transforms root)}))
 
 (defn- board-timing
@@ -1608,12 +1649,19 @@
         env      {:idx idx :own-of own-of :objects (into {} (map (juxt :id identity)) shapes)
                   :to-board (gmt/translate-matrix (- bx vb-x) (- by vb-y))
                   :vb-w vb-w :vb-h vb-h :bx bx :by by :duration duration :steady? steady?}
+        ;; a masked element moves with its mask, which is in its space
+        groups-of (reduce (fn [acc shape]
+                            (if-let [k (::sb/mask-of (meta shape))]
+                              (update acc k (fnil conj []) (:id shape))
+                              acc))
+                          {}
+                          shapes)
         by-key   (group-by :key specs)
         boards   (into {}
                        (for [[k specs] by-key
                              :let [own (filterv #(contains? node-properties (:property %)) specs)]
                              :when (seq own)
-                             shape-id (get shapes-of k)]
+                             shape-id (get groups-of k (get shapes-of k))]
                          [shape-id (element-board ctx env k own shape-id)]))
         paints   (for [[k specs] by-key
                        spec specs
