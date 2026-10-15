@@ -414,3 +414,22 @@
         ;; Width and height should be clamped to at least 0.01
         (t/is (>= (gpo/width-points bounds) 0.01))
         (t/is (>= (gpo/height-points bounds) 0.01))))))
+
+(t/deftest bounds-map-inverted-mask-test
+  (t/testing "An inverted mask keeps what is out of it, so all the children count"
+    (let [mask-id  (uuid/next)
+          rect-id  (uuid/next)
+          group-id (uuid/next)
+          bounds   (fn [mode]
+                     (let [group   (cond-> (make-masked-group group-id [mask-id rect-id])
+                                     mode (assoc :mask-mode mode))
+                           objects (make-objects [(make-rect mask-id 0 0 10 10)
+                                                  (make-rect rect-id 100 100 50 50)
+                                                  group])
+                           bm      (-> (gbm/objects->bounds-map objects)
+                                       (gbm/transform-bounds-map objects {} [group-id]))]
+                       (gpo/width-points @(get bm group-id))))]
+      (t/is (mth/close? 10.0 (bounds nil)))
+      (t/is (mth/close? 10.0 (bounds :luma)))
+      (t/is (mth/close? 150.0 (bounds :alpha-inverted)))
+      (t/is (mth/close? 150.0 (bounds :luma-inverted))))))

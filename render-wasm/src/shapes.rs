@@ -417,9 +417,23 @@ impl Shape {
         }
     }
 
-    pub fn set_masked(&mut self, masked: bool) {
+    /// Mask the group with its bottom-most child, keeping what it holds
+    /// as `mode` says, or not (`None`).
+    pub fn set_masked(&mut self, mode: Option<MaskMode>) {
         if let Type::Group(data) = &mut self.shape_type {
-            data.masked = masked;
+            data.masked = mode.is_some();
+            data.mask_mode = mode.unwrap_or_default();
+        }
+    }
+
+    /// How the masked group keeps what it holds; `None` for any other shape.
+    pub fn mask_mode(&self) -> Option<MaskMode> {
+        match self.shape_type {
+            Type::Group(Group {
+                masked: true,
+                mask_mode,
+            }) => Some(mask_mode),
+            _ => None,
         }
     }
 
@@ -1067,7 +1081,7 @@ impl Shape {
 
     pub fn extrect_depends_on_children(&self) -> bool {
         match self.shape_type {
-            Type::Group(Group { masked: true }) => true,
+            Type::Group(Group { masked: true, .. }) => true,
             Type::Group(_) | Type::Frame(_) => !self.clip_content,
             _ => false,
         }
@@ -1082,7 +1096,7 @@ impl Shape {
         let mut rect = bounds.to_rect();
 
         match self.shape_type {
-            Type::Group(Group { masked: true }) => {
+            Type::Group(Group { masked: true, .. }) => {
                 let mut mask_rect: Option<math::Rect> = None;
                 let mut content_rect: Option<math::Rect> = None;
 
@@ -1101,7 +1115,12 @@ impl Shape {
                     }
                 }
 
+                // A mask that keeps what is out of it can leave all of it.
+                let inverted = self.mask_mode().is_some_and(|mode| mode.inverted());
                 match (mask_rect, content_rect) {
+                    (_, Some(content)) if inverted => {
+                        rect.join(content);
+                    }
                     (Some(mut mask), Some(content)) => {
                         if mask.intersect(content) {
                             rect.join(mask);
@@ -2005,13 +2024,13 @@ impl Shape {
 
     /// A group whose first child clips the rest of its content.
     pub fn is_masked_group(&self) -> bool {
-        matches!(self.shape_type, Type::Group(Group { masked: true }))
+        matches!(self.shape_type, Type::Group(Group { masked: true, .. }))
     }
 
     pub fn masked_group_layer_blur(&self) -> Option<Blur> {
         use crate::shapes::BlurType;
         match self.shape_type {
-            Type::Group(Group { masked: true }) => self.blur.filter(|blur| {
+            Type::Group(Group { masked: true, .. }) => self.blur.filter(|blur| {
                 !blur.hidden && blur.blur_type == BlurType::LayerBlur && blur.value > 0.0
             }),
             _ => None,
@@ -2133,7 +2152,7 @@ impl Shape {
     /// Keyed on the shape alone: the layer is opened and restored on
     /// different walker passes, between which fast mode or zoom can change.
     pub fn has_group_inner_shadow_layer(&self) -> bool {
-        matches!(self.shape_type, Type::Group(Group { masked: false }))
+        matches!(self.shape_type, Type::Group(Group { masked: false, .. }))
             && self.inner_shadows_visible().next().is_some()
     }
 
@@ -2476,8 +2495,11 @@ mod tests {
     #[test]
     fn test_set_masked() {
         let mut shape = any_shape();
-        shape.set_shape_type(Type::Group(Group { masked: false }));
-        shape.set_masked(true);
+        shape.set_shape_type(Type::Group(Group {
+            masked: false,
+            ..Default::default()
+        }));
+        shape.set_masked(Some(MaskMode::Alpha));
 
         if let Type::Group(Group { masked, .. }) = shape.shape_type {
             assert!(masked);
@@ -2488,7 +2510,10 @@ mod tests {
 
     fn masked_group_with(shadows: Vec<Shadow>, blur: Option<Blur>) -> Shape {
         let mut shape = any_shape();
-        shape.set_shape_type(Type::Group(Group { masked: true }));
+        shape.set_shape_type(Type::Group(Group {
+            masked: true,
+            ..Default::default()
+        }));
         shape.set_selrect(0.0, 0.0, 100.0, 100.0);
         for shadow in shadows {
             shape.add_shadow(shadow);
@@ -2543,7 +2568,10 @@ mod tests {
     #[test]
     fn masked_group_layer_filter_ignores_unmasked_groups() {
         let mut shape = masked_group_with(vec![drop_shadow(4.0, 0.0, (10.0, 0.0))], None);
-        shape.set_shape_type(Type::Group(Group { masked: false }));
+        shape.set_shape_type(Type::Group(Group {
+            masked: false,
+            ..Default::default()
+        }));
 
         assert!(shape.masked_group_layer_filter(1.0, false, false).is_none());
     }
@@ -2653,7 +2681,10 @@ mod tests {
     #[test]
     fn a_plain_group_layers_its_inner_shadows() {
         let mut shape = masked_group_with(vec![inner_shadow(4.0, (8.0, 8.0))], None);
-        shape.set_shape_type(Type::Group(Group { masked: false }));
+        shape.set_shape_type(Type::Group(Group {
+            masked: false,
+            ..Default::default()
+        }));
 
         assert!(shape.has_group_inner_shadow_layer());
         assert!(shape.group_inner_shadow_layer_filter(1.0, false).is_some());
@@ -2674,7 +2705,10 @@ mod tests {
     #[test]
     fn only_a_plain_group_with_a_visible_inner_shadow_gets_the_layer() {
         let mut drops = masked_group_with(vec![drop_shadow(4.0, 0.0, (8.0, 8.0))], None);
-        drops.set_shape_type(Type::Group(Group { masked: false }));
+        drops.set_shape_type(Type::Group(Group {
+            masked: false,
+            ..Default::default()
+        }));
         assert!(!drops.has_group_inner_shadow_layer());
 
         let mut hidden = masked_group_with(
@@ -2688,7 +2722,10 @@ mod tests {
             )],
             None,
         );
-        hidden.set_shape_type(Type::Group(Group { masked: false }));
+        hidden.set_shape_type(Type::Group(Group {
+            masked: false,
+            ..Default::default()
+        }));
         assert!(!hidden.has_group_inner_shadow_layer());
 
         // A masked group carries its inner shadows in its own layer filter.
@@ -2706,7 +2743,10 @@ mod tests {
         // The masked-group shadow silhouette relies on this split: the mask is
         // the first child, and iterating the children yields only the content.
         let mut group = any_shape();
-        group.set_shape_type(Type::Group(Group { masked: true }));
+        group.set_shape_type(Type::Group(Group {
+            masked: true,
+            ..Default::default()
+        }));
 
         let mask_id = Uuid::new_v4();
         let content_a = Uuid::new_v4();
@@ -2733,7 +2773,10 @@ mod tests {
 
         {
             let group = pool.add_shape(group_id);
-            group.set_shape_type(Type::Group(Group { masked: true }));
+            group.set_shape_type(Type::Group(Group {
+                masked: true,
+                ..Default::default()
+            }));
             group.set_selrect(0.0, 0.0, 50.0, 50.0);
             group.children = vec![mask_id, content_id];
             group.add_shadow(drop_shadow(4.0, 0.0, (20.0, 20.0)));
@@ -2782,7 +2825,10 @@ mod tests {
 
         {
             let group = pool.add_shape(group_id);
-            group.set_shape_type(Type::Group(Group { masked: true }));
+            group.set_shape_type(Type::Group(Group {
+                masked: true,
+                ..Default::default()
+            }));
             group.children = vec![mask_id, content_id];
         }
 
@@ -2935,7 +2981,10 @@ mod tests {
             frame_with_fill_and_child(Fill::Solid(SolidColor(skia::Color::BLACK)), 1.0);
         pool.get_mut(&group_id)
             .expect("group")
-            .set_shape_type(Type::Group(Group { masked: false }));
+            .set_shape_type(Type::Group(Group {
+                masked: false,
+                ..Default::default()
+            }));
         let group = pool.get(&group_id).expect("group");
         assert!(!group.container_fill_covers_shadow_descendants(&pool));
     }

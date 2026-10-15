@@ -842,8 +842,9 @@
   (h/call wasm/internal-module "_set_shape_type" (sr/translate-shape-type type)))
 
 (defn set-masked
-  [masked]
-  (props/set-masked masked))
+  "Mask the current shape as `props/mask-value` says."
+  [value]
+  (props/set-masked value))
 
 (defn set-shape-selrect
   [selrect]

@@ -899,7 +899,7 @@
                              (= :bool (:type group))
                              (path/update-bool-shape group objects)
 
-                             (:masked-group group)
+                             (cfh/mask-bounds-shape? group)
                              (->> (map lookup children)
                                   (set-mask-selrect group))
 

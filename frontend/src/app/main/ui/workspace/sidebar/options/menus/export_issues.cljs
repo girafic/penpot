@@ -26,6 +26,7 @@
    :lottie/shadow   i/drop-shadow
    :lottie/blur     i/effects
    :lottie/stroke   i/stroke-size
+   :lottie/matte    i/mask
    :background-blur i/effects
    :blend-mode      i/layers
    :split-text      i/text

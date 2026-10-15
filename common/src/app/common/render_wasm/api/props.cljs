@@ -165,9 +165,23 @@
                     hidden)))
         shadows))
 
+(defn mask-value
+  "How the renderer reads whether the group `shape` is masked and how
+  (see `cts/mask-modes`): 0 unmasked, 1 by the alpha of the mask, 2 by
+  where it is not, 3 by its brightness, 4 by its darkness."
+  [shape]
+  (if (true? (:masked-group shape))
+    (case (:mask-mode shape)
+      :alpha-inverted 2
+      :luma           3
+      :luma-inverted  4
+      1)
+    0))
+
 (defn set-masked
-  [masked]
-  (h/call wasm/internal-module "_set_shape_masked_group" masked))
+  "Mask the current shape, a group, as `mask-value` says (0: not)."
+  [value]
+  (h/call wasm/internal-module "_set_shape_masked_group" value))
 
 (defn set-shape-svg-attrs
   [attrs]

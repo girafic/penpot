@@ -325,6 +325,25 @@
                     (ptk/data-event :layout/update {:ids [(:id group)]})
                     (dwu/commit-undo-transaction undo-id)))))))))
 
+(defn set-mask-mode
+  "Sets how the masked group `id` keeps the layers it holds (see
+  `cts/mask-modes`) and resizes it: an inverted mask keeps what is out
+  of it, so the group spans all its layers and not only its mask."
+  [id mode]
+  (ptk/reify ::set-mask-mode
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [page-id (:current-page-id state)
+            objects (dsh/lookup-page-objects state page-id)
+            changes (-> (pcb/empty-changes it page-id)
+                        (pcb/with-objects objects)
+                        (pcb/update-shapes [id] #(if (= :alpha mode)
+                                                   (dissoc % :mask-mode)
+                                                   (assoc % :mask-mode mode)))
+                        (pcb/resize-parents [id]))]
+        (rx/of (dch/commit-changes changes)
+               (ptk/data-event :layout/update {:ids [id]}))))))
+
 (defn unmask-group
   ([]
    (unmask-group nil))
@@ -344,7 +363,7 @@
                                (-> changes
                                    (pcb/update-shapes [(:id mask)]
                                                       (fn [shape]
-                                                        (dissoc shape :masked-group)))
+                                                        (dissoc shape :masked-group :mask-mode)))
                                    (pcb/resize-parents [(:id mask)])))
                              (-> (pcb/empty-changes it page-id)
                                  (pcb/with-objects objects))

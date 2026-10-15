@@ -108,11 +108,16 @@ fn calculate_group_bounds(
     shape_bounds.with_points(result)
 }
 
+/// The bounds of a masked group: those of its mask, or of all its
+/// children when the mask keeps what is out of it.
 fn calculate_masked_group_bounds(
     shape: &Shape,
     shapes: ShapesPoolRef,
     bounds: &HashMap<Uuid, Bounds>,
 ) -> Option<Bounds> {
+    if shape.mask_mode().is_some_and(|mode| mode.inverted()) {
+        return calculate_group_bounds(shape, shapes, bounds);
+    }
     let mask = shape.mask_id().and_then(|id| shapes.get(id))?;
     Some(bounds.find(mask))
 }
@@ -411,7 +416,7 @@ fn propagate_reflow(
         }) => {
             layout_reflows.insert(*id);
         }
-        Type::Group(Group { masked: true }) => {
+        Type::Group(Group { masked: true, .. }) => {
             // Masked group bounds are the mask shape bounds (first child in stored
             // order, children_ids returns children in reverse order)
             if let Some(shape_bounds) = calculate_masked_group_bounds(shape, shapes, bounds) {
@@ -1077,7 +1082,10 @@ mod tests {
             content.set_selrect(0.0, 0.0, 10.0, 10.0);
 
             let parent = shapes.add_shape(parent_id);
-            parent.set_shape_type(Type::Group(Group { masked: true }));
+            parent.set_shape_type(Type::Group(Group {
+                masked: true,
+                ..Default::default()
+            }));
             parent.add_child(mask_id);
             parent.add_child(content_id);
             parent.set_selrect(1.0, 1.0, 5.0, 5.0);
@@ -1090,5 +1098,37 @@ mod tests {
 
         assert_eq!(bounds.width(), 4.0);
         assert_eq!(bounds.height(), 4.0);
+    }
+
+    #[test]
+    fn test_inverted_masked_group_bounds_are_all_its_children() {
+        let parent_id = Uuid::new_v4();
+        let shapes = {
+            let mut shapes = ShapesPool::new();
+            shapes.initialize(10);
+
+            let mask_id = Uuid::new_v4();
+            let mask = shapes.add_shape(mask_id);
+            mask.set_selrect(1.0, 1.0, 5.0, 5.0);
+
+            let content_id = Uuid::new_v4();
+            let content = shapes.add_shape(content_id);
+            content.set_selrect(0.0, 0.0, 10.0, 10.0);
+
+            let parent = shapes.add_shape(parent_id);
+            parent.set_shape_type(Type::Group(Group::default()));
+            parent.set_masked(Some(MaskMode::LumaInverted));
+            parent.add_child(mask_id);
+            parent.add_child(content_id);
+            parent.set_selrect(1.0, 1.0, 5.0, 5.0);
+            shapes
+        };
+
+        let parent = shapes.get(&parent_id).unwrap();
+
+        let bounds = calculate_masked_group_bounds(parent, &shapes, &HashMap::new()).unwrap();
+
+        assert_eq!(bounds.width(), 10.0);
+        assert_eq!(bounds.height(), 10.0);
     }
 }

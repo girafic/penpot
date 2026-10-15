@@ -1826,7 +1826,13 @@
                         (assoc-in [cid :parent-id] gid))]
         (t/is (not-any? #(has? (issues masked tl) % :mask) [:svg :lottie :webm])
               "an SVG and a Lottie keep it to its mask, a video draws as the canvas")
-        (t/is (not (has? (issues masked tl) :lottie :lottie/images)) "as vectors")))
+        (t/is (not (has? (issues masked tl) :lottie :lottie/images)) "as vectors")
+        (t/is (not (has? (issues masked tl) :lottie :lottie/matte)))
+        (doseq [[mode matte?] [[:alpha-inverted false] [:luma false] [:luma-inverted true]]]
+          (t/is (= matte? (has? (issues (assoc-in masked [gid :mask-mode] mode) tl) :lottie :lottie/matte))
+                (str "lottie-web plays a mask by " mode)))
+        (t/is (has? (issues (assoc-in masked [gid :mask-mode] :luma-inverted) tl) :dotlottie :lottie/matte))
+        (t/is (not (has? (issues (assoc-in masked [gid :mask-mode] :luma-inverted) tl) :svg :lottie/matte)))))
     (t/testing "a board that shows through"
       (let [clear (update objects bid assoc :fills [])]
         (t/is (has? (issues clear tl) :gif :gif/alpha))

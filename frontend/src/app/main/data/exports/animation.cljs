@@ -24,6 +24,7 @@
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
+   [app.common.types.shape :as cts]
    [app.common.types.stroke :as ctst]
    [app.main.data.event :as ev]
    [app.main.data.exports.svg-vectors :as svgv]
@@ -620,6 +621,8 @@
     soften at their own strength (as the canvas in lottie-web);
   - `:lottie/stroke`, a stroke Lottie draws otherwise (see
     `off-center-stroke?`);
+  - `:lottie/matte`, a mask by luminance inverted (see
+    `cts/mask-modes`), a track matte lottie-web does not play;
   - `:background-blur` and `:blend-mode`, which no markup format plays
     (in SVG a layer blends only within itself);
   - `:split-text`, a split text played whole (one that underlines or
@@ -701,6 +704,8 @@
             (some?* (fn [shape]
                       (and (not= :text (:type shape))
                            (some off-center-stroke? (shown (:strokes shape))))))]
+           [:lottie/matte lottie-formats
+            (some?* #(and (cfh/mask-shape? %) (= :luma-inverted (cts/mask-mode %))))]
            [:background-blur markup-formats
             (or (contains? animated :background-blur)
                 (some?* (fn [shape] (some #(pos? (:value % 0)) (shown (:background-blur shape))))))]

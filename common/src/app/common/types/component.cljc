@@ -93,6 +93,7 @@
    :blur                    :blur-group
    :background-blur         :blur-group
    :masked-group            :mask-group
+   :mask-mode               :mask-group
    :constraints-h           :constraints-group
    :constraints-v           :constraints-group
    :fixed-scroll            :constraints-group

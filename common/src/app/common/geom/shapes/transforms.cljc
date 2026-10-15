@@ -466,7 +466,7 @@
                 children (cfh/get-immediate-children objects id)
                 shape
                 (cond
-                  (cfh/mask-shape? shape)
+                  (cfh/mask-bounds-shape? shape)
                   (update-mask-selrect shape children)
 
                   (cfh/bool-shape? shape)
@@ -569,7 +569,7 @@
            (map (d/getf objects) $)
            (apply-children-modifiers objects modif-tree modifiers $ propagate?))]
      (cond
-       (cfh/mask-shape? group)
+       (cfh/mask-bounds-shape? group)
        (update-mask-selrect group children)
 
        (cfh/bool-shape? group)

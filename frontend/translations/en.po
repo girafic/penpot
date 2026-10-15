@@ -8305,6 +8305,12 @@ msgstr "Size animation · Stretches in %s"
 msgid "workspace.options.export.issue.lottie-size.text"
 msgstr "Width and height play as a scale of the layer in %s, which stretches its strokes, corners and text. Rectangles, ellipses and boards that are not rotated, in plain colors and with equal corners change their size instead, the layers in a board moving as their constraints say."
 
+msgid "workspace.options.export.issue.lottie-matte"
+msgstr "Luminance inverted mask · May not play in %s"
+
+msgid "workspace.options.export.issue.lottie-matte.text"
+msgstr "A mask by luminance inverted plays as a track matte of %s that lottie-web does not support: it shows the layers unmasked. Skottie and ThorVG (dotLottie players) mask them."
+
 msgid "workspace.options.export.issue.lottie-shadow"
 msgstr "Shadows · May change in %s"
 
@@ -8887,6 +8893,30 @@ msgstr "More color tokens"
 #: src/app/main/ui/workspace/sidebar/options/drawing/frame.cljs:117, src/app/main/ui/workspace/sidebar/options/menus/measures.cljs:518
 msgid "workspace.options.no-size-preset-results"
 msgstr "No matching size preset"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/mask.cljs
+msgid "workspace.options.mask"
+msgstr "Mask"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/mask.cljs
+msgid "workspace.options.mask-hint"
+msgstr "How the bottom-most layer of the group keeps the others"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/mask.cljs
+msgid "workspace.options.mask.alpha"
+msgstr "Alpha"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/mask.cljs
+msgid "workspace.options.mask.alpha-inverted"
+msgstr "Alpha inverted"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/mask.cljs
+msgid "workspace.options.mask.luma"
+msgstr "Luminance"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/mask.cljs
+msgid "workspace.options.mask.luma-inverted"
+msgstr "Luminance inverted"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/layer.cljs:240, src/app/main/ui/workspace/sidebar/options/menus/layer.cljs:297
 msgid "workspace.options.opacity"

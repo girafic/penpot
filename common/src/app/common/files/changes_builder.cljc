@@ -905,7 +905,7 @@
                                  ;; normalized in the same way as
                                  ;; update-bool in order to make all
                                  ;; this code consistent
-                                 (if (:masked-group parent)
+                                 (if (cfh/mask-bounds-shape? parent)
                                    (gsh/update-mask-selrect parent children)
                                    (gsh/update-group-selrect parent children)))]
             (if resized-parent

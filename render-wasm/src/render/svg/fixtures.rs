@@ -241,7 +241,10 @@ fn add_group_inner(
 ) {
     let shape = pool.add_shape(id);
     shape.set_parent(parent);
-    shape.set_shape_type(Type::Group(Group { masked }));
+    shape.set_shape_type(Type::Group(Group {
+        masked,
+        ..Default::default()
+    }));
     shape.set_selrect(l, t, r, b);
     for child in children {
         shape.add_child(*child);

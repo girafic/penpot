@@ -36,7 +36,7 @@
 
            children
            (cond->> (cfh/get-immediate-children objects id)
-             (cfh/mask-shape? shape)
+             (cfh/mask-bounds-shape? shape)
              (take 1))
            shape-bounds (if current-ref @current-ref @(get bounds-map id))
            current-bounds

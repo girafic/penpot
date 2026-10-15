@@ -203,7 +203,7 @@
          bounds
          (cond
            (or (empty? (:shapes shape))
-               (:masked-group shape)
+               (cfh/mask-bounds-shape? shape)
                (cfh/bool-shape? shape)
                (and (cfh/frame-shape? shape)
                     (not (:show-content shape))))
@@ -219,8 +219,7 @@
                    (or (not (cfh/frame-shape? shape))
                        (:show-content shape))
 
-                   (or (not (cfh/group-shape? shape))
-                       (not (:masked-group shape)))))
+                   (not (cfh/mask-bounds-shape? shape))))
             (:id shape)
 
             (fn [result child]

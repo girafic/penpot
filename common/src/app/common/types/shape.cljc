@@ -105,6 +105,19 @@
 (def text-align-types
   #{"left" "right" "center" "justify"})
 
+(def mask-modes
+  "How the mask of a masked group (its bottom-most layer) keeps the
+  layers it holds, as the track mattes of After Effects: by the opacity
+  of the mask (`:alpha`, the default) or by its brightness (`:luma`),
+  or where it is not (`:alpha-inverted`, `:luma-inverted`)."
+  #{:alpha :alpha-inverted :luma :luma-inverted})
+
+(defn mask-mode
+  "How the masked group `shape` keeps the layers it holds (see
+  `mask-modes`)."
+  [shape]
+  (or (:mask-mode shape) :alpha))
+
 (def bool-types
   #{:union
     :difference
@@ -201,6 +214,7 @@
    [:locked {:optional true} :boolean]
    [:hidden {:optional true} :boolean]
    [:masked-group {:optional true} :boolean]
+   [:mask-mode {:optional true} [::sm/one-of mask-modes]]
    [:fills {:optional true} schema:fills]
    [:proportion {:optional true} ::sm/safe-number]
    [:proportion-lock {:optional true} :boolean]
@@ -511,7 +525,7 @@
 (def ^:private allowed-shape-attrs
   #{:page-id :component-id :component-file :component-root :main-instance
     :remote-synced :shape-ref :touched :blocked :collapsed :locked
-    :hidden :masked-group :fills :proportion :proportion-lock :constraints-h
+    :hidden :masked-group :mask-mode :fills :proportion :proportion-lock :constraints-h
     :constraints-v :fixed-scroll :r1 :r2 :r3 :r4 :rotation :opacity :grids :exports
     :strokes :blend-mode :interactions :shadow :blur :background-blur :grow-type :applied-tokens
     :plugin-data})

@@ -9,6 +9,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.render-wasm.api.props :as props]
    [app.common.render-wasm.api.select :as wselect]
    [app.common.render-wasm.svg-derived :as svg-derived]
    [app.common.transit :as t]
@@ -249,9 +250,9 @@
           (api/set-shape-background-blur (:background-blur shape))
           (api/set-shape-shadows (:shadow shape)))
 
-        :masked-group
+        (:masked-group :mask-mode)
         (when (cfh/group-shape? shape)
-          (api/set-masked (boolean (:masked-group shape))))
+          (api/set-masked (props/mask-value shape)))
 
         :content
         (cond

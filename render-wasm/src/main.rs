@@ -28,7 +28,7 @@ use globals::{get_design_state, get_gpu_state, get_render_state, get_resources, 
 use macros::wasm_error;
 use math::{Bounds, Matrix};
 use mem::SerializableResult;
-use shapes::{StructureEntry, StructureEntryType, TransformEntry};
+use shapes::{MaskMode, StructureEntry, StructureEntryType, TransformEntry};
 use skia_safe as skia;
 use utils::uuid_from_u32_quartet;
 use uuid::Uuid;
@@ -486,9 +486,9 @@ pub extern "C" fn set_parent(a: u32, b: u32, c: u32, d: u32) -> Result<()> {
 
 #[no_mangle]
 #[wasm_error]
-pub extern "C" fn set_shape_masked_group(masked: bool) -> Result<()> {
+pub extern "C" fn set_shape_masked_group(value: u8) -> Result<()> {
     with_current_shape_mut!(state, |shape: &mut Shape| {
-        shape.set_masked(masked);
+        shape.set_masked(MaskMode::from_value(value));
     });
     Ok(())
 }

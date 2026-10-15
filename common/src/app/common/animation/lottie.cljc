@@ -26,6 +26,7 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.path :as path]
+   [app.common.types.shape :as cts]
    [clojure.string :as str]))
 
 (def ^:private lottie-fps 60)
@@ -1492,11 +1493,16 @@
                (map-indexed vector)
                (filter #(and (= :inner-shadow (:style (second %))) (not (:hidden (second %)))))))))
 
+(def ^:private lottie-track-mattes
+  "The track matte (`tt`) of each mask mode (see `cts/mask-modes`)."
+  {:alpha 1 :alpha-inverted 2 :luma 3 :luma-inverted 4})
+
 (defn- lottie-masked-layers
   "The layers of the masked group `shape` in its precomp, the top-most
-  first: its mask, the bottom-most of what it holds, an alpha matte
-  (`td`) over a precomp of the others, `inner` but the mask (see
-  `layer-nodes`), which keeps them to it (`tt`), as the canvas does. The
+  first: its mask, the bottom-most of what it holds, a matte (`td`)
+  over a precomp of the others, `inner` but the mask (see
+  `layer-nodes`), which keeps them to it (`tt`, by alpha or luma,
+  inverted or not, as its mask mode says), as the canvas does. The
   mask draws without its shadows and blur, as the canvas draws it; the
   layers it holds are layers (see `aexp/export-holders`). The precomp goes to
   `comps`."
@@ -1518,7 +1524,7 @@
       :always       (conj (cond-> {:ddd 0 :ty 0 :nm (str name " content") :refId ref :sr 1
                                    :ks lottie-identity-ks :ao 0 :w width :h height
                                    :ip 0 :op (ms->frames duration) :st 0 :bm 0}
-                            (some? matte) (assoc :tt 1)))
+                            (some? matte) (assoc :tt (get lottie-track-mattes (cts/mask-mode shape) 1))))
       :always       (into (filter ::null) drawn))))
 
 (defn- lottie-precomp-layer

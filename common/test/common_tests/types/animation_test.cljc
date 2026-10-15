@@ -2395,6 +2395,31 @@
     (t/is (not (str/includes? content "class=\"Mask\"")) "its mask no shape of its own")
     (t/is (not (str/includes? svg "class=\"Reveal\"")) "the group drawn by what it holds")))
 
+(t/deftest the-exports-keep-the-mask-mode-of-a-masked-group
+  ;; as the track mattes of After Effects: by alpha or luma, inverted or not
+  (let [{:keys [bid gid rid objects]} (masked-reveal)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe rid {:time 0 :property :x :value 0})
+                   (cta/add-keyframe rid {:time 1000 :property :x :value 200}))
+        ids    (aexp/export-layer-ids objects tl)
+        images (into {}
+                     (map (fn [id] [id {:markup (str "<rect class=\"" (get-in objects [id :name] "board") "\"/>")}]))
+                     (cons bid ids))]
+    (doseq [[mode tt type filter?] [[:alpha 1 "alpha" false]
+                                    [:alpha-inverted 2 "luminance" true]
+                                    [:luma 3 "luminance" false]
+                                    [:luma-inverted 4 "luminance" true]]]
+      (let [objects (assoc-in objects [gid :mask-mode] mode)
+            L       (alottie/timeline->lottie tl objects)
+            comp    #(some (fn [c] (when (= % (:id c)) c)) (:assets L))
+            [_ content] (:layers (comp (:refId (first (:layers L)))))
+            svg     (asvg/timeline->svg tl objects images)
+            mask    (second (re-find (re-pattern (str "<mask id=\"penpot-mask-" gid "\"[^>]*>([\\s\\S]*?)</mask>")) svg))]
+        (t/is (= tt (:tt content)) (str "the track matte of " mode))
+        (t/is (str/includes? svg (str "mask-type=\"" type "\"")) (str "the SVG mask of " mode))
+        (t/is (= filter? (str/includes? mask "fill=\"white\"")) (str "a white region under " mode))
+        (t/is (= filter? (str/includes? svg (str "id=\"penpot-mask-" gid "-filter\""))))))))
+
 (t/deftest lottie-draws-a-masked-group-as-vectors
   ;; Not an image any more: its own animation plays on it.
   (let [{:keys [bid gid objects]} (masked-reveal)

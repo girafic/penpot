@@ -253,6 +253,40 @@
                 "The parent must use the updated bounds of both children")
           (assert-idempotent data changes))))))
 
+(t/deftest an-inverted-mask-spans-all-the-layers-of-its-group
+  (let [page-id  (uuid/custom 32 1)
+        group-id (uuid/custom 32 2)
+        mask-id  (uuid/custom 32 3)
+        rect-id  (uuid/custom 32 4)
+        data     (ch/process-changes
+                  (make-file-data (uuid/custom 32 5) page-id)
+                  (mapv (fn [[id parent-id type x y w h]]
+                          {:type :add-obj :id id :page-id page-id
+                           :frame-id uuid/zero :parent-id parent-id
+                           :obj (cond-> (cts/setup-shape
+                                         {:id id :type type :name (name type)
+                                          :frame-id uuid/zero :parent-id parent-id
+                                          :x x :y y :width w :height h})
+                                  (= :group type) (assoc :masked-group true))})
+                        [[group-id uuid/zero :group 20 20 10 10]
+                         [mask-id group-id :circle 20 20 10 10]
+                         [rect-id group-id :rect 0 0 100 100]]))
+        bounds   (fn [mode]
+                   (-> (ch/process-changes
+                        data
+                        [{:type :mod-obj :id group-id :page-id page-id
+                          :operations [{:type :set :attr :mask-mode :val mode}]}
+                         {:type :reg-objects :page-id page-id :shapes [group-id]}])
+                       (get-in [:pages-index page-id :objects group-id])
+                       (select-keys [:x :y :width :height])
+                       (update-vals double)))
+        mask     {:x 20.0 :y 20.0 :width 10.0 :height 10.0}
+        all      {:x 0.0 :y 0.0 :width 100.0 :height 100.0}]
+    (t/is (= mask (bounds nil)) "The mask keeps what is in it")
+    (t/is (= mask (bounds :luma)))
+    (t/is (= all (bounds :alpha-inverted)) "An inverted one what is out of it")
+    (t/is (= all (bounds :luma-inverted)))))
+
 (t/deftest add-obj
   (let [file-id (uuid/custom 2 2)
         page-id (uuid/custom 1 1)

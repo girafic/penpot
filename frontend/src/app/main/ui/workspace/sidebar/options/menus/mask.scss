@@ -1,0 +1,20 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+.element-set {
+  max-width: var(--options-width);
+}
+
+.title-spacing {
+  padding-left: var(--sp-xxs);
+  margin: 0;
+}
+
+.element-set-content {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--sp-s);
+}

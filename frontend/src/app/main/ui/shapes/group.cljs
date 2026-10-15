@@ -7,6 +7,8 @@
 (ns app.main.ui.shapes.group
   (:require
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
+   [app.common.types.shape :as cts]
    [app.main.ui.context :as muc]
    [app.main.ui.shapes.mask :refer [mask-url clip-url mask-factory]]
    [rumext.v2 :as mf]))
@@ -30,8 +32,11 @@
                             (rest childs)
                             childs)
 
+            mode          (cts/mask-mode shape)
             wrapper       (if ^boolean masked-group? "g" mf/Fragment)
-            clip-props    (if ^boolean masked-group?
+            ;; what an inverted mask keeps is out of its outline
+            clip-props    (if (and ^boolean masked-group?
+                                   (not (contains? cfh/inverted-mask-modes mode)))
                             #js {:clipPath (clip-url render-id mask)}
                             #js {})
 
@@ -56,7 +61,7 @@
          [:> wrapper clip-props
           [:> wrapper mask-props
            (when ^boolean masked-group?
-             [:& render-mask {:mask mask}])
+             [:& render-mask {:mask mask :mode mode}])
 
            (for [item childs]
              [:& shape-wrapper

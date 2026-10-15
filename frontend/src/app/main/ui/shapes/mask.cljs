@@ -53,6 +53,10 @@
     {::mf/wrap-props false}
     [props]
     (let [mask       (unchecked-get props "mask")
+          ;; how the mask keeps what the group holds (see `cts/mask-modes`)
+          mode       (or (unchecked-get props "mode") :alpha)
+          inverted?  (contains? cfh/inverted-mask-modes mode)
+          luma?      (contains? #{:luma :luma-inverted} mode)
           render-id  (mf/use-ctx muc/render-id)
 
           svg-text?  (and ^boolean (cfh/text-shape? mask)
@@ -71,19 +75,31 @@
           bw         (dm/get-prop bounds :width)
           bh         (dm/get-prop bounds :height)
 
-          shape      (mf/with-memo [mask]
-                       (-> mask
-                           (dissoc :shadow :blur)
-                           (assoc :is-mask? true)))]
+          ;; a luma mask keeps its colours, whose brightness keeps
+          shape      (mf/with-memo [mask luma?]
+                       (cond-> (dissoc mask :shadow :blur)
+                         (not luma?) (assoc :is-mask? true)))
+
+          ;; what an inverted mask keeps reaches past it: a region as
+          ;; far as anything goes
+          [rx ry rw rh] (if inverted?
+                          [(- bx 100000) (- by 100000) (+ bw 200000) (+ bh 200000)]
+                          [bx by bw bh])]
 
       [:defs
        [:filter {:id (filter-id render-id mask)}
-        [:feFlood {:flood-color "white"
-                   :result "FloodResult"}]
-        [:feComposite {:in "FloodResult"
-                       :in2 "SourceGraphic"
-                       :operator "in"
-                       :result "comp"}]]
+        (if (= :luma-inverted mode)
+          ;; dark where it was bright: over the white region below, the
+          ;; mask keeps where it is dark
+          [:feColorMatrix {:type "matrix"
+                           :values "-1 0 0 0 1  0 -1 0 0 1  0 0 -1 0 1  0 0 0 1 0"}]
+          [:*
+           [:feFlood {:flood-color (if inverted? "black" "white")
+                      :result "FloodResult"}]
+           [:feComposite {:in "FloodResult"
+                          :in2 "SourceGraphic"
+                          :operator "in"
+                          :result "comp"}]])]
        ;; Clip path is necessary so the elements inside the mask won't affect
        ;; the events outside. Clip hides the elements but mask doesn't (like display vs visibility)
        ;; we cannot use clips instead of mask because clips can only be simple shapes
@@ -95,10 +111,10 @@
        ;; There is a bug in Firefox with filters and texts. We change the text to white at shape level
        [:mask {:class "mask-shape"
                :id (mask-id render-id mask)
-               :x bx
-               :y by
-               :width bw
-               :height bh
+               :x rx
+               :y ry
+               :width rw
+               :height rh
 
                ;; This is necesary to prevent a race condition in the dynamic-modifiers whether the modifier
                ;; triggers afte the render
@@ -108,7 +124,9 @@
                :data-old-height bh
                :mask-units "userSpaceOnUse"}
 
-        [:g {:filter (when-not ^boolean svg-text?
+        (when inverted?
+          [:rect {:x rx :y ry :width rw :height rh :fill "white"}])
+        [:g {:filter (when (or inverted? (and (not luma?) (not ^boolean svg-text?)))
                        (filter-url render-id mask))}
          [:& shape-wrapper {:shape shape}]]]])))
 

@@ -32,7 +32,7 @@ use crate::globals::get_text_editor_state;
 use crate::math;
 use crate::shapes::{
     all_with_ancestors, modifier_changes_text_layout, radius_to_sigma, Blur, BlurType, Corners,
-    Fill, Shadow, Shape, SolidColor, Stroke, StrokeKind, Type,
+    Fill, MaskMode, Shadow, Shape, SolidColor, Stroke, StrokeKind, Type,
 };
 use crate::state::{ShapesPoolMutRef, ShapesPoolRef};
 use crate::tiles::{self, PendingTiles, TileRect};
@@ -76,8 +76,9 @@ pub struct NodeRenderState {
     clip_bounds: Option<ClipStack>,
     // This is a flag to indicate that we've already drawn the mask of a masked group.
     visited_mask: bool,
-    // This bool indicates that we're drawing the mask shape.
-    mask: bool,
+    // Set while we're drawing the mask shape of a masked group: how the
+    // mask keeps what the group holds.
+    mask: Option<MaskMode>,
     // True when this container was flattened (enter/exit skipped).
     flattened: bool,
 }
@@ -2692,7 +2693,7 @@ impl RenderState {
                 visited_children: false,
                 clip_bounds: None,
                 visited_mask: false,
-                mask: false,
+                mask: None,
                 flattened: false,
             }));
 
@@ -2931,7 +2932,7 @@ impl RenderState {
                 visited_children: false,
                 clip_bounds: None,
                 visited_mask: false,
-                mask: false,
+                mask: None,
                 flattened: false,
             });
             self.render_shape_tree_partial_uncached(tree, timestamp, false, true)?;
@@ -3094,7 +3095,7 @@ impl RenderState {
     pub fn render_shape_enter(
         &mut self,
         element: &Shape,
-        mask: bool,
+        mask: Option<MaskMode>,
         clip_bounds: Option<&ClipStack>,
         target_surface: SurfaceId,
     ) {
@@ -3150,11 +3151,12 @@ impl RenderState {
         }
 
         // When we're rendering the mask shape we need to set a special blend mode
-        // called 'destination-in' that keeps the drawn content within the mask.
+        // called 'destination-in' that keeps the drawn content within the mask,
+        // or 'destination-out', out of it, by its brightness for a luma mask
+        // (see `MaskMode::paint`).
         // @see https://skia.org/docs/user/api/skblendmode_overview/
-        if mask {
-            let mut mask_paint = skia::Paint::default();
-            mask_paint.set_blend_mode(skia::BlendMode::DstIn);
+        if let Some(mode) = mask {
+            let mask_paint = mode.paint();
             let mask_rec = skia::canvas::SaveLayerRec::default().paint(&mask_paint);
             self.surfaces.canvas(target_surface).save_layer(&mask_rec);
         }
@@ -3221,7 +3223,7 @@ impl RenderState {
                         visited_children: true,
                         clip_bounds: None,
                         visited_mask: true,
-                        mask: false,
+                        mask: None,
                         flattened: false,
                     });
                     if let Some(&mask_id) = element.mask_id() {
@@ -3230,7 +3232,7 @@ impl RenderState {
                             visited_children: false,
                             clip_bounds: None,
                             visited_mask: false,
-                            mask: true,
+                            mask: Some(group.mask_mode),
                             flattened: false,
                         });
                     }
@@ -3542,8 +3544,15 @@ impl RenderState {
             self.render_black_silhouette_subtree(content, children_clip_bounds.clone(), pass)?;
         }
 
+        // The silhouette is black: a luma mask keeps it as an alpha one
+        // would, where it is or is not.
+        let inverted = shape.mask_mode().is_some_and(|mode| mode.inverted());
         let mut mask_paint = skia::Paint::default();
-        mask_paint.set_blend_mode(skia::BlendMode::DstIn);
+        mask_paint.set_blend_mode(if inverted {
+            skia::BlendMode::DstOut
+        } else {
+            skia::BlendMode::DstIn
+        });
         let mask_rec = skia::canvas::SaveLayerRec::default().paint(&mask_paint);
         self.surfaces
             .canvas(SurfaceId::DropShadows)
@@ -4110,7 +4119,7 @@ impl RenderState {
                                 visited_children: false,
                                 clip_bounds: clip_bounds.clone(),
                                 visited_mask: false,
-                                mask: false,
+                                mask: None,
                                 flattened: false,
                             });
                         }
@@ -4133,7 +4142,7 @@ impl RenderState {
                 };
 
                 let is_visible = export
-                    || mask
+                    || mask.is_some()
                     || if is_container || has_effects {
                         let element_extrect =
                             extrect.get_or_insert_with(|| transformed_element.extrect(tree, scale));
@@ -4427,7 +4436,7 @@ impl RenderState {
                         visited_children: false,
                         clip_bounds: children_clip_bounds.clone(),
                         visited_mask: false,
-                        mask: false,
+                        mask: None,
                         flattened: false,
                     });
                 }
@@ -4609,7 +4618,7 @@ impl RenderState {
                         visited_children: false,
                         clip_bounds: None,
                         visited_mask: false,
-                        mask: false,
+                        mask: None,
                         flattened: false,
                     }));
             } else {
@@ -5158,7 +5167,10 @@ mod tests {
 
     fn shadowed_group(style: ShadowStyle) -> Shape {
         let mut group = Shape::new(Uuid::new_v4());
-        group.set_shape_type(Type::Group(Group { masked: false }));
+        group.set_shape_type(Type::Group(Group {
+            masked: false,
+            ..Default::default()
+        }));
         group.set_selrect(0.0, 0.0, 100.0, 100.0);
         group.add_shadow(Shadow::new(
             skia::Color::BLACK,
@@ -5216,7 +5228,10 @@ mod tests {
     #[test]
     fn a_see_through_masked_group_shows_no_shadow_through_what_it_holds() {
         let mut group = shadowed_group(ShadowStyle::Drop);
-        group.set_shape_type(Type::Group(Group { masked: true }));
+        group.set_shape_type(Type::Group(Group {
+            masked: true,
+            ..Default::default()
+        }));
         group.set_opacity(0.5);
 
         let pixel = masked_group_pixel(&group);
@@ -5238,7 +5253,10 @@ mod tests {
         let base = canvas.save_count();
 
         let mut masked = shadowed_group(ShadowStyle::Inner);
-        masked.set_shape_type(Type::Group(Group { masked: true }));
+        masked.set_shape_type(Type::Group(Group {
+            masked: true,
+            ..Default::default()
+        }));
         let mut rect = shadowed_group(ShadowStyle::Inner);
         rect.set_shape_type(Type::Rect(RectType::default()));
 
@@ -5260,7 +5278,10 @@ mod tests {
 
     fn group(masked: bool) -> Shape {
         let mut shape = Shape::new(Uuid::new_v4());
-        shape.set_shape_type(Type::Group(Group { masked }));
+        shape.set_shape_type(Type::Group(Group {
+            masked,
+            ..Default::default()
+        }));
         shape.set_selrect(10.0, 20.0, 110.0, 120.0);
         shape
     }
@@ -5437,7 +5458,10 @@ mod tests {
     #[test]
     fn append_child_clip_agrees_with_get_children_clip_bounds() {
         let mut masked = Shape::new(Uuid::new_v4());
-        masked.set_shape_type(Type::Group(Group { masked: true }));
+        masked.set_shape_type(Type::Group(Group {
+            masked: true,
+            ..Default::default()
+        }));
         masked.set_selrect(0.0, 0.0, 50.0, 50.0);
 
         for shape in [frame(true), frame(false), masked] {
@@ -5447,7 +5471,7 @@ mod tests {
                     visited_children: false,
                     clip_bounds: None,
                     visited_mask: false,
-                    mask: false,
+                    mask: None,
                     flattened: false,
                 };
 

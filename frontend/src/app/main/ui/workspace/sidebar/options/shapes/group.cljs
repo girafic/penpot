@@ -9,6 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.types.shape :as cts]
    [app.common.types.shape.layout :as ctl]
    [app.main.refs :as refs]
    [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-menu*]]
@@ -20,6 +21,7 @@
    [app.main.ui.workspace.sidebar.options.menus.layer :refer [layer-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [layout-container-flex-attrs layout-container-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.mask :refer [mask-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.measures :refer [measures-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.shadow :refer [shadow-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.stroke :refer [stroke-menu*]]
@@ -134,6 +136,9 @@
                       :ids layer-ids
                       :applied-tokens applied-tokens
                       :values layer-values}]
+     (when (true? (:masked-group shape))
+       [:> mask-menu* {:id (:id shape)
+                       :mode (cts/mask-mode shape)}])
      [:> measures-menu* {:type type
                          :ids measure-ids
                          :applied-tokens applied-tokens

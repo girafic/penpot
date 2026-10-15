@@ -22,6 +22,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
    [app.common.types.path :as path]
+   [app.common.types.shape :as cts]
    [clojure.string :as str]))
 
 (defn- svg-escape
@@ -1099,12 +1100,24 @@
 
 (declare emit-svg-node)
 
+(def ^:private svg-mask-filters
+  "The filters that turn the mask of an inverted mask mode (see
+  `cts/mask-modes`) into what keeps over a white region: black where it
+  is, or dark where it was bright."
+  {:alpha-inverted (str "<feFlood flood-color=\"black\" result=\"flood\"/>"
+                        "<feComposite in=\"flood\" in2=\"SourceGraphic\" operator=\"in\"/>")
+   :luma-inverted  (str "<feColorMatrix type=\"matrix\""
+                        " values=\"-1 0 0 0 1  0 -1 0 0 1  0 0 -1 0 1  0 0 0 1 0\"/>")})
+
 (defn- svg-masked
   "What the masked group `shape` holds, the layers `inner` (see
-  `layer-nodes`) kept to its mask, the bottom-most of them, an alpha
-  `<mask>` drawn without its shadows and blur, as the canvas draws it;
-  one region around the board (`width` by `height` of `ctx`) as large as
-  the layers may move. The layers it holds are layers (see
+  `layer-nodes`) kept to its mask, the bottom-most of them, drawn
+  without its shadows and blur, as the canvas draws it: a `<mask>` by
+  its alpha or by its brightness, as its mask mode says (see
+  `cts/mask-modes`); an inverted one over a white region, which the
+  mask, filtered (see `svg-mask-filters`), takes from. One region
+  around the board (`width` by `height` of `ctx`) as large as the
+  layers may move. The layers it holds are layers (see
   `aexp/export-holders`)."
   [{:keys [width height] :as ctx} shape inner]
   (let [mask-id (first (:shapes shape))
@@ -1112,15 +1125,26 @@
         content (str/join "" (keep #(emit-svg-node ctx %) (remove #(= mask-id (:id %)) inner)))]
     (if (nil? node)
       content
-      (let [plain (-> ctx
-                      (update-in [:objects mask-id] dissoc :shadow :blur)
-                      ;; nor the filters of its effects (see `svg-smil`)
-                      (update-in [:smil mask-id] dissoc :filters :inner))
-            mid   (svg-escape (svg-mask-id (:id shape)))]
-        (str "<defs><mask id=\"" mid "\" mask-type=\"alpha\" style=\"mask-type: alpha\""
-             " maskUnits=\"userSpaceOnUse\" x=\"" (acss/fmt (- width)) "\" y=\"" (acss/fmt (- height))
-             "\" width=\"" (acss/fmt (* 3 width)) "\" height=\"" (acss/fmt (* 3 height)) "\">"
-             (emit-svg-node plain node)
+      (let [plain  (-> ctx
+                       (update-in [:objects mask-id] dissoc :shadow :blur)
+                       ;; nor the filters of its effects (see `svg-smil`)
+                       (update-in [:smil mask-id] dissoc :filters :inner))
+            mode   (cts/mask-mode shape)
+            filter (get svg-mask-filters mode)
+            type   (if (= :alpha mode) "alpha" "luminance")
+            mid    (svg-escape (svg-mask-id (:id shape)))
+            fid    (str mid "-filter")
+            [x y w h] (map acss/fmt [(- width) (- height) (* 3 width) (* 3 height)])
+            drawn  (emit-svg-node plain node)]
+        (str "<defs>"
+             (when (some? filter)
+               (str "<filter id=\"" fid "\">" filter "</filter>"))
+             "<mask id=\"" mid "\" mask-type=\"" type "\" style=\"mask-type: " type "\""
+             " maskUnits=\"userSpaceOnUse\" x=\"" x "\" y=\"" y "\" width=\"" w "\" height=\"" h "\">"
+             (if (some? filter)
+               (str "<rect x=\"" x "\" y=\"" y "\" width=\"" w "\" height=\"" h "\" fill=\"white\"/>"
+                    "<g filter=\"url(#" fid ")\">" drawn "</g>")
+               drawn)
              "</mask></defs>"
              "<g mask=\"url(#" mid ")\">" content "</g>")))))
 

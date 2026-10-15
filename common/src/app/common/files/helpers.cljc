@@ -66,6 +66,18 @@
   ([objects id]
    (mask-shape? (get objects id))))
 
+(def inverted-mask-modes
+  "The modes of `app.common.types.shape/mask-modes` that keep what is
+  out of the mask, not what is in it."
+  #{:alpha-inverted :luma-inverted})
+
+(defn mask-bounds-shape?
+  "Whether the masked group `shape` spans only its mask, as all but the
+  `inverted-mask-modes` keep, which span all its layers."
+  [shape]
+  (and ^boolean (mask-shape? shape)
+       (not (contains? inverted-mask-modes (:mask-mode shape)))))
+
 (defn bool-shape?
   [shape]
   (and (some? shape)

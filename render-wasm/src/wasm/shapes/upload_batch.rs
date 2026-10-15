@@ -12,7 +12,7 @@
 //!     BLUR_LAYER:  [u8 hidden][u8;3 pad][f32 value]
 //!     BLUR_BG:     same
 //!     SHADOWS:     [u32 n][n × 24]
-//!     MASKED:      [u8 value][u8;3 pad]
+//!     MASKED:      [u8 value: 0 not masked, 1-4 a `MaskMode`][u8;3 pad]
 //!     BOOL_TYPE:   [u8 value][u8;3 pad]
 //!     GROW_TYPE:   [u8 value][u8;3 pad]
 //!     FLEX:        32 bytes  (clears container layout, then sets flex)
@@ -27,7 +27,7 @@
 use skia_safe as skia;
 
 use crate::mem;
-use crate::shapes::{Blur, BlurType, Shadow, ShadowStyle, Stroke, Type};
+use crate::shapes::{Blur, BlurType, MaskMode, Shadow, ShadowStyle, Stroke, Type};
 use crate::utils::{decode_optional_f32, uuid_from_u32_quartet};
 use crate::uuid::Uuid;
 use crate::wasm::fills::{read_fills_from_bytes, RawFillData, RAW_FILL_DATA_SIZE};
@@ -301,10 +301,10 @@ fn apply_shape_payload(payload: &[u8]) -> Result<()> {
     }
 
     if mask & SECTION_MASKED != 0 {
-        let masked = cur.u8()? != 0;
+        let mode = MaskMode::from_value(cur.u8()?);
         let _ = cur.take(3)?;
         with_current_shape_mut!(state, |shape: &mut Shape| {
-            shape.set_masked(masked);
+            shape.set_masked(mode);
         });
     }
 

@@ -14,6 +14,7 @@
    [app.common.buffer :as buf]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.render-wasm.api.props :as props]
    [app.common.render-wasm.helpers :as h]
    [app.common.render-wasm.mem :as mem]
    [app.common.render-wasm.serializers :as sr]
@@ -300,7 +301,6 @@
         blur       (get shape :blur)
         bg-blur    (get shape :background-blur)
         shadows    (or (get shape :shadow) [])
-        masked?    (and (= shape-type :group) (boolean (get shape :masked-group)))
         bool-type  (when (= shape-type :bool) (get shape :bool-type))
         grow-type  (when (= shape-type :text) (get shape :grow-type))
         flex?      (and include-layout? (ctl/flex-layout? shape))
@@ -350,7 +350,7 @@
         offset (cond-> offset
                  (= shape-type :group)
                  (as-> o
-                       (do (buf/write-u8 dview o (if masked? 1 0))
+                       (do (buf/write-u8 dview o (props/mask-value shape))
                            (+ o 4))))
 
         offset (cond-> offset
