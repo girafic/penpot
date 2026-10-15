@@ -28,6 +28,7 @@
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.lottie :as dwlt]
    [app.main.data.workspace.mcp :as mcp]
+   [app.main.data.workspace.media :as dwm]
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.data.workspace.undo :as dwu]
    [app.main.data.workspace.versions :as dwv]
@@ -670,13 +671,15 @@
              (on-pin-version event))))
 
         ;; A board with the animation and its timeline, in the middle of
-        ;; the view, for each picked file.
+        ;; the view, for each picked file: a Lottie or an SVG (static
+        ;; without animations, see `dwm/svg-uploaded`).
         on-import-lottie
         (mf/use-fn
+         (mf/deps file-id)
          (fn [_]
            (let [^js input (dom/create-element "input")]
              (set! (.-type input) "file")
-             (set! (.-accept input) dwlt/accept)
+             (set! (.-accept input) (str dwlt/accept ",.svg,image/svg+xml"))
              (set! (.-multiple input) true)
              (.addEventListener input "change"
                                 (fn [_]
@@ -684,7 +687,11 @@
                                         position (gpt/point (+ (:x vbox) (/ (:width vbox) 2))
                                                             (+ (:y vbox) (/ (:height vbox) 2)))]
                                     (doseq [blob (array-seq (.-files input))]
-                                      (st/emit! (dwlt/import-lottie blob position))))))
+                                      (st/emit! (if (dwlt/lottie-file? blob)
+                                                  (dwlt/import-lottie blob position)
+                                                  (dwm/upload-media-workspace {:file-id file-id
+                                                                               :position position
+                                                                               :blobs [blob]})))))))
              (dom/click input))))
 
         on-import-lottie-key-down

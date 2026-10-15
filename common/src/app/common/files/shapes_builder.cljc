@@ -61,7 +61,9 @@
                 :hint (str "unexpected blend mode: " value)))
     value))
 
-(defn- svg-dimensions
+(defn svg-dimensions
+  "The `[x y width height]` of the viewBox of the parsed SVG `data`, or
+  of its width and height without one."
   [{:keys [attrs] :as data}]
   (let [width   (:width attrs 100)
         height  (:height attrs 100)
@@ -309,7 +311,11 @@
       (let [shape-id (:id shape)
             shape    (-> shape
                          (assoc :frame-id frame-id)
-                         (assoc :parent-id parent-id))
+                         (assoc :parent-id parent-id)
+                         ;; which element made it, for an importer that
+                         ;; tags the elements (see `app.common.files.svg-animation`)
+                         (cond-> (contains? svg-element ::element-key)
+                           (vary-meta assoc ::element-key (::element-key svg-element))))
             children (conj children shape)
             unames   (conj unames (:name shape))]
 

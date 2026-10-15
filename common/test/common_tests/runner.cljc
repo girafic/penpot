@@ -26,6 +26,7 @@
    [common-tests.files.lottie-test]
    [common-tests.files.repair-test]
    [common-tests.files.shapes-builder-test]
+   [common-tests.files.svg-animation-test]
    [common-tests.files.tokens-test]
    [common-tests.files.validate-test]
    [common-tests.geom-align-test]
@@ -136,6 +137,7 @@
    'common-tests.files.lottie-test
    'common-tests.files.repair-test
    'common-tests.files.shapes-builder-test
+   'common-tests.files.svg-animation-test
    'common-tests.files.tokens-test
    'common-tests.files.validate-test
    'common-tests.geom-align-test

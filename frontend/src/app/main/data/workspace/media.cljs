@@ -12,6 +12,7 @@
    [app.common.exceptions :as ex]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.shapes-builder :as sb]
+   [app.common.files.svg-animation :as svga]
    [app.common.math :as mth]
    [app.common.media :as media]
    [app.common.schema :as sm]
@@ -26,7 +27,9 @@
    [app.main.data.notifications :as ntf]
    [app.main.data.uploads :as uploads]
    [app.main.data.workspace.shapes :as dwsh]
+   [app.main.data.workspace.svg-animation :as dwsa]
    [app.main.data.workspace.svg-upload :as svg]
+   [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.store :as st]
    [app.util.http :as http]
@@ -55,10 +58,18 @@
          true
          (catch :default _ false))))
 
+(def ^:private animated-svg-re
+  "What an animated SVG has: SMIL animations or CSS keyframes."
+  #"<(?:animate|animateTransform|animateMotion|set)\b|@(?:-webkit-)?keyframes")
+
 (defn svg->clj
   [[name text]]
   (try
-    (let [text (if (contains? cf/flags :frontend-svgo)
+    (let [;; svgo moves CSS rules into the style of elements in an order
+          ;; that breaks animations (a delay before its shorthand), and
+          ;; drops ids SMIL refers to
+          text (if (and (contains? cf/flags :frontend-svgo)
+                        (not (re-find animated-svg-re text)))
                  (optimize text)
                  text)
           data (-> (tubax/xml->clj text)
@@ -98,12 +109,18 @@
   [svg-data file-id position]
   (ptk/reify ::svg-uploaded
     ptk/WatchEvent
-    (watch [_ _ _]
+    (watch [_ state _]
       ;; Once the SVG is uploaded, we need to extract all the bitmap
       ;; images and upload them separately, then proceed to create
-      ;; all shapes.
-      (->> (svg/upload-images svg-data file-id)
-           (rx/map #(svg/add-svg-shapes (assoc svg-data :image-data %) position))))))
+      ;; all shapes: with Motion on, an animated SVG as a board with its
+      ;; timeline.
+      (let [animated? (and (features/active-feature? state "animation/v1")
+                           (svga/animated? svg-data))]
+        (->> (svg/upload-images svg-data file-id)
+             (rx/map #(let [svg-data (assoc svg-data :image-data %)]
+                        (if animated?
+                          (dwsa/svg-animation-imported svg-data position)
+                          (svg/add-svg-shapes svg-data position)))))))))
 
 
 (defn upload-media-url

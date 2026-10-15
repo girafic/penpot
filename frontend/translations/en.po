@@ -7388,7 +7388,7 @@ msgid "workspace.shape.menu.paste-animation"
 msgstr "Paste animation"
 
 msgid "workspace.lottie.import"
-msgstr "Import Lottie…"
+msgstr "Import animation…"
 
 msgid "workspace.lottie.import-error"
 msgstr "The Lottie animation could not be read."
@@ -9879,6 +9879,50 @@ msgstr "Add page"
 #: src/app/main/ui/workspace/left_header.cljs:94
 msgid "workspace.sitemap"
 msgstr "Sitemap"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.attribute"
+msgstr "animations of other attributes"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.dash"
+msgstr "dash animations other than drawing a line"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.filter"
+msgstr "filter animations"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.gradient"
+msgstr "gradient animations"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.interactive"
+msgstr "animations that start on a click or hover"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.loop-length"
+msgstr "the full length of loops that do not fit together"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.paint"
+msgstr "colours of fills or strokes the shape does not have"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.path-morph"
+msgstr "shape morphing"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.skew"
+msgstr "skews"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.text-style"
+msgstr "text style animations"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.imported-without"
+msgstr "SVG animation imported without: %s"
 
 #: src/app/main/data/workspace/comments.cljs:49
 msgid "workspace.toast.comments-hidden"
