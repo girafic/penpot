@@ -142,6 +142,48 @@
       (t/is (= [board] (layers rows)) "the board always")
       (t/is (false? (:expandable? (first rows)))))))
 
+(t/deftest layers-out-of-the-board-keep-their-rows
+  ;; A layer dragged out of every board keeps its track in the timeline
+  ;; of its board (and plays on the canvas): it shows there, marked.
+  (let [board    (uuid/next)
+        rect     (uuid/next)
+        loose    (uuid/next)
+        group    (uuid/next)
+        inner    (uuid/next)
+        objects  {uuid/zero {:id uuid/zero :parent-id uuid/zero :shapes [board loose group]}
+                  board     {:id board :parent-id uuid/zero :shapes [rect]}
+                  rect      {:id rect :parent-id board}
+                  loose     {:id loose :name "b" :parent-id uuid/zero}
+                  group     {:id group :name "a" :parent-id uuid/zero :shapes [inner]}
+                  inner     {:id inner :name "c" :parent-id group}}
+        timeline (-> (cta/make-timeline {:board-id board})
+                     (cta/add-keyframe rect {:time 0 :property :x :value 0})
+                     (cta/add-keyframe loose {:time 0 :property :y :value 0})
+                     (cta/add-keyframe inner {:time 0 :property :x :value 0}))
+        rows     (filterv #(= :layer (:type %)) (timeline/timeline-rows objects board timeline {} {}))]
+    (t/is (= [board rect inner loose] (mapv :id rows)) "after the layers of the board, by name")
+    (t/is (= [false false true true] (mapv #(true? (:outside? %)) rows)))
+    (t/is (= [0 1 1 1] (mapv :depth rows)))
+    (t/is (= [board rect] (mapv :id (filter #(= :layer (:type %))
+                                            (timeline/timeline-rows objects board
+                                                                    (cta/remove-shapes timeline #{loose inner})
+                                                                    {} {}))))
+          "none without one")))
+
+(t/deftest the-dock-follows-a-layer-out-of-its-board
+  (let [[board-a board-b loose] [(uuid/next) (uuid/next) (uuid/next)]
+        objects   {uuid/zero {:id uuid/zero :type :frame :shapes [board-a board-b loose]}
+                   board-a {:id board-a :type :frame :parent-id uuid/zero :frame-id uuid/zero}
+                   board-b {:id board-b :type :frame :parent-id uuid/zero :frame-id uuid/zero}
+                   loose   {:id loose :type :rect :parent-id uuid/zero :frame-id uuid/zero}}
+        timelines {board-a (cta/add-keyframe (cta/make-timeline {:board-id board-a})
+                                             loose {:time 0 :property :x :value 0})}
+        anim      {:board-id board-b}]
+    (t/is (= board-a (dwam/selection-board-id objects [loose] timelines)) "the board holding its track")
+    (t/is (= board-a (dwam/target-board-id objects [loose] anim timelines)))
+    (t/is (= board-b (dwam/target-board-id objects [loose] (assoc anim :board-id board-b) {}))
+          "without a track, the last one")))
+
 (t/deftest a-click-on-a-property-picks-its-keyframes
   (let [file-id  (uuid/next)
         page-id  (uuid/next)

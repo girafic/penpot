@@ -22,6 +22,7 @@
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.component :as ctk]
+   [app.common.uuid :as uuid]
    [app.config :as cfg]
    [app.main.data.comments :as dcm]
    [app.main.data.shortcuts :as ds]
@@ -440,6 +441,28 @@
                  child-ids)))]
      (set (walk board-id)))))
 
+(defn- outside-ids
+  "Ids of the layers out of the board `board-id` that its `timeline`
+  animates, the top-most ones, in the order of the layers panel: a layer
+  dragged out of every board keeps its track there for when it comes
+  back (see `cltl/generate-move-timelines`), and plays with the board on
+  the canvas."
+  [objects board-id timeline]
+  (let [ids (into #{}
+                  (filter (fn [id]
+                            (and (not= id board-id)
+                                 (contains? objects id)
+                                 (not (some #(= board-id %) (cfh/get-parent-ids objects id)))
+                                 (or (seq (dm/get-in timeline [:tracks id :keyframes]))
+                                     (seq (dm/get-in timeline [:tracks id :animations]))))))
+                  (keys (:tracks timeline)))]
+    (when (seq ids)
+      (letfn [(walk [id]
+                (if (contains? ids id)
+                  [id]
+                  (mapcat walk (reverse (dm/get-in objects [id :shapes])))))]
+        (vec (walk uuid/zero))))))
+
 (defn timeline-rows
   "Flatten the layers of `board-id` (top-most first, like the layers
   panel) into rows: one per layer followed, while it is expanded, by one
@@ -450,10 +473,16 @@
   `expanded` holds the ones the user toggled. A component copy playing
   the animation of its main, which ends at the time `copy-ends` gives
   for it, has a bar over it, `:copy`, and keeps its layers folded away
-  unless the board animates them."
+  unless the board animates them. The layers out of the board that its
+  timeline animates (see `outside-ids`) follow, marked `:outside?`."
   [objects board-id timeline expanded copy-ends]
-  (let [animated (animated-ids objects board-id timeline)
-        playing  (animated-ids objects board-id timeline copy-ends)]
+  (let [outside  (outside-ids objects board-id timeline)
+        animated (into (animated-ids objects board-id timeline)
+                       (mapcat #(animated-ids objects % timeline))
+                       outside)
+        playing  (into (animated-ids objects board-id timeline copy-ends)
+                       (mapcat #(animated-ids objects % timeline copy-ends))
+                       outside)]
     (letfn [(walk [id depth]
               (when-let [shape (get objects id)]
                 (let [copy-end   (get copy-ends id)
@@ -481,7 +510,11 @@
                            (for [[property index] slots]
                              {:type :property :id id :property property :index index :depth (inc depth)})
                            (mapcat #(walk % (inc depth)) children)))))))]
-      (vec (walk board-id 0)))))
+      (into (vec (walk board-id 0))
+            (mapcat (fn [id]
+                      (let [[row & rows] (walk id 1)]
+                        (cons (assoc row :outside? true) rows))))
+            outside))))
 
 (defn expand-to
   "`expanded` (see `timeline-rows`) with the closed parents of the layers
@@ -657,7 +690,7 @@
   its keyframes and its children's."
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [row-index shape depth expandable? expanded? selected? hovered?
+  [{:keys [row-index shape depth expandable? expanded? selected? hovered? outside?
            on-toggle on-select on-context-menu on-hover]}]
   (let [shape-id (:id shape)
         ;; in the colour of components, as in the layers panel
@@ -723,6 +756,11 @@
                    :size "s"
                    :class (stl/css :layer-icon)}]
       [:span {:class (stl/css :layer-name) :title (:name shape)} (:name shape)]
+      ;; Out of the board, which still animates it (see `outside-ids`).
+      (when outside?
+        [:span {:class (stl/css :outside-hint)
+                :title (tr "workspace.animation.outside-board-hint")}
+         (tr "workspace.animation.outside-board")])
       [:> row-toggles* {:hidden? hidden?
                         :locked? blocked?
                         :on-toggle-visibility on-toggle-visibility
@@ -1658,8 +1696,8 @@
 
         ;; The dock targets the board (top-level frame) of the selection,
         ;; and keeps the last one while nothing is selected.
-        sel-board-id (dwam/selection-board-id objects selected)
-        board-id   (dwam/target-board-id objects selected anim)
+        sel-board-id (dwam/selection-board-id objects selected timelines)
+        board-id   (dwam/target-board-id objects selected anim timelines)
         board      (get objects board-id)
         ;; A board without animation shows a new empty timeline; the
         ;; first edit stores it.
@@ -3389,6 +3427,7 @@
                                     :depth depth
                                     :expandable? (:expandable? row)
                                     :expanded? (:expanded? row)
+                                    :outside? (:outside? row)
                                     :selected? (contains? selected id)
                                     :hovered? hovered?
                                     :on-toggle on-toggle-layer

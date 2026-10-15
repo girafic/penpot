@@ -6771,6 +6771,17 @@ msgstr "Origin X"
 msgid "workspace.animation.origin-y"
 msgstr "Origin Y"
 
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.outside-board"
+msgstr "Outside the board"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.outside-board-hint"
+msgstr ""
+"Out of the board, this layer keeps its animation and plays with it on the "
+"canvas, but not in view mode or in exports. Move it back into the board to "
+"play it there."
+
 msgid "workspace.animation.scale"
 msgstr "Scale"
 

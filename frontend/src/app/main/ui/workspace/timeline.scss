@@ -730,6 +730,17 @@ $header-height: $ruler-height + $row-height;
   text-overflow: ellipsis;
 }
 
+// A layer out of the board that the board still animates (see
+// `outside-ids`): its name shrinks first.
+.outside-hint {
+  flex-shrink: 0;
+  margin-inline: deprecated.$s-4;
+  font-size: deprecated.$fs-11;
+  font-style: italic;
+  color: var(--color-foreground-secondary);
+  white-space: nowrap;
+}
+
 // A lane of audio clips moves by its label (see `on-lane-drag-down`); the
 // line shows where it goes: the top of the row it takes the place of,
 // the bottom going down.

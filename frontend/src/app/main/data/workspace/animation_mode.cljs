@@ -12,6 +12,7 @@
   rulers, see `app.render-wasm.rulers-state`) can ask too."
   (:require
    [app.common.files.helpers :as cfh]
+   [app.common.logic.timelines :as cltl]
    [app.main.data.helpers :as dsh]))
 
 (defn motion-mode?
@@ -22,26 +23,35 @@
 (defn selection-board-id
   "The board (top-level frame) of the selection `selected` (ids) of the
   page `objects`: the selected board itself, or the root frame holding
-  the selected shapes. `nil` when nothing is selected."
-  [objects selected]
-  (when-let [shape-id (first selected)]
-    (cfh/get-shape-id-root-frame objects shape-id)))
+  the selected shapes; for a shape out of every board, the board whose
+  timeline of `timelines` animates it, as it keeps its track there (see
+  `cltl/generate-move-timelines`). `nil` when nothing is selected."
+  ([objects selected]
+   (selection-board-id objects selected nil))
+  ([objects selected timelines]
+   (when-let [shape-id (first selected)]
+     (or (cfh/get-shape-id-root-frame objects shape-id)
+         (first (cltl/find-track timelines shape-id))))))
 
 (defn target-board-id
   "The board the timeline dock targets for the selection `selected` of
-  the page `objects` and the animation state `anim`: the board of the
-  selection or, when nothing is selected, the last targeted one (see
-  `set-active-board`), so the timeline stays visible and playable."
-  [objects selected anim]
-  (or (selection-board-id objects selected)
-      (:board-id anim)))
+  the page `objects` (with its `timelines`, see `selection-board-id`)
+  and the animation state `anim`: the board of the selection or, when
+  nothing is selected, the last targeted one (see `set-active-board`),
+  so the timeline stays visible and playable."
+  ([objects selected anim]
+   (target-board-id objects selected anim nil))
+  ([objects selected anim timelines]
+   (or (selection-board-id objects selected timelines)
+       (:board-id anim))))
 
 (defn active-board-id
   "The board the timeline dock currently targets (see `target-board-id`)."
   [state]
   (target-board-id (dsh/lookup-page-objects state)
                    (dsh/lookup-selected state)
-                   (:workspace-animation state)))
+                   (:workspace-animation state)
+                   (:timelines (dsh/lookup-page state))))
 
 (defn timeline-maximized?
   "Whether the timeline dock covers the whole workspace, the sidebars
