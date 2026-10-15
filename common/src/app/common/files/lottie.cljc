@@ -264,7 +264,10 @@
       (assoc :stroke-cap-start cap :stroke-cap-end cap))))
 
 (defn- fill
-  [item box]
+  "The fill of the paint `item` of a shape whose selrect is `box`; `m`
+  takes the points of a gradient, in the space of the layer, to the
+  board, as the outlines."
+  [item box m]
   (case (:ty item)
     "fl"
     (let [c (rgb01 (rest-value (:c item) [0 0 0 1]))]
@@ -280,8 +283,8 @@
                             :color   (hex (subvec k (inc (* j 4)) (+ 4 (* j 4))))
                             :opacity (clamp01 (if alphas? (nth k (+ (* n 4) (* j 2) 1) 1) 1))})
                          (range n))
-          [sx sy]  (pair (rest-value (:s item) [0 0]))
-          [ex ey]  (pair (rest-value (:e item) [0 0]))
+          [sx sy]  (move-point m (pair (rest-value (:s item) [0 0])))
+          [ex ey]  (move-point m (pair (rest-value (:e item) [0 0])))
           {:keys [x0 y0 x1 y1]} box
           w        (max 1e-6 (- x1 x0))
           h        (max 1e-6 (- y1 y0))]
@@ -452,7 +455,7 @@
                  (cts/setup-shape (assoc base :type :path
                                          :content (path/from-plain (into [] (mapcat subpath-segments) paths)))))
         box    (selrect-box shape)
-        fills  (into [] (keep #(fill % box)) (filter #(#{"fl" "gf"} (:ty %)) paints))
+        fills  (into [] (keep #(fill % box m)) (filter #(#{"fl" "gf"} (:ty %)) paints))
         strokes (into [] (map #(stroke ctx % (scale-of m))) (filter #(#{"st" "gs"} (:ty %)) paints))]
     (cond-> (assoc shape :fills fills :strokes strokes)
       (< opacity 1) (assoc :opacity opacity))))

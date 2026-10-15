@@ -236,6 +236,22 @@
     (t/is (some? (shape-named result "Matted")))
     (t/is (= :path (:type (shape-named result "Morph"))) "at its first keyframe")))
 
+(t/deftest gradients-move-with-their-layer
+  (let [ramp   {:ty "gr" :nm "Ramp"
+                :it [{:ty "rc" :nm "Ramp path" :s (static [10 10]) :p (static [5 5]) :r (static 0)}
+                     {:ty "gf" :t 1 :s (static [0 5]) :e (static [10 5]) :o (static 100)
+                      :g {:p 2 :k (static [0 1 1 1 1 0 0 0])}}
+                     group-tr]}
+        result (lottie/lottie->shapes
+                (document [(layer 1 "Ramp" [ramp] :ks (assoc rest-ks :p (static [100 50 0])))])
+                {:x 0 :y 0})
+        ramp   (shape-named result "Ramp")]
+    (t/is (= [100 50 10 10] (bounds ramp)))
+    (t/is (= {:start-x 0 :start-y 0.5 :end-x 1 :end-y 0.5}
+             (norm (select-keys (get-in ramp [:fills 0 :fill-color-gradient])
+                                [:start-x :start-y :end-x :end-y])))
+          "across the shape, where the layer is")))
+
 (t/deftest image-layers-show-the-uploaded-image
   (let [media-id (uuid/next)
         doc      (document [{:ty 2 :ind 1 :nm "Photo" :refId "img_1" :ip 0 :op 60 :st 0
