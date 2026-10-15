@@ -11,6 +11,7 @@
   (:require
    [app.common.data.macros :as dm]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.transforms :as dwt]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -21,6 +22,9 @@
 
 (def ^:private ref:timeline
   (l/derived dwa/current-timeline st/state))
+
+(def ^:private ref:playhead
+  (l/derived dwa/playhead st/state =))
 
 (def ^:private color
   "Like the selection handles."
@@ -114,12 +118,20 @@
              :on-double-click on-double-click}]]))
 
 (mf/defc motion-path*
-  [{:keys [shape-id zoom]}]
+  "The motion path of the layer `shape-id`. While it is edited (a drag,
+  `editing?`), the path follows the edit as it will be recorded (see
+  `dwa/edited-motion-path`)."
+  [{:keys [shape-id zoom editing?]}]
   (let [timeline (mf/deref ref:timeline)
         objects  (mf/deref refs/workspace-page-objects)
-        path     (mf/with-memo [timeline objects shape-id]
+        edit     (mf/deref dwm/motion-edit)
+        edit     (when editing? edit)
+        playhead (mf/deref ref:playhead)
+        path     (mf/with-memo [timeline objects shape-id edit playhead]
                    (when (some? timeline)
-                     (dwa/motion-path timeline objects shape-id)))]
+                     (if (some? edit)
+                       (dwa/edited-motion-path timeline objects shape-id playhead edit)
+                       (dwa/motion-path timeline objects shape-id))))]
     (when (some? path)
       [:g {:class "motion-path"}
        [:polyline {:points (str/join " " (map (fn [[x y]] (dm/str x "," y)) (:points path)))

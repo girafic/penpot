@@ -710,6 +710,15 @@
           modif-tree
           ids))
 
+(defn edited-objects
+  "`objects` as `edit`, a modif-tree that changes some of them, leaves
+  them."
+  [objects edit]
+  (reduce-kv (fn [objects id {:keys [modifiers]}]
+               (d/update-when objects id gsh/transform-shape modifiers))
+             objects
+             (gm/set-objects-modifiers edit objects)))
+
 (defn edit-preview
   "The modif-tree showing `edit`, a modif-tree that changes shapes of
   `objects`, over the animations of `timelines` at `time` in motion
@@ -719,10 +728,7 @@
   drag the canvas shows what it will show once the shapes are dropped,
   and the animated shapes the edit leaves alone stay where they are."
   [timelines board-id objects time edit]
-  (let [after     (reduce-kv (fn [objects id {:keys [modifiers]}]
-                               (d/update-when objects id gsh/transform-shape modifiers))
-                             objects
-                             (gm/set-objects-modifiers edit objects))
+  (let [after     (edited-objects objects edit)
         timelines (d/update-when timelines board-id cta/record-edit objects after time)]
     (merge-with (fn [edit shown]
                   (update edit :modifiers ctm/add-modifiers (:modifiers shown)))

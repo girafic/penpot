@@ -1065,13 +1065,14 @@
                   :zoom zoom
                   :disabled (or drawing-tool @space?)}])))
 
-          ;; In motion mode, the way the selected layer moves
+          ;; In motion mode, the way the selected layer moves, which
+          ;; follows a drag of it
           (when (and (contains? layout :animation-timeline)
                      (= 1 (count selected))
-                     (nil? transform)
                      (not text-editing?))
             [:> motion-path* {:shape-id (first selected)
-                              :zoom zoom}])
+                              :zoom zoom
+                              :editing? (some? transform)}])
 
           (when show-prototypes?
             [:> interactions/interactions*

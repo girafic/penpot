@@ -528,3 +528,22 @@
   (let [next-unit #(dwa/time-unit (:workspace-animation (ptk/update (dwa/toggle-time-unit)
                                                                     {:workspace-animation {:time-unit %}})))]
     (t/is (= [:s :frames :ms] (mapv next-unit [:ms :s :frames])) "the unit button goes round")))
+
+(t/deftest the-motion-path-follows-a-drag
+  ;; Dragged at the playhead, the layer gets a keyframe there once
+  ;; dropped (see `cta/record-edit`): its path shows it meanwhile.
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 300 :height 200})
+        bid   (:id board)
+        rect  (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20 :parent-id bid :frame-id bid})
+        rid   (:id rect)
+        objs  {bid (assoc board :shapes [rid]) rid rect}
+        tl    (-> (cta/make-timeline {:board-id bid :duration 1000})
+                  (cta/add-keyframe rid {:time 0 :property :x :value 10})
+                  (cta/add-keyframe rid {:time 0 :property :y :value 10})
+                  (cta/add-keyframe rid {:time 1000 :property :x :value 110})
+                  (cta/add-keyframe rid {:time 1000 :property :y :value 10}))
+        edit  {rid {:modifiers (ctm/move-modifiers (gpt/point 100 0))}}
+        plain (dwa/motion-path tl objs rid)
+        moved (dwa/edited-motion-path tl objs rid 1000 edit)]
+    (t/is (= (first (:points plain)) (first (:points moved))) "it starts where it did")
+    (t/is (= [100 0] (mapv - (last (:points moved)) (last (:points plain)))) "and ends where the layer is dragged")))

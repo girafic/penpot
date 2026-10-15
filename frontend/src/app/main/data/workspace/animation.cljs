@@ -918,6 +918,14 @@
                    :next (some-> (get pairs (inc i)) at)}))
                pairs)}))))
 
+(defn edited-motion-path
+  "The motion path of `shape-id` (see `motion-path`) as it will be once
+  `edit`, a modif-tree of `objects` in progress (a drag), is recorded in
+  `timeline` at `time` (see `cta/record-edit`): as the canvas shows the
+  shapes meanwhile (see `cltl/edit-preview`)."
+  [timeline objects shape-id time edit]
+  (let [after (cltl/edited-objects objects edit)]
+    (motion-path (cta/record-edit timeline objects after time) after shape-id)))
 (defn- set-path-keyframe
   "`keyframe` with the handle components `out` and `in` of its axis; a
   zero one is left out."

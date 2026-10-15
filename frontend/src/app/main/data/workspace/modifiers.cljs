@@ -338,6 +338,12 @@
         (wasm.modifiers/property-changes objects prev-wasm-props wasm-props)]
     (wasm.shape/process-shape-changes! objects-changed shape-changes)))
 
+(defonce ^{:doc "In motion mode, the modif-tree of the edit in progress (a drag)
+  that shows over the animation (see `edit-preview-tree`), for the motion
+  path to follow it (see `dwa/edited-motion-path`); nil otherwise."}
+  motion-edit
+  (atom nil))
+
 (defn- edit-preview-tree
   "In motion mode, the modif-tree showing the edit `modif-tree` over the
   animations the canvas shows (see `cltl/edit-preview`), the text in
@@ -382,6 +388,7 @@
     (ptk/reify ::clear-local-transform
       ptk/EffectEvent
       (effect [_ state _]
+        (reset! motion-edit nil)
         (when (features/active-feature? state "render-wasm/v1")
           ;; End interactive transform mode BEFORE cleaning modifiers so
           ;; the final full-quality render triggered by subsequent shape
@@ -643,7 +650,12 @@
                            (calculate-modifiers state ignore-constraints ignore-snap-pixel tree page-id params)))]
          (if (:animation-preview? params)
            (with-edit-modifiers state nil modifiers)
-           (with-edit-modifiers state modifiers shown)))))))
+           (with-edit-modifiers state modifiers shown))))
+
+     ptk/EffectEvent
+     (effect [_ state _]
+       (when-not (:animation-preview? params)
+         (reset! motion-edit (when (some? (get state ::edit-modifiers)) modif-tree)))))))
 
 (defn- without-nil-ids
   "Drop nil-keyed entries from a modif-tree. A nil shape id (possible in
@@ -763,6 +775,9 @@
               over-motion? (not (identical? modif-tree edit-tree))
               snap-pixel?  (snap-pixel-preview? state ignore-snap-pixel animation-preview?)
               translation? (every? #(ctm/only-move? (:modifiers %)) (vals modif-tree))]
+
+          (when-not animation-preview?
+            (reset! motion-edit (when over-motion? edit-tree)))
 
           (if translation?
             ;; Pure translation: no structure changes needed. If structure
