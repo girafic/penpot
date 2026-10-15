@@ -1154,6 +1154,10 @@ Board:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -1190,6 +1194,7 @@ Board:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -1603,6 +1608,10 @@ Board:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -2031,6 +2040,18 @@ Board:
         The current shape must be a component copy instance.
 
         Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
+
+        Returns void
       switchVariant: |-
         ```
         switchVariant(pos: number, value: string): void
@@ -2388,6 +2409,10 @@ VariantContainer:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -2424,6 +2449,7 @@ VariantContainer:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -2840,6 +2866,10 @@ VariantContainer:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -3268,6 +3298,18 @@ VariantContainer:
         The current shape must be a component copy instance.
 
         Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
+
+        Returns void
       switchVariant: |-
         ```
         switchVariant(pos: number, value: string): void
@@ -3609,6 +3651,10 @@ Boolean:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -3645,6 +3691,7 @@ Boolean:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -3982,6 +4029,10 @@ Boolean:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -4332,6 +4383,18 @@ Boolean:
         (and those of its children) to the ones in the linked main component.
         Similar to the "reset overrides" action on the Penpot interface.
         The current shape must be a component copy instance.
+
+        Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
 
         Returns void
       switchVariant: |-
@@ -5431,7 +5494,7 @@ ProjectFile:
     }
     ```
 
-    Referenced by: PenpotMgmt, Project, ProjectFile
+    Referenced by: PenpotMgmt, Project, ProjectFile, Team
   members:
     Properties:
       id: |-
@@ -6920,6 +6983,10 @@ Ellipse:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -6956,6 +7023,7 @@ Ellipse:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -7265,6 +7333,10 @@ Ellipse:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -7560,6 +7632,18 @@ Ellipse:
         (and those of its children) to the ones in the linked main component.
         Similar to the "reset overrides" action on the Penpot interface.
         The current shape must be a component copy instance.
+
+        Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
 
         Returns void
       switchVariant: |-
@@ -9528,6 +9612,10 @@ Group:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -9564,6 +9652,7 @@ Group:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -9877,6 +9966,10 @@ Group:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -10238,6 +10331,18 @@ Group:
         (and those of its children) to the ones in the linked main component.
         Similar to the "reset overrides" action on the Penpot interface.
         The current shape must be a component copy instance.
+
+        Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
 
         Returns void
       switchVariant: |-
@@ -10831,6 +10936,10 @@ Image:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -10867,6 +10976,7 @@ Image:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -11176,6 +11286,10 @@ Image:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -11471,6 +11585,18 @@ Image:
         (and those of its children) to the ones in the linked main component.
         Similar to the "reset overrides" action on the Penpot interface.
         The current shape must be a component copy instance.
+
+        Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
 
         Returns void
       switchVariant: |-
@@ -12008,6 +12134,7 @@ Library:
         typographies: LibraryTypography[];
         animationStyles: LibraryAnimationStyle[];
         components: LibraryComponent[];
+        deletedComponents: LibraryComponent[];
         tokens: TokenCatalog;
         createColor(): LibraryColor;
         createTypography(): LibraryTypography;
@@ -12078,6 +12205,13 @@ Library:
         ```
         console.log(penpot.library.local.components
         ```
+      deletedComponents: |-
+        ```
+        readonly deletedComponents: LibraryComponent[]
+        ```
+
+        Deleted components, including individual deleted variants.
+        Use a component's `restore()` method to restore it.
       tokens: |-
         ```
         readonly tokens: TokenCatalog
@@ -12806,6 +12940,10 @@ LibraryComponent:
 
     ```
     interface LibraryComponent {
+        annotation: string | null;
+        duplicate(): LibraryComponent;
+        remove(): void;
+        restore(): void;
         instance(): Shape;
         mainInstance(): Shape;
         isVariant(): this is LibraryVariantComponent;
@@ -12829,9 +12967,18 @@ LibraryComponent:
       + LibraryComponent
         - LibraryVariantComponent
 
-    Referenced by: Board, Boolean, ContextTypesUtils, Ellipse, Group, Image, Library, Path, Rectangle, ShapeBase, SvgRaw, Text, VariantContainer, Variants
+    Referenced by: Board, Boolean, ContextTypesUtils, Ellipse, Group, Image, Library, LibraryComponent, LibraryVariantComponent, Path, Rectangle, ShapeBase, SvgRaw, Text, VariantContainer, Variants
   members:
     Properties:
+      annotation: |-
+        ```
+        annotation: string | null
+        ```
+
+        The component annotation, or null when none is set.
+        Set null to delete it. Text can contain at most 300 characters.
+        Writing requires `library:write` permission and a live component in the
+        current file's library.
       id: |-
         ```
         readonly id: string
@@ -12857,6 +13004,40 @@ LibraryComponent:
 
         The path of the library element.
     Methods:
+      duplicate: |-
+        ```
+        duplicate(): LibraryComponent
+        ```
+
+        Duplicates this component and its main instance in the current file's library.
+        Requires `library:write` permission. The component must not be deleted.
+
+        Returns LibraryComponent
+      remove: |-
+        ```
+        remove(): void
+        ```
+
+        Deletes this component and its main instance from the current file's library.
+        Requires `library:write` permission. Does nothing if already deleted.
+        Surviving copies keep their link so the component can be restored later.
+
+        Returns void
+      restore: |-
+        ```
+        restore(): void
+        ```
+
+        Restores this component if it has been deleted, including its main instance.
+        Leaves the current page, selection, zoom, and viewport unchanged.
+        Requires `library:write` permission. Does nothing if already restored.
+
+        Returns void
+
+        Example
+        ```
+        penpot.selection[0].component()?.restore();
+        ```
       instance: |-
         ```
         instance(): Shape
@@ -13038,6 +13219,10 @@ LibraryVariantComponent:
 
     ```
     interface LibraryVariantComponent {
+        annotation: string | null;
+        duplicate(): LibraryComponent;
+        remove(): void;
+        restore(): void;
         instance(): Shape;
         mainInstance(): Shape;
         isVariant(): this is LibraryVariantComponent;
@@ -13068,6 +13253,15 @@ LibraryVariantComponent:
     Referenced by: ContextTypesUtils, LibraryComponent, LibraryVariantComponent
   members:
     Properties:
+      annotation: |-
+        ```
+        annotation: string | null
+        ```
+
+        The component annotation, or null when none is set.
+        Set null to delete it. Text can contain at most 300 characters.
+        Writing requires `library:write` permission and a live component in the
+        current file's library.
       variants: |-
         ```
         readonly variants: Variants | null
@@ -13112,6 +13306,40 @@ LibraryVariantComponent:
 
         The path of the library element.
     Methods:
+      duplicate: |-
+        ```
+        duplicate(): LibraryComponent
+        ```
+
+        Duplicates this component and its main instance in the current file's library.
+        Requires `library:write` permission. The component must not be deleted.
+
+        Returns LibraryComponent
+      remove: |-
+        ```
+        remove(): void
+        ```
+
+        Deletes this component and its main instance from the current file's library.
+        Requires `library:write` permission. Does nothing if already deleted.
+        Surviving copies keep their link so the component can be restored later.
+
+        Returns void
+      restore: |-
+        ```
+        restore(): void
+        ```
+
+        Restores this component if it has been deleted, including its main instance.
+        Leaves the current page, selection, zoom, and viewport unchanged.
+        Requires `library:write` permission. Does nothing if already restored.
+
+        Returns void
+
+        Example
+        ```
+        penpot.selection[0].component()?.restore();
+        ```
       instance: |-
         ```
         instance(): Shape
@@ -14698,6 +14926,10 @@ Path:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -14734,6 +14966,7 @@ Path:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -15065,6 +15298,10 @@ Path:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -15374,6 +15611,18 @@ Path:
         (and those of its children) to the ones in the linked main component.
         Similar to the "reset overrides" action on the Penpot interface.
         The current shape must be a component copy instance.
+
+        Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
 
         Returns void
       switchVariant: |-
@@ -16079,6 +16328,10 @@ Rectangle:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -16115,6 +16368,7 @@ Rectangle:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -16424,6 +16678,10 @@ Rectangle:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -16719,6 +16977,18 @@ Rectangle:
         (and those of its children) to the ones in the linked main component.
         Similar to the "reset overrides" action on the Penpot interface.
         The current shape must be a component copy instance.
+
+        Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
 
         Returns void
       switchVariant: |-
@@ -17897,7 +18167,7 @@ TimelineJsonPreset:
     ```
     interface TimelineJsonPreset {
         type: PresetAnimationType;
-        direction: "in" | "out";
+        direction: "out" | "in";
         start: number;
         duration: number;
         easing?: TimelineJsonEasing;
@@ -17920,7 +18190,7 @@ TimelineJsonPreset:
         The effect.
       direction: |-
         ```
-        direction: "in" | "out"
+        direction: "out" | "in"
         ```
 
         Whether the layer enters or exits.
@@ -18136,7 +18406,7 @@ CopyAnimationOptions:
     interface CopyAnimationOptions {
         properties?: AnimatableProperty[];
         presets?: boolean;
-        values?: "exact" | "relative";
+        values?: "relative" | "exact";
         start?: number;
         stagger?: number;
         replace?: boolean;
@@ -18160,7 +18430,7 @@ CopyAnimationOptions:
         Whether the preset animations are copied too. `true` by default.
       values: |-
         ```
-        values?: "exact" | "relative"
+        values?: "relative" | "exact"
         ```
 
         `relative` (the default): the targets move, turn and resize by as much
@@ -18854,7 +19124,7 @@ PresetAnimationProps:
     ```
     interface PresetAnimationProps {
         type: PresetAnimationType;
-        direction?: "in" | "out";
+        direction?: "out" | "in";
         start?: number;
         duration?: number;
         easing?: MotionEasing;
@@ -18880,7 +19150,7 @@ PresetAnimationProps:
         The effect.
       direction: |-
         ```
-        direction?: "in" | "out"
+        direction?: "out" | "in"
         ```
 
         `in` plays from the effect to the layer as it is (an entrance), `out`
@@ -18980,7 +19250,7 @@ PresetAnimation:
         id: string;
         shape: Shape;
         type: PresetAnimationType;
-        direction: "in" | "out";
+        direction: "out" | "in";
         start: number;
         duration: number;
         easing: MotionEasing;
@@ -19019,7 +19289,7 @@ PresetAnimation:
         The effect.
       direction: |-
         ```
-        direction: "in" | "out"
+        direction: "out" | "in"
         ```
 
         `in` (an entrance) or `out` (an exit).
@@ -19548,6 +19818,10 @@ ShapeBase:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -19584,6 +19858,7 @@ ShapeBase:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -19892,6 +20167,10 @@ ShapeBase:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -20187,6 +20466,18 @@ ShapeBase:
         (and those of its children) to the ones in the linked main component.
         Similar to the "reset overrides" action on the Penpot interface.
         The current shape must be a component copy instance.
+
+        Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
 
         Returns void
       switchVariant: |-
@@ -20499,8 +20790,8 @@ Stroke:
     Interface Stroke
     ================
 
-    Represents stroke properties in Penpot. You can add a stroke to any shape except for groups.
-    This interface includes properties for defining the color, style, width, alignment, and caps of a stroke.
+    Stroke properties for any shape except groups.
+    Literals apply strokeWidth before top/right/bottom/left widths.
 
     ```
     interface Stroke {
@@ -20510,6 +20801,11 @@ Stroke:
         strokeOpacity?: number;
         strokeStyle?: "none" | "svg" | "mixed" | "solid" | "dotted" | "dashed";
         strokeWidth?: number;
+        strokeWidthType?: "simple" | "multiple";
+        strokeWidthTop?: number;
+        strokeWidthRight?: number;
+        strokeWidthBottom?: number;
+        strokeWidthLeft?: number;
         strokeAlignment?: "center" | "inner" | "outer";
         strokeCapStart?: StrokeCap;
         strokeCapEnd?: StrokeCap;
@@ -20557,7 +20853,41 @@ Stroke:
         strokeWidth?: number
         ```
 
-        The optional width of the stroke.
+        Reads the top width. Setting it selects simple mode and sets all four sides.
+      strokeWidthType: |-
+        ```
+        readonly strokeWidthType?: "simple" | "multiple"
+        ```
+
+        Computed width mode: simple when all four effective widths match, multiple otherwise.
+      strokeWidthTop: |-
+        ```
+        strokeWidthTop?: number
+        ```
+
+        Top side width; setting it preserves the other side widths.
+        Boards and rectangles only; other shape types raise a validation error.
+      strokeWidthRight: |-
+        ```
+        strokeWidthRight?: number
+        ```
+
+        Right side width; setting it preserves the other side widths.
+        Boards and rectangles only; other shape types raise a validation error.
+      strokeWidthBottom: |-
+        ```
+        strokeWidthBottom?: number
+        ```
+
+        Bottom side width; setting it preserves the other side widths.
+        Boards and rectangles only; other shape types raise a validation error.
+      strokeWidthLeft: |-
+        ```
+        strokeWidthLeft?: number
+        ```
+
+        Left side width; setting it preserves the other side widths.
+        Boards and rectangles only; other shape types raise a validation error.
       strokeAlignment: |-
         ```
         strokeAlignment?: "center" | "inner" | "outer"
@@ -20675,6 +21005,10 @@ SvgRaw:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -20711,6 +21045,7 @@ SvgRaw:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -21013,6 +21348,10 @@ SvgRaw:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -21314,6 +21653,18 @@ SvgRaw:
         (and those of its children) to the ones in the linked main component.
         Similar to the "reset overrides" action on the Penpot interface.
         The current shape must be a component copy instance.
+
+        Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
 
         Returns void
       switchVariant: |-
@@ -21650,6 +22001,10 @@ Text:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -21686,6 +22041,7 @@ Text:
         detach(): void;
         swapComponent(component: LibraryComponent): void;
         resetOverrides(): void;
+        updateMain(): void;
         switchVariant(pos: number, value: string): void;
         combineAsVariants(ids: string[]): VariantContainer;
         isVariantHead(): boolean;
@@ -22006,6 +22362,10 @@ Text:
             shadow: string;
             strokeColor: string;
             strokeWidth: string;
+            strokeWidthTop: string;
+            strokeWidthRight: string;
+            strokeWidthBottom: string;
+            strokeWidthLeft: string;
             fontFamilies: string;
             fontSize: string;
             fontWeight: string;
@@ -22409,6 +22769,18 @@ Text:
         (and those of its children) to the ones in the linked main component.
         Similar to the "reset overrides" action on the Penpot interface.
         The current shape must be a component copy instance.
+
+        Returns void
+      updateMain: |-
+        ```
+        updateMain(): void
+        ```
+
+        Applies this copy's overrides to its main component and synchronizes copies.
+        Similar to the editor's "update main component" action.
+        Requires `content:write` and `library:write` permissions.
+        The shape must be a component copy head on the active page of the current file,
+        outside any other component copy, with a main component that is not deleted.
 
         Returns void
       switchVariant: |-
@@ -27784,7 +28156,14 @@ TokenDimensionProps:
     ==============================
 
     ```
-    TokenDimensionProps: "x" | "y" | "strokeWidth"
+    TokenDimensionProps:
+        | "x"
+        | "y"
+        | "strokeWidth"
+        | "strokeWidthTop"
+        | "strokeWidthRight"
+        | "strokeWidthBottom"
+        | "strokeWidthLeft"
     ```
 
     The properties that a Dimension token can be applied to.
@@ -27917,7 +28296,12 @@ TokenBorderWidthProps:
     ================================
 
     ```
-    TokenBorderWidthProps: "strokeWidth"
+    TokenBorderWidthProps:
+        | "strokeWidth"
+        | "strokeWidthTop"
+        | "strokeWidthRight"
+        | "strokeWidthBottom"
+        | "strokeWidthLeft"
     ```
 
     The properties that a BorderWidth token can be applied to.
