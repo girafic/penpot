@@ -190,12 +190,12 @@
 
 (defn content-end
   "The latest time the dock shows something of `timeline` at: a
-  keyframe, the end of an animated copy (`copy-ends`, by copy) or of an
+  keyframe, the end of an animated copy (`copy-spans`, by copy) or of an
   audio clip, which may run far past the duration and is trimmed at its
   end."
-  [timeline copy-ends]
+  [timeline copy-spans]
   (apply max 0 (concat (map :time (mapcat :keyframes (vals (:tracks timeline))))
-                       (vals copy-ends)
+                       (map second (vals copy-spans))
                        (map ctau/clip-end (vals (:audio-clips timeline))))))
 
 (defn- axis-span
@@ -459,22 +459,22 @@
                                    (= :volume mode)  "ns-resize"
                                    :else             "ew-resize")
     (:keyframe :easing)      (if locked? "default" "pointer")
-    :copy                    "pointer"
+    :copy                    "grab"
     (:segment :lane :row)    "crosshair"
     "default"))
 
 (defn- animated-ids
   "Ids of the layers of `board-id` (itself included) that have keyframes,
   preset animations or animated children, or that are component copies
-  playing the animation of their mains (`copy-ends`, see `timeline-rows`)."
+  playing the animation of their mains (`copy-spans`, see `timeline-rows`)."
   ([objects board-id timeline]
    (animated-ids objects board-id timeline {}))
-  ([objects board-id timeline copy-ends]
+  ([objects board-id timeline copy-spans]
    (letfn [(walk [id]
              (let [child-ids (mapcat walk (dm/get-in objects [id :shapes]))]
                (if (or (seq (dm/get-in timeline [:tracks id :keyframes]))
                        (seq (dm/get-in timeline [:tracks id :animations]))
-                       (contains? copy-ends id)
+                       (contains? copy-spans id)
                        (seq child-ids))
                  (cons id child-ids)
                  child-ids)))]
@@ -511,24 +511,24 @@
   gets its row with its first animation. Animated layers start expanded;
   `expanded` holds the ones the user toggled, or is `:all` to open them
   all (see `filter-rows`). A component copy playing
-  the animation of its main, which ends at the time `copy-ends` gives
-  for it, has a bar over it, `:copy`, and keeps its layers folded away
+  the animation of its main, over the span `copy-spans` gives for it (see
+  `cta/copy-clock`), has a bar over it, `:copy`, and keeps its layers folded away
   unless the board animates them. The layers out of the board that its
   timeline animates (see `outside-ids`) follow, marked `:outside?`."
-  [objects board-id timeline expanded copy-ends]
+  [objects board-id timeline expanded copy-spans]
   (let [outside  (outside-ids objects board-id timeline)
         animated (into (animated-ids objects board-id timeline)
                        (mapcat #(animated-ids objects % timeline))
                        outside)
-        playing  (into (animated-ids objects board-id timeline copy-ends)
-                       (mapcat #(animated-ids objects % timeline copy-ends))
+        playing  (into (animated-ids objects board-id timeline copy-spans)
+                       (mapcat #(animated-ids objects % timeline copy-spans))
                        outside)]
     (letfn [(walk [id depth]
               (when-let [shape (get objects id)]
-                (let [copy-end   (get copy-ends id)
+                (let [copy-span  (get copy-spans id)
                       ;; A copy shows its own animation, in the board,
                       ;; unfolded; the one of its main, as a bar.
-                      folded?    (and (some? copy-end) (not (contains? animated id)))
+                      folded?    (and (some? copy-span) (not (contains? animated id)))
                       children   (when-not folded?
                                    (filter #(contains? playing %) (reverse (:shapes shape))))
                       animations (dm/get-in timeline [:tracks id :animations])
@@ -542,7 +542,7 @@
                          :shape shape
                          :expandable? (boolean (or (seq children) (seq animations) (seq slots)))
                          :expanded? expanded?
-                         :copy (when (some? copy-end) [0 copy-end])
+                         :copy copy-span
                          :range (when (contains? animated id)
                                   (cta/keyframes-range timeline (cons id (cfh/get-children-ids objects id))))}
                         (when expanded?
@@ -1365,23 +1365,6 @@
   (let [playhead (mf/deref ref:playhead)]
     [:span {:class (stl/css :current-time)} (dwa/format-time playhead unit fps)]))
 
-(defn- time->field
-  "`time` (ms) as a field of the dock shows it in `unit`, in frames at
-  `fps` (see `dwa/time-units`)."
-  [time unit fps]
-  (case unit
-    :s      (/ time 1000)
-    :frames (dwa/time->frames time fps)
-    time))
-
-(defn- field->time
-  "The time (ms) a field of the dock in `unit` holds as `value`."
-  [value unit fps]
-  (case unit
-    :s      (mth/round (* value 1000))
-    :frames (dwa/frames->time value fps)
-    value))
-
 (mf/defc playhead-follower*
   "While a zoomed timeline plays, pages the view to keep the playhead
   in sight. `geo-ref` places the lanes (see `lanes/draw!`)."
@@ -1438,7 +1421,7 @@
          (mf/deps clip-id unit fps fade-in fade-out)
          (fn [which value]
            (when (number? value)
-             (let [ms (max 0 (field->time value unit fps))]
+             (let [ms (max 0 (dwa/field->time value unit fps))]
                (st/emit! (if (= which :in)
                            (dwaa/set-clip-fades clip-id ms fade-out)
                            (dwaa/set-clip-fades clip-id fade-in ms)))))))
@@ -1523,7 +1506,7 @@
       [:> deprecated-input/numeric-input* {:key (dm/str "in-" (name unit))
                                            :min 0
                                            :step step
-                                           :value (time->field fade-in unit fps)
+                                           :value (dwa/time->field fade-in unit fps)
                                            :is-disabled locked?
                                            :on-change on-fade-in}]]
      [:div {:class (stl/css :duration-field :fade-field)
@@ -1532,7 +1515,7 @@
       [:> deprecated-input/numeric-input* {:key (dm/str "out-" (name unit))
                                            :min 0
                                            :step step
-                                           :value (time->field fade-out unit fps)
+                                           :value (dwa/time->field fade-out unit fps)
                                            :is-disabled locked?
                                            :on-change on-fade-out}]]
      [:button {:type "button"
@@ -1580,7 +1563,7 @@
          (mf/deps unit fps)
          (fn [value]
            (when (number? value)
-             (st/emit! (dwa/set-duration (field->time value unit fps))))))
+             (st/emit! (dwa/set-duration (dwa/field->time value unit fps))))))
 
         on-toggle-unit
         (mf/use-fn #(st/emit! (dwa/toggle-time-unit)))
@@ -1825,9 +1808,13 @@
         copies     (mf/with-memo [objects timelines files board-id]
                      (when (some? board-id)
                        (dwa/copy-timelines objects timelines files board-id)))
-        copy-ends  (mf/with-memo [copies]
-                     (reduce (fn [ends [[_ id] tl]]
-                               (update ends id (fnil max 0) (cta/cycle-duration tl)))
+        ;; when each copy plays the animation of its main, on the clock
+        ;; the board gives it (see `cta/copy-clock`)
+        copy-spans (mf/with-memo [copies]
+                     (reduce (fn [spans [[_ id] tl]]
+                               (let [start (:clock-start tl 0)
+                                     end   (cta/clock-end tl)]
+                                 (update spans id (fn [[s e]] [(min (or s start) start) (max (or e end) end)]))))
                              {}
                              copies))
         clock      (mf/with-memo [timeline copies timelines board-id]
@@ -1914,8 +1901,8 @@
         ;; Horizontal zoom of the time axis.
         zoom*      (mf/use-state 1)
         zoom       (deref zoom*)
-        latest     (mf/with-memo [timeline copy-ends]
-                     (content-end timeline copy-ends))
+        latest     (mf/with-memo [timeline copy-spans]
+                     (content-end timeline copy-spans))
         ;; Before 0 when something lies there, as in Figma, else from 0.
         origin     (mf/with-memo [timeline]
                      (content-start timeline))
@@ -2094,10 +2081,10 @@
                (dom/blur! (dom/get-target event))
                (reset! row-filter* "")))))
 
-        rows       (mf/with-memo [objects board-id timeline expanded copy-ends audio-collapsed? audio-recording
+        rows       (mf/with-memo [objects board-id timeline expanded copy-spans audio-collapsed? audio-recording
                                   row-filter filtering?]
                      (when (some? timeline)
-                       (-> (timeline-rows objects board-id timeline (if filtering? :all expanded) copy-ends)
+                       (-> (timeline-rows objects board-id timeline (if filtering? :all expanded) copy-spans)
                            (filter-rows row-filter)
                            (into (dwaa/audio-rows (cond-> timeline
                                                     (some? audio-recording)
@@ -2818,10 +2805,16 @@
                (on-clip-down event target)
 
                ;; The animation of a component copy is the one of its
-               ;; main, edited there: its bar only picks the copy.
+               ;; main, edited there: its bar picks the copy, and dragging
+               ;; it moves when the copy starts (see `cta/copy-clock`).
                :copy
                (when left?
-                 (select-on-press event (:shape-id target) (:selected scene)))
+                 (select-on-press event (:shape-id target) (:selected scene))
+                 (dom/capture-pointer event)
+                 (mf/set-ref-val! press-ref {:kind :copy
+                                             :shape-id (:shape-id target)
+                                             :start (first (:span target))
+                                             :x0 x}))
 
                :ruler
                (when left?
@@ -2891,6 +2884,19 @@
                :scrub
                (on-scrub event)
 
+               :copy
+               (when (or (:moved? press) (> (mth/abs (- x (:x0 press))) drag-threshold))
+                 (let [{:keys [shape-id start undo-id]} press
+                       {:keys [span axis-width]} (mf/ref-val geo-ref)
+                       undo-id (or undo-id (js/Symbol))
+                       t       (+ start (mth/round (* (- x (:x0 press)) (/ span (max 1 axis-width)))))
+                       to      (snap-target t event {})]
+                   (when-not (:undo-id press)
+                     (st/emit! (dwu/start-undo-transaction undo-id)))
+                   (mf/set-ref-val! press-ref (assoc press :moved? true :undo-id undo-id))
+                   (show-snap to)
+                   (st/emit! (dwa/set-copy-clock shape-id {:start (max 0 (or to (frame-snap t event)))}))))
+
                :keyframe
                (when (and (some? (:undo-id press))
                           (or (:moved? press) (> (mth/abs (- x (:x0 press))) drag-threshold)))
@@ -2937,6 +2943,12 @@
              (case (:kind press)
                :scrub
                (show-snap nil)
+
+               :copy
+               (do
+                 (show-snap nil)
+                 (when-let [undo-id (:undo-id press)]
+                   (st/emit! (dwu/commit-undo-transaction undo-id))))
 
                ;; A click selects the keyframe (and its layer) and moves the
                ;; playhead to it, a locked one only the playhead. A dragged

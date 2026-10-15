@@ -1140,8 +1140,11 @@
                 sound!  (fn [t]
                           (let [on? (not (get storage/user ::audio-muted false))]
                             (follow ::board timeline t on?)
+                            ;; each copy from its start, at its pace (see
+                            ;; `cta/copy-clock`)
                             (doseq [[main-id copy] voices]
-                              (follow main-id copy t on?))))]
+                              (let [start (:clock-start copy 0)]
+                                (follow main-id (cltl/at-pace copy) (- t start) (and on? (>= t start)))))))]
             (rx/concat
              (->> (frame-times start (when sound? audio/now-ms) (not sound?))
                   (rx/take-while (fn [t] (not (cltl/view-playback-ended? timeline (vals copies) t))))

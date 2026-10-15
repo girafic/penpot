@@ -409,6 +409,24 @@
     (str/starts-with? size "h") (str (subs size 1) "h")
     :else (str size "x")))
 
+(def min-copy-speed
+  "The slowest a component copy plays the animation of its main: a
+  quarter of its pace."
+  0.25)
+
+(def max-copy-speed
+  "The fastest a component copy plays the animation of its main: four
+  times its pace."
+  4)
+
+(def schema:copy-clock
+  "When and how fast a component copy in a board plays the animation of
+  its main (see `copy-clock`), as a precomposition in After Effects:
+  from `:start` ms of the board on, at `:speed` times its pace."
+  [:map {:title "AnimationCopyClock"}
+   [:start {:optional true} ::sm/safe-int]
+   [:speed {:optional true} [::sm/number {:min min-copy-speed :max max-copy-speed}]]])
+
 (def schema:timeline
   [:map {:title "AnimationTimeline"}
    [:board-id ::sm/uuid]
@@ -424,7 +442,10 @@
    [:markers {:optional true} [:vector {:gen/max 3} schema:marker]]
    [:export {:optional true} schema:export]
    [:tracks [:map-of {:gen/max 3} ::sm/uuid schema:track]]
-   [:audio-clips {:optional true} [:map-of {:gen/max 2} ::sm/uuid ctau/schema:audio-clip]]])
+   [:audio-clips {:optional true} [:map-of {:gen/max 2} ::sm/uuid ctau/schema:audio-clip]]
+   ;; the clocks of the component copies in the board, by the id of the
+   ;; head of each (see `copy-clock`)
+   [:copies {:optional true} [:map-of {:gen/max 2} ::sm/uuid schema:copy-clock]]])
 
 (def schema:timeline-attrs
   "Settings of a timeline to change, its board and tracks aside. A nil
@@ -437,7 +458,8 @@
    [:loop-count {:optional true} [:maybe ::sm/safe-int]]
    [:autoplay {:optional true} [:maybe :boolean]]
    [:markers {:optional true} [:maybe [:vector {:gen/max 3} schema:marker]]]
-   [:export {:optional true} [:maybe schema:export]]])
+   [:export {:optional true} [:maybe schema:export]]
+   [:copies {:optional true} [:maybe [:map-of {:gen/max 2} ::sm/uuid schema:copy-clock]]]])
 
 (def schema:timelines
   [:map-of {:gen/max 2} ::sm/uuid schema:timeline])
@@ -591,12 +613,59 @@
   (cond-> (:duration timeline)
     (= :ping-pong (playback-mode timeline)) (* 2)))
 
+(defn copy-clock
+  "When and how fast the board of `timeline` plays the animation of the
+  main of its component copy `id` (see `schema:copy-clock`): `{:start
+  :speed}`, from 0 at its own pace unless set."
+  [timeline id]
+  (let [{:keys [start speed]} (dm/get-in timeline [:copies id])]
+    {:start (or start 0)
+     :speed (or speed 1)}))
+
+(defn set-copy-clock
+  "`timeline` with its component copy `id` playing the animation of its
+  main from `start` ms on at `speed` (see `copy-clock`); the defaults
+  are left out."
+  [timeline id {:keys [start speed]}]
+  (let [speed (some-> speed (mth/clamp min-copy-speed max-copy-speed))
+        clock (cond-> {}
+                (and (some? start) (not (zero? start))) (assoc :start (mth/round start))
+                (and (some? speed) (not= 1 speed))      (assoc :speed speed))]
+    (if (empty? clock)
+      (let [timeline (d/dissoc-in timeline [:copies id])]
+        (cond-> timeline (empty? (:copies timeline)) (dissoc :copies)))
+      (assoc-in timeline [:copies id] clock))))
+
+(defn- clock-elapsed
+  "`elapsed` ms of the board as the clock of the animation of a
+  component copy counts them (`:clock-start` and `:clock-speed`, see
+  `app.common.logic.timelines/instance-timelines`): 0 until it starts,
+  then at its pace. A timeline of a board keeps `elapsed`."
+  [timeline elapsed]
+  (let [start (:clock-start timeline 0)
+        speed (:clock-speed timeline 1)]
+    (if (and (zero? start) (= 1 speed))
+      elapsed
+      (* (max 0 (- elapsed start)) speed))))
+
+(defn clock-end
+  "When `timeline` is back at its start (see `cycle-duration`), in ms of
+  the board: for the animation of a component copy, from its start and
+  at its pace (see `clock-elapsed`)."
+  [timeline]
+  (let [cycle (cycle-duration timeline)
+        speed (:clock-speed timeline 1)]
+    (+ (:clock-start timeline 0)
+       (if (= 1 speed) cycle (int (mth/ceil (/ cycle (double speed))))))))
+
 (defn playback-time
   "The time of `timeline` shown `elapsed` ms after playing from its
   start: held at the end when played once, wrapped when looping, going
-  back and forth in ping-pong."
+  back and forth in ping-pong. The animation of a component copy keeps
+  its own clock (see `clock-elapsed`)."
   [timeline elapsed]
-  (let [duration (max 1 (:duration timeline))]
+  (let [duration (max 1 (:duration timeline))
+        elapsed  (clock-elapsed timeline elapsed)]
     (case (playback-mode timeline)
       :loop      (mod elapsed duration)
       :ping-pong (let [t (mod elapsed (* 2 duration))]
@@ -608,7 +677,7 @@
   start, which only happens when it plays once."
   [timeline elapsed]
   (and (= :once (playback-mode timeline))
-       (> elapsed (:duration timeline))))
+       (> (clock-elapsed timeline elapsed) (:duration timeline))))
 
 (defn timeline-empty?
   "Whether `timeline` animates nothing and plays no sound: no tracks and
@@ -2005,6 +2074,18 @@
                 (sort-keyframes))
            :loops
            (into #{} (map (fn [[property index]] (slot-key property index))) (keys by-slot)))))
+
+(defn retime-track
+  "`track` played from `start` ms on at `speed` times its pace: its
+  keyframes moved and spread out, so the animation of a component copy
+  keeps its clock in the timeline of its board (see `copy-clock`)."
+  [track start speed]
+  (if (and (zero? start) (= 1 speed))
+    track
+    (update track :keyframes
+            (fn [keyframes]
+              (mapv #(update % :time (fn [time] (mth/round (+ start (/ time (double speed))))))
+                    keyframes)))))
 
 (def ^:private path-steps
   "Straight steps a curved segment of a motion path is drawn with."
@@ -3562,7 +3643,12 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn remove-shapes
-  "Drop the tracks targeting any of `shape-ids` (used when shapes are
-  deleted). Returns the updated timeline."
+  "Drop the tracks targeting any of `shape-ids`, and the clocks of the
+  component copies among them (used when shapes are deleted). Returns
+  the updated timeline."
   [timeline shape-ids]
-  (update timeline :tracks #(apply dissoc % shape-ids)))
+  (let [timeline (update timeline :tracks #(apply dissoc % shape-ids))]
+    (if (contains? timeline :copies)
+      (let [copies (apply dissoc (:copies timeline) shape-ids)]
+        (if (empty? copies) (dissoc timeline :copies) (assoc timeline :copies copies)))
+      timeline)))

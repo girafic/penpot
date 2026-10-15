@@ -1763,7 +1763,8 @@
           (fn [[copy-id entries]]
             (let [timelines (map val entries)]
               #js {:copy (shape-proxy plugin-id file-id page-id copy-id)
-                   :duration (reduce max 0 (map cta/cycle-duration timelines))
+                   ;; a round at the pace the board gives the copy
+                   :duration (reduce max 0 (map #(- (cta/clock-end %) (:clock-start % 0)) timelines))
                    :playback (if (every? #(= :once (cta/playback-mode %)) timelines) "once" "loop")}))))))
 
 (defn timeline-options

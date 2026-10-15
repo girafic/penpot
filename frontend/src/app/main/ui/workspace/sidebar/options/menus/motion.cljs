@@ -11,6 +11,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.math :as mth]
    [app.common.path-names :as cpn]
    [app.common.types.animation :as cta]
@@ -940,6 +941,53 @@
 (def ^:private ref:stagger
   (l/derived dwa/stagger st/state))
 
+(def ^:private ref:timelines
+  (l/derived #(get % :timelines) refs/workspace-page))
+
+(mf/defc copy-clock-rows*
+  "When and how fast the component copy `shape-id` plays the animation of
+  its main, as a precomposition in After Effects (see `cta/copy-clock`):
+  only for a copy whose main animates."
+  {::mf/private true}
+  [{:keys [shape-id]}]
+  (let [objects   (mf/deref refs/workspace-page-objects)
+        timelines (mf/deref ref:timelines)
+        files     (mf/deref refs/files)
+        board-id  (cfh/get-shape-id-root-frame objects shape-id)
+        animated? (mf/with-memo [objects timelines files board-id shape-id]
+                    (and (some? board-id)
+                         (some (fn [[[_ id]]] (= id shape-id))
+                               (dwa/copy-timelines objects timelines files board-id))))
+        {:keys [start speed]} (cta/copy-clock (get timelines board-id) shape-id)
+
+        on-start
+        (mf/use-fn
+         (mf/deps shape-id)
+         (number-handler #(st/emit! (dwa/set-copy-clock shape-id {:start (max 0 (mth/round %))}))))
+
+        on-speed
+        (mf/use-fn
+         (mf/deps shape-id)
+         (number-handler #(st/emit! (dwa/set-copy-clock shape-id {:speed (/ % 100)}))))]
+
+    (when animated?
+      [:div {:class (stl/css :copy-clock)}
+       [:> animation-row* {:label (tr "workspace.animation.copy-start")}
+        [:> numeric-input* {:text-icon "ms"
+                            :property (tr "workspace.animation.copy-start")
+                            :min 0
+                            :step 10
+                            :value start
+                            :on-change on-start}]]
+       [:> animation-row* {:label (tr "workspace.animation.copy-speed")}
+        [:> numeric-input* {:text-icon "%"
+                            :property (tr "workspace.animation.copy-speed")
+                            :min (* 100 cta/min-copy-speed)
+                            :max (* 100 cta/max-copy-speed)
+                            :step 5
+                            :value (mth/round (* 100 speed))
+                            :on-change on-speed}]]])))
+
 (mf/defc animations-menu*
   "The preset animations of the selection, in motion mode: add one from
   the menu, then open it to change its settings. The list shows for a
@@ -1050,6 +1098,9 @@
                              :step 10
                              :value stagger
                              :on-change on-stagger}]]])
+
+     (when (some? shape-id)
+       [:> copy-clock-rows* {:shape-id shape-id}])
 
      (when (seq animations)
        [:div {:class (stl/css :animations-list)}

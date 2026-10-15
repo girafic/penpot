@@ -53,9 +53,10 @@
         timelines))
 
 (defn- settings
-  "A timeline without its board, tracks and audio clips."
+  "A timeline without its board, tracks, audio clips and the clocks of
+  its component copies."
   [timeline]
-  (dissoc timeline :board-id :tracks :audio-clips))
+  (dissoc timeline :board-id :tracks :audio-clips :copies))
 
 (defn animation-sources
   "What copying the animation of the shapes of `ids` of `page` (with its
@@ -427,7 +428,9 @@
   its own clock (see `cta/playback-time`). The board that is the main of
   a copy gives it its audio clips too, an entry of their own when it
   animates nothing (see `with-instance-clips`). A shape `timeline`, the
-  one of the board, animates itself keeps that animation."
+  one of the board, animates itself keeps that animation. Each plays on
+  the clock `timeline` gives the copy (see `cta/copy-clock`), as
+  `:clock-start` and `:clock-speed` when they are not the defaults."
   [objects board-id timeline main-page]
   (let [own (:tracks timeline)]
     (reduce
@@ -435,6 +438,11 @@
        (let [head    (get objects head-id)
              main-id (:shape-ref head)
              main    (some-> (main-page head) :timelines (get main-id))
+             {:keys [start speed]} (cta/copy-clock timeline head-id)
+             entry   (fn [settings]
+                       (cond-> (assoc settings :board-id board-id :tracks {})
+                         (not (zero? start)) (assoc :clock-start start)
+                         (not= 1 speed)      (assoc :clock-speed speed)))
              result  (reduce
                       (fn [result id]
                         (if-let [{:keys [board track ref-id] main :timeline mobjs :objects cmap :map}
@@ -442,7 +450,7 @@
                                    (main-track (get objects id) head main-page))]
                           (let [k [:copy head-id board]]
                             (-> result
-                                (update k #(or % (assoc (settings main) :board-id board-id :tracks {})))
+                                (update k #(or % (entry (settings main))))
                                 (assoc-in [k :tracks id]
                                           (mapped-track track ref-id mobjs board id objects board-id cmap))))
                           result))
@@ -451,7 +459,7 @@
          (if-let [clips (not-empty (:audio-clips main))]
            (let [k [:copy head-id main-id]]
              (-> result
-                 (update k #(or % (assoc (settings main) :board-id board-id :tracks {})))
+                 (update k #(or % (entry (settings main))))
                  (assoc-in [k :audio-clips] clips)))
            result)))
      {}
@@ -474,7 +482,7 @@
   [timeline copies stored?]
   (if (or (not (cta/timeline-empty? timeline)) (empty? copies))
     timeline
-    (let [longest (reduce max 1 (map cta/cycle-duration copies))]
+    (let [longest (reduce max 1 (map cta/clock-end copies))]
       (assoc timeline
              :duration (if stored? (max longest (:duration timeline)) longest)
              :playback (if (every? #(= :once (cta/playback-mode %)) copies) :once :loop)))))
@@ -494,7 +502,9 @@
   [timeline copies objects & {:keys [text-split]}]
   (reduce
    (fn [timeline copy]
-     (let [clock  (select-keys copy [:duration :playback :loop])
+     (let [clock  (select-keys copy [:duration :playback :loop :clock-start :clock-speed])
+           start  (:clock-start copy 0)
+           speed  (:clock-speed copy 1)
            copy   (-> (cond-> copy (= :whole text-split) cta/flatten-splits)
                       (cta/resolve-animations objects)
                       (cta/expand-loops))
@@ -505,7 +515,7 @@
            loop?  (= :loop (cta/playback-mode copy))
            period (:duration copy)]
        (cond-> timeline
-         loop? (update :copy-loops (fnil conj []) period)
+         loop? (update :copy-loops (fnil conj []) (if (= 1 speed) period (/ period (double speed))))
          :always
          (update :tracks
                  (fn [tracks]
@@ -514,6 +524,7 @@
                                   (not (contains? tracks id))
                                   (assoc id (cond-> track
                                               loop?                     (cta/loop-track period)
+                                              :always                   (cta/retime-track start speed)
                                               (seq (:animations track)) (assoc :split-clock clock)))))
                               tracks
                               (:tracks copy)))))))
@@ -541,6 +552,30 @@
       (> (ctau/clip-end clip) length)
       (-> (assoc :duration (- length (:start clip)))
           (dissoc :fade-out)))))
+
+(defn at-pace
+  "`copy` (see `instance-timelines`) as it sounds at its pace: its
+  duration and the timing of its audio clips in ms of the board, the
+  clips playing their files that much faster, and no clock of its own
+  left; its start stays to the caller (see `with-instance-clips`)."
+  [copy]
+  (let [speed (:clock-speed copy 1)
+        pace  #(some-> % (/ (double speed)) mth/round)]
+    (cond-> (dissoc copy :clock-start :clock-speed)
+      (not= 1 speed)
+      (-> (update :duration pace)
+          (update :audio-clips
+                  (fn [clips]
+                    (when (some? clips)
+                      (update-vals clips
+                                   (fn [clip]
+                                     (-> clip
+                                         (update :start pace)
+                                         (update :duration #(max ctau/min-clip-duration (pace %)))
+                                         (d/update-when :fade-in pace)
+                                         (d/update-when :fade-out pace)
+                                         (assoc :speed (mth/clamp (* speed (ctau/clip-speed clip))
+                                                                  ctau/min-speed ctau/max-speed))))))))))))
 
 (defn sounding-mains
   "The main boards whose audio clips the component copies `copies` (by
@@ -572,9 +607,12 @@
     (first
      (reduce
       (fn [[timeline lanes] [main-id copy]]
-        (let [clips  (sort-by (juxt :lane :start) (vals (:audio-clips copy)))
+        (let [start  (:clock-start copy 0)
+              copy   (at-pace copy)
+              clips  (sort-by (juxt :lane :start) (vals (:audio-clips copy)))
               length (:duration copy)
-              clips  (for [[index at] (map-indexed vector (copy-cycles copy duration))
+              clips  (for [[index at] (map-indexed vector
+                                                   (map #(+ start %) (copy-cycles copy (- duration start))))
                            clip       clips
                            :let       [id (uuid/custom (long (hash [main-id (:id clip)])) (long index))]
                            :when      (< at duration)]

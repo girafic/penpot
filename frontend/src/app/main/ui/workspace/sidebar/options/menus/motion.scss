@@ -113,6 +113,13 @@
   grid-column: 1 / -1;
 }
 
+// When and how fast a component copy plays the animation of its main.
+.copy-clock {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+}
+
 .animations-list {
   grid-column: 1 / -1;
   display: flex;

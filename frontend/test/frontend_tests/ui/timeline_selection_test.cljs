@@ -330,7 +330,7 @@
   (let [tl (-> (cta/make-timeline {:board-id (uuid/next) :duration 2000})
                (cta/add-keyframe shape-a {:time 2500 :property :x :value 0}))]
     (t/is (= 2500 (timeline/content-end tl {})) "a keyframe")
-    (t/is (= 3000 (timeline/content-end tl {(uuid/next) 3000})) "an animated copy")
+    (t/is (= 3000 (timeline/content-end tl {(uuid/next) [500 3000]})) "an animated copy, by its span")
     (t/is (= 60500 (timeline/content-end (ctau/add-audio-clip tl {:audio-id (uuid/next) :name "long.mp3"
                                                                   :source-duration 60000 :start 500})
                                          {}))

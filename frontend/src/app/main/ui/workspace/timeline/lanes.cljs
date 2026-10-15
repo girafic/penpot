@@ -314,18 +314,19 @@
         (case (:type row)
           :layer
           (let [[start end] (:range row)
-                [_ copy-end] (:copy row)
+                [copy-start copy-end] (:copy row)
                 part        (when (and bar? (some? start))
                               (bar-part (time->x geo start) (time->x geo end) x true))]
             (cond
               (some? part)
               (assoc base :type :bar :mode part)
 
-              ;; the bar of a component copy: it selects the copy
+              ;; the bar of a component copy: it selects the copy, and
+              ;; dragging it moves when the copy starts
               (and bar? (some? copy-end)
-                   (<= (time->x geo 0) x (max (time->x geo copy-end)
-                                              (+ (time->x geo 0) min-bar-width))))
-              (assoc base :type :copy)
+                   (<= (time->x geo copy-start) x (max (time->x geo copy-end)
+                                                       (+ (time->x geo copy-start) min-bar-width))))
+              (assoc base :type :copy :span [copy-start copy-end])
 
               :else
               (assoc base :type :row)))

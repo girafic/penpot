@@ -6785,6 +6785,14 @@ msgstr "Origin X"
 msgid "workspace.animation.origin-y"
 msgstr "Origin Y"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.copy-start"
+msgstr "Start"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.copy-speed"
+msgstr "Speed"
+
 #: src/app/main/ui/workspace/timeline.cljs
 msgid "workspace.animation.outside-board"
 msgstr "Outside the board"

@@ -276,6 +276,23 @@
   [time fps]
   (frames->time (mth/round (/ (* time fps) 1000)) fps))
 
+(defn time->field
+  "`time` (ms) as a field shows it in the time `unit` of the timeline,
+  in frames at `fps` (see `time-units`)."
+  [time unit fps]
+  (case unit
+    :s      (/ time 1000)
+    :frames (time->frames time fps)
+    time))
+
+(defn field->time
+  "The time (ms) a field in `unit` holds as `value`."
+  [value unit fps]
+  (case unit
+    :s      (mth/round (* value 1000))
+    :frames (frames->time value fps)
+    value))
+
 (defn format-seconds
   "`time` (ms) in seconds, to the millisecond: `1.25`."
   [time]
@@ -556,6 +573,21 @@
    (commit-timeline it state board-id timeline nil))
   ([it state board-id timeline undo-group]
    (commit-page-timeline it state (:current-page-id state) board-id timeline undo-group)))
+
+(defn set-copy-clock
+  "Play the animation of the main of the component copy `copy-id`, in
+  the active board, from another time or at another pace, as a
+  precomposition: `changes` holds its `:start` (ms) and/or `:speed`
+  (see `cta/copy-clock`); the other keeps what it was."
+  [copy-id changes]
+  (ptk/reify ::set-copy-clock
+    ptk/WatchEvent
+    (watch [it state _]
+      (when-let [tl (current-or-new-timeline state)]
+        (let [tl' (cta/set-copy-clock tl copy-id (merge (cta/copy-clock tl copy-id) changes))]
+          (when (not= tl tl')
+            (rx/of (commit-timeline it state (:board-id tl') tl')
+                   (apply-preview))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TIMELINE CRUD

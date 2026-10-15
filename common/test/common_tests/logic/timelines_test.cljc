@@ -14,6 +14,7 @@
    [app.common.logic.shapes :as cls]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
+   [app.common.schema :as sm]
    [app.common.test-helpers.components :as thc]
    [app.common.test-helpers.compositions :as tho]
    [app.common.test-helpers.files :as thf]
@@ -272,6 +273,62 @@
     ;; at 250 ms the copy shows as the main does then
     (t/is (mth/close? (+ (get-in objects [board :selrect :x]) 10 dx 12.5)
                       (get-in (cltl/shown-shapes timelines objects 250) [copy-rect :selrect :x])))))
+
+(t/deftest a-copy-plays-on-the-clock-its-board-gives-it
+  ;; as a precomposition: from 500 ms on, at twice its pace
+  (let [{:keys [objects board copy copy-rect main-page]} (component-scene)
+        own       (cta/set-copy-clock (cta/make-timeline {:board-id board}) copy {:start 500 :speed 2})
+        plain     (cltl/instance-timelines objects board nil main-page)
+        timelines (cltl/instance-timelines objects board own main-page)
+        timeline  (get timelines [:copy copy (thi/id :main)])
+        ;; where it shows, at rest when nothing moves it
+        x-at      #(or (get-in (cltl/shown-shapes %1 objects %2) [copy-rect :selrect :x])
+                       (get-in objects [copy-rect :selrect :x]))]
+    (t/is (= {:start 500 :speed 2} (cta/copy-clock own copy)))
+    (t/is (= [500 2] [(:clock-start timeline) (:clock-speed timeline)]))
+    (t/is (mth/close? (x-at plain 0) (x-at timelines 400)) "at rest until it starts")
+    (t/is (mth/close? (x-at plain 250) (x-at timelines 625)) "then at twice its pace")
+    (t/is (= 1000 (cta/clock-end timeline)) "a second of the main in half a second, from 500 ms")
+    (t/is (= 1000 (:duration (cltl/with-copies-clock (cta/make-timeline {:board-id board}) [timeline] false)))
+          "a board without tracks keeps time with it")
+    (t/is (not (contains? (cta/set-copy-clock own copy {:start 0 :speed 1}) :copies)) "the defaults")
+    (t/is (not (contains? (cta/remove-shapes own [copy]) :copies)) "a copy deleted")))
+
+(t/deftest the-clock-of-a-copy-goes-as-a-setting-of-the-timeline
+  ;; only what changed is sent (see `pcb/change-timeline`): the clocks
+  ;; of the copies with the other settings
+  (let [{:keys [board copy]} (component-scene)
+        page    {:id (uuid/next) :timelines {board (cta/make-timeline {:board-id board})}}
+        timed   (cta/set-copy-clock (get-in page [:timelines board]) copy {:start 300 :speed 2})
+        changes (-> (pcb/empty-changes nil) (pcb/with-page page) (pcb/change-timeline board timed))
+        change  (first (:redo-changes changes))]
+    (t/is (= :update-timeline (:type change)))
+    (t/is (= {:copies {copy {:start 300 :speed 2}}} (:attrs change)))
+    (t/is (sm/validate cta/schema:timeline-attrs (:attrs change)))
+    (t/is (not (sm/validate cta/schema:timeline-attrs {:copies {copy {:speed 10}}})) "within its pace")))
+
+(t/deftest exports-play-a-copy-on-its-clock
+  (let [{:keys [objects board copy copy-rect main-page]} (component-scene)
+        own      (cta/set-copy-clock (cta/make-timeline {:board-id board :duration 2000}) copy {:start 500 :speed 2})
+        plain    (vals (cltl/instance-timelines objects board nil main-page))
+        copies   (vals (cltl/instance-timelines objects board own main-page))
+        exported #(cta/expand-loops (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 2000}) % objects))
+        x-at     #(get-in (cta/values-at %1 %2) [copy-rect :x])]
+    (t/is (= [500.0] (mapv double (:copy-loops (cltl/with-instance-tracks own copies objects))))
+          "it loops every 500 ms")
+    (t/is (mth/close? (x-at (exported plain) 0) (x-at (exported copies) 300)) "at rest until it starts")
+    (t/is (mth/close? (x-at (exported plain) 250) (x-at (exported copies) 625)))))
+
+(t/deftest the-sound-of-a-copy-keeps-its-clock
+  (let [clip  {:id (uuid/next) :audio-id (uuid/next) :name "ding.wav" :source-duration 1000
+               :start 0 :offset 0 :duration 1000 :lane 0 :fade-out 200}
+        copy  {:duration 1000 :playback :once :clock-start 500 :clock-speed 2
+               :audio-clips {(:id clip) clip}}
+        board (cltl/with-instance-clips (cta/make-timeline {:board-id (uuid/next) :duration 3000})
+                {[:copy (uuid/next) (uuid/next)] copy})
+        baked (first (vals (:audio-clips board)))]
+    (t/is (= [500 500 2 100] ((juxt :start :duration :speed :fade-out) baked))
+          "from 500 ms, at twice its pace")))
 
 (t/deftest a-copy-animated-in-its-board-keeps-that-animation
   (let [{:keys [objects board copy-rect main-page]} (component-scene)
