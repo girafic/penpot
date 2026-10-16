@@ -3242,10 +3242,33 @@
       default))
 
 (defn- change-turn
-  "The turn (degrees) nearest to the linear part of the matrix `change`:
-  none for a stretch along turned axes, which only skews."
+  "The turn (degrees) nearest to the linear part of the matrix `change`,
+  a mirror taken out first (along x), so a mirrored leader still turns
+  its follower: none for a stretch along turned axes, which only skews."
   [{:keys [a b c d]}]
-  (mth/degrees (mth/atan2 (- b c) (+ a d))))
+  (if (neg? (- (* a d) (* b c)))
+    (mth/degrees (mth/atan2 (- (- b) c) (- d a)))
+    (mth/degrees (mth/atan2 (- b c) (+ a d)))))
+
+(defn- change-least-scale
+  "The least scale of the matrix `change` along any axis (its smaller
+  singular value): near 0 when it squashes a layer flat along one."
+  [{:keys [a b c d]}]
+  (let [f   (+ (* a a) (* b b) (* c c) (* d d))
+        det (- (* a d) (* b c))]
+    (mth/sqrt (max 0 (/ (- f (mth/sqrt (max 0 (- (* f f) (* 4 det det))))) 2)))))
+
+(defn- unscaled
+  "The matrix `m` without its scale: its turn (see `change-turn`) around
+  `pivot`, which goes where `m` takes it."
+  [m pivot]
+  (let [turn (mth/radians (change-turn m))
+        cos  (mth/cos turn)
+        sin  (mth/sin turn)
+        to   (gpt/transform pivot m)]
+    (gmt/matrix cos sin (- sin) cos
+                (- (:x to) (- (* cos (:x pivot)) (* sin (:y pivot))))
+                (- (:y to) (+ (* sin (:x pivot)) (* cos (:y pivot)))))))
 
 (defn- change-scale
   "The even scale of the matrix `change`: the one that keeps its area."
@@ -3285,23 +3308,29 @@
         ids
         (recur (into ids new) new)))))
 
-(def ^:private first-frame-cache
-  "The modifiers of the follow chains of the last timeline played (see
-  `followed-modifiers`) at its first frame, which every frame reads:
-  `[key objects modifiers]`."
-  (atom nil))
+;; The modifiers of the follow chains of the timelines played (see
+;; `followed-modifiers`) at their first frame, which every frame reads:
+;; `[objects modifiers]` by timeline, gone with a timeline no longer
+;; played. Playback runs in the browser only.
+#?(:cljs
+   (defonce ^:private first-frame-cache
+     (js/WeakMap.)))
 
 (defn- first-frame-modifiers
   "The modifiers of the layers of `chain`, a timeline of the follow
   chains of the timeline `key` (see `follow-chain`), at its first
   frame: the same as on the frame before while `key` and `objects` are."
   [key objects chain]
-  (let [[k objs modifiers] @first-frame-cache]
-    (if (and (some? key) (identical? k key) (identical? objs objects))
-      modifiers
-      (let [modifiers (own-modifiers chain objects 0)]
-        (reset! first-frame-cache [key objects modifiers])
-        modifiers))))
+  #?(:cljs
+     (let [[objs modifiers] (when (some? key) (.get first-frame-cache key))]
+       (if (and (some? objs) (identical? objs objects))
+         modifiers
+         (let [modifiers (own-modifiers chain objects 0)]
+           (when (some? key)
+             (.set first-frame-cache key [objects modifiers]))
+           modifiers)))
+     :clj
+     (do key (own-modifiers chain objects 0))))
 
 (defn- followed-modifiers
   "`own` (see `own-modifiers`) with the layers of `timeline` that follow
@@ -3311,8 +3340,9 @@
   through. Opacity multiplies by the leader's, as in a group. Before its
   delay a follower waits at the leader's first frame, or, when
   `timeline` loops, takes the end of the loop before. A leader whose
-  first frame is scaled to (almost) nothing, as a pop in from 0, is
-  followed from where it rests. The other times
+  first frame squashes it to (almost) nothing along an axis, as a pop
+  in from 0, counts its scale from rest (its place and turn from that
+  frame). The other times
   play the follow chains only, their first frame read once while `key`
   (the timeline the caller keeps, before it is resolved) stays."
   [timeline objects time own & {:keys [key]}]
@@ -3346,15 +3376,17 @@
                                             ;; or from its first frame; a first
                                             ;; frame scaled to (almost) nothing
                                             ;; holds no change to count from
-                                            first   (matrix (played leader 0))
-                                            start   (if (or (= :rest (:from follow))
-                                                            (< (change-scale first) 0.01))
-                                                      (gmt/matrix)
-                                                      first)
-                                            change  (if-let [inv (gmt/inverse start)] (gmt/multiply now inv) now)
                                             lshape  (get objects leader)
-                                            pivot   (-> (origin-point lshape (track-origin (get-track timeline leader)))
-                                                        (gpt/transform start))
+                                            rested  (origin-point lshape (track-origin (get-track timeline leader)))
+                                            first   (matrix (played leader 0))
+                                            start   (cond
+                                                      (= :rest (:from follow)) (gmt/matrix)
+                                                      ;; squashed flat: its place and
+                                                      ;; turn count, not its scale
+                                                      (< (change-least-scale first) 0.01) (unscaled first rested)
+                                                      :else first)
+                                            change  (if-let [inv (gmt/inverse start)] (gmt/multiply now inv) now)
+                                            pivot   (gpt/transform rested start)
                                             moved   (ctm/add-modifiers mods (follow-modifiers follow change pivot))]
                                         (cond-> moved
                                           (:opacity follow)
@@ -3464,10 +3496,12 @@
         ;; where its pivot is without a move, and where it goes
         probe   (gpt/transform pivot (matrix (shape->modifiers shape values origin origin*)))
         target  (gpt/transform pivot total)]
-    (assoc values
-           :x (+ rest-x (- (:x target) (:x probe)))
-           :y (+ rest-y (- (:y target) (:y probe)))
-           :opacity (modifiers-opacity played (:opacity shape 1)))))
+    (cond-> (assoc values
+                   :x (+ rest-x (- (:x target) (:x probe)))
+                   :y (+ rest-y (- (:y target) (:y probe)))
+                   :opacity (modifiers-opacity played (:opacity shape 1)))
+      ;; shrunk to nothing (a leader flipping through 0), it has no turn
+      (< scale 1e-6) (assoc :rotation nil))))
 
 (defn- baked-track
   "The track of the follower `id` of `timeline` playing its `poses` (see
@@ -3486,12 +3520,15 @@
                   :opacity (:opacity shape 1)}
         baked    (into {}
                        (keep (fn [property]
-                               (let [tol    (get bake-tolerances property)
-                                     values (cond-> (mapv property poses)
-                                              (= :rotation property) unwrapped)]
-                                 (when (or (contains? animated property)
-                                           (some #(> (mth/abs (- % (get at-rest property))) tol) values))
-                                   [property (thin-samples (map vector times values) tol)]))))
+                               (let [tol     (get bake-tolerances property)
+                                     ;; the times a pose has a value for it
+                                     samples (filterv (comp some? second) (map vector times (map property poses)))
+                                     values  (cond-> (mapv second samples)
+                                               (= :rotation property) unwrapped)]
+                                 (when (and (seq values)
+                                            (or (contains? animated property)
+                                                (some #(> (mth/abs (- % (get at-rest property))) tol) values)))
+                                   [property (thin-samples (map vector (map first samples) values) tol)]))))
                        (keys bake-tolerances))]
     (-> track
         (dissoc :follow)

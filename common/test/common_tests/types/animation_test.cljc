@@ -5048,30 +5048,64 @@
       (t/is (mth/close? 10 (width 1000) 0.01) (str "its own size at the end, from " from))
       (t/is (close-point? [205 105] (centre-at tl objects follower 1000))))))
 
-#?(:clj
-   (t/deftest a-follow-plays-its-chain-only
-     ;; other times play the layers of the follow chains only, and the
-     ;; first frame once while the timeline stays
-     (let [{:keys [leader follower objects]} (follow-scene)
-           others  (repeatedly 20 #(cts/setup-shape {:type :rect :x 0 :y 0 :width 5 :height 5}))
-           objects (into objects (map (juxt :id identity)) others)
-           tl      (reduce (fn [tl s]
-                             (-> tl
-                                 (cta/add-keyframe (:id s) {:time 0 :property :x :value 0})
-                                 (cta/add-keyframe (:id s) {:time 1000 :property :x :value 50})))
-                           (-> (mk-timeline)
-                               (cta/add-keyframe leader {:time 0 :property :x :value 100})
-                               (cta/add-keyframe leader {:time 1000 :property :x :value 200})
-                               (cta/set-follow follower {:leader leader :delay 100}))
-                           others)
-           calls   (atom [])
-           real    @#'cta/own-modifiers]
-       (with-redefs [cta/own-modifiers (fn [timeline objects time]
-                                         (swap! calls conj [time (count (:tracks timeline))])
-                                         (real timeline objects time))]
-         (cta/timeline->modif-tree tl objects 500)
-         (cta/timeline->modif-tree tl objects 600))
-       (let [others (remove (fn [[time]] (#{500 600} time)) @calls)]
-         (t/is (every? (fn [[_ n]] (<= n 2)) others) "the leader and its follower only")
-         (t/is (= 1 (count (filter (fn [[time]] (zero? time)) others))) "the first frame once")))))
+(t/deftest a-mirroring-leader-turns-its-follower-on
+  ;; a leader turning 90 degrees while it flips (scale-x 1 to -1) turns
+  ;; its follower to the end, with no jump on the last frame
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe leader {:time 0 :property :rotation :value 0 :easing :linear})
+                  (cta/add-keyframe leader {:time 1000 :property :rotation :value 90})
+                  (cta/add-keyframe leader {:time 0 :property :scale-x :value 1 :easing :linear})
+                  (cta/add-keyframe leader {:time 1000 :property :scale-x :value -1})
+                  (cta/set-follow follower {:leader leader}))
+        turn  #(:rotation (shown-at tl objects follower %) 0)
+        [x1 y1] (centre-at tl objects follower 999)
+        [x2 y2] (centre-at tl objects follower 1000)]
+    (t/is (mth/close? (turn 999) (turn 1000) 1))
+    (t/is (and (mth/close? x1 x2 1) (mth/close? y1 y2 1)))
+    ;; at 500 the follower has no size, so no turn to compare
+    (t/is (plays-alike? tl (cta/bake-follows tl objects) objects follower [0 250 480 520 750 999 1000]))))
+
+(t/deftest a-mirrored-leader-turns-its-follower-from-rest
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :scale-x :value -1})
+               (cta/add-keyframe leader {:time 1000 :property :scale-x :value -1})
+               (cta/add-keyframe leader {:time 0 :property :rotation :value 0 :easing :linear})
+               (cta/add-keyframe leader {:time 1000 :property :rotation :value 90})
+               (cta/set-follow follower {:leader leader :from :rest}))]
+    (t/is (mth/close? 90 (:rotation (shown-at tl objects follower 1000)) 0.5))
+    (t/is (mth/close? 45 (:rotation (shown-at tl objects follower 500)) 0.5))
+    (t/is (plays-alike? tl (cta/bake-follows tl objects) objects follower [0 500 1000]))))
+
+(t/deftest a-leader-popping-in-along-one-axis-is-followed-at-its-place
+  ;; squashed flat along x at first: its scale counts from rest, its
+  ;; place and turn from that first frame
+  (doseq [[sx sy] [[0.001 1] [1 0.004]]]
+    (let [{:keys [leader follower objects]} (follow-scene)
+          tl    (-> (mk-timeline)
+                    (cta/add-keyframe leader {:time 0 :property :scale-x :value sx :easing :linear})
+                    (cta/add-keyframe leader {:time 1000 :property :scale-x :value 1})
+                    (cta/add-keyframe leader {:time 0 :property :scale-y :value sy :easing :linear})
+                    (cta/add-keyframe leader {:time 1000 :property :scale-y :value 1})
+                    (cta/set-follow follower {:leader leader}))
+          width #(get-in (shown-at tl objects follower %) [:selrect :width])]
+      (t/is (mth/close? 10 (width 1000) 0.01) (str "its own size at the end, from " [sx sy]))
+      (t/is (close-point? [205 105] (centre-at tl objects follower 1000))))))
+
+(t/deftest a-follow-reads-the-objects-it-plays-with
+  ;; the same timeline with the leader resting elsewhere: its first
+  ;; frame moves it by another amount, which the follower takes
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl      (-> (mk-timeline)
+                    (cta/add-keyframe leader {:time 0 :property :x :value 100 :easing :linear})
+                    (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+                    (cta/set-follow follower {:leader leader}))
+        elsewhere (update objects leader #(gsh/transform-shape % (ctm/move-modifiers (gpt/point -50 0))))]
+    (t/is (close-point? [305 105] (centre-at tl objects follower 1000)))
+    (t/is (close-point? [305 105] (centre-at tl elsewhere follower 1000))
+          "100 on from its first frame, wherever it rests")
+    (t/is (close-point? [355 105] (centre-at (cta/set-follow tl follower {:leader leader :from :rest})
+                                             elsewhere follower 1000))
+          "150 from where it rests")))
 
