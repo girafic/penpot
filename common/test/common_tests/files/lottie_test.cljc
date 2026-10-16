@@ -123,6 +123,18 @@
     (t/is (close-pairs? [[0 0.5] [1000 1]] (keyframes-of result box :scale-x)))
     (t/is (close-pairs? [[0 0.5] [1000 1]] (keyframes-of result box :scale-y)))))
 
+(t/deftest a-negative-scale-flips-the-layer
+  (let [ks     (assoc rest-ks
+                      :p (static [40 25 0]) :a (static [40 25 0])
+                      :s (anim (kf 0 [100 -100 100]) (kf 30 [-50 0 100])))
+        result (lottie/lottie->shapes
+                (document [(layer 1 "Box" [(rect-group [20 10 40 30] [0 0 1 1])] :ks ks)])
+                {:x 0 :y 0})
+        box    (shape-named result "Box")]
+    (t/is (close-pairs? [[0 1] [1000 -0.5]] (keyframes-of result box :scale-x)))
+    (t/is (close-pairs? [[0 -1] [1000 0.001]] (keyframes-of result box :scale-y))
+          "flipped, and never quite flat")))
+
 (t/deftest an-anchor-away-from-the-middle-makes-a-board-around-it
   (let [ks     (assoc rest-ks
                       :p (static [20 10 0]) :a (static [20 10 0])

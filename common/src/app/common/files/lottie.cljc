@@ -576,13 +576,21 @@
             (ctx :keyframe id (merge base {:property :x :value (finite (+ rest-x dx))} (handles ox ix)))
             (ctx :keyframe id (merge base {:property :y :value (finite (+ rest-y dy))} (handles oy iy)))))))))
 
+(defn- scale-factor
+  "The factor of the Lottie scale `v` (in percent): negative flips the
+  layer, as the flip tools do; never quite 0, which a resize cannot
+  undo."
+  [v]
+  (let [f (/ v 100)]
+    (if (< (mth/abs f) 0.001) (if (neg? f) -0.001 0.001) f)))
+
 (defn- add-transform-keyframes
   "The keyframes of the Lottie transform `tr` (of a layer or a group) on
   the node `id`: see `add-position-keyframes`."
   [ctx id tr rest parent-m node-x node-y]
   (add-keyframes ctx id (:o tr) :opacity #(clamp01 (/ (scalar %) 100)))
-  (add-keyframes ctx id (:s tr) :scale-x #(max 0.001 (/ (first (pair %)) 100)))
-  (add-keyframes ctx id (:s tr) :scale-y #(max 0.001 (/ (second (pair %)) 100)))
+  (add-keyframes ctx id (:s tr) :scale-x #(scale-factor (first (pair %))))
+  (add-keyframes ctx id (:s tr) :scale-y #(scale-factor (second (pair %))))
   (add-keyframes ctx id (or (:r tr) (:rz tr)) :rotation scalar)
   (add-position-keyframes ctx id (:p tr) (:p rest) parent-m node-x node-y))
 
