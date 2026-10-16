@@ -6823,6 +6823,18 @@ msgstr "Pick the leader on the canvas"
 msgid "workspace.animation.follow-delay"
 msgstr "Delay"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.follow-from"
+msgstr "From"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.follow-from-start"
+msgstr "Start"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.follow-from-rest"
+msgstr "Rest"
+
 #: src/app/main/ui/workspace/timeline.cljs
 msgid "workspace.animation.follows"
 msgstr "Follows %s"

@@ -4699,7 +4699,7 @@
 (t/deftest a-follow-reads-with-its-defaults
   (let [{:keys [leader follower]} (follow-scene)
         tl (cta/set-follow (mk-timeline) follower {:leader leader :delay 100})]
-    (t/is (= {:leader leader :position true :rotation true :scale true :opacity false :delay 100}
+    (t/is (= {:leader leader :from :start :position true :rotation true :scale true :opacity false :delay 100}
              (cta/follow-of tl follower)))
     (t/is (= {:leader leader :delay 100} (get-in tl [:tracks follower :follow])) "the defaults left out")
     (t/is (cta/valid-timeline? tl))
@@ -4944,3 +4944,44 @@
         ;; the dot's centre (100,50) turned 90 degrees around the end
         turned  [(- ex (- 50 ey)) (+ ey (- 100 ex))]]
     (t/is (close-point? turned (centre-at tl objects (:id dot) 1000)))))
+
+(defn- popping-leader
+  "The follow scene with the leader scaling from half its size to its
+  own in 1 s, as the pop preset does, and the follower following it from
+  `from`."
+  [from]
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :scale-x :value 0.5 :easing :linear})
+               (cta/add-keyframe leader {:time 1000 :property :scale-x :value 1})
+               (cta/add-keyframe leader {:time 0 :property :scale-y :value 0.5 :easing :linear})
+               (cta/add-keyframe leader {:time 1000 :property :scale-y :value 1})
+               (cta/set-follow follower (cond-> {:leader leader} (some? from) (assoc :from from))))]
+    {:tl tl :objects objects :follower follower}))
+
+(t/deftest a-follow-reads-where-it-counts-from
+  (let [{:keys [tl follower]} (popping-leader nil)]
+    (t/is (= :start (:from (cta/follow-of tl follower))) "the first frame by default")
+    (t/is (not (contains? (get-in tl [:tracks follower :follow]) :from)) "left out"))
+  (let [{:keys [tl follower]} (popping-leader :rest)]
+    (t/is (= :rest (:from (cta/follow-of tl follower))))
+    (t/is (cta/valid-timeline? tl))))
+
+(t/deftest a-follower-from-rest-takes-what-its-leader-is-from-rest
+  ;; as a layer of a group: at half the size at first, its own at the end
+  (let [{:keys [tl objects follower]} (popping-leader :rest)
+        width #(get-in (shown-at tl objects follower %) [:selrect :width])]
+    (t/is (mth/close? 5 (width 0) 0.01))
+    (t/is (close-point? [157.5 107.5] (centre-at tl objects follower 0)) "half way to the leader's pivot")
+    (t/is (mth/close? 10 (width 1000) 0.01) "its own size at the end")
+    (t/is (close-point? [205 105] (centre-at tl objects follower 1000)) "where it rests"))
+  (t/testing "from the first frame it grows on to twice its size"
+    (let [{:keys [tl objects follower]} (popping-leader nil)]
+      (t/is (mth/close? 10 (get-in (shown-at tl objects follower 0) [:selrect :width]) 0.01))
+      (t/is (mth/close? 20 (get-in (shown-at tl objects follower 1000) [:selrect :width]) 0.01)))))
+
+(t/deftest a-follow-from-rest-bakes-alike
+  (let [{:keys [tl objects follower]} (popping-leader :rest)
+        baked (cta/bake-follows tl objects)]
+    (t/is (nil? (get-in baked [:tracks follower :follow])))
+    (t/is (plays-alike? tl baked objects follower (range 0 1001 50)))))

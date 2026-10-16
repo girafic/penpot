@@ -631,7 +631,8 @@
 
 (defn update-follow
   "Change how the layer `shape-id` follows its leader: `changes` taken
-  into its follow (see `cta/follow-of`)."
+  into its follow (see `cta/follow-of`), such as `:from` `:rest` to take
+  all that moves the leader from where it rests."
   [shape-id changes]
   (ptk/reify ::update-follow
     ptk/WatchEvent

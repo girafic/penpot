@@ -4400,14 +4400,16 @@ export interface Timeline {
   followOf(shape: Shape): Follow | null;
 
   /**
-   * Makes `shape` follow another layer of the board, `follow.leader`, as a
-   * layer of a group moves with the group: it takes what the leader does
-   * from its first frame on, `delay` milliseconds later, after its own
-   * animation. It moves as the leader's pivot moves, turns and scales
-   * around that pivot and, with `opacity`, fades with the leader. `null`
-   * makes it follow none. The leader must be another layer of the board,
-   * not one `shape` is in, holds or is followed by. The SVG, CSS, Lottie
-   * and code exports play a follow by keyframes made from it.
+   * Makes `shape` follow another layer of the board, `follow.leader`: it
+   * takes what the leader does from its first frame on (`from: 'start'`,
+   * the default), or all that moves the leader from where it rests, as a
+   * layer of a group moves with the group (`from: 'rest'`), `delay`
+   * milliseconds later, after its own animation. It moves as the leader's
+   * pivot moves, turns and scales around that pivot and, with `opacity`,
+   * fades with the leader. `null` makes it follow none. The leader must
+   * be another layer of the board, not one `shape` is in, holds or is
+   * followed by. The SVG, CSS, Lottie and code exports play a follow by
+   * keyframes made from it.
    * @param shape A layer inside the board.
    * @param follow The leader and what the layer takes of it, or `null`.
    *
@@ -4415,6 +4417,7 @@ export interface Timeline {
    * ```js
    * timeline.setFollow(badge, { leader: card, delay: 100 });
    * timeline.setFollow(shadow, { leader: button, rotation: false });
+   * timeline.setFollow(label, { leader: popIn, from: 'rest' });
    * ```
    */
   setFollow(shape: Shape, follow: FollowProps | null): void;
@@ -4852,6 +4855,12 @@ export interface TimelineJsonAudioClip {
 }
 
 /**
+ * Where a follow counts from, see `Follow.from`: the first frame of the
+ * leader (`'start'`) or where it rests (`'rest'`).
+ */
+export type FollowFrom = 'start' | 'rest';
+
+/**
  * How a layer follows another layer of its board, see `Timeline.setFollow`.
  */
 export interface Follow {
@@ -4859,6 +4868,13 @@ export interface Follow {
    * The layer it follows.
    */
   readonly leader: Shape;
+
+  /**
+   * What it takes of the leader: what the leader does from its first
+   * frame on (`'start'`), or all that moves it from where it rests
+   * (`'rest'`), as a layer of a group does.
+   */
+  readonly from: FollowFrom;
 
   /**
    * Whether it moves as the pivot of the leader moves.
@@ -4895,6 +4911,13 @@ export interface FollowProps {
    * The layer to follow: another layer of the board.
    */
   leader: Shape;
+
+  /**
+   * Take what the leader does from its first frame on (`'start'`), or
+   * all that moves it from where it rests, as a layer of a group does
+   * (`'rest'`, for a leader that pops or slides in). `'start'` by default.
+   */
+  from?: FollowFrom;
 
   /**
    * Move as the pivot of the leader moves. `true` by default.

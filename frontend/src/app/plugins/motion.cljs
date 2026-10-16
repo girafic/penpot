@@ -1689,9 +1689,10 @@
       :followOf
       (fn [shape]
         (when-let [shape-id (layer :followOf shape)]
-          (when-let [{:keys [leader position rotation scale opacity delay]}
+          (when-let [{:keys [leader from position rotation scale opacity delay]}
                      (cta/follow-of (locate) shape-id)]
             #js {:leader (shape-proxy plugin-id file-id page-id leader)
+                 :from (name from)
                  :position position
                  :rotation rotation
                  :scale scale
@@ -1712,6 +1713,7 @@
                                             (when (some? value) [part value]))))
                                   [:position :rotation :scale :opacity])
                   delay     (prop "delay")
+                  from      (prop "from")
                   objects   (u/locate-objects file-id page-id)
                   timeline  (or (locate) (cta/make-timeline {:board-id board-id}))
                   error     (cond
@@ -1727,6 +1729,9 @@
                               (and (some? delay) (not (valid-time? delay)))
                               "The delay should be a number of milliseconds from 0"
 
+                              (and (some? from) (not (contains? #{"start" "rest"} from)))
+                              "from should be 'start' or 'rest'"
+
                               (not (some #{leader-id} (cltl/follow-leaders objects timeline shape-id)))
                               (dm/str "The leader should be another layer of the board, not one "
                                       "the shape is in, holds or is followed by"))]
@@ -1734,7 +1739,8 @@
                 (u/not-valid plugin-id :setFollow error)
                 (write! :setFollow #(cta/set-follow % shape-id
                                                     (cond-> (assoc parts :leader leader-id)
-                                                      (some? delay) (assoc :delay (mth/round delay))))))))))
+                                                      (some? delay) (assoc :delay (mth/round delay))
+                                                      (some? from)  (assoc :from (keyword from))))))))))
 
       ;; As copying the animation of a layer on the canvas and pasting it
       ;; onto others, in the boards of the page they are in.

@@ -1065,7 +1065,13 @@
         on-delay
         (mf/use-fn
          (mf/deps shape-id)
-         (number-handler #(st/emit! (dwa/update-follow shape-id {:delay (max 0 (mth/round %))}))))]
+         (number-handler #(st/emit! (dwa/update-follow shape-id {:delay (max 0 (mth/round %))}))))
+
+        on-from
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn [value]
+           (st/emit! (dwa/update-follow shape-id {:from (keyword value)}))))]
 
     ;; leaving the layer closes its section
     (mf/with-effect [shape-id]
@@ -1104,6 +1110,19 @@
 
           (when (some? follow)
             [:*
+             ;; what it takes: what the leader does from its first frame
+             ;; on, or all that moves it from where it rests
+             [:> animation-row* {:label (tr "workspace.animation.follow-from")}
+              [:> radio-buttons* {:name (dm/str "follow-from-" shape-id)
+                                  :selected (name (:from follow))
+                                  :extended true
+                                  :options [{:id (dm/str "follow-from-start-" shape-id)
+                                             :value "start"
+                                             :label (tr "workspace.animation.follow-from-start")}
+                                            {:id (dm/str "follow-from-rest-" shape-id)
+                                             :value "rest"
+                                             :label (tr "workspace.animation.follow-from-rest")}]
+                                  :on-change on-from}]]
              [:div {:class (stl/css :follow-parts)}
               (for [[part label] follow-parts]
                 [:> checkbox* {:key (name part)

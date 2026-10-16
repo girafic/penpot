@@ -79,6 +79,15 @@
     (.appendChild board rect)
     [board rect]))
 
+(defn- board-with-rects
+  "A board with `n` rectangles inside: `[board rects]`."
+  [^js context n]
+  (let [^js board (.createBoard context)
+        rects     (vec (repeatedly n #(let [^js rect (.createRectangle context)]
+                                        (.appendChild board rect)
+                                        rect)))]
+    [board rects]))
+
 (t/deftest property-names-cover-the-model
   (t/is (= cta/animatable-properties (set (keys motion/property-names)))))
 
@@ -173,8 +182,11 @@
         (.setFollow timeline badge #js {:leader card :delay 100})
         (t/is (= {:leader (aget card "$id") :delay 100} (:follow (stored-track store context board badge)))
               "the defaults left out")
-        (t/is (= {:leader (aget card "$id") :position true :rotation true :scale true :opacity false :delay 100}
+        (t/is (= {:leader (aget card "$id") :from "start" :position true :rotation true :scale true :opacity false :delay 100}
                  (follow badge)))
+        (.setFollow timeline badge #js {:leader card :delay 100 :from "rest"})
+        (t/is (= "rest" (:from (follow badge))) "from where the card rests")
+        (t/is (= :rest (get-in (stored-track store context board badge) [:follow :from])))
         (.setFollow timeline badge #js {:leader card :rotation false})
         (t/is (false? (:rotation (follow badge))))
         (t/testing "a leader it cannot follow is refused"
@@ -182,7 +194,8 @@
           (t/is (thrown? js/Error (.setFollow timeline badge #js {:leader board})) "the board it is in")
           (t/is (thrown? js/Error (.setFollow timeline badge #js {:leader badge})) "itself")
           (t/is (thrown? js/Error (.setFollow timeline third #js {:leader card :delay -5})))
-          (t/is (thrown? js/Error (.setFollow timeline third #js {:leader card :scale "yes"}))))
+          (t/is (thrown? js/Error (.setFollow timeline third #js {:leader card :scale "yes"})))
+          (t/is (thrown? js/Error (.setFollow timeline third #js {:leader card :from "end"}))))
         (.setFollow timeline badge nil)
         (t/is (nil? (follow badge)) "null follows none")))))
 
@@ -759,15 +772,6 @@
             ^js timeline (.-timeline (shape-of file :board))
             added        (.addAnimationStyle timeline (shape-of file :words) "typewriter" 100)]
         (t/is (= [["fade" "char" 100]] (mapv (fn [^js a] [(.-type a) (.-split a) (.-start a)]) added)))))))
-
-(defn- board-with-rects
-  "A board with `n` rectangles inside: `[board rects]`."
-  [^js context n]
-  (let [^js board (.createBoard context)
-        rects     (vec (repeatedly n #(let [^js rect (.createRectangle context)]
-                                        (.appendChild board rect)
-                                        rect)))]
-    [board rects]))
 
 (t/deftest a-plugin-makes-applies-and-edits-a-style
   (thw/with-wasm-mocks*

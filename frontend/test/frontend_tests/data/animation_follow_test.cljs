@@ -102,6 +102,10 @@
     (t/is (= {:leader (thi/id :lead) :rotation false}
              (get-in (committed-timeline set state file) [:tracks (thi/id :dot) :follow]))
           "what it takes of the leader")
+    (let [[set] (emitted (dwa/update-follow (thi/id :dot) {:from :rest}) state)]
+      (t/is (= {:leader (thi/id :lead) :from :rest}
+               (get-in (committed-timeline set state file) [:tracks (thi/id :dot) :follow]))
+            "from where the leader rests"))
     (t/is (nil? (get-in (committed-timeline (dwa/clear-follow (thi/id :dot)) state file)
                         [:tracks (thi/id :dot)]))
           "nothing left of its track")))

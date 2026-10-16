@@ -302,14 +302,16 @@
 
 (def schema:follow
   "How a layer follows another one of its board, its leader (see
-  `follow-of`): it takes what the leader does from its first frame on,
-  `:delay` ms later, the parts it takes: where its pivot goes
+  `follow-of`): it takes what the leader does `:delay` ms later, from
+  its first frame on (`:from` `:start`) or from where it rests (`:rest`,
+  as a layer of a group does), the parts it takes: where its pivot goes
   (`:position`), how it turns and scales around that pivot
   (`:rotation`, `:scale`) and its opacity (`:opacity`). The defaults
-  (position, rotation and scale; no opacity; no delay) are stored as
-  absence."
+  (from the first frame; position, rotation and scale; no opacity; no
+  delay) are stored as absence."
   [:map {:title "AnimationFollow"}
    [:leader ::sm/uuid]
+   [:from {:optional true} [:enum :start :rest]]
    [:position {:optional true} :boolean]
    [:rotation {:optional true} :boolean]
    [:scale {:optional true} :boolean]
@@ -918,7 +920,7 @@
       (assoc-in timeline [:tracks shape-id :origin] {:x ox :y oy}))))
 
 (def ^:private follow-defaults
-  {:position true :rotation true :scale true :opacity false :delay 0})
+  {:from :start :position true :rotation true :scale true :opacity false :delay 0})
 
 (defn follow-of
   "How `shape-id` follows another layer of the board of `timeline` (see
@@ -935,7 +937,7 @@
   left out."
   [timeline shape-id follow]
   (if (some? (:leader follow))
-    (let [follow (-> (select-keys follow [:leader :position :rotation :scale :opacity :delay])
+    (let [follow (-> (select-keys follow [:leader :from :position :rotation :scale :opacity :delay])
                      (d/update-when :delay #(int (mth/round %))))
           stored (into {} (remove (fn [[k v]] (= v (get follow-defaults k ::none)))) follow)]
       (-> (ensure-track timeline shape-id)
@@ -3242,8 +3244,9 @@
 (defn- followed-modifiers
   "`own` (see `own-modifiers`) with the layers of `timeline` that follow
   a leader (see `follow-of`) moved as it: what the leader does from its
-  first frame on, `:delay` ms later, after their own animation; a chain
-  of followers follows through. Opacity multiplies by the leader's, as
+  first frame on, or from where it rests (`:from` `:rest`), `:delay` ms
+  later, after their own animation; a chain of followers follows
+  through. Opacity multiplies by the leader's, as
   in a group. Before its delay a follower waits at the leader's first
   frame, or, when `timeline` loops, takes the end of the loop before."
   [timeline objects time own]
@@ -3268,7 +3271,11 @@
                                             leader  (:leader follow)
                                             matrix  #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
                                             now     (matrix (played leader (earlier t (:delay follow))))
-                                            start   (matrix (played leader 0))
+                                            ;; from where it rests, as in a group,
+                                            ;; or from its first frame
+                                            start   (if (= :rest (:from follow))
+                                                      (gmt/matrix)
+                                                      (matrix (played leader 0)))
                                             change  (if-let [inv (gmt/inverse start)] (gmt/multiply now inv) now)
                                             lshape  (get objects leader)
                                             pivot   (-> (origin-point lshape (track-origin (get-track timeline leader)))

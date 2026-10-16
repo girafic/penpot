@@ -17808,14 +17808,16 @@ Timeline:
         setFollow(shape: Shape, follow: FollowProps | null): void
         ```
 
-        Makes `shape` follow another layer of the board, `follow.leader`, as a
-        layer of a group moves with the group: it takes what the leader does
-        from its first frame on, `delay` milliseconds later, after its own
-        animation. It moves as the leader's pivot moves, turns and scales
-        around that pivot and, with `opacity`, fades with the leader. `null`
-        makes it follow none. The leader must be another layer of the board,
-        not one `shape` is in, holds or is followed by. The SVG, CSS, Lottie
-        and code exports play a follow by keyframes made from it.
+        Makes `shape` follow another layer of the board, `follow.leader`: it
+        takes what the leader does from its first frame on (`from: 'start'`,
+        the default), or all that moves the leader from where it rests, as a
+        layer of a group moves with the group (`from: 'rest'`), `delay`
+        milliseconds later, after its own animation. It moves as the leader's
+        pivot moves, turns and scales around that pivot and, with `opacity`,
+        fades with the leader. `null` makes it follow none. The leader must
+        be another layer of the board, not one `shape` is in, holds or is
+        followed by. The SVG, CSS, Lottie and code exports play a follow by
+        keyframes made from it.
 
         Parameters
 
@@ -17830,7 +17832,7 @@ Timeline:
 
         Example
         ```
-        timeline.setFollow(badge, { leader: card, delay: 100 });timeline.setFollow(shadow, { leader: button, rotation: false });
+        timeline.setFollow(badge, { leader: card, delay: 100 });timeline.setFollow(shadow, { leader: button, rotation: false });timeline.setFollow(label, { leader: popIn, from: 'rest' });
         ```
       toCSS: |-
         ```
@@ -18465,6 +18467,7 @@ Follow:
     ```
     interface Follow {
         leader: Shape;
+        from: FollowFrom;
         position: boolean;
         rotation: boolean;
         scale: boolean;
@@ -18482,6 +18485,14 @@ Follow:
         ```
 
         The layer it follows.
+      from: |-
+        ```
+        readonly from: FollowFrom
+        ```
+
+        What it takes of the leader: what the leader does from its first
+        frame on (`'start'`), or all that moves it from where it rests
+        (`'rest'`), as a layer of a group does.
       position: |-
         ```
         readonly position: boolean
@@ -18523,6 +18534,7 @@ FollowProps:
     ```
     interface FollowProps {
         leader: Shape;
+        from?: FollowFrom;
         position?: boolean;
         rotation?: boolean;
         scale?: boolean;
@@ -18540,6 +18552,14 @@ FollowProps:
         ```
 
         The layer to follow: another layer of the board.
+      from: |-
+        ```
+        from?: FollowFrom
+        ```
+
+        Take what the leader does from its first frame on (`'start'`), or
+        all that moves it from where it rests, as a layer of a group does
+        (`'rest'`, for a leader that pops or slides in). `'start'` by default.
       position: |-
         ```
         position?: boolean
@@ -27877,6 +27897,20 @@ TimelineJsonEasing:
     * `{ type: 'hold' }`: the value stays until the next keyframe.
 
     Referenced by: TimelineJsonKeyframe, TimelineJsonPreset
+  members: {}
+FollowFrom:
+  overview: |-
+    Type Alias FollowFrom
+    =====================
+
+    ```
+    FollowFrom: "start" | "rest"
+    ```
+
+    Where a follow counts from, see `Follow.from`: the first frame of the
+    leader (`'start'`) or where it rests (`'rest'`).
+
+    Referenced by: Follow, FollowProps
   members: {}
 TimelineExportFormat:
   overview: |-
