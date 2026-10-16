@@ -119,6 +119,44 @@
                                   (= :y (:property keyframe)) (update :value + dy)))))
         (d/update-when :animations (partial mapv new-id)))))
 
+(defn- copied-follow
+  "`track` of a copy in `new-board` of `objects`, following (see
+  `cta/follow-of`) the copy of its leader when that was copied too (in
+  `ids-map`), its leader still when that is in the same board, else
+  nothing."
+  [track ids-map objects new-board]
+  (if-let [leader (dm/get-in track [:follow :leader])]
+    (cond
+      (contains? ids-map leader)
+      (assoc-in track [:follow :leader] (get ids-map leader))
+
+      (and (contains? objects leader)
+           (= new-board (cfh/get-shape-id-root-frame objects leader)))
+      track
+
+      :else
+      (dissoc track :follow))
+    track))
+
+(defn- strayed-follows-dropped
+  "`timelines` (of the shapes `objects`) without the follows of layers
+  whose leaders are gone, or out of the board of their timeline: a
+  layer follows one of its own board only."
+  [timelines objects]
+  (reduce-kv
+   (fn [timelines board-id timeline]
+     (reduce-kv (fn [timelines id track]
+                  (let [leader (dm/get-in track [:follow :leader])]
+                    (if (and (some? leader)
+                             (not (and (contains? objects leader)
+                                       (= board-id (cfh/get-shape-id-root-frame objects leader)))))
+                      (update timelines board-id cta/set-follow id nil)
+                      timelines)))
+                timelines
+                (:tracks timeline)))
+   timelines
+   timelines))
+
 (defn- track-end
   [track]
   (reduce max 0 (concat (map :time (:keyframes track))
@@ -263,9 +301,10 @@
                (if (nil? new-board)
                  timelines
                  (add-track timelines new-board
-                            (moved-track track new-id
-                                         (offset at (in-board objects new-id new-board))
-                                         true)
+                            (-> (moved-track track new-id
+                                             (offset at (in-board objects new-id new-board))
+                                             true)
+                                (copied-follow ids-map objects new-board))
                             (settings-of new-board board)))))
            (:timelines page)
            tracks)
@@ -351,7 +390,10 @@
                         (add-clips host clips (settings (get timelines id)) false)))
                     timelines))
                 result
-                ids)]
+                ids)
+
+        ;; a layer follows one of its own board only
+        result (strayed-follows-dropped result moved)]
     (cond-> changes
       (not= result timelines)
       (commit-timelines page result))))
@@ -478,6 +520,33 @@
                                   :height (update keyframe :value * sy)
                                   keyframe)))))))
 
+(defn- copy-follows
+  "`result` (see `instance-timelines`) with the followers in the
+  timelines of the copy `head-id` following the copies of their leaders,
+  by `refs` (the main shape each copy shape plays, to that copy shape);
+  a follow whose leader plays nothing there is dropped."
+  [result head-id refs]
+  (reduce-kv
+   (fn [result k entry]
+     (if (and (vector? k) (= :copy (first k)) (= head-id (second k)))
+       (assoc result k
+              (update entry :tracks
+                      (fn [tracks]
+                        (reduce-kv
+                         (fn [tracks id track]
+                           (if-let [leader (dm/get-in track [:follow :leader])]
+                             (let [copy (get refs leader)]
+                               (assoc tracks id
+                                      (if (contains? tracks copy)
+                                        (assoc-in track [:follow :leader] copy)
+                                        (dissoc track :follow))))
+                             tracks))
+                         tracks
+                         tracks))))
+       result))
+   result
+   result))
+
 (defn instance-timelines
   "The timelines playing, in the board `board-id` of `objects`, the
   animations of the component copies in it as their mains play them: the
@@ -492,7 +561,8 @@
   animates nothing (see `with-instance-clips`). A shape `timeline`, the
   one of the board, animates itself keeps that animation. Each plays on
   the clock `timeline` gives the copy (see `cta/copy-clock`), as
-  `:clock-start` and `:clock-speed` when they are not the defaults."
+  `:clock-start` and `:clock-speed` when they are not the defaults. A
+  follower there follows the copy of its leader (see `cta/follow-of`)."
   [objects board-id timeline main-page]
   (let [own (:tracks timeline)]
     (reduce
@@ -505,19 +575,22 @@
                        (cond-> (assoc settings :board-id board-id :tracks {})
                          (not (zero? start)) (assoc :clock-start start)
                          (not= 1 speed)      (assoc :clock-speed speed)))
+             refs    (volatile! {})
              result  (reduce
                       (fn [result id]
                         (if-let [{:keys [board track ref-id] main :timeline mobjs :objects cmap :map}
                                  (when-not (contains? own id)
                                    (main-track (get objects id) head main-page))]
                           (let [k [:copy head-id board]]
+                            (vswap! refs assoc ref-id id)
                             (-> result
                                 (update k #(or % (entry (settings main))))
                                 (assoc-in [k :tracks id]
                                           (mapped-track track ref-id mobjs board id objects board-id cmap))))
                           result))
                       result
-                      (cfh/get-children-ids-with-self objects head-id))]
+                      (cfh/get-children-ids-with-self objects head-id))
+             result  (copy-follows result head-id @refs)]
          (if-let [clips (not-empty (:audio-clips main))]
            (let [k [:copy head-id main-id]]
              (-> result

@@ -1369,3 +1369,77 @@
     (t/is (= {title :word} (:splits code)) "the design plays it by words")
     (t/is (not-any? :split (get-in code [:timeline :tracks title :animations]))
           "the code plays it whole")))
+
+;; FOLLOW
+
+(defn- following-file
+  "`animated-file` with a dot in board A that follows the rect."
+  []
+  (let [file (-> (animated-file)
+                 (ths/add-sample-shape :dot :type :rect :parent-label :board-a
+                                       :x 300 :y 200 :width 10 :height 10))
+        a    (thi/id :board-a)
+        tl   (cta/set-follow (get (timelines file) a) (thi/id :dot) {:leader (thi/id :rect) :delay 100})]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline a tl)))))
+
+(t/deftest a-copied-board-follows-in-its-copy
+  (let [file     (following-file)
+        page     (thf/current-page file)
+        a        (thi/id :board-a)
+        changes  (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                 (:objects page) page #{a} (gpt/point 500 0)
+                                                 {(:id file) file} (:data file) (:id file))
+        copy-of  (into {} (keep #(when (= :add-obj (:type %)) [(:old-id %) (-> % :obj :id)])) (:redo-changes changes))
+        file     (thf/apply-changes file changes)
+        tl       (get (timelines file) (copy-of a))
+        dot      (copy-of (thi/id :dot))
+        rect     (copy-of (thi/id :rect))]
+    (t/is (= {:leader rect :delay 100} (get-in tl [:tracks dot :follow])) "the copy of its leader")
+    (t/is (cta/valid-timeline? tl))))
+
+(t/deftest a-copied-follower-follows-the-same-leader-in-its-board
+  (let [[file dot] (duplicate (following-file) :dot (gpt/point 10 0))
+        tl         (get (timelines file) (thi/id :board-a))]
+    (t/is (= (thi/id :rect) (get-in tl [:tracks dot :follow :leader])))))
+
+(t/deftest a-follower-moved-out-of-the-board-follows-no-more
+  (let [file (relocate (following-file) :dot :board-b)
+        tls  (timelines file)]
+    (t/is (nil? (cta/follow-of (get tls (thi/id :board-b)) (thi/id :dot))))
+    (t/is (nil? (cta/follow-of (get tls (thi/id :board-a)) (thi/id :dot))))))
+
+(t/deftest a-follower-of-a-deleted-leader-follows-no-more
+  (let [file (delete (following-file) :rect)]
+    (t/is (nil? (cta/follow-of (get (timelines file) (thi/id :board-a)) (thi/id :dot))))))
+
+(t/deftest a-copy-of-a-component-follows-in-the-copy
+  ;; the main board turns; its rect follows it; the copy plays both
+  (let [file (component-file)
+        main (thi/id :main)
+        page (thf/current-page file)
+        tl   (-> (get-in page [:timelines main])
+                 (cta/add-keyframe main {:time 0 :property :rotation :value 0 :easing :linear})
+                 (cta/add-keyframe main {:time 1000 :property :rotation :value 90})
+                 (cta/set-follow (thi/id :main-rect) {:leader main}))
+        file (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                         (pcb/with-page page)
+                                         (pcb/set-timeline main tl)))
+        {:keys [objects board copy copy-rect main-page]} (component-scene file)
+        copies (cltl/instance-timelines objects board nil main-page)
+        tl     (get copies [:copy copy main])]
+    (t/is (= copy (get-in tl [:tracks copy-rect :follow :leader])) "the head of the copy, not the main")))
+
+(t/deftest a-copy-drops-a-follow-whose-leader-plays-nothing-there
+  (let [file (component-file)
+        main (thi/id :main)
+        page (thf/current-page file)
+        tl   (cta/set-follow (get-in page [:timelines main]) (thi/id :main-rect) {:leader main})
+        file (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                         (pcb/with-page page)
+                                         (pcb/set-timeline main tl)))
+        {:keys [objects board copy copy-rect main-page]} (component-scene file)
+        tl   (get (cltl/instance-timelines objects board nil main-page) [:copy copy main])]
+    (t/is (some? (get-in tl [:tracks copy-rect])))
+    (t/is (nil? (get-in tl [:tracks copy-rect :follow])))))
