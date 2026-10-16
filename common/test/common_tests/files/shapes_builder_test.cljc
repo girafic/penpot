@@ -299,7 +299,7 @@
                                    {:tag :tspan :attrs {:x "50" :dy "12"} :content ["two"]}]})]
     (t/is (= [["one"] ["two"]] (mapv #(mapv :text (:children %)) (paragraphs text))))
     (t/is (= ["center" "center"] (mapv :text-align (paragraphs text))))
-    (t/is (= :fixed (:grow-type text)) "centred where the SVG has it")))
+    (t/is (= :auto-height (:grow-type text)) "centred where the SVG has it, as wide as it may be")))
 
 (t/deftest the-texts-of-penpot-exports-come-back-whole
   (let [line   (fn [y t] {:tag :text :attrs {:x "61" :y y :dominant-baseline "ideographic"
@@ -358,3 +358,50 @@
                                     :content ["Hi"]})]
       (t/is (nil? text) transform)
       (t/is (some #(= :svg-raw (:type %)) children) transform))))
+
+(defn- first-node
+  [text]
+  (first (:children (first (paragraphs text)))))
+
+(t/deftest a-text-keeps-its-opacity-and-display
+  (let [[text] (text-of {:tag :text :attrs {:x "0" :y "20" :opacity "0.4" :display "none"} :content ["Hi"]})]
+    (t/is (= 0.4 (:opacity text)))
+    (t/is (true? (:hidden text)))
+    (t/is (empty? (:svg-attrs text)) "a Penpot text draws no SVG attributes")))
+
+(t/deftest an-outlined-text-has-a-stroke-and-no-fill
+  (let [[text] (text-of {:tag :text :attrs {:x "0" :y "20" :fill "none" :stroke "#000000" :stroke-width "2"}
+                         :content ["Hi"]})]
+    (t/is (empty? (:fills (first-node text))))
+    (t/is (= [{:stroke-color "#000000" :stroke-width 2.0 :stroke-alignment :center}]
+             (mapv #(-> (select-keys % [:stroke-color :stroke-width :stroke-alignment])
+                        (update :stroke-width double))
+                   (:strokes text))))))
+
+(t/deftest a-filtered-text-stays-svg
+  (let [[text children] (text-of {:tag :text :attrs {:x "0" :y "20" :filter "url(#glow)"} :content ["Hi"]})]
+    (t/is (nil? text))
+    (t/is (some #(= :svg-raw (:type %)) children))))
+
+(t/deftest the-lengths-of-a-text-have-units
+  (let [size  #(:font-size (first-node (first (apply text-of %&))))]
+    (t/is (= "16" (size {:tag :text :attrs {:x "0" :y "20" :font-size "12pt"} :content ["a"]})))
+    (t/is (= "30" (size {:tag :g :attrs {:font-size "20"}
+                         :content [{:tag :text :attrs {:x "0" :y "20" :font-size "1.5em"} :content ["a"]}]}))
+          "of its group")
+    (let [[text] (text-of {:tag :text :attrs {:x "0" :y "20" :font-size "20"}
+                           :content ["a" {:tag :tspan :attrs {:font-size "50%"} :content ["b"]}]})]
+      (t/is (= "10" (:font-size (second (:children (first (paragraphs text)))))) "of its text"))
+    (let [[text] (text-of {:tag :text :attrs {:x "0" :y "20" :font-size "10"}
+                           :content [{:tag :tspan :attrs {:x "0" :dy "0.71em"} :content ["a"]}]})]
+      (t/is (mth/close? (- 27.1 9) (:y text)) "a line down by 0.71 of its size"))))
+
+(t/deftest a-centred-label-stays-on-one-line
+  ;; its width a guess its glyphs cannot pass, centred on where the SVG
+  ;; has it
+  (let [[text] (text-of {:tag :text :attrs {:x "200" :y "40" :font-size "20" :font-weight "bold" :text-anchor "middle"}
+                         :content ["TOTAL REVENUE"]})]
+    (t/is (>= (:width text) (* 13 20)))
+    (t/is (mth/close? 200 (first (centre text))))
+    (t/is (= "center" (:text-align (first (paragraphs text)))))
+    (t/is (= :auto-height (:grow-type text)))))

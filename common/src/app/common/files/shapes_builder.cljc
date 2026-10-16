@@ -413,6 +413,9 @@
 
 (declare paint-fill)
 (declare calculate-rect-metadata)
+(declare setup-stroke)
+(declare setup-opacity)
+(declare setup-other)
 
 (defn- text-prop
   "The text property `k` (a keyword of its CSS name) of the SVG element
@@ -442,6 +445,18 @@
   (let [v (mth/precision v 3)]
     (if (== v (mth/round v)) (dm/str (long (mth/round v))) (dm/str v))))
 
+(defn- font-size
+  "The pixels of the font size of the text properties `props`, which
+  hold it in pixels (see `text-lines`)."
+  [props]
+  (or (csvg/css-length (:font-size props) 16) 16))
+
+(defn- text-length
+  "The pixels of the first of the SVG lengths `s` of a text, `em` of the
+  font size `size`."
+  [s size]
+  (some-> s str str/trim (str/split #"[\s,]+") (first) (csvg/css-length size)))
+
 (defn- text-node
   "The Penpot text node of the text `text` with the SVG text properties
   `props`, its lengths scaled by `scale`; its fill through `defs` (see
@@ -449,7 +464,7 @@
   of a Google font, which the workspace resolves to the fonts it has."
   [text props shape defs scale]
   (let [family  (some-> (:font-family props) (str/split #",") (first) (str/replace #"[\"']" "") (str/trim) (not-empty))
-        size    (* scale (or (some-> (:font-size props) (csvg/parse-numbers) (first)) 16))
+        size    (font-size props)
         weight  (let [w (str/lower (str (:font-weight props "400")))]
                   (case w
                     ("bold" "bolder") "700"
@@ -457,6 +472,7 @@
                     "lighter"         "300"
                     (if (re-matches #"\d+" w) w "400")))
         italic? (contains? #{"italic" "oblique"} (str/lower (str (:font-style props))))
+        none?   (= "none" (:fill props))
         fill    (or (paint-fill (:fill props "#000000") shape defs nil 0) {:fill-color clr/black})
         opacity (d/parse-double (:fill-opacity props) 1)]
     (merge (dissoc txt/default-text-attrs :typography-ref-file :typography-ref-id)
@@ -464,35 +480,42 @@
             :font-id         (if family (dm/str "gfont-" (-> family str/lower (str/replace #"\s+" "-"))) "sourcesanspro")
             :font-family     (or family "sourcesanspro")
             :font-variant-id (dm/str (if (= weight "400") (if italic? "" "regular") weight) (when italic? "italic"))
-            :font-size       (num-str size)
+            :font-size       (num-str (* scale size))
             :font-weight     weight
             :font-style      (if italic? "italic" "normal")
-            :letter-spacing  (num-str (* scale (or (some-> (:letter-spacing props) (csvg/parse-numbers) (first)) 0)))
+            :letter-spacing  (num-str (* scale (or (text-length (:letter-spacing props) size) 0)))
             :text-transform  (:text-transform props "none")
             :text-decoration (let [d (str (:text-decoration props))]
                                (cond (str/includes? d "underline") "underline"
                                      (str/includes? d "line-through") "line-through"
                                      :else "none"))
-            :fills           [(update fill :fill-opacity #(* (or % 1) opacity))]})))
+            ;; an outlined text has no fill
+            :fills           (if none? [] [(update fill :fill-opacity #(* (or % 1) opacity))])})))
 
 (defn- text-lines
   "The lines of the SVG `<text>` elements `nodes`, each with its runs of
   text and their properties, its `:x` `:y` and anchor: a `<tspan>` with
-  a position of its own starts one, a `<text>` too."
+  a position of its own starts one, a `<text>` too. A font size is in
+  pixels, one in `em` or `%` of the one it is in."
   [nodes inherited]
   (let [lines (volatile! [])
         line  (fn [x y anchor] (vswap! lines conj {:x x :y y :anchor anchor :runs []}))
         run   (fn [text props] (vswap! lines (fn [ls] (update ls (dec (count ls)) update :runs conj [text props]))))
         walk  (fn walk [node props]
-                (let [attrs (:attrs node)
-                      props (merge props (own-text-props attrs))
-                      x     (some-> (:x attrs) (csvg/parse-numbers) (first))
-                      y     (some-> (:y attrs) (csvg/parse-numbers) (first))
-                      dy    (some-> (:dy attrs) (csvg/parse-numbers) (first))]
-                  (when (or (= :text (:tag node)) (some? y) (and (some? dy) (not (zero? dy))))
+                (let [attrs  (:attrs node)
+                      own    (own-text-props attrs)
+                      parent (font-size props)
+                      props  (cond-> (merge props own)
+                               (contains? own :font-size)
+                               (assoc :font-size (num-str (or (csvg/css-length (:font-size own) parent) parent))))
+                      size   (font-size props)
+                      x      (text-length (:x attrs) size)
+                      y      (text-length (:y attrs) size)
+                      dy     (or (text-length (:dy attrs) size) 0)]
+                  (when (or (= :text (:tag node)) (some? y) (not (zero? dy)))
                     (let [prev (peek @lines)]
                       (line (or x (:x prev) 0)
-                            (or y (when (some? dy) (+ (:y prev 0) dy)) (:y prev 0))
+                            (or y (+ (:y prev 0) dy))
                             (:text-anchor props "start"))))
                   (doseq [child (:content node)]
                     (cond
@@ -529,9 +552,12 @@
   "The Penpot text of the SVG `<text>` `element`, or of the text container
   of a Penpot export (a `g` with the box of its text and a `<text>` for
   each line in it): a paragraph for each line. A loose text is placed
-  by its first baseline, as wide as its text may be. Its transform (with
-  the ones of its groups) turns it and scales its font; nil for one a
-  Penpot text cannot have (see `even-scale`)."
+  by its first baseline, as wide as its text may be: one anchored in its
+  middle or end as wide as its text cannot pass, its lines centred or to
+  the right. Its transform (with the ones of its groups) turns it and
+  scales its font. It keeps its opacity, display, blend mode and stroke;
+  nil for a text a Penpot text cannot be: transformed otherwise (see
+  `even-scale`) or filtered."
   [name frame-id {:keys [x y defs] :as svg-data} {:keys [attrs] :as element}]
   (let [m          (csvg/parse-transform (:transform attrs))
         scale      (even-scale m)
@@ -541,16 +567,23 @@
                                        (:content element))]
                        (filterv #(= :text (:tag %)) (:content (or fills element))))
                      [element])
-        inherited  (own-text-props (dissoc attrs :x :y))
-        lines      (text-lines texts inherited)]
-    (when (and (seq lines) (some? scale))
+        ;; a loose text reads its own properties, with the ones of its
+        ;; groups (see `csvg/inherit-attributes`)
+        inherited  (if container? (own-text-props (dissoc attrs :x :y)) {})
+        lines      (text-lines texts inherited)
+        filtered?  (not (contains? #{nil "none"} (text-prop attrs :filter)))]
+    (when (and (seq lines) (some? scale) (not filtered?))
       (let [first-props (second (first (:runs (first lines))))
-            size        (or (some-> (:font-size first-props) (csvg/parse-numbers) (first)) 16)
+            size        (font-size first-props)
+            spacing     (or (text-length (:letter-spacing first-props) size) 0)
             anchor      (:anchor (first lines))
             align       (case anchor "middle" "center" "end" "right" "left")
             chars       (reduce max 1 (map #(count (str/join (map first (:runs %)))) lines))
-            ;; a guess of the width, which the layout of the text corrects
-            width       (* chars size 0.62)
+            ;; a guess of the width, which the layout of the text corrects;
+            ;; a centred one no glyph is wider than, for it not to wrap
+            width       (if (and (not container?) (not= "left" align))
+                          (* chars (+ size spacing))
+                          (* chars size 0.62))
             height      (* (count lines) size 1.2)
             [bx by bw bh]
             (if container?
@@ -573,10 +606,22 @@
                                         :children (mapv (fn [[text props]] (text-node text props shape defs scale)) runs)}))
                               lines)]
         (-> shape
-            (assoc :grow-type (if (and (not container?) (= "left" align)) :auto-width :fixed))
+            (assoc :grow-type (cond container? :fixed (= "left" align) :auto-width :else :auto-height))
             (assoc :content {:type "root" :vertical-align "top"
                              :children [{:type "paragraph-set" :children paragraphs}]})
-            (dissoc :position-data))))))
+            (dissoc :position-data)
+            ;; its look, but its fill, which its nodes hold
+            (assoc :strokes [])
+            (assoc :svg-attrs (-> (select-keys attrs [:opacity :display :mix-blend-mode :stroke :stroke-width
+                                                      :stroke-opacity :stroke-dasharray :style])
+                                  (csvg/attrs->props)
+                                  (d/update-when :style select-keys [:opacity :display :mixBlendMode :stroke
+                                                                     :strokeWidth :strokeOpacity :strokeDasharray])))
+            (setup-stroke)
+            (setup-opacity)
+            (setup-other)
+            (dissoc :svg-attrs)
+            (d/update-when :strokes (partial mapv #(assoc % :stroke-alignment :center))))))))
 
 (defn create-raw-svg
   [name frame-id {:keys [x y width height offset-x offset-y defs] :as svg-data} {:keys [attrs] :as data}]

@@ -876,21 +876,54 @@
       transform
       (update :transform append-transform))))
 
+(defn css-length
+  "The pixels of the CSS length `s` (px, pt, pc, in, cm, mm, em, rem or
+  %), `em` and `%` of `em` pixels; nil for none."
+  [s em]
+  (when-let [[_ n unit] (re-matches #"\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-zA-Z%]*)\s*" (str s))]
+    (let [v (d/parse-double n)]
+      (case (str/lower unit)
+        ("" "px") v
+        "pt"      (* v (/ 96 72))
+        "pc"      (* v 16)
+        "in"      (* v 96)
+        "cm"      (* v (/ 96 2.54))
+        "mm"      (* v (/ 96 25.4))
+        "em"      (* v em)
+        "rem"     (* v 16)
+        "%"       (* em (/ v 100))
+        nil))))
+
+(defn- relative-font-size
+  "`attrs` with their own font size (`own`, the attributes as the element
+  has them) in `em` or `%` in pixels of the one of its group, as the
+  group gives what it holds its size, and loses it there."
+  [attrs own group-attrs]
+  (let [parent (css-length (or (get-in group-attrs [:style :font-size]) (:font-size group-attrs)) 16)
+        size   #(if (re-find #"(em|%)\s*$" (str %)) (dm/str (css-length % parent)) %)]
+    (cond
+      (nil? parent)                    attrs
+      (get-in own [:style :font-size]) (update-in attrs [:style :font-size] size)
+      (:font-size own)                 (update attrs :font-size size)
+      :else                            attrs)))
+
 (defn inherit-attributes
   [group-attrs {:keys [attrs] :as node}]
   (if (map? node)
     (let [attrs             (-> (format-styles attrs)
                                 (add-transform (:transform group-attrs)))
-          group-attrs       (format-styles group-attrs)
+          own               attrs
+          group             (format-styles group-attrs)
 
           ;; Don't inherit a property that is already in the style attribute
-          inherit-style     (-> (:style group-attrs) (d/without-keys (keys attrs)))
+          inherit-style     (-> (:style group) (d/without-keys (keys attrs)))
           inheritable-props (->> inheritable-props (remove #(contains? (:styles attrs) %)))
-          group-attrs       (-> group-attrs (assoc :style inherit-style))
+          group-attrs       (-> group (assoc :style inherit-style))
 
           attrs             (-> (select-keys group-attrs inheritable-props)
                                 (d/deep-merge attrs)
-                                (d/without-nils))]
+                                (d/without-nils)
+                                (relative-font-size own group))]
       (assoc node :attrs attrs))
     node))
 
@@ -997,6 +1030,10 @@
                 attrs
 
                 (= key :unicode)
+                attrs
+
+                ;; of the font size it is in (see `inherit-attributes`)
+                (= key :font-size)
                 attrs
 
                 (str/starts-with? (d/name key) "data-")
