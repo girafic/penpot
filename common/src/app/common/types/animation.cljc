@@ -3229,12 +3229,18 @@
   a leader (see `follow-of`) moved as it: what the leader does from its
   first frame on, `:delay` ms later, after their own animation; a chain
   of followers follows through. Opacity multiplies by the leader's, as
-  in a group."
+  in a group. Before its delay a follower waits at the leader's first
+  frame, or, when `timeline` loops, takes the end of the loop before."
   [timeline objects time own]
   (let [follows (followers timeline objects)]
     (if (empty? follows)
       own
-      (let [own-at (memoize #(own-modifiers timeline objects %))
+      (let [duration (:duration timeline 0)
+            wraps?   (and (= :loop (playback-mode timeline)) (pos? duration))
+            earlier  (fn [t delay]
+                       (let [t (- t delay)]
+                         (if wraps? (mod t duration) (max 0 t))))
+            own-at (memoize #(own-modifiers timeline objects %))
             cache  (volatile! {})
             played (fn played [id t]
                      (let [k [id t]]
@@ -3246,7 +3252,7 @@
                                       (let [follow  (follow-of timeline id)
                                             leader  (:leader follow)
                                             matrix  #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
-                                            now     (matrix (played leader (max 0 (- t (:delay follow)))))
+                                            now     (matrix (played leader (earlier t (:delay follow))))
                                             start   (matrix (played leader 0))
                                             change  (if-let [inv (gmt/inverse start)] (gmt/multiply now inv) now)
                                             lshape  (get objects leader)
@@ -3258,7 +3264,7 @@
                                           (ctm/change-property
                                            :opacity
                                            (* (modifiers-opacity mods (:opacity (get objects id) 1))
-                                              (modifiers-opacity (played leader (max 0 (- t (:delay follow))))
+                                              (modifiers-opacity (played leader (earlier t (:delay follow)))
                                                                  (:opacity lshape 1)))))))]
                            (vswap! cache assoc k v)
                            v))))]

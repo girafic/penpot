@@ -4761,6 +4761,19 @@
     (t/is (close-point? [235 105] (centre-at tl objects follower 500)) "where the leader was at 300 ms")
     (t/is (close-point? [205 105] (centre-at tl objects follower 100)) "at rest before")))
 
+(t/deftest a-follower-of-a-loop-waits-at-its-end
+  ;; before its delay, it shows where the leader was at the end of the
+  ;; loop before, so the loop goes on without a jump
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (assoc :playback :loop)
+               (cta/add-keyframe leader {:time 0 :property :x :value 100 :easing :linear})
+               (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+               (cta/set-follow follower {:leader leader :delay 200}))]
+    (t/is (close-point? [295 105] (centre-at tl objects follower 100)) "where the leader was at 900 ms")
+    (t/is (close-point? [205 105] (centre-at (assoc tl :playback :once) objects follower 100))
+          "played once, at rest")))
+
 (t/deftest a-follower-takes-the-opacity-of-its-leader
   (let [{:keys [leader follower objects]} (follow-scene)
         tl (-> (mk-timeline)
