@@ -18,6 +18,8 @@
    [app.main.data.workspace.selection :as dws]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.async :as async]
+   [frontend-tests.helpers.mock :as mock]
    [potok.v2.core :as ptk]))
 
 (t/use-fixtures :each
@@ -50,116 +52,170 @@
    :workspace-local {:selected #{(thi/id :dot)}}
    :workspace-animation {:board-id (thi/id :board-a)}})
 
-(defn- emitted
-  "The events `event` emits on `state`, as `stream` goes; none for a
-  watch that gives nil."
-  ([event state]
-   (emitted event state (rx/empty)))
-  ([event state stream]
-   (let [events (atom [])]
-     (some->> (ptk/watch event state stream)
-              (rx/subs! #(swap! events conj %)))
-     @events)))
+(defn- ^:async emitted
+  "The events `event` emits on `state`, once its watch ends."
+  [event state]
+  (let [events (atom [])]
+    (await (async/observe (ptk/watch event state (rx/empty)) :on-next #(swap! events conj %)))
+    @events))
 
-(defn- committed-timeline
+(defn- ^:async committed-timeline
   "The timeline of board A once the commits `event` emits on `state` are
   applied to `file`; nil when it commits nothing."
   [event state file]
-  (let [commits (->> (emitted event state)
-                     (filter #(= ::dch/commit-changes (ptk/type %)))
-                     (mapcat #(emitted % state))
-                     (map deref))]
+  (let [events  (await (emitted event state))
+        commits (filter #(= ::dch/commit-changes (ptk/type %)) events)
+        done    (await (js/Promise.all (into-array (map #(emitted % state) commits))))
+        commits (into [] (comp (mapcat identity) (map deref)) done)]
     (when (seq commits)
       (let [data (reduce #(cpc/process-changes %1 (:redo-changes %2) false) (:data file) commits)]
         (get-in data [:pages-index (:id (thf/current-page file)) :timelines (thi/id :board-a)])))))
 
-(t/deftest a-layer-follows-its-leader-in-one-commit
-  (let [file  (follow-file)
-        state (workspace-state file)
-        tl    (committed-timeline (dwa/set-follow (thi/id :dot) {:leader (thi/id :lead) :delay 100})
-                                  state file)]
-    (t/is (= {:leader (thi/id :lead) :delay 100} (get-in tl [:tracks (thi/id :dot) :follow])))
-    (t/is (= 1 (count (filter #(= ::dch/commit-changes (ptk/type %))
-                              (emitted (dwa/set-follow (thi/id :dot) {:leader (thi/id :lead)}) state))))
-          "one undo step")))
+(defn- following-file
+  "`follow-file` with the dot following the lead."
+  []
+  (let [file (follow-file)
+        page (thf/current-page file)]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page page)
+                                (pcb/set-timeline (thi/id :board-a)
+                                                  (cta/set-follow (get-in page [:timelines (thi/id :board-a)])
+                                                                  (thi/id :dot) {:leader (thi/id :lead)}))))))
 
-(t/deftest a-layer-cannot-follow-its-board-nor-itself
+(t/deftest ^:async a-layer-follows-its-leader-in-one-commit
+  (let [file   (follow-file)
+        state  (workspace-state file)
+        tl     (await (committed-timeline (dwa/set-follow (thi/id :dot) {:leader (thi/id :lead) :delay 100})
+                                          state file))
+        events (await (emitted (dwa/set-follow (thi/id :dot) {:leader (thi/id :lead)}) state))]
+    (t/is (= {:leader (thi/id :lead) :delay 100} (get-in tl [:tracks (thi/id :dot) :follow])))
+    (t/is (= 1 (count (filter #(= ::dch/commit-changes (ptk/type %)) events))) "one undo step")))
+
+(t/deftest ^:async a-layer-cannot-follow-its-board-nor-itself
   (let [file  (follow-file)
         state (workspace-state file)]
-    (t/is (nil? (committed-timeline (dwa/set-follow (thi/id :dot) {:leader (thi/id :board-a)}) state file)))
-    (t/is (nil? (committed-timeline (dwa/set-follow (thi/id :dot) {:leader (thi/id :dot)}) state file)))))
+    (t/is (nil? (await (committed-timeline (dwa/set-follow (thi/id :dot) {:leader (thi/id :board-a)}) state file))))
+    (t/is (nil? (await (committed-timeline (dwa/set-follow (thi/id :dot) {:leader (thi/id :dot)}) state file))))))
 
-(t/deftest a-follow-changes-and-goes
-  (let [file  (follow-file)
-        page  (thf/current-page file)
-        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
-                                          (pcb/with-page page)
-                                          (pcb/set-timeline (thi/id :board-a)
-                                                            (cta/set-follow (get-in page [:timelines (thi/id :board-a)])
-                                                                            (thi/id :dot) {:leader (thi/id :lead)}))))
-        state (workspace-state file)
-        [set] (emitted (dwa/update-follow (thi/id :dot) {:rotation false}) state)]
+(t/deftest ^:async a-follow-changes-and-goes
+  (let [file    (following-file)
+        state   (workspace-state file)
+        follow  #(get-in % [:tracks (thi/id :dot) :follow])
+        [parts] (await (emitted (dwa/update-follow (thi/id :dot) {:rotation false}) state))
+        [rest]  (await (emitted (dwa/update-follow (thi/id :dot) {:from :rest}) state))]
     (t/is (= {:leader (thi/id :lead) :rotation false}
-             (get-in (committed-timeline set state file) [:tracks (thi/id :dot) :follow]))
+             (follow (await (committed-timeline parts state file))))
           "what it takes of the leader")
-    (let [[set] (emitted (dwa/update-follow (thi/id :dot) {:from :rest}) state)]
-      (t/is (= {:leader (thi/id :lead) :from :rest}
-               (get-in (committed-timeline set state file) [:tracks (thi/id :dot) :follow]))
-            "from where the leader rests"))
-    (t/is (nil? (get-in (committed-timeline (dwa/clear-follow (thi/id :dot)) state file)
+    (t/is (= {:leader (thi/id :lead) :from :rest}
+             (follow (await (committed-timeline rest state file))))
+          "from where the leader rests")
+    (t/is (nil? (get-in (await (committed-timeline (dwa/clear-follow (thi/id :dot)) state file))
                         [:tracks (thi/id :dot)]))
           "nothing left of its track")))
 
-(t/deftest a-click-on-a-layer-picks-the-leader
-  (let [file    (follow-file)
-        state   (workspace-state file)
-        stream  (rx/subject)
-        events  (atom [])
-        picking (ptk/update (dwa/pick-leader (thi/id :dot)) state)]
+(defn- picking
+  "The pick of the leader of the dot on `state`, watched on `stream`:
+  `[state promise events]`, the promise resolving once it ends."
+  [state stream]
+  (let [event  (dwa/pick-leader (thi/id :dot))
+        events (atom [])
+        ended  (async/observe (ptk/watch event (ptk/update event state) stream)
+                              :on-next #(swap! events conj %))]
+    [(ptk/update event state) ended events]))
+
+(t/deftest ^:async a-click-on-a-layer-picks-the-leader
+  (let [state  (workspace-state (follow-file))
+        stream (rx/subject)
+        [picking ended events] (picking state stream)]
     (t/is (= (thi/id :dot) (dwa/picking-leader picking)))
-    (->> (ptk/watch (dwa/pick-leader (thi/id :dot)) picking stream)
-         (rx/subs! #(swap! events conj %)))
     (rx/push! stream (dws/select-shape (thi/id :lead)))
+    (await ended)
     (let [[end] @events
           ;; the click has selected the leader
           picked (-> (ptk/update end picking)
                      (assoc-in [:workspace-local :selected] #{(thi/id :lead)}))]
       (t/is (= ::dwa/end-pick-leader (ptk/type end)))
       (t/is (nil? (dwa/picking-leader picked)) "picking ends")
-      (t/is (= [::dwa/set-follow ::dws/select-shape] (mapv ptk/type (emitted end picked)))
+      (t/is (= [::dwa/set-follow ::dws/select-shape] (mapv ptk/type (await (emitted end picked))))
             "it follows the leader and stays selected"))))
 
-(t/deftest a-click-on-nothing-cancels-the-pick
-  (t/async done
-    (let [state  (workspace-state (follow-file))
-          stream (rx/subject)
-          events (atom [])]
-      (->> (ptk/watch (dwa/pick-leader (thi/id :dot)) state stream)
-           (rx/subs! #(swap! events conj %)
-                     (fn [cause] (t/is false (str cause)) (done))
-                     (fn []
-                       (let [[end] @events]
-                         (t/is (= ::dwa/end-pick-leader (ptk/type end)))
-                         (t/is (= [::dws/select-shape] (mapv ptk/type (emitted end state)))
-                               "it follows nothing and stays selected"))
-                       (done))))
-      (rx/push! stream (dws/deselect-all)))))
+(t/deftest ^:async a-click-not-hovered-yet-picks-on-release
+  ;; it deselects first and selects on release, soon after
+  (let [timer (rx/subject)]
+    (await
+     (mock/with-mocks*
+       {rx/timer (mock/stub (fn [_] timer))}
+       (let [state  (assoc-in (workspace-state (follow-file)) [:workspace-local :selected] #{(thi/id :lead)})
+             stream (rx/subject)
+             [_ ended events] (picking state stream)]
+         (rx/push! stream (dws/deselect-all))
+         (await (async/settle))
+         (rx/push! stream (dws/select-shape (thi/id :lead)))
+         (await ended)
+         (t/is (= [::dwa/set-follow ::dws/select-shape]
+                  (mapv ptk/type (await (emitted (first @events) state))))))))))
 
-(t/deftest only-the-keyframe-exports-bake-follows
-  (let [file  (follow-file)
-        page  (thf/current-page file)
-        board (thi/id :board-a)
-        dot   (thi/id :dot)
-        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
-                                          (pcb/with-page page)
-                                          (pcb/set-timeline board
-                                                            (cta/set-follow (get-in page [:timelines board])
-                                                                            dot {:leader (thi/id :lead)}))))
+(t/deftest ^:async a-click-on-nothing-cancels-the-pick
+  (let [timer (rx/subject)]
+    (await
+     (mock/with-mocks*
+       {rx/timer (mock/stub (fn [_] timer))}
+       (let [state  (workspace-state (follow-file))
+             stream (rx/subject)
+             [_ ended events] (picking state stream)]
+         (rx/push! stream (dws/deselect-all))
+         (await (async/settle))
+         (rx/push! timer :elapsed)
+         (await ended)
+         (t/is (= ::dwa/end-pick-leader (ptk/type (first @events))))
+         (t/is (= [::dws/select-shape] (mapv ptk/type (await (emitted (first @events) state))))
+               "it follows nothing and stays selected"))))))
+
+(defn- ^:async ended-by
+  "The events the pick of the leader of the dot emits when `ending`
+  comes, once it ends."
+  [ending]
+  (let [stream (rx/subject)
+        [_ ended events] (picking (workspace-state (follow-file)) stream)]
+    (rx/push! stream ending)
+    (await ended)
+    @events))
+
+(t/deftest ^:async picking-again-or-cancelling-ends-the-pick
+  (t/is (empty? (await (ended-by (dwa/pick-leader (thi/id :lead))))) "picked again: nothing picked")
+  (t/is (empty? (await (ended-by (dwa/cancel-pick-leader)))) "cancelled: nothing picked"))
+
+(t/deftest ^:async leaving-motion-mode-the-page-or-the-file-ends-the-pick
+  (let [state  (workspace-state (follow-file))
+        closed (await (ended-by (dwa/close-timeline)))
+        paged  (await (ended-by (ptk/data-event :app.main.data.workspace.pages/finalize-page {})))
+        filed  (await (ended-by (ptk/data-event :app.main.data.workspace/finalize-workspace {})))]
+    (t/is (= [::dwa/end-pick-leader] (mapv ptk/type closed)))
+    (t/is (= [::dwa/end-pick-leader] (mapv ptk/type paged)))
+    (t/is (= [::dwa/end-pick-leader] (mapv ptk/type filed)))
+    (t/is (nil? (dwa/picking-leader (ptk/update (first closed) state))) "no pick left")
+    (t/is (empty? (await (emitted (first closed) state))) "nothing picked, nothing selected")))
+
+(t/deftest ^:async a-pick-selects-no-layer-gone-from-the-page
+  (let [file   (follow-file)
+        page   (thf/current-page file)
+        state  (update-in (workspace-state file)
+                          [:files (:id file) :data :pages-index (:id page) :objects] dissoc (thi/id :dot))
+        stream (rx/subject)
+        [_ ended events] (picking state stream)]
+    (rx/push! stream (dws/select-shape (thi/id :lead)))
+    (await ended)
+    (t/is (empty? (await (emitted (first @events) state))))))
+
+(t/deftest ^:async only-the-keyframe-exports-bake-follows
+  (let [file  (following-file)
         page  (thf/current-page file)
         files {(:id file) file}
+        board (thi/id :board-a)
+        dot   (thi/id :dot)
         kept  (dwa/board-export-timeline page files board)
         baked (dwa/board-export-timeline page files board :bake? true)]
     (t/is (some? (get-in kept [:tracks dot :follow])) "the video exports play the follow")
     (t/is (nil? (get-in baked [:tracks dot :follow])))
-    (t/is (some #(= :x (:property %)) (get-in baked [:tracks dot :keyframes])) "SVG, Lottie and CSS read keyframes")))
-
+    (t/is (some #(= :x (:property %)) (get-in baked [:tracks dot :keyframes])) "SVG, Lottie and CSS read keyframes")
+    (await (async/settle))))

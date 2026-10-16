@@ -610,21 +610,22 @@
 (defn set-follow
   "Make the layer `shape-id` follow another layer of its board as
   `follow` says (see `cta/set-follow`), in one undo step; nil follows
-  none. A leader it cannot follow (see `cltl/follow-leaders`) changes
+  none. A leader it cannot follow (see `cltl/can-follow?`) changes
   nothing."
   [shape-id follow]
   (ptk/reify ::set-follow
     ptk/WatchEvent
     (watch [it state _]
-      (when-let [tl (layer-board-timeline state shape-id)]
-        (let [objects (dsh/lookup-page-objects state)
-              leader  (:leader follow)
-              tl'     (cta/set-follow tl shape-id follow)]
-          (when (and (not= tl tl')
-                     (or (nil? leader)
-                         (some #{leader} (cltl/follow-leaders objects tl shape-id))))
-            (rx/of (commit-timeline it state (:board-id tl') tl')
-                   (apply-preview))))))))
+      (let [tl      (layer-board-timeline state shape-id)
+            objects (dsh/lookup-page-objects state)
+            leader  (:leader follow)
+            tl'     (some-> tl (cta/set-follow shape-id follow))]
+        (if (and (some? tl)
+                 (not= tl tl')
+                 (or (nil? leader) (cltl/can-follow? objects tl shape-id leader)))
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (apply-preview))
+          (rx/empty))))))
 
 (defn clear-follow
   "Make the layer `shape-id` follow none (see `set-follow`)."
@@ -639,8 +640,9 @@
   (ptk/reify ::update-follow
     ptk/WatchEvent
     (watch [_ state _]
-      (when-let [follow (some-> (layer-board-timeline state shape-id) (cta/follow-of shape-id))]
-        (rx/of (set-follow shape-id (merge follow changes)))))))
+      (if-let [follow (some-> (layer-board-timeline state shape-id) (cta/follow-of shape-id))]
+        (rx/of (set-follow shape-id (merge follow changes)))
+        (rx/empty)))))
 
 (defn picking-leader
   "The layer whose leader the next click on a layer picks (see
@@ -649,6 +651,9 @@
   (dm/get-in state [:workspace-animation :picking-leader]))
 
 (defn- end-pick-leader
+  "End the pick of a leader of `shape-id` (see `pick-leader`): with
+  `picked?`, the layer selected is its leader. `shape-id` stays
+  selected, while it is on the page."
   [shape-id picked?]
   (ptk/reify ::end-pick-leader
     ptk/UpdateEvent
@@ -657,20 +662,34 @@
 
     ptk/WatchEvent
     (watch [_ state _]
-      (when (some? shape-id)
+      (if (and (some? shape-id) (contains? (dsh/lookup-page-objects state) shape-id))
         (let [leader (when picked? (first (dsh/lookup-selected state)))
               follow (some-> (layer-board-timeline state shape-id) (cta/follow-of shape-id))]
           (rx/concat
-           (when (some? leader)
-             (rx/of (set-follow shape-id (assoc follow :leader leader))))
-           ;; it stays selected
-           (rx/of (dws/select-shape shape-id))))))))
+           (if (some? leader)
+             (rx/of (set-follow shape-id (assoc follow :leader leader)))
+             (rx/empty))
+           (rx/of (dws/select-shape shape-id))))
+        (rx/empty)))))
+
+(defn cancel-pick-leader
+  "Stop waiting for a leader to be picked (see `pick-leader`)."
+  []
+  (end-pick-leader nil false))
+
+(def ^:private pick-endings
+  "What ends the pick of a leader, as nothing can be picked then: leaving
+  motion mode, the page or the file."
+  #{::close-timeline
+    :app.main.data.workspace.pages/finalize-page
+    :app.main.data.workspace/finalize-workspace})
 
 (defn pick-leader
-  "Make the next layer selected, by a click on the canvas or in the
-  layers, the leader of the layer `shape-id` (see `set-follow`), which
-  stays selected. Esc, or a click on nothing, cancels, `shape-id` still
-  selected; so does picking again."
+  "Make the next layer selected, by a click on the canvas, in the layers
+  or with a selection band, the leader of the layer `shape-id` (see
+  `set-follow`), which stays selected. Esc, or a click on nothing,
+  cancels, `shape-id` still selected; so does picking again. Leaving
+  motion mode, the page or the file ends it."
   [shape-id]
   (ptk/reify ::pick-leader
     ptk/UpdateEvent
@@ -679,26 +698,20 @@
 
     ptk/WatchEvent
     (watch [_ _ stream]
-      (let [stop (rx/filter #(contains? #{::pick-leader ::end-pick-leader} (ptk/type %)) stream)]
+      (let [of-type (fn [types] (rx/filter #(contains? types (ptk/type %)) stream))]
         (->> (rx/merge
-              (->> stream
-                   (rx/filter (ptk/type? ::dws/select-shape))
-                   (rx/map (constantly true)))
+              (->> (of-type #{::dws/select-shape ::dws/select-shapes})
+                   (rx/map #(end-pick-leader shape-id true)))
               ;; a click the canvas has not hovered yet deselects first
               ;; and selects on release: nothing selected soon after is a
               ;; click on nothing, or Esc
-              (->> stream
-                   (rx/filter (ptk/type? ::dws/deselect-all))
+              (->> (of-type #{::dws/deselect-all})
                    (rx/switch-map #(rx/timer 500))
-                   (rx/map (constantly false))))
+                   (rx/map #(end-pick-leader shape-id false)))
+              (->> (of-type pick-endings)
+                   (rx/map #(cancel-pick-leader))))
              (rx/take 1)
-             (rx/map #(end-pick-leader shape-id %))
-             (rx/take-until stop))))))
-
-(defn cancel-pick-leader
-  "Stop waiting for a leader to be picked (see `pick-leader`)."
-  []
-  (end-pick-leader nil false))
+             (rx/take-until (of-type #{::pick-leader ::end-pick-leader})))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TIMELINE CRUD
