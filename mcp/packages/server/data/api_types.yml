@@ -17376,6 +17376,8 @@ Timeline:
         setOrigin(shape: Shape, origin: { x: number; y: number }): void;
         followOf(shape: Shape): Follow | null;
         setFollow(shape: Shape, follow: FollowProps | null): void;
+        ikOf(shape: Shape): Ik | null;
+        setIk(shape: Shape, ik: IkProps | null): void;
         toCSS(): string;
         toJSON(): TimelineJson;
         toReact(): string;
@@ -17835,6 +17837,54 @@ Timeline:
         Example
         ```
         timeline.setFollow(badge, { leader: card, delay: 100 });timeline.setFollow(shadow, { leader: button, rotation: false });timeline.setFollow(label, { leader: popIn, from: 'rest' });
+        ```
+      ikOf: |-
+        ```
+        ikOf(shape: Shape): Ik | null
+        ```
+
+        The goal `shape` reaches, as the Reach section of the Motion tab sets
+        it, or `null` when it reaches none.
+
+        Parameters
+
+        * shape: Shape
+
+          A layer inside the board.
+
+        Returns Ik | null
+      setIk: |-
+        ```
+        setIk(shape: Shape, ik: IkProps | null): void
+        ```
+
+        Makes `shape`, the end of a chain of two follows (a hand that follows
+        the forearm, which follows the upper arm, each with no delay, taking
+        the position and rotation of its leader, see `setFollow`), reach
+        `ik.goal`: every frame the two links turn around their pivots so the
+        pivot of `shape` lands on the goal's, or points straight at a goal
+        out of reach, the elbow on the side `ik.bend` says. What follows a
+        link goes along. `null` makes it reach none. The goal must be another
+        layer of the board out of the chain, not in one of its layers nor
+        holding one, not led by the chain through follows and the goals of
+        other chains, nor a layer of a component copy the board does not
+        animate itself; a layer is in one chain only. The SVG, CSS, Lottie
+        and code exports play it by keyframes.
+
+        Parameters
+
+        * shape: Shape
+
+          A layer inside the board, at the end of a chain of two follows.
+        * ik: IkProps | null
+
+          The goal and how to reach it, or `null`.
+
+        Returns void
+
+        Example
+        ```
+        timeline.setIk(hand, { goal: ball });timeline.setIk(foot, { goal: footprint, bend: 'cw', end: 'keep' });
         ```
       toCSS: |-
         ```
@@ -18592,6 +18642,80 @@ FollowProps:
         ```
 
         Do what the leader does this many milliseconds later. 0 by default.
+Ik:
+  overview: |-
+    Interface Ik
+    ============
+
+    The goal the end of a chain of two follows reaches, see
+    `Timeline.setIk`.
+
+    ```
+    interface Ik {
+        goal: Shape;
+        bend: IkBend;
+        end: IkEnd;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      goal: |-
+        ```
+        readonly goal: Shape
+        ```
+
+        The layer it reaches.
+      bend: |-
+        ```
+        readonly bend: IkBend
+        ```
+
+        The side its elbow bends to.
+      end: |-
+        ```
+        readonly end: IkEnd
+        ```
+
+        How the end of the chain turns.
+IkProps:
+  overview: |-
+    Interface IkProps
+    =================
+
+    The goal of the end of a chain of two follows, see `Timeline.setIk`.
+
+    ```
+    interface IkProps {
+        goal: Shape;
+        bend?: IkBend;
+        end?: IkEnd;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      goal: |-
+        ```
+        goal: Shape
+        ```
+
+        The layer to reach: another layer of the board, out of the chain.
+      bend: |-
+        ```
+        bend?: IkBend
+        ```
+
+        The side the elbow bends to. By default the side the chain is drawn
+        bent to at its first frame, or the one it bent to before.
+      end: |-
+        ```
+        end?: IkEnd
+        ```
+
+        How the end of the chain turns. `'chain'` by default, or as before.
 CopyAnimationOptions:
   overview: |-
     Interface CopyAnimationOptions
@@ -27914,6 +28038,35 @@ FollowFrom:
 
     Referenced by: Follow, FollowProps
   members: {}
+IkBend:
+  overview: |-
+    Type Alias IkBend
+    =================
+
+    ```
+    IkBend: "cw" | "ccw"
+    ```
+
+    The side the elbow of a chain bends to as it reaches, see
+    `Timeline.setIk`: clockwise (`'cw'`) or counter-clockwise (`'ccw'`).
+
+    Referenced by: Ik, IkProps
+  members: {}
+IkEnd:
+  overview: |-
+    Type Alias IkEnd
+    ================
+
+    ```
+    IkEnd: "chain" | "keep" | "goal"
+    ```
+
+    How the end of a chain turns as it reaches, see `Timeline.setIk`:
+    along with the chain (`'chain'`), keeping its own angle (`'keep'`), or
+    taking the turn of the goal (`'goal'`).
+
+    Referenced by: Ik, IkProps
+  members: {}
 TimelineExportFormat:
   overview: |-
     Type Alias TimelineExportFormat
@@ -28214,7 +28367,7 @@ Shape:
     let shape: Shape;if (penpot.utils.types.isRectangle(shape)) {  console.log(shape.type);}
     ```
 
-    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, Follow, FollowProps, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryAnimationStyle, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
+    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, Follow, FollowProps, GridLayout, Group, Ik, IkProps, Image, Interaction, Keyframe, Library, LibraryAnimationStyle, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
   members: {}
 StrokeCap:
   overview: |-

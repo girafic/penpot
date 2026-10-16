@@ -1743,6 +1743,62 @@
                                                       (some? delay) (assoc :delay (mth/round delay))
                                                       (some? from)  (assoc :from (keyword from))))))))))
 
+      ;; The goal the end of a chain of two follows reaches, as the Reach
+      ;; section of the Motion tab sets it
+      :ikOf
+      (fn [shape]
+        (when-let [shape-id (layer :ikOf shape)]
+          (when-let [{:keys [goal bend turn]} (cta/ik-of (locate) shape-id)]
+            #js {:goal (shape-proxy plugin-id file-id page-id goal)
+                 :bend (name bend)
+                 :end (name turn)})))
+
+      :setIk
+      (fn [shape ik]
+        (when-let [shape-id (layer :setIk shape)]
+          (if (nil? ik)
+            (write! :setIk #(cta/set-ik % shape-id nil))
+            (let [prop     #(when (object? ik) (obj/get ik %))
+                  goal     (prop "goal")
+                  goal-id  (when (shape-proxy? goal) (obj/get goal "$id"))
+                  bend     (prop "bend")
+                  end      (prop "end")
+                  objects  (u/locate-objects file-id page-id)
+                  timeline (or (locate) (cta/make-timeline {:board-id board-id}))
+                  error    (cond
+                             (not (object? ik))
+                             "The ik should be an object with a goal, or null"
+
+                             (nil? goal-id)
+                             "The goal should be a shape"
+
+                             (and (some? bend) (not (contains? #{"cw" "ccw"} bend)))
+                             "bend should be 'cw' or 'ccw'"
+
+                             (and (some? end) (not (contains? #{"chain" "keep" "goal"} end)))
+                             "end should be 'chain', 'keep' or 'goal'"
+
+                             (nil? (cta/ik-links timeline objects shape-id))
+                             (dm/str "The shape should end a chain of two follows: it follows a layer "
+                                     "with no delay, taking its position and rotation, which follows another so")
+
+                             (not (cltl/can-reach? objects timeline shape-id goal-id))
+                             (dm/str "The goal should be another layer of the board, out of the chain, "
+                                     "not in one of its layers nor holding one, not led by it, in no other "
+                                     "chain's layers, nor a layer of a component copy the board does not animate"))]
+              (if (some? error)
+                (u/not-valid plugin-id :setIk error)
+                (write! :setIk
+                        (fn [timeline]
+                          (let [old (cta/ik-of timeline shape-id)]
+                            (cta/set-ik timeline shape-id
+                                        (cond-> {:goal goal-id
+                                                 :bend (if (some? bend)
+                                                         (keyword bend)
+                                                         (or (:bend old) (cta/natural-bend timeline objects shape-id) :ccw))}
+                                          (some? end)  (assoc :turn (keyword end))
+                                          (and (nil? end) (some? old)) (assoc :turn (:turn old))))))))))))
+
       ;; As copying the animation of a layer on the canvas and pasting it
       ;; onto others, in the boards of the page they are in.
       :copyAnimation

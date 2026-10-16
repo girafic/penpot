@@ -223,6 +223,35 @@
         (t/is (= (cthi/id :anim-copy) (aget (.-leader (.followOf timeline (proxy :own))) "$id"))
               "a copy the board animates leads")))))
 
+(t/deftest the-end-of-an-arm-reaches-a-goal
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]  (setup true)
+            [^js board [^js upper ^js fore ^js hand ^js ball]] (board-with-rects context 4)
+            ^js timeline         (.addTimeline board)
+            ik                   #(some-> (.ikOf timeline %)
+                                          (js->clj :keywordize-keys true)
+                                          (update :goal (fn [^js goal] (aget goal "$id"))))]
+        (.setFollow timeline fore #js {:leader upper})
+        (.setFollow timeline hand #js {:leader fore})
+        (t/is (nil? (ik hand)) "none at first")
+        (.setIk timeline hand #js {:goal ball :end "keep"})
+        (t/is (= {:goal (aget ball "$id") :bend "ccw" :end "keep"} (ik hand)) "a straight arm bends counter-clockwise")
+        (t/is (= {:goal (aget ball "$id") :turn :keep} (:ik (stored-track store context board hand))))
+        (.setIk timeline hand #js {:goal ball :bend "cw"})
+        (t/is (= {:goal (aget ball "$id") :bend "cw" :end "keep"} (ik hand)) "what is not given stays")
+        (t/testing "a goal or a chain it cannot reach is refused"
+          (t/is (thrown? js/Error (.setIk timeline hand #js {:goal fore})) "a link of its chain")
+          (t/is (thrown? js/Error (.setIk timeline fore #js {:goal ball})) "a chain of one link")
+          (t/is (thrown? js/Error (.setIk timeline hand #js {:goal board})))
+          (t/is (thrown? js/Error (.setIk timeline hand #js {:goal ball :bend "up"})))
+          (t/is (thrown? js/Error (.setIk timeline hand #js {:goal ball :end "free"})))
+          (let [refused (try (.setIk timeline hand #js {:goal fore}) nil
+                             (catch :default cause (ex-message cause)))]
+            (t/is (str/includes? (str refused) "out of the chain") "the message names the rule")))
+        (.setIk timeline hand nil)
+        (t/is (nil? (ik hand)) "null reaches none")))))
+
 (t/deftest keyframes-animate-the-layers
   (thw/with-wasm-mocks*
     (fn []

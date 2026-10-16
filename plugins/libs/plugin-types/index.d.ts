@@ -4425,6 +4425,37 @@ export interface Timeline {
   setFollow(shape: Shape, follow: FollowProps | null): void;
 
   /**
+   * The goal `shape` reaches, as the Reach section of the Motion tab sets
+   * it, or `null` when it reaches none.
+   * @param shape A layer inside the board.
+   */
+  ikOf(shape: Shape): Ik | null;
+
+  /**
+   * Makes `shape`, the end of a chain of two follows (a hand that follows
+   * the forearm, which follows the upper arm, each with no delay, taking
+   * the position and rotation of its leader, see `setFollow`), reach
+   * `ik.goal`: every frame the two links turn around their pivots so the
+   * pivot of `shape` lands on the goal's, or points straight at a goal
+   * out of reach, the elbow on the side `ik.bend` says. What follows a
+   * link goes along. `null` makes it reach none. The goal must be another
+   * layer of the board out of the chain, not in one of its layers nor
+   * holding one, not led by the chain through follows and the goals of
+   * other chains, nor a layer of a component copy the board does not
+   * animate itself; a layer is in one chain only. The SVG, CSS, Lottie
+   * and code exports play it by keyframes.
+   * @param shape A layer inside the board, at the end of a chain of two follows.
+   * @param ik The goal and how to reach it, or `null`.
+   *
+   * @example
+   * ```js
+   * timeline.setIk(hand, { goal: ball });
+   * timeline.setIk(foot, { goal: footprint, bend: 'cw', end: 'keep' });
+   * ```
+   */
+  setIk(shape: Shape, ik: IkProps | null): void;
+
+  /**
    * The animation as CSS, as the Motion tab of Inspect gives it with the
    * board selected: `@keyframes` and the `animation` rules of the layers,
    * with the classes the code of Inspect gives them (see
@@ -4945,6 +4976,61 @@ export interface FollowProps {
    * Do what the leader does this many milliseconds later. 0 by default.
    */
   delay?: number;
+}
+
+/**
+ * The side the elbow of a chain bends to as it reaches, see
+ * `Timeline.setIk`: clockwise (`'cw'`) or counter-clockwise (`'ccw'`).
+ */
+export type IkBend = 'cw' | 'ccw';
+
+/**
+ * How the end of a chain turns as it reaches, see `Timeline.setIk`:
+ * along with the chain (`'chain'`), keeping its own angle (`'keep'`), or
+ * taking the turn of the goal (`'goal'`).
+ */
+export type IkEnd = 'chain' | 'keep' | 'goal';
+
+/**
+ * The goal the end of a chain of two follows reaches, see
+ * `Timeline.setIk`.
+ */
+export interface Ik {
+  /**
+   * The layer it reaches.
+   */
+  readonly goal: Shape;
+
+  /**
+   * The side its elbow bends to.
+   */
+  readonly bend: IkBend;
+
+  /**
+   * How the end of the chain turns.
+   */
+  readonly end: IkEnd;
+}
+
+/**
+ * The goal of the end of a chain of two follows, see `Timeline.setIk`.
+ */
+export interface IkProps {
+  /**
+   * The layer to reach: another layer of the board, out of the chain.
+   */
+  goal: Shape;
+
+  /**
+   * The side the elbow bends to. By default the side the chain is drawn
+   * bent to at its first frame, or the one it bent to before.
+   */
+  bend?: IkBend;
+
+  /**
+   * How the end of the chain turns. `'chain'` by default, or as before.
+   */
+  end?: IkEnd;
 }
 
 /**
