@@ -65,15 +65,12 @@ impl Gradient {
             .zip(self.offsets.iter().copied())
     }
 
+    /// The shader of a linear gradient over `rect`, as SVG draws one in
+    /// `objectBoundingBox` units (the SVG renderer and the exports): its
+    /// start and end in the box of the shape, and its lines of one colour
+    /// at a right angle in that box, so slanted on a box that is not
+    /// square. A box with no width or height has it in pixels.
     pub fn to_linear_shader(&self, rect: &Rect) -> Option<skia::Shader> {
-        let start = (
-            rect.left + self.start.0 * rect.width(),
-            rect.top + self.start.1 * rect.height(),
-        );
-        let end = (
-            rect.left + self.end.0 * rect.width(),
-            rect.top + self.end.1 * rect.height(),
-        );
         let colors4f: Vec<skia::Color4f> = self
             .colors
             .iter()
@@ -87,7 +84,21 @@ impl Gradient {
         );
         let gradient =
             skia::gradient::Gradient::new(colors, skia::gradient::Interpolation::default());
-        skia::shaders::linear_gradient((start, end), &gradient, None)
+        let (width, height) = (rect.width(), rect.height());
+        if width.abs() < 0.001 || height.abs() < 0.001 {
+            let start = (
+                rect.left + self.start.0 * width,
+                rect.top + self.start.1 * height,
+            );
+            let end = (
+                rect.left + self.end.0 * width,
+                rect.top + self.end.1 * height,
+            );
+            return skia::shaders::linear_gradient((start, end), &gradient, None);
+        }
+        let mut local = skia::Matrix::translate((rect.left, rect.top));
+        local.pre_scale((width, height), None);
+        skia::shaders::linear_gradient((self.start, self.end), &gradient, Some(&local))
     }
 
     pub fn to_radial_shader(&self, rect: &Rect) -> Option<skia::Shader> {
@@ -392,5 +403,40 @@ pub fn set_paint_fill(paint: &mut Paint, fill: &Fill, bounding_box: &Rect, remov
     let shader = get_fill_shader(fill, bounding_box);
     if let Some(shader) = shader {
         paint.set_shader(shader);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The grey a black-to-white `gradient` (corner to corner) paints at
+    /// `(x, y)` of a `w` by `h` box.
+    fn grey_at(w: f32, h: f32, x: i32, y: i32) -> u8 {
+        let gradient = Gradient::new(
+            (0.0, 0.0),
+            (1.0, 1.0),
+            255,
+            1.0,
+            &[(skia::Color::BLACK, 0.0), (skia::Color::WHITE, 1.0)],
+        );
+        let rect = Rect::from_xywh(0.0, 0.0, w, h);
+        let mut surface = skia::surfaces::raster_n32_premul((w as i32, h as i32)).expect("surface");
+        let mut paint = Paint::default();
+        paint.set_shader(gradient.to_linear_shader(&rect));
+        surface.canvas().draw_rect(rect, &paint);
+        let image = surface.image_snapshot();
+        image.peek_pixels().expect("pixels").get_color((x, y)).r()
+    }
+
+    #[test]
+    fn a_linear_gradient_goes_by_the_box_of_its_shape() {
+        // as SVG with objectBoundingBox: 10% across and half down a box
+        // twice as wide as high is 30% along the diagonal, not 18%
+        let grey = grey_at(200.0, 100.0, 20, 50) as i32;
+        assert!((grey - 77).abs() <= 2, "30% grey: {grey}");
+        // on a square box both are the same
+        let grey = grey_at(100.0, 100.0, 10, 50) as i32;
+        assert!((grey - 77).abs() <= 2, "30% grey: {grey}");
     }
 }
