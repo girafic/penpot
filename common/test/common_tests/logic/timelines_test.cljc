@@ -1443,3 +1443,31 @@
         tl   (get (cltl/instance-timelines objects board nil main-page) [:copy copy main])]
     (t/is (some? (get-in tl [:tracks copy-rect])))
     (t/is (nil? (get-in tl [:tracks copy-rect :follow])))))
+
+(t/deftest the-code-plays-a-follow-by-keyframes
+  (let [file (following-file)
+        page (thf/current-page file)
+        a    (thi/id :board-a)
+        dot  (thi/id :dot)
+        code (cltl/code-timelines page {(:id file) file} a)
+        track (get-in code [:timeline :tracks dot])]
+    (t/is (nil? (:follow track)))
+    (t/is (= #{:x} (into #{} (map :property) (:keyframes track))) "it moves along x as the rect does")))
+
+(t/deftest the-exports-play-the-follows-of-copies-by-keyframes
+  (let [file (component-file)
+        main (thi/id :main)
+        page (thf/current-page file)
+        tl   (-> (get-in page [:timelines main])
+                 (cta/add-keyframe main {:time 0 :property :rotation :value 0 :easing :linear})
+                 (cta/add-keyframe main {:time 1000 :property :rotation :value 90})
+                 (cta/set-follow (thi/id :main-rect) {:leader main}))
+        file (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                         (pcb/with-page page)
+                                         (pcb/set-timeline main tl)))
+        {:keys [objects board copy-rect main-page]} (component-scene file)
+        copies   (cltl/instance-timelines objects board nil main-page)
+        exported (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000}) (vals copies) objects)
+        track    (get-in exported [:tracks copy-rect])]
+    (t/is (nil? (:follow track)))
+    (t/is (some #(= :rotation (:property %)) (:keyframes track)) "it turns with the head of its copy")))

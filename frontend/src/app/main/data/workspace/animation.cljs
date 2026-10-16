@@ -181,7 +181,9 @@
   own, with the animations of the component copies in it and the sound
   of their mains (see `cltl/with-instance-tracks` and
   `cltl/with-instance-clips`) and, while it has no tracks, keeping time
-  with them. Nil when the board has no timeline and no animated copies.
+  with them; the layers that follow others play keyframes (see
+  `cta/bake-follows`), which the markup exports read. Nil when the board
+  has no timeline and no animated copies.
   `files` holds the files of the components, by id. With `text-split`
   `:whole`, every split animation plays as an animation of its whole
   text, as the markup exports (CSS, SVG and Lottie) play them (see
@@ -194,6 +196,7 @@
     (when-let [own (when (or stored? (seq copies))
                      (board-timeline timelines (get objects board-id)))]
       (-> (cond-> own (= :whole text-split) cta/flatten-splits)
+          (cta/bake-follows objects)
           (cltl/with-copies-clock (vals copies) stored?)
           (cltl/with-instance-tracks (vals copies) objects :text-split text-split)
           (cltl/with-instance-clips copies)))))

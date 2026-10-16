@@ -4795,3 +4795,91 @@
                (cta/add-animation leader {:type :fade :start 0 :duration 300})
                (cta/set-follow follower {:leader leader}))]
     (t/is (close-point? [305 105] (centre-at tl objects follower 1000)))))
+
+(defn- plays-alike?
+  "Whether `baked` shows the layer `id` of `objects` as `timeline` does
+  at each of `times`, within a pixel, a degree and a hundredth."
+  [timeline baked objects id times]
+  (every? (fn [t]
+            (let [a (shown-at timeline objects id t)
+                  b (shown-at baked objects id t)
+                  [ax ay] (centre-at timeline objects id t)
+                  [bx by] (centre-at baked objects id t)]
+              (and (mth/close? ax bx 0.5)
+                   (mth/close? ay by 0.5)
+                   (mth/close? (:rotation a 0) (:rotation b 0) 0.5)
+                   (mth/close? (get-in a [:selrect :width]) (get-in b [:selrect :width]) 0.1)
+                   (mth/close? (:opacity a 1) (:opacity b 1) 0.01))))
+          times))
+
+(defn- baked-property
+  [baked id property]
+  (filterv #(= property (:property %)) (get-in baked [:tracks id :keyframes])))
+
+(t/deftest a-follow-bakes-into-keyframes-that-play-alike
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe leader {:time 0 :property :rotation :value 0 :easing :ease-in-out})
+                  (cta/add-keyframe leader {:time 1000 :property :rotation :value 270})
+                  (cta/add-keyframe follower {:time 0 :property :y :value 100})
+                  (cta/add-keyframe follower {:time 1000 :property :y :value 140})
+                  (cta/set-follow follower {:leader leader :delay 150}))
+        baked (cta/bake-follows tl objects)]
+    (t/is (nil? (get-in baked [:tracks follower :follow])) "no follow left")
+    (t/is (cta/valid-timeline? baked))
+    (t/is (= (get-in tl [:tracks leader]) (get-in baked [:tracks leader])) "the leader as it was")
+    (t/is (plays-alike? tl baked objects follower (range 0 1001 25)))
+    (t/is (< 180 (:value (peek (baked-property baked follower :rotation)))) "it turns on past 180")))
+
+(t/deftest a-linear-follow-bakes-to-few-keyframes
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl    (-> (mk-timeline)
+                  (assoc :duration 10000)
+                  (cta/add-keyframe leader {:time 0 :property :x :value 100 :easing :linear})
+                  (cta/add-keyframe leader {:time 10000 :property :x :value 900})
+                  (cta/set-follow follower {:leader leader}))
+        baked (cta/bake-follows tl objects)]
+    (t/is (<= (count (baked-property baked follower :x)) 3))
+    (t/is (empty? (baked-property baked follower :y)) "nothing that stays where it rests")
+    (t/is (empty? (baked-property baked follower :rotation)))
+    (t/is (plays-alike? tl baked objects follower [0 2500 5000 9999 10000]))))
+
+(t/deftest a-follow-bakes-its-scale-and-opacity
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe leader {:time 0 :property :scale-x :value 1})
+                  (cta/add-keyframe leader {:time 1000 :property :scale-x :value 2})
+                  (cta/add-keyframe leader {:time 0 :property :scale-y :value 1})
+                  (cta/add-keyframe leader {:time 1000 :property :scale-y :value 2})
+                  (cta/add-keyframe leader {:time 0 :property :opacity :value 1})
+                  (cta/add-keyframe leader {:time 1000 :property :opacity :value 0.4})
+                  (cta/set-follow follower {:leader leader :opacity true}))
+        baked (cta/bake-follows tl objects)]
+    (t/is (seq (baked-property baked follower :scale-x)))
+    (t/is (seq (baked-property baked follower :opacity)))
+    (t/is (plays-alike? tl baked objects follower (range 0 1001 100)))))
+
+(t/deftest a-chain-of-follows-bakes-through
+  (let [{:keys [leader follower objects]} (follow-scene)
+        third   (cts/setup-shape {:type :rect :x 300 :y 100 :width 10 :height 10})
+        objects (assoc objects (:id third) third)
+        tl      (-> (mk-timeline)
+                    (cta/add-keyframe leader {:time 0 :property :rotation :value 0})
+                    (cta/add-keyframe leader {:time 1000 :property :rotation :value 90})
+                    (cta/set-follow follower {:leader leader :delay 100})
+                    (cta/set-follow (:id third) {:leader follower :delay 100}))
+        baked   (cta/bake-follows tl objects)]
+    (t/is (plays-alike? tl baked objects (:id third) (range 0 1001 50)))
+    (t/is (not-any? :follow (vals (:tracks baked))))))
+
+(t/deftest a-timeline-without-follows-bakes-to-itself
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :x :value 100})
+               (cta/add-keyframe leader {:time 1000 :property :x :value 200}))]
+    (t/is (identical? tl (cta/bake-follows tl objects)))
+    (t/testing "a cycle bakes to no follow"
+      (let [tl (-> tl
+                   (cta/set-follow follower {:leader leader})
+                   (cta/set-follow leader {:leader follower}))]
+        (t/is (not-any? :follow (vals (:tracks (cta/bake-follows tl objects)))))))))

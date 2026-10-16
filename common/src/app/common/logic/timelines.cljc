@@ -631,7 +631,8 @@
   `cta/text-unit-entries`), or, with `text-split` `:whole`, play as
   animations of the whole text, as the markup exports play them (see
   `cta/flatten-splits`). A shape `timeline` animates itself keeps that
-  animation. `:copy-loops` holds the cycles (ms) of the copies that loop,
+  animation. The layers of copies that follow others play keyframes
+  (see `cta/bake-follows`). `:copy-loops` holds the cycles (ms) of the copies that loop,
   whose clock the exports bind to the board's (see
   `app.main.data.exports.animation/export-issues`)."
   [timeline copies objects & {:keys [text-split]}]
@@ -641,6 +642,7 @@
            start  (:clock-start copy 0)
            speed  (:clock-speed copy 1)
            copy   (-> (cond-> copy (= :whole text-split) cta/flatten-splits)
+                      (cta/bake-follows objects)
                       (cta/resolve-animations objects)
                       (cta/expand-loops))
            ;; ping-pong turns into a loop of there and back
@@ -796,7 +798,8 @@
   but those by characters or words of the texts `units?` (a function of
   a text) is true of, which the code plays by units (see
   `cta/unit-timelines`); and `:splits`, the texts the design plays by
-  units, with their kind. Nil when the board plays nothing."
+  units, with their kind. The layers that follow others play keyframes
+  (see `cta/bake-follows`). Nil when the board plays nothing."
   [page files board-id & {:keys [units?] :or {units? (constantly false)}}]
   (let [objects   (:objects page)
         timelines (:timelines page)
@@ -811,7 +814,8 @@
                         (mapv (fn [[[_ head-id] timeline]] {:head-id head-id :timeline timeline})))
             splits (split-kinds (cons own (map :timeline copies)) objects)
             ;; lines play whole: a page breaks them as its width says
-            flat   #(cta/flatten-splits % #{:char :word} (fn [id] (units? (get objects id))))
+            flat   #(-> (cta/bake-follows % objects)
+                        (cta/flatten-splits #{:char :word} (fn [id] (units? (get objects id)))))
             copies (mapv #(update % :timeline flat) copies)]
         {:board-id board-id
          :timeline (-> (flat own)

@@ -3293,6 +3293,167 @@
                tree
                (text-unit-entries timeline objects time))))
 
+;; --- Baking follows ------------------------------------------------------
+
+(def ^:private bake-tolerances
+  "How far the keyframes a follow bakes into (see `bake-follows`) may miss
+  it: a quarter pixel or degree, a little scale and opacity."
+  {:x 0.25 :y 0.25 :rotation 0.25 :scale-x 0.002 :scale-y 0.002 :opacity 0.004})
+
+(defn- thin-samples
+  "The fewest of `samples` (`[time value]`, by time) that linear
+  keyframes through them pass within `tol` of all the others: the first
+  and last, and recursively the one missed most (Ramer-Douglas-Peucker)."
+  [samples tol]
+  (let [v     (vec samples)
+        n     (count v)
+        inner (fn inner [i j]
+                (let [[ti vi] (nth v i)
+                      [tj vj] (nth v j)
+                      [k dev] (reduce (fn [[_ most :as acc] k]
+                                        (let [[tk vk] (nth v k)
+                                              f       (if (= ti tj) 0 (/ (- tk ti) (- tj ti)))
+                                              miss    (mth/abs (- vk (+ vi (* f (- vj vi)))))]
+                                          (if (> miss most) [k miss] acc)))
+                                      [nil 0]
+                                      (range (inc i) j))]
+                  (if (and (some? k) (> dev tol))
+                    (concat (inner i k) [k] (inner k j))
+                    [])))]
+    (if (<= n 2)
+      v
+      (mapv v (concat [0] (inner 0 (dec n)) [(dec n)])))))
+
+(defn- unwrapped
+  "`angles` (degrees) moved by whole turns to be nearest the one before
+  each: a turn past 180 degrees goes on, not back."
+  [angles]
+  (reduce (fn [acc a]
+            (if-let [prev (peek acc)]
+              (conj acc (+ a (* 360 (mth/round (/ (- prev a) 360)))))
+              (conj acc a)))
+          []
+          angles))
+
+(defn- follow-chain
+  "The layers `follows` of `timeline` and the leaders they follow, through
+  a chain of followers."
+  [timeline follows]
+  (loop [ids (set follows), front follows]
+    (let [leaders (into #{} (keep #(dm/get-in timeline [:tracks % :follow :leader])) front)
+          new     (remove ids leaders)]
+      (if (empty? new)
+        ids
+        (recur (into ids new) new)))))
+
+(defn- followed-pose
+  "The values of `values`' properties that show the follower `id` of
+  `timeline` as it plays with its follow: its own `values` at a time,
+  `own` its own modifiers then and `played` those with its follow (see
+  `followed-modifiers`). What the follow adds since its own pose turns
+  and scales it (the nearest, for a skew) and moves its pivot."
+  [timeline objects id values own played]
+  (let [shape   (get objects id)
+        origin  (position-origin timeline objects id)
+        pivot   (origin-point shape (track-origin (get-track timeline id)))
+        matrix  #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
+        total   (matrix played)
+        follow  (if-let [inv (gmt/inverse (matrix own))] (gmt/multiply total inv) total)
+        {:keys [a b c d]} follow
+        sx      (mth/sqrt (+ (* a a) (* b b)))
+        sy      (if (pos? sx) (/ (- (* a d) (* b c)) sx) 0)
+        rest-x  (rest-value shape :x origin)
+        rest-y  (rest-value shape :y origin)
+        values  (-> (merge {:rotation (rest-value shape :rotation origin) :scale-x 1 :scale-y 1} values)
+                    (update :rotation + (mth/degrees (mth/atan2 b a)))
+                    (update :scale-x * sx)
+                    (update :scale-y * sy)
+                    (assoc :x rest-x :y rest-y))
+        ;; where its pivot is without a move, and where it goes
+        probe   (gpt/transform pivot (matrix (shape->modifiers shape values origin pivot)))
+        target  (gpt/transform pivot total)]
+    (assoc values
+           :x (+ rest-x (- (:x target) (:x probe)))
+           :y (+ rest-y (- (:y target) (:y probe)))
+           :opacity (modifiers-opacity played (:opacity shape 1)))))
+
+(defn- baked-track
+  "The track of the follower `id` of `timeline` playing its `poses` (see
+  `followed-pose`, one at each of `times`) as linear keyframes, from its
+  own track as it plays: the properties the poses change, or that it
+  animated, get the keyframes that keep within `bake-tolerances` of them."
+  [timeline objects id times poses]
+  (let [shape    (get objects id)
+        origin   (position-origin timeline objects id)
+        track    (get-track timeline id)
+        animated (into #{} (map :property) (:keyframes track))
+        at-rest  {:x (rest-value shape :x origin)
+                  :y (rest-value shape :y origin)
+                  :rotation (rest-value shape :rotation origin)
+                  :scale-x 1 :scale-y 1
+                  :opacity (:opacity shape 1)}
+        baked    (into {}
+                       (keep (fn [property]
+                               (let [tol    (get bake-tolerances property)
+                                     values (cond-> (mapv property poses)
+                                              (= :rotation property) unwrapped)]
+                                 (when (or (contains? animated property)
+                                           (some #(> (mth/abs (- % (get at-rest property))) tol) values))
+                                   [property (thin-samples (map vector times values) tol)]))))
+                       (keys bake-tolerances))]
+    (-> track
+        (dissoc :follow)
+        (update :keyframes (fn [keyframes]
+                             (->> (remove #(and (contains? baked (:property %)) (nil? (:index %))) keyframes)
+                                  (concat (for [[property samples] baked
+                                                [time value] samples]
+                                            (make-keyframe {:time time :property property :value value
+                                                            :easing :linear})))
+                                  (sort-keyframes)
+                                  (vec))))
+        (d/update-when :loops #(into #{} (remove (fn [k] (contains? baked k))) %)))))
+
+(defn bake-follows
+  "`timeline` with its follows (see `follow-of`) played by keyframes of
+  the followers, for the exports that read keyframes: the pose of each
+  follower `fps` times a second through the duration, as the canvas
+  shows it (see `timeline->modif-tree`), kept where linear keyframes
+  between the others would miss it by more than a quarter pixel or
+  degree. The tracks of the followers come as they play (see
+  `resolve-animations`), the others as they are. A follow that plays
+  nothing (a cycle, a leader gone) is left out."
+  [timeline objects & {:keys [fps] :or {fps 60}}]
+  (if-not (some :follow (vals (:tracks timeline)))
+    timeline
+    (let [resolved (resolve-animations timeline objects)
+          follows  (followers resolved objects)
+          ids      (follow-chain resolved follows)
+          played   (update resolved :tracks select-keys ids)
+          times    (frame-times (:duration timeline) fps)
+          frames   (mapv (fn [t]
+                           (let [own (own-modifiers played objects t)]
+                             {:values (values-at played t)
+                              :own    own
+                              :played (followed-modifiers played objects t own)}))
+                         times)
+          baked    (into {}
+                         (map (fn [id]
+                                [id (baked-track played objects id times
+                                                 (mapv (fn [{:keys [values own played]}]
+                                                         (followed-pose resolved objects id (get values id)
+                                                                        (get own id) (get played id)))
+                                                       frames))]))
+                         follows)]
+      (update timeline :tracks
+              (fn [tracks]
+                (reduce-kv (fn [tracks id track]
+                             (let [track (or (get baked id) (dissoc track :follow))]
+                               (if (empty-track? track)
+                                 (dissoc tracks id)
+                                 (assoc tracks id track))))
+                           tracks
+                           tracks))))))
+
 (defn timeline->opacity
   "Compute `{shape-id opacity}` for every shape that animates opacity at
   `time` (opacity is applied as a transient style override, not a
