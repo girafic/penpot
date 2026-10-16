@@ -6796,6 +6796,42 @@ msgid "workspace.animation.origin-y"
 msgstr "Origin Y"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.follow"
+msgstr "Follow"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.add-follow"
+msgstr "Follow another layer"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.remove-follow"
+msgstr "Follow no layer"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.follow-leader"
+msgstr "Leader"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.follow-choose"
+msgstr "Choose a layer"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.follow-pick"
+msgstr "Pick the leader on the canvas"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.follow-delay"
+msgstr "Delay"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.follows"
+msgstr "Follows %s"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.follows-hint"
+msgstr "Select the layer it follows"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.copy-start"
 msgstr "Start"
 

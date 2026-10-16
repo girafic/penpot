@@ -772,6 +772,25 @@
               (cons id (mapcat walk (rseq (vec (dm/get-in objects [id :shapes])))))))]
     (walk id)))
 
+(defn follow-leaders
+  "The layers of the board of `timeline` (of `objects`) that `shape-id`
+  can follow (see `cta/follow-of`), in the order of the layers panel:
+  not itself, a layer it is in or that is in it (they move together
+  already), nor one that follows it, through others."
+  [objects timeline shape-id]
+  (let [above       (set (cfh/get-parent-ids objects shape-id))
+        inside      (set (cfh/get-children-ids objects shape-id))
+        leader-of   #(dm/get-in timeline [:tracks % :follow :leader])
+        follows-it? (fn [id]
+                      (loop [at (leader-of id), seen #{id}]
+                        (cond (nil? at)           false
+                              (= at shape-id)     true
+                              (contains? seen at) false
+                              :else               (recur (leader-of at) (conj seen at)))))]
+    (into []
+          (remove #(or (= % shape-id) (contains? above %) (contains? inside %) (follows-it? %)))
+          (rest (layer-ids objects (:board-id timeline))))))
+
 (defn- split-kinds
   "`{text-id kind}`: the kind of units each text of the tracks of
   `timelines` plays its split animations by (see `cta/unit-split-kind`)."

@@ -511,8 +511,9 @@
 
 (defn- animated-ids
   "Ids of the layers of `board-id` (itself included) that have keyframes,
-  preset animations or animated children, or that are component copies
-  playing the animation of their mains (`copy-spans`, see `timeline-rows`)."
+  preset animations, a leader they follow (see `cta/follow-of`) or
+  animated children, or that are component copies playing the animation
+  of their mains (`copy-spans`, see `timeline-rows`)."
   ([objects board-id timeline]
    (animated-ids objects board-id timeline {}))
   ([objects board-id timeline copy-spans]
@@ -520,6 +521,7 @@
              (let [child-ids (mapcat walk (dm/get-in objects [id :shapes]))]
                (if (or (seq (dm/get-in timeline [:tracks id :keyframes]))
                        (seq (dm/get-in timeline [:tracks id :animations]))
+                       (some? (dm/get-in timeline [:tracks id :follow]))
                        (contains? copy-spans id)
                        (seq child-ids))
                  (cons id child-ids)
@@ -830,7 +832,7 @@
   {::mf/private true
    ::mf/wrap [mf/memo]}
   [{:keys [row-index shape depth expandable? expanded? selected? hovered? outside?
-           on-toggle on-select on-context-menu on-hover]}]
+           leader-id leader-name on-toggle on-select on-context-menu on-hover]}]
   (let [shape-id (:id shape)
         ;; in the colour of components, as in the layers panel
         component? (ctk/instance-head? shape)
@@ -871,7 +873,14 @@
         (mf/use-fn
          (mf/deps shape-id on-context-menu)
          (fn [event]
-           (on-context-menu event shape-id nil)))]
+           (on-context-menu event shape-id nil)))
+
+        on-leader-click
+        (mf/use-fn
+         (mf/deps leader-id)
+         (fn [event]
+           (dom/stop-propagation event)
+           (st/emit! (dws/select-shape leader-id))))]
 
     [:div {:class (stl/css-case :row true
                                 :layer-row true
@@ -895,6 +904,13 @@
                    :size "s"
                    :class (stl/css :layer-icon)}]
       [:span {:class (stl/css :layer-name) :title (:name shape)} (:name shape)]
+      ;; the layer it follows (see `cta/follow-of`), selected by a click
+      (when (some? leader-id)
+        [:button {:type "button"
+                  :class (stl/css :follow-chip)
+                  :title (tr "workspace.animation.follows-hint")
+                  :on-click on-leader-click}
+         (tr "workspace.animation.follows" leader-name)])
       ;; Out of the board, which still animates it (see `outside-ids`).
       (when outside?
         [:span {:class (stl/css :outside-hint)
@@ -3674,6 +3690,8 @@
                                     :expandable? (:expandable? row)
                                     :expanded? (:expanded? row)
                                     :outside? (:outside? row)
+                                    :leader-id (dm/get-in timeline [:tracks id :follow :leader])
+                                    :leader-name (dm/get-in objects [(dm/get-in timeline [:tracks id :follow :leader]) :name])
                                     :selected? (contains? selected id)
                                     :hovered? hovered?
                                     :on-toggle on-toggle-layer

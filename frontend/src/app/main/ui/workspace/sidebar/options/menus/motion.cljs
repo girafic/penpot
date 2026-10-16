@@ -12,6 +12,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.path-names :as cpn]
    [app.common.types.animation :as cta]
@@ -29,9 +30,11 @@
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
    [app.main.ui.ds.controls.input :refer [input*]]
    [app.main.ui.ds.controls.numeric-input :refer [numeric-input*]]
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
+   [app.main.ui.ds.controls.select :refer [select*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.workspace.sidebar.options.menus.interactions :refer [prototype-pill*]]
    [app.main.ui.workspace.timeline.easing :as easing :refer [easing-menu* easing-curve-editor*]]
@@ -987,6 +990,135 @@
                             :step 5
                             :value (mth/round (* 100 speed))
                             :on-change on-speed}]]])))
+
+(def ^:private ref:picking-leader
+  (l/derived dwa/picking-leader st/state))
+
+(def ^:private follow-parts
+  "What a follower can take of its leader, and its label."
+  [[:position #(tr "workspace.animation.position")]
+   [:rotation #(tr "workspace.options.rotation")]
+   [:scale #(tr "workspace.animation.scale")]
+   [:opacity #(tr "workspace.options.opacity")]])
+
+(mf/defc follow-menu*
+  "Whom the selected layer, a single one in a board, follows (see
+  `cta/follow-of`): a layer of its board, chosen in the list or picked on
+  the canvas with the picker, and what it takes of it, after a delay. The
+  + of the title shows the section; its - follows none."
+  [{:keys [ids]}]
+  (let [shape-id  (when (= 1 (count ids)) (first ids))
+        objects   (mf/deref refs/workspace-page-objects)
+        timelines (mf/deref ref:timelines)
+        picking   (mf/deref ref:picking-leader)
+        board-id  (when (some? shape-id) (cfh/get-shape-id-root-frame objects shape-id))
+        layer?    (and (some? board-id) (not= uuid/zero board-id) (not= board-id shape-id))
+        timeline  (mf/with-memo [timelines board-id]
+                    (or (get timelines board-id) (cta/make-timeline {:board-id board-id})))
+        follow    (when layer? (cta/follow-of timeline shape-id))
+        leaders   (mf/with-memo [objects timeline shape-id layer?]
+                    (when layer? (cltl/follow-leaders objects timeline shape-id)))
+        options   (mf/with-memo [leaders objects]
+                    (into [{:id "" :label (tr "workspace.animation.follow-choose")}]
+                          (map (fn [id] {:id (dm/str id) :label (dm/get-in objects [id :name])}))
+                          leaders))
+        ;; the layer whose section the + opened
+        open*     (mf/use-state nil)
+        open?     (or (some? follow) (= shape-id (deref open*)))
+        picking?  (and (some? shape-id) (= picking shape-id))
+
+        on-add
+        (mf/use-fn
+         (mf/deps shape-id)
+         #(reset! open* shape-id))
+
+        on-remove
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn []
+           (reset! open* nil)
+           (st/emit! (dwa/clear-follow shape-id))))
+
+        on-leader
+        (mf/use-fn
+         (mf/deps shape-id follow)
+         (fn [id]
+           (when-let [leader (uuid/parse* id)]
+             (st/emit! (dwa/set-follow shape-id (assoc follow :leader leader))))))
+
+        on-pick
+        (mf/use-fn
+         (mf/deps shape-id picking?)
+         (fn []
+           (st/emit! (if picking?
+                       (dwa/cancel-pick-leader)
+                       (dwa/pick-leader shape-id)))))
+
+        on-part
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn [event]
+           (let [node (dom/get-current-target event)
+                 part (keyword (dom/get-data node "part"))]
+             (st/emit! (dwa/update-follow shape-id {part (dom/checked? node)})))))
+
+        on-delay
+        (mf/use-fn
+         (mf/deps shape-id)
+         (number-handler #(st/emit! (dwa/update-follow shape-id {:delay (max 0 (mth/round %))}))))]
+
+    ;; leaving the layer closes its section
+    (mf/with-effect [shape-id]
+      #(reset! open* nil))
+
+    (when layer?
+      [:div {:class (stl/css :follow-menu)}
+       [:div {:class (stl/css :animations-title)}
+        [:> title-bar* {:collapsable false
+                        :title (tr "workspace.animation.follow")}
+         (if open?
+           [:> icon-button* {:variant "ghost"
+                             :aria-label (tr "workspace.animation.remove-follow")
+                             :icon i/remove
+                             :on-click on-remove}]
+           [:> icon-button* {:variant "ghost"
+                             :aria-label (tr "workspace.animation.add-follow")
+                             :icon i/add
+                             :on-click on-add}])]]
+
+       (when open?
+         [:div {:class (stl/css :follow-rows)}
+          [:> animation-row* {:label (tr "workspace.animation.follow-leader")}
+           [:div {:class (stl/css :follow-leader)}
+            [:> select* {:class (stl/css :follow-leader-select)
+                         :options options
+                         :default-selected (if (some? follow) (dm/str (:leader follow)) "")
+                         :aria-label (tr "workspace.animation.follow-leader")
+                         :on-change on-leader}]
+            [:> icon-button* {:variant "ghost"
+                              :aria-label (tr "workspace.animation.follow-pick")
+                              :aria-pressed picking?
+                              :class (stl/css-case :follow-picking picking?)
+                              :icon i/picker
+                              :on-click on-pick}]]]
+
+          (when (some? follow)
+            [:*
+             [:div {:class (stl/css :follow-parts)}
+              (for [[part label] follow-parts]
+                [:> checkbox* {:key (name part)
+                               :id (dm/str "follow-" (name part))
+                               :label (label)
+                               :data-part (name part)
+                               :checked (boolean (get follow part))
+                               :on-change on-part}])]
+             [:> animation-row* {:label (tr "workspace.animation.follow-delay")}
+              [:> numeric-input* {:text-icon "ms"
+                                  :property (tr "workspace.animation.follow-delay")
+                                  :min 0
+                                  :step 10
+                                  :value (:delay follow)
+                                  :on-change on-delay}]]])])])))
 
 (mf/defc animations-menu*
   "The preset animations of the selection, in motion mode: add one from

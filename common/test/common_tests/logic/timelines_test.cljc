@@ -1471,3 +1471,20 @@
         track    (get-in exported [:tracks copy-rect])]
     (t/is (nil? (:follow track)))
     (t/is (some #(= :rotation (:property %)) (:keyframes track)) "it turns with the head of its copy")))
+
+(t/deftest a-layer-follows-one-of-its-board-only
+  (let [file    (-> (following-file)
+                    (tho/add-group :group :parent-label :board-a)
+                    (ths/add-sample-shape :inner :type :rect :parent-label :group
+                                          :x 120 :y 120 :width 10 :height 10))
+        page    (thf/current-page file)
+        objects (:objects page)
+        tl      (get (timelines file) (thi/id :board-a))
+        ids     #(set (cltl/follow-leaders objects tl (thi/id %)))]
+    (t/is (= #{(thi/id :group) (thi/id :inner)} (ids :rect))
+          "not itself, the board, nor the dot that follows it")
+    (t/is (= #{(thi/id :rect) (thi/id :group) (thi/id :inner)} (ids :dot)))
+    (t/is (not (contains? (ids :rect) (thi/id :board-b))) "not of another board")
+    (t/is (not (contains? (ids :inner) (thi/id :group))) "not the group it is in")
+    (t/is (not (contains? (ids :group) (thi/id :inner))) "not a layer in it")
+    (t/is (not (contains? (ids :rect) (thi/id :dot))) "not one that follows it")))
