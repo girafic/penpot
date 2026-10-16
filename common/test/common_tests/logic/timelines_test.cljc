@@ -6,6 +6,7 @@
 
 (ns common-tests.logic.timelines-test
   (:require
+   [app.common.data :as d]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
@@ -1414,35 +1415,49 @@
   (let [file (delete (following-file) :rect)]
     (t/is (nil? (cta/follow-of (get (timelines file) (thi/id :board-a)) (thi/id :dot))))))
 
-(t/deftest a-copy-of-a-component-follows-in-the-copy
-  ;; the main board turns; its rect follows it; the copy plays both
-  (let [file (component-file)
+(defn- following-component-file
+  "A component whose main holds a rect moving from 10 to 60 in 1 s, a dot
+  that follows the layer `leader` and a still square; a copy of it in
+  board B at 1000,100."
+  [leader]
+  (let [file (-> (thf/sample-file :file1)
+                 (tho/add-simple-component :anim :main :main-rect
+                                           :root-params {:x 0 :y 0 :width 200 :height 200}
+                                           :child-params {:x 10 :y 20 :width 50 :height 50})
+                 (ths/add-sample-shape :main-dot :type :rect :parent-label :main
+                                       :x 120 :y 120 :width 10 :height 10)
+                 (ths/add-sample-shape :main-still :type :rect :parent-label :main
+                                       :x 150 :y 20 :width 10 :height 10)
+                 (tho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
+                 (thc/instantiate-component :anim :copy :parent-label :board-b))
         main (thi/id :main)
-        page (thf/current-page file)
-        tl   (-> (get-in page [:timelines main])
-                 (cta/add-keyframe main {:time 0 :property :rotation :value 0 :easing :linear})
-                 (cta/add-keyframe main {:time 1000 :property :rotation :value 90})
-                 (cta/set-follow (thi/id :main-rect) {:leader main}))
-        file (thf/apply-changes file (-> (pcb/empty-changes nil)
-                                         (pcb/with-page page)
-                                         (pcb/set-timeline main tl)))
-        {:keys [objects board copy copy-rect main-page]} (component-scene file)
-        copies (cltl/instance-timelines objects board nil main-page)
-        tl     (get copies [:copy copy main])]
-    (t/is (= copy (get-in tl [:tracks copy-rect :follow :leader])) "the head of the copy, not the main")))
+        tl   (-> (cta/make-timeline {:board-id main :duration 1000 :playback :loop})
+                 (cta/add-keyframe (thi/id :main-rect) {:time 0 :property :x :value 10 :easing :linear})
+                 (cta/add-keyframe (thi/id :main-rect) {:time 1000 :property :x :value 60})
+                 (cta/set-follow (thi/id :main-dot) {:leader (thi/id leader)}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline main tl)))))
+
+(defn- copy-of
+  "The layer of the copy `copy` of `objects` that plays `main-label`."
+  [objects copy main-label]
+  (d/seek #(= (thi/id main-label) (get-in objects [% :shape-ref]))
+          (cfh/get-children-ids objects copy)))
+
+(t/deftest a-copy-of-a-component-follows-in-the-copy
+  (let [{:keys [objects board copy main-page]} (component-scene (following-component-file :main-rect))
+        tl (get (cltl/instance-timelines objects board nil main-page) [:copy copy (thi/id :main)])]
+    (t/is (= (copy-of objects copy :main-rect)
+             (get-in tl [:tracks (copy-of objects copy :main-dot) :follow :leader]))
+          "the rect of the copy, not of the main")))
 
 (t/deftest a-copy-drops-a-follow-whose-leader-plays-nothing-there
-  (let [file (component-file)
-        main (thi/id :main)
-        page (thf/current-page file)
-        tl   (cta/set-follow (get-in page [:timelines main]) (thi/id :main-rect) {:leader main})
-        file (thf/apply-changes file (-> (pcb/empty-changes nil)
-                                         (pcb/with-page page)
-                                         (pcb/set-timeline main tl)))
-        {:keys [objects board copy copy-rect main-page]} (component-scene file)
-        tl   (get (cltl/instance-timelines objects board nil main-page) [:copy copy main])]
-    (t/is (some? (get-in tl [:tracks copy-rect])))
-    (t/is (nil? (get-in tl [:tracks copy-rect :follow])))))
+  (let [{:keys [objects board copy main-page]} (component-scene (following-component-file :main-still))
+        tl  (get (cltl/instance-timelines objects board nil main-page) [:copy copy (thi/id :main)])
+        dot (copy-of objects copy :main-dot)]
+    (t/is (some? (get-in tl [:tracks dot])))
+    (t/is (nil? (get-in tl [:tracks dot :follow])))))
 
 (t/deftest the-code-plays-a-follow-by-keyframes
   (let [file (following-file)
@@ -1455,22 +1470,13 @@
     (t/is (= #{:x} (into #{} (map :property) (:keyframes track))) "it moves along x as the rect does")))
 
 (t/deftest the-exports-play-the-follows-of-copies-by-keyframes
-  (let [file (component-file)
-        main (thi/id :main)
-        page (thf/current-page file)
-        tl   (-> (get-in page [:timelines main])
-                 (cta/add-keyframe main {:time 0 :property :rotation :value 0 :easing :linear})
-                 (cta/add-keyframe main {:time 1000 :property :rotation :value 90})
-                 (cta/set-follow (thi/id :main-rect) {:leader main}))
-        file (thf/apply-changes file (-> (pcb/empty-changes nil)
-                                         (pcb/with-page page)
-                                         (pcb/set-timeline main tl)))
-        {:keys [objects board copy-rect main-page]} (component-scene file)
+  (let [{:keys [objects board copy main-page]} (component-scene (following-component-file :main-rect))
         copies   (cltl/instance-timelines objects board nil main-page)
         exported (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000}) (vals copies) objects)
-        track    (get-in exported [:tracks copy-rect])]
+        track    (get-in exported [:tracks (copy-of objects copy :main-dot)])
+        xs       (->> (:keyframes track) (filter #(= :x (:property %))) (sort-by :time) (map :value))]
     (t/is (nil? (:follow track)))
-    (t/is (some #(= :rotation (:property %)) (:keyframes track)) "it turns with the head of its copy")))
+    (t/is (mth/close? 50 (- (last xs) (first xs)) 0.5) "it moves 50 as the rect of its copy does")))
 
 (t/deftest a-layer-follows-one-of-its-board-only
   (let [file    (-> (following-file)
@@ -1488,3 +1494,59 @@
     (t/is (not (contains? (ids :inner) (thi/id :group))) "not the group it is in")
     (t/is (not (contains? (ids :group) (thi/id :inner))) "not a layer in it")
     (t/is (not (contains? (ids :rect) (thi/id :dot))) "not one that follows it")))
+
+(defn- grouped-following-file
+  "Board A with a group holding a rect, and two dots: the first follows
+  the group, the group follows the second."
+  []
+  (let [file (-> (thf/sample-file :file1)
+                 (tho/add-frame :board-a :x 100 :y 100 :width 400 :height 300)
+                 (tho/add-group :group :parent-label :board-a)
+                 (ths/add-sample-shape :inner :type :rect :parent-label :group
+                                       :x 120 :y 120 :width 40 :height 40)
+                 (ths/add-sample-shape :dot :type :rect :parent-label :board-a
+                                       :x 300 :y 200 :width 10 :height 10)
+                 (ths/add-sample-shape :lead :type :rect :parent-label :board-a
+                                       :x 300 :y 300 :width 10 :height 10)
+                 (tho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300))
+        a    (thi/id :board-a)
+        tl   (-> (cta/make-timeline {:board-id a :duration 1000})
+                 (cta/add-keyframe (thi/id :lead) {:time 0 :property :x :value 200})
+                 (cta/add-keyframe (thi/id :lead) {:time 1000 :property :x :value 250})
+                 (cta/set-follow (thi/id :dot) {:leader (thi/id :group)})
+                 (cta/set-follow (thi/id :group) {:leader (thi/id :lead)}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline a tl)))))
+
+(t/deftest a-follower-moved-into-its-leader-follows-no-more
+  ;; it moves with it as a layer of it already
+  (let [file (relocate (grouped-following-file) :dot :group)
+        tl   (get (timelines file) (thi/id :board-a))]
+    (t/is (nil? (cta/follow-of tl (thi/id :dot))))
+    (t/is (some? (cta/follow-of tl (thi/id :group))) "the others keep theirs")))
+
+(t/deftest a-leader-moved-into-its-follower-leads-no-more
+  (let [file (relocate (grouped-following-file) :lead :group)
+        tl   (get (timelines file) (thi/id :board-a))]
+    (t/is (nil? (cta/follow-of tl (thi/id :group))))
+    (t/is (some? (cta/follow-of tl (thi/id :dot))))))
+
+(t/deftest a-leader-moved-to-another-board-leads-no-more
+  (let [file (relocate (following-file) :rect :board-b)]
+    (t/is (nil? (cta/follow-of (get (timelines file) (thi/id :board-a)) (thi/id :dot))))))
+
+(t/deftest a-layer-of-a-copy-leads-when-its-board-animates-it
+  ;; what it plays of its main moves no follower
+  (let [file    (-> (following-component-file :main-rect)
+                    (ths/add-sample-shape :dot-b :type :rect :parent-label :board-b
+                                          :x 1300 :y 300 :width 10 :height 10))
+        {:keys [objects board copy]} (component-scene file)
+        rect    (copy-of objects copy :main-rect)
+        tl      (cta/make-timeline {:board-id board})]
+    (t/is (not (cltl/can-follow? objects tl (thi/id :dot-b) rect)))
+    (t/is (not (contains? (set (cltl/follow-leaders objects tl (thi/id :dot-b))) rect)))
+    (let [tl (-> tl
+                 (cta/add-keyframe rect {:time 0 :property :y :value 50})
+                 (cta/add-keyframe rect {:time 1000 :property :y :value 90}))]
+      (t/is (cltl/can-follow? objects tl (thi/id :dot-b) rect) "animated by the board itself"))))

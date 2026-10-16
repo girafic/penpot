@@ -119,37 +119,62 @@
                                   (= :y (:property keyframe)) (update :value + dy)))))
         (d/update-when :animations (partial mapv new-id)))))
 
+(defn- placed-to-follow?
+  "Whether the layer `id` of `objects` is where it can follow the layer
+  `leader` (see `cta/follow-of`): another layer of its board `board-id`,
+  not one it is in or that is in it, which move together already."
+  [objects board-id id leader]
+  (and (not= id leader)
+       (contains? objects leader)
+       (= board-id (cfh/get-shape-id-root-frame objects leader))
+       (not (cta/nested-layers? objects id leader))))
+
+(defn- leads-back?
+  "Whether `leader` follows the layer `id` in `timeline`, through others."
+  [timeline leader id]
+  (loop [at leader, seen #{}]
+    (cond (nil? at)           false
+          (= at id)           true
+          (contains? seen at) false
+          :else               (recur (dm/get-in timeline [:tracks at :follow :leader]) (conj seen at)))))
+
+(defn can-follow?
+  "Whether the layer `id` of the board of `timeline` (of `objects`) can
+  follow the layer `leader` (see `cta/follow-of`): another layer of the
+  board, not one it is in or that is in it (they move together already),
+  nor one that follows it, through others; a layer of a component copy
+  only when the board animates it itself, as what it plays of its main
+  moves no follower."
+  [objects timeline id leader]
+  (and (placed-to-follow? objects (:board-id timeline) id leader)
+       (not (leads-back? timeline leader id))
+       (or (nil? (dm/get-in objects [leader :shape-ref]))
+           (contains? (:tracks timeline) leader))))
+
 (defn- copied-follow
   "`track` of a copy in `new-board` of `objects`, following (see
   `cta/follow-of`) the copy of its leader when that was copied too (in
-  `ids-map`), its leader still when that is in the same board, else
-  nothing."
+  `ids-map`), else its leader still, as long as it is placed to follow
+  it (see `placed-to-follow?`), else nothing."
   [track ids-map objects new-board]
   (if-let [leader (dm/get-in track [:follow :leader])]
-    (cond
-      (contains? ids-map leader)
-      (assoc-in track [:follow :leader] (get ids-map leader))
-
-      (and (contains? objects leader)
-           (= new-board (cfh/get-shape-id-root-frame objects leader)))
-      track
-
-      :else
-      (dissoc track :follow))
+    (let [leader (get ids-map leader leader)]
+      (if (placed-to-follow? objects new-board (:shape-id track) leader)
+        (assoc-in track [:follow :leader] leader)
+        (dissoc track :follow)))
     track))
 
 (defn- strayed-follows-dropped
   "`timelines` (of the shapes `objects`) without the follows of layers
-  whose leaders are gone, or out of the board of their timeline: a
-  layer follows one of its own board only."
+  whose leaders are gone, out of the board of their timeline, or now in
+  them or holding them (see `placed-to-follow?`)."
   [timelines objects]
   (reduce-kv
    (fn [timelines board-id timeline]
      (reduce-kv (fn [timelines id track]
                   (let [leader (dm/get-in track [:follow :leader])]
                     (if (and (some? leader)
-                             (not (and (contains? objects leader)
-                                       (= board-id (cfh/get-shape-id-root-frame objects leader)))))
+                             (not (placed-to-follow? objects board-id id leader)))
                       (update timelines board-id cta/set-follow id nil)
                       timelines)))
                 timelines
@@ -774,22 +799,10 @@
 
 (defn follow-leaders
   "The layers of the board of `timeline` (of `objects`) that `shape-id`
-  can follow (see `cta/follow-of`), in the order of the layers panel:
-  not itself, a layer it is in or that is in it (they move together
-  already), nor one that follows it, through others."
+  can follow (see `can-follow?`), in the order of the layers panel."
   [objects timeline shape-id]
-  (let [above       (set (cfh/get-parent-ids objects shape-id))
-        inside      (set (cfh/get-children-ids objects shape-id))
-        leader-of   #(dm/get-in timeline [:tracks % :follow :leader])
-        follows-it? (fn [id]
-                      (loop [at (leader-of id), seen #{id}]
-                        (cond (nil? at)           false
-                              (= at shape-id)     true
-                              (contains? seen at) false
-                              :else               (recur (leader-of at) (conj seen at)))))]
-    (into []
-          (remove #(or (= % shape-id) (contains? above %) (contains? inside %) (follows-it? %)))
-          (rest (layer-ids objects (:board-id timeline))))))
+  (filterv #(can-follow? objects timeline shape-id %)
+           (rest (layer-ids objects (:board-id timeline)))))
 
 (defn- split-kinds
   "`{text-id kind}`: the kind of units each text of the tracks of

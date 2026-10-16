@@ -3196,10 +3196,29 @@
    {}
    (values-at timeline time)))
 
+(defn- inside?
+  "Whether the layer `id` of `objects` is in the layer `other`, through
+  groups and boards."
+  [objects id other]
+  (loop [at (dm/get-in objects [id :parent-id]), depth 0]
+    (cond
+      (or (nil? at) (> depth 64)) false
+      (= at other)                true
+      (= at uuid/zero)            false
+      :else                       (recur (dm/get-in objects [at :parent-id]) (inc depth)))))
+
+(defn nested-layers?
+  "Whether one of the layers `a` and `b` of `objects` is in the other:
+  they move together already, and a follow between them would move one
+  twice."
+  [objects a b]
+  (or (inside? objects a b) (inside? objects b a)))
+
 (defn- followers
   "The layers of `timeline` that follow a leader of `objects` (see
   `follow-of`), but those whose leaders lead back to a layer of the
-  chain: a cycle follows nothing."
+  chain (a cycle follows nothing) and those in their leader or holding
+  it, which move with it already."
   [timeline objects]
   (let [leader-of (fn [id] (dm/get-in timeline [:tracks id :follow :leader]))
         cyclic?   (fn [id]
@@ -3208,7 +3227,10 @@
                             (contains? seen at) true
                             :else               (recur (leader-of at) (conj seen at)))))]
     (into #{}
-          (filter #(and (contains? objects %) (contains? objects (leader-of %)) (not (cyclic? %))))
+          (filter #(and (contains? objects %)
+                        (contains? objects (leader-of %))
+                        (not (cyclic? %))
+                        (not (nested-layers? objects % (leader-of %)))))
           (keys (:tracks timeline)))))
 
 (defn- modifiers-opacity
