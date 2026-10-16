@@ -17374,6 +17374,8 @@ Timeline:
         clear(shape: Shape): void;
         originOf(shape: Shape): { x: number; y: number };
         setOrigin(shape: Shape, origin: { x: number; y: number }): void;
+        followOf(shape: Shape): Follow | null;
+        setFollow(shape: Shape, follow: FollowProps | null): void;
         toCSS(): string;
         toJSON(): TimelineJson;
         toReact(): string;
@@ -17785,6 +17787,50 @@ Timeline:
         Example
         ```
         timeline.setOrigin(door, { x: 0, y: 0.5 });timeline.addKeyframe(door, { property: 'scaleX', time: 0, value: 1 });timeline.addKeyframe(door, { property: 'scaleX', time: 600, value: 0 });
+        ```
+      followOf: |-
+        ```
+        followOf(shape: Shape): Follow | null
+        ```
+
+        How `shape` follows another layer of the board, as the Follow section
+        of the Motion tab sets it, or `null` when it follows none.
+
+        Parameters
+
+        * shape: Shape
+
+          A layer inside the board.
+
+        Returns Follow | null
+      setFollow: |-
+        ```
+        setFollow(shape: Shape, follow: FollowProps | null): void
+        ```
+
+        Makes `shape` follow another layer of the board, `follow.leader`, as a
+        layer of a group moves with the group: it takes what the leader does
+        from its first frame on, `delay` milliseconds later, after its own
+        animation. It moves as the leader's pivot moves, turns and scales
+        around that pivot and, with `opacity`, fades with the leader. `null`
+        makes it follow none. The leader must be another layer of the board,
+        not one `shape` is in, holds or is followed by. The SVG, CSS, Lottie
+        and code exports play a follow by keyframes made from it.
+
+        Parameters
+
+        * shape: Shape
+
+          A layer inside the board.
+        * follow: FollowProps | null
+
+          The leader and what the layer takes of it, or `null`.
+
+        Returns void
+
+        Example
+        ```
+        timeline.setFollow(badge, { leader: card, delay: 100 });timeline.setFollow(shadow, { leader: button, rotation: false });
         ```
       toCSS: |-
         ```
@@ -18409,6 +18455,121 @@ TimelineJsonAudioClip:
         ```
 
         Whether it is silent.
+Follow:
+  overview: |-
+    Interface Follow
+    ================
+
+    How a layer follows another layer of its board, see `Timeline.setFollow`.
+
+    ```
+    interface Follow {
+        leader: Shape;
+        position: boolean;
+        rotation: boolean;
+        scale: boolean;
+        opacity: boolean;
+        delay: number;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      leader: |-
+        ```
+        readonly leader: Shape
+        ```
+
+        The layer it follows.
+      position: |-
+        ```
+        readonly position: boolean
+        ```
+
+        Whether it moves as the pivot of the leader moves.
+      rotation: |-
+        ```
+        readonly rotation: boolean
+        ```
+
+        Whether it turns with the leader, around the leader's pivot.
+      scale: |-
+        ```
+        readonly scale: boolean
+        ```
+
+        Whether it scales with the leader, around the leader's pivot.
+      opacity: |-
+        ```
+        readonly opacity: boolean
+        ```
+
+        Whether its opacity is multiplied by the leader's.
+      delay: |-
+        ```
+        readonly delay: number
+        ```
+
+        How much later it does what the leader does, in milliseconds.
+FollowProps:
+  overview: |-
+    Interface FollowProps
+    =====================
+
+    The leader of a layer and what the layer takes of it, see
+    `Timeline.setFollow`.
+
+    ```
+    interface FollowProps {
+        leader: Shape;
+        position?: boolean;
+        rotation?: boolean;
+        scale?: boolean;
+        opacity?: boolean;
+        delay?: number;
+    }
+    ```
+
+    Referenced by: Timeline
+  members:
+    Properties:
+      leader: |-
+        ```
+        leader: Shape
+        ```
+
+        The layer to follow: another layer of the board.
+      position: |-
+        ```
+        position?: boolean
+        ```
+
+        Move as the pivot of the leader moves. `true` by default.
+      rotation: |-
+        ```
+        rotation?: boolean
+        ```
+
+        Turn with the leader, around its pivot. `true` by default.
+      scale: |-
+        ```
+        scale?: boolean
+        ```
+
+        Scale with the leader, around its pivot. `true` by default.
+      opacity: |-
+        ```
+        opacity?: boolean
+        ```
+
+        Multiply its opacity by the leader's. `false` by default.
+      delay: |-
+        ```
+        delay?: number
+        ```
+
+        Do what the leader does this many milliseconds later. 0 by default.
 CopyAnimationOptions:
   overview: |-
     Interface CopyAnimationOptions
@@ -28017,7 +28178,7 @@ Shape:
     let shape: Shape;if (penpot.utils.types.isRectangle(shape)) {  console.log(shape.type);}
     ```
 
-    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryAnimationStyle, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
+    Referenced by: AnimatedCopy, AppliedAnimationStyle, Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, Follow, FollowProps, GridLayout, Group, Image, Interaction, Keyframe, Library, LibraryAnimationStyle, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, PresetAnimation, Rectangle, ShapeBase, SvgRaw, Text, Timeline, ToggleOverlay, TokenBase, TokenBorderRadius, TokenBorderWidth, TokenColor, TokenCubicBezier, TokenDimension, TokenDuration, TokenFontFamilies, TokenFontSizes, TokenFontWeights, TokenLetterSpacing, TokenNumber, TokenOpacity, TokenRotation, TokenShadow, TokenSizing, TokenSpacing, TokenSpring, TokenTextCase, TokenTextDecoration, TokenTypography, VariantContainer, Viewport
   members: {}
 StrokeCap:
   overview: |-

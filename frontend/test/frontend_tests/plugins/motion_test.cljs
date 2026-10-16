@@ -160,6 +160,32 @@
         (.setOrigin timeline rect #js {:x 0.5 :y 0.5})
         (t/is (nil? (:origin (stored-track store context board rect))) "its center again, as unset")))))
 
+(t/deftest a-layer-follows-another-of-its-board
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]           (setup true)
+            [^js board [^js card ^js badge ^js third]] (board-with-rects context 3)
+            ^js timeline                  (.addTimeline board)
+            follow                        #(some-> (.followOf timeline %)
+                                                   (js->clj :keywordize-keys true)
+                                                   (update :leader (fn [^js leader] (aget leader "$id"))))]
+        (t/is (nil? (follow badge)) "none at first")
+        (.setFollow timeline badge #js {:leader card :delay 100})
+        (t/is (= {:leader (aget card "$id") :delay 100} (:follow (stored-track store context board badge)))
+              "the defaults left out")
+        (t/is (= {:leader (aget card "$id") :position true :rotation true :scale true :opacity false :delay 100}
+                 (follow badge)))
+        (.setFollow timeline badge #js {:leader card :rotation false})
+        (t/is (false? (:rotation (follow badge))))
+        (t/testing "a leader it cannot follow is refused"
+          (t/is (thrown? js/Error (.setFollow timeline card #js {:leader badge})) "one that follows it")
+          (t/is (thrown? js/Error (.setFollow timeline badge #js {:leader board})) "the board it is in")
+          (t/is (thrown? js/Error (.setFollow timeline badge #js {:leader badge})) "itself")
+          (t/is (thrown? js/Error (.setFollow timeline third #js {:leader card :delay -5})))
+          (t/is (thrown? js/Error (.setFollow timeline third #js {:leader card :scale "yes"}))))
+        (.setFollow timeline badge nil)
+        (t/is (nil? (follow badge)) "null follows none")))))
+
 (t/deftest keyframes-animate-the-layers
   (thw/with-wasm-mocks*
     (fn []

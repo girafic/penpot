@@ -1684,6 +1684,58 @@
               (write! :setOrigin #(cta/set-track-origin % shape-id x y))
               (u/not-valid plugin-id :setOrigin "The origin should be { x, y }, each from 0 to 1")))))
 
+      ;; Whom a layer follows, as the Follow section of the Motion tab
+      ;; sets it: what its leader does from its first frame, a delay later
+      :followOf
+      (fn [shape]
+        (when-let [shape-id (layer :followOf shape)]
+          (when-let [{:keys [leader position rotation scale opacity delay]}
+                     (cta/follow-of (locate) shape-id)]
+            #js {:leader (shape-proxy plugin-id file-id page-id leader)
+                 :position position
+                 :rotation rotation
+                 :scale scale
+                 :opacity opacity
+                 :delay delay})))
+
+      :setFollow
+      (fn [shape follow]
+        (when-let [shape-id (layer :setFollow shape)]
+          (if (nil? follow)
+            (write! :setFollow #(cta/set-follow % shape-id nil))
+            (let [prop      #(when (object? follow) (obj/get follow %))
+                  leader    (prop "leader")
+                  leader-id (when (shape-proxy? leader) (obj/get leader "$id"))
+                  parts     (into {}
+                                  (keep (fn [part]
+                                          (let [value (prop (name part))]
+                                            (when (some? value) [part value]))))
+                                  [:position :rotation :scale :opacity])
+                  delay     (prop "delay")
+                  objects   (u/locate-objects file-id page-id)
+                  timeline  (or (locate) (cta/make-timeline {:board-id board-id}))
+                  error     (cond
+                              (not (object? follow))
+                              "The follow should be an object with a leader, or null"
+
+                              (nil? leader-id)
+                              "The leader should be a shape"
+
+                              (not-every? boolean? (vals parts))
+                              "position, rotation, scale and opacity should be true or false"
+
+                              (and (some? delay) (not (valid-time? delay)))
+                              "The delay should be a number of milliseconds from 0"
+
+                              (not (some #{leader-id} (cltl/follow-leaders objects timeline shape-id)))
+                              (dm/str "The leader should be another layer of the board, not one "
+                                      "the shape is in, holds or is followed by"))]
+              (if (some? error)
+                (u/not-valid plugin-id :setFollow error)
+                (write! :setFollow #(cta/set-follow % shape-id
+                                                    (cond-> (assoc parts :leader leader-id)
+                                                      (some? delay) (assoc :delay (mth/round delay))))))))))
+
       ;; As copying the animation of a layer on the canvas and pasting it
       ;; onto others, in the boards of the page they are in.
       :copyAnimation

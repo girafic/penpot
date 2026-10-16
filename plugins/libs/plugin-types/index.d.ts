@@ -4393,6 +4393,33 @@ export interface Timeline {
   setOrigin(shape: Shape, origin: { x: number; y: number }): void;
 
   /**
+   * How `shape` follows another layer of the board, as the Follow section
+   * of the Motion tab sets it, or `null` when it follows none.
+   * @param shape A layer inside the board.
+   */
+  followOf(shape: Shape): Follow | null;
+
+  /**
+   * Makes `shape` follow another layer of the board, `follow.leader`, as a
+   * layer of a group moves with the group: it takes what the leader does
+   * from its first frame on, `delay` milliseconds later, after its own
+   * animation. It moves as the leader's pivot moves, turns and scales
+   * around that pivot and, with `opacity`, fades with the leader. `null`
+   * makes it follow none. The leader must be another layer of the board,
+   * not one `shape` is in, holds or is followed by. The SVG, CSS, Lottie
+   * and code exports play a follow by keyframes made from it.
+   * @param shape A layer inside the board.
+   * @param follow The leader and what the layer takes of it, or `null`.
+   *
+   * @example
+   * ```js
+   * timeline.setFollow(badge, { leader: card, delay: 100 });
+   * timeline.setFollow(shadow, { leader: button, rotation: false });
+   * ```
+   */
+  setFollow(shape: Shape, follow: FollowProps | null): void;
+
+  /**
    * The animation as CSS, as the Motion tab of Inspect gives it with the
    * board selected: `@keyframes` and the `animation` rules of the layers,
    * with the classes the code of Inspect gives them (see
@@ -4822,6 +4849,77 @@ export interface TimelineJsonAudioClip {
    * Whether it is silent.
    */
   muted: boolean;
+}
+
+/**
+ * How a layer follows another layer of its board, see `Timeline.setFollow`.
+ */
+export interface Follow {
+  /**
+   * The layer it follows.
+   */
+  readonly leader: Shape;
+
+  /**
+   * Whether it moves as the pivot of the leader moves.
+   */
+  readonly position: boolean;
+
+  /**
+   * Whether it turns with the leader, around the leader's pivot.
+   */
+  readonly rotation: boolean;
+
+  /**
+   * Whether it scales with the leader, around the leader's pivot.
+   */
+  readonly scale: boolean;
+
+  /**
+   * Whether its opacity is multiplied by the leader's.
+   */
+  readonly opacity: boolean;
+
+  /**
+   * How much later it does what the leader does, in milliseconds.
+   */
+  readonly delay: number;
+}
+
+/**
+ * The leader of a layer and what the layer takes of it, see
+ * `Timeline.setFollow`.
+ */
+export interface FollowProps {
+  /**
+   * The layer to follow: another layer of the board.
+   */
+  leader: Shape;
+
+  /**
+   * Move as the pivot of the leader moves. `true` by default.
+   */
+  position?: boolean;
+
+  /**
+   * Turn with the leader, around its pivot. `true` by default.
+   */
+  rotation?: boolean;
+
+  /**
+   * Scale with the leader, around its pivot. `true` by default.
+   */
+  scale?: boolean;
+
+  /**
+   * Multiply its opacity by the leader's. `false` by default.
+   */
+  opacity?: boolean;
+
+  /**
+   * Do what the leader does this many milliseconds later. 0 by default.
+   */
+  delay?: number;
 }
 
 /**
