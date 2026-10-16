@@ -14,11 +14,15 @@
    [app.common.files.shapes-builder :as sb]
    [app.common.svg :as csvg]
    [app.common.types.shape-tree :as ctst]
+   [app.common.types.text :as txt]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.undo :as dwu]
+   [app.main.data.workspace.wasm-text :as dwwt]
+   [app.main.features :as features]
+   [app.main.fonts :as fonts]
    [app.main.repo :as rp]
    [app.util.webapi :as wapi]
    [beicon.v2.core :as rx]
@@ -66,6 +70,44 @@
                          (rx/map #(vector (:href item) %)))))
        (rx/reduce conj {})))
 
+(defn resolve-text-fonts
+  "The text `shape` an SVG import made with the fonts its nodes ask for (a
+  family, a weight and a style, see `sb/create-text-shape`) as the fonts
+  installed that have them, else the default one, at the nearest weight."
+  [shape]
+  (if-not (cfh/text-shape? shape)
+    shape
+    (update shape :content
+            (fn [content]
+              (txt/transform-nodes
+               txt/is-text-node?
+               (fn [node]
+                 (let [font    (or (some-> (:font-family node) fonts/find-font-family)
+                                   (fonts/get-font-data "sourcesanspro"))
+                       variant (or (fonts/find-closest-variant font (:font-weight node) (:font-style node))
+                                   (fonts/get-default-variant font))]
+                   (cond-> node
+                     (some? font)
+                     (assoc :font-id (:id font) :font-family (:family font))
+
+                     (some? variant)
+                     (assoc :font-variant-id (:id variant)
+                            :font-weight (str (:weight variant))
+                            :font-style (:style variant)))))
+               content)))))
+
+(defn text-layout
+  "The events that lay out the texts `ids` an import added to the page
+  `page-id` in the undo transaction `undo-id`: before its changes
+  (`:before`), and after them (`:after`), which commit the transaction,
+  with the resize of the texts in it when the new renderer lays them
+  out."
+  [state page-id ids undo-id]
+  {:before (when (seq ids) [(ptk/data-event :text/reflow {:ids ids :page-id page-id})])
+   :after  (if (and (seq ids) (features/active-feature? state "render-wasm/v1"))
+             [(dwwt/resize-wasm-text-all ids {:undo-id undo-id})]
+             [(dwu/commit-undo-transaction undo-id)])})
+
 (defn add-svg-shapes
   ([svg-data position]
    (add-svg-shapes nil svg-data position nil))
@@ -100,6 +142,8 @@
                [new-shape new-children]
                (sb/create-svg-shapes id svg-data position objects frame-id parent-id selected true)
 
+               new-children    (mapv resolve-text-fonts new-children)
+
                changes         (-> (pcb/empty-changes it page-id)
                                    (pcb/with-objects objects)
                                    (pcb/add-object new-shape))
@@ -115,14 +159,19 @@
                                                         (map :id)
                                                         (reverse)
                                                         (vec)))
-               undo-id         (js/Symbol)]
+               undo-id         (js/Symbol)
+               layout          (text-layout state page-id
+                                            (into [] (comp (filter cfh/text-shape?) (map :id)) new-children)
+                                            undo-id)]
 
-           (rx/of (dwu/start-undo-transaction undo-id)
-                  (dch/commit-changes changes)
-                  (when change-selection?
-                    (dws/select-shapes (d/ordered-set (:id new-shape))))
-                  (ptk/data-event :layout/update {:ids [(:id new-shape)]})
-                  (dwu/commit-undo-transaction undo-id)))
+           (rx/concat
+            (rx/of (dwu/start-undo-transaction undo-id))
+            (rx/from (:before layout))
+            (rx/of (dch/commit-changes changes)
+                   (when change-selection?
+                     (dws/select-shapes (d/ordered-set (:id new-shape))))
+                   (ptk/data-event :layout/update {:ids [(:id new-shape)]}))
+            (rx/from (:after layout))))
 
          (catch :default cause
            (js/console.error cause)

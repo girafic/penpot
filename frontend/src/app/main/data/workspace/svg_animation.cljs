@@ -17,6 +17,7 @@
    [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace.selection :as dws]
+   [app.main.data.workspace.svg-upload :as svg]
    [app.main.data.workspace.undo :as dwu]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
@@ -56,18 +57,23 @@
             {:keys [shapes timeline skipped]}
             (svga/svg->shapes svg-data {:x (- (:x position) (/ w 2))
                                         :y (- (:y position) (/ h 2))})
+            shapes   (mapv svg/resolve-text-fonts shapes)
             board-id (:id (first shapes))
             changes  (as-> (-> (pcb/empty-changes it (:id page))
                                (pcb/with-page page)
                                (pcb/with-objects (:objects page))) changes
                        (reduce pcb/add-object changes shapes)
                        (pcb/change-timeline changes board-id timeline))
-            undo-id  (js/Symbol)]
+            undo-id  (js/Symbol)
+            layout   (svg/text-layout state (:id page)
+                                      (into [] (comp (filter #(= :text (:type %))) (map :id)) shapes)
+                                      undo-id)]
         (rx/concat
-         (rx/of (dwu/start-undo-transaction undo-id)
-                (dch/commit-changes changes)
-                (dws/select-shapes (d/ordered-set board-id))
-                (dwu/commit-undo-transaction undo-id))
+         (rx/of (dwu/start-undo-transaction undo-id))
+         (rx/from (:before layout))
+         (rx/of (dch/commit-changes changes)
+                (dws/select-shapes (d/ordered-set board-id)))
+         (rx/from (:after layout))
          (if (seq skipped)
            (rx/of (ntf/warn (skipped-message skipped)))
            (rx/empty)))))))

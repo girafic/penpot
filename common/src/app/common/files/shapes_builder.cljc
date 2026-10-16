@@ -24,6 +24,7 @@
    [app.common.types.path :as path]
    [app.common.types.path.segment :as path.segm]
    [app.common.types.shape :as cts]
+   [app.common.types.text :as txt]
    [app.common.uuid :as uuid]
    [cuerdas.core :as str]))
 
@@ -253,35 +254,82 @@
       (= "alpha" type)                              [:alpha content]
       :else                                         [:luma content])))
 
+(defn- clip-id
+  "The id of the clip path the element with `attrs` refers to."
+  [{:keys [style] :as attrs}]
+  (or (url-id (:clip-path attrs))
+      (cond
+        (string? style) (some->> style (re-find #"(?:^|;)\s*clip-path\s*:\s*([^;]+)") (second) (url-id))
+        (map? style)    (url-id (:clipPath style)))))
+
+(defn- opaque
+  "The SVG `node` and the nodes in it filled opaque white without a
+  stroke: what a clip path keeps is where they are."
+  [node]
+  (if-not (map? node)
+    node
+    (-> node
+        (update :attrs #(-> (dissoc % :style :class :opacity :fill-opacity :stroke :filter)
+                            (assoc :fill "#ffffff" :stroke "none")))
+        (update :content #(mapv opaque %)))))
+
+(defn- wrap-masked
+  "The SVG `node` held by a masked group over the drawing `content`,
+  keeping as `mode` says: the group takes its transform, so the drawing
+  is in its space, and the key of the element it holds (`::mask-of`), so
+  that an animated import moves the outer-most group."
+  [node mode content]
+  (let [content (filterv map? content)]
+    (cond-> {:tag :g
+             :attrs (select-keys (:attrs node) [:transform])
+             ::mask-mode mode
+             ::name (or (::name node) (resolve-element-name (:tag node) (:attrs node)))
+             :content [(if (= 1 (count content))
+                         (first content)
+                         {:tag :g :attrs {} :content content})
+                       (-> node
+                           (update :attrs dissoc :transform)
+                           (dissoc ::mask-of))]}
+      (or (contains? node ::mask-of) (contains? node ::element-key))
+      (assoc ::mask-of (or (::mask-of node) (::element-key node))))))
+
 (defn- mask-groups
-  "The SVG `node` with each element a `<mask>` of `defs` masks held by a
-  masked group: the drawing of the mask at the bottom, in the space of
-  the element (its transform moves to the group), and the element over
-  it, without its mask."
+  "The SVG `node` with each element a `<mask>` or a `<clipPath>` of
+  `defs` keeps held by a masked group: the drawing of the mask (or the
+  clip path, opaque, as an alpha mask) at the bottom, in the space of
+  the element, and the element over it, without them. A clip goes
+  around a mask."
   [defs node]
   (if-not (map? node)
     node
-    (let [node (cond-> node (seq (:content node)) (update :content #(mapv (partial mask-groups defs) %)))
-          mask (get defs (mask-id (:attrs node)))]
-      (if (and (= :mask (:tag mask))
-               (not= "objectBoundingBox" (get-in mask [:attrs :maskContentUnits])))
-        (let [[mode content] (mask-content mask defs)
-              content        (filterv map? content)
-              attrs          (:attrs node)]
-          (cond-> {:tag :g
-                   :attrs (select-keys attrs [:transform])
-                   ::mask-mode mode
-                   ::name (resolve-element-name (:tag node) attrs)
-                   :content [(if (= 1 (count content))
-                               (first content)
-                               {:tag :g :attrs {} :content content})
-                             (-> node
-                                 (update :attrs dissoc :mask :transform)
-                                 (update-in [:attrs :style]
-                                            #(if (string? %) (str/replace % #"(?:^|;)\s*mask\s*:[^;]*" "") %)))]}
-            (contains? node ::element-key)
-            (assoc ::mask-of (::element-key node))))
-        node))))
+    (let [node  (cond-> node (seq (:content node)) (update :content #(mapv (partial mask-groups defs) %)))
+          attrs (:attrs node)
+          mask  (get defs (mask-id attrs))
+          mask  (when (and (= :mask (:tag mask))
+                           (not= "objectBoundingBox" (get-in mask [:attrs :maskContentUnits])))
+                  mask)
+          clip  (get defs (clip-id attrs))
+          clip  (when (and (= :clipPath (:tag clip))
+                           (not= "objectBoundingBox" (get-in clip [:attrs :clipPathUnits])))
+                  clip)
+          strip (fn [style prop]
+                  (if (string? style)
+                    (str/replace style (re-pattern (str "(?:^|;)\\s*" prop "\\s*:[^;]*")) "")
+                    style))
+          bare  (cond-> node
+                  (some? mask) (-> (update :attrs dissoc :mask)
+                                   (update-in [:attrs :style] strip "mask"))
+                  (some? clip) (-> (update :attrs dissoc :clip-path)
+                                   (update-in [:attrs :style] strip "clip-path")))]
+      (cond-> bare
+        (some? mask)
+        (as-> n (let [[mode content] (mask-content mask defs)] (wrap-masked n mode content)))
+
+        (some? clip)
+        (wrap-masked :alpha
+                     (let [content (mapv opaque (:content clip))
+                           t       (get-in clip [:attrs :transform])]
+                       (if (some? t) [{:tag :g :attrs {:transform t} :content content}] content)))))))
 
 (defn create-svg-shapes
   ([svg-data pos objects frame-id parent-id selected center?]
@@ -362,6 +410,155 @@
          root-shape-with-defs (assoc root-shape :svg-defs (merge def-nodes all-defs-from-children))]
 
      [root-shape-with-defs children])))
+
+(declare paint-fill)
+
+(defn- text-prop
+  "The text property `k` (a keyword of its CSS name) of the SVG element
+  with `attrs`: of its style, or else of its attribute."
+  [attrs k]
+  (let [style (:style attrs)
+        v     (or (if (map? style)
+                    (get style k)
+                    (some->> (str style)
+                             (re-find (re-pattern (str "(?:^|;)\\s*" (name k) "\\s*:\\s*([^;]+)")))
+                             (second)))
+                  (get attrs k))]
+    (when-not (str/blank? (str v))
+      (str/trim (str v)))))
+
+(def ^:private text-props
+  [:font-family :font-size :font-weight :font-style :letter-spacing
+   :text-decoration :text-transform :fill :fill-opacity :text-anchor])
+
+(defn- own-text-props
+  [attrs]
+  (into {} (keep (fn [k] (when-let [v (text-prop attrs k)] [k v]))) text-props))
+
+(defn- num-str
+  "`v` as the text of a number: a whole one without its decimals."
+  [v]
+  (let [v (mth/precision v 3)]
+    (if (== v (mth/round v)) (dm/str (long (mth/round v))) (dm/str v))))
+
+(defn- text-node
+  "The Penpot text node of the text `text` with the SVG text properties
+  `props`; its fill through `defs` (see `paint-fill`). The font is the
+  one of the family asked for, by the id of a Google font, which the
+  workspace resolves to the fonts it has."
+  [text props shape defs]
+  (let [family  (some-> (:font-family props) (str/split #",") (first) (str/replace #"[\"']" "") (str/trim) (not-empty))
+        size    (or (some-> (:font-size props) (csvg/parse-numbers) (first)) 16)
+        weight  (let [w (str/lower (str (:font-weight props "400")))]
+                  (case w
+                    ("bold" "bolder") "700"
+                    "normal"          "400"
+                    "lighter"         "300"
+                    (if (re-matches #"\d+" w) w "400")))
+        italic? (contains? #{"italic" "oblique"} (str/lower (str (:font-style props))))
+        fill    (or (paint-fill (:fill props "#000000") shape defs nil 0) {:fill-color clr/black})
+        opacity (d/parse-double (:fill-opacity props) 1)]
+    (merge (dissoc txt/default-text-attrs :typography-ref-file :typography-ref-id)
+           {:text            text
+            :font-id         (if family (dm/str "gfont-" (-> family str/lower (str/replace #"\s+" "-"))) "sourcesanspro")
+            :font-family     (or family "sourcesanspro")
+            :font-variant-id (dm/str (if (= weight "400") (if italic? "" "regular") weight) (when italic? "italic"))
+            :font-size       (num-str size)
+            :font-weight     weight
+            :font-style      (if italic? "italic" "normal")
+            :letter-spacing  (num-str (or (some-> (:letter-spacing props) (csvg/parse-numbers) (first)) 0))
+            :text-transform  (:text-transform props "none")
+            :text-decoration (let [d (str (:text-decoration props))]
+                               (cond (str/includes? d "underline") "underline"
+                                     (str/includes? d "line-through") "line-through"
+                                     :else "none"))
+            :fills           [(update fill :fill-opacity #(* (or % 1) opacity))]})))
+
+(defn- text-lines
+  "The lines of the SVG `<text>` elements `nodes`, each with its runs of
+  text and their properties, its `:x` `:y` and anchor: a `<tspan>` with
+  a position of its own starts one, a `<text>` too."
+  [nodes inherited]
+  (let [lines (volatile! [])
+        line  (fn [x y anchor] (vswap! lines conj {:x x :y y :anchor anchor :runs []}))
+        run   (fn [text props] (vswap! lines (fn [ls] (update ls (dec (count ls)) update :runs conj [text props]))))
+        walk  (fn walk [node props]
+                (let [attrs (:attrs node)
+                      props (merge props (own-text-props attrs))
+                      x     (some-> (:x attrs) (csvg/parse-numbers) (first))
+                      y     (some-> (:y attrs) (csvg/parse-numbers) (first))
+                      dy    (some-> (:dy attrs) (csvg/parse-numbers) (first))]
+                  (when (or (= :text (:tag node)) (some? y) (and (some? dy) (not (zero? dy))))
+                    (let [prev (peek @lines)]
+                      (line (or x (:x prev) 0)
+                            (or y (when (some? dy) (+ (:y prev 0) dy)) (:y prev 0))
+                            (:text-anchor props "start"))))
+                  (doseq [child (:content node)]
+                    (cond
+                      (string? child)
+                      (let [t (str/replace child #"\s+" " ")]
+                        (when-not (str/blank? t) (run t props)))
+
+                      (contains? #{:tspan :a} (:tag child))
+                      (walk child props)))))]
+    (doseq [node nodes] (walk node inherited))
+    (->> @lines
+         (keep (fn [l]
+                 (let [runs (:runs l)
+                       runs (cond-> runs
+                              (seq runs) (update 0 update 0 str/ltrim)
+                              (seq runs) (update (dec (count runs)) update 0 str/rtrim))]
+                   (when (some #(not (str/blank? (first %))) runs)
+                     (assoc l :runs runs)))))
+         (vec))))
+
+(defn create-text-shape
+  "The Penpot text of the SVG `<text>` `element`, or of the text container
+  of a Penpot export (a `g` with the box of its text and a `<text>` for
+  each line in it): a paragraph for each line. A loose text is placed
+  by its first baseline, as wide as its text may be."
+  [name frame-id {:keys [x y defs] :as svg-data} {:keys [attrs] :as element}]
+  (let [container? (contains? attrs :width)
+        texts      (if container?
+                     (let [fills (some #(when (and (map? %) (str/includes? (str (get-in % [:attrs :class])) "fills")) %)
+                                       (:content element))]
+                       (filterv #(= :text (:tag %)) (:content (or fills element))))
+                     [element])
+        inherited  (own-text-props (dissoc attrs :x :y))
+        lines      (text-lines texts inherited)]
+    (when (seq lines)
+      (let [first-props (second (first (:runs (first lines))))
+            size        (or (some-> (:font-size first-props) (csvg/parse-numbers) (first)) 16)
+            anchor      (:anchor (first lines))
+            align       (case anchor "middle" "center" "end" "right" "left")
+            chars       (reduce max 1 (map #(count (str/join (map first (:runs %)))) lines))
+            ;; a guess of the width, which the layout of the text corrects
+            width       (* chars size 0.62)
+            height      (* (count lines) size 1.2)
+            translate   (csvg/parse-transform (:transform attrs))
+            [bx by bw bh]
+            (if container?
+              [(d/parse-double (:x attrs) 0) (d/parse-double (:y attrs) 0)
+               (d/parse-double (:width attrs) width) (d/parse-double (:height attrs) height)]
+              (let [{lx :x ly :y} (first lines)]
+                [(case anchor "middle" (- lx (/ width 2)) "end" (- lx width) lx)
+                 (- ly (* 0.9 size))
+                 width height]))
+            bx          (+ bx (:e translate 0) x)
+            by          (+ by (:f translate 0) y)
+            shape       (cts/setup-shape {:type :text :name name :frame-id frame-id
+                                          :x bx :y by :width (max bw 1) :height (max bh 1)})
+            paragraphs  (mapv (fn [{:keys [runs]}]
+                                (merge txt/default-paragraph-attrs
+                                       {:type "paragraph"
+                                        :text-align (if container? "left" align)
+                                        :children (mapv (fn [[text props]] (text-node text props shape defs)) runs)}))
+                              lines)]
+        (-> shape
+            (assoc :grow-type (if (and (not container?) (= "left" align)) :auto-width :fixed))
+            (assoc :content {:type "root" :vertical-align "top"
+                             :children [{:type "paragraph-set" :children paragraphs}]})
+            (dissoc :position-data))))))
 
 (defn create-raw-svg
   [name frame-id {:keys [x y width height offset-x offset-y defs] :as svg-data} {:keys [attrs] :as data}]
@@ -807,16 +1004,37 @@
                     (get style :strokeLinecap))
         linecap (some-> linecap str/trim keyword)
 
+        ;; the dashes, as the stroke styles of Penpot draw them: a dash
+        ;; and a gap, dots (no dash), or dashes and dots (more lengths);
+        ;; a list of an odd count repeats, as in SVG
+        dashes  (when (some? color)
+                  (let [v (str/trim (str (or (:strokeDasharray style) (:strokeDasharray attrs))))]
+                    (when-not (or (str/blank? v) (= "none" v))
+                      (let [ns (csvg/parse-numbers v)]
+                        (when (and (seq ns) (some pos? ns))
+                          (vec (if (odd? (count ns)) (concat ns ns) ns)))))))
+        dashed  (cond
+                  (nil? dashes)                  nil
+                  (zero? (first dashes))         {:stroke-style :dotted}
+                  (> (count dashes) 2)           {:stroke-style :mixed}
+                  :else                          {:stroke-style :dashed
+                                                  :stroke-dash (first dashes)
+                                                  :stroke-gap (second dashes)})
+
         attrs
         (-> attrs
             (cond-> (some? color)
               (dissoc :stroke :strokeWidth :strokeOpacity))
+            (cond-> (some? dashed)
+              (dissoc :strokeDasharray :strokeDashoffset))
             (update
              :style
              (fn [style]
                (-> style
                    (cond-> (some? color)
-                     (dissoc :stroke :strokeWidth :strokeOpacity)))))
+                     (dissoc :stroke :strokeWidth :strokeOpacity))
+                   (cond-> (some? dashed)
+                     (dissoc :strokeDasharray :strokeDashoffset)))))
             (d/without-nils))]
 
     (cond-> (assoc shape :svg-attrs attrs)
@@ -828,6 +1046,9 @@
 
       (and (some? color) (some? width))
       (assoc-in [:strokes 0 :stroke-width] width)
+
+      (some? dashed)
+      (update-in [:strokes 0] merge dashed)
 
       (and (some? color) (some? linecap) (cfh/path-shape? shape)
            (or (= linecap :round) (= linecap :square)))
@@ -950,7 +1171,11 @@
 
       (let [;; SVG graphic elements
             ;; :circle :ellipse :image :line :path :polygon :polyline :rect :text :use
-            shape   (case tag
+            text-box? (and (= :g tag) (str/includes? (str (:class attrs)) "text-container")
+                           (contains? attrs :width))
+            shape   (case (if text-box? :text tag)
+                      :text        (or (create-text-shape name frame-id svg-data element)
+                                       (create-raw-svg name frame-id svg-data element))
                       (:g :a :svg) (create-group name frame-id svg-data element)
                       :rect        (create-rect-shape name frame-id svg-data element)
                       (:circle
@@ -980,6 +1205,8 @@
                (cond-> (contains? #{:alpha-inverted :luma :luma-inverted} (::mask-mode element))
                  (assoc :mask-mode (::mask-mode element))))
 
-           (cond->> (:content element)
-             (contains? csvg/parent-tags tag)
-             (mapv (partial csvg/inherit-attributes attrs)))])))))
+           ;; a text holds its lines itself
+           (when-not (= :text (:type shape))
+             (cond->> (:content element)
+               (contains? csvg/parent-tags tag)
+               (mapv (partial csvg/inherit-attributes attrs))))])))))
