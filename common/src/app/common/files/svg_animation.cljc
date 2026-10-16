@@ -78,6 +78,24 @@
         (str/ends-with? s "h")   (some-> (number s) (* 3600000))
         :else                    (some-> (number s) (* 1000))))))
 
+;; --- Limits: an SVG comes from anyone, the import must end
+
+(def ^:private min-dur
+  "The shortest cycle (ms) of an animation the import plays."
+  10)
+
+(def ^:private max-board
+  "The longest board (ms) the import makes."
+  600000)
+
+(def ^:private max-steps
+  "The most steps of a CSS `steps()` easing; more play as a line."
+  1000)
+
+(def ^:private max-starts
+  "The most starts of segments of one animation in its board."
+  10000)
+
 (defn- rgb
   "The `[r g b]` of the CSS colour `s`, nil for none."
   [s]
@@ -277,7 +295,9 @@
         (when (and x1 y1 x2 y2) [(mth/clamp x1 0 1) y1 (mth/clamp x2 0 1) y2]))
 
       (str/starts-with? s "steps")
-      [:steps (max 1 (int (or (number s) 1))) (if (re-find #"start" s) :start :end)]
+      (let [n (or (number s) 1)]
+        (when (<= n max-steps)
+          [:steps (max 1 (int n)) (if (re-find #"start" s) :start :end)]))
 
       :else
       (get css-easings "ease"))))
@@ -594,7 +614,8 @@
 
 (defn- smil-timing
   [attrs begin]
-  (let [dur    (clock (:dur attrs))
+  (let [;; a `dur` of 0 or less is an error: no duration, as if indefinite
+        dur    (let [d (clock (:dur attrs))] (when (and (some? d) (pos? d)) d))
         rc     (:repeatCount attrs)
         rd     (:repeatDur attrs)
         repeat (cond
@@ -764,7 +785,7 @@
                               :fill-before (contains? #{"backwards" "both"} fill)
                               :fill-after  (if (contains? #{"forwards" "both"} fill) :freeze :remove)
                               :direction   (keyword (get anim "animation-direction" "normal"))}]
-               (when (and (seq stops) (some? dur) (pos? dur))
+               (when (and (seq stops) (some? dur))
                  (for [prop (distinct (mapcat (comp keys :decls) stops))
                        :let [property (get properties prop)]
                        :when (or (some? property)
@@ -989,13 +1010,22 @@
         start  (if (and steady? (not (mth/finite? active))) ##-Inf begin)]
     (if (not (mth/finite? (or dur ##Inf)))
       (filter #(<= 0 % duration) [begin])
-      (let [i0 (long (mth/floor (/ (- (max start 0) begin) dur)))
-            i1 (long (mth/ceil (/ (- (min end duration) begin) dur)))]
-        (->> (for [i (range i0 (inc i1))
-                   f times]
-               (+ begin (* dur (+ i (if (reversed? (:direction spec) i) (- 1 f) f)))))
-             (concat [begin end])
+      (let [i0     (mth/floor (/ (- (max start 0) begin) dur))
+            i1     (mth/ceil (/ (- (min end duration) begin) dur))
+            ;; a begin out of reach has no cycles to list
+            starts (when (and (mth/finite? i0) (mth/finite? i1))
+                     (for [i (range (long i0) (inc (long i1)))
+                           f times]
+                       (+ begin (* dur (+ i (if (reversed? (:direction spec) i) (- 1 f) f))))))]
+        (->> (concat [begin end] starts)
              (filter #(and (<= 0 % duration) (<= start % end))))))))
+
+(defn- segment-starts
+  "About how many segments of `spec` a board of `duration` ms plays."
+  [{:keys [dur times] :as spec} duration]
+  (if (and (some? dur) (mth/finite? dur))
+    (* (count times) (inc (/ (min duration (active-duration spec)) dur)))
+    (count times)))
 
 (defn- spec-easing
   "The easing of `spec` over the times `a` to `b` of the board, which no
@@ -1425,15 +1455,20 @@
   "The parsed SVG `svg-data` cleaned (see `clean` and `hoist-defs`), with
   the specs of its animations and the transforms of its elements."
   [ctx svg-data]
-  (let [idx      (index svg-data)
-        sheet    (stylesheet (str/join "\n" (:css idx)))
-        cascaded (into {} (map (fn [k] [k (cascade sheet idx k)])) (keys (:by-key idx)))
-        css      (into [] (mapcat (fn [[k decls]] (css-specs ctx (:keyframes sheet) k decls))) cascaded)
-        specs    (->> (into (smil-specs ctx idx) css)
-                      (map expand-steps)
-                      (map #(cond-> % (= :transform (:property %)) (transform-spec)))
-                      (vec))
-        root     (hoist-defs (clean (:root idx) cascaded))]
+  (let [idx       (index svg-data)
+        sheet     (stylesheet (str/join "\n" (:css idx)))
+        cascaded  (into {} (map (fn [k] [k (cascade sheet idx k)])) (keys (:by-key idx)))
+        css       (into [] (mapcat (fn [[k decls]] (css-specs ctx (:keyframes sheet) k decls))) cascaded)
+        ;; a cycle shorter than `min-dur` shows nothing a board can play
+        playable? (fn [{:keys [dur]}]
+                    (or (nil? dur) (not (mth/finite? dur)) (>= dur min-dur)
+                        (do (ctx :skip :timing) false)))
+        specs     (->> (into (smil-specs ctx idx) css)
+                       (filter playable?)
+                       (map expand-steps)
+                       (map #(cond-> % (= :transform (:property %)) (transform-spec)))
+                       (vec))
+        root      (hoist-defs (clean (:root idx) cascaded))]
     {:idx idx :specs specs :root root :own-of (transforms root)}))
 
 (defn- board-timing
@@ -1447,16 +1482,17 @@
         ends    (keep (fn [spec] (let [a (active-duration spec)] (when (mth/finite? a) (+ (:begin spec) a)))) specs)
         gcd     (fn gcd [a b] (if (zero? b) a (gcd b (mod a b))))
         cycle   (when (seq loops)
-                  (let [ms   (map #(long (max 10 (mth/round %))) loops)
+                  ;; a loop longer than the longest board plays cut to it
+                  (let [ms   (map #(long (mth/clamp (mth/round %) min-dur max-board)) loops)
                         lcm  (reduce (fn [a b] (/ (* a b) (gcd a b))) ms)
                         most (reduce max ms)]
-                    (if (<= lcm (max 20000 most))
+                    (if (and (<= lcm (max 20000 most)) (every? #(<= % max-board) loops))
                       lcm
                       (do (ctx :skip :loop-length) most))))
         finite  (if (seq ends) (reduce max ends) 0)]
     [(int (mth/round (max 100 (if (some? cycle)
                                 (* cycle (max 1 (mth/ceil (/ (min finite 60000) cycle))))
-                                (min finite 600000)))))
+                                (min finite max-board)))))
      (some? cycle)]))
 
 (defn- pivot-of
@@ -1646,6 +1682,10 @@
                           {}
                           shapes)
         [duration steady?] (board-timing ctx specs)
+        ;; one that starts too many segments in the board is too fast for it
+        specs    (filterv #(or (<= (segment-starts % duration) max-starts)
+                               (do (ctx :skip :timing) false))
+                          specs)
         env      {:idx idx :own-of own-of :objects (into {} (map (juxt :id identity)) shapes)
                   :to-board (gmt/translate-matrix (- bx vb-x) (- by vb-y))
                   :vb-w vb-w :vb-h vb-h :bx bx :by by :duration duration :steady? steady?}
@@ -1694,12 +1734,13 @@
                    :x bx :y by :width vb-w :height vb-h
                    :parent-id uuid/zero :frame-id uuid/zero
                    :fills [] :strokes [] :shapes []})
-        timeline (reduce (fn [timeline [shape-id kf]] (cta/add-keyframe timeline shape-id kf))
-                         (cta/make-timeline {:board-id board-id
-                                             :name (:name board)
-                                             :duration duration
-                                             :playback (if steady? :loop :once)})
-                         frames)]
+        timeline (reduce-kv (fn [timeline shape-id frames]
+                              (cta/add-keyframes timeline shape-id (map second frames)))
+                            (cta/make-timeline {:board-id board-id
+                                                :name (:name board)
+                                                :duration duration
+                                                :playback (if steady? :loop :once)})
+                            (group-by first frames))]
     {:shapes   (with-frame-ids (into [board] shapes))
      :timeline (assoc timeline :duration duration)
      :skipped  @skipped}))

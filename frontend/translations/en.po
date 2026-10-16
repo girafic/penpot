@@ -9902,7 +9902,7 @@ msgstr "animations that start on a click or hover"
 
 #: src/app/main/data/workspace/svg_animation.cljs
 msgid "workspace.svg-animation.feature.loop-length"
-msgstr "the full length of loops that do not fit together"
+msgstr "the full length of loops that are too long or do not fit together"
 
 #: src/app/main/data/workspace/svg_animation.cljs
 msgid "workspace.svg-animation.feature.paint"
@@ -9919,6 +9919,10 @@ msgstr "skews"
 #: src/app/main/data/workspace/svg_animation.cljs
 msgid "workspace.svg-animation.feature.text-style"
 msgstr "text style animations"
+
+#: src/app/main/data/workspace/svg_animation.cljs
+msgid "workspace.svg-animation.feature.timing"
+msgstr "animations too short or too fast to play"
 
 #: src/app/main/data/workspace/svg_animation.cljs
 msgid "workspace.svg-animation.imported-without"

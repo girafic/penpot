@@ -24,23 +24,29 @@
    [cuerdas.core :as str]
    [potok.v2.core :as ptk]))
 
-;; The features `svga/svg->shapes` counts:
-;; (tr "workspace.svg-animation.feature.attribute")
-;; (tr "workspace.svg-animation.feature.dash")
-;; (tr "workspace.svg-animation.feature.filter")
-;; (tr "workspace.svg-animation.feature.gradient")
-;; (tr "workspace.svg-animation.feature.interactive")
-;; (tr "workspace.svg-animation.feature.loop-length")
-;; (tr "workspace.svg-animation.feature.paint")
-;; (tr "workspace.svg-animation.feature.path-morph")
-;; (tr "workspace.svg-animation.feature.skew")
-;; (tr "workspace.svg-animation.feature.text-style")
+(defn- feature-name
+  "What the import of an animated SVG left out, a feature
+  `svga/svg->shapes` counts, as the warning names it."
+  [feature]
+  (case feature
+    :attribute   (tr "workspace.svg-animation.feature.attribute")
+    :dash        (tr "workspace.svg-animation.feature.dash")
+    :filter      (tr "workspace.svg-animation.feature.filter")
+    :gradient    (tr "workspace.svg-animation.feature.gradient")
+    :interactive (tr "workspace.svg-animation.feature.interactive")
+    :loop-length (tr "workspace.svg-animation.feature.loop-length")
+    :paint       (tr "workspace.svg-animation.feature.paint")
+    :path-morph  (tr "workspace.svg-animation.feature.path-morph")
+    :skew        (tr "workspace.svg-animation.feature.skew")
+    :text-style  (tr "workspace.svg-animation.feature.text-style")
+    :timing      (tr "workspace.svg-animation.feature.timing")
+    (name feature)))
 
 (defn- skipped-message
   [skipped]
   (tr "workspace.svg-animation.imported-without"
       (->> (keys skipped)
-           (map #_:clj-kondo/ignore #(tr (str "workspace.svg-animation.feature." (name %))))
+           (map feature-name)
            (sort)
            (str/join ", "))))
 

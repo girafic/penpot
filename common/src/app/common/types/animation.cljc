@@ -912,6 +912,26 @@
           track    (assoc track :keyframes (sort-keyframes (conj (vec kept) keyframe)))]
       (assoc-in timeline [:tracks shape-id] track))))
 
+(defn add-keyframes
+  "Add `keyframes` to the track of `shape-id` as `add-keyframe` adds each
+  in turn (a later one at the time and slot of another replaces it), but
+  sorted once: for the many keyframes of an import."
+  [timeline shape-id keyframes]
+  (let [added (into []
+                    (comp (remove #(locked-keyframe? timeline shape-id %))
+                          (map make-keyframe))
+                    keyframes)]
+    (if (empty? added)
+      timeline
+      (let [track (or (get-track timeline shape-id) {:shape-id shape-id :keyframes []})
+            ;; the last keyframe of each time and slot
+            kept  (reduce (fn [acc keyframe]
+                            (assoc acc [(:time keyframe) (keyframe-slot keyframe)] keyframe))
+                          {}
+                          (concat (:keyframes track) added))]
+        (assoc-in timeline [:tracks shape-id]
+                  (assoc track :keyframes (sort-keyframes (vals kept))))))))
+
 (defn update-keyframe
   "Apply `f` to a keyframe, unless its property is locked."
   [timeline shape-id keyframe-id f]

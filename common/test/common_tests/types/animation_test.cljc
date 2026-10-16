@@ -671,6 +671,20 @@
     (t/is (= "#00ff00" (:value (d/seek #(= 0 (:index %)) kfs))))
     (t/is (= "#ff0000" (:value (d/seek #(= 1 (:index %)) kfs))))))
 
+(t/deftest keyframes-added-at-once-as-one-by-one
+  (let [sid    (uuid/next)
+        kfs    [{:time 500 :property :x :value 5}
+                {:time 0 :property :fill-color :index 0 :value "#000000"}
+                {:time 0 :property :x :value 0}
+                {:time 0 :property :fill-color :index 0 :value "#00ff00"}
+                {:time 500 :property :x :value 7}]
+        base   (cta/add-keyframe (mk-timeline) sid {:time 1000 :property :x :value 10})
+        plain  #(mapv (juxt :time :property :index :value) (get-in % [:tracks sid :keyframes]))]
+    (t/is (= (plain (reduce #(cta/add-keyframe %1 sid %2) base kfs))
+             (plain (cta/add-keyframes base sid kfs))))
+    (t/is (= [[0 :fill-color 0 "#00ff00"] [0 :x nil 0] [500 :x nil 7] [1000 :x nil 10]]
+             (plain (cta/add-keyframes base sid kfs))))))
+
 (t/deftest gradient-fill-stays-put
   (let [shape (cts/setup-shape
                {:type :rect :x 0 :y 0 :width 100 :height 100
