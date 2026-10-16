@@ -1732,9 +1732,10 @@
                               (and (some? from) (not (contains? #{"start" "rest"} from)))
                               "from should be 'start' or 'rest'"
 
-                              (not (some #{leader-id} (cltl/follow-leaders objects timeline shape-id)))
+                              (not (cltl/can-follow? objects timeline shape-id leader-id))
                               (dm/str "The leader should be another layer of the board, not one "
-                                      "the shape is in, holds or is followed by"))]
+                                      "the shape is in, holds or is followed by, nor a layer of a "
+                                      "component copy the board does not animate"))]
               (if (some? error)
                 (u/not-valid plugin-id :setFollow error)
                 (write! :setFollow #(cta/set-follow % shape-id

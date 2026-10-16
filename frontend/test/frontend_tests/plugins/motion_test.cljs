@@ -199,6 +199,30 @@
         (.setFollow timeline badge nil)
         (t/is (nil? (follow badge)) "null follows none")))))
 
+(t/deftest a-layer-of-a-copy-leads-only-when-its-board-animates-it
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [file            (-> (cthf/sample-file :motion-file :page-label :motion-page)
+                                (ctho/add-simple-component :anim-comp :anim-main :anim-rect
+                                                           :root-params {:x 0 :y 0 :width 200 :height 200}
+                                                           :child-params {:x 10 :y 20 :width 50 :height 50})
+                                (ctho/add-frame :anim-host :x 1000 :y 0 :width 400 :height 400)
+                                (cthc/instantiate-component :anim-comp :anim-copy :parent-label :anim-host)
+                                (ctho/add-rect :own :parent-label :anim-host :x 1300 :y 50 :width 40 :height 40))
+            _               (setup file true)
+            page-id         (cthf/current-page-id file)
+            proxy           #(shape/shape-proxy plugin-id (:id file) page-id (cthi/id %))
+            ^js timeline    (.addTimeline (proxy :anim-host))
+            refused         (try (.setFollow timeline (proxy :own) #js {:leader (proxy :anim-copy)})
+                                 nil
+                                 (catch :default cause (ex-message cause)))]
+        (t/is (str/includes? (str refused) "component copy the board does not animate")
+              "the message names the rule")
+        (.addKeyframe timeline (proxy :anim-copy) #js {:property "opacity" :time 0 :value 1})
+        (.setFollow timeline (proxy :own) #js {:leader (proxy :anim-copy)})
+        (t/is (= (cthi/id :anim-copy) (aget (.-leader (.followOf timeline (proxy :own))) "$id"))
+              "a copy the board animates leads")))))
+
 (t/deftest keyframes-animate-the-layers
   (thw/with-wasm-mocks*
     (fn []

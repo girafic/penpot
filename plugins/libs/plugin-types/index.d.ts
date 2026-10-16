@@ -4408,8 +4408,10 @@ export interface Timeline {
    * pivot moves, turns and scales around that pivot and, with `opacity`,
    * fades with the leader. `null` makes it follow none. The leader must
    * be another layer of the board, not one `shape` is in, holds or is
-   * followed by. The SVG, CSS, Lottie and code exports play a follow by
-   * keyframes made from it.
+   * followed by, nor a layer of a component copy the board does not
+   * animate itself (what a copy plays of its main moves no follower).
+   * The SVG, CSS, Lottie and code exports play a follow by keyframes
+   * made from it.
    * @param shape A layer inside the board.
    * @param follow The leader and what the layer takes of it, or `null`.
    *
