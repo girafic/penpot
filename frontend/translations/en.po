@@ -6817,7 +6817,7 @@ msgstr "Choose a layer"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.follow-pick"
-msgstr "Pick the leader on the canvas"
+msgstr "Pick the leader on the canvas or in the layers"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.follow-delay"
