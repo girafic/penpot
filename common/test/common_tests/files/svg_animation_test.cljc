@@ -240,6 +240,101 @@
       (t/is (= centre (mapv mth/round [(+ (:x node) (/ (:width node) 2)) (+ (:y node) (/ (:height node) 2))]))
             (str label ": the board centred on where it grows from")))))
 
+;; --- How the animations play, as Chrome plays them (values sampled in
+;; Chrome at the times asked)
+
+(defn- value-at
+  "The value of `property` of the shape named `name` at `t` ms, as the
+  timeline of the import plays it."
+  [{:keys [timeline] :as result} name property t]
+  (cta/property-value-at (cta/property-keyframes timeline (:id (named result name)) property) t))
+
+(defn- plays?
+  "Whether `property` of the shape named `name` has the values `expected`
+  (`[t value]`) as Chrome plays them."
+  [result name property expected]
+  (every? (fn [[t v]] (mth/close? v (value-at result name property t) 0.01)) expected))
+
+(defn- moved-x
+  "How far the board of the element `id` has moved in x at `t` ms."
+  [result id t]
+  (- (value-at result (str id " motion") :x t) (:x (named result (str id " motion")))))
+
+(defn- one
+  "An SVG of the element `#x` with the SMIL animation of `attrs` (`tag`)."
+  [tag attrs & [elem-attrs]]
+  (svg (el :rect (merge {:id "x" :width "10" :height "10"} elem-attrs) (el tag attrs))))
+
+(t/deftest an-animation-begins-at-the-end-of-another
+  (let [result (import-svg (svg (el :rect {:id "a-el" :width "10" :height "10"}
+                                    (el :animate {:id "a" :attributeName "opacity" :from "1" :to "0"
+                                                  :dur "1s" :fill "freeze"}))
+                                (el :rect {:id "x" :x "20" :width "10" :height "10"}
+                                    (el :animate {:attributeName "opacity" :from "1" :to "0"
+                                                  :begin "a.end+0.5s" :dur "1s" :fill "freeze"}))))]
+    (t/is (plays? result "x motion" :opacity [[1400 1] [2000 0.5] [2500 0]]))
+    (t/is (= 2500 (get-in result [:timeline :duration])))))
+
+(t/deftest end-and-repeat-dur-stop-a-repeat
+  (let [ended  (import-svg (one :animate {:attributeName "opacity" :values "1;0" :dur "1s"
+                                          :repeatCount "indefinite" :end "2.5s"}))
+        frozen (import-svg (one :animate {:attributeName "opacity" :values "1;0" :dur "1s"
+                                          :repeatDur "1.5s" :fill "freeze"}))]
+    (t/is (plays? ended "x motion" :opacity [[500 0.5] [1500 0.5] [2400 0.6] [2600 1]]))
+    (t/is (= 2500 (get-in ended [:timeline :duration])))
+    (t/is (plays? frozen "x motion" :opacity [[1200 0.8] [1500 0.5] [1800 0.5]]))))
+
+(t/deftest key-splines-ease-a-segment
+  (t/is (plays? (import-svg (one :animate {:attributeName "opacity" :values "1;0" :keyTimes "0;1"
+                                           :calcMode "spline" :keySplines "0.42 0 0.58 1"
+                                           :dur "1s" :fill "freeze"}))
+                "x motion" :opacity [[250 0.8708] [500 0.5] [750 0.1292]])))
+
+(t/deftest discrete-values-hold
+  (t/is (plays? (import-svg (one :animate {:attributeName "opacity" :values "1;0.5;0" :calcMode "discrete"
+                                           :dur "1.5s" :fill "freeze"}))
+                "x motion" :opacity [[250 1] [750 0.5] [1250 0] [1600 0]])))
+
+(t/deftest a-motion-goes-at-an-even-pace
+  ;; paced: as far along its path as the time is along the cycle
+  (let [result (import-svg (one :animateMotion {:path "M0 0 L10 0 L100 0" :dur "1s" :fill "freeze"}))]
+    (doseq [[t x] [[250 25] [500 50] [750 75]]]
+      (t/is (mth/close? x (moved-x result "x" t) 0.5) (str t " ms")))))
+
+(t/deftest a-negative-delay-starts-half-way
+  (let [result (import-svg (svg (el :style {} (str "@keyframes f { from { opacity: 0 } to { opacity: 1 } }"
+                                                   "#x { animation: f 2s linear -1s both; }"))
+                                (el :rect {:id "x" :width "10" :height "10"})))]
+    (t/is (plays? result "x motion" :opacity [[0 0.5] [500 0.75] [1000 1]]))))
+
+(t/deftest an-additive-animation-goes-on-top-of-the-transform
+  (let [result (import-svg (one :animateTransform {:attributeName "transform" :type "translate"
+                                                   :from "0 0" :to "50 0" :additive "sum"
+                                                   :dur "1s" :fill "freeze"}
+                                {:transform "translate(10 0)"}))]
+    ;; Chrome: 10, 35 and 60 with the translate it has at rest
+    (doseq [[t x] [[0 0] [500 25] [1000 50]]]
+      (t/is (mth/close? x (moved-x result "x" t) 0.5) (str t " ms")))))
+
+(t/deftest a-turn-goes-around-its-transform-origin
+  (doseq [[label css centre] [["of the view box" "transform-origin: right bottom;" [100 100]]
+                              ["of the box of the element" "transform-box: fill-box; transform-origin: left top;" [40 40]]]]
+    (let [result (import-svg (svg (el :style {} (str "@keyframes spin { to { transform: rotate(90deg) } }"
+                                                     "#x { " css " animation: spin 1s linear forwards; }"))
+                                  (el :rect {:id "x" :x "40" :y "40" :width "20" :height "20"})))
+          node   (named result "x motion")]
+      (t/is (= centre (mapv mth/round [(+ (:x node) (/ (:width node) 2)) (+ (:y node) (/ (:height node) 2))])) label)
+      (t/is (plays? result "x motion" :rotation [[500 45]]) label))))
+
+(t/deftest loops-that-do-not-fit-together-play-the-longest
+  ;; 7, 11 and 13 s meet again only after 1001 s
+  (let [result (import-svg (apply svg (for [[i dur] (map-indexed vector ["7s" "11s" "13s"])]
+                                        (el :rect {:id (str "r" i) :x (str (* 20 i)) :width "10" :height "10"}
+                                            (el :animate {:attributeName "opacity" :values "1;0;1"
+                                                          :dur dur :repeatCount "indefinite"})))))]
+    (t/is (= {:loop-length 1} (:skipped result)))
+    (t/is (= 13000 (get-in result [:timeline :duration])))))
+
 ;; --- What an SVG asks for is bounded: it comes from anyone
 
 (defn- keyframe-count
