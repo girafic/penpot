@@ -9,6 +9,8 @@
    [app.common.animation.lottie :as alottie]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.lottie :as lottie]
+   [app.common.geom.rect :as grc]
+   [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
@@ -194,18 +196,48 @@
                :stroke-style :solid :stroke-cap-start :round :stroke-cap-end :round}]
              (norm (:strokes path))))))
 
-(t/deftest parents-carry-the-layers-they-parent
+(defn- centre-at
+  "Where the centre of `shape` of `result` is as its timeline plays it at
+  `time`."
+  [result shape time]
+  (let [objects (into {} (map (juxt :id identity)) (:shapes result))
+        mods    (get-in (cta/timeline->modif-tree (:timeline result) objects time) [(:id shape) :modifiers])
+        shape   (cond-> shape (some? mods) (gsh/transform-shape mods))
+        c       (grc/rect->center (:selrect shape))]
+    [(:x c) (:y c)]))
+
+(t/deftest parents-lead-the-layers-they-parent
   (let [null   {:ty 3 :ind 1 :nm "Controller" :ip 0 :op 60 :st 0
                 :ks (assoc rest-ks :p (static [100 50 0]) :r (anim (kf 0 0) (kf 30 45)))}
         child  (layer 2 "Child" [(rect-group [0 0 20 20] [0 1 0 1])] :parent 1
-                      :ks (assoc rest-ks :p (static [-10 -10 0])))
+                      :ks (assoc rest-ks :p (static [20 -10 0])))
         result (lottie/lottie->shapes (document [child null]) {:x 0 :y 0})
         node   (shape-named result "Controller")
-        box    (shape-named result "Child")]
+        box    (shape-named result "Child")
+        board  (first (:shapes result))]
     (t/is (= :frame (:type node)))
-    (t/is (= (:id node) (:parent-id box)) "the child moves with its parent")
-    (t/is (= [90 40 20 20] (bounds box)))
-    (t/is (close-pairs? [[0 0] [1000 45]] (keyframes-of result node :rotation)))))
+    (t/is (= (:id board) (:parent-id box)) "beside its parent")
+    (t/is (= {:leader (:id node) :from :rest} (get-in (:timeline result) [:tracks (:id box) :follow]))
+          "it follows the parent from where it rests")
+    (t/is (= [120 40 20 20] (bounds box)))
+    (t/is (close-pairs? [[0 0] [1000 45]] (keyframes-of result node :rotation)))
+    (let [[x y] (centre-at result box 1000)]
+      (t/is (and (mth/close? (+ 100 (* 30 (mth/cos (mth/radians 45)))) x 0.01)
+                 (mth/close? (+ 50 (* 30 (mth/sin (mth/radians 45)))) y 0.01))
+            (str "turned with it around its anchor: " [x y])))))
+
+(t/deftest parents-that-stretch-or-flip-carry-the-layers-they-parent
+  (doseq [[label scale] [["stretching" (anim (kf 0 [100 100 100]) (kf 30 [200 100 100]))]
+                         ["flipped" (static [-100 100 100])]]]
+    (let [null   {:ty 3 :ind 1 :nm "Controller" :ip 0 :op 60 :st 0
+                  :ks (assoc rest-ks :p (static [100 50 0]) :s scale)}
+          child  (layer 2 "Child" [(rect-group [0 0 20 20] [0 1 0 1])] :parent 1
+                        :ks (assoc rest-ks :p (static [-10 -10 0])))
+          result (lottie/lottie->shapes (document [child null]) {:x 0 :y 0})
+          node   (shape-named result "Controller")
+          box    (shape-named result "Child")]
+      (t/is (= (:id node) (:parent-id box)) (str "a " label " parent moves it inside it"))
+      (t/is (nil? (get-in (:timeline result) [:tracks (:id box) :follow]))))))
 
 (t/deftest precompositions-play-from-their-start
   (let [inner  (layer 1 "Inner" [(rect-group [0 0 10 10] [0 0 1 1])]
@@ -415,3 +447,41 @@
     (t/is (= (cta/easing-curve :ease-in) (cta/easing-curve (:easing (first xs)))))
     (t/is (close-pairs? [[0 1] [1000 0]] (keyframes-of result box :opacity)))
     (t/is (= 1000 (get-in result [:timeline :duration])))))
+
+(t/deftest follows-come-back-from-a-lottie-as-follows
+  ;; exported as children of their leaders (see `alottie/parent-candidates`),
+  ;; imported as follows again, playing alike
+  (let [board    (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        rect     (fn [name x y w h color]
+                   (cts/setup-shape {:type :rect :name name :x x :y y :width w :height h
+                                     :fills [{:fill-color color :fill-opacity 1}]}))
+        leader   (rect "leader" 80 80 40 40 "#FF0000")
+        follower (rect "follower" 190 90 20 20 "#0000FF")
+        moon     (rect "moon" 240 95 10 10 "#00FF00")
+        objects  (into {} (map (juxt :id identity)) [board leader follower moon])
+        tl       (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                     (cta/add-keyframe (:id leader) {:time 0 :property :rotation :value 0 :easing :linear})
+                     (cta/add-keyframe (:id leader) {:time 1000 :property :rotation :value 90})
+                     (cta/add-keyframe (:id leader) {:time 0 :property :x :value 80 :easing :linear})
+                     (cta/add-keyframe (:id leader) {:time 1000 :property :x :value 180})
+                     (cta/add-keyframe (:id follower) {:time 0 :property :rotation :value 0 :easing :linear})
+                     (cta/add-keyframe (:id follower) {:time 1000 :property :rotation :value 180})
+                     (cta/set-follow (:id follower) {:leader (:id leader)})
+                     (cta/set-follow (:id moon) {:leader (:id follower)}))
+        doc      (alottie/timeline->lottie tl objects)
+        result   (lottie/lottie->shapes doc {:x 0 :y 0})
+        named    #(shape-named result %)
+        follow   #(get-in (:timeline result) [:tracks (:id (named %)) :follow :leader])
+        before   (fn [shape t]
+                   (let [mods  (get-in (cta/timeline->modif-tree tl objects t) [(:id shape) :modifiers])
+                         c     (grc/rect->center (:selrect (cond-> shape (some? mods) (gsh/transform-shape mods))))]
+                     [(:x c) (:y c)]))]
+    (t/is (some :parent (:layers doc)) "exported as children")
+    (t/is (= (:id (named "follower")) (follow "moon")))
+    (t/is (= (:id (named "leader")) (follow "follower")))
+    (doseq [t [250 500 1000]
+            [shape name] [[follower "follower"] [moon "moon"]]]
+      (let [[ax ay] (before shape t)
+            [bx by] (centre-at result (named name) t)]
+        (t/is (and (mth/close? ax bx 1) (mth/close? ay by 1))
+              (str name " at " t ": " [ax ay] " " [bx by]))))))

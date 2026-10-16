@@ -21,7 +21,9 @@
   that moves is a transparent board centred on its anchor, which carries
   the keyframes: its position as the change from rest, its scale and
   rotation around the anchor, its opacity. The in and out points of a
-  layer are held opacity keyframes."
+  layer are held opacity keyframes. The layers a parent moves follow it
+  from rest beside it (see `cta/follow-of`) where a follow plays it as
+  Lottie does (see `followable?`), else they move inside its board."
   (:require
    [app.common.animation.lottie :as alottie]
    [app.common.data :as d]
@@ -753,6 +755,23 @@
 
 (declare add-layer)
 
+(defn- followable?
+  "Whether the layers `layer` parents can follow it (see `cta/follow-of`,
+  from where it rests) beside it, which plays its move, turn and scale as
+  Lottie does: it scales evenly and never flips nor skews, at its own
+  pace and flat; else they move inside its board."
+  [layer]
+  (let [tr     (:ks layer)
+        scales (if (animated? (:s tr))
+                 (map :s (keyframes-of (:s tr)))
+                 [(rest-value (:s tr) [100 100])])]
+    (and (every? (fn [v] (let [[x y] (pair v)] (and (pos? x) (mth/close? x y)))) scales)
+         (not (animated? (:sk tr)))
+         (zero? (scalar (rest-value (:sk tr) 0)))
+         (nil? (:tm layer))
+         (or (nil? (:sr layer)) (= 1 (:sr layer)))
+         (not= 1 (:ddd layer)))))
+
 (defn- add-layer*
   "Add the shapes of `layer` (with the layers it parents, `children`) to
   the board `parent-id`; `parent-m` takes its parent's space to the board.
@@ -762,7 +781,9 @@
   The layer's node, a board centred on its anchor (or, for a single shape
   that turns or scales only around its middle, the shape), carries the
   keyframes of its transform. What only its drawing does goes on boards
-  inside it when needed (see `inner-roles`); a clip keeps to its own box."
+  inside it when needed (see `inner-roles`); a clip keeps to its own box.
+  The layers it parents follow its node beside it, or move inside it
+  (see `followable?`). The id of the node."
   [ctx layer children parent-id parent-m]
   (let [tr        (:ks layer)
         rest      (rest-transform tr)
@@ -775,6 +796,7 @@
         fades?    (animated? (:o tr))
         span?     (span? ctx layer)
         parent?   (boolean (seq children))
+        follow?   (and parent? (followable? layer))
         hidden?   (and (some? (:td layer)) (not= 0 (:td layer)) (not (::as-matte layer)))
         own-nodes (if hidden? [] (layer-shape-nodes ctx layer m))
         single    (when (and (= 1 (count own-nodes)) (= :drawable (:kind (first own-nodes))))
@@ -793,7 +815,8 @@
         (add-paint-keyframes ctx id single)
         (add-size-keyframes ctx id shape single)
         (add-transform-keyframes ctx id tr rest parent-m (relative-x ctx shape) (relative-y ctx shape))
-        (when span? (add-span-keyframes ctx id layer opacity)))
+        (when span? (add-span-keyframes ctx id layer opacity))
+        id)
 
       (let [id      (uuid/next)
             slot    (ctx :reserve)
@@ -808,8 +831,9 @@
             drawing (or (:id (peek boards)) id)]
         (when-not hidden?
           (add-own-drawing ctx layer own-nodes drawing m))
-        (doseq [[child grandchildren] children]
-          (add-layer ctx child grandchildren id m))
+        (when-not follow?
+          (doseq [[child grandchildren] children]
+            (add-layer ctx child grandchildren id m)))
 
         ;; the boards inside the node, the inner-most first: each around
         ;; what it holds
@@ -841,7 +865,13 @@
           (add-transform-keyframes ctx id (cond-> tr (not= :opacity on-node) (dissoc :o))
                                    rest parent-m (relative-x ctx node) (relative-y ctx node))
           (when (= :span on-node)
-            (add-span-keyframes ctx id layer (if fades? 1 opacity))))))))
+            (add-span-keyframes ctx id layer (if fades? 1 opacity))))
+
+        ;; beside its node and over it, following it
+        (when follow?
+          (doseq [[child grandchildren] children]
+            (ctx :follow (add-layer ctx child grandchildren parent-id m) id)))
+        id))))
 
 (def ^:private unsupported-layers
   {5 :text 6 :audio 7 :video-placeholder 13 :camera 15 :data})
@@ -870,7 +900,8 @@
   `cts/mask-modes`) with the matte at the bottom as its mask, as its `tt`
   says, and the layer over it. The group spans the matte, or both with
   an inverted matte. A layer that parents others keeps none: they would
-  be kept to it too."
+  be kept to it too. The id of what it adds on top: the layer's node, or
+  the group."
   [ctx layer children parent-id parent-m]
   (let [matte (::matte layer)]
     (cond
@@ -894,7 +925,8 @@
             box   (if (contains? cfh/inverted-mask-modes mode)
                     (merge-boxes mask (selrect-box (ctx :shape-at start)))
                     mask)]
-        (ctx :place slot (matte-group id (:nm layer) parent-id box mode))))))
+        (ctx :place slot (matte-group id (:nm layer) parent-id box mode))
+        id))))
 
 (defn- with-mattes
   "`layers`, the top-most first, each matted one (`tt`) with its track
@@ -1010,7 +1042,7 @@
         width    (max 1 (scalar (:w doc)))
         height   (max 1 (scalar (:h doc)))
         comps    (into {} (keep (fn [a] (when (:layers a) [(:id a) a]))) (:assets doc))
-        state    (volatile! {:shapes [] :keyframes [] :skipped {} :offset 0})
+        state    (volatile! {:shapes [] :keyframes [] :follows [] :skipped {} :offset 0})
         time     (fn [frame]
                    (-> (/ (* 1000 (- (+ frame (:offset @state)) comp-ip)) fr)
                        (mth/round)
@@ -1026,6 +1058,7 @@
                    (case op
                      :skip        (vswap! state update-in [:skipped (first args)] (fnil inc 0))
                      :keyframe    (vswap! state update :keyframes conj args)
+                     :follow      (vswap! state update :follows conj args)
                      :add         (vswap! state update :shapes conj (first args))
                      :reserve     (let [slot (count (:shapes @state))]
                                     (vswap! state update :shapes conj nil)
@@ -1058,7 +1091,7 @@
                    :strokes []
                    :shapes []})]
     (comp-layers ctx nil id [1 0 0 1 x y] 0)
-    (let [{:keys [shapes keyframes skipped]} @state
+    (let [{:keys [shapes keyframes follows skipped]} @state
           timeline (reduce (fn [timeline [shape-id kf]]
                              (cta/add-keyframe timeline shape-id kf))
                            (cta/make-timeline {:board-id id
@@ -1066,6 +1099,10 @@
                                                :duration (time comp-op)
                                                :playback :loop})
                            keyframes)
+          timeline (reduce (fn [timeline [follower leader]]
+                             (cta/set-follow timeline follower {:leader leader :from :rest}))
+                           timeline
+                           follows)
           timeline (reduce (fn [timeline {:keys [tm cm]}]
                              (cta/add-marker timeline {:time (time (scalar tm)) :name (str cm)}))
                            timeline
