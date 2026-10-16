@@ -656,18 +656,20 @@
   `cta/text-unit-entries`), or, with `text-split` `:whole`, play as
   animations of the whole text, as the markup exports play them (see
   `cta/flatten-splits`). A shape `timeline` animates itself keeps that
-  animation. The layers of copies that follow others play keyframes
-  (see `cta/bake-follows`). `:copy-loops` holds the cycles (ms) of the copies that loop,
-  whose clock the exports bind to the board's (see
+  animation. With `bake?`, for the exports that read keyframes only, the
+  layers of copies that follow others play keyframes (see
+  `cta/bake-follows`). `:copy-loops` holds the cycles (ms) of the copies
+  that loop, whose clock the exports bind to the board's (see
   `app.main.data.exports.animation/export-issues`)."
-  [timeline copies objects & {:keys [text-split]}]
+  [timeline copies objects & {:keys [text-split bake?]}]
   (reduce
    (fn [timeline copy]
      (let [clock  (select-keys copy [:duration :playback :loop :clock-start :clock-speed])
            start  (:clock-start copy 0)
            speed  (:clock-speed copy 1)
-           copy   (-> (cond-> copy (= :whole text-split) cta/flatten-splits)
-                      (cta/bake-follows objects)
+           copy   (-> (cond-> copy
+                        (= :whole text-split) cta/flatten-splits
+                        bake?                 (cta/bake-follows objects))
                       (cta/resolve-animations objects)
                       (cta/expand-loops))
            ;; ping-pong turns into a loop of there and back

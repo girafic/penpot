@@ -144,3 +144,22 @@
                                "it follows nothing and stays selected"))
                        (done))))
       (rx/push! stream (dws/deselect-all)))))
+
+(t/deftest only-the-keyframe-exports-bake-follows
+  (let [file  (follow-file)
+        page  (thf/current-page file)
+        board (thi/id :board-a)
+        dot   (thi/id :dot)
+        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page page)
+                                          (pcb/set-timeline board
+                                                            (cta/set-follow (get-in page [:timelines board])
+                                                                            dot {:leader (thi/id :lead)}))))
+        page  (thf/current-page file)
+        files {(:id file) file}
+        kept  (dwa/board-export-timeline page files board)
+        baked (dwa/board-export-timeline page files board :bake? true)]
+    (t/is (some? (get-in kept [:tracks dot :follow])) "the video exports play the follow")
+    (t/is (nil? (get-in baked [:tracks dot :follow])))
+    (t/is (some #(= :x (:property %)) (get-in baked [:tracks dot :keyframes])) "SVG, Lottie and CSS read keyframes")))
+

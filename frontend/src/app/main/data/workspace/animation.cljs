@@ -182,24 +182,26 @@
   own, with the animations of the component copies in it and the sound
   of their mains (see `cltl/with-instance-tracks` and
   `cltl/with-instance-clips`) and, while it has no tracks, keeping time
-  with them; the layers that follow others play keyframes (see
-  `cta/bake-follows`), which the markup exports read. Nil when the board
+  with them. With `bake?`, for the exports that read keyframes (SVG,
+  Lottie, CSS), the layers that follow others play keyframes (see
+  `cta/bake-follows`); the others play their follows. Nil when the board
   has no timeline and no animated copies.
   `files` holds the files of the components, by id. With `text-split`
   `:whole`, every split animation plays as an animation of its whole
   text, as the markup exports (CSS, SVG and Lottie) play them (see
   `cta/flatten-splits`)."
-  [page files board-id & {:keys [text-split]}]
+  [page files board-id & {:keys [text-split bake?]}]
   (let [objects   (:objects page)
         timelines (:timelines page)
         stored?   (contains? timelines board-id)
         copies    (copy-timelines objects timelines files board-id)]
     (when-let [own (when (or stored? (seq copies))
                      (board-timeline timelines (get objects board-id)))]
-      (-> (cond-> own (= :whole text-split) cta/flatten-splits)
-          (cta/bake-follows objects)
+      (-> (cond-> own
+            (= :whole text-split) cta/flatten-splits
+            bake?                 (cta/bake-follows objects))
           (cltl/with-copies-clock (vals copies) stored?)
-          (cltl/with-instance-tracks (vals copies) objects :text-split text-split)
+          (cltl/with-instance-tracks (vals copies) objects :text-split text-split :bake? bake?)
           (cltl/with-instance-clips copies)))))
 
 (defn export-timeline
@@ -2562,7 +2564,7 @@
   (ptk/reify ::export-css
     ptk/EffectEvent
     (effect [_ state _]
-      (when-let [tl (export-timeline state :text-split :whole)]
+      (when-let [tl (export-timeline state :text-split :whole :bake? true)]
         (let [objects (dsh/lookup-page-objects state)
               css     (acss/timeline->css tl objects)
               blob    (wapi/create-blob css "text/css")]
@@ -2575,7 +2577,7 @@
   (ptk/reify ::export-lottie
     ptk/EffectEvent
     (effect [_ state _]
-      (when-let [tl (export-timeline state :text-split :whole)]
+      (when-let [tl (export-timeline state :text-split :whole :bake? true)]
         (let [objects (dsh/lookup-page-objects state)
               data    (alottie/timeline->lottie tl objects)
               json    (js/JSON.stringify (clj->js data) nil 2)

@@ -1472,11 +1472,15 @@
 (t/deftest the-exports-play-the-follows-of-copies-by-keyframes
   (let [{:keys [objects board copy main-page]} (component-scene (following-component-file :main-rect))
         copies   (cltl/instance-timelines objects board nil main-page)
-        exported (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000}) (vals copies) objects)
+        exported (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000}) (vals copies) objects
+                   :bake? true)
         track    (get-in exported [:tracks (copy-of objects copy :main-dot)])
         xs       (->> (:keyframes track) (filter #(= :x (:property %))) (sort-by :time) (map :value))]
     (t/is (nil? (:follow track)))
-    (t/is (mth/close? 50 (- (last xs) (first xs)) 0.5) "it moves 50 as the rect of its copy does")))
+    (t/is (mth/close? 50 (- (last xs) (first xs)) 0.5) "it moves 50 as the rect of its copy does")
+    (t/testing "only the exports that read keyframes bake it"
+      (let [kept (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000}) (vals copies) objects)]
+        (t/is (some? (get-in kept [:tracks (copy-of objects copy :main-dot) :follow])))))))
 
 (t/deftest a-layer-follows-one-of-its-board-only
   (let [file    (-> (following-file)
