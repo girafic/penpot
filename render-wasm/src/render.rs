@@ -370,6 +370,15 @@ fn exit_pops_nested_stacks(element: &Shape, visited_mask: bool) -> bool {
     !(visited_mask && element.is_masked_group())
 }
 
+/// Whether drawing `shape` changes the matrix of the canvas, which it must
+/// then restore: a clip, an offset, a transform of its own, or the move a
+/// modifier gives an SVG element (`svg_transform`, as its box only moves).
+/// Left on the canvas, the move of an SVG element went on to every shape
+/// drawn after it on that surface, as in the mask of a masked group.
+fn shape_draw_needs_save(shape: &Shape, clipped: bool, offset: bool) -> bool {
+    clipped || offset || !shape.transform.is_identity() || shape.svg_transform().is_some()
+}
+
 /// Whether this pass draws strokes over the children: all of them for a
 /// clipped frame, only the inner one otherwise.
 fn exit_draws_strokes_over_children(element: &Shape, visited_mask: bool) -> bool {
@@ -1658,8 +1667,7 @@ impl RenderState {
 
         // Only save canvas state if we have clipping or transforms
         // For simple shapes without clipping, skip expensive save/restore
-        let needs_save =
-            clip_bounds.is_some() || offset.is_some() || !shape.transform.is_identity();
+        let needs_save = shape_draw_needs_save(shape, clip_bounds.is_some(), offset.is_some());
 
         if needs_save {
             self.surfaces.apply_mut(surface_ids, |s| {
@@ -5164,6 +5172,33 @@ fn shape_layer_paint(element: &Shape) -> skia::Paint {
 mod tests {
     use super::*;
     use crate::shapes::{Frame, Group, Rect as RectType, Shadow, ShadowStyle};
+
+    #[test]
+    fn a_moved_svg_element_restores_the_canvas() {
+        let mut svg = Shape::new(Uuid::new_v4());
+        svg.set_svg_raw_content("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>".to_string());
+        svg.set_selrect(0.0, 0.0, 100.0, 100.0);
+        assert!(
+            !shape_draw_needs_save(&svg, false, false),
+            "at rest it changes nothing"
+        );
+
+        svg.apply_transform(&Matrix::translate((40.0, 0.0)));
+        assert!(svg.transform.is_identity(), "a move only moves its box");
+        assert!(
+            shape_draw_needs_save(&svg, false, false),
+            "but its content moves on the canvas"
+        );
+
+        let mut rect = Shape::new(Uuid::new_v4());
+        rect.set_shape_type(Type::Rect(RectType::default()));
+        rect.set_selrect(0.0, 0.0, 100.0, 100.0);
+        rect.apply_transform(&Matrix::translate((40.0, 0.0)));
+        assert!(
+            !shape_draw_needs_save(&rect, false, false),
+            "a moved rect draws in place"
+        );
+    }
 
     fn shadowed_group(style: ShadowStyle) -> Shape {
         let mut group = Shape::new(Uuid::new_v4());
