@@ -181,7 +181,7 @@
         board (thi/id :board-a)
         dot   (thi/id :dot)
         kept  (dwa/board-export-timeline page files board)
-        baked (dwa/board-export-timeline page files board :bake? true)]
+        baked (dwa/board-export-timeline page files board :bake true)]
     (t/is (some? (get-in kept [:tracks dot :follow])) "the video exports play the follow")
     (t/is (nil? (get-in baked [:tracks dot :follow])))
     (t/is (some #(= :x (:property %)) (get-in baked [:tracks dot :keyframes])) "SVG, Lottie and CSS read keyframes")

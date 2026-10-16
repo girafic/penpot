@@ -10,6 +10,7 @@
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
    [app.common.logic.libraries :as cll]
    [app.common.logic.shapes :as cls]
@@ -1472,15 +1473,43 @@
 (t/deftest the-exports-play-the-follows-of-copies-by-keyframes
   (let [{:keys [objects board copy main-page]} (component-scene (following-component-file :main-rect))
         copies   (cltl/instance-timelines objects board nil main-page)
-        exported (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000}) (vals copies) objects
-                   :bake? true)
+        exported (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000}) (vals copies) objects)
         track    (get-in exported [:tracks (copy-of objects copy :main-dot)])
         xs       (->> (:keyframes track) (filter #(= :x (:property %))) (sort-by :time) (map :value))]
     (t/is (nil? (:follow track)))
-    (t/is (mth/close? 50 (- (last xs) (first xs)) 0.5) "it moves 50 as the rect of its copy does")
-    (t/testing "only the exports that read keyframes bake it"
-      (let [kept (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000}) (vals copies) objects)]
-        (t/is (some? (get-in kept [:tracks (copy-of objects copy :main-dot) :follow])))))))
+    (t/is (mth/close? 50 (- (last xs) (first xs)) 0.5) "it moves 50 as the rect of its copy does")))
+
+(defn- centre-in
+  "Where the layer `id` of `objects` is, moved by the modif-tree `tree`."
+  [tree objects id]
+  (let [mods  (get-in tree [id :modifiers])
+        shape (cond-> (get objects id) (some? mods) (gsh/transform-shape mods))
+        c     (grc/rect->center (:selrect shape))]
+    [(:x c) (:y c)]))
+
+(t/deftest the-exports-play-the-follows-of-retimed-copies-as-the-canvas
+  ;; a copy at twice the pace, and a copy playing there and back: its
+  ;; dot follows the rect 200 ms later on the clock of the copy
+  (doseq [[clock playback] [[{:start 0 :speed 2} :loop] [{:start 0 :speed 1} :ping-pong]]]
+    (let [file   (following-component-file :main-rect)
+          main   (thi/id :main)
+          page   (thf/current-page file)
+          tl     (-> (get-in page [:timelines main])
+                     (assoc :playback playback)
+                     (cta/set-follow (thi/id :main-dot) {:leader (thi/id :main-rect) :delay 200}))
+          file   (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                             (pcb/with-page page)
+                                             (pcb/set-timeline main tl)))
+          {:keys [objects board copy main-page]} (component-scene file)
+          host   (cta/set-copy-clock (cta/make-timeline {:board-id board :duration 2000}) copy clock)
+          copies (cltl/instance-timelines objects board host main-page)
+          export (cltl/with-instance-tracks host (vals copies) objects)
+          dot    (copy-of objects copy :main-dot)]
+      (doseq [t [300 450 1200 1500]]
+        (let [[cx cy] (centre-in (cltl/animation-tree copies objects t) objects dot)
+              [ex ey] (centre-in (cta/timeline->modif-tree export objects t) objects dot)]
+          (t/is (and (mth/close? cx ex 1) (mth/close? cy ey 1))
+                (str playback " at " t ": canvas " [cx cy] ", export " [ex ey])))))))
 
 (t/deftest a-layer-follows-one-of-its-board-only
   (let [file    (-> (following-file)
@@ -1554,3 +1583,26 @@
                  (cta/add-keyframe rect {:time 0 :property :y :value 50})
                  (cta/add-keyframe rect {:time 1000 :property :y :value 90}))]
       (t/is (cltl/can-follow? objects tl (thi/id :dot-b) rect) "animated by the board itself"))))
+
+(defn- pasted-follow
+  "How a copy of the dot of `grouped-following-file` pasted into the layer
+  `parent` follows (see `cta/follow-of`)."
+  [parent]
+  (let [file    (grouped-following-file)
+        page    (thf/current-page file)
+        objects (:objects page)
+        copy-id (uuid/next)
+        copy    (assoc (get objects (thi/id :dot)) :id copy-id :parent-id (thi/id parent))
+        changes (-> (pcb/empty-changes nil)
+                    (pcb/with-page page)
+                    (pcb/with-objects objects)
+                    (pcb/add-object copy))
+        changes (cltl/generate-copy-timelines changes page {(thi/id :dot) copy-id}
+                                              (cltl/animation-sources page objects #{(thi/id :dot)}))]
+    (cta/follow-of (get (timelines (thf/apply-changes file changes)) (thi/id :board-a)) copy-id)))
+
+(t/deftest a-follower-pasted-into-its-leader-follows-no-more
+  ;; each call makes its file: read the ids after it
+  (let [beside (pasted-follow :board-a)]
+    (t/is (= (thi/id :group) (:leader beside)) "pasted beside it, it follows the group"))
+  (t/is (nil? (pasted-follow :group)) "pasted into it, it moves with it already"))

@@ -1884,7 +1884,7 @@
   so it stops between them when `cancelled?`."
   [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled? ids? bbox?
            outline? preview?]}]
-  (let [tl       (dwa/board-export-timeline page files board-id :bake? true)
+  (let [tl       (dwa/board-export-timeline page files board-id :bake true)
         objects  (:objects page)
         board    (get objects board-id)
         ;; split texts play their units, each on its own
