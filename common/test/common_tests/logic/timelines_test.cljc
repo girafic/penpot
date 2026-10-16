@@ -1416,6 +1416,50 @@
   (let [file (delete (following-file) :rect)]
     (t/is (nil? (cta/follow-of (get (timelines file) (thi/id :board-a)) (thi/id :dot))))))
 
+(defn- reaching-board-file
+  "`animated-file` with an arm in board A (an upper arm, a forearm
+  following it and a hand following that) whose hand reaches a ball."
+  []
+  (let [file (-> (animated-file)
+                 (ths/add-sample-shape :upper :type :rect :parent-label :board-a
+                                       :x 120 :y 300 :width 100 :height 10)
+                 (ths/add-sample-shape :fore :type :rect :parent-label :board-a
+                                       :x 220 :y 300 :width 100 :height 10)
+                 (ths/add-sample-shape :hand :type :rect :parent-label :board-a
+                                       :x 320 :y 295 :width 20 :height 20)
+                 (ths/add-sample-shape :ball :type :rect :parent-label :board-a
+                                       :x 300 :y 350 :width 10 :height 10))
+        a    (thi/id :board-a)
+        tl   (-> (get (timelines file) a)
+                 (cta/set-follow (thi/id :fore) {:leader (thi/id :upper)})
+                 (cta/set-follow (thi/id :hand) {:leader (thi/id :fore)})
+                 (cta/set-ik (thi/id :hand) {:goal (thi/id :ball) :bend :cw}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline a tl)))))
+
+(t/deftest a-copied-board-reaches-in-its-copy
+  (let [file    (reaching-board-file)
+        page    (thf/current-page file)
+        a       (thi/id :board-a)
+        changes (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                (:objects page) page #{a} (gpt/point 500 0)
+                                                {(:id file) file} (:data file) (:id file))
+        copy-of (into {} (keep #(when (= :add-obj (:type %)) [(:old-id %) (-> % :obj :id)])) (:redo-changes changes))
+        file    (thf/apply-changes file changes)
+        tl      (get (timelines file) (copy-of a))]
+    (t/is (= {:goal (copy-of (thi/id :ball)) :bend :cw} (get-in tl [:tracks (copy-of (thi/id :hand)) :ik]))
+          "the copy of its goal")
+    (t/is (cta/valid-timeline? tl))))
+
+(t/deftest a-goal-moved-out-of-the-board-or-deleted-is-reached-no-more
+  (let [moved   (relocate (reaching-board-file) :ball :board-b)
+        deleted (delete (reaching-board-file) :ball)]
+    (t/is (nil? (cta/ik-of (get (timelines moved) (thi/id :board-a)) (thi/id :hand))))
+    (t/is (nil? (cta/ik-of (get (timelines deleted) (thi/id :board-a)) (thi/id :hand))))
+    (t/is (some? (cta/follow-of (get (timelines deleted) (thi/id :board-a)) (thi/id :hand)))
+          "it follows still")))
+
 (defn- following-component-file
   "A component whose main holds a rect moving from 10 to 60 in 1 s, a dot
   that follows the layer `leader` and a still square; a copy of it in

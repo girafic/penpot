@@ -153,30 +153,43 @@
 
 (defn- copied-follow
   "`track` of a copy in `new-board` of `objects`, following (see
-  `cta/follow-of`) the copy of its leader when that was copied too (in
-  `ids-map`), else its leader still, as long as it is placed to follow
-  it (see `placed-to-follow?`), else nothing."
+  `cta/follow-of`) and reaching (see `cta/ik-of`) the copies of its
+  leader and goal when they were copied too (in `ids-map`), else its
+  leader and goal still, each as long as it is placed for it (see
+  `placed-to-follow?`), else nothing."
   [track ids-map objects new-board]
-  (if-let [leader (dm/get-in track [:follow :leader])]
-    (let [leader (get ids-map leader leader)]
-      (if (placed-to-follow? objects new-board (:shape-id track) leader)
-        (assoc-in track [:follow :leader] leader)
-        (dissoc track :follow)))
-    track))
+  (let [placed #(when (some? %)
+                  (let [other (get ids-map % %)]
+                    (when (placed-to-follow? objects new-board (:shape-id track) other)
+                      other)))
+        leader (dm/get-in track [:follow :leader])
+        goal   (dm/get-in track [:ik :goal])]
+    (cond-> track
+      (some? leader)
+      (as-> track (if-let [leader (placed leader)]
+                    (assoc-in track [:follow :leader] leader)
+                    (dissoc track :follow)))
+
+      (some? goal)
+      (as-> track (if-let [goal (placed goal)]
+                    (assoc-in track [:ik :goal] goal)
+                    (dissoc track :ik))))))
 
 (defn- strayed-follows-dropped
   "`timelines` (of the shapes `objects`) without the follows of layers
   whose leaders are gone, out of the board of their timeline, or now in
-  them or holding them (see `placed-to-follow?`)."
+  them or holding them (see `placed-to-follow?`), nor the goals (see
+  `cta/ik-of`) so placed."
   [timelines objects]
   (reduce-kv
    (fn [timelines board-id timeline]
      (reduce-kv (fn [timelines id track]
-                  (let [leader (dm/get-in track [:follow :leader])]
-                    (if (and (some? leader)
-                             (not (placed-to-follow? objects board-id id leader)))
-                      (update timelines board-id cta/set-follow id nil)
-                      timelines)))
+                  (let [leader  (dm/get-in track [:follow :leader])
+                        goal    (dm/get-in track [:ik :goal])
+                        strayed #(and (some? %) (not (placed-to-follow? objects board-id id %)))]
+                    (cond-> timelines
+                      (strayed leader) (update board-id cta/set-follow id nil)
+                      (strayed goal)   (update board-id cta/set-ik id nil))))
                 timelines
                 (:tracks timeline)))
    timelines
@@ -547,9 +560,10 @@
 
 (defn- copy-follows
   "`result` (see `instance-timelines`) with the followers in the
-  timelines of the copy `head-id` following the copies of their leaders,
-  by `refs` (the main shape each copy shape plays, to that copy shape);
-  a follow whose leader plays nothing there is dropped."
+  timelines of the copy `head-id` following the copies of their leaders
+  and reaching the copies of their goals, by `refs` (the main shape each
+  copy shape plays, to that copy shape); a follow or goal whose layer
+  plays nothing there is dropped."
   [result head-id refs]
   (reduce-kv
    (fn [result k entry]
@@ -559,13 +573,22 @@
                       (fn [tracks]
                         (reduce-kv
                          (fn [tracks id track]
-                           (if-let [leader (dm/get-in track [:follow :leader])]
-                             (let [copy (get refs leader)]
+                           (let [leader (dm/get-in track [:follow :leader])
+                                 goal   (dm/get-in track [:ik :goal])
+                                 copy   #(let [copy (get refs %)] (when (contains? tracks copy) copy))]
+                             (if (or (some? leader) (some? goal))
                                (assoc tracks id
-                                      (if (contains? tracks copy)
-                                        (assoc-in track [:follow :leader] copy)
-                                        (dissoc track :follow))))
-                             tracks))
+                                      (cond-> track
+                                        (some? leader)
+                                        (as-> track (if-let [leader (copy leader)]
+                                                      (assoc-in track [:follow :leader] leader)
+                                                      (dissoc track :follow)))
+
+                                        (some? goal)
+                                        (as-> track (if-let [goal (copy goal)]
+                                                      (assoc-in track [:ik :goal] goal)
+                                                      (dissoc track :ik)))))
+                               tracks)))
                          tracks
                          tracks))))
        result))
@@ -852,7 +875,8 @@
   a text) is true of, which the code plays by units (see
   `cta/unit-timelines`); and `:splits`, the texts the design plays by
   units, with their kind. The layers that follow others play keyframes
-  (see `cta/bake-follows`). Nil when the board plays nothing."
+  (see `cta/bake-follows`); helper layers play nothing (see
+  `cta/drop-guides`). Nil when the board plays nothing."
   [page files board-id & {:keys [units?] :or {units? (constantly false)}}]
   (let [objects   (:objects page)
         timelines (:timelines page)
@@ -868,6 +892,7 @@
             splits (split-kinds (cons own (map :timeline copies)) objects)
             ;; lines play whole: a page breaks them as its width says
             flat   #(-> (cta/bake-follows % objects)
+                        (cta/drop-guides)
                         (cta/flatten-splits #{:char :word} (fn [id] (units? (get objects id)))))
             copies (mapv #(update % :timeline flat) copies)]
         {:board-id board-id

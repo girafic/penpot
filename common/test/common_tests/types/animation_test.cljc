@@ -5416,3 +5416,46 @@
                (cta/add-keyframe goal {:time 1000 :property :x :value 180})
                (cta/set-ik arm-hand {:goal goal}))]
     (t/is (near? (pivot-at tl objects goal 300) (pivot-at tl objects arm-hand 300 :back? true)))))
+
+(t/deftest a-reaching-arm-bakes-into-keyframes-that-play-alike
+  (let [{:keys [tl objects arm-upper arm-fore arm-hand goal]} (arm-scene)
+        tl    (-> tl
+                  (cta/add-keyframe goal {:time 0 :property :x :value 240 :easing :linear})
+                  (cta/add-keyframe goal {:time 1000 :property :x :value 180})
+                  (cta/add-keyframe goal {:time 0 :property :y :value 140 :easing :ease-in-out})
+                  (cta/add-keyframe goal {:time 1000 :property :y :value 170})
+                  (cta/set-ik arm-hand {:goal goal}))
+        alike (fn [tl baked]
+                (every? (fn [t]
+                          (every? #(let [a (pivot-at tl objects % t)
+                                         b (pivot-at baked objects % t)]
+                                     (and (mth/close? (:x a) (:x b) 0.5) (mth/close? (:y a) (:y b) 0.5)))
+                                  [arm-upper arm-fore arm-hand]))
+                        (range 0 1001 25)))
+        baked (cta/bake-follows tl objects)]
+    (t/is (cta/valid-timeline? baked))
+    (t/is (nil? (get-in baked [:tracks arm-hand :ik])) "no goal left to reach")
+    (t/is (seq (baked-property baked arm-upper :rotation)) "the shoulder turns by keyframes")
+    (t/is (alike tl baked))
+    (t/testing "a shoulder turning on its centre, with no track"
+      (let [tl    (update tl :tracks dissoc arm-upper)
+            baked (cta/bake-follows tl objects)]
+        (t/is (nil? (get-in tl [:tracks arm-upper])))
+        (t/is (= arm-upper (get-in baked [:tracks arm-upper :shape-id])))
+        (t/is (cta/valid-timeline? baked))
+        (t/is (alike tl baked))))))
+
+(t/deftest guides-play-in-no-export
+  (let [{:keys [tl arm-hand goal]} (arm-scene)
+        tl (-> tl
+               (cta/add-keyframe goal {:time 0 :property :x :value 240})
+               (cta/set-guide goal true)
+               (cta/set-ik arm-hand {:goal goal}))]
+    (t/is (not (contains? (:tracks (cta/drop-guides tl)) goal)))
+    (t/is (contains? (:tracks (cta/drop-guides tl)) arm-hand))))
+
+(t/deftest a-deleted-goal-is-reached-no-more
+  (let [{:keys [tl arm-hand goal]} (arm-scene)
+        tl (cta/remove-shapes (cta/set-ik tl arm-hand {:goal goal}) [goal])]
+    (t/is (nil? (cta/ik-of tl arm-hand)))
+    (t/is (some? (cta/follow-of tl arm-hand)))))

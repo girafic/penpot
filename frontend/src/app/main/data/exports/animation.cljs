@@ -1896,14 +1896,50 @@
                     (map-indexed vector drawn))]
       {:images images :fonts fonts :objects view})))
 
+(defn guide-ids
+  "The helper layers of the board `board-id` of `page` the exports leave
+  out, as goal rings (see `cta/guide?`)."
+  [page board-id]
+  (let [timeline (dm/get-in page [:timelines board-id])]
+    (into #{}
+          (filter #(and (cta/guide? timeline %) (contains? (:objects page) %)))
+          (keys (:tracks timeline)))))
+
+(defn- without-layers
+  "`objects` without the layers `ids`."
+  [objects ids]
+  (reduce (fn [objects id]
+            (let [parent (dm/get-in objects [id :parent-id])]
+              (-> (dissoc objects id)
+                  (d/update-in-when [parent :shapes] (fn [shapes] (filterv #(not= id %) shapes))))))
+          objects
+          ids))
+
+(defn guides-hidden
+  "The promise `f` gives, with the layers `guides` of `objects` hidden in
+  WASM through `bridge` while it runs, shown as they were after."
+  [bridge objects guides f]
+  (let [{:keys [use-shape set-shape-hidden]} bridge
+        hide! (fn [hide?]
+                (when (and use-shape set-shape-hidden)
+                  (doseq [id guides]
+                    (use-shape id)
+                    (set-shape-hidden (or hide? (boolean (dm/get-in objects [id :hidden])))))))]
+    (hide! true)
+    (-> (js/Promise.resolve nil)
+        (.then (fn [_] (f)))
+        (.finally #(hide! false)))))
+
 (defn- markup-export
   "A promise of the markup export (`:svg` `:lottie` `:dotlottie`) of
   `opts` (see `run-export`): the pictures of its layers one at a time,
-  so it stops between them when `cancelled?`."
+  so it stops between them when `cancelled?`. The helper layers (see
+  `guide-ids`) are left out, once what reaches them plays by keyframes."
   [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled? ids? bbox?
            outline? preview?]}]
-  (let [tl       (dwa/board-export-timeline page files board-id :bake true)
-        objects  (:objects page)
+  (let [guides   (guide-ids page board-id)
+        tl       (dwa/board-export-timeline page files board-id :bake true)
+        objects  (without-layers (:objects page) guides)
         board    (get objects board-id)
         ;; split texts play their units, each on its own
         texts    (unit-texts objects tl)
@@ -2006,23 +2042,25 @@
   :name :ext :mtype}` with what `export-notes` tells, `{:status
   :unavailable}` (no codec), or `{:status :nothing}` (nothing plays);
   `cancel` makes it reject with `:export-cancelled` at its next frame or
-  picture."
+  picture. The helper layers (see `guide-ids`) are in no export."
   [{:keys [page files board-id] :as ctx} params]
   (let [cancel? (atom false)
         opts    (-> (merge ctx params)
                     (update :bridge #(or % (default-bridge)))
                     (assoc :cancelled? #(deref cancel?)))]
     {:cancel  #(reset! cancel? true)
-     :promise (cond
-                (nil? (dwa/board-export-timeline page files board-id))
-                (js/Promise.resolve {:status :nothing})
+     :promise (guides-hidden
+               (:bridge opts) (:objects page) (guide-ids page board-id)
+               #(cond
+                  (nil? (dwa/board-export-timeline page files board-id))
+                  (js/Promise.resolve {:status :nothing})
 
-                ;; a native promise, as the others (`p/let` makes one of promesa)
-                (contains? markup-formats (:format params))
-                (js/Promise.resolve (markup-export opts))
+                  ;; a native promise, as the others (`p/let` makes one of promesa)
+                  (contains? markup-formats (:format params))
+                  (js/Promise.resolve (markup-export opts))
 
-                :else
-                (raster-export opts))}))
+                  :else
+                  (raster-export opts)))}))
 
 (defn- file-names
   "The names in a ZIP of the files of `results` (see `run-export`): each

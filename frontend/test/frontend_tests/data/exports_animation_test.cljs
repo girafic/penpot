@@ -346,6 +346,31 @@
     (t/is (< (js/Math.abs (- 12 (moved false))) 0.01) "there: where the rect was at 300 ms")
     (t/is (< (js/Math.abs (- 28 (moved true))) 0.01) "back: where it was at 700 ms, on its way back")))
 
+(t/deftest guides-are-in-no-export
+  (let [{:keys [objects bid cid]} (test-objects)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe cid {:time 0 :property :x :value 10})
+                   (cta/set-guide cid true))
+        page   {:objects objects :timelines {bid tl}}
+        calls  (atom [])
+        bridge {:use-shape #(swap! calls conj [:use %])
+                :set-shape-hidden #(swap! calls conj [:hidden %])}]
+    (t/is (= #{cid} (dea/guide-ids page bid)))
+    (t/is (empty? (:tracks (dwa/board-export-timeline page {} bid :bake true)))
+          "the keyframe exports play nothing of it")
+    (t/async
+      done
+      (-> (dea/guides-hidden bridge objects #{cid}
+                             (fn []
+                               (swap! calls conj :export)
+                               (js/Promise.resolve :done)))
+          (.then (fn [result]
+                   (t/is (= :done result))
+                   (t/is (= [[:use cid] [:hidden true] :export [:use cid] [:hidden false]] @calls)
+                         "hidden while it exports, shown as it was after")))
+          (.catch (fn [cause] (t/is false (ex-message cause))))
+          (.finally (finish done))))))
+
 (def ^:private *closed (atom 0))
 
 (defn- fake-format []

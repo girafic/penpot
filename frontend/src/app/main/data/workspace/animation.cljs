@@ -184,7 +184,8 @@
   `cltl/with-instance-clips`) and, while it has no tracks, keeping time
   with them. With `bake`, for the exports that read keyframes (SVG,
   Lottie, CSS), the layers of the board that follow others play
-  keyframes (see `cta/bake-follows`); the others play their follows
+  keyframes (see `cta/bake-follows`) and its helper layers nothing (see
+  `cta/drop-guides`); the others play their follows
   (those of copies always play keyframes, see
   `cltl/with-instance-tracks`). Nil when the board has no timeline and
   no animated copies.
@@ -201,7 +202,7 @@
                      (board-timeline timelines (get objects board-id)))]
       (-> (cond-> own
             (= :whole text-split) cta/flatten-splits
-            bake                  (cta/bake-follows objects))
+            bake                  (-> (cta/bake-follows objects) (cta/drop-guides)))
           (cltl/with-copies-clock (vals copies) stored?)
           (cltl/with-instance-tracks (vals copies) objects :text-split text-split)
           (cltl/with-instance-clips copies)))))

@@ -1007,6 +1007,13 @@
       (store-track timeline shape-id (dissoc track :ik))
       timeline)))
 
+(defn drop-guides
+  "`timeline` without the tracks of its helper layers (see `guide?`), for
+  the exports that leave them out, once what reaches them plays by
+  keyframes (see `bake-follows`)."
+  [timeline]
+  (update timeline :tracks #(into {} (remove (fn [[_ track]] (:guide track))) %)))
+
 (defn guide?
   "Whether `shape-id` is a helper layer of `timeline` the exports leave
   out, as a goal ring (see `schema:ik`)."
@@ -3794,7 +3801,7 @@
                                    [property (thin-samples (map vector (map first samples) values) tol)]))))
                        (keys bake-tolerances))]
     (-> track
-        (dissoc :follow)
+        (dissoc :follow :ik)
         (update :keyframes (fn [keyframes]
                              (->> (remove #(and (contains? baked (:property %)) (nil? (:index %))) keyframes)
                                   (concat (for [[property samples] baked
@@ -3847,8 +3854,10 @@
     (let [timeline (cond-> timeline
                      (= :ping-pong (playback-mode timeline)) (round-trip objects))
           resolved (resolve-animations timeline objects)
-          follows  (followers resolved objects)
-          ids      (follow-chain resolved follows)
+          chains   (vals (ik-chains resolved objects))
+          ;; the followers, and the upper links of chains that reach
+          follows  (into (followers resolved objects) (map :a) chains)
+          ids      (follow-chain resolved (into follows (map :goal) chains))
           played   (update resolved :tracks select-keys ids)
           times    (frame-times (:duration timeline) fps)
           frames   (mapv (fn [t]
@@ -3867,13 +3876,21 @@
                          follows)]
       (update timeline :tracks
               (fn [tracks]
-                (reduce-kv (fn [tracks id track]
-                             (let [track (or (get baked id) (dissoc track :follow))]
-                               (if (empty-track? track)
-                                 (dissoc tracks id)
-                                 (assoc tracks id track))))
-                           tracks
-                           tracks))))))
+                (as-> tracks tracks
+                  (reduce-kv (fn [tracks id track]
+                               (let [track (or (get baked id) (dissoc track :follow :ik))]
+                                 (if (empty-track? track)
+                                   (dissoc tracks id)
+                                   (assoc tracks id track))))
+                             tracks
+                             tracks)
+                  ;; an upper link that only turns around its centre
+                  (reduce-kv (fn [tracks id track]
+                               (cond-> tracks
+                                 (and (not (contains? tracks id)) (not (empty-track? track)))
+                                 (assoc id (assoc track :shape-id id))))
+                             tracks
+                             baked)))))))
 
 (defn timeline->opacity
   "Compute `{shape-id opacity}` for every shape that animates opacity at
@@ -4393,15 +4410,16 @@
 
 (defn remove-shapes
   "Drop the tracks targeting any of `shape-ids`, the follows of the
-  layers that follow them, and the clocks of the component copies among
-  them (used when shapes are deleted). Returns the updated timeline."
+  layers that follow them and the goals of those that reach them, and the
+  clocks of the component copies among them (used when shapes are
+  deleted). Returns the updated timeline."
   [timeline shape-ids]
   (let [removed  (set shape-ids)
         timeline (update timeline :tracks #(apply dissoc % shape-ids))
         timeline (reduce-kv (fn [timeline id track]
-                              (if (contains? removed (dm/get-in track [:follow :leader]))
-                                (set-follow timeline id nil)
-                                timeline))
+                              (cond-> timeline
+                                (contains? removed (dm/get-in track [:follow :leader])) (set-follow id nil)
+                                (contains? removed (dm/get-in track [:ik :goal]))       (set-ik id nil)))
                             timeline
                             (:tracks timeline))]
     (if (contains? timeline :copies)
