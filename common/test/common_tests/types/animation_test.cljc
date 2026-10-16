@@ -5173,3 +5173,124 @@
       (t/is (mth/close? (opacity tl 50) (opacity baked 1950) 0.02) "a preset plays back too"))
     (let [still (update-in tl [:tracks follower] dissoc :follow)]
       (t/is (identical? still (cta/bake-follows still objects)) "without follows it stays ping-pong"))))
+
+;; --- Reaching a goal (two-bone IK) -----------------------------------------
+
+(defn- add-arm
+  "`scene` (`{:objects :tl}`) with an arm in the board `:board`, labelled
+  by `prefix`: an upper arm with its pivot at 100,`y`, a forearm following
+  it with its pivot at 200,`elbow-y` and a hand following that with its
+  pivot at 300,`y`; their ids under `:<prefix>-upper` and so on."
+  [{:keys [board] :as scene} prefix & {:keys [y elbow-y] :or {y 100}}]
+  (let [elbow-y (or elbow-y y)
+        in      (fn [shape] (assoc shape :parent-id board :frame-id board))
+        upper   (in (cts/setup-shape {:type :rect :x 100 :y (- y 5) :width 100 :height 10}))
+        fore    (in (cts/setup-shape {:type :rect :x 200 :y (- elbow-y 5) :width 100 :height 10}))
+        hand    (in (cts/setup-shape {:type :rect :x 300 :y (- y 10) :width 20 :height 20}))
+        k       #(keyword (str prefix "-" %))]
+    (-> scene
+        (update :objects into (map (juxt :id identity)) [upper fore hand])
+        (update-in [:objects board :shapes] into (map :id) [upper fore hand])
+        (update :tl #(-> %
+                         (cta/set-track-origin (:id upper) 0 0.5)
+                         (cta/set-track-origin (:id fore) 0 0.5)
+                         (cta/set-track-origin (:id hand) 0 0.5)
+                         (cta/set-follow (:id fore) {:leader (:id upper)})
+                         (cta/set-follow (:id hand) {:leader (:id fore)})))
+        (assoc (k "upper") (:id upper) (k "fore") (:id fore) (k "hand") (:id hand)))))
+
+(defn- add-layer
+  "`scene` with a 10 by 10 rect labelled `label` centred on `cx`,`cy`, in
+  `parent` (the board by default)."
+  [{:keys [board] :as scene} label cx cy & {:keys [parent] :or {parent board}}]
+  (let [shape (assoc (cts/setup-shape {:type :rect :x (- cx 5) :y (- cy 5) :width 10 :height 10})
+                     :parent-id parent :frame-id board)]
+    (-> scene
+        (update :objects assoc (:id shape) shape)
+        (update-in [:objects parent :shapes] (fnil conj []) (:id shape))
+        (assoc label (:id shape)))))
+
+(defn- arm-scene
+  "A board 400 by 400 with an arm (see `add-arm`, labelled `arm`) and a
+  goal centred on 245,145."
+  [& opts]
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 400})]
+    (-> {:board (:id board)
+         :objects {(:id board) (assoc board :shapes [])}
+         :tl (cta/make-timeline {:board-id (:id board) :name "Arm" :duration 1000})}
+        (as-> scene (apply add-arm scene "arm" opts))
+        (add-layer :goal 245 145))))
+
+(t/deftest an-ik-reads-with-its-defaults
+  (let [{:keys [tl goal arm-hand]} (arm-scene)
+        hand arm-hand
+        tl   (cta/set-ik tl hand {:goal goal})]
+    (t/is (= {:goal goal} (get-in tl [:tracks hand :ik])) "the defaults left out")
+    (t/is (= {:goal goal :bend :ccw :turn :chain} (cta/ik-of tl hand)))
+    (t/is (= {:goal goal :bend :cw :turn :keep}
+             (get-in (cta/set-ik tl hand {:goal goal :bend :cw :turn :keep}) [:tracks hand :ik])))
+    (t/is (cta/valid-timeline? (cta/set-ik tl hand {:goal goal :bend :cw :turn :goal})))
+    (t/is (nil? (cta/ik-of (cta/set-ik tl hand nil) hand)))
+    (t/is (some? (get-in (cta/set-follow tl hand nil) [:tracks hand :ik]))
+          "a track that reaches stays when it follows no more")
+    (t/testing "a guide"
+      (let [guided (cta/set-guide tl goal true)]
+        (t/is (cta/guide? guided goal))
+        (t/is (cta/valid-timeline? guided))
+        (t/is (not (contains? (:tracks (cta/set-guide guided goal false)) goal))
+              "nothing left of its track")))))
+
+(t/deftest ik-chains-take-two-links-that-follow-at-once
+  (let [{:keys [tl objects arm-upper arm-fore arm-hand goal] :as scene}
+        (-> (arm-scene)
+            (add-layer :away 600 600 :parent uuid/zero)
+            (as-> scene (add-layer scene :nested 150 100 :parent (:arm-upper scene))))
+        tl     (cta/set-ik tl arm-hand {:goal goal})
+        chains #(cta/ik-chains % objects)
+        none?  #(empty? (chains %))]
+    (t/is (= {arm-hand {:a arm-upper :b arm-fore :e arm-hand :goal goal :bend :ccw :turn :chain}} (chains tl)))
+    (t/is (none? (cta/set-follow tl arm-hand {:leader arm-fore :delay 50})) "a delay")
+    (t/is (none? (cta/set-follow tl arm-fore {:leader arm-upper :rotation false})) "no turn")
+    (t/is (none? (cta/set-follow tl arm-fore {:leader arm-upper :position false})) "no move")
+    (t/is (none? (cta/set-follow tl arm-fore nil)) "a missing link")
+    (t/is (none? (cta/set-ik tl arm-hand {:goal arm-fore})) "a goal in the chain")
+    (t/is (none? (cta/set-ik tl arm-hand {:goal (:nested scene)})) "a goal in a link")
+    (t/is (none? (cta/set-ik tl arm-hand {:goal (:away scene)})) "a goal off the board")
+    (t/is (none? (cta/set-ik tl arm-hand {:goal (:board scene)})) "the board")))
+
+(t/deftest ik-chains-that-loop-or-share-a-link-play-none
+  (let [{:keys [tl objects arm-hand arm-fore goal] :as scene}
+        (-> (arm-scene)
+            (add-arm "two" :y 200)
+            (add-layer :x 50 50))
+        two    (:two-hand scene)
+        chains #(set (keys (cta/ik-chains % objects)))]
+    (t/is (= #{arm-hand two} (chains (-> tl
+                                         (cta/set-ik arm-hand {:goal two})
+                                         (cta/set-ik two {:goal goal}))))
+          "one hand reaches for the other")
+    (t/is (= #{} (chains (-> tl
+                             (cta/set-ik arm-hand {:goal two})
+                             (cta/set-ik two {:goal arm-hand}))))
+          "each reaching for the other")
+    (t/is (= #{} (chains (-> tl
+                             (cta/set-follow (:x scene) {:leader arm-hand})
+                             (cta/set-follow goal {:leader (:x scene)})
+                             (cta/set-ik arm-hand {:goal goal}))))
+          "a goal that follows the hand, through another")
+    (let [{:keys [thumb objects]} (add-layer scene :thumb 300 120)
+          tl (-> tl
+                 (cta/set-follow thumb {:leader arm-fore})
+                 (cta/set-ik arm-hand {:goal goal})
+                 (cta/set-ik thumb {:goal (:x scene)}))]
+      (t/is (= #{} (set (keys (cta/ik-chains tl objects)))) "two chains sharing their links"))))
+
+(t/deftest the-natural-bend-is-the-side-the-arm-is-drawn-bent
+  (let [bend (fn [elbow-y]
+               (let [{:keys [tl objects arm-hand]} (arm-scene :elbow-y elbow-y)]
+                 (cta/natural-bend tl objects arm-hand)))]
+    (t/is (= :cw (bend 120)) "the elbow below a line pointing right")
+    (t/is (= :ccw (bend 80)))
+    (t/is (= :ccw (bend 100)) "straight")
+    (let [{:keys [tl objects arm-fore]} (arm-scene)]
+      (t/is (nil? (cta/natural-bend tl objects arm-fore)) "one link only"))))

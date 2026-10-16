@@ -1543,6 +1543,42 @@
                   (first (centre-in (cltl/view-animation-tree page {} a time elapsed) objects (thi/id :dot))))]
     (t/is (mth/close? 20 (- (dot-x 500 2500) (dot-x 500 500)) 0.5))))
 
+(defn- reaching-file
+  "`following-component-file` with an arm in board B (an upper arm, a
+  forearm following it, a hand following that) and a ball."
+  []
+  (let [file (-> (following-component-file :main-rect)
+                 (ths/add-sample-shape :upper :type :rect :parent-label :board-b
+                                       :x 1100 :y 300 :width 100 :height 10)
+                 (ths/add-sample-shape :fore :type :rect :parent-label :board-b
+                                       :x 1200 :y 300 :width 100 :height 10)
+                 (ths/add-sample-shape :hand :type :rect :parent-label :board-b
+                                       :x 1300 :y 295 :width 20 :height 20)
+                 (ths/add-sample-shape :ball :type :rect :parent-label :board-b
+                                       :x 1250 :y 350 :width 10 :height 10))
+        b    (thi/id :board-b)
+        tl   (-> (cta/make-timeline {:board-id b :duration 1000})
+                 (cta/set-follow (thi/id :fore) {:leader (thi/id :upper)})
+                 (cta/set-follow (thi/id :hand) {:leader (thi/id :fore)}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline b tl)))))
+
+(t/deftest a-hand-reaches-a-layer-of-its-board
+  (let [file    (reaching-file)
+        objects (:objects (thf/current-page file))
+        tl      (get (timelines file) (thi/id :board-b))
+        rect    (copy-of objects (thi/id :copy) :main-rect)
+        reach?  #(cltl/can-reach? objects %1 (thi/id :hand) %2)]
+    (t/is (reach? tl (thi/id :ball)))
+    (t/is (not (reach? tl (thi/id :fore))) "not a link of its chain")
+    (t/is (not (cltl/can-reach? objects tl (thi/id :fore) (thi/id :ball))) "a chain of one link")
+    (t/is (not (reach? tl rect)) "not a layer of a copy the board does not animate")
+    (t/is (reach? (cta/add-keyframe tl rect {:time 0 :property :x :value 1010}) rect))
+    (let [goals (set (cltl/reach-goals objects tl (thi/id :hand)))]
+      (t/is (contains? goals (thi/id :ball)) "the layers it can reach")
+      (t/is (not-any? goals [(thi/id :upper) (thi/id :fore) (thi/id :hand) (thi/id :copy) rect])))))
+
 (t/deftest a-layer-follows-one-of-its-board-only
   (let [file    (-> (following-file)
                     (tho/add-group :group :parent-label :board-a)

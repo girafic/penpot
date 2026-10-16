@@ -806,6 +806,25 @@
   (filterv #(can-follow? objects timeline shape-id %)
            (rest (layer-ids objects (:board-id timeline)))))
 
+(defn can-reach?
+  "Whether the layer `id` of the board of `timeline` (of `objects`) can
+  reach the layer `goal` (see `cta/schema:ik`): it ends a chain of two
+  follows, and the goal is another layer of the board out of the chain,
+  in none of its layers nor holding one, not led by it through follows
+  and the goals of other chains (see `cta/ik-chains`), nor a layer of a
+  component copy the board does not animate itself (see `can-follow?`)."
+  [objects timeline id goal]
+  (and (contains? (cta/ik-chains (cta/set-ik timeline id {:goal goal}) objects) id)
+       (or (nil? (dm/get-in objects [goal :shape-ref]))
+           (contains? (:tracks timeline) goal))))
+
+(defn reach-goals
+  "The layers of the board of `timeline` (of `objects`) that `id` can
+  reach (see `can-reach?`), in the order of the layers panel."
+  [objects timeline id]
+  (filterv #(can-reach? objects timeline id %)
+           (rest (layer-ids objects (:board-id timeline)))))
+
 (defn- split-kinds
   "`{text-id kind}`: the kind of units each text of the tracks of
   `timelines` plays its split animations by (see `cta/unit-split-kind`)."

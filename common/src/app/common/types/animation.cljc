@@ -318,6 +318,19 @@
    [:opacity {:optional true} :boolean]
    [:delay {:optional true} ::sm/safe-int]])
 
+(def schema:ik
+  "How the layer at the end of a chain of two follows (an arm: the hand
+  follows the forearm, which follows the upper arm, see `ik-chains`)
+  reaches the layer `:goal`: the two links turn so its pivot lands on
+  the goal's (inverse kinematics), the elbow bending clockwise (`:cw`)
+  or not (`:ccw`), the layer itself turning with the chain (`:chain`),
+  keeping its own angle (`:keep`) or taking the turn of the goal
+  (`:goal`). The defaults (`:ccw`, `:chain`) are stored as absence."
+  [:map {:title "AnimationIk"}
+   [:goal ::sm/uuid]
+   [:bend {:optional true} [:enum :cw :ccw]]
+   [:turn {:optional true} [:enum :chain :keep :goal]]])
+
 (def schema:track
   [:map {:title "AnimationTrack"}
    [:shape-id ::sm/uuid]
@@ -333,7 +346,10 @@
     [:map
      [:x ::sm/safe-number]
      [:y ::sm/safe-number]]]
-   [:follow {:optional true} schema:follow]])
+   [:follow {:optional true} schema:follow]
+   [:ik {:optional true} schema:ik]
+   ;; A helper layer the exports leave out, as a goal ring (see `set-guide`).
+   [:guide {:optional true} :boolean]])
 
 ;; What playback does at the end of a timeline: stop (`:once`), start
 ;; over (`:loop`) or play back to the start and on (`:ping-pong`).
@@ -910,12 +926,15 @@
     (assoc-in timeline [:tracks shape-id] {:shape-id shape-id :keyframes []})))
 
 (defn- empty-track?
-  "A track with nothing left: no keyframes, animations, origin or follow."
+  "A track with nothing left: no keyframes, animations, origin, follow,
+  goal to reach nor guide flag."
   [track]
   (and (empty? (:keyframes track))
        (empty? (:animations track))
        (nil? (:origin track))
-       (nil? (:follow track))))
+       (nil? (:follow track))
+       (nil? (:ik track))
+       (not (:guide track))))
 
 (defn set-track-origin
   "Set the scale/rotation pivot of `shape-id`. Values are 0–1 and
@@ -964,6 +983,46 @@
     (if (empty-track? track)
       (update timeline :tracks dissoc shape-id)
       (assoc-in timeline [:tracks shape-id] track))))
+
+(def ^:private ik-defaults
+  {:bend :ccw :turn :chain})
+
+(defn ik-of
+  "How `shape-id`, the end of a chain of two follows, reaches its goal
+  (see `schema:ik`), with the defaults; nil when it reaches none."
+  [timeline shape-id]
+  (when-let [ik (dm/get-in timeline [:tracks shape-id :ik])]
+    (merge ik-defaults ik)))
+
+(defn set-ik
+  "`timeline` with `shape-id` reaching the layer `:goal` of `ik` (see
+  `schema:ik`), or reaching none for nil; the defaults are left out."
+  [timeline shape-id ik]
+  (if (some? (:goal ik))
+    (let [ik     (select-keys ik [:goal :bend :turn])
+          stored (into {} (remove (fn [[k v]] (= v (get ik-defaults k ::none)))) ik)]
+      (-> (ensure-track timeline shape-id)
+          (assoc-in [:tracks shape-id :ik] stored)))
+    (if-let [track (get-track timeline shape-id)]
+      (store-track timeline shape-id (dissoc track :ik))
+      timeline)))
+
+(defn guide?
+  "Whether `shape-id` is a helper layer of `timeline` the exports leave
+  out, as a goal ring (see `schema:ik`)."
+  [timeline shape-id]
+  (true? (dm/get-in timeline [:tracks shape-id :guide])))
+
+(defn set-guide
+  "`timeline` with `shape-id` a helper layer the exports leave out, or
+  not (see `guide?`)."
+  [timeline shape-id guide?]
+  (if guide?
+    (-> (ensure-track timeline shape-id)
+        (assoc-in [:tracks shape-id :guide] true))
+    (if-let [track (get-track timeline shape-id)]
+      (store-track timeline shape-id (dissoc track :guide))
+      timeline)))
 
 (defn add-keyframe
   "Add a keyframe to the track of `shape-id`, creating the track if
@@ -3242,6 +3301,74 @@
                         (not (nested-layers? objects % (leader-of %)))))
           (keys (:tracks timeline)))))
 
+(defn- ik-links*
+  "`{:a :b}`, the links of the chain of two follows that ends at `id` in
+  `timeline`, `follows` its followers (see `followers`): `id` follows
+  `:b` and `:b` follows `:a`, each at once (no delay), taking where its
+  leader's pivot goes and how it turns, as joints do. Nil without such a
+  chain."
+  [timeline follows id]
+  (let [joint (fn [id]
+                (when (contains? follows id)
+                  (let [{:keys [leader position rotation delay]} (follow-of timeline id)]
+                    (when (and position rotation (zero? delay))
+                      leader))))]
+    (when-let [b (joint id)]
+      (when-let [a (joint b)]
+        {:a a :b b}))))
+
+(defn ik-links
+  "`{:a :b}`, the links of the chain of two follows that ends at the
+  layer `id` of `timeline` (of `objects`), see `schema:ik`; nil without
+  such a chain."
+  [timeline objects id]
+  (ik-links* timeline (followers timeline objects) id))
+
+(defn ik-chains
+  "The chains of `timeline` (of `objects`) whose end reaches a goal (see
+  `schema:ik`) as they play: `{effector {:a :b :e :goal :bend :turn}}`,
+  `:a` and `:b` its links (see `ik-links`). A goal must be another layer
+  of the board, out of the chain, neither in a layer of it nor holding
+  one; a layer may be in one chain only; and no goal may be led by a
+  layer of its chain, through follows and the goals of other chains.
+  The others play without reaching, every frame, as two edits from two
+  places may make a loop together."
+  [timeline objects]
+  (let [follows    (followers timeline objects)
+        board-id   (:board-id timeline)
+        candidates (into {}
+                         (keep (fn [[id track]]
+                                 (when-let [goal (dm/get-in track [:ik :goal])]
+                                   (when-let [{:keys [a b]} (ik-links* timeline follows id)]
+                                     (when (and (contains? objects goal)
+                                                (inside? objects goal board-id)
+                                                (not (contains? #{a b id} goal))
+                                                (not-any? #(nested-layers? objects goal %) [a b id]))
+                                       [id (merge {:a a :b b :e id} (ik-of timeline id))])))))
+                         (:tracks timeline))
+        layers     (juxt :a :b :e)
+        counts     (frequencies (mapcat layers (vals candidates)))
+        candidates (into {} (filter (fn [[_ chain]] (every? #(= 1 (get counts %)) (layers chain)))) candidates)
+        goal-of    (into {}
+                         (mapcat (fn [chain] (map (fn [id] [id (:goal chain)]) (layers chain))))
+                         (vals candidates))
+        leader-of  #(when (contains? follows %) (dm/get-in timeline [:tracks % :follow :leader]))
+        ;; whether `from` leads to one of `targets`, through follows and goals
+        reaches?   (fn [from targets]
+                     (loop [front [from] seen #{}]
+                       (if-let [id (peek front)]
+                         (cond
+                           (contains? targets id) true
+                           (contains? seen id)    (recur (pop front) seen)
+                           :else                  (recur (cond-> (pop front)
+                                                           (some? (leader-of id)) (conj (leader-of id))
+                                                           (some? (goal-of id))   (conj (goal-of id)))
+                                                         (conj seen id)))
+                         false)))]
+    (into {}
+          (remove (fn [[_ chain]] (reaches? (:goal chain) (set (layers chain)))))
+          candidates)))
+
 (defn- modifiers-opacity
   "The opacity `modifiers` give a shape, `default` when they give none."
   [modifiers default]
@@ -3449,6 +3576,28 @@
                  (update-in tree [shape-id :modifiers] ctm/change-property :text-units entries))
                tree
                (text-unit-entries resolved objects time))))
+
+(defn natural-bend
+  "The side the chain of two follows that ends at the layer `id` of
+  `timeline` (see `ik-links`) is drawn bent to at its first frame, as it
+  plays without reaching: `:cw` when its elbow is clockwise of the line
+  from its shoulder to its wrist (the pivots of its links and of `id`),
+  else `:ccw`, a straight chain too. Nil without such a chain."
+  [timeline objects id]
+  (when-let [{:keys [a b]} (ik-links timeline objects id)]
+    (let [free  (update timeline :tracks d/update-vals #(dissoc % :ik))
+          tree  (timeline->modif-tree free objects 0)
+          pivot (fn [x]
+                  (let [mods  (dm/get-in tree [x :modifiers])
+                        point (origin-point (get objects x) (track-origin (get-track timeline x)))]
+                    (cond-> point
+                      (some? mods) (gpt/transform (ctm/modifiers->transform mods)))))
+          s     (pivot a)
+          e     (pivot b)
+          w     (pivot id)
+          cross (- (* (- (:x e) (:x s)) (- (:y w) (:y s)))
+                   (* (- (:y e) (:y s)) (- (:x w) (:x s))))]
+      (if (< cross -1e-6) :cw :ccw))))
 
 ;; --- Baking follows ------------------------------------------------------
 
