@@ -410,6 +410,27 @@ $header-height: $ruler-height + $row-height;
   flex: none;
 }
 
+// The kinds of property the keys of After Effects show (P, S, R, T).
+.row-filter-props {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: deprecated.$s-2;
+  block-size: deprecated.$s-16;
+  padding-inline: deprecated.$s-4;
+  border: none;
+  border-radius: deprecated.$br-4;
+  background-color: var(--color-background-quaternary);
+  font-size: deprecated.$fs-11;
+  color: var(--color-foreground-primary);
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-accent-primary);
+  }
+}
+
 .row-filter-input {
   flex: 1;
   min-inline-size: 0;

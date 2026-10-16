@@ -287,6 +287,48 @@
     (when (seq times)
       (reduce min times))))
 
+(def property-keys
+  "The keys that show only one kind of property in the focused dock, as
+  in After Effects: Position (P), Scale (S), Rotation (R) and Opacity
+  (T), with the properties each shows; U shows all of them again (see
+  `shown-properties`)."
+  {"p" #{:x :y}
+   "s" #{:scale-x :scale-y}
+   "r" #{:rotation}
+   "t" #{:opacity}})
+
+(defn- property-key
+  "The key of `property-keys` (or \"u\") the key `event` presses, nil for
+  another."
+  [event]
+  (let [k (str/lower (str (.-key ^js event)))]
+    (when (or (contains? property-keys k) (= "u" k))
+      k)))
+
+(defn shown-properties
+  "The properties the dock shows (nil for all) after the key `k` of
+  `property-keys` (\"u\": all of them) when it shows `shown`: only those
+  of the key, or all again when they were the only ones; with Shift
+  (`add?`), those of the key added to the ones shown, or taken out when
+  shown already."
+  [shown k add?]
+  (let [props (get property-keys k)]
+    (cond
+      (nil? props)                  nil
+      (not add?)                    (when-not (= shown props) props)
+      (every? (or shown #{}) props) (not-empty (reduce disj shown props))
+      :else                         (into (or shown #{}) props))))
+
+(defn- property-names
+  "The names of the kinds of property of `property-keys` among the
+  properties `props`, as the dock lists the ones it shows."
+  [props]
+  (cond-> []
+    (every? props (get property-keys "p")) (conj (tr "workspace.animation.position"))
+    (every? props (get property-keys "s")) (conj (tr "workspace.animation.scale"))
+    (every? props (get property-keys "r")) (conj (tr "workspace.options.rotation"))
+    (every? props (get property-keys "t")) (conj (tr "workspace.options.opacity"))))
+
 (defn dock-key-action
   "What a key `event` does in the focused dock (but in a text field, which
   keeps its keys), by what is selected there: `:add-marker` (M),
@@ -298,7 +340,9 @@
   `:copy-selection` or `:cut-selection` (Cmd/Ctrl + C or X) for the
   keyframes `selected-kfs` and the clips, together; else
   `:delete-keyframes` or `:shift-keyframes` (the arrows) for the
-  keyframes. Nil for a key the dock leaves to the workspace."
+  keyframes; `:show-properties` for the keys of After Effects (P, S, R,
+  T and U, with Shift too, see `shown-properties`). Nil for a key the
+  dock leaves to the workspace."
   [event selected-kfs selected-clip & [selected-anims]]
   (let [plain?  (not (or (kbd/mod? event) (kbd/alt? event) (kbd/shift? event)))
         delete? (or (kbd/delete? event) (kbd/backspace? event))
@@ -317,6 +361,8 @@
       (if (x-key? event) :cut-selection :copy-selection)
       (and (seq selected-anims) delete?)          :delete-clip
       (and (seq selected-anims) arrow?)           :nudge-clip
+      (and (not (kbd/mod? event)) (not (kbd/alt? event)) (some? (property-key event)))
+      :show-properties
       delete?                                     :delete-keyframes
       (and (seq selected-kfs) arrow?)             :shift-keyframes)))
 
@@ -573,37 +619,41 @@
   (\"pos\" or \"pos x\" for Position X, \"dot pos\" for the position of
   the layer Dot), and the layers holding them, as the search of Blender's
   dope sheet: properties, preset animations, or layers, which keep all
-  their rows. The board, the first row, and the rows of the audio lanes
-  always stay."
-  [rows query]
-  (let [words   (into [] (remove str/empty?) (str/split (str/lower (str/trim query)) #"\s+"))
-        match?  (fn [row stack]
-                  (let [text (str/lower (str/join " " (keep row-label (conj (mapv :row stack) row))))]
-                    (every? #(str/includes? text %) words)))
-        layered #{:layer :property :animation}]
-    (if (empty? words)
-      rows
-      (loop [rows rows, stack [], out []]
-        (if-let [{:keys [type depth] :as row} (first rows)]
-          (if-not (contains? layered type)
-            (recur (rest rows) stack (conj out row))
-            ;; the open layers above, each with whether it matched and
-            ;; whether it is out yet
-            (let [stack    (filterv #(< (:depth (:row %)) depth) stack)
-                  matched? (or (zero? depth) (match? row stack) (some :matched? stack))]
-              (if (= :layer type)
-                (let [entry {:row row :matched? (and (pos? depth) (match? row stack))}]
-                  (if (or (zero? depth) (:matched? entry))
-                    (recur (rest rows)
-                           (conj (mapv #(assoc % :out? true) stack) (assoc entry :out? true))
-                           (into out (comp (remove :out?) (map :row)) (conj stack entry)))
-                    (recur (rest rows) (conj stack entry) out)))
-                (if matched?
-                  (recur (rest rows)
-                         (mapv #(assoc % :out? true) stack)
-                         (conj (into out (comp (remove :out?) (map :row)) stack) row))
-                  (recur (rest rows) stack out)))))
-          out)))))
+  their rows. With `properties` (a set, see `shown-properties`), only
+  the rows of those properties, as the keys of After Effects show them.
+  The board, the first row, and the rows of the audio lanes always stay."
+  ([rows query]
+   (filter-rows rows query nil))
+  ([rows query properties]
+   (let [words   (into [] (remove str/empty?) (str/split (str/lower (str/trim query)) #"\s+"))
+         match?  (fn [row stack]
+                   (let [text (str/lower (str/join " " (keep row-label (conj (mapv :row stack) row))))]
+                     (and (every? #(str/includes? text %) words)
+                          (or (nil? properties) (contains? properties (:property row))))))
+         layered #{:layer :property :animation}]
+     (if (and (empty? words) (nil? properties))
+       rows
+       (loop [rows rows, stack [], out []]
+         (if-let [{:keys [type depth] :as row} (first rows)]
+           (if-not (contains? layered type)
+             (recur (rest rows) stack (conj out row))
+             ;; the open layers above, each with whether it matched and
+             ;; whether it is out yet
+             (let [stack    (filterv #(< (:depth (:row %)) depth) stack)
+                   matched? (or (zero? depth) (match? row stack) (some :matched? stack))]
+               (if (= :layer type)
+                 (let [entry {:row row :matched? (and (pos? depth) (match? row stack))}]
+                   (if (or (zero? depth) (:matched? entry))
+                     (recur (rest rows)
+                            (conj (mapv #(assoc % :out? true) stack) (assoc entry :out? true))
+                            (into out (comp (remove :out?) (map :row)) (conj stack entry)))
+                     (recur (rest rows) (conj stack entry) out)))
+                 (if matched?
+                   (recur (rest rows)
+                          (mapv #(assoc % :out? true) stack)
+                          (conj (into out (comp (remove :out?) (map :row)) stack) row))
+                   (recur (rest rows) stack out)))))
+           out))))))
 
 (defn expand-to
   "`expanded` (see `timeline-rows`) with the closed parents of the layers
@@ -2065,7 +2115,16 @@
         ;; holds something, every layer is open.
         row-filter* (mf/use-state "")
         row-filter  (deref row-filter*)
-        filtering?  (not (str/blank? row-filter))
+        ;; the properties the keys of After Effects show, nil for all
+        ;; (see `shown-properties`)
+        prop-filter* (mf/use-state nil)
+        prop-filter  (deref prop-filter*)
+        filtering?  (or (not (str/blank? row-filter)) (some? prop-filter))
+
+        on-show-all-properties
+        (mf/use-fn
+         (fn [_]
+           (reset! prop-filter* nil)))
 
         on-row-filter-change
         (mf/use-fn
@@ -2082,10 +2141,10 @@
                (reset! row-filter* "")))))
 
         rows       (mf/with-memo [objects board-id timeline expanded copy-spans audio-collapsed? audio-recording
-                                  row-filter filtering?]
+                                  row-filter prop-filter filtering?]
                      (when (some? timeline)
                        (-> (timeline-rows objects board-id timeline (if filtering? :all expanded) copy-spans)
-                           (filter-rows row-filter)
+                           (filter-rows row-filter prop-filter)
                            (into (dwaa/audio-rows (cond-> timeline
                                                     (some? audio-recording)
                                                     (dwar/with-recording-clip audio-recording))
@@ -3079,7 +3138,8 @@
         ;; instead of reaching the workspace shortcuts for the selected
         ;; shapes (Cmd/Ctrl+V: see `on-paste`). M adds a marker at the
         ;; playhead and Alt with the arrows goes to the marker before or
-        ;; after it.
+        ;; after it. P, S, R and T show only one kind of property, as in
+        ;; After Effects (see `shown-properties`).
         on-key-down
         (mf/use-fn
          (mf/deps selected-kfs selected-clip selected-anims selection timeline unit fps)
@@ -3105,6 +3165,7 @@
                  :delete-keyframes (st/emit! (if (whole-selection? selection)
                                                (dwaa/delete-selection)
                                                (dwa/delete-selected-keyframes)))
+                 :show-properties  (swap! prop-filter* shown-properties (property-key event) (kbd/shift? event))
                  :copy-selection   (st/emit! (dwaa/copy-selection))
                  :cut-selection    (st/emit! (dwaa/cut-selection))
                  :shift-keyframes  (st/emit! (if (whole-selection? selection)
@@ -3573,7 +3634,15 @@
                          :spell-check false
                          :value row-filter
                          :on-change on-row-filter-change
-                         :on-key-down on-row-filter-key-down}]]]
+                         :on-key-down on-row-filter-key-down}]
+                ;; the kinds of property the keys of After Effects show
+                (when (some? prop-filter)
+                  [:button {:type "button"
+                            :class (stl/css :row-filter-props)
+                            :title (tr "workspace.animation.show-all-properties")
+                            :on-click on-show-all-properties}
+                   (str/join ", " (property-names prop-filter))
+                   [:> i/icon* {:icon-id i/close :size "s"}]])]]
 
               [:& (mf/provider snap-context) {:value snap}
                [:> marker-row* {:markers (:markers timeline)

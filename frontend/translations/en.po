@@ -6735,7 +6735,17 @@ msgstr "Filter"
 msgid "workspace.animation.filter-rows-hint"
 msgstr ""
 "Show only the properties, animations and layers whose name holds this "
-"text (Esc clears it)"
+"text (Esc clears it). In the timeline, P, S, R and T show only the "
+"position, scale, rotation or opacity, with Shift more than one; U shows "
+"all again"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.show-all-properties"
+msgstr "Show all properties (U)"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.position"
+msgstr "Position"
 
 msgid "workspace.animation.collapse-all"
 msgstr "Collapse all layers"

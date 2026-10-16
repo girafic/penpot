@@ -279,7 +279,7 @@
       (t/is (= :copy-selection (action (key-event "c" :mod? true) kfs nil)))
       (t/is (= :cut-selection (action (key-event "x" :mod? true) kfs nil)))
       (t/is (= :shift-keyframes (action (key-event "ArrowLeft") kfs nil)))
-      (t/is (nil? (action (key-event "s") kfs nil)) "S splits no keyframe"))
+      (t/is (= :show-properties (action (key-event "s") kfs nil)) "S shows the scale, as no clip is there to split"))
     (t/testing "nothing selected"
       (t/is (nil? (action (key-event "c" :mod? true) #{} nil)) "Cmd/Ctrl+C reaches the workspace")
       (t/is (nil? (action (key-event "b" :mod? true) #{} nil)) "and Cmd/Ctrl+B")
@@ -288,6 +288,43 @@
       (t/is (= :add-marker (action (key-event "m") #{} nil)))
       (t/is (nil? (action (key-event "m" :shift? true) #{} nil)) "Shift+M leaves motion mode")
       (t/is (= :jump-to-marker (action (key-event "ArrowRight" :alt? true) #{} nil))))))
+
+(t/deftest the-keys-of-after-effects-show-one-kind-of-property
+  ;; P, S, R and T, as in After Effects; with Shift, more than one
+  (let [action #(timeline/dock-key-action % #{} nil)
+        after  #(timeline/shown-properties %1 %2 %3)]
+    (doseq [k ["p" "P" "s" "r" "t" "u" "U"]]
+      (t/is (= :show-properties (action (key-event k))) k))
+    (t/is (= :show-properties (action (key-event "P" :shift? true))) "with Shift too")
+    (t/is (nil? (action (key-event "p" :mod? true))) "but not with Cmd/Ctrl")
+    (t/is (= :split-clip (timeline/dock-key-action (key-event "s") #{} (uuid/next))) "S splits a selected clip")
+    (t/is (= #{:x :y} (after nil "p" false)) "only the position")
+    (t/is (= #{:rotation} (after #{:x :y} "r" false)) "only the rotation, then")
+    (t/is (nil? (after #{:x :y} "p" false)) "the same key again: all of them")
+    (t/is (= #{:x :y :scale-x :scale-y} (after #{:x :y} "s" true)) "Shift adds the scale")
+    (t/is (= #{:scale-x :scale-y} (after #{:x :y :scale-x :scale-y} "p" true)) "and takes the position out")
+    (t/is (nil? (after #{:opacity} "t" true)) "nothing left: all of them")
+    (t/is (nil? (after #{:opacity} "u" false)) "U shows all of them")))
+
+(t/deftest the-rows-filter-by-property
+  (let [board    (uuid/next)
+        dot      (uuid/next)
+        title    (uuid/next)
+        objects  {uuid/zero {:id uuid/zero :parent-id uuid/zero :shapes [board]}
+                  board     {:id board :name "Board" :parent-id uuid/zero :shapes [dot title]}
+                  dot       {:id dot :name "Position" :parent-id board}
+                  title     {:id title :name "Title" :parent-id board}}
+        timeline (-> (cta/make-timeline {:board-id board})
+                     (cta/add-keyframe dot {:time 0 :property :x :value 0})
+                     (cta/add-keyframe dot {:time 0 :property :rotation :value 0})
+                     (cta/add-keyframe title {:time 0 :property :opacity :value 1})
+                     (cta/add-animation title {:type :fade :start 0 :duration 300}))
+        all      (conj (timeline/timeline-rows objects board timeline :all {}) {:type :audio-group})
+        shown    #(mapv (fn [{:keys [type id property]}] (or property (when (= :audio-group type) :audio) id))
+                        (timeline/filter-rows all %1 %2))]
+    (t/is (= [board dot :x :audio] (shown "" #{:x :y})) "the position, under its layer, not the layer named so")
+    (t/is (= [board title :opacity dot :rotation :audio] (shown "" #{:rotation :opacity})) "no animation")
+    (t/is (= [board title :opacity :audio] (shown "title" #{:rotation :opacity})) "with the text too")))
 
 (t/deftest a-box-picks-all-kinds-and-whole-tracks
   (let [hits  {:kfs   [{:shape-id 1 :keyframe-id 10 :left 0 :right 10 :top 0 :bottom 10}]
