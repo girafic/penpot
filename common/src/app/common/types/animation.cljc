@@ -3219,21 +3219,32 @@
             (rseq (vec (:structure-parent modifiers))))
       default))
 
+(defn- change-turn
+  "The turn (degrees) nearest to the linear part of the matrix `change`:
+  none for a stretch along turned axes, which only skews."
+  [{:keys [a b c d]}]
+  (mth/degrees (mth/atan2 (- b c) (+ a d))))
+
+(defn- change-scale
+  "The even scale of the matrix `change`: the one that keeps its area."
+  [{:keys [a b c d]}]
+  (mth/sqrt (mth/abs (- (* a d) (* b c)))))
+
 (defn- follow-modifiers
   "The modifiers that make a layer take `change`, what its leader does
   since its first frame (a matrix), around `pivot`, where the pivot of
-  the leader is then: as `follow` says, it scales and turns around that
-  pivot (a skew of the leader is left out) and moves as the pivot does."
+  the leader is then: as `follow` says, it scales evenly and turns
+  around that pivot (the nearest turn and the scale of the area: a
+  stretch of the leader is left out, as no shape could take it) and
+  moves as the pivot does."
   [{:keys [position rotation scale]} change pivot]
-  (let [{:keys [a b c d]} change
-        sx    (mth/sqrt (+ (* a a) (* b b)))
-        sy    (if (pos? sx) (/ (- (* a d) (* b c)) sx) 0)
-        turn  (mth/degrees (mth/atan2 b a))
+  (let [s     (change-scale change)
+        turn  (change-turn change)
         moved (gpt/transform pivot change)]
     (cond-> (ctm/empty)
-      (and scale (not (and (mth/close? sx 1) (mth/close? sy 1))))
-      (-> (ctm/resize (gpt/point sx sy) pivot)
-          (ctm/scale-content (mth/sqrt (mth/abs (* sx sy)))))
+      (and scale (not (mth/close? s 1)))
+      (-> (ctm/resize (gpt/point s s) pivot)
+          (ctm/scale-content s))
 
       (and rotation (not (mth/close? turn 0)))
       (ctm/rotation pivot turn)
@@ -3241,15 +3252,48 @@
       position
       (ctm/move (gpt/subtract moved pivot)))))
 
+(defn- follow-chain
+  "The layers `follows` of `timeline` and the leaders they follow, through
+  a chain of followers."
+  [timeline follows]
+  (loop [ids (set follows), front follows]
+    (let [leaders (into #{} (keep #(dm/get-in timeline [:tracks % :follow :leader])) front)
+          new     (remove ids leaders)]
+      (if (empty? new)
+        ids
+        (recur (into ids new) new)))))
+
+(def ^:private first-frame-cache
+  "The modifiers of the follow chains of the last timeline played (see
+  `followed-modifiers`) at its first frame, which every frame reads:
+  `[key objects modifiers]`."
+  (atom nil))
+
+(defn- first-frame-modifiers
+  "The modifiers of the layers of `chain`, a timeline of the follow
+  chains of the timeline `key` (see `follow-chain`), at its first
+  frame: the same as on the frame before while `key` and `objects` are."
+  [key objects chain]
+  (let [[k objs modifiers] @first-frame-cache]
+    (if (and (some? key) (identical? k key) (identical? objs objects))
+      modifiers
+      (let [modifiers (own-modifiers chain objects 0)]
+        (reset! first-frame-cache [key objects modifiers])
+        modifiers))))
+
 (defn- followed-modifiers
   "`own` (see `own-modifiers`) with the layers of `timeline` that follow
   a leader (see `follow-of`) moved as it: what the leader does from its
   first frame on, or from where it rests (`:from` `:rest`), `:delay` ms
   later, after their own animation; a chain of followers follows
-  through. Opacity multiplies by the leader's, as
-  in a group. Before its delay a follower waits at the leader's first
-  frame, or, when `timeline` loops, takes the end of the loop before."
-  [timeline objects time own]
+  through. Opacity multiplies by the leader's, as in a group. Before its
+  delay a follower waits at the leader's first frame, or, when
+  `timeline` loops, takes the end of the loop before. A leader whose
+  first frame is scaled to (almost) nothing, as a pop in from 0, is
+  followed from where it rests. The other times
+  play the follow chains only, their first frame read once while `key`
+  (the timeline the caller keeps, before it is resolved) stays."
+  [timeline objects time own & {:keys [key]}]
   (let [follows (followers timeline objects)]
     (if (empty? follows)
       own
@@ -3257,8 +3301,13 @@
             wraps?   (and (= :loop (playback-mode timeline)) (pos? duration))
             earlier  (fn [t delay]
                        (let [t (- t delay)]
-                         (if wraps? (mod t duration) (max 0 t))))
-            own-at (memoize #(own-modifiers timeline objects %))
+                         (cond (>= t 0) t
+                               wraps?   (mod t duration)
+                               :else    0)))
+            chain    (update timeline :tracks select-keys (follow-chain timeline follows))
+            own-at   (memoize #(if (zero? %)
+                                 (first-frame-modifiers key objects chain)
+                                 (own-modifiers chain objects %)))
             cache  (volatile! {})
             played (fn played [id t]
                      (let [k [id t]]
@@ -3272,10 +3321,14 @@
                                             matrix  #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
                                             now     (matrix (played leader (earlier t (:delay follow))))
                                             ;; from where it rests, as in a group,
-                                            ;; or from its first frame
-                                            start   (if (= :rest (:from follow))
+                                            ;; or from its first frame; a first
+                                            ;; frame scaled to (almost) nothing
+                                            ;; holds no change to count from
+                                            first   (matrix (played leader 0))
+                                            start   (if (or (= :rest (:from follow))
+                                                            (< (change-scale first) 0.01))
                                                       (gmt/matrix)
-                                                      (matrix (played leader 0)))
+                                                      first)
                                             change  (if-let [inv (gmt/inverse start)] (gmt/multiply now inv) now)
                                             lshape  (get objects leader)
                                             pivot   (-> (origin-point lshape (track-origin (get-track timeline leader)))
@@ -3307,9 +3360,10 @@
   `set-modifiers` / `set-wasm-modifiers` (editor preview) or applied
   through `transform-shape` (viewer/export)."
   [timeline objects time]
-  (let [timeline (resolve-animations timeline objects)
-        own      (own-modifiers timeline objects time)
-        played   (followed-modifiers timeline objects time own)
+  (let [resolved (resolve-animations timeline objects)
+        own      (own-modifiers resolved objects time)
+        ;; the timeline as given stays the same from frame to frame
+        played   (followed-modifiers resolved objects time own :key timeline)
         tree     (reduce-kv (fn [tree shape-id modifiers]
                               (cond-> tree
                                 (not (ctm/empty? modifiers))
@@ -3319,7 +3373,7 @@
     (reduce-kv (fn [tree shape-id entries]
                  (update-in tree [shape-id :modifiers] ctm/change-property :text-units entries))
                tree
-               (text-unit-entries timeline objects time))))
+               (text-unit-entries resolved objects time))))
 
 ;; --- Baking follows ------------------------------------------------------
 
@@ -3363,17 +3417,6 @@
           []
           angles))
 
-(defn- follow-chain
-  "The layers `follows` of `timeline` and the leaders they follow, through
-  a chain of followers."
-  [timeline follows]
-  (loop [ids (set follows), front follows]
-    (let [leaders (into #{} (keep #(dm/get-in timeline [:tracks % :follow :leader])) front)
-          new     (remove ids leaders)]
-      (if (empty? new)
-        ids
-        (recur (into ids new) new)))))
-
 (defn- followed-pose
   "The values of `values`' properties that show the follower `id` of
   `timeline` as it plays with its follow: its own `values` at a time,
@@ -3388,15 +3431,13 @@
         matrix  #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
         total   (matrix played)
         follow  (if-let [inv (gmt/inverse (matrix own))] (gmt/multiply total inv) total)
-        {:keys [a b c d]} follow
-        sx      (mth/sqrt (+ (* a a) (* b b)))
-        sy      (if (pos? sx) (/ (- (* a d) (* b c)) sx) 0)
+        scale   (change-scale follow)
         rest-x  (rest-value shape :x origin)
         rest-y  (rest-value shape :y origin)
         values  (-> (merge {:rotation (rest-value shape :rotation origin) :scale-x 1 :scale-y 1} values)
-                    (update :rotation + (mth/degrees (mth/atan2 b a)))
-                    (update :scale-x * sx)
-                    (update :scale-y * sy)
+                    (update :rotation + (change-turn follow))
+                    (update :scale-x * scale)
+                    (update :scale-y * scale)
                     (assoc :x rest-x :y rest-y))
         ;; where its pivot is without a move, and where it goes
         probe   (gpt/transform pivot (matrix (shape->modifiers shape values origin origin*)))
@@ -3463,7 +3504,7 @@
                            (let [own (own-modifiers played objects t)]
                              {:values (values-at played t)
                               :own    own
-                              :played (followed-modifiers played objects t own)}))
+                              :played (followed-modifiers played objects t own :key played)}))
                          times)
           baked    (into {}
                          (map (fn [id]

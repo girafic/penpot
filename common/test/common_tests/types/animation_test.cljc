@@ -4822,6 +4822,7 @@
                    (mth/close? ay by 0.5)
                    (mth/close? (:rotation a 0) (:rotation b 0) 0.5)
                    (mth/close? (get-in a [:selrect :width]) (get-in b [:selrect :width]) 0.1)
+                   (mth/close? (get-in a [:selrect :height]) (get-in b [:selrect :height]) 0.1)
                    (mth/close? (:opacity a 1) (:opacity b 1) 0.01))))
           times))
 
@@ -4985,3 +4986,92 @@
         baked (cta/bake-follows tl objects)]
     (t/is (nil? (get-in baked [:tracks follower :follow])))
     (t/is (plays-alike? tl baked objects follower (range 0 1001 50)))))
+
+(t/deftest a-follower-of-a-loop-holds-at-its-end
+  ;; the end of a loop is where it is a moment before, not its start
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (assoc :playback :loop)
+               (cta/add-keyframe leader {:time 0 :property :x :value 100 :easing :linear})
+               (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+               (cta/set-follow follower {:leader leader}))
+        [x1] (centre-at tl objects follower 999)
+        [x2] (centre-at tl objects follower 1000)]
+    (t/is (mth/close? x1 x2 0.2))
+    (t/is (mth/close? 305 x2 0.01))
+    (t/testing "the baked loop ends there too"
+      (let [baked (cta/bake-follows tl objects)]
+        (t/is (mth/close? 300 (:value (peek (baked-property baked follower :x))) 0.3))))))
+
+(t/deftest a-stretching-turned-leader-scales-its-follower-evenly
+  ;; a leader turned 45 degrees stretches along its own x: that turns
+  ;; nothing, and the follower scales by the stretch of the area
+  (let [{:keys [follower objects]} (follow-scene)
+        leader  (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 20 :height 20})
+                    (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 110 110) 45)))
+        objects (assoc objects (:id leader) leader)
+        tl      (-> (mk-timeline)
+                    (cta/add-keyframe (:id leader) {:time 0 :property :scale-x :value 1 :easing :linear})
+                    (cta/add-keyframe (:id leader) {:time 1000 :property :scale-x :value 2})
+                    (cta/set-follow follower {:leader (:id leader)}))
+        shown   (shown-at tl objects follower 1000)]
+    (t/is (mth/close? 0 (:rotation shown 0) 0.01) "no turn")
+    (t/is (mth/close? (* 10 (mth/sqrt 2)) (get-in shown [:selrect :width]) 0.01))
+    (t/is (mth/close? (* 10 (mth/sqrt 2)) (get-in shown [:selrect :height]) 0.01))))
+
+(t/deftest a-turned-follower-bakes-as-it-plays
+  ;; a follower turned 90 degrees and a leader stretching along x: the
+  ;; bake scales it as the canvas does, evenly
+  (let [{:keys [leader objects]} (follow-scene)
+        follower (-> (cts/setup-shape {:type :rect :x 200 :y 100 :width 10 :height 20})
+                     (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 205 110) 90)))
+        objects  (assoc objects (:id follower) follower)
+        tl       (-> (mk-timeline)
+                     (cta/add-keyframe leader {:time 0 :property :scale-x :value 1 :easing :linear})
+                     (cta/add-keyframe leader {:time 1000 :property :scale-x :value 2})
+                     (cta/set-follow (:id follower) {:leader leader}))
+        baked    (cta/bake-follows tl objects)]
+    (t/is (plays-alike? tl baked objects (:id follower) (range 0 1001 100)))))
+
+(t/deftest a-leader-popping-in-from-nothing-is-followed-from-rest
+  ;; its first frame holds no change to count from: its follower takes
+  ;; it from where it rests, as with `:from :rest`
+  (doseq [from [0 0.005]]
+    (let [{:keys [leader follower objects]} (follow-scene)
+          tl    (-> (mk-timeline)
+                    (cta/add-keyframe leader {:time 0 :property :scale-x :value from :easing :linear})
+                    (cta/add-keyframe leader {:time 1000 :property :scale-x :value 1})
+                    (cta/add-keyframe leader {:time 0 :property :scale-y :value from :easing :linear})
+                    (cta/add-keyframe leader {:time 1000 :property :scale-y :value 1})
+                    (cta/set-follow follower {:leader leader}))
+          width #(get-in (shown-at tl objects follower %) [:selrect :width])]
+      (t/is (mth/close? 10 (width 1000) 0.01) (str "its own size at the end, from " from))
+      (t/is (close-point? [205 105] (centre-at tl objects follower 1000))))))
+
+#?(:clj
+   (t/deftest a-follow-plays-its-chain-only
+     ;; other times play the layers of the follow chains only, and the
+     ;; first frame once while the timeline stays
+     (let [{:keys [leader follower objects]} (follow-scene)
+           others  (repeatedly 20 #(cts/setup-shape {:type :rect :x 0 :y 0 :width 5 :height 5}))
+           objects (into objects (map (juxt :id identity)) others)
+           tl      (reduce (fn [tl s]
+                             (-> tl
+                                 (cta/add-keyframe (:id s) {:time 0 :property :x :value 0})
+                                 (cta/add-keyframe (:id s) {:time 1000 :property :x :value 50})))
+                           (-> (mk-timeline)
+                               (cta/add-keyframe leader {:time 0 :property :x :value 100})
+                               (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+                               (cta/set-follow follower {:leader leader :delay 100}))
+                           others)
+           calls   (atom [])
+           real    @#'cta/own-modifiers]
+       (with-redefs [cta/own-modifiers (fn [timeline objects time]
+                                         (swap! calls conj [time (count (:tracks timeline))])
+                                         (real timeline objects time))]
+         (cta/timeline->modif-tree tl objects 500)
+         (cta/timeline->modif-tree tl objects 600))
+       (let [others (remove (fn [[time]] (#{500 600} time)) @calls)]
+         (t/is (every? (fn [[_ n]] (<= n 2)) others) "the leader and its follower only")
+         (t/is (= 1 (count (filter (fn [[time]] (zero? time)) others))) "the first frame once")))))
+
