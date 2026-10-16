@@ -200,6 +200,21 @@
                              [:fill-color-gradient :type]))
           "a gradient")))
 
+;; --- Hidden layers
+
+(t/deftest a-layer-without-display-is-hidden-and-only-hidden
+  ;; once hidden it keeps no `display` that would hide it again when
+  ;; it is shown
+  (doseq [attrs [{:display "none"} {:style "display: none"}]]
+    (let [[_ children] (sb/create-svg-shapes
+                        (svg-with {:tag :rect :attrs (merge {:id "box" :width "10" :height "10"} attrs)
+                                   :content []})
+                        {:x 0 :y 0} {} nil nil #{} false)
+          box          (some #(when (= "box" (:name %)) %) children)]
+      (t/is (true? (:hidden box)) (str attrs))
+      (t/is (nil? (get-in box [:svg-attrs :display])) (str attrs))
+      (t/is (nil? (get-in box [:svg-attrs :style :display])) (str attrs)))))
+
 ;; --- Dashes
 
 (t/deftest dash-arrays-become-stroke-styles

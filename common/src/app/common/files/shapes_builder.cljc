@@ -1080,12 +1080,11 @@
 
 (defn setup-other [shape]
   (cond-> shape
-    (= (dm/get-in shape [:svg-attrs :display]) "none")
-    (-> (update-in [:svg-attrs :style] dissoc :display)
-        (assoc :hidden true))
-
-    (= (dm/get-in shape [:svg-attrs :style :display]) "none")
+    ;; hidden, with no `display` left that would hide it once shown
+    (or (= (dm/get-in shape [:svg-attrs :display]) "none")
+        (= (dm/get-in shape [:svg-attrs :style :display]) "none"))
     (-> (update :svg-attrs dissoc :display)
+        (d/update-in-when [:svg-attrs :style] dissoc :display)
         (assoc :hidden true))))
 
 (defn tag->name

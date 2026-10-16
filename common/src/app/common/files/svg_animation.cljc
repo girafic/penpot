@@ -1380,11 +1380,12 @@
     (gmt/multiply (gmt/translate-matrix dx dy) (gmt/scale-matrix (gpt/point sx sy) c))))
 
 (defn- node-delta
-  "The change of the element `node` at the time `t` from its rest, in
-  the space of the board (`to-board` takes its parent's to it), with its
-  nominal rotation: the transforms of `specs` over its own one `own`, as
-  SMIL and CSS stack them, its motion and its animated geometry."
-  [node own specs to-board box t side steady?]
+  "The change of the element `node` at the time `t` from the pose it is
+  built in (`built`, its transform), in the space of the board
+  (`to-board` takes its parent's to it), with its nominal rotation: the
+  transforms of `specs` over its own one `own`, as SMIL and CSS stack
+  them, its motion and its animated geometry."
+  [node own built specs to-board box t side steady?]
   (let [own-rot  (matrix-angle own)
         [m rot]  (reduce (fn [[m rot] spec]
                            (case (:property spec)
@@ -1409,7 +1410,7 @@
                                    [(:property spec) v]))))
                        specs)
         m        (cond-> m (seq geometry) (gmt/multiply (geometry-matrix node geometry)))
-        rest-m   (gmt/multiply to-board own)
+        rest-m   (gmt/multiply to-board built)
         delta    (gmt/multiply (gmt/multiply to-board m) (gmt/inverse rest-m))]
     [delta (- rot own-rot)]))
 
@@ -1426,16 +1427,18 @@
 
 (defn- transforms
   "The own transform (`:own`) of each element of the SVG `root`, by its
-  key, and the one of its ancestors (`:parent-m`); the drawing of a mask
-  in the space of the element it masks."
+  key, the one it is built with (`:built`, see `clean`) and the one of
+  its ancestors (`:parent-m`); the drawing of a mask in the space of the
+  element it masks."
   [root]
   (let [acc    (volatile! {})
         ids    (volatile! {})
         masked (volatile! [])]
     (letfn [(walk [node parent-m]
-              (let [own (csvg/parse-transform (get-in node [:attrs :transform]))
-                    m   (gmt/multiply parent-m own)]
-                (vswap! acc assoc (::sb/element-key node) {:own own :parent-m parent-m})
+              (let [built (csvg/parse-transform (get-in node [:attrs :transform]))
+                    own   (or (::rest-transform node) built)
+                    m     (gmt/multiply parent-m built)]
+                (vswap! acc assoc (::sb/element-key node) {:own own :built built :parent-m parent-m})
                 (when-let [id (get-in node [:attrs :id])] (vswap! ids assoc id node))
                 (when-let [mask (sb/mask-id (:attrs node))] (vswap! masked conj [mask m]))
                 (doseq [child (:content node) :when (element? child)]
@@ -1453,9 +1456,9 @@
 (def ^:private paint-properties
   #{:fill :stroke :fill-opacity :stroke-opacity :stroke-width :stroke-dashoffset})
 
-(defn- inherit-targets
-  "The keys of the drawable elements under the element `k` (itself
-  first) that take its `property`: not those that set it themselves."
+(defn- inheritors
+  "The keys of the elements under the element `k` (itself first) that
+  take its `property`: not those that set it themselves."
   [idx k property]
   (let [prop (name property)
         sets? (fn [node] (or (contains? (:attrs node) (keyword prop))
@@ -1465,9 +1468,14 @@
         (let [{:keys [node children]} (get-in idx [:by-key k'])]
           (if (and (not= k k') (sets? node))
             (recur (rest queue) acc)
-            (recur (into (vec (rest queue)) children)
-                   (cond-> acc (contains? drawable-tags (:tag node)) (conj k')))))
+            (recur (into (vec (rest queue)) children) (conj acc k'))))
         acc))))
+
+(defn- inherit-targets
+  "The keys of the drawable elements among the `inheritors`."
+  [idx k property]
+  (filterv #(contains? drawable-tags (get-in idx [:by-key % :node :tag]))
+           (inheritors idx k property)))
 
 (defn- entry
   "A keyframe of `property` at `t` with the value `v` and the easing `e`
@@ -1486,8 +1494,11 @@
   "The element `node` without its animations, scripts and styles, the
   static CSS of each element (`cascaded`, by key) in its style, as the
   static import reads only that, and a static CSS transform as its
-  transform."
-  [node cascaded]
+  transform. An element `moving` (keys) animates whose transform is
+  singular at rest (a pop-in from `scale(0)`) is built without it, at
+  its full size, the transform kept as `::rest-transform` for its
+  animation to start from (see `transforms`)."
+  [node cascaded moving]
   (let [decls (get cascaded (::sb/element-key node))
         ;; each property once, its last value, as the cascade ends
         rules (->> (reverse decls)
@@ -1507,14 +1518,20 @@
                 (assoc-in [:attrs :transform]
                           (str (first (css-matrix (css-transform css-t)
                                                   (origin-point (decl "transform-origin") [0 0 0 0])
-                                                  [0 0 0 0])))))]
+                                                  [0 0 0 0])))))
+        rest-m (csvg/parse-transform (get-in node [:attrs :transform]))
+        node   (cond-> node
+                 (and (contains? moving (::sb/element-key node))
+                      (< (mth/abs (gmt/determinant rest-m)) 1e-9))
+                 (-> (update :attrs dissoc :transform)
+                     (assoc ::rest-transform rest-m)))]
     (update node :content
             (fn [content]
               (into []
                     (keep #(cond
                              (not (element? %)) %
                              (contains? (into animation-tags #{:style :script}) (:tag %)) nil
-                             :else (clean % cascaded)))
+                             :else (clean % cascaded moving)))
                     content)))))
 
 (defn- hoist-defs
@@ -1561,7 +1578,8 @@
                        (map expand-steps)
                        (map #(cond-> % (= :transform (:property %)) (transform-spec)))
                        (vec))
-        root      (hoist-defs (clean (:root idx) cascaded))]
+        moving    (into #{} (comp (filter #(contains? #{:transform :motion} (:property %))) (map :key)) specs)
+        root      (hoist-defs (clean (:root idx) cascaded moving))]
     {:idx idx :specs specs :root root :own-of (transforms root)}))
 
 (defn- board-timing
@@ -1615,20 +1633,20 @@
   :frames}`; `env` holds what the board is played in."
   [ctx {:keys [idx own-of objects to-board vb-w vb-h bx by duration steady?]} k own shape-id]
   (let [elem     (get-in idx [:by-key k])
-        {own-m :own parent-m :parent-m} (get own-of k)
+        {own-m :own built-m :built parent-m :parent-m} (get own-of k)
         shape    (get objects shape-id)
         moves    (filterv #(contains? #{:transform :motion :x :y :cx :cy :r :rx :ry} (:property %)) own)
         fades    (filterv #(contains? #{:opacity :visibility :display} (:property %)) own)
         board-m  (gmt/multiply to-board parent-m)
         ;; the box of the percentages and the origin of CSS
-        local    (let [inv (gmt/inverse (gmt/multiply board-m own-m))
+        local    (let [inv (gmt/inverse (gmt/multiply board-m built-m))
                        r   (grc/points->rect (map #(gpt/transform % inv) (grc/rect->points (bounds shape))))]
                    [(:x r) (:y r) (:width r) (:height r)])
         box      (or (some #(when (= :css (:source %))
                               (if (str/includes? (str (:box %)) "fill") local [0 0 vb-w vb-h]))
                            moves)
                      [0 0 vb-w vb-h])
-        delta    (fn [t side] (node-delta (:node elem) own-m moves board-m box t side steady?))
+        delta    (fn [t side] (node-delta (:node elem) own-m built-m moves board-m box t side steady?))
         times    (->> moves (mapcat #(spec-times % duration steady?)) (concat [0 duration]))
         ;; the point its transform turns and scales around
         origin   (some (fn [spec]
@@ -1664,14 +1682,17 @@
                        :rotation r
                        :scale-x  sx
                        :scale-y  sy)))
+        ;; a fading property plays its last animation that plays then,
+        ;; else its value at rest; display and visibility hide as 0
+        resting  (fn [property]
+                   (if (= :opacity property)
+                     (if fade? base-op 1)
+                     (or (some #(when (= property (:property %)) (:rest %)) fades) 1)))
+        value    (fn [property t side]
+                   (or (some #(when (= property (:property %)) (spec-value % t side steady?)) (rseq fades))
+                       (resting property)))
         opacity  (fn [t side]
-                   (reduce (fn [acc spec]
-                             (if (= :opacity (:property spec))
-                               acc
-                               (if-let [v (spec-value spec t side steady?)] (* acc v) acc)))
-                           (or (some #(when (= :opacity (:property %)) (spec-value % t side steady?)) fades)
-                               (if fade? base-op 1))
-                           fades))
+                   (* (value :opacity t side) (value :display t side) (value :visibility t side)))
         moved    (when (seq moves)
                    (for [[property at-rest] [[:x rest-x] [:y rest-y] [:rotation 0] [:scale-x 1] [:scale-y 1]]
                          [t v e] (keyframes #(channel property %1 %2) moves (tolerances property) duration at-rest steady?)]
@@ -1733,8 +1754,8 @@
       (let [attrs    (:attrs node)
             dash     (numbers (or (:stroke-dasharray attrs)
                                   (some->> (str (:style attrs)) (re-find #"stroke-dasharray\s*:\s*([^;]+)") second)))
-            {own-m :own parent-m :parent-m} (get own-of target)
-            scale    (mth/sqrt (mth/abs (gmt/determinant (gmt/multiply to-board parent-m own-m))))
+            {built-m :built parent-m :parent-m} (get own-of target)
+            scale    (mth/sqrt (mth/abs (gmt/determinant (gmt/multiply to-board parent-m built-m))))
             total    (or (number (:pathLength attrs))
                          (when (pos? scale) (/ (outline-length shape) scale))
                          0)]
@@ -1742,6 +1763,17 @@
           (concat (put :trim-start nil #(mth/clamp (/ (- (or (value %1 %2) 0)) total) 0 1) 0)
                   (put :trim-end nil #(mth/clamp (- 1 (/ (or (value %1 %2) 0) total)) 0 1) 1))
           (do (ctx :skip :dash) nil))))))
+
+(defn- shown
+  "`shape` that its board shows and hides by `properties` (`:display`,
+  `:visibility`): not hidden, nor kept hidden by them in its SVG."
+  [shape properties]
+  (let [props (vec properties)]
+    (-> shape
+        (cond-> (contains? properties :display) (dissoc :hidden))
+        (d/update-when :svg-attrs #(apply dissoc % props))
+        (d/update-in-when [:svg-attrs :style] #(apply dissoc % props))
+        (d/update-when :svg-attrs #(cond-> % (empty? (:style %)) (dissoc :style))))))
 
 (defn svg->shapes
   "The shapes and the timeline of the animated SVG `svg-data` (parsed
@@ -1805,12 +1837,24 @@
                    frame)
         frames   (into (into [] (mapcat :frames) (vals boards)) paints)
         trims    (into #{} (keep (fn [[id kf]] (when (contains? #{:trim-start :trim-end} (:property kf)) id))) frames)
+        ;; the properties that show and hide each shape on its board (a
+        ;; visibility goes to what the element holds)
+        toggled  (->> (for [{:keys [key property]} specs
+                            :when (contains? #{:display :visibility} property)
+                            k  (if (= :visibility property) (inheritors idx key property) [key])
+                            id (get shapes-of k)]
+                        [id property])
+                      (reduce (fn [acc [id property]] (update acc id (fnil conj #{}) property)) {}))
         shapes   (->> shapes
                       (map (fn [shape]
                              (cond-> shape
                                ;; its board plays its opacity
                                (:fade? (get boards (:id shape)))
                                (dissoc :opacity)
+
+                               ;; its board shows and hides it
+                               (contains? toggled (:id shape))
+                               (shown (get toggled (:id shape)))
 
                                ;; a line that draws itself is not dashed
                                (contains? trims (:id shape))

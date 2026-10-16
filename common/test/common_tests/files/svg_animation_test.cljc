@@ -206,6 +206,40 @@
       (t/is (mth/close? (:x node) (:value (first xs)) 0.5) (str label ": where it is at rest"))
       (t/is (not-any? #(= :step (:interpolation %)) xs) label))))
 
+(t/deftest a-layer-shows-when-its-display-turns-on
+  (let [result (import-svg (svg (el :g {:id "box" :display "none"}
+                                    (el :rect {:id "kid" :width "10" :height "10"})
+                                    (el :set {:attributeName "display" :to "inline"
+                                              :begin "1s" :dur "1s" :fill "freeze"}))))
+        box    (named result "box")]
+    (t/is (not (:hidden box)))
+    (t/is (nil? (get-in box [:svg-attrs :display])) "nor hidden by its SVG")
+    (t/is (close-frames? [[0 0] [1000 1] [2000 1]] (frames result (named result "box motion") :opacity)))))
+
+(t/deftest a-layer-shows-when-it-turns-visible
+  (let [result (import-svg (svg (el :g {:id "box" :visibility "hidden"}
+                                    (el :rect {:id "kid" :width "10" :height "10"})
+                                    (el :set {:attributeName "visibility" :to "visible"
+                                              :begin "1s" :dur "1s" :fill "freeze"}))))]
+    (t/is (nil? (get-in (named result "box") [:svg-attrs :visibility])))
+    (t/is (nil? (get-in (named result "kid") [:svg-attrs :visibility])) "nor what it holds")
+    (t/is (close-frames? [[0 0] [1000 1] [2000 1]] (frames result (named result "box motion") :opacity)))))
+
+(t/deftest a-pop-in-from-nothing-is-built-whole
+  ;; at rest it is scaled to nothing: built at its full size, its board
+  ;; plays the scale
+  (doseq [[label css centre] [["around its corner" "" [0 0]]
+                              ["around its centre" "transform-box: fill-box; transform-origin: center;" [50 50]]]]
+    (let [result (import-svg (svg (el :style {} (str "@keyframes pop { to { transform: scale(1) } }"
+                                                     "#box { transform: scale(0); " css
+                                                     " animation: pop 1s linear forwards; }"))
+                                  (el :rect {:id "box" :x "40" :y "40" :width "20" :height "20"})))
+          node   (named result "box motion")]
+      (t/is (= [20 20] (mapv mth/round ((juxt :width :height) (:selrect (named result "box"))))) label)
+      (t/is (close-frames? [[0 0] [1000 1]] (frames result node :scale-x)) label)
+      (t/is (= centre (mapv mth/round [(+ (:x node) (/ (:width node) 2)) (+ (:y node) (/ (:height node) 2))]))
+            (str label ": the board centred on where it grows from")))))
+
 ;; --- What an SVG asks for is bounded: it comes from anyone
 
 (defn- keyframe-count
