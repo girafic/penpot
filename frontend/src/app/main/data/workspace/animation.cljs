@@ -651,10 +651,10 @@
   (dm/get-in state [:workspace-animation :picking-leader]))
 
 (defn- end-pick-leader
-  "End the pick of a leader of `shape-id` (see `pick-leader`): with
-  `picked?`, the layer selected is its leader. `shape-id` stays
-  selected, while it is on the page."
-  [shape-id picked?]
+  "End the pick of a leader of `shape-id` (see `pick-leader`): its leader
+  is `leader`, or with `selected?` the layer selected, or none. `shape-id`
+  stays selected, while it is on the page."
+  [shape-id {:keys [leader selected?]}]
   (ptk/reify ::end-pick-leader
     ptk/UpdateEvent
     (update [_ state]
@@ -663,10 +663,10 @@
     ptk/WatchEvent
     (watch [_ state _]
       (if (and (some? shape-id) (contains? (dsh/lookup-page-objects state) shape-id))
-        (let [leader (when picked? (first (dsh/lookup-selected state)))
+        (let [leader (or leader (when selected? (first (dsh/lookup-selected state))))
               follow (some-> (layer-board-timeline state shape-id) (cta/follow-of shape-id))]
           (rx/concat
-           (if (some? leader)
+           (if (and (some? leader) (not= leader shape-id))
              (rx/of (set-follow shape-id (assoc follow :leader leader)))
              (rx/empty))
            (rx/of (dws/select-shape shape-id))))
@@ -675,7 +675,25 @@
 (defn cancel-pick-leader
   "Stop waiting for a leader to be picked (see `pick-leader`)."
   []
-  (end-pick-leader nil false))
+  (end-pick-leader nil {}))
+
+(defn pick-leader-at
+  "A click on the canvas while a leader is picked (see `pick-leader`): the
+  layer `leader-id` clicked becomes the leader. A click on nothing (nil),
+  or on a layer it cannot follow (see `cltl/can-follow?`), leaves the
+  pick waiting for another: a click lands before the canvas knows the
+  layer under the pointer when it comes at once."
+  [leader-id]
+  (ptk/reify ::pick-leader-at
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [shape-id (picking-leader state)
+            tl       (some->> shape-id (layer-board-timeline state))]
+        (if (and (some? leader-id)
+                 (some? tl)
+                 (cltl/can-follow? (dsh/lookup-page-objects state) tl shape-id leader-id))
+          (rx/of (end-pick-leader shape-id {:leader leader-id}))
+          (rx/empty))))))
 
 (def ^:private pick-endings
   "What ends the pick of a leader, as nothing can be picked then: leaving
@@ -685,11 +703,12 @@
     :app.main.data.workspace/finalize-workspace})
 
 (defn pick-leader
-  "Make the next layer selected, by a click on the canvas, in the layers
-  or with a selection band, the leader of the layer `shape-id` (see
-  `set-follow`), which stays selected. Esc, or a click on nothing,
-  cancels, `shape-id` still selected; so does picking again. Leaving
-  motion mode, the page or the file ends it."
+  "Make the next layer clicked on the canvas (see `pick-leader-at`, the
+  canvas waits for a click then) or chosen in the layers the leader of
+  the layer `shape-id` (see `set-follow`), which stays selected. Esc
+  cancels, `shape-id` still selected; so does picking again (the picker
+  of the Follow section). Leaving motion mode, the page or the file ends
+  it."
   [shape-id]
   (ptk/reify ::pick-leader
     ptk/UpdateEvent
@@ -701,13 +720,10 @@
       (let [of-type (fn [types] (rx/filter #(contains? types (ptk/type %)) stream))]
         (->> (rx/merge
               (->> (of-type #{::dws/select-shape ::dws/select-shapes})
-                   (rx/map #(end-pick-leader shape-id true)))
-              ;; a click the canvas has not hovered yet deselects first
-              ;; and selects on release: nothing selected soon after is a
-              ;; click on nothing, or Esc
+                   (rx/map #(end-pick-leader shape-id {:selected? true})))
+              ;; Esc deselects
               (->> (of-type #{::dws/deselect-all})
-                   (rx/switch-map #(rx/timer 500))
-                   (rx/map #(end-pick-leader shape-id false)))
+                   (rx/map #(end-pick-leader shape-id {})))
               (->> (of-type pick-endings)
                    (rx/map #(cancel-pick-leader))))
              (rx/take 1)

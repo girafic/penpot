@@ -92,9 +92,9 @@
       (when (not= size vport)
         (st/emit! (dw/initialize-viewport (dom/get-client-size prnt)))))))
 
-(defn setup-cursor [cursor alt? mod? space? panning drawing-tool drawing-path? path-editing? path-drag-cursor z? workspace-read-only? can-alt-duplicate?]
+(defn setup-cursor [cursor alt? mod? space? panning drawing-tool drawing-path? path-editing? path-drag-cursor z? workspace-read-only? can-alt-duplicate? picking-leader?]
   (mf/use-effect
-   (mf/deps @cursor @alt? @mod? @space? panning drawing-tool drawing-path? path-editing? path-drag-cursor z? workspace-read-only? can-alt-duplicate?)
+   (mf/deps @cursor @alt? @mod? @space? panning drawing-tool drawing-path? path-editing? path-drag-cursor z? workspace-read-only? can-alt-duplicate? picking-leader?)
    (fn []
      (let [show-pen? (or (= drawing-tool :path)
                          (and drawing-path?
@@ -109,6 +109,8 @@
            (cond
              (and @mod? @space?)             (utils/get-cursor :zoom)
              (or panning @space?)            (utils/get-cursor :hand)
+             ;; a click picks the leader of a layer (see `dwa/pick-leader`)
+             picking-leader?                 (utils/get-cursor :picker)
              ;; Keep the drag cursor across the viewport.
              (some? path-drag-cursor)        (cur/get-static path-drag-cursor)
              (= drawing-tool :comments)      (utils/get-cursor :comments)

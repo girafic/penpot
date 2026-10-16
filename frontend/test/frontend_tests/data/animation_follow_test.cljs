@@ -19,7 +19,6 @@
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.async :as async]
-   [frontend-tests.helpers.mock :as mock]
    [potok.v2.core :as ptk]))
 
 (t/use-fixtures :each
@@ -123,7 +122,7 @@
                               :on-next #(swap! events conj %))]
     [(ptk/update event state) ended events]))
 
-(t/deftest ^:async a-click-on-a-layer-picks-the-leader
+(t/deftest ^:async a-layer-chosen-in-the-layers-leads
   (let [state  (workspace-state (follow-file))
         stream (rx/subject)
         [picking ended events] (picking state stream)]
@@ -131,45 +130,13 @@
     (rx/push! stream (dws/select-shape (thi/id :lead)))
     (await ended)
     (let [[end] @events
-          ;; the click has selected the leader
+          ;; it is selected in the layers
           picked (-> (ptk/update end picking)
                      (assoc-in [:workspace-local :selected] #{(thi/id :lead)}))]
       (t/is (= ::dwa/end-pick-leader (ptk/type end)))
       (t/is (nil? (dwa/picking-leader picked)) "picking ends")
       (t/is (= [::dwa/set-follow ::dws/select-shape] (mapv ptk/type (await (emitted end picked))))
             "it follows the leader and stays selected"))))
-
-(t/deftest ^:async a-click-not-hovered-yet-picks-on-release
-  ;; it deselects first and selects on release, soon after
-  (let [timer (rx/subject)]
-    (await
-     (mock/with-mocks*
-       {rx/timer (mock/stub (fn [_] timer))}
-       (let [state  (assoc-in (workspace-state (follow-file)) [:workspace-local :selected] #{(thi/id :lead)})
-             stream (rx/subject)
-             [_ ended events] (picking state stream)]
-         (rx/push! stream (dws/deselect-all))
-         (await (async/settle))
-         (rx/push! stream (dws/select-shape (thi/id :lead)))
-         (await ended)
-         (t/is (= [::dwa/set-follow ::dws/select-shape]
-                  (mapv ptk/type (await (emitted (first @events) state))))))))))
-
-(t/deftest ^:async a-click-on-nothing-cancels-the-pick
-  (let [timer (rx/subject)]
-    (await
-     (mock/with-mocks*
-       {rx/timer (mock/stub (fn [_] timer))}
-       (let [state  (workspace-state (follow-file))
-             stream (rx/subject)
-             [_ ended events] (picking state stream)]
-         (rx/push! stream (dws/deselect-all))
-         (await (async/settle))
-         (rx/push! timer :elapsed)
-         (await ended)
-         (t/is (= ::dwa/end-pick-leader (ptk/type (first @events))))
-         (t/is (= [::dws/select-shape] (mapv ptk/type (await (emitted (first @events) state))))
-               "it follows nothing and stays selected"))))))
 
 (defn- ^:async ended-by
   "The events the pick of the leader of the dot emits when `ending`
@@ -219,3 +186,39 @@
     (t/is (nil? (get-in baked [:tracks dot :follow])))
     (t/is (some #(= :x (:property %)) (get-in baked [:tracks dot :keyframes])) "SVG, Lottie and CSS read keyframes")
     (await (async/settle))))
+
+(defn- picking-state
+  "The workspace on `follow-file` while the leader of the dot is picked."
+  []
+  (let [state (workspace-state (follow-file))]
+    (ptk/update (dwa/pick-leader (thi/id :dot)) state)))
+
+(t/deftest ^:async a-click-on-the-canvas-picks-the-leader
+  (let [picking (picking-state)
+        [end]   (await (emitted (dwa/pick-leader-at (thi/id :lead)) picking))]
+    (t/is (= ::dwa/end-pick-leader (ptk/type end)))
+    (t/is (nil? (dwa/picking-leader (ptk/update end picking))) "picking ends")
+    (t/is (= [::dwa/set-follow ::dws/select-shape]
+             (mapv ptk/type (await (emitted end (ptk/update end picking)))))
+          "it follows the layer clicked and stays selected")))
+
+(t/deftest ^:async a-click-on-nothing-or-a-layer-it-cannot-follow-waits-for-another
+  (let [picking (picking-state)
+        state   (update picking :workspace-animation dissoc :picking-leader)]
+    (t/is (empty? (await (emitted (dwa/pick-leader-at nil) picking)))
+          "nothing, or a layer the canvas does not know under the pointer yet")
+    (t/is (empty? (await (emitted (dwa/pick-leader-at (thi/id :board-a)) picking))) "its board")
+    (t/is (empty? (await (emitted (dwa/pick-leader-at (thi/id :lead)) state))) "nothing without a pick")))
+
+(t/deftest ^:async esc-cancels-the-pick
+  (let [picking (picking-state)
+        stream  (rx/subject)
+        event   (dwa/pick-leader (thi/id :dot))
+        events  (atom [])
+        ended   (async/observe (ptk/watch event picking stream) :on-next #(swap! events conj %))]
+    (rx/push! stream (dws/deselect-all))
+    (await ended)
+    (t/is (= [::dwa/end-pick-leader] (mapv ptk/type @events)))
+    (t/is (= [::dws/select-shape] (mapv ptk/type (await (emitted (first @events) picking))))
+          "it follows nothing and stays selected")))
+

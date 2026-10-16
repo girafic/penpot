@@ -177,6 +177,11 @@
   keyframe, targeted board)."
   (l/derived :workspace-animation st/state))
 
+(def picking-leader?
+  "Whether the canvas waits for a click on the leader of a layer (see
+  `app.main.data.workspace.animation/pick-leader`)."
+  (l/derived #(some? (get-in % [:workspace-animation :picking-leader])) st/state))
+
 (def canvas-in-window
   "Whether the canvas is in its small window over the maximized timeline
   (see `dwam/canvas-in-window?`)."

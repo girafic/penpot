@@ -36,6 +36,7 @@
     :zoom (cur/get-static "zoom")
     :zoom-in (cur/get-static "zoom-in")
     :zoom-out (cur/get-static "zoom-out")
+    :picker (cur/get-static "picker")
     (cur/get-static "pointer-inner")))
 
 ;; Ensure that the label has always the same font

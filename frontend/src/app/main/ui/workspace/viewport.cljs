@@ -141,6 +141,9 @@
                              (some #(ctk/allow-duplicate? base-objects %)
                                    (map (d/getf base-objects) selected)))
 
+        ;; a click picks the leader of a layer (see `dwa/pick-leader`)
+        picking-leader? (mf/deref refs/picking-leader?)
+
         selected-shapes'  (ui-hooks/use-throttle 100 selected-shapes)
         badge-shapes      (if (= transform :resize)
                             selected-shapes'
@@ -339,7 +342,7 @@
 
     (hooks/setup-dom-events zoom disable-paste-ref in-viewport-ref read-only? drawing-tool path-drawing?)
     (hooks/setup-viewport-size vport viewport-ref)
-    (hooks/setup-cursor cursor alt? mod? space? panning drawing-tool path-drawing? path-editing? (get path-bar-state :drag-cursor) z? read-only? can-alt-duplicate?)
+    (hooks/setup-cursor cursor alt? mod? space? panning drawing-tool path-drawing? path-editing? (get path-bar-state :drag-cursor) z? read-only? can-alt-duplicate? picking-leader?)
     (hooks/setup-keyboard alt? mod? space? z? shift?)
     (hooks/setup-hover-shapes page-id move-stream base-objects selected mod? hover measure-hover
                               hover-ids hover-top-frame-id @hover-disabled? focus zoom show-measures? read-only? transform)

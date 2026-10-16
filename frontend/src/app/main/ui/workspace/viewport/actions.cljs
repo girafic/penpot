@@ -14,6 +14,7 @@
    [app.common.uuid :as uuid]
    [app.config :as cfg]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.audio :as dwaa]
    [app.main.data.workspace.drawing :as dd]
    [app.main.data.workspace.libraries :as dwl]
@@ -41,6 +42,12 @@
    [rumext.v2 :as mf]))
 
 (def scale-per-pixel -0.0057)
+
+(defn- picking-leader?
+  "Whether the canvas waits for a click on the leader of a layer (see
+  `dwa/pick-leader`): a click picks then, it neither selects nor moves."
+  []
+  (some? (dwa/picking-leader @st/state)))
 
 (defn on-pointer-down
   [{:keys [id blocked hidden type]} selected edition drawing-tool text-editing?
@@ -88,6 +95,9 @@
                    (st/emit! (dw/start-zooming pt)))
                  (st/emit! (dw/start-panning))))
 
+             (and left-click? (picking-leader?))
+             (st/emit! (mse/->MouseEvent :down ctrl? shift? alt? meta?))
+
              left-click?
              (do
                (st/emit! (mse/->MouseEvent :down ctrl? shift? alt? meta?)
@@ -130,7 +140,8 @@
        (when (and (dom/left-mouse? bevent)
                   (not mod?)
                   (not shift?)
-                  (not @space?))
+                  (not @space?)
+                  (not (picking-leader?)))
 
          (dom/prevent-default bevent)
          (dom/stop-propagation bevent)
@@ -145,10 +156,12 @@
      (let [shift? (kbd/shift? event)
            selected? (contains? selected id)
            selected-drawtool (deref refs/selected-drawing-tool)]
-       (st/emit! (when (or shift? (not selected?))
-                   (dw/select-shape id shift?))
-                 (when (and (nil? selected-drawtool) (not shift?) (not read-only?))
-                   (dw/start-move-selected)))))))
+       (if (picking-leader?)
+         (st/emit! (dwa/pick-leader-at id))
+         (st/emit! (when (or shift? (not selected?))
+                     (dw/select-shape id shift?))
+                   (when (and (nil? selected-drawtool) (not shift?) (not read-only?))
+                     (dw/start-move-selected))))))))
 
 (defn on-frame-enter
   [frame-hover]
@@ -182,11 +195,16 @@
 
          ;; FIXME: Maybe we can transform this into a cond instead
          ;; of multiple (when)s.
-         (when (and hovering?
-                    (not @space?)
-                    (not edition)
-                    (not drawing-path?)
-                    (not drawing-tool))
+         (cond
+           ;; the layer clicked leads: no selection
+           (and (picking-leader?) (not @space?))
+           (st/emit! (dwa/pick-leader-at (:id @hover)))
+
+           (and hovering?
+                (not @space?)
+                (not edition)
+                (not drawing-path?)
+                (not drawing-tool))
            (st/emit! (dw/select-shape (:id @hover) shift?)))
 
          (when (and @z?
