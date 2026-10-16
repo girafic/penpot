@@ -224,7 +224,8 @@
                                     :selected selected
                                     :objects {}
                                     :images #{}}
-                             (or (seq (:tracks motion)) (seq (:audio motion))) (assoc :motion motion))
+                             (or (seq (:tracks motion)) (seq (:audio motion)) (seq (:clocks motion)))
+                             (assoc :motion motion))
 
                   shapes   (keep (d/getf objects) shape-ids)]
 

@@ -52,6 +52,15 @@
             [board-id track]))
         timelines))
 
+(defn- find-clock
+  "`[board-id clock]`: the board whose timeline gives the component copy
+  `id` a clock of its own (see `cta/copy-clock`), and the clock."
+  [timelines id]
+  (some (fn [[board-id timeline]]
+          (when-let [clock (dm/get-in timeline [:copies id])]
+            [board-id clock]))
+        timelines))
+
 (defn- settings
   "A timeline without its board, tracks, audio clips and the clocks of
   its component copies."
@@ -61,10 +70,16 @@
 (defn animation-sources
   "What copying the animation of the shapes of `ids` of `page` (with its
   `objects`) takes: their tracks, with where the shapes are in their
-  board, and the settings and the audio clips of the timelines of the
-  boards among them."
+  board, the clocks of the component copies among them, and the
+  settings and the audio clips of the timelines of the boards among
+  them."
   [page objects ids]
-  (let [timelines (:timelines page)]
+  (let [timelines (:timelines page)
+        clocks    (into {}
+                        (keep (fn [id]
+                                (when-let [[board-id clock] (find-clock timelines id)]
+                                  [id {:board board-id :clock clock}])))
+                        ids)]
     (cond-> {:tracks
              (into {}
                    (keep (fn [id]
@@ -79,6 +94,9 @@
                            (when-let [timeline (get timelines id)]
                              [id (settings timeline)])))
                    ids)}
+      (seq clocks)
+      (assoc :clocks clocks)
+
       (some #(seq (dm/get-in timelines [% :audio-clips])) ids)
       (assoc :audio
              (into {}
@@ -117,6 +135,17 @@
                (assoc :board-id board-id)
                (assoc-in [:tracks (:shape-id track)] track)
                (update :duration max (track-end track))))))
+
+(defn- add-clock
+  "`timelines` with `clock` for the component copy `id` in the timeline
+  of `board-id`, a new one with `settings` when the board has none."
+  [timelines board-id id clock settings]
+  (let [timeline (or (get timelines board-id)
+                     (merge (cta/make-timeline {:board-id board-id}) settings))]
+    (assoc timelines board-id
+           (-> timeline
+               (assoc :board-id board-id)
+               (cta/set-copy-clock id clock)))))
 
 (defn- add-clips
   "`timelines` with the audio `clips` of another board in the timeline of
@@ -211,29 +240,47 @@
   copies on `page`. A copy outside of any board (an alt-drag duplicate
   before it is dropped) keeps the board of its original when
   `keep-board?`."
-  [changes page ids-map {:keys [tracks settings audio]} & {:keys [keep-board?]}]
-  (if (and (empty? tracks) (empty? audio))
+  [changes page ids-map {:keys [tracks settings audio clocks]} & {:keys [keep-board?]}]
+  (if (and (empty? tracks) (empty? audio) (empty? clocks))
     changes
-    (let [objects   (pcb/get-objects changes)
-          root-of   (fn [new-id]
-                      (when (contains? objects new-id)
-                        (cfh/get-shape-id-root-frame objects new-id)))
+    (let [objects     (pcb/get-objects changes)
+          root-of     (fn [new-id]
+                        (when (contains? objects new-id)
+                          (cfh/get-shape-id-root-frame objects new-id)))
+          ;; the board of the copy `new-id` of a layer of `board`, and
+          ;; the settings of a timeline made for it
+          board-of    (fn [new-id board]
+                        (or (root-of new-id)
+                            (when (and keep-board? (contains? objects new-id)) board)))
+          settings-of (fn [new-board board]
+                        (or (get settings (d/seek #(= new-board (get ids-map %)) (keys settings)))
+                            (get settings board)))
           timelines
           (reduce-kv
            (fn [timelines old-id {:keys [board track at]}]
              (let [new-id    (get ids-map old-id)
-                   new-board (or (root-of new-id)
-                                 (when (and keep-board? (contains? objects new-id)) board))]
+                   new-board (board-of new-id board)]
                (if (nil? new-board)
                  timelines
                  (add-track timelines new-board
                             (moved-track track new-id
                                          (offset at (in-board objects new-id new-board))
                                          true)
-                            (or (get settings (d/seek #(= new-board (get ids-map %)) (keys settings)))
-                                (get settings board))))))
+                            (settings-of new-board board)))))
            (:timelines page)
            tracks)
+
+          ;; a copy of a component copy plays on its clock
+          timelines
+          (reduce-kv
+           (fn [timelines old-id {:keys [board clock]}]
+             (let [new-id    (get ids-map old-id)
+                   new-board (board-of new-id board)]
+               (if (nil? new-board)
+                 timelines
+                 (add-clock timelines new-board new-id clock (settings-of new-board board)))))
+           timelines
+           clocks)
 
           ;; the clips of a board go to the board of its copy: the copy
           ;; itself, or the board it is pasted into
@@ -275,6 +322,21 @@
                                            false)
                               (settings (get timelines board)))))))
          timelines
+         all-ids)
+
+        ;; a component copy takes its clock along
+        result
+        (reduce
+         (fn [timelines id]
+           (let [[board clock] (find-clock timelines id)
+                 new-board     (cfh/get-shape-id-root-frame moved id)]
+             (if (or (nil? clock) (nil? new-board) (= board new-board))
+               timelines
+               (-> timelines
+                   ;; no clock is the clock of the defaults
+                   (update board cta/set-copy-clock id {})
+                   (add-clock new-board id clock (settings (get timelines board)))))))
+         result
          all-ids)
 
         ;; a board put into another one gives it its clips too

@@ -307,6 +307,88 @@
     (t/is (sm/validate cta/schema:timeline-attrs (:attrs change)))
     (t/is (not (sm/validate cta/schema:timeline-attrs {:copies {copy {:speed 10}}})) "within its pace")))
 
+(defn- timed-copy-file
+  "`component-file` with its copy in board B playing from 500 ms on at
+  twice its pace, B looping in 4 s with no track, and an empty board C
+  at 2000,100."
+  []
+  (let [file (-> (component-file)
+                 (tho/add-frame :board-c :x 2000 :y 100 :width 400 :height 300))
+        b    (thi/id :board-b)
+        tl   (-> (cta/make-timeline {:board-id b :duration 4000 :playback :loop})
+                 (cta/set-copy-clock (thi/id :copy) {:start 500 :speed 2}))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page (thf/current-page file))
+                                (pcb/set-timeline b tl)))))
+
+(def ^:private timed
+  {:start 500 :speed 2})
+
+(t/deftest a-duplicated-board-keeps-the-clocks-of-its-copies
+  ;; though the board has no track of its own
+  (let [[file board] (duplicate (timed-copy-file) :board-b (gpt/point 0 500))
+        tl           (get (timelines file) board)
+        copy         (first (get-in (thf/current-page file) [:objects board :shapes]))]
+    (t/is (not= (thi/id :copy) copy))
+    (t/is (= timed (cta/copy-clock tl copy)))
+    (t/is (= [4000 :loop] [(:duration tl) (:playback tl)]) "the settings of its board")
+    (t/is (= timed (cta/copy-clock (get (timelines file) (thi/id :board-b)) (thi/id :copy)))
+          "the original keeps its own")
+    (t/is (cta/valid-timeline? tl))))
+
+(t/deftest a-duplicated-copy-keeps-its-clock
+  (let [[file copy] (duplicate (timed-copy-file) :copy (gpt/point 10 0))
+        tl          (get (timelines file) (thi/id :board-b))]
+    (t/is (= timed (cta/copy-clock tl copy)))
+    (t/is (= timed (cta/copy-clock tl (thi/id :copy)))))
+  (t/testing "by alt-drag: a board of its own until it is dropped"
+    (let [file    (timed-copy-file)
+          page    (thf/current-page file)
+          id      (thi/id :copy)
+          b       (thi/id :board-b)
+          changes (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                  (:objects page) page #{id} (gpt/point 0 0)
+                                                  {(:id file) file} (:data file) (:id file)
+                                                  :alt-duplication? true)
+          copy    (some #(when (and (= :add-obj (:type %)) (= id (:old-id %))) (-> % :obj :id))
+                        (:redo-changes changes))
+          file    (thf/apply-changes file changes)
+          page    (thf/current-page file)
+          dropped (thf/apply-changes file (cls/generate-relocate (-> (pcb/empty-changes nil)
+                                                                     (pcb/with-page-id (:id page))
+                                                                     (pcb/with-objects (:objects page))
+                                                                     (pcb/with-library-data (:data file)))
+                                                                 b 0 #{copy}))]
+      (t/is (= timed (cta/copy-clock (get (timelines file) copy) copy)) "while it is dragged")
+      (t/is (= timed (cta/copy-clock (get (timelines dropped) b) copy)) "once it is dropped")
+      (t/is (not (contains? (timelines dropped) copy))))))
+
+(t/deftest a-pasted-copy-brings-its-clock
+  ;; what the clipboard takes of a copy that has no track of its own
+  (let [file    (timed-copy-file)
+        page    (thf/current-page file)
+        id      (thi/id :copy)
+        motion  (cltl/animation-sources page (:objects page)
+                                        (cfh/get-children-ids-with-self (:objects page) id))
+        changes (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                (:objects page) page #{id} (gpt/point 0 0)
+                                                {(:id file) file} (:data file) (:id file)
+                                                {:motion motion})
+        copy    (some #(when (and (= :add-obj (:type %)) (= id (:old-id %))) (-> % :obj :id))
+                      (:redo-changes changes))
+        file    (thf/apply-changes file changes)]
+    (t/is (empty? (:tracks motion)))
+    (t/is (= timed (cta/copy-clock (get (timelines file) (thi/id :board-b)) copy)))))
+
+(t/deftest a-moved-copy-takes-its-clock-along
+  (let [file (relocate (timed-copy-file) :copy :board-c)
+        tls  (timelines file)
+        c    (get tls (thi/id :board-c))]
+    (t/is (= timed (cta/copy-clock c (thi/id :copy))))
+    (t/is (= [4000 :loop] [(:duration c) (:playback c)]) "the settings of the board it left")
+    (t/is (not (contains? (get tls (thi/id :board-b)) :copies)))
+    (t/is (cta/valid-timeline? c))))
+
 (t/deftest exports-play-a-copy-on-its-clock
   (let [{:keys [objects board copy copy-rect main-page]} (component-scene)
         own      (cta/set-copy-clock (cta/make-timeline {:board-id board :duration 2000}) copy {:start 500 :speed 2})
