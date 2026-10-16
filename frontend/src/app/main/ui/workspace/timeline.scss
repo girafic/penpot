@@ -9,6 +9,7 @@
 @use "ds/spacing.scss" as *;
 @use "ds/z-index.scss" as *;
 @use "refactor/common-refactor.scss" as deprecated;
+@use "ds/typography.scss" as t;
 
 $track-label-width: 300px;
 
@@ -794,20 +795,19 @@ $header-height: $ruler-height + $row-height;
   text-overflow: ellipsis;
 }
 
-// A layer out of the board that the board still animates (see
-// `outside-ids`): its name shrinks first.
 // The layer a layer follows: a click selects it.
 .follow-chip {
+  @include t.use-typography("body-small");
+
   flex: 0 1 auto;
   min-inline-size: 0;
   overflow: hidden;
-  block-size: deprecated.$s-16;
-  margin-inline: deprecated.$s-4;
-  padding-inline: deprecated.$s-4;
+  block-size: ds-sizes.$sz-16;
+  margin-inline: var(--sp-xs);
+  padding-inline: var(--sp-xs);
   border: none;
-  border-radius: deprecated.$br-4;
+  border-radius: ds-borders.$br-4;
   background-color: var(--color-background-quaternary);
-  font-size: deprecated.$fs-11;
   color: var(--color-foreground-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -818,6 +818,8 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
+// A layer out of the board that the board still animates (see
+// `outside-ids`): its name shrinks first.
 .outside-hint {
   flex-shrink: 0;
   margin-inline: deprecated.$s-4;
