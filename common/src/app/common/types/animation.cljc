@@ -3696,8 +3696,10 @@
           e     (pivot b)
           w     (pivot id)
           cross (- (* (- (:x e) (:x s)) (- (:y w) (:y s)))
-                   (* (- (:y e) (:y s)) (- (:x w) (:x s))))]
-      (if (< cross -1e-6) :cw :ccw))))
+                   (* (- (:y e) (:y s)) (- (:x w) (:x s))))
+          ;; the sine of the bend: straight within a tenth of a degree
+          sine  (/ cross (max 1e-9 (* (gpt/distance s e) (gpt/distance s w))))]
+      (if (< sine -2e-3) :cw :ccw))))
 
 ;; --- Baking follows ------------------------------------------------------
 

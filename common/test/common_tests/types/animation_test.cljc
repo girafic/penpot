@@ -5292,6 +5292,7 @@
     (t/is (= :cw (bend 120)) "the elbow below a line pointing right")
     (t/is (= :ccw (bend 80)))
     (t/is (= :ccw (bend 100)) "straight")
+    (t/is (= :ccw (bend 100.0001)) "straight but for a rounding")
     (let [{:keys [tl objects arm-fore]} (arm-scene)]
       (t/is (nil? (cta/natural-bend tl objects arm-fore)) "one link only"))))
 
