@@ -1138,7 +1138,7 @@
             drawn  (emit-svg-node plain node)]
         (str "<defs>"
              (when (some? filter)
-               (str "<filter id=\"" fid "\">" filter "</filter>"))
+               (str "<filter id=\"" fid "\" color-interpolation-filters=\"sRGB\">" filter "</filter>"))
              "<mask id=\"" mid "\" mask-type=\"" type "\" style=\"mask-type: " type "\""
              " maskUnits=\"userSpaceOnUse\" x=\"" x "\" y=\"" y "\" width=\"" w "\" height=\"" h "\">"
              (if (some? filter)

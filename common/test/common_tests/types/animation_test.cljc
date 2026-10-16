@@ -2418,7 +2418,11 @@
         (t/is (= tt (:tt content)) (str "the track matte of " mode))
         (t/is (str/includes? svg (str "mask-type=\"" type "\"")) (str "the SVG mask of " mode))
         (t/is (= filter? (str/includes? mask "fill=\"white\"")) (str "a white region under " mode))
-        (t/is (= filter? (str/includes? svg (str "id=\"penpot-mask-" gid "-filter\""))))))))
+        ;; in sRGB, where the mask reads its luminance, as the canvas
+        ;; inverts it: in linearRGB a mid grey would keep 90%, not 50%
+        (t/is (= filter? (str/includes? svg (str "id=\"penpot-mask-" gid "-filter\""
+                                                 " color-interpolation-filters=\"sRGB\"")))
+              (str "the filter of " mode))))))
 
 (t/deftest lottie-draws-a-masked-group-as-vectors
   ;; Not an image any more: its own animation plays on it.

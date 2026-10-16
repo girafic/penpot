@@ -87,7 +87,10 @@
                           [bx by bw bh])]
 
       [:defs
-       [:filter {:id (filter-id render-id mask)}
+       ;; in sRGB, where the mask reads its luminance: the inverted luma
+       ;; of a mid grey stays mid grey, as the new renderer draws it
+       [:filter {:id (filter-id render-id mask)
+                 :color-interpolation-filters "sRGB"}
         (if (= :luma-inverted mode)
           ;; dark where it was bright: over the white region below, the
           ;; mask keeps where it is dark
