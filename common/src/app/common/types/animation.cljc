@@ -691,6 +691,15 @@
                    (if (> t duration) (- (* 2 duration) t) t))
       (min elapsed duration))))
 
+(defn playback-back?
+  "Whether `timeline` plays its way back `elapsed` ms after playing from
+  its start: the second half of each round of ping-pong (see
+  `playback-time`), on the clock of a component copy too."
+  [timeline elapsed]
+  (and (= :ping-pong (playback-mode timeline))
+       (let [duration (max 1 (:duration timeline))]
+         (> (mod (clock-elapsed timeline elapsed) (* 2 duration)) duration))))
+
 (defn playback-ended?
   "Whether playback of `timeline` has stopped `elapsed` ms after its
   start, which only happens when it plays once."
@@ -3337,41 +3346,51 @@
   a leader (see `follow-of`) moved as it: what the leader does from its
   first frame on, or from where it rests (`:from` `:rest`), `:delay` ms
   later, after their own animation; a chain of followers follows
-  through. Opacity multiplies by the leader's, as in a group. Before its
-  delay a follower waits at the leader's first frame, or, when
-  `timeline` loops, takes the end of the loop before. A leader whose
+  through. Opacity multiplies by the leader's, as in a group. The delay
+  counts in the time played: in ping-pong, on the way back (`back?`,
+  see `playback-back?`) a follower is where its leader was on its way
+  back, or there, a moment before. Before its delay a follower waits at
+  the leader's first frame, or, when `timeline` loops or plays
+  ping-pong, takes the end of the round before. A leader whose
   first frame squashes it to (almost) nothing along an axis, as a pop
   in from 0, counts its scale from rest (its place and turn from that
   frame). The other times
   play the follow chains only, their first frame read once while `key`
   (the timeline the caller keeps, before it is resolved) stays."
-  [timeline objects time own & {:keys [key]}]
+  [timeline objects time own & {:keys [key back?]}]
   (let [follows (followers timeline objects)]
     (if (empty? follows)
       own
-      (let [duration (:duration timeline 0)
-            wraps?   (and (= :loop (playback-mode timeline)) (pos? duration))
-            earlier  (fn [t delay]
-                       (let [t (- t delay)]
-                         (cond (>= t 0) t
-                               wraps?   (mod t duration)
-                               :else    0)))
+      (let [duration   (:duration timeline 0)
+            mode       (playback-mode timeline)
+            ping-pong? (and (= :ping-pong mode) (pos? duration))
+            ;; the time played in a round: ping-pong goes there and back
+            round      (if ping-pong? (* 2 duration) duration)
+            wraps?     (and (contains? #{:loop :ping-pong} mode) (pos? duration))
+            fold       (fn [u] (if (and ping-pong? (> u duration)) (- round u) u))
+            now        (if (and ping-pong? back?) (- round time) time)
+            earlier    (fn [u delay]
+                         (let [u (- u delay)]
+                           (cond (>= u 0) u
+                                 wraps?   (mod u round)
+                                 :else    0)))
             chain    (update timeline :tracks select-keys (follow-chain timeline follows))
             own-at   (memoize #(if (zero? %)
                                  (first-frame-modifiers key objects chain)
                                  (own-modifiers chain objects %)))
             cache  (volatile! {})
-            played (fn played [id t]
-                     (let [k [id t]]
+            ;; `u`, the time played in the round
+            played (fn played [id u]
+                     (let [k [id u]]
                        (if (contains? @cache k)
                          (get @cache k)
-                         (let [mods (get (if (= t time) own (own-at t)) id)
+                         (let [mods (get (if (= u now) own (own-at (fold u))) id)
                                v    (if-not (contains? follows id)
                                       mods
                                       (let [follow  (follow-of timeline id)
                                             leader  (:leader follow)
                                             matrix  #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
-                                            now     (matrix (played leader (earlier t (:delay follow))))
+                                            at      (matrix (played leader (earlier u (:delay follow))))
                                             ;; from where it rests, as in a group,
                                             ;; or from its first frame; a first
                                             ;; frame scaled to (almost) nothing
@@ -3385,7 +3404,7 @@
                                                       ;; turn count, not its scale
                                                       (< (change-least-scale first) 0.01) (unscaled first rested)
                                                       :else first)
-                                            change  (if-let [inv (gmt/inverse start)] (gmt/multiply now inv) now)
+                                            change  (if-let [inv (gmt/inverse start)] (gmt/multiply at inv) at)
                                             pivot   (gpt/transform rested start)
                                             moved   (ctm/add-modifiers mods (follow-modifiers follow change pivot))]
                                         (cond-> moved
@@ -3393,12 +3412,12 @@
                                           (ctm/change-property
                                            :opacity
                                            (* (modifiers-opacity mods (:opacity (get objects id) 1))
-                                              (modifiers-opacity (played leader (earlier t (:delay follow)))
+                                              (modifiers-opacity (played leader (earlier u (:delay follow)))
                                                                  (:opacity lshape 1)))))))]
                            (vswap! cache assoc k v)
                            v))))]
         (reduce (fn [acc id]
-                  (if-let [mods (played id time)]
+                  (if-let [mods (played id now)]
                     (assoc acc id mods)
                     acc))
                 own
@@ -3412,12 +3431,14 @@
   (`:text-units`, see `text-unit-entries`): there at every time, `[]` at
   rest, so that every renderer clears a pose. Designed to be fed to
   `set-modifiers` / `set-wasm-modifiers` (editor preview) or applied
-  through `transform-shape` (viewer/export)."
-  [timeline objects time]
+  through `transform-shape` (viewer/export). With `back?`, `time` is on
+  the way back of ping-pong (see `playback-back?`), where the layers
+  that follow others lag behind their leaders as they go back."
+  [timeline objects time & {:keys [back?]}]
   (let [resolved (resolve-animations timeline objects)
         own      (own-modifiers resolved objects time)
         ;; the timeline as given stays the same from frame to frame
-        played   (followed-modifiers resolved objects time own :key timeline)
+        played   (followed-modifiers resolved objects time own :key timeline :back? back?)
         tree     (reduce-kv (fn [tree shape-id modifiers]
                               (cond-> tree
                                 (not (ctm/empty? modifiers))
@@ -3542,6 +3563,31 @@
                                   (vec))))
         (d/update-when :loops #(into #{} (remove (fn [k] (contains? baked k))) %)))))
 
+(defn follows?
+  "Whether a layer of `timeline` follows another (see `follow-of`)."
+  [timeline]
+  (boolean (some :follow (vals (:tracks timeline)))))
+
+(defn- round-trip
+  "The ping-pong `timeline` as the loop of its way there and back (see
+  `expand-ping-pong`), what it plays turned into keyframes first; the
+  split animations of its texts keep its clock (see
+  `text-unit-entries`)."
+  [timeline objects]
+  (let [clock (select-keys timeline [:duration :playback])]
+    (-> timeline
+        (resolve-animations objects)
+        (expand-loops)
+        (expand-paths)
+        (expand-springs)
+        (cut-timeline)
+        (expand-ping-pong)
+        (update :tracks d/update-vals
+                (fn [track]
+                  (cond-> track
+                    (and (seq (:animations track)) (nil? (:split-clock track)))
+                    (assoc :split-clock clock)))))))
+
 (defn bake-follows
   "`timeline` with its follows (see `follow-of`) played by keyframes of
   the followers, for the exports that read keyframes: the pose of each
@@ -3549,12 +3595,16 @@
   shows it (see `timeline->modif-tree`), kept where linear keyframes
   between the others would miss it by more than a quarter pixel or
   degree. The tracks of the followers come as they play (see
-  `resolve-animations`), the others as they are. A follow that plays
-  nothing (a cycle, a leader gone) is left out."
+  `resolve-animations`), the others as they are. A ping-pong timeline
+  turns into the loop of its way there and back first (see
+  `round-trip`), where the followers lag behind both ways. A follow
+  that plays nothing (a cycle, a leader gone) is left out."
   [timeline objects & {:keys [fps] :or {fps 60}}]
-  (if-not (some :follow (vals (:tracks timeline)))
+  (if-not (follows? timeline)
     timeline
-    (let [resolved (resolve-animations timeline objects)
+    (let [timeline (cond-> timeline
+                     (= :ping-pong (playback-mode timeline)) (round-trip objects))
+          resolved (resolve-animations timeline objects)
           follows  (followers resolved objects)
           ids      (follow-chain resolved follows)
           played   (update resolved :tracks select-keys ids)

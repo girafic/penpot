@@ -1505,11 +1505,43 @@
           copies (cltl/instance-timelines objects board host main-page)
           export (cltl/with-instance-tracks host (vals copies) objects)
           dot    (copy-of objects copy :main-dot)]
-      (doseq [t [300 450 1200 1500]]
+      (doseq [t [300 450 1100 1200 1500 1900]]
         (let [[cx cy] (centre-in (cltl/animation-tree copies objects t) objects dot)
               [ex ey] (centre-in (cta/timeline->modif-tree export objects t) objects dot)]
           (t/is (and (mth/close? cx ex 1) (mth/close? cy ey 1))
                 (str playback " at " t ": canvas " [cx cy] ", export " [ex ey])))))))
+
+(t/deftest a-follower-in-a-ping-pong-copy-lags-on-the-way-back
+  ;; the dot is where the rect of the copy was 200 ms before, on its way
+  ;; back too
+  (let [file   (following-component-file :main-rect)
+        main   (thi/id :main)
+        page   (thf/current-page file)
+        tl     (-> (get-in page [:timelines main])
+                   (assoc :playback :ping-pong)
+                   (cta/set-follow (thi/id :main-dot) {:leader (thi/id :main-rect) :delay 200}))
+        file   (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                           (pcb/with-page page)
+                                           (pcb/set-timeline main tl)))
+        {:keys [objects board copy main-page]} (component-scene file)
+        copies (cltl/instance-timelines objects board (cta/make-timeline {:board-id board :duration 2000}) main-page)
+        rect   (copy-of objects copy :main-rect)
+        dot    (copy-of objects copy :main-dot)
+        x      (fn [id elapsed] (first (centre-in (cltl/animation-tree copies objects elapsed) objects id)))]
+    (doseq [elapsed [500 1100 1300 1500 1700]]
+      (t/is (mth/close? (- (x dot elapsed) (x dot 200)) (- (x rect (- elapsed 200)) (x rect 0)) 0.5)
+            (str "at " elapsed)))))
+
+(t/deftest the-view-mode-shows-followers-behind-on-the-way-back
+  ;; the board plays ping-pong: at 500 ms on its way back the dot is
+  ;; where the rect was at 600, at 500 on its way there where it was at 400
+  (let [file    (following-file)
+        a       (thi/id :board-a)
+        page    (update-in (thf/current-page file) [:timelines a] assoc :playback :ping-pong)
+        objects (:objects page)
+        dot-x   (fn [time elapsed]
+                  (first (centre-in (cltl/view-animation-tree page {} a time elapsed) objects (thi/id :dot))))]
+    (t/is (mth/close? 20 (- (dot-x 500 2500) (dot-x 500 500)) 0.5))))
 
 (t/deftest a-layer-follows-one-of-its-board-only
   (let [file    (-> (following-file)

@@ -859,10 +859,15 @@
 
 (defn animation-tree
   "The modif-tree showing the animations of `timelines` (by board) at
-  `time`: every board as it plays then (see `cta/playback-time`)."
-  [timelines objects time]
-  (reduce-kv (fn [tree _ timeline]
-               (into tree (cta/timeline->modif-tree timeline objects (cta/playback-time timeline time))))
+  `time`: every board as it plays then (see `cta/playback-time`), on
+  its way back in ping-pong as `time` says (see `cta/playback-back?`),
+  or as `back`, the keys of the timelines going back at `time`, says
+  (the playhead of the workspace, which shows the time of a timeline)."
+  [timelines objects time & {:keys [back]}]
+  (reduce-kv (fn [tree key timeline]
+               (into tree (cta/timeline->modif-tree timeline objects (cta/playback-time timeline time)
+                                                    :back? (or (contains? back key)
+                                                               (cta/playback-back? timeline time)))))
              {}
              timelines))
 
@@ -875,9 +880,12 @@
   id."
   [page files board-id time elapsed]
   (let [objects   (:objects page)
-        timelines (:timelines page)]
+        timelines (:timelines page)
+        own       (select-keys timelines [board-id])]
     (merge (animation-tree (copy-timelines objects timelines files board-id) objects elapsed)
-           (animation-tree (select-keys timelines [board-id]) objects time))))
+           (animation-tree own objects time
+                           :back (when (some-> (get own board-id) (cta/playback-back? elapsed))
+                                   #{board-id})))))
 
 (defn view-playback-ended?
   "Whether the view mode stops playing a board `elapsed` ms after it
@@ -889,9 +897,10 @@
 
 (defn shown-shapes
   "The shapes the animations of `timelines` move at `time`, by id, as the
-  canvas shows them: with the children they carry along."
-  [timelines objects time]
-  (let [modif-tree (animation-tree timelines objects time)]
+  canvas shows them: with the children they carry along. `back` as in
+  `animation-tree`."
+  [timelines objects time & {:keys [back]}]
+  (let [modif-tree (animation-tree timelines objects time :back back)]
     (when (seq modif-tree)
       (into {}
             (keep (fn [[id {:keys [modifiers]}]]

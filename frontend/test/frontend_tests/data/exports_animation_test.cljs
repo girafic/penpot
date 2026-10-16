@@ -320,6 +320,32 @@
       (t/is (= [:set-modifiers false] (first @calls)))
       (t/is (some #{[:pixels bid]} @calls)))))
 
+(t/deftest ping-pong-videos-capture-the-way-back-where-layers-follow
+  (let [{:keys [objects bid cid]} (test-objects)
+        dot       (cts/setup-shape {:type :rect :x 60 :y 10 :width 10 :height 10})
+        did       (:id dot)
+        objects   (-> objects
+                      (assoc did (assoc dot :parent-id bid :frame-id bid))
+                      (update-in [bid :shapes] conj did))
+        tl        (-> (cta/make-timeline {:board-id bid :duration 1000 :playback :ping-pong})
+                      (cta/add-keyframe cid {:time 0 :property :x :value 10 :easing :linear})
+                      (cta/add-keyframe cid {:time 1000 :property :x :value 50}))
+        following (cta/set-follow tl did {:leader cid :delay 200})
+        times     [0 250 500 750 1000]
+        moved     (fn [back?]
+                    (let [entries (atom nil)
+                          bridge  {:set-modifiers (fn [entries' & _] (reset! entries entries'))
+                                   :apply-shape-properties (fn [_ _])
+                                   :render-shape-pixels (fn [_ _ _] (js/Uint8Array. #js [1]))}]
+                      (dea/render-shape-at-time objects following bid 500 {:bridge bridge :back? back?})
+                      (:e (get (into {} @entries) did))))]
+    (t/is (= [750 500 250 0] (dea/back-times following times false)) "back to the start")
+    (t/is (= [750 500 250] (dea/back-times following times true)) "the next round shows the start")
+    (t/is (nil? (dea/back-times tl times false)) "without follows the frames there play backwards")
+    (t/is (nil? (dea/back-times (assoc following :playback :loop) times false)))
+    (t/is (< (js/Math.abs (- 12 (moved false))) 0.01) "there: where the rect was at 300 ms")
+    (t/is (< (js/Math.abs (- 28 (moved true))) 0.01) "back: where it was at 700 ms, on its way back")))
+
 (def ^:private *closed (atom 0))
 
 (defn- fake-format []

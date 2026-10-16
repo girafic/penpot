@@ -32,6 +32,9 @@
 (def ^:private ref:playing?
   (l/derived #(dm/get-in % [:workspace-animation :playing?] false) st/state =))
 
+(def ^:private ref:back?
+  (l/derived dwa/playing-back? st/state =))
+
 (def ^:private color
   "Like the selection handles."
   "var(--color-accent-tertiary)")
@@ -126,13 +129,15 @@
 (mf/defc follow-line*
   "A dashed line from the layer `shape-id` to the pivot of the layer it
   follows (see `cta/follow-of`), both where `timeline` shows them at
-  `playhead`."
+  `playhead`, on the way back of ping-pong with `back?`."
   {::mf/private true}
-  [{:keys [shape-id timeline objects playhead zoom]}]
+  [{:keys [shape-id timeline objects playhead back? zoom]}]
   (let [leader (dm/get-in timeline [:tracks shape-id :follow :leader])
-        ends   (mf/with-memo [timeline objects playhead shape-id leader]
+        ends   (mf/with-memo [timeline objects playhead back? shape-id leader]
                  (when (and (some? leader) (contains? objects leader) (contains? objects shape-id))
-                   (let [moved (cltl/shown-shapes {(:board-id timeline) timeline} objects playhead)
+                   (let [board (:board-id timeline)
+                         moved (cltl/shown-shapes {board timeline} objects playhead
+                                                  :back (when back? #{board}))
                          at    #(or (get moved %) (get objects %))]
                      {:from (grc/rect->center (:selrect (at shape-id)))
                       :to   (cta/origin-point (at leader) (cta/track-origin (cta/get-track timeline leader)))})))]
@@ -160,6 +165,7 @@
         edit     (when editing? edit)
         playhead (mf/deref ref:playhead)
         playing? (mf/deref ref:playing?)
+        back?    (mf/deref ref:back?)
         path     (mf/with-memo [timeline objects shape-id edit playhead]
                    (when (some? timeline)
                      (if (some? edit)
@@ -171,6 +177,7 @@
                          :timeline timeline
                          :objects objects
                          :playhead playhead
+                         :back? back?
                          :zoom zoom}])
      (when (some? path)
        [:g {:class "motion-path"}

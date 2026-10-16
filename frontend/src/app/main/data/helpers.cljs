@@ -184,19 +184,21 @@
   "`{:timelines :board-id :time}` of the animation the canvas shows in
   motion mode: the timeline of the board it plays, by board, the one
   edits are recorded to (see `app.main.data.workspace.animation/apply-preview`),
+  with `:back` (see `cltl/animation-tree`) on the way back of ping-pong;
   or nil."
   [state]
   (when (contains? (:workspace-layout state) :animation-timeline)
-    (when-let [{:keys [board-id time]} (dm/get-in state [:workspace-animation :preview])]
+    (when-let [{:keys [board-id time back?]} (dm/get-in state [:workspace-animation :preview])]
       (when-let [timeline (dm/get-in (lookup-page state) [:timelines board-id])]
-        {:timelines {board-id timeline} :board-id board-id :time time}))))
+        (cond-> {:timelines {board-id timeline} :board-id board-id :time time}
+          back? (assoc :back #{board-id}))))))
 
 (defn lookup-shown-shapes
   "In motion mode, the shapes the animations move, by id, as the canvas
   shows them (see `cltl/shown-shapes`)."
   [state]
-  (when-let [{:keys [timelines time]} (lookup-animation-preview state)]
-    (cltl/shown-shapes timelines (lookup-page-objects state) time)))
+  (when-let [{:keys [timelines time back]} (lookup-animation-preview state)]
+    (cltl/shown-shapes timelines (lookup-page-objects state) time :back back)))
 
 (defn select-bool-children
   [state parent-id]

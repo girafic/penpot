@@ -73,13 +73,15 @@
 
 (def ^:private ref:motion-rest
   "Whether the animation plays, the board it plays and, while it rests,
-  its playhead: all the viewport reads of it, so playback does not render
-  it again each frame."
+  its playhead and whether that shows the way back of ping-pong: all the
+  viewport reads of it, so playback does not render it again each
+  frame."
   (l/derived (fn [anim]
                (let [playing? (boolean (:playing? anim))]
                  {:playing? playing?
                   :board-id (get-in anim [:preview :board-id])
-                  :playhead (when-not playing? (get anim :playhead 0))}))
+                  :playhead (when-not playing? (get anim :playhead 0))
+                  :back?    (and (not playing?) (neg? (get anim :direction 1)))}))
              refs/workspace-animation =))
 
 ;; --- Viewport
@@ -100,11 +102,11 @@
 
 (defn- preview-selected
   "`objects` with the `selected` shapes where the animations of
-  `timelines` show them at `time`."
-  [selected objects timelines time]
+  `timelines` show them at `time`, `back` as in `cltl/animation-tree`."
+  [selected objects timelines time back]
   (if (empty? selected)
     objects
-    (let [shown (cltl/shown-shapes timelines objects time)]
+    (let [shown (cltl/shown-shapes timelines objects time :back back)]
       (reduce (fn [objects id]
                 (if-let [shape (get shown id)]
                   (assoc objects id shape)
@@ -242,12 +244,13 @@
                                (not (:playing? animation))
                                (nil? transform))
         playhead          (or (:playhead animation) 0)
+        back              (when (:back? animation) #{(:board-id animation)})
 
         objects-modified
         (mf/with-memo
-          [base-objects wasm-modifiers selected motion-preview? timelines playhead]
+          [base-objects wasm-modifiers selected motion-preview? timelines playhead back]
           (if motion-preview?
-            (preview-selected selected base-objects timelines playhead)
+            (preview-selected selected base-objects timelines playhead back)
             (apply-modifiers-to-selected selected base-objects wasm-modifiers)))
 
         selected-shapes   (mf/with-memo [selected objects-modified]

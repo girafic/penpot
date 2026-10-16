@@ -15,6 +15,7 @@
    [app.common.test-helpers.shapes :as ths]
    [app.common.types.animation :as cta]
    [app.main.data.changes :as dch]
+   [app.main.data.helpers :as dsh]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.selection :as dws]
    [beicon.v2.core :as rx]
@@ -226,4 +227,27 @@
     (t/is (= [::dwa/end-pick-leader] (mapv ptk/type @events)))
     (t/is (= [::dws/select-shape] (mapv ptk/type (await (emitted (first @events) picking))))
           "it follows nothing and stays selected")))
+
+(t/deftest ^:async the-canvas-shows-followers-behind-on-the-way-back
+  ;; paused on the way back of ping-pong, the canvas, its selection and
+  ;; its hovering show the dot where the lead was 200 ms before
+  (let [file  (following-file)
+        page  (thf/current-page file)
+        tl    (-> (get-in page [:timelines (thi/id :board-a)])
+                  (assoc :playback :ping-pong)
+                  (cta/set-follow (thi/id :dot) {:leader (thi/id :lead) :delay 200}))
+        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page page)
+                                          (pcb/set-timeline (thi/id :board-a) tl)))
+        at    (fn [direction]
+                (let [state (-> (workspace-state file)
+                                (update :workspace-animation assoc :playhead 500 :direction direction))
+                      state (ptk/update (dwa/apply-preview) state)]
+                  [(dwa/playing-back? state)
+                   (get-in (dsh/lookup-shown-shapes state) [(thi/id :dot) :selrect :x])]))
+        [there? x-there] (at 1)
+        [back? x-back]   (at -1)]
+    (t/is (= [false true] [there? back?]))
+    (t/is (< 10 (- x-back x-there)) (str "further on the way back: " [x-there x-back]))
+    (await (async/settle))))
 

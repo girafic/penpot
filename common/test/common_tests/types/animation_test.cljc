@@ -5109,3 +5109,67 @@
                                              elsewhere follower 1000))
           "150 from where it rests")))
 
+
+(t/deftest playback-goes-back-on-the-way-back-of-ping-pong
+  (let [tl (cta/make-timeline {:board-id (uuid/next) :duration 1000 :playback :ping-pong})]
+    (t/is (= [false false true true false] (mapv #(cta/playback-back? tl %) [0 1000 1001 1999 2000])))
+    (t/is (not (cta/playback-back? (assoc tl :playback :loop) 1500)) "only ping-pong goes back")
+    (t/is (cta/playback-back? (assoc tl :clock-speed 2) 600) "on the clock of a copy")))
+
+(defn- back-centre-at
+  "`centre-at` on the way back of ping-pong."
+  [timeline objects id time]
+  (let [mods  (get-in (cta/timeline->modif-tree timeline objects time :back? true) [id :modifiers])
+        shape (cond-> (get objects id) (some? mods) (gsh/transform-shape mods))
+        c     (grc/rect->center (:selrect shape))]
+    [(:x c) (:y c)]))
+
+(t/deftest a-follower-of-ping-pong-lags-on-the-way-back-too
+  ;; the delay counts in the time played: on the way back the follower
+  ;; is where the leader was a moment before, on its way back or there
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (assoc :playback :ping-pong)
+               (cta/add-keyframe leader {:time 0 :property :x :value 100 :easing :linear})
+               (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+               (cta/set-follow follower {:leader leader :delay 200}))]
+    (t/is (close-point? [235 105] (centre-at tl objects follower 500)) "there: where the leader was at 300 ms")
+    (t/is (close-point? [275 105] (back-centre-at tl objects follower 500))
+          "back: where it was at 700 ms, on its way back")
+    (t/is (close-point? [295 105] (back-centre-at tl objects follower 900))
+          "past the turn: where it was at 900 ms, on its way there")
+    (t/is (close-point? [215 105] (centre-at tl objects follower 100))
+          "there again: where it was at 100 ms, on its way back")
+    (t/is (close-point? [285 105] (back-centre-at (assoc tl :playback :loop) objects follower 1000))
+          "a loop has no way back: where the leader was at 800 ms")))
+
+(t/deftest a-follow-of-ping-pong-bakes-into-a-loop-there-and-back
+  (let [{:keys [leader follower objects]} (follow-scene)
+        other (cts/setup-shape {:type :rect :x 300 :y 300 :width 10 :height 10})
+        objects (assoc objects (:id other) other)
+        tl    (-> (mk-timeline)
+                  (assoc :playback :ping-pong)
+                  (cta/add-keyframe leader {:time 0 :property :x :value 100 :easing :ease-in-out})
+                  (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+                  (cta/add-animation (:id other) {:type :fade :start 0 :duration 300})
+                  (cta/set-follow follower {:leader leader :delay 200}))
+        baked (cta/bake-follows tl objects)
+        shown (fn [id u]
+                (if (> u 1000)
+                  (back-centre-at tl objects id (- 2000 u))
+                  (centre-at tl objects id u)))]
+    (t/is (= [:loop 2000] [(cta/playback-mode baked) (:duration baked)]) "there and back as one loop")
+    (t/is (cta/valid-timeline? baked))
+    (t/is (nil? (get-in baked [:tracks follower :follow])) "no follow left")
+    (doseq [u (range 0 2001 50)]
+      (let [[ex ey] (shown follower u)
+            [bx by] (centre-at baked objects follower u)
+            [lx ly] (shown leader u)
+            [kx ky] (centre-at baked objects leader u)]
+        (t/is (and (mth/close? ex bx 0.5) (mth/close? ey by 0.5)) (str "the follower at " u))
+        (t/is (and (mth/close? lx kx 0.5) (mth/close? ly ky 0.5)) (str "the leader at " u))))
+    (let [opacity #(:opacity (shown-at %1 objects (:id other) %2) 1)]
+      (t/is (< (opacity tl 50) 0.9))
+      (t/is (mth/close? (opacity tl 50) (opacity baked 1950) 0.02) "a preset plays back too"))
+    (let [still (update-in tl [:tracks follower] dissoc :follow)]
+      (t/is (identical? still (cta/bake-follows still objects)) "without follows it stays ping-pong"))))

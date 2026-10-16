@@ -228,6 +228,19 @@
   [state]
   (dm/get-in state [:workspace-animation :playhead] 0))
 
+(defn playing-back?
+  "Whether the playhead shows the way back of ping-pong, where playback
+  goes on back (see `cta/advance-playback`)."
+  [state]
+  (neg? (dm/get-in state [:workspace-animation :direction] 1)))
+
+(defn- back-boards
+  "The active board while the playhead shows its way back (see
+  `playing-back?`), for `cltl/animation-tree`."
+  [state]
+  (when (playing-back? state)
+    #{(active-board-id state)}))
+
 (defn shown-playhead
   "The playhead the panels show values at: while playing, the one
   playback started from, so they do not render again each frame."
@@ -1990,14 +2003,16 @@
       ;; What the canvas shows, for an edit on it to show over it (see
       ;; `dsh/lookup-animation-preview`).
       (if (some? (previewed-timelines state))
-        (assoc-in state [:workspace-animation :preview] {:board-id (active-board-id state) :time (playhead state)})
+        (assoc-in state [:workspace-animation :preview] {:board-id (active-board-id state)
+                                                         :time (playhead state)
+                                                         :back? (playing-back? state)})
         (update state :workspace-animation dissoc :preview)))
 
     ptk/WatchEvent
     (watch [_ state _]
       (if-let [timelines (previewed-timelines state)]
         (let [objects    (dsh/lookup-page-objects state)
-              modif-tree (-> (cltl/animation-tree timelines objects (playhead state))
+              modif-tree (-> (cltl/animation-tree timelines objects (playhead state) :back (back-boards state))
                              (texts-at-rest state))]
           ;; The selection frame follows the selected shapes (see the
           ;; viewport), not every shape the preview moves.
@@ -2022,7 +2037,7 @@
             objects   (dsh/lookup-page-objects state)
             preview   (when (and (seq timelines)
                                  (not (dm/get-in state [:workspace-animation :playing?])))
-                        (cltl/shown-shapes timelines objects (playhead state)))]
+                        (cltl/shown-shapes timelines objects (playhead state) :back (back-boards state)))]
         (if (some? page-id)
           (->> (mw/ask! {:cmd :index/set-preview
                          :page-id page-id

@@ -124,10 +124,12 @@
     was-fast?))
 
 (defn render-shape-at-time
-  "Apply the timeline pose at `time` silently, rasterize `shape-id`, then
-  leave WASM on that pose. The caller restores the playhead."
-  [objects timeline shape-id time {:keys [bridge scale] :or {bridge (default-bridge) scale 1}}]
-  (apply-pose! objects (cta/timeline->modif-tree timeline objects time) {:bridge bridge})
+  "Apply the timeline pose at `time` silently, on the way back of
+  ping-pong with `back?` (see `cta/timeline->modif-tree`), rasterize
+  `shape-id`, then leave WASM on that pose. The caller restores the
+  playhead."
+  [objects timeline shape-id time {:keys [bridge scale back?] :or {bridge (default-bridge) scale 1}}]
+  (apply-pose! objects (cta/timeline->modif-tree timeline objects time :back? back?) {:bridge bridge})
   ((:render-shape-pixels bridge) shape-id scale :png))
 
 (defn shoot-shape-at-rest
@@ -1526,28 +1528,42 @@
                         nil))))
       (f))))
 
+(defn back-times
+  "The times of the frames a raster export of a ping-pong `timeline`
+  captures on its way back, where its layers that follow others lag
+  behind (see `cta/timeline->modif-tree`): `times` backwards from the
+  one before the end, to the start but when it `repeats?` (the next
+  round shows it). Nil when no layer follows another: the frames there
+  play backwards (see `cta/ping-pong-frames`)."
+  [timeline times repeats?]
+  (when (and (= :ping-pong (cta/playback-mode timeline)) (cta/follows? timeline))
+    (cond-> (vec (rest (rseq (vec times)))) repeats? pop)))
+
 (defn- capture-frames
-  "The pictures of the board `board-id` at `times`, decoded, cut to the
-  board (see `with-board-clipped`, `crop-frames`); `on-frame` hears each
-  as it is decoded: the picture, the box it covers (nil without a way to
-  know it) and its scale."
-  [{:keys [objects timeline board-id times bridge cancelled? on-progress on-frame
+  "The pictures of the board `board-id` at `times`, then at `back-times`
+  on the way back of ping-pong, decoded, cut to the board (see
+  `with-board-clipped`, `crop-frames`); `on-frame` hears each as it is
+  decoded: the picture, the box it covers (nil without a way to know it)
+  and its scale."
+  [{:keys [objects timeline board-id times back-times bridge cancelled? on-progress on-frame
            yield decode scale]}]
   (let [decode   (or decode decode-png)
         yield    (or yield default-yield)
         extrect  (:get-shape-extrect bridge)
-        n        (count times)]
+        shots    (concat (map vector times (repeat false))
+                         (map vector back-times (repeat true)))
+        n        (count shots)]
     (with-board-clipped
       bridge (get objects board-id)
       (fn []
         (-> (reduce
-             (fn [p t]
+             (fn [p [t back?]]
                (-> p
                    (.then
                     (fn [acc]
                       (throw-if-cancelled cancelled?)
                       (let [bytes (render-shape-at-time objects timeline board-id t
-                                                        {:bridge bridge :scale (or scale 1)})
+                                                        {:bridge bridge :scale (or scale 1) :back? back?})
                             ;; where the picture is, as posed
                             rect  (when extrect (extrect board-id))]
                         (-> (decode bytes)
@@ -1559,7 +1575,7 @@
                                      (-> (yield)
                                          (.then (fn [_] (conj acc [image rect]))))))))))))
              (js/Promise.resolve [])
-             times)
+             shots)
             (.then (fn [shots]
                      (crop-frames (mapv first shots)
                                   (mapv second shots)
@@ -1630,6 +1646,9 @@
         bw       (* (or (:width (:selrect board)) 1) scale)
         bh       (* (or (:height (:selrect board)) 1) scale)
         times    (cta/frame-times (:duration tl) fps)
+        ;; videos do not loop, so they end on the first frame
+        repeats? (and loop? (not (#{:mp4 :webm} format)))
+        back     (back-times tl times repeats?)
         encoding (phase-progress on-progress :encode)]
     (when sound?
       (prefetch-audio! tl))
@@ -1648,6 +1667,7 @@
                                     :timeline tl
                                     :board-id board-id
                                     :times times
+                                    :back-times back
                                     :bridge bridge
                                     :cancelled? cancelled?
                                     :on-progress (phase-progress on-progress :capture)
@@ -1655,13 +1675,11 @@
                                     :yield yield
                                     :decode decode
                                     :scale (* scale fit)})
-                   ;; Ping-pong plays the captured frames back to the start.
-                   ;; Videos do not loop, so they end on the first frame.
                    (.then
                     (fn [frames]
                       (cond-> frames
-                        (= :ping-pong (cta/playback-mode tl))
-                        (cta/ping-pong-frames (and loop? (not (#{:mp4 :webm} format)))))))
+                        (and (= :ping-pong (cta/playback-mode tl)) (nil? back))
+                        (cta/ping-pong-frames repeats?))))
                    (.then
                     (fn [frames]
                       (case format
