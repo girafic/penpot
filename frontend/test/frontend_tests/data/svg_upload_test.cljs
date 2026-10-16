@@ -7,11 +7,14 @@
 (ns frontend-tests.data.svg-upload-test
   "Tests for the media upload triggered from an SVG import."
   (:require
+   [app.common.files.helpers :as cfh]
    [app.common.transit :as tr]
    [app.common.uuid :as uuid]
+   [app.main.data.workspace.media :as media]
    [app.main.data.workspace.svg-upload :as svg]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
+   [frontend-tests.helpers.async :as async]
    [frontend-tests.helpers.http :as http]))
 
 (defn- image-node
@@ -61,3 +64,15 @@
                   (t/is (not (contains? params :width)))
                   (t/is (not (contains? params :height))))
                 (done))))))))
+
+(t/deftest ^:async an-svg-component-gets-fonts-the-workspace-has
+  ;; uploaded as a component: no Arial here, so the default font, at the
+  ;; nearest weight
+  (let [svg-data     {:name "label" :tag :svg :attrs {:viewBox "0 0 100 40" :width "100" :height "40"}
+                      :content [{:tag :text :attrs {:x "0" :y "20" :font-family "Arial" :font-weight "bold"}
+                                 :content ["Hi"]}]}
+        [_ children] (await (async/->promise (media/create-shapes-svg (uuid/next) {} {:x 0 :y 0} svg-data)))
+        text         (some #(when (cfh/text-shape? %) %) children)
+        node         (get-in text [:content :children 0 :children 0 :children 0])]
+    (t/is (= "Hi" (:text node)))
+    (t/is (= ["sourcesanspro" "700"] [(:font-id node) (:font-weight node)]))))

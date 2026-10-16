@@ -11,7 +11,7 @@
    [app.common.data.macros :as dm]
    [app.common.exceptions :as ex]
    [app.common.files.changes-builder :as pcb]
-   [app.common.files.shapes-builder :as sb]
+   [app.common.files.helpers :as cfh]
    [app.common.files.svg-animation :as svga]
    [app.common.math :as mth]
    [app.common.media :as media]
@@ -29,6 +29,7 @@
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.svg-animation :as dwsa]
    [app.main.data.workspace.svg-upload :as svg]
+   [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.store :as st]
@@ -343,7 +344,7 @@
         process-svg
         (fn [svg-data]
           (let [[root-svg-shape children]
-                (sb/create-svg-shapes svg-data pos objects uuid/zero nil #{} false)
+                (svg/create-svg-shapes svg-data pos objects uuid/zero nil #{} false)
 
                 frame-shape
                 (cts/setup-shape
@@ -458,8 +459,18 @@
             page    (dsh/get-page fdata page-id)
             pos     (dsh/get-viewport-center state)]
 
+        ;; its texts laid out, in the same undo step (see `svg/text-layout`)
         (->> (create-shapes-svg file-id (:objects page) pos svg-data)
-             (rx/map (partial add-shapes-and-component it fdata page (:name svg-data))))))))
+             (rx/mapcat (fn [[_ children :as shapes]]
+                          (let [undo-id (js/Symbol)
+                                layout  (svg/text-layout state page-id
+                                                         (into [] (comp (filter cfh/text-shape?) (map :id)) children)
+                                                         undo-id)]
+                            (rx/concat
+                             (rx/of (dwu/start-undo-transaction undo-id))
+                             (rx/from (:before layout))
+                             (rx/of (add-shapes-and-component it fdata page (:name svg-data) shapes))
+                             (rx/from (:after layout)))))))))))
 
 (defn upload-media-components
   [params]

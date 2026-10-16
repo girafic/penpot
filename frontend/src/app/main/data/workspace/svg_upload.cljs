@@ -96,6 +96,14 @@
                             :font-style (:style variant)))))
                content)))))
 
+(defn create-svg-shapes
+  "`[root children]`, the shapes of the SVG import of `args` (see
+  `sb/create-svg-shapes`), its texts in the fonts the workspace has (see
+  `resolve-text-fonts`)."
+  [& args]
+  (let [[root children] (apply sb/create-svg-shapes args)]
+    [root (mapv resolve-text-fonts children)]))
+
 (defn text-layout
   "The events that lay out the texts `ids` an import added to the page
   `page-id` in the undo transaction `undo-id`: before its changes
@@ -140,9 +148,7 @@
                                  base-id)
 
                [new-shape new-children]
-               (sb/create-svg-shapes id svg-data position objects frame-id parent-id selected true)
-
-               new-children    (mapv resolve-text-fonts new-children)
+               (create-svg-shapes id svg-data position objects frame-id parent-id selected true)
 
                changes         (-> (pcb/empty-changes it page-id)
                                    (pcb/with-objects objects)
