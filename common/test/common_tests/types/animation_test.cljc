@@ -5294,3 +5294,125 @@
     (t/is (= :ccw (bend 100)) "straight")
     (let [{:keys [tl objects arm-fore]} (arm-scene)]
       (t/is (nil? (cta/natural-bend tl objects arm-fore)) "one link only"))))
+
+(defn- pivot-at
+  "Where the pivot of the layer `id` of `objects` is as `timeline` shows
+  it at `time`."
+  [timeline objects id time & {:keys [back?]}]
+  (let [mods  (get-in (cta/timeline->modif-tree timeline objects time :back? back?) [id :modifiers])
+        point (cta/origin-point (get objects id) (cta/track-origin (cta/get-track timeline id)))]
+    (cond-> point (some? mods) (gpt/transform (ctm/modifiers->transform mods)))))
+
+(defn- point-at
+  "Where the point `p` of the layer `id` of `objects` (at rest) is as
+  `timeline` shows it at `time`."
+  [timeline objects id time p]
+  (let [mods (get-in (cta/timeline->modif-tree timeline objects time) [id :modifiers])]
+    (cond-> p (some? mods) (gpt/transform (ctm/modifiers->transform mods)))))
+
+(defn- near?
+  [a b]
+  (and (mth/close? (:x a) (:x b) 0.01) (mth/close? (:y a) (:y b) 0.01)))
+
+(defn- side
+  "The side of the line from `s` to `g` the elbow `e` is on."
+  [s e g]
+  (if (neg? (- (* (- (:x e) (:x s)) (- (:y g) (:y s))) (* (- (:y e) (:y s)) (- (:x g) (:x s)))))
+    :cw :ccw))
+
+(t/deftest a-hand-reaches-its-goal
+  (let [{:keys [tl objects arm-upper arm-fore arm-hand goal]} (arm-scene)
+        tl       (-> tl
+                     (cta/add-keyframe goal {:time 0 :property :x :value 240 :easing :linear})
+                     (cta/add-keyframe goal {:time 1000 :property :x :value 180}))
+        reaching (cta/set-ik tl arm-hand {:goal goal})]
+    (doseq [t [0 250 500 1000]]
+      (let [g (pivot-at reaching objects goal t)
+            s (pivot-at reaching objects arm-upper t)
+            e (pivot-at reaching objects arm-fore t)
+            w (pivot-at reaching objects arm-hand t)]
+        (t/is (near? g w) (str "the hand on the goal at " t ": " [g w]))
+        (t/is (near? (gpt/point 100 100) s) "the shoulder stays")
+        (t/is (mth/close? 100 (gpt/distance s e) 0.01) "the upper arm keeps its length")
+        (t/is (mth/close? 100 (gpt/distance e w) 0.01) "so does the forearm")
+        (t/is (near? e (point-at reaching objects arm-upper t (gpt/point 200 100)))
+              "the elbow at the end of the upper arm")
+        (t/is (= :ccw (side s e g)))))
+    (t/testing "the other bend mirrors the elbow"
+      (let [cw (cta/set-ik tl arm-hand {:goal goal :bend :cw})
+            g  (pivot-at cw objects goal 500)
+            e  (pivot-at cw objects arm-fore 500)]
+        (t/is (near? g (pivot-at cw objects arm-hand 500)))
+        (t/is (= :cw (side (gpt/point 100 100) e g)))))))
+
+(t/deftest a-goal-out-of-reach-points-the-arm-at-it
+  (let [{:keys [tl objects arm-fore arm-hand far]} (add-layer (arm-scene) :far 380 300)
+        tl  (cta/set-ik tl arm-hand {:goal far})
+        len (mth/sqrt (+ (* 280 280) (* 200 200)))]
+    (t/is (near? (gpt/point (+ 100 (* 200 (/ 280 len))) (+ 100 (* 200 (/ 200 len))))
+                 (pivot-at tl objects arm-hand 0)))
+    (t/is (near? (gpt/point (+ 100 (* 100 (/ 280 len))) (+ 100 (* 100 (/ 200 len))))
+                 (pivot-at tl objects arm-fore 0)))))
+
+(t/deftest a-hand-stays-on-its-goal-as-the-body-moves
+  (let [{:keys [tl objects arm-upper arm-hand goal body]} (add-layer (arm-scene) :body 50 100)
+        tl (-> tl
+               (cta/add-keyframe body {:time 0 :property :x :value 45 :easing :linear})
+               (cta/add-keyframe body {:time 1000 :property :x :value 95})
+               (cta/set-follow arm-upper {:leader body})
+               (cta/set-ik arm-hand {:goal goal}))]
+    (t/is (near? (gpt/point 150 100) (pivot-at tl objects arm-upper 1000)) "the shoulder goes with the body")
+    (doseq [t [0 500 1000]]
+      (t/is (near? (gpt/point 245 145) (pivot-at tl objects arm-hand t)) (str "planted at " t)))))
+
+(t/deftest the-layers-on-a-reaching-hand-go-with-it
+  ;; the goal is away from the hand at the first frame: what follows the
+  ;; hand counts from where it is without reaching
+  (let [{:keys [tl objects arm-hand goal finger]} (add-layer (arm-scene) :finger 330 100)
+        tl (-> tl
+               (cta/set-follow finger {:leader arm-hand})
+               (cta/set-ik arm-hand {:goal goal}))]
+    (doseq [t [0 500]]
+      (t/is (near? (point-at tl objects arm-hand t (gpt/point 330 100)) (pivot-at tl objects finger t))
+            (str "on the hand at " t)))))
+
+(t/deftest the-end-of-a-chain-turns-as-its-ik-says
+  (let [{:keys [tl objects arm-fore arm-hand goal]} (arm-scene)
+        tl    (cta/add-keyframe tl goal {:time 0 :property :rotation :value 30})
+        tip   (fn [turn]
+                (let [tl (cta/set-ik tl arm-hand {:goal goal :turn turn})
+                      w  (pivot-at tl objects arm-hand 0)]
+                  [(gpt/subtract (point-at tl objects arm-hand 0 (gpt/point 310 100)) w)
+                   (gpt/subtract w (pivot-at tl objects arm-fore 0))]))
+        [chain forearm] (tip :chain)]
+    (t/is (near? (gpt/scale (gpt/unit forearm) 10) chain) "along the forearm")
+    (t/is (near? (gpt/point 10 0) (first (tip :keep))) "its own angle")
+    (t/is (near? (gpt/point (* 10 (mth/cos (mth/radians 30))) 5) (first (tip :goal))) "the goal's turn")))
+
+(t/deftest a-chain-it-cannot-solve-plays-as-it-is
+  (let [{:keys [tl objects arm-upper arm-hand shoulder]} (add-layer (arm-scene) :shoulder 100 100)
+        finite? #(and (mth/finite? (:x %)) (mth/finite? (:y %)))]
+    (let [w (pivot-at (cta/set-ik tl arm-hand {:goal shoulder}) objects arm-hand 0)]
+      (t/is (finite? w))
+      (t/is (near? (gpt/point 300 100) w) "a goal on the shoulder of an arm of equal links"))
+    (let [tl (-> tl (cta/set-track-origin arm-upper 1 0.5) (cta/set-ik arm-hand {:goal shoulder}))
+          w  (pivot-at tl objects arm-hand 0)]
+      (t/is (finite? w))
+      (t/is (near? (gpt/point 300 100) w) "an upper arm turning on the elbow"))))
+
+(t/deftest a-reaching-arm-keeps-its-shoulder-with-presets-around
+  (let [{:keys [tl objects arm-upper arm-hand goal]} (arm-scene)
+        tl (-> tl
+               (cta/add-animation goal {:type :fade :start 0 :duration 300})
+               (cta/set-ik arm-hand {:goal goal}))]
+    (t/is (near? (gpt/point 100 100) (point-at tl objects arm-upper 500 (gpt/point 100 100))))
+    (t/is (near? (gpt/point 245 145) (pivot-at tl objects arm-hand 500)))))
+
+(t/deftest a-hand-reaches-on-the-way-back-of-ping-pong
+  (let [{:keys [tl objects arm-hand goal]} (arm-scene)
+        tl (-> tl
+               (assoc :playback :ping-pong)
+               (cta/add-keyframe goal {:time 0 :property :x :value 240 :easing :linear})
+               (cta/add-keyframe goal {:time 1000 :property :x :value 180})
+               (cta/set-ik arm-hand {:goal goal}))]
+    (t/is (near? (pivot-at tl objects goal 300) (pivot-at tl objects arm-hand 300 :back? true)))))

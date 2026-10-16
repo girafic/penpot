@@ -3039,9 +3039,10 @@
               (reduce-kv (fn [tracks shape-id track]
                            (let [track (resolve-track timeline objects shape-id (visible-track track))]
                              ;; Nothing left to play once all of it is hidden;
-                             ;; a track that follows plays still.
+                             ;; a track that follows, reaches or holds the
+                             ;; pivot others turn around plays still.
                              (if (and (empty? (:keyframes track)) (empty? (:animations track))
-                                      (nil? (:follow track)))
+                                      (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track)))
                                (dissoc tracks shape-id)
                                (assoc tracks shape-id track))))
                          tracks
@@ -3332,42 +3333,44 @@
   one; a layer may be in one chain only; and no goal may be led by a
   layer of its chain, through follows and the goals of other chains.
   The others play without reaching, every frame, as two edits from two
-  places may make a loop together."
-  [timeline objects]
-  (let [follows    (followers timeline objects)
-        board-id   (:board-id timeline)
-        candidates (into {}
-                         (keep (fn [[id track]]
-                                 (when-let [goal (dm/get-in track [:ik :goal])]
-                                   (when-let [{:keys [a b]} (ik-links* timeline follows id)]
-                                     (when (and (contains? objects goal)
-                                                (inside? objects goal board-id)
-                                                (not (contains? #{a b id} goal))
-                                                (not-any? #(nested-layers? objects goal %) [a b id]))
-                                       [id (merge {:a a :b b :e id} (ik-of timeline id))])))))
-                         (:tracks timeline))
-        layers     (juxt :a :b :e)
-        counts     (frequencies (mapcat layers (vals candidates)))
-        candidates (into {} (filter (fn [[_ chain]] (every? #(= 1 (get counts %)) (layers chain)))) candidates)
-        goal-of    (into {}
-                         (mapcat (fn [chain] (map (fn [id] [id (:goal chain)]) (layers chain))))
-                         (vals candidates))
-        leader-of  #(when (contains? follows %) (dm/get-in timeline [:tracks % :follow :leader]))
-        ;; whether `from` leads to one of `targets`, through follows and goals
-        reaches?   (fn [from targets]
-                     (loop [front [from] seen #{}]
-                       (if-let [id (peek front)]
-                         (cond
-                           (contains? targets id) true
-                           (contains? seen id)    (recur (pop front) seen)
-                           :else                  (recur (cond-> (pop front)
-                                                           (some? (leader-of id)) (conj (leader-of id))
-                                                           (some? (goal-of id))   (conj (goal-of id)))
-                                                         (conj seen id)))
-                         false)))]
-    (into {}
-          (remove (fn [[_ chain]] (reaches? (:goal chain) (set (layers chain)))))
-          candidates)))
+  places may make a loop together. `follows`, its followers (see
+  `followers`), when the caller has them."
+  ([timeline objects]
+   (ik-chains timeline objects (followers timeline objects)))
+  ([timeline objects follows]
+   (let [board-id   (:board-id timeline)
+         candidates (into {}
+                          (keep (fn [[id track]]
+                                  (when-let [goal (dm/get-in track [:ik :goal])]
+                                    (when-let [{:keys [a b]} (ik-links* timeline follows id)]
+                                      (when (and (contains? objects goal)
+                                                 (inside? objects goal board-id)
+                                                 (not (contains? #{a b id} goal))
+                                                 (not-any? #(nested-layers? objects goal %) [a b id]))
+                                        [id (merge {:a a :b b :e id} (ik-of timeline id))])))))
+                          (:tracks timeline))
+         layers     (juxt :a :b :e)
+         counts     (frequencies (mapcat layers (vals candidates)))
+         candidates (into {} (filter (fn [[_ chain]] (every? #(= 1 (get counts %)) (layers chain)))) candidates)
+         goal-of    (into {}
+                          (mapcat (fn [chain] (map (fn [id] [id (:goal chain)]) (layers chain))))
+                          (vals candidates))
+         leader-of  #(when (contains? follows %) (dm/get-in timeline [:tracks % :follow :leader]))
+         ;; whether `from` leads to one of `targets`, through follows and goals
+         reaches?   (fn [from targets]
+                      (loop [front [from] seen #{}]
+                        (if-let [id (peek front)]
+                          (cond
+                            (contains? targets id) true
+                            (contains? seen id)    (recur (pop front) seen)
+                            :else                  (recur (cond-> (pop front)
+                                                            (some? (leader-of id)) (conj (leader-of id))
+                                                            (some? (goal-of id))   (conj (goal-of id)))
+                                                          (conj seen id)))
+                          false)))]
+     (into {}
+           (remove (fn [[_ chain]] (reaches? (:goal chain) (set (layers chain)))))
+           candidates))))
 
 (defn- modifiers-opacity
   "The opacity `modifiers` give a shape, `default` when they give none."
@@ -3468,6 +3471,37 @@
      :clj
      (do key (own-modifiers chain objects 0))))
 
+(defn- normal-turn
+  "`degrees` as a turn from -180 to 180."
+  [degrees]
+  (- (mod (+ degrees 180) 360) 180))
+
+(defn- two-bone-turns
+  "How the links of a chain of two (see `schema:ik`) turn so that its end
+  reaches `g`: `s`, `e` and `w` the pivots of its upper link, of its
+  lower link and of its end as they are, `bend` the side the elbow
+  goes. `{:upper :lower}` turns (degrees) around the shoulder `s` and
+  then around the elbow where it goes (`:elbow`), the end then at
+  `:reach`, `g` or the nearest point out of reach. Nil for a link or
+  a distance of (almost) nothing, which no turn solves."
+  [s e w g bend]
+  (let [l1 (gpt/distance s e)
+        l2 (gpt/distance e w)
+        d  (gpt/distance s g)]
+    (when (and (> l1 1e-6) (> l2 1e-6) (> d 1e-6))
+      (let [d*     (mth/clamp d (mth/abs (- l1 l2)) (+ l1 l2))
+            cos-a  (mth/clamp (/ (- (+ (* l1 l1) (* d* d*)) (* l2 l2)) (* 2 l1 d*)) -1 1)
+            angle  #(mth/degrees (mth/atan2 (- (:y %2) (:y %1)) (- (:x %2) (:x %1))))
+            toward (angle s g)
+            ;; Penpot turns clockwise for positive angles
+            elbow* (+ toward (* (if (= :cw bend) 1 -1) (mth/degrees (mth/acos cos-a))))
+            upper  (normal-turn (- elbow* (angle s e)))
+            at     #(gpt/add s (gpt/scale (gpt/point (mth/cos (mth/radians %1)) (mth/sin (mth/radians %1))) %2))
+            elbow  (at elbow* l1)
+            reach  (at toward d*)
+            lower  (normal-turn (- (angle elbow reach) (angle elbow (gpt/rotate w s upper))))]
+        {:upper upper :lower lower :elbow elbow :reach reach}))))
+
 (defn- followed-modifiers
   "`own` (see `own-modifiers`) with the layers of `timeline` that follow
   a leader (see `follow-of`) moved as it: what the leader does from its
@@ -3481,9 +3515,17 @@
   ping-pong, takes the end of the round before. A leader whose
   first frame squashes it to (almost) nothing along an axis, as a pop
   in from 0, counts its scale from rest (its place and turn from that
-  frame). The other times
-  play the follow chains only, their first frame read once while `key`
-  (the timeline the caller keeps, before it is resolved) stays."
+  frame).
+
+  The links of a chain whose end reaches a goal (see `ik-chains`) turn
+  so that it does (see `two-bone-turns`), from the pose they play
+  without it (`:fk`), and what follows them goes along: a follow counts
+  from where its leader is at its first frame with no reaching at all
+  (`:none`), so a turn there moves its followers too.
+
+  The other times play the follow chains and goals only, their first
+  frame read once while `key` (the timeline the caller keeps, before it
+  is resolved) stays."
   [timeline objects time own & {:keys [key back?]}]
   (let [follows (followers timeline objects)]
     (if (empty? follows)
@@ -3501,54 +3543,105 @@
                            (cond (>= u 0) u
                                  wraps?   (mod u round)
                                  :else    0)))
-            chain    (update timeline :tracks select-keys (follow-chain timeline follows))
-            own-at   (memoize #(if (zero? %)
-                                 (first-frame-modifiers key objects chain)
-                                 (own-modifiers chain objects %)))
-            cache  (volatile! {})
-            ;; `u`, the time played in the round
-            played (fn played [id u]
-                     (let [k [id u]]
-                       (if (contains? @cache k)
-                         (get @cache k)
-                         (let [mods (get (if (= u now) own (own-at (fold u))) id)
-                               v    (if-not (contains? follows id)
-                                      mods
-                                      (let [follow  (follow-of timeline id)
-                                            leader  (:leader follow)
-                                            matrix  #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
-                                            at      (matrix (played leader (earlier u (:delay follow))))
-                                            ;; from where it rests, as in a group,
-                                            ;; or from its first frame; a first
-                                            ;; frame scaled to (almost) nothing
-                                            ;; holds no change to count from
-                                            lshape  (get objects leader)
-                                            rested  (origin-point lshape (track-origin (get-track timeline leader)))
-                                            first   (matrix (played leader 0))
-                                            start   (cond
-                                                      (= :rest (:from follow)) (gmt/matrix)
-                                                      ;; squashed flat: its place and
-                                                      ;; turn count, not its scale
-                                                      (< (change-least-scale first) 0.01) (unscaled first rested)
-                                                      :else first)
-                                            change  (if-let [inv (gmt/inverse start)] (gmt/multiply at inv) at)
-                                            pivot   (gpt/transform rested start)
-                                            moved   (ctm/add-modifiers mods (follow-modifiers follow change pivot))]
-                                        (cond-> moved
-                                          (:opacity follow)
-                                          (ctm/change-property
-                                           :opacity
-                                           (* (modifiers-opacity mods (:opacity (get objects id) 1))
-                                              (modifiers-opacity (played leader (earlier u (:delay follow)))
-                                                                 (:opacity lshape 1)))))))]
-                           (vswap! cache assoc k v)
-                           v))))]
-        (reduce (fn [acc id]
-                  (if-let [mods (played id now)]
-                    (assoc acc id mods)
-                    acc))
-                own
-                follows)))))
+            chains     (ik-chains timeline objects follows)
+            chain-of   (into {}
+                             (mapcat (fn [chain] (map (fn [id] [id chain]) [(:a chain) (:b chain) (:e chain)])))
+                             (vals chains))
+            goals      (into #{} (map :goal) (vals chains))
+            chain      (update timeline :tracks select-keys (follow-chain timeline (into follows goals)))
+            own-at     (memoize #(if (zero? %)
+                                   (first-frame-modifiers key objects chain)
+                                   (own-modifiers chain objects %)))
+            matrix     #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
+            rested     (fn [id] (origin-point (get objects id) (track-origin (get-track timeline id))))
+            cache      (volatile! {})
+            cached     (fn [k f]
+                         (if (contains? @cache k)
+                           (get @cache k)
+                           (let [v (f)] (vswap! cache assoc k v) v)))]
+        (letfn [;; the modifiers of the layer `id` at `u`, the time played in
+                ;; the round: as it plays (`:all`), without the reaching of
+                ;; its chain (`:fk`) or with no reaching at all (`:none`)
+                (played [id u mode]
+                  (let [mode (cond (empty? chains)                                  :all
+                                   (and (= :fk mode) (not (contains? chain-of id))) :all
+                                   :else                                            mode)]
+                    (cached
+                     [id u mode]
+                     (fn []
+                       (if (and (= :all mode) (contains? chain-of id))
+                         (reached id u (played id u :fk))
+                         (let [mods (get (if (= u now) own (own-at (fold u))) id)]
+                           (if-not (contains? follows id)
+                             mods
+                             (let [follow  (follow-of timeline id)
+                                   leader  (:leader follow)
+                                   lmode   (if (and (= :fk mode) (not= (chain-of leader) (chain-of id))) :all mode)
+                                   lplayed (played leader (earlier u (:delay follow)) lmode)
+                                   at      (matrix lplayed)
+                                   ;; from where it rests, as in a group,
+                                   ;; or from its first frame with no
+                                   ;; reaching; a first frame scaled to
+                                   ;; (almost) nothing holds no change to
+                                   ;; count from
+                                   lshape  (get objects leader)
+                                   lpivot  (rested leader)
+                                   first   (matrix (played leader 0 :none))
+                                   start   (cond
+                                             (= :rest (:from follow)) (gmt/matrix)
+                                             ;; squashed flat: its place and
+                                             ;; turn count, not its scale
+                                             (< (change-least-scale first) 0.01) (unscaled first lpivot)
+                                             :else first)
+                                   change  (if-let [inv (gmt/inverse start)] (gmt/multiply at inv) at)
+                                   pivot   (gpt/transform lpivot start)
+                                   moved   (ctm/add-modifiers mods (follow-modifiers follow change pivot))]
+                               (cond-> moved
+                                 (:opacity follow)
+                                 (ctm/change-property
+                                  :opacity
+                                  (* (modifiers-opacity mods (:opacity (get objects id) 1))
+                                     (modifiers-opacity lplayed (:opacity lshape 1)))))))))))))
+
+                ;; where the layer `id` turns around at `u`, played in `mode`
+                (pivot-at [id u mode]
+                  (gpt/transform (rested id) (matrix (played id u mode))))
+
+                ;; how the chain ending at `e` turns at `u` (see `two-bone-turns`)
+                (solved [{:keys [a b e goal bend]} u]
+                  (cached
+                   [::solved e u]
+                   (fn []
+                     (let [shoulder (pivot-at a u :fk)
+                           wrist    (pivot-at e u :fk)]
+                       (some-> (two-bone-turns shoulder (pivot-at b u :fk) wrist (pivot-at goal u :all) bend)
+                               (assoc :shoulder shoulder :wrist wrist))))))
+
+                ;; `mods` of the layer `id` of a chain, as it plays without
+                ;; reaching, with the turns that make it reach at `u`
+                (reached [id u mods]
+                  (let [{:keys [a e goal turn] :as chain} (chain-of id)]
+                    (if-let [{:keys [upper lower shoulder elbow reach wrist]} (solved chain u)]
+                      (let [upper-turn (ctm/rotation nil shoulder upper)]
+                        (cond
+                          (= id a)
+                          (ctm/add-modifiers mods upper-turn)
+
+                          (or (not= id e) (= :chain turn))
+                          (-> (ctm/add-modifiers mods upper-turn)
+                              (ctm/add-modifiers (ctm/rotation nil elbow lower)))
+
+                          :else
+                          (cond-> (ctm/add-modifiers mods (ctm/move nil (gpt/subtract reach wrist)))
+                            (= :goal turn)
+                            (ctm/add-modifiers (ctm/rotation nil reach (change-turn (matrix (played goal u :all))))))))
+                      mods)))]
+          (reduce (fn [acc id]
+                    (if-let [mods (played id now :all)]
+                      (assoc acc id mods)
+                      acc))
+                  own
+                  (into follows (keys chain-of))))))))
 
 (defn timeline->modif-tree
   "Compute a transient modif-tree `{shape-id {:modifiers ...}}` for
