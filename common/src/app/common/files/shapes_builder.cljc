@@ -412,6 +412,7 @@
      [root-shape-with-defs children])))
 
 (declare paint-fill)
+(declare calculate-rect-metadata)
 
 (defn- text-prop
   "The text property `k` (a keyword of its CSS name) of the SVG element
@@ -443,12 +444,12 @@
 
 (defn- text-node
   "The Penpot text node of the text `text` with the SVG text properties
-  `props`; its fill through `defs` (see `paint-fill`). The font is the
-  one of the family asked for, by the id of a Google font, which the
-  workspace resolves to the fonts it has."
-  [text props shape defs]
+  `props`, its lengths scaled by `scale`; its fill through `defs` (see
+  `paint-fill`). The font is the one of the family asked for, by the id
+  of a Google font, which the workspace resolves to the fonts it has."
+  [text props shape defs scale]
   (let [family  (some-> (:font-family props) (str/split #",") (first) (str/replace #"[\"']" "") (str/trim) (not-empty))
-        size    (or (some-> (:font-size props) (csvg/parse-numbers) (first)) 16)
+        size    (* scale (or (some-> (:font-size props) (csvg/parse-numbers) (first)) 16))
         weight  (let [w (str/lower (str (:font-weight props "400")))]
                   (case w
                     ("bold" "bolder") "700"
@@ -466,7 +467,7 @@
             :font-size       (num-str size)
             :font-weight     weight
             :font-style      (if italic? "italic" "normal")
-            :letter-spacing  (num-str (or (some-> (:letter-spacing props) (csvg/parse-numbers) (first)) 0))
+            :letter-spacing  (num-str (* scale (or (some-> (:letter-spacing props) (csvg/parse-numbers) (first)) 0)))
             :text-transform  (:text-transform props "none")
             :text-decoration (let [d (str (:text-decoration props))]
                                (cond (str/includes? d "underline") "underline"
@@ -512,13 +513,29 @@
                      (assoc l :runs runs)))))
          (vec))))
 
+(defn- even-scale
+  "The scale of the matrix `m` when it only scales evenly, turns and
+  moves, as a Penpot text can (no skew, no mirror), else nil."
+  [{:keys [a b c d]}]
+  (let [sx (mth/sqrt (+ (* a a) (* b b)))
+        sy (mth/sqrt (+ (* c c) (* d d)))]
+    (when (and (pos? sx)
+               (pos? (- (* a d) (* b c)))
+               (mth/close? sx sy (* 1e-3 sx))
+               (mth/close? 0 (+ (* a c) (* b d)) (* 1e-3 sx sy)))
+      sx)))
+
 (defn create-text-shape
   "The Penpot text of the SVG `<text>` `element`, or of the text container
   of a Penpot export (a `g` with the box of its text and a `<text>` for
   each line in it): a paragraph for each line. A loose text is placed
-  by its first baseline, as wide as its text may be."
+  by its first baseline, as wide as its text may be. Its transform (with
+  the ones of its groups) turns it and scales its font; nil for one a
+  Penpot text cannot have (see `even-scale`)."
   [name frame-id {:keys [x y defs] :as svg-data} {:keys [attrs] :as element}]
-  (let [container? (contains? attrs :width)
+  (let [m          (csvg/parse-transform (:transform attrs))
+        scale      (even-scale m)
+        container? (contains? attrs :width)
         texts      (if container?
                      (let [fills (some #(when (and (map? %) (str/includes? (str (get-in % [:attrs :class])) "fills")) %)
                                        (:content element))]
@@ -526,7 +543,7 @@
                      [element])
         inherited  (own-text-props (dissoc attrs :x :y))
         lines      (text-lines texts inherited)]
-    (when (seq lines)
+    (when (and (seq lines) (some? scale))
       (let [first-props (second (first (:runs (first lines))))
             size        (or (some-> (:font-size first-props) (csvg/parse-numbers) (first)) 16)
             anchor      (:anchor (first lines))
@@ -535,7 +552,6 @@
             ;; a guess of the width, which the layout of the text corrects
             width       (* chars size 0.62)
             height      (* (count lines) size 1.2)
-            translate   (csvg/parse-transform (:transform attrs))
             [bx by bw bh]
             (if container?
               [(d/parse-double (:x attrs) 0) (d/parse-double (:y attrs) 0)
@@ -544,15 +560,17 @@
                 [(case anchor "middle" (- lx (/ width 2)) "end" (- lx width) lx)
                  (- ly (* 0.9 size))
                  width height]))
-            bx          (+ bx (:e translate 0) x)
-            by          (+ by (:f translate 0) y)
-            shape       (cts/setup-shape {:type :text :name name :frame-id frame-id
-                                          :x bx :y by :width (max bw 1) :height (max bh 1)})
+            ;; its box in its own space, where the SVG draws it
+            box         (grc/make-rect (+ bx x) (+ by y) (max bw 1) (max bh 1))
+            shape       (cts/setup-shape
+                         (-> (calculate-rect-metadata box (gmt/transform-in (gpt/point svg-data) m))
+                             (assoc :type :text :name name :frame-id frame-id
+                                    :rotation (mod (mth/degrees (mth/atan2 (:b m) (:a m))) 360))))
             paragraphs  (mapv (fn [{:keys [runs]}]
                                 (merge txt/default-paragraph-attrs
                                        {:type "paragraph"
                                         :text-align (if container? "left" align)
-                                        :children (mapv (fn [[text props]] (text-node text props shape defs)) runs)}))
+                                        :children (mapv (fn [[text props]] (text-node text props shape defs scale)) runs)}))
                               lines)]
         (-> shape
             (assoc :grow-type (if (and (not container?) (= "left" align)) :auto-width :fixed))

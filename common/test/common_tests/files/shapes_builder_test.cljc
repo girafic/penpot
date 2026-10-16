@@ -7,6 +7,10 @@
 (ns common-tests.files.shapes-builder-test
   (:require
    [app.common.files.shapes-builder :as sb]
+   [app.common.geom.matrix :as gmt]
+   [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
+   [app.common.math :as mth]
    [app.common.types.shape.text :as sht]
    [clojure.test :as t]))
 
@@ -312,3 +316,45 @@
              ((juxt :font-weight :font-size :letter-spacing #(get-in % [:fills 0 :fill-color]))
               (first (:children (first (paragraphs text)))))))
     (t/is (sht/valid-content? (:content text)))))
+
+(defn- centre
+  [shape]
+  (let [c (grc/rect->center (:selrect shape))]
+    [(:x c) (:y c)]))
+
+(defn- close-to?
+  [expected actual]
+  (every? true? (map #(mth/close? %1 %2 0.5) expected actual)))
+
+(t/deftest a-scaled-text-scales-its-font
+  ;; the scale of its group too: the attribute the text gets has it
+  (let [[text] (text-of {:tag :g :attrs {:transform "scale(2)"}
+                         :content [{:tag :text :attrs {:x "10" :y "20" :font-size "10"} :content ["Hi"]}]})]
+    (t/is (= "20" (:font-size (first (:children (first (paragraphs text)))))))
+    (t/is (close-to? [20 22] [(:x text) (:y text)]) "its first baseline where the SVG draws it")))
+
+(t/deftest a-turned-text-turns
+  (let [[text] (text-of {:tag :text :attrs {:x "-50" :y "20" :font-size "10" :transform "rotate(-90)"}
+                         :content ["Axis"]})]
+    (t/is (mth/close? 270 (:rotation text)))
+    (t/is (close-to? [17 37.6] (centre text)) "around the origin of the SVG")
+    (t/is (close-to? [24.8 12] [(:width text) (:height text)]) "its box not turned")))
+
+(t/deftest a-turned-text-of-a-penpot-export-comes-back-turned
+  (let [m      (gmt/rotate-matrix 30 (gpt/point 134 53))
+        [text] (text-of {:tag :g :attrs {:class "text-container" :x "60" :y "36" :width "148" :height "34"
+                                         :transform (str m)}
+                         :content [{:tag :g :attrs {:class "fills"}
+                                    :content [{:tag :text :attrs {:x "61" :y "52" :style "font-size:13px"}
+                                               :content ["PENPOT"]}]}]})]
+    (t/is (mth/close? 30 (:rotation text)))
+    (t/is (close-to? [134 53] (centre text)))
+    (t/is (close-to? [148 34] [(:width text) (:height text)]))))
+
+(t/deftest a-skewed-or-mirrored-text-stays-svg
+  ;; a Penpot text can only turn and scale evenly
+  (doseq [transform ["matrix(1 0 0 -1 0 100)" "skewX(20)" "scale(2 1)"]]
+    (let [[text children] (text-of {:tag :text :attrs {:x "10" :y "20" :font-size "10" :transform transform}
+                                    :content ["Hi"]})]
+      (t/is (nil? text) transform)
+      (t/is (some #(= :svg-raw (:type %)) children) transform))))
