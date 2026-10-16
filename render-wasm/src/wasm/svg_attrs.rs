@@ -1,5 +1,6 @@
 use macros::ToJs;
 
+use crate::mem;
 use crate::shapes::{FillRule, StrokeLineCap, StrokeLineJoin, SvgAttrs};
 use crate::with_current_shape_mut;
 
@@ -90,5 +91,25 @@ pub extern "C" fn set_shape_svg_attrs(
             stroke_linejoin,
             fill_none,
         ));
+    });
+}
+
+/// The `stroke-dasharray` of the current shape's SVG attributes, its
+/// lengths as little-endian f32s in the shared bytes, and its
+/// `stroke-dashoffset` (see `SvgAttrs::dash_effect`). Call it after
+/// `set_shape_svg_attrs`, which starts the attributes with none.
+#[no_mangle]
+pub extern "C" fn set_shape_svg_stroke_dash(offset: f32) {
+    let bytes = mem::bytes_or_empty();
+    let lengths: Vec<f32> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
+        .collect();
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        let attrs = shape.svg_attrs.get_or_insert_with(SvgAttrs::default);
+        attrs.stroke_dasharray = lengths;
+        attrs.stroke_dashoffset = offset;
     });
 }

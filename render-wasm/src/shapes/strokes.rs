@@ -441,9 +441,14 @@ impl Stroke {
         }
 
         let trim = self.trim.and_then(trim_effect);
-        if self.style != StrokeStyle::Solid || trim.is_some() {
+        // A solid stroke of an imported SVG draws the dashes of the SVG that
+        // no stroke style draws (see `SvgAttrs::dash_effect`).
+        let pattern = self
+            .path_effect()
+            .or_else(|| svg_attrs.and_then(SvgAttrs::dash_effect));
+        if pattern.is_some() || trim.is_some() {
             // The pattern runs along the trimmed outline.
-            let path_effect = match (self.path_effect(), trim) {
+            let path_effect = match (pattern, trim) {
                 (Some(dash), Some(trim)) => Some(skia::PathEffect::compose(dash, trim)),
                 (dash, trim) => dash.or(trim),
             };
@@ -792,6 +797,25 @@ mod tests {
         assert!(stroke.to_paint(&rect, None, true).path_effect().is_some());
         assert!(solid_center(2.0)
             .to_paint(&rect, None, true)
+            .path_effect()
+            .is_none());
+    }
+
+    #[test]
+    fn a_solid_stroke_draws_the_dash_array_of_its_svg() {
+        // a pattern the stroke styles cannot draw, kept as the SVG has it
+        let rect = Rect::from_xywh(0.0, 0.0, 10.0, 10.0);
+        let attrs = SvgAttrs {
+            stroke_dasharray: vec![12.0, 4.0, 2.0, 4.0],
+            stroke_dashoffset: 3.0,
+            ..SvgAttrs::default()
+        };
+        assert!(solid_center(2.0)
+            .to_paint(&rect, Some(&attrs), true)
+            .path_effect()
+            .is_some());
+        assert!(solid_center(2.0)
+            .to_paint(&rect, Some(&SvgAttrs::default()), true)
             .path_effect()
             .is_none());
     }

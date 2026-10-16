@@ -14,6 +14,7 @@
   run identically in the browser and under Node. Setters that need host-specific
   data sources (fonts, image bytes, SVG static markup) stay in `app.render-wasm.api`."
   (:require
+   [app.common.data :as d]
    [app.common.math :as mth]
    [app.common.render-wasm.helpers :as h]
    [app.common.render-wasm.mem :as mem]
@@ -21,6 +22,7 @@
    [app.common.render-wasm.serializers.color :as sr-clr]
    [app.common.render-wasm.serializers.text-units :as sr-tu]
    [app.common.render-wasm.wasm :as wasm]
+   [app.common.svg :as csvg]
    [app.common.types.fills :as types.fills]
    [app.common.types.fills.impl :as types.fills.impl]
    [app.common.types.path :as path]))
@@ -189,8 +191,18 @@
         fill-rule       (-> (or (:fillRule style) (:fillRule attrs)) sr/translate-fill-rule)
         stroke-linecap  (-> (or (:strokeLinecap style) (:strokeLinecap attrs)) sr/translate-stroke-linecap)
         stroke-linejoin (-> (or (:strokeLinejoin style) (:strokeLinejoin attrs)) sr/translate-stroke-linejoin)
-        fill-none       (= "none" (or (:fill style) (:fill attrs)))]
-    (h/call wasm/internal-module "_set_shape_svg_attrs" fill-rule stroke-linecap stroke-linejoin fill-none)))
+        fill-none       (= "none" (or (:fill style) (:fill attrs)))
+        ;; dashes no stroke style draws, kept as the SVG has them (see
+        ;; `sb/setup-stroke`)
+        dasharray       (csvg/parse-numbers (str (or (:strokeDasharray style) (:strokeDasharray attrs))))
+        dashoffset      (d/parse-double (or (:strokeDashoffset style) (:strokeDashoffset attrs)) 0)]
+    (h/call wasm/internal-module "_set_shape_svg_attrs" fill-rule stroke-linecap stroke-linejoin fill-none)
+    (when (seq dasharray)
+      (let [offset (mem/alloc->offset-32 (* 4 (count dasharray)))
+            heap   (mem/get-heap-f32)]
+        (doseq [[i length] (map-indexed vector dasharray)]
+          (aset heap (+ offset i) length))
+        (h/call wasm/internal-module "_set_shape_svg_stroke_dash" dashoffset)))))
 
 (defn set-shape-svg-raw-content
   [content]
