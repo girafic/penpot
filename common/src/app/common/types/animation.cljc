@@ -870,14 +870,27 @@
     {:x (double (or (:x origin) 0.5))
      :y (double (or (:y origin) 0.5))}))
 
-(defn origin-point
-  "Absolute point on `shape` for the normalized `origin`."
+(defn box-point
+  "The point at the normalized `origin` of the box of `shape` (its
+  `:selrect`) before it turns: where its width and height grow from in
+  its own space."
   [shape origin]
   (let [sr (:selrect shape)
         ox (or (:x origin) 0.5)
         oy (or (:y origin) 0.5)]
     (gpt/point (+ (or (:x sr) 0) (* (or (:width sr) 0) ox))
                (+ (or (:y sr) 0) (* (or (:height sr) 0) oy)))))
+
+(defn origin-point
+  "The point at the normalized `origin` of `shape` as it lies: its box
+  turned as the shape is around its middle (its `:rotation`, as the
+  exports turn it), where it turns and scales around."
+  [shape origin]
+  (let [point    (box-point shape origin)
+        rotation (or (:rotation shape) 0)]
+    (if (mth/almost-zero? (mod rotation 360))
+      point
+      (gpt/rotate point (box-point shape default-transform-origin) rotation))))
 
 (defn- ensure-track
   [timeline shape-id]
@@ -2674,11 +2687,12 @@
 
 (defn- shape->modifiers
   "Build a single modifiers record for `shape` from the interpolated
-  `values` (positions relative to `origin`). Position/scale/rotation
-  become geometry modifiers; opacity becomes a `:change-property`
-  structure modifier so it rides the same modifier pipeline in every
-  renderer (SVG via `transform-shape`, WASM via `set-shape-opacity`) and
-  in export."
+  `values` (positions relative to `origin`), turning and scaling around
+  its normalized `pivot` (see `track-origin`; its middle when nil).
+  Position/scale/rotation become geometry modifiers; opacity becomes a
+  `:change-property` structure modifier so it rides the same modifier
+  pipeline in every renderer (SVG via `transform-shape`, WASM via
+  `set-shape-opacity`) and in export."
   [shape values origin pivot]
   (let [selrect (:selrect shape)
         base-x  (:x selrect)
@@ -2691,7 +2705,8 @@
         sx       (axis-scale base-w values :width :scale-x)
         sy       (axis-scale base-h values :height :scale-y)
         target-r (get values :rotation base-r)
-        pivot    (or pivot (origin-point shape default-transform-origin))
+        box      (box-point shape (or pivot default-transform-origin))
+        pivot    (origin-point shape (or pivot default-transform-origin))
         turned?  (and (some? (:transform shape)) (not (gmt/unit? (:transform shape))))
         ;; a scale scales what the shape holds, its strokes, shadows and
         ;; text too, as the scale tool does and the exports play it; a
@@ -2707,13 +2722,13 @@
     (cond-> (ctm/empty)
       (and (has? values :scale-x :scale-y :width :height) turned?)
       (ctm/resize (gpt/point sx sy)
-                  (gmt/transform-point-center pivot (gpt/point (+ base-x (/ base-w 2)) (+ base-y (/ base-h 2)))
+                  (gmt/transform-point-center box (gpt/point (+ base-x (/ base-w 2)) (+ base-y (/ base-h 2)))
                                               (:transform shape))
                   (:transform shape)
                   (:transform-inverse shape))
 
       (and (has? values :scale-x :scale-y :width :height) (not turned?))
-      (ctm/resize (gpt/point sx sy) pivot)
+      (ctm/resize (gpt/point sx sy) box)
 
       (and (has? values :scale-x :scale-y) (not (mth/close? scale 1)))
       (ctm/scale-content scale)
@@ -3173,7 +3188,7 @@
    (fn [acc shape-id values]
      (if-let [shape (get objects shape-id)]
        (let [board-origin (position-origin timeline objects shape-id)
-             pivot        (origin-point shape (track-origin (get-track timeline shape-id)))]
+             pivot        (track-origin (get-track timeline shape-id))]
          (assoc acc shape-id (shape->modifiers shape values board-origin pivot)))
        acc))
    {}
@@ -3361,7 +3376,8 @@
   [timeline objects id values own played]
   (let [shape   (get objects id)
         origin  (position-origin timeline objects id)
-        pivot   (origin-point shape (track-origin (get-track timeline id)))
+        origin* (track-origin (get-track timeline id))
+        pivot   (origin-point shape origin*)
         matrix  #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
         total   (matrix played)
         follow  (if-let [inv (gmt/inverse (matrix own))] (gmt/multiply total inv) total)
@@ -3376,7 +3392,7 @@
                     (update :scale-y * sy)
                     (assoc :x rest-x :y rest-y))
         ;; where its pivot is without a move, and where it goes
-        probe   (gpt/transform pivot (matrix (shape->modifiers shape values origin pivot)))
+        probe   (gpt/transform pivot (matrix (shape->modifiers shape values origin origin*)))
         target  (gpt/transform pivot total)]
     (assoc values
            :x (+ rest-x (- (:x target) (:x probe)))

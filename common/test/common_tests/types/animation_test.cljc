@@ -4896,3 +4896,51 @@
                    (cta/set-follow follower {:leader leader})
                    (cta/set-follow leader {:leader follower}))]
         (t/is (not-any? :follow (vals (:tracks (cta/bake-follows tl objects)))))))))
+
+(defn- turned-limb
+  "A limb 20 by 100 at 0,0, turned 30 degrees around its middle (10,50):
+  its bottom end, the middle of the bottom of its box as it lies, is at
+  (10 - 50 sin 30, 50 + 50 cos 30)."
+  []
+  (-> (cts/setup-shape {:type :rect :x 0 :y 0 :width 20 :height 100})
+      (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 10 50) 30))))
+
+(def ^:private limb-end
+  [(- 10 (* 50 (mth/sin (mth/radians 30)))) (+ 50 (* 50 (mth/cos (mth/radians 30))))])
+
+(t/deftest the-pivot-of-a-turned-shape-turns-with-it
+  (let [limb (turned-limb)
+        end  (cta/origin-point limb {:x 0.5 :y 1})]
+    (t/is (close-point? limb-end [(:x end) (:y end)]) "on the shape as it lies")
+    (t/is (close-point? [10 100] (let [p (cta/box-point limb {:x 0.5 :y 1})] [(:x p) (:y p)]))
+          "on its box before it turns")
+    (t/is (= (aexp/pivot-offset limb {:x 0.5 :y 1})
+             [(- (:x end) (get-in limb [:selrect :x])) (- (:y end) (get-in limb [:selrect :y]))])
+          "where the exports turn it")))
+
+(t/deftest a-turned-shape-turns-around-its-pivot-as-it-lies
+  (let [limb   (turned-limb)
+        sid    (:id limb)
+        tl     (-> (mk-timeline)
+                   (cta/set-track-origin sid 0.5 1)
+                   (cta/add-keyframe sid {:time 0 :property :rotation :value 30})
+                   (cta/add-keyframe sid {:time 1000 :property :rotation :value 60}))
+        mods   (get-in (cta/timeline->modif-tree tl {sid limb} 1000) [sid :modifiers])
+        limb'  (gsh/transform-shape limb mods)
+        end    (cta/origin-point limb' {:x 0.5 :y 1})]
+    (t/is (mth/close? 60.0 (double (:rotation limb')) 0.01))
+    (t/is (close-point? limb-end [(:x end) (:y end)]) "its end stays where it was")))
+
+(t/deftest a-layer-follows-a-turned-leader-around-its-pivot
+  (let [limb    (turned-limb)
+        dot     (cts/setup-shape {:type :rect :x 95 :y 45 :width 10 :height 10})
+        objects {(:id limb) limb (:id dot) dot}
+        tl      (-> (mk-timeline)
+                    (cta/set-track-origin (:id limb) 0.5 1)
+                    (cta/add-keyframe (:id limb) {:time 0 :property :rotation :value 30})
+                    (cta/add-keyframe (:id limb) {:time 1000 :property :rotation :value 120})
+                    (cta/set-follow (:id dot) {:leader (:id limb)}))
+        [ex ey] limb-end
+        ;; the dot's centre (100,50) turned 90 degrees around the end
+        turned  [(- ex (- 50 ey)) (+ ey (- 100 ex))]]
+    (t/is (close-point? turned (centre-at tl objects (:id dot) 1000)))))

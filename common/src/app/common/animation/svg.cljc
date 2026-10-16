@@ -224,7 +224,7 @@
   [shape track values]
   (when (some #(contains? values %) aexp/svg-size-properties)
     (let [{:keys [x y width height]} (:selrect shape)
-          pivot   (cta/origin-point shape (cta/track-origin track))
+          pivot   (cta/box-point shape (cta/track-origin track))
           span    (fn [from size pivot new-size]
                     (let [start (- pivot (* (- pivot from) (/ new-size size)))]
                       [(min start (+ start new-size)) (mth/abs new-size)]))

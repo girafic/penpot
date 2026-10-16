@@ -178,7 +178,7 @@
   first radius clamped as Lottie clamps it."
   [shape track ox oy]
   (let [{:keys [x y width height]} (:selrect shape)
-        pivot  (cta/origin-point shape (cta/track-origin track))
+        pivot  (cta/box-point shape (cta/track-origin track))
         values (acss/shape-values {:tracks {(:id shape) track}} (:id shape))]
     (fn [t]
       (let [v (values t)

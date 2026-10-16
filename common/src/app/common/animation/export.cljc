@@ -89,18 +89,13 @@
 (defn pivot-offset
   "Where the track origin `origin` (0..1 on the box of `shape`, see
   `track-origin`) is from the top left of the box, turned as the shape
-  is around its center: what the pivot is in the picture of the shape."
+  is around its center (see `cta/origin-point`): what the pivot is in
+  the picture of the shape."
   [shape origin]
   (let [sr    (:selrect shape)
-        sw    (double (or (:width sr) 0))
-        sh    (double (or (:height sr) 0))
-        dx    (* (- (or (:x origin) 0.5) 0.5) sw)
-        dy    (* (- (or (:y origin) 0.5) 0.5) sh)
-        angle (mth/radians (or (:rotation shape) 0))
-        cos   (mth/cos angle)
-        sin   (mth/sin angle)]
-    [(+ (/ sw 2) (- (* dx cos) (* dy sin)))
-     (+ (/ sh 2) (+ (* dx sin) (* dy cos)))]))
+        point (cta/origin-point shape origin)]
+    [(- (:x point) (or (:x sr) 0))
+     (- (:y point) (or (:y sr) 0))]))
 
 (defn lottie-pivot
   "Layer-space point of the track origin on `shape` as it is, turned with
@@ -468,7 +463,7 @@
                  children (filterv layer? (:shapes holder))]
           :when (and (some? holder) (seq kfs) (seq children))
           :let  [{:keys [width height]} (:selrect holder)
-                 pivot  (cta/origin-point holder (cta/track-origin track))
+                 pivot  (cta/box-point holder (cta/track-origin track))
                  values (acss/shape-values timeline hid)
                  size   #(let [v (values %)] [(get v :width width) (get v :height height)])
                  poses  (for [[t kf] (acss/eased-stops #(mapv double (size %))
