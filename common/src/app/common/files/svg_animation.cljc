@@ -1858,7 +1858,9 @@
 
                                ;; a line that draws itself is not dashed
                                (contains? trims (:id shape))
-                               (update :strokes (fn [strokes] (mapv #(assoc % :stroke-style :solid) strokes))))))
+                               (-> (update :strokes (fn [strokes] (mapv #(assoc % :stroke-style :solid) strokes)))
+                                   (d/update-when :svg-attrs dissoc :strokeDasharray :strokeDashoffset)
+                                   (d/update-in-when [:svg-attrs :style] dissoc :strokeDasharray :strokeDashoffset)))))
                       (mapcat (fn [shape]
                                 (if-let [node (:node (get boards (:id shape)))]
                                   [node (assoc shape :parent-id (:id node))]

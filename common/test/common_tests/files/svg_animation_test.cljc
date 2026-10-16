@@ -116,7 +116,8 @@
                                                   :dur "1s" :fill "freeze"}))))
         line   (named result "line")]
     (t/is (close-frames? [[0 0] [1000 1]] (frames result line :trim-end)))
-    (t/is (= :solid (get-in line [:strokes 0 :stroke-style])) "no dashes left")))
+    (t/is (= :solid (get-in line [:strokes 0 :stroke-style])) "no dashes left")
+    (t/is (not-any? #(contains? (:svg-attrs line) %) [:strokeDasharray :strokeDashoffset]) "nor in its SVG")))
 
 (t/deftest a-motion-follows-its-path
   (let [result (import-svg (svg (el :circle {:id "dot" :cx "0" :cy "0" :r "5"}

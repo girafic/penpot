@@ -191,6 +191,17 @@
         {:keys [start-x start-y end-x]} (:fill-color-gradient fill)]
     (t/is (= [0.0 0.5 1.0] (mapv double [start-x start-y end-x])))))
 
+(t/deftest a-radial-gradient-in-user-space-stays-round
+  ;; Penpot draws it in the box of the shape: on a box twice as wide as
+  ;; high, it is half as wide as its radius says
+  (let [g      {:tag :radialGradient :attrs {:id "g" :gradientUnits "userSpaceOnUse" :cx "100" :cy "50" :r "40"}
+                :content [{:tag :stop :attrs {:offset "0" :stop-color "#ffffff"} :content []}
+                          {:tag :stop :attrs {:offset "1" :stop-color "#000000"} :content []}]}
+        [fill] (filled [g] {:tag :rect :attrs {:id "box" :width "200" :height "100" :fill "url(#g)"} :content []})
+        {:keys [start-y end-y width]} (:fill-color-gradient fill)]
+    (t/is (mth/close? 0.4 (- end-y start-y)) "40 of 100 high")
+    (t/is (mth/close? 0.5 width))))
+
 (t/deftest the-pattern-fills-of-penpot-exports-come-back
   (let [pattern (fn [style]
                   {:tag :pattern :attrs {:id "p" :patternUnits "userSpaceOnUse" :x "10" :y "10" :width "80" :height "40"}
@@ -222,20 +233,29 @@
 ;; --- Dashes
 
 (t/deftest dash-arrays-become-stroke-styles
-  (let [stroke (fn [dasharray]
+  (let [line   (fn [dasharray & [offset]]
                  (let [[_ children] (sb/create-svg-shapes
-                                     (svg-with {:tag :path :attrs {:id "line" :d "M0 50 L100 50" :fill "none" :stroke "#000000"
-                                                                   :stroke-width "2" :stroke-dasharray dasharray}
+                                     (svg-with {:tag :path :attrs (cond-> {:id "line" :d "M0 50 L100 50" :fill "none" :stroke "#000000"
+                                                                           :stroke-width "2" :stroke-dasharray dasharray}
+                                                                    offset (assoc :stroke-dashoffset offset))
                                                 :content []})
                                      {:x 0 :y 0} {} nil nil #{} false)]
-                   (-> (some #(when (= "line" (:name %)) %) children)
-                       (get-in [:strokes 0])
-                       (select-keys [:stroke-style :stroke-dash :stroke-gap]))))]
+                   (some #(when (= "line" (:name %)) %) children)))
+        stroke (fn [dasharray]
+                 (-> (line dasharray)
+                     (get-in [:strokes 0])
+                     (select-keys [:stroke-style :stroke-dash :stroke-gap])))
+        kept?  (fn [shape] (and (nil? (get-in shape [:strokes 0 :stroke-style]))
+                                (some? (get-in shape [:svg-attrs :strokeDasharray]))))]
     (t/is (= {:stroke-style :dashed :stroke-dash 6.0 :stroke-gap 4.0} (update-vals (stroke "6 4") #(if (number? %) (double %) %))))
     (t/is (= {:stroke-style :dashed :stroke-dash 5.0 :stroke-gap 5.0} (update-vals (stroke "5") #(if (number? %) (double %) %)))
           "one length repeats")
     (t/is (= {:stroke-style :dotted} (stroke "0,7")))
-    (t/is (= {:stroke-style :mixed} (stroke "7,7,3,7")))
+    (t/is (= {:stroke-style :dashed :stroke-dash 10.0 :stroke-gap 5.0} (update-vals (stroke "10 5 10 5") #(if (number? %) (double %) %)))
+          "a pattern that repeats")
+    (doseq [dasharray ["7,7,3,7" "10 5 2 5" "1 2 3"]]
+      (t/is (kept? (line dasharray)) (str dasharray ": no stroke style draws it, the SVG does")))
+    (t/is (kept? (line "1000" "1000")) "an offset: a line not drawn yet")
     (t/is (not= :dashed (:stroke-style (stroke "none"))))))
 
 ;; --- Clip paths

@@ -924,13 +924,14 @@
          :end-x (rel-x (fraction (:x2 attrs) 1)) :end-y (rel-y (fraction (:y2 attrs) 0))
          :width 1 :stops stops}
 
+        ;; in user space, round: Penpot draws it in the box of the shape
         :radialGradient
         (let [cx (rel-x (fraction (:cx attrs) 0.5))
               cy (rel-y (fraction (:cy attrs) 0.5))
               r  (fraction (:r attrs) 0.5)]
           {:type :radial
            :start-x cx :start-y cy :end-x cx :end-y (+ cy (if user? (/ r (max height 1e-6)) r))
-           :width 1 :stops stops})
+           :width (if user? (/ height (max width 1e-6)) 1) :stops stops})
 
         nil))))
 
@@ -1038,6 +1039,17 @@
           (assoc-in [:fills 0 :fill-opacity] (-> (dm/get-in shape [:svg-attrs :style :fillOpacity])
                                                  (d/parse-double 1)))))))
 
+(defn- dash-period
+  "The dash lengths `ns` (an even count) as their shortest period, which
+  repeats: `10 5 10 5` is `10 5`."
+  [ns]
+  (let [n (count ns)]
+    (or (some (fn [p]
+                (when (and (zero? (mod n p)) (= ns (into [] (take n) (cycle (take p ns)))))
+                  (subvec ns 0 p)))
+              (range 2 n 2))
+        ns)))
+
 (defn- setup-stroke
   [shape]
   (let [attrs   (get shape :svg-attrs)
@@ -1068,21 +1080,22 @@
         linecap (some-> linecap str/trim keyword)
 
         ;; the dashes, as the stroke styles of Penpot draw them: a dash
-        ;; and a gap, dots (no dash), or dashes and dots (more lengths);
-        ;; a list of an odd count repeats, as in SVG
+        ;; and a gap, or dots (no dash); a list of an odd count repeats,
+        ;; as in SVG. Other patterns, and dashes that start elsewhere
+        ;; (an offset), stay SVG attributes, which draw them exactly.
         dashes  (when (some? color)
                   (let [v (str/trim (str (or (:strokeDasharray style) (:strokeDasharray attrs))))]
                     (when-not (or (str/blank? v) (= "none" v))
                       (let [ns (csvg/parse-numbers v)]
                         (when (and (seq ns) (some pos? ns))
-                          (vec (if (odd? (count ns)) (concat ns ns) ns)))))))
+                          (dash-period (vec (if (odd? (count ns)) (concat ns ns) ns))))))))
+        offset  (d/parse-double (or (:strokeDashoffset style) (:strokeDashoffset attrs)) 0)
         dashed  (cond
-                  (nil? dashes)                  nil
-                  (zero? (first dashes))         {:stroke-style :dotted}
-                  (> (count dashes) 2)           {:stroke-style :mixed}
-                  :else                          {:stroke-style :dashed
-                                                  :stroke-dash (first dashes)
-                                                  :stroke-gap (second dashes)})
+                  (or (nil? dashes) (not (zero? offset)) (> (count dashes) 2)) nil
+                  (zero? (first dashes))                                       {:stroke-style :dotted}
+                  :else                                                        {:stroke-style :dashed
+                                                                                :stroke-dash (first dashes)
+                                                                                :stroke-gap (second dashes)})
 
         attrs
         (-> attrs
