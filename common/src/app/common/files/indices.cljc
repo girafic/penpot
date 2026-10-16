@@ -49,7 +49,8 @@
                   (cfh/bool-shape? shape))
               (conj shape)
 
-              (:masked-group shape)
+              ;; an inverted mask keeps all the layers of its group
+              (cfh/mask-bounds-shape? shape)
               (conj (get objects (->> shape :shapes first))))))
 
         xform
