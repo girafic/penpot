@@ -49,6 +49,15 @@
   []
   (some? (dwa/picking-leader @st/state)))
 
+(defonce ^:private picked-at
+  (atom 0))
+
+(defn- just-picked?
+  "Whether the canvas picked a leader a moment ago: the rest of a double
+  click on it neither selects nor edits it."
+  []
+  (< (- (js/Date.now) @picked-at) 400))
+
 (defn on-pointer-down
   [{:keys [id blocked hidden type]} selected edition drawing-tool text-editing?
    node-editing? grid-editing? drawing-path? create-comment? space? panning z? read-only?]
@@ -95,7 +104,7 @@
                    (st/emit! (dw/start-zooming pt)))
                  (st/emit! (dw/start-panning))))
 
-             (and left-click? (picking-leader?))
+             (and left-click? (or (picking-leader?) (just-picked?)))
              (st/emit! (mse/->MouseEvent :down ctrl? shift? alt? meta?))
 
              left-click?
@@ -141,7 +150,8 @@
                   (not mod?)
                   (not shift?)
                   (not @space?)
-                  (not (picking-leader?)))
+                  (not (picking-leader?))
+                  (not (just-picked?)))
 
          (dom/prevent-default bevent)
          (dom/stop-propagation bevent)
@@ -196,9 +206,15 @@
          ;; FIXME: Maybe we can transform this into a cond instead
          ;; of multiple (when)s.
          (cond
-           ;; the layer clicked leads: no selection
-           (and (picking-leader?) (not @space?))
-           (st/emit! (dwa/pick-leader-at (:id @hover)))
+           ;; the layer clicked leads: no selection, Z zooms only
+           (picking-leader?)
+           (when-not (or @space? @z?)
+             (reset! picked-at (js/Date.now))
+             (st/emit! (dwa/pick-leader-at (:id @hover))))
+
+           ;; the rest of a double click on the leader just picked
+           (just-picked?)
+           nil
 
            (and hovering?
                 (not @space?)
@@ -223,7 +239,7 @@
    (mf/deps @hover @hover-ids selected @hover-top-frame-id drawing-path? edition drawing-tool @z? read-only?)
    (fn [event]
      (dom/stop-propagation event)
-     (when-not @z?
+     (when-not (or @z? (just-picked?))
        (let [ctrl? (kbd/ctrl? event)
              shift? (kbd/shift? event)
              alt? (kbd/alt? event)

@@ -17,6 +17,7 @@
    [app.common.types.shape.layout :as ctl]
    [app.common.uuid :as uuid]
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.collapse :as dwc]
    [app.main.refs :as refs]
    [app.main.store :as st]
@@ -318,6 +319,10 @@
            (dom/prevent-default event)
            (mf/set-ref-val! scroll-middle-ref false)
            (cond
+             ;; the layer clicked leads (see `dwa/pick-leader`)
+             (some? (dwa/picking-leader @st/state))
+             (st/emit! (dwa/pick-leader-at id))
+
              (kbd/shift? event)
              (if is-filtered
                (st/emit! (dw/shift-select-shapes id objects))

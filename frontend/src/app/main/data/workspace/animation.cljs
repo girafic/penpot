@@ -653,10 +653,10 @@
   (dm/get-in state [:workspace-animation :picking-leader]))
 
 (defn- end-pick-leader
-  "End the pick of a leader of `shape-id` (see `pick-leader`): its leader
-  is `leader`, or with `selected?` the layer selected, or none. `shape-id`
-  stays selected, while it is on the page."
-  [shape-id {:keys [leader selected?]}]
+  "End the pick of a leader of `shape-id` (see `pick-leader`), whose
+  leader is `leader`, or none. `shape-id` stays selected, while it is on
+  the page."
+  [shape-id {:keys [leader]}]
   (ptk/reify ::end-pick-leader
     ptk/UpdateEvent
     (update [_ state]
@@ -665,8 +665,7 @@
     ptk/WatchEvent
     (watch [_ state _]
       (if (and (some? shape-id) (contains? (dsh/lookup-page-objects state) shape-id))
-        (let [leader (or leader (when selected? (first (dsh/lookup-selected state))))
-              follow (some-> (layer-board-timeline state shape-id) (cta/follow-of shape-id))]
+        (let [follow (some-> (layer-board-timeline state shape-id) (cta/follow-of shape-id))]
           (rx/concat
            (if (and (some? leader) (not= leader shape-id))
              (rx/of (set-follow shape-id (assoc follow :leader leader)))
@@ -680,11 +679,12 @@
   (end-pick-leader nil {}))
 
 (defn pick-leader-at
-  "A click on the canvas while a leader is picked (see `pick-leader`): the
-  layer `leader-id` clicked becomes the leader. A click on nothing (nil),
-  or on a layer it cannot follow (see `cltl/can-follow?`), leaves the
-  pick waiting for another: a click lands before the canvas knows the
-  layer under the pointer when it comes at once."
+  "A click on the canvas or in the layers while a leader is picked (see
+  `pick-leader`): the layer `leader-id` clicked becomes the leader. A
+  click on nothing (nil), or on a layer it cannot follow (see
+  `cltl/can-follow?`), leaves the pick waiting for another: a click lands
+  before the canvas knows the layer under the pointer when it comes at
+  once."
   [leader-id]
   (ptk/reify ::pick-leader-at
     ptk/WatchEvent
@@ -705,12 +705,13 @@
     :app.main.data.workspace/finalize-workspace})
 
 (defn pick-leader
-  "Make the next layer clicked on the canvas (see `pick-leader-at`, the
-  canvas waits for a click then) or chosen in the layers the leader of
-  the layer `shape-id` (see `set-follow`), which stays selected. Esc
-  cancels, `shape-id` still selected; so does picking again (the picker
-  of the Follow section). Leaving motion mode, the page or the file ends
-  it."
+  "Make the next layer clicked on the canvas or in the layers (see
+  `pick-leader-at`, they wait for a click then) the leader of the layer
+  `shape-id` (see `set-follow`), which stays selected. Esc cancels,
+  `shape-id` still selected; so does picking again (the picker of the
+  Follow section). A selection made otherwise (a right-click, select
+  all, a duplicate, Tab, a drag in the layers) and leaving motion mode,
+  the page or the file end it with no leader."
   [shape-id]
   (ptk/reify ::pick-leader
     ptk/UpdateEvent
@@ -721,8 +722,9 @@
     (watch [_ _ stream]
       (let [of-type (fn [types] (rx/filter #(contains? types (ptk/type %)) stream))]
         (->> (rx/merge
+              ;; a selection made otherwise moves on
               (->> (of-type #{::dws/select-shape ::dws/select-shapes})
-                   (rx/map #(end-pick-leader shape-id {:selected? true})))
+                   (rx/map #(cancel-pick-leader)))
               ;; Esc deselects
               (->> (of-type #{::dws/deselect-all})
                    (rx/map #(end-pick-leader shape-id {})))

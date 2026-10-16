@@ -109,8 +109,6 @@
            (cond
              (and @mod? @space?)             (utils/get-cursor :zoom)
              (or panning @space?)            (utils/get-cursor :hand)
-             ;; a click picks the leader of a layer (see `dwa/pick-leader`)
-             picking-leader?                 (utils/get-cursor :picker)
              ;; Keep the drag cursor across the viewport.
              (some? path-drag-cursor)        (cur/get-static path-drag-cursor)
              (= drawing-tool :comments)      (utils/get-cursor :comments)
@@ -119,6 +117,8 @@
              (= drawing-tool :circle)        (utils/get-cursor :create-ellipse)
              (and show-zoom? (not @alt?))    (utils/get-cursor :zoom-in)
              (and show-zoom? @alt?)          (utils/get-cursor :zoom-out)
+             ;; a click picks the leader of a layer (see `dwa/pick-leader`)
+             picking-leader?                 (utils/get-cursor :picker)
              show-pen?                       (utils/get-cursor :draw-path)
              (= drawing-tool :curve)         (utils/get-cursor :pencil)
              drawing-tool                    (utils/get-cursor :create-shape)

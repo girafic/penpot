@@ -6,6 +6,7 @@
 
 (ns frontend-tests.data.animation-follow-test
   (:require
+   [app.common.data :as d]
    [app.common.files.changes :as cpc]
    [app.common.files.changes-builder :as pcb]
    [app.common.test-helpers.compositions :as tho]
@@ -122,21 +123,24 @@
                               :on-next #(swap! events conj %))]
     [(ptk/update event state) ended events]))
 
-(t/deftest ^:async a-layer-chosen-in-the-layers-leads
+(t/deftest ^:async a-selection-made-otherwise-ends-the-pick-with-no-leader
   (let [state  (workspace-state (follow-file))
         stream (rx/subject)
         [picking ended events] (picking state stream)]
     (t/is (= (thi/id :dot) (dwa/picking-leader picking)))
+    ;; a right-click, select all, a duplicate, Tab or a drag in the layers
     (rx/push! stream (dws/select-shape (thi/id :lead)))
     (await ended)
-    (let [[end] @events
-          ;; it is selected in the layers
-          picked (-> (ptk/update end picking)
-                     (assoc-in [:workspace-local :selected] #{(thi/id :lead)}))]
-      (t/is (= ::dwa/end-pick-leader (ptk/type end)))
-      (t/is (nil? (dwa/picking-leader picked)) "picking ends")
-      (t/is (= [::dwa/set-follow ::dws/select-shape] (mapv ptk/type (await (emitted end picked))))
-            "it follows the leader and stays selected"))))
+    (let [[end] @events]
+      (t/is (= [::dwa/end-pick-leader] (mapv ptk/type @events)))
+      (t/is (nil? (dwa/picking-leader (ptk/update end picking))) "picking ends")
+      (t/is (empty? (await (emitted end picking))) "nothing followed, nothing reselected")))
+  (let [state  (workspace-state (follow-file))
+        stream (rx/subject)
+        [picking ended events] (picking state stream)]
+    (rx/push! stream (dws/select-shapes (d/ordered-set (thi/id :lead) (thi/id :dot))))
+    (await ended)
+    (t/is (empty? (await (emitted (first @events) picking))) "several layers selected")))
 
 (defn- ^:async ended-by
   "The events the pick of the leader of the dot emits when `ending`
@@ -170,8 +174,9 @@
                           [:files (:id file) :data :pages-index (:id page) :objects] dissoc (thi/id :dot))
         stream (rx/subject)
         [_ ended events] (picking state stream)]
-    (rx/push! stream (dws/select-shape (thi/id :lead)))
+    (rx/push! stream (dws/deselect-all))
     (await ended)
+    (t/is (= [::dwa/end-pick-leader] (mapv ptk/type @events)))
     (t/is (empty? (await (emitted (first @events) state))))))
 
 (t/deftest ^:async only-the-keyframe-exports-bake-follows
