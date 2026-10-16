@@ -10,6 +10,7 @@
    #?(:clj [clojure.xml :as xml])
    [app.common.files.changes-builder :as pcb]
    [app.common.files.svg-animation :as svga]
+   [app.common.geom.rect :as grc]
    [app.common.math :as mth]
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
@@ -335,6 +336,40 @@
                                                           :dur dur :repeatCount "indefinite"})))))]
     (t/is (= {:loop-length 1} (:skipped result)))
     (t/is (= 13000 (get-in result [:timeline :duration])))))
+
+;; --- Static CSS in an animated SVG
+
+(t/deftest a-static-css-turn-goes-around-its-origin
+  ;; the box of `transform-origin` is the view box from its origin, not
+  ;; where it starts, or the box of the element: where Chrome draws it
+  (doseq [[label view-box css centre]
+          [["the view box" "0 0 100 100" "transform-origin: center;" [50 7.57]]
+           ["a view box elsewhere" "-50 -50 100 100" "transform-origin: center;" [100 57.57]]
+           ["the box of the element" "0 0 100 100" "transform-box: fill-box; transform-origin: center;" [20 20]]]]
+    (let [result (import-svg (assoc (el :svg {:viewBox view-box :width "100" :height "100"}
+                                        (el :style {} (str "#b { " css " transform: rotate(45deg); }"
+                                                           "@keyframes a { to { opacity: 0 } } #o { animation: a 1s; }"))
+                                        (el :rect {:id "b" :x "10" :y "10" :width "20" :height "20"})
+                                        (el :rect {:id "o" :width "5" :height "5"}))
+                                    :name "Test.svg"))
+          b      (named result "b")
+          c      (grc/rect->center (:selrect b))]
+      (t/is (every? true? (map #(mth/close? %1 %2 0.05) centre [(:x c) (:y c)])) label)
+      (t/is (mth/close? 28.28 (:width (grc/points->rect (:points b))) 0.05) (str label ": turned")))))
+
+(t/deftest a-pop-in-around-its-centre-waits-at-nothing
+  (let [result (import-svg (svg (el :style {} (str "@keyframes pop { to { transform: scale(1) } }"
+                                                   "#box { transform-box: fill-box; transform-origin: center;"
+                                                   " transform: scale(0); animation: pop 1s linear 0.5s forwards; }"))
+                                (el :rect {:id "box" :x "40" :y "40" :width "20" :height "20"})))]
+    (t/is (plays? result "box motion" :scale-x [[0 0] [250 0] [1000 0.5] [1500 1]]))))
+
+(t/deftest an-unknown-blend-mode-is-left-out
+  (let [result (import-svg (svg (el :style {} (str ".glow { mix-blend-mode: plus-lighter; }"
+                                                   "@keyframes a { to { opacity: 0 } } #box { animation: a 1s; }"))
+                                (el :rect {:id "box" :class "glow" :width "10" :height "10"})))]
+    (t/is (some? (named result "box")))
+    (t/is (= {:attribute 1} (:skipped result)))))
 
 ;; --- What an SVG asks for is bounded: it comes from anyone
 

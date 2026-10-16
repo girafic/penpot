@@ -8,14 +8,18 @@
   "Tests for the media upload triggered from an SVG import."
   (:require
    [app.common.files.helpers :as cfh]
+   [app.common.files.svg-animation :as svga]
    [app.common.transit :as tr]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.media :as media]
+   [app.main.data.workspace.svg-animation :as dwsa]
    [app.main.data.workspace.svg-upload :as svg]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.async :as async]
-   [frontend-tests.helpers.http :as http]))
+   [frontend-tests.helpers.http :as http]
+   [frontend-tests.helpers.mock :as mock]
+   [potok.v2.core :as ptk]))
 
 (defn- image-node
   [href]
@@ -76,3 +80,15 @@
         node         (get-in text [:content :children 0 :children 0 :children 0])]
     (t/is (= "Hi" (:text node)))
     (t/is (= ["sourcesanspro" "700"] [(:font-id node) (:font-weight node)]))))
+
+(t/deftest ^:async an-animated-svg-that-fails-to-import-is-an-invalid-svg
+  ;; as the import of a static one says it, not as an internal error
+  (let [error (atom nil)]
+    (await
+     (mock/with-mocks*
+       {svga/svg->shapes (mock/stub (fn [& _] (throw (ex-info "unexpected" {}))))}
+       (await (async/observe (ptk/watch (dwsa/svg-animation-imported {:tag :svg :attrs {:viewBox "0 0 10 10"} :content []}
+                                                                     {:x 0 :y 0})
+                                        {} (rx/empty))
+                             :on-error #(reset! error %)))))
+    (t/is (= :svg-parser (:type (ex-data @error))))))

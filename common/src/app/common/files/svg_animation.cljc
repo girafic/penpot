@@ -1490,48 +1490,85 @@
 (def ^:private moving?
   #(re-find #"^(animation|transition|transform|offset)" %))
 
+(defn- node-box
+  "The box `[x y w h]` of the element `node` in its own space, from its
+  geometry; nil for one the import does not measure."
+  [{:keys [tag attrs]}]
+  (let [n      #(d/parse-double (get attrs %) 0)
+        around (fn [points]
+                 (when (seq points)
+                   (let [r (grc/points->rect points)] [(:x r) (:y r) (:width r) (:height r)])))]
+    (case tag
+      (:rect :image)       [(n :x) (n :y) (n :width) (n :height)]
+      :circle              (let [r (n :r)] [(- (n :cx) r) (- (n :cy) r) (* 2 r) (* 2 r)])
+      :ellipse             [(- (n :cx) (n :rx)) (- (n :cy) (n :ry)) (* 2 (n :rx)) (* 2 (n :ry))]
+      :line                (around [(gpt/point (n :x1) (n :y1)) (gpt/point (n :x2) (n :y2))])
+      (:polyline :polygon) (around (map (fn [[x y]] (gpt/point x y)) (partition 2 (numbers (:points attrs)))))
+      :path                (around (try (polyline (path/from-string (:d attrs)))
+                                        (catch #?(:clj Throwable :cljs :default) _ nil)))
+      nil)))
+
+(defn- known-blend?
+  "Whether the CSS blend mode `v` is one Penpot has."
+  [v]
+  (contains? cts/blend-modes (keyword (str/lower (str/trim (str v))))))
+
 (defn- clean
   "The element `node` without its animations, scripts and styles, the
   static CSS of each element (`cascaded`, by key) in its style, as the
   static import reads only that, and a static CSS transform as its
-  transform. An element `moving` (keys) animates whose transform is
-  singular at rest (a pop-in from `scale(0)`) is built without it, at
-  its full size, the transform kept as `::rest-transform` for its
-  animation to start from (see `transforms`)."
-  [node cascaded moving]
-  (let [decls (get cascaded (::sb/element-key node))
+  transform, around its `transform-origin` in the view box (`view`,
+  `[0 0 w h]`) or the box of the element (`transform-box: fill-box`).
+  An element `moving` (keys) animates whose transform is singular at
+  rest (a pop-in from `scale(0)`) is built without it, at its full
+  size, the transform kept as `::rest-transform` for its animation to
+  start from (see `transforms`). What the import cannot apply (a blend
+  mode Penpot does not have, a box it does not measure) is counted by
+  `ctx` and left out."
+  [{:keys [ctx cascaded moving view] :as env} node]
+  (let [decls      (get cascaded (::sb/element-key node))
         ;; each property once, its last value, as the cascade ends
-        rules (->> (reverse decls)
-                   (remove #(moving? (first %)))
-                   (reduce (fn [[seen acc] [p :as decl]]
-                             (if (contains? seen p) [seen acc] [(conj seen p) (conj acc decl)]))
-                           [#{} ()])
-                   (second))
-        decl  (fn [prop] (some (fn [[p v]] (when (= prop p) v)) (reverse decls)))
-        css-t (decl "transform")
-        node  (cond-> node
-                (seq rules)
-                (-> (update :attrs #(apply dissoc % (map (comp keyword first) rules)))
-                    (assoc-in [:attrs :style] (str/join ";" (map (fn [[p v]] (str p ":" v)) rules))))
+        rules      (->> (reverse decls)
+                        (remove #(moving? (first %)))
+                        (reduce (fn [[seen acc] [p :as decl]]
+                                  (if (contains? seen p) [seen acc] [(conj seen p) (conj acc decl)]))
+                                [#{} ()])
+                        (second))
+        decl       (fn [prop] (some (fn [[p v]] (when (= prop p) v)) (reverse decls)))
+        unknown?   #(and (some? %) (not (known-blend? %)))
+        css-blend  (some (fn [[p v]] (when (= "mix-blend-mode" p) v)) rules)
+        attr-blend (get-in node [:attrs :mix-blend-mode])
+        rules      (cond->> rules (unknown? css-blend) (remove #(= "mix-blend-mode" (first %))))
+        css-t      (decl "transform")
+        box        (if (str/includes? (str/lower (str (decl "transform-box"))) "fill") (node-box node) view)
+        node       (cond-> node
+                     (seq rules)
+                     (-> (update :attrs #(apply dissoc % (map (comp keyword first) rules)))
+                         (assoc-in [:attrs :style] (str/join ";" (map (fn [[p v]] (str p ":" v)) rules))))
 
-                (and (some? css-t) (not (str/includes? (str/lower (str (decl "transform-box"))) "fill")))
-                (assoc-in [:attrs :transform]
-                          (str (first (css-matrix (css-transform css-t)
-                                                  (origin-point (decl "transform-origin") [0 0 0 0])
-                                                  [0 0 0 0])))))
-        rest-m (csvg/parse-transform (get-in node [:attrs :transform]))
-        node   (cond-> node
-                 (and (contains? moving (::sb/element-key node))
-                      (< (mth/abs (gmt/determinant rest-m)) 1e-9))
-                 (-> (update :attrs dissoc :transform)
-                     (assoc ::rest-transform rest-m)))]
+                     (unknown? attr-blend)
+                     (update :attrs dissoc :mix-blend-mode)
+
+                     (and (some? css-t) (some? box))
+                     (assoc-in [:attrs :transform]
+                               (str (first (css-matrix (css-transform css-t)
+                                                       (origin-point (decl "transform-origin") box)
+                                                       box)))))
+        rest-m     (csvg/parse-transform (get-in node [:attrs :transform]))
+        node       (cond-> node
+                     (and (contains? moving (::sb/element-key node))
+                          (< (mth/abs (gmt/determinant rest-m)) 1e-9))
+                     (-> (update :attrs dissoc :transform)
+                         (assoc ::rest-transform rest-m)))]
+    (when (or (unknown? css-blend) (unknown? attr-blend) (and (some? css-t) (nil? box)))
+      (ctx :skip :attribute))
     (update node :content
             (fn [content]
               (into []
                     (keep #(cond
                              (not (element? %)) %
                              (contains? (into animation-tags #{:style :script}) (:tag %)) nil
-                             :else (clean % cascaded moving)))
+                             :else (clean env %)))
                     content)))))
 
 (defn- hoist-defs
@@ -1579,7 +1616,9 @@
                        (map #(cond-> % (= :transform (:property %)) (transform-spec)))
                        (vec))
         moving    (into #{} (comp (filter #(contains? #{:transform :motion} (:property %))) (map :key)) specs)
-        root      (hoist-defs (clean (:root idx) cascaded moving))]
+        ;; the box of `transform-origin`: the view box, from its origin
+        [_ _ w h] (sb/svg-dimensions svg-data)
+        root      (hoist-defs (clean {:ctx ctx :cascaded cascaded :moving moving :view [0 0 w h]} (:root idx)))]
     {:idx idx :specs specs :root root :own-of (transforms root)}))
 
 (defn- board-timing
