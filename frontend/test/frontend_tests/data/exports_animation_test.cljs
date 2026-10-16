@@ -371,6 +371,22 @@
           (.catch (fn [cause] (t/is false (ex-message cause))))
           (.finally (finish done))))))
 
+(t/deftest lottie-reads-the-follows-it-makes-children
+  (let [{:keys [objects bid cid]} (test-objects)
+        dot     (cts/setup-shape {:type :rect :x 60 :y 10 :width 10 :height 10})
+        did     (:id dot)
+        objects (-> objects
+                    (assoc did (assoc dot :parent-id bid :frame-id bid))
+                    (update-in [bid :shapes] conj did))
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe cid {:time 0 :property :x :value 10})
+                    (cta/add-keyframe cid {:time 1000 :property :x :value 50})
+                    (cta/set-follow did {:leader cid}))
+        page    {:objects objects :timelines {bid tl}}
+        follow  #(get-in (dwa/board-export-timeline page {} bid :bake %) [:tracks did :follow])]
+    (t/is (some? (follow :lottie)) "Lottie makes the dot a child of the rect")
+    (t/is (nil? (follow true)) "SVG and CSS play it by keyframes")))
+
 (def ^:private *closed (atom 0))
 
 (defn- fake-format []

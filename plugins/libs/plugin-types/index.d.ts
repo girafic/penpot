@@ -4410,8 +4410,11 @@ export interface Timeline {
    * be another layer of the board, not one `shape` is in, holds or is
    * followed by, nor a layer of a component copy the board does not
    * animate itself (what a copy plays of its main moves no follower).
-   * The SVG, CSS, Lottie and code exports play a follow by keyframes
-   * made from it.
+   * The SVG, CSS and code exports play a follow by keyframes made from
+   * it. Lottie makes the layer a child of its leader's layer when it
+   * follows with no delay, taking all that moves the leader and not its
+   * opacity, from where the leader rests or a first frame at rest, and
+   * the leader scales evenly and never flips; else by keyframes too.
    * @param shape A layer inside the board.
    * @param follow The leader and what the layer takes of it, or `null`.
    *

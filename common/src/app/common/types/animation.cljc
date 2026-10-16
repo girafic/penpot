@@ -3290,7 +3290,7 @@
   [objects a b]
   (or (inside? objects a b) (inside? objects b a)))
 
-(defn- followers
+(defn followers
   "The layers of `timeline` that follow a leader of `objects` (see
   `follow-of`), but those whose leaders lead back to a layer of the
   chain (a cycle follows nothing) and those in their leader or holding
@@ -3849,8 +3849,10 @@
   `resolve-animations`), the others as they are. A ping-pong timeline
   turns into the loop of its way there and back first (see
   `round-trip`), where the followers lag behind both ways. A follow
-  that plays nothing (a cycle, a leader gone) is left out."
-  [timeline objects & {:keys [fps] :or {fps 60}}]
+  that plays nothing (a cycle, a leader gone) is left out. The layers
+  `keep?` is true of keep their follows, as the Lottie export plays
+  some by parenting (see `app.common.animation.lottie/parent-candidates`)."
+  [timeline objects & {:keys [fps keep?] :or {fps 60 keep? (constantly false)}}]
   (if-not (follows? timeline)
     timeline
     (let [timeline (cond-> timeline
@@ -3858,7 +3860,7 @@
           resolved (resolve-animations timeline objects)
           chains   (vals (ik-chains resolved objects))
           ;; the followers, and the upper links of chains that reach
-          follows  (into (followers resolved objects) (map :a) chains)
+          follows  (into #{} (remove keep?) (into (followers resolved objects) (map :a) chains))
           ids      (follow-chain resolved (into follows (map :goal) chains))
           played   (update resolved :tracks select-keys ids)
           times    (frame-times (:duration timeline) fps)
@@ -3880,7 +3882,8 @@
               (fn [tracks]
                 (as-> tracks tracks
                   (reduce-kv (fn [tracks id track]
-                               (let [track (or (get baked id) (dissoc track :follow :ik))]
+                               (let [track (or (get baked id)
+                                               (cond-> track (not (keep? id)) (dissoc :follow :ik)))]
                                  (if (empty-track? track)
                                    (dissoc tracks id)
                                    (assoc tracks id track))))

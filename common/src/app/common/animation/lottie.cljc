@@ -25,6 +25,7 @@
    [app.common.geom.shapes.corners :as gco]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [clojure.string :as str]))
@@ -1802,6 +1803,27 @@
      :ks (assoc lottie-identity-ks :o (get-in layer [:ks :o] {:a 0 :k 100}))
      :ao 0 :w width :h height :ip 0 :op (ms->frames duration) :st 0 :bm (or (:bm layer) 0)}))
 
+(defn- lottie-rest-ks
+  "The transform of the layer of `shape` (see `lottie-shape-layer`) with
+  nothing playing: where it is at rest, in the composition."
+  [{:keys [objects layer-ids assets timeline ox oy]} shape]
+  (let [id     (:id shape)
+        origin (cta/position-origin timeline objects id)
+        rest   (cond-> {:shape-id id :keyframes []}
+                 (some? (dm/get-in timeline [:tracks id :origin]))
+                 (assoc :origin (dm/get-in timeline [:tracks id :origin])))
+        asset  (get assets id)]
+    (if (and (some? asset) (not (lottie-vector-layer? objects layer-ids id)))
+      (:ks (shape->lottie-image-layer 0 shape rest ox oy origin asset 1))
+      (lottie-ks shape rest ox oy origin))))
+
+(defn- lottie-tagged
+  "`layer`, the one layer that moves `shape` as its transform says: with
+  the shape (`::shape`) and its transform at rest (`::rest-ks`), so a
+  layer that follows it can be its child (see `lottie-parented`)."
+  [ctx shape layer]
+  (assoc layer ::shape (:id shape) ::rest-ks (lottie-rest-ks ctx shape)))
+
 (defn- lottie-node-layers
   "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first,
   each that follows the board it is in as it resizes (`:follow` of
@@ -1822,7 +1844,7 @@
                                     (lottie-precomp-layer ctx node)
                                     (and vector? (lottie-shadow-layers? shape track))
                                     (lottie-effects-layer ctx shape)
-                                    :else                       (lottie-shape-layer ctx shape track))
+                                    :else                       (lottie-tagged ctx shape (lottie-shape-layer ctx shape track)))
                           shadows (when (and vector?
                                              (contains? #{:group :frame} (:type shape))
                                              (not (contains? (:units ctx) id)))
@@ -1839,6 +1861,127 @@
                         (conj (mapv #(assoc % ::follow id) layers) (lottie-follow-null ctx shape stops))
                         layers)))))
         (rseq (vec nodes))))
+
+(defn- lottie-shifted
+  "The 1D Lottie property `prop` with `d` added to its values."
+  [prop d]
+  (if (= 1 (:a prop))
+    (update prop :k (fn [kfs] (mapv #(update % :s (fn [[v]] [(+ v d)])) kfs)))
+    (update prop :k + d)))
+
+(defn- lottie-parent-ks
+  "The transform `ks` of a layer turned into the space of a parent layer
+  whose transform at rest is `rest` (see `lottie-rest-ks`): moved and
+  turned back as much, its anchor and scale kept. Nil when it can not be
+  as the canvas plays it: the parent scales at rest, or turns and the
+  layer's x and y play at other times or easings, which a turn mixes."
+  [ks rest]
+  (let [px    (get-in rest [:p :x :k])
+        py    (get-in rest [:p :y :k])
+        r     (get-in rest [:r :k])
+        [ax ay] (get-in rest [:a :k])
+        [sx sy] (get-in rest [:s :k])
+        x     (get-in ks [:p :x])
+        y     (get-in ks [:p :y])]
+    (when (and (number? px) (number? py) (number? r) (number? ax) (number? ay)
+               (mth/close? 100 sx) (mth/close? 100 sy)
+               (some? x) (some? y))
+      (let [rad  (mth/radians (- r))
+            cos  (mth/cos rad)
+            sin  (mth/sin rad)
+            to   (fn [x y]
+                   [(+ ax (- (* cos (- x px)) (* sin (- y py))))
+                    (+ ay (+ (* sin (- x px)) (* cos (- y py))))])
+            same #(= (mapv (fn [kf] (dissoc kf :s)) (:k x)) (mapv (fn [kf] (dissoc kf :s)) (:k y)))
+            [x y] (cond
+                    (mth/close? r 0)
+                    [(lottie-shifted x (- ax px)) (lottie-shifted y (- ay py))]
+
+                    (and (= 0 (:a x)) (= 0 (:a y)))
+                    (let [[x' y'] (to (:k x) (:k y))]
+                      [{:a 0 :k x'} {:a 0 :k y'}])
+
+                    (and (= 1 (:a x)) (= 1 (:a y)) (same))
+                    (let [pairs (mapv (fn [kx ky] (to (first (:s kx)) (first (:s ky)))) (:k x) (:k y))]
+                      [(assoc x :k (mapv (fn [kf [v _]] (assoc kf :s [v])) (:k x) pairs))
+                       (assoc y :k (mapv (fn [kf [_ v]] (assoc kf :s [v])) (:k y) pairs))]))]
+        (when (some? x)
+          (-> ks
+              (assoc-in [:p :x] x)
+              (assoc-in [:p :y] y)
+              (update :r lottie-shifted (- r))))))))
+
+(defn- lottie-parented
+  "`layers`, of one composition, with the layer of each follower in
+  `parents` (its id to its leader's) a child (`:parent`) of the layer of
+  its leader when both are there, one each (see `lottie-tagged`), its
+  transform turned into its leader's space (see `lottie-parent-ks`):
+  Lottie plays the move, turn and scale of the leader on it as the
+  canvas does. `[layers parented failed]`: the followers made children,
+  and those whose layer is there but could not be (in a board whose size
+  plays, which has its own parent, or with a leader elsewhere)."
+  [layers parents]
+  (let [tagged (group-by ::shape (filter ::shape layers))
+        one    #(let [found (get tagged %)] (when (= 1 (count found)) (first found)))]
+    (reduce (fn [[layers parented failed] [i layer]]
+              (let [id   (::shape layer)
+                    lead (some-> (get parents id) one)
+                    ks   (when (and (some? lead)
+                                    (= layer (one id))
+                                    (nil? (:parent layer))
+                                    (nil? (:parent lead))
+                                    (some? (:ind lead)))
+                           (lottie-parent-ks (:ks layer) (::rest-ks lead)))]
+                (cond
+                  (not (contains? parents id)) [layers parented failed]
+                  (some? ks)                   [(assoc layers i (assoc layer :ks ks :parent (:ind lead)))
+                                                (conj parented id) failed]
+                  :else                        [layers parented (conj failed id)])))
+            [(vec layers) #{} #{}]
+            (map-indexed vector layers))))
+
+(defn- lottie-untagged
+  [layers]
+  (mapv #(dissoc % ::shape ::rest-ks) layers))
+
+(defn parent-candidates
+  "The layers of `timeline` (of `objects`) whose follows (see
+  `cta/follow-of`) a Lottie export can play by parenting (see
+  `lottie-parented`): at once (no delay), taking where the pivot of the
+  leader goes, how it turns and scales and not its opacity, from where
+  it rests, or from a first frame where it plays at rest; a
+  leader that scales evenly, never flips nor stretches, and is no helper
+  layer (see `cta/guide?`); no link of a chain that reaches (see
+  `cta/ik-chains`). Where their layers land decides the rest."
+  [timeline objects]
+  (let [follows  (cta/followers timeline objects)
+        chained  (into #{} (mapcat (juxt :a :b :e)) (vals (cta/ik-chains timeline objects follows)))
+        even?    (fn [leader]
+                   (let [kfs   (dm/get-in timeline [:tracks leader :keyframes])
+                         rows  #(into #{} (comp (filter (fn [kf] (= % (:property kf))))
+                                                (map (juxt :time :value :easing :interpolation)))
+                                      kfs)
+                         sx    (rows :scale-x)
+                         shape (get objects leader)]
+                     (and (= sx (rows :scale-y))
+                          (every? #(pos? (second %)) sx)
+                          (not-any? #(contains? #{:width :height} (:property %)) kfs)
+                          (not (:flip-x shape))
+                          (not (:flip-y shape)))))
+        at-zero  (delay (cta/timeline->modif-tree timeline objects 0))
+        at-rest? (fn [leader]
+                   (let [mods (dm/get-in @at-zero [leader :modifiers])
+                         {:keys [a b c d e f]} (if (some? mods) (ctm/modifiers->transform mods) (gmt/matrix))]
+                     (every? (fn [[v w]] (mth/close? v w)) [[a 1] [b 0] [c 0] [d 1] [e 0] [f 0]])))]
+    (into #{}
+          (filter (fn [id]
+                    (let [{:keys [leader from position rotation scale opacity delay]} (cta/follow-of timeline id)]
+                      (and (zero? delay) position rotation scale (not opacity)
+                           (not (contains? chained id))
+                           (not (cta/guide? timeline leader))
+                           (even? leader)
+                           (or (= :rest from) (at-rest? leader))))))
+          follows)))
 
 (defn- lottie-layers
   "The layers of the composition of `timeline`, the top-most first, and
@@ -1885,6 +2028,60 @@
                    (lottie-numbered (cond-> (into layers inner) (some? content) (conj content))))
      :comps  (mapv (fn [comp] (update comp :layers (partial mapv #(dissoc % ::effect)))) @(:comps ctx))}))
 
+(defn- lottie-doc
+  "The Lottie document of `timeline` (see `timeline->lottie`), the layers
+  of the followers in `parents` (their ids to their leaders') children of
+  their leaders' where they can be (see `lottie-parented`): `{:doc
+  :parented :failed}`."
+  [timeline objects assets propagate parents]
+  (let [markers    (lottie-markers timeline)
+        unit-texts (aexp/unit-text-ids assets)
+        resolved   (-> timeline
+                       (cta/flatten-splits #{:char :word :line} unit-texts)
+                       (cta/resolve-animations objects)
+                       ;; the size of a group on its layers (see `aexp/expand-group-sizes`)
+                       (aexp/expand-group-sizes objects))
+        ;; Lottie has no ping-pong, so the way back is part of the document.
+        expand     #(-> % cta/expand-paths cta/expand-springs cta/cut-timeline cta/expand-ping-pong)
+        units      (into {}
+                         (map (fn [[id units]] [id (update units :timeline expand)]))
+                         (select-keys (cta/unit-timelines resolved objects) unit-texts))
+        timeline   (expand (cta/expand-loops resolved))
+        board-id   (:board-id timeline)
+        ;; the layers the pictures were taken of, even when all draw as
+        ;; vectors: a shape among them that is no Lottie content (with
+        ;; effects, see `lottie-content?`) draws only as one
+        holders    (aexp/svg-holder-ids objects (aexp/svg-sized-ids objects timeline))
+        layer-ids  (if (some? assets)
+                     (set (aexp/export-layer-ids objects timeline))
+                     (-> (set (keys (:tracks timeline)))
+                         (disj board-id)
+                         (into (mapcat #(dm/get-in objects [% :shapes])) (aexp/export-holders objects timeline))))
+        bsr        (dm/get-in objects [board-id :selrect])
+        follow     (when (and (some? propagate) (seq holders))
+                     (into {} (aexp/board-follow timeline objects holders layer-ids propagate
+                                                 (or (:x bsr) 0) (or (:y bsr) 0))))
+        {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets units follow)
+        [layers parented failed] (lottie-parented layers parents)
+        comps     (mapv (fn [comp] (update comp :layers lottie-parented parents)) comps)
+        parented  (into parented (mapcat #(second (:layers %))) comps)
+        failed    (into failed (mapcat #(nth (:layers %) 2)) comps)
+        layers    (lottie-untagged layers)
+        comps     (mapv (fn [comp] (update comp :layers #(lottie-untagged (first %)))) comps)
+        ;; the pictures among them (the units of texts may be outlines)
+        images    (map (fn [[_ asset]]
+                         {:id (:id asset)
+                          :w (:w asset)
+                          :h (:h asset)
+                          :u (or (:u asset) "")
+                          :p (:p asset)
+                          :e (or (:e asset) 1)})
+                       (remove (comp :runs val) assets))]
+    {:doc      (cond-> (lottie-document timeline objects layers (concat images comps))
+                 (seq markers) (assoc :markers markers))
+     :parented parented
+     :failed   failed}))
+
 (defn timeline->lottie
   "Generate a Lottie (bodymovin) animation document (a plain map ready for
   JSON encoding) for `timeline`, using `objects` for geometry. The board
@@ -1909,48 +2106,27 @@
   outline when they can (see `lottie-sized?`), the layers in such a
   board moving with it as `:propagate` says (an option, see
   `board-follow`), those of a group on its layers (see
-  `aexp/expand-group-sizes`), else they stretch it."
+  `aexp/expand-group-sizes`), else they stretch it. A layer that follows
+  another (see `cta/follow-of`) is a child (`parent`) of its leader's
+  layer where Lottie plays the follow as the canvas does (see
+  `parent-candidates`, `lottie-parented`), else it plays it by keyframes
+  (see `cta/bake-follows`); `:keep`, an option, the followers to try."
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]
    (timeline->lottie timeline objects assets nil))
-  ([timeline objects assets {:keys [propagate]}]
-   (let [markers    (lottie-markers timeline)
-         unit-texts (aexp/unit-text-ids assets)
-         resolved   (-> timeline
-                        (cta/flatten-splits #{:char :word :line} unit-texts)
-                        (cta/resolve-animations objects)
-                        ;; the size of a group on its layers (see `aexp/expand-group-sizes`)
-                        (aexp/expand-group-sizes objects))
-         ;; Lottie has no ping-pong, so the way back is part of the document.
-         expand     #(-> % cta/expand-paths cta/expand-springs cta/cut-timeline cta/expand-ping-pong)
-         units      (into {}
-                          (map (fn [[id units]] [id (update units :timeline expand)]))
-                          (select-keys (cta/unit-timelines resolved objects) unit-texts))
-         timeline   (expand (cta/expand-loops resolved))
-         board-id   (:board-id timeline)
-         ;; the layers the pictures were taken of, even when all draw as
-         ;; vectors: a shape among them that is no Lottie content (with
-         ;; effects, see `lottie-content?`) draws only as one
-         holders    (aexp/svg-holder-ids objects (aexp/svg-sized-ids objects timeline))
-         layer-ids  (if (some? assets)
-                      (set (aexp/export-layer-ids objects timeline))
-                      (-> (set (keys (:tracks timeline)))
-                          (disj board-id)
-                          (into (mapcat #(dm/get-in objects [% :shapes])) (aexp/export-holders objects timeline))))
-         bsr        (dm/get-in objects [board-id :selrect])
-         follow     (when (and (some? propagate) (seq holders))
-                      (into {} (aexp/board-follow timeline objects holders layer-ids propagate
-                                                  (or (:x bsr) 0) (or (:y bsr) 0))))
-         {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets units follow)
-         ;; the pictures among them (the units of texts may be outlines)
-         images    (map (fn [[_ asset]]
-                          {:id (:id asset)
-                           :w (:w asset)
-                           :h (:h asset)
-                           :u (or (:u asset) "")
-                           :p (:p asset)
-                           :e (or (:e asset) 1)})
-                        (remove (comp :runs val) assets))]
-     (cond-> (lottie-document timeline objects layers (concat images comps))
-       (seq markers) (assoc :markers markers)))))
+  ([timeline objects assets {:keys [propagate] tried :keep}]
+   ;; the follows Lottie parents keep (see `parent-candidates`), the others
+   ;; play by keyframes; those it could not parent where their layers
+   ;; landed play by keyframes the next time
+   (let [kept    (or tried (parent-candidates timeline objects))
+         baked   (cta/bake-follows timeline objects :keep? kept)
+         parents (into {}
+                       (keep (fn [id] (when-let [leader (:leader (cta/follow-of baked id))] [id leader])))
+                       kept)
+         {:keys [doc parented failed]} (lottie-doc baked objects assets propagate parents)
+         left    (into #{} (remove #(and (contains? parented %) (not (contains? failed %)))) kept)]
+     (if (seq left)
+       (timeline->lottie timeline objects assets {:propagate propagate
+                                                  :keep (into #{} (remove left) kept)})
+       doc))))

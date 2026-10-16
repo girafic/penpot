@@ -5460,3 +5460,143 @@
         tl (cta/remove-shapes (cta/set-ik tl arm-hand {:goal goal}) [goal])]
     (t/is (nil? (cta/ik-of tl arm-hand)))
     (t/is (some? (cta/follow-of tl arm-hand)))))
+
+;; --- Lottie parenting ----------------------------------------------------
+
+(defn- lottie-value
+  "The value of the 1D Lottie property `prop` at `frame`, its keyframes
+  played linearly."
+  [prop frame]
+  (if (= 0 (:a prop))
+    (:k prop)
+    (let [kfs   (:k prop)
+          [a b] (or (d/seek (fn [[a b]] (<= (:t a) frame (:t b))) (partition 2 1 kfs))
+                    [(last kfs) (last kfs)])
+          va    (first (:s a))
+          vb    (first (:s b))]
+      (if (= (:t a) (:t b)) va (+ va (* (- vb va) (/ (- frame (:t a)) (- (:t b) (:t a)))))))))
+
+(defn- lottie-world
+  "Where the anchor of `layer` is in the composition at `frame`, through
+  the layers it is a child of (none scaling)."
+  [layers layer frame]
+  (loop [[x y] [(lottie-value (get-in layer [:ks :p :x]) frame) (lottie-value (get-in layer [:ks :p :y]) frame)]
+         at    layer]
+    (if-let [parent (d/seek #(= (:ind %) (:parent at)) layers)]
+      (let [[ax ay] (get-in parent [:ks :a :k])
+            r       (mth/radians (lottie-value (get-in parent [:ks :r]) frame))
+            px      (lottie-value (get-in parent [:ks :p :x]) frame)
+            py      (lottie-value (get-in parent [:ks :p :y]) frame)
+            dx      (- x ax)
+            dy      (- y ay)]
+        (recur [(+ px (- (* (mth/cos r) dx) (* (mth/sin r) dy)))
+                (+ py (+ (* (mth/sin r) dx) (* (mth/cos r) dy)))]
+               parent))
+      (gpt/point x y))))
+
+(defn- lottie-follow-scene
+  "A board 400 by 300 with a leader 40 by 40 centred on 100,100 (turned
+  `turn` degrees at rest) that turns a quarter and moves 100 right in a
+  second, linearly, and a follower 20 by 20 centred on 200,100."
+  [& {:keys [turn] :or {turn 0}}]
+  (let [board    (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        leader   (cts/setup-shape {:type :rect :x 80 :y 80 :width 40 :height 40 :name "leader"})
+        leader   (cond-> leader
+                   (not= 0 turn) (gsh/transform-shape (ctm/rotation-modifiers leader (gpt/point 100 100) turn)))
+        follower (cts/setup-shape {:type :rect :x 190 :y 90 :width 20 :height 20 :name "follower"})
+        lid      (:id leader)
+        fid      (:id follower)
+        tl       (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                     (cta/add-keyframe lid {:time 0 :property :rotation :value turn :easing :linear})
+                     (cta/add-keyframe lid {:time 1000 :property :rotation :value (+ turn 90)})
+                     (cta/add-keyframe lid {:time 0 :property :x :value (-> leader :selrect :x) :easing :linear})
+                     (cta/add-keyframe lid {:time 1000 :property :x :value (+ 100 (-> leader :selrect :x))}))]
+    {:objects {(:id board) board lid leader fid follower}
+     :board (:id board) :leader lid :follower fid :tl tl}))
+
+(defn- lottie-layer
+  [doc objects id]
+  (d/seek #(= (:name (get objects id)) (:nm %)) (:layers doc)))
+
+(t/deftest a-follow-at-once-exports-to-lottie-as-a-child
+  (doseq [turn [0 30]]
+    (let [{:keys [objects tl leader follower]} (lottie-follow-scene :turn turn)
+          tl   (cta/set-follow tl follower {:leader leader})
+          doc  (alottie/timeline->lottie tl objects)
+          lead (lottie-layer doc objects leader)
+          fol  (lottie-layer doc objects follower)]
+      (t/is (= (:ind lead) (:parent fol)) (str "turned " turn " at rest"))
+      (t/is (= 0 (get-in fol [:ks :r :a])) "it turns with its leader, by no keyframes of its own")
+      (doseq [frame [0 15 30 60]]
+        (let [canvas (pivot-at tl objects follower (* frame (/ 1000 60)))
+              lottie (lottie-world (:layers doc) fol frame)]
+          (t/is (and (mth/close? (:x canvas) (:x lottie) 0.01) (mth/close? (:y canvas) (:y lottie) 0.01))
+                (str "turned " turn ", frame " frame ": canvas " canvas ", lottie " lottie)))))))
+
+(t/deftest a-chain-of-follows-exports-to-lottie-as-children
+  (let [{:keys [objects tl leader follower]} (lottie-follow-scene)
+        moon    (cts/setup-shape {:type :rect :x 240 :y 95 :width 10 :height 10 :name "moon"})
+        objects (assoc objects (:id moon) moon)
+        tl      (-> tl
+                    (cta/add-keyframe follower {:time 0 :property :rotation :value 0 :easing :linear})
+                    (cta/add-keyframe follower {:time 1000 :property :rotation :value 180})
+                    (cta/set-follow follower {:leader leader})
+                    (cta/set-follow (:id moon) {:leader follower}))
+        doc     (alottie/timeline->lottie tl objects)
+        planet  (lottie-layer doc objects follower)
+        moon-l  (lottie-layer doc objects (:id moon))]
+    (t/is (= (:ind planet) (:parent moon-l)))
+    (t/is (= (:ind (lottie-layer doc objects leader)) (:parent planet)))
+    (doseq [frame [15 45]]
+      (let [canvas (pivot-at tl objects (:id moon) (* frame (/ 1000 60)))
+            lottie (lottie-world (:layers doc) moon-l frame)]
+        (t/is (and (mth/close? (:x canvas) (:x lottie) 0.01) (mth/close? (:y canvas) (:y lottie) 0.01))
+              (str "frame " frame ": canvas " canvas ", lottie " lottie))))))
+
+(t/deftest the-other-follows-export-to-lottie-by-keyframes
+  (let [{:keys [objects tl leader follower]} (lottie-follow-scene)
+        parent (fn [tl objects] (:parent (lottie-layer (alottie/timeline->lottie tl objects) objects follower)))
+        follow #(cta/set-follow tl follower (assoc % :leader leader))]
+    (t/is (some? (parent (follow {}) objects)))
+    (t/is (nil? (parent (follow {:delay 50}) objects)) "a delay")
+    (t/is (nil? (parent (follow {:scale false}) objects)) "a part off")
+    (t/is (nil? (parent (follow {:opacity true}) objects)) "its opacity")
+    (t/is (nil? (parent (-> (follow {})
+                            (cta/add-keyframe leader {:time 0 :property :scale-x :value 1})
+                            (cta/add-keyframe leader {:time 1000 :property :scale-x :value 2}))
+                        objects))
+          "a leader stretching")
+    (t/is (nil? (parent (-> (follow {})
+                            (cta/add-keyframe leader {:time 0 :property :scale-x :value 1})
+                            (cta/add-keyframe leader {:time 1000 :property :scale-x :value -1})
+                            (cta/add-keyframe leader {:time 0 :property :scale-y :value 1})
+                            (cta/add-keyframe leader {:time 1000 :property :scale-y :value -1}))
+                        objects))
+          "a leader flipping")
+    (t/is (nil? (parent (-> (follow {})
+                            (update-in [:tracks leader :keyframes] (partial filterv #(not= :x (:property %))))
+                            (cta/add-keyframe leader {:time 0 :property :x :value 100 :easing :linear})
+                            (cta/add-keyframe leader {:time 500 :property :x :value 140}))
+                        objects))
+          "a leader away at its first frame, followed from it")
+    (let [{:keys [objects tl leader follower]} (lottie-follow-scene :turn 30)
+          tl  (-> tl
+                  (cta/add-keyframe follower {:time 0 :property :x :value 190 :easing :linear})
+                  (cta/add-keyframe follower {:time 1000 :property :x :value 250})
+                  (cta/add-keyframe follower {:time 0 :property :y :value 90 :easing :linear})
+                  (cta/add-keyframe follower {:time 500 :property :y :value 120})
+                  (cta/set-follow follower {:leader leader}))
+          doc (alottie/timeline->lottie tl objects)
+          fol (lottie-layer doc objects follower)]
+      (t/is (nil? (:parent fol)) "a turned leader, the x and y of its follower at other times")
+      (t/is (= 1 (get-in fol [:ks :r :a])) "it turns by keyframes"))))
+
+(t/deftest a-reaching-chain-exports-to-lottie-by-keyframes
+  (let [{:keys [tl objects arm-hand goal board]} (arm-scene)
+        tl  (-> tl
+                (cta/add-keyframe goal {:time 0 :property :x :value 240 :easing :linear})
+                (cta/add-keyframe goal {:time 1000 :property :x :value 180})
+                (cta/set-ik arm-hand {:goal goal}))
+        doc (alottie/timeline->lottie tl objects)]
+    (t/is (not-any? :parent (:layers doc)) "its links play the turns that reach")
+    (t/is (some? board))))

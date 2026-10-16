@@ -1937,14 +1937,15 @@
   `guide-ids`) are left out, once what reaches them plays by keyframes."
   [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled? ids? bbox?
            outline? preview?]}]
-  (let [guides   (guide-ids page board-id)
-        tl       (dwa/board-export-timeline page files board-id :bake true)
+  (let [lottie?  (contains? #{:lottie :dotlottie} format)
+        guides   (guide-ids page board-id)
+        ;; Lottie makes some followers children of their leaders
+        tl       (dwa/board-export-timeline page files board-id :bake (if lottie? :lottie true))
         objects  (without-layers (:objects page) guides)
         board    (get objects board-id)
         ;; split texts play their units, each on its own
         texts    (unit-texts objects tl)
         vectors? (= :svg format)
-        lottie?  (contains? #{:lottie :dotlottie} format)
         ;; Lottie draws the other texts as the outlines of their glyphs
         ;; (see `outline-texts`)
         shapes   (if lottie? (second (outline-texts objects tl texts bridge)) objects)
