@@ -991,8 +991,12 @@
                             :value (mth/round (* 100 speed))
                             :on-change on-speed}]]])))
 
-(def ^:private ref:picking-leader
-  (l/derived dwa/picking-leader st/state))
+(def ^:private ref:picking
+  "The layer a pick is for and what it picks (see `dwa/picking-leader`)."
+  (l/derived (fn [state]
+               (when-let [id (dwa/picking-leader state)]
+                 [id (dwa/picking-purpose state)]))
+             st/state))
 
 (def ^:private follow-parts
   "What a follower can take of its leader, and its label."
@@ -1010,7 +1014,7 @@
   (let [shape-id  (when (= 1 (count ids)) (first ids))
         objects   (mf/deref refs/workspace-page-objects)
         timelines (mf/deref ref:timelines)
-        picking   (mf/deref ref:picking-leader)
+        picking   (mf/deref ref:picking)
         board-id  (when (some? shape-id) (cfh/get-shape-id-root-frame objects shape-id))
         layer?    (and (some? board-id) (not= uuid/zero board-id) (not= board-id shape-id))
         timeline  (mf/with-memo [timelines board-id]
@@ -1025,7 +1029,7 @@
         ;; the layer whose section the + opened
         open*     (mf/use-state nil)
         open?     (or (some? follow) (= shape-id (deref open*)))
-        picking?  (and (some? shape-id) (= picking shape-id))
+        picking?  (and (some? shape-id) (= picking [shape-id :leader]))
 
         on-add
         (mf/use-fn
@@ -1138,6 +1142,154 @@
                                   :step 10
                                   :value (:delay follow)
                                   :on-change on-delay}]]])])])))
+
+(mf/defc reach-menu*
+  "The goal the selected layer reaches (see `cta/ik-of`), when it ends a
+  chain of two follows (an arm: the hand follows the forearm, which
+  follows the upper arm, see `cta/ik-links`) or reaches one already: a
+  layer of its board, chosen in the list, picked on the canvas or made
+  new (`dwa/add-goal`); the side its elbow bends to and how it turns
+  itself. A broken chain keeps its goal, which it reaches once mended.
+  The + of the title shows the section; its - reaches none."
+  [{:keys [ids]}]
+  (let [shape-id  (when (= 1 (count ids)) (first ids))
+        objects   (mf/deref refs/workspace-page-objects)
+        timelines (mf/deref ref:timelines)
+        picking   (mf/deref ref:picking)
+        board-id  (when (some? shape-id) (cfh/get-shape-id-root-frame objects shape-id))
+        layer?    (and (some? board-id) (not= uuid/zero board-id) (not= board-id shape-id))
+        timeline  (mf/with-memo [timelines board-id]
+                    (or (get timelines board-id) (cta/make-timeline {:board-id board-id})))
+        ik        (when layer? (cta/ik-of timeline shape-id))
+        chain?    (mf/with-memo [timeline objects shape-id layer?]
+                    (and layer? (some? (cta/ik-links timeline objects shape-id))))
+        reaching? (mf/with-memo [timeline objects shape-id ik]
+                    (and (some? ik) (contains? (cta/ik-chains timeline objects) shape-id)))
+        goals     (mf/with-memo [objects timeline shape-id chain?]
+                    (when chain? (cltl/reach-goals objects timeline shape-id)))
+        options   (mf/with-memo [goals objects]
+                    (into [{:id "" :label (tr "workspace.animation.follow-choose")}]
+                          (map (fn [id] {:id (dm/str id) :label (dm/get-in objects [id :name])}))
+                          goals))
+        ;; the layer whose section the + opened
+        open*     (mf/use-state nil)
+        open?     (or (some? ik) (= shape-id (deref open*)))
+        picking?  (and (some? shape-id) (= picking [shape-id :goal]))
+
+        on-add
+        (mf/use-fn
+         (mf/deps shape-id)
+         #(reset! open* shape-id))
+
+        on-remove
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn []
+           (reset! open* nil)
+           (st/emit! (dwa/clear-ik shape-id))))
+
+        on-goal
+        (mf/use-fn
+         (mf/deps shape-id ik)
+         (fn [id]
+           (when-let [goal (uuid/parse* id)]
+             (st/emit! (dwa/set-ik shape-id (assoc ik :goal goal))))))
+
+        on-pick
+        (mf/use-fn
+         (mf/deps shape-id picking?)
+         (fn []
+           (st/emit! (if picking?
+                       (dwa/cancel-pick-leader)
+                       (dwa/pick-goal shape-id)))))
+
+        on-new-goal
+        (mf/use-fn
+         (mf/deps shape-id)
+         #(st/emit! (dwa/add-goal shape-id)))
+
+        on-bend
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn [value]
+           (st/emit! (dwa/update-ik shape-id {:bend (keyword value)}))))
+
+        on-turn
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn [value]
+           (st/emit! (dwa/update-ik shape-id {:turn (keyword value)}))))]
+
+    ;; leaving the layer closes its section
+    (mf/with-effect [shape-id]
+      #(reset! open* nil))
+
+    (when (or chain? (some? ik))
+      [:div {:class (stl/css :follow-menu)}
+       [:div {:class (stl/css :animations-title)}
+        [:> title-bar* {:collapsable false
+                        :title (tr "workspace.animation.reach")}
+         (if open?
+           [:> icon-button* {:variant "ghost"
+                             :aria-label (tr "workspace.animation.remove-reach")
+                             :icon i/remove
+                             :on-click on-remove}]
+           [:> icon-button* {:variant "ghost"
+                             :aria-label (tr "workspace.animation.add-reach")
+                             :icon i/add
+                             :on-click on-add}])]]
+
+       (when open?
+         [:div {:class (stl/css :follow-rows)}
+          (when (and (some? ik) (not reaching?))
+            [:p {:class (stl/css :reach-broken)} (tr "workspace.animation.reach-broken")])
+          (when chain?
+            [:*
+             [:> animation-row* {:label (tr "workspace.animation.reach-goal")}
+              [:div {:class (stl/css :follow-leader)}
+               [:> select* {:class (stl/css :follow-leader-select)
+                            :options options
+                            :default-selected (if (some? ik) (dm/str (:goal ik)) "")
+                            :aria-label (tr "workspace.animation.reach-goal")
+                            :on-change on-goal}]
+               [:> icon-button* {:variant "ghost"
+                                 :aria-label (tr "workspace.animation.reach-pick")
+                                 :aria-pressed picking?
+                                 :class (stl/css-case :follow-picking picking?)
+                                 :icon i/picker
+                                 :on-click on-pick}]]]
+             [:> button* {:variant "secondary"
+                          :class (stl/css :reach-new-goal)
+                          :on-click on-new-goal}
+              (tr "workspace.animation.reach-new-goal")]])
+
+          (when (some? ik)
+            [:*
+             [:> animation-row* {:label (tr "workspace.animation.reach-bend")}
+              [:> radio-buttons* {:name (dm/str "reach-bend-" shape-id)
+                                  :selected (name (:bend ik))
+                                  :extended true
+                                  :options [{:id (dm/str "reach-bend-cw-" shape-id)
+                                             :value "cw"
+                                             :label (tr "workspace.animation.reach-bend-cw")}
+                                            {:id (dm/str "reach-bend-ccw-" shape-id)
+                                             :value "ccw"
+                                             :label (tr "workspace.animation.reach-bend-ccw")}]
+                                  :on-change on-bend}]]
+             [:> animation-row* {:label (tr "workspace.animation.reach-turn")}
+              [:> radio-buttons* {:name (dm/str "reach-turn-" shape-id)
+                                  :selected (name (:turn ik))
+                                  :extended true
+                                  :options [{:id (dm/str "reach-turn-chain-" shape-id)
+                                             :value "chain"
+                                             :label (tr "workspace.animation.reach-turn-chain")}
+                                            {:id (dm/str "reach-turn-keep-" shape-id)
+                                             :value "keep"
+                                             :label (tr "workspace.animation.reach-turn-keep")}
+                                            {:id (dm/str "reach-turn-goal-" shape-id)
+                                             :value "goal"
+                                             :label (tr "workspace.animation.reach-turn-goal")}]
+                                  :on-change on-turn}]]])])])))
 
 (mf/defc animations-menu*
   "The preset animations of the selection, in motion mode: add one from

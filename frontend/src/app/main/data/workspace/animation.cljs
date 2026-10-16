@@ -24,6 +24,7 @@
    [app.common.transit :as t]
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
@@ -660,29 +661,139 @@
         (rx/of (set-follow shape-id (merge follow changes)))
         (rx/empty)))))
 
+(defn set-ik
+  "Make the layer `shape-id`, the end of a chain of two follows, reach
+  another layer of its board as `ik` says (see `cta/set-ik`), in one undo
+  step; nil reaches none. Its elbow bends as the chain is drawn bent (see
+  `cta/natural-bend`) unless `ik` or the goal it reached says otherwise.
+  A goal it cannot reach (see `cltl/can-reach?`) changes nothing."
+  [shape-id ik]
+  (ptk/reify ::set-ik
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [tl      (layer-board-timeline state shape-id)
+            objects (dsh/lookup-page-objects state)
+            goal    (:goal ik)
+            ik      (cond-> ik
+                      (and (some? goal) (nil? (:bend ik)))
+                      (assoc :bend (or (some-> tl (cta/ik-of shape-id) :bend)
+                                       (some-> tl (cta/natural-bend objects shape-id))
+                                       :ccw)))
+            tl'     (some-> tl (cta/set-ik shape-id ik))]
+        (if (and (some? tl)
+                 (not= tl tl')
+                 (or (nil? goal) (cltl/can-reach? objects tl shape-id goal)))
+          (rx/of (commit-timeline it state (:board-id tl') tl')
+                 (apply-preview))
+          (rx/empty))))))
+
+(defn clear-ik
+  "Make the layer `shape-id` reach none (see `set-ik`)."
+  [shape-id]
+  (set-ik shape-id nil))
+
+(defn update-ik
+  "Change how the layer `shape-id` reaches its goal: `changes` taken into
+  it (see `cta/ik-of`), such as `:bend` or `:turn`."
+  [shape-id changes]
+  (ptk/reify ::update-ik
+    ptk/WatchEvent
+    (watch [_ state _]
+      (if-let [ik (some-> (layer-board-timeline state shape-id) (cta/ik-of shape-id))]
+        (rx/of (set-ik shape-id (merge ik changes)))
+        (rx/empty)))))
+
+(def ^:private goal-size
+  "The size of the ring `add-goal` makes."
+  24)
+
+(defn add-goal
+  "Give the layer `shape-id`, the end of a chain of two follows (see
+  `cta/ik-links`), a new goal to reach: a ring on its pivot where the
+  canvas shows it, a helper layer the exports leave out (see
+  `cta/guide?`), selected to be moved, in one undo step. Nothing changes
+  where it reaches, as its elbow bends as drawn (see `set-ik`)."
+  [shape-id]
+  (ptk/reify ::add-goal
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [page    (dsh/lookup-page state)
+            objects (:objects page)
+            tl      (layer-board-timeline state shape-id)
+            shape   (get objects shape-id)]
+        (if (and (some? tl) (some? shape) (some? (cta/ik-links tl objects shape-id)))
+          (let [board-id (:board-id tl)
+                shown    (or (get (dsh/lookup-shown-shapes state) shape-id) shape)
+                pivot    (cta/origin-point shown (cta/track-origin (cta/get-track tl shape-id)))
+                half     (/ goal-size 2)
+                ring     (cts/setup-shape {:type :circle
+                                           :name (dm/str (:name shape) " goal")
+                                           :x (- (:x pivot) half)
+                                           :y (- (:y pivot) half)
+                                           :width goal-size
+                                           :height goal-size
+                                           :fills []
+                                           :strokes [{:stroke-color "#FF3D8B"
+                                                      :stroke-opacity 1
+                                                      :stroke-width 2
+                                                      :stroke-style :solid
+                                                      :stroke-alignment :inner}]
+                                           :parent-id board-id
+                                           :frame-id board-id})
+                bend     (or (cta/natural-bend tl objects shape-id) :ccw)
+                tl'      (-> tl
+                             (cta/set-guide (:id ring) true)
+                             (cta/set-ik shape-id {:goal (:id ring) :bend bend}))
+                changes  (-> (pcb/empty-changes it (:id page))
+                             (pcb/with-page page)
+                             (pcb/with-objects objects)
+                             (pcb/add-object ring)
+                             (pcb/change-timeline board-id tl'))
+                undo-id  (js/Symbol)]
+            (rx/of (dwu/start-undo-transaction undo-id)
+                   (dch/commit-changes changes)
+                   (dws/select-shapes (d/ordered-set (:id ring)))
+                   (dwu/commit-undo-transaction undo-id)
+                   (apply-preview)))
+          (rx/empty))))))
+
 (defn picking-leader
-  "The layer whose leader the next click on a layer picks (see
-  `pick-leader`), if any."
+  "The layer whose leader, or goal (see `picking-purpose`), the next
+  click on a layer picks (see `pick-leader`), if any."
   [state]
   (dm/get-in state [:workspace-animation :picking-leader]))
 
+(defn picking-purpose
+  "What the pick of the layer `picking-leader` is for: its leader
+  (`:leader`, see `pick-leader`) or its goal (`:goal`, see `pick-goal`)."
+  [state]
+  (dm/get-in state [:workspace-animation :picking-purpose] :leader))
+
 (defn- end-pick-leader
-  "End the pick of a leader of `shape-id` (see `pick-leader`), whose
-  leader is `leader`, or none. `shape-id` stays selected, while it is on
-  the page."
-  [shape-id {:keys [leader]}]
+  "End the pick of a leader or goal of `shape-id` (see `pick-leader` and
+  `pick-goal`), whose leader is `leader`, or goal `goal`, or none.
+  `shape-id` stays selected, while it is on the page."
+  [shape-id {:keys [leader goal]}]
   (ptk/reify ::end-pick-leader
     ptk/UpdateEvent
     (update [_ state]
-      (update state :workspace-animation dissoc :picking-leader))
+      (update state :workspace-animation dissoc :picking-leader :picking-purpose))
 
     ptk/WatchEvent
     (watch [_ state _]
       (if (and (some? shape-id) (contains? (dsh/lookup-page-objects state) shape-id))
-        (let [follow (some-> (layer-board-timeline state shape-id) (cta/follow-of shape-id))]
+        (let [tl     (layer-board-timeline state shape-id)
+              follow (some-> tl (cta/follow-of shape-id))]
           (rx/concat
-           (if (and (some? leader) (not= leader shape-id))
+           (cond
+             (and (some? leader) (not= leader shape-id))
              (rx/of (set-follow shape-id (assoc follow :leader leader)))
+
+             (and (some? goal) (not= goal shape-id))
+             ;; as stored: an elbow never set bends as drawn
+             (rx/of (set-ik shape-id (assoc (dm/get-in tl [:tracks shape-id :ik]) :goal goal)))
+
+             :else
              (rx/empty))
            (rx/of (dws/select-shape shape-id))))
         (rx/empty)))))
@@ -693,10 +804,11 @@
   (end-pick-leader nil {}))
 
 (defn pick-leader-at
-  "A click on the canvas or in the layers while a leader is picked (see
-  `pick-leader`): the layer `leader-id` clicked becomes the leader. A
-  click on nothing (nil), or on a layer it cannot follow (see
-  `cltl/can-follow?`), leaves the pick waiting for another: a click lands
+  "A click on the canvas or in the layers while a leader or goal is
+  picked (see `pick-leader` and `pick-goal`): the layer `leader-id`
+  clicked becomes the leader, or the goal. A click on nothing (nil), or
+  on a layer it cannot follow or reach (see `cltl/can-follow?` and
+  `cltl/can-reach?`), leaves the pick waiting for another: a click lands
   before the canvas knows the layer under the pointer when it comes at
   once."
   [leader-id]
@@ -704,11 +816,15 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [shape-id (picking-leader state)
-            tl       (some->> shape-id (layer-board-timeline state))]
+            tl       (some->> shape-id (layer-board-timeline state))
+            objects  (dsh/lookup-page-objects state)
+            goal?    (= :goal (picking-purpose state))]
         (if (and (some? leader-id)
                  (some? tl)
-                 (cltl/can-follow? (dsh/lookup-page-objects state) tl shape-id leader-id))
-          (rx/of (end-pick-leader shape-id {:leader leader-id}))
+                 (if goal?
+                   (cltl/can-reach? objects tl shape-id leader-id)
+                   (cltl/can-follow? objects tl shape-id leader-id)))
+          (rx/of (end-pick-leader shape-id (if goal? {:goal leader-id} {:leader leader-id})))
           (rx/empty))))))
 
 (def ^:private pick-endings
@@ -718,19 +834,18 @@
     :app.main.data.workspace.pages/finalize-page
     :app.main.data.workspace/finalize-workspace})
 
-(defn pick-leader
-  "Make the next layer clicked on the canvas or in the layers (see
-  `pick-leader-at`, they wait for a click then) the leader of the layer
-  `shape-id` (see `set-follow`), which stays selected. Esc cancels,
-  `shape-id` still selected; so does picking again (the picker of the
-  Follow section). A selection made otherwise (a right-click, select
-  all, a duplicate, Tab, a drag in the layers) and leaving motion mode,
-  the page or the file end it with no leader."
-  [shape-id]
+(defn- pick
+  "Make the next layer clicked on the canvas or in the layers the leader
+  (`purpose` `:leader`) or the goal (`:goal`) of the layer `shape-id`,
+  see `pick-leader` and `pick-goal`."
+  [shape-id purpose]
   (ptk/reify ::pick-leader
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-animation :picking-leader] shape-id))
+      (update state :workspace-animation
+              #(if (= :goal purpose)
+                 (assoc % :picking-leader shape-id :picking-purpose :goal)
+                 (-> (assoc % :picking-leader shape-id) (dissoc :picking-purpose)))))
 
     ptk/WatchEvent
     (watch [_ _ stream]
@@ -746,6 +861,24 @@
                    (rx/map #(cancel-pick-leader))))
              (rx/take 1)
              (rx/take-until (of-type #{::pick-leader ::end-pick-leader})))))))
+
+(defn pick-leader
+  "Make the next layer clicked on the canvas or in the layers (see
+  `pick-leader-at`, they wait for a click then) the leader of the layer
+  `shape-id` (see `set-follow`), which stays selected. Esc cancels,
+  `shape-id` still selected; so does picking again (the picker of the
+  Follow section). A selection made otherwise (a right-click, select
+  all, a duplicate, Tab, a drag in the layers) and leaving motion mode,
+  the page or the file end it with no leader."
+  [shape-id]
+  (pick shape-id :leader))
+
+(defn pick-goal
+  "Make the next layer clicked on the canvas or in the layers the goal
+  the layer `shape-id` reaches (see `set-ik`), as `pick-leader` does for
+  a leader."
+  [shape-id]
+  (pick shape-id :goal))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TIMELINE CRUD

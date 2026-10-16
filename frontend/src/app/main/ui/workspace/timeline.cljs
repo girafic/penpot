@@ -832,7 +832,7 @@
   {::mf/private true
    ::mf/wrap [mf/memo]}
   [{:keys [row-index shape depth expandable? expanded? selected? hovered? outside?
-           leader-id leader-name on-toggle on-select on-context-menu on-hover]}]
+           leader-id leader-name goal-id goal-name on-toggle on-select on-context-menu on-hover]}]
   (let [shape-id (:id shape)
         ;; in the colour of components, as in the layers panel
         component? (ctk/instance-head? shape)
@@ -880,7 +880,14 @@
          (mf/deps leader-id)
          (fn [event]
            (dom/stop-propagation event)
-           (st/emit! (dws/select-shape leader-id))))]
+           (st/emit! (dws/select-shape leader-id))))
+
+        on-goal-click
+        (mf/use-fn
+         (mf/deps goal-id)
+         (fn [event]
+           (dom/stop-propagation event)
+           (st/emit! (dws/select-shape goal-id))))]
 
     [:div {:class (stl/css-case :row true
                                 :layer-row true
@@ -904,8 +911,17 @@
                    :size "s"
                    :class (stl/css :layer-icon)}]
       [:span {:class (stl/css :layer-name) :title (:name shape)} (:name shape)]
-      ;; the layer it follows (see `cta/follow-of`), selected by a click
-      (when (some? leader-id)
+      ;; the layer it reaches (see `cta/ik-of`), or else follows (see
+      ;; `cta/follow-of`), selected by a click
+      (cond
+        (some? goal-id)
+        [:button {:type "button"
+                  :class (stl/css :follow-chip)
+                  :title (tr "workspace.animation.reaches-hint")
+                  :on-click on-goal-click}
+         (tr "workspace.animation.reaches" goal-name)]
+
+        (some? leader-id)
         [:button {:type "button"
                   :class (stl/css :follow-chip)
                   :title (tr "workspace.animation.follows-hint")
@@ -3692,6 +3708,8 @@
                                     :outside? (:outside? row)
                                     :leader-id (dm/get-in timeline [:tracks id :follow :leader])
                                     :leader-name (dm/get-in objects [(dm/get-in timeline [:tracks id :follow :leader]) :name])
+                                    :goal-id (dm/get-in timeline [:tracks id :ik :goal])
+                                    :goal-name (dm/get-in objects [(dm/get-in timeline [:tracks id :ik :goal]) :name])
                                     :selected? (contains? selected id)
                                     :hovered? hovered?
                                     :on-toggle on-toggle-layer

@@ -128,11 +128,13 @@
 
 (mf/defc follow-line*
   "A dashed line from the layer `shape-id` to the pivot of the layer it
-  follows (see `cta/follow-of`), both where `timeline` shows them at
-  `playhead`, on the way back of ping-pong with `back?`."
+  reaches (see `cta/ik-of`), or else follows (see `cta/follow-of`), both
+  where `timeline` shows them at `playhead`, on the way back of
+  ping-pong with `back?`."
   {::mf/private true}
   [{:keys [shape-id timeline objects playhead back? zoom]}]
-  (let [leader (dm/get-in timeline [:tracks shape-id :follow :leader])
+  (let [leader (or (dm/get-in timeline [:tracks shape-id :ik :goal])
+                   (dm/get-in timeline [:tracks shape-id :follow :leader]))
         ends   (mf/with-memo [timeline objects playhead back? shape-id leader]
                  (when (and (some? leader) (contains? objects leader) (contains? objects shape-id))
                    (let [board (:board-id timeline)

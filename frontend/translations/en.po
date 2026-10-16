@@ -6843,6 +6843,70 @@ msgstr "Follows %s"
 msgid "workspace.animation.follows-hint"
 msgstr "Select the layer it follows"
 
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.reaches"
+msgstr "Reaches %s"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.reaches-hint"
+msgstr "Select the layer it reaches"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach"
+msgstr "Reach"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.add-reach"
+msgstr "Reach a goal"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.remove-reach"
+msgstr "Reach no goal"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-goal"
+msgstr "Goal"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-pick"
+msgstr "Pick the goal on the canvas or in the layers"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-new-goal"
+msgstr "New goal"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-broken"
+msgstr "It follows no chain of two links at once: it plays without reaching."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-bend"
+msgstr "Bend"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-bend-cw"
+msgstr "Clockwise"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-bend-ccw"
+msgstr "Counter"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-turn"
+msgstr "Turns"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-turn-chain"
+msgstr "Along"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-turn-keep"
+msgstr "Own"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-turn-goal"
+msgstr "Goal"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.copy-start"
 msgstr "Start"
