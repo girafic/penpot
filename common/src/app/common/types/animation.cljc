@@ -300,6 +300,22 @@
    [:style schema:style-instance]
    [:preset schema:preset-animation]])
 
+(def schema:follow
+  "How a layer follows another one of its board, its leader (see
+  `follow-of`): it takes what the leader does from its first frame on,
+  `:delay` ms later, the parts it takes: where its pivot goes
+  (`:position`), how it turns and scales around that pivot
+  (`:rotation`, `:scale`) and its opacity (`:opacity`). The defaults
+  (position, rotation and scale; no opacity; no delay) are stored as
+  absence."
+  [:map {:title "AnimationFollow"}
+   [:leader ::sm/uuid]
+   [:position {:optional true} :boolean]
+   [:rotation {:optional true} :boolean]
+   [:scale {:optional true} :boolean]
+   [:opacity {:optional true} :boolean]
+   [:delay {:optional true} ::sm/safe-int]])
+
 (def schema:track
   [:map {:title "AnimationTrack"}
    [:shape-id ::sm/uuid]
@@ -314,7 +330,8 @@
    [:origin {:optional true}
     [:map
      [:x ::sm/safe-number]
-     [:y ::sm/safe-number]]]])
+     [:y ::sm/safe-number]]]
+   [:follow {:optional true} schema:follow]])
 
 ;; What playback does at the end of a timeline: stop (`:once`), start
 ;; over (`:loop`) or play back to the start and on (`:ping-pong`).
@@ -869,11 +886,12 @@
     (assoc-in timeline [:tracks shape-id] {:shape-id shape-id :keyframes []})))
 
 (defn- empty-track?
-  "A track with nothing left: no keyframes, animations or origin."
+  "A track with nothing left: no keyframes, animations, origin or follow."
   [track]
   (and (empty? (:keyframes track))
        (empty? (:animations track))
-       (nil? (:origin track))))
+       (nil? (:origin track))
+       (nil? (:follow track))))
 
 (defn set-track-origin
   "Set the scale/rotation pivot of `shape-id`. Values are 0–1 and
@@ -885,6 +903,33 @@
     (if (and (mth/close? ox 0.5) (mth/close? oy 0.5))
       (d/update-in-when timeline [:tracks shape-id] dissoc :origin)
       (assoc-in timeline [:tracks shape-id :origin] {:x ox :y oy}))))
+
+(def ^:private follow-defaults
+  {:position true :rotation true :scale true :opacity false :delay 0})
+
+(defn follow-of
+  "How `shape-id` follows another layer of the board of `timeline` (see
+  `schema:follow`), with the defaults; nil when it follows none."
+  [timeline shape-id]
+  (when-let [follow (dm/get-in timeline [:tracks shape-id :follow])]
+    (merge follow-defaults follow)))
+
+(declare store-track)
+
+(defn set-follow
+  "`timeline` with `shape-id` following the layer `:leader` of `follow`
+  (see `schema:follow`), or following none for nil; the defaults are
+  left out."
+  [timeline shape-id follow]
+  (if (some? (:leader follow))
+    (let [follow (-> (select-keys follow [:leader :position :rotation :scale :opacity :delay])
+                     (d/update-when :delay #(int (mth/round %))))
+          stored (into {} (remove (fn [[k v]] (= v (get follow-defaults k ::none)))) follow)]
+      (-> (ensure-track timeline shape-id)
+          (assoc-in [:tracks shape-id :follow] stored)))
+    (if-let [track (get-track timeline shape-id)]
+      (store-track timeline shape-id (dissoc track :follow))
+      timeline)))
 
 (defn- store-track
   "Put back `track` of `shape-id` after something was removed from it:
@@ -2908,8 +2953,10 @@
             (fn [tracks]
               (reduce-kv (fn [tracks shape-id track]
                            (let [track (resolve-track timeline objects shape-id (visible-track track))]
-                             ;; Nothing left to play once all of it is hidden.
-                             (if (and (empty? (:keyframes track)) (empty? (:animations track)))
+                             ;; Nothing left to play once all of it is hidden;
+                             ;; a track that follows plays still.
+                             (if (and (empty? (:keyframes track)) (empty? (:animations track))
+                                      (nil? (:follow track)))
                                (dissoc tracks shape-id)
                                (assoc tracks shape-id track))))
                          tracks
@@ -3118,6 +3165,110 @@
            (unit-split-kind (get objects shape-id) (track-animations track)))
          (:tracks timeline))))
 
+(defn- own-modifiers
+  "`{shape-id modifiers}` of the shapes of `objects` that `timeline` (as
+  it plays, see `resolve-animations`) animates, at `time`."
+  [timeline objects time]
+  (reduce-kv
+   (fn [acc shape-id values]
+     (if-let [shape (get objects shape-id)]
+       (let [board-origin (position-origin timeline objects shape-id)
+             pivot        (origin-point shape (track-origin (get-track timeline shape-id)))]
+         (assoc acc shape-id (shape->modifiers shape values board-origin pivot)))
+       acc))
+   {}
+   (values-at timeline time)))
+
+(defn- followers
+  "The layers of `timeline` that follow a leader of `objects` (see
+  `follow-of`), but those whose leaders lead back to a layer of the
+  chain: a cycle follows nothing."
+  [timeline objects]
+  (let [leader-of (fn [id] (dm/get-in timeline [:tracks id :follow :leader]))
+        cyclic?   (fn [id]
+                    (loop [at (leader-of id) seen #{id}]
+                      (cond (nil? at)           false
+                            (contains? seen at) true
+                            :else               (recur (leader-of at) (conj seen at)))))]
+    (into #{}
+          (filter #(and (contains? objects %) (contains? objects (leader-of %)) (not (cyclic? %))))
+          (keys (:tracks timeline)))))
+
+(defn- modifiers-opacity
+  "The opacity `modifiers` give a shape, `default` when they give none."
+  [modifiers default]
+  (or (some (fn [{:keys [type property value]}]
+              (when (and (= :change-property type) (= :opacity property)) value))
+            (rseq (vec (:structure-parent modifiers))))
+      default))
+
+(defn- follow-modifiers
+  "The modifiers that make a layer take `change`, what its leader does
+  since its first frame (a matrix), around `pivot`, where the pivot of
+  the leader is then: as `follow` says, it scales and turns around that
+  pivot (a skew of the leader is left out) and moves as the pivot does."
+  [{:keys [position rotation scale]} change pivot]
+  (let [{:keys [a b c d]} change
+        sx    (mth/sqrt (+ (* a a) (* b b)))
+        sy    (if (pos? sx) (/ (- (* a d) (* b c)) sx) 0)
+        turn  (mth/degrees (mth/atan2 b a))
+        moved (gpt/transform pivot change)]
+    (cond-> (ctm/empty)
+      (and scale (not (and (mth/close? sx 1) (mth/close? sy 1))))
+      (-> (ctm/resize (gpt/point sx sy) pivot)
+          (ctm/scale-content (mth/sqrt (mth/abs (* sx sy)))))
+
+      (and rotation (not (mth/close? turn 0)))
+      (ctm/rotation pivot turn)
+
+      position
+      (ctm/move (gpt/subtract moved pivot)))))
+
+(defn- followed-modifiers
+  "`own` (see `own-modifiers`) with the layers of `timeline` that follow
+  a leader (see `follow-of`) moved as it: what the leader does from its
+  first frame on, `:delay` ms later, after their own animation; a chain
+  of followers follows through. Opacity multiplies by the leader's, as
+  in a group."
+  [timeline objects time own]
+  (let [follows (followers timeline objects)]
+    (if (empty? follows)
+      own
+      (let [own-at (memoize #(own-modifiers timeline objects %))
+            cache  (volatile! {})
+            played (fn played [id t]
+                     (let [k [id t]]
+                       (if (contains? @cache k)
+                         (get @cache k)
+                         (let [mods (get (if (= t time) own (own-at t)) id)
+                               v    (if-not (contains? follows id)
+                                      mods
+                                      (let [follow  (follow-of timeline id)
+                                            leader  (:leader follow)
+                                            matrix  #(if (some? %) (ctm/modifiers->transform %) (gmt/matrix))
+                                            now     (matrix (played leader (max 0 (- t (:delay follow)))))
+                                            start   (matrix (played leader 0))
+                                            change  (if-let [inv (gmt/inverse start)] (gmt/multiply now inv) now)
+                                            lshape  (get objects leader)
+                                            pivot   (-> (origin-point lshape (track-origin (get-track timeline leader)))
+                                                        (gpt/transform start))
+                                            moved   (ctm/add-modifiers mods (follow-modifiers follow change pivot))]
+                                        (cond-> moved
+                                          (:opacity follow)
+                                          (ctm/change-property
+                                           :opacity
+                                           (* (modifiers-opacity mods (:opacity (get objects id) 1))
+                                              (modifiers-opacity (played leader (max 0 (- t (:delay follow))))
+                                                                 (:opacity lshape 1)))))))]
+                           (vswap! cache assoc k v)
+                           v))))]
+        (reduce (fn [acc id]
+                  (if-let [mods (played id time)]
+                    (assoc acc id mods)
+                    acc))
+                own
+                follows)))))
+
 (defn timeline->modif-tree
   "Compute a transient modif-tree `{shape-id {:modifiers ...}}` for
   `timeline` at `time`, covering transforms (x/y/scale/rotation), opacity
@@ -3129,18 +3280,14 @@
   through `transform-shape` (viewer/export)."
   [timeline objects time]
   (let [timeline (resolve-animations timeline objects)
-        tree     (reduce-kv
-                  (fn [tree shape-id values]
-                    (if-let [shape (get objects shape-id)]
-                      (let [board-origin (position-origin timeline objects shape-id)
-                            pivot        (origin-point shape (track-origin (get-track timeline shape-id)))
-                            modifiers    (shape->modifiers shape values board-origin pivot)]
-                        (if (ctm/empty? modifiers)
-                          tree
-                          (assoc tree shape-id {:modifiers modifiers})))
-                      tree))
-                  {}
-                  (values-at timeline time))]
+        own      (own-modifiers timeline objects time)
+        played   (followed-modifiers timeline objects time own)
+        tree     (reduce-kv (fn [tree shape-id modifiers]
+                              (cond-> tree
+                                (not (ctm/empty? modifiers))
+                                (assoc shape-id {:modifiers modifiers})))
+                            {}
+                            played)]
     (reduce-kv (fn [tree shape-id entries]
                  (update-in tree [shape-id :modifiers] ctm/change-property :text-units entries))
                tree
@@ -3663,11 +3810,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn remove-shapes
-  "Drop the tracks targeting any of `shape-ids`, and the clocks of the
-  component copies among them (used when shapes are deleted). Returns
-  the updated timeline."
+  "Drop the tracks targeting any of `shape-ids`, the follows of the
+  layers that follow them, and the clocks of the component copies among
+  them (used when shapes are deleted). Returns the updated timeline."
   [timeline shape-ids]
-  (let [timeline (update timeline :tracks #(apply dissoc % shape-ids))]
+  (let [removed  (set shape-ids)
+        timeline (update timeline :tracks #(apply dissoc % shape-ids))
+        timeline (reduce-kv (fn [timeline id track]
+                              (if (contains? removed (dm/get-in track [:follow :leader]))
+                                (set-follow timeline id nil)
+                                timeline))
+                            timeline
+                            (:tracks timeline))]
     (if (contains? timeline :copies)
       (let [copies (apply dissoc (:copies timeline) shape-ids)]
         (if (empty? copies) (dissoc timeline :copies) (assoc timeline :copies copies)))

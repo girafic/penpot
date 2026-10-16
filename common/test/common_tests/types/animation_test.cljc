@@ -4668,3 +4668,130 @@
     (t/is (str/includes? svg ";M-10,10L70,10") "twice as wide, around its middle")
     (t/is (not (re-find #"scale\(2, 1\)" svg)) "not a scale of its group")))
 
+
+;; FOLLOW
+
+(defn- follow-scene
+  "A leader 20 by 20 at 100,100 and a follower 10 by 10 at 200,100, on
+  no board (their keyframes count from the canvas)."
+  []
+  (let [leader   (cts/setup-shape {:type :rect :x 100 :y 100 :width 20 :height 20})
+        follower (cts/setup-shape {:type :rect :x 200 :y 100 :width 10 :height 10})]
+    {:leader (:id leader) :follower (:id follower)
+     :objects {(:id leader) leader (:id follower) follower}}))
+
+(defn- shown-at
+  "The shape `id` of `objects` as `timeline` shows it at `time`."
+  [timeline objects id time]
+  (let [mods (get-in (cta/timeline->modif-tree timeline objects time) [id :modifiers])]
+    (cond-> (get objects id)
+      (some? mods) (-> (gsh/transform-shape mods) (merge (cta/appearance-changes mods))))))
+
+(defn- centre-at
+  [timeline objects id time]
+  (let [c (grc/rect->center (:selrect (shown-at timeline objects id time)))]
+    [(:x c) (:y c)]))
+
+(defn- close-point?
+  [[ex ey] [ax ay]]
+  (and (mth/close? ex ax 0.01) (mth/close? ey ay 0.01)))
+
+(t/deftest a-follow-reads-with-its-defaults
+  (let [{:keys [leader follower]} (follow-scene)
+        tl (cta/set-follow (mk-timeline) follower {:leader leader :delay 100})]
+    (t/is (= {:leader leader :position true :rotation true :scale true :opacity false :delay 100}
+             (cta/follow-of tl follower)))
+    (t/is (= {:leader leader :delay 100} (get-in tl [:tracks follower :follow])) "the defaults left out")
+    (t/is (cta/valid-timeline? tl))
+    (t/is (nil? (cta/follow-of (cta/set-follow tl follower nil) follower)))
+    (t/is (not (contains? (:tracks (cta/set-follow tl follower nil)) follower)) "nothing left of its track")))
+
+(t/deftest a-follower-moves-with-its-leader
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :x :value 100})
+               (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+               (cta/set-follow follower {:leader leader}))]
+    (t/is (close-point? [205 105] (centre-at tl objects follower 0)))
+    (t/is (close-point? [255 105] (centre-at tl objects follower 500)))))
+
+(t/deftest a-follower-follows-from-the-first-frame
+  ;; the leader starts 200 left of where it rests: the follower does not
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :x :value -100})
+               (cta/add-keyframe leader {:time 1000 :property :x :value 100})
+               (cta/set-follow follower {:leader leader}))]
+    (t/is (close-point? [205 105] (centre-at tl objects follower 0)) "where it rests")
+    (t/is (close-point? [405 105] (centre-at tl objects follower 1000)))))
+
+(t/deftest a-follower-turns-around-its-leader
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :rotation :value 0})
+               (cta/add-keyframe leader {:time 1000 :property :rotation :value 90})
+               (cta/set-follow follower {:leader leader}))]
+    ;; (95, -5) from the pivot of the leader at 110,110, turned 90 degrees
+    (t/is (close-point? [115 205] (centre-at tl objects follower 1000)))
+    (t/is (mth/close? 90 (:rotation (shown-at tl objects follower 1000)) 0.01))
+    (t/testing "without its rotation: only where the pivot goes"
+      (let [tl (cta/set-follow tl follower {:leader leader :rotation false})]
+        (t/is (close-point? [205 105] (centre-at tl objects follower 1000)))))))
+
+(t/deftest a-follower-scales-around-its-leader
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :scale-x :value 1})
+               (cta/add-keyframe leader {:time 1000 :property :scale-x :value 2})
+               (cta/add-keyframe leader {:time 0 :property :scale-y :value 1})
+               (cta/add-keyframe leader {:time 1000 :property :scale-y :value 2})
+               (cta/set-follow follower {:leader leader}))]
+    (t/is (close-point? [300 100] (centre-at tl objects follower 1000)))
+    (t/is (mth/close? 20 (get-in (shown-at tl objects follower 1000) [:selrect :width]) 0.01))
+    (t/testing "without its scale"
+      (let [tl (cta/set-follow tl follower {:leader leader :scale false})]
+        (t/is (close-point? [205 105] (centre-at tl objects follower 1000)))))))
+
+(t/deftest a-follower-waits-its-delay
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :x :value 100})
+               (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+               (cta/set-follow follower {:leader leader :delay 200}))]
+    (t/is (close-point? [235 105] (centre-at tl objects follower 500)) "where the leader was at 300 ms")
+    (t/is (close-point? [205 105] (centre-at tl objects follower 100)) "at rest before")))
+
+(t/deftest a-follower-takes-the-opacity-of-its-leader
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :opacity :value 1})
+               (cta/add-keyframe leader {:time 1000 :property :opacity :value 0.5}))]
+    (t/is (mth/close? 1 (:opacity (shown-at (cta/set-follow tl follower {:leader leader}) objects follower 1000) 1))
+          "not by default")
+    (t/is (mth/close? 0.5 (:opacity (shown-at (cta/set-follow tl follower {:leader leader :opacity true})
+                                              objects follower 1000))))))
+
+(t/deftest follows-chain-and-cycles-play-none
+  (let [{:keys [leader follower objects]} (follow-scene)
+        third    (cts/setup-shape {:type :rect :x 300 :y 100 :width 10 :height 10})
+        objects  (assoc objects (:id third) third)
+        tl       (-> (mk-timeline)
+                     (cta/add-keyframe leader {:time 0 :property :x :value 100})
+                     (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+                     (cta/set-follow follower {:leader leader})
+                     (cta/set-follow (:id third) {:leader follower}))]
+    (t/is (close-point? [405 105] (centre-at tl objects (:id third) 1000)) "through the follower")
+    (let [tl (cta/set-follow tl leader {:leader (:id third)})]
+      (t/is (close-point? [205 105] (centre-at tl objects follower 1000)) "a cycle follows nothing")
+      (t/is (close-point? [210 110] (centre-at tl objects leader 1000)) "and the leader still moves"))))
+
+(t/deftest a-follow-plays-with-preset-animations-around
+  ;; the timeline as it plays (`resolve-animations`) keeps a track that
+  ;; only follows
+  (let [{:keys [leader follower objects]} (follow-scene)
+        tl (-> (mk-timeline)
+               (cta/add-keyframe leader {:time 0 :property :x :value 100})
+               (cta/add-keyframe leader {:time 1000 :property :x :value 200})
+               (cta/add-animation leader {:type :fade :start 0 :duration 300})
+               (cta/set-follow follower {:leader leader}))]
+    (t/is (close-point? [305 105] (centre-at tl objects follower 1000)))))
