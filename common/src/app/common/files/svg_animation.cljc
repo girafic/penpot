@@ -586,6 +586,41 @@
         (into (mapcat :decls) rules)
         (into (declarations (get-in node [:attrs :style]))))))
 
+(def ^:private inherited
+  "The animated properties an element takes from its parent when it does
+  not set them."
+  #{"fill" "stroke" "fill-opacity" "stroke-opacity" "stroke-width" "stroke-dashoffset" "visibility"})
+
+(def ^:private initial-values
+  "The animated properties when nothing sets them, as CSS starts them."
+  {"opacity" "1" "fill-opacity" "1" "stroke-opacity" "1" "stroke-width" "1"
+   "stroke-dashoffset" "0" "fill" "black" "stroke" "none"
+   "visibility" "visible" "display" "inline" "transform" "none"
+   "x" "0" "y" "0" "cx" "0" "cy" "0" "r" "0" "rx" "0" "ry" "0"})
+
+(defn- matrix-text
+  "The SVG transform `s` as one CSS `matrix()`."
+  [s]
+  (let [{:keys [a b c d e f]} (csvg/parse-transform s)]
+    (str "matrix(" (str/join "," [a b c d e f]) ")")))
+
+(defn- rest-text
+  "The text of the property `prop` of the element `k` of `idx` at rest,
+  what an animation that does not say starts from: its static CSS (the
+  declarations of `cascaded`, by key), else its attribute (a `transform`
+  in SVG syntax as a CSS `matrix()`), else for an inherited property the
+  one of its parent, else the initial value."
+  [idx cascaded k prop]
+  (let [own (fn [k]
+              (let [css  (some (fn [[p v]] (when (= p prop) v)) (rseq (vec (get cascaded k))))
+                    attr (get-in idx [:by-key k :node :attrs (keyword prop)])
+                    v    (or css (when (some? attr) (if (= "transform" prop) (matrix-text attr) attr)))]
+                (when-not (= "inherit" (some-> v str/trim)) v)))]
+    (or (some own (if (contains? inherited prop)
+                    (cons k (get-in idx [:by-key k :ancestors]))
+                    [k]))
+        (get initial-values prop))))
+
 ;; --- Animations -------------------------------------------------------------
 ;;
 ;; An animation (a "spec") of a property of an element: `:times` (0 to
@@ -767,8 +802,9 @@
 
 (defn- css-specs
   "The specs of the CSS animations of the element `k`, given its
-  declarations `decls` and the keyframes of the sheet."
-  [ctx sheet-keyframes k decls]
+  declarations `decls`, the keyframes of the sheet and `rest-of`, the
+  text of a property of an element at rest (see `rest-text`)."
+  [ctx sheet-keyframes k decls rest-of]
   (let [static (into {} decls)]
     (into []
           (mapcat
@@ -799,16 +835,17 @@
                                              :value  (value (get decls prop))
                                              :easing (if-let [tf (get decls "animation-timing-function")] (css-easing tf) easing)})
                                           own)
-                             base   (value (get static prop (if (= :transform property) "none" nil)))
+                             base   (value (rest-of k prop))
                              points (cond-> points
                                       (pos? (:offset (first points)))
                                       (->> (into [{:offset 0 :value base :easing easing}]))
 
                                       (< (:offset (peek points)) 1)
                                       (conj {:offset 1 :value base :easing easing}))]
-                       :when (every? some? (map :value points))]
+                       :when (or (every? some? (map :value points))
+                                 (do (ctx :skip (unplayed prop)) false))]
                    (merge timing
-                          {:key k :property property :source :css
+                          {:key k :property property :source :css :rest base
                            :origin (get static "transform-origin") :box (get static "transform-box")
                            :times (mapv :offset points)
                            :values (mapv :value points)
@@ -817,8 +854,8 @@
 
 (defn- smil-specs
   "The specs of the SMIL animations of the SVG of `idx`, by the key of
-  the element each animates."
-  [ctx idx]
+  the element each animates; `rest-of` as in `css-specs`."
+  [ctx idx rest-of]
   (let [anims (->> (vals (:by-key idx))
                    (filter #(contains? animation-tags (:tag (:node %))))
                    (sort-by :key))
@@ -854,19 +891,20 @@
                  (nil? property) (do (ctx :skip (unplayed attribute)) nil)
 
                  :else
-                 (let [target-attrs (get-in idx [:by-key target :node :attrs])
-                       timing (smil-timing attrs begin)
+                 (let [timing (smil-timing attrs begin)
                        timing (cond-> timing (and (= :set tag) (nil? (:dur timing))) (assoc :dur ##Inf :repeat 1))]
                    (case property
                      :transform
                      (let [type   (:type attrs "translate")
                            parse  #(let [ns (numbers %)] (when (seq ns) ns))
-                           values (smil-values attrs parse nil)]
+                           ;; SMIL: a by-animation is `values="0;by"`, added
+                           by?    (and (nil? (:values attrs)) (nil? (:from attrs)) (some? (:by attrs)))
+                           values (smil-values attrs parse (when by? (mapv (constantly 0) (parse (:by attrs)))))]
                        (when (seq values)
                          (merge timing
                                 (smil-cycle attrs values "linear")
                                 {:key target :property :transform :source :smil :type type
-                                 :additive (if (= "sum" (:additive attrs)) :sum :replace)})))
+                                 :additive (if (or by? (= "sum" (:additive attrs))) :sum :replace)})))
 
                      :motion
                      (let [mpath  (some #(when (= :mpath (:tag %)) %) (:content node))
@@ -888,13 +926,14 @@
                                  :rotate (:rotate attrs "0")})))
 
                      (let [parse  #(parse-value property %)
-                           base   (parse-value property (get target-attrs (keyword attribute)))
+                           base   (parse (rest-of target attribute))
                            values (smil-values attrs parse base)
                            values (if (and (= :set tag) (seq values)) [(peek values)] values)]
-                       (when (seq values)
+                       (if (seq values)
                          (merge timing
                                 (smil-cycle attrs values (if (= :set tag) "discrete" "linear"))
-                                {:key target :property property :source :smil}))))))))
+                                {:key target :property property :source :smil :rest base})
+                         (do (ctx :skip (unplayed attribute)) nil))))))))
            anims))))
 
 (defn- expand-steps
@@ -1205,11 +1244,17 @@
                  (if (contains? #{"top" "bottom"} a) [(or b "center") a] [a (or b "center")]))]
     (gpt/point (+ x (coord a w :x)) (+ y (coord b h :y)))))
 
+(defn- fns-matrix
+  "The matrix of the CSS transform `fns`, the percentages of the box
+  `[w h]`."
+  [fns wh]
+  (reduce (fn [m f] (gmt/multiply m (or (function-matrix f wh) (gmt/matrix)))) (gmt/matrix) fns))
+
 (defn- css-matrix
   "The matrix of the CSS transform `fns` around `origin`, the
   percentages of `box`, with its nominal rotation."
   [fns origin [_ _ w h]]
-  (let [m (reduce (fn [m f] (gmt/multiply m (or (function-matrix f [w h]) (gmt/matrix)))) (gmt/matrix) fns)]
+  (let [m (fns-matrix fns [w h])]
     [(gmt/multiply (gmt/translate-matrix origin) m (gmt/translate-matrix (gpt/negate origin)))
      (reduce + (map (fn [[fname args]] (if (contains? #{"rotate" "rotatez"} fname) (angle-deg (first args)) 0)) fns))]))
 
@@ -1230,14 +1275,61 @@
        (into (vec b) (map identity-function) (drop n a))]
       [a b])))
 
+(defn- unmatrix
+  "The parts of the 2D matrix `m` that CSS interpolates (CSS Transforms,
+  decomposing a 2D matrix): `[tx ty sx sy angle m11 m12 m21 m22]`, the
+  matrix turned by `angle` and scaled by `sx` `sy` after `m11`..`m22`."
+  [{:keys [a b c d e f]}]
+  (let [sx        (mth/sqrt (+ (* a a) (* b b)))
+        sy        (mth/sqrt (+ (* c c) (* d d)))
+        ;; a mirror flips the axis it turns the least
+        [sx sy]   (cond (not (neg? (- (* a d) (* b c)))) [sx sy]
+                        (< a d)                           [(- sx) sy]
+                        :else                             [sx (- sy)])
+        [r0x r0y] (if (zero? sx) [a b] [(/ a sx) (/ b sx)])
+        [r1x r1y] (if (zero? sy) [c d] [(/ c sy) (/ d sy)])
+        angle     (mth/atan2 r0y r0x)
+        sn        (- r0y)
+        cs        r0x]
+    (into [e f sx sy (mth/degrees angle)]
+          (if (zero? angle)
+            [r0x r0y r1x r1y]
+            [(+ (* cs r0x) (* sn r1x)) (+ (* cs r0y) (* sn r1y))
+             (- (* cs r1x) (* sn r0x)) (- (* cs r1y) (* sn r0y))]))))
+
+(defn- lerp-matrix
+  "The CSS transform between the matrices `ma` and `mb` at `u`, as CSS
+  interpolates transforms of other functions: by their parts (see
+  `unmatrix`), as a translate, a rotate, a matrix and a scale."
+  [ma mb u]
+  (let [[tx1 ty1 sx1 sy1 a1 & r1] (unmatrix ma)
+        [tx2 ty2 sx2 sy2 a2 & r2] (unmatrix mb)
+        ;; one mirrored in x and the other in y: a turn
+        [sx1 sy1 a1] (if (or (and (neg? sx1) (neg? sy2)) (and (neg? sy1) (neg? sx2)))
+                       [(- sx1) (- sy1) (+ a1 (if (neg? a1) 180 -180))]
+                       [sx1 sy1 a1])
+        ;; not the long way round
+        a1           (if (zero? a1) 360 a1)
+        a2           (if (zero? a2) 360 a2)
+        [a1 a2]      (cond (<= (mth/abs (- a1 a2)) 180) [a1 a2]
+                           (> a1 a2)                    [(- a1 360) a2]
+                           :else                        [a1 (- a2 360)])
+        at           #(+ %1 (* u (- %2 %1)))
+        [m11 m12 m21 m22] (map at r1 r2)]
+    [["translate" [[(at tx1 tx2) "px"] [(at ty1 ty2) "px"]]]
+     ["rotate" [[(at a1 a2) "deg"]]]
+     ["matrix" [[m11 ""] [m12 ""] [m21 ""] [m22 ""] [0 ""] [0 ""]]]
+     ["scale" [[(at sx1 sx2) ""] [(at sy1 sy2) ""]]]]))
+
 (defn- lerp-css
   "The CSS transform between `a` and `b` at `u`: function by function
-  when they have the same ones (see `pad`)."
-  [a b u]
+  when they have the same ones (see `pad`), else through their matrices
+  (see `lerp-matrix`), the percentages of the box `[w h]`."
+  [a b u wh]
   (let [[a b] (pad a b)]
     (if (and (= (map first a) (map first b)) (= (map (comp count second) a) (map (comp count second) b)))
       (mapv (fn [[fname aa] [_ ba]] [fname (mapv (fn [[x unit] [y]] [(+ x (* u (- y x))) unit]) aa ba)]) a b)
-      (if (< u 0.5) a b))))
+      (lerp-matrix (fns-matrix a wh) (fns-matrix b wh) u))))
 
 (defn- transform-spec
   "`spec` of a CSS transform with its values parsed."
@@ -1256,7 +1348,7 @@
       (if (= :css (:source spec))
         (let [{:keys [times values easings]} spec
               [j eased] (cycle-point times easings f side)
-              fns (lerp-css (nth values j) (nth values (inc j) (nth values j)) eased)]
+              fns (lerp-css (nth values j) (nth values (inc j) (nth values j)) eased (drop 2 box))]
           (css-matrix fns (origin-point (:origin spec) box) box))
         (let [params (cycle-value spec f side)]
           [(smil-matrix (:type spec) params) (if (= "rotate" (:type spec)) (first params) 0)])))))
@@ -1458,12 +1550,13 @@
   (let [idx       (index svg-data)
         sheet     (stylesheet (str/join "\n" (:css idx)))
         cascaded  (into {} (map (fn [k] [k (cascade sheet idx k)])) (keys (:by-key idx)))
-        css       (into [] (mapcat (fn [[k decls]] (css-specs ctx (:keyframes sheet) k decls))) cascaded)
+        rest-of   (partial rest-text idx cascaded)
+        css       (into [] (mapcat (fn [[k decls]] (css-specs ctx (:keyframes sheet) k decls rest-of))) cascaded)
         ;; a cycle shorter than `min-dur` shows nothing a board can play
         playable? (fn [{:keys [dur]}]
                     (or (nil? dur) (not (mth/finite? dur)) (>= dur min-dur)
                         (do (ctx :skip :timing) false)))
-        specs     (->> (into (smil-specs ctx idx) css)
+        specs     (->> (into (smil-specs ctx idx rest-of) css)
                        (filter playable?)
                        (map expand-steps)
                        (map #(cond-> % (= :transform (:property %)) (transform-spec)))

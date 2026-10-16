@@ -145,6 +145,67 @@
                                     (el :animate {:attributeName "x" :to "20" :dur "1s" :begin "click"}))))]
     (t/is (= {:path-morph 1 :interactive 1} (:skipped result)))))
 
+;; --- What an animation does not say starts from the value at rest
+
+(defn- css-anim
+  "An SVG whose element `#box` plays the CSS `keyframes` (`a`) for 1 s,
+  linear, kept at its end."
+  [keyframes & content]
+  (apply svg (el :style {} (str "@keyframes a { " keyframes " }"
+                                " #box { animation: a 1s linear forwards; }"))
+         content))
+
+(t/deftest one-sided-keyframes-start-from-the-value-at-rest
+  (doseq [[keyframes expected] [["to { opacity: 0 }" [[0 1] [1000 0]]]
+                                ["from { opacity: 0 }" [[0 0] [1000 1]]]
+                                ["50% { opacity: .5 }" [[0 1] [500 0.5] [1000 1]]]]]
+    (let [result (import-svg (css-anim keyframes (el :rect {:id "box" :width "20" :height "20"})))]
+      (t/is (close-frames? expected (frames result (named result "box motion") :opacity)) keyframes)
+      (t/is (empty? (:skipped result)) keyframes))))
+
+(t/deftest a-line-draws-itself-from-its-dash-attributes
+  (let [result (import-svg (css-anim "to { stroke-dashoffset: 0 }"
+                                     (el :path {:id "box" :d "M0 50 L100 50" :fill "none" :stroke "#000000"
+                                                :stroke-dasharray "100" :stroke-dashoffset "100"})))]
+    (t/is (close-frames? [[0 0] [1000 1]] (frames result (named result "box") :trim-end)))))
+
+(t/deftest smil-to-and-by-start-from-the-value-at-rest
+  (let [result (import-svg (svg (el :rect {:id "fade" :width "10" :height "10"}
+                                    (el :animate {:attributeName "opacity" :to "0" :dur "1s" :fill "freeze"}))
+                                (el :rect {:id "turn" :x "40" :y "40" :width "20" :height "20"}
+                                    (el :animateTransform {:attributeName "transform" :type "rotate" :by "360"
+                                                           :dur "1s" :fill "freeze"}))
+                                ;; a by-animation is `values="0;by"` added: from scale(0)
+                                (el :rect {:id "grow" :x "20" :width "10" :height "10"}
+                                    (el :animateTransform {:attributeName "transform" :type "scale" :by "1"
+                                                           :dur "1s" :fill "freeze"}))))]
+    (t/is (close-frames? [[0 1] [1000 0]] (frames result (named result "fade motion") :opacity)))
+    (t/is (close-frames? [[0 0] [1000 360]] (frames result (named result "turn motion") :rotation)))
+    (t/is (close-frames? [[0 0] [1000 1]] (frames result (named result "grow motion") :scale-x)))
+    (t/is (empty? (:skipped result)))))
+
+(t/deftest a-colour-blends-from-the-one-at-rest
+  (doseq [[label dot] [["its own" (el :circle {:id "box" :cx "50" :cy "50" :r "10" :fill "#0000ff"})]
+                       ["of its group" (el :g {:fill "#0000ff"} (el :circle {:id "box" :cx "50" :cy "50" :r "10"}))]]]
+    (let [result (import-svg (css-anim "50% { fill: #ff0000 }" dot))]
+      (t/is (close-frames? [[0 "#0000ff"] [500 "#ff0000"] [1000 "#0000ff"]]
+                           (frames result (named result "box") :fill-color))
+            label))))
+
+(t/deftest a-css-transform-starts-from-the-transform-attribute
+  ;; in SVG syntax, its centre kept; to other functions through their
+  ;; matrices, as CSS interpolates them, with no jump
+  (doseq [[label transform turn] [["a turn" "rotate(30 50 50)" 60]
+                                  ["a move" "translate(50 50)" 90]]]
+    (let [result (import-svg (css-anim "to { transform: rotate(90deg) }"
+                                       (el :rect {:id "box" :x "40" :y "40" :width "20" :height "20"
+                                                  :transform transform})))
+          node   (named result "box motion")
+          xs     (cta/property-keyframes (:timeline result) (:id node) :x)]
+      (t/is (close-frames? [[0 0] [1000 turn]] (frames result node :rotation)) label)
+      (t/is (mth/close? (:x node) (:value (first xs)) 0.5) (str label ": where it is at rest"))
+      (t/is (not-any? #(= :step (:interpolation %)) xs) label))))
+
 ;; --- What an SVG asks for is bounded: it comes from anyone
 
 (defn- keyframe-count
