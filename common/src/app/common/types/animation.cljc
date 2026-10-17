@@ -3653,7 +3653,7 @@
           (assoc-in [:tracks shape-id :animations index] animation)
           (update :duration max (animation-end animation))))))
 
-(defn paste-track
+(defn- paste-track*
   "Paste `track` (see `retarget-track`) onto `shape-id` of `timeline`.
   `:replace` first removes the unlocked keyframes of the rows `track` has
   keyframes of and, when it has presets or style uses, the unlocked
@@ -3714,6 +3714,24 @@
           (update $ :duration max end))]
     {:timeline pasted
      :pivot-kept? pivot-kept?}))
+
+(defn paste-track
+  "Paste `track` (see `retarget-track`) onto `shape-id` of `timeline` as
+  `paste-track*` does, `{:timeline :pivot-kept? :outlines-left-out}`: a
+  merge whose outlines would take the row of `shape-id` past what it
+  holds (see `ctao/outline-row-fits?`) leaves the outlines of `track`
+  out, which `:outlines-left-out` counts, and pastes the rest."
+  [timeline shape-id track mode]
+  (let [pasted (paste-track* timeline shape-id track mode)]
+    (if (ctao/outline-row-fits? (dm/get-in pasted [:timeline :tracks shape-id :keyframes]))
+      (assoc pasted :outlines-left-out 0)
+      (let [outline? #(= :content (:property %))]
+        (-> (paste-track* timeline shape-id
+                          (-> track
+                              (update :keyframes #(filterv (complement outline?) %))
+                              (dissoc :outline-box))
+                          mode)
+            (assoc :outlines-left-out (count (filter outline? (:keyframes track)))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; EDITS ON THE CANVAS

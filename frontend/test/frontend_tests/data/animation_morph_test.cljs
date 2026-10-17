@@ -23,6 +23,7 @@
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.path.changes :as dwpc]
+   [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.async :as async]
@@ -268,3 +269,10 @@
     (t/is (seq (commits events)) "the fade recorded")
     (t/is (every? #(= group (:undo-group (deref %))) (mapcat identity done))
           "in the undo group of the edit, so both undo together")))
+
+(t/deftest a-paste-tells-the-outlines-it-left-out
+  (let [toast (dwa/paste-result-toast {:skipped 7 :outlines-left-out 5 :grown #{}})]
+    (t/is (= (str (tr "workspace.animation.paste-skipped" 2) " "
+                  (tr "workspace.animation.paste-outline-too-large" 5 32768))
+             (get-in (ptk/update toast {}) [:notification :content]))
+          "the others with their reason, the outlines with theirs")))

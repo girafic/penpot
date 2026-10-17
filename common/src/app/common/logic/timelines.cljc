@@ -1288,9 +1288,11 @@
   page and id) with `skip-source?`. A board without a timeline gets one,
   named after it.
 
-  `{:timelines :skipped :pivot-kept :targets :grown}`: the timelines of
-  the page after it, how many keyframes and split presets the targets
-  could not take (see `cta/retarget-track`) and how many targets kept
+  `{:timelines :skipped :outlines-left-out :pivot-kept :targets :grown}`:
+  the timelines of the page after it, how many keyframes and split
+  presets the targets could not take (see `cta/retarget-track`), among
+  them the outlines a merge left out for a row they would have taken
+  past what it holds (see `cta/paste-track`), how many targets kept
   their pivot, the targets pasted onto, and the boards whose timeline
   grew longer. `{:error :too-large}`, and nothing pasted, onto more than
   `max-paste-targets` layers or for more than `max-paste-keyframes`
@@ -1329,16 +1331,17 @@
                      (cta/retarget-track (:track layer) (:pose layer) (get objects target-id) to
                                          :exact? exact?)
 
-                     {:keys [timeline pivot-kept?]}
+                     {:keys [timeline pivot-kept? outlines-left-out]}
                      (cta/paste-track timeline target-id
                                       (shift-track track (mth/round (+ offset (* n stagger))))
                                       mode)]
                  (-> result
                      (assoc-in [:timelines board-id] timeline)
-                     (update :skipped + skipped)
+                     (update :skipped + skipped outlines-left-out)
+                     (update :outlines-left-out + outlines-left-out)
                      (update :pivot-kept + (if pivot-kept? 1 0))
                      (update :targets conj target-id))))
-             {:timelines timelines :skipped 0 :pivot-kept 0 :targets #{}}
+             {:timelines timelines :skipped 0 :outlines-left-out 0 :pivot-kept 0 :targets #{}}
              (map-indexed vector pairs))]
         (assoc result :grown
                (into #{}

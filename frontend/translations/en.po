@@ -7330,6 +7330,10 @@ msgstr "Custom spring"
 msgid "workspace.animation.spring-bounce"
 msgstr "Bounce"
 
+#: src/app/main/data/workspace/animation.cljs
+msgid "workspace.animation.paste-outline-too-large"
+msgstr "%s path keyframes were left out: a Path row holds at most %s segments."
+
 msgid "workspace.animation.paste-skipped"
 msgstr "%s keyframes or text animations were left out: the layer has no matching fill, stroke, shadow, blur, radius or text."
 

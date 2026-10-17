@@ -1475,10 +1475,14 @@
 (defn paste-result-toast
   "The toast telling what a paste of an animation clip (see
   `cltl/paste-animation`) left out or changed, or nil."
-  [{:keys [skipped grown]}]
-  (let [notes (cond-> []
-                (pos? skipped) (conj (tr "workspace.animation.paste-skipped" skipped))
-                (seq grown)    (conj (tr "workspace.animation.paste-grown")))]
+  [{:keys [skipped outlines-left-out grown]}]
+  (let [outlines (or outlines-left-out 0)
+        others   (- skipped outlines)
+        notes    (cond-> []
+                   (pos? others)   (conj (tr "workspace.animation.paste-skipped" others))
+                   (pos? outlines) (conj (tr "workspace.animation.paste-outline-too-large"
+                                             outlines ctao/max-outline-row-segments))
+                   (seq grown)     (conj (tr "workspace.animation.paste-grown")))]
     (when (seq notes)
       (ntf/show {:content (str/join " " notes)
                  :type :toast

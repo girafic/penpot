@@ -786,6 +786,33 @@
                (:targets (paste file (assoc clip :page-id (uuid/next)) [:rect]
                                 {:mode :replace :skip-source? true})))))))
 
+(t/deftest a-merge-paste-leaves-out-outlines-past-what-a-row-holds
+  ;; five outlines of 4000 segments onto a path with five of its own: the
+  ;; row would pass 32768, so the clip's outlines stay out
+  (let [big      (fn [k] (path/from-plain (into [{:command :move-to :params {:x 0 :y 0}}]
+                                                (map (fn [i] {:command :line-to :params {:x i :y (mod (+ i k) 7)}}))
+                                                (range 1 4000))))
+        file     (-> (paste-file)
+                     (ths/add-sample-shape :src :type :path :parent-label :board-a
+                                           :content (outline-corners [[10 20] [50 20] [10 60]]))
+                     (ths/add-sample-shape :dst :type :path :parent-label :board-a
+                                           :content (outline-corners [[110 20] [150 20] [110 60]])))
+        objects  (:objects (thf/current-page file))
+        file     (with-timeline file :board-a
+                   #(as-> % tl
+                      (reduce (fn [tl t] (cta/set-outline-at tl (get objects (thi/id :src)) t (big t))) tl [0 100 200 300 400])
+                      (reduce (fn [tl t] (cta/set-outline-at tl (get objects (thi/id :dst)) t (big t))) tl [1000 1100 1200 1300 1400])))
+        clip     (clip-of file [:src] :whole-layer? true)
+        merged   (paste file clip [:dst] {:mode :merge})
+        replaced (paste file clip [:dst] {:mode :replace})
+        times    (fn [track] (mapv :time (filter #(= :content (:property %)) (:keyframes track))))]
+    (t/is (= 5 (:outlines-left-out merged)))
+    (t/is (= 5 (:skipped merged)) "counted among what the target could not take")
+    (t/is (= [1000 1100 1200 1300 1400] (times (track-in merged :board-a :dst))) "its own outlines as they were")
+    (t/is (sm/validate cta/schema:track (track-in merged :board-a :dst)) "a row the file takes")
+    (t/is (= [0 100 200 300 400] (times (track-in replaced :board-a :dst))) "replacing its own, the clip's go in")
+    (t/is (zero? (:outlines-left-out replaced)))))
+
 (t/deftest paste-gives-the-pivot-to-a-target-that-does-not-turn
   (let [file   (with-timeline (paste-file) :board-a
                  #(-> %
