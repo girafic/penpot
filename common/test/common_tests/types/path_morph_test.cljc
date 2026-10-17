@@ -134,6 +134,61 @@
         (t/is (and (some? x') (mth/close? x x' 1e-6) (mth/close? y y' 1e-6))
               (str "the point " v " of the star goes to the point " v " of the spun one"))))))
 
+(defn- subpath-areas
+  "The signed area of each subpath of `content` (of the polygon of its
+  points and handles)."
+  [content]
+  (let [subs (reduce (fn [subs {:keys [command params]}]
+                       (case command
+                         :move-to    (conj subs [[(:x params) (:y params)]])
+                         :close-path subs
+                         (update subs (dec (count subs)) into
+                                 (cond-> []
+                                   (some? (:c1x params)) (conj [(:c1x params) (:c1y params)] [(:c2x params) (:c2y params)])
+                                   :always (conj [(:x params) (:y params)])))))
+                     []
+                     (vec content))]
+    (mapv (fn [ps]
+            (/ (reduce + (map (fn [[x0 y0] [x1 y1]] (- (* x0 y1) (* x1 y0))) ps (concat (rest ps) [(first ps)]))) 2))
+          subs)))
+
+(defn- with-hole
+  "A square with a square hole, the hole going round the other way."
+  []
+  (path/from-plain (into (vec (polygon [[0 0] [100 0] [100 100] [0 100]]))
+                         (vec (polygon [[30 30] [30 70] [70 70] [70 30]])))))
+
+(t/deftest a-hole-stays-a-hole-as-it-grows
+  ;; the hole of the square goes round against its outline (nonzero),
+  ;; through the morph and whichever way the shape before it goes
+  (let [hole? (fn [content]
+                (let [[outer inner] (subpath-areas content)]
+                  (or (mth/close? 0 inner 1e-6) (neg? (* outer inner)))))]
+    (doseq [[label row] [["a triangle into it" [(polygon [[0 0] [100 0] [50 100]]) (with-hole)]]
+                         ["a triangle the other way into it" [(polygon [[0 0] [50 100] [100 0]]) (with-hole)]]
+                         ["it, the square, it" [(with-hole) (polygon [[0 0] [100 0] [100 100] [0 100]]) (with-hole)]]]]
+      (let [matched (morph/match row)]
+        (t/is (every? hole? matched) label)
+        (t/is (every? true? (map #(some? (path/lerp %1 %2 0.5)) matched (rest matched))) label)))))
+
+(t/deftest outlines-of-one-structure-pair-up-with-unequal-sides
+  ;; two rectangles of one structure, one wide and one tall, after a
+  ;; triangle: split alike, each corner of one still goes to the corner
+  ;; of the other at its place
+  (let [wide    (polygon [[0 0] [100 0] [100 20] [0 20]])
+        tall    (polygon [[0 0] [20 0] [20 100] [0 100]])
+        [_ w' t'] (morph/match [(polygon [[0 0] [60 0] [30 60]]) wide tall])
+        at      (fn [content [x y]]
+                  (first (keep-indexed (fn [j [qx qy]] (when (and (mth/close? x qx 1e-6) (mth/close? y qy 1e-6)) j))
+                                       (points content))))]
+    (doseq [v (range 4)]
+      (let [j        (at w' (nth (points wide) v))
+            [x y]    (nth (points tall) v)
+            [x' y'] (when (some? j) (nth (points t') j))]
+        (t/is (some? j))
+        (t/is (and (some? x') (mth/close? x x' 1e-6) (mth/close? y y' 1e-6))
+              (str "the corner " v " of the wide one goes to the corner " v " of the tall one"))))))
+
 (t/deftest close-contents-are-of-one-structure-within-a-tolerance
   (let [a (polygon [[0 0] [10 0] [0 10]])]
     (t/is (morph/close? a (polygon [[0 0.004] [10 0] [0 10]]) 0.01))

@@ -221,16 +221,65 @@
   "The turn `[r back?]` (see `turned`) that starts the closed subpath of
   curves `cs` from `start` where it is closest to the subpath of curves
   `ref-cs` from `ref-start`, of as many curves: the least squared
-  distance between their vertices. Nil when there is none to make (too
-  many curves, or not as many)."
-  [start cs ref-start ref-cs]
+  distance between their vertices; backwards only with `back?`. Nil when
+  there is none to make (too many curves, or not as many)."
+  [start cs ref-start ref-cs back?]
   (let [k (count cs)]
     (when-not (or (> k max-aligned-segments) (not= k (count ref-cs)) (< k 2))
       (let [ref  (vertices ref-start ref-cs)
             cost (fn [[r back?]]
                    (let [[s c] (turned start cs r back?)]
                      (reduce + (map (fn [a b] (let [d (distance a b)] (* d d))) (vertices s c) ref))))]
-        (apply min-key cost (for [back? [false true] r (range k)] [r back?]))))))
+        (apply min-key cost (for [back? (if back? [false true] [false]) r (range k)] [r back?]))))))
+
+(defn- curve-points
+  "The points of the subpath of curves `cs` from `start`, its handles
+  among them."
+  [start cs]
+  (into [start] (mapcat identity) cs))
+
+(defn- signed-area
+  "The area the subpath of curves `cs` from `start` encloses, about (of
+  the polygon of its points and handles), its sign the way it goes
+  round."
+  [start cs]
+  (let [ps (curve-points start cs)]
+    (/ (reduce + (map (fn [[x0 y0] [x1 y1]] (- (* x0 y1) (* x1 y0)))
+                      ps (concat (rest ps) [(first ps)])))
+       2)))
+
+(defn- box
+  "The box `[x0 y0 x1 y1]` of the subpath of curves `cs` from `start`."
+  [start cs]
+  (let [ps (curve-points start cs)]
+    [(reduce min (map first ps)) (reduce min (map second ps))
+     (reduce max (map first ps)) (reduce max (map second ps))]))
+
+(defn- free-subpaths
+  "The indexes of the closed subpaths of `subs` (each `{:start :curves
+  :closed?}`) whose box meets the box of no other one: those that may go
+  round the other way on their own without a hole filling or a fill
+  opening, which the way each goes round against the one around it
+  makes (nonzero)."
+  [subs]
+  (let [boxes  (into {}
+                     (keep-indexed (fn [i {:keys [start curves closed?]}]
+                                     (when (and closed? (seq curves)) [i (box start curves)])))
+                     subs)
+        meets? (fn [[ax0 ay0 ax1 ay1] [bx0 by0 bx1 by1]]
+                 (and (<= ax0 bx1) (<= bx0 ax1) (<= ay0 by1) (<= by0 ay1)))]
+    (into #{}
+          (filter (fn [i] (not-any? (fn [[j b]] (and (not= i j) (meets? (get boxes i) b))) boxes)))
+          (keys boxes))))
+
+(defn- orientation
+  "Which way the closed subpaths of `subs` go round as a whole: the sign
+  of their areas together, 0 when they enclose nothing."
+  [subs]
+  (let [area (reduce + (keep (fn [{:keys [start curves closed?]}]
+                               (when (and closed? (seq curves)) (signed-area start curves)))
+                             subs))]
+    (cond (> area 1e-9) 1 (< area -1e-9) -1 :else 0)))
 
 (defn- centre
   [{:keys [start segments]}]
@@ -268,12 +317,14 @@
     open in all, a closed one going back to its start by a curve; each
     subpath has its longer curves split until it has as many as the
     others (see `target-count`), those of one structure alike, so that
-    their points keep going to each other; and a closed subpath of
-    another structure than the one before it starts, forwards or
-    backwards, where it is closest to it (a square from a corner into a
-    heart from its point does not twist), while one of the same structure
-    turns as that one did (a star spinning by its points keeps
-    spinning)."
+    their points keep going to each other; a content going round the
+    other way than the one before goes backwards as a whole, so that its
+    holes stay holes; and a closed subpath of another structure than the
+    one before it starts where it is closest to it (a square from a
+    corner into a heart from its point does not twist), backwards too
+    when it stands apart from the others, while one of the same structure
+    turns as that one did (a star spinning by its points keeps spinning).
+    A subpath one lacks grows from a point and turns to fit nothing."
   [contents]
   (let [contents (vec contents)]
     (if (or (< (count contents) 2)
@@ -317,25 +368,43 @@
                           groups)))
                      rows
                      (range n))
-            ;; a closed subpath of another structure than the one before
-            ;; starts where it is closest to it, one of the same turns as
-            ;; it did: `[rows turns]`
+            ;; a content going round the other way than the one before
+            ;; goes backwards as a whole, so that its holes stay holes;
+            ;; then a closed subpath of another structure than the one
+            ;; before starts where it is closest to it (backwards only on
+            ;; its own, see `free-subpaths`), and one of the same turns as
+            ;; it did; none turns to fit a point
             [rows]  (reduce
-                     (fn [[out turns] r]
-                       (let [prev  (peek out)
-                             pairs (mapv (fn [i {:keys [start curves closed?] :as sub}]
-                                           (let [turn (when (and closed? (some? prev))
-                                                        (if (= (get-in kinds [r i]) (get-in kinds [(dec r) i]))
-                                                          (nth turns i)
-                                                          (let [ref (nth prev i)]
-                                                            (best-turn start curves (:start ref) (:curves ref)))))]
-                                             (if-let [[k back?] turn]
-                                               (let [[s c] (turned start curves k back?)]
-                                                 [(assoc sub :start s :curves c) turn])
-                                               [sub nil])))
-                                         (range)
-                                         (nth rows r))]
-                         [(conj out (mapv first pairs)) (mapv second pairs)]))
-                     [[] nil]
+                     (fn [[out flips turns] r]
+                       (let [prev   (peek out)
+                             row    (nth rows r)
+                             way    (orientation row)
+                             flip?  (boolean (and (some? prev)
+                                                  (not (zero? way))
+                                                  (= (- way) (orientation prev))))
+                             row    (cond->> row
+                                      flip? (mapv (fn [{:keys [start curves closed?] :as sub}]
+                                                    (if (and closed? (seq curves))
+                                                      (let [[s c] (turned start curves 0 true)]
+                                                        (assoc sub :start s :curves c))
+                                                      sub))))
+                             free   (free-subpaths row)
+                             pairs  (mapv (fn [i {:keys [start curves closed?] :as sub}]
+                                            (let [kind   (get-in kinds [r i])
+                                                  before (when (some? prev) (get-in kinds [(dec r) i]))
+                                                  turn   (when (and closed? (some? prev) (some? kind) (some? before))
+                                                           (if (and (= kind before) (= flip? (peek flips)))
+                                                             (nth turns i)
+                                                             (let [ref (nth prev i)]
+                                                               (best-turn start curves (:start ref) (:curves ref)
+                                                                          (contains? free i)))))]
+                                              (if-let [[k back?] turn]
+                                                (let [[s c] (turned start curves k back?)]
+                                                  [(assoc sub :start s :curves c) turn])
+                                                [sub nil])))
+                                          (range)
+                                          row)]
+                         [(conj out (mapv first pairs)) (conj flips flip?) (mapv second pairs)]))
+                     [[] [] nil]
                      (range (count rows)))]
         (mapv curve-content rows)))))
