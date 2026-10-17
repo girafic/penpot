@@ -321,13 +321,39 @@
     (t/is (= (:id (shape-named result "Matted matte")) (:parent-id (shape-named result "Matte"))))
     (t/is (= (:id (first (:shapes result))) (:parent-id (shape-named result "Between"))))))
 
-(t/deftest a-matted-parent-keeps-no-matte
+(t/deftest a-matted-parent-keeps-its-matte-beside-its-followers
   (let [doc    (-> (matte-document 1)
                    (update :layers conj (layer 3 "Child" [(rect-group [0 0 5 5] [0 0 1 1])] :parent 2)))
+        result (lottie/lottie->shapes doc {:x 0 :y 0})
+        board  (first (:shapes result))
+        group  (shape-named result "Matted matte")
+        node   (shape-named result "Matted")
+        child  (shape-named result "Child")]
+    (t/is (empty? (:skipped result)) "the matte is kept")
+    (t/is (= [(:id group) (:id group)] [(:parent-id (shape-named result "Matte")) (:parent-id node)])
+          "the group holds the matte and the parent's node")
+    (t/is (= (:id board) (:parent-id child)) "the child beside the group, kept to no matte")
+    (t/is (= {:leader (:id node) :from :rest} (get-in (:timeline result) [:tracks (:id child) :follow])))))
+
+(t/deftest a-matted-parent-that-stretches-keeps-no-matte
+  (let [doc    (-> (matte-document 1 :ks (assoc rest-ks :s (anim (kf 0 [100 100 100]) (kf 30 [200 100 100]))))
+                   (update :layers conj (layer 3 "Child" [(rect-group [0 0 5 5] [0 0 1 1])] :parent 2)))
         result (lottie/lottie->shapes doc {:x 0 :y 0})]
-    (t/is (= {:matte 1} (:skipped result)) "its children would be kept to it too")
+    (t/is (= {:matte 1} (:skipped result)) "its children, inside it, would be kept to it too")
     (t/is (nil? (shape-named result "Matted matte")))
     (t/is (nil? (shape-named result "Matte")) "the matte draws nothing")))
+
+(t/deftest a-parent-its-children-follow-fades-itself
+  (let [parent (layer 1 "Parent" [(rect-group [0 0 20 20] [0 1 0 1])]
+                      :ks (assoc rest-ks :p (static [50 50 0]) :o (anim (kf 0 0) (kf 30 100))))
+        child  (layer 2 "Child" [(rect-group [0 0 10 10] [1 0 0 1])] :parent 1
+                      :ks (assoc rest-ks :p (static [30 0 0])))
+        result (lottie/lottie->shapes (document [child parent]) {:x 0 :y 0})
+        node   (shape-named result "Parent")]
+    (t/is (some? (get-in (:timeline result) [:tracks (:id (shape-named result "Child")) :follow])))
+    (t/is (nil? (shape-named result "Parent opacity")) "no board inside it to fade")
+    (t/is (close-pairs? [[0 0] [1000 1]] (keyframes-of result node :opacity))
+          "its follower fades not with it")))
 
 (t/deftest a-matte-goes-into-a-file
   (let [file    (thf/sample-file :file1)

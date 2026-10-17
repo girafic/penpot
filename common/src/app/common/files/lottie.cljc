@@ -782,9 +782,10 @@
   that turns or scales only around its middle, the shape), carries the
   keyframes of its transform. What only its drawing does goes on boards
   inside it when needed (see `inner-roles`); a clip keeps to its own box.
-  The layers it parents follow its node beside it, or move inside it
-  (see `followable?`). The id of the node."
-  [ctx layer children parent-id parent-m]
+  The layers it parents follow its node beside it (in the board
+  `beside`, or `parent-id`), or move inside it (see `followable?`). The
+  id of the node."
+  [ctx layer children parent-id parent-m & {:keys [beside]}]
   (let [tr        (:ks layer)
         rest      (rest-transform tr)
         m         (mult parent-m (:m rest))
@@ -821,7 +822,8 @@
       (let [id      (uuid/next)
             slot    (ctx :reserve)
             {:keys [on-node roles]}
-            (inner-roles {:parent? parent? :span? span? :fades? fades? :opacity opacity
+            ;; the layers that follow it are none of its children
+            (inner-roles {:parent? (and parent? (not follow?)) :span? span? :fades? fades? :opacity opacity
                           :clip? (some? clip) :effects? effects?})
             boards  (loop [roles roles parent-id id acc []]
                       (if-let [role (first roles)]
@@ -870,7 +872,7 @@
         ;; beside its node and over it, following it
         (when follow?
           (doseq [[child grandchildren] children]
-            (ctx :follow (add-layer ctx child grandchildren parent-id m) id)))
+            (ctx :follow (add-layer ctx child grandchildren (or beside parent-id) m) id)))
         id))))
 
 (def ^:private unsupported-layers
@@ -899,16 +901,17 @@
   see `with-mattes`) when it has one: a masked group (see
   `cts/mask-modes`) with the matte at the bottom as its mask, as its `tt`
   says, and the layer over it. The group spans the matte, or both with
-  an inverted matte. A layer that parents others keeps none: they would
-  be kept to it too. The id of what it adds on top: the layer's node, or
-  the group."
+  an inverted matte. The layers it parents follow it beside the group
+  (see `followable?`), or else it keeps none: they would be kept to it
+  too. The id of what it adds on top: the layer's node, or the group."
   [ctx layer children parent-id parent-m]
   (let [matte (::matte layer)]
     (cond
       (nil? matte)
       (add-layer* ctx layer children parent-id parent-m)
 
-      (or (seq children) (contains? unsupported-layers (:ty matte)))
+      (or (and (seq children) (not (followable? layer)))
+          (contains? unsupported-layers (:ty matte)))
       (do (ctx :skip :matte)
           (add-layer* ctx layer children parent-id parent-m))
 
@@ -920,7 +923,7 @@
             _     (when (:tt matte) (ctx :skip :matte))
             _     (add-layer* ctx (assoc matte ::as-matte true) [] id parent-m)
             start (ctx :count)
-            _     (add-layer* ctx layer [] id parent-m)
+            _     (add-layer* ctx layer children id parent-m :beside parent-id)
             mask  (selrect-box (ctx :shape-at (inc slot)))
             box   (if (contains? cfh/inverted-mask-modes mode)
                     (merge-boxes mask (selrect-box (ctx :shape-at start)))
