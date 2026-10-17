@@ -25,11 +25,13 @@
    [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
+   [app.common.types.path :as path]
    [app.common.types.shape.interactions :as cti]
    [app.common.types.shape.layout :as ctl]
    [app.common.types.shape.radius :as ctsr]
@@ -54,7 +56,14 @@
     :shadow-spread :shadow-color :shadow-opacity
     :blur :background-blur
     ;; path trim: the part of the outline the strokes are drawn along
-    :trim-start :trim-end :trim-offset})
+    :trim-start :trim-end :trim-offset
+    ;; the outline of a path, in its own frame (see `outline-of`)
+    :content})
+
+(def style-properties
+  "The properties the keyframe entries of an animation style animate: all
+  but the outline of a path, which no value relative to a layer holds."
+  (disj animatable-properties :content))
 
 (def trim-properties
   "Path trim, as fractions of the outline: the strokes are drawn from
@@ -140,22 +149,46 @@
    [::sm/one-of animatable-properties]
    [:tuple [::sm/one-of animatable-properties] ::sm/safe-int]])
 
-(def schema:keyframe
-  [:map {:title "Keyframe"}
-   [:id ::sm/uuid]
+(def ^:private keyframe-entries
+  "The entries of a keyframe but its property and value (see
+  `schema:keyframe`)."
+  [[:id ::sm/uuid]
    [:time ::sm/safe-int]
-   [:property [::sm/one-of animatable-properties]]
    [:index {:optional true} ::sm/safe-int]
-   [:value [:or ::sm/safe-number clr/schema:hex-color]]
    [:easing {:optional true} schema:easing]
    [:interpolation {:optional true} [::sm/one-of interpolation-types]]
-   ;; Motion path: for `:x` and `:y`, how far along its axis the curve
-   ;; leaves the keyframe towards the next one (`:path-out`) and comes into
-   ;; it from the previous one (`:path-in`), like the handles of a bezier
-   ;; node. Without them the position moves in a straight line.
-   [:path-in {:optional true} ::sm/safe-number]
-   [:path-out {:optional true} ::sm/safe-number]
    [:applied-tokens {:optional true} schema:keyframe-tokens]])
+
+(def schema:keyframe
+  "A keyframe: the value of a property at a time. The outline of a path
+  (`:content`) holds path content and no motion path; the colours a hex
+  colour, the others a number. JSON gives the property as a string, and
+  decoding picks the branch before turning it into a keyword."
+  [:multi {:title "Keyframe"
+           :dispatch (fn [v]
+                       (if (and (map? v) (= "content" (some-> (:property v) name)))
+                         :content
+                         :value))}
+   [:content
+    (into [:map {:title "OutlineKeyframe"}
+           [:property [::sm/one-of #{:content}]]
+           [:value path/schema:content]
+           ;; no motion path
+           [:path-in {:optional true} :nil]
+           [:path-out {:optional true} :nil]]
+          keyframe-entries)]
+   [:value
+    (into [:map {:title "ValueKeyframe"}
+           [:property [::sm/one-of style-properties]]
+           [:value [:or ::sm/safe-number clr/schema:hex-color]]
+           ;; Motion path: for `:x` and `:y`, how far along its axis the
+           ;; curve leaves the keyframe towards the next one (`:path-out`)
+           ;; and comes into it from the previous one (`:path-in`), like the
+           ;; handles of a bezier node. Without them the position moves in
+           ;; a straight line.
+           [:path-in {:optional true} ::sm/safe-number]
+           [:path-out {:optional true} ::sm/safe-number]]
+          keyframe-entries)]])
 
 ;; A preset animation (like Figma's animation styles): an effect over a
 ;; span of time that stays editable. `:in` plays from the effect to the
@@ -226,7 +259,7 @@
   [:map {:title "AnimationStyleKeysEntry"}
    [:id ::sm/uuid]
    [:type [:= :keys]]
-   [:property [::sm/one-of animatable-properties]]
+   [:property [::sm/one-of style-properties]]
    [:index {:optional true} ::sm/safe-int]
    [:start ::sm/safe-int]
    [:duration ::sm/safe-int]
@@ -351,7 +384,13 @@
    [:follow {:optional true} schema:follow]
    [:ik {:optional true} schema:ik]
    ;; A helper layer the exports leave out, as a goal ring (see `set-guide`).
-   [:guide {:optional true} :boolean]])
+   [:guide {:optional true} :boolean]
+   ;; The size of the box the outlines of the `:content` keyframes were
+   ;; made for, which they scale with (see `outline->content`).
+   [:outline-box {:optional true}
+    [:map
+     [:width ::sm/safe-number]
+     [:height ::sm/safe-number]]]])
 
 ;; What playback does at the end of a timeline: stop (`:once`), start
 ;; over (`:loop`) or play back to the start and on (`:ping-pong`).
@@ -808,8 +847,8 @@
              :value value}
       (some? easing) (assoc :easing easing)
       (some? interpolation) (assoc :interpolation interpolation)
-      (some? path-in) (assoc :path-in path-in)
-      (some? path-out) (assoc :path-out path-out)
+      (and (some? path-in) (not= :content property)) (assoc :path-in path-in)
+      (and (some? path-out) (not= :content property)) (assoc :path-out path-out)
       (some? index) (assoc :index index)
       (string? easing-token) (assoc :applied-tokens {:easing easing-token}))))
 
@@ -920,6 +959,98 @@
     (if (mth/almost-zero? (mod rotation 360))
       point
       (gpt/rotate point (box-point shape default-transform-origin) rotation))))
+
+;; OUTLINES
+;;
+;; The keyframes of the outline of a path (`:content`) hold it in the
+;; path's own frame: its content taken back by its rest transform (which
+;; turns and flips it) around its middle, from the top-left of its
+;; selrect, for the size of the box its row was made for (`:outline-box`
+;; of its track). A move, a turn or a flip of the path takes them along, a
+;; resize scales them (see `outline->content`).
+
+(def max-outline-segments
+  "The most segments an outline keyframe holds."
+  4096)
+
+(def max-outline-row-segments
+  "The most segments the outline keyframes of one row hold together: a
+  track goes whole with every edit of its layer."
+  32768)
+
+(defn outline-fits?
+  "Whether `value` is an outline a keyframe can hold: path content that
+  draws something (more than moves), within `max-outline-segments`."
+  [value]
+  (and (path/content? value)
+       (<= (count value) max-outline-segments)
+       (boolean (some #(not= :move-to (:command %)) value))))
+
+(defn outline-row-fits?
+  "Whether the outline keyframes among `keyframes` hold no more than
+  `max-outline-row-segments` segments together."
+  [keyframes]
+  (<= (transduce (comp (filter #(= :content (:property %)))
+                       (map (comp count :value)))
+                 + 0 keyframes)
+      max-outline-row-segments))
+
+(defn- rest-frame
+  "The matrix taking an outline in the own frame of the path `shape` (see
+  `outline-of`) where the path rests: its transform (which turns and
+  flips it) around the middle of its selrect."
+  [shape]
+  (let [selrect (:selrect shape)]
+    (gmt/multiply (gmt/transform-in (grc/rect->center selrect) (:transform shape (gmt/matrix)))
+                  (gmt/translate-matrix (:x selrect) (:y selrect)))))
+
+(defn outline-box
+  "The size of the box of the path `shape` at rest, which the outlines of
+  a row are made for (see `outline->content`)."
+  [shape]
+  {:width (dm/get-in shape [:selrect :width])
+   :height (dm/get-in shape [:selrect :height])})
+
+(defn- outline-scale
+  "How much the outlines of the row `track` grow to fit the path `shape`:
+  its box over the box they were made for, each axis 1 when either is
+  about 0 or the row has no box."
+  [shape track]
+  (let [box   (:outline-box track)
+        rest  (outline-box shape)
+        ratio (fn [k]
+                (let [made (get box k) now (get rest k)]
+                  (if (and (number? made) (number? now) (> made 0.01) (> now 0.01))
+                    (/ now made)
+                    1)))]
+    (gpt/point (ratio :width) (ratio :height))))
+
+(defn outline-of
+  "The outline of the path `shape` in its own frame: its content taken
+  back by its rest transform (which turns and flips it) around its
+  middle, from the top-left of its selrect."
+  [shape]
+  (path/transform-content (path/content (:content shape)) (gmt/inverse (rest-frame shape))))
+
+(defn outline-value
+  "The outline of the path `shape` (see `outline-of`) as a keyframe of the
+  row `track` holds it: for the box its outlines were made for."
+  [shape track]
+  (let [{:keys [x y]} (outline-scale shape track)]
+    (cond-> (outline-of shape)
+      (or (not= 1 x) (not= 1 y))
+      (path/transform-content (gmt/scale-matrix (gpt/point (/ 1 x) (/ 1 y)))))))
+
+(defn outline->content
+  "The content of the path `shape` drawing the outline `value`, a
+  keyframe of the row `track` (see `outline-value`), where the path
+  rests: scaled to its box, turned and flipped as it is."
+  [shape track value]
+  (let [scale (outline-scale shape track)]
+    (path/transform-content value
+                            (cond-> (rest-frame shape)
+                              (or (not= 1 (:x scale)) (not= 1 (:y scale)))
+                              (gmt/multiply (gmt/scale-matrix scale))))))
 
 (defn- ensure-track
   [timeline shape-id]
@@ -2076,9 +2207,10 @@
 
 (defn curved?
   "Whether the segment from the keyframe `from` to `to` follows a motion
-  path (see `schema:keyframe`)."
+  path (see `schema:keyframe`): never an outline."
   [from to]
   (and (not= :step (:interpolation from :linear))
+       (not= :content (:property from))
        (or (some? (:path-out from)) (some? (:path-in to)))))
 
 (defn- segment-value
@@ -3353,15 +3485,20 @@
     (:trim-start :trim-end :trim-offset)
     (d/not-empty? (:strokes shape))
 
+    :content
+    (= :path (:type shape))
+
     true))
 
 (defn keyframe-value-fits?
   "Whether the value of `keyframe` is of the kind its property takes: a
-  hex colour for a colour, a finite number for the others."
+  hex colour for a colour, an outline (see `outline-fits?`) for the
+  outline of a path, a finite number for the others."
   [{:keys [property value]}]
-  (if (color-property? property)
-    (clr/hex-color-string? value)
-    (mth/finite? value)))
+  (cond
+    (color-property? property) (clr/hex-color-string? value)
+    (= :content property)      (outline-fits? value)
+    :else                      (mth/finite? value)))
 
 (defn- relative-value
   "`value` of `property`, of a layer resting at `from`, for a layer

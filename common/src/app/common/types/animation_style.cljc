@@ -104,10 +104,11 @@
   "Whether a new style takes the keyframes of `keyframe`'s row of `track`
   (see `animations->entries`): the row is neither hidden, locked nor
   looping (a loop repeats over the duration of a timeline, which a style
-  does not have)."
+  does not have), nor the outline of a path (see `cta/style-properties`)."
   [track {:keys [property index]}]
   (let [key (cta/slot-key property index)]
-    (not (some #(contains? (get track %) key) [:hidden :locked :loops]))))
+    (and (contains? cta/style-properties property)
+         (not (some #(contains? (get track %) key) [:hidden :locked :loops])))))
 
 (defn keyframe-count
   "How many keyframes the keyframe entries of `entries` hold together (see

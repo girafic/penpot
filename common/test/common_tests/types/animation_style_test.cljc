@@ -17,6 +17,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.animation-style :as ctas]
    [app.common.types.file :as ctf]
+   [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.types.text-units :as tu]
    [app.common.uuid :as uuid]
@@ -673,6 +674,24 @@
       (cta/add-keyframe sid {:time 100 :property :rotation :value 0 :easing :linear})
       (cta/add-keyframe sid {:time 500 :property :rotation :value 90})
       (f)))
+
+(t/deftest saving-a-layer-leaves-its-outline-out
+  (let [sid     (uuid/next)
+        outline (fn [w] (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                                          {:command :line-to :params {:x w :y 0}}
+                                          {:command :line-to :params {:x 0 :y w}}
+                                          {:command :close-path :params {}}]))
+        track   (-> (cta/make-timeline {:board-id (uuid/next)})
+                    (cta/add-keyframe sid {:time 0 :property :x :value 0})
+                    (cta/add-keyframe sid {:time 500 :property :x :value 40})
+                    (cta/add-keyframe sid {:time 0 :property :content :value (outline 10)})
+                    (cta/add-keyframe sid {:time 500 :property :content :value (outline 20)})
+                    (get-in [:tracks sid]))
+        {:keys [entries]} (ctas/animations->entries track pose)
+        use     (ctas/make-use (ctas/make-animation-style {:name "Slide" :entries entries}) (uuid/next) 0)]
+    (t/is (= [:x] (mapv :property entries)) "no style entry holds an outline")
+    (t/is (= [:content :content] (mapv :property (:keyframes (ctas/replace-with-use track use))))
+          "the row stays on the layer")))
 
 (t/deftest saving-a-layer-takes-its-rows-of-keyframes
   (let [{:keys [board rect objects]} (board-and-rect)

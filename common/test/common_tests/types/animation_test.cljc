@@ -5713,3 +5713,105 @@
                  (cta/set-follow thumb {:leader arm-fore})
                  (cta/set-ik thumb {:goal two}))]
       (t/is (= :shared (ctaf/ik-problem tl objects arm-hand))))))
+
+;; OUTLINES
+
+(defn- plain-path
+  "Path content of the corners `points` (`[x y]` pairs), closed."
+  [points]
+  (path/from-plain
+   (-> [{:command :move-to :params (zipmap [:x :y] (first points))}]
+       (into (map (fn [p] {:command :line-to :params (zipmap [:x :y] p)})) (rest points))
+       (conj {:command :close-path :params {}}))))
+
+(defn- path-layer
+  "A path of the corners `points`, at rest, turned `rotation` degrees
+  around its middle and flipped as `flip` (`:x`, `:y` or both) says."
+  [points & {:keys [rotation flip]}]
+  (let [shape  (cts/setup-shape {:type :path :content (plain-path points)})
+        center (gsh/shape->center shape)
+        shape  (cond-> shape
+                 (some? rotation)
+                 (gsh/transform-shape (ctm/rotation-modifiers shape center rotation)))
+        sx     (if (contains? #{:x :both} flip) -1 1)
+        sy     (if (contains? #{:y :both} flip) -1 1)]
+    (cond-> shape
+      (some? flip)
+      (gsh/transform-shape (ctm/resize-modifiers (gpt/point sx sy) (gsh/shape->center shape)
+                                                 (:transform shape) (:transform-inverse shape))))))
+
+(defn- close-contents?
+  [a b tolerance]
+  (let [a (vec a) b (vec b)]
+    (and (= (count a) (count b))
+         (every? true? (map (fn [sa sb]
+                              (and (= (:command sa) (:command sb))
+                                   (every? (fn [k] (mth/close? (get-in sa [:params k] 0) (get-in sb [:params k] 0) tolerance))
+                                           [:x :y :c1x :c1y :c2x :c2y])))
+                            a b)))))
+
+(def ^:private triangle [[20 30] [60 30] [20 70]])
+
+(t/deftest an-outline-is-a-keyframe-of-a-path
+  (let [sid      (uuid/next)
+        outline  (plain-path [[0 0] [40 0] [0 40]])
+        tl       (-> (mk-timeline)
+                     (cta/add-keyframe sid {:time 0 :property :content :value outline})
+                     (cta/add-keyframe sid {:time 500 :property :content :value (plain-path [[0 0] [40 0] [40 40]])})
+                     (cta/add-keyframe sid {:time 0 :property :x :value 10})
+                     (cta/add-keyframe sid {:time 0 :property :fill-color :index 0 :value "#ff0000"}))
+        encode   (sm/encoder cta/schema:timeline (sm/json-transformer))
+        decode   (sm/decoder cta/schema:timeline (sm/json-transformer))
+        content? #(= :content (:property %))
+        on-row   (fn [f] (update-in tl [:tracks sid :keyframes] (partial mapv #(cond-> % (content? %) f))))]
+    (t/is (cta/valid-timeline? tl))
+    (t/is (= tl (-> tl encode json-roundtrip decode)) "its outline goes as a path string, a colour as a colour")
+    (t/is (not (cta/valid-timeline? (on-row #(assoc % :value 5)))) "a number")
+    (t/is (not (cta/valid-timeline? (cta/add-keyframe (mk-timeline) sid {:time 0 :property :x :value outline})))
+          "an outline on a number")
+    (t/is (not (cta/valid-timeline? (on-row #(assoc % :path-in 3)))) "no motion path")
+    (t/is (nil? (:path-in (cta/make-keyframe {:property :content :value outline :path-in 3}))))
+    (t/is (cta/keyframe-value-fits? {:property :content :value outline}))
+    (t/is (not (cta/keyframe-value-fits? {:property :content :value (path/from-plain [{:command :move-to :params {:x 0 :y 0}}])}))
+          "an outline that only moves draws nothing")
+    (t/is (not (cta/keyframe-value-fits? {:property :content :value 4})))
+    (t/is (not (sm/validate cta/schema:keys-entry
+                            {:id (uuid/next) :type :keys :property :content :start 0 :duration 100
+                             :keyframes [{:time 0 :value 1}]}))
+          "no style entry holds an outline")))
+
+(t/deftest only-a-path-shows-an-outline
+  (let [kf {:property :content :value (plain-path triangle)}]
+    (t/is (cta/fits-keyframe? (path-layer triangle) kf))
+    (doseq [type [:rect :circle :bool]]
+      (t/is (not (cta/fits-keyframe? (cts/setup-shape {:type type :x 0 :y 0 :width 10 :height 10}) kf))
+            (str type)))))
+
+(t/deftest an-outline-is-held-in-the-frame-of-its-path
+  (t/is (close-contents? (plain-path [[0 0] [40 0] [0 40]]) (cta/outline-of (path-layer triangle)) 1e-3)
+        "from the top-left of its box")
+  (doseq [[label opts] [["at rest" {}]
+                        ["turned" {:rotation 30}]
+                        ["flipped" {:flip :x}]
+                        ["flipped up" {:flip :y}]
+                        ["turned and flipped" {:rotation 30 :flip :both}]]]
+    (let [shape (apply path-layer triangle (mapcat identity opts))]
+      (t/is (close-contents? (:content shape) (cta/outline->content shape nil (cta/outline-of shape)) 1e-3)
+            (str label ": its own outline draws it where it rests"))
+      (t/is (close-contents? (plain-path [[0 0] [40 0] [0 40]]) (cta/outline-of shape) 1e-3)
+            (str label ": the same outline in its own frame"))))
+  (let [shape (path-layer triangle)
+        half  {:outline-box {:width 20 :height 20}}]
+    (t/is (close-contents? (plain-path [[20 30] [100 30] [20 110]])
+                           (cta/outline->content shape half (plain-path [[0 0] [40 0] [0 40]]))
+                           1e-3)
+          "a row made for a box half as big grows twice")
+    (t/is (close-contents? (:content shape) (cta/outline->content shape half (cta/outline-value shape half)) 1e-3)
+          "its value for that row draws it")
+    (t/is (= {:width 40.0 :height 40.0} (update-vals (cta/outline-box shape) double)))))
+
+(t/deftest an-outline-row-has-a-budget
+  (let [big (plain-path (mapv (fn [i] [i (mod i 7)]) (range 4000)))]
+    (t/is (cta/outline-fits? big))
+    (t/is (not (cta/outline-row-fits? (repeat 9 {:property :content :value big}))))
+    (t/is (cta/outline-row-fits? (repeat 8 {:property :content :value big})))))
