@@ -34,7 +34,8 @@
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
-   [clojure.set :as set]))
+   [clojure.set :as set]
+   [clojure.walk :as walk]))
 
 ;; --- Values -----------------------------------------------------------------
 
@@ -1028,6 +1029,24 @@
            [[] {}]
            shapes)))
 
+(defn- with-slots
+  "`doc` with each property of its layers and assets that names a slot
+  (`sid`) holding the value of that slot (`slots` of the document, what a
+  theme can change), as the players show it; a property whose slot is
+  missing keeps its own value."
+  [doc]
+  (let [slots (:slots doc)
+        slot  (fn [node]
+                (if-let [p (when (and (map? node) (string? (:sid node)))
+                             (get-in slots [(keyword (:sid node)) :p]))]
+                  (merge (dissoc node :a :k) p)
+                  node))]
+    (if (empty? slots)
+      doc
+      (-> doc
+          (update :layers #(walk/prewalk slot %))
+          (update :assets #(walk/prewalk slot %))))))
+
 (defn lottie->shapes
   "The shapes and the timeline of the Lottie document `doc` (parsed JSON
   with keyword keys): a board `id` named `name` with its top left corner
@@ -1035,10 +1054,12 @@
   and the bottom-most first, ready to be added in that order; and the
   timeline of the board. `images` maps the id of an image asset to the
   uploaded media object (`:id`, `:width`, `:height`, `:mtype`) with its
-  Lottie size (`:w`, `:h`). `:skipped` counts what a board cannot show,
-  by feature."
+  Lottie size (`:w`, `:h`). A property that names a slot plays its value
+  (see `with-slots`). `:skipped` counts what a board cannot show, by
+  feature."
   [doc {:keys [id name x y images background]}]
-  (let [id       (or id (uuid/next))
+  (let [doc      (with-slots doc)
+        id       (or id (uuid/next))
         fr       (let [fr (:fr doc)] (if (and (number? fr) (pos? fr)) fr 30))
         comp-ip  (scalar (:ip doc))
         comp-op  (max (inc comp-ip) (scalar (:op doc)))

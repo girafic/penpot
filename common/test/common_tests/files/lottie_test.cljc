@@ -109,6 +109,22 @@
     (t/is (empty? (get-in result [:timeline :tracks])))
     (t/is (empty? (:skipped result)))))
 
+(t/deftest a-property-plays-the-value-of-its-slot
+  (let [slotted (fn [sid] (assoc-in (rect-group [0 0 10 10] [1 1 1 1]) [:it 1 :c :sid] sid))
+        doc     (document [(layer 1 "Snow" [(slotted "Snow")])
+                           (layer 2 "Roof" [(slotted "Roof")])
+                           (layer 3 "Plain" [(slotted "Missing")])]
+                          :slots {:Snow {:p (static [1 0 0])}
+                                  :Roof {:p (anim (kf 0 [0 0 1]) (kf 30 [0 1 0]))}})
+        result  (lottie/lottie->shapes doc {:x 0 :y 0})
+        fill    #(get-in (shape-named result %) [:fills 0 :fill-color])]
+    (t/is (= "#ff0000" (fill "Snow")) "as the players show it, not the colour in the layer")
+    (t/is (= [[0 "#0000ff"] [1000 "#00ff00"]]
+             (mapv (juxt :time :value)
+                   (cta/property-keyframes (:timeline result) (:id (shape-named result "Roof")) :fill-color 0)))
+          "a slot that plays")
+    (t/is (= "#ffffff" (fill "Plain")) "a slot that is missing: its own colour")))
+
 (t/deftest layer-keyframes-become-keyframes
   (let [ks     (assoc rest-ks
                       :p (static [40 25 0]) :a (static [40 25 0])
