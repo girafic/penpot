@@ -5944,10 +5944,17 @@
                   (cta/add-keyframe sid {:time 0 :property :content :value (unique-polygon 3 40)})
                   (cta/add-keyframe sid {:time 1000 :property :content :value (unique-polygon 6 40)})
                   (cta/add-animation sid {:type :fade :start 0 :duration 500}))]
-    (with-redefs [morph/match (fn [values & more] (swap! calls inc) (apply match values more))]
-      (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 300)
-      (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 600))
-    (t/is (= 1 @calls) "rows built anew each time match once")))
+    ;; counted on the JVM: in JS the callers of `morph/match`, which has
+    ;; two arities, call one of them directly, past any redefinition
+    ;; (`matched-rows-are-kept-by-row` checks the cache on both)
+    #?(:clj
+       (do (with-redefs [morph/match (fn [values & more] (swap! calls inc) (apply match values more))]
+             (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 300)
+             (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 600))
+           (t/is (= 1 @calls) "rows built anew each time match once"))
+       :cljs
+       (t/is (= (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 300)
+                (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 300))))))
 
 (t/deftest the-exports-keep-the-structure-of-outlines
   (let [sid      (uuid/next)
