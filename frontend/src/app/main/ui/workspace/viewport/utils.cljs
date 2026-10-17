@@ -8,6 +8,7 @@
   (:require
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
+   [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.main.ui.css-cursors :as cur]
    [app.main.ui.formats :refer [format-number]]))
@@ -112,3 +113,47 @@
                 (/ 1 zoom) (/ 1 zoom)
                 ;; translate
                 (* zoom (:x label-pos)) (* zoom (:y label-pos)))))))
+
+(defn with-shown
+  "`objects` with the shapes of `ids` where the animation shows them:
+  `shown` a delay of `cltl/shown-shapes`, forced only when there are
+  `ids`."
+  [objects shown ids]
+  (if (empty? ids)
+    objects
+    (let [shown @shown]
+      (reduce (fn [objects id]
+                (if-let [shape (get shown id)]
+                  (assoc objects id shape)
+                  objects))
+              objects
+              ids))))
+
+(defn- apply-wasm-modifiers-to-ids
+  "`objects` with the shapes of `id-set` moved by `wasm-modifiers`
+  (`{id transform}`). During a WASM drag, `wasm-modifiers` can list every
+  propagated descendant (large variants); the SVG outlines only need the
+  geometry of the selected, hovered and highlighted shapes, not the
+  whole page."
+  [objects wasm-modifiers id-set]
+  (if (or (empty? wasm-modifiers) (empty? id-set))
+    objects
+    (reduce
+     (fn [objs id]
+       (if-let [t (get wasm-modifiers id)]
+         (if (contains? objs id)
+           (update objs id gsh/apply-transform t)
+           objs)
+         objs))
+     objects
+     id-set)))
+
+(defn outline-objects
+  "`objects` with the shapes of `ids`, those the outlines of the WASM
+  viewport draw, as it shows them: moved by `wasm-modifiers` while
+  dragged and, in motion mode while paused, where the animation shows
+  them (`shown`, a delay of `cltl/shown-shapes`, see `with-shown`), a
+  path with the outline it has at the playhead."
+  [objects wasm-modifiers ids shown]
+  (cond-> (apply-wasm-modifiers-to-ids objects wasm-modifiers ids)
+    (some? shown) (with-shown shown ids)))

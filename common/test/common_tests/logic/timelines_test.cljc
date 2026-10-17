@@ -24,9 +24,11 @@
    [app.common.test-helpers.shapes :as ths]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.modifiers :as ctm]
+   [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.types.text :as txt]
    [app.common.uuid :as uuid]
@@ -477,6 +479,42 @@
         timeline  (get (cltl/instance-timelines objects board nil main-page) [:copy copy (thi/id :main)])]
     ;; from where it is, twice as far: 50 in the main, 100 here
     (t/is (= [at (+ at 100)] (x-values timeline copy-rect)))))
+
+(defn- outline-corners
+  "The path content of the corners `points`, closed."
+  [points]
+  (path/from-plain
+   (-> [{:command :move-to :params (zipmap [:x :y] (first points))}]
+       (into (map (fn [p] {:command :line-to :params (zipmap [:x :y] p)})) (rest points))
+       (conj {:command :close-path :params {}}))))
+
+(t/deftest a-scaled-copy-plays-the-morph-of-its-main-scaled
+  ;; the main holds a triangle (40 by 40) whose outline goes to a flat
+  ;; one (40 by 20); a copy twice as big draws it twice as big
+  (let [file      (-> (thf/sample-file :file1)
+                      (tho/add-simple-component :anim :main :main-path
+                                                :root-params {:x 0 :y 0 :width 200 :height 200}
+                                                :child-params {:type :path
+                                                               :content (outline-corners [[10 20] [50 20] [10 60]])})
+                      (tho/add-frame :board-b :x 1000 :y 100 :width 400 :height 300)
+                      (thc/instantiate-component :anim :copy :parent-label :board-b))
+        main-path (get-in (thf/current-page file) [:objects (thi/id :main-path)])
+        tl        (-> (cta/make-timeline {:board-id (thi/id :main) :duration 1000})
+                      (cta/set-outline-at main-path 0 (ctao/outline-of main-path))
+                      (cta/set-outline-at main-path 1000 (outline-corners [[0 0] [40 0] [40 20]])))
+        file      (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                              (pcb/with-page (thf/current-page file))
+                                              (pcb/set-timeline (thi/id :main) tl)))
+        {:keys [objects board copy copy-rect timelines]} (component-scene file)
+        objects   (scale-copy objects copy 2)
+        timeline  (get (cltl/instance-timelines objects board nil (constantly {:objects objects :timelines timelines}))
+                       [:copy copy (thi/id :main)])
+        track     (get-in timeline [:tracks copy-rect])
+        end       (:value (last (cta/property-keyframes timeline copy-rect :content)))
+        drawn     (path/calc-selrect (ctao/outline->content (get objects copy-rect) track end))]
+    (t/is (some? end) "the copy plays the outline of the main")
+    (t/is (= [80 40] [(mth/round (:width drawn)) (mth/round (:height drawn))])
+          "twice as big, through the box its row was made for")))
 
 (t/deftest a-component-in-a-copy-plays-its-own-main
   (let [file      (-> (thf/sample-file :file1)

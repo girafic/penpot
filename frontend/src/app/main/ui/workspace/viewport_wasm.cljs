@@ -100,39 +100,6 @@
   [selected objects modifiers]
   (apply-modifiers-to-objects objects (select-keys modifiers selected)))
 
-(defn- with-shown
-  "`objects` with the shapes of `ids` where the animation shows them:
-  `shown` a delay of `cltl/shown-shapes`, forced only when there are
-  `ids`."
-  [objects shown ids]
-  (if (empty? ids)
-    objects
-    (let [shown @shown]
-      (reduce (fn [objects id]
-                (if-let [shape (get shown id)]
-                  (assoc objects id shape)
-                  objects))
-              objects
-              ids))))
-
-(defn- apply-wasm-modifiers-to-ids
-  "Like `apply-modifiers-to-objects`, but only updates ids in `id-set`. During WASM
-  drag, `wasm-modifiers` can list every propagated descendant (large variants); SVG
-  outlines only need geometry for `selected` / hover / highlight — not the whole page."
-  [objects wasm-modifiers id-set]
-  (if (or (empty? wasm-modifiers) (empty? id-set))
-    objects
-    (reduce
-     (fn [objs id]
-       (if-let [t (get wasm-modifiers id)]
-         (if (contains? objs id)
-           (update objs id gsh/apply-transform t)
-           objs)
-         objs))
-     objects
-     id-set)))
-
-
 (defn- outline-wasm-source-ids
   "Superset of shape ids that `shape-outlines` may look up (all outline usages here)."
   [base-objects selected highlighted edition hover-ids hover frame-hover]
@@ -259,7 +226,7 @@
         (mf/with-memo
           [base-objects wasm-modifiers selected shown]
           (if (some? shown)
-            (with-shown base-objects shown selected)
+            (utils/with-shown base-objects shown selected)
             (apply-modifiers-to-selected selected base-objects wasm-modifiers)))
 
         selected-shapes   (mf/with-memo [selected objects-modified]
@@ -343,10 +310,7 @@
         objects-for-outlines
         (mf/with-memo
           [base-objects wasm-modifiers outline-wasm-ids shown]
-          (cond-> (if (seq wasm-modifiers)
-                    (apply-wasm-modifiers-to-ids base-objects wasm-modifiers outline-wasm-ids)
-                    base-objects)
-            (some? shown) (with-shown shown outline-wasm-ids)))
+          (utils/outline-objects base-objects wasm-modifiers outline-wasm-ids shown))
 
         zoom              (d/check-num zoom 1)
 

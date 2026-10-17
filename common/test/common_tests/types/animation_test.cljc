@@ -6009,6 +6009,18 @@
     (t/is (= (into #{} (map turn) #{[20.0 30.0] [60.0 30.0] [60.0 50.0]}) (corner-points (:content shown)))
           "turned a quarter around the middle of the path at rest")))
 
+(t/deftest an-outline-scales-with-its-path
+  (let [{:keys [objects tl id bid]}
+        (morph-scene (fn [tl id]
+                       (-> tl
+                           (cta/add-keyframe id {:time 0 :property :width :value 40 :easing :linear})
+                           (cta/add-keyframe id {:time 1000 :property :width :value 80})
+                           (cta/add-keyframe id {:time 0 :property :height :value 40 :easing :linear})
+                           (cta/add-keyframe id {:time 1000 :property :height :value 80}))))
+        shown (get (cltl/shown-shapes {bid tl} objects 1000) id)]
+    (t/is (= #{[0.0 10.0] [80.0 10.0] [80.0 50.0]} (corner-points (:content shown)))
+          "the flat triangle twice as big, around the middle of the path at rest")))
+
 (defn- outline-size
   "The width and height of the box of `content`."
   [content]
