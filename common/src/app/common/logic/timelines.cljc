@@ -681,6 +681,21 @@
   [objects timelines files board-id]
   (instance-timelines objects board-id (get timelines board-id) (main-page-of files)))
 
+(defn guide-ids
+  "The helper layers of the board `board-id` of `page`, as goal rings (see
+  `cta/guide?`), which no export nor code shows: of its own timeline and
+  of the component copies in it (`files` holds the files of their
+  components, see `copy-timelines`)."
+  [page files board-id]
+  (let [objects   (:objects page)
+        timelines (:timelines page)]
+    (into #{}
+          (comp (mapcat :tracks)
+                (keep (fn [[id track]] (when (:guide track) id)))
+                (filter #(contains? objects %)))
+          (cons (get timelines board-id)
+                (vals (copy-timelines objects timelines files board-id))))))
+
 (defn with-copies-clock
   "`timeline`, of a board, keeping time with the animations of the
   component copies in it, `copies` (see `instance-timelines`), while it

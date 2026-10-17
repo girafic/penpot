@@ -1702,6 +1702,21 @@
           (t/is (and (mth/close? (:x g) (:x w) 0.5) (mth/close? (:y g) (:y w) 0.5))
                 "the exports bake it alike"))))))
 
+(t/deftest the-guides-of-a-board-are-its-own-and-those-of-its-copies
+  (let [file    (rig-component-file)
+        main    (thi/id :rig-main)
+        tl      (cta/set-guide (get-in (thf/current-page file) [:timelines main]) (thi/id :ball) true)
+        file    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                            (pcb/with-page (thf/current-page file))
+                                            (pcb/set-timeline main tl)))
+        page    (thf/current-page file)
+        objects (:objects page)
+        guides  #(cltl/guide-ids page {(:id file) file} (thi/id %))]
+    (t/is (= #{(thi/id :ball)} (guides :rig-main)) "its own")
+    (t/is (= #{(played-in objects (thi/id :copy) :ball)} (guides :board-b)) "the ring of a copy")
+    (t/is (= #{(played-in objects (thi/id :copy2) :ball)} (guides :board-c)) "of a copy in a copy")
+    (t/is (empty? (cltl/guide-ids page {} (thi/id :board-b))) "none without the files of the components")))
+
 (t/deftest a-layer-follows-one-of-its-board-only
   (let [file    (-> (following-file)
                     (tho/add-group :group :parent-label :board-a)

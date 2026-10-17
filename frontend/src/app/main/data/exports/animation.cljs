@@ -17,6 +17,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.modifiers :as cgm]
    [app.common.geom.rect :as grc]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.render-wasm.api.select :as wselect]
    [app.common.types.animation :as cta]
@@ -1897,21 +1898,6 @@
                     (map-indexed vector drawn))]
       {:images images :fonts fonts :objects view})))
 
-(defn guide-ids
-  "The helper layers of the board `board-id` of `page` the exports leave
-  out, as goal rings (see `cta/guide?`): of its own timeline and of the
-  component copies in it (`files` holds the files of their components,
-  see `dwa/copy-timelines`)."
-  [page files board-id]
-  (let [objects   (:objects page)
-        timelines (:timelines page)]
-    (into #{}
-          (comp (mapcat :tracks)
-                (keep (fn [[id track]] (when (:guide track) id)))
-                (filter #(contains? objects %)))
-          (cons (get timelines board-id)
-                (vals (dwa/copy-timelines objects timelines files board-id))))))
-
 (defn- without-layers
   "`objects` without the layers `ids`."
   [objects ids]
@@ -1941,11 +1927,12 @@
   "A promise of the markup export (`:svg` `:lottie` `:dotlottie`) of
   `opts` (see `run-export`): the pictures of its layers one at a time,
   so it stops between them when `cancelled?`. The helper layers (see
-  `guide-ids`) are left out, once what reaches them plays by keyframes."
+  `cltl/guide-ids`) are left out, once what reaches them plays by
+  keyframes."
   [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled? ids? bbox?
            outline? preview?]}]
   (let [lottie?  (contains? #{:lottie :dotlottie} format)
-        guides   (guide-ids page files board-id)
+        guides   (cltl/guide-ids page files board-id)
         ;; Lottie makes some followers children of their leaders
         tl       (dwa/board-export-timeline page files board-id :bake (if lottie? :lottie true))
         objects  (without-layers (:objects page) guides)
@@ -2050,7 +2037,7 @@
   :name :ext :mtype}` with what `export-notes` tells, `{:status
   :unavailable}` (no codec), or `{:status :nothing}` (nothing plays);
   `cancel` makes it reject with `:export-cancelled` at its next frame or
-  picture. The helper layers (see `guide-ids`) are in no export."
+  picture. The helper layers (see `cltl/guide-ids`) are in no export."
   [{:keys [page files board-id] :as ctx} params]
   (let [cancel? (atom false)
         opts    (-> (merge ctx params)
@@ -2058,7 +2045,7 @@
                     (assoc :cancelled? #(deref cancel?)))]
     {:cancel  #(reset! cancel? true)
      :promise (guides-hidden
-               (:bridge opts) (:objects page) (guide-ids page files board-id)
+               (:bridge opts) (:objects page) (cltl/guide-ids page files board-id)
                #(cond
                   (nil? (dwa/board-export-timeline page files board-id))
                   (js/Promise.resolve {:status :nothing})

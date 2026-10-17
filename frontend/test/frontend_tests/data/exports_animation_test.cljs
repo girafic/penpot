@@ -8,6 +8,7 @@
   (:require
    [app.common.data :as d]
    [app.common.files.changes-builder :as pcb]
+   [app.common.logic.timelines :as cltl]
    [app.common.test-helpers.components :as cthc]
    [app.common.test-helpers.compositions :as ctho]
    [app.common.test-helpers.files :as cthf]
@@ -356,7 +357,7 @@
         calls  (atom [])
         bridge {:use-shape #(swap! calls conj [:use %])
                 :set-shape-hidden #(swap! calls conj [:hidden %])}]
-    (t/is (= #{cid} (dea/guide-ids page {} bid)))
+    (t/is (= #{cid} (cltl/guide-ids page {} bid)))
     (t/is (empty? (:tracks (dwa/board-export-timeline page {} bid :bake true)))
           "the keyframe exports play nothing of it")
     (t/async
@@ -409,7 +410,7 @@
         ring   (d/seek #(= (cthi/id :ring) (get-in page [:objects % :shape-ref]))
                        (keys (:objects page)))]
     (t/is (some? ring))
-    (t/is (contains? (dea/guide-ids page files host) ring) "the ring of the copy is a guide")
+    (t/is (contains? (cltl/guide-ids page files host) ring) "the ring of the copy is a guide")
     (t/is (nil? (get-in (dwa/board-export-timeline page files host :bake true) [:tracks ring]))
           "the keyframe exports play nothing of it")))
 

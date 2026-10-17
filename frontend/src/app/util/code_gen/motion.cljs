@@ -12,11 +12,13 @@
   with the classes the HTML of the Inspect gives the shapes."
   (:require
    [app.common.animation.css :as acss]
+   [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.logic.timelines :as cltl]
    [app.common.types.animation :as cta]
    [app.common.types.animation-code :as ctac]
+   [app.common.types.shape-tree :as ctst]
    [app.util.code-gen.common :as cgc]
    [app.util.code-gen.style-css-values :as sv]
    [cuerdas.core :as str]))
@@ -51,6 +53,35 @@
         boards  (->> (into #{} (keep #(cfh/get-shape-id-root-frame objects %)) ids)
                      (sort-by (fn [id] [(dm/get-in objects [id :name]) (str id)])))]
     (into [] (keep #(code-timelines page files %)) boards)))
+
+(defn guide-ids
+  "The helper layers of the boards the shapes of `ids` of `page` are in,
+  as goal rings (see `cltl/guide-ids`), which the code of the Inspect
+  leaves out as the exports do; `files` holds the files of the
+  components, by id."
+  [page files ids]
+  (let [objects (:objects page)]
+    (into #{}
+          (comp (keep #(cfh/get-shape-id-root-frame objects %))
+                (distinct)
+                (mapcat #(cltl/guide-ids page files %)))
+          ids)))
+
+(defn without-guides
+  "`[objects shapes]`: `objects` and the selected `shapes` of them (with
+  the children of each) without the helper layers of the boards those
+  are in (see `guide-ids`), which the code of the Inspect leaves out as
+  the exports do; `page` has the timelines, `files` the files of the
+  components, by id."
+  [page files objects shapes]
+  (let [guides (guide-ids page files (map :id shapes))]
+    (if (empty? guides)
+      [objects shapes]
+      [(:objects (reduce #(ctst/delete-shape %1 %2 true) {:objects objects} guides))
+       (into []
+             (comp (remove #(contains? guides (:id %)))
+                   (map #(d/update-when % :shapes (partial filterv (complement guides)))))
+             shapes)])))
 
 (defn code-units
   "`{text-id bases}`: the texts of `codes` (see `code-of-boards`) the code

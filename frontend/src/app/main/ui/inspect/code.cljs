@@ -121,6 +121,14 @@
         motion?        (features/use-feature "animation/v1")
         page           (motion/use-motion-page from page-id objects)
 
+        ;; without the helper layers of the animation, as goal rings,
+        ;; which no code shows
+        [objects shapes]
+        (mf/with-memo [motion? page libraries objects shapes]
+          (if motion?
+            (cgm/without-guides page libraries objects shapes)
+            [objects shapes]))
+
         shapes
         (mf/with-memo [shapes frame]
           (mapv #(gsh/translate-to-frame % frame) shapes))

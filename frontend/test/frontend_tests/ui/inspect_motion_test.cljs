@@ -105,6 +105,29 @@
     (t/is (zero? (anim-count css copy-rect)))
     (t/is (nil? (cgm/animation-css page files #{})) "nothing selected, nothing")))
 
+(t/deftest the-code-of-the-inspect-leaves-the-helper-layers-out
+  (let [{:keys [page files board]}
+        (scene (fn [timeline _]
+                 (-> timeline
+                     (cta/add-keyframe (cthi/id :own) {:time 0 :property :x :value 300})
+                     (cta/set-guide (cthi/id :own) true))))
+        objects (:objects page)
+        own     (cthi/id :own)
+        class   (cgc/shape->selector (get objects own))
+        html    (fn [objects shapes] (cg/generate-markup-code objects "html" shapes))
+        css     (fn [objects shapes] (cg/generate-style-code objects "css" shapes (vals objects)))
+        [objects' shapes'] (cgm/without-guides page files objects [(get objects board)])]
+    (t/is (= #{own} (cgm/guide-ids page files [board])))
+    (t/is (= #{own} (cgm/guide-ids page files [own])) "selected itself")
+    (t/is (str/includes? (html objects [(get objects board)]) class) "a helper layer, before")
+    (t/is (not (contains? objects' own)))
+    (t/is (not (str/includes? (html objects' shapes') class)) "the HTML of its board without it")
+    (t/is (not (str/includes? (css objects' shapes') class)) "the CSS too")
+    (t/is (empty? (second (cgm/without-guides page files objects [(get objects own)])))
+          "nothing of it, selected itself")
+    (t/is (identical? objects (first (cgm/without-guides page files objects [(get objects (cthi/id :main))])))
+          "a board with no helper layers, the same objects")))
+
 (t/deftest a-turned-layer-keeps-its-turn-in-the-css
   (let [turn   (fn [page id]
                  (update-in page [:objects id] assoc
