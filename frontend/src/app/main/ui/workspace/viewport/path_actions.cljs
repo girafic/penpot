@@ -41,6 +41,12 @@
   (deprecated-icon/icon-xref :snap (stl/css :snap-icon :pathbar-icon)))
 
 ;; Handler behavior icons: mirror, aligned, and independent.
+(def ^:private first-point-icon
+  (deprecated-icon/icon-xref :pin (stl/css :pathbar-icon)))
+
+(def ^:private reverse-direction-icon
+  (deprecated-icon/icon-xref :switch (stl/css :pathbar-icon)))
+
 (def ^:private handler-mirror-icon
   (deprecated-icon/icon-xref :handlers-equal (stl/css :pathbar-icon)))
 
@@ -234,6 +240,23 @@
          (fn [_]
            (st/emit! (drp/toggle-snap))))
 
+        ;; in an edit of an outline keyframe at the playhead, its first
+        ;; point and its way round (see `drp/start-at-node`)
+        outline-edit?   (true? (:outline-edit state))
+        one-node?       (= 1 (count selected-nodes))
+
+        on-first-point
+        (mf/use-fn
+         (mf/deps one-node?)
+         (fn [_]
+           (when one-node?
+             (st/emit! (drp/start-at-node)))))
+
+        on-reverse-direction
+        (mf/use-fn
+         (fn [_]
+           (st/emit! (drp/reverse-direction))))
+
         ;; Show node actions only when they apply.
         structural-visible? (or (:merge-nodes enabled-buttons)
                                 (:join-nodes enabled-buttons)
@@ -312,6 +335,19 @@
      (when handler-visible?
        [:> handler-type-menu* {:active-type active-handler-type
                                :on-select on-set-handler-type}])
+
+     ;; The first point and the way round of an outline keyframe
+     (when outline-edit?
+       [:*
+        [:div {:class (stl/css :separator)}]
+        [:div {:class (stl/css :sub-actions-group)}
+         (when one-node?
+           [:> topbar-button* {:title (tr "workspace.path.actions.first-point")
+                               :on-click on-first-point
+                               :icon first-point-icon}])
+         [:> topbar-button* {:title (tr "workspace.path.actions.reverse-direction")
+                             :on-click on-reverse-direction
+                             :icon reverse-direction-icon}]]])
 
      (when middle-visible?
        [:div {:class (stl/css :separator)}])

@@ -6680,6 +6680,14 @@ msgid "workspace.header.menu.show-timeline"
 msgstr "Show animation timeline"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.outline-auto"
+msgstr "Auto"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.outline-auto-title"
+msgstr "Match the first point of this keyframe automatically again"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.edit-outline"
 msgstr "Edit at playhead"
 
@@ -9501,6 +9509,14 @@ msgstr "Move nodes (%s)"
 #: src/app/main/ui/workspace/viewport/path_actions.cljs:292
 msgid "workspace.path.actions.separate-nodes"
 msgstr "Separate nodes (%s)"
+
+#: src/app/main/ui/workspace/viewport/path_actions.cljs
+msgid "workspace.path.actions.first-point"
+msgstr "First point of the morph: the keyframe before pairs its first point with this node"
+
+#: src/app/main/ui/workspace/viewport/path_actions.cljs
+msgid "workspace.path.actions.reverse-direction"
+msgstr "Reverse direction of the morph"
 
 #: src/app/main/ui/workspace/viewport/path_actions.cljs:322
 msgid "workspace.path.actions.snap-nodes"

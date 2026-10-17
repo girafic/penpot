@@ -236,8 +236,12 @@
           segments))
 
 (defn- closed?
+  "Whether the subpath `slice` is closed: by a close, or ending where it
+  starts, as the path editor holds it (see `close-subpaths`)."
   [slice]
-  (= :close-path (:command (peek slice))))
+  (let [end (some-> (peek slice) helpers/segment->point)]
+    (or (= :close-path (:command (peek slice)))
+        (and (> (count slice) 2) (some? end) (pt= (helpers/segment->point (first slice)) end)))))
 
 (defn- body
   "The segments of the subpath `slice` but its move-to and close; a closed
@@ -260,6 +264,13 @@
           (pop segs)
           segs)
         (conj {:command :close-path :params {}}))))
+
+(defn closed-starts
+  "The first point of each closed subpath of `content` (see `closed?`)."
+  [content]
+  (into []
+        (comp (filter closed?) (map #(helpers/segment->point (first %))))
+        (slices (vec content))))
 
 (defn start-at
   "The plain segments of `content` with its closed subpath that has a node

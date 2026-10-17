@@ -477,8 +477,20 @@
     ptk/UpdateEvent
     (update [_ state]
       (if (outline-edit? state)
-        (fixed-start state (process-path-tool (fn [content points]
-                                                (path/start-subpath-at content (first points)))))
+        (let [id       (st/get-path-id state)
+              content  (st/get-path state :content)
+              selected (helpers/selected-node-indices content (st/get-selection state id))
+              point    (first (helpers/node-positions content selected))
+              after    (fixed-start state (process-path-tool (fn [content _]
+                                                               (path/start-subpath-at content point))))
+              ;; the node stays selected, now the first of its subpath
+              index    (when (some? point)
+                         (d/index-of-pred (vec (st/get-path after :content))
+                                          #(and (= :move-to (:command %))
+                                                (< (gpt/distance point (gpt/point (dm/get-in % [:params :x]) (dm/get-in % [:params :y]))) 0.1))))]
+          (cond-> after
+            (some? index)
+            (assoc-in [:workspace-local :edit-path id :selection] (assoc helpers/empty-selection :nodes #{index}))))
         state))))
 
 (defn reverse-direction

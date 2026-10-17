@@ -98,6 +98,12 @@
   [content point]
   (impl/from-plain (subpath/start-at content point)))
 
+(defn closed-subpath-starts
+  "The first point of each closed subpath of `content`, closed by a close
+  or ending where it starts: the first points of a morph keyframe."
+  [content]
+  (subpath/closed-starts content))
+
 (defn reverse-subpaths-at
   "`content` with its subpaths that have a node at one of `points` (all
   without `points`) going the other way round (see `subpath/reverse-at`),

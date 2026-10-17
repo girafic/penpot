@@ -112,7 +112,19 @@
         (mf/use-fn
          (mf/deps shape-id)
          #(st/emit! (dwa/request-outline-edit shape-id)
-                    (dw/start-editing-selected)))]
+                    (dw/start-editing-selected)))
+
+        ;; the keyframe at the playhead holds its first point by hand (see
+        ;; `cta/set-outline-fixed`): Auto matches it again
+        playhead (mf/deref ref:playhead)
+        timeline (mf/deref ref:timeline)
+        fixed?   (some #(and (= :content (:property %)) (= playhead (:time %)) (:fixed-start %))
+                       (:keyframes (cta/get-track timeline shape-id)))
+
+        on-auto
+        (mf/use-fn
+         (mf/deps shape-id)
+         #(st/emit! (dwa/set-outline-fixed shape-id false)))]
 
     (when (and (some? shape-id) (= shape-id (:id shape)))
       (cond
@@ -120,6 +132,11 @@
         [:div {:class (stl/css :outline-row)}
          [:span {:class (stl/css :trim-label)} (tr "workspace.animation.path")]
          [:div {:class (stl/css :outline-actions)}
+          (when fixed?
+            [:> button* {:variant "ghost"
+                         :title (tr "workspace.animation.outline-auto-title")
+                         :on-click on-auto}
+             (tr "workspace.animation.outline-auto")])
           [:> button* {:variant "secondary"
                        :on-click on-edit}
            (tr "workspace.animation.edit-outline")]

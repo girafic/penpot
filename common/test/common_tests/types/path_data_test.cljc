@@ -2927,3 +2927,24 @@
         back (path/reverse-subpaths-at two [(gpt/point 30 0)])]
     (t/is (= (take 5 (plain-of two)) (take 5 (plain-of back))) "the subpaths without the point as they are")
     (t/is (= [30.0 0.0] (mapv double ((juxt :x :y) (:params (nth (vec back) 5))))) "an open one from its end")))
+
+(defn- xys
+  [points]
+  (mapv (fn [p] [(double (:x p)) (double (:y p))]) points))
+
+(t/deftest a-subpath-ending-where-it-starts-is-closed
+  ;; as the path editor holds a closed one, without a close
+  (let [held    (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                                  {:command :line-to :params {:x 10 :y 0}}
+                                  {:command :line-to :params {:x 10 :y 10}}
+                                  {:command :line-to :params {:x 0 :y 0}}])
+        started (path/start-subpath-at held (gpt/point 10 10))]
+    (t/is (= [[0.0 0.0]] (xys (path/closed-subpath-starts held))))
+    (t/is (= [10.0 10.0] (mapv double ((juxt :x :y) (:params (first (vec started)))))))
+    (t/is (= :close-path (:command (last (vec started)))))
+    (t/is (= [[0.0 0.0] [20.0 0.0]]
+             (xys (path/closed-subpath-starts (path/from-plain (into (vec square) [{:command :move-to :params {:x 20 :y 0}}
+                                                                                   {:command :line-to :params {:x 30 :y 0}}
+                                                                                   {:command :line-to :params {:x 20 :y 10}}
+                                                                                   {:command :close-path :params {}}])))))
+          "of each closed one")))

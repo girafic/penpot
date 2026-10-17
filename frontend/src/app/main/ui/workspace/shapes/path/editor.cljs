@@ -571,6 +571,18 @@
              :style {:fill "none"
                      :stroke accent-color
                      :strokeWidth (/ 1 zoom)}}]
+     ;; in an edit of an outline keyframe, its first points (see
+     ;; `drp/start-at-node`)
+     (when (:outline-edit state)
+       [:g.first-points {:pointer-events "none"}
+        (for [[i point] (d/enumerate (path/closed-subpath-starts content))]
+          [:circle {:key (dm/str "first-" i)
+                    :cx (:x point)
+                    :cy (:y point)
+                    :r (/ 9 zoom)
+                    :style {:fill "none"
+                            :stroke accent-color
+                            :strokeWidth (/ 2 zoom)}}])])
      (for [{:keys [index] :as entry} segment-entries]
        (let [is-selected (or (contains? selected-segments index)
                              ;; Select segments between selected endpoints.
