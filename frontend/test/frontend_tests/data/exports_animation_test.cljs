@@ -15,6 +15,7 @@
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
@@ -100,7 +101,7 @@
                                   {:command :line-to :params {:x 40 :y 20}}
                                   {:command :close-path :params {}}])
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
-                    (cta/add-keyframe pid {:time 0 :property :content :value (cta/outline-of path)})
+                    (cta/add-keyframe pid {:time 0 :property :content :value (ctao/outline-of path)})
                     (cta/add-keyframe pid {:time 1000 :property :content :value flat}))
         bridge  {:set-modifiers (fn [& _])
                  :clean-modifiers (fn [])
@@ -1394,7 +1395,7 @@
                   (let [objects {(:id board) (assoc board :shapes [(:id shape)])
                                  (:id shape) (assoc shape :parent-id (:id board) :frame-id (:id board))}
                         tl      (cta/set-outline-at (cta/make-timeline {:board-id (:id board) :duration 1000})
-                                                    shape 0 (cta/outline-of shape))]
+                                                    shape 0 (ctao/outline-of shape))]
                     (set (get (dea/export-issues objects tl) :lottie))))]
     (t/is (not (contains? (issues vector) :lottie/morph)) "a path of vectors morphs")
     (t/is (contains? (issues picture) :lottie/morph) "a picture keeps its outline")))

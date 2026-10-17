@@ -16,6 +16,7 @@
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.path :as path]
    [app.main.data.changes :as dch]
    [app.main.data.workspace.animation :as dwa]
@@ -83,8 +84,8 @@
         track (get-in page [:timelines (thi/id :board-a) :tracks (thi/id :blob)])
         blob  (get-in page [:objects (thi/id :blob)])]
     (t/is (= [[250 :content]] (mapv (juxt :time :property) (:keyframes track))))
-    (t/is (= (str (cta/outline-of blob)) (str (:value (first (:keyframes track))))) "its outline as it is")
-    (t/is (= (cta/outline-box blob) (:outline-box track)) "for its box")
+    (t/is (= (str (ctao/outline-of blob)) (str (:value (first (:keyframes track))))) "its outline as it is")
+    (t/is (= (ctao/outline-box blob) (:outline-box track)) "for its box")
     (let [file  (with-page file page)
           again (await (committed (dwa/toggle-keyframes (thi/id :blob) [:content]) (workspace-state file 250) file))]
       (t/is (empty? (get-in again [:timelines (thi/id :board-a) :tracks (thi/id :blob) :keyframes]))
@@ -106,7 +107,7 @@
         id    (:id blob)
         tl    (-> (get-in page [:timelines (thi/id :board-a)])
                   (assoc :duration 2000)
-                  (cta/set-outline-at blob 0 (cta/outline-of blob))
+                  (cta/set-outline-at blob 0 (ctao/outline-of blob))
                   (cta/set-outline-at blob 2000 flat)
                   (cta/add-keyframe id {:time 0 :property :x :value 20})
                   (cta/add-keyframe id {:time 2000 :property :x :value 120}))]
@@ -156,8 +157,8 @@
                                 state file))
         row   (get-in page [:timelines (thi/id :board-a) :tracks (thi/id :blob)])]
     (t/is (= [0 500] (mapv :time (:keyframes row))))
-    (t/is (= (str (cta/outline-of blob)) (str (:value (first (:keyframes row))))))
-    (t/is (= (cta/outline-box blob) (:outline-box row)))))
+    (t/is (= (str (ctao/outline-of blob)) (str (:value (first (:keyframes row))))))
+    (t/is (= (ctao/outline-box blob) (:outline-box row)))))
 
 (t/deftest ^:async finishing-an-edit-in-motion-mode-keeps-a-keyframe
   (let [file   (morphing-file)

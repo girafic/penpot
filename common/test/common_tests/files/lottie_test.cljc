@@ -16,6 +16,7 @@
    [app.common.test-helpers.ids-map :as thi]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
@@ -315,7 +316,7 @@
     (t/is (= {:type :bezier :curve [0.42 0 0.58 1]} (:easing (first row))) "as they ease")
     (t/is (every? #(= :curve-to %) (keep #(#{:curve-to :line-to} (:command %)) (vec (:content shape))))
           "all curves, one structure")
-    (t/is (= (cta/outline-box shape) (:outline-box track)) "made for its box")
+    (t/is (= (ctao/outline-box shape) (:outline-box track)) "made for its box")
     (t/is (= [20.0 20.0] (mapv double ((juxt :x :y) (:params (nth (vec (:value (second row))) 2)))))
           "to the bigger one, in its own frame")))
 

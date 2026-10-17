@@ -23,6 +23,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.animation-code :as ctac]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
@@ -195,11 +196,11 @@
 
 (defn- parse-outline
   "The path content of the SVG path `value`, when it is one an outline
-  keyframe can hold (see `cta/outline-fits?`)."
+  keyframe can hold (see `ctao/outline-fits?`)."
   [value]
   (when (string? value)
     (let [content (try (path/from-string value) (catch :default _ nil))]
-      (when (and (some? content) (cta/outline-fits? content))
+      (when (and (some? content) (ctao/outline-fits? content))
         content))))
 
 (defn- valid-value?
@@ -215,16 +216,16 @@
 (defn- outline-in
   "The value of the outline keyframe the plugin API gives as `d`, an SVG
   path in page coordinates where the path `shape` rests (as `shape.d`),
-  for the row of `track` (see `cta/outline-value`)."
+  for the row of `track` (see `ctao/outline-value`)."
   [shape track d]
-  (cta/outline-value (assoc shape :content (parse-outline d)) track))
+  (ctao/outline-value (assoc shape :content (parse-outline d)) track))
 
 (defn- outline-out
   "The outline keyframe `value` of the path `shape` (the row of `track`)
   as the plugin API gives it: an SVG path in page coordinates where the
   path rests (see `outline-in`)."
   [shape track value]
-  (str (cta/outline->content shape track value)))
+  (str (ctao/outline->content shape track value)))
 
 (defn format-easing
   "The easing of a keyframe or preset animation as the plugin API gives
@@ -1512,7 +1513,7 @@
                                                 (update :value (fn [d] (outline-in shape (cta/get-track % shape-id) d))))]
                                  (-> %
                                      (cta/add-keyframe shape-id (assoc keyframe :id id))
-                                     (cta/ensure-outline-box shape)
+                                     (ctao/ensure-outline-box shape)
                                      (update :duration max (:time keyframe)))))
                   (when (contains? keyframe :applied-tokens)
                     (st/emit! (dwtp/propagate-style-tokens)))

@@ -20,6 +20,7 @@
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
@@ -5790,7 +5791,7 @@
             (str type)))))
 
 (t/deftest an-outline-is-held-in-the-frame-of-its-path
-  (t/is (close-contents? (plain-path [[0 0] [40 0] [0 40]]) (cta/outline-of (path-layer triangle)) 1e-3)
+  (t/is (close-contents? (plain-path [[0 0] [40 0] [0 40]]) (ctao/outline-of (path-layer triangle)) 1e-3)
         "from the top-left of its box")
   (doseq [[label opts] [["at rest" {}]
                         ["turned" {:rotation 30}]
@@ -5798,25 +5799,25 @@
                         ["flipped up" {:flip :y}]
                         ["turned and flipped" {:rotation 30 :flip :both}]]]
     (let [shape (apply path-layer triangle (mapcat identity opts))]
-      (t/is (close-contents? (:content shape) (cta/outline->content shape nil (cta/outline-of shape)) 1e-3)
+      (t/is (close-contents? (:content shape) (ctao/outline->content shape nil (ctao/outline-of shape)) 1e-3)
             (str label ": its own outline draws it where it rests"))
-      (t/is (close-contents? (plain-path [[0 0] [40 0] [0 40]]) (cta/outline-of shape) 1e-3)
+      (t/is (close-contents? (plain-path [[0 0] [40 0] [0 40]]) (ctao/outline-of shape) 1e-3)
             (str label ": the same outline in its own frame"))))
   (let [shape (path-layer triangle)
         half  {:outline-box {:width 20 :height 20}}]
     (t/is (close-contents? (plain-path [[20 30] [100 30] [20 110]])
-                           (cta/outline->content shape half (plain-path [[0 0] [40 0] [0 40]]))
+                           (ctao/outline->content shape half (plain-path [[0 0] [40 0] [0 40]]))
                            1e-3)
           "a row made for a box half as big grows twice")
-    (t/is (close-contents? (:content shape) (cta/outline->content shape half (cta/outline-value shape half)) 1e-3)
+    (t/is (close-contents? (:content shape) (ctao/outline->content shape half (ctao/outline-value shape half)) 1e-3)
           "its value for that row draws it")
-    (t/is (= {:width 40.0 :height 40.0} (update-vals (cta/outline-box shape) double)))))
+    (t/is (= {:width 40.0 :height 40.0} (update-vals (ctao/outline-box shape) double)))))
 
 (t/deftest an-outline-row-has-a-budget
   (let [big (plain-path (mapv (fn [i] [i (mod i 7)]) (range 4000)))]
-    (t/is (cta/outline-fits? big))
-    (t/is (not (cta/outline-row-fits? (repeat 9 {:property :content :value big}))))
-    (t/is (cta/outline-row-fits? (repeat 8 {:property :content :value big})))))
+    (t/is (ctao/outline-fits? big))
+    (t/is (not (ctao/outline-row-fits? (repeat 9 {:property :content :value big}))))
+    (t/is (ctao/outline-row-fits? (repeat 8 {:property :content :value big})))))
 
 (defn- unique-polygon
   "A closed polygon of `n` corners on a circle around a random middle, so
@@ -5894,9 +5895,9 @@
         objects {bid (assoc board :shapes [id])
                  id  (assoc shape :parent-id bid :frame-id bid)}
         tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
-                    (cta/add-keyframe id {:time 0 :property :content :value (cta/outline-of shape) :easing :linear})
+                    (cta/add-keyframe id {:time 0 :property :content :value (ctao/outline-of shape) :easing :linear})
                     (cta/add-keyframe id {:time 1000 :property :content :value (plain-path [[0 0] [40 0] [40 20]])})
-                    (assoc-in [:tracks id :outline-box] (cta/outline-box shape))
+                    (assoc-in [:tracks id :outline-box] (ctao/outline-box shape))
                     (f id))]
     {:objects objects :tl tl :id id :bid bid}))
 
@@ -5915,8 +5916,8 @@
              (some #(when (= :content (:property %)) (:value %))
                    (get-in (ctaf/timeline->modif-tree tl objects time) [id :modifiers :structure-parent])))]
     (t/is (contains? (corner-points (op 1000)) [60.0 50.0]) "the flat triangle in the box of the path")
-    (t/is (= (corner-points (op 1000)) (corner-points (cta/outline->content (get objects id) (get-in tl [:tracks id])
-                                                                            (plain-path [[0 0] [40 0] [40 20]])))))
+    (t/is (= (corner-points (op 1000)) (corner-points (ctao/outline->content (get objects id) (get-in tl [:tracks id])
+                                                                             (plain-path [[0 0] [40 0] [40 20]])))))
     (t/is (some? (op 500)))))
 
 (t/deftest an-outline-moves-and-turns-with-its-path
@@ -5954,13 +5955,13 @@
         flat    (plain-path [[0 0] [40 0] [40 20]])
         tl      (-> (mk-timeline)
                     (cta/add-keyframe (:id src) {:time 0 :property :content :value flat})
-                    (cta/ensure-outline-box src))
+                    (ctao/ensure-outline-box src))
         track   (get-in tl [:tracks (:id src)])
         pose    {:x 0 :y 0 :width 40 :height 40 :rotation 0}
         shown   (fn [{:keys [track]} target]
                   (let [pasted (get-in (:timeline (cta/paste-track (mk-timeline) (:id target) track :merge))
                                        [:tracks (:id target)])]
-                    (cta/outline->content target pasted (:value (first (:keyframes pasted))))))]
+                    (ctao/outline->content target pasted (:value (first (:keyframes pasted))))))]
     (t/is (= {:width 40.0 :height 40.0} (update-vals (:outline-box track) double)))
     (t/is (= [80.0 40.0] (outline-size (shown (cta/retarget-track track pose dst pose) dst)))
           "scaled to a path twice as big")
@@ -5969,11 +5970,11 @@
     (t/is (= 1 (:skipped (cta/retarget-track track pose rect pose))) "a rectangle takes none")
     (let [own    (-> (mk-timeline)
                      (cta/add-keyframe (:id dst) {:time 500 :property :content :value (plain-path [[0 0] [80 0] [0 80]])})
-                     (cta/ensure-outline-box dst))
+                     (ctao/ensure-outline-box dst))
           pasted (:timeline (cta/paste-track own (:id dst) (:track (cta/retarget-track track pose dst pose)) :merge))
           row    (get-in pasted [:tracks (:id dst)])
           kf     (d/seek #(= 0 (:time %)) (:keyframes row))]
-      (t/is (= [80.0 40.0] (outline-size (cta/outline->content dst row (:value kf))))
+      (t/is (= [80.0 40.0] (outline-size (ctao/outline->content dst row (:value kf))))
             "into the box of the row it joins"))))
 
 (t/deftest recording-a-path-tells-moves-from-reshapes
@@ -5990,12 +5991,12 @@
                    (->> (cta/record-unanimated (cta/make-timeline {:board-id bid :duration 1000})
                                                (objects shape) (objects after) [id] 500)
                         :tracks vals (mapcat :keyframes) (map :property) set))]
-    (t/is (= :none (cta/outline-change shape moved)))
-    (t/is (= :none (cta/outline-change shape turned)))
-    (t/is (= :none (cta/outline-change turned (gsh/transform-shape turned (ctm/rotation-modifiers turned (gsh/shape->center turned) -45))))
+    (t/is (= :none (ctao/outline-change shape moved)))
+    (t/is (= :none (ctao/outline-change shape turned)))
+    (t/is (= :none (ctao/outline-change turned (gsh/transform-shape turned (ctm/rotation-modifiers turned (gsh/shape->center turned) -45))))
           "turned back, the noise of the floats aside")
-    (t/is (= :resize (cta/outline-change shape resized)))
-    (t/is (= :reshape (cta/outline-change shape reshaped)))
+    (t/is (= :resize (ctao/outline-change shape resized)))
+    (t/is (= :reshape (ctao/outline-change shape reshaped)))
     (t/is (= #{:x} (recorded moved)) "with REC, a move records where it went")
     (t/is (= #{:rotation} (recorded turned)))
     (t/is (= #{:width :height} (recorded resized)))
@@ -6008,17 +6009,17 @@
         tl    (cta/set-outline-at (mk-timeline) shape 500 flat)
         row   #(get-in % [:tracks id])]
     (t/is (= [500] (mapv :time (:keyframes (row tl)))))
-    (t/is (= (cta/outline-box shape) (:outline-box (row tl))) "a new row made for its box")
-    (let [again (cta/set-outline-at tl shape 500 (cta/outline-of shape))]
+    (t/is (= (ctao/outline-box shape) (:outline-box (row tl))) "a new row made for its box")
+    (let [again (cta/set-outline-at tl shape 500 (ctao/outline-of shape))]
       (t/is (= 1 (count (:keyframes (row again)))) "the one there changes")
-      (t/is (= (str (cta/outline-of shape)) (str (:value (first (:keyframes (row again))))))))))
+      (t/is (= (str (ctao/outline-of shape)) (str (:value (first (:keyframes (row again))))))))))
 
 (t/deftest an-svg-morphs-a-path-on-its-outline
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
         shape (assoc (path-layer triangle) :fills [{:fill-color "#000000" :fill-opacity 1}])
         sid   (:id shape)
         tl    (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
-                  (cta/set-outline-at shape 0 (cta/outline-of shape))
+                  (cta/set-outline-at shape 0 (ctao/outline-of shape))
                   (cta/set-outline-at shape 1000 (plain-path [[0 0] [40 0] [40 20] [0 20]])))
         track (get-in tl [:tracks sid])
         svg   (asvg/timeline->svg tl (svg-board-with board shape)
@@ -6036,7 +6037,7 @@
         shape  (assoc (path-layer triangle) :fills [{:fill-color "#000000" :fill-opacity 1}])
         sid    (:id shape)
         tl     (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
-                   (cta/set-outline-at shape 0 (cta/outline-of shape))
+                   (cta/set-outline-at shape 0 (ctao/outline-of shape))
                    (cta/set-outline-at shape 1000 (plain-path [[0 0] [40 0] [40 20] [0 20]])))
         doc    (alottie/timeline->lottie tl (svg-board-with board shape))
         sh     (filter #(= "sh" (:ty %)) (lottie-items-of (get-in doc [:layers 0 :shapes])))

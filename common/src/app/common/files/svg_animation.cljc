@@ -40,6 +40,7 @@
    [app.common.math :as mth]
    [app.common.svg :as csvg]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.color :as clr]
    [app.common.types.path :as path]
    [app.common.types.path.morph :as morph]
@@ -1834,7 +1835,7 @@
 
 (defn- path-frames
   "The keyframes `[shape-id keyframe]` of the outline (`:content`, see
-  `cta/outline-of`) of the path `shape-id` of the element `target`, whose
+  `ctao/outline-of`) of the path `shape-id` of the element `target`, whose
   `d` or `points` `spec` animates: its values in the board as the element
   is placed, which morph when they all have one structure (as browsers
   play them, a jump between others, counted as `:path-morph`)."
@@ -1862,7 +1863,7 @@
                            :rest (outline-numbers (if (same? rest) rest template)))
             at-rest (:rest spec)]
         (for [[t v e] (keyframes #(spec-value spec %1 %2 steady?) [spec] 0.25 duration at-rest steady?)]
-          [shape-id (entry :content t (cta/outline-of (assoc shape :content (numbers-content template v))) e nil)])))))
+          [shape-id (entry :content t (ctao/outline-of (assoc shape :content (numbers-content template v))) e nil)])))))
 
 (defn- shown
   "`shape` that its board shows and hides by `properties` (`:display`,
@@ -1990,7 +1991,7 @@
                             (group-by first frames))
         ;; the outlines of each path that morphs are made for its box
         timeline (reduce (fn [timeline shape]
-                           (cond-> timeline (= :path (:type shape)) (cta/ensure-outline-box shape)))
+                           (cond-> timeline (= :path (:type shape)) (ctao/ensure-outline-box shape)))
                          timeline
                          shapes)]
     {:shapes   (with-frame-ids (into [board] shapes))

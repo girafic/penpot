@@ -15,6 +15,7 @@
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.shape :as cts]
    [clojure.string :as cstr]
    [clojure.test :as t]))
@@ -166,7 +167,7 @@
     (t/is (= [0 1000] (mapv first frames)))
     (t/is (= "M0,0L40,0L40,40Z" (second (first frames))) "from its outline, in its own frame")
     (t/is (= "M0,0L80,0L40,80Z" (second (peek frames))) "to the other one")
-    (t/is (= (cta/outline-box shape) (get-in (:timeline result) [:tracks (:id shape) :outline-box])))))
+    (t/is (= (ctao/outline-box shape) (get-in (:timeline result) [:tracks (:id shape) :outline-box])))))
 
 (t/deftest a-css-path-and-points-morph
   (let [css    (import-svg (svg (el :style {} (str "@keyframes grow { to { d: path('M10 10 L90 10 L50 90 Z') } }"

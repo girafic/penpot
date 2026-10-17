@@ -30,6 +30,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.color :as clr]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
@@ -673,14 +674,14 @@
             (recur (conj kept cur) more)))))))
 
 (defn- add-outline-keyframes
-  "Keyframes of the outline (`:content`, see `cta/outline-of`) of the path
+  "Keyframes of the outline (`:content`, see `ctao/outline-of`) of the path
   `shape` of the `:drawable` `node` whose outlines morph (animated `sh`):
   its outlines at the keyframes of those paths, as they ease, when they
   all have the same; else at every frame between their first and their
   last, which the lerp of their neighbours does not give within 0.25 px.
   Each outline in the board as `m` places it and all curves, so that
   they have one structure. Over the limits of outlines (see
-  `cta/outline-row-fits?`) the path keeps its first outline, counted as
+  `ctao/outline-row-fits?`) the path keeps its first outline, counted as
   `:path-morph`."
   [ctx id shape {:keys [outlines m] morphing? :morphs?}]
   (when (and morphing? (= :path (:type shape)))
@@ -710,10 +711,10 @@
           kfs      (mapv (fn [[frame c]]
                            (merge {:property :content
                                    :time (ctx :time frame)
-                                   :value (cta/outline-of (assoc shape :content c))}
+                                   :value (ctao/outline-of (assoc shape :content c))}
                                   (get eases frame {:easing :linear})))
                          samples)]
-      (if (and (every? cta/keyframe-value-fits? kfs) (cta/outline-row-fits? kfs))
+      (if (and (every? cta/keyframe-value-fits? kfs) (ctao/outline-row-fits? kfs))
         (doseq [kf kfs] (ctx :keyframe id kf))
         (ctx :skip :path-morph)))))
 
@@ -1248,7 +1249,7 @@
           ;; the outlines of each path that morphs are made for its box
           timeline (reduce (fn [timeline shape]
                              (cond-> timeline
-                               (= :path (:type shape)) (cta/ensure-outline-box shape)))
+                               (= :path (:type shape)) (ctao/ensure-outline-box shape)))
                            timeline
                            (remove nil? shapes))
           timeline (reduce (fn [timeline [follower leader]]

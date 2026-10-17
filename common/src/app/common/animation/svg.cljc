@@ -20,6 +20,7 @@
    [app.common.geom.shapes.corners :as gco]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.color :as clr]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
@@ -441,7 +442,7 @@
 
 (defn svg-smil-morph?
   "Whether an SVG of vectors plays the outline `track` animates on the
-  path `shape` (see `cta/outline-of`) by SMIL, on the path of its outline
+  path `shape` (see `ctao/outline-of`) by SMIL, on the path of its outline
   (see `svg-outline-path`)."
   [shape track]
   (boolean
@@ -820,7 +821,7 @@
                                  (#(gmt/multiply (gmt/transform-in center turn) %
                                                  (gmt/transform-in center unturn))))]
                         (path/transform-content (if (and morph? (some? (:content vs)))
-                                                  (cta/outline->content shape track (:content vs))
+                                                  (ctao/outline->content shape track (:content vs))
                                                   (:content shape))
                                                 m)))
             ;; the numbers of every value go into the commands of the

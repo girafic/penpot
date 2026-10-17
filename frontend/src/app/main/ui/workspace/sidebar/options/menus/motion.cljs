@@ -94,7 +94,7 @@
   "The outline of the selected layer as keyframes, in motion mode: for a
   path, the edit of its nodes at the playhead, which goes into a
   keyframe (see `dwa/outline-edit`), and the diamond of its outline there
-  (see `cta/outline-of`); a rectangle, an ellipse or a boolean turns into
+  (see `ctao/outline-of`); a rectangle, an ellipse or a boolean turns into
   a path first, by the button, to morph."
   [{:keys [shapes]}]
   (let [shape-id (mf/use-ctx ctx/motion-shape-id)

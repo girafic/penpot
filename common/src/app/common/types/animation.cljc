@@ -18,21 +18,22 @@
   viewer playback and the exporter, so the animation is computed
   identically everywhere; the layers that follow others and the chains
   that reach play in `app.common.types.animation-follow`, with the
-  modifiers of a timeline at a time (`timeline->modif-tree`). The exports
-  that write it out are `app.common.animation.css`, `.svg` and `.lottie`."
+  modifiers of a timeline at a time (`timeline->modif-tree`); the
+  outlines of a path as keyframes are held in
+  `app.common.types.animation-outline`. The exports that write it out
+  are `app.common.animation.css`, `.svg` and `.lottie`."
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
-   [app.common.geom.rect :as grc]
    [app.common.math :as mth]
    [app.common.schema :as sm]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
-   [app.common.types.path.morph :as morph]
    [app.common.types.shape.interactions :as cti]
    [app.common.types.shape.layout :as ctl]
    [app.common.types.shape.radius :as ctsr]
@@ -58,7 +59,7 @@
     :blur :background-blur
     ;; path trim: the part of the outline the strokes are drawn along
     :trim-start :trim-end :trim-offset
-    ;; the outline of a path, in its own frame (see `outline-of`)
+    ;; the outline of a path, in its own frame (see `ctao/outline-of`)
     :content})
 
 (def style-properties
@@ -387,7 +388,7 @@
    ;; A helper layer the exports leave out, as a goal ring (see `set-guide`).
    [:guide {:optional true} :boolean]
    ;; The size of the box the outlines of the `:content` keyframes were
-   ;; made for, which they scale with (see `outline->content`).
+   ;; made for, which they scale with (see `ctao/outline->content`).
    [:outline-box {:optional true}
     [:map
      [:width ::sm/safe-number]
@@ -961,155 +962,6 @@
       point
       (gpt/rotate point (box-point shape default-transform-origin) rotation))))
 
-;; OUTLINES
-;;
-;; The keyframes of the outline of a path (`:content`) hold it in the
-;; path's own frame: its content taken back by its rest transform (which
-;; turns and flips it) around its middle, from the top-left of its
-;; selrect, for the size of the box its row was made for (`:outline-box`
-;; of its track). A move, a turn or a flip of the path takes them along, a
-;; resize scales them (see `outline->content`).
-
-(def max-outline-segments
-  "The most segments an outline keyframe holds."
-  4096)
-
-(def max-outline-row-segments
-  "The most segments the outline keyframes of one row hold together: a
-  track goes whole with every edit of its layer."
-  32768)
-
-(defn outline-fits?
-  "Whether `value` is an outline a keyframe can hold: path content that
-  draws something (more than moves), within `max-outline-segments`."
-  [value]
-  (and (path/content? value)
-       (<= (count value) max-outline-segments)
-       (boolean (some #(not= :move-to (:command %)) value))))
-
-(defn outline-row-fits?
-  "Whether the outline keyframes among `keyframes` hold no more than
-  `max-outline-row-segments` segments together."
-  [keyframes]
-  (<= (transduce (comp (filter #(= :content (:property %)))
-                       (map (comp count :value)))
-                 + 0 keyframes)
-      max-outline-row-segments))
-
-(defn- rest-frame
-  "The matrix taking an outline in the own frame of the path `shape` (see
-  `outline-of`) where the path rests: its transform (which turns and
-  flips it) around the middle of its selrect."
-  [shape]
-  (let [selrect (:selrect shape)]
-    (gmt/multiply (gmt/transform-in (grc/rect->center selrect) (:transform shape (gmt/matrix)))
-                  (gmt/translate-matrix (:x selrect) (:y selrect)))))
-
-(defn outline-box
-  "The size of the box of the path `shape` at rest, which the outlines of
-  a row are made for (see `outline->content`)."
-  [shape]
-  {:width (dm/get-in shape [:selrect :width])
-   :height (dm/get-in shape [:selrect :height])})
-
-(defn- outline-scale
-  "How much the outlines of the row `track` grow to fit the path `shape`:
-  its box over the box they were made for, each axis 1 when either is
-  about 0 or the row has no box."
-  [shape track]
-  (let [box   (:outline-box track)
-        rest  (outline-box shape)
-        ratio (fn [k]
-                (let [made (get box k) now (get rest k)]
-                  (if (and (number? made) (number? now) (> made 0.01) (> now 0.01))
-                    (/ now made)
-                    1)))]
-    (gpt/point (ratio :width) (ratio :height))))
-
-(defn outline-of
-  "The outline of the path `shape` in its own frame: its content taken
-  back by its rest transform (which turns and flips it) around its
-  middle, from the top-left of its selrect."
-  [shape]
-  (path/transform-content (path/content (:content shape)) (gmt/inverse (rest-frame shape))))
-
-(defn outline-value
-  "The outline of the path `shape` (see `outline-of`) as a keyframe of the
-  row `track` holds it: for the box its outlines were made for."
-  [shape track]
-  (let [{:keys [x y]} (outline-scale shape track)]
-    (cond-> (outline-of shape)
-      (or (not= 1 x) (not= 1 y))
-      (path/transform-content (gmt/scale-matrix (gpt/point (/ 1 x) (/ 1 y)))))))
-
-(defn ensure-outline-box
-  "`timeline` with the box of the path `shape` (see `outline-box`) as the
-  one its row of outlines is made for, when it has outline keyframes and
-  no box yet: a new row is made for the path as it is."
-  [timeline shape]
-  (let [shape-id (:id shape)
-        track    (get-in timeline [:tracks shape-id])]
-    (if (and (some? track)
-             (nil? (:outline-box track))
-             (some #(= :content (:property %)) (:keyframes track)))
-      (assoc-in timeline [:tracks shape-id :outline-box] (outline-box shape))
-      timeline)))
-
-(defn rescale-outlines
-  "`keyframes` with their outlines, made for the box `from`, scaled to be
-  made for the box `to` (see `outline->content`)."
-  [keyframes from to]
-  (let [ratio (fn [k]
-                (let [a (get from k) b (get to k)]
-                  (if (and (number? a) (number? b) (> a 0.01) (> b 0.01)) (/ b a) 1)))
-        scale (gpt/point (ratio :width) (ratio :height))]
-    (if (and (= 1 (:x scale)) (= 1 (:y scale)))
-      keyframes
-      (mapv #(cond-> %
-               (= :content (:property %))
-               (update :value path/transform-content (gmt/scale-matrix scale)))
-            keyframes))))
-
-(defn- close-outlines?
-  "Whether the outlines `a` and `b` have one structure and their points
-  are within `tolerance` of each other."
-  [a b tolerance]
-  (and (= (count a) (count b))
-       (every? true? (map (fn [sa sb]
-                            (and (= (:command sa) (:command sb))
-                                 (every? #(mth/close? (dm/get-in sa [:params %] 0) (dm/get-in sb [:params %] 0) tolerance)
-                                         [:x :y :c1x :c1y :c2x :c2y])))
-                          a b))))
-
-(defn outline-change
-  "How an edit changed the outline of the path from `before` to `after`
-  (see `outline-of`): `:none` when it only moved, turned or flipped it,
-  `:resize` when it scaled it with its box, `:reshape` otherwise; within
-  0.01 px, the noise of the floats of path content."
-  [before after]
-  (let [old (outline-of before)
-        new (outline-of after)]
-    (cond
-      (close-outlines? old new 0.01)
-      :none
-
-      (close-outlines? (outline-value before {:outline-box (outline-box after)}) new 0.01)
-      :resize
-
-      :else
-      :reshape)))
-
-(defn outline->content
-  "The content of the path `shape` drawing the outline `value`, a
-  keyframe of the row `track` (see `outline-value`), where the path
-  rests: scaled to its box, turned and flipped as it is."
-  [shape track value]
-  (let [scale (outline-scale shape track)]
-    (path/transform-content value
-                            (cond-> (rest-frame shape)
-                              (or (not= 1 (:x scale)) (not= 1 (:y scale)))
-                              (gmt/multiply (gmt/scale-matrix scale))))))
-
 (defn- ensure-track
   [timeline shape-id]
   (if (get-track timeline shape-id)
@@ -1348,7 +1200,7 @@
 
 (defn set-outline-at
   "`timeline` with the outline keyframe of the path `shape` at `time`
-  holding `value` (see `outline-value`): the one there changed, or a new
+  holding `value` (see `ctao/outline-value`): the one there changed, or a new
   one with the timing of the segment it splits; a new row made for the
   box of the path."
   [timeline shape time value]
@@ -1361,7 +1213,7 @@
           (add-keyframe timeline shape-id
                         (merge {:time time :property :content :value value}
                                (split-timing timeline shape-id :content nil time))))
-        (ensure-outline-box shape))))
+        (ctao/ensure-outline-box shape))))
 
 (defn looping?
   "Whether the keyframes of `property` (and optional `index`) of
@@ -2346,41 +2198,19 @@
     (assoc-in m [property index] v)
     (assoc m property v)))
 
-(defonce ^:private outline-rows-cache
-  (atom {}))
-
-(def ^:private outline-rows-cache-size
-  "The most rows of outlines whose matched outlines are kept (see
-  `matched-outlines`)."
-  256)
-
-(defn- matched-outlines
-  "The outlines `values` of a row of keyframes, in time order, matched to
-  one structure (see `morph/match`). Kept by the outlines, and kept as
-  they are for the matched ones, so that the rows every frame builds
-  anew match once."
-  [values]
-  (or (get @outline-rows-cache values)
-      (let [matched (morph/match values)]
-        (swap! outline-rows-cache
-               (fn [cache]
-                 (-> (if (< (count cache) outline-rows-cache-size) cache {})
-                     (assoc values matched matched matched))))
-        matched)))
-
 (defn- matched-row
   "`keyframes`, the time-sorted keyframes of a row of outlines, with their
-  outlines matched to one structure (see `matched-outlines`)."
+  outlines matched to one structure (see `ctao/matched-outlines`)."
   [keyframes]
   (let [values  (mapv :value keyframes)
-        matched (matched-outlines values)]
+        matched (ctao/matched-outlines values)]
     (if (= values matched)
       keyframes
       (mapv #(assoc %1 :value %2) keyframes matched))))
 
 (defn match-outlines
   "`timeline` with the outlines of each of its rows of `:content`
-  keyframes matched to one structure (see `morph/match`), so that each
+  keyframes matched to one structure (see `ctao/matched-outlines`), so that each
   one morphs into the next and every keyframe the exports make of them
   (see `expand-springs`, `cut-timeline`) keeps it."
   [timeline]
@@ -3054,7 +2884,7 @@
   `:change-property` structure modifier so it rides the same modifier
   pipeline in every renderer (SVG via `transform-shape`, WASM via
   `set-shape-opacity`) and in export. The outline of a path, a keyframe
-  of the row of `track` (see `outline->content`), is its content where
+  of the row of `track` (see `ctao/outline->content`), is its content where
   it rests, which the transform moves, turns and scales then."
   ([shape values origin pivot]
    (shape->modifiers shape values origin pivot nil))
@@ -3148,7 +2978,7 @@
                          trim-properties))
 
       (and (contains? values :content) (= :path (:type shape)))
-      (ctm/change-property :content (outline->content shape track (:content values))))))
+      (ctm/change-property :content (ctao/outline->content shape track (:content values))))))
 
 (defn rest-value
   "The value of `property` that `shape` has without keyframes, positions
@@ -3656,12 +3486,12 @@
 
 (defn keyframe-value-fits?
   "Whether the value of `keyframe` is of the kind its property takes: a
-  hex colour for a colour, an outline (see `outline-fits?`) for the
+  hex colour for a colour, an outline (see `ctao/outline-fits?`) for the
   outline of a path, a finite number for the others."
   [{:keys [property value]}]
   (cond
     (color-property? property) (clr/hex-color-string? value)
-    (= :content property)      (outline-fits? value)
+    (= :content property)      (ctao/outline-fits? value)
     :else                      (mth/finite? value)))
 
 (defn- relative-value
@@ -3730,7 +3560,7 @@
   "`track`, of a layer resting at `from` (see `rest-pose`), for the shape
   `target` resting at `to`: its positions and rotation counted from where
   `target` rests and its sizes scaled to it (see `relative-value`), or
-  its values as they are with `exact?`; its outlines (see `outline->content`)
+  its values as they are with `exact?`; its outlines (see `ctao/outline->content`)
   scale to the box of `target`, or keep their size with `exact?`. The
   keyframes `target` cannot
   show (see `fits-keyframe?`) are left out, and so are the split presets
@@ -3764,7 +3594,7 @@
             ;; with their size: made for the box of the target as they
             ;; are; else scaled with it
             (cond-> (and outlines? exact?)
-              (assoc :outline-box (outline-box target)))
+              (assoc :outline-box (ctao/outline-box target)))
             (cond-> (seq kept)
               (assoc :animations (mapv #(make-animation (dissoc % :id :hidden :locked)) kept)))
             (prune-slot-flags))]
@@ -3852,11 +3682,11 @@
         end         (reduce max 0 (track-times track))
 
         ;; outlines go into the box of the row they join (see
-        ;; `outline->content`), a new row taking theirs
+        ;; `ctao/outline->content`), a new row taking theirs
         box         (:outline-box own)
         keyframes   (cond-> (:keyframes track)
                       (and (some? box) (some? (:outline-box track)))
-                      (rescale-outlines (:outline-box track) box))
+                      (ctao/rescale-outlines (:outline-box track) box))
 
         pasted
         (as-> cleared $
@@ -4057,7 +3887,7 @@
   with the value before at 0, so the change plays. `before` and `after`
   are the objects before and after the edit. A shape whose text changes
   records nothing, nor does a path reshaped (moved, turned or resized it
-  records as any layer, see `outline-change`) or a boolean whose outline
+  records as any layer, see `ctao/outline-change`) or a boolean whose outline
   changes, nor fills, strokes and shadows added or removed."
   [timeline before after shape-ids time]
   (let [board-id (:board-id timeline)
@@ -4079,7 +3909,7 @@
                              (dm/get-in timeline [:tracks shape-id :keyframes]))]
          (if (or (nil? old-shape) (nil? new-shape)
                  (if (and (= :path (:type old-shape)) (= :path (:type new-shape)))
-                   (= :reshape (outline-change old-shape new-shape))
+                   (= :reshape (ctao/outline-change old-shape new-shape))
                    (not= (:content old-shape) (:content new-shape))))
            timeline
            (let [timeline

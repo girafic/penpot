@@ -24,6 +24,7 @@
    [app.common.transit :as t]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.animation-style :as ctas]
    [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
@@ -471,8 +472,8 @@
      :shadow-opacity  (or (get-in (item-at (:shadow shape) index) [:color :opacity]) 1)
      :blur            (or (get-in shape [:blur :value]) 0)
      :background-blur (or (get-in shape [:background-blur :value]) 0)
-     ;; for a row made for the path as it is (see `cta/outline-value`)
-     :content         (when (= :path (:type shape)) (cta/outline-of shape))
+     ;; for a row made for the path as it is (see `ctao/outline-value`)
+     :content         (when (= :path (:type shape)) (ctao/outline-of shape))
      (get cta/trim-properties property))))
 
 (def transform-properties
@@ -498,7 +499,7 @@
 (defn shape-values-at
   "The value each animatable property of `shape` shows at `time`:
   interpolated from its keyframes when animated, otherwise its own; for
-  a path, its outline too (see `cta/outline-value`). Indexed properties
+  a path, its outline too (see `ctao/outline-value`). Indexed properties
   nest as `{index value}`."
   [timeline objects shape time]
   (let [origin   (cta/position-origin timeline objects (:id shape))
@@ -515,7 +516,7 @@
         values   (cond-> values
                    (= :path (:type shape))
                    (assoc :content (or (:content animated)
-                                       (cta/outline-value shape (cta/get-track timeline (:id shape))))))]
+                                       (ctao/outline-value shape (cta/get-track timeline (:id shape))))))]
     (reduce
      (fn [values {:keys [index properties]}]
        (reduce (fn [values property]
@@ -1027,7 +1028,7 @@
                                                             (inserted-keyframe tl values shape-id property index time)))
                                         tl
                                         properties)
-                                (cta/ensure-outline-box shape)))
+                                (ctao/ensure-outline-box shape)))
                  events   (cond-> [(commit-timeline it state (:board-id tl') tl')
                                    (apply-preview)]
                             (nil? existing)
@@ -1056,7 +1057,7 @@
                 tl'    (-> (cta/add-keyframe tl shape-id
                                              (-> (inserted-keyframe tl values shape-id property index time)
                                                  (assoc :id id)))
-                           (cta/ensure-outline-box shape))]
+                           (ctao/ensure-outline-box shape))]
             (rx/of (commit-timeline it state (:board-id tl') tl')
                    (select-keyframe shape-id id)
                    (set-playhead time)))
@@ -2660,7 +2661,7 @@
   "What an edit of the path `id` in motion mode starts from when its
   outline goes into keyframes, its Path row animated or auto-keyframe on:
   `{:time :content}`, the outline shown at the playhead placed where the
-  path rests (see `cta/outline->content`). Nil when the edit changes the
+  path rests (see `ctao/outline->content`). Nil when the edit changes the
   path itself, as outside motion mode."
   [state id]
   (let [objects (dsh/lookup-page-objects state)
@@ -2678,9 +2679,9 @@
                               (update :tracks select-keys [id])
                               (cta/values-at time)
                               (dm/get-in [id :content]))
-                          (cta/outline-value shape track))]
+                          (ctao/outline-value shape track))]
             {:time time
-             :content (cta/outline->content shape track value)}))))))
+             :content (ctao/outline->content shape track value)}))))))
 
 (defn set-outline-at-playhead
   "Keep `content`, an edit of the outline of the path `id` where it rests
@@ -2700,10 +2701,10 @@
                                     (:keyframes (cta/get-track tl id))))
                 tl       (cond-> tl
                            (and new-row? (pos? time))
-                           (cta/set-outline-at shape 0 (cta/outline-value shape nil)))
+                           (cta/set-outline-at shape 0 (ctao/outline-value shape nil)))
                 track    (cta/get-track tl id)
                 tl       (cta/set-outline-at tl shape time
-                                             (cta/outline-value (assoc shape :content content) track))]
+                                             (ctao/outline-value (assoc shape :content content) track))]
             (rx/of (commit-timeline it state (:board-id tl) tl (uuid/next))
                    (apply-preview)))
           (rx/empty))))))

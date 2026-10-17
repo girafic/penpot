@@ -48,7 +48,7 @@
   code models of the boards) of `objects`: the texts it plays whole,
   split by lines (a page breaks the lines) or drawn as SVG (see
   `cgm/code-units?`), audio and the outlines of paths (see
-  `cta/outline-of`), which only the JSON gives."
+  `ctao/outline-of`), which only the JSON gives."
   [codes objects format]
   (when (not= "json" format)
     (cond-> []

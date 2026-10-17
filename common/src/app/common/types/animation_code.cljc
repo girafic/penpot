@@ -140,7 +140,7 @@
       v)))
 
 (defn- json-value
-  "A value as JSON: a number rounded, an outline (see `cta/outline-of`)
+  "A value as JSON: a number rounded, an outline (see `ctao/outline-of`)
   as its SVG path, in the own frame of its path, the others as they are."
   [v]
   (cond

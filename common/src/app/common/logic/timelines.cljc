@@ -24,6 +24,7 @@
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
@@ -1086,12 +1087,12 @@
 (defn- clip-track?
   "Whether the keyframes and presets of `track` can be pasted: the values
   of the kind their properties take, no more outline than a row holds
-  (see `cta/outline-row-fits?`), and no entry of a style use before
+  (see `ctao/outline-row-fits?`), and no entry of a style use before
   the start of its style (see `clip-entry?`). They may lie before the
   start of the timeline, as on the timeline itself."
   [{:keys [keyframes animations]}]
   (and (every? cta/keyframe-value-fits? keyframes)
-       (cta/outline-row-fits? keyframes)
+       (ctao/outline-row-fits? keyframes)
        (every? #(every? clip-entry? (:entries %)) animations)))
 
 (defn- clip-size

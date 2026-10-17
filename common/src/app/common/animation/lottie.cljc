@@ -26,6 +26,7 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
+   [app.common.types.animation-outline :as ctao]
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
@@ -981,7 +982,7 @@
 
 (defn- lottie-track
   "The track of `id` in the timeline of `ctx`, its outlines (see
-  `cta/outline->content`) the contents they draw where its path rests."
+  `ctao/outline->content`) the contents they draw where its path rests."
   [{:keys [timeline duration objects]} id]
   (let [track (or (get-in timeline [:tracks id]) {:shape-id id :keyframes []})
         shape (get objects id)]
@@ -989,7 +990,7 @@
       (and (= :path (:type shape)) (some #(= :content (:property %)) (:keyframes track)))
       (update :keyframes (partial mapv #(cond-> %
                                           (= :content (:property %))
-                                          (update :value (fn [v] (cta/outline->content shape track v)))))))))
+                                          (update :value (fn [v] (ctao/outline->content shape track v)))))))))
 
 (defn- lottie-numbered
   "`layers` numbered (`:ind`), each that follows the board it is in
