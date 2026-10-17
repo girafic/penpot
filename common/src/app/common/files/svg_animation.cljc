@@ -1835,10 +1835,12 @@
 
 (defn- path-frames
   "The keyframes `[shape-id keyframe]` of the outline (`:content`, see
-  `ctao/outline-of`) of the path `shape-id` of the element `target`, whose
-  `d` or `points` `spec` animates: its values in the board as the element
-  is placed, which morph when they all have one structure (as browsers
-  play them, a jump between others, counted as `:path-morph`)."
+  `ctao/outline-of`) of the path `shape-id` of the element `target`,
+  whose `d` or `points` `spec` animates: its values in the board as the
+  element is placed, which morph when they all have one structure, and
+  else each held until the next, as browsers play them (a step keyframe
+  at each). Past what an outline row holds (see `ctao/row-takes?`) none,
+  counted as `:path-morph`."
   [ctx {:keys [idx own-of objects to-board duration steady?]} spec target shape-id]
   (let [shape    (get objects shape-id)
         tag      (get-in idx [:by-key target :node :tag])
@@ -1855,15 +1857,35 @@
         values   (mapv content (:values spec))
         template (first values)
         rest     (content (:rest spec))
-        same?    #(and (some? %) (morph/same-structure? template %))]
-    (if-not (and (= :path (:type shape)) (some? template) (every? same? values))
-      (do (ctx :skip :path-morph) nil)
-      (let [spec    (assoc spec
-                           :values (mapv outline-numbers values)
-                           :rest (outline-numbers (if (same? rest) rest template)))
-            at-rest (:rest spec)]
-        (for [[t v e] (keyframes #(spec-value spec %1 %2 steady?) [spec] 0.25 duration at-rest steady?)]
-          [shape-id (entry :content t (ctao/outline-of (assoc shape :content (numbers-content template v))) e nil)])))))
+        same?    #(and (some? %) (morph/same-structure? template %))
+        frames   (cond
+                   (or (not= :path (:type shape)) (nil? template) (not (every? some? values)))
+                   nil
+
+                   ;; one structure: their numbers morph
+                   (every? same? values)
+                   (let [spec    (assoc spec
+                                        :values (mapv outline-numbers values)
+                                        :rest (outline-numbers (if (same? rest) rest template)))
+                         at-rest (:rest spec)]
+                     (for [[t v e] (keyframes #(spec-value spec %1 %2 steady?) [spec] 0.25 duration at-rest steady?)]
+                       [shape-id (entry :content t (ctao/outline-of (assoc shape :content (numbers-content template v))) e nil)]))
+
+                   ;; others: each held until the next
+                   :else
+                   (let [spec    (assoc spec
+                                        :values values
+                                        :easings (vec (repeat (max 0 (dec (count values))) :step))
+                                        :rest (or rest template))
+                         at-rest (:rest spec)]
+                     (for [[t v e] (keyframes #(spec-value spec %1 %2 steady?) [spec] 0.25 duration at-rest steady?)]
+                       [shape-id (entry :content t (ctao/outline-of (assoc shape :content v)) e nil)])))
+        kfs      (mapv second frames)]
+    (if (and (some? frames)
+             (every? #(ctao/outline-fits? (:value %)) kfs)
+             (ctao/outline-row-fits? kfs))
+      frames
+      (do (ctx :skip :path-morph) nil))))
 
 (defn- shown
   "`shape` that its board shows and hides by `properties` (`:display`,

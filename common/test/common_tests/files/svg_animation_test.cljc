@@ -145,10 +145,8 @@
 
 (t/deftest what-a-board-cannot-play-is-counted
   (let [result (import-svg (svg (el :path {:id "shape" :d "M0 0 L10 10"}
-                                    (el :animate {:attributeName "d" :values "M0 0 L10 10;M0 0 L20 20 L30 0" :dur "1s"})
                                     (el :animate {:attributeName "x" :to "20" :dur "1s" :begin "click"}))))]
-    (t/is (= {:path-morph 1 :interactive 1} (:skipped result))
-          "outlines of other structures, which a browser plays as jumps")))
+    (t/is (= {:interactive 1} (:skipped result)))))
 
 (defn- outline-frames
   "The `[time path]` of the outline keyframes of `shape`, whole numbers
@@ -168,6 +166,28 @@
     (t/is (= "M0,0L40,0L40,40Z" (second (first frames))) "from its outline, in its own frame")
     (t/is (= "M0,0L80,0L40,80Z" (second (peek frames))) "to the other one")
     (t/is (= (ctao/outline-box shape) (get-in (:timeline result) [:tracks (:id shape) :outline-box])))))
+
+(t/deftest a-path-of-other-outlines-holds-each
+  ;; a browser plays outlines of other structures as jumps: each held
+  ;; until the next
+  (let [result (import-svg (svg (el :path {:id "shape" :d "M10 10 L50 10 L50 50 Z" :fill "#ff0000"}
+                                    (el :animate {:attributeName "d" :values "M10 10 L50 10 L50 50 Z;M10 10 L90 10 L90 90 L10 90 Z"
+                                                  :dur "1s" :fill "freeze"}))))
+        shape  (named result "shape")
+        kfs    (cta/property-keyframes (:timeline result) (:id shape) :content)]
+    (t/is (empty? (:skipped result)) "nothing left out")
+    (t/is (= [0 1000] (mapv :time kfs)))
+    (t/is (= :step (:interpolation (first kfs))) "the triangle held until the square")
+    (t/is (= "M0,0L40,0L40,40Z" (cstr/replace (str (:value (first kfs))) #"\.0(?=\D|$)" "")))
+    (t/is (= "M0,0L80,0L80,80L0,80Z" (cstr/replace (str (:value (peek kfs))) #"\.0(?=\D|$)" "")))))
+
+(t/deftest a-path-past-what-a-row-holds-is-counted
+  (let [big    (fn [k] (str "M0 0" (apply str (map #(str " L" % " " (mod (+ % k) 7)) (range 1 5000)))))
+        result (import-svg (svg (el :path {:id "shape" :d (big 0) :fill "#ff0000"}
+                                    (el :animate {:attributeName "d" :values (str (big 0) ";" (big 1))
+                                                  :dur "1s" :fill "freeze"}))))]
+    (t/is (= {:path-morph 1} (:skipped result)))
+    (t/is (empty? (cta/property-keyframes (:timeline result) (:id (named result "shape")) :content)))))
 
 (t/deftest a-css-path-and-points-morph
   (let [css    (import-svg (svg (el :style {} (str "@keyframes grow { to { d: path('M10 10 L90 10 L50 90 Z') } }"
