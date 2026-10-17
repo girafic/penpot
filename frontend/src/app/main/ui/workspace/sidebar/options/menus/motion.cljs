@@ -106,9 +106,13 @@
          (mf/deps shape-id)
          #(st/emit! (dw/convert-selected-to-path [shape-id])))
 
-        ;; the nodes of the outline at the playhead (see `dwa/outline-edit`)
+        ;; the nodes of the outline at the playhead (see `dwa/outline-edit`),
+        ;; a new Path row if it has none
         on-edit
-        (mf/use-fn #(st/emit! (dw/start-editing-selected)))]
+        (mf/use-fn
+         (mf/deps shape-id)
+         #(st/emit! (dwa/request-outline-edit shape-id)
+                    (dw/start-editing-selected)))]
 
     (when (and (some? shape-id) (= shape-id (:id shape)))
       (cond

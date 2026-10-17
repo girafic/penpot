@@ -999,11 +999,20 @@
                  (cta/split-timing tl shape-id property index time))
     (some? index) (assoc :index index)))
 
+(defn- outline-takes?
+  "Whether the row of outlines of `shape-id` in `tl` takes `value` at
+  `time`, in place of the one there (see `ctao/row-takes?`)."
+  [tl shape-id time value]
+  (ctao/row-takes? (:keyframes (cta/get-track tl shape-id))
+                   #(and (= :content (:property %)) (= time (:time %)))
+                   value))
+
 (defn toggle-keyframes
   "Toggle the keyframes of `properties` of `shape-id` at the playhead:
   remove the ones placed there or, when there are none, add them with
   the value each property shows there, so the animation is unchanged.
-  Locked properties keep their keyframes."
+  Locked properties keep their keyframes, and an outline its row has no
+  room for (see `ctao/row-takes?`) stays out, with a warning."
   ([shape-id properties]
    (toggle-keyframes shape-id properties nil))
   ([shape-id properties index]
@@ -1021,18 +1030,29 @@
                  shape    (get objects shape-id)
                  values   (row-values tl objects shape properties index time)
                  placed   (keep #(keyframe-at tl shape-id % time index) properties)
+                 ;; an outline its row has no room for stays out
+                 takes?   #(or (not= :content %)
+                               (outline-takes? tl shape-id time (cta/value-of values :content index)))
+                 adding   (when (empty? placed) (filterv takes? properties))
+                 refused? (and (empty? placed) (< (count adding) (count properties)))
                  tl'      (if (seq placed)
                             (reduce #(cta/remove-keyframe %1 shape-id (:id %2)) tl placed)
                             (-> (reduce (fn [tl property]
                                           (cta/add-keyframe tl shape-id
                                                             (inserted-keyframe tl values shape-id property index time)))
                                         tl
-                                        properties)
+                                        adding)
                                 (ctao/ensure-outline-box shape)))
-                 events   (cond-> [(commit-timeline it state (:board-id tl') tl')
-                                   (apply-preview)]
-                            (nil? existing)
-                            (conj (layout/toggle-layout-flag :animation-timeline :force? true)))]
+                 events   (cond-> []
+                            (or (seq placed) (seq adding))
+                            (conj (commit-timeline it state (:board-id tl') tl')
+                                  (apply-preview))
+
+                            (and (nil? existing) (or (seq placed) (seq adding)))
+                            (conj (layout/toggle-layout-flag :animation-timeline :force? true))
+
+                            refused?
+                            (conj (ntf/warn (tr "workspace.animation.outline-too-large"))))]
              (apply rx/of events))
            (rx/empty)))))))
 
@@ -1040,7 +1060,8 @@
   "Add a keyframe of `property` (and optional `index`) of `shape-id` at
   `time` that leaves the animation as it is (see `inserted-keyframe`),
   select it and move the playhead to it, so its value can be changed
-  right away. A locked property takes none."
+  right away. A locked property takes none, nor an outline its row has
+  no room for (see `ctao/row-takes?`)."
   [shape-id property index time]
   (ptk/reify ::add-keyframe-at
     ptk/WatchEvent
@@ -1053,14 +1074,17 @@
                  (some? shape)
                  (not (cta/slot-flag? tl shape-id :locked property index)))
           (let [id     (uuid/next)
-                values (row-values tl objects shape [property] index time)
-                tl'    (-> (cta/add-keyframe tl shape-id
-                                             (-> (inserted-keyframe tl values shape-id property index time)
-                                                 (assoc :id id)))
-                           (ctao/ensure-outline-box shape))]
-            (rx/of (commit-timeline it state (:board-id tl') tl')
-                   (select-keyframe shape-id id)
-                   (set-playhead time)))
+                values (row-values tl objects shape [property] index time)]
+            (if (and (= :content property)
+                     (not (outline-takes? tl shape-id time (cta/value-of values :content index))))
+              (rx/of (ntf/warn (tr "workspace.animation.outline-too-large")))
+              (let [tl' (-> (cta/add-keyframe tl shape-id
+                                              (-> (inserted-keyframe tl values shape-id property index time)
+                                                  (assoc :id id)))
+                            (ctao/ensure-outline-box shape))]
+                (rx/of (commit-timeline it state (:board-id tl') tl')
+                       (select-keyframe shape-id id)
+                       (set-playhead time)))))
           (rx/empty))))))
 
 (defn set-value-at-playhead
@@ -2657,12 +2681,31 @@
   [state]
   (dm/get-in state [:workspace-animation :auto-keyframe?] false))
 
+(defn request-outline-edit
+  "Make the next edit of the path `id` an edit of its outline at the
+  playhead (see `outline-edit`), as the Edit at playhead button asks,
+  its Path row animated or not; the edit takes the request when it
+  starts (see `take-outline-edit-request`)."
+  [id]
+  (ptk/reify ::request-outline-edit
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-animation :outline-edit-id] id))))
+
+(defn take-outline-edit-request
+  "`state` without the request of an outline edit (see
+  `request-outline-edit`), which an edit of a path takes as it starts."
+  [state]
+  (update state :workspace-animation dissoc :outline-edit-id))
+
 (defn outline-edit
   "What an edit of the path `id` in motion mode starts from when its
-  outline goes into keyframes, its Path row animated or auto-keyframe on:
-  `{:time :content}`, the outline shown at the playhead placed where the
-  path rests (see `ctao/outline->content`). Nil when the edit changes the
-  path itself, as outside motion mode."
+  outline goes into keyframes, its Path row animated, auto-keyframe on
+  or the edit asked for (see `request-outline-edit`): `{:time :content}`,
+  the outline shown at the playhead placed where the path rests (see
+  `ctao/outline->content`). Nil when the edit changes the path itself,
+  as outside motion mode or when its Path row is locked or hidden (as an
+  edit with auto-keyframe on leaves those, see `cta/record-edit`)."
   [state id]
   (let [objects (dsh/lookup-page-objects state)
         shape   (get objects id)
@@ -2670,10 +2713,13 @@
     (when (and (contains? (:workspace-layout state) :animation-timeline)
                (= :path (:type shape))
                (some? tl)
-               (= (:board-id tl) (cfh/get-shape-id-root-frame objects id)))
+               (= (:board-id tl) (cfh/get-shape-id-root-frame objects id))
+               (not (cta/slot-flag? tl id :locked :content nil))
+               (not (cta/slot-flag? tl id :hidden :content nil)))
       (let [track     (cta/get-track tl id)
-            animated? (some #(= :content (:property %)) (:keyframes track))]
-        (when (or animated? (auto-keyframe? state))
+            animated? (some #(= :content (:property %)) (:keyframes track))
+            asked?    (= id (dm/get-in state [:workspace-animation :outline-edit-id]))]
+        (when (or animated? asked? (auto-keyframe? state))
           (let [time  (playhead state)
                 value (or (-> (cta/resolve-animations tl objects)
                               (update :tracks select-keys [id])
@@ -2687,7 +2733,9 @@
   "Keep `content`, an edit of the outline of the path `id` where it rests
   (see `outline-edit`), as its outline keyframe at the playhead, the path
   itself left as it is, so that every other row keeps its place; a new
-  row also keeps the outline the path has at 0. One undo step."
+  row also keeps the outline the path has at 0. One undo step. A locked
+  or hidden Path row keeps what it has, and an outline its row has no
+  room for (see `ctao/row-takes?`) stays out, with a warning."
   [id content]
   (ptk/reify ::set-outline-at-playhead
     ptk/WatchEvent
@@ -2695,7 +2743,10 @@
       (let [objects (dsh/lookup-page-objects state)
             shape   (get objects id)
             tl      (current-timeline state)]
-        (if (and (= :path (:type shape)) (some? tl))
+        (if (and (= :path (:type shape))
+                 (some? tl)
+                 (not (cta/slot-flag? tl id :locked :content nil))
+                 (not (cta/slot-flag? tl id :hidden :content nil)))
           (let [time     (playhead state)
                 new-row? (not (some #(= :content (:property %))
                                     (:keyframes (cta/get-track tl id))))
@@ -2703,10 +2754,12 @@
                            (and new-row? (pos? time))
                            (cta/set-outline-at shape 0 (ctao/outline-value shape nil)))
                 track    (cta/get-track tl id)
-                tl       (cta/set-outline-at tl shape time
-                                             (ctao/outline-value (assoc shape :content content) track))]
-            (rx/of (commit-timeline it state (:board-id tl) tl (uuid/next))
-                   (apply-preview)))
+                value    (ctao/outline-value (assoc shape :content content) track)]
+            (if (outline-takes? tl id time value)
+              (let [tl (cta/set-outline-at tl shape time value)]
+                (rx/of (commit-timeline it state (:board-id tl) tl (uuid/next))
+                       (apply-preview)))
+              (rx/of (ntf/warn (tr "workspace.animation.outline-too-large")))))
           (rx/empty))))))
 
 (defn toggle-auto-keyframe

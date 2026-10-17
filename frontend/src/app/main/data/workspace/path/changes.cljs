@@ -47,9 +47,11 @@
           (rx/empty)
 
           ;; in motion mode, a keyframe of its outline (see
-          ;; `dwa/outline-edit`)
-          (and outline? (seq new-content))
-          (rx/of (dwa/set-outline-at-playhead id new-content))
+          ;; `dwa/outline-edit`); one without nodes keeps what it has
+          outline?
+          (if (seq new-content)
+            (rx/of (dwa/set-outline-at-playhead id new-content))
+            (rx/empty))
 
           (empty? new-content)
           (let [changes (-> (pcb/empty-changes it page-id)

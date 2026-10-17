@@ -7339,6 +7339,10 @@ msgstr "Select layers inside a board to paste the animation onto."
 msgid "workspace.animation.paste-needs-motion"
 msgstr "Motion is not turned on."
 
+#: src/app/main/data/workspace/animation.cljs
+msgid "workspace.animation.outline-too-large"
+msgstr "This path has too many nodes to keep as a keyframe: an outline holds at most 4096 segments, a Path row 32768."
+
 msgid "workspace.animation.paste-invalid"
 msgstr "The copied animation cannot be pasted."
 

@@ -770,11 +770,14 @@
              (st/emit! (dwa/set-keyframe-value shape-id kf-id hex)))))]
 
     (cond
-      ;; an outline, which the canvas edits (see `dwa/edit-outline`)
+      ;; an outline, which the canvas edits (see `dwa/outline-edit`): the
+      ;; nodes of the keyframe there, else of the outline shown (matched
+      ;; to the others, see `ctao/matched-outlines`)
       (= :content property)
-      [:span {:class (stl/css :row-value :row-outline)}
-       (tr "workspace.animation.path-nodes"
-           (if (some? value) (count (remove #(= :close-path (:command %)) value)) 0))]
+      (let [outline (if (some? keyframe) (:value keyframe) value)]
+        [:span {:class (stl/css :row-value :row-outline)}
+         (tr "workspace.animation.path-nodes"
+             (if (some? outline) (count (remove #(= :close-path (:command %)) outline)) 0))])
 
       (cta/color-property? property)
       [:div {:class (stl/css-case :row-color true :disabled disabled?)

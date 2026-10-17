@@ -3668,6 +3668,16 @@
     (t/is (= [[0 "#000000"] [500 "#ff0000"]] (times-and-values recorded id :fill-color 0)))
     (t/is (zero? @calls) "its outline is not compared when it did not change")))
 
+(t/deftest record-unanimated-leaves-a-rectangle-turned-into-a-path
+  ;; with REC on, Convert to path records no keyframe: the outline it
+  ;; gets is not a change of one
+  (let [{:keys [board rect objects]} (board-and-rect)
+        rid   (:id rect)
+        tl    (cta/make-timeline {:board-id (:id board) :duration 1000})
+        after (update objects rid path/convert-to-path objects)]
+    (t/is (= :path (get-in after [rid :type])))
+    (t/is (= tl (cta/record-unanimated tl objects after [rid] 500)))))
+
 (t/deftest record-unanimated-leaves-an-edited-path
   (let [{:keys [board rect objects]} (board-and-rect)
         rid   (:id rect)

@@ -925,6 +925,7 @@
             shape     (assoc shape :fills (resolve-edit-fills shape objects))]
 
         (-> state
+            (dwa/take-outline-edit-request)
             (assoc-in [:workspace-drawing :object] shape)
             (update-in [:workspace-local :edit-path id]
                        (fn [state]
