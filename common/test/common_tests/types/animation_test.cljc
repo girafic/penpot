@@ -18,6 +18,7 @@
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
@@ -137,9 +138,9 @@
                   (cta/add-keyframe sid {:time 1000 :property :x
                                          :value (+ (-> shape :selrect :x) 100)}))
         ;; at t=0 there is no displacement -> empty modifiers (no entry)
-        tree0 (cta/timeline->modif-tree tl objects 0)
+        tree0 (ctaf/timeline->modif-tree tl objects 0)
         ;; at t=1000 the shape should move +100 in x
-        tree1 (cta/timeline->modif-tree tl objects 1000)]
+        tree1 (ctaf/timeline->modif-tree tl objects 1000)]
     (t/is (not (contains? tree0 sid)))
     (t/is (contains? tree1 sid))
     (t/is (some? (get-in tree1 [sid :modifiers])))))
@@ -152,7 +153,7 @@
                   (cta/add-keyframe sid {:time 1000 :property :width :value 200})
                   (cta/add-keyframe sid {:time 0 :property :height :value 40})
                   (cta/add-keyframe sid {:time 1000 :property :height :value 80}))
-        mods  (get-in (cta/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
+        mods  (get-in (ctaf/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
         shape' (gsh/transform-shape shape mods)]
     (t/is (mth/close? 200.0 (double (-> shape' :selrect :width)) 0.01))
     (t/is (mth/close? 80.0 (double (-> shape' :selrect :height)) 0.01))))
@@ -165,7 +166,7 @@
         tl     (-> (mk-timeline)
                    (cta/add-keyframe sid {:time 0 :property :width :value 100})
                    (cta/add-keyframe sid {:time 1000 :property :width :value 200}))
-        mods   (get-in (cta/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
+        mods   (get-in (ctaf/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
         shape' (gsh/transform-shape shape mods)]
     (t/is (mth/close? 30.0 (double (:rotation shape)) 0.01))
     (t/is (mth/close? 200.0 (double (-> shape' :selrect :width)) 0.01))
@@ -204,7 +205,7 @@
         tl    (-> (mk-timeline)
                   (cta/add-keyframe tid {:time 0 :property :fill-color :index 0 :value "#ff0000"})
                   (cta/add-keyframe tid {:time 1000 :property :fill-color :index 0 :value "#00ff00"}))
-        mods  (get-in (cta/timeline->modif-tree tl {tid text} 1000) [tid :modifiers])
+        mods  (get-in (ctaf/timeline->modif-tree tl {tid text} 1000) [tid :modifiers])
         fills (some #(when (= :fills (:property %)) (:value %)) (:structure-parent mods))]
     (t/is (= blue (cta/paint-fills text)))
     (t/is (= [{:fill-color "#00ff00" :fill-opacity 0.5}] fills) "its colour on the fill of its span")
@@ -220,7 +221,7 @@
         tl    (-> (mk-timeline)
                   (cta/add-keyframe sid {:time 0 :property :opacity :value 1})
                   (cta/add-keyframe sid {:time 1000 :property :opacity :value 0}))
-        tree  (cta/timeline->modif-tree tl {sid shape} 500)
+        tree  (ctaf/timeline->modif-tree tl {sid shape} 500)
         modifiers (get-in tree [sid :modifiers])]
     (t/testing "opacity-only track still yields a (non-empty) modifier"
       (t/is (contains? tree sid))
@@ -700,7 +701,7 @@
         tl    (-> (mk-timeline)
                   (cta/add-keyframe sid {:time 0 :property :fill-color :index 0 :value "#0000ff"})
                   (cta/add-keyframe sid {:time 1000 :property :fill-color :index 0 :value "#ff0000"}))
-        tree  (cta/timeline->modif-tree tl {sid shape} 1000)
+        tree  (ctaf/timeline->modif-tree tl {sid shape} 1000)
         shape' (ctm/apply-structure-modifiers shape (get-in tree [sid :modifiers]))
         fills  (vec (:fills shape'))]
     (t/is (hex-close? "#ff0000" (:fill-color (first fills))))
@@ -722,7 +723,7 @@
                   (cta/add-keyframe sid {:time 1000 :property :shadow-offset-x :index 0 :value 20})
                   (cta/add-keyframe sid {:time 0 :property :blur :value 0})
                   (cta/add-keyframe sid {:time 1000 :property :blur :value 10}))
-        tree  (cta/timeline->modif-tree tl {sid shape} 500)
+        tree  (ctaf/timeline->modif-tree tl {sid shape} 500)
         shape' (ctm/apply-structure-modifiers shape (get-in tree [sid :modifiers]))]
     (t/is (mth/close? 10.0 (double (get-in shape' [:shadow 0 :offset-x])) 0.001))
     (t/is (mth/close? 5.0 (double (get-in shape' [:blur :value])) 0.001))))
@@ -734,7 +735,7 @@
         tl    (-> (mk-timeline)
                   (cta/add-keyframe sid {:time 0 :property :r1 :value 0})
                   (cta/add-keyframe sid {:time 1000 :property :r1 :value 20}))
-        mods  (get-in (cta/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
+        mods  (get-in (ctaf/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
         shape' (ctm/apply-structure-modifiers shape mods)]
     (t/is (mth/close? 20.0 (double (:r1 shape')) 0.001))
     (t/is (= 0 (:r2 shape')))))
@@ -748,7 +749,7 @@
                   (cta/add-keyframe sid {:time 1000 :property :fill-color :index 0 :value "#ffffff"})
                   (cta/add-keyframe sid {:time 0 :property :fill-opacity :index 0 :value 1})
                   (cta/add-keyframe sid {:time 1000 :property :fill-opacity :index 0 :value 0}))
-        tree  (cta/timeline->modif-tree tl {sid shape} 500)
+        tree  (ctaf/timeline->modif-tree tl {sid shape} 500)
         shape' (ctm/apply-structure-modifiers shape (get-in tree [sid :modifiers]))
         fill   (first (vec (:fills shape')))]
     (t/is (contains? tree sid))
@@ -764,7 +765,7 @@
                   (cta/add-keyframe sid {:time 0 :property :x :value 10})
                   (cta/add-keyframe sid {:time 0 :property :y :value 20}))
         pos   (fn [objects]
-                (let [mods (get-in (cta/timeline->modif-tree tl objects 0) [sid :modifiers])]
+                (let [mods (get-in (ctaf/timeline->modif-tree tl objects 0) [sid :modifiers])]
                   (-> (gsh/transform-shape (get objects sid) mods) :selrect ((juxt :x :y)))))
         close (fn [[ax ay] [bx by]] (and (mth/close? ax bx 0.001) (mth/close? ay by 0.001)))]
     (t/is (= (gpt/point 100 50) (cta/position-origin tl {bid board} sid)))
@@ -1744,7 +1745,7 @@
                   (cta/set-track-origin sid 0 0)
                   (cta/add-keyframe sid {:time 0 :property :scale-x :value 1})
                   (cta/add-keyframe sid {:time 1000 :property :scale-x :value 2}))
-        mods  (get-in (cta/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
+        mods  (get-in (ctaf/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
         shape' (gsh/transform-shape shape mods)]
     (t/is (mth/close? 10.0 (double (-> shape' :selrect :x)) 0.01))
     (t/is (mth/close? 200.0 (double (-> shape' :selrect :width)) 0.01))))
@@ -1755,7 +1756,7 @@
         tl    (-> (mk-timeline)
                   (cta/add-keyframe sid {:time 0 :property :scale-x :value 1})
                   (cta/add-keyframe sid {:time 1000 :property :scale-x :value 2}))
-        mods  (get-in (cta/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
+        mods  (get-in (ctaf/timeline->modif-tree tl {sid shape} 1000) [sid :modifiers])
         shape' (gsh/transform-shape shape mods)]
     (t/is (mth/close? -40.0 (double (-> shape' :selrect :x)) 0.01))
     (t/is (mth/close? 200.0 (double (-> shape' :selrect :width)) 0.01))))
@@ -2165,7 +2166,7 @@
         [cid did] (map :id [card dot])
         objects (in-board board [card] {cid [dot]})
         posed   (fn [tl]
-                  (let [tree (cgm/set-objects-modifiers (cta/timeline->modif-tree tl objects 0) objects)]
+                  (let [tree (cgm/set-objects-modifiers (ctaf/timeline->modif-tree tl objects 0) objects)]
                     (:selrect (gsh/transform-shape (get objects did) (get-in tree [did :modifiers])))))
         tl      (cta/make-timeline {:board-id (:id board) :duration 1000})
         scaled  (posed (-> tl
@@ -2176,7 +2177,7 @@
     (t/is (close-all? [135 110 20 20] ((juxt :x :y :width :height) resized))
           "kept to its left edge, as it is")
     (t/is (some #(= :scale-content (:type %))
-                (:structure-child (get-in (cta/timeline->modif-tree
+                (:structure-child (get-in (ctaf/timeline->modif-tree
                                            (-> tl
                                                (cta/add-keyframe cid {:time 0 :property :scale-x :value 0.5})
                                                (cta/add-keyframe cid {:time 0 :property :scale-y :value 0.5}))
@@ -2825,7 +2826,7 @@
         sid (:id rect)
         tl  (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
                 (cta/add-animation sid {:type :fade :duration 400}))]
-    (t/is (some? (get-in (cta/timeline->modif-tree tl objects 0) [sid :modifiers])))
+    (t/is (some? (get-in (ctaf/timeline->modif-tree tl objects 0) [sid :modifiers])))
     (t/is (re-find #"opacity" (acss/timeline->css tl objects)))))
 
 (t/deftest modifiers-give-the-shape-at-a-time
@@ -2840,10 +2841,10 @@
                    (cta/add-keyframe sid {:time 0 :property :opacity :value 1})
                    (cta/add-keyframe sid {:time 1000 :property :opacity :value 0.5}))
         at     (fn [time]
-                 (gsh/transform-shape rect (get-in (cta/timeline->modif-tree tl objects time)
+                 (gsh/transform-shape rect (get-in (ctaf/timeline->modif-tree tl objects time)
                                                    [sid :modifiers])))
         rotated (assoc rect :rotation 30)
-        shape0  (gsh/transform-shape rotated (get-in (cta/timeline->modif-tree tl (assoc objects sid rotated) 0)
+        shape0  (gsh/transform-shape rotated (get-in (ctaf/timeline->modif-tree tl (assoc objects sid rotated) 0)
                                                      [sid :modifiers]))]
     (t/is (close? 45 (:rotation (at 500))))
     (t/is (close? 0.75 (:opacity (at 500))))
@@ -2904,7 +2905,7 @@
                     (cta/toggle-slot-flag sid :hidden :rotation)
                     (cta/toggle-animation-flag sid aid :hidden))]
         (t/is (nil? (cta/get-track (cta/resolve-animations tl2 objects) sid)))
-        (t/is (empty? (cta/timeline->modif-tree tl2 objects 500)))))
+        (t/is (empty? (ctaf/timeline->modif-tree tl2 objects 500)))))
 
     (t/testing "shown again"
       (t/is (= tl (-> tl
@@ -3188,8 +3189,8 @@
                          (range 0 (inc (:duration styled)) 10)))
           "the times it plays otherwise")
     (doseq [time [0 150 250 350 450 550 1000]]
-      (t/is (= (cta/timeline->modif-tree written objects time)
-               (cta/timeline->modif-tree styled objects time))
+      (t/is (= (ctaf/timeline->modif-tree written objects time)
+               (ctaf/timeline->modif-tree styled objects time))
             (str "t=" time)))
     (t/is (= (acss/timeline->css written objects) (acss/timeline->css styled objects)))
     (t/is (= (asvg/timeline->svg written objects {}) (asvg/timeline->svg styled objects {})))
@@ -3341,7 +3342,7 @@
         tl    (-> (mk-timeline)
                   (cta/add-keyframe sid {:time 0 :property :trim-end :value 0})
                   (cta/add-keyframe sid {:time 1000 :property :trim-end :value 1}))
-        at    #(gsh/transform-shape shape (get-in (cta/timeline->modif-tree tl {sid shape} %)
+        at    #(gsh/transform-shape shape (get-in (ctaf/timeline->modif-tree tl {sid shape} %)
                                                   [sid :modifiers]))]
     (t/is (cta/valid-timeline? tl))
     (t/is (close? 0.5 (:trim-end (at 500))))
@@ -3358,7 +3359,7 @@
                       (cta/add-keyframe sid {:time 0 :property :rotation :value 0})
                       (cta/add-keyframe sid {:time 1000 :property :rotation :value 90}))
         ;; with an edit of the layout at the same time
-        modifiers (-> (get-in (cta/timeline->modif-tree tl {sid shape} 500) [sid :modifiers])
+        modifiers (-> (get-in (ctaf/timeline->modif-tree tl {sid shape} 500) [sid :modifiers])
                       (ctm/change-property :layout-item-h-sizing :fix))
         changes   (cta/appearance-changes modifiers)
         objects   (cta/apply-appearance-modifiers {sid shape} {sid {:modifiers modifiers}})]
@@ -4044,7 +4045,7 @@
   "The `:text-units` the animation of `timeline` gives `sid` at `time`,
   `::none` without."
   [timeline objects sid time]
-  (-> (cta/timeline->modif-tree timeline objects time)
+  (-> (ctaf/timeline->modif-tree timeline objects time)
       (get-in [sid :modifiers])
       (cta/appearance-changes)
       (get :text-units ::none)))
@@ -4311,7 +4312,7 @@
 
 (defn- blur-at
   [timeline objects sid time]
-  (-> (cta/timeline->modif-tree timeline objects time)
+  (-> (ctaf/timeline->modif-tree timeline objects time)
       (get-in [sid :modifiers])
       (cta/appearance-changes)
       (get :blur ::none)))
@@ -4684,7 +4685,7 @@
 (defn- shown-at
   "The shape `id` of `objects` as `timeline` shows it at `time`."
   [timeline objects id time]
-  (let [mods (get-in (cta/timeline->modif-tree timeline objects time) [id :modifiers])]
+  (let [mods (get-in (ctaf/timeline->modif-tree timeline objects time) [id :modifiers])]
     (cond-> (get objects id)
       (some? mods) (-> (gsh/transform-shape mods) (merge (cta/appearance-changes mods))))))
 
@@ -4839,7 +4840,7 @@
                   (cta/add-keyframe follower {:time 0 :property :y :value 100})
                   (cta/add-keyframe follower {:time 1000 :property :y :value 140})
                   (cta/set-follow follower {:leader leader :delay 150}))
-        baked (cta/bake-follows tl objects)]
+        baked (ctaf/bake-follows tl objects)]
     (t/is (nil? (get-in baked [:tracks follower :follow])) "no follow left")
     (t/is (cta/valid-timeline? baked))
     (t/is (= (get-in tl [:tracks leader]) (get-in baked [:tracks leader])) "the leader as it was")
@@ -4853,7 +4854,7 @@
                   (cta/add-keyframe leader {:time 0 :property :x :value 100 :easing :linear})
                   (cta/add-keyframe leader {:time 10000 :property :x :value 900})
                   (cta/set-follow follower {:leader leader}))
-        baked (cta/bake-follows tl objects)]
+        baked (ctaf/bake-follows tl objects)]
     (t/is (<= (count (baked-property baked follower :x)) 3))
     (t/is (empty? (baked-property baked follower :y)) "nothing that stays where it rests")
     (t/is (empty? (baked-property baked follower :rotation)))
@@ -4869,7 +4870,7 @@
                   (cta/add-keyframe leader {:time 0 :property :opacity :value 1})
                   (cta/add-keyframe leader {:time 1000 :property :opacity :value 0.4})
                   (cta/set-follow follower {:leader leader :opacity true}))
-        baked (cta/bake-follows tl objects)]
+        baked (ctaf/bake-follows tl objects)]
     (t/is (seq (baked-property baked follower :scale-x)))
     (t/is (seq (baked-property baked follower :opacity)))
     (t/is (plays-alike? tl baked objects follower (range 0 1001 100)))))
@@ -4883,7 +4884,7 @@
                     (cta/add-keyframe leader {:time 1000 :property :rotation :value 90})
                     (cta/set-follow follower {:leader leader :delay 100})
                     (cta/set-follow (:id third) {:leader follower :delay 100}))
-        baked   (cta/bake-follows tl objects)]
+        baked   (ctaf/bake-follows tl objects)]
     (t/is (plays-alike? tl baked objects (:id third) (range 0 1001 50)))
     (t/is (not-any? :follow (vals (:tracks baked))))))
 
@@ -4892,12 +4893,12 @@
         tl (-> (mk-timeline)
                (cta/add-keyframe leader {:time 0 :property :x :value 100})
                (cta/add-keyframe leader {:time 1000 :property :x :value 200}))]
-    (t/is (identical? tl (cta/bake-follows tl objects)))
+    (t/is (identical? tl (ctaf/bake-follows tl objects)))
     (t/testing "a cycle bakes to no follow"
       (let [tl (-> tl
                    (cta/set-follow follower {:leader leader})
                    (cta/set-follow leader {:leader follower}))]
-        (t/is (not-any? :follow (vals (:tracks (cta/bake-follows tl objects)))))))))
+        (t/is (not-any? :follow (vals (:tracks (ctaf/bake-follows tl objects)))))))))
 
 (defn- turned-limb
   "A limb 20 by 100 at 0,0, turned 30 degrees around its middle (10,50):
@@ -4927,7 +4928,7 @@
                    (cta/set-track-origin sid 0.5 1)
                    (cta/add-keyframe sid {:time 0 :property :rotation :value 30})
                    (cta/add-keyframe sid {:time 1000 :property :rotation :value 60}))
-        mods   (get-in (cta/timeline->modif-tree tl {sid limb} 1000) [sid :modifiers])
+        mods   (get-in (ctaf/timeline->modif-tree tl {sid limb} 1000) [sid :modifiers])
         limb'  (gsh/transform-shape limb mods)
         end    (cta/origin-point limb' {:x 0.5 :y 1})]
     (t/is (mth/close? 60.0 (double (:rotation limb')) 0.01))
@@ -4984,7 +4985,7 @@
 
 (t/deftest a-follow-from-rest-bakes-alike
   (let [{:keys [tl objects follower]} (popping-leader :rest)
-        baked (cta/bake-follows tl objects)]
+        baked (ctaf/bake-follows tl objects)]
     (t/is (nil? (get-in baked [:tracks follower :follow])))
     (t/is (plays-alike? tl baked objects follower (range 0 1001 50)))))
 
@@ -5001,7 +5002,7 @@
     (t/is (mth/close? x1 x2 0.2))
     (t/is (mth/close? 305 x2 0.01))
     (t/testing "the baked loop ends there too"
-      (let [baked (cta/bake-follows tl objects)]
+      (let [baked (ctaf/bake-follows tl objects)]
         (t/is (mth/close? 300 (:value (peek (baked-property baked follower :x))) 0.3))))))
 
 (t/deftest a-stretching-turned-leader-scales-its-follower-evenly
@@ -5031,7 +5032,7 @@
                      (cta/add-keyframe leader {:time 0 :property :scale-x :value 1 :easing :linear})
                      (cta/add-keyframe leader {:time 1000 :property :scale-x :value 2})
                      (cta/set-follow (:id follower) {:leader leader}))
-        baked    (cta/bake-follows tl objects)]
+        baked    (ctaf/bake-follows tl objects)]
     (t/is (plays-alike? tl baked objects (:id follower) (range 0 1001 100)))))
 
 (t/deftest a-leader-popping-in-from-nothing-is-followed-from-rest
@@ -5065,7 +5066,7 @@
     (t/is (mth/close? (turn 999) (turn 1000) 1))
     (t/is (and (mth/close? x1 x2 1) (mth/close? y1 y2 1)))
     ;; at 500 the follower has no size, so no turn to compare
-    (t/is (plays-alike? tl (cta/bake-follows tl objects) objects follower [0 250 480 520 750 999 1000]))))
+    (t/is (plays-alike? tl (ctaf/bake-follows tl objects) objects follower [0 250 480 520 750 999 1000]))))
 
 (t/deftest a-mirrored-leader-turns-its-follower-from-rest
   (let [{:keys [leader follower objects]} (follow-scene)
@@ -5077,7 +5078,7 @@
                (cta/set-follow follower {:leader leader :from :rest}))]
     (t/is (mth/close? 90 (:rotation (shown-at tl objects follower 1000)) 0.5))
     (t/is (mth/close? 45 (:rotation (shown-at tl objects follower 500)) 0.5))
-    (t/is (plays-alike? tl (cta/bake-follows tl objects) objects follower [0 500 1000]))))
+    (t/is (plays-alike? tl (ctaf/bake-follows tl objects) objects follower [0 500 1000]))))
 
 (t/deftest a-leader-popping-in-along-one-axis-is-followed-at-its-place
   ;; squashed flat along x at first: its scale counts from rest, its
@@ -5120,7 +5121,7 @@
 (defn- back-centre-at
   "`centre-at` on the way back of ping-pong."
   [timeline objects id time]
-  (let [mods  (get-in (cta/timeline->modif-tree timeline objects time :back? true) [id :modifiers])
+  (let [mods  (get-in (ctaf/timeline->modif-tree timeline objects time :back? true) [id :modifiers])
         shape (cond-> (get objects id) (some? mods) (gsh/transform-shape mods))
         c     (grc/rect->center (:selrect shape))]
     [(:x c) (:y c)]))
@@ -5154,7 +5155,7 @@
                   (cta/add-keyframe leader {:time 1000 :property :x :value 200})
                   (cta/add-animation (:id other) {:type :fade :start 0 :duration 300})
                   (cta/set-follow follower {:leader leader :delay 200}))
-        baked (cta/bake-follows tl objects)
+        baked (ctaf/bake-follows tl objects)
         shown (fn [id u]
                 (if (> u 1000)
                   (back-centre-at tl objects id (- 2000 u))
@@ -5173,7 +5174,7 @@
       (t/is (< (opacity tl 50) 0.9))
       (t/is (mth/close? (opacity tl 50) (opacity baked 1950) 0.02) "a preset plays back too"))
     (let [still (update-in tl [:tracks follower] dissoc :follow)]
-      (t/is (identical? still (cta/bake-follows still objects)) "without follows it stays ping-pong"))))
+      (t/is (identical? still (ctaf/bake-follows still objects)) "without follows it stays ping-pong"))))
 
 ;; --- Reaching a goal (two-bone IK) -----------------------------------------
 
@@ -5247,7 +5248,7 @@
             (add-layer :away 600 600 :parent uuid/zero)
             (as-> scene (add-layer scene :nested 150 100 :parent (:arm-upper scene))))
         tl     (cta/set-ik tl arm-hand {:goal goal})
-        chains #(cta/ik-chains % objects)
+        chains #(ctaf/ik-chains % objects)
         none?  #(empty? (chains %))]
     (t/is (= {arm-hand {:a arm-upper :b arm-fore :e arm-hand :goal goal :bend :ccw :turn :chain}} (chains tl)))
     (t/is (none? (cta/set-follow tl arm-hand {:leader arm-fore :delay 50})) "a delay")
@@ -5265,7 +5266,7 @@
             (add-arm "two" :y 200)
             (add-layer :x 50 50))
         two    (:two-hand scene)
-        chains #(set (keys (cta/ik-chains % objects)))]
+        chains #(set (keys (ctaf/ik-chains % objects)))]
     (t/is (= #{arm-hand two} (chains (-> tl
                                          (cta/set-ik arm-hand {:goal two})
                                          (cta/set-ik two {:goal goal}))))
@@ -5284,24 +5285,24 @@
                  (cta/set-follow thumb {:leader arm-fore})
                  (cta/set-ik arm-hand {:goal goal})
                  (cta/set-ik thumb {:goal (:x scene)}))]
-      (t/is (= #{} (set (keys (cta/ik-chains tl objects)))) "two chains sharing their links"))))
+      (t/is (= #{} (set (keys (ctaf/ik-chains tl objects)))) "two chains sharing their links"))))
 
 (t/deftest the-natural-bend-is-the-side-the-arm-is-drawn-bent
   (let [bend (fn [elbow-y]
                (let [{:keys [tl objects arm-hand]} (arm-scene :elbow-y elbow-y)]
-                 (cta/natural-bend tl objects arm-hand)))]
+                 (ctaf/natural-bend tl objects arm-hand)))]
     (t/is (= :cw (bend 120)) "the elbow below a line pointing right")
     (t/is (= :ccw (bend 80)))
     (t/is (= :ccw (bend 100)) "straight")
     (t/is (= :ccw (bend 100.0001)) "straight but for a rounding")
     (let [{:keys [tl objects arm-fore]} (arm-scene)]
-      (t/is (nil? (cta/natural-bend tl objects arm-fore)) "one link only"))))
+      (t/is (nil? (ctaf/natural-bend tl objects arm-fore)) "one link only"))))
 
 (defn- pivot-at
   "Where the pivot of the layer `id` of `objects` is as `timeline` shows
   it at `time`."
   [timeline objects id time & {:keys [back?]}]
-  (let [mods  (get-in (cta/timeline->modif-tree timeline objects time :back? back?) [id :modifiers])
+  (let [mods  (get-in (ctaf/timeline->modif-tree timeline objects time :back? back?) [id :modifiers])
         point (cta/origin-point (get objects id) (cta/track-origin (cta/get-track timeline id)))]
     (cond-> point (some? mods) (gpt/transform (ctm/modifiers->transform mods)))))
 
@@ -5309,7 +5310,7 @@
   "Where the point `p` of the layer `id` of `objects` (at rest) is as
   `timeline` shows it at `time`."
   [timeline objects id time p]
-  (let [mods (get-in (cta/timeline->modif-tree timeline objects time) [id :modifiers])]
+  (let [mods (get-in (ctaf/timeline->modif-tree timeline objects time) [id :modifiers])]
     (cond-> p (some? mods) (gpt/transform (ctm/modifiers->transform mods)))))
 
 (defn- near?
@@ -5434,14 +5435,14 @@
                                      (and (mth/close? (:x a) (:x b) 0.5) (mth/close? (:y a) (:y b) 0.5)))
                                   [arm-upper arm-fore arm-hand]))
                         (range 0 1001 25)))
-        baked (cta/bake-follows tl objects)]
+        baked (ctaf/bake-follows tl objects)]
     (t/is (cta/valid-timeline? baked))
     (t/is (nil? (get-in baked [:tracks arm-hand :ik])) "no goal left to reach")
     (t/is (seq (baked-property baked arm-upper :rotation)) "the shoulder turns by keyframes")
     (t/is (alike tl baked))
     (t/testing "a shoulder turning on its centre, with no track"
       (let [tl    (update tl :tracks dissoc arm-upper)
-            baked (cta/bake-follows tl objects)]
+            baked (ctaf/bake-follows tl objects)]
         (t/is (nil? (get-in tl [:tracks arm-upper])))
         (t/is (= arm-upper (get-in baked [:tracks arm-upper :shape-id])))
         (t/is (cta/valid-timeline? baked))
@@ -5698,7 +5699,7 @@
 (t/deftest an-ik-problem-names-the-rule-the-chain-breaks
   (let [{:keys [tl objects arm-fore arm-hand goal] :as scene} (add-arm (arm-scene) "two" :y 200)
         two     (:two-hand scene)
-        problem #(cta/ik-problem % objects arm-hand)
+        problem #(ctaf/ik-problem % objects arm-hand)
         reach   (cta/set-ik tl arm-hand {:goal goal})]
     (t/is (nil? (problem reach)) "it reaches")
     (t/is (nil? (problem tl)) "no goal, no problem")
@@ -5711,4 +5712,4 @@
           tl (-> reach
                  (cta/set-follow thumb {:leader arm-fore})
                  (cta/set-ik thumb {:goal two}))]
-      (t/is (= :shared (cta/ik-problem tl objects arm-hand))))))
+      (t/is (= :shared (ctaf/ik-problem tl objects arm-hand))))))

@@ -20,6 +20,7 @@
    [app.common.math :as mth]
    [app.common.render-wasm.api.select :as wselect]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
@@ -125,11 +126,11 @@
 
 (defn render-shape-at-time
   "Apply the timeline pose at `time` silently, on the way back of
-  ping-pong with `back?` (see `cta/timeline->modif-tree`), rasterize
+  ping-pong with `back?` (see `ctaf/timeline->modif-tree`), rasterize
   `shape-id`, then leave WASM on that pose. The caller restores the
   playhead."
   [objects timeline shape-id time {:keys [bridge scale back?] :or {bridge (default-bridge) scale 1}}]
-  (apply-pose! objects (cta/timeline->modif-tree timeline objects time :back? back?) {:bridge bridge})
+  (apply-pose! objects (ctaf/timeline->modif-tree timeline objects time :back? back?) {:bridge bridge})
   ((:render-shape-pixels bridge) shape-id scale :png))
 
 (defn shoot-shape-at-rest
@@ -1291,7 +1292,7 @@
   "Give the shapes whose properties the animation preview at `time`
   changed their own ones back."
   [objects timeline time {:keys [apply-shape-properties]}]
-  (doseq [[id ops] (property-ops (cta/timeline->modif-tree timeline objects time))]
+  (doseq [[id ops] (property-ops (ctaf/timeline->modif-tree timeline objects time))]
     (when-let [shape (get objects id)]
       (apply-shape-properties shape (map (comp :property second) ops)))))
 
@@ -1531,12 +1532,12 @@
 (defn back-times
   "The times of the frames a raster export of a ping-pong `timeline`
   captures on its way back, where its layers that follow others lag
-  behind (see `cta/timeline->modif-tree`): `times` backwards from the
+  behind (see `ctaf/timeline->modif-tree`): `times` backwards from the
   one before the end, to the start but when it `repeats?` (the next
   round shows it). Nil when no layer follows another: the frames there
   play backwards (see `cta/ping-pong-frames`)."
   [timeline times repeats?]
-  (when (and (= :ping-pong (cta/playback-mode timeline)) (cta/follows? timeline))
+  (when (and (= :ping-pong (cta/playback-mode timeline)) (ctaf/follows? timeline))
     (cond-> (vec (rest (rseq (vec times)))) repeats? pop)))
 
 (defn- capture-frames

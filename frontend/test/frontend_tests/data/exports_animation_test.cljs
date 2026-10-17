@@ -13,6 +13,7 @@
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
@@ -67,7 +68,7 @@
                (cta/add-keyframe cid {:time 1000 :property :x :value 50})
                (cta/add-keyframe cid {:time 0 :property :opacity :value 1})
                (cta/add-keyframe cid {:time 1000 :property :opacity :value 0}))
-        tree (cta/timeline->modif-tree tl objects 1000)
+        tree (ctaf/timeline->modif-tree tl objects 1000)
         bridge {:set-modifiers (fn [entries & {:keys [request-render?]}]
                                  (log calls :set-modifiers entries request-render?))
                 :clean-modifiers (fn [] (log calls :clean-modifiers))
@@ -87,7 +88,7 @@
         {:keys [objects bid cid]} (test-objects)
         tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
                    (cta/add-animation cid {:type :move :start 0 :duration 1000 :offset-x 0 :offset-y 40}))
-        tree   (cta/timeline->modif-tree tl objects 500)
+        tree   (ctaf/timeline->modif-tree tl objects 500)
         result [[cid :propagated]]
         bridge {:set-modifiers (fn [entries & _] (log calls :set-modifiers entries))
                 :propagate-modifiers (fn [entries snap? axis]
@@ -1509,7 +1510,7 @@
                                           (when (some #{:text-units} props)
                                             (swap! sent conj (:text-units shape))))}]
     (doseq [time [250 500 750]]
-      (dea/apply-pose! objects (cta/timeline->modif-tree tl objects time) {:bridge bridge}))
+      (dea/apply-pose! objects (ctaf/timeline->modif-tree tl objects time) {:bridge bridge}))
     (t/is (= 3 (count @sent)) "every frame")
     (t/is (seq (first @sent)) "posed while it plays")
     (t/is (= [[] []] (rest @sent)) "at rest from its end")))

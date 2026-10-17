@@ -23,6 +23,7 @@
    [app.common.path-names :as cpn]
    [app.common.transit :as t]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.animation-style :as ctas]
    [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
@@ -185,7 +186,7 @@
   `cltl/with-instance-clips`) and, while it has no tracks, keeping time
   with them. With `bake`, for the exports that read keyframes (SVG,
   Lottie, CSS), the layers of the board that follow others play
-  keyframes (see `cta/bake-follows`), but those Lottie can make children
+  keyframes (see `ctaf/bake-follows`), but those Lottie can make children
   of their leaders with `bake` `:lottie` (see
   `alottie/parent-candidates`), and its helper layers nothing (see
   `cta/drop-guides`); the others play their follows
@@ -205,9 +206,9 @@
                      (board-timeline timelines (get objects board-id)))]
       (-> (cond-> own
             (= :whole text-split) cta/flatten-splits
-            bake                  (cta/bake-follows objects :keep? (if (= :lottie bake)
-                                                                     (alottie/parent-candidates own objects)
-                                                                     (constantly false)))
+            bake                  (ctaf/bake-follows objects :keep? (if (= :lottie bake)
+                                                                      (alottie/parent-candidates own objects)
+                                                                      (constantly false)))
             bake                  (cta/drop-guides))
           (cltl/with-copies-clock (vals copies) stored?)
           (cltl/with-instance-tracks (vals copies) objects :text-split text-split)
@@ -527,7 +528,7 @@
   [timeline objects shape time]
   (let [shape-id  (:id shape)
         modifiers (-> (update timeline :tracks select-keys [shape-id])
-                      (cta/timeline->modif-tree objects time)
+                      (ctaf/timeline->modif-tree objects time)
                       (dm/get-in [shape-id :modifiers]))]
     (gsh/transform-shape shape (cond-> modifiers
                                  (some? modifiers)
@@ -672,7 +673,7 @@
   "Make the layer `shape-id`, the end of a chain of two follows, reach
   another layer of its board as `ik` says (see `cta/set-ik`), in one undo
   step; nil reaches none. Its elbow bends as the chain is drawn bent (see
-  `cta/natural-bend`) unless `ik` or the goal it reached says otherwise.
+  `ctaf/natural-bend`) unless `ik` or the goal it reached says otherwise.
   A new goal it cannot reach (see `cltl/can-reach?`) changes nothing;
   the bend and turn of a chain that cannot reach for now still change."
   [shape-id ik]
@@ -685,7 +686,7 @@
             ik      (cond-> ik
                       (and (some? goal) (nil? (:bend ik)))
                       (assoc :bend (or (some-> tl (cta/ik-of shape-id) :bend)
-                                       (some-> tl (cta/natural-bend objects shape-id))
+                                       (some-> tl (ctaf/natural-bend objects shape-id))
                                        :ccw)))
             tl'     (some-> tl (cta/set-ik shape-id ik))]
         ;; only a new goal is checked: a chain broken for now keeps
@@ -721,7 +722,7 @@
 
 (defn add-goal
   "Give the layer `shape-id`, the end of a chain of two follows (see
-  `cta/ik-links`), a new goal to reach: a ring on its pivot where the
+  `ctaf/ik-links`), a new goal to reach: a ring on its pivot where the
   canvas shows it, a helper layer the exports leave out (see
   `cta/guide?`), selected to be moved, in one undo step. Nothing changes
   where it reaches, as its elbow bends as drawn (see `set-ik`), or as it
@@ -734,7 +735,7 @@
             objects (:objects page)
             tl      (layer-board-timeline state shape-id)
             shape   (get objects shape-id)]
-        (if (and (some? tl) (some? shape) (some? (cta/ik-links tl objects shape-id)))
+        (if (and (some? tl) (some? shape) (some? (ctaf/ik-links tl objects shape-id)))
           (let [board-id (:board-id tl)
                 shown    (or (get (dsh/lookup-shown-shapes state) shape-id) shape)
                 pivot    (cta/origin-point shown (cta/track-origin (cta/get-track tl shape-id)))
@@ -755,7 +756,7 @@
                                            :frame-id board-id})
                 ;; what it is set to stays, a new reach bends as drawn
                 old      (cta/ik-of tl shape-id)
-                bend     (or (:bend old) (cta/natural-bend tl objects shape-id) :ccw)
+                bend     (or (:bend old) (ctaf/natural-bend tl objects shape-id) :ccw)
                 tl'      (-> tl
                              (cta/set-guide (:id ring) true)
                              (cta/set-ik shape-id (assoc old :goal (:id ring) :bend bend)))

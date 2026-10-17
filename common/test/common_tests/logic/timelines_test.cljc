@@ -23,6 +23,7 @@
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.modifiers :as ctm]
@@ -1554,7 +1555,7 @@
           dot    (copy-of objects copy :main-dot)]
       (doseq [t [300 450 1100 1200 1500 1900]]
         (let [[cx cy] (centre-in (cltl/animation-tree copies objects t) objects dot)
-              [ex ey] (centre-in (cta/timeline->modif-tree export objects t) objects dot)]
+              [ex ey] (centre-in (ctaf/timeline->modif-tree export objects t) objects dot)]
           (t/is (and (mth/close? cx ex 1) (mth/close? cy ey 1))
                 (str playback " at " t ": canvas " [cx cy] ", export " [ex ey])))))))
 
@@ -1695,7 +1696,7 @@
                   (str "on the ball at " elapsed ": " w " " g))))
         (let [export (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000})
                        (vals copies) objects)
-              tree   (cta/timeline->modif-tree export objects 300)
+              tree   (ctaf/timeline->modif-tree export objects 300)
               w      (centre tree hand)
               g      (centre tree ball)]
           (t/is (and (mth/close? (:x g) (:x w) 0.5) (mth/close? (:y g) (:y w) 0.5))

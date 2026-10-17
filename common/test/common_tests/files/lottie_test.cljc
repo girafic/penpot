@@ -15,6 +15,7 @@
    [app.common.test-helpers.files :as thf]
    [app.common.test-helpers.ids-map :as thi]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
@@ -201,7 +202,7 @@
   `time`."
   [result shape time]
   (let [objects (into {} (map (juxt :id identity)) (:shapes result))
-        mods    (get-in (cta/timeline->modif-tree (:timeline result) objects time) [(:id shape) :modifiers])
+        mods    (get-in (ctaf/timeline->modif-tree (:timeline result) objects time) [(:id shape) :modifiers])
         shape   (cond-> shape (some? mods) (gsh/transform-shape mods))
         c       (grc/rect->center (:selrect shape))]
     [(:x c) (:y c)]))
@@ -499,7 +500,7 @@
         named    #(shape-named result %)
         follow   #(get-in (:timeline result) [:tracks (:id (named %)) :follow :leader])
         before   (fn [shape t]
-                   (let [mods  (get-in (cta/timeline->modif-tree tl objects t) [(:id shape) :modifiers])
+                   (let [mods  (get-in (ctaf/timeline->modif-tree tl objects t) [(:id shape) :modifiers])
                          c     (grc/rect->center (:selrect (cond-> shape (some? mods) (gsh/transform-shape mods))))]
                      [(:x c) (:y c)]))]
     (t/is (some :parent (:layers doc)) "exported as children")

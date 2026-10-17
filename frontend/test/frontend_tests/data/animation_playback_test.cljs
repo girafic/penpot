@@ -8,6 +8,7 @@
   (:require
    [app.common.geom.point :as gpt]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.modifiers :as ctm]
    [app.common.types.shape :as cts]
@@ -444,7 +445,7 @@
 
 (t/deftest the-text-in-edition-shows-at-rest
   (let [{:keys [a b objects timeline]} (split-texts)
-        tree (cta/timeline->modif-tree timeline objects 100)]
+        tree (ctaf/timeline->modif-tree timeline objects 100)]
     (t/is (seq (units-of tree a)))
     (let [shown (dwa/texts-at-rest tree {:workspace-local {:edition a}})]
       (t/is (= [] (units-of shown a)))
@@ -453,11 +454,11 @@
 
 (t/deftest a-text-no-more-posed-is-set-at-rest
   (let [{:keys [a b objects timeline]} (split-texts)
-        posed   (cta/timeline->modif-tree timeline objects 100)
+        posed   (ctaf/timeline->modif-tree timeline objects 100)
         ;; what the canvas was given for that frame
         props   (vec (wasm.modifiers/extract-property-changes posed))
         ;; the split animations of `a` removed
-        without (cta/timeline->modif-tree (update-in timeline [:tracks a] dissoc :animations) objects 100)
+        without (ctaf/timeline->modif-tree (update-in timeline [:tracks a] dissoc :animations) objects 100)
         shown   (dwa/texts-at-rest without {:wasm-props props})]
     (t/is (= ::none (units-of without a)))
     (t/is (= [] (units-of shown a)) "its pose clears")
@@ -467,7 +468,7 @@
 
 (t/deftest the-pose-of-a-text-clears-once-its-split-ends
   (let [{:keys [a objects timeline]} (split-texts)
-        frame   #(vec (wasm.modifiers/extract-property-changes (cta/timeline->modif-tree timeline objects %)))
+        frame   #(vec (wasm.modifiers/extract-property-changes (ctaf/timeline->modif-tree timeline objects %)))
         [changed changes] (wasm.modifiers/property-changes objects (frame 100) (frame 600))]
     (t/is (contains? (get changes a) :text-units))
     (t/is (= [] (get-in changed [a :text-units])) "the text is restored")))

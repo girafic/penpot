@@ -25,6 +25,7 @@
    [app.common.geom.shapes.corners :as gco]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
@@ -1956,11 +1957,11 @@
   leader that scales evenly, never flips nor stretches as it plays (its
   hidden rows left out, its presets and styles as their keyframes, see
   `cta/resolve-animations`), and is no helper layer (see `cta/guide?`);
-  no link of a chain that reaches (see `cta/ik-chains`). Where their
+  no link of a chain that reaches (see `ctaf/ik-chains`). Where their
   layers land decides the rest."
   [timeline objects]
-  (let [follows  (cta/followers timeline objects)
-        chained  (into #{} (mapcat (juxt :a :b :e)) (vals (cta/ik-chains timeline objects follows)))
+  (let [follows  (ctaf/followers timeline objects)
+        chained  (into #{} (mapcat (juxt :a :b :e)) (vals (ctaf/ik-chains timeline objects follows)))
         resolved (delay (cta/resolve-animations timeline objects))
         even?    (fn [leader]
                    (let [kfs   (dm/get-in @resolved [:tracks leader :keyframes])
@@ -1974,7 +1975,7 @@
                           (not-any? #(contains? #{:width :height} (:property %)) kfs)
                           (not (:flip-x shape))
                           (not (:flip-y shape)))))
-        at-zero  (delay (cta/timeline->modif-tree timeline objects 0))
+        at-zero  (delay (ctaf/timeline->modif-tree timeline objects 0))
         at-rest? (fn [leader]
                    (let [mods (dm/get-in @at-zero [leader :modifiers])
                          {:keys [a b c d e f]} (if (some? mods) (ctm/modifiers->transform mods) (gmt/matrix))]
@@ -2095,10 +2096,10 @@
   "The Lottie document of `timeline` (see `timeline->lottie`), the layers
   of the followers in `kept` children of their leaders' (see
   `lottie-doc`), the other follows playing by keyframes (see
-  `cta/bake-follows`). Those it could not parent where their layers
+  `ctaf/bake-follows`). Those it could not parent where their layers
   landed play by keyframes the next time."
   [timeline objects assets propagate kept]
-  (let [baked   (cta/bake-follows timeline objects :keep? kept)
+  (let [baked   (ctaf/bake-follows timeline objects :keep? kept)
         parents (into {}
                       (keep (fn [id] (when-let [leader (:leader (cta/follow-of baked id))] [id leader])))
                       kept)
@@ -2136,7 +2137,7 @@
   another (see `cta/follow-of`) is a child (`parent`) of its leader's
   layer where Lottie plays the follow as the canvas does (see
   `parent-candidates`, `lottie-parented`), else it plays it by keyframes
-  (see `cta/bake-follows`)."
+  (see `ctaf/bake-follows`)."
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]

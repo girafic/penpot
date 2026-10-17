@@ -22,6 +22,7 @@
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
    [app.common.types.animation-code :as ctac]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
@@ -1798,7 +1799,7 @@
                                         (cond-> {:goal goal-id
                                                  :bend (if (some? bend)
                                                          (keyword bend)
-                                                         (or (:bend old) (cta/natural-bend timeline objects shape-id) :ccw))}
+                                                         (or (:bend old) (ctaf/natural-bend timeline objects shape-id) :ccw))}
                                           (some? end)  (assoc :turn (keyword end))
                                           (and (nil? end) (some? old)) (assoc :turn (:turn old))))))))))))
 

@@ -23,6 +23,7 @@
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.component :as ctk]
    [app.common.types.components-list :as ctkl]
@@ -705,7 +706,7 @@
   animations of the whole text, as the markup exports play them (see
   `cta/flatten-splits`). A shape `timeline` animates itself keeps that
   animation. The layers of copies that follow others play keyframes
-  (see `cta/bake-follows`): a follow plays on the clock of its copy,
+  (see `ctaf/bake-follows`): a follow plays on the clock of its copy,
   which the retiming, looping and ping-pong here cannot carry.
   `:copy-loops` holds the cycles (ms) of the copies that loop, whose
   clock the exports bind to the board's (see
@@ -717,7 +718,7 @@
            start  (:clock-start copy 0)
            speed  (:clock-speed copy 1)
            copy   (-> (cond-> copy (= :whole text-split) cta/flatten-splits)
-                      (cta/bake-follows objects)
+                      (ctaf/bake-follows objects)
                       (cta/resolve-animations objects)
                       (cta/expand-loops))
            ;; ping-pong turns into a loop of there and back
@@ -856,12 +857,12 @@
 
 (defn reach-problem
   "Why the layer `id` of the board of `timeline` (of `objects`) cannot
-  reach the layer `goal` (see `cta/ik-problem`), or `:copy` for a layer
+  reach the layer `goal` (see `ctaf/ik-problem`), or `:copy` for a layer
   of a component copy the board does not animate itself, as what it
   plays of its main moves no follower (see `can-follow?`); nil when it
   can."
   [objects timeline id goal]
-  (or (cta/ik-problem (cta/set-ik timeline id {:goal goal}) objects id)
+  (or (ctaf/ik-problem (cta/set-ik timeline id {:goal goal}) objects id)
       (when (and (some? (dm/get-in objects [goal :shape-ref]))
                  (not (contains? (:tracks timeline) goal)))
         :copy)))
@@ -910,7 +911,7 @@
   a text) is true of, which the code plays by units (see
   `cta/unit-timelines`); and `:splits`, the texts the design plays by
   units, with their kind. The layers that follow others play keyframes
-  (see `cta/bake-follows`); helper layers play nothing (see
+  (see `ctaf/bake-follows`); helper layers play nothing (see
   `cta/drop-guides`). Nil when the board plays nothing."
   [page files board-id & {:keys [units?] :or {units? (constantly false)}}]
   (let [objects   (:objects page)
@@ -926,7 +927,7 @@
                         (mapv (fn [[[_ head-id] timeline]] {:head-id head-id :timeline timeline})))
             splits (split-kinds (cons own (map :timeline copies)) objects)
             ;; lines play whole: a page breaks them as its width says
-            flat   #(-> (cta/bake-follows % objects)
+            flat   #(-> (ctaf/bake-follows % objects)
                         (cta/drop-guides)
                         (cta/flatten-splits #{:char :word} (fn [id] (units? (get objects id)))))
             copies (mapv #(update % :timeline flat) copies)]
@@ -944,9 +945,9 @@
   (the playhead of the workspace, which shows the time of a timeline)."
   [timelines objects time & {:keys [back]}]
   (reduce-kv (fn [tree key timeline]
-               (into tree (cta/timeline->modif-tree timeline objects (cta/playback-time timeline time)
-                                                    :back? (or (contains? back key)
-                                                               (cta/playback-back? timeline time)))))
+               (into tree (ctaf/timeline->modif-tree timeline objects (cta/playback-time timeline time)
+                                                     :back? (or (contains? back key)
+                                                                (cta/playback-back? timeline time)))))
              {}
              timelines))
 

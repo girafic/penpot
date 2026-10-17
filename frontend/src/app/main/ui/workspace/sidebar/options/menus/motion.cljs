@@ -16,6 +16,7 @@
    [app.common.math :as mth]
    [app.common.path-names :as cpn]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.animation-style :as ctas]
    [app.common.types.text-units :as tu]
    [app.common.uuid :as uuid]
@@ -1146,11 +1147,11 @@
 (mf/defc reach-menu*
   "The goal the selected layer reaches (see `cta/ik-of`), when it ends a
   chain of two follows (an arm: the hand follows the forearm, which
-  follows the upper arm, see `cta/ik-links`) or reaches one already: a
+  follows the upper arm, see `ctaf/ik-links`) or reaches one already: a
   layer of its board, chosen in the list, picked on the canvas or made
   new (`dwa/add-goal`); the side its elbow bends to and how it turns
   itself. A chain that cannot reach keeps its goal, which it reaches
-  once mended, and says why (see `cta/ik-problem`).
+  once mended, and says why (see `ctaf/ik-problem`).
   The + of the title shows the section; its - reaches none."
   [{:keys [ids]}]
   (let [shape-id  (when (= 1 (count ids)) (first ids))
@@ -1163,10 +1164,10 @@
                     (or (get timelines board-id) (cta/make-timeline {:board-id board-id})))
         ik        (when layer? (cta/ik-of timeline shape-id))
         chain?    (mf/with-memo [timeline objects shape-id layer?]
-                    (and layer? (some? (cta/ik-links timeline objects shape-id))))
-        ;; why it reaches its goal no more (see `cta/ik-problem`)
+                    (and layer? (some? (ctaf/ik-links timeline objects shape-id))))
+        ;; why it reaches its goal no more (see `ctaf/ik-problem`)
         problem   (mf/with-memo [timeline objects shape-id ik]
-                    (when (some? ik) (cta/ik-problem timeline objects shape-id)))
+                    (when (some? ik) (ctaf/ik-problem timeline objects shape-id)))
         goals     (mf/with-memo [objects timeline shape-id chain?]
                     (when chain? (cltl/reach-goals objects timeline shape-id)))
         options   (mf/with-memo [goals objects]
