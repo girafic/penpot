@@ -16,6 +16,7 @@
    [app.common.test-helpers.ids-map :as thi]
    [app.common.types.animation :as cta]
    [app.common.types.shape :as cts]
+   [clojure.string :as cstr]
    [clojure.test :as t]))
 
 (t/use-fixtures :each thi/test-fixture)
@@ -143,9 +144,38 @@
 
 (t/deftest what-a-board-cannot-play-is-counted
   (let [result (import-svg (svg (el :path {:id "shape" :d "M0 0 L10 10"}
-                                    (el :animate {:attributeName "d" :to "M0 0 L20 20" :dur "1s"})
+                                    (el :animate {:attributeName "d" :values "M0 0 L10 10;M0 0 L20 20 L30 0" :dur "1s"})
                                     (el :animate {:attributeName "x" :to "20" :dur "1s" :begin "click"}))))]
-    (t/is (= {:path-morph 1 :interactive 1} (:skipped result)))))
+    (t/is (= {:path-morph 1 :interactive 1} (:skipped result))
+          "outlines of other structures, which a browser plays as jumps")))
+
+(defn- outline-frames
+  "The `[time path]` of the outline keyframes of `shape`, whole numbers
+  written whole."
+  [result shape]
+  (mapv (juxt :time #(cstr/replace (str (:value %)) #"\.0(?=\D|$)" ""))
+        (cta/property-keyframes (:timeline result) (:id shape) :content)))
+
+(t/deftest an-animated-path-morphs
+  (let [result (import-svg (svg (el :path {:id "shape" :d "M10 10 L50 10 L50 50 Z" :fill "#ff0000"}
+                                    (el :animate {:attributeName "d" :values "M10 10 L50 10 L50 50 Z;M10 10 L90 10 L50 90 Z"
+                                                  :dur "1s" :fill "freeze"}))))
+        shape  (named result "shape")
+        frames (outline-frames result shape)]
+    (t/is (empty? (:skipped result)))
+    (t/is (= [0 1000] (mapv first frames)))
+    (t/is (= "M0,0L40,0L40,40Z" (second (first frames))) "from its outline, in its own frame")
+    (t/is (= "M0,0L80,0L40,80Z" (second (peek frames))) "to the other one")
+    (t/is (= (cta/outline-box shape) (get-in (:timeline result) [:tracks (:id shape) :outline-box])))))
+
+(t/deftest a-css-path-and-points-morph
+  (let [css    (import-svg (svg (el :style {} (str "@keyframes grow { to { d: path('M10 10 L90 10 L50 90 Z') } }"
+                                                   "#shape { animation: grow 1s forwards; }"))
+                                (el :path {:id "shape" :d "M10 10 L50 10 L50 50 Z" :fill "#ff0000"})))
+        points (import-svg (svg (el :polygon {:id "shape" :points "10,10 50,10 50,50" :fill "#ff0000"}
+                                    (el :animate {:attributeName "points" :to "10,10 90,10 50,90" :dur "1s" :fill "freeze"}))))]
+    (t/is (= 2 (count (outline-frames css (named css "shape")))) "d: path() of CSS")
+    (t/is (= 2 (count (outline-frames points (named points "shape")))) "points of a polygon")))
 
 ;; --- What an animation does not say starts from the value at rest
 

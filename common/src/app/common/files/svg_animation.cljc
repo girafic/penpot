@@ -42,6 +42,7 @@
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
    [app.common.types.path :as path]
+   [app.common.types.path.morph :as morph]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [clojure.string :as cstr]
@@ -524,7 +525,9 @@
    "visibility" :visibility "display" :display
    "transform" :transform "motion" :motion
    "x" :x "y" :y "cx" :cx "cy" :cy "r" :r "rx" :rx "ry" :ry
-   "width" :width "height" :height})
+   "width" :width "height" :height
+   ;; the outline of a path (see `path-frames`)
+   "d" :d "points" :points})
 
 (defn- unplayed
   "What an animation of the attribute or property `attribute` that a
@@ -735,6 +738,9 @@
       (:stroke-width :stroke-dashoffset
                      :x :y :cx :cy :r :rx :ry
                      :width :height)                  (number s)
+      ;; an outline, as the path data it is, out of a CSS `path()`
+      (:d :points)                      (let [d (str/trim (or (second (re-find #"^path\(\s*['\"]?(.*?)['\"]?\s*\)$" s)) s))]
+                                          (when-not (str/blank? d) d))
       nil)))
 
 (defn- lerp
@@ -1803,6 +1809,61 @@
                   (put :trim-end nil #(mth/clamp (- 1 (/ (or (value %1 %2) 0) total)) 0 1) 1))
           (do (ctx :skip :dash) nil))))))
 
+(def ^:private outline-properties
+  #{:d :points})
+
+(defn- outline-numbers
+  "The numbers of the segments of `content`, in their order."
+  [content]
+  (into [] (mapcat (fn [{:keys [params]}]
+                     [(:x params 0) (:y params 0) (:c1x params 0) (:c1y params 0) (:c2x params 0) (:c2y params 0)]))
+        (vec content)))
+
+(defn- numbers-content
+  "The content of the structure of `template` with the numbers `ns` (see
+  `outline-numbers`)."
+  [template ns]
+  (path/from-plain
+   (mapv (fn [{:keys [command] :as segment} [x y c1x c1y c2x c2y]]
+           (case command
+             :close-path segment
+             :curve-to   (assoc segment :params {:x x :y y :c1x c1x :c1y c1y :c2x c2x :c2y c2y})
+             (assoc segment :params {:x x :y y})))
+         (vec template)
+         (partition 6 ns))))
+
+(defn- path-frames
+  "The keyframes `[shape-id keyframe]` of the outline (`:content`, see
+  `cta/outline-of`) of the path `shape-id` of the element `target`, whose
+  `d` or `points` `spec` animates: its values in the board as the element
+  is placed, which morph when they all have one structure (as browsers
+  play them, a jump between others, counted as `:path-morph`)."
+  [ctx {:keys [idx own-of objects to-board duration steady?]} spec target shape-id]
+  (let [shape    (get objects shape-id)
+        tag      (get-in idx [:by-key target :node :tag])
+        {built-m :built parent-m :parent-m} (get own-of target)
+        m        (gmt/multiply to-board parent-m built-m)
+        content  (fn [s]
+                   (when (string? s)
+                     (let [d (if (= :points (:property spec))
+                               (let [ps (partition 2 (numbers s))]
+                                 (when (seq ps)
+                                   (str "M" (str/join " L" (map #(str/join "," %) ps)) (when (= :polygon tag) " Z"))))
+                               s)]
+                       (some-> d path/from-string (path/transform-content m)))))
+        values   (mapv content (:values spec))
+        template (first values)
+        rest     (content (:rest spec))
+        same?    #(and (some? %) (morph/same-structure? template %))]
+    (if-not (and (= :path (:type shape)) (some? template) (every? same? values))
+      (do (ctx :skip :path-morph) nil)
+      (let [spec    (assoc spec
+                           :values (mapv outline-numbers values)
+                           :rest (outline-numbers (if (same? rest) rest template)))
+            at-rest (:rest spec)]
+        (for [[t v e] (keyframes #(spec-value spec %1 %2 steady?) [spec] 0.25 duration at-rest steady?)]
+          [shape-id (entry :content t (cta/outline-of (assoc shape :content (numbers-content template v))) e nil)])))))
+
 (defn- shown
   "`shape` that its board shows and hides by `properties` (`:display`,
   `:visibility`): not hidden, nor kept hidden by them in its SVG."
@@ -1874,7 +1935,15 @@
                        shape-id (get shapes-of target)
                        frame (paint-frames ctx env spec target shape-id)]
                    frame)
-        frames   (into (into [] (mapcat :frames) (vals boards)) paints)
+        outlines (for [[k specs] by-key
+                       spec specs
+                       :when (contains? outline-properties (:property spec))
+                       shape-id (get shapes-of k)
+                       frame (path-frames ctx env spec k shape-id)]
+                   frame)
+        frames   (-> (into [] (mapcat :frames) (vals boards))
+                     (into paints)
+                     (into outlines))
         trims    (into #{} (keep (fn [[id kf]] (when (contains? #{:trim-start :trim-end} (:property kf)) id))) frames)
         ;; the properties that show and hide each shape on its board (a
         ;; visibility goes to what the element holds)
@@ -1918,7 +1987,12 @@
                                                 :name (:name board)
                                                 :duration duration
                                                 :playback (if steady? :loop :once)})
-                            (group-by first frames))]
+                            (group-by first frames))
+        ;; the outlines of each path that morphs are made for its box
+        timeline (reduce (fn [timeline shape]
+                           (cond-> timeline (= :path (:type shape)) (cta/ensure-outline-box shape)))
+                         timeline
+                         shapes)]
     {:shapes   (with-frame-ids (into [board] shapes))
      :timeline (assoc timeline :duration duration)
      :skipped  @skipped}))

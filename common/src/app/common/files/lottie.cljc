@@ -166,14 +166,13 @@
 (defn- subpaths
   "The subpaths (`:v` vertices, `:i` and `:o` tangents relative to them,
   `:c` closed) of an outline item at rest."
-  [ctx {:keys [ty] :as item}]
+  [_ctx {:keys [ty] :as item}]
   (case ty
     "sh"
-    (do (when (animated? (:ks item))
-          (ctx :skip :path-morph))
-        (let [k (rest-value (:ks item) nil)
-              k (if (sequential? k) (first k) k)]
-          (if (seq (:v k)) [k] [])))
+    ;; at its first keyframe when it morphs (see `add-outline-keyframes`)
+    (let [k (rest-value (:ks item) nil)
+          k (if (sequential? k) (first k) k)]
+      (if (seq (:v k)) [k] []))
 
     "rc"
     (let [[w h]   (pair (rest-value (:s item) [0 0]))
@@ -244,6 +243,33 @@
                     (map #(seg (dec %) %))
                     (range 1 n))
         c (conj (seg (dec n) 0) {:command :close-path :params {}})))))
+
+(defn- subpath-curves
+  "The segments of a subpath all curves, so that every outline of a path
+  that morphs has one structure (see `add-outline-keyframes`)."
+  [{:keys [v i o c]}]
+  (when (seq v)
+    (let [n   (count v)
+          seg (fn [a b]
+                (let [[ax ay]   (nth v a)
+                      [bx by]   (nth v b)
+                      [oax oay] (nth o a)
+                      [ibx iby] (nth i b)]
+                  {:command :curve-to
+                   :params {:x bx :y by
+                            :c1x (+ ax oax) :c1y (+ ay oay)
+                            :c2x (+ bx ibx) :c2y (+ by iby)}}))
+          [x y] (first v)]
+      (cond-> (into [{:command :move-to :params {:x x :y y}}]
+                    (map #(seg (dec %) %))
+                    (range 1 n))
+        c (conj (seg (dec n) 0) {:command :close-path :params {}})))))
+
+(defn- morphs?
+  "Whether the outline item `item` is a path that morphs (an animated
+  `sh`)."
+  [item]
+  (and (= "sh" (:ty item)) (animated? (:ks item))))
 
 ;; --- Paints
 
@@ -380,6 +406,7 @@
                      (when (seq paths)
                        {:kind     :drawable
                         :outlines outlines
+                        :morphs?  (boolean (some morphs? outlines))
                         :paints   paints
                         :paths    paths
                         :m        m
@@ -428,7 +455,7 @@
 (defn- drawable-shape
   "The shape of a `:drawable` node: a rectangle or an ellipse while it is
   only moved, else a path."
-  [ctx id parent-id {:keys [outlines paints paths m opacity]}]
+  [ctx id parent-id {:keys [outlines paints paths m opacity] morphing? :morphs?}]
   (let [single (when (= 1 (count outlines)) (first outlines))
         base   {:id id
                 :name (or (:nm single) "Path")
@@ -458,7 +485,9 @@
 
                  :else
                  (cts/setup-shape (assoc base :type :path
-                                         :content (path/from-plain (into [] (mapcat subpath-segments) paths)))))
+                                         :content (path/from-plain
+                                                   (into [] (mapcat (if morphing? subpath-curves subpath-segments))
+                                                         paths)))))
         box    (selrect-box shape)
         fills  (into [] (keep #(fill % box m)) (filter #(#{"fl" "gf"} (:ty %)) paints))
         strokes (into [] (map #(stroke ctx % (scale-of m))) (filter #(#{"st" "gs"} (:ty %)) paints))]
@@ -597,6 +626,97 @@
   (add-keyframes ctx id (or (:r tr) (:rz tr)) :rotation scalar)
   (add-position-keyframes ctx id (:p tr) (:p rest) parent-m node-x node-y))
 
+(defn- shape-at
+  "The value (`{c v i o}`) of the animated Lottie path `ks` at `frame`:
+  each vertex and tangent taken from the keyframe before to the next as
+  its easing says, held by a hold."
+  [ks frame]
+  (let [kfs   (keyframes-of ks)
+        value #(let [s (:s %)] (if (sequential? s) (first s) s))
+        [a b] (or (some (fn [[a b]] (when (<= (:t a) frame (:t b)) [a b])) (partition 2 1 kfs))
+                  [(if (< frame (:t (first kfs))) (first kfs) (peek kfs)) nil])]
+    (if (or (nil? b) (= 1 (:h a)) (== (:t a) (:t b)) (== frame (:t a)))
+      (value a)
+      (let [t     (/ (- frame (:t a)) (- (:t b) (:t a)))
+            curve (:curve (:easing (easing a)))
+            t     (if (some? curve) (cta/cubic-bezier curve t) t)
+            va    (value a)
+            vb    (value b)
+            mix   (fn [xs ys] (mapv (fn [p q] (mapv #(+ %1 (* (- %2 %1) t)) p q)) xs ys))]
+        (if (= (count (:v va)) (count (:v vb)))
+          (assoc va :v (mix (:v va) (:v vb)) :i (mix (:i va) (:i vb)) :o (mix (:o va) (:o vb)))
+          va)))))
+
+(defn- close-contents?
+  "Whether the contents `a` and `b` of one structure are within `tol` px."
+  [a b tol]
+  (every? true? (map (fn [sa sb]
+                       (every? #(<= (mth/abs (- (get-in sa [:params %] 0) (get-in sb [:params %] 0))) tol)
+                               [:x :y :c1x :c1y :c2x :c2y]))
+                     a b)))
+
+(defn- thin-outlines
+  "The `[frame content]` samples `samples`, each one the lerp of its
+  neighbours gives within 0.25 px left out."
+  [samples]
+  (if (< (count samples) 3)
+    samples
+    (loop [kept [(first samples)] [cur & more] (rest samples)]
+      (if (empty? more)
+        (conj kept cur)
+        (let [[fa ca] (peek kept)
+              [fb cb] cur
+              [fc cc] (first more)
+              between (path/lerp ca cc (/ (- fb fa) (- fc fa)))]
+          (if (and (some? between) (close-contents? (vec between) (vec cb) 0.25))
+            (recur kept more)
+            (recur (conj kept cur) more)))))))
+
+(defn- add-outline-keyframes
+  "Keyframes of the outline (`:content`, see `cta/outline-of`) of the path
+  `shape` of the `:drawable` `node` whose outlines morph (animated `sh`):
+  its outlines at the keyframes of those paths, as they ease, when they
+  all have the same; else at every frame between their first and their
+  last, which the lerp of their neighbours does not give within 0.25 px.
+  Each outline in the board as `m` places it and all curves, so that
+  they have one structure. Over the limits of outlines (see
+  `cta/outline-row-fits?`) the path keeps its first outline, counted as
+  `:path-morph`."
+  [ctx id shape {:keys [outlines m] morphing? :morphs?}]
+  (when (and morphing? (= :path (:type shape)))
+    (let [animated (filterv morphs? outlines)
+          kfss     (mapv #(keyframes-of (:ks %)) animated)
+          timing   (fn [kfs] (mapv (juxt :t easing) kfs))
+          same?    (apply = (map timing kfss))
+          frames   (if same?
+                     (mapv :t (first kfss))
+                     (let [ts (mapcat #(map :t %) kfss)]
+                       (vec (range (reduce min ts) (inc (reduce max ts))))))
+          content  (fn [frame]
+                     (path/from-plain
+                      (into []
+                            (comp (mapcat (fn [item]
+                                            (if (morphs? item)
+                                              [(shape-at (:ks item) frame)]
+                                              (subpaths ctx item))))
+                                  (map #(move-subpath m %))
+                                  (mapcat subpath-curves))
+                            outlines)))
+          samples  (cond->> (mapv (fn [frame] [frame (content frame)]) frames)
+                     (not same?) (thin-outlines))
+          eases    (if same?
+                     (into {} (map (fn [kf] [(:t kf) (easing kf)])) (first kfss))
+                     {})
+          kfs      (mapv (fn [[frame c]]
+                           (merge {:property :content
+                                   :time (ctx :time frame)
+                                   :value (cta/outline-of (assoc shape :content c))}
+                                  (get eases frame {:easing :linear})))
+                         samples)]
+      (if (and (every? cta/keyframe-value-fits? kfs) (cta/outline-row-fits? kfs))
+        (doseq [kf kfs] (ctx :keyframe id kf))
+        (ctx :skip :path-morph)))))
+
 (defn- add-paint-keyframes
   "Keyframes of the fills, strokes and trim of the shape of a drawable."
   [ctx id {:keys [paints trim]}]
@@ -657,6 +777,7 @@
             shape (drawable-shape ctx id parent-id node)]
         (ctx :add shape)
         (add-paint-keyframes ctx id node)
+        (add-outline-keyframes ctx id shape node)
         (add-size-keyframes ctx id shape node)))))
 
 (defn- layer-shape-nodes
@@ -815,6 +936,7 @@
                     (assoc :opacity (* opacity (:opacity shape 1))))]
         (ctx :add shape)
         (add-paint-keyframes ctx id single)
+        (add-outline-keyframes ctx id shape single)
         (add-size-keyframes ctx id shape single)
         (add-transform-keyframes ctx id tr rest parent-m (relative-x ctx shape) (relative-y ctx shape))
         (when span? (add-span-keyframes ctx id layer opacity))
@@ -1123,6 +1245,12 @@
                                                :duration (time comp-op)
                                                :playback :loop})
                            keyframes)
+          ;; the outlines of each path that morphs are made for its box
+          timeline (reduce (fn [timeline shape]
+                             (cond-> timeline
+                               (= :path (:type shape)) (cta/ensure-outline-box shape)))
+                           timeline
+                           (remove nil? shapes))
           timeline (reduce (fn [timeline [follower leader]]
                              (cta/set-follow timeline follower {:leader leader :from :rest}))
                            timeline

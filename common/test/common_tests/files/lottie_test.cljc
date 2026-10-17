@@ -291,10 +291,47 @@
                            (layer 3 "Matted" [(rect-group [0 0 10 10] [1 0 0 1])] :tt 1)
                            (layer 4 "Morph" [morph])])
                 {:x 0 :y 0})]
-    (t/is (= {:text 1 :matte 1 :path-morph 1} (:skipped result))
+    (t/is (= {:text 1 :matte 1} (:skipped result))
           "a track matte under a text, which a board cannot show")
     (t/is (some? (shape-named result "Matted")) "drawn whole")
     (t/is (= :path (:type (shape-named result "Morph"))) "at its first keyframe")))
+
+(defn- outline-row
+  [result shape]
+  (cta/property-keyframes (:timeline result) (:id shape) :content))
+
+(t/deftest an-animated-path-morphs
+  (let [tri    (fn [w] {:c true :v [[0 0] [w 0] [w w]] :i [[0 0] [0 0] [0 0]] :o [[0 0] [0 0] [0 0]]})
+        morph  {:ty "gr"
+                :it [{:ty "sh" :ks (anim (kf 0 [(tri 10)]) (kf 30 [(tri 20)]))}
+                     {:ty "fl" :c (static [0 0 0 1]) :o (static 100)}
+                     group-tr]}
+        result (lottie/lottie->shapes (document [(layer 1 "Morph" [morph])]) {:x 0 :y 0})
+        shape  (shape-named result "Morph")
+        row    (outline-row result shape)
+        track  (get-in (:timeline result) [:tracks (:id shape)])]
+    (t/is (empty? (:skipped result)))
+    (t/is (= [0 1000] (mapv :time row)) "at the keyframes of the path")
+    (t/is (= {:type :bezier :curve [0.42 0 0.58 1]} (:easing (first row))) "as they ease")
+    (t/is (every? #(= :curve-to %) (keep #(#{:curve-to :line-to} (:command %)) (vec (:content shape))))
+          "all curves, one structure")
+    (t/is (= (cta/outline-box shape) (:outline-box track)) "made for its box")
+    (t/is (= [20.0 20.0] (mapv double ((juxt :x :y) (:params (nth (vec (:value (second row))) 2)))))
+          "to the bigger one, in its own frame")))
+
+(t/deftest paths-that-morph-at-other-times-are-sampled
+  (let [tri    (fn [w] {:c true :v [[0 0] [w 0] [w w]] :i [[0 0] [0 0] [0 0]] :o [[0 0] [0 0] [0 0]]})
+        sh     (fn [ks] {:ty "sh" :ks ks})
+        morph  {:ty "gr"
+                :it [(sh (anim (kf 0 [(tri 10)] :o {:x [0] :y [0]} :i {:x [1] :y [1]}) (kf 30 [(tri 20)])))
+                     (sh (anim (kf 15 [(tri 5)] :o {:x [0] :y [0]} :i {:x [1] :y [1]}) (kf 45 [(tri 15)])))
+                     {:ty "fl" :c (static [0 0 0 1]) :o (static 100)}
+                     group-tr]}
+        result (lottie/lottie->shapes (document [(layer 1 "Two" [morph])]) {:x 0 :y 0})
+        row    (outline-row result (shape-named result "Two"))]
+    (t/is (< 2 (count row)) "where one of them turns")
+    (t/is (< (count row) 46) "but not at every frame of a straight stretch")
+    (t/is (= [0 1500] ((juxt first peek) (mapv :time row))))))
 
 (defn- matte-document
   "A matte (a black and white ellipse) over a matted square, kept to it
