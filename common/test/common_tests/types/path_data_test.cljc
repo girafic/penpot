@@ -2948,3 +2948,50 @@
                                                                                    {:command :line-to :params {:x 20 :y 10}}
                                                                                    {:command :close-path :params {}}])))))
           "of each closed one")))
+
+(defn- subpath-signs
+  "The sign of the area each subpath of `content` encloses (of its end
+  points)."
+  [content]
+  (->> (vec content)
+       (reduce (fn [subs {:keys [command params]}]
+                 (case command
+                   :move-to    (conj subs [[(:x params) (:y params)]])
+                   :close-path subs
+                   (update subs (dec (count subs)) conj [(:x params) (:y params)])))
+               [])
+       (mapv (fn [ps]
+               (let [area (reduce + (map (fn [[x0 y0] [x1 y1]] (- (* x0 y1) (* x1 y0))) ps (concat (rest ps) [(first ps)])))]
+                 (cond (pos? area) 1 (neg? area) -1 :else 0))))))
+
+(defn- undirected
+  "The lines `content` draws, each as its two ends in either order."
+  [content]
+  (frequencies (mapcat (fn [[[a b] n]] (repeat n (sort [a b]))) (drawn-segments content))))
+
+(t/deftest a-segment-after-a-close-starts-another-subpath
+  ;; valid SVG: after Z a line goes on from the start of the closed one
+  (let [content (path/from-string "M0 0 L10 0 L10 10 Z L20 20 L30 0 Z")]
+    (t/is (= (drawn-segments content) (drawn-segments (path/start-subpath-at content (gpt/point 10 10))))
+          "the same drawing, its second subpath apart")
+    (t/is (= (undirected content) (undirected (path/reverse-subpaths-at content [(gpt/point 10 10)])))
+          "the same lines, the other way round")))
+
+(t/deftest a-hole-goes-round-with-its-outline
+  ;; an O: the inner ring goes round against the outer one; reversing
+  ;; one of them reverses both, a square apart stays as it is
+  (let [o       (path/from-plain (-> (vec square)
+                                     (into (vec (path/from-plain [{:command :move-to :params {:x 3 :y 3}}
+                                                                  {:command :line-to :params {:x 3 :y 7}}
+                                                                  {:command :line-to :params {:x 7 :y 7}}
+                                                                  {:command :line-to :params {:x 7 :y 3}}
+                                                                  {:command :close-path :params {}}])))
+                                     (into [{:command :move-to :params {:x 20 :y 0}}
+                                            {:command :line-to :params {:x 30 :y 0}}
+                                            {:command :line-to :params {:x 30 :y 10}}
+                                            {:command :close-path :params {}}])))
+        signs   (subpath-signs o)
+        back    (subpath-signs (path/reverse-subpaths-at o [(gpt/point 3 7)]))]
+    (t/is (= (first signs) (- (second signs))) "a hole to begin with")
+    (t/is (= [(- (first signs)) (- (second signs)) (nth signs 2)] back)
+          "outline and hole go round together, the square apart as it was")))

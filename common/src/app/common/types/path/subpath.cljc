@@ -7,6 +7,7 @@
 (ns app.common.types.path.subpath
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
    [app.common.types.path.helpers :as helpers]))
 
@@ -226,14 +227,27 @@
 
 (defn- slices
   "The subpaths of the plain `segments`, each the vector of its segments
-  from its move-to."
+  from its move-to; a segment after a close starts another one from the
+  start of the subpath it closed, as SVG draws it."
   [segments]
-  (reduce (fn [acc segment]
-            (if (or (= :move-to (:command segment)) (empty? acc))
-              (conj acc [segment])
-              (update acc (dec (count acc)) conj segment)))
-          []
-          segments))
+  (:out
+   (reduce (fn [{:keys [out start closed?]} segment]
+             (let [command (:command segment)]
+               (cond
+                 (= :move-to command)
+                 {:out (conj out [segment]) :start (helpers/segment->point segment) :closed? false}
+
+                 (or (empty? out) closed?)
+                 {:out (conj out [(helpers/make-move-to (or start (gpt/point 0 0))) segment])
+                  :start start
+                  :closed? (= :close-path command)}
+
+                 :else
+                 {:out (update out (dec (count out)) conj segment)
+                  :start start
+                  :closed? (= :close-path command)})))
+           {:out [] :start nil :closed? false}
+           segments)))
 
 (defn- closed?
   "Whether the subpath `slice` is closed: by a close, or ending where it
@@ -289,26 +303,58 @@
                       slice))))
         (slices (vec content))))
 
+(defn- reverse-slice
+  "The subpath `slice` going the other way round: a closed one from the
+  same start, an open one from its end."
+  [slice]
+  (let [start (helpers/segment->point (first slice))
+        segs  (body slice)]
+    (if (empty? segs)
+      slice
+      (let [prevs (into [(first slice)] (pop segs))
+            back  (mapv (fn [i] (reverse-command (nth segs i) (nth prevs i)))
+                        (range (dec (count segs)) -1 -1))]
+        (into [(helpers/make-move-to (helpers/segment->point (peek segs)))]
+              (cond-> back (closed? slice) (closing start)))))))
+
+(defn- slice-box
+  "The box `[x0 y0 x1 y1]` of the points and handles of the subpath
+  `slice`."
+  [slice]
+  (let [ps (mapcat (fn [{:keys [params]}]
+                     (cond-> [[(:x params) (:y params)]]
+                       (some? (:c1x params)) (conj [(:c1x params) (:c1y params)] [(:c2x params) (:c2y params)])))
+                   (filter #(some? (dm/get-in % [:params :x])) slice))]
+    (when (seq ps)
+      [(reduce min (map first ps)) (reduce min (map second ps))
+       (reduce max (map first ps)) (reduce max (map second ps))])))
+
+(defn- boxes-meet?
+  [[ax0 ay0 ax1 ay1] [bx0 by0 bx1 by1]]
+  (and (<= ax0 bx1) (<= bx0 ax1) (<= ay0 by1) (<= by0 ay1)))
+
 (defn reverse-at
   "The plain segments of `content` with its subpaths that have a node at
   one of `points` (all of them without `points`) going the other way
-  round: a closed one from the same start, an open one from its end."
+  round (see `reverse-slice`), each closed one with the closed ones its
+  box meets, one after another: a hole goes round with the outline
+  around it, so that it stays a hole (nonzero)."
   [content points]
-  (into []
-        (mapcat (fn [slice]
-                  (let [start (helpers/segment->point (first slice))
-                        segs  (body slice)
-                        nodes (cons start (map helpers/segment->point segs))
-                        hit?  (or (empty? points)
-                                  (some (fn [p] (some #(pt= p %) nodes)) points))]
-                    (if (and hit? (seq segs))
-                      (let [prevs (into [(first slice)] (pop segs))
-                            back  (mapv (fn [i] (reverse-command (nth segs i) (nth prevs i)))
-                                        (range (dec (count segs)) -1 -1))]
-                        (into [(helpers/make-move-to (helpers/segment->point (peek segs)))]
-                              (cond-> back (closed? slice) (closing start))))
-                      slice))))
-        (slices (vec content))))
+  (let [subs    (slices (vec content))
+        boxes   (mapv slice-box subs)
+        closed  (into #{} (filter #(and (closed? (nth subs %)) (some? (nth boxes %)))) (range (count subs)))
+        hit?    (fn [slice]
+                  (let [nodes (cons (helpers/segment->point (first slice)) (map helpers/segment->point (body slice)))]
+                    (or (empty? points) (some (fn [p] (some #(pt= p %) nodes)) points))))
+        hit     (into #{} (filter #(hit? (nth subs %))) (range (count subs)))
+        grow    (fn [turned]
+                  (into turned
+                        (filter (fn [i] (some #(and (contains? closed %) (boxes-meet? (nth boxes i) (nth boxes %))) turned)))
+                        closed))
+        turned  (loop [turned hit]
+                  (let [more (grow turned)]
+                    (if (= more turned) turned (recur more))))]
+    (into [] cat (map (fn [i slice] (if (contains? turned i) (reverse-slice slice) slice)) (range) subs))))
 
 ;; FIXME: revisit this fn impl for perfromance
 (defn reverse-content
