@@ -671,7 +671,8 @@
   another layer of its board as `ik` says (see `cta/set-ik`), in one undo
   step; nil reaches none. Its elbow bends as the chain is drawn bent (see
   `cta/natural-bend`) unless `ik` or the goal it reached says otherwise.
-  A goal it cannot reach (see `cltl/can-reach?`) changes nothing."
+  A new goal it cannot reach (see `cltl/can-reach?`) changes nothing;
+  the bend and turn of a chain that cannot reach for now still change."
   [shape-id ik]
   (ptk/reify ::set-ik
     ptk/WatchEvent
@@ -685,9 +686,13 @@
                                        (some-> tl (cta/natural-bend objects shape-id))
                                        :ccw)))
             tl'     (some-> tl (cta/set-ik shape-id ik))]
+        ;; only a new goal is checked: a chain broken for now keeps
+        ;; what it is set to, and reaches as set once mended
         (if (and (some? tl)
                  (not= tl tl')
-                 (or (nil? goal) (cltl/can-reach? objects tl shape-id goal)))
+                 (or (nil? goal)
+                     (= goal (some-> tl (cta/ik-of shape-id) :goal))
+                     (cltl/can-reach? objects tl shape-id goal)))
           (rx/of (commit-timeline it state (:board-id tl') tl')
                  (apply-preview))
           (rx/empty))))))
@@ -717,7 +722,8 @@
   `cta/ik-links`), a new goal to reach: a ring on its pivot where the
   canvas shows it, a helper layer the exports leave out (see
   `cta/guide?`), selected to be moved, in one undo step. Nothing changes
-  where it reaches, as its elbow bends as drawn (see `set-ik`)."
+  where it reaches, as its elbow bends as drawn (see `set-ik`), or as it
+  was set to, with how it turns."
   [shape-id]
   (ptk/reify ::add-goal
     ptk/WatchEvent
@@ -745,10 +751,12 @@
                                                       :stroke-alignment :inner}]
                                            :parent-id board-id
                                            :frame-id board-id})
-                bend     (or (cta/natural-bend tl objects shape-id) :ccw)
+                ;; what it is set to stays, a new reach bends as drawn
+                old      (cta/ik-of tl shape-id)
+                bend     (or (:bend old) (cta/natural-bend tl objects shape-id) :ccw)
                 tl'      (-> tl
                              (cta/set-guide (:id ring) true)
-                             (cta/set-ik shape-id {:goal (:id ring) :bend bend}))
+                             (cta/set-ik shape-id (assoc old :goal (:id ring) :bend bend)))
                 changes  (-> (pcb/empty-changes it (:id page))
                              (pcb/with-page page)
                              (pcb/with-objects objects)
@@ -2061,7 +2069,9 @@
           (cond-> (some? prev)
             (assoc-in [:playheads prev] (get anim :playhead 0)))
           (assoc :board-id board-id
-                 :playhead (get-in anim [:playheads board-id] 0))))))
+                 :playhead (get-in anim [:playheads board-id] 0)
+                 ;; shown on the way there (see `playing-back?`)
+                 :direction 1)))))
 
 (defn set-active-board
   "Remember the board the timeline dock targets (see `active-board-id`).
@@ -2199,7 +2209,9 @@
   (ptk/reify ::set-playhead
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-animation :playhead] (max 0 (int time))))
+      ;; a seek shows the way there; only playback goes back (see
+      ;; `show-frame`)
+      (update state :workspace-animation assoc :playhead (max 0 (int time)) :direction 1))
 
     ptk/WatchEvent
     (watch [_ _ _]
@@ -2302,7 +2314,7 @@
     (update [_ state]
       (cond-> state
         (not (motion-mode? state))
-        (update :workspace-animation #(-> % (dissoc :preview) (assoc :playhead 0)))))
+        (update :workspace-animation #(-> % (dissoc :preview) (assoc :playhead 0 :direction 1)))))
 
     ptk/WatchEvent
     (watch [_ state _]

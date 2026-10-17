@@ -251,3 +251,11 @@
     (t/is (< 10 (- x-back x-there)) (str "further on the way back: " [x-there x-back]))
     (await (async/settle))))
 
+(t/deftest a-seek-or-another-board-shows-the-way-there
+  ;; only playback goes back: a pause keeps the way back until a seek
+  (let [state (-> (workspace-state (follow-file))
+                  (update :workspace-animation assoc :playhead 500 :direction -1))]
+    (t/is (dwa/playing-back? state))
+    (t/is (not (dwa/playing-back? (ptk/update (dwa/set-playhead 300) state))) "a seek")
+    (t/is (not (dwa/playing-back? (ptk/update (dwa/set-active-board (thi/id :lead)) state))) "another board")))
+

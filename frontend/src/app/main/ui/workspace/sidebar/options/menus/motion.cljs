@@ -996,7 +996,7 @@
   (l/derived (fn [state]
                (when-let [id (dwa/picking-leader state)]
                  [id (dwa/picking-purpose state)]))
-             st/state))
+             st/state =))
 
 (def ^:private follow-parts
   "What a follower can take of its leader, and its label."

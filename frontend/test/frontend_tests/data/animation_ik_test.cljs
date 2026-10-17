@@ -139,3 +139,33 @@
           "it reaches the layer clicked and stays selected")
     (t/is (empty? (await (emitted (dwa/pick-leader-at (thi/id :fore)) picking)))
           "a link of its chain waits for another click")))
+
+(defn- reaching-file
+  "`arm-file` with the hand reaching the ball as `ik` says, the forearm
+  following the upper arm with `follow`."
+  [ik follow]
+  (let [file (arm-file)
+        page (thf/current-page file)
+        tl   (-> (get-in page [:timelines (thi/id :board-a)])
+                 (cta/set-follow (thi/id :fore) (merge {:leader (thi/id :upper)} follow))
+                 (cta/set-ik (thi/id :hand) (merge {:goal (thi/id :ball)} ik)))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page page)
+                                (pcb/set-timeline (thi/id :board-a) tl)))))
+
+(t/deftest ^:async a-broken-chain-keeps-the-settings-of-its-reach
+  (let [file   (reaching-file {} {:delay 50})
+        state  (workspace-state file)
+        [set]  (await (emitted (dwa/update-ik (thi/id :hand) {:bend :cw :turn :keep}) state))
+        [page] (await (committed set state file))]
+    (t/is (= {:goal (thi/id :ball) :bend :cw :turn :keep} (ik-of page))
+          "it reaches with them once the chain is mended")))
+
+(t/deftest ^:async a-new-goal-keeps-the-bend-and-the-turn
+  (let [file   (reaching-file {:bend :cw :turn :keep} {})
+        state  (workspace-state file)
+        [page] (await (committed (dwa/add-goal (thi/id :hand)) state file))
+        ik     (ik-of page)]
+    (t/is (not= (thi/id :ball) (:goal ik)) "a new ring")
+    (t/is (= [:cw :keep] [(:bend ik) (:turn ik)]))))
+
