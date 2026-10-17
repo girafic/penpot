@@ -100,19 +100,20 @@
   [selected objects modifiers]
   (apply-modifiers-to-objects objects (select-keys modifiers selected)))
 
-(defn- preview-selected
-  "`objects` with the `selected` shapes where the animations of
-  `timelines` show them at `time`, `back` as in `cltl/animation-tree`."
-  [selected objects timelines time back]
-  (if (empty? selected)
+(defn- with-shown
+  "`objects` with the shapes of `ids` where the animation shows them:
+  `shown` a delay of `cltl/shown-shapes`, forced only when there are
+  `ids`."
+  [objects shown ids]
+  (if (empty? ids)
     objects
-    (let [shown (cltl/shown-shapes timelines objects time :back back)]
+    (let [shown @shown]
       (reduce (fn [objects id]
                 (if-let [shape (get shown id)]
                   (assoc objects id shape)
                   objects))
               objects
-              selected))))
+              ids))))
 
 (defn- apply-wasm-modifiers-to-ids
   "Like `apply-modifiers-to-objects`, but only updates ids in `id-set`. During WASM
@@ -246,11 +247,19 @@
         playhead          (or (:playhead animation) 0)
         back              (when (:back? animation) #{(:board-id animation)})
 
+        ;; the shapes where the animation shows them, while paused in
+        ;; motion mode: once for the selection and the outlines (a path
+        ;; with the outline at the playhead), when they have shapes
+        shown
+        (mf/with-memo [motion-preview? timelines base-objects playhead back]
+          (when motion-preview?
+            (delay (cltl/shown-shapes timelines base-objects playhead :back back))))
+
         objects-modified
         (mf/with-memo
-          [base-objects wasm-modifiers selected motion-preview? timelines playhead back]
-          (if motion-preview?
-            (preview-selected selected base-objects timelines playhead back)
+          [base-objects wasm-modifiers selected shown]
+          (if (some? shown)
+            (with-shown base-objects shown selected)
             (apply-modifiers-to-selected selected base-objects wasm-modifiers)))
 
         selected-shapes   (mf/with-memo [selected objects-modified]
@@ -333,10 +342,11 @@
 
         objects-for-outlines
         (mf/with-memo
-          [base-objects wasm-modifiers outline-wasm-ids]
-          (if (seq wasm-modifiers)
-            (apply-wasm-modifiers-to-ids base-objects wasm-modifiers outline-wasm-ids)
-            base-objects))
+          [base-objects wasm-modifiers outline-wasm-ids shown]
+          (cond-> (if (seq wasm-modifiers)
+                    (apply-wasm-modifiers-to-ids base-objects wasm-modifiers outline-wasm-ids)
+                    base-objects)
+            (some? shown) (with-shown shown outline-wasm-ids)))
 
         zoom              (d/check-num zoom 1)
 
