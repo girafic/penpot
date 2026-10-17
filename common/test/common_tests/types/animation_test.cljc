@@ -6090,6 +6090,50 @@
     (t/is (str/includes? (first values) "M20,30") "from the triangle")
     (t/is (str/includes? (last values) "60,50") "to the flat box")))
 
+(defn- region
+  "The `[x y width height]` of the element `tag` with the id `id` in
+  `svg`."
+  [svg tag id]
+  (some->> (re-find (re-pattern (str "<" tag " id=\"" id "\" x=\"([^\"]*)\" y=\"([^\"]*)\" width=\"([^\"]*)\" height=\"([^\"]*)\""))
+                    svg)
+           rest
+           (mapv d/parse-double)))
+
+(t/deftest an-svg-morph-keeps-its-effects-and-strokes-around-it
+  ;; a 40 by 40 triangle at 20, 30 whose outline grows to 300 wide
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 100})
+        shape  (assoc (path-layer triangle) :fills [{:fill-color "#000000" :fill-opacity 1}])
+        sid    (:id shape)
+        tl     (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                   (cta/set-outline-at shape 0 (ctao/outline-of shape))
+                   (cta/set-outline-at shape 1000 (plain-path [[0 0] [300 0] [0 40]])))
+        markup (str "<path d=\"" (:content shape) "\" data-penpot-outline=\"\" fill=\"#000000\"></path>")
+        holds? (fn [[x y w h] x0 x1]
+                 (and (<= x x0) (>= (+ x w) x1) (<= y 30) (>= (+ y h) 70)))]
+    (t/testing "a drop shadow: its filter holds the shadow of the whole morph"
+      (let [shadowed (assoc shape :shadow [{:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 4 :spread 0
+                                            :hidden false :color {:color "#000000" :opacity 0.5}}])
+            svg      (asvg/timeline->svg tl (svg-board-with board shadowed) {sid {:markup markup}})
+            box      (region svg "filter" (str "penpot-effects-" sid))]
+        (t/is (some? box))
+        (t/is (holds? box 20 324) (str "from the triangle to past the grown one: " box))))
+    (t/testing "a layer blur: as far around it"
+      (let [blurred (assoc shape :blur {:id (uuid/next) :type :layer-blur :value 6 :hidden false})
+            svg     (asvg/timeline->svg tl (svg-board-with board blurred) {sid {:markup markup}})
+            box     (region svg "filter" (str "penpot-effects-" sid))]
+        (t/is (some? box))
+        (t/is (holds? box 14 326) (str "with the blur around it: " box))))
+    (t/testing "an outer stroke: its mask over the whole morph"
+      (let [stroked (assoc shape :strokes [{:stroke-color "#000000" :stroke-opacity 1 :stroke-width 2 :stroke-style :solid :stroke-alignment :outer}])
+            mask-id (str "outer-stroke-render-2-" sid "-0")
+            markup  (str "<g id=\"shape-" sid "\"><g class=\"fills\" id=\"fills-" sid "\">" markup "</g>"
+                         "<g id=\"strokes-r-" sid "\" class=\"strokes\"><g class=\"outer-stroke-shape\"><defs>"
+                         "<mask id=\"" mask-id "\" x=\"17\" y=\"27\" width=\"46\" height=\"46\" maskUnits=\"userSpaceOnUse\">"
+                         "</mask></defs></g></g></g>")
+            svg     (asvg/timeline->svg tl (svg-board-with board stroked) {sid {:markup markup}})
+            box     (region svg "mask" mask-id)]
+        (t/is (holds? box 20 320) (str "from the triangle to the grown one: " box))))))
+
 (t/deftest lottie-morphs-a-path-by-its-vertices
   (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
         shape  (assoc (path-layer triangle) :fills [{:fill-color "#000000" :fill-opacity 1}])

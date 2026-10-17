@@ -589,6 +589,79 @@
   (smil-element "feGaussianBlur" ""
                 (smil-attr timeline "stdDeviation" #(vector (aexp/blur-sigma (radius %))) kfs render-number)))
 
+(defn- outline-size
+  "The box `[x y width height]` of `shape` (in its own space, its turn
+  aside) its width and height `values` give, resized around its pivot
+  `origin` (a share of its box), as the canvas resizes it (see
+  `cta/shape->modifiers`)."
+  [shape origin values]
+  (let [{:keys [x y width height]} (:selrect shape)
+        w (double (get values :width width))
+        h (double (get values :height height))
+        px (+ x (* width (:x origin)))
+        py (+ y (* height (:y origin)))]
+    [(- px (* w (:x origin))) (- py (* h (:y origin))) w h]))
+
+(defn- svg-drawn-path
+  "The function of the values of the path `shape` at a time (see
+  `acss/shape-values`) to its outline then, on the page, as an SVG of
+  vectors plays it on its path (see `svg-outline-path`): its points
+  resized along its own sides around its pivot, as the canvas resizes
+  it, and the outline the row `track` plays when it morphs (see
+  `svg-smil-morph?`)."
+  [shape track]
+  (let [{:keys [x y width height]} (:selrect shape)
+        origin (cta/track-origin track)
+        morph? (svg-smil-morph? shape track)
+        center (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
+        pivot  (gpt/point (+ x (* width (:x origin))) (+ y (* height (:y origin))))
+        turn   (:transform shape)
+        unturn (:transform-inverse shape)]
+    (fn [vs]
+      (let [sx (/ (double (get vs :width width)) width)
+            sy (/ (double (get vs :height height)) height)
+            m  (cond->> (gmt/scale-matrix (gpt/point sx sy) pivot)
+                 (and (some? turn) (some? unturn))
+                 (#(gmt/multiply (gmt/transform-in center turn) %
+                                 (gmt/transform-in center unturn))))]
+        (path/transform-content (if (and morph? (some? (:content vs)))
+                                  (ctao/outline->content shape track (:content vs))
+                                  (:content shape))
+                                m)))))
+
+(defn- svg-played-box
+  "How the box of `shape` plays as `timeline` (cut to its duration) plays
+  the size of its box or outline on its elements (see
+  `aexp/svg-box-sized?`, `aexp/svg-outline-sized?`) or its outline (see
+  `svg-smil-morph?`): `{:times :corners}`, the times to take it at
+  (between its keyframes too, as its easings may go past them) and the
+  function of a time to the corners of its box then: of the outline it
+  draws for a path that morphs, on the page; else of its box in its own
+  space and, turned by its `transform`, on the page. Nil when none of
+  them plays."
+  [shape timeline]
+  (let [sid    (:id shape)
+        track  (dm/get-in timeline [:tracks sid])
+        sized? (or (aexp/svg-box-sized? shape track) (aexp/svg-outline-sized? shape track))
+        morph? (svg-smil-morph? shape track)]
+    (when (or sized? morph?)
+      (let [values   (acss/shape-values timeline sid)
+            origin   (cta/track-origin track)
+            duration (max 1 (:duration timeline))
+            {:keys [x y width height]} (:selrect shape)
+            turn     (when-let [transform (:transform shape)]
+                       (gmt/transform-in (gpt/point (+ x (/ width 2)) (+ y (/ height 2))) transform))
+            drawn    (when morph? (svg-drawn-path shape track))]
+        {:times   (into (sorted-set duration)
+                        (concat (map #(* duration (/ % 120)) (range 120))
+                                (keep #(when (<= 0 (:time %) duration) (:time %)) (:keyframes track))))
+         :corners (if morph?
+                    (fn [t] (grc/rect->points (path/calc-selrect (drawn (values t)))))
+                    (fn [t]
+                      (let [[bx by bw bh] (outline-size shape origin (values t))
+                            own (for [px [bx (+ bx bw)] py [by (+ by bh)]] (gpt/point px py))]
+                        (cond-> own (some? turn) (concat (map #(gpt/transform % turn) own))))))}))))
+
 (defn- svg-effects-filter
   "The filter `id` of the effects of `shape` an SVG of vectors draws on
   a filter of their own (see `svg-smil`): with `shadows?`, its shadows
@@ -673,10 +746,16 @@
                       (filter #(contains? styles (nth % 2))))
         [prev drops] (chain "BackgroundImageFix" (filter #(= :drop-shadow (nth % 2)) shown) drop)
         [_ inners]   (chain "shape" (filter #(= :inner-shadow (nth % 2)) shown) inner)
-        times    (into #{0 duration} (map :time) (concat kfs blur-kfs))
+        ;; the box as it plays its size or its outline (see
+        ;; `svg-played-box`), with its effects then
+        played   (when (some? track) (svg-played-box shape timeline))
+        times    (-> #{0 duration}
+                     (into (map :time) (concat kfs blur-kfs))
+                     (into (:times played)))
         bounds   (grc/join-rects
                   (cond-> (mapv #(gsb/get-shape-filter-bounds
                                   (cond-> (assoc shape :shadow (shadows %))
+                                    (some? played) (assoc :points ((:corners played) %))
                                     blur? (assoc :blur {:type :layer-blur :value (radius %) :hidden false})))
                                 times)
                     (some? area) (conj area)))
@@ -760,19 +839,6 @@
                                    (vswap! numbers next)
                                    (acss/fmt n))))))
 
-(defn- outline-size
-  "The box `[x y width height]` of `shape` (in its own space, its turn
-  aside) its width and height `values` give, resized around its pivot
-  `origin` (a share of its box), as the canvas resizes it (see
-  `cta/shape->modifiers`)."
-  [shape origin values]
-  (let [{:keys [x y width height]} (:selrect shape)
-        w (double (get values :width width))
-        h (double (get values :height height))
-        px (+ x (* width (:x origin)))
-        py (+ y (* height (:y origin)))]
-    [(- px (* w (:x origin))) (- py (* h (:y origin))) w h]))
-
 (defn- svg-outline-path
   "The `<animate>` of the path of the outline of `shape` whose corners,
   size or outline `timeline` (cut to its duration) plays (see
@@ -808,22 +874,7 @@
                     render-corner-path)
       ;; a path: its points resized as the canvas resizes it, along its own
       ;; sides when it is turned, and its outline as it morphs
-      (let [{:keys [x y width height]} (:selrect shape)
-            center  (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
-            pivot   (gpt/point (+ x (* width (:x origin))) (+ y (* height (:y origin))))
-            turn    (:transform shape)
-            unturn  (:transform-inverse shape)
-            drawn   (fn [vs]
-                      (let [sx (/ (double (get vs :width width)) width)
-                            sy (/ (double (get vs :height height)) height)
-                            m  (cond->> (gmt/scale-matrix (gpt/point sx sy) pivot)
-                                 (and (some? turn) (some? unturn))
-                                 (#(gmt/multiply (gmt/transform-in center turn) %
-                                                 (gmt/transform-in center unturn))))]
-                        (path/transform-content (if (and morph? (some? (:content vs)))
-                                                  (ctao/outline->content shape track (:content vs))
-                                                  (:content shape))
-                                                m)))
+      (let [drawn   (svg-drawn-path shape track)
             ;; the numbers of every value go into the commands of the
             ;; first, which they all have
             d       (if morph? (str (drawn (values 0))) (str (:content shape)))]
@@ -836,36 +887,21 @@
   "The region `[x y width height]` the masks of the outer strokes of
   `shape` take as `timeline` (cut to its duration) plays its width and
   height on its elements (see `aexp/svg-box-sized?`,
-  `aexp/svg-outline-sized?`): what its box covers as it plays, in its own
-  space and on the page (an element turned by a `transform` of its own
-  has its mask in its own space, a path not), and around it as far as
-  its strokes reach (their miters, four times as wide as they are at
-  their widest). Its easings may go past its keyframes: it is sampled
-  between them too."
+  `aexp/svg-outline-sized?`) or its outline (see `svg-smil-morph?`):
+  what its box covers as it plays (see `svg-played-box`), and around it
+  as far as its strokes reach (their miters, four times as wide as they
+  are at their widest)."
   [shape timeline]
-  (let [sid      (:id shape)
-        track    (dm/get-in timeline [:tracks sid])
-        values   (acss/shape-values timeline sid)
-        origin   (cta/track-origin track)
-        duration (max 1 (:duration timeline))
-        times    (into (sorted-set duration)
-                       (concat (map #(* duration (/ % 120)) (range 120))
-                               (keep #(when (<= 0 (:time %) duration) (:time %)) (:keyframes track))))
-        {:keys [x y width height]} (:selrect shape)
-        turn     (when-let [transform (:transform shape)]
-                   (gmt/transform-in (gpt/point (+ x (/ width 2)) (+ y (/ height 2))) transform))
-        strokes  (cta/as-vec (:strokes shape))
-        corners  (fn [t]
-                   (let [[bx by bw bh] (outline-size shape origin (values t))
-                         own (for [px [bx (+ bx bw)] py [by (+ by bh)]] (gpt/point px py))]
-                     (cond-> own (some? turn) (concat (map #(gpt/transform % turn) own)))))
-        widest   (reduce max 0
-                         (for [t times index (range (count strokes))]
-                           (or (indexed-value (:stroke-width (values t)) index)
-                               (:stroke-width (get strokes index))
-                               0)))
-        pad      (* 4 widest)
-        box      (grc/points->rect (mapcat corners times))]
+  (let [values  (acss/shape-values timeline (:id shape))
+        {:keys [times corners]} (svg-played-box shape timeline)
+        strokes (cta/as-vec (:strokes shape))
+        widest  (reduce max 0
+                        (for [t times index (range (count strokes))]
+                          (or (indexed-value (:stroke-width (values t)) index)
+                              (:stroke-width (get strokes index))
+                              0)))
+        pad     (* 4 widest)
+        box     (grc/points->rect (mapcat corners times))]
     [(- (:x box) pad) (- (:y box) pad) (+ (:width box) (* 2 pad)) (+ (:height box) (* 2 pad))]))
 
 (defn- svg-box-pattern
@@ -972,9 +1008,12 @@
                                    (svg-smil-morph? shape track)))
                       (svg-outline-path shape timeline))
            ;; its fills and the masks of its outer strokes over its box
-           ;; as its size plays on its elements (see `svg-sized-paint`)
+           ;; as its size or its outline plays on its elements (see
+           ;; `svg-sized-paint`)
            paint    (when (and (some? shape)
-                               (or (aexp/svg-box-sized? shape track) (aexp/svg-outline-sized? shape track)))
+                               (or (aexp/svg-box-sized? shape track)
+                                   (aexp/svg-outline-sized? shape track)
+                                   (svg-smil-morph? shape track)))
                       {:region (when (some #(= :outer (aexp/svg-stroke-alignment shape %))
                                            (cta/as-vec (:strokes shape)))
                                  (svg-sized-region shape timeline))})
