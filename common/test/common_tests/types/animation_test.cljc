@@ -5846,6 +5846,14 @@
     (t/is (not (ctao/outline-row-fits? (repeat 9 {:property :content :value big}))))
     (t/is (ctao/outline-row-fits? (repeat 8 {:property :content :value big})))))
 
+(t/deftest an-outline-keyframe-keeps-its-fixed-start
+  (let [outline (plain-path [[0 0] [40 0] [0 40]])
+        kf      (cta/make-keyframe {:property :content :time 0 :value outline :fixed-start true})]
+    (t/is (true? (:fixed-start kf)))
+    (t/is (sm/validate cta/schema:keyframe kf))
+    (t/is (nil? (:fixed-start (cta/make-keyframe {:property :opacity :time 0 :value 1 :fixed-start true})))
+          "only an outline has one")))
+
 (t/deftest a-row-takes-an-outline-within-its-budget
   (let [big   (plain-path (mapv (fn [i] [i (mod i 7)]) (range 4000)))
         huge  (plain-path (mapv (fn [i] [i (mod i 7)]) (range 5000)))
@@ -5936,7 +5944,7 @@
                   (cta/add-keyframe sid {:time 0 :property :content :value (unique-polygon 3 40)})
                   (cta/add-keyframe sid {:time 1000 :property :content :value (unique-polygon 6 40)})
                   (cta/add-animation sid {:type :fade :start 0 :duration 500}))]
-    (with-redefs [morph/match (fn [values] (swap! calls inc) (match values))]
+    (with-redefs [morph/match (fn [values & more] (swap! calls inc) (apply match values more))]
       (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 300)
       (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 600))
     (t/is (= 1 @calls) "rows built anew each time match once")))

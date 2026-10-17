@@ -193,21 +193,26 @@
 
 (defn matched-outlines
   "The outlines `values` of a row of keyframes, in time order, matched to
-  one structure (see `morph/match`). Kept for the row `row-key` (its
-  layer and index) until its outlines change, and given back as they are
-  for the matched ones, so that the rows every frame builds anew match
-  once; past `outline-rows-cache-size` rows, a new one takes the place
-  of another (see `keep-row`)."
-  [row-key values]
-  (let [entry (get @outline-rows-cache row-key)]
-    (cond
-      (and (some? entry) (= values (:values entry)))
-      (:matched entry)
+  one structure (see `morph/match`), those `fixed` (a boolean each: a
+  first point and way round set by hand) not turned to fit the one
+  before. Kept for the row `row-key` (its layer and index) until its
+  outlines change, and given back as they are for the matched ones, so
+  that the rows every frame builds anew match once; past
+  `outline-rows-cache-size` rows, a new one takes the place of another
+  (see `keep-row`)."
+  ([row-key values]
+   (matched-outlines row-key values nil))
+  ([row-key values fixed]
+   (let [entry (get @outline-rows-cache row-key)]
+     (cond
+       (and (some? entry) (= values (:values entry)) (= fixed (:fixed entry)))
+       (:matched entry)
 
-      (and (some? entry) (= values (:matched entry)))
-      values
+       (and (some? entry) (= values (:matched entry)))
+       values
 
-      :else
-      (let [matched (morph/match values)]
-        (swap! outline-rows-cache keep-row row-key {:values values :matched matched} outline-rows-cache-size)
-        matched))))
+       :else
+       (let [matched (morph/match values fixed)]
+         (swap! outline-rows-cache keep-row row-key {:values values :fixed fixed :matched matched}
+                outline-rows-cache-size)
+         matched)))))

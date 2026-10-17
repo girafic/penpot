@@ -189,6 +189,38 @@
         (t/is (and (some? x') (mth/close? x x' 1e-6) (mth/close? y y' 1e-6))
               (str "the corner " v " of the wide one goes to the corner " v " of the tall one"))))))
 
+(defn- corners-in-order
+  "The corners `corners` (`[x y]`) in the order the matched `content`
+  passes them."
+  [content corners]
+  (into []
+        (comp (map (fn [[x y]] (some (fn [[cx cy :as c]] (when (and (mth/close? x cx 1e-6) (mth/close? y cy 1e-6)) c)) corners)))
+              (remove nil?)
+              (dedupe))
+        (points content)))
+
+(t/deftest a-fixed-keyframe-pairs-first-point-to-first-point
+  ;; a triangle into a square drawn from its far corner: matched on its
+  ;; own the square starts near the triangle's start, fixed it starts
+  ;; where it was drawn from
+  (let [tri      (polygon [[0 0] [100 0] [0 100]])
+        from-c   (polygon [[100 100] [0 100] [0 0] [100 0]])
+        corners  [[0 0] [100 0] [100 100] [0 100]]
+        [_ auto] (morph/match [tri from-c])
+        [_ fixed] (morph/match [tri from-c] [false true])]
+    (t/is (not= [100.0 100.0] (mapv double (first (points auto)))) "on its own, turned to fit")
+    (t/is (= [100.0 100.0] (mapv double (first (points fixed)))) "fixed, from where it was drawn")
+    (t/is (= [[100 100] [0 100] [0 0] [100 0]] (take 4 (corners-in-order fixed corners))) "and the way it goes round"))
+  (let [tri      (polygon [[0 0] [100 0] [0 100]])
+        back     (polygon [[100 100] [100 0] [0 0] [0 100]])
+        [_ fixed] (morph/match [tri back] [false true])]
+    (t/is (= [[100 100] [100 0] [0 0] [0 100]] (take 4 (corners-in-order fixed [[0 0] [100 0] [100 100] [0 100]])))
+          "the other way round, as it was drawn"))
+  (let [a (polygon [[0 0] [10 0] [0 10]])
+        b (polygon [[0 10] [0 0] [10 0]])]
+    (t/is (every? true? (map identical? [a b] (morph/match [a b] [false true])))
+          "of one structure, as they are")))
+
 (t/deftest close-contents-are-of-one-structure-within-a-tolerance
   (let [a (polygon [[0 0] [10 0] [0 10]])]
     (t/is (morph/close? a (polygon [[0 0.004] [10 0] [0 10]]) 0.01))

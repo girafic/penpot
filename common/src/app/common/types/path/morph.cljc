@@ -324,87 +324,108 @@
     corner into a heart from its point does not twist), backwards too
     when it stands apart from the others, while one of the same structure
     turns as that one did (a star spinning by its points keeps spinning).
-    A subpath one lacks grows from a point and turns to fit nothing."
-  [contents]
-  (let [contents (vec contents)]
-    (if (or (< (count contents) 2)
-            (every? #(same-structure? (first contents) %) (rest contents)))
-      contents
-      (let [subs    (mapv subpaths contents)
-            n       (apply max (map count subs))
-            partner (fn [i] (some #(get % i) subs))
-            open?   (fn [i] (some #(false? (:closed? (get % i))) subs))
-            ;; what each subpath of each content is made of
-            kinds   (mapv (fn [row] (mapv #(structure (get row %)) (range n))) subs)
-            ;; each subpath as curves, a missing one as a point
-            rows    (mapv (fn [row]
-                            (mapv (fn [i]
-                                    (if-let [sub (get row i)]
-                                      {:start (:start sub) :curves (curves sub)
-                                       :closed? (and (:closed? sub) (not (open? i)))}
-                                      {:start (centre (partner i)) :curves []
-                                       :closed? (and (:closed? (partner i)) (not (open? i)))}))
-                                  (range n)))
-                          subs)
-            ;; as many curves in each, those of one structure split alike
-            ;; by their mean lengths
-            rows    (reduce
-                     (fn [rows i]
-                       (let [m      (target-count (map #(count (:curves (nth % i))) rows))
-                             groups (group-by #(get-in kinds [% i]) (range (count rows)))
-                             split  (fn [rows members f] (reduce #(update-in %1 [%2 i] f) rows members))]
-                         (reduce-kv
-                          (fn [rows kind members]
-                            (if (nil? kind)
-                              (split rows members (fn [{:keys [start] :as sub}]
-                                                    (assoc sub :curves (vec (repeat m [start start start])))))
-                              (let [lengths (map #(let [{:keys [start curves]} (get-in rows [% i])]
-                                                    (curve-lengths start curves))
-                                                 members)
-                                    counts  (pieces (apply mapv (fn [& ls] (/ (reduce + ls) (count ls))) lengths) m)]
-                                (split rows members (fn [{:keys [start curves] :as sub}]
-                                                      (assoc sub :curves (split-by start curves counts)))))))
-                          rows
-                          groups)))
-                     rows
-                     (range n))
-            ;; a content going round the other way than the one before
-            ;; goes backwards as a whole, so that its holes stay holes;
-            ;; then a closed subpath of another structure than the one
-            ;; before starts where it is closest to it (backwards only on
-            ;; its own, see `free-subpaths`), and one of the same turns as
-            ;; it did; none turns to fit a point
-            [rows]  (reduce
-                     (fn [[out flips turns] r]
-                       (let [prev   (peek out)
-                             row    (nth rows r)
-                             way    (orientation row)
-                             flip?  (boolean (and (some? prev)
-                                                  (not (zero? way))
-                                                  (= (- way) (orientation prev))))
-                             row    (cond->> row
-                                      flip? (mapv (fn [{:keys [start curves closed?] :as sub}]
-                                                    (if (and closed? (seq curves))
-                                                      (let [[s c] (turned start curves 0 true)]
-                                                        (assoc sub :start s :curves c))
-                                                      sub))))
-                             free   (free-subpaths row)
-                             pairs  (mapv (fn [i {:keys [start curves closed?] :as sub}]
-                                            (let [kind   (get-in kinds [r i])
-                                                  before (when (some? prev) (get-in kinds [(dec r) i]))
-                                                  turn   (when (and closed? (some? prev) (some? kind) (some? before))
-                                                           (if (and (= kind before) (= flip? (peek flips)))
-                                                             (nth turns i)
-                                                             (let [ref (nth prev i)]
-                                                               (best-turn start curves (:start ref) (:curves ref)
-                                                                          (contains? free i)))))]
-                                              (if-let [[k back?] turn]
-                                                (let [[s c] (turned start curves k back?)]
-                                                  [(assoc sub :start s :curves c) turn])
-                                                [sub nil])))
-                                          (range)
-                                          row)]
-                         [(conj out (mapv first pairs)) (conj flips flip?) (mapv second pairs)]))
-                     [[] [] nil]
-                     (range (count rows)))]
-        (mapv curve-content rows)))))
+    A subpath one lacks grows from a point and turns to fit nothing. A
+    content of `fixed` (a boolean each) has its first point and way
+    round set by hand: it turns as the one before did, so its first point
+    goes to that one's first point, as Lottie and After Effects pair
+    them."
+  ([contents]
+   (match contents nil))
+  ([contents fixed]
+   (let [contents (vec contents)]
+     (if (or (< (count contents) 2)
+             (every? #(same-structure? (first contents) %) (rest contents)))
+       contents
+       (let [subs    (mapv subpaths contents)
+             n       (apply max (map count subs))
+             partner (fn [i] (some #(get % i) subs))
+             open?   (fn [i] (some #(false? (:closed? (get % i))) subs))
+             ;; what each subpath of each content is made of
+             kinds   (mapv (fn [row] (mapv #(structure (get row %)) (range n))) subs)
+             ;; each subpath as curves, a missing one as a point
+             rows    (mapv (fn [row]
+                             (mapv (fn [i]
+                                     (if-let [sub (get row i)]
+                                       {:start (:start sub) :curves (curves sub)
+                                        :closed? (and (:closed? sub) (not (open? i)))}
+                                       {:start (centre (partner i)) :curves []
+                                        :closed? (and (:closed? (partner i)) (not (open? i)))}))
+                                   (range n)))
+                           subs)
+             ;; as many curves in each, those of one structure split alike
+             ;; by their mean lengths
+             rows    (reduce
+                      (fn [rows i]
+                        (let [m      (target-count (map #(count (:curves (nth % i))) rows))
+                              groups (group-by #(get-in kinds [% i]) (range (count rows)))
+                              split  (fn [rows members f] (reduce #(update-in %1 [%2 i] f) rows members))]
+                          (reduce-kv
+                           (fn [rows kind members]
+                             (if (nil? kind)
+                               (split rows members (fn [{:keys [start] :as sub}]
+                                                     (assoc sub :curves (vec (repeat m [start start start])))))
+                               (let [lengths (map #(let [{:keys [start curves]} (get-in rows [% i])]
+                                                     (curve-lengths start curves))
+                                                  members)
+                                     counts  (pieces (apply mapv (fn [& ls] (/ (reduce + ls) (count ls))) lengths) m)]
+                                 (split rows members (fn [{:keys [start curves] :as sub}]
+                                                       (assoc sub :curves (split-by start curves counts)))))))
+                           rows
+                           groups)))
+                      rows
+                      (range n))
+             ;; a content going round the other way than the one before
+             ;; goes backwards as a whole, so that its holes stay holes;
+             ;; then a closed subpath of another structure than the one
+             ;; before starts where it is closest to it (backwards only on
+             ;; its own, see `free-subpaths`), and one of the same turns as
+             ;; it did; none turns to fit a point
+             [rows]  (reduce
+                      (fn [[out flips turns] r]
+                        (let [prev   (peek out)
+                              row    (nth rows r)
+                              ;; its first point and way round set by hand:
+                              ;; turned as the one before, first point to
+                              ;; first point
+                              fixed? (and (some? prev) (true? (get fixed r)))
+                              way    (orientation row)
+                              flip?  (if fixed?
+                                       (boolean (peek flips))
+                                       (boolean (and (some? prev)
+                                                     (not (zero? way))
+                                                     (= (- way) (orientation prev)))))
+                              row    (cond->> row
+                                       flip? (mapv (fn [{:keys [start curves closed?] :as sub}]
+                                                     (if (and closed? (seq curves))
+                                                       (let [[s c] (turned start curves 0 true)]
+                                                         (assoc sub :start s :curves c))
+                                                       sub))))
+                              free   (free-subpaths row)
+                              pairs  (mapv (fn [i {:keys [start curves closed?] :as sub}]
+                                             (let [kind   (get-in kinds [r i])
+                                                   before (when (some? prev) (get-in kinds [(dec r) i]))
+                                                   turn   (when (and closed? (some? prev))
+                                                            (cond
+                                                              fixed?
+                                                              (nth turns i)
+
+                                                              (or (nil? kind) (nil? before))
+                                                              nil
+
+                                                              (and (= kind before) (= flip? (peek flips)))
+                                                              (nth turns i)
+
+                                                              :else
+                                                              (let [ref (nth prev i)]
+                                                                (best-turn start curves (:start ref) (:curves ref)
+                                                                           (contains? free i)))))]
+                                               (if-let [[k back?] turn]
+                                                 (let [[s c] (turned start curves k back?)]
+                                                   [(assoc sub :start s :curves c) turn])
+                                                 [sub nil])))
+                                           (range)
+                                           row)]
+                          [(conj out (mapv first pairs)) (conj flips flip?) (mapv second pairs)]))
+                      [[] [] nil]
+                      (range (count rows)))]
+         (mapv curve-content rows))))))

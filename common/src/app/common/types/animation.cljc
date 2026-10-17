@@ -175,6 +175,9 @@
     (into [:map {:title "OutlineKeyframe"}
            [:property [::sm/one-of #{:content}]]
            [:value ctao/schema:outline]
+           ;; its first point and way round set by hand: not turned to
+           ;; fit the keyframe before (see `ctao/matched-outlines`)
+           [:fixed-start {:optional true} :boolean]
            ;; no motion path
            [:path-in {:optional true} :nil]
            [:path-out {:optional true} :nil]]
@@ -846,7 +849,7 @@
 (defn make-keyframe
   "A keyframe from `params`, with the design token that sets its easing
   (`:applied-tokens` `{:easing name}`) when it names one."
-  [{:keys [id time property value easing interpolation index path-in path-out applied-tokens]}]
+  [{:keys [id time property value easing interpolation index path-in path-out applied-tokens fixed-start]}]
   (let [easing-token (:easing applied-tokens)]
     (cond-> {:id (or id (uuid/next))
              :time (or time 0)
@@ -857,6 +860,7 @@
       (and (some? path-in) (not= :content property)) (assoc :path-in path-in)
       (and (some? path-out) (not= :content property)) (assoc :path-out path-out)
       (some? index) (assoc :index index)
+      (and (true? fixed-start) (= :content property)) (assoc :fixed-start true)
       (string? easing-token) (assoc :applied-tokens {:easing easing-token}))))
 
 (defn- keyframe-slot
@@ -2213,7 +2217,7 @@
   structure (see `ctao/matched-outlines`)."
   [row-key keyframes]
   (let [values  (mapv :value keyframes)
-        matched (ctao/matched-outlines row-key values)]
+        matched (ctao/matched-outlines row-key values (mapv #(true? (:fixed-start %)) keyframes))]
     (if (= values matched)
       keyframes
       (mapv #(assoc %1 :value %2) keyframes matched))))
