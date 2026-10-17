@@ -672,9 +672,10 @@
   `blur-sigma`). With `timeline` (cut to its duration), SMIL plays their
   keyframes on it; without, they rest. Its region, on the page, holds
   them as they play, and `area` (a rect on the page), when given: what
-  the layers in it may cover. Of its shadows, those of `styles` (both
-  kinds by default)."
-  [id shape timeline {:keys [shadows? blur? area styles] :or {styles #{:drop-shadow :inner-shadow}}}]
+  the layers in it may cover, and `played`, its box as it plays (see
+  `svg-played-box`), when it does. Of its shadows, those of `styles`
+  (both kinds by default)."
+  [id shape timeline {:keys [shadows? blur? area styles played] :or {styles #{:drop-shadow :inner-shadow}}}]
   (let [sid      (:id shape)
         track    (dm/get-in timeline [:tracks sid])
         duration (max 1 (:duration timeline 1))
@@ -746,9 +747,9 @@
                       (filter #(contains? styles (nth % 2))))
         [prev drops] (chain "BackgroundImageFix" (filter #(= :drop-shadow (nth % 2)) shown) drop)
         [_ inners]   (chain "shape" (filter #(= :inner-shadow (nth % 2)) shown) inner)
-        ;; the box as it plays its size or its outline (see
+        ;; the box as it plays its size or its outline (`played`, see
         ;; `svg-played-box`), with its effects then
-        played   (when (some? track) (svg-played-box shape timeline))
+        played   (when (some? timeline) played)
         times    (-> #{0 duration}
                      (into (map :time) (concat kfs blur-kfs))
                      (into (:times played)))
@@ -888,12 +889,12 @@
   `shape` take as `timeline` (cut to its duration) plays its width and
   height on its elements (see `aexp/svg-box-sized?`,
   `aexp/svg-outline-sized?`) or its outline (see `svg-smil-morph?`):
-  what its box covers as it plays (see `svg-played-box`), and around it
-  as far as its strokes reach (their miters, four times as wide as they
-  are at their widest)."
-  [shape timeline]
+  what its box covers as it plays (`played`, see `svg-played-box`), and
+  around it as far as its strokes reach (their miters, four times as
+  wide as they are at their widest)."
+  [shape timeline played]
   (let [values  (acss/shape-values timeline (:id shape))
-        {:keys [times corners]} (svg-played-box shape timeline)
+        {:keys [times corners]} played
         strokes (cta/as-vec (:strokes shape))
         widest  (reduce max 0
                         (for [t times index (range (count strokes))]
@@ -926,15 +927,18 @@
       markup)))
 
 (defn- svg-sized-paint
-  "The vectors `markup` of the layer `sid`, whose width and height play on
-  its elements (see `aexp/svg-box-sized?`, `aexp/svg-outline-sized?`),
-  with the pattern of its fills over its box as it plays (see
-  `svg-box-pattern`) and the masks of its outer strokes, bounded to its
-  box at rest by the SVG renderer, over `region` (see
-  `svg-sized-region`), when it has any."
-  [markup sid region]
-  (let [pattern-id (second (re-find (re-pattern (str "id=\"fills-" sid "\"><\\w+ [^>]*?fill=\"url\\(#([^)\"]+)\\)\""))
-                                    markup))
+  "The vectors `markup` of the layer `sid`, whose width and height or
+  outline play on its elements (see `aexp/svg-box-sized?`,
+  `aexp/svg-outline-sized?`, `svg-smil-morph?`): with `pattern?` (a box
+  that sizes), the pattern of its fills over its box as it plays (see
+  `svg-box-pattern`), a morph keeping its fills at rest as the canvas
+  does; and the masks of its outer strokes, bounded to its box at rest by
+  the SVG renderer, over `region` (see `svg-sized-region`), when it has
+  any."
+  [markup sid region pattern?]
+  (let [pattern-id (when pattern?
+                     (second (re-find (re-pattern (str "id=\"fills-" sid "\"><\\w+ [^>]*?fill=\"url\\(#([^)\"]+)\\)\""))
+                                      markup)))
         [x y w h]  region]
     (cond-> markup
       (some? pattern-id)
@@ -1007,23 +1011,27 @@
                                    (aexp/svg-outline-sized? shape track)
                                    (svg-smil-morph? shape track)))
                       (svg-outline-path shape timeline))
+           ;; its box as its size or its outline plays (see
+           ;; `svg-played-box`), once for its paint and its filters
+           played   (when (some? shape) (svg-played-box shape timeline))
            ;; its fills and the masks of its outer strokes over its box
            ;; as its size or its outline plays on its elements (see
            ;; `svg-sized-paint`)
-           paint    (when (and (some? shape)
-                               (or (aexp/svg-box-sized? shape track)
-                                   (aexp/svg-outline-sized? shape track)
-                                   (svg-smil-morph? shape track)))
+           sized?   (and (some? shape)
+                         (or (aexp/svg-box-sized? shape track) (aexp/svg-outline-sized? shape track)))
+           paint    (when (and (some? shape) (or sized? (svg-smil-morph? shape track)))
                       {:region (when (some #(= :outer (aexp/svg-stroke-alignment shape %))
                                            (cta/as-vec (:strokes shape)))
-                                 (svg-sized-region shape timeline))})
+                                 (svg-sized-region shape timeline played))
+                       :pattern? sized?})
            filters  (when (or shadows? blur?)
                       (let [flags {:shadows? shadows? :blur? blur? :styles drops
-                                   :area (when (contains? wide sid) area)}]
+                                   :area (when (contains? wide sid) area)
+                                   :played played}]
                         (str (svg-effects-filter (svg-effects-id sid false) shape timeline flags)
                              (svg-effects-filter (svg-effects-id sid true) shape nil flags))))
            inner    (when board?
-                      (let [flags {:shadows? true :styles #{:inner-shadow}}]
+                      (let [flags {:shadows? true :styles #{:inner-shadow} :played played}]
                         (str (svg-effects-filter (svg-inner-id sid false) shape timeline flags)
                              (svg-effects-filter (svg-inner-id sid true) shape nil flags))))]
        (cond-> result
@@ -1090,7 +1098,7 @@
   [{:keys [smil ox oy]} id markup]
   (let [{:keys [outline inner paint]} (get smil id)
         markup (cond-> markup
-                 (some? paint) (svg-sized-paint id (:region paint)))
+                 (some? paint) (svg-sized-paint id (:region paint) (:pattern? paint)))
         ;; the inner shadows of a board on a filter around its vectors
         inside (fn [markup defs?]
                  (if (some? inner)

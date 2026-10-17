@@ -6156,6 +6156,45 @@
             box     (region svg "mask" mask-id)]
         (t/is (holds? box 20 320) (str "from the triangle to the grown one: " box))))))
 
+(t/deftest an-svg-morph-keeps-its-fills-at-rest
+  ;; two fills: their pattern stays over the box at rest, as the canvas
+  ;; draws them while the outline plays (it is a box that sizes that
+  ;; takes its pattern along)
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 100})
+        shape  (path-layer triangle)
+        sid    (:id shape)
+        tl     (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                   (cta/set-outline-at shape 0 (ctao/outline-of shape))
+                   (cta/set-outline-at shape 1000 (plain-path [[0 0] [300 0] [0 40]])))
+        markup (str "<g id=\"shape-" sid "\"><defs><pattern patternUnits=\"userSpaceOnUse\" x=\"20\" y=\"30\""
+                    " width=\"40\" height=\"40\" id=\"fill-0-render-1\"><g><rect width=\"40\" height=\"40\""
+                    " style=\"fill:#ff0000\"></rect><rect width=\"40\" height=\"40\" style=\"fill:#ffffff\"></rect>"
+                    "</g></pattern></defs><g class=\"fills\" id=\"fills-" sid "\"><path d=\"" (:content shape)
+                    "\" data-penpot-outline=\"\" fill=\"url(#fill-0-render-1)\"></path></g></g>")
+        svg    (asvg/timeline->svg tl (svg-board-with board shape) {sid {:markup markup}})]
+    (t/is (str/includes? svg "patternUnits=\"userSpaceOnUse\" x=\"20\" y=\"30\""))
+    (t/is (not (str/includes? svg "objectBoundingBox")))))
+
+(t/deftest a-turned-svg-morph-keeps-its-shadow-around-it
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 400})
+        shape  (-> (path-layer triangle :rotation 30)
+                   (assoc :fills [{:fill-color "#000000" :fill-opacity 1}]
+                          :shadow [{:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 4 :spread 0
+                                    :hidden false :color {:color "#000000" :opacity 0.5}}]))
+        sid    (:id shape)
+        wide   (plain-path [[0 0] [300 0] [0 40]])
+        tl     (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                   (cta/set-outline-at shape 0 (ctao/outline-of shape))
+                   (cta/set-outline-at shape 1000 wide))
+        drawn  (path/calc-selrect (ctao/outline->content shape (get-in tl [:tracks sid]) wide))
+        markup (str "<path d=\"" (:content shape) "\" data-penpot-outline=\"\" fill=\"#000000\"></path>")
+        svg    (asvg/timeline->svg tl (svg-board-with board shape) {sid {:markup markup}})
+        [x y w h] (region svg "filter" (str "penpot-effects-" sid))]
+    (t/is (some? x))
+    (t/is (and (<= x (:x drawn)) (<= y (:y drawn))
+               (>= (+ x w) (+ (:x drawn) (:width drawn))) (>= (+ y h) (+ (:y drawn) (:height drawn))))
+          (str "the turned outline at 1 s, " drawn ", within " [x y w h]))))
+
 (t/deftest lottie-morphs-a-path-by-its-vertices
   (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
         shape  (assoc (path-layer triangle) :fills [{:fill-color "#000000" :fill-opacity 1}])
