@@ -221,6 +221,84 @@
        (mapv close-loop)
        (into [] xf-mapcat-data)))
 
+;; THE START AND THE WAY ROUND (of a morph keyframe, see
+;; `app.common.types.path.morph`)
+
+(defn- slices
+  "The subpaths of the plain `segments`, each the vector of its segments
+  from its move-to."
+  [segments]
+  (reduce (fn [acc segment]
+            (if (or (= :move-to (:command segment)) (empty? acc))
+              (conj acc [segment])
+              (update acc (dec (count acc)) conj segment)))
+          []
+          segments))
+
+(defn- closed?
+  [slice]
+  (= :close-path (:command (peek slice))))
+
+(defn- body
+  "The segments of the subpath `slice` but its move-to and close; a closed
+  one with a line back to its start where it ends elsewhere, which its
+  close draws."
+  [slice]
+  (let [start (helpers/segment->point (first slice))
+        segs  (filterv #(not (contains? #{:move-to :close-path} (:command %))) (rest slice))
+        end   (some-> (peek segs) helpers/segment->point)]
+    (cond-> segs
+      (and (closed? slice) (some? end) (not (pt= start end)))
+      (conj (helpers/make-line-to start)))))
+
+(defn- closing
+  "The segments `segs` of a closed subpath from `start`, closed: a last
+  line back to `start` left to the close, which draws it."
+  [segs start]
+  (let [last-seg (peek segs)]
+    (-> (if (and (= :line-to (:command last-seg)) (pt= start (helpers/segment->point last-seg)))
+          (pop segs)
+          segs)
+        (conj {:command :close-path :params {}}))))
+
+(defn start-at
+  "The plain segments of `content` with its closed subpath that has a node
+  at `point` (see `pt=`) starting at it, drawing the same; the others as
+  they are."
+  [content point]
+  (into []
+        (mapcat (fn [slice]
+                  (let [segs (when (closed? slice) (body slice))
+                        k    (when (> (count segs) 1)
+                               (d/index-of-pred (pop segs) #(pt= point (helpers/segment->point %))))]
+                    (if (some? k)
+                      (let [p (helpers/segment->point (nth segs k))]
+                        (into [(helpers/make-move-to p)]
+                              (closing (-> (subvec segs (inc k)) (into (subvec segs 0 (inc k)))) p)))
+                      slice))))
+        (slices (vec content))))
+
+(defn reverse-at
+  "The plain segments of `content` with its subpaths that have a node at
+  one of `points` (all of them without `points`) going the other way
+  round: a closed one from the same start, an open one from its end."
+  [content points]
+  (into []
+        (mapcat (fn [slice]
+                  (let [start (helpers/segment->point (first slice))
+                        segs  (body slice)
+                        nodes (cons start (map helpers/segment->point segs))
+                        hit?  (or (empty? points)
+                                  (some (fn [p] (some #(pt= p %) nodes)) points))]
+                    (if (and hit? (seq segs))
+                      (let [prevs (into [(first slice)] (pop segs))
+                            back  (mapv (fn [i] (reverse-command (nth segs i) (nth prevs i)))
+                                        (range (dec (count segs)) -1 -1))]
+                        (into [(helpers/make-move-to (helpers/segment->point (peek segs)))]
+                              (cond-> back (closed? slice) (closing start))))
+                      slice))))
+        (slices (vec content))))
+
 ;; FIXME: revisit this fn impl for perfromance
 (defn reverse-content
   "Given a content reverse the order of the commands"

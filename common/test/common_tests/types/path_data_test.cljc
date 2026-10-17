@@ -2864,3 +2864,66 @@
         result  (path/splice-content content sub)]
     (t/is (path.impl/path-data? result))
     (t/is (= (into (vec content) sub) (vec result)))))
+
+;; THE START AND THE WAY ROUND OF A SUBPATH
+
+(defn- plain-of
+  [content]
+  (mapv #(select-keys % [:command :params]) (vec content)))
+
+(defn- drawn-segments
+  "The segments of `content` as `[from to c1 c2]`, a close as a line back
+  to its start, without zero-length closes: what it draws, in no order."
+  [content]
+  (->> (vec content)
+       (reduce (fn [[out start prev] {:keys [command params]}]
+                 (let [p [(:x params) (:y params)]]
+                   (case command
+                     :move-to    [out p p]
+                     :close-path [(cond-> out (not= prev start) (conj [prev start nil nil])) start start]
+                     [(conj out [prev p (when (:c1x params) [(:c1x params) (:c1y params)])
+                                 (when (:c2x params) [(:c2x params) (:c2y params)])])
+                      start p])))
+               [[] nil nil])
+       first
+       (map (fn [[a b c1 c2]] [(mapv double a) (mapv double b) (some->> c1 (mapv double)) (some->> c2 (mapv double))]))
+       frequencies))
+
+(def ^:private square
+  (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                    {:command :line-to :params {:x 10 :y 0}}
+                    {:command :line-to :params {:x 10 :y 10}}
+                    {:command :line-to :params {:x 0 :y 10}}
+                    {:command :close-path :params {}}]))
+
+(t/deftest a-closed-subpath-starts-at-a-node
+  (let [started (path/start-subpath-at square (gpt/point 10 10))]
+    (t/is (= {:command :move-to :params {:x 10.0 :y 10.0}} (update (first (plain-of started)) :params update-vals double)))
+    (t/is (= (drawn-segments square) (drawn-segments started)) "the same square")
+    (t/is (= (count (vec square)) (count (vec started))) "as many segments, the last line left to the close"))
+  (let [rounded (path/from-plain [{:command :move-to :params {:x 0 :y 5}}
+                                  {:command :curve-to :params {:c1x 0 :c1y 2 :c2x 2 :c2y 0 :x 5 :y 0}}
+                                  {:command :line-to :params {:x 15 :y 0}}
+                                  {:command :curve-to :params {:c1x 18 :c1y 0 :c2x 20 :c2y 2 :x 20 :y 5}}
+                                  {:command :line-to :params {:x 20 :y 15}}
+                                  {:command :line-to :params {:x 0 :y 15}}
+                                  {:command :close-path :params {}}])
+        started (path/start-subpath-at rounded (gpt/point 15 0))]
+    (t/is (= (drawn-segments rounded) (drawn-segments started)) "its curves with their handles"))
+  (t/is (= (plain-of square) (plain-of (path/start-subpath-at square (gpt/point 5 5)))) "no node there")
+  (let [open (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                               {:command :line-to :params {:x 10 :y 0}}
+                               {:command :line-to :params {:x 10 :y 10}}])]
+    (t/is (= (plain-of open) (plain-of (path/start-subpath-at open (gpt/point 10 0)))) "an open one as it is")))
+
+(t/deftest a-subpath-goes-the-other-way-round
+  (let [back (path/reverse-subpaths-at square [(gpt/point 10 0)])]
+    (t/is (= [0.0 0.0] (mapv double ((juxt :x :y) (:params (first (vec back)))))) "a closed one from its start")
+    (t/is (= [0.0 10.0] (mapv double ((juxt :x :y) (:params (second (vec back)))))) "towards its last corner")
+    (t/is (= (count (vec square)) (count (vec back))))
+    (t/is (= (plain-of square) (plain-of (path/reverse-subpaths-at back []))) "twice, as it was"))
+  (let [two  (path/from-plain (into (vec square) [{:command :move-to :params {:x 20 :y 0}}
+                                                  {:command :line-to :params {:x 30 :y 0}}]))
+        back (path/reverse-subpaths-at two [(gpt/point 30 0)])]
+    (t/is (= (take 5 (plain-of two)) (take 5 (plain-of back))) "the subpaths without the point as they are")
+    (t/is (= [30.0 0.0] (mapv double ((juxt :x :y) (:params (nth (vec back) 5))))) "an open one from its end")))

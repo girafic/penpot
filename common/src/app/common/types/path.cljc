@@ -91,6 +91,20 @@
   (-> (subpath/close-subpaths content)
       (impl/from-plain)))
 
+(defn start-subpath-at
+  "`content` with its closed subpath that has a node at `point` starting
+  at it, drawing the same (see `subpath/start-at`), as PathData: the
+  first point of a morph keyframe."
+  [content point]
+  (impl/from-plain (subpath/start-at content point)))
+
+(defn reverse-subpaths-at
+  "`content` with its subpaths that have a node at one of `points` (all
+  without `points`) going the other way round (see `subpath/reverse-at`),
+  as PathData: the way round of a morph keyframe."
+  [content points]
+  (impl/from-plain (subpath/reverse-at content points)))
+
 (defn merge-touching-subpaths
   "Given a content, fold consecutive subpaths whose endpoints coincide
   into a single continuous subpath, returning a PathData instance.
