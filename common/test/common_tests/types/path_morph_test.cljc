@@ -221,6 +221,62 @@
     (t/is (every? true? (map identical? [a b] (morph/match [a b] [false true])))
           "of one structure, as they are")))
 
+(defn- sign [x] (cond (pos? x) 1 (neg? x) -1 :else 0))
+
+(t/deftest a-content-going-round-the-other-way-turns-as-a-whole
+  ;; a triangle one way round into a square with a hole the other: the
+  ;; square goes round as the triangle (it does not turn inside out), its
+  ;; hole still against it
+  (let [tri   (polygon [[0 0] [0 100] [100 0]])
+        [t m] (morph/match [tri (with-hole)])
+        [outer inner] (subpath-areas m)]
+    (t/is (= (sign (first (subpath-areas t))) (sign outer)) "the outline as the triangle")
+    (t/is (= (- (sign outer)) (sign inner)) "the hole against it")))
+
+(t/deftest only-a-subpath-apart-turns-round-on-its-own
+  (t/testing "a square apart, drawn the other way, turns to fit"
+    (let [two   (path/from-plain (into (vec (polygon [[0 0] [40 0] [40 40] [0 40]]))
+                                       (vec (polygon [[100 0] [140 0] [140 40] [100 40]]))))
+          other (path/from-plain (into (vec (polygon [[0 0] [40 0] [40 40] [0 40]]))
+                                       (vec (polygon [[120 0] [100 15] [108 40] [132 40] [140 15]]))))
+          [a b] (morph/match [two other])]
+      (t/is (= (sign (second (subpath-areas a))) (sign (second (subpath-areas b))))
+            "the pentagon goes round as the square before it")))
+  (t/testing "a hole turns only with its outline"
+    (let [pent  (path/from-plain (into (vec (polygon [[0 0] [100 0] [100 100] [0 100]]))
+                                       (vec (polygon [[50 30] [70 45] [62 70] [38 70] [30 45]]))))
+          [_ m] (morph/match [(with-hole) pent])]
+      (t/is (= (sign (second (subpath-areas pent))) (sign (second (subpath-areas m))))
+            "the inner pentagon as it was drawn, not turned on its own"))))
+
+(defn- index-of-point
+  [content [x y]]
+  (first (keep-indexed (fn [j [qx qy]] (when (and (mth/close? x qx 1e-6) (mth/close? y qy 1e-6)) j))
+                       (points content))))
+
+(t/deftest a-fixed-row-after-a-turned-one-pairs-their-first-points
+  ;; the square is turned to fit the triangle; the fixed pentagon after
+  ;; it turns as the square did, so their first points meet
+  (let [tri      (polygon [[0 0] [100 0] [0 100]])
+        square   (polygon [[100 100] [0 100] [0 0] [100 0]])
+        pentagon (polygon [[50 0] [100 40] [80 100] [20 100] [0 40]])
+        [_ s p]  (morph/match [tri square pentagon] [false false true])
+        j        (index-of-point s [100 100])]
+    (t/is (some? j))
+    (t/is (pos? j) "the square turned")
+    (t/is (= j (index-of-point p [50 0])) "the pentagon's first point where the square's is")))
+
+(t/deftest a-row-after-a-fixed-one-aligns-to-it
+  (let [tri      (polygon [[0 0] [100 0] [0 100]])
+        square   (polygon [[100 100] [0 100] [0 0] [100 0]])
+        ;; drawn from its corner farthest from the square's start
+        pentagon (polygon [[0 40] [50 0] [100 40] [80 100] [20 100]])
+        [_ s p]  (morph/match [tri square pentagon] [false true false])
+        [sx sy]  (first (points s))
+        [px py]  (first (points p))]
+    (t/is (= [100.0 100.0] (mapv double [sx sy])) "the fixed square from its own start")
+    (t/is (< (mth/hypot (- px sx) (- py sy)) 30) "the pentagon turned to start next to it")))
+
 (t/deftest close-contents-are-of-one-structure-within-a-tolerance
   (let [a (polygon [[0 0] [10 0] [0 10]])]
     (t/is (morph/close? a (polygon [[0 0.004] [10 0] [0 10]]) 0.01))

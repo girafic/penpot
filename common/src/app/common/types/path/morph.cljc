@@ -221,16 +221,16 @@
   "The turn `[r back?]` (see `turned`) that starts the closed subpath of
   curves `cs` from `start` where it is closest to the subpath of curves
   `ref-cs` from `ref-start`, of as many curves: the least squared
-  distance between their vertices; backwards only with `back?`. Nil when
-  there is none to make (too many curves, or not as many)."
-  [start cs ref-start ref-cs back?]
+  distance between their vertices; backwards only with `may-reverse?`.
+  Nil when there is none to make (too many curves, or not as many)."
+  [start cs ref-start ref-cs may-reverse?]
   (let [k (count cs)]
     (when-not (or (> k max-aligned-segments) (not= k (count ref-cs)) (< k 2))
       (let [ref  (vertices ref-start ref-cs)
             cost (fn [[r back?]]
                    (let [[s c] (turned start cs r back?)]
                      (reduce + (map (fn [a b] (let [d (distance a b)] (* d d))) (vertices s c) ref))))]
-        (apply min-key cost (for [back? (if back? [false true] [false]) r (range k)] [r back?]))))))
+        (apply min-key cost (for [back? (if may-reverse? [false true] [false]) r (range k)] [r back?]))))))
 
 (defn- curve-points
   "The points of the subpath of curves `cs` from `start`, its handles

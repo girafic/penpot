@@ -5894,6 +5894,15 @@
     (t/is (= {:values 10} (get (keep-row full [2 nil] {:values 10} 4) [2 nil])) "a row kept, in its place")
     (t/is (= 4 (count (keep-row full [2 nil] {:values 10} 4))))))
 
+(t/deftest matched-rows-are-kept-with-their-fixed-starts
+  (let [k      [(uuid/next) nil]
+        values [(plain-path [[0 0] [100 0] [0 100]]) (plain-path [[100 100] [0 100] [0 0] [100 0]])]
+        auto   (ctao/matched-outlines k values [false false])
+        fixed  (ctao/matched-outlines k values [false true])]
+    (t/is (= (str (second (morph/match values [false true]))) (str (second fixed)))
+          "a fixed start matches anew, not as the row kept")
+    (t/is (not= (str (second auto)) (str (second fixed))))))
+
 (t/deftest matched-rows-are-kept-by-row
   ;; more rows than the old cache held, each matched once: a second pass
   ;; gives the very same outlines back
@@ -5953,8 +5962,9 @@
              (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 600))
            (t/is (= 1 @calls) "rows built anew each time match once"))
        :cljs
-       (t/is (= (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 300)
-                (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 300))))))
+       (let [values [(unique-polygon 3 40) (unique-polygon 6 40)]]
+         (t/is (identical? (ctao/matched-outlines [sid nil] values) (ctao/matched-outlines [sid nil] values))
+               "a row matches once")))))
 
 (t/deftest the-exports-keep-the-structure-of-outlines
   (let [sid      (uuid/next)
