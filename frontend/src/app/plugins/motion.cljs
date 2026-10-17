@@ -213,6 +213,9 @@
 (def ^:private outline-message
   "The value of a path should be an SVG path like 'M0,0 L10,0 L10,10 Z'")
 
+(def ^:private outline-row-message
+  "The path keyframes of a layer hold at most 32768 segments together")
+
 (defn- outline-in
   "The value of the outline keyframe the plugin API gives as `d`, an SVG
   path in page coordinates where the path `shape` rests (as `shape.d`),
@@ -511,8 +514,12 @@
              (= :content property)
              (let [timeline (locate-timeline file-id page-id board-id)
                    shape    (get (u/locate-objects file-id page-id) shape-id)
-                   outline  (outline-in shape (cta/get-track timeline shape-id) value)]
-               (update! :value #(assoc % :value outline)))
+                   track    (cta/get-track timeline shape-id)
+                   outline  (outline-in shape track value)]
+               ;; in place of its own outline, within what its row holds
+               (if (ctao/row-takes? (:keyframes track) #(= id (:id %)) outline)
+                 (update! :value #(assoc % :value outline))
+                 (u/not-valid plugin-id :value outline-row-message)))
 
              :else
              (update! :value #(assoc % :value value)))))}
@@ -1503,6 +1510,15 @@
               (and (= :content (:property keyframe))
                    (not= :path (:type (get (u/locate-objects file-id page-id) shape-id))))
               (u/not-valid plugin-id :addKeyframe "Only a path morphs: turn the layer into a path first")
+
+              ;; within what the row holds, in place of one at its time
+              (and (= :content (:property keyframe))
+                   (let [track (cta/get-track (locate) shape-id)]
+                     (not (ctao/row-takes? (:keyframes track)
+                                           #(and (= :content (:property %)) (= (:time keyframe) (:time %)))
+                                           (outline-in (get (u/locate-objects file-id page-id) shape-id)
+                                                       track (:value keyframe))))))
+              (u/not-valid plugin-id :addKeyframe outline-row-message)
 
               :else
               (let [id    (uuid/next)

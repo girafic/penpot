@@ -122,6 +122,37 @@
                                                                    :keyframes #js [#js {:time 0 :value "M0,0L10,0Z"}]}]))
                 "no style holds one"))))))
 
+(t/deftest the-outlines-of-a-path-hold-a-budget
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            ^js board    (.createBoard context)
+            ^js blob     (.createPath context)
+            _            (.appendChild board blob)
+            _            (set! (.-d blob) "M10,10L50,10L10,50Z")
+            ^js timeline (.addTimeline board)
+            ;; 4000 segments, eight of which a row holds
+            big          (str "M0,0" (str/join (map #(str "L" % "," (mod % 7)) (range 1 4000))) "Z")
+            count-kfs    #(count (:keyframes (stored-track store context board blob)))]
+        (doseq [t (range 8)]
+          (.addKeyframe timeline blob #js {:property "path" :time (* t 100) :value big}))
+        (t/is (= 8 (count-kfs)))
+        (t/is (thrown? js/Error (.addKeyframe timeline blob #js {:property "path" :time 900 :value big}))
+              "a ninth goes over the row")
+        (t/is (= 8 (count-kfs)))
+        (t/is (some? (.addKeyframe timeline blob #js {:property "path" :time 700 :value big}))
+              "one in place of one at its time fits")
+        (let [^js first-kf (first (filter #(= 0 (.-time ^js %)) (.-keyframes timeline)))
+              small        "M10,10L50,10L10,50Z"
+              bigger       (str big "L1,1")]
+          (set! (.-value first-kf) small)
+          (t/is (= 8 (count-kfs)))
+          (.addKeyframe timeline blob #js {:property "path" :time 800 :value big})
+          (t/is (thrown? js/Error (set! (.-value first-kf) bigger))
+                "a value that takes the row past it is refused")
+          (t/is (= "M10,10L50,10L10,50Z" (str/replace (str (.-value first-kf)) #"\.0(?=\D|$)" ""))
+                "and the keyframe keeps its own"))))))
+
 (t/deftest property-names-cover-the-model
   (t/is (= cta/animatable-properties (set (keys motion/property-names)))))
 
