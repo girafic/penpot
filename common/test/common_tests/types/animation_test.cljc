@@ -3651,6 +3651,23 @@
                                          (update-in objects [rid :fills] #(into [{:fill-color "#ff0000" :fill-opacity 1}] %))
                                          [rid] 500))))))
 
+(t/deftest record-unanimated-records-the-fill-of-a-path-without-its-outline
+  (let [board    (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape    (assoc (cts/setup-shape {:type :path :content (path/from-plain [{:command :move-to :params {:x 20 :y 30}}
+                                                                                 {:command :line-to :params {:x 60 :y 30}}
+                                                                                 {:command :line-to :params {:x 20 :y 70}}
+                                                                                 {:command :close-path :params {}}])})
+                        :fills [{:fill-color "#000000" :fill-opacity 1}])
+        [bid id] (map :id [board shape])
+        objects  {bid (assoc board :shapes [id]) id (assoc shape :parent-id bid :frame-id bid)}
+        tl       (cta/make-timeline {:board-id bid :duration 1000})
+        calls    (atom 0)
+        recorded #?(:clj (with-redefs [ctao/outline-change (fn [& _] (swap! calls inc) :none)]
+                           (cta/record-unanimated tl objects (assoc-in objects [id :fills 0 :fill-color] "#ff0000") [id] 500))
+                    :cljs (cta/record-unanimated tl objects (assoc-in objects [id :fills 0 :fill-color] "#ff0000") [id] 500))]
+    (t/is (= [[0 "#000000"] [500 "#ff0000"]] (times-and-values recorded id :fill-color 0)))
+    (t/is (zero? @calls) "its outline is not compared when it did not change")))
+
 (t/deftest record-unanimated-leaves-an-edited-path
   (let [{:keys [board rect objects]} (board-and-rect)
         rid   (:id rect)
@@ -5818,6 +5835,47 @@
     (t/is (ctao/outline-fits? big))
     (t/is (not (ctao/outline-row-fits? (repeat 9 {:property :content :value big}))))
     (t/is (ctao/outline-row-fits? (repeat 8 {:property :content :value big})))))
+
+(t/deftest a-row-takes-an-outline-within-its-budget
+  (let [big   (plain-path (mapv (fn [i] [i (mod i 7)]) (range 4000)))
+        huge  (plain-path (mapv (fn [i] [i (mod i 7)]) (range 5000)))
+        eight (mapv (fn [t] {:property :content :time t :value big}) (range 8))
+        none  (constantly false)]
+    (t/is (ctao/row-takes? [] none big))
+    (t/is (not (ctao/row-takes? [] none huge)) "more than a keyframe holds")
+    (t/is (not (ctao/row-takes? eight none big)) "a ninth goes over the row")
+    (t/is (ctao/row-takes? eight #(= 0 (:time %)) big) "in place of one, it fits")
+    (t/is (not (ctao/row-takes? [] none (path/from-plain [{:command :move-to :params {:x 0 :y 0}}]))) "nothing drawn")))
+
+(t/deftest the-schema-bounds-outlines
+  (let [big   (plain-path (mapv (fn [i] [i (mod i 7)]) (range 4000)))
+        huge  (plain-path (mapv (fn [i] [i (mod i 7)]) (range 5000)))
+        kf    (fn [t v] {:id (uuid/next) :property :content :time t :value v})
+        track (fn [n] {:shape-id (uuid/next) :keyframes (mapv #(kf % big) (range n))})]
+    (t/is (sm/validate cta/schema:keyframe (kf 0 big)))
+    (t/is (not (sm/validate cta/schema:keyframe (kf 0 huge))) "a keyframe holds at most 4096 segments")
+    (t/is (sm/validate cta/schema:track (track 8)))
+    (t/is (not (sm/validate cta/schema:track (track 9))) "a row at most 32768")))
+
+(t/deftest an-outline-past-the-budget-is-not-set
+  (let [shape (path-layer triangle)
+        big   (plain-path (mapv (fn [i] [i (mod i 7)]) (range 4000)))
+        tl    (reduce #(cta/set-outline-at %1 shape %2 big) (mk-timeline) [0 100 200 300 400 500 600 700])]
+    (t/is (= 8 (count (get-in tl [:tracks (:id shape) :keyframes]))))
+    (t/is (identical? tl (cta/set-outline-at tl shape 800 big)) "a ninth would go over the row")
+    (t/is (not (identical? tl (cta/set-outline-at tl shape 700 (plain-path [[0 0] [10 0] [0 10]]))))
+          "one in place of one there fits")))
+
+(t/deftest matched-rows-are-kept-by-row
+  ;; more rows than the old cache held, each matched once: a second pass
+  ;; gives the very same outlines back
+  (let [tri    (plain-path [[0 0] [40 0] [0 40]])
+        rows   (mapv (fn [i] [[(uuid/next) nil] [tri (plain-path [[0 0] [40 0] [40 (+ 40 i)] [0 40]])]]) (range 300))
+        once   (mapv (fn [[k v]] (ctao/matched-outlines k v)) rows)
+        again  (mapv (fn [[k v]] (ctao/matched-outlines k v)) rows)]
+    (t/is (every? true? (map identical? once again)))
+    (t/is (every? true? (map (fn [[k _] m] (identical? m (ctao/matched-outlines k m))) rows once))
+          "the matched ones as they are")))
 
 (defn- unique-polygon
   "A closed polygon of `n` corners on a circle around a random middle, so

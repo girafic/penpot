@@ -54,6 +54,23 @@
                  + 0 keyframes)
       max-outline-row-segments))
 
+(defn row-takes?
+  "Whether the outline keyframes among `keyframes`, but those `replaced?`
+  (a predicate of a keyframe) leaves out, take `value` too: an outline a
+  keyframe holds (see `outline-fits?`), the row within
+  `max-outline-row-segments` with it."
+  [keyframes replaced? value]
+  (and (outline-fits? value)
+       (outline-row-fits? (conj (into [] (remove replaced?) keyframes)
+                                {:property :content :value value}))))
+
+(def schema:outline
+  "The outline an outline keyframe holds: path content of at most
+  `max-outline-segments` segments."
+  [:and path/schema:content
+   [:fn {:error/message "An outline keyframe holds at most 4096 segments"}
+    #(<= (count %) max-outline-segments)]])
+
 (defn- rest-frame
   "The matrix taking an outline in the own frame of the path `shape` (see
   `outline-of`) where the path rests: its transform (which turns and
@@ -70,19 +87,21 @@
   {:width (dm/get-in shape [:selrect :width])
    :height (dm/get-in shape [:selrect :height])})
 
-(defn- outline-scale
-  "How much the outlines of the row `track` grow to fit the path `shape`:
-  its box over the box they were made for, each axis 1 when either is
-  about 0 or the row has no box."
-  [shape track]
-  (let [box   (:outline-box track)
-        rest  (outline-box shape)
-        ratio (fn [k]
-                (let [made (get box k) now (get rest k)]
-                  (if (and (number? made) (number? now) (> made 0.01) (> now 0.01))
-                    (/ now made)
-                    1)))]
+(defn box-scale
+  "How much outlines made for the box `from` grow to fit the box `to`
+  (each `{:width :height}`), as a point: each axis 1 when either is about
+  0 or not given."
+  [from to]
+  (let [ratio (fn [k]
+                (let [a (get from k) b (get to k)]
+                  (if (and (number? a) (number? b) (> a 0.01) (> b 0.01)) (/ b a) 1)))]
     (gpt/point (ratio :width) (ratio :height))))
+
+(defn- outline-scale
+  "How much the outlines of the row `track` grow to fit the path `shape`
+  (see `box-scale`): its box over the box they were made for."
+  [shape track]
+  (box-scale (:outline-box track) (outline-box shape)))
 
 (defn outline-of
   "The outline of the path `shape` in its own frame: its content taken
@@ -115,12 +134,9 @@
 
 (defn rescale-outlines
   "`keyframes` with their outlines, made for the box `from`, scaled to be
-  made for the box `to` (see `outline->content`)."
+  made for the box `to` (see `box-scale`, `outline->content`)."
   [keyframes from to]
-  (let [ratio (fn [k]
-                (let [a (get from k) b (get to k)]
-                  (if (and (number? a) (number? b) (> a 0.01) (> b 0.01)) (/ b a) 1)))
-        scale (gpt/point (ratio :width) (ratio :height))]
+  (let [scale (box-scale from to)]
     (if (and (= 1 (:x scale)) (= 1 (:y scale)))
       keyframes
       (mapv #(cond-> %
@@ -163,18 +179,27 @@
 (def ^:private outline-rows-cache-size
   "The most rows of outlines whose matched outlines are kept (see
   `matched-outlines`)."
-  256)
+  1024)
 
 (defn matched-outlines
   "The outlines `values` of a row of keyframes, in time order, matched to
-  one structure (see `morph/match`). Kept by the outlines, and kept as
-  they are for the matched ones, so that the rows every frame builds
-  anew match once."
-  [values]
-  (or (get @outline-rows-cache values)
+  one structure (see `morph/match`). Kept for the row `row-key` (its
+  layer and index) until its outlines change, and given back as they are
+  for the matched ones, so that the rows every frame builds anew match
+  once. A new row past `outline-rows-cache-size` clears the others."
+  [row-key values]
+  (let [entry (get @outline-rows-cache row-key)]
+    (cond
+      (and (some? entry) (= values (:values entry)))
+      (:matched entry)
+
+      (and (some? entry) (= values (:matched entry)))
+      values
+
+      :else
       (let [matched (morph/match values)]
         (swap! outline-rows-cache
                (fn [cache]
-                 (-> (if (< (count cache) outline-rows-cache-size) cache {})
-                     (assoc values matched matched matched))))
-        matched)))
+                 (-> (if (or (contains? cache row-key) (< (count cache) outline-rows-cache-size)) cache {})
+                     (assoc row-key {:values values :matched matched}))))
+        matched))))

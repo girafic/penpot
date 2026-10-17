@@ -174,7 +174,7 @@
    [:content
     (into [:map {:title "OutlineKeyframe"}
            [:property [::sm/one-of #{:content}]]
-           [:value path/schema:content]
+           [:value ctao/schema:outline]
            ;; no motion path
            [:path-in {:optional true} :nil]
            [:path-out {:optional true} :nil]]
@@ -371,7 +371,11 @@
 (def schema:track
   [:map {:title "AnimationTrack"}
    [:shape-id ::sm/uuid]
-   [:keyframes [:vector {:gen/max 8} schema:keyframe]]
+   ;; its outlines within `ctao/max-outline-row-segments` together
+   [:keyframes [:and
+                [:vector {:gen/max 8} schema:keyframe]
+                [:fn {:error/message "The outline keyframes of a row hold at most 32768 segments"}
+                 ctao/outline-row-fits?]]]
    [:animations {:optional true} [:vector {:gen/max 4} schema:animation]]
    ;; Properties (or `[property index]`) whose keyframes repeat, are left
    ;; out of playback and exports, or are kept from edits.
@@ -1200,20 +1204,24 @@
 
 (defn set-outline-at
   "`timeline` with the outline keyframe of the path `shape` at `time`
-  holding `value` (see `ctao/outline-value`): the one there changed, or a new
-  one with the timing of the segment it splits; a new row made for the
-  box of the path."
+  holding `value` (see `ctao/outline-value`): the one there changed, or a
+  new one with the timing of the segment it splits; a new row made for
+  the box of the path. Unchanged when the row does not take it (see
+  `ctao/row-takes?`)."
   [timeline shape time value]
-  (let [shape-id (:id shape)
-        existing (d/seek #(and (= :content (:property %)) (= time (:time %)))
-                         (dm/get-in timeline [:tracks shape-id :keyframes]))]
-    (-> (if (some? existing)
-          (update-in timeline [:tracks shape-id :keyframes]
-                     (partial mapv #(cond-> % (= (:id existing) (:id %)) (assoc :value value))))
-          (add-keyframe timeline shape-id
-                        (merge {:time time :property :content :value value}
-                               (split-timing timeline shape-id :content nil time))))
-        (ctao/ensure-outline-box shape))))
+  (let [shape-id  (:id shape)
+        keyframes (dm/get-in timeline [:tracks shape-id :keyframes])
+        here?     #(and (= :content (:property %)) (= time (:time %)))
+        existing  (d/seek here? keyframes)]
+    (if-not (ctao/row-takes? keyframes here? value)
+      timeline
+      (-> (if (some? existing)
+            (update-in timeline [:tracks shape-id :keyframes]
+                       (partial mapv #(cond-> % (= (:id existing) (:id %)) (assoc :value value))))
+            (add-keyframe timeline shape-id
+                          (merge {:time time :property :content :value value}
+                                 (split-timing timeline shape-id :content nil time))))
+          (ctao/ensure-outline-box shape)))))
 
 (defn looping?
   "Whether the keyframes of `property` (and optional `index`) of
@@ -2199,11 +2207,12 @@
     (assoc m property v)))
 
 (defn- matched-row
-  "`keyframes`, the time-sorted keyframes of a row of outlines, with their
-  outlines matched to one structure (see `ctao/matched-outlines`)."
-  [keyframes]
+  "`keyframes`, the time-sorted keyframes of the row of outlines
+  `row-key` (`[shape-id index]`), with their outlines matched to one
+  structure (see `ctao/matched-outlines`)."
+  [row-key keyframes]
   (let [values  (mapv :value keyframes)
-        matched (ctao/matched-outlines values)]
+        matched (ctao/matched-outlines row-key values)]
     (if (= values matched)
       keyframes
       (mapv #(assoc %1 :value %2) keyframes matched))))
@@ -2222,8 +2231,7 @@
                  (if (some #(= :content (:property %)) keyframes)
                    (let [{rows true others false} (group-by #(= :content (:property %)) keyframes)
                          rows (->> (group-by :index rows)
-                                   (vals)
-                                   (mapcat #(matched-row (sort-keyframes %))))]
+                                   (mapcat (fn [[index kfs]] (matched-row [shape-id index] (sort-keyframes kfs)))))]
                      (assoc tracks shape-id (assoc track :keyframes (sort-keyframes (concat others rows)))))
                    tracks))
                tracks
@@ -2243,7 +2251,7 @@
            values   (reduce-kv
                      (fn [m [property index] keyframes]
                        (let [keyframes (cond-> (sort-keyframes keyframes)
-                                         (= :content property) (matched-row))
+                                         (= :content property) (->> (matched-row [shape-id index])))
                              time      (if (contains? loops (slot-key property index))
                                          (loop-time keyframes time)
                                          time)
@@ -3909,7 +3917,8 @@
                              (dm/get-in timeline [:tracks shape-id :keyframes]))]
          (if (or (nil? old-shape) (nil? new-shape)
                  (if (and (= :path (:type old-shape)) (= :path (:type new-shape)))
-                   (= :reshape (ctao/outline-change old-shape new-shape))
+                   (and (not= (:content old-shape) (:content new-shape))
+                        (= :reshape (ctao/outline-change old-shape new-shape)))
                    (not= (:content old-shape) (:content new-shape))))
            timeline
            (let [timeline
