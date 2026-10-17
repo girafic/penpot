@@ -571,6 +571,10 @@ Keyframe values by property (`AnimatableProperty`):
   * "fillColor", "strokeColor", "shadowColor": a hex color like "#ff6600"
   * "trimStart", "trimEnd", "trimOffset": the part of the outline (0 to 1) the strokes are drawn along; animate "trimEnd"
     from 0 to 1 to draw a line or an outline on
+  * "path": the outline of a path layer, an SVG path string like its `d`, in page coordinates where the path rests; it
+    morphs into the next keyframe's outline (points are added where two outlines have not as many). Only path layers
+    (turn a rectangle or an ellipse into a path first), no `pathIn`/`pathOut`, not in animation styles. E.g. a circle
+    path to a star: `addKeyframe(blob, {property: "path", time: 0, value: blob.d})`, then one at 1000 ms with the star
   * Fill, stroke and shadow properties take `index`: which fill, stroke or shadow of the layer (0 by default)
 
 Easing (`MotionEasing`); the one of a keyframe applies from it to the next one:

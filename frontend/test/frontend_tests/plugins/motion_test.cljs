@@ -88,6 +88,40 @@
                                         rect)))]
     [board rects]))
 
+(t/deftest the-outline-of-a-path-is-a-keyframe
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            [^js board ^js rect] (board-with-rect context)
+            ^js blob     (.createPath context)
+            _            (.appendChild board blob)
+            _            (set! (.-d blob) "M10,10L50,10L10,50Z")
+            ^js timeline (.addTimeline board)
+            ^js from     (.addKeyframe timeline blob #js {:property "path" :time 0 :value "M10,10L50,10L10,50Z" :easing "linear"})
+            ^js to       (.addKeyframe timeline blob #js {:property "path" :time 1000 :value "M10,10L90,10L10,90Z"})
+            plain        #(str/replace (str %) #"\.0(?=\D|$)" "")]
+        (t/testing "its values are SVG paths where the path rests, as its `d`"
+          (t/is (= "path" (.-property from)))
+          (t/is (= "M10,10L50,10L10,50Z" (plain (.-value from))))
+          (t/is (= "M10,10L90,10L10,90Z" (plain (.-value to))))
+          (t/is (= "M10,10L70,10L10,70Z" (plain (.valueAt timeline blob "path" 500))) "halfway")
+          (t/is (some? (:outline-box (stored-track store context board blob))) "made for its box"))
+
+        (t/testing "they change"
+          (set! (.-value to) "M10,10L30,10L10,30Z")
+          (t/is (= "M10,10L30,10L10,30Z" (plain (.-value to))))
+          (t/is (thrown? js/Error (set! (.-value to) 5))))
+
+        (t/testing "what is not valid is refused"
+          (t/is (thrown? js/Error (.addKeyframe timeline rect #js {:property "path" :time 0 :value "M0,0L10,0Z"}))
+                "a rectangle, no path")
+          (t/is (thrown? js/Error (.addKeyframe timeline blob #js {:property "path" :time 0 :value "far"})))
+          (t/is (thrown? js/Error (.addKeyframe timeline blob #js {:property "path" :time 0 :value "M0,0L10,0Z" :pathIn 3})))
+          (t/is (thrown? js/Error (.createAnimationStyle (.. context -library -local)
+                                                         #js [#js {:type "keyframes" :property "path" :duration 500
+                                                                   :keyframes #js [#js {:time 0 :value "M0,0L10,0Z"}]}]))
+                "no style holds one"))))))
+
 (t/deftest property-names-cover-the-model
   (t/is (= cta/animatable-properties (set (keys motion/property-names)))))
 

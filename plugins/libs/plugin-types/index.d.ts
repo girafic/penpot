@@ -5415,6 +5415,13 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  *   `#ff6600`.
  * - `trimStart`, `trimEnd`, `trimOffset`: a fraction of the outline (0 to
  *   1) the strokes are drawn along, to draw a line on.
+ * - `path`: the outline of a path layer, an SVG path like its `d`, in
+ *   page coordinates where the path rests. The outline morphs from one
+ *   keyframe to the next, points added where two have not as many. Only
+ *   path layers take it (turn a rectangle or an ellipse into a path
+ *   first); it takes no motion path (`pathIn`, `pathOut`) and no animation
+ *   style holds it. Moving, turning or resizing the path takes its
+ *   outlines along; setting its `d` changes the box they are kept in.
  *
  * The fill, stroke and shadow properties take the `index` of the fill,
  * stroke or shadow of the layer.
@@ -5447,7 +5454,8 @@ export type AnimatableProperty =
   | 'backgroundBlur'
   | 'trimStart'
   | 'trimEnd'
-  | 'trimOffset';
+  | 'trimOffset'
+  | 'path';
 
 /**
  * How a value goes from a keyframe to the next one, or how a preset
@@ -5485,8 +5493,8 @@ export interface KeyframeProps {
    */
   time: number;
   /**
-   * The value of the property then: a number, or a hexadecimal color for
-   * the colors.
+   * The value of the property then: a number, a hexadecimal color for the
+   * colors, or an SVG path for `path` (see `AnimatableProperty`).
    */
   value: number | string;
   /**

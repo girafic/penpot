@@ -26,6 +26,7 @@
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
+   [app.common.types.path :as path]
    [app.common.types.shape.interactions :as cti]
    [app.common.types.text-units :as tu]
    [app.common.types.token :as cto]
@@ -192,11 +193,38 @@
   [value]
   (sm/valid-safe-number? value))
 
+(defn- parse-outline
+  "The path content of the SVG path `value`, when it is one an outline
+  keyframe can hold (see `cta/outline-fits?`)."
+  [value]
+  (when (string? value)
+    (let [content (try (path/from-string value) (catch :default _ nil))]
+      (when (and (some? content) (cta/outline-fits? content))
+        content))))
+
 (defn- valid-value?
   [property value]
-  (if (cta/color-property? property)
-    (and (string? value) (sm/validate clr/schema:hex-color value))
-    (sm/valid-safe-number? value)))
+  (cond
+    (cta/color-property? property) (and (string? value) (sm/validate clr/schema:hex-color value))
+    (= :content property)          (some? (parse-outline value))
+    :else                          (sm/valid-safe-number? value)))
+
+(def ^:private outline-message
+  "The value of a path should be an SVG path like 'M0,0 L10,0 L10,10 Z'")
+
+(defn- outline-in
+  "The value of the outline keyframe the plugin API gives as `d`, an SVG
+  path in page coordinates where the path `shape` rests (as `shape.d`),
+  for the row of `track` (see `cta/outline-value`)."
+  [shape track d]
+  (cta/outline-value (assoc shape :content (parse-outline d)) track))
+
+(defn- outline-out
+  "The outline keyframe `value` of the path `shape` (the row of `track`)
+  as the plugin API gives it: an SVG path in page coordinates where the
+  path rests (see `outline-in`)."
+  [shape track value]
+  (str (cta/outline->content shape track value)))
 
 (defn format-easing
   "The easing of a keyframe or preset animation as the plugin API gives
@@ -464,12 +492,28 @@
              (update! :time #(assoc % :time time) #(update % :duration max time)))))}
 
       :value
-      {:get #(:value (locate))
+      {:get
+       (fn []
+         (let [{:keys [property value]} (locate)]
+           (if (= :content property)
+             (let [timeline (locate-timeline file-id page-id board-id)
+                   shape    (get (u/locate-objects file-id page-id) shape-id)]
+               (outline-out shape (cta/get-track timeline shape-id) value))
+             value)))
        :set
        (fn [value]
          (let [property (:property (locate))]
-           (if (not (valid-value? property value))
+           (cond
+             (not (valid-value? property value))
              (u/not-valid plugin-id :value value)
+
+             (= :content property)
+             (let [timeline (locate-timeline file-id page-id board-id)
+                   shape    (get (u/locate-objects file-id page-id) shape-id)
+                   outline  (outline-in shape (cta/get-track timeline shape-id) value)]
+               (update! :value #(assoc % :value outline)))
+
+             :else
              (update! :value #(assoc % :value value)))))}
 
       :easing
@@ -932,9 +976,10 @@
       "The time should be a number of milliseconds"
 
       (not (valid-value? property value))
-      (if (cta/color-property? property)
-        "The value of a color should be an hexadecimal color like '#ff0000'"
-        "The value should be a number")
+      (cond
+        (cta/color-property? property) "The value of a color should be an hexadecimal color like '#ff0000'"
+        (= :content property)          outline-message
+        :else                          "The value should be a number")
 
       (and (some? index) (not (cta/indexed-property? property)))
       "Only fills, strokes and shadows take an index"
@@ -947,6 +992,9 @@
 
       (string? tokens)
       tokens
+
+      (and (= :content property) (or (some? (obj/get props "pathIn")) (some? (obj/get props "pathOut"))))
+      "The outline of a path takes no motion path"
 
       :else
       (merge {:property property
@@ -1085,6 +1133,9 @@
     (cond
       (nil? property)
       "Not a property that can be animated"
+
+      (not (contains? cta/style-properties property))
+      "A style holds no outline of a path, which is no value relative to a layer"
 
       (and (some? index) (not (cta/indexed-property? property)))
       "Only fills, strokes and shadows take an index"
@@ -1448,12 +1499,21 @@
               (cta/slot-flag? (locate) shape-id :locked (:property keyframe) (:index keyframe))
               (u/not-valid plugin-id :addKeyframe "The property is locked")
 
+              (and (= :content (:property keyframe))
+                   (not= :path (:type (get (u/locate-objects file-id page-id) shape-id))))
+              (u/not-valid plugin-id :addKeyframe "Only a path morphs: turn the layer into a path first")
+
               :else
-              (let [id (uuid/next)]
+              (let [id    (uuid/next)
+                    shape (get (u/locate-objects file-id page-id) shape-id)]
                 (when (write! :addKeyframe
-                              #(-> %
-                                   (cta/add-keyframe shape-id (assoc keyframe :id id))
-                                   (update :duration max (:time keyframe))))
+                              #(let [keyframe (cond-> keyframe
+                                                (= :content (:property keyframe))
+                                                (update :value (fn [d] (outline-in shape (cta/get-track % shape-id) d))))]
+                                 (-> %
+                                     (cta/add-keyframe shape-id (assoc keyframe :id id))
+                                     (cta/ensure-outline-box shape)
+                                     (update :duration max (:time keyframe)))))
                   (when (contains? keyframe :applied-tokens)
                     (st/emit! (dwtp/propagate-style-tokens)))
                   (keyframe-proxy plugin-id file-id page-id board-id shape-id id)))))))
@@ -1659,9 +1719,12 @@
               (let [objects (u/locate-objects file-id page-id)
                     values  (-> (cta/resolve-animations (locate) objects)
                                 (cta/values-at time)
-                                (get shape-id))]
-                (cta/value-of values property (when (cta/indexed-property? property)
-                                                (d/nilv index 0))))))))
+                                (get shape-id))
+                    value   (cta/value-of values property (when (cta/indexed-property? property)
+                                                            (d/nilv index 0)))]
+                (if (and (= :content property) (some? value))
+                  (outline-out (get objects shape-id) (cta/get-track (locate) shape-id) value)
+                  value))))))
 
       :clear
       (fn [shape]
