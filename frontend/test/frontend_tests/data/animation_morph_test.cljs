@@ -25,6 +25,7 @@
    [app.main.data.workspace.path :as drp]
    [app.main.data.workspace.path.changes :as dwpc]
    [app.main.data.workspace.path.edition :as dwpe]
+   [app.main.data.workspace.path.helpers :as dwph]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
@@ -275,7 +276,7 @@
 (t/deftest a-paste-tells-the-outlines-it-left-out
   (let [toast (dwa/paste-result-toast {:skipped 7 :outlines-left-out 5 :grown #{}})]
     (t/is (= (str (tr "workspace.animation.paste-skipped" 2) " "
-                  (tr "workspace.animation.paste-outline-too-large" 5 32768))
+                  (tr "workspace.animation.paste-outline-too-large" 5 ctao/max-outline-row-segments))
              (get-in (ptk/update toast {}) [:notification :content]))
           "the others with their reason, the outlines with theirs")))
 
@@ -417,3 +418,75 @@
             auto  (await (committed (dwa/set-outline-fixed (thi/id :blob) false) state file))]
         (t/is (= 1 (count done)) "Auto in one undo step")
         (t/is (nil? (:fixed-start (content-keyframe auto 1000))) "matched automatically again")))))
+
+(defn- selected-points
+  [state]
+  (let [id      (thi/id :blob)
+        content (get-in state [:workspace-drawing :object :content])]
+    (dwph/node-positions content (get-in state [:workspace-local :edit-path id :selection :nodes]))))
+
+(t/deftest the-tools-keep-selection-and-handler-types-with-their-nodes
+  (let [file  (morph-file)
+        id    (thi/id :blob)
+        state (-> (editing (workspace-state file 1000) #{1} true)
+                  (assoc-in [:workspace-local :edit-path id :handler-types] {2 :mirror}))
+        back  (ptk/update (drp/reverse-direction) state)
+        types (fn [st]
+                (let [content (vec (get-in st [:workspace-drawing :object :content]))]
+                  (into {}
+                        (map (fn [[i t]] [[(get-in content [i :params :x]) (get-in content [i :params :y])] t]))
+                        (get-in st [:workspace-local :edit-path id :handler-types]))))]
+    (t/is (= #{(gpt/point 60 30)} (selected-points back)) "reversed, the node still selected")
+    (t/is (= {[20 70] :mirror} (types back)) "and its handler type on it")
+    (let [started (ptk/update (drp/start-at-node) state)]
+      (t/is (= #{(gpt/point 60 30)} (selected-points started)) "started at it, the node still selected")
+      (t/is (= {[20 70] :mirror} (types started))))))
+
+(t/deftest an-undo-takes-the-first-point-back
+  (let [state (editing (workspace-state (morph-file) 1000) #{2} true)
+        entry (#'app.main.data.workspace.path.undo/make-entry state)
+        after (ptk/update (drp/start-at-node) state)
+        undo  (#'app.main.data.workspace.path.undo/load-entry after entry)]
+    (t/is (true? (get-in after [:workspace-local :edit-path (thi/id :blob) :outline-fixed])))
+    (t/is (not (get-in undo [:workspace-local :edit-path (thi/id :blob) :outline-fixed]))
+          "undone, the edit no longer sets it")))
+
+(defn- fixed-row-file
+  "`morph-file` with the Path row of :blob going from the triangle to
+  `to` (at 1000), held by hand there."
+  [to]
+  (let [file (morph-file)
+        page (thf/current-page file)
+        blob (get-in page [:objects (thi/id :blob)])
+        tl   (-> (get-in page [:timelines (thi/id :board-a)])
+                 (cta/set-outline-at blob 0 (ctao/outline-of blob))
+                 (cta/set-outline-at blob 1000 to)
+                 (cta/set-outline-fixed (thi/id :blob) 1000 true))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page page)
+                                (pcb/set-timeline (thi/id :board-a) tl)))))
+
+(defn- board-timeline
+  [file]
+  (get-in (thf/current-page file) [:timelines (thi/id :board-a)]))
+
+(t/deftest ^:async auto-shows-where-it-matches-again
+  (let [square (path/from-plain [{:command :move-to :params {:x 40 :y 40}}
+                                 {:command :line-to :params {:x 0 :y 40}}
+                                 {:command :line-to :params {:x 0 :y 0}}
+                                 {:command :line-to :params {:x 40 :y 0}}
+                                 {:command :close-path :params {}}])
+        other  (path/from-plain [{:command :move-to :params {:x 0 :y 40}}
+                                 {:command :line-to :params {:x 0 :y 0}}
+                                 {:command :line-to :params {:x 40 :y 0}}
+                                 {:command :close-path :params {}}])
+        ;; each file its own :blob, asked right after it is made
+        auto?  (fn [file] (dwa/outline-auto? (board-timeline file) (thi/id :blob) 1000))
+        mixed  (fixed-row-file square)]
+    (t/is (true? (auto? mixed)) "a row of other structures")
+    (t/is (false? (auto? (with-row-flag mixed :locked))) "not a locked one")
+    (let [locked (with-row-flag mixed :locked)]
+      (t/is (empty? (commits (await (emitted (dwa/set-outline-fixed (thi/id :blob) false) (workspace-state locked 1000)))))
+            "a locked row keeps its mark"))
+    (t/is (false? (auto? (fixed-row-file other)))
+          "nor a row of one structure, which pairs point by point")))

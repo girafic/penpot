@@ -131,7 +131,7 @@
             _            (.appendChild board blob)
             _            (set! (.-d blob) "M10,10L50,10L10,50Z")
             ^js timeline (.addTimeline board)
-            _            (.addKeyframe timeline blob #js {:property "path" :time 0 :value "M10,10L50,10L10,50Z"})
+            _            (.addKeyframe timeline blob #js {:property "path" :time 0 :value "M10,10L50,10L10,50Z" :easing "linear"})
             ^js square   (.addKeyframe timeline blob #js {:property "path" :time 1000 :value "M50,50L10,50L10,10L50,10Z"})
             ^js fade     (.addKeyframe timeline blob #js {:property "opacity" :time 0 :value 1})
             stored       #(->> (:keyframes (stored-track store context board blob))
@@ -145,6 +145,10 @@
         (set! (.-fixedStart square) false)
         (t/is (nil? (stored)) "and taken off")
         (t/is (thrown? js/Error (set! (.-fixedStart fade) true)) "not on another property")
+        (set! (.-fixedStart square) true)
+        (t/is (str/starts-with? (str/replace (str (.valueAt timeline blob "path" 500)) #"\.0(?=\D|$)" "") "M30,30")
+              "half way, the triangle's first point goes to the square's")
+        (set! (.-fixedStart square) false)
         (t/is (thrown? js/Error (set! (.-fixedStart square) "yes")) "a boolean")))))
 
 (t/deftest the-outlines-of-a-path-hold-a-budget

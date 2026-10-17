@@ -26,6 +26,7 @@
    [app.common.types.animation-follow :as ctaf]
    [app.common.types.animation-outline :as ctao]
    [app.common.types.animation-style :as ctas]
+   [app.common.types.path.morph :as morph]
    [app.common.types.shape :as cts]
    [app.common.types.shape-tree :as ctst]
    [app.common.uuid :as uuid]
@@ -2734,8 +2735,7 @@
           (let [time  (playhead state)
                 ;; on a keyframe its own outline, not the one matched to
                 ;; the others (see `ctao/matched-outlines`)
-                value (or (some #(when (and (= :content (:property %)) (= time (:time %))) (:value %))
-                                (:keyframes track))
+                value (or (:value (keyframe-at tl id :content time))
                           (-> (cta/resolve-animations tl objects)
                               (update :tracks select-keys [id])
                               (cta/values-at time)
@@ -2775,8 +2775,7 @@
                  track    (cta/get-track tl id)
                  value    (ctao/outline-value (assoc shape :content content) track)]
              ;; the outline at 0 of a new row and the edit, both or none
-             (if (and (or (nil? at-0)
-                          (some #(and (= :content (:property %)) (= 0 (:time %))) (:keyframes track)))
+             (if (and (or (nil? at-0) (some? (keyframe-at tl id :content 0)))
                       (outline-takes? tl id time value))
                (let [tl (cond-> (cta/set-outline-at tl shape time value)
                           fixed? (cta/set-outline-fixed id time true))]
@@ -2785,10 +2784,24 @@
                (rx/of (outline-too-large))))
            (rx/empty)))))))
 
+(defn outline-auto?
+  "Whether the outline keyframe of `shape-id` at `time` in `tl` holds its
+  first point by hand where Auto can match it again: its Path row neither
+  locked nor hidden, and of outlines of other structures (a row of one
+  structure pairs point by point, its first points as they are)."
+  [tl shape-id time]
+  (let [kfs (filterv #(= :content (:property %)) (:keyframes (cta/get-track tl shape-id)))]
+    (boolean
+     (and (:fixed-start (keyframe-at tl shape-id :content time))
+          (not (cta/slot-flag? tl shape-id :locked :content nil))
+          (not (cta/slot-flag? tl shape-id :hidden :content nil))
+          (not (every? #(morph/same-structure? (:value (first kfs)) (:value %)) (rest kfs)))))))
+
 (defn set-outline-fixed
   "Hold the first point and the way round of the outline keyframe of the
   path `id` at the playhead as they are (`fixed?`), or match them
-  automatically again (see `cta/set-outline-fixed`). One undo step."
+  automatically again (see `cta/set-outline-fixed`). One undo step. A
+  locked or hidden Path row keeps what it has."
   [id fixed?]
   (ptk/reify ::set-outline-fixed
     ptk/WatchEvent
@@ -2796,8 +2809,9 @@
       (let [tl   (current-timeline state)
             time (playhead state)]
         (if (and (some? tl)
-                 (some #(and (= :content (:property %)) (= time (:time %)))
-                       (:keyframes (cta/get-track tl id))))
+                 (some? (keyframe-at tl id :content time))
+                 (not (cta/slot-flag? tl id :locked :content nil))
+                 (not (cta/slot-flag? tl id :hidden :content nil)))
           (let [tl (cta/set-outline-fixed tl id time fixed?)]
             (rx/of (commit-timeline it state (:board-id tl) tl)
                    (apply-preview)))

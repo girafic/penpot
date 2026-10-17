@@ -36,9 +36,11 @@
      :selrect (:selrect shape)
      :points  (:points shape)
      :last-point (get-in state [:workspace-local :edit-path id :last-point])
-     :prev-handler (get-in state [:workspace-local :edit-path id :prev-handler])}))
+     :prev-handler (get-in state [:workspace-local :edit-path id :prev-handler])
+     ;; a first point or a way round set by hand (see `tools/start-at-node`)
+     :outline-fixed (get-in state [:workspace-local :edit-path id :outline-fixed])}))
 
-(defn- load-entry [state {:keys [content selrect points last-point prev-handler]}]
+(defn- load-entry [state {:keys [content selrect points last-point prev-handler outline-fixed]}]
   (let [id (st/get-path-id state)
         old-content (st/get-path state :content)]
     (-> state
@@ -52,7 +54,8 @@
            (cond-> (assoc edit-state
                           :preview nil
                           :last-point last-point
-                          :prev-handler prev-handler)
+                          :prev-handler prev-handler
+                          :outline-fixed outline-fixed)
              (some? content)
              (update :selection helpers/remap-selection old-content content)))))))
 

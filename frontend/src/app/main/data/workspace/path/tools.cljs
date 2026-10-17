@@ -460,12 +460,29 @@
 (defn- fixed-start
   "`state` after the path tool `tool`, the edit marked as setting the
   first point or the way round of its outline by hand (see
-  `dwa/set-outline-at-playhead`) when the tool changed it."
+  `dwa/set-outline-at-playhead`) when the tool changed it. Its nodes go
+  elsewhere in the content, as many as they were: the selected ones and
+  the handler types stay with their nodes, by position."
   [state tool]
-  (let [after (ptk/update tool state)]
-    (cond-> after
-      (not= (st/get-path state :content) (st/get-path after :content))
-      (assoc-in [:workspace-local :edit-path (st/get-path-id state) :outline-fixed] true))))
+  (let [id     (st/get-path-id state)
+        before (st/get-path state :content)
+        after  (ptk/update tool state)
+        now    (st/get-path after :content)]
+    (if (= before now)
+      after
+      (update-in after [:workspace-local :edit-path id]
+                 (fn [edit-state]
+                   (-> edit-state
+                       (assoc :outline-fixed true)
+                       (assoc :selection
+                              (assoc helpers/empty-selection
+                                     :nodes (helpers/remap-selected-nodes
+                                             (helpers/selected-node-indices
+                                              before (dm/get-in state [:workspace-local :edit-path id :selection]))
+                                             before now)))
+                       (assoc :handler-types
+                              (helpers/remap-handler-types-by-position
+                               (dm/get-in state [:workspace-local :edit-path id :handler-types]) before now))))))))
 
 (defn start-at-node
   "Make the closed subpath of the selected node start at it (see
@@ -480,17 +497,9 @@
         (let [id       (st/get-path-id state)
               content  (st/get-path state :content)
               selected (helpers/selected-node-indices content (st/get-selection state id))
-              point    (first (helpers/node-positions content selected))
-              after    (fixed-start state (process-path-tool (fn [content _]
-                                                               (path/start-subpath-at content point))))
-              ;; the node stays selected, now the first of its subpath
-              index    (when (some? point)
-                         (d/index-of-pred (vec (st/get-path after :content))
-                                          #(and (= :move-to (:command %))
-                                                (< (gpt/distance point (gpt/point (dm/get-in % [:params :x]) (dm/get-in % [:params :y]))) 0.1))))]
-          (cond-> after
-            (some? index)
-            (assoc-in [:workspace-local :edit-path id :selection] (assoc helpers/empty-selection :nodes #{index}))))
+              point    (first (helpers/node-positions content selected))]
+          (fixed-start state (process-path-tool (fn [content _]
+                                                  (path/start-subpath-at content point)))))
         state))))
 
 (defn reverse-direction

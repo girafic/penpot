@@ -340,32 +340,38 @@
           :else
           content)))))
 
+(defn remap-handler-types-by-position
+  "Remaps handler types by node position, whatever changed."
+  [handler-types old-content new-content]
+  (let [handler-types (or handler-types {})
+        types-by-position
+        (reduce-kv
+         (fn [result index type]
+           (let [segment (nth old-content index nil)]
+             (if (or (nil? segment) (= :close-path (:command segment)))
+               result
+               (update result
+                       (path.helpers/segment->point segment)
+                       (fnil conj #{})
+                       type))))
+         {}
+         handler-types)]
+    (into {}
+          (keep (fn [[index segment]]
+                  (when-not (= :close-path (:command segment))
+                    (let [types (get types-by-position
+                                     (path.helpers/segment->point segment))]
+                      (when (= 1 (count types))
+                        [index (first types)])))))
+          (d/enumerate new-content))))
+
 (defn remap-handler-types
   "Remaps handler types by node position after structural changes."
   [handler-types old-content new-content]
   (let [handler-types (or handler-types {})]
     (if (= (count old-content) (count new-content))
       handler-types
-      (let [types-by-position
-            (reduce-kv
-             (fn [result index type]
-               (let [segment (nth old-content index nil)]
-                 (if (or (nil? segment) (= :close-path (:command segment)))
-                   result
-                   (update result
-                           (path.helpers/segment->point segment)
-                           (fnil conj #{})
-                           type))))
-             {}
-             handler-types)]
-        (into {}
-              (keep (fn [[index segment]]
-                      (when-not (= :close-path (:command segment))
-                        (let [types (get types-by-position
-                                         (path.helpers/segment->point segment))]
-                          (when (= 1 (count types))
-                            [index (first types)])))))
-              (d/enumerate new-content))))))
+      (remap-handler-types-by-position handler-types old-content new-content))))
 
 ;; Nodes and segments use command indices. Handlers use `[index prefix]`.
 ;; Selection and hover use grouped index sets:

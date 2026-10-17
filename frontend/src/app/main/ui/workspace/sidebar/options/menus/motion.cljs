@@ -114,12 +114,11 @@
          #(st/emit! (dwa/request-outline-edit shape-id)
                     (dw/start-editing-selected)))
 
-        ;; the keyframe at the playhead holds its first point by hand (see
-        ;; `cta/set-outline-fixed`): Auto matches it again
+        ;; the keyframe at the playhead holds its first point by hand where
+        ;; Auto can match it again (see `dwa/outline-auto?`)
         playhead (mf/deref ref:playhead)
         timeline (mf/deref ref:timeline)
-        fixed?   (some #(and (= :content (:property %)) (= playhead (:time %)) (:fixed-start %))
-                       (:keyframes (cta/get-track timeline shape-id)))
+        fixed?   (and (some? timeline) (dwa/outline-auto? timeline shape-id playhead))
 
         on-auto
         (mf/use-fn
