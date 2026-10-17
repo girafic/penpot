@@ -6679,6 +6679,10 @@ msgstr "Hide animation timeline"
 msgid "workspace.header.menu.show-timeline"
 msgstr "Show animation timeline"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.edit-outline"
+msgstr "Edit at playhead"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs, src/app/util/motion_labels.cljs
 msgid "workspace.animation.path"
 msgstr "Path"

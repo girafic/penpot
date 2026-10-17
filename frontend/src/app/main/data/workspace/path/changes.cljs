@@ -8,8 +8,10 @@
   (:require
    [app.common.files.changes-builder :as pcb]
    [app.common.types.path :as path]
+   [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.shapes :as dwsh]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -32,6 +34,7 @@
             objects      (dsh/lookup-page-objects state page-id)
             shape        (get objects id)
             old-content  (get-in state [:workspace-local :edit-path id :old-content])
+            outline?     (get-in state [:workspace-local :edit-path id :outline-edit])
             edit-content (get-in state [:workspace-drawing :object :content])
             new-content  (some-> edit-content (normalize-content false))]
         (cond
@@ -42,6 +45,11 @@
               (= old-content edit-content)
               (= (path/close-loops old-content) new-content))
           (rx/empty)
+
+          ;; in motion mode, a keyframe of its outline (see
+          ;; `dwa/outline-edit`)
+          (and outline? (seq new-content))
+          (rx/of (dwa/set-outline-at-playhead id new-content))
 
           (empty? new-content)
           (let [changes (-> (pcb/empty-changes it page-id)
@@ -59,4 +67,5 @@
                   (path/convert-to-path)
                   (assoc :content new-content)
                   (path/update-geometry)))
-            {:reg-objects? true})))))))
+            ;; with the keyframes motion mode records of it
+            {:reg-objects? true :undo-group (uuid/next)})))))))

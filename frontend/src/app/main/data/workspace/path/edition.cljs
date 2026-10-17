@@ -14,6 +14,7 @@
    [app.common.types.path :as path]
    [app.common.types.path.helpers :as path.helpers]
    [app.main.data.helpers :as dsh]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.path.changes :as changes]
    [app.main.data.workspace.path.helpers :as helpers]
@@ -912,7 +913,11 @@
     ptk/UpdateEvent
     (update [_ state]
       (let [objects   (dsh/lookup-page-objects state)
-            shape     (get objects id)
+            ;; in motion mode, the outline at the playhead, which goes
+            ;; into a keyframe when done (see `dwa/outline-edit`)
+            outline   (dwa/outline-edit state id)
+            shape     (cond-> (get objects id)
+                        (some? outline) (assoc :content (:content outline)))
             shape     (-> shape
                           (path/convert-to-path objects)
                           (update :content path/close-subpaths)
@@ -932,7 +937,9 @@
                                         :hover helpers/empty-selection
                                         :handler-types {}
                                         :snap-toggled true})]
-                           (assoc state :old-content (:content shape))))))))
+                           (assoc state
+                                  :old-content (:content shape)
+                                  :outline-edit (some? outline))))))))
 
     ptk/WatchEvent
     (watch [_ _ stream]

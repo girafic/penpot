@@ -2656,6 +2656,58 @@
   [state]
   (dm/get-in state [:workspace-animation :auto-keyframe?] false))
 
+(defn outline-edit
+  "What an edit of the path `id` in motion mode starts from when its
+  outline goes into keyframes, its Path row animated or auto-keyframe on:
+  `{:time :content}`, the outline shown at the playhead placed where the
+  path rests (see `cta/outline->content`). Nil when the edit changes the
+  path itself, as outside motion mode."
+  [state id]
+  (let [objects (dsh/lookup-page-objects state)
+        shape   (get objects id)
+        tl      (current-timeline state)]
+    (when (and (contains? (:workspace-layout state) :animation-timeline)
+               (= :path (:type shape))
+               (some? tl)
+               (= (:board-id tl) (cfh/get-shape-id-root-frame objects id)))
+      (let [track     (cta/get-track tl id)
+            animated? (some #(= :content (:property %)) (:keyframes track))]
+        (when (or animated? (auto-keyframe? state))
+          (let [time  (playhead state)
+                value (or (-> (cta/resolve-animations tl objects)
+                              (update :tracks select-keys [id])
+                              (cta/values-at time)
+                              (dm/get-in [id :content]))
+                          (cta/outline-value shape track))]
+            {:time time
+             :content (cta/outline->content shape track value)}))))))
+
+(defn set-outline-at-playhead
+  "Keep `content`, an edit of the outline of the path `id` where it rests
+  (see `outline-edit`), as its outline keyframe at the playhead, the path
+  itself left as it is, so that every other row keeps its place; a new
+  row also keeps the outline the path has at 0. One undo step."
+  [id content]
+  (ptk/reify ::set-outline-at-playhead
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [objects (dsh/lookup-page-objects state)
+            shape   (get objects id)
+            tl      (current-timeline state)]
+        (if (and (= :path (:type shape)) (some? tl))
+          (let [time     (playhead state)
+                new-row? (not (some #(= :content (:property %))
+                                    (:keyframes (cta/get-track tl id))))
+                tl       (cond-> tl
+                           (and new-row? (pos? time))
+                           (cta/set-outline-at shape 0 (cta/outline-value shape nil)))
+                track    (cta/get-track tl id)
+                tl       (cta/set-outline-at tl shape time
+                                             (cta/outline-value (assoc shape :content content) track))]
+            (rx/of (commit-timeline it state (:board-id tl) tl (uuid/next))
+                   (apply-preview)))
+          (rx/empty))))))
+
 (defn toggle-auto-keyframe
   "Turn auto-keyframe on or off: while it is on, an edit in motion mode
   also records the properties it changes that are not animated yet (see

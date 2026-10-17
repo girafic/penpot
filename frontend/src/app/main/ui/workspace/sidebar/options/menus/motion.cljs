@@ -92,9 +92,10 @@
 
 (mf/defc outline-row*
   "The outline of the selected layer as keyframes, in motion mode: for a
-  path, the diamond of its outline at the playhead (see
-  `cta/outline-of`); a rectangle, an ellipse or a boolean turns into a
-  path first, by the button, to morph."
+  path, the edit of its nodes at the playhead, which goes into a
+  keyframe (see `dwa/outline-edit`), and the diamond of its outline there
+  (see `cta/outline-of`); a rectangle, an ellipse or a boolean turns into
+  a path first, by the button, to morph."
   [{:keys [shapes]}]
   (let [shape-id (mf/use-ctx ctx/motion-shape-id)
         shape    (when (= 1 (count shapes)) (first shapes))
@@ -103,14 +104,22 @@
         on-convert
         (mf/use-fn
          (mf/deps shape-id)
-         #(st/emit! (dw/convert-selected-to-path [shape-id])))]
+         #(st/emit! (dw/convert-selected-to-path [shape-id])))
+
+        ;; the nodes of the outline at the playhead (see `dwa/outline-edit`)
+        on-edit
+        (mf/use-fn #(st/emit! (dw/start-editing-selected)))]
 
     (when (and (some? shape-id) (= shape-id (:id shape)))
       (cond
         (= :path type)
         [:div {:class (stl/css :outline-row)}
          [:span {:class (stl/css :trim-label)} (tr "workspace.animation.path")]
-         [:> keyframe-diamond* {:properties [:content]}]]
+         [:div {:class (stl/css :outline-actions)}
+          [:> button* {:variant "secondary"
+                       :on-click on-edit}
+           (tr "workspace.animation.edit-outline")]
+          [:> keyframe-diamond* {:properties [:content]}]]]
 
         (contains? convertible-types type)
         [:div {:class (stl/css :outline-row)}
