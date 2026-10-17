@@ -552,10 +552,10 @@
                              :extended true
                              :options [{:id (dm/str "animation-in-" id)
                                         :value "in"
-                                        :label (tr "workspace.options.interaction-in")}
+                                        :label (tr "workspace.animation.direction-in")}
                                        {:id (dm/str "animation-out-" id)
                                         :value "out"
-                                        :label (tr "workspace.options.interaction-out")}]
+                                        :label (tr "workspace.animation.direction-out")}]
                              :disabled locked?
                              :on-change on-direction}]]
 

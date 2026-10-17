@@ -7278,6 +7278,12 @@ msgstr "Type"
 msgid "workspace.animation.direction"
 msgstr "Direction"
 
+msgid "workspace.animation.direction-in"
+msgstr "In"
+
+msgid "workspace.animation.direction-out"
+msgstr "Out"
+
 msgid "workspace.animation.start"
 msgstr "Start"
 
