@@ -205,6 +205,13 @@
       (t/is (empty? (:skipped result)) label)
       (t/is (some #(and (= 500 (first %)) (= "M0,0L80,0L80,80L0,80Z" (nth % 2))) frames)
             (str label ": the square from 500 ms"))))
+  (t/testing "an eased CSS one where its easing reaches half way"
+    (doseq [[tf from to] [["" 280 305] ["ease-in" 640 680]]]
+      (let [result (import-svg (svg (el :style {} (str "@keyframes m { from { d: path('" tri "') } to { d: path('" sq "') } }"
+                                                       " #shape { animation: m 1s " tf " infinite; }"))
+                                    (el :path {:id "shape" :d tri :fill "#ff0000"})))
+            switch (some #(when (= "M0,0L80,0L80,80L0,80Z" (nth % 2)) (first %)) (held-outlines result))]
+        (t/is (and (some? switch) (<= from switch to)) (str "timing " (pr-str tf) ": the square from " switch " ms")))))
   (t/testing "three: the last from the middle of its interval"
     (let [result (import-svg (svg (el :path {:id "shape" :d tri :fill "#ff0000"}
                                       (el :animate {:attributeName "d" :values (str tri ";" sq ";" hexa)

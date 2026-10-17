@@ -1833,14 +1833,31 @@
          (vec template)
          (partition 6 ns))))
 
+(defn- half-way
+  "Where a value that cannot morph switches over a segment of `easing`
+  (see `ease`): at the progress where the eased one reaches 0.5, as CSS
+  plays a discrete value (and Blink a SMIL spline); the middle for a
+  linear one."
+  [easing]
+  (if (nil? easing)
+    0.5
+    (loop [lo 0.0 hi 1.0 n 0]
+      (if (= n 30)
+        hi
+        (let [m (/ (+ lo hi) 2)]
+          (if (< (ease easing m) 0.5)
+            (recur m hi (inc n))
+            (recur lo m (inc n))))))))
+
 (defn- path-frames
   "The keyframes `[shape-id keyframe]` of the outline (`:content`, see
   `ctao/outline-of`) of the path `shape-id` of the element `target`,
   whose `d` or `points` `spec` animates: its values in the board as the
   element is placed, which morph when they all have one structure, and
-  else each held (a step keyframe at each), switching at the middle of
-  its interval as CSS and Blink play values that cannot morph (Gecko
-  splits a SMIL animation of more than two into equal parts instead).
+  else each held (a step keyframe at each), switching where the easing of
+  its interval reaches half way (see `half-way`), as CSS and Blink play
+  values that cannot morph (Gecko splits a SMIL animation of more than
+  two into equal parts instead).
   Past what an outline row holds (see `ctao/row-takes?`), or changing but
   leaving no keyframe, none, counted as `:path-morph`."
   [ctx {:keys [idx own-of objects to-board duration steady?]} spec target shape-id]
@@ -1881,7 +1898,10 @@
                          spec      (if discrete?
                                      (assoc spec :values values)
                                      (let [ts  (vec (:times spec))
-                                           mid (map #(/ (+ %1 %2) 2) ts (subvec ts 1))]
+                                           es  (concat (:easings spec) (repeat nil))
+                                           mid (map (fn [t0 t1 e]
+                                                      (if (= :step e) t1 (+ t0 (* (- t1 t0) (half-way e)))))
+                                                    ts (subvec ts 1) es)]
                                        (assoc spec
                                               :times (vec (concat [(first ts)] mid [(peek ts)]))
                                               :values (conj values (peek values))
