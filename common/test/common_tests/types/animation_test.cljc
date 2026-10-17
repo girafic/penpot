@@ -6012,3 +6012,21 @@
     (let [again (cta/set-outline-at tl shape 500 (cta/outline-of shape))]
       (t/is (= 1 (count (:keyframes (row again)))) "the one there changes")
       (t/is (= (str (cta/outline-of shape)) (str (:value (first (:keyframes (row again))))))))))
+
+(t/deftest an-svg-morphs-a-path-on-its-outline
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        shape (assoc (path-layer triangle) :fills [{:fill-color "#000000" :fill-opacity 1}])
+        sid   (:id shape)
+        tl    (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                  (cta/set-outline-at shape 0 (cta/outline-of shape))
+                  (cta/set-outline-at shape 1000 (plain-path [[0 0] [40 0] [40 20] [0 20]])))
+        track (get-in tl [:tracks sid])
+        svg   (asvg/timeline->svg tl (svg-board-with board shape)
+                                  {sid {:markup (str "<path d=\"" (:content shape) "\" data-penpot-outline=\"\" fill=\"#000000\"></path>")}})
+        values (some->> (re-find #"attributeName=\"d\"[^>]*values=\"([^\"]*)\"" svg) second (#(str/split % #";")))]
+    (t/is (asvg/svg-smil-morph? shape track))
+    (t/is (not (asvg/svg-smil-morph? (assoc shape :type :rect) track)))
+    (t/is (seq values) "on its outline")
+    (t/is (apply = (map #(apply str (re-seq #"[MLCZ]" %)) values)) "every value of one structure")
+    (t/is (str/includes? (first values) "M20,30") "from the triangle")
+    (t/is (str/includes? (last values) "60,50") "to the flat box")))

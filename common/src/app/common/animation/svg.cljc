@@ -439,6 +439,15 @@
         (some aexp/svg-radius-properties (track-properties track))
         (not (aexp/svg-even-corners? shape track)))))
 
+(defn svg-smil-morph?
+  "Whether an SVG of vectors plays the outline `track` animates on the
+  path `shape` (see `cta/outline-of`) by SMIL, on the path of its outline
+  (see `svg-outline-path`)."
+  [shape track]
+  (boolean
+   (and (= :path (:type shape))
+        (some #(= :content (:property %)) (:keyframes track)))))
+
 (def ^:private smil-linear [0 0 1 1])
 
 (defn- smil-curve
@@ -764,20 +773,24 @@
     [(- px (* w (:x origin))) (- py (* h (:y origin))) w h]))
 
 (defn- svg-outline-path
-  "The `<animate>` of the path of the outline of `shape` whose corners or
-  size `timeline` (cut to its duration) plays (see `svg-smil-corners?`,
-  `aexp/svg-outline-sized?`): a rectangle in its own space (its turn is
-  the `transform` of the path), its corners clamped as the canvas clamps
-  them; a path resized along its own sides around its pivot, as the
-  canvas resizes it, its strokes as wide."
+  "The `<animate>` of the path of the outline of `shape` whose corners,
+  size or outline `timeline` (cut to its duration) plays (see
+  `svg-smil-corners?`, `aexp/svg-outline-sized?`, `svg-smil-morph?`): a
+  rectangle in its own space (its turn is the `transform` of the path),
+  its corners clamped as the canvas clamps them; a path resized along its
+  own sides around its pivot, as the canvas resizes it, its strokes as
+  wide, and morphing, its outlines of one structure (see
+  `cta/match-outlines`)."
   [shape timeline]
   (let [sid    (:id shape)
         track  (dm/get-in timeline [:tracks sid])
         values (acss/shape-values timeline sid)
         origin (cta/track-origin track)
         sized? (aexp/svg-outline-sized? shape track)
+        morph? (svg-smil-morph? shape track)
         kfs    (filterv #(or (aexp/svg-radius-properties (:property %))
-                             (and sized? (aexp/svg-size-properties (:property %))))
+                             (and sized? (aexp/svg-size-properties (:property %)))
+                             (and morph? (= :content (:property %))))
                         (:keyframes track))
         points #(smil-points % kfs (max 1 (:duration timeline)))]
     (if (contains? #{:rect :frame} (:type shape))
@@ -793,23 +806,29 @@
                                                             :r4 (get vs :r4 (or (:r4 shape) 0))})))))
                     render-corner-path)
       ;; a path: its points resized as the canvas resizes it, along its own
-      ;; sides when it is turned
-      (let [d      (str (:content shape))
-            {:keys [x y width height]} (:selrect shape)
-            center (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
-            pivot  (gpt/point (+ x (* width (:x origin))) (+ y (* height (:y origin))))
-            turn   (:transform shape)
-            unturn (:transform-inverse shape)]
+      ;; sides when it is turned, and its outline as it morphs
+      (let [{:keys [x y width height]} (:selrect shape)
+            center  (gpt/point (+ x (/ width 2)) (+ y (/ height 2)))
+            pivot   (gpt/point (+ x (* width (:x origin))) (+ y (* height (:y origin))))
+            turn    (:transform shape)
+            unturn  (:transform-inverse shape)
+            drawn   (fn [vs]
+                      (let [sx (/ (double (get vs :width width)) width)
+                            sy (/ (double (get vs :height height)) height)
+                            m  (cond->> (gmt/scale-matrix (gpt/point sx sy) pivot)
+                                 (and (some? turn) (some? unturn))
+                                 (#(gmt/multiply (gmt/transform-in center turn) %
+                                                 (gmt/transform-in center unturn))))]
+                        (path/transform-content (if (and morph? (some? (:content vs)))
+                                                  (cta/outline->content shape track (:content vs))
+                                                  (:content shape))
+                                                m)))
+            ;; the numbers of every value go into the commands of the
+            ;; first, which they all have
+            d       (if morph? (str (drawn (values 0))) (str (:content shape)))]
         (smil-animate timeline "d"
                       (points (fn [t]
-                                (let [vs (values t)
-                                      sx (/ (double (get vs :width width)) width)
-                                      sy (/ (double (get vs :height height)) height)
-                                      m  (cond->> (gmt/scale-matrix (gpt/point sx sy) pivot)
-                                           (and (some? turn) (some? unturn))
-                                           (#(gmt/multiply (gmt/transform-in center turn) %
-                                                           (gmt/transform-in center unturn))))]
-                                  (mapv d/parse-double (re-seq path-number (str (path/transform-content (:content shape) m)))))))
+                                (mapv d/parse-double (re-seq path-number (str (drawn (values t)))))))
                       #(render-path-numbers d %))))))
 
 (defn- svg-sized-region
@@ -947,7 +966,9 @@
                                (cta/as-vec (:shadow shape))))
            blur?    (and (some? shape) (svg-filter-blur? shape track))
            outline  (when (and (some? shape)
-                               (or (svg-smil-corners? shape track) (aexp/svg-outline-sized? shape track)))
+                               (or (svg-smil-corners? shape track)
+                                   (aexp/svg-outline-sized? shape track)
+                                   (svg-smil-morph? shape track)))
                       (svg-outline-path shape timeline))
            ;; its fills and the masks of its outer strokes over its box
            ;; as its size plays on its elements (see `svg-sized-paint`)

@@ -126,6 +126,22 @@
     (t/is (<= 3 (count (re-seq #"<path [^>]*data-penpot-outline=\"\"" markup))))
     (t/is (not (str/includes? (svgv/layer-markup objects (:id p) nil) "data-penpot-outline")) "not at rest")))
 
+(t/deftest a-morphing-path-is-marked-for-smil
+  ;; SMIL plays its outline on the elements of its outline.
+  (let [p (cts/setup-shape {:type :path
+                            :content (path/content [{:command :move-to :params {:x 10 :y 10}}
+                                                    {:command :line-to :params {:x 50 :y 10}}
+                                                    {:command :line-to :params {:x 50 :y 40}}
+                                                    {:command :close-path :params {}}])
+                            :fills [{:fill-color "#ff0000" :fill-opacity 1}]
+                            :strokes [{:stroke-color "#00ff00" :stroke-opacity 1 :stroke-width 2
+                                       :stroke-style :solid :stroke-alignment :center}]})
+        {:keys [objects]} (board-with p)
+        track  {:keyframes [{:time 0 :property :content :value (:content p)}
+                            {:time 1000 :property :content :value (:content p)}]}
+        markup (svgv/layer-markup objects (:id p) track)]
+    (t/is (<= 2 (count (re-seq #"<path [^>]*data-penpot-outline=\"\"" markup))) "its fill and its stroke")))
+
 (t/deftest a-turned-rect-resized-draws-as-a-marked-path
   (let [a (assoc (cts/setup-shape {:type :rect :x 10 :y 10 :width 20 :height 20 :r1 0 :r2 0 :r3 0 :r4 0
                                    :fills [{:fill-color "#ff0000" :fill-opacity 1}]})

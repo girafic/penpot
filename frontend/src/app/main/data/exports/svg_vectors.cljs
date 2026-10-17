@@ -49,11 +49,13 @@
 
 (defn- smil-outline?
   "Whether SMIL plays on the outline of `shape` what `track` animates:
-  its corners (see `asvg/svg-smil-corners?`) or its size (see
-  `aexp/svg-outline-sized?`)."
+  its corners (see `asvg/svg-smil-corners?`), its size (see
+  `aexp/svg-outline-sized?`) or its outline (see `asvg/svg-smil-morph?`)."
   [shape track]
   (boolean (and (some? shape)
-                (or (asvg/svg-smil-corners? shape track) (aexp/svg-outline-sized? shape track)))))
+                (or (asvg/svg-smil-corners? shape track)
+                    (aexp/svg-outline-sized? shape track)
+                    (asvg/svg-smil-morph? shape track)))))
 
 (defn- rest-shape
   "`shape` as its layer draws it: without its opacity, which the group of
