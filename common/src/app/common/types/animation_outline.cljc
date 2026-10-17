@@ -68,7 +68,7 @@
   "The outline an outline keyframe holds: path content of at most
   `max-outline-segments` segments."
   [:and path/schema:content
-   [:fn {:error/message "An outline keyframe holds at most 4096 segments"}
+   [:fn {:error/message (str "An outline keyframe holds at most " max-outline-segments " segments")}
     #(<= (count %) max-outline-segments)]])
 
 (defn- rest-frame
@@ -181,12 +181,23 @@
   `matched-outlines`)."
   1024)
 
+(defn- keep-row
+  "`cache` with `entry` for the row `row-key`: in place of the one it
+  had, or else, a new row when `cache` holds `size` already, in place of
+  another one, so the rows kept stay kept."
+  [cache row-key entry size]
+  (assoc (if (or (contains? cache row-key) (< (count cache) size))
+           cache
+           (dissoc cache (first (keys cache))))
+         row-key entry))
+
 (defn matched-outlines
   "The outlines `values` of a row of keyframes, in time order, matched to
   one structure (see `morph/match`). Kept for the row `row-key` (its
   layer and index) until its outlines change, and given back as they are
   for the matched ones, so that the rows every frame builds anew match
-  once. A new row past `outline-rows-cache-size` clears the others."
+  once; past `outline-rows-cache-size` rows, a new one takes the place
+  of another (see `keep-row`)."
   [row-key values]
   (let [entry (get @outline-rows-cache row-key)]
     (cond
@@ -198,8 +209,5 @@
 
       :else
       (let [matched (morph/match values)]
-        (swap! outline-rows-cache
-               (fn [cache]
-                 (-> (if (or (contains? cache row-key) (< (count cache) outline-rows-cache-size)) cache {})
-                     (assoc row-key {:values values :matched matched}))))
+        (swap! outline-rows-cache keep-row row-key {:values values :matched matched} outline-rows-cache-size)
         matched))))

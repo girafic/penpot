@@ -214,7 +214,7 @@
   "The value of a path should be an SVG path like 'M0,0 L10,0 L10,10 Z'")
 
 (def ^:private outline-row-message
-  "The path keyframes of a layer hold at most 32768 segments together")
+  (str "The path keyframes of a layer hold at most " ctao/max-outline-row-segments " segments together"))
 
 (defn- outline-in
   "The value of the outline keyframe the plugin API gives as `d`, an SVG

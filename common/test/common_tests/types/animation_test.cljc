@@ -3666,7 +3666,7 @@
                            (cta/record-unanimated tl objects (assoc-in objects [id :fills 0 :fill-color] "#ff0000") [id] 500))
                     :cljs (cta/record-unanimated tl objects (assoc-in objects [id :fills 0 :fill-color] "#ff0000") [id] 500))]
     (t/is (= [[0 "#000000"] [500 "#ff0000"]] (times-and-values recorded id :fill-color 0)))
-    (t/is (zero? @calls) "its outline is not compared when it did not change")))
+    #?(:clj (t/is (zero? @calls) "its outline is not compared when it did not change"))))
 
 (t/deftest record-unanimated-leaves-a-rectangle-turned-into-a-path
   ;; with REC on, Convert to path records no keyframe: the outline it
@@ -5875,6 +5875,16 @@
     (t/is (identical? tl (cta/set-outline-at tl shape 800 big)) "a ninth would go over the row")
     (t/is (not (identical? tl (cta/set-outline-at tl shape 700 (plain-path [[0 0] [10 0] [0 10]]))))
           "one in place of one there fits")))
+
+(t/deftest a-full-cache-of-rows-gives-up-one-for-a-new-row
+  (let [keep-row #'ctao/keep-row
+        full     (into {} (map (fn [i] [[i nil] {:values i}])) (range 4))
+        added    (keep-row full [9 nil] {:values 9} 4)]
+    (t/is (= 4 (count added)))
+    (t/is (contains? added [9 nil]))
+    (t/is (= 3 (count (filter #(contains? added [% nil]) (range 4)))) "the others but one kept")
+    (t/is (= {:values 10} (get (keep-row full [2 nil] {:values 10} 4) [2 nil])) "a row kept, in its place")
+    (t/is (= 4 (count (keep-row full [2 nil] {:values 10} 4))))))
 
 (t/deftest matched-rows-are-kept-by-row
   ;; more rows than the old cache held, each matched once: a second pass

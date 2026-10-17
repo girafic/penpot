@@ -374,7 +374,8 @@
    ;; its outlines within `ctao/max-outline-row-segments` together
    [:keyframes [:and
                 [:vector {:gen/max 8} schema:keyframe]
-                [:fn {:error/message "The outline keyframes of a row hold at most 32768 segments"}
+                [:fn {:error/message (str "The outline keyframes of a row hold at most "
+                                          ctao/max-outline-row-segments " segments")}
                  ctao/outline-row-fits?]]]
    [:animations {:optional true} [:vector {:gen/max 4} schema:animation]]
    ;; Properties (or `[property index]`) whose keyframes repeat, are left

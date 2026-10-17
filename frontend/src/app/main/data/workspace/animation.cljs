@@ -999,6 +999,13 @@
                  (cta/split-timing tl shape-id property index time))
     (some? index) (assoc :index index)))
 
+(defn- outline-too-large
+  "The warning that an outline is past what a keyframe or its row holds
+  (see `ctao/row-takes?`)."
+  []
+  (ntf/warn (tr "workspace.animation.outline-too-large"
+                ctao/max-outline-segments ctao/max-outline-row-segments)))
+
 (defn- outline-takes?
   "Whether the row of outlines of `shape-id` in `tl` takes `value` at
   `time`, in place of the one there (see `ctao/row-takes?`)."
@@ -1052,7 +1059,7 @@
                             (conj (layout/toggle-layout-flag :animation-timeline :force? true))
 
                             refused?
-                            (conj (ntf/warn (tr "workspace.animation.outline-too-large"))))]
+                            (conj (outline-too-large)))]
              (apply rx/of events))
            (rx/empty)))))))
 
@@ -1077,7 +1084,7 @@
                 values (row-values tl objects shape [property] index time)]
             (if (and (= :content property)
                      (not (outline-takes? tl shape-id time (cta/value-of values :content index))))
-              (rx/of (ntf/warn (tr "workspace.animation.outline-too-large")))
+              (rx/of (outline-too-large))
               (let [tl' (-> (cta/add-keyframe tl shape-id
                                               (-> (inserted-keyframe tl values shape-id property index time)
                                                   (assoc :id id)))
@@ -2763,7 +2770,7 @@
               (let [tl (cta/set-outline-at tl shape time value)]
                 (rx/of (commit-timeline it state (:board-id tl) tl (uuid/next))
                        (apply-preview)))
-              (rx/of (ntf/warn (tr "workspace.animation.outline-too-large")))))
+              (rx/of (outline-too-large))))
           (rx/empty))))))
 
 (defn toggle-auto-keyframe
