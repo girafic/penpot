@@ -18,6 +18,7 @@
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
+   [app.common.types.path :as path]
    [app.common.types.text-units :as tu]
    [cuerdas.core :as str]))
 
@@ -139,8 +140,13 @@
       v)))
 
 (defn- json-value
+  "A value as JSON: a number rounded, an outline (see `cta/outline-of`)
+  as its SVG path, in the own frame of its path, the others as they are."
   [v]
-  (if (number? v) (json-number v) v))
+  (cond
+    (number? v)        (json-number v)
+    (path/content? v)  (str v)
+    :else              v))
 
 (defn- json-easing
   "The easing of the segment `keyframe` (or a preset) starts, as the JSON

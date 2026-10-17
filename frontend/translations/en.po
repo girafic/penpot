@@ -8351,6 +8351,10 @@ msgstr[1] "Export %s elements"
 msgid "workspace.options.export.add-export"
 msgstr "Add export"
 
+#: src/app/main/ui/inspect/motion.cljs
+msgid "workspace.options.export.no-morph"
+msgstr "Path morphing is not included in this format: SVG, Lottie and video play it."
+
 #: src/app/main/ui/workspace/sidebar/options/menus/exports.cljs:228, src/app/main/ui/workspace/sidebar/options/menus/exports.cljs:263
 msgid "workspace.options.export.remove-export"
 msgstr "Remove export"
@@ -8436,6 +8440,14 @@ msgstr "Effects and image fills · Exported as images"
 
 msgid "workspace.options.export.issue.lottie-images.text"
 msgstr "Layers with image fills or gradient strokes, and groups or boards holding shapes with shadows or blur, are images in %s: their fills, strokes, shadows and blur don't animate, and they blur when scaled up."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.lottie-morph"
+msgstr "Path morphing · Kept at rest"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/export_issues.cljs
+msgid "workspace.options.export.issue.lottie-morph.text"
+msgstr "A path whose outline morphs and that is an image in %s, for its effects or paints, keeps its outline at rest."
 
 msgid "workspace.options.export.issue.svg-appearance"
 msgstr "Strokes of texts · Left out of %s"

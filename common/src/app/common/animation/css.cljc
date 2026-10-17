@@ -411,6 +411,17 @@
    (let [timeline (-> timeline
                       (cta/flatten-splits (or (:kinds units) #{}) (or (:texts units) (constantly true)))
                       (cta/resolve-animations objects)
+                      ;; no outline of a path, which no CSS of a box plays
+                      ;; (an SVG plays them by SMIL), nor a track that plays
+                      ;; only that
+                      (update :tracks
+                              (fn [tracks]
+                                (into {}
+                                      (keep (fn [[id {:keys [keyframes animations] :as track}]]
+                                              (let [kept (filterv #(not= :content (:property %)) keyframes)]
+                                                (when (or (seq kept) (seq animations) (empty? keyframes))
+                                                  [id (assoc track :keyframes kept)]))))
+                                      tracks)))
                       cta/expand-loops
                       cta/expand-paths
                       cta/cut-timeline)

@@ -613,6 +613,8 @@
     `aexp/export-layer-ids`; texts are the outlines of their
     glyphs, see `outline-texts`, and an SVG has its layers as vectors,
     see `app.main.data.exports.svg-vectors`);
+  - `:lottie/morph`, a path whose outline plays (see `cta/outline-of`)
+    that draws as a picture, which keeps its outline at rest;
   - `:svg/appearance`, what an SVG keeps as it rests (see
     `svg-static?`; its CSS plays the rest on its vectors; its texts
     outlined with `:outline` of its export settings, see
@@ -692,6 +694,12 @@
                                     (not (contains? #{:text :image} (:type shape)))
                                     (not (alottie/lottie-vector-layer? objects lottie-set id)))))
                            (cons board-id lottie-ids)))]
+           [:lottie/morph lottie-formats
+            (boolean (some (fn [[id track]]
+                             (and (some? (get objects id))
+                                  (some #(= :content (:property %)) (:keyframes track))
+                                  (not (alottie/lottie-vector-layer? objects lottie-set id))))
+                           (:tracks resolved)))]
            [:svg/appearance #{:svg}
             (boolean (some (fn [[id track]]
                              (when-let [shape (get objects id)]

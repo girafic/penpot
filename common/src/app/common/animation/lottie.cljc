@@ -664,14 +664,17 @@
 
 (defn- lottie-path-shapes
   "Lottie paths (`sh`) of path `content`, one per subpath, moved by
-  `dx`, `dy`. Tangents are relative to their vertex."
-  [content dx dy]
+  `dx`, `dy`. Tangents are relative to their vertex. A subpath back on
+  its first vertex closes on it, unless not `fold?` (outlines that morph
+  keep their vertices, as many in each)."
+  [content dx dy & {:keys [fold?] :or {fold? true}}]
   (let [point  (fn [x y] [(+ x dx) (+ y dy)])
         vertex (fn [[x y]] {:v [x y] :i [0 0] :o [0 0]})
         item   (fn [vertices closed?]
                  (let [first-v  (first vertices)
                        last-v   (peek vertices)
-                       back?    (and (> (count vertices) 2)
+                       back?    (and fold?
+                                     (> (count vertices) 2)
                                      (mth/close? ((:v first-v) 0) ((:v last-v) 0))
                                      (mth/close? ((:v first-v) 1) ((:v last-v) 1)))
                        ;; an outline back on its first vertex closes on it,
@@ -720,6 +723,30 @@
             (recur (rest segments) vertices items)))
         (done items vertices false)))))
 
+(defn- lottie-morph-paths
+  "The Lottie paths (`sh`) of the outlines the keyframes `kfs` of a path
+  play (see `cta/match-outlines`; their values its contents where it
+  rests), turned back by `turn-back` and in the board at `ox`, `oy`: one
+  per subpath, each playing its vertices, eased as the canvas eases
+  them (see `eased-stops`)."
+  [kfs turn-back ox oy]
+  (let [kfs     (cta/sort-keyframes kfs)
+        items   (fn [t]
+                  (lottie-path-shapes (turn-back (cta/property-value-at kfs t)) (- ox) (- oy) :fold? false))
+        numbers (fn [t]
+                  (into [] (mapcat (fn [item]
+                                     (let [{:keys [v i o]} (get-in item [:ks :k])]
+                                       (flatten [v i o]))))
+                        (items t)))
+        times   (vec (into (sorted-set) (map :time) kfs))
+        stops   (mapv (fn [[t kf]] [t kf (items t)]) (acss/eased-stops numbers kfs times))]
+    (mapv (fn [index]
+            {:ty "sh" :nm "path"
+             :ks (lottie-stops-prop (map (fn [[t kf its]] [t kf (get-in its [index :ks :k])]) stops)
+                                    vector
+                                    first)})
+          (range (count (nth (first stops) 2))))))
+
 (defn- lottie-outline
   "The outline of `shape` as Lottie items, in board coordinates (the
   board at `ox`, `oy`) and before it turns: the layer turns it. An
@@ -756,11 +783,14 @@
           (lottie-path-shapes (- ox) (- oy)))
 
       :else
-      (-> (cond-> (:content shape)
-            (not (mth/almost-zero? rotation))
-            (path/transform-content (gmt/rotate-matrix (- rotation)
-                                                       (gpt/point (+ x (/ width 2)) (+ y (/ height 2))))))
-          (lottie-path-shapes (- ox) (- oy))))))
+      (let [turn-back #(cond-> %
+                         (not (mth/almost-zero? rotation))
+                         (path/transform-content (gmt/rotate-matrix (- rotation)
+                                                                    (gpt/point (+ x (/ width 2)) (+ y (/ height 2))))))]
+        ;; a path that morphs plays its outlines (see `lottie-track`)
+        (if (and (= :path (:type shape)) (seq (by-prop :content)))
+          (lottie-morph-paths (by-prop :content) turn-back ox oy)
+          (lottie-path-shapes (turn-back (:content shape)) (- ox) (- oy)))))))
 
 (defn- lottie-vector-groups
   "The Lottie groups drawing `shape` as vectors: its outline (resized as
@@ -950,9 +980,16 @@
   #{:x :y :rotation :scale-x :scale-y :opacity})
 
 (defn- lottie-track
-  [{:keys [timeline duration]} id]
-  (-> (or (get-in timeline [:tracks id]) {:shape-id id :keyframes []})
-      (assoc :duration duration)))
+  "The track of `id` in the timeline of `ctx`, its outlines (see
+  `cta/outline->content`) the contents they draw where its path rests."
+  [{:keys [timeline duration objects]} id]
+  (let [track (or (get-in timeline [:tracks id]) {:shape-id id :keyframes []})
+        shape (get objects id)]
+    (cond-> (assoc track :duration duration)
+      (and (= :path (:type shape)) (some #(= :content (:property %)) (:keyframes track)))
+      (update :keyframes (partial mapv #(cond-> %
+                                          (= :content (:property %))
+                                          (update :value (fn [v] (cta/outline->content shape track v)))))))))
 
 (defn- lottie-numbered
   "`layers` numbered (`:ind`), each that follows the board it is in

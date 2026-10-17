@@ -1382,6 +1382,23 @@
         (t/is (contains? (svg objects trimmed) :svg/appearance) "its trim stays, a text takes no length")
         (t/is (not (contains? (svg objects (on trimmed)) :svg/appearance)) "but of an outline")))))
 
+(t/deftest a-morph-on-a-picture-is-an-issue-of-lottie
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 80})
+        content (path/from-plain [{:command :move-to :params {:x 10 :y 10}}
+                                  {:command :line-to :params {:x 50 :y 10}}
+                                  {:command :line-to :params {:x 10 :y 50}}
+                                  {:command :close-path :params {}}])
+        vector  (cts/setup-shape {:type :path :content content :fills [{:fill-color "#ff0000" :fill-opacity 1}]})
+        picture (assoc vector :fills [{:fill-opacity 1 :fill-image {:id (uuid/next) :width 10 :height 10 :mtype "image/png"}}])
+        issues  (fn [shape]
+                  (let [objects {(:id board) (assoc board :shapes [(:id shape)])
+                                 (:id shape) (assoc shape :parent-id (:id board) :frame-id (:id board))}
+                        tl      (cta/set-outline-at (cta/make-timeline {:board-id (:id board) :duration 1000})
+                                                    shape 0 (cta/outline-of shape))]
+                    (set (get (dea/export-issues objects tl) :lottie))))]
+    (t/is (not (contains? (issues vector) :lottie/morph)) "a path of vectors morphs")
+    (t/is (contains? (issues picture) :lottie/morph) "a picture keeps its outline")))
+
 (t/deftest an-svg-has-the-units-of-a-split-text-as-vectors
   (let [{:keys [objects bid tid]} (text-board)
         tl      (cta/add-animation (cta/make-timeline {:board-id bid :duration 1000}) tid

@@ -17,6 +17,7 @@
    [app.common.types.animation-code :as ctac]
    [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
+   [app.common.types.path :as path]
    [app.common.uuid :as uuid]
    [clojure.string :as cstr]
    [clojure.test :as t]))
@@ -154,6 +155,27 @@
     (t/is (= {"type" "hold"} (nth easings 3)))
     (t/is (= {"type" "bezier" "curve" [0 0 1 1] "name" "linear"} (nth easings 4)) "none is linear")
     (t/is (nil? (nth easings 5)) "the last keyframe starts no segment")))
+
+(t/deftest the-outline-of-a-path-is-its-svg-path
+  (let [outline (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                                  {:command :line-to :params {:x 40 :y 0}}
+                                  {:command :line-to :params {:x 40 :y 20}}
+                                  {:command :close-path :params {}}])
+        [objects code] (board-scene #(cta/add-keyframe % (thi/id :a) {:time 0 :property :content :value outline}))
+        values  (mapv #(get % "value") (get (property-json (layer-json (ctac/motion-json code objects) :a) "path") "keyframes"))]
+    (t/is (= 1 (count values)))
+    (t/is (string? (first values)))
+    (t/is (cstr/starts-with? (first values) "M0") "in the own frame of its path")))
+
+(t/deftest the-css-leaves-the-outline-of-a-path-out
+  (let [outline (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                                  {:command :line-to :params {:x 40 :y 0}}
+                                  {:command :close-path :params {}}])
+        [objects code] (board-scene #(-> %
+                                         (cta/add-keyframe (thi/id :a) {:time 0 :property :content :value outline})
+                                         (cta/add-keyframe (thi/id :a) {:time 500 :property :content :value outline})))
+        css (acss/timeline->css (:timeline code) objects)]
+    (t/is (not (cstr/includes? css "@keyframes")) "no animation of a box")))
 
 (t/deftest a-fade-in-is-keyframes-and-a-preset
   (let [[objects code] (board-scene #(cta/add-animation % (thi/id :a) {:type :fade :start 0 :duration 400}))

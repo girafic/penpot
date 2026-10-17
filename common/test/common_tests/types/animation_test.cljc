@@ -6030,3 +6030,19 @@
     (t/is (apply = (map #(apply str (re-seq #"[MLCZ]" %)) values)) "every value of one structure")
     (t/is (str/includes? (first values) "M20,30") "from the triangle")
     (t/is (str/includes? (last values) "60,50") "to the flat box")))
+
+(t/deftest lottie-morphs-a-path-by-its-vertices
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 200 :height 100})
+        shape  (assoc (path-layer triangle) :fills [{:fill-color "#000000" :fill-opacity 1}])
+        sid    (:id shape)
+        tl     (-> (cta/make-timeline {:board-id (:id board) :duration 1000})
+                   (cta/set-outline-at shape 0 (cta/outline-of shape))
+                   (cta/set-outline-at shape 1000 (plain-path [[0 0] [40 0] [40 20] [0 20]])))
+        doc    (alottie/timeline->lottie tl (svg-board-with board shape))
+        sh     (filter #(= "sh" (:ty %)) (lottie-items-of (get-in doc [:layers 0 :shapes])))
+        frames (get-in (first sh) [:ks :k])]
+    (t/is (= 1 (count sh)) "one subpath")
+    (t/is (= 1 (get-in (first sh) [:ks :a])) "that plays")
+    (t/is (apply = (map #(count (:v (first (:s %)))) frames)) "as many vertices at every keyframe")
+    (t/is (= [20.0 30.0] (mapv double (first (:v (first (:s (first frames))))))) "from the triangle")
+    (t/is (some #(= [60.0 50.0] (mapv double %)) (:v (first (:s (last frames))))) "to the flat box")))

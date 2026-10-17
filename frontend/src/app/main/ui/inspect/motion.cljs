@@ -47,10 +47,18 @@
   "What the code in `format` leaves out of the animation of `codes` (the
   code models of the boards) of `objects`: the texts it plays whole,
   split by lines (a page breaks the lines) or drawn as SVG (see
-  `cgm/code-units?`), and audio, which only the JSON gives."
+  `cgm/code-units?`), audio and the outlines of paths (see
+  `cta/outline-of`), which only the JSON gives."
   [codes objects format]
   (when (not= "json" format)
     (cond-> []
+      (some (fn [{:keys [timeline copies]}]
+              (some (fn [tl] (some #(some (fn [kf] (= :content (:property kf))) (:keyframes %))
+                                   (vals (:tracks tl))))
+                    (cons timeline (map :timeline copies))))
+            codes)
+      (conj (tr "workspace.options.export.no-morph"))
+
       (some (fn [{:keys [splits]}]
               (some (fn [[id kind]] (or (= :line kind) (not (cgm/code-units? (get objects id)))))
                     splits))
