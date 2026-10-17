@@ -533,6 +533,26 @@
               (when (some? next-head)
                 (recur ref next-head cmap (inc depth))))))))))
 
+(defn- ref-ids
+  "The main shapes the copy `shape` under the copy head `head` plays,
+  following what it refers to (`:shape-ref`) from main to main as
+  `main-track` does, a component in a component included, whether they
+  have a track or not."
+  [shape head main-page]
+  (loop [shape shape, head head, ids [], depth 0]
+    (let [page   (when (< depth 8) (main-page head))
+          mobjs  (:objects page)
+          ref-id (:shape-ref shape)]
+      (if (and (some? page) (some? ref-id) (some? (get mobjs (:shape-ref head))))
+        (let [ids       (conj ids ref-id)
+              ref       (get mobjs ref-id)
+              next-head (when (some? (:shape-ref ref))
+                          (head-of mobjs ref-id))]
+          (if (some? next-head)
+            (recur ref next-head ids (inc depth))
+            ids))
+        ids))))
+
 (defn- mapped-track
   "`track` of `ref-id` (of `main-objects`, in its board `main-board`) for
   `shape-id` (of `objects`, in the board `board-id`), its positions and
@@ -561,9 +581,10 @@
 (defn- copy-follows
   "`result` (see `instance-timelines`) with the followers in the
   timelines of the copy `head-id` following the copies of their leaders
-  and reaching the copies of their goals, by `refs` (the main shape each
-  copy shape plays, to that copy shape); a follow or goal whose layer
-  plays nothing there is dropped."
+  and reaching the copies of their goals, by `refs` (a delay of each
+  main shape a copy shape plays, to that copy shape, see `ref-ids`),
+  with a track or not: a still goal, or an upper arm turning on its
+  centre, drives a chain. A follow or goal with no copy is dropped."
   [result head-id refs]
   (reduce-kv
    (fn [result k entry]
@@ -575,7 +596,7 @@
                          (fn [tracks id track]
                            (let [leader (dm/get-in track [:follow :leader])
                                  goal   (dm/get-in track [:ik :goal])
-                                 copy   #(let [copy (get refs %)] (when (contains? tracks copy) copy))]
+                                 copy   #(get @refs %)]
                              (if (or (some? leader) (some? goal))
                                (assoc tracks id
                                       (cond-> track
@@ -623,22 +644,26 @@
                        (cond-> (assoc settings :board-id board-id :tracks {})
                          (not (zero? start)) (assoc :clock-start start)
                          (not= 1 speed)      (assoc :clock-speed speed)))
-             refs    (volatile! {})
+             ids     (cfh/get-children-ids-with-self objects head-id)
+             ;; only when a follow or a goal asks for it
+             refs    (delay
+                       (into {}
+                             (mapcat (fn [id] (map (fn [ref-id] [ref-id id]) (ref-ids (get objects id) head main-page))))
+                             ids))
              result  (reduce
                       (fn [result id]
                         (if-let [{:keys [board track ref-id] main :timeline mobjs :objects cmap :map}
                                  (when-not (contains? own id)
                                    (main-track (get objects id) head main-page))]
                           (let [k [:copy head-id board]]
-                            (vswap! refs assoc ref-id id)
                             (-> result
                                 (update k #(or % (entry (settings main))))
                                 (assoc-in [k :tracks id]
                                           (mapped-track track ref-id mobjs board id objects board-id cmap))))
                           result))
                       result
-                      (cfh/get-children-ids-with-self objects head-id))
-             result  (copy-follows result head-id @refs)]
+                      ids)
+             result  (copy-follows result head-id refs)]
          (if-let [clips (not-empty (:audio-clips main))]
            (let [k [:copy head-id main-id]]
              (-> result

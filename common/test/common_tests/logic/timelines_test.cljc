@@ -1497,12 +1497,15 @@
              (get-in tl [:tracks (copy-of objects copy :main-dot) :follow :leader]))
           "the rect of the copy, not of the main")))
 
-(t/deftest a-copy-drops-a-follow-whose-leader-plays-nothing-there
+(t/deftest a-copy-keeps-a-follow-whose-leader-plays-nothing-there
+  ;; a still leader moves nothing, and a still goal or upper arm drives a
+  ;; chain (see `a-copy-of-a-rig-reaches-the-copy-of-its-still-goal`)
   (let [{:keys [objects board copy main-page]} (component-scene (following-component-file :main-still))
-        tl  (get (cltl/instance-timelines objects board nil main-page) [:copy copy (thi/id :main)])
-        dot (copy-of objects copy :main-dot)]
-    (t/is (some? (get-in tl [:tracks dot])))
-    (t/is (nil? (get-in tl [:tracks dot :follow])))))
+        copies (cltl/instance-timelines objects board nil main-page)
+        tl     (get copies [:copy copy (thi/id :main)])
+        dot    (copy-of objects copy :main-dot)]
+    (t/is (= (copy-of objects copy :main-still) (get-in tl [:tracks dot :follow :leader])))
+    (t/is (nil? (get-in (cltl/animation-tree copies objects 500) [dot :modifiers])) "it stays where it is")))
 
 (t/deftest the-code-plays-a-follow-by-keyframes
   (let [file (following-file)
@@ -1622,6 +1625,81 @@
     (let [goals (set (cltl/reach-goals objects tl (thi/id :hand)))]
       (t/is (contains? goals (thi/id :ball)) "the layers it can reach")
       (t/is (not-any? goals [(thi/id :upper) (thi/id :fore) (thi/id :hand) (thi/id :copy) rect])))))
+
+(defn- rig-component-file
+  "A component whose main holds an arm (an upper arm with no track, a
+  forearm following it, a hand following that) reaching a still ball;
+  a copy of it in board B, and a copy of a component that holds a copy
+  of it in board C."
+  []
+  (let [file (-> (thf/sample-file :file1)
+                 (tho/add-simple-component :rig :rig-main :upper
+                                           :root-params {:x 0 :y 0 :width 400 :height 300}
+                                           :child-params {:x 50 :y 95 :width 100 :height 10})
+                 (ths/add-sample-shape :fore :type :rect :parent-label :rig-main
+                                       :x 150 :y 95 :width 100 :height 10)
+                 (ths/add-sample-shape :hand :type :rect :parent-label :rig-main
+                                       :x 290 :y 90 :width 20 :height 20)
+                 (ths/add-sample-shape :ball :type :rect :parent-label :rig-main
+                                       :x 235 :y 155 :width 10 :height 10))
+        main (thi/id :rig-main)
+        tl   (-> (cta/make-timeline {:board-id main :duration 1000 :playback :loop})
+                 (cta/set-follow (thi/id :fore) {:leader (thi/id :upper)})
+                 (cta/set-follow (thi/id :hand) {:leader (thi/id :fore)})
+                 (cta/set-ik (thi/id :hand) {:goal (thi/id :ball)}))]
+    (-> file
+        (thf/apply-changes (-> (pcb/empty-changes nil)
+                               (pcb/with-page (thf/current-page file))
+                               (pcb/set-timeline main tl)))
+        (tho/add-frame :board-b :x 1000 :y 100 :width 600 :height 400)
+        (thc/instantiate-component :rig :copy :parent-label :board-b)
+        (tho/add-frame :outer-main :x 0 :y 1000 :width 600 :height 400)
+        (thc/instantiate-component :rig :nested :parent-label :outer-main)
+        (thc/make-component :outer :outer-main)
+        (tho/add-frame :board-c :x 2000 :y 100 :width 800 :height 600)
+        (thc/instantiate-component :outer :copy2 :parent-label :board-c))))
+
+(defn- played-in
+  "The copy of the main shape `label` in the copy `head` of `objects`,
+  through a component in a component too."
+  [objects head label]
+  (let [main (thi/id label)]
+    (d/seek (fn [id]
+              (loop [ref (get-in objects [id :shape-ref]) depth 0]
+                (cond (nil? ref)    false
+                      (= ref main)  true
+                      (> depth 4)   false
+                      :else         (recur (get-in objects [ref :shape-ref]) (inc depth)))))
+            (cfh/get-children-ids objects head))))
+
+(t/deftest a-copy-of-a-rig-reaches-the-copy-of-its-still-goal
+  (let [file      (rig-component-file)
+        page      (thf/current-page file)
+        objects   (:objects page)
+        main-page (constantly {:objects objects :timelines (:timelines page)})]
+    (doseq [[board head] [[(thi/id :board-b) (thi/id :copy)] [(thi/id :board-c) (thi/id :copy2)]]]
+      (let [copies (cltl/instance-timelines objects board nil main-page)
+            tl     (get copies [:copy head (thi/id :rig-main)])
+            [upper fore hand ball] (map #(played-in objects head %) [:upper :fore :hand :ball])
+            centre #(let [mods  (get-in % [%2 :modifiers])
+                          shape (cond-> (get objects %2) (some? mods) (gsh/transform-shape mods))]
+                      (grc/rect->center (:selrect shape)))]
+        (t/is (every? some? [upper fore hand ball]) (str "the copy " head))
+        (t/is (= ball (get-in tl [:tracks hand :ik :goal])) "it reaches the copy of the still ball")
+        (t/is (= upper (get-in tl [:tracks fore :follow :leader])) "its forearm follows the copy of the upper arm")
+        (doseq [elapsed [0 300 700]]
+          (let [tree (cltl/animation-tree copies objects elapsed)
+                w    (centre tree hand)
+                g    (centre tree ball)]
+            (t/is (and (mth/close? (:x g) (:x w) 0.01) (mth/close? (:y g) (:y w) 0.01))
+                  (str "on the ball at " elapsed ": " w " " g))))
+        (let [export (cltl/with-instance-tracks (cta/make-timeline {:board-id board :duration 1000})
+                       (vals copies) objects)
+              tree   (cta/timeline->modif-tree export objects 300)
+              w      (centre tree hand)
+              g      (centre tree ball)]
+          (t/is (and (mth/close? (:x g) (:x w) 0.5) (mth/close? (:y g) (:y w) 0.5))
+                "the exports bake it alike"))))))
 
 (t/deftest a-layer-follows-one-of-its-board-only
   (let [file    (-> (following-file)
