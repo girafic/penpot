@@ -211,7 +211,9 @@
             bake                  (cta/drop-guides))
           (cltl/with-copies-clock (vals copies) stored?)
           (cltl/with-instance-tracks (vals copies) objects :text-split text-split)
-          (cltl/with-instance-clips copies)))))
+          (cltl/with-instance-clips copies)
+          ;; and those of the copies
+          (cond-> bake (cta/drop-guides))))))
 
 (defn export-timeline
   "The timeline the exports of the active board read (see

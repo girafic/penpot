@@ -355,7 +355,7 @@
         calls  (atom [])
         bridge {:use-shape #(swap! calls conj [:use %])
                 :set-shape-hidden #(swap! calls conj [:hidden %])}]
-    (t/is (= #{cid} (dea/guide-ids page bid)))
+    (t/is (= #{cid} (dea/guide-ids page {} bid)))
     (t/is (empty? (:tracks (dwa/board-export-timeline page {} bid :bake true)))
           "the keyframe exports play nothing of it")
     (t/async
@@ -386,6 +386,31 @@
         follow  #(get-in (dwa/board-export-timeline page {} bid :bake %) [:tracks did :follow])]
     (t/is (some? (follow :lottie)) "Lottie makes the dot a child of the rect")
     (t/is (nil? (follow true)) "SVG and CSS play it by keyframes")))
+
+(t/deftest the-guides-of-copies-are-in-no-export
+  (let [file   (-> (cthf/sample-file :file1)
+                   (ctho/add-simple-component :rig :rig-main :ring
+                                              :root-params {:x 0 :y 0 :width 200 :height 200}
+                                              :child-params {:x 10 :y 20 :width 24 :height 24})
+                   (ctho/add-frame :host :x 1000 :y 0 :width 400 :height 400)
+                   (cthc/instantiate-component :rig :copy :parent-label :host))
+        main   (cthi/id :rig-main)
+        tl     (-> (cta/make-timeline {:board-id main :duration 1000})
+                   (cta/add-keyframe (cthi/id :ring) {:time 0 :property :x :value 10})
+                   (cta/add-keyframe (cthi/id :ring) {:time 1000 :property :x :value 60})
+                   (cta/set-guide (cthi/id :ring) true))
+        file   (cthf/apply-changes file (-> (pcb/empty-changes nil)
+                                            (pcb/with-page (cthf/current-page file))
+                                            (pcb/set-timeline main tl)))
+        page   (cthf/current-page file)
+        files  {(:id file) file}
+        host   (cthi/id :host)
+        ring   (d/seek #(= (cthi/id :ring) (get-in page [:objects % :shape-ref]))
+                       (keys (:objects page)))]
+    (t/is (some? ring))
+    (t/is (contains? (dea/guide-ids page files host) ring) "the ring of the copy is a guide")
+    (t/is (nil? (get-in (dwa/board-export-timeline page files host :bake true) [:tracks ring]))
+          "the keyframe exports play nothing of it")))
 
 (def ^:private *closed (atom 0))
 

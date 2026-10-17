@@ -1898,12 +1898,18 @@
 
 (defn guide-ids
   "The helper layers of the board `board-id` of `page` the exports leave
-  out, as goal rings (see `cta/guide?`)."
-  [page board-id]
-  (let [timeline (dm/get-in page [:timelines board-id])]
+  out, as goal rings (see `cta/guide?`): of its own timeline and of the
+  component copies in it (`files` holds the files of their components,
+  see `dwa/copy-timelines`)."
+  [page files board-id]
+  (let [objects   (:objects page)
+        timelines (:timelines page)]
     (into #{}
-          (filter #(and (cta/guide? timeline %) (contains? (:objects page) %)))
-          (keys (:tracks timeline)))))
+          (comp (mapcat :tracks)
+                (keep (fn [[id track]] (when (:guide track) id)))
+                (filter #(contains? objects %)))
+          (cons (get timelines board-id)
+                (vals (dwa/copy-timelines objects timelines files board-id))))))
 
 (defn- without-layers
   "`objects` without the layers `ids`."
@@ -1938,7 +1944,7 @@
   [{:keys [page files board-id format bridge time yield decode on-progress on-frame cancelled? ids? bbox?
            outline? preview?]}]
   (let [lottie?  (contains? #{:lottie :dotlottie} format)
-        guides   (guide-ids page board-id)
+        guides   (guide-ids page files board-id)
         ;; Lottie makes some followers children of their leaders
         tl       (dwa/board-export-timeline page files board-id :bake (if lottie? :lottie true))
         objects  (without-layers (:objects page) guides)
@@ -2051,7 +2057,7 @@
                     (assoc :cancelled? #(deref cancel?)))]
     {:cancel  #(reset! cancel? true)
      :promise (guides-hidden
-               (:bridge opts) (:objects page) (guide-ids page board-id)
+               (:bridge opts) (:objects page) (guide-ids page files board-id)
                #(cond
                   (nil? (dwa/board-export-timeline page files board-id))
                   (js/Promise.resolve {:status :nothing})
