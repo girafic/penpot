@@ -16,7 +16,6 @@
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
-   [app.common.math :as mth]
    [app.common.types.path :as path]
    [app.common.types.path.morph :as morph]))
 
@@ -129,17 +128,6 @@
                (update :value path/transform-content (gmt/scale-matrix scale)))
             keyframes))))
 
-(defn- close-outlines?
-  "Whether the outlines `a` and `b` have one structure and their points
-  are within `tolerance` of each other."
-  [a b tolerance]
-  (and (= (count a) (count b))
-       (every? true? (map (fn [sa sb]
-                            (and (= (:command sa) (:command sb))
-                                 (every? #(mth/close? (dm/get-in sa [:params %] 0) (dm/get-in sb [:params %] 0) tolerance)
-                                         [:x :y :c1x :c1y :c2x :c2y])))
-                          a b))))
-
 (defn outline-change
   "How an edit changed the outline of the path from `before` to `after`
   (see `outline-of`): `:none` when it only moved, turned or flipped it,
@@ -149,10 +137,10 @@
   (let [old (outline-of before)
         new (outline-of after)]
     (cond
-      (close-outlines? old new 0.01)
+      (morph/close? old new 0.01)
       :none
 
-      (close-outlines? (outline-value before {:outline-box (outline-box after)}) new 0.01)
+      (morph/close? (outline-value before {:outline-box (outline-box after)}) new 0.01)
       :resize
 
       :else

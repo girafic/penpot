@@ -110,6 +110,36 @@
     (t/is (= [0 5 10 15 20 30 35 40 50 55 60 70]
              (mapv (fn [[x _]] (mth/round x)) (points s'))))))
 
+(t/deftest a-star-spinning-by-its-points-keeps-spinning-past-another-structure
+  ;; a circle, then a star, then the star with its points shifted by two:
+  ;; the two stars are of one structure, so each point of the first goes
+  ;; to the point of the second at its place, as without the circle
+  (let [s       (star 100 100)
+        spun    (path/from-plain (let [pts   (mapv :params (subvec (vec s) 0 10))
+                                       moved (vec (concat (drop 2 pts) (take 2 pts)))]
+                                   (-> [{:command :move-to :params (first moved)}]
+                                       (into (map (fn [p] {:command :line-to :params p})) (rest moved))
+                                       (conj {:command :close-path :params {}}))))
+        [_ s' t'] (morph/match [(circle 100 100 50) s spun])
+        at      (fn [content p] (first (keep-indexed (fn [j q] (when (and (mth/close? (first p) (first q) 1e-6)
+                                                                          (mth/close? (second p) (second q) 1e-6))
+                                                                 j))
+                                                     (points content))))]
+    (t/is (morph/same-structure? s' t'))
+    (doseq [v (range 10)]
+      (let [j       (at s' (nth (points s) v))
+            [x y]   (nth (points spun) v)
+            [x' y'] (when (some? j) (nth (points t') j))]
+        (t/is (some? j))
+        (t/is (and (some? x') (mth/close? x x' 1e-6) (mth/close? y y' 1e-6))
+              (str "the point " v " of the star goes to the point " v " of the spun one"))))))
+
+(t/deftest close-contents-are-of-one-structure-within-a-tolerance
+  (let [a (polygon [[0 0] [10 0] [0 10]])]
+    (t/is (morph/close? a (polygon [[0 0.004] [10 0] [0 10]]) 0.01))
+    (t/is (not (morph/close? a (polygon [[0 0.5] [10 0] [0 10]]) 0.01)))
+    (t/is (not (morph/close? a (polygon [[0 0] [10 0] [0 10] [0 5]]) 0.01)) "not of one structure")))
+
 (t/deftest an-open-line-and-a-circle-match
   (let [line    (polygon [[50 100] [150 100]] :open? true)
         [l' c'] (morph/match [line (circle 100 100 50)])]

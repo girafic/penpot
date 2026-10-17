@@ -33,6 +33,7 @@
    [app.common.types.animation-outline :as ctao]
    [app.common.types.color :as clr]
    [app.common.types.path :as path]
+   [app.common.types.path.morph :as morph]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [clojure.set :as set]
@@ -648,14 +649,6 @@
           (assoc va :v (mix (:v va) (:v vb)) :i (mix (:i va) (:i vb)) :o (mix (:o va) (:o vb)))
           va)))))
 
-(defn- close-contents?
-  "Whether the contents `a` and `b` of one structure are within `tol` px."
-  [a b tol]
-  (every? true? (map (fn [sa sb]
-                       (every? #(<= (mth/abs (- (get-in sa [:params %] 0) (get-in sb [:params %] 0))) tol)
-                               [:x :y :c1x :c1y :c2x :c2y]))
-                     a b)))
-
 (defn- thin-outlines
   "The `[frame content]` samples `samples`, each one the lerp of its
   neighbours gives within 0.25 px left out."
@@ -669,7 +662,7 @@
               [fb cb] cur
               [fc cc] (first more)
               between (path/lerp ca cc (/ (- fb fa) (- fc fa)))]
-          (if (and (some? between) (close-contents? (vec between) (vec cb) 0.25))
+          (if (and (some? between) (morph/close? between cb 0.25))
             (recur kept more)
             (recur (conj kept cur) more)))))))
 
