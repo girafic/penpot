@@ -167,19 +167,55 @@
     (t/is (= "M0,0L80,0L40,80Z" (second (peek frames))) "to the other one")
     (t/is (= (ctao/outline-box shape) (get-in (:timeline result) [:tracks (:id shape) :outline-box])))))
 
+(def ^:private tri "M10 10 L50 10 L50 50 Z")
+(def ^:private sq "M10 10 L90 10 L90 90 L10 90 Z")
+(def ^:private hexa "M10 10 L50 10 L70 30 L50 50 L10 50 L0 30 Z")
+
+(defn- held-outlines
+  "`[time interpolation path]` of the outline keyframes of the element
+  `shape` of the SVG `result`, whole numbers written whole."
+  [result]
+  (mapv (juxt :time :interpolation #(cstr/replace (str (:value %)) #"\.0(?=\D|$)" ""))
+        (cta/property-keyframes (:timeline result) (:id (named result "shape")) :content)))
+
 (t/deftest a-path-of-other-outlines-holds-each
-  ;; a browser plays outlines of other structures as jumps: each held
-  ;; until the next
-  (let [result (import-svg (svg (el :path {:id "shape" :d "M10 10 L50 10 L50 50 Z" :fill "#ff0000"}
-                                    (el :animate {:attributeName "d" :values "M10 10 L50 10 L50 50 Z;M10 10 L90 10 L90 90 L10 90 Z"
+  ;; a browser plays outlines of other structures as jumps, at the middle
+  ;; of each interval
+  (let [result (import-svg (svg (el :path {:id "shape" :d tri :fill "#ff0000"}
+                                    (el :animate {:attributeName "d" :values (str tri ";" sq)
                                                   :dur "1s" :fill "freeze"}))))
-        shape  (named result "shape")
-        kfs    (cta/property-keyframes (:timeline result) (:id shape) :content)]
+        frames (held-outlines result)]
     (t/is (empty? (:skipped result)) "nothing left out")
-    (t/is (= [0 1000] (mapv :time kfs)))
-    (t/is (= :step (:interpolation (first kfs))) "the triangle held until the square")
-    (t/is (= "M0,0L40,0L40,40Z" (cstr/replace (str (:value (first kfs))) #"\.0(?=\D|$)" "")))
-    (t/is (= "M0,0L80,0L80,80L0,80Z" (cstr/replace (str (:value (peek kfs))) #"\.0(?=\D|$)" "")))))
+    (t/is (= [0 500] (mapv first (take 2 frames))) "the square from 500 ms")
+    (t/is (= :step (second (first frames))) "the triangle held until it")
+    (t/is (= "M0,0L40,0L40,40Z" (nth (first frames) 2)))
+    (t/is (= "M0,0L80,0L80,80L0,80Z" (nth (second frames) 2)))))
+
+(t/deftest outlines-of-other-structures-loop-as-browsers-play-them
+  (doseq [[label svg-data]
+          [["SMIL, repeating"
+            (svg (el :path {:id "shape" :d tri :fill "#ff0000"}
+                     (el :animate {:attributeName "d" :values (str tri ";" sq) :dur "1s" :repeatCount "indefinite"})))]
+           ["CSS, infinite"
+            (svg (el :style {} (str "@keyframes m { from { d: path('" tri "') } to { d: path('" sq "') } }"
+                                    " #shape { animation: m 1s linear infinite; }"))
+                 (el :path {:id "shape" :d tri :fill "#ff0000"}))]]]
+    (let [result (import-svg svg-data)
+          frames (held-outlines result)]
+      (t/is (empty? (:skipped result)) label)
+      (t/is (some #(and (= 500 (first %)) (= "M0,0L80,0L80,80L0,80Z" (nth % 2))) frames)
+            (str label ": the square from 500 ms"))))
+  (t/testing "three: the last from the middle of its interval"
+    (let [result (import-svg (svg (el :path {:id "shape" :d tri :fill "#ff0000"}
+                                      (el :animate {:attributeName "d" :values (str tri ";" sq ";" hexa)
+                                                    :dur "1s" :repeatCount "indefinite"}))))]
+      (t/is (some #(and (= 750 (first %)) (cstr/starts-with? (nth % 2) "M0,0L40,0L60,20")) (held-outlines result))
+            "the hexagon from 750 ms")))
+  (t/testing "an explicit discrete one as it says"
+    (let [result (import-svg (svg (el :path {:id "shape" :d tri :fill "#ff0000"}
+                                      (el :animate {:attributeName "d" :values (str tri ";" sq) :calcMode "discrete"
+                                                    :dur "1s" :repeatCount "indefinite"}))))]
+      (t/is (= [0 500] (mapv first (take 2 (held-outlines result))))))))
 
 (t/deftest a-path-past-what-a-row-holds-is-counted
   (let [big    (fn [k] (str "M0 0" (apply str (map #(str " L" % " " (mod (+ % k) 7)) (range 1 5000)))))

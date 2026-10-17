@@ -1838,9 +1838,11 @@
   `ctao/outline-of`) of the path `shape-id` of the element `target`,
   whose `d` or `points` `spec` animates: its values in the board as the
   element is placed, which morph when they all have one structure, and
-  else each held until the next, as browsers play them (a step keyframe
-  at each). Past what an outline row holds (see `ctao/row-takes?`) none,
-  counted as `:path-morph`."
+  else each held (a step keyframe at each), switching at the middle of
+  its interval as CSS and Blink play values that cannot morph (Gecko
+  splits a SMIL animation of more than two into equal parts instead).
+  Past what an outline row holds (see `ctao/row-takes?`), or changing but
+  leaving no keyframe, none, counted as `:path-morph`."
   [ctx {:keys [idx own-of objects to-board duration steady?]} spec target shape-id]
   (let [shape    (get objects shape-id)
         tag      (get-in idx [:by-key target :node :tag])
@@ -1871,17 +1873,28 @@
                      (for [[t v e] (keyframes #(spec-value spec %1 %2 steady?) [spec] 0.25 duration at-rest steady?)]
                        [shape-id (entry :content t (ctao/outline-of (assoc shape :content (numbers-content template v))) e nil)]))
 
-                   ;; others: each held until the next
+                   ;; others: each held, switching at the middle of its
+                   ;; interval as CSS and Blink play values that cannot
+                   ;; morph (an explicit discrete one as it says)
                    :else
-                   (let [spec    (assoc spec
-                                        :values values
-                                        :easings (vec (repeat (max 0 (dec (count values))) :step))
-                                        :rest (or rest template))
-                         at-rest (:rest spec)]
+                   (let [discrete? (and (seq (:easings spec)) (every? #(= :step %) (:easings spec)))
+                         spec      (if discrete?
+                                     (assoc spec :values values)
+                                     (let [ts  (vec (:times spec))
+                                           mid (map #(/ (+ %1 %2) 2) ts (subvec ts 1))]
+                                       (assoc spec
+                                              :times (vec (concat [(first ts)] mid [(peek ts)]))
+                                              :values (conj values (peek values))
+                                              :easings (vec (repeat (count values) :step)))))
+                         spec      (assoc spec :rest (or rest template))
+                         at-rest   (:rest spec)]
                      (for [[t v e] (keyframes #(spec-value spec %1 %2 steady?) [spec] 0.25 duration at-rest steady?)]
                        [shape-id (entry :content t (ctao/outline-of (assoc shape :content v)) e nil)])))
         kfs      (mapv second frames)]
     (if (and (some? frames)
+             ;; one that changes but leaves no keyframe is counted, never
+             ;; dropped without a word
+             (or (seq frames) (apply = values))
              (every? #(ctao/outline-fits? (:value %)) kfs)
              (ctao/outline-row-fits? kfs))
       frames
