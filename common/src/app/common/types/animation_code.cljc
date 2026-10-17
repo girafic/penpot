@@ -51,7 +51,8 @@
    :background-blur "backgroundBlur"
    :trim-start "trimStart"
    :trim-end "trimEnd"
-   :trim-offset "trimOffset"})
+   :trim-offset "trimOffset"
+   :content "path"})
 
 (def token-setting-names
   "The settings of a style entry a design token sets (see
@@ -74,7 +75,8 @@
    :shadow-offset-x :shadow-offset-y :shadow-blur
    :shadow-spread :shadow-color :shadow-opacity
    :blur :background-blur
-   :trim-start :trim-end :trim-offset])
+   :trim-start :trim-end :trim-offset
+   :content])
 
 (defn- clock-layers
   "`layers` (by id) with those `timeline` animates and `layers` has not
