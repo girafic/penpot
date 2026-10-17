@@ -1819,10 +1819,13 @@
 
 (defn- lottie-tagged
   "`layer`, the one layer that moves `shape` as its transform says: with
-  the shape (`::shape`) and its transform at rest (`::rest-ks`), so a
-  layer that follows it can be its child (see `lottie-parented`)."
+  the shape (`::shape`) and, when it leads a layer that can be its child
+  (one of the `:leaders` of `ctx`), its transform at rest (`::rest-ks`,
+  see `lottie-parented`)."
   [ctx shape layer]
-  (assoc layer ::shape (:id shape) ::rest-ks (lottie-rest-ks ctx shape)))
+  (cond-> (assoc layer ::shape (:id shape))
+    (contains? (:leaders ctx) (:id shape))
+    (assoc ::rest-ks (lottie-rest-ks ctx shape))))
 
 (defn- lottie-node-layers
   "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first,
@@ -1950,14 +1953,17 @@
   `lottie-parented`): at once (no delay), taking where the pivot of the
   leader goes, how it turns and scales and not its opacity, from where
   it rests, or from a first frame where it plays at rest; a
-  leader that scales evenly, never flips nor stretches, and is no helper
-  layer (see `cta/guide?`); no link of a chain that reaches (see
-  `cta/ik-chains`). Where their layers land decides the rest."
+  leader that scales evenly, never flips nor stretches as it plays (its
+  hidden rows left out, its presets and styles as their keyframes, see
+  `cta/resolve-animations`), and is no helper layer (see `cta/guide?`);
+  no link of a chain that reaches (see `cta/ik-chains`). Where their
+  layers land decides the rest."
   [timeline objects]
   (let [follows  (cta/followers timeline objects)
         chained  (into #{} (mapcat (juxt :a :b :e)) (vals (cta/ik-chains timeline objects follows)))
+        resolved (delay (cta/resolve-animations timeline objects))
         even?    (fn [leader]
-                   (let [kfs   (dm/get-in timeline [:tracks leader :keyframes])
+                   (let [kfs   (dm/get-in @resolved [:tracks leader :keyframes])
                          rows  #(into #{} (comp (filter (fn [kf] (= % (:property kf))))
                                                 (map (juxt :time :value :easing :interpolation)))
                                       kfs)
@@ -1990,13 +1996,15 @@
   in the tree of the board go below the others, and the board draws
   itself, and what is no layer, at the bottom. The layers in a board
   whose size plays on its outline follow it as `follow` says (see
-  `board-follow`)."
-  [timeline objects layer-ids assets units follow]
+  `board-follow`). The layers of `leaders` keep their transform at rest
+  for the layers of their followers (see `lottie-tagged`)."
+  [timeline objects layer-ids assets units follow leaders]
   (let [board-id (:board-id timeline)
         board    (get objects board-id)
         bsr      (:selrect board)
         ctx      {:objects objects
                   :follow follow
+                  :leaders leaders
                   :layer-ids layer-ids
                   :assets assets
                   :units units
@@ -2061,7 +2069,8 @@
         follow     (when (and (some? propagate) (seq holders))
                      (into {} (aexp/board-follow timeline objects holders layer-ids propagate
                                                  (or (:x bsr) 0) (or (:y bsr) 0))))
-        {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets units follow)
+        {:keys [layers comps]} (lottie-layers timeline objects layer-ids assets units follow
+                                              (set (vals parents)))
         [layers parented failed] (lottie-parented layers parents)
         comps     (mapv (fn [comp] (update comp :layers lottie-parented parents)) comps)
         parented  (into parented (mapcat #(second (:layers %))) comps)
@@ -2081,6 +2090,23 @@
                  (seq markers) (assoc :markers markers))
      :parented parented
      :failed   failed}))
+
+(defn- lottie-parenting
+  "The Lottie document of `timeline` (see `timeline->lottie`), the layers
+  of the followers in `kept` children of their leaders' (see
+  `lottie-doc`), the other follows playing by keyframes (see
+  `cta/bake-follows`). Those it could not parent where their layers
+  landed play by keyframes the next time."
+  [timeline objects assets propagate kept]
+  (let [baked   (cta/bake-follows timeline objects :keep? kept)
+        parents (into {}
+                      (keep (fn [id] (when-let [leader (:leader (cta/follow-of baked id))] [id leader])))
+                      kept)
+        {:keys [doc parented failed]} (lottie-doc baked objects assets propagate parents)
+        left    (into #{} (remove #(and (contains? parented %) (not (contains? failed %)))) kept)]
+    (if (seq left)
+      (recur timeline objects assets propagate (into #{} (remove left) kept))
+      doc)))
 
 (defn timeline->lottie
   "Generate a Lottie (bodymovin) animation document (a plain map ready for
@@ -2110,23 +2136,10 @@
   another (see `cta/follow-of`) is a child (`parent`) of its leader's
   layer where Lottie plays the follow as the canvas does (see
   `parent-candidates`, `lottie-parented`), else it plays it by keyframes
-  (see `cta/bake-follows`); `:keep`, an option, the followers to try."
+  (see `cta/bake-follows`)."
   ([timeline objects]
    (timeline->lottie timeline objects nil))
   ([timeline objects assets]
    (timeline->lottie timeline objects assets nil))
-  ([timeline objects assets {:keys [propagate] tried :keep}]
-   ;; the follows Lottie parents keep (see `parent-candidates`), the others
-   ;; play by keyframes; those it could not parent where their layers
-   ;; landed play by keyframes the next time
-   (let [kept    (or tried (parent-candidates timeline objects))
-         baked   (cta/bake-follows timeline objects :keep? kept)
-         parents (into {}
-                       (keep (fn [id] (when-let [leader (:leader (cta/follow-of baked id))] [id leader])))
-                       kept)
-         {:keys [doc parented failed]} (lottie-doc baked objects assets propagate parents)
-         left    (into #{} (remove #(and (contains? parented %) (not (contains? failed %)))) kept)]
-     (if (seq left)
-       (timeline->lottie timeline objects assets {:propagate propagate
-                                                  :keep (into #{} (remove left) kept)})
-       doc))))
+  ([timeline objects assets {:keys [propagate]}]
+   (lottie-parenting timeline objects assets propagate (parent-candidates timeline objects))))

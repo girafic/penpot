@@ -18,6 +18,7 @@
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-style :as ctas]
    [app.common.types.audio-clip :as ctau]
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
@@ -5590,6 +5591,99 @@
           fol (lottie-layer doc objects follower)]
       (t/is (nil? (:parent fol)) "a turned leader, the x and y of its follower at other times")
       (t/is (= 1 (get-in fol [:ks :r :a])) "it turns by keyframes"))))
+
+(defn- lottie-pose-misses
+  "The frames, of a few, where the pivot of the layer of `id`, in the
+  layers `layers` of a Lottie document of `tl`, is not where the canvas
+  shows it, with both; within half a pixel, as the keyframes of a baked
+  follow are taken a few times a second."
+  [layers tl objects id]
+  (let [layer (d/seek #(= (:name (get objects id)) (:nm %)) layers)]
+    (into []
+          (keep (fn [frame]
+                  (let [canvas (pivot-at tl objects id (* frame (/ 1000 60)))
+                        lottie (lottie-world layers layer frame)]
+                    (when-not (and (mth/close? (:x canvas) (:x lottie) 0.5) (mth/close? (:y canvas) (:y lottie) 0.5))
+                      [frame canvas lottie]))))
+          [0 15 30 60])))
+
+(t/deftest a-follow-lottie-cannot-play-as-a-child-plays-by-keyframes
+  (let [{:keys [objects tl board leader follower]} (lottie-follow-scene)
+        tl       (cta/set-follow tl follower {:leader leader})
+        stretch  #(-> %
+                      (cta/add-keyframe leader {:time 0 :property :scale-x :value 1 :easing :linear})
+                      (cta/add-keyframe leader {:time 1000 :property :scale-x :value 2}))
+        unparented (fn [tl objects]
+                     (let [doc (alottie/timeline->lottie tl objects)]
+                       (t/is (nil? (:parent (lottie-layer doc objects follower))) "no parent")
+                       (t/is (empty? (lottie-pose-misses (:layers doc) tl objects follower)) "where the canvas shows it")))]
+    (t/testing "a leader whose scale-y row is hidden"
+      (let [even (-> (stretch tl)
+                     (cta/add-keyframe leader {:time 0 :property :scale-y :value 1 :easing :linear})
+                     (cta/add-keyframe leader {:time 1000 :property :scale-y :value 2}))]
+        (t/is (some? (:parent (lottie-layer (alottie/timeline->lottie even objects) objects follower)))
+              "both rows play, it scales evenly")
+        (unparented (assoc-in even [:tracks leader :hidden] #{:scale-y}) objects)))
+    (t/testing "a leader whose style stretches it"
+      (let [style (ctas/make-animation-style
+                   {:name "Stretch"
+                    :entries [{:type :keys :property :scale-x :start 0 :duration 1000
+                               :keyframes [{:time 0 :value 1 :easing :linear} {:time 1000 :value 2}]}]})]
+        (unparented (cta/add-animation tl leader (ctas/make-use style (uuid/next) 0)) objects)))
+    (t/testing "a helper layer as leader"
+      (unparented (cta/set-guide tl leader true) objects))
+    (t/testing "a leader inside a group, which is a precomp"
+      (let [group   (cts/setup-shape {:type :group :x 60 :y 60 :width 80 :height 80 :name "group"})
+            other   (cts/setup-shape {:type :rect :x 60 :y 60 :width 10 :height 10 :name "other"})
+            objects (in-board (get objects board) [group (get objects follower)]
+                              {(:id group) [(get objects leader) other]})
+            tl      (cta/add-keyframe tl (:id group) {:time 0 :property :opacity :value 1})]
+        (unparented tl objects)))
+    (t/testing "a faded leader whose shadows spread"
+      (let [lead    (assoc (cts/setup-shape {:type :frame :x 80 :y 80 :width 40 :height 40 :name "leader"})
+                           :id leader :opacity 0.5
+                           :shadow [{:id (uuid/next) :style :drop-shadow :offset-x 4 :offset-y 4 :blur 0
+                                     :spread 4 :hidden false :color {:color "#000000" :opacity 0.5}}])
+            objects (in-board (get objects board) [lead (get objects follower)])]
+        (t/is (some? (d/seek #(= "leader with shadows" (:nm %)) (:layers (alottie/timeline->lottie tl objects))))
+              "its layer is in a precomp with those of its shadows")
+        (unparented tl objects)))))
+
+(t/deftest a-follower-in-a-board-whose-size-plays-exports-to-lottie-by-keyframes
+  ;; it has a parent already, the null that moves it with the board
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        card    (cts/setup-shape {:type :frame :x 100 :y 100 :width 100 :height 50})
+        left    (assoc (cts/setup-shape {:type :rect :x 110 :y 110 :width 10 :height 10})
+                       :name "Left" :constraints-h :left :constraints-v :top)
+        right   (assoc (cts/setup-shape {:type :rect :x 180 :y 110 :width 10 :height 10})
+                       :name "Right" :constraints-h :right :constraints-v :top)
+        [bid cid lid rid] (map :id [board card left right])
+        objects (in-board board [card] {cid [left right]})
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe cid {:time 0 :property :width :value 100})
+                    (cta/add-keyframe cid {:time 1000 :property :width :value 140})
+                    (cta/add-keyframe lid {:time 0 :property :y :value 110 :easing :linear})
+                    (cta/add-keyframe lid {:time 1000 :property :y :value 130})
+                    (cta/set-follow rid {:leader lid}))
+        L       (alottie/timeline->lottie tl objects nil {:propagate cgm/set-objects-modifiers})
+        holder  (get-in L [:layers 0])
+        comp    (some #(when (= (:refId holder) (:id %)) %) (:assets L))
+        named   (fn [shape] (d/seek #(= (:name shape) (:nm %)) (:layers comp)))
+        null    (d/seek #(= (:parent (named right)) (:ind %)) (:layers comp))]
+    (t/is (= 3 (:ty null)) "a child of its null, not of its leader")
+    (doseq [frame [0 30 60]]
+      (t/is (mth/close? (:y (pivot-at tl objects rid (* frame (/ 1000 60))))
+                        (lottie-value (get-in (named right) [:ks :p :y]) frame)
+                        0.01)
+            (str "it moves down with its leader by keyframes, frame " frame)))))
+
+(t/deftest only-a-leader-keeps-its-rest-for-lottie-children
+  (let [{:keys [objects tl leader follower]} (lottie-follow-scene)
+        layers (:layers (#'alottie/lottie-layers tl objects #{leader follower} nil {} nil #{leader}))
+        tagged (fn [id] (d/seek #(= id (::alottie/shape %)) layers))]
+    (t/is (some? (::alottie/rest-ks (tagged leader))))
+    (t/is (some? (tagged follower)))
+    (t/is (not (contains? (tagged follower) ::alottie/rest-ks)))))
 
 (t/deftest a-reaching-chain-exports-to-lottie-by-keyframes
   (let [{:keys [tl objects arm-hand goal board]} (arm-scene)
