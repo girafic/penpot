@@ -744,6 +744,16 @@
                                :y (some-> y (- (:y box)))}]))))
         values))
 
+(defn outline-nodes
+  "How many nodes the Path row shows: of the outline of `keyframe` when
+  the playhead is on one, else of `value`, the outline shown (matched to
+  the others, see `ctao/matched-outlines`)."
+  [keyframe value]
+  (let [outline (if (some? keyframe) (:value keyframe) value)]
+    (if (some? outline)
+      (count (remove #(= :close-path (:command %)) outline))
+      0)))
+
 (mf/defc property-value*
   "The value of the property at the playhead, editable on a keyframe
   placed there unless it is locked. A position shows `offset` less (see
@@ -770,14 +780,10 @@
              (st/emit! (dwa/set-keyframe-value shape-id kf-id hex)))))]
 
     (cond
-      ;; an outline, which the canvas edits (see `dwa/outline-edit`): the
-      ;; nodes of the keyframe there, else of the outline shown (matched
-      ;; to the others, see `ctao/matched-outlines`)
+      ;; an outline, which the canvas edits (see `dwa/outline-edit`)
       (= :content property)
-      (let [outline (if (some? keyframe) (:value keyframe) value)]
-        [:span {:class (stl/css :row-value :row-outline)}
-         (tr "workspace.animation.path-nodes"
-             (if (some? outline) (count (remove #(= :close-path (:command %)) outline)) 0))])
+      [:span {:class (stl/css :row-value :row-outline)}
+       (tr "workspace.animation.path-nodes" (outline-nodes keyframe value))]
 
       (cta/color-property? property)
       [:div {:class (stl/css-case :row-color true :disabled disabled?)

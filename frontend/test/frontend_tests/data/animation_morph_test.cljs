@@ -23,6 +23,7 @@
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.path.changes :as dwpc]
+   [app.main.data.workspace.path.edition :as dwpe]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
@@ -276,3 +277,87 @@
                   (tr "workspace.animation.paste-outline-too-large" 5 32768))
              (get-in (ptk/update toast {}) [:notification :content]))
           "the others with their reason, the outlines with theirs")))
+
+(def ^:private big
+  "4000 segments: eight in a row hold 32000, a ninth takes it past 32768."
+  (path/from-plain (into [{:command :move-to :params {:x 0 :y 0}}]
+                         (map (fn [i] {:command :line-to :params {:x (/ i 100) :y (mod i 7)}}))
+                         (range 1 4000))))
+
+(defn- full-row-file
+  "`morph-file` with the path :big whose Path row holds eight outlines of
+  4000 segments, at 0 to 700."
+  []
+  (let [file  (-> (morph-file)
+                  (ths/add-sample-shape :big :type :path :parent-label :board-a :content big))
+        page  (thf/current-page file)
+        shape (get-in page [:objects (thi/id :big)])
+        tl    (reduce #(cta/set-outline-at %1 shape %2 (ctao/outline-of shape))
+                      (get-in page [:timelines (thi/id :board-a)])
+                      (range 0 800 100))]
+    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                (pcb/with-page page)
+                                (pcb/set-timeline (thi/id :board-a) tl)))))
+
+(t/deftest ^:async a-full-path-row-takes-no-more
+  (let [file  (full-row-file)
+        id    (thi/id :big)
+        state (workspace-state file 900)]
+    (t/is (= 8 (count (get-in (thf/current-page file) [:timelines (thi/id :board-a) :tracks id :keyframes]))))
+    (let [events (await (emitted (dwa/toggle-keyframes id [:content]) state))]
+      (t/is (empty? (commits events)) "the diamond adds no ninth")
+      (t/is (warned? events)))
+    (let [events (await (emitted (dwa/add-keyframe-at id :content nil 900) state))]
+      (t/is (empty? (commits events)) "nor a keyframe added on the row")
+      (t/is (warned? events)))
+    (let [events (await (emitted (dwa/set-outline-at-playhead id big) state))]
+      (t/is (empty? (commits events)) "nor an edit at the playhead")
+      (t/is (warned? events)))))
+
+(t/deftest ^:async a-new-row-past-the-limit-at-0-warns
+  ;; a path past what a keyframe holds: the edit would fit, its outline
+  ;; at 0 does not, so neither goes in
+  (let [file   (-> (morph-file)
+                   (ths/add-sample-shape :huge :type :path :parent-label :board-a :content huge))
+        state  (assoc-in (workspace-state file 500) [:workspace-animation :auto-keyframe?] true)
+        events (await (emitted (dwa/set-outline-at-playhead (thi/id :huge) triangle) state))]
+    (t/is (empty? (commits events)))
+    (t/is (warned? events))))
+
+(t/deftest an-edit-at-a-keyframe-starts-from-its-own-outline
+  ;; the row goes from the triangle to a square, matched as curves: at
+  ;; the square's keyframe the edit starts from its own lines
+  (let [file    (morph-file)
+        page    (thf/current-page file)
+        blob    (get-in page [:objects (thi/id :blob)])
+        tl      (-> (get-in page [:timelines (thi/id :board-a)])
+                    (cta/set-outline-at blob 0 (ctao/outline-of blob))
+                    (cta/set-outline-at blob 1000 (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                                                                    {:command :line-to :params {:x 40 :y 0}}
+                                                                    {:command :line-to :params {:x 40 :y 40}}
+                                                                    {:command :line-to :params {:x 0 :y 40}}
+                                                                    {:command :close-path :params {}}])))
+        file    (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                            (pcb/with-page page)
+                                            (pcb/set-timeline (thi/id :board-a) tl)))
+        content (:content (dwa/outline-edit (workspace-state file 1000) (thi/id :blob)))]
+    (t/is (= [:move-to :line-to :line-to :line-to :close-path] (mapv :command (vec content))))))
+
+(t/deftest ^:async an-outline-edit-that-draws-nothing-keeps-what-it-has
+  (let [file   (morphing-file)
+        id     (thi/id :blob)
+        state  (-> (workspace-state file 1000)
+                   (assoc-in [:workspace-local :edit-path id] {:old-content triangle :outline-edit true})
+                   (assoc-in [:workspace-drawing :object :content]
+                             (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                                               {:command :move-to :params {:x 10 :y 10}}])))]
+    (t/is (empty? (await (emitted (dwpc/finalize-path-content id) state))) "no warning, no keyframe")))
+
+(t/deftest the-path-editor-takes-the-request-of-an-outline-edit
+  (let [file  (morph-file)
+        id    (thi/id :blob)
+        state (->> (workspace-state file 1000)
+                   (ptk/update (dwa/request-outline-edit id))
+                   (ptk/update (dwpe/start-path-edit id)))]
+    (t/is (true? (get-in state [:workspace-local :edit-path id :outline-edit])) "an edit of its outline")
+    (t/is (nil? (get-in state [:workspace-animation :outline-edit-id])) "the request taken")))

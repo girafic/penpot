@@ -2713,8 +2713,8 @@
   "What an edit of the path `id` in motion mode starts from when its
   outline goes into keyframes, its Path row animated, auto-keyframe on
   or the edit asked for (see `request-outline-edit`): `{:time :content}`,
-  the outline shown at the playhead placed where the path rests (see
-  `ctao/outline->content`). Nil when the edit changes the path itself,
+  the outline at the playhead (the keyframe's own there, else the one
+  shown) placed where the path rests (see `ctao/outline->content`). Nil when the edit changes the path itself,
   as outside motion mode or when its Path row is locked or hidden (as an
   edit with auto-keyframe on leaves those, see `cta/record-edit`)."
   [state id]
@@ -2732,7 +2732,11 @@
             asked?    (= id (dm/get-in state [:workspace-animation :outline-edit-id]))]
         (when (or animated? asked? (auto-keyframe? state))
           (let [time  (playhead state)
-                value (or (-> (cta/resolve-animations tl objects)
+                ;; on a keyframe its own outline, not the one matched to
+                ;; the others (see `ctao/matched-outlines`)
+                value (or (some #(when (and (= :content (:property %)) (= time (:time %))) (:value %))
+                                (:keyframes track))
+                          (-> (cta/resolve-animations tl objects)
                               (update :tracks select-keys [id])
                               (cta/values-at time)
                               (dm/get-in [id :content]))
@@ -2761,12 +2765,15 @@
           (let [time     (playhead state)
                 new-row? (not (some #(= :content (:property %))
                                     (:keyframes (cta/get-track tl id))))
+                at-0     (when (and new-row? (pos? time)) (ctao/outline-value shape nil))
                 tl       (cond-> tl
-                           (and new-row? (pos? time))
-                           (cta/set-outline-at shape 0 (ctao/outline-value shape nil)))
+                           (some? at-0) (cta/set-outline-at shape 0 at-0))
                 track    (cta/get-track tl id)
                 value    (ctao/outline-value (assoc shape :content content) track)]
-            (if (outline-takes? tl id time value)
+            ;; the outline at 0 of a new row and the edit, both or none
+            (if (and (or (nil? at-0)
+                         (some #(and (= :content (:property %)) (= 0 (:time %))) (:keyframes track)))
+                     (outline-takes? tl id time value))
               (let [tl (cta/set-outline-at tl shape time value)]
                 (rx/of (commit-timeline it state (:board-id tl) tl (uuid/next))
                        (apply-preview)))

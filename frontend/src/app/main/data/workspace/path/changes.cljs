@@ -47,9 +47,9 @@
           (rx/empty)
 
           ;; in motion mode, a keyframe of its outline (see
-          ;; `dwa/outline-edit`); one without nodes keeps what it has
+          ;; `dwa/outline-edit`); one that draws nothing keeps what it has
           outline?
-          (if (seq new-content)
+          (if (some #(not= :move-to (:command %)) new-content)
             (rx/of (dwa/set-outline-at-playhead id new-content))
             (rx/empty))
 

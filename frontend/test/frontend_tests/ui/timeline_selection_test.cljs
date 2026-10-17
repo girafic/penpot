@@ -8,6 +8,7 @@
   (:require
    [app.common.types.animation :as cta]
    [app.common.types.audio-clip :as ctau]
+   [app.common.types.path :as path]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.animation-mode :as dwam]
@@ -409,3 +410,17 @@
   (t/is (= {:width 1512 :height 820}
            (timeline/scroll-view-size #js {:width 1512 :height 820}))
         "whole pixels as they are"))
+
+(t/deftest the-path-row-counts-the-nodes-of-its-keyframe
+  (let [square  (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                                  {:command :line-to :params {:x 10 :y 0}}
+                                  {:command :line-to :params {:x 10 :y 10}}
+                                  {:command :line-to :params {:x 0 :y 10}}
+                                  {:command :close-path :params {}}])
+        matched (path/from-plain (into [{:command :move-to :params {:x 0 :y 0}}]
+                                       (map (fn [i] {:command :curve-to
+                                                     :params {:x i :y 0 :c1x i :c1y 0 :c2x i :c2y 0}}))
+                                       (range 1 20)))]
+    (t/is (= 4 (timeline/outline-nodes {:value square} matched)) "on a keyframe, its own nodes")
+    (t/is (= 20 (timeline/outline-nodes nil matched)) "between them, those shown")
+    (t/is (= 0 (timeline/outline-nodes nil nil)))))
