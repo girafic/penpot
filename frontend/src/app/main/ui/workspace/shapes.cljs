@@ -17,6 +17,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.types.animation :as cta]
    [app.common.uuid :as uuid]
    [app.main.refs :as refs]
    [app.main.ui.context :as ctx]
@@ -145,7 +146,7 @@
         appearance (mf/deref (mf/with-memo [shape-id]
                                (refs/workspace-appearance-by-id shape-id)))
         shape      (mf/with-memo [shape appearance]
-                     (cond-> shape (some? appearance) (merge appearance)))]
+                     (cond-> shape (some? appearance) (cta/with-appearance appearance)))]
     (if ^boolean (cfh/root-frame? shape)
       [:> root-frame-shape-wrapper #js {:shape shape}]
       (render-shape-content shape false))))

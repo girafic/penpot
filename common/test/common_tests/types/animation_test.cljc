@@ -15,6 +15,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.animation :as cta]
@@ -5881,3 +5882,60 @@
     (t/is (< 3 (count row)) "a spring, loops and the way back as keyframes")
     (t/is (every? #(morph/same-structure? (first row) %) row) "all of one structure")
     (t/is (every? (fn [content] (every? (fn [s] (every? #(mth/finite? (get-in s [:params %] 0)) [:x :y])) (vec content))) row))))
+
+(defn- morph-scene
+  "A board with the path `triangle` at rest (box 40 by 40 at 20, 30, with
+  radii for the scale of corners on the JVM) whose outline goes, in a
+  second, to a flat triangle across the top of its box; `f` adds keyframes."
+  [f]
+  (let [board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape   (assoc (path-layer triangle) :r1 0 :r2 0 :r3 0 :r4 0)
+        [bid id] (map :id [board shape])
+        objects {bid (assoc board :shapes [id])
+                 id  (assoc shape :parent-id bid :frame-id bid)}
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe id {:time 0 :property :content :value (cta/outline-of shape) :easing :linear})
+                    (cta/add-keyframe id {:time 1000 :property :content :value (plain-path [[0 0] [40 0] [40 20]])})
+                    (assoc-in [:tracks id :outline-box] (cta/outline-box shape))
+                    (f id))]
+    {:objects objects :tl tl :id id :bid bid}))
+
+(defn- corner-points
+  "The points of the segments of `content` that draw, as `[x y]` rounded
+  to 0.01."
+  [content]
+  (into #{} (keep #(when (#{:line-to :curve-to :move-to} (:command %))
+                     [(/ (mth/round (* 100 (get-in % [:params :x]))) 100.0)
+                      (/ (mth/round (* 100 (get-in % [:params :y]))) 100.0)]))
+        (vec content)))
+
+(t/deftest an-outline-plays-where-its-path-rests
+  (let [{:keys [objects tl id]} (morph-scene (fn [tl _] tl))
+        op (fn [time]
+             (some #(when (= :content (:property %)) (:value %))
+                   (get-in (ctaf/timeline->modif-tree tl objects time) [id :modifiers :structure-parent])))]
+    (t/is (contains? (corner-points (op 1000)) [60.0 50.0]) "the flat triangle in the box of the path")
+    (t/is (= (corner-points (op 1000)) (corner-points (cta/outline->content (get objects id) (get-in tl [:tracks id])
+                                                                            (plain-path [[0 0] [40 0] [40 20]])))))
+    (t/is (some? (op 500)))))
+
+(t/deftest an-outline-moves-and-turns-with-its-path
+  (let [{:keys [objects tl id bid]}
+        (morph-scene (fn [tl id]
+                       (-> tl
+                           (cta/add-keyframe id {:time 0 :property :x :value 20 :easing :linear})
+                           (cta/add-keyframe id {:time 1000 :property :x :value 120}))))
+        shown (get (cltl/shown-shapes {bid tl} objects 1000) id)]
+    (t/is (= #{[120.0 30.0] [160.0 30.0] [160.0 50.0]} (corner-points (:content shown)))
+          "the flat triangle, moved 100 to the right")
+    (t/is (mth/close? 20 (get-in shown [:selrect :height]) 0.01) "its box fits the outline"))
+  (let [{:keys [objects tl id bid]}
+        (morph-scene (fn [tl id]
+                       (-> tl
+                           (cta/add-keyframe id {:time 0 :property :rotation :value 0 :easing :linear})
+                           (cta/add-keyframe id {:time 1000 :property :rotation :value 90}))))
+        shown (get (cltl/shown-shapes {bid tl} objects 1000) id)
+        turn  (fn [[x y]] (let [p (gpt/rotate (gpt/point x y) (gpt/point 40 50) 90)]
+                            [(/ (mth/round (* 100 (:x p))) 100.0) (/ (mth/round (* 100 (:y p))) 100.0)]))]
+    (t/is (= (into #{} (map turn) #{[20.0 30.0] [60.0 30.0] [60.0 50.0]}) (corner-points (:content shown)))
+          "turned a quarter around the middle of the path at rest")))

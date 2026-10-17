@@ -2760,10 +2760,11 @@
 (def appearance-attrs
   "The attributes of a shape the animation changes with `:change-property`
   modifiers (see `shape->modifiers`): how it looks, and the poses of the
-  units of a text (`:text-units`, see `text-unit-entries`). Its geometry
-  takes the transform path."
+  units of a text (`:text-units`, see `text-unit-entries`), and the
+  outline of a path (`:content`, where it rests). Its geometry takes the
+  transform path."
   #{:opacity :r1 :r2 :r3 :r4 :fills :strokes :shadow :blur :background-blur
-    :trim-start :trim-end :trim-offset :text-units})
+    :trim-start :trim-end :trim-offset :text-units :content})
 
 (defn appearance-changes
   "`{attr value}` of the `appearance-attrs` that `modifiers` change, or nil.
@@ -2778,15 +2779,24 @@
            {}
            (:structure-parent modifiers))))
 
+(defn with-appearance
+  "`shape` with the appearance `changes` (see `appearance-changes`), its
+  box fitting the outline when one is its (see `path/update-geometry`),
+  so that its filters and paints cover it."
+  [shape changes]
+  (cond-> (merge shape changes)
+    (and (contains? changes :content) (= :path (:type shape)))
+    (path/update-geometry)))
+
 (defn apply-appearance-modifiers
   "Apply the appearance half of `modifiers` to `objects`, so SVG can paint
-  the animated fills, strokes, shadows, blurs and trims. Geometry stays on
-  the transform path."
+  the animated fills, strokes, shadows, blurs, trims and outlines (see
+  `with-appearance`). Geometry stays on the transform path."
   [objects modifiers]
   (reduce-kv
    (fn [objects id {:keys [modifiers]}]
      (if-let [changes (appearance-changes modifiers)]
-       (d/update-when objects id merge changes)
+       (d/update-when objects id with-appearance changes)
        objects))
    objects
    modifiers))
@@ -2960,6 +2970,8 @@
                     1.0)]
     (* from-size scale)))
 
+(declare ^:private shape-modifiers*)
+
 (defn shape->modifiers
   "Build a single modifiers record for `shape` from the interpolated
   `values` (positions relative to `origin`), turning and scaling around
@@ -2967,8 +2979,16 @@
   Position/scale/rotation become geometry modifiers; opacity becomes a
   `:change-property` structure modifier so it rides the same modifier
   pipeline in every renderer (SVG via `transform-shape`, WASM via
-  `set-shape-opacity`) and in export."
-  [shape values origin pivot]
+  `set-shape-opacity`) and in export. The outline of a path, a keyframe
+  of the row of `track` (see `outline->content`), is its content where
+  it rests, which the transform moves, turns and scales then."
+  ([shape values origin pivot]
+   (shape->modifiers shape values origin pivot nil))
+  ([shape values origin pivot track]
+   (shape-modifiers* shape values origin pivot track)))
+
+(defn- shape-modifiers*
+  [shape values origin pivot track]
   (let [selrect (:selrect shape)
         base-x  (:x selrect)
         base-y  (:y selrect)
@@ -3051,7 +3071,10 @@
       (as-> $ (reduce-kv (fn [modifiers property rest]
                            (ctm/change-property modifiers property (get values property rest)))
                          $
-                         trim-properties)))))
+                         trim-properties))
+
+      (and (contains? values :content) (= :path (:type shape)))
+      (ctm/change-property :content (outline->content shape track (:content values))))))
 
 (defn rest-value
   "The value of `property` that `shape` has without keyframes, positions

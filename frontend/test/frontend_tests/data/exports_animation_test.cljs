@@ -84,6 +84,38 @@
                 @calls))
     (t/is (some #(= :props (first %)) @calls))))
 
+(t/deftest apply-pose-sends-the-outline-of-a-path
+  (let [calls   (atom [])
+        board   (cts/setup-shape {:type :frame :x 0 :y 0 :width 100 :height 80})
+        path    (cts/setup-shape {:type :path
+                                  :content (path/from-plain [{:command :move-to :params {:x 10 :y 10}}
+                                                             {:command :line-to :params {:x 50 :y 10}}
+                                                             {:command :line-to :params {:x 10 :y 50}}
+                                                             {:command :close-path :params {}}])})
+        [bid pid] (map :id [board path])
+        objects {bid (assoc board :shapes [pid])
+                 pid (assoc path :parent-id bid :frame-id bid)}
+        flat    (path/from-plain [{:command :move-to :params {:x 0 :y 0}}
+                                  {:command :line-to :params {:x 40 :y 0}}
+                                  {:command :line-to :params {:x 40 :y 20}}
+                                  {:command :close-path :params {}}])
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe pid {:time 0 :property :content :value (cta/outline-of path)})
+                    (cta/add-keyframe pid {:time 1000 :property :content :value flat}))
+        bridge  {:set-modifiers (fn [& _])
+                 :clean-modifiers (fn [])
+                 :apply-shape-properties (fn [shape props] (log calls :props shape (vec props)))}]
+    (dea/apply-pose! objects (ctaf/timeline->modif-tree tl objects 1000) {:bridge bridge})
+    (let [[_ shape props] (first @calls)]
+      (t/is (some #{:content} props))
+      (t/is (= "M10,10L50,10L50,30Z" (str/replace (str (:content shape)) #"\.0(?=\D|$)" ""))
+            "the flat triangle where the path rests"))
+    (reset! calls [])
+    (#'dea/restore-rest-properties! objects tl 1000 bridge)
+    (let [[_ shape props] (first @calls)]
+      (t/is (some #{:content} props))
+      (t/is (= (:content path) (:content shape)) "its own outline back"))))
+
 (t/deftest apply-pose-composes-the-transforms-of-parents
   (let [calls  (atom [])
         {:keys [objects bid cid]} (test-objects)

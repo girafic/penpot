@@ -29,8 +29,9 @@
    (fn [acc shape-id values]
      (if-let [shape (get objects shape-id)]
        (let [board-origin (cta/position-origin timeline objects shape-id)
-             pivot        (cta/track-origin (cta/get-track timeline shape-id))]
-         (assoc acc shape-id (cta/shape->modifiers shape values board-origin pivot)))
+             track        (cta/get-track timeline shape-id)
+             pivot        (cta/track-origin track)]
+         (assoc acc shape-id (cta/shape->modifiers shape values board-origin pivot track)))
        acc))
    {}
    (cta/values-at timeline time)))
@@ -543,7 +544,7 @@
                     (update :scale-y * scale)
                     (assoc :x rest-x :y rest-y))
         ;; where its pivot is without a move, and where it goes
-        probe   (gpt/transform pivot (matrix (cta/shape->modifiers shape values origin origin*)))
+        probe   (gpt/transform pivot (matrix (cta/shape->modifiers shape (dissoc values :content) origin origin*)))
         target  (gpt/transform pivot total)]
     (cond-> (assoc values
                    :x (+ rest-x (- (:x target) (:x probe)))

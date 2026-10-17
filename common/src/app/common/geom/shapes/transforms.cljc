@@ -480,6 +480,22 @@
             (assoc objects id shape)))
         objects)))
 
+(defn- outline-op?
+  [op]
+  (and (= :change-property (:type op)) (= :content (:property op))))
+
+(defn- outline-change
+  "The content the last `:change-property` of `:content` among the
+  structure modifiers of `modifiers` sets, or nil."
+  [modifiers]
+  (reduce (fn [content op] (if (outline-op? op) (:value op) content))
+          nil
+          (:structure-parent modifiers)))
+
+(defn- without-outline-change
+  [modifiers]
+  (update modifiers :structure-parent #(into [] (remove outline-op?) %)))
+
 (defn transform-shape
   ([shape]
    (let [modifiers (:modifiers shape)]
@@ -489,7 +505,15 @@
 
   ([shape modifiers]
    (if (and (some? shape) (some? modifiers) (not (ctm/empty? modifiers)))
-     (let [transform (ctm/modifiers->transform modifiers)]
+     (let [;; the outline the animation draws for a path, where it rests
+           ;; (see `cta/shape->modifiers`), which the transform then moves,
+           ;; turns and scales with it
+           content   (outline-change modifiers)
+           shape     (cond-> shape
+                       (and (some? content) (cfh/path-shape? shape))
+                       (path/update-geometry content))
+           modifiers (cond-> modifiers (some? content) (without-outline-change))
+           transform (ctm/modifiers->transform modifiers)]
        (cond-> shape
          (and (some? transform)
               (not (cfh/root? shape)))
