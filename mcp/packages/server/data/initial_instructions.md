@@ -574,7 +574,10 @@ Keyframe values by property (`AnimatableProperty`):
   * "path": the outline of a path layer, an SVG path string like its `d`, in page coordinates where the path rests; it
     morphs into the next keyframe's outline (points are added where two outlines have not as many). Only path layers
     (turn a rectangle or an ellipse into a path first), no `pathIn`/`pathOut`, not in animation styles. E.g. a circle
-    path to a star: `addKeyframe(blob, {property: "path", time: 0, value: blob.d})`, then one at 1000 ms with the star
+    path to a star: `addKeyframe(blob, {property: "path", time: 0, value: blob.d})`, then one at 1000 ms with the star.
+    Penpot pairs the points of two outlines of other structures on its own (shortest ways); to choose, start a
+    keyframe's `value` at the point wanted and set `keyframe.fixedStart = true`: its first point then goes to the first
+    point of the keyframe before, in the way round it is drawn
   * Fill, stroke and shadow properties take `index`: which fill, stroke or shadow of the layer (0 by default)
 
 Easing (`MotionEasing`); the one of a keyframe applies from it to the next one:

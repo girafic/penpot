@@ -5550,6 +5550,23 @@ export interface Keyframe {
    */
   value: number | string;
   /**
+   * For a `path` keyframe, whether its first point and the way it goes
+   * round were set by hand. Penpot pairs the points of consecutive path
+   * keyframes of other structures on its own, so that each point takes
+   * the shortest way; a fixed keyframe instead turns as the keyframe
+   * before it does, so its first point goes to that one's first point
+   * (as Lottie and After Effects pair them). Set its `value` to start at
+   * the point wanted, then set `fixedStart` to `true`; `false` matches it
+   * on its own again. Other keyframes have none: setting it throws.
+   *
+   * @example
+   * ```js
+   * keyframe.value = 'M100,0 L200,100 L100,200 L0,100 Z';
+   * keyframe.fixedStart = true;
+   * ```
+   */
+  fixedStart: boolean;
+  /**
    * How the value goes on from here to the next keyframe. Setting it
    * unbinds the token of `appliedTokens`.
    */

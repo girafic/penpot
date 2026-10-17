@@ -524,6 +524,20 @@
              :else
              (update! :value #(assoc % :value value)))))}
 
+      :fixedStart
+      {:get #(true? (:fixed-start (locate)))
+       :set
+       (fn [value]
+         (cond
+           (not (boolean? value))
+           (u/not-valid plugin-id :fixedStart value)
+
+           (not= :content (:property (locate)))
+           (u/not-valid plugin-id :fixedStart "Only a path keyframe has a first point")
+
+           :else
+           (update! :fixedStart #(if value (assoc % :fixed-start true) (dissoc % :fixed-start)))))}
+
       :easing
       {:get #(some-> (locate) format-easing)
        :set

@@ -122,6 +122,31 @@
                                                                    :keyframes #js [#js {:time 0 :value "M0,0L10,0Z"}]}]))
                 "no style holds one"))))))
 
+(t/deftest a-path-keyframe-holds-its-first-point-by-hand
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context] (setup true)
+            ^js board    (.createBoard context)
+            ^js blob     (.createPath context)
+            _            (.appendChild board blob)
+            _            (set! (.-d blob) "M10,10L50,10L10,50Z")
+            ^js timeline (.addTimeline board)
+            _            (.addKeyframe timeline blob #js {:property "path" :time 0 :value "M10,10L50,10L10,50Z"})
+            ^js square   (.addKeyframe timeline blob #js {:property "path" :time 1000 :value "M50,50L10,50L10,10L50,10Z"})
+            ^js fade     (.addKeyframe timeline blob #js {:property "opacity" :time 0 :value 1})
+            stored       #(->> (:keyframes (stored-track store context board blob))
+                               (filter (fn [kf] (and (= :content (:property kf)) (= 1000 (:time kf)))))
+                               first
+                               :fixed-start)]
+        (t/is (false? (.-fixedStart square)) "matched on its own at first")
+        (set! (.-fixedStart square) true)
+        (t/is (true? (.-fixedStart square)))
+        (t/is (true? (stored)) "kept on the keyframe")
+        (set! (.-fixedStart square) false)
+        (t/is (nil? (stored)) "and taken off")
+        (t/is (thrown? js/Error (set! (.-fixedStart fade) true)) "not on another property")
+        (t/is (thrown? js/Error (set! (.-fixedStart square) "yes")) "a boolean")))))
+
 (t/deftest the-outlines-of-a-path-hold-a-budget
   (thw/with-wasm-mocks*
     (fn []
