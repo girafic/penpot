@@ -955,6 +955,15 @@ $header-height: $ruler-height + $row-height;
   }
 }
 
+// the nodes of an outline, which the canvas edits
+.row-outline {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  white-space: nowrap;
+  color: var(--color-foreground-secondary);
+}
+
 .row-value {
   inline-size: 52px;
   block-size: 20px;

@@ -5939,3 +5939,39 @@
                             [(/ (mth/round (* 100 (:x p))) 100.0) (/ (mth/round (* 100 (:y p))) 100.0)]))]
     (t/is (= (into #{} (map turn) #{[20.0 30.0] [60.0 30.0] [60.0 50.0]}) (corner-points (:content shown)))
           "turned a quarter around the middle of the path at rest")))
+
+(defn- outline-size
+  "The width and height of the box of `content`."
+  [content]
+  (let [ps (corner-points content)]
+    [(- (apply max (map first ps)) (apply min (map first ps)))
+     (- (apply max (map second ps)) (apply min (map second ps)))]))
+
+(t/deftest an-outline-pastes-onto-paths-only
+  (let [src     (path-layer triangle)
+        dst     (path-layer [[100 100] [180 100] [100 180]])
+        rect    (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10})
+        flat    (plain-path [[0 0] [40 0] [40 20]])
+        tl      (-> (mk-timeline)
+                    (cta/add-keyframe (:id src) {:time 0 :property :content :value flat})
+                    (cta/ensure-outline-box src))
+        track   (get-in tl [:tracks (:id src)])
+        pose    {:x 0 :y 0 :width 40 :height 40 :rotation 0}
+        shown   (fn [{:keys [track]} target]
+                  (let [pasted (get-in (:timeline (cta/paste-track (mk-timeline) (:id target) track :merge))
+                                       [:tracks (:id target)])]
+                    (cta/outline->content target pasted (:value (first (:keyframes pasted))))))]
+    (t/is (= {:width 40.0 :height 40.0} (update-vals (:outline-box track) double)))
+    (t/is (= [80.0 40.0] (outline-size (shown (cta/retarget-track track pose dst pose) dst)))
+          "scaled to a path twice as big")
+    (t/is (= [40.0 20.0] (outline-size (shown (cta/retarget-track track pose dst pose :exact? true) dst)))
+          "or as big as it was")
+    (t/is (= 1 (:skipped (cta/retarget-track track pose rect pose))) "a rectangle takes none")
+    (let [own    (-> (mk-timeline)
+                     (cta/add-keyframe (:id dst) {:time 500 :property :content :value (plain-path [[0 0] [80 0] [0 80]])})
+                     (cta/ensure-outline-box dst))
+          pasted (:timeline (cta/paste-track own (:id dst) (:track (cta/retarget-track track pose dst pose)) :merge))
+          row    (get-in pasted [:tracks (:id dst)])
+          kf     (d/seek #(= 0 (:time %)) (:keyframes row))]
+      (t/is (= [80.0 40.0] (outline-size (cta/outline->content dst row (:value kf))))
+            "into the box of the row it joins"))))

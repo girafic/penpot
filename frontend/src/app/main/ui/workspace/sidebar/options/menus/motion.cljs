@@ -84,6 +84,41 @@
                 :on-click on-toggle}
        [:span {:class (stl/css :diamond)}]])))
 
+;; OUTLINE
+
+(def ^:private convertible-types
+  "The layers the outline row turns into paths, which morph."
+  #{:rect :circle :bool})
+
+(mf/defc outline-row*
+  "The outline of the selected layer as keyframes, in motion mode: for a
+  path, the diamond of its outline at the playhead (see
+  `cta/outline-of`); a rectangle, an ellipse or a boolean turns into a
+  path first, by the button, to morph."
+  [{:keys [shapes]}]
+  (let [shape-id (mf/use-ctx ctx/motion-shape-id)
+        shape    (when (= 1 (count shapes)) (first shapes))
+        type     (:type shape)
+
+        on-convert
+        (mf/use-fn
+         (mf/deps shape-id)
+         #(st/emit! (dw/convert-selected-to-path [shape-id])))]
+
+    (when (and (some? shape-id) (= shape-id (:id shape)))
+      (cond
+        (= :path type)
+        [:div {:class (stl/css :outline-row)}
+         [:span {:class (stl/css :trim-label)} (tr "workspace.animation.path")]
+         [:> keyframe-diamond* {:properties [:content]}]]
+
+        (contains? convertible-types type)
+        [:div {:class (stl/css :outline-row)}
+         [:span {:class (stl/css :trim-label)} (tr "workspace.animation.path")]
+         [:> button* {:variant "secondary"
+                      :on-click on-convert}
+          (tr "workspace.animation.convert-to-path")]]))))
+
 ;; PATH TRIM
 
 (mf/defc trim-row*

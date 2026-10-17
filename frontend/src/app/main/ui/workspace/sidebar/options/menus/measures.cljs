@@ -37,7 +37,7 @@
    [app.main.ui.workspace.sidebar.options.menus.audio :refer [audio-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.border-radius :refer  [border-radius-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
-   [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* follow-menu* keyframe-diamond* reach-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* follow-menu* keyframe-diamond* outline-row* reach-menu*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [clojure.set :as set]
@@ -983,6 +983,8 @@
   (let [motion-mode? (mf/use-ctx ctx/motion-mode?)]
     [:*
      [:> measures-section* props]
+     (when ^boolean motion-mode?
+       [:> outline-row* {:shapes shapes}])
      (when ^boolean motion-mode?
        [:> animations-menu* {:ids ids :shapes shapes}])
      (when ^boolean motion-mode?

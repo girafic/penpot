@@ -287,6 +287,16 @@
   color: var(--color-foreground-secondary);
 }
 
+// Outline of a path
+
+.outline-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-xs);
+  margin-block-start: var(--sp-s);
+}
+
 // Path trim
 
 .trim-row {

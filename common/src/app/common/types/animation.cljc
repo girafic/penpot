@@ -1042,6 +1042,34 @@
       (or (not= 1 x) (not= 1 y))
       (path/transform-content (gmt/scale-matrix (gpt/point (/ 1 x) (/ 1 y)))))))
 
+(defn ensure-outline-box
+  "`timeline` with the box of the path `shape` (see `outline-box`) as the
+  one its row of outlines is made for, when it has outline keyframes and
+  no box yet: a new row is made for the path as it is."
+  [timeline shape]
+  (let [shape-id (:id shape)
+        track    (get-in timeline [:tracks shape-id])]
+    (if (and (some? track)
+             (nil? (:outline-box track))
+             (some #(= :content (:property %)) (:keyframes track)))
+      (assoc-in timeline [:tracks shape-id :outline-box] (outline-box shape))
+      timeline)))
+
+(defn rescale-outlines
+  "`keyframes` with their outlines, made for the box `from`, scaled to be
+  made for the box `to` (see `outline->content`)."
+  [keyframes from to]
+  (let [ratio (fn [k]
+                (let [a (get from k) b (get to k)]
+                  (if (and (number? a) (number? b) (> a 0.01) (> b 0.01)) (/ b a) 1)))
+        scale (gpt/point (ratio :width) (ratio :height))]
+    (if (and (= 1 (:x scale)) (= 1 (:y scale)))
+      keyframes
+      (mapv #(cond-> %
+               (= :content (:property %))
+               (update :value path/transform-content (gmt/scale-matrix scale)))
+            keyframes))))
+
 (defn outline->content
   "The content of the path `shape` drawing the outline `value`, a
   keyframe of the row `track` (see `outline-value`), where the path
@@ -3656,7 +3684,9 @@
   "`track`, of a layer resting at `from` (see `rest-pose`), for the shape
   `target` resting at `to`: its positions and rotation counted from where
   `target` rests and its sizes scaled to it (see `relative-value`), or
-  its values as they are with `exact?`. The keyframes `target` cannot
+  its values as they are with `exact?`; its outlines (see `outline->content`)
+  scale to the box of `target`, or keep their size with `exact?`. The
+  keyframes `target` cannot
   show (see `fits-keyframe?`) are left out, and so are the split presets
   (see `schema:preset-animation`) when it is no text; a style use goes
   whole, with all its entries. The track gets new keyframe and animation
@@ -3677,11 +3707,18 @@
            (cond-> (dissoc keyframe :id)
              (not exact?) (update :value #(relative-value property % from to)))))
 
+        outlines? (some #(= :content (:property %)) fits)
+
         track
         (-> track
             (assoc :shape-id (:id target))
             (assoc :keyframes (sort-keyframes (mapv retarget fits)))
             (dissoc :hidden :locked :animations)
+            (cond-> (not outlines?) (dissoc :outline-box))
+            ;; with their size: made for the box of the target as they
+            ;; are; else scaled with it
+            (cond-> (and outlines? exact?)
+              (assoc :outline-box (outline-box target)))
             (cond-> (seq kept)
               (assoc :animations (mapv #(make-animation (dissoc % :id :hidden :locked)) kept)))
             (prune-slot-flags))]
@@ -3768,9 +3805,19 @@
         pivot-kept? (and pivot? (pivot-motion? own))
         end         (reduce max 0 (track-times track))
 
+        ;; outlines go into the box of the row they join (see
+        ;; `outline->content`), a new row taking theirs
+        box         (:outline-box own)
+        keyframes   (cond-> (:keyframes track)
+                      (and (some? box) (some? (:outline-box track)))
+                      (rescale-outlines (:outline-box track) box))
+
         pasted
         (as-> cleared $
-          (reduce #(add-keyframe %1 shape-id %2) $ (:keyframes track))
+          (reduce #(add-keyframe %1 shape-id %2) $ keyframes)
+          (cond-> $
+            (and (nil? (dm/get-in $ [:tracks shape-id :outline-box])) (some? (:outline-box track)))
+            (assoc-in [:tracks shape-id :outline-box] (:outline-box track)))
           (reduce #(merge-animation %1 shape-id %2) $ (:animations track))
           (reduce #(d/update-in-when %1 [:tracks shape-id] update-slot-flag :loops conj %2)
                   $

@@ -769,7 +769,14 @@
            (when (some? keyframe)
              (st/emit! (dwa/set-keyframe-value shape-id kf-id hex)))))]
 
-    (if (cta/color-property? property)
+    (cond
+      ;; an outline, which the canvas edits (see `dwa/edit-outline`)
+      (= :content property)
+      [:span {:class (stl/css :row-value :row-outline)}
+       (tr "workspace.animation.path-nodes"
+           (if (some? value) (count (remove #(= :close-path (:command %)) value)) 0))]
+
+      (cta/color-property? property)
       [:div {:class (stl/css-case :row-color true :disabled disabled?)
              :title hint}
        [:> swatch* {:background {:color (or value "#000000") :opacity 1}
@@ -778,6 +785,8 @@
                          :class (stl/css :row-value)
                          :disabled disabled?
                          :on-change on-color}]]
+
+      :else
       [:> deprecated-input/numeric-input* {:class (stl/css :row-value)
                                            :value (some-> value (- offset) (->> (dwa/value->display property)))
                                            :is-disabled disabled?

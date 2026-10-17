@@ -471,6 +471,8 @@
      :shadow-opacity  (or (get-in (item-at (:shadow shape) index) [:color :opacity]) 1)
      :blur            (or (get-in shape [:blur :value]) 0)
      :background-blur (or (get-in shape [:background-blur :value]) 0)
+     ;; for a row made for the path as it is (see `cta/outline-value`)
+     :content         (when (= :path (:type shape)) (cta/outline-of shape))
      (get cta/trim-properties property))))
 
 (def transform-properties
@@ -485,7 +487,7 @@
    :trim-start :trim-end :trim-offset])
 
 (def animatable-properties
-  (into transform-properties (concat [:opacity :r1 :r2 :r3 :r4] appearance-properties)))
+  (into transform-properties (concat [:opacity :r1 :r2 :r3 :r4] appearance-properties [:content])))
 
 (defn- store-value
   [m property index v]
@@ -495,8 +497,9 @@
 
 (defn shape-values-at
   "The value each animatable property of `shape` shows at `time`:
-  interpolated from its keyframes when animated, otherwise its own.
-  Indexed properties nest as `{index value}`."
+  interpolated from its keyframes when animated, otherwise its own; for
+  a path, its outline too (see `cta/outline-value`). Indexed properties
+  nest as `{index value}`."
   [timeline objects shape time]
   (let [origin   (cta/position-origin timeline objects (:id shape))
         animated (-> (cta/resolve-animations timeline objects)
@@ -508,7 +511,11 @@
                                              (shape-property-value shape property origin))]))
                        (into transform-properties
                              (concat [:opacity :r1 :r2 :r3 :r4 :blur :background-blur]
-                                     (keys cta/trim-properties))))]
+                                     (keys cta/trim-properties))))
+        values   (cond-> values
+                   (= :path (:type shape))
+                   (assoc :content (or (:content animated)
+                                       (cta/outline-value shape (cta/get-track timeline (:id shape))))))]
     (reduce
      (fn [values {:keys [index properties]}]
        (reduce (fn [values property]
@@ -1015,11 +1022,12 @@
                  placed   (keep #(keyframe-at tl shape-id % time index) properties)
                  tl'      (if (seq placed)
                             (reduce #(cta/remove-keyframe %1 shape-id (:id %2)) tl placed)
-                            (reduce (fn [tl property]
-                                      (cta/add-keyframe tl shape-id
-                                                        (inserted-keyframe tl values shape-id property index time)))
-                                    tl
-                                    properties))
+                            (-> (reduce (fn [tl property]
+                                          (cta/add-keyframe tl shape-id
+                                                            (inserted-keyframe tl values shape-id property index time)))
+                                        tl
+                                        properties)
+                                (cta/ensure-outline-box shape)))
                  events   (cond-> [(commit-timeline it state (:board-id tl') tl')
                                    (apply-preview)]
                             (nil? existing)
@@ -1045,9 +1053,10 @@
                  (not (cta/slot-flag? tl shape-id :locked property index)))
           (let [id     (uuid/next)
                 values (row-values tl objects shape [property] index time)
-                tl'    (cta/add-keyframe tl shape-id
-                                         (-> (inserted-keyframe tl values shape-id property index time)
-                                             (assoc :id id)))]
+                tl'    (-> (cta/add-keyframe tl shape-id
+                                             (-> (inserted-keyframe tl values shape-id property index time)
+                                                 (assoc :id id)))
+                           (cta/ensure-outline-box shape))]
             (rx/of (commit-timeline it state (:board-id tl') tl')
                    (select-keyframe shape-id id)
                    (set-playhead time)))

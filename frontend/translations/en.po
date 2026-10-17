@@ -6297,6 +6297,10 @@ msgstr "Align top (%s)"
 msgid "workspace.animation.autoplay"
 msgstr "Play when the prototype shows the board"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.convert-to-path"
+msgstr "Convert to path to morph"
+
 #: src/app/main/ui/workspace/timeline/easing.cljs
 msgid "workspace.animation.easing-no-token"
 msgstr "None"
@@ -6674,6 +6678,14 @@ msgstr "Hide animation timeline"
 
 msgid "workspace.header.menu.show-timeline"
 msgstr "Show animation timeline"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs, src/app/util/motion_labels.cljs
+msgid "workspace.animation.path"
+msgstr "Path"
+
+#: src/app/main/ui/workspace/timeline.cljs
+msgid "workspace.animation.path-nodes"
+msgstr "%s nodes"
 
 msgid "workspace.animation.play"
 msgstr "Play / pause"
