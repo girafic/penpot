@@ -22,6 +22,7 @@
    [app.main.data.changes :as dch]
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace.animation :as dwa]
+   [app.main.data.workspace.path :as drp]
    [app.main.data.workspace.path.changes :as dwpc]
    [app.main.data.workspace.path.edition :as dwpe]
    [app.util.i18n :refer [tr]]
@@ -361,3 +362,58 @@
                    (ptk/update (dwpe/start-path-edit id)))]
     (t/is (true? (get-in state [:workspace-local :edit-path id :outline-edit])) "an edit of its outline")
     (t/is (nil? (get-in state [:workspace-animation :outline-edit-id])) "the request taken")))
+
+(defn- editing
+  "`state` editing the outline of :blob (the triangle) with the nodes
+  `nodes` selected, an outline edit with `outline?`."
+  [state nodes outline?]
+  (let [id   (thi/id :blob)
+        blob (get-in (thf/current-page (get-in state [:files (:current-file-id state)])) [:objects id])]
+    (-> state
+        (assoc-in [:workspace-drawing :object] blob)
+        (assoc-in [:workspace-local :edition] id)
+        (assoc-in [:workspace-local :edit-path id] {:edit-mode :move
+                                                    :selection {:nodes nodes :segments #{} :handlers #{}}
+                                                    :outline-edit outline?}))))
+
+(defn- edited-points
+  [state]
+  (mapv (fn [{:keys [params]}] [(:x params) (:y params)])
+        (filter #(not= :close-path (:command %)) (vec (get-in state [:workspace-drawing :object :content])))))
+
+(t/deftest the-first-point-tool-starts-the-outline-at-a-node
+  (let [state (editing (workspace-state (morph-file) 1000) #{2} true)
+        after (ptk/update (drp/start-at-node) state)]
+    (t/is (= [20 70] (first (edited-points after))) "from the selected node")
+    (t/is (= #{[20 30] [60 30] [20 70]} (set (edited-points after))) "the same triangle")
+    (t/is (true? (get-in after [:workspace-local :edit-path (thi/id :blob) :outline-fixed])) "set by hand")
+    (let [plain (editing state #{2} false)]
+      (t/is (= plain (ptk/update (drp/start-at-node) plain)) "only in an edit of an outline"))))
+
+(t/deftest the-direction-tool-turns-the-outline-around
+  (let [state (editing (workspace-state (morph-file) 1000) #{} true)
+        after (ptk/update (drp/reverse-direction) state)]
+    (t/is (= [[20 30] [20 70] [60 30]] (take 3 (edited-points after))) "every subpath, from the same start")
+    (t/is (true? (get-in after [:workspace-local :edit-path (thi/id :blob) :outline-fixed])))))
+
+(defn- content-keyframe
+  [page time]
+  (some #(when (and (= :content (:property %)) (= time (:time %))) %)
+        (get-in page [:timelines (thi/id :board-a) :tracks (thi/id :blob) :keyframes])))
+
+(t/deftest ^:async a-fixed-edit-marks-its-keyframe
+  (let [file  (morphing-file)
+        state (workspace-state file 1000)
+        blob  (get-in (thf/current-page file) [:objects (thi/id :blob)])
+        fixed (await (committed (dwa/set-outline-at-playhead (thi/id :blob) (:content blob) {:fixed? true}) state file))]
+    (t/is (true? (:fixed-start (content-keyframe fixed 1000))) "set by hand")
+    (let [file  (with-page file fixed)
+          plain (await (committed (dwa/set-outline-at-playhead (thi/id :blob) (path/move-content (:content blob) (gpt/point 0 5)))
+                                  (workspace-state file 1000) file))]
+      (t/is (true? (:fixed-start (content-keyframe plain 1000))) "a plain edit keeps it")
+      (let [file  (with-page file plain)
+            state (workspace-state file 1000)
+            done  (commits (await (emitted (dwa/set-outline-fixed (thi/id :blob) false) state)))
+            auto  (await (committed (dwa/set-outline-fixed (thi/id :blob) false) state file))]
+        (t/is (= 1 (count done)) "Auto in one undo step")
+        (t/is (nil? (:fixed-start (content-keyframe auto 1000))) "matched automatically again")))))

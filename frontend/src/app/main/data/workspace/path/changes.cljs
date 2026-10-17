@@ -35,6 +35,7 @@
             shape        (get objects id)
             old-content  (get-in state [:workspace-local :edit-path id :old-content])
             outline?     (get-in state [:workspace-local :edit-path id :outline-edit])
+            fixed?       (get-in state [:workspace-local :edit-path id :outline-fixed])
             edit-content (get-in state [:workspace-drawing :object :content])
             new-content  (some-> edit-content (normalize-content false))]
         (cond
@@ -50,7 +51,7 @@
           ;; `dwa/outline-edit`); one that draws nothing keeps what it has
           outline?
           (if (some #(not= :move-to (:command %)) new-content)
-            (rx/of (dwa/set-outline-at-playhead id new-content))
+            (rx/of (dwa/set-outline-at-playhead id new-content {:fixed? fixed?}))
             (rx/empty))
 
           (empty? new-content)

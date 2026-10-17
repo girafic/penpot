@@ -2750,34 +2750,57 @@
   itself left as it is, so that every other row keeps its place; a new
   row also keeps the outline the path has at 0. One undo step. A locked
   or hidden Path row keeps what it has, and an outline its row has no
-  room for (see `ctao/row-takes?`) stays out, with a warning."
-  [id content]
-  (ptk/reify ::set-outline-at-playhead
+  room for (see `ctao/row-takes?`) stays out, with a warning. With
+  `fixed?` its first point and way round were set by hand (see
+  `cta/set-outline-fixed`); without, the keyframe keeps what it had."
+  ([id content]
+   (set-outline-at-playhead id content nil))
+  ([id content {:keys [fixed?]}]
+   (ptk/reify ::set-outline-at-playhead
+     ptk/WatchEvent
+     (watch [it state _]
+       (let [objects (dsh/lookup-page-objects state)
+             shape   (get objects id)
+             tl      (current-timeline state)]
+         (if (and (= :path (:type shape))
+                  (some? tl)
+                  (not (cta/slot-flag? tl id :locked :content nil))
+                  (not (cta/slot-flag? tl id :hidden :content nil)))
+           (let [time     (playhead state)
+                 new-row? (not (some #(= :content (:property %))
+                                     (:keyframes (cta/get-track tl id))))
+                 at-0     (when (and new-row? (pos? time)) (ctao/outline-value shape nil))
+                 tl       (cond-> tl
+                            (some? at-0) (cta/set-outline-at shape 0 at-0))
+                 track    (cta/get-track tl id)
+                 value    (ctao/outline-value (assoc shape :content content) track)]
+             ;; the outline at 0 of a new row and the edit, both or none
+             (if (and (or (nil? at-0)
+                          (some #(and (= :content (:property %)) (= 0 (:time %))) (:keyframes track)))
+                      (outline-takes? tl id time value))
+               (let [tl (cond-> (cta/set-outline-at tl shape time value)
+                          fixed? (cta/set-outline-fixed id time true))]
+                 (rx/of (commit-timeline it state (:board-id tl) tl (uuid/next))
+                        (apply-preview)))
+               (rx/of (outline-too-large))))
+           (rx/empty)))))))
+
+(defn set-outline-fixed
+  "Hold the first point and the way round of the outline keyframe of the
+  path `id` at the playhead as they are (`fixed?`), or match them
+  automatically again (see `cta/set-outline-fixed`). One undo step."
+  [id fixed?]
+  (ptk/reify ::set-outline-fixed
     ptk/WatchEvent
     (watch [it state _]
-      (let [objects (dsh/lookup-page-objects state)
-            shape   (get objects id)
-            tl      (current-timeline state)]
-        (if (and (= :path (:type shape))
-                 (some? tl)
-                 (not (cta/slot-flag? tl id :locked :content nil))
-                 (not (cta/slot-flag? tl id :hidden :content nil)))
-          (let [time     (playhead state)
-                new-row? (not (some #(= :content (:property %))
-                                    (:keyframes (cta/get-track tl id))))
-                at-0     (when (and new-row? (pos? time)) (ctao/outline-value shape nil))
-                tl       (cond-> tl
-                           (some? at-0) (cta/set-outline-at shape 0 at-0))
-                track    (cta/get-track tl id)
-                value    (ctao/outline-value (assoc shape :content content) track)]
-            ;; the outline at 0 of a new row and the edit, both or none
-            (if (and (or (nil? at-0)
-                         (some #(and (= :content (:property %)) (= 0 (:time %))) (:keyframes track)))
-                     (outline-takes? tl id time value))
-              (let [tl (cta/set-outline-at tl shape time value)]
-                (rx/of (commit-timeline it state (:board-id tl) tl (uuid/next))
-                       (apply-preview)))
-              (rx/of (outline-too-large))))
+      (let [tl   (current-timeline state)
+            time (playhead state)]
+        (if (and (some? tl)
+                 (some #(and (= :content (:property %)) (= time (:time %)))
+                       (:keyframes (cta/get-track tl id))))
+          (let [tl (cta/set-outline-fixed tl id time fixed?)]
+            (rx/of (commit-timeline it state (:board-id tl) tl)
+                   (apply-preview)))
           (rx/empty))))))
 
 (defn toggle-auto-keyframe

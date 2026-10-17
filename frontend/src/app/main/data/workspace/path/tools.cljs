@@ -448,3 +448,53 @@
     (update [_ state]
       (let [id (st/get-path-id state)]
         (update-in state [:workspace-local :edit-path id :snap-toggled] not)))))
+
+;; THE FIRST POINT AND THE WAY ROUND OF AN OUTLINE KEYFRAME
+
+(defn- outline-edit?
+  "Whether the path edit in `state` edits an outline keyframe at the
+  playhead (see `dwa/outline-edit`)."
+  [state]
+  (true? (dm/get-in state [:workspace-local :edit-path (st/get-path-id state) :outline-edit])))
+
+(defn- fixed-start
+  "`state` after the path tool `tool`, the edit marked as setting the
+  first point or the way round of its outline by hand (see
+  `dwa/set-outline-at-playhead`) when the tool changed it."
+  [state tool]
+  (let [after (ptk/update tool state)]
+    (cond-> after
+      (not= (st/get-path state :content) (st/get-path after :content))
+      (assoc-in [:workspace-local :edit-path (st/get-path-id state) :outline-fixed] true))))
+
+(defn start-at-node
+  "Make the closed subpath of the selected node start at it (see
+  `path/start-subpath-at`): the first point of the outline keyframe the
+  edit makes, which goes to the first point of the keyframe before. Only
+  in an edit of an outline at the playhead."
+  []
+  (ptk/reify ::start-at-node
+    ptk/UpdateEvent
+    (update [_ state]
+      (if (outline-edit? state)
+        (fixed-start state (process-path-tool (fn [content points]
+                                                (path/start-subpath-at content (first points)))))
+        state))))
+
+(defn reverse-direction
+  "Make the subpaths of the selected nodes, or all of them without any,
+  go the other way round (see `path/reverse-subpaths-at`): the way round
+  of the outline keyframe the edit makes. Only in an edit of an outline
+  at the playhead."
+  []
+  (ptk/reify ::reverse-direction
+    ptk/UpdateEvent
+    (update [_ state]
+      (if (outline-edit? state)
+        (let [id       (st/get-path-id state)
+              content  (st/get-path state :content)
+              selected (helpers/selected-node-indices content (st/get-selection state id))]
+          (fixed-start state (process-path-tool (when (empty? selected) (set (path/get-points content)))
+                                                (fn [content points]
+                                                  (path/reverse-subpaths-at content (vec points))))))
+        state))))

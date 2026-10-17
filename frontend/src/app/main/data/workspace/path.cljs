@@ -63,6 +63,8 @@
 (dm/export tools/join-nodes)
 (dm/export tools/separate-nodes)
 (dm/export tools/toggle-snap)
+(dm/export tools/start-at-node)
+(dm/export tools/reverse-direction)
 (dm/export tools/set-handler-type)
 (dm/export tools/toggle-node-curve)
 (dm/export tools/toggle-segment-curve)

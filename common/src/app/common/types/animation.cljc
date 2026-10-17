@@ -1228,6 +1228,18 @@
                                  (split-timing timeline shape-id :content nil time))))
           (ctao/ensure-outline-box shape)))))
 
+(defn set-outline-fixed
+  "`timeline` with the outline keyframe of `shape-id` at `time` holding
+  its first point and way round by hand (`fixed?`, see `:fixed-start`
+  of `schema:keyframe`) or matched automatically again."
+  [timeline shape-id time fixed?]
+  (update-in timeline [:tracks shape-id :keyframes]
+             (fn [keyframes]
+               (some->> keyframes
+                        (mapv #(if (and (= :content (:property %)) (= time (:time %)))
+                                 (if fixed? (assoc % :fixed-start true) (dissoc % :fixed-start))
+                                 %))))))
+
 (defn looping?
   "Whether the keyframes of `property` (and optional `index`) of
   `shape-id` repeat over the timeline."
