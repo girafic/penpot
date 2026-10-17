@@ -67,20 +67,48 @@
                             {:command :close-path :params {}}])
         [a' b'] (morph/match [a b])]
     (t/is (morph/same-structure? a' b'))
-    (t/is (= [:move-to :curve-to :line-to :close-path] (commands a')))
-    (t/is (= (points a) (points a')) "the line keeps its course")))
+    (t/is (every? #{:move-to :curve-to :close-path} (commands a')) "all curves")
+    (t/is (= (set (points a)) (set (points a'))) "the lines keep their course")))
+
+(t/deftest a-square-into-a-heart-does-not-twist
+  ;; as many segments, but lines from a corner into curves from the point
+  ;; of the heart: the heart starts where it is closest to the square
+  (let [square (polygon [[0 0] [100 0] [100 100] [0 100]])
+        heart  (path/from-plain [{:command :move-to :params {:x 50 :y 100}}
+                                 {:command :curve-to :params {:c1x 30 :c1y 80 :c2x 0 :c2y 60 :x 0 :y 30}}
+                                 {:command :curve-to :params {:c1x 0 :c1y 0 :c2x 40 :c2y 0 :x 50 :y 20}}
+                                 {:command :curve-to :params {:c1x 60 :c1y 0 :c2x 100 :c2y 0 :x 100 :y 30}}
+                                 {:command :curve-to :params {:c1x 100 :c1y 60 :c2x 70 :c2y 80 :x 50 :y 100}}
+                                 {:command :close-path :params {}}])
+        [s' h'] (morph/match [square heart])
+        d       (fn [[x0 y0] [x1 y1]] (mth/hypot (- x1 x0) (- y1 y0)))]
+    (t/is (morph/same-structure? s' h'))
+    (t/is (< (reduce + (map d (points s') (points h')))
+             (reduce + (map d (points square) (points heart))))
+          "closer than point by point from where each starts")))
 
 (t/deftest a-circle-and-a-star-match
   (let [c       (circle 100 100 50)
         s       (star 100 100)
         [c' s'] (morph/match [c s])]
     (t/is (morph/same-structure? c' s'))
-    (t/is (= 10 (count (filter #{:curve-to} (commands c')))))
+    (t/is (= 20 (count (filter #{:curve-to} (commands c'))))
+          "four and ten as twenty, so that each splits evenly")
     (t/is (every? (fn [[x y]] (mth/close? 50 (mth/hypot (- x 100) (- y 100)) 0.5)) (points c'))
           "the circle split along itself")
-    (t/is (= (set (points s)) (set (map (fn [[x y]] [x y]) (points s'))))
+    (t/is (every? (set (points s')) (points s))
           "the star keeps its points")
     (t/is (some? (path/lerp c' s' 0.5)))))
+
+(t/deftest the-points-added-to-equal-sides-spread-evenly
+  ;; a line of seven equal steps against one of eleven (no small multiple
+  ;; of both): the four new points go to steps spread along it, not to
+  ;; the first four
+  (let [seven   (polygon (mapv (fn [i] [(* 10 i) 0]) (range 8)) :open? true)
+        eleven  (polygon (mapv (fn [i] [(* 7 i) 20]) (range 12)) :open? true)
+        [s' _]  (morph/match [seven eleven])]
+    (t/is (= [0 5 10 15 20 30 35 40 50 55 60 70]
+             (mapv (fn [[x _]] (mth/round x)) (points s'))))))
 
 (t/deftest an-open-line-and-a-circle-match
   (let [line    (polygon [[50 100] [150 100]] :open? true)
@@ -105,5 +133,5 @@
         [s' o'] (morph/match [square other])
         d       (fn [[x0 y0] [x1 y1]] (mth/hypot (- x1 x0) (- y1 y0)))]
     (t/is (morph/same-structure? s' o'))
-    (t/is (< (reduce + (map d (points s') (points o'))) 60)
+    (t/is (< (/ (reduce + (map d (points s') (points o'))) (count (points s'))) 10)
           "the points go the short way")))

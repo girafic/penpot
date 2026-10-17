@@ -18,6 +18,11 @@
   partner's: the search tries every start."
   1024)
 
+(def ^:private max-even-segments
+  "The most curves a subpath gets so that each of its outlines splits
+  evenly (see `target-count`)."
+  64)
+
 (defn same-structure?
   "Whether the contents `a` and `b` have the same segments, with the same
   command each."
@@ -146,10 +151,31 @@
             shares  (mapv #(if (pos? total) (* extra (/ % total)) (/ extra (double k))) lengths)
             pieces  (mapv #(inc (long (mth/floor %))) shares)
             left    (- n (reduce + pieces))
-            ;; the rest to those with the largest remainders
-            order   (sort-by #(- (- (nth shares %) (mth/floor (nth shares %)))) (range k))
-            pieces  (reduce #(update %1 %2 inc) pieces (take left order))]
+            ;; the rest to those with the largest remainders, spread
+            ;; evenly among those of one remainder (the sides of a star)
+            groups  (->> (range k)
+                         (group-by #(long (mth/round (* 1e6 (- (nth shares %) (mth/floor (nth shares %)))))))
+                         (sort-by key >)
+                         (map val))
+            picks   (loop [groups groups left left out []]
+                      (if (or (<= left 0) (empty? groups))
+                        out
+                        (let [g (first groups) m (count g) p (min left m)]
+                          (recur (rest groups) (- left p) (into out (map #(nth g (quot (* % m) p))) (range p))))))
+            pieces  (reduce #(update %1 %2 inc) pieces picks)]
         (into [] (mapcat (fn [p c m] (split-into p c m)) starts cs pieces))))))
+
+(defn- target-count
+  "How many curves a subpath of as many curves as `counts` (one for each
+  outline, none where it lacks the subpath) gets in all: their least
+  common multiple while it is small, so that each splits evenly (a circle
+  of four and a star of ten as twenty each), or else the most."
+  [counts]
+  (let [counts (filter pos? counts)
+        most   (reduce max 1 counts)
+        gcd    (fn [a b] (if (zero? b) a (recur b (mod a b))))
+        lcm    (reduce (fn [a b] (quot (* a b) (gcd a b))) 1 counts)]
+    (if (<= lcm max-even-segments) lcm most)))
 
 (defn- vertices
   "The start of each of the curves `cs` of a subpath starting at `start`."
@@ -204,86 +230,68 @@
                                        curves)})
                     subs)))
 
-(defn- match-commands
-  "`rows`, the subpaths of each content, with as many subpaths of as many
-  segments each: those whose commands differ at a place become curves
-  there in every one."
-  [rows]
-  (let [mixed? (fn [i j] (apply not= (map #(get-in % [i :segments j :command]) rows)))]
-    (mapv (fn [subs]
-            (mapv (fn [i {:keys [start segments] :as sub}]
-                    (assoc sub :segments
-                           (first
-                            (reduce (fn [[out p] j]
-                                      (let [segment (nth segments j)
-                                            segment (if (mixed? i j) (curve-from p segment) segment)]
-                                        [(conj out segment) (point-of segment)]))
-                                    [[] start]
-                                    (range (count segments))))))
-                  (range)
-                  subs))
-          rows)))
-
 (defn match
   "`contents`, the outlines of a row of keyframes, all of one structure
   (see `same-structure?`), so that each one morphs into the next:
-  - contents of one structure stay as they are;
-  - with as many subpaths of as many segments each, and open or closed
-    alike, the segments whose commands differ at a place become curves
-    there, and each point still goes to the point at its place;
+  - contents of one structure stay as they are, each point going to the
+    point at its place (as Lottie and SMIL play them);
   - otherwise every segment becomes a curve; a subpath one of them lacks
     is a point at the middle of the one it has; a subpath open in one is
-    open in all, a closed one going back to its start by a curve; the
-    subpath with fewer curves has its longer ones split until they are as
-    many; and a closed subpath whose curves were split starts, forwards
-    or backwards, where it is closest to the one before it."
+    open in all, a closed one going back to its start by a curve; each
+    subpath has its longer curves split until it has as many as the
+    others (see `target-count`); and a closed subpath that was not of one structure starts,
+    forwards or backwards, where it is closest to the one before it (a
+    square from a corner into a heart from its point does not twist)."
   [contents]
   (let [contents (vec contents)]
     (if (or (< (count contents) 2)
             (every? #(same-structure? (first contents) %) (rest contents)))
       contents
-      (let [rows  (mapv subpaths contents)
-            n     (apply max (map count rows))
-            shape (fn [subs] (mapv (juxt (comp count :segments) :closed?) subs))]
-        (if (and (apply = (map count rows)) (apply = (map shape rows)))
-          (mapv to-content (match-commands rows))
-          (let [partner (fn [i] (some #(get % i) rows))
-                open?   (fn [i] (some #(false? (:closed? (get % i))) rows))
-                ;; each subpath as curves, a missing one as a point
-                rows    (mapv (fn [subs]
-                                (mapv (fn [i]
-                                        (if-let [sub (get subs i)]
-                                          {:start (:start sub) :curves (curves sub)
-                                           :closed? (and (:closed? sub) (not (open? i)))}
-                                          {:start (centre (partner i)) :curves []
-                                           :closed? (and (:closed? (partner i)) (not (open? i)))}))
-                                      (range n)))
-                              rows)
-                counts  (mapv (fn [i] (map #(count (:curves (nth % i))) rows)) (range n))
-                ;; as many curves in each
-                rows    (mapv (fn [subs]
-                                (mapv (fn [i {:keys [start curves] :as sub}]
-                                        (let [m (apply max (nth counts i))]
-                                          (assoc sub :curves
-                                                 (if (empty? curves)
-                                                   (vec (repeat m [start start start]))
-                                                   (with-count start curves m)))))
-                                      (range)
-                                      subs))
-                              rows)
-                ;; the closed ones that were split start where they are
-                ;; closest to the one before
-                rows    (reduce (fn [out subs]
-                                  (let [prev (peek out)]
-                                    (conj out
-                                          (mapv (fn [i {:keys [start curves closed?] :as sub}]
-                                                  (if (and closed? (some? prev) (not (apply = (nth counts i))))
-                                                    (let [ref (nth prev i)
-                                                          [s c] (aligned start curves (:start ref) (:curves ref))]
-                                                      (assoc sub :start s :curves c))
-                                                    sub))
-                                                (range)
-                                                subs))))
-                                []
-                                rows)]
-            (mapv curve-content rows)))))))
+      (let [rows    (mapv subpaths contents)
+            n       (apply max (map count rows))
+            ;; the subpaths not of one structure in every content
+            mixed   (into #{}
+                          (filter (fn [i]
+                                    (not (apply = (map #(some-> (get % i) ((juxt :closed? (comp (partial mapv :command) :segments))))
+                                                       rows)))))
+                          (range n))
+            partner (fn [i] (some #(get % i) rows))
+            open?   (fn [i] (some #(false? (:closed? (get % i))) rows))
+            ;; each subpath as curves, a missing one as a point
+            rows    (mapv (fn [subs]
+                            (mapv (fn [i]
+                                    (if-let [sub (get subs i)]
+                                      {:start (:start sub) :curves (curves sub)
+                                       :closed? (and (:closed? sub) (not (open? i)))}
+                                      {:start (centre (partner i)) :curves []
+                                       :closed? (and (:closed? (partner i)) (not (open? i)))}))
+                                  (range n)))
+                          rows)
+            counts  (mapv (fn [i] (map #(count (:curves (nth % i))) rows)) (range n))
+            ;; as many curves in each
+            rows    (mapv (fn [subs]
+                            (mapv (fn [i {:keys [start curves] :as sub}]
+                                    (let [m (target-count (nth counts i))]
+                                      (assoc sub :curves
+                                             (if (empty? curves)
+                                               (vec (repeat m [start start start]))
+                                               (with-count start curves m)))))
+                                  (range)
+                                  subs))
+                          rows)
+            ;; the closed ones not of one structure start where they are
+            ;; closest to the one before
+            rows    (reduce (fn [out subs]
+                              (let [prev (peek out)]
+                                (conj out
+                                      (mapv (fn [i {:keys [start curves closed?] :as sub}]
+                                              (if (and closed? (some? prev) (contains? mixed i))
+                                                (let [ref (nth prev i)
+                                                      [s c] (aligned start curves (:start ref) (:curves ref))]
+                                                  (assoc sub :start s :curves c))
+                                                sub))
+                                            (range)
+                                            subs))))
+                            []
+                            rows)]
+        (mapv curve-content rows)))))
