@@ -3332,6 +3332,57 @@
   [timeline objects id]
   (ik-links* timeline (followers timeline objects) id))
 
+(defn- ik-verdicts
+  "`{effector [problem chain]}` for each layer of `timeline` (of
+  `objects`) with a goal, `follows` its followers (see `followers`): its
+  chain (see `ik-chains`) when it plays, else the first rule it breaks
+  (see `ik-problem`)."
+  [timeline objects follows]
+  (let [board-id (:board-id timeline)
+        layers   (juxt :a :b :e)
+        verdict  (fn [id goal]
+                   (if-let [{:keys [a b]} (ik-links* timeline follows id)]
+                     (if (and (contains? objects goal)
+                              (inside? objects goal board-id)
+                              (not (contains? #{a b id} goal))
+                              (not-any? #(nested-layers? objects goal %) [a b id]))
+                       [nil (merge {:a a :b b :e id} (ik-of timeline id))]
+                       [:goal nil])
+                     [:chain nil]))
+        verdicts (into {}
+                       (keep (fn [[id track]]
+                               (when-let [goal (dm/get-in track [:ik :goal])]
+                                 [id (verdict id goal)])))
+                       (:tracks timeline))
+        placed   (into {} (keep (fn [[id [problem chain]]] (when (nil? problem) [id chain]))) verdicts)
+        counts   (frequencies (mapcat layers (vals placed)))
+        shared?  (fn [chain] (not-every? #(= 1 (get counts %)) (layers chain)))
+        unshared (into {} (remove (comp shared? val)) placed)
+        goal-of  (into {}
+                       (mapcat (fn [chain] (map (fn [id] [id (:goal chain)]) (layers chain))))
+                       (vals unshared))
+        leader-of #(when (contains? follows %) (dm/get-in timeline [:tracks % :follow :leader]))
+        ;; whether `from` leads to one of `targets`, through follows and goals
+        reaches?  (fn [from targets]
+                    (loop [front [from] seen #{}]
+                      (if-let [id (peek front)]
+                        (cond
+                          (contains? targets id) true
+                          (contains? seen id)    (recur (pop front) seen)
+                          :else                  (recur (cond-> (pop front)
+                                                          (some? (leader-of id)) (conj (leader-of id))
+                                                          (some? (goal-of id))   (conj (goal-of id)))
+                                                        (conj seen id)))
+                        false)))]
+    (reduce-kv (fn [verdicts id chain]
+                 (assoc verdicts id
+                        (cond
+                          (shared? chain)                                 [:shared nil]
+                          (reaches? (:goal chain) (set (layers chain)))   [:loop nil]
+                          :else                                           [nil chain])))
+               verdicts
+               placed)))
+
 (defn ik-chains
   "The chains of `timeline` (of `objects`) whose end reaches a goal (see
   `schema:ik`) as they play: `{effector {:a :b :e :goal :bend :turn}}`,
@@ -3340,44 +3391,25 @@
   one; a layer may be in one chain only; and no goal may be led by a
   layer of its chain, through follows and the goals of other chains.
   The others play without reaching, every frame, as two edits from two
-  places may make a loop together. `follows`, its followers (see
-  `followers`), when the caller has them."
+  places may make a loop together (see `ik-problem`). `follows`, its
+  followers (see `followers`), when the caller has them."
   ([timeline objects]
    (ik-chains timeline objects (followers timeline objects)))
   ([timeline objects follows]
-   (let [board-id   (:board-id timeline)
-         candidates (into {}
-                          (keep (fn [[id track]]
-                                  (when-let [goal (dm/get-in track [:ik :goal])]
-                                    (when-let [{:keys [a b]} (ik-links* timeline follows id)]
-                                      (when (and (contains? objects goal)
-                                                 (inside? objects goal board-id)
-                                                 (not (contains? #{a b id} goal))
-                                                 (not-any? #(nested-layers? objects goal %) [a b id]))
-                                        [id (merge {:a a :b b :e id} (ik-of timeline id))])))))
-                          (:tracks timeline))
-         layers     (juxt :a :b :e)
-         counts     (frequencies (mapcat layers (vals candidates)))
-         candidates (into {} (filter (fn [[_ chain]] (every? #(= 1 (get counts %)) (layers chain)))) candidates)
-         goal-of    (into {}
-                          (mapcat (fn [chain] (map (fn [id] [id (:goal chain)]) (layers chain))))
-                          (vals candidates))
-         leader-of  #(when (contains? follows %) (dm/get-in timeline [:tracks % :follow :leader]))
-         ;; whether `from` leads to one of `targets`, through follows and goals
-         reaches?   (fn [from targets]
-                      (loop [front [from] seen #{}]
-                        (if-let [id (peek front)]
-                          (cond
-                            (contains? targets id) true
-                            (contains? seen id)    (recur (pop front) seen)
-                            :else                  (recur (cond-> (pop front)
-                                                            (some? (leader-of id)) (conj (leader-of id))
-                                                            (some? (goal-of id))   (conj (goal-of id)))
-                                                          (conj seen id)))
-                          false)))]
-     (into {}
-           (remove (fn [[_ chain]] (reaches? (:goal chain) (set (layers chain)))))
-           candidates))))
+   (into {}
+         (keep (fn [[id [problem chain]]] (when (nil? problem) [id chain])))
+         (ik-verdicts timeline objects follows))))
+
+(defn ik-problem
+  "Why the layer `id` of `timeline` (of `objects`) reaches its goal (see
+  `schema:ik`) no more as it plays: it ends no chain of two links that
+  follow at once (`:chain`, see `ik-links`), its goal is off the board,
+  in its chain or in or around one of its links (`:goal`), a link of its
+  chain is in another chain too (`:shared`), or its goal is led by its
+  chain, through follows and the goals of other chains (`:loop`). Nil
+  when it reaches, or has no goal."
+  [timeline objects id]
+  (first (get (ik-verdicts timeline objects (followers timeline objects)) id)))
 
 (defn- modifiers-opacity
   "The opacity `modifiers` give a shape, `default` when they give none."

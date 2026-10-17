@@ -252,6 +252,26 @@
         (.setIk timeline hand nil)
         (t/is (nil? (ik hand)) "null reaches none")))))
 
+(t/deftest a-plugin-hears-why-a-chain-cannot-reach
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[_ ^js context] (setup true)
+            [^js board [^js upper ^js fore ^js hand ^js ball ^js upper2 ^js fore2 ^js hand2 ^js thumb]]
+            (board-with-rects context 8)
+            ^js timeline (.addTimeline board)
+            refused      #(try (.setIk timeline %1 %2) nil
+                               (catch :default cause (ex-message cause)))]
+        (.setFollow timeline fore #js {:leader upper})
+        (.setFollow timeline hand #js {:leader fore})
+        (.setFollow timeline fore2 #js {:leader upper2})
+        (.setFollow timeline hand2 #js {:leader fore2})
+        (t/is (nil? (refused hand #js {:goal hand2})) "a hand reaches for a hand of another chain")
+        (.setIk timeline hand2 #js {:goal ball})
+        (t/is (str/includes? (str (refused hand2 #js {:goal hand})) "led by the chain") "each for the other")
+        (.setFollow timeline thumb #js {:leader fore})
+        (t/is (str/includes? (str (refused thumb #js {:goal ball})) "in one chain only") "a link in two chains")
+        (t/is (str/includes? (str (refused fore #js {:goal ball})) "chain of two follows"))))))
+
 (t/deftest keyframes-animate-the-layers
   (thw/with-wasm-mocks*
     (fn []

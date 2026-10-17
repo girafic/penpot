@@ -1778,14 +1778,17 @@
                              (and (some? end) (not (contains? #{"chain" "keep" "goal"} end)))
                              "end should be 'chain', 'keep' or 'goal'"
 
-                             (nil? (cta/ik-links timeline objects shape-id))
-                             (dm/str "The shape should end a chain of two follows: it follows a layer "
-                                     "with no delay, taking its position and rotation, which follows another so")
-
-                             (not (cltl/can-reach? objects timeline shape-id goal-id))
-                             (dm/str "The goal should be another layer of the board, out of the chain, "
-                                     "not in one of its layers nor holding one, not led by it, in no other "
-                                     "chain's layers, nor a layer of a component copy the board does not animate"))]
+                             :else
+                             (case (cltl/reach-problem objects timeline shape-id goal-id)
+                               :chain  (dm/str "The shape should end a chain of two follows: it follows a layer "
+                                               "with no delay, taking its position and rotation, which follows another so")
+                               :goal   (dm/str "The goal should be another layer of the board, out of the chain, "
+                                               "not in one of its layers nor holding one")
+                               :shared "A layer of the chain is in another chain too: a layer is in one chain only"
+                               :loop   (dm/str "The goal should not be led by the chain, through follows "
+                                               "or the goals of other chains")
+                               :copy   "The goal should not be a layer of a component copy the board does not animate"
+                               nil))]
               (if (some? error)
                 (u/not-valid plugin-id :setIk error)
                 (write! :setIk

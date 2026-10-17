@@ -1149,7 +1149,8 @@
   follows the upper arm, see `cta/ik-links`) or reaches one already: a
   layer of its board, chosen in the list, picked on the canvas or made
   new (`dwa/add-goal`); the side its elbow bends to and how it turns
-  itself. A broken chain keeps its goal, which it reaches once mended.
+  itself. A chain that cannot reach keeps its goal, which it reaches
+  once mended, and says why (see `cta/ik-problem`).
   The + of the title shows the section; its - reaches none."
   [{:keys [ids]}]
   (let [shape-id  (when (= 1 (count ids)) (first ids))
@@ -1163,8 +1164,9 @@
         ik        (when layer? (cta/ik-of timeline shape-id))
         chain?    (mf/with-memo [timeline objects shape-id layer?]
                     (and layer? (some? (cta/ik-links timeline objects shape-id))))
-        reaching? (mf/with-memo [timeline objects shape-id ik]
-                    (and (some? ik) (contains? (cta/ik-chains timeline objects) shape-id)))
+        ;; why it reaches its goal no more (see `cta/ik-problem`)
+        problem   (mf/with-memo [timeline objects shape-id ik]
+                    (when (some? ik) (cta/ik-problem timeline objects shape-id)))
         goals     (mf/with-memo [objects timeline shape-id chain?]
                     (when chain? (cltl/reach-goals objects timeline shape-id)))
         options   (mf/with-memo [goals objects]
@@ -1241,8 +1243,13 @@
 
        (when open?
          [:div {:class (stl/css :follow-rows)}
-          (when (and (some? ik) (not reaching?))
-            [:p {:class (stl/css :reach-broken)} (tr "workspace.animation.reach-broken")])
+          (when (some? problem)
+            [:p {:class (stl/css :reach-broken)}
+             (case problem
+               :goal   (tr "workspace.animation.reach-broken-goal")
+               :shared (tr "workspace.animation.reach-broken-shared")
+               :loop   (tr "workspace.animation.reach-broken-loop")
+               (tr "workspace.animation.reach-broken"))])
           (when chain?
             [:*
              [:> animation-row* {:label (tr "workspace.animation.reach-goal")}

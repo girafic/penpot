@@ -6880,6 +6880,18 @@ msgid "workspace.animation.reach-broken"
 msgstr "It follows no chain of two links at once: it plays without reaching."
 
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-broken-goal"
+msgstr "Its goal is off the board, in the chain or around a link of it: it plays without reaching."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-broken-shared"
+msgstr "A layer of its chain is in another chain too: it plays without reaching."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.reach-broken-loop"
+msgstr "Its goal moves with its own chain: it plays without reaching."
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
 msgid "workspace.animation.reach-bend"
 msgstr "Bend"
 

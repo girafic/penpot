@@ -5600,3 +5600,21 @@
         doc (alottie/timeline->lottie tl objects)]
     (t/is (not-any? :parent (:layers doc)) "its links play the turns that reach")
     (t/is (some? board))))
+
+(t/deftest an-ik-problem-names-the-rule-the-chain-breaks
+  (let [{:keys [tl objects arm-fore arm-hand goal] :as scene} (add-arm (arm-scene) "two" :y 200)
+        two     (:two-hand scene)
+        problem #(cta/ik-problem % objects arm-hand)
+        reach   (cta/set-ik tl arm-hand {:goal goal})]
+    (t/is (nil? (problem reach)) "it reaches")
+    (t/is (nil? (problem tl)) "no goal, no problem")
+    (t/is (= :chain (problem (cta/set-follow reach arm-hand {:leader arm-fore :delay 50}))))
+    (t/is (= :goal (problem (cta/set-ik tl arm-hand {:goal arm-fore}))))
+    (t/is (= :loop (problem (-> tl (cta/set-ik arm-hand {:goal two}) (cta/set-ik two {:goal arm-hand})))))
+    (t/is (nil? (problem (-> tl (cta/set-ik arm-hand {:goal two}) (cta/set-ik two {:goal goal}))))
+          "one hand reaches for the other")
+    (let [{:keys [thumb objects]} (add-layer scene :thumb 300 120)
+          tl (-> reach
+                 (cta/set-follow thumb {:leader arm-fore})
+                 (cta/set-ik thumb {:goal two}))]
+      (t/is (= :shared (cta/ik-problem tl objects arm-hand))))))

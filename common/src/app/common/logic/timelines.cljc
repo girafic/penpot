@@ -854,17 +854,27 @@
   (filterv #(can-follow? objects timeline shape-id %)
            (rest (layer-ids objects (:board-id timeline)))))
 
+(defn reach-problem
+  "Why the layer `id` of the board of `timeline` (of `objects`) cannot
+  reach the layer `goal` (see `cta/ik-problem`), or `:copy` for a layer
+  of a component copy the board does not animate itself, as what it
+  plays of its main moves no follower (see `can-follow?`); nil when it
+  can."
+  [objects timeline id goal]
+  (or (cta/ik-problem (cta/set-ik timeline id {:goal goal}) objects id)
+      (when (and (some? (dm/get-in objects [goal :shape-ref]))
+                 (not (contains? (:tracks timeline) goal)))
+        :copy)))
+
 (defn can-reach?
   "Whether the layer `id` of the board of `timeline` (of `objects`) can
   reach the layer `goal` (see `cta/schema:ik`): it ends a chain of two
   follows, and the goal is another layer of the board out of the chain,
   in none of its layers nor holding one, not led by it through follows
-  and the goals of other chains (see `cta/ik-chains`), nor a layer of a
-  component copy the board does not animate itself (see `can-follow?`)."
+  and the goals of other chains, nor a layer of a component copy the
+  board does not animate itself (see `reach-problem`)."
   [objects timeline id goal]
-  (and (contains? (cta/ik-chains (cta/set-ik timeline id {:goal goal}) objects) id)
-       (or (nil? (dm/get-in objects [goal :shape-ref]))
-           (contains? (:tracks timeline) goal))))
+  (nil? (reach-problem objects timeline id goal)))
 
 (defn reach-goals
   "The layers of the board of `timeline` (of `objects`) that `id` can
