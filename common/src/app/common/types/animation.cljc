@@ -32,6 +32,7 @@
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
+   [app.common.types.path.morph :as morph]
    [app.common.types.shape.interactions :as cti]
    [app.common.types.shape.layout :as ctl]
    [app.common.types.shape.radius :as ctsr]
@@ -2192,8 +2193,15 @@
 
 (defn- lerp-value
   [from to t]
-  (if (or (string? from) (string? to))
+  (cond
+    ;; outlines of one structure (see `match-outlines`), else the first
+    (path/content? from)
+    (or (when (path/content? to) (path/lerp from to t)) from)
+
+    (or (string? from) (string? to))
     (lerp-color from to t)
+
+    :else
     (lerp from to t)))
 
 (defn- bezier-value
@@ -2264,10 +2272,65 @@
     (assoc-in m [property index] v)
     (assoc m property v)))
 
+(defonce ^:private outline-rows-cache
+  (atom {}))
+
+(def ^:private outline-rows-cache-size
+  "The most rows of outlines whose matched outlines are kept (see
+  `matched-outlines`)."
+  256)
+
+(defn- matched-outlines
+  "The outlines `values` of a row of keyframes, in time order, matched to
+  one structure (see `morph/match`). Kept by the outlines, and kept as
+  they are for the matched ones, so that the rows every frame builds
+  anew match once."
+  [values]
+  (or (get @outline-rows-cache values)
+      (let [matched (morph/match values)]
+        (swap! outline-rows-cache
+               (fn [cache]
+                 (-> (if (< (count cache) outline-rows-cache-size) cache {})
+                     (assoc values matched matched matched))))
+        matched)))
+
+(defn- matched-row
+  "`keyframes`, the time-sorted keyframes of a row of outlines, with their
+  outlines matched to one structure (see `matched-outlines`)."
+  [keyframes]
+  (let [values  (mapv :value keyframes)
+        matched (matched-outlines values)]
+    (if (= values matched)
+      keyframes
+      (mapv #(assoc %1 :value %2) keyframes matched))))
+
+(defn match-outlines
+  "`timeline` with the outlines of each of its rows of `:content`
+  keyframes matched to one structure (see `morph/match`), so that each
+  one morphs into the next and every keyframe the exports make of them
+  (see `expand-springs`, `cut-timeline`) keeps it."
+  [timeline]
+  (if (some #(some (fn [kf] (= :content (:property kf))) (:keyframes %)) (vals (:tracks timeline)))
+    (update timeline :tracks
+            (fn [tracks]
+              (reduce-kv
+               (fn [tracks shape-id {:keys [keyframes] :as track}]
+                 (if (some #(= :content (:property %)) keyframes)
+                   (let [{rows true others false} (group-by #(= :content (:property %)) keyframes)
+                         rows (->> (group-by :index rows)
+                                   (vals)
+                                   (mapcat #(matched-row (sort-keyframes %))))]
+                     (assoc tracks shape-id (assoc track :keyframes (sort-keyframes (concat others rows)))))
+                   tracks))
+               tracks
+               tracks)))
+    timeline))
+
 (defn values-at
   "Return `{shape-id {property value}}` with the interpolated value of
   every animated property of every track of `timeline` at `time` (ms).
-  Indexed properties (fill, stroke, shadow) nest as `{index value}`."
+  Indexed properties (fill, stroke, shadow) nest as `{index value}`. The
+  outlines of a path morph into each other (see `match-outlines`)."
   [timeline time]
   (reduce-kv
    (fn [acc shape-id track]
@@ -2275,7 +2338,8 @@
            by-slot  (group-by keyframe-slot (:keyframes track))
            values   (reduce-kv
                      (fn [m [property index] keyframes]
-                       (let [keyframes (sort-keyframes keyframes)
+                       (let [keyframes (cond-> (sort-keyframes keyframes)
+                                         (= :content property) (matched-row))
                              time      (if (contains? loops (slot-key property index))
                                          (loop-time keyframes time)
                                          time)
@@ -3171,24 +3235,27 @@
   "Return `timeline` as it plays: its hidden rows left out and its preset
   animations turned into the keyframes they stand for, but the split
   animations that play the units of a text one by one, which stay the
-  `:animations` of its track (see `text-unit-entries`). Everything that
-  reads keyframes uses it: the preview, the playback and the exports."
+  `:animations` of its track (see `text-unit-entries`), and the outlines
+  of a path matched to morph into each other (see `match-outlines`).
+  Everything that reads keyframes uses it: the preview, the playback and
+  the exports."
   [timeline objects]
-  (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
-    (update timeline :tracks
-            (fn [tracks]
-              (reduce-kv (fn [tracks shape-id track]
-                           (let [track (resolve-track timeline objects shape-id (visible-track track))]
-                             ;; Nothing left to play once all of it is hidden;
-                             ;; a track that follows, reaches or holds the
-                             ;; pivot others turn around plays still.
-                             (if (and (empty? (:keyframes track)) (empty? (:animations track))
-                                      (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track)))
-                               (dissoc tracks shape-id)
-                               (assoc tracks shape-id track))))
-                         tracks
-                         tracks)))
-    timeline))
+  (match-outlines
+   (if (some #(or (seq (:animations %)) (seq (:hidden %))) (vals (:tracks timeline)))
+     (update timeline :tracks
+             (fn [tracks]
+               (reduce-kv (fn [tracks shape-id track]
+                            (let [track (resolve-track timeline objects shape-id (visible-track track))]
+                              ;; Nothing left to play once all of it is hidden;
+                              ;; a track that follows, reaches or holds the
+                              ;; pivot others turn around plays still.
+                              (if (and (empty? (:keyframes track)) (empty? (:animations track))
+                                       (nil? (:follow track)) (nil? (:ik track)) (nil? (:origin track)))
+                                (dissoc tracks shape-id)
+                                (assoc tracks shape-id track))))
+                          tracks
+                          tracks)))
+     timeline)))
 
 (def ^:private unit-rest
   "The values of a unit of a text at rest, where the text lays it out,

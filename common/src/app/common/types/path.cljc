@@ -64,6 +64,12 @@
   [content]
   (impl/check-content content))
 
+(defn lerp
+  "The content between the contents `a` and `b` of one structure at `t`
+  (see `impl/lerp`); nil when their structures differ."
+  [a b t]
+  (impl/lerp a b t))
+
 (defn get-byte-size
   "Get byte size of a path content"
   [content]

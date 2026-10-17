@@ -740,6 +740,31 @@
     :else
     (throw (ex-info "unexpected data" {:data data}))))
 
+(defn lerp
+  "The content between the contents `a` and `b` at `t` (`a` at 0, `b` at
+  1, past them beyond): every number of each segment taken that far from
+  the one of `a` to the one of `b`. Nil when they differ in structure,
+  in their number of segments or the command of one."
+  [a b t]
+  (let [size (count a)]
+    (when (= size (count b))
+      (let [ba     (.-buffer ^PathData a)
+            bb     (.-buffer ^PathData b)
+            buffer (buf/clone ba)]
+        (loop [index 0]
+          (if (< index size)
+            (let [offset (* index SEGMENT-U8-SIZE)]
+              (when (= (buf/read-short ba offset) (buf/read-short bb offset))
+                (loop [k 4]
+                  (when (<= k 24)
+                    (let [va (buf/read-float ba (+ offset k))
+                          vb (buf/read-float bb (+ offset k))]
+                      (buf/write-float buffer (+ offset k) (+ va (* (- vb va) t))))
+                    (recur (+ k 4))))
+                (recur (inc index))))
+            #?(:clj  (PathData. size buffer nil)
+               :cljs (PathData. size buffer (weak/weak-value-map) nil))))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SERIALIZATION
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

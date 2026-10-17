@@ -24,6 +24,7 @@
    [app.common.types.color :as clr]
    [app.common.types.modifiers :as ctm]
    [app.common.types.path :as path]
+   [app.common.types.path.morph :as morph]
    [app.common.types.shape :as cts]
    [app.common.types.text :as txt]
    [app.common.types.text-units :as tu]
@@ -5815,3 +5816,68 @@
     (t/is (cta/outline-fits? big))
     (t/is (not (cta/outline-row-fits? (repeat 9 {:property :content :value big}))))
     (t/is (cta/outline-row-fits? (repeat 8 {:property :content :value big})))))
+
+(defn- unique-polygon
+  "A closed polygon of `n` corners on a circle around a random middle, so
+  that no earlier match of the same outlines is kept."
+  [n r]
+  (let [cx (+ 100 (rand)) cy 100]
+    (plain-path (mapv (fn [i] (let [a (mth/radians (* i (/ 360 n)))]
+                                [(+ cx (* r (mth/cos a))) (+ cy (* r (mth/sin a)))]))
+                      (range n)))))
+
+(defn- outline-row
+  [tl sid]
+  (mapv :value (filter #(= :content (:property %)) (get-in tl [:tracks sid :keyframes]))))
+
+(t/deftest outlines-morph-into-each-other
+  (let [sid    (uuid/next)
+        a      (unique-polygon 4 50)
+        b      (unique-polygon 10 50)
+        tl     (-> (mk-timeline)
+                   (cta/add-keyframe sid {:time 0 :property :content :value a :easing :linear})
+                   (cta/add-keyframe sid {:time 1000 :property :content :value b}))
+        at     #(get-in (cta/values-at tl %) [sid :content])
+        [a' b'] (morph/match [a b])]
+    (t/is (morph/same-structure? (at 500) b') "between them, of their matched structure")
+    (t/is (= (vec (path/lerp a' b' 0.5)) (vec (at 500))))
+    (t/is (= (vec a') (vec (at 0))))
+    (t/is (= (vec b') (vec (at 1000))))
+    (let [near (at 999)]
+      (t/is (every? true? (map (fn [p q] (every? #(mth/close? (get-in p [:params %] 0) (get-in q [:params %] 0) 0.5) [:x :y]))
+                               (vec near) (vec b')))
+            "no jump at a keyframe"))))
+
+(t/deftest a-row-of-outlines-matches-once
+  (let [sid   (uuid/next)
+        calls (atom 0)
+        match morph/match
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe sid {:time 0 :property :content :value (unique-polygon 3 40)})
+                  (cta/add-keyframe sid {:time 1000 :property :content :value (unique-polygon 6 40)})
+                  (cta/add-animation sid {:type :fade :start 0 :duration 500}))]
+    (with-redefs [morph/match (fn [values] (swap! calls inc) (match values))]
+      (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 300)
+      (cta/values-at (cta/resolve-animations tl {sid {:id sid}}) 600))
+    (t/is (= 1 @calls) "rows built anew each time match once")))
+
+(t/deftest the-exports-keep-the-structure-of-outlines
+  (let [sid      (uuid/next)
+        tl       (-> (mk-timeline)
+                     (assoc :playback :ping-pong)
+                     (cta/add-keyframe sid {:time 0 :property :content :value (unique-polygon 3 40)
+                                            :easing {:type :spring :stiffness 300 :damping 10 :mass 1}})
+                     (cta/add-keyframe sid {:time 600 :property :content :value (unique-polygon 7 40)
+                                            :interpolation :step})
+                     (cta/add-keyframe sid {:time 900 :property :content :value (unique-polygon 5 40)})
+                     (cta/toggle-loop sid :content))
+        expanded (-> tl
+                     (cta/resolve-animations {})
+                     (cta/expand-loops)
+                     (cta/expand-springs)
+                     (cta/cut-timeline)
+                     (cta/expand-ping-pong))
+        row      (outline-row expanded sid)]
+    (t/is (< 3 (count row)) "a spring, loops and the way back as keyframes")
+    (t/is (every? #(morph/same-structure? (first row) %) row) "all of one structure")
+    (t/is (every? (fn [content] (every? (fn [s] (every? #(mth/finite? (get-in s [:params %] 0)) [:x :y])) (vec content))) row))))
