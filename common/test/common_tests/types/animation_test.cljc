@@ -5975,3 +5975,40 @@
           kf     (d/seek #(= 0 (:time %)) (:keyframes row))]
       (t/is (= [80.0 40.0] (outline-size (cta/outline->content dst row (:value kf))))
             "into the box of the row it joins"))))
+
+(t/deftest recording-a-path-tells-moves-from-reshapes
+  (let [board    (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        shape    (assoc (path-layer triangle) :r1 0 :r2 0 :r3 0 :r4 0)
+        [bid id] (map :id [board shape])
+        shape    (assoc shape :parent-id bid :frame-id bid)
+        objects  #(hash-map bid (assoc board :shapes [id]) id %)
+        moved    (gsh/transform-shape shape (ctm/move-modifiers 30 0))
+        turned   (gsh/transform-shape shape (ctm/rotation-modifiers shape (gsh/shape->center shape) 45))
+        resized  (gsh/transform-shape shape (ctm/resize-modifiers (gpt/point 2 2) (gpt/point 20 30)))
+        reshaped (path/update-geometry shape (plain-path [[20 30] [60 30] [40 70]]))
+        recorded (fn [after]
+                   (->> (cta/record-unanimated (cta/make-timeline {:board-id bid :duration 1000})
+                                               (objects shape) (objects after) [id] 500)
+                        :tracks vals (mapcat :keyframes) (map :property) set))]
+    (t/is (= :none (cta/outline-change shape moved)))
+    (t/is (= :none (cta/outline-change shape turned)))
+    (t/is (= :none (cta/outline-change turned (gsh/transform-shape turned (ctm/rotation-modifiers turned (gsh/shape->center turned) -45))))
+          "turned back, the noise of the floats aside")
+    (t/is (= :resize (cta/outline-change shape resized)))
+    (t/is (= :reshape (cta/outline-change shape reshaped)))
+    (t/is (= #{:x} (recorded moved)) "with REC, a move records where it went")
+    (t/is (= #{:rotation} (recorded turned)))
+    (t/is (= #{:width :height} (recorded resized)))
+    (t/is (empty? (recorded reshaped)) "a reshape records nothing")))
+
+(t/deftest an-outline-is-set-at-a-time
+  (let [shape (path-layer triangle)
+        id    (:id shape)
+        flat  (plain-path [[0 0] [40 0] [40 20]])
+        tl    (cta/set-outline-at (mk-timeline) shape 500 flat)
+        row   #(get-in % [:tracks id])]
+    (t/is (= [500] (mapv :time (:keyframes (row tl)))))
+    (t/is (= (cta/outline-box shape) (:outline-box (row tl))) "a new row made for its box")
+    (let [again (cta/set-outline-at tl shape 500 (cta/outline-of shape))]
+      (t/is (= 1 (count (:keyframes (row again)))) "the one there changes")
+      (t/is (= (str (cta/outline-of shape)) (str (:value (first (:keyframes (row again))))))))))

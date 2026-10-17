@@ -1070,6 +1070,35 @@
                (update :value path/transform-content (gmt/scale-matrix scale)))
             keyframes))))
 
+(defn- close-outlines?
+  "Whether the outlines `a` and `b` have one structure and their points
+  are within `tolerance` of each other."
+  [a b tolerance]
+  (and (= (count a) (count b))
+       (every? true? (map (fn [sa sb]
+                            (and (= (:command sa) (:command sb))
+                                 (every? #(mth/close? (dm/get-in sa [:params %] 0) (dm/get-in sb [:params %] 0) tolerance)
+                                         [:x :y :c1x :c1y :c2x :c2y])))
+                          a b))))
+
+(defn outline-change
+  "How an edit changed the outline of the path from `before` to `after`
+  (see `outline-of`): `:none` when it only moved, turned or flipped it,
+  `:resize` when it scaled it with its box, `:reshape` otherwise; within
+  0.01 px, the noise of the floats of path content."
+  [before after]
+  (let [old (outline-of before)
+        new (outline-of after)]
+    (cond
+      (close-outlines? old new 0.01)
+      :none
+
+      (close-outlines? (outline-value before {:outline-box (outline-box after)}) new 0.01)
+      :resize
+
+      :else
+      :reshape)))
+
 (defn outline->content
   "The content of the path `shape` drawing the outline `value`, a
   keyframe of the row `track` (see `outline-value`), where the path
@@ -1316,6 +1345,23 @@
     (if (some? previous)
       (select-keys previous [:easing :interpolation])
       {:easing :ease})))
+
+(defn set-outline-at
+  "`timeline` with the outline keyframe of the path `shape` at `time`
+  holding `value` (see `outline-value`): the one there changed, or a new
+  one with the timing of the segment it splits; a new row made for the
+  box of the path."
+  [timeline shape time value]
+  (let [shape-id (:id shape)
+        existing (d/seek #(and (= :content (:property %)) (= time (:time %)))
+                         (dm/get-in timeline [:tracks shape-id :keyframes]))]
+    (-> (if (some? existing)
+          (update-in timeline [:tracks shape-id :keyframes]
+                     (partial mapv #(cond-> % (= (:id existing) (:id %)) (assoc :value value))))
+          (add-keyframe timeline shape-id
+                        (merge {:time time :property :content :value value}
+                               (split-timing timeline shape-id :content nil time))))
+        (ensure-outline-box shape))))
 
 (defn looping?
   "Whether the keyframes of `property` (and optional `index`) of
@@ -4009,9 +4055,10 @@
   does with auto-keyframe on (`record-edit` takes the animated ones).
   Each gets a keyframe with its new value there and, past the start, one
   with the value before at 0, so the change plays. `before` and `after`
-  are the objects before and after the edit. A shape whose path or text
-  changes records nothing, nor do fills, strokes and shadows added or
-  removed."
+  are the objects before and after the edit. A shape whose text changes
+  records nothing, nor does a path reshaped (moved, turned or resized it
+  records as any layer, see `outline-change`) or a boolean whose outline
+  changes, nor fills, strokes and shadows added or removed."
   [timeline before after shape-ids time]
   (let [board-id (:board-id timeline)
 
@@ -4031,7 +4078,9 @@
                              (map (juxt :property :index))
                              (dm/get-in timeline [:tracks shape-id :keyframes]))]
          (if (or (nil? old-shape) (nil? new-shape)
-                 (not= (:content old-shape) (:content new-shape)))
+                 (if (and (= :path (:type old-shape)) (= :path (:type new-shape)))
+                   (= :reshape (outline-change old-shape new-shape))
+                   (not= (:content old-shape) (:content new-shape))))
            timeline
            (let [timeline
                  (reduce (fn [timeline property]
