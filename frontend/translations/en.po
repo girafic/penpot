@@ -6844,6 +6844,10 @@ msgid "workspace.animation.follow-pick"
 msgstr "Pick the leader on the canvas or in the layers"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.follow-tilt"
+msgstr "3D rotation"
+
 msgid "workspace.animation.follow-delay"
 msgstr "Delay"
 

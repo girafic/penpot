@@ -1074,6 +1074,7 @@
   [[:position #(tr "workspace.animation.position")]
    [:rotation #(tr "workspace.options.rotation")]
    [:scale #(tr "workspace.animation.scale")]
+   [:tilt #(tr "workspace.animation.follow-tilt")]
    [:opacity #(tr "workspace.options.opacity")]])
 
 (mf/defc follow-menu*

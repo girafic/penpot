@@ -276,13 +276,16 @@
         (.setFollow timeline badge #js {:leader card :delay 100})
         (t/is (= {:leader (aget card "$id") :delay 100} (:follow (stored-track store context board badge)))
               "the defaults left out")
-        (t/is (= {:leader (aget card "$id") :from "start" :position true :rotation true :scale true :opacity false :delay 100}
+        (t/is (= {:leader (aget card "$id") :from "start" :position true :rotation true :scale true :tilt true
+                  :opacity false :delay 100}
                  (follow badge)))
         (.setFollow timeline badge #js {:leader card :delay 100 :from "rest"})
         (t/is (= "rest" (:from (follow badge))) "from where the card rests")
         (t/is (= :rest (get-in (stored-track store context board badge) [:follow :from])))
         (.setFollow timeline badge #js {:leader card :rotation false})
         (t/is (false? (:rotation (follow badge))))
+        (.setFollow timeline badge #js {:leader card :tilt false})
+        (t/is (false? (:tilt (follow badge))) "its tilt too")
         (t/testing "a leader it cannot follow is refused"
           (t/is (thrown? js/Error (.setFollow timeline card #js {:leader badge})) "one that follows it")
           (t/is (thrown? js/Error (.setFollow timeline badge #js {:leader board})) "the board it is in")

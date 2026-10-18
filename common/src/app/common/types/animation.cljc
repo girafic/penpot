@@ -350,15 +350,17 @@
   its first frame on (`:from` `:start`) or from where it rests (`:rest`,
   as a layer of a group does), the parts it takes: where its pivot goes
   (`:position`), how it turns and scales around that pivot
-  (`:rotation`, `:scale`) and its opacity (`:opacity`). The defaults
-  (from the first frame; position, rotation and scale; no opacity; no
-  delay) are stored as absence."
+  (`:rotation`, `:scale`), how it tilts (`:tilt`, its 3D rotation, see
+  `app.common.geom.tilt`) and its opacity (`:opacity`). The defaults
+  (from the first frame; position, rotation, scale and tilt; no opacity;
+  no delay) are stored as absence."
   [:map {:title "AnimationFollow"}
    [:leader ::sm/uuid]
    [:from {:optional true} [:enum :start :rest]]
    [:position {:optional true} :boolean]
    [:rotation {:optional true} :boolean]
    [:scale {:optional true} :boolean]
+   [:tilt {:optional true} :boolean]
    [:opacity {:optional true} :boolean]
    [:delay {:optional true} ::sm/safe-int]])
 
@@ -1004,7 +1006,7 @@
       (assoc-in timeline [:tracks shape-id :origin] {:x ox :y oy}))))
 
 (def ^:private follow-defaults
-  {:from :start :position true :rotation true :scale true :opacity false :delay 0})
+  {:from :start :position true :rotation true :scale true :tilt true :opacity false :delay 0})
 
 (defn follow-of
   "How `shape-id` follows another layer of the board of `timeline` (see
@@ -1021,7 +1023,7 @@
   left out."
   [timeline shape-id follow]
   (if (some? (:leader follow))
-    (let [follow (-> (select-keys follow [:leader :from :position :rotation :scale :opacity :delay])
+    (let [follow (-> (select-keys follow [:leader :from :position :rotation :scale :tilt :opacity :delay])
                      (d/update-when :delay #(int (mth/round %))))
           stored (into {} (remove (fn [[k v]] (= v (get follow-defaults k ::none)))) follow)]
       (-> (ensure-track timeline shape-id)
@@ -2704,7 +2706,9 @@
   outline of a path (`:content`, where it rests). Its geometry takes the
   transform path."
   #{:opacity :r1 :r2 :r3 :r4 :fills :strokes :shadow :blur :background-blur
-    :trim-start :trim-end :trim-offset :text-units :content})
+    :trim-start :trim-end :trim-offset :text-units :content
+    ;; the tilt, drawn and not kept in the geometry (see `app.common.geom.tilt`)
+    :rotate-x :rotate-y :tilt-pivot})
 
 (defn appearance-changes
   "`{attr value}` of the `appearance-attrs` that `modifiers` change, or nil.

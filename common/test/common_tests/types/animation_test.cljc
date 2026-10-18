@@ -4874,7 +4874,7 @@
 (t/deftest a-follow-reads-with-its-defaults
   (let [{:keys [leader follower]} (follow-scene)
         tl (cta/set-follow (mk-timeline) follower {:leader leader :delay 100})]
-    (t/is (= {:leader leader :from :start :position true :rotation true :scale true :opacity false :delay 100}
+    (t/is (= {:leader leader :from :start :position true :rotation true :scale true :tilt true :opacity false :delay 100}
              (cta/follow-of tl follower)))
     (t/is (= {:leader leader :delay 100} (get-in tl [:tracks follower :follow])) "the defaults left out")
     (t/is (cta/valid-timeline? tl))
@@ -4958,6 +4958,24 @@
           "not by default")
     (t/is (mth/close? 0.5 (:opacity (shown-at (cta/set-follow tl follower {:leader leader :opacity true})
                                               objects follower 1000))))))
+
+(t/deftest a-follower-takes-the-tilt-of-its-leader
+  (let [{:keys [leader follower objects]} (follow-scene)
+        objects (assoc-in objects [follower :rotate-y] 10)
+        tl      (-> (mk-timeline)
+                    (cta/add-keyframe leader {:time 0 :property :rotate-y :value 0 :easing :linear})
+                    (cta/add-keyframe leader {:time 1000 :property :rotate-y :value 60}))
+        tilt    #(:rotate-y (shown-at %1 objects follower %2))]
+    (t/is (mth/close? 70 (tilt (cta/set-follow tl follower {:leader leader}) 1000))
+          "its own tilt and the change of the leader's")
+    (t/is (mth/close? 40 (tilt (cta/set-follow tl follower {:leader leader :delay 500}) 1000))
+          "a delay later")
+    (t/is (mth/close? 10 (tilt (cta/set-follow tl follower {:leader leader :tilt false}) 1000))
+          "not when it takes no tilt")
+    (t/testing "baked for the exports"
+      (let [baked (ctaf/bake-follows (cta/set-follow tl follower {:leader leader}) objects)]
+        (t/is (mth/close? 70 (:value (peek (filterv #(= :rotate-y (:property %))
+                                                    (get-in baked [:tracks follower :keyframes]))))))))))
 
 (t/deftest follows-chain-and-cycles-play-none
   (let [{:keys [leader follower objects]} (follow-scene)

@@ -1784,13 +1784,14 @@
       :followOf
       (fn [shape]
         (when-let [shape-id (layer :followOf shape)]
-          (when-let [{:keys [leader from position rotation scale opacity delay]}
+          (when-let [{:keys [leader from position rotation scale tilt opacity delay]}
                      (cta/follow-of (locate) shape-id)]
             #js {:leader (shape-proxy plugin-id file-id page-id leader)
                  :from (name from)
                  :position position
                  :rotation rotation
                  :scale scale
+                 :tilt tilt
                  :opacity opacity
                  :delay delay})))
 
@@ -1806,7 +1807,7 @@
                                   (keep (fn [part]
                                           (let [value (prop (name part))]
                                             (when (some? value) [part value]))))
-                                  [:position :rotation :scale :opacity])
+                                  [:position :rotation :scale :tilt :opacity])
                   delay     (prop "delay")
                   from      (prop "from")
                   objects   (u/locate-objects file-id page-id)
@@ -1819,7 +1820,7 @@
                               "The leader should be a shape"
 
                               (not-every? boolean? (vals parts))
-                              "position, rotation, scale and opacity should be true or false"
+                              "position, rotation, scale, tilt and opacity should be true or false"
 
                               (and (some? delay) (not (valid-time? delay)))
                               "The delay should be a number of milliseconds from 0"

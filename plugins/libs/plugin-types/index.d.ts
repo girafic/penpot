@@ -4935,6 +4935,12 @@ export interface Follow {
   readonly scale: boolean;
 
   /**
+   * Whether it tilts as the leader does: the change of the leader's 3D
+   * rotation (`rotateX`, `rotateY`), around its own pivot.
+   */
+  readonly tilt: boolean;
+
+  /**
    * Whether its opacity is multiplied by the leader's.
    */
   readonly opacity: boolean;
@@ -4976,6 +4982,12 @@ export interface FollowProps {
    * Scale with the leader, around its pivot. `true` by default.
    */
   scale?: boolean;
+
+  /**
+   * Tilt as the leader does (its 3D rotation, `rotateX` and `rotateY`),
+   * around its own pivot. `true` by default.
+   */
+  tilt?: boolean;
 
   /**
    * Multiply its opacity by the leader's. `false` by default.

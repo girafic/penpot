@@ -157,13 +157,40 @@
   [timeline objects id]
   (first (get (ik-verdicts timeline objects (followers timeline objects)) id)))
 
+(defn- modifiers-value
+  "The value of `prop` `modifiers` give a shape, `default` when they give
+  none."
+  [modifiers prop default]
+  (or (some (fn [{:keys [type property value]}]
+              (when (and (= :change-property type) (= prop property)) value))
+            (rseq (vec (:structure-parent (or modifiers (ctm/empty))))))
+      default))
+
 (defn- modifiers-opacity
   "The opacity `modifiers` give a shape, `default` when they give none."
   [modifiers default]
-  (or (some (fn [{:keys [type property value]}]
-              (when (and (= :change-property type) (= :opacity property)) value))
-            (rseq (vec (:structure-parent modifiers))))
-      default))
+  (modifiers-value modifiers :opacity default))
+
+(defn- follow-tilt
+  "`mods` of the layer `shape` (its track `track`) with the change of the
+  tilt of its leader `leader` since `start` (the modifiers it counts
+  from, nil for where it rests) to `played` (see
+  `app.common.geom.tilt`): its own tilt and that change, around its own
+  pivot."
+  [mods shape track leader played start]
+  (let [tilt   (fn [modifiers shape property]
+                 (modifiers-value modifiers property (or (get shape property) 0)))
+        dx     (- (tilt played leader :rotate-x) (tilt start leader :rotate-x))
+        dy     (- (tilt played leader :rotate-y) (tilt start leader :rotate-y))]
+    (if (and (mth/almost-zero? dx) (mth/almost-zero? dy))
+      mods
+      (let [{:keys [x y]} (cta/track-origin track)]
+        (-> mods
+            (ctm/change-property :rotate-x (+ (tilt mods shape :rotate-x) dx))
+            (ctm/change-property :rotate-y (+ (tilt mods shape :rotate-y) dy))
+            (ctm/change-property :tilt-pivot {:x x :y y
+                                              :rest-x (or (:rotate-x shape) 0)
+                                              :rest-y (or (:rotate-y shape) 0)}))))))
 
 (defn- change-turn
   "The turn (degrees) nearest to the linear part of the matrix `change`,
@@ -382,6 +409,11 @@
                                    pivot   (gpt/transform lpivot start)
                                    moved   (ctm/add-modifiers mods (follow-modifiers follow change pivot))]
                                (cond-> moved
+                                 (:tilt follow)
+                                 (follow-tilt (get objects id) (cta/get-track timeline id) lshape lplayed
+                                              (when-not (= :rest (:from follow))
+                                                (or (played leader 0 :none) (ctm/empty))))
+
                                  (:opacity follow)
                                  (ctm/change-property
                                   :opacity
@@ -484,7 +516,8 @@
 (def ^:private bake-tolerances
   "How far the keyframes a follow bakes into (see `bake-follows`) may miss
   it: a quarter pixel or degree, a little scale and opacity."
-  {:x 0.25 :y 0.25 :rotation 0.25 :scale-x 0.002 :scale-y 0.002 :opacity 0.004})
+  {:x 0.25 :y 0.25 :rotation 0.25 :scale-x 0.002 :scale-y 0.002 :opacity 0.004
+   :rotate-x 0.25 :rotate-y 0.25})
 
 (defn- thin-samples
   "The fewest of `samples` (`[time value]`, by time) that linear
@@ -549,7 +582,9 @@
     (cond-> (assoc values
                    :x (+ rest-x (- (:x target) (:x probe)))
                    :y (+ rest-y (- (:y target) (:y probe)))
-                   :opacity (modifiers-opacity played (:opacity shape 1)))
+                   :opacity (modifiers-opacity played (:opacity shape 1))
+                   :rotate-x (modifiers-value played :rotate-x (or (:rotate-x shape) 0))
+                   :rotate-y (modifiers-value played :rotate-y (or (:rotate-y shape) 0)))
       ;; shrunk to nothing (a leader flipping through 0), it has no turn
       (< scale 1e-6) (assoc :rotation nil))))
 
@@ -567,7 +602,9 @@
                   :y (cta/rest-value shape :y origin)
                   :rotation (cta/rest-value shape :rotation origin)
                   :scale-x 1 :scale-y 1
-                  :opacity (:opacity shape 1)}
+                  :opacity (:opacity shape 1)
+                  :rotate-x (or (:rotate-x shape) 0)
+                  :rotate-y (or (:rotate-y shape) 0)}
         baked    (into {}
                        (keep (fn [property]
                                (let [tol     (get bake-tolerances property)
