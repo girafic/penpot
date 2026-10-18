@@ -216,6 +216,11 @@ pub struct Shape {
     pub tilt: Option<Tilt>,
     /// Hide the layer while its back faces the viewer.
     pub backface_hidden: bool,
+    /// How far, px, the layer comes towards the viewer, in the space of its
+    /// parent (see `math::tilt`).
+    pub translate_z: f32,
+    /// Whether a group or board is a 3D space (see `three_d_space`).
+    pub preserve_3d: bool,
     /// How far the viewer of the tilted layers of this board is, px; `None`
     /// is `math::tilt::DEFAULT_PERSPECTIVE`.
     pub perspective: Option<f32>,
@@ -332,6 +337,8 @@ impl Shape {
             backface_hidden: false,
             perspective: None,
             perspective_origin: (0.5, 0.5),
+            translate_z: 0.0,
+            preserve_3d: false,
         }
     }
 
@@ -515,8 +522,92 @@ impl Shape {
         self.centered_transform().map_point(point)
     }
 
+    /// How far the layer comes towards the viewer (see `translate_z`), and
+    /// whether it is a 3D space (see `three_d_space`). Its extrect is that
+    /// of the layer as it shows.
+    pub fn set_depth(&mut self, z: f32, preserve_3d: bool) {
+        self.translate_z = z;
+        self.preserve_3d = preserve_3d;
+        self.invalidate_extrect();
+    }
+
     pub fn is_tilted(&self) -> bool {
         self.tilt.is_some()
+    }
+
+    /// Whether the layer leaves the plane: it tilts or comes out of it.
+    pub fn is_three_d(&self) -> bool {
+        self.tilt.is_some() || self.translate_z.abs() > 1e-6
+    }
+
+    /// Whether this group or board is a 3D space: set `preserve_3d`, not
+    /// clipping, with nothing that would flatten what it holds into its
+    /// plane (an opacity, a blur, a shadow, a blend or a mask), as CSS
+    /// flattens a `preserve-3d` element. What it holds draws back to front.
+    pub fn three_d_space(&self) -> bool {
+        self.preserve_3d
+            && match &self.shape_type {
+                Type::Group(_) => !self.is_masked_group(),
+                Type::Frame(_) => !self.clip_content,
+                _ => false,
+            }
+            && self.opacity >= 0.999
+            && self.shadows.iter().all(|s| s.hidden())
+            && self.blur.is_none_or(|b| b.hidden || b.value <= 0.0)
+            && self.blend_mode() == BlendMode::default()
+    }
+
+    /// Whether this is a group that is a 3D space (see `three_d_space`): it
+    /// draws nothing of its own, its tilt and depth go into those of what it
+    /// holds.
+    pub fn is_space_group(&self) -> bool {
+        matches!(self.shape_type, Type::Group(_)) && self.three_d_space()
+    }
+
+    /// Where this layer takes the points of the page in space (see
+    /// `math::tilt::model44`).
+    pub fn model44(&self) -> Option<tilt::M44> {
+        tilt::model44(
+            &self.selrect,
+            &self.centered_transform(),
+            self.tilt.as_ref(),
+            self.translate_z,
+        )
+    }
+
+    /// Where this layer and the 3D space groups it is in take the points of
+    /// the page in space, `None` when all stay in the plane, and the
+    /// outermost of them.
+    pub fn space_chain<'a>(
+        &'a self,
+        shapes_pool: ShapesPoolRef<'a>,
+    ) -> (Option<tilt::M44>, &'a Shape) {
+        let mut m = self.model44();
+        let mut top = self;
+        while let Some(parent) = top
+            .parent_id
+            .filter(|id| !id.is_nil())
+            .and_then(|id| shapes_pool.get(&id))
+            .filter(|parent| parent.is_space_group())
+        {
+            m = match (parent.model44(), m) {
+                (Some(pm), Some(m)) => Some(tilt::mul44(&pm, &m)),
+                (pm, m) => pm.or(m),
+            };
+            top = parent;
+        }
+        (m, top)
+    }
+
+    /// How far the middle of this layer comes towards the viewer in the 3D
+    /// space it is in, px: what draws it before or after the other layers
+    /// of a 3D space.
+    pub fn depth(&self, shapes_pool: ShapesPoolRef) -> f64 {
+        let center = self.center();
+        match self.space_chain(shapes_pool).0 {
+            Some(m) => tilt::apply44(&m, [center.x as f64, center.y as f64, 0.0])[2],
+            None => 0.0,
+        }
     }
 
     /// The distance of the viewer and the vanishing point the tilt of this
@@ -539,12 +630,18 @@ impl Shape {
         (tilt::DEFAULT_PERSPECTIVE, self.center())
     }
 
-    /// The homography of the page this layer is drawn through for its own
-    /// tilt (see `math::tilt`), `None` when flat.
+    /// The homography of the page this layer is drawn through in the plane
+    /// of the layer it is in: its tilt and depth and those of the 3D space
+    /// groups it is in, seen from the board of the outermost (see
+    /// `math::tilt`); `None` when it stays in the plane, and for a 3D space
+    /// group, which passes its own to what it holds.
     pub fn tilt_matrix(&self, shapes_pool: ShapesPoolRef) -> Option<Matrix> {
-        let t = self.tilt.as_ref()?;
-        let (distance, vp) = self.perspective_of(shapes_pool);
-        tilt::tilt_matrix(&self.selrect, &self.centered_transform(), t, distance, vp)
+        if self.is_space_group() {
+            return None;
+        }
+        let (m, top) = self.space_chain(shapes_pool);
+        let (distance, vp) = top.perspective_of(shapes_pool);
+        m.map(|m| tilt::seen(&m, distance, vp))
     }
 
     pub fn set_vertical_align(&mut self, align: VerticalAlign) {
@@ -2029,7 +2126,7 @@ impl Shape {
 
         // Cannot flatten if it has visual effects that affect children:
 
-        if self.clip_content || self.tilt.is_some() {
+        if self.clip_content || self.is_three_d() || self.preserve_3d {
             return false;
         }
 
@@ -2462,6 +2559,111 @@ mod tests {
         quarter.set_perspective(Some(800.0), (0.0, 0.0));
         let vp = quarter.vanishing_point();
         assert!(math::is_close_to(vp.x, 150.0) && math::is_close_to(vp.y, -50.0));
+    }
+
+    /// A board seen from 800 px, a group turned 30° about Y holding a face
+    /// 100 px forward and a face turned 90° on its right: a corner of a cube
+    /// (the corners Chromium gives for it are in `geom_tilt_test.cljc`).
+    fn cube_corner(preserve_3d: bool) -> (ShapesPool, Uuid, Uuid, Uuid) {
+        let mut pool = ShapesPool::new();
+        pool.initialize(4);
+        let [board_id, group_id, front_id, right_id] = [(); 4].map(|_| Uuid::new_v4());
+        {
+            let board = pool.add_shape(board_id);
+            board.set_shape_type(Type::Frame(Frame::default()));
+            board.set_selrect(0.0, 0.0, 400.0, 400.0);
+            board.set_perspective(Some(800.0), (0.5, 0.5));
+            board.children = vec![group_id];
+        }
+        {
+            let group = pool.add_shape(group_id);
+            group.set_shape_type(Type::Group(Group::default()));
+            group.set_selrect(100.0, 100.0, 400.0, 300.0);
+            group.set_parent(board_id);
+            group.set_tilt(Some(tilt::Tilt::new(0.0, 30.0)), false);
+            group.set_depth(0.0, preserve_3d);
+            group.children = vec![front_id, right_id];
+        }
+        {
+            let front = pool.add_shape(front_id);
+            front.set_shape_type(Type::Rect(Rect::default()));
+            front.set_selrect(100.0, 100.0, 300.0, 300.0);
+            front.set_parent(group_id);
+            front.set_depth(100.0, false);
+        }
+        {
+            let right = pool.add_shape(right_id);
+            right.set_shape_type(Type::Rect(Rect::default()));
+            right.set_selrect(200.0, 100.0, 400.0, 300.0);
+            right.set_parent(group_id);
+            right.set_tilt(Some(tilt::Tilt::new(0.0, 90.0)), false);
+        }
+        pool.mark_tilts();
+        (pool, group_id, front_id, right_id)
+    }
+
+    fn projected_corners(pool: &ShapesPool, id: &Uuid) -> Vec<(f64, f64)> {
+        let shape = pool.get(id).expect("shape");
+        let h = pool.tilt_projection(shape).expect("leaves the plane");
+        let r = shape.selrect;
+        [
+            (r.left, r.top),
+            (r.right, r.top),
+            (r.right, r.bottom),
+            (r.left, r.bottom),
+        ]
+        .iter()
+        .map(|&(x, y)| {
+            let p = tilt::project_point(&h, Point::new(x, y)).expect("shows");
+            (p.x as f64, p.y as f64)
+        })
+        .collect()
+    }
+
+    fn assert_close(expected: &[(f64, f64)], actual: &[(f64, f64)]) {
+        for ((ex, ey), (ax, ay)) in expected.iter().zip(actual) {
+            assert!(
+                (ex - ax).abs() < 0.01 && (ey - ay).abs() < 0.01,
+                "expected {expected:?}, got {actual:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_3d_space_keeps_the_depth_of_what_it_holds() {
+        let (pool, group_id, front_id, right_id) = cube_corner(true);
+        let group = pool.get(&group_id).expect("group");
+        assert!(group.three_d_space());
+        assert!(group.tilt_matrix(&pool).is_none());
+        assert_close(
+            &[
+                (162.52640405506264, 74.68621813215825),
+                (355.2565148451803, 91.65726539606239),
+                (355.2565148451803, 308.34273460393763),
+                (162.52640405506264, 325.3137818678418),
+            ],
+            &projected_corners(&pool, &front_id),
+        );
+        assert_close(
+            &[
+                (355.2565148451804, 91.65726539606241),
+                (238.00013121617312, 112.24245605240561),
+                (238.00013121617312, 287.7575439475945),
+                (355.2565148451804, 308.3427346039377),
+            ],
+            &projected_corners(&pool, &right_id),
+        );
+        let depth = |id: &Uuid| pool.get(id).expect("face").depth(&pool);
+        assert!((depth(&front_id) - 111.60254037844386).abs() < 1e-3);
+        assert!((depth(&right_id) + 25.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_group_that_is_no_3d_space_flattens_what_it_holds() {
+        let (pool, group_id, front_id, _) = cube_corner(false);
+        assert!(!pool.get(&group_id).expect("group").three_d_space());
+        let flat = projected_corners(&pool, &front_id);
+        assert!((flat[0].0 - 162.52640405506264).abs() > 1.0);
     }
 
     #[test]

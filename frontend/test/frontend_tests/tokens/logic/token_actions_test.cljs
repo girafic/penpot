@@ -170,6 +170,32 @@
            (t/is (= 30 (:rotate-y rect-1')))
            (t/is (nil? (:rotate-x rect-1')) "only the axis it was applied to")))))))
 
+(t/deftest test-apply-depth-token
+  ;; a number token brings a layer towards the viewer (Penpot Motion)
+  (t/async
+    done
+    (let [file   (-> (ctht/sample-file-with-tokens
+                      :lib-fn #(-> %
+                                   (ctob/add-set (ctob/make-token-set :id (cthi/new-id! :set-a) :name "Set A"))
+                                   (ctob/add-theme (ctob/make-token-theme :id (cthi/new-id! :theme-a)
+                                                                          :name "Theme A" :sets #{"Set A"}))
+                                   (ctob/add-token (cthi/id :set-a)
+                                                   (ctob/make-token {:name "depth.near" :value "40" :type :number})))
+                      :status-fn #(ctos/set-tokens-status % #{(cthi/id :theme-a)} #{(cthi/id :set-a)}))
+                     (ctho/add-rect :rect-1))
+          store  (ths/setup-store file)
+          rect-1 (cths/get-shape file :rect-1)
+          events [(dwta/apply-token {:shape-ids [(:id rect-1)]
+                                     :attributes #{:translate-z}
+                                     :token (toht/get-token file "depth.near")
+                                     :on-update-shape dwta/update-depth})]]
+      (tohs/run-store-async
+       store done events
+       (fn [new-state]
+         (let [rect-1' (cths/get-shape (ths/get-file-from-state new-state) :rect-1)]
+           (t/is (= "depth.near" (get-in rect-1' [:applied-tokens :translate-z])))
+           (t/is (= 40 (:translate-z rect-1')))))))))
+
 (t/deftest test-apply-multiple-tokens
   (t/testing "applying a token twice with the same attributes will override the previously applied tokens values"
     (t/async

@@ -1034,6 +1034,24 @@
                 :else
                 (commit-tilt! self :rotate-y value 0)))}
 
+           :translateZ
+           {:this true
+            :get #(-> % u/proxy->shape (:translate-z 0))
+            :set
+            (fn [self value]
+              (cond
+                (not (sm/valid-safe-number? value))
+                (u/not-valid plugin-id :translateZ value)
+
+                (not (r/check-permission plugin-id "content:write"))
+                (u/not-valid plugin-id :translateZ "Plugin doesn't have 'content:write' permission")
+
+                (not (u/page-active? page-id))
+                (u/not-valid plugin-id :translateZ "Cannot modify a page that is not currently active")
+
+                :else
+                (commit-tilt! self :translate-z value 0)))}
+
            :backfaceHidden
            {:this true
             :get #(-> % u/proxy->shape :backface-hidden boolean)
@@ -2031,6 +2049,28 @@
 
                    :else
                    (st/emit! (dw/reorder-children file-id page-id (:id shape) ids)))))}))
+
+         (cond-> (or (cfh/frame-shape? data) (cfh/group-shape? data))
+           (crc/add-properties!
+            {:name "preserve3d"
+             :get
+             (fn [self]
+               (-> self u/proxy->shape :preserve-depth true?))
+
+             :set
+             (fn [self value]
+               (cond
+                 (not (boolean? value))
+                 (u/not-valid plugin-id :preserve3d value)
+
+                 (not (r/check-permission plugin-id "content:write"))
+                 (u/not-valid plugin-id :preserve3d "Plugin doesn't have 'content:write' permission")
+
+                 (not (u/page-active? page-id))
+                 (u/not-valid plugin-id :preserve3d "Cannot modify a page that is not currently active")
+
+                 :else
+                 (commit-tilt! self :preserve-depth (when value true) nil)))}))
 
          (cond-> (cfh/group-shape? data)
            (crc/add-properties!

@@ -278,6 +278,12 @@
    [:rotate-x {:optional true} ::sm/safe-number]
    [:rotate-y {:optional true} ::sm/safe-number]
    [:backface-hidden {:optional true} :boolean]
+   ;; How far, px, the layer comes towards the viewer, in the space of its
+   ;; parent (see `app.common.geom.tilt`). Absent is in the plane.
+   [:translate-z {:optional true} ::sm/safe-number]
+   ;; Whether a group or board is a 3D space: what it holds keeps its depth
+   ;; there, drawn back to front (see `gtl/three-d-space?`).
+   [:preserve-depth {:optional true} :boolean]
 
    ;; Carried on circles, rects and texts too, not only on frames, so it
    ;; belongs here rather than in `schema:frame-attrs`. Not nilable: the key
@@ -541,6 +547,7 @@
     :remote-synced :shape-ref :touched :blocked :collapsed :locked
     :hidden :masked-group :mask-mode :fills :proportion :proportion-lock :constraints-h
     :constraints-v :fixed-scroll :r1 :r2 :r3 :r4 :rotation :rotate-x :rotate-y :backface-hidden
+    :translate-z :preserve-depth
     :opacity :grids :exports
     :strokes :blend-mode :interactions :shadow :blur :background-blur :grow-type :applied-tokens
     :plugin-data})

@@ -351,7 +351,7 @@ fn text_layout_cache_rotation_only(tree: ShapesPoolRef, shape: &Shape) -> bool {
  * When changing this method check the benchmark
  */
 fn sort_z_index(tree: ShapesPoolRef, element: &Shape, children_ids: Vec<Uuid>) -> Vec<Uuid> {
-    if element.has_layout() {
+    let ids = if element.has_layout() {
         let mut ids = children_ids;
 
         if element.is_flex() && !element.is_flex_reverse() {
@@ -365,6 +365,20 @@ fn sort_z_index(tree: ShapesPoolRef, element: &Shape, children_ids: Vec<Uuid>) -
         ids
     } else {
         children_ids
+    };
+
+    // The layers of a 3D space draw back to front, by how far their middle
+    // comes towards the viewer (see `Shape::depth`); as they are where two
+    // are as deep.
+    if tree.has_tilts() && element.three_d_space() {
+        let mut by_depth: Vec<(f64, Uuid)> = ids
+            .into_iter()
+            .map(|id| (tree.get(&id).map(|s| s.depth(tree)).unwrap_or(0.0), id))
+            .collect();
+        by_depth.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        by_depth.into_iter().map(|(_, id)| id).collect()
+    } else {
+        ids
     }
 }
 
@@ -751,7 +765,8 @@ impl RenderState {
     /// The homography of the page `shape` is drawn through for its own tilt
     /// and those of the groups and boards it is in (see `math::tilt`), worked
     /// out once a pass; `None` when nothing tilts it. A render of one shape
-    /// (`tilt_stop`) leaves out the tilts of the layers it is in.
+    /// (`tilt_stop`) leaves out the tilts of the layers it is in, the 3D
+    /// space groups too.
     pub fn tilt_projection(&mut self, shape: &Shape, tree: ShapesPoolRef) -> Option<Matrix> {
         if !tree.has_tilts() {
             return None;
@@ -768,7 +783,15 @@ impl RenderState {
                 .and_then(|id| tree.get(&id))
                 .and_then(|parent| self.tilt_projection(parent, tree))
         };
-        let projection = match (parent, shape.tilt_matrix(tree)) {
+        let own = if self.tilt_stop == Some(shape.id) {
+            shape.model44().map(|m| {
+                let (distance, vp) = shape.perspective_of(tree);
+                tilt::seen(&m, distance, vp)
+            })
+        } else {
+            shape.tilt_matrix(tree)
+        };
+        let projection = match (parent, own) {
             (Some(parent), Some(own)) => Some(Matrix::concat(&parent, &own)),
             (parent, own) => parent.or(own),
         };

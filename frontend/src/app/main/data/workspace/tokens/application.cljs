@@ -121,6 +121,19 @@
                            {:ignore-touched true
                             :page-id page-id})))))
 
+(defn update-depth
+  "Bring the shapes of `shape-ids` `value` px towards the viewer (see
+  `app.common.geom.tilt`): 0 is in the plane."
+  ([value shape-ids attributes] (update-depth value shape-ids attributes nil))
+  ([value shape-ids _attributes page-id]
+   (when (number? value)
+     (dwsh/update-shapes shape-ids
+                         #(if (mth/almost-zero? value)
+                            (dissoc % :translate-z)
+                            (assoc % :translate-z value))
+                         {:ignore-touched true
+                          :page-id page-id}))))
+
 (defn update-perspective
   "The perspective of the boards of `shape-ids`, `value` px kept within
   what a board takes."
@@ -693,6 +706,7 @@
    ctt/rotation-keys       update-rotation
    ctt/tilt-keys           update-tilt
    ctt/perspective-keys    update-perspective
+   ctt/depth-keys          update-depth
 
    ;; Typography
    ctt/font-family-keys     update-font-family
@@ -1131,7 +1145,7 @@
    :number
    {:title "Number"
     :attributes ctt/rotation-keys
-    :all-attributes (set/union ctt/number-keys ctt/tilt-keys ctt/perspective-keys)
+    :all-attributes (set/union ctt/number-keys ctt/tilt-keys ctt/perspective-keys ctt/depth-keys)
     :on-update-shape update-rotation
     :modal {:key :tokens/number
             :fields [{:label "Number"

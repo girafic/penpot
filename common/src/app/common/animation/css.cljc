@@ -93,7 +93,7 @@
 
 (def ^:private css-transform-properties
   "The properties the CSS of an animation plays through `transform`."
-  #{:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y})
+  #{:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y :translate-z})
 
 (declare frame-values*)
 
@@ -112,7 +112,8 @@
   `position-origin`). A tilted shape (see `app.common.geom.tilt`) has its
   `:rotate-x` and `:rotate-y` (degrees) with its transform, and, turning
   around `pivot` (fractions of its box) off its middle with a tilt at
-  rest, `:lift` (`[dx dy dz]` px, see `gtl/lift`). A board whose camera
+  rest, `:lift` (`[dx dy dz]` px, see `gtl/lift`); one that comes out of
+  the plane its `:translate-z` (px, towards the viewer). A board whose camera
   plays (see `cta/camera-properties`) has `:perspective` (px) and
   `:perspective-origin` (CSS, shares of its box)."
   ([shape values origin]
@@ -120,16 +121,21 @@
   ([shape values origin pivot]
    (let [frame (frame-values* shape values origin)]
      (if (and (contains? frame :translate-x)
-              (or (gtl/tilted? shape) (cta/has? values :rotate-x :rotate-y)))
+              (or (gtl/three-d? shape) (cta/has? values :rotate-x :rotate-y :translate-z)))
        (let [rest-x (or (:rotate-x shape) 0)
              rest-y (or (:rotate-y shape) 0)
+             rest-z (or (:translate-z shape) 0)
              {px :x py :y} (or pivot cta/default-transform-origin)
-             lift   (gtl/lift shape px py rest-x rest-y)]
+             lift   (gtl/lift shape px py rest-x rest-y)
+             z      (get values :translate-z rest-z)]
          (cond-> (assoc frame
                         :rotate-x (get values :rotate-x rest-x)
                         :rotate-y (get values :rotate-y rest-y))
            (some #(not (mth/almost-zero? %)) lift)
-           (assoc :lift lift)))
+           (assoc :lift lift)
+
+           (or (contains? values :translate-z) (not (mth/almost-zero? z)))
+           (assoc :translate-z z)))
        frame))))
 
 (defn- frame-values*
@@ -244,6 +250,8 @@
                  "rotate(" (fmt rotate) "deg) "
                  (when-not (str/blank? rest-transform)
                    (str rest-transform " "))
+                 (when (contains? frame :translate-z)
+                   (str "translateZ(" (fmt (:translate-z frame)) "px) "))
                  (when-let [[dx dy dz] lift]
                    (str "translate3d(" (fmt dx) "px, " (fmt dy) "px, " (fmt dz) "px) "))
                  (when (contains? frame :rotate-x)

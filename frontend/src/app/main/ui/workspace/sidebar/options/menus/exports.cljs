@@ -468,7 +468,7 @@
                (some #(contains? #{:pdf :svg} (:type %)) exports)
                (let [objects (deref refs/workspace-page-objects)]
                  (some (fn [shape]
-                         (some #(gtl/tilted? (get objects %))
+                         (some #(gtl/three-d? (get objects %))
                                (cons (:id shape) (cfh/get-children-ids objects (:id shape)))))
                        shapes))))
 

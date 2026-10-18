@@ -48,6 +48,27 @@
         (t/is (not (contains? (stored store context rect) :backface-hidden)))
         (t/is (nil? (.-perspective board)) "the default")))))
 
+(t/deftest the-depth-and-the-3d-space-read-and-write
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context plugin-id)
+            _           (set! st/state store)
+            ^js board   (.createBoard context)
+            ^js rect    (.createRectangle context)]
+        (.appendChild board rect)
+        (t/is (= 0 (.-translateZ rect)) "in the plane")
+        (set! (.-translateZ rect) 40)
+        (t/is (= 40 (:translate-z (stored store context rect))))
+        (set! (.-translateZ rect) 0)
+        (t/is (not (contains? (stored store context rect) :translate-z)))
+        (t/is (false? (.-preserve3d board)))
+        (set! (.-preserve3d board) true)
+        (t/is (true? (:preserve-depth (stored store context board))))
+        (set! (.-preserve3d board) false)
+        (t/is (not (contains? (stored store context board) :preserve-depth)))
+        (t/is (undefined? (.-preserve3d rect)) "groups and boards only")))))
+
 (t/deftest the-vanishing-point-of-a-board-reads-and-writes
   (thw/with-wasm-mocks*
     (fn []

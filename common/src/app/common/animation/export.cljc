@@ -59,7 +59,9 @@
         tilted   (into []
                        (comp (remove #{board-id})
                              (filter #(let [shape (get objects %)]
-                                        (or (gtl/tilted? shape) (true? (:backface-hidden shape)))))
+                                        (or (gtl/three-d? shape)
+                                            (gtl/three-d-space? shape)
+                                            (true? (:backface-hidden shape)))))
                              (keep #(if (contains? #{:group :frame} (dm/get-in objects [% :type]))
                                       %
                                       (dm/get-in objects [% :parent-id]))))

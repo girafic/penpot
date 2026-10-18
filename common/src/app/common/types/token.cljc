@@ -355,6 +355,13 @@
 
 (def perspective-keys (schema-keys schema:perspective))
 
+;; How far a layer comes towards the viewer (see `app.common.geom.tilt`)
+(def ^:private schema:depth
+  [:map {:title "DepthTokenAttrs"}
+   [:translate-z {:optional true} schema:token-name]])
+
+(def depth-keys (schema-keys schema:depth))
+
 (def ^:private schema:number
   (-> (reduce mu/union [schema:line-height
                         schema:rotation])
@@ -417,6 +424,7 @@
                          rotation-keys
                          tilt-keys
                          perspective-keys
+                         depth-keys
                          shadow-keys
                          sizing-keys
                          spacing-keys
@@ -437,6 +445,7 @@
    schema:rotation
    schema:tilt
    schema:perspective
+   schema:depth
    schema:number
    schema:font-size
    schema:letter-spacing
@@ -514,6 +523,7 @@
      (rotation-keys shape-attr) #{shape-attr}
      (tilt-keys shape-attr) #{shape-attr}
      (perspective-keys shape-attr) #{shape-attr}
+     (depth-keys shape-attr) #{shape-attr}
      (number-keys shape-attr) #{shape-attr}
      (axis-keys shape-attr) #{shape-attr})))
 
@@ -542,6 +552,7 @@
              stroke-width-keys
              rotation-keys
              tilt-keys
+             depth-keys
              sizing-keys
              opacity-keys
              shadow-keys
@@ -617,6 +628,7 @@
    :rotate-x           [:rotation :number]
    :rotate-y           [:rotation :number]
    :perspective        [:number :dimensions]
+   :translate-z        [:number :dimensions]
    :border-radius      [:border-radius :dimensions]
    :row-gap            [:spacing :dimensions]
    :column-gap         [:spacing :dimensions]

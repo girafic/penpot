@@ -1059,6 +1059,9 @@ Board:
         clipContent: boolean;
         showInViewMode: boolean;
         perspective: number | null;
+        perspectiveX: number | null;
+        perspectiveY: number | null;
+        preserve3d: boolean;
         grid?: GridLayout;
         flex?: FlexLayout;
         guides: Guide[];
@@ -1139,6 +1142,7 @@ Board:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
@@ -1256,8 +1260,35 @@ Board:
         ```
 
         How far the viewer of the tilted layers of the board is, in px
-        (100 to 100000), as CSS `perspective`: the vanishing point is the
-        middle of the board. `null` is the default, 1000.
+        (100 to 100000), as CSS `perspective`; their vanishing point is at
+        `perspectiveX`, `perspectiveY`. `null` is the default, 1000.
+        Animatable as the keyframe property `perspective`.
+      perspectiveX: |-
+        ```
+        perspectiveX: number | null
+        ```
+
+        Where the vanishing point of the tilted layers of the board is across
+        it, a fraction of its width (0 is its left edge, 1 its right one), as
+        CSS `perspective-origin`. `null` is its middle, 0.5. Animatable as the
+        keyframe property `perspectiveX`.
+      perspectiveY: |-
+        ```
+        perspectiveY: number | null
+        ```
+
+        Where the vanishing point of the tilted layers of the board is down
+        it, a fraction of its height (0 is its top edge, 1 its bottom one).
+        `null` is its middle, 0.5. Animatable as the keyframe property
+        `perspectiveY`.
+      preserve3d: |-
+        ```
+        preserve3d: boolean
+        ```
+
+        When true the board, unless it clips its content, is a 3D space: its
+        children draw back to front by their depth (see `Group.preserve3d`).
+        Penpot Motion.
       grid: |-
         ```
         readonly grid?: GridLayout
@@ -1603,6 +1634,16 @@ Board:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -2351,6 +2392,9 @@ VariantContainer:
         clipContent: boolean;
         showInViewMode: boolean;
         perspective: number | null;
+        perspectiveX: number | null;
+        perspectiveY: number | null;
+        preserve3d: boolean;
         grid?: GridLayout;
         flex?: FlexLayout;
         guides: Guide[];
@@ -2432,6 +2476,7 @@ VariantContainer:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
@@ -2548,8 +2593,35 @@ VariantContainer:
         ```
 
         How far the viewer of the tilted layers of the board is, in px
-        (100 to 100000), as CSS `perspective`: the vanishing point is the
-        middle of the board. `null` is the default, 1000.
+        (100 to 100000), as CSS `perspective`; their vanishing point is at
+        `perspectiveX`, `perspectiveY`. `null` is the default, 1000.
+        Animatable as the keyframe property `perspective`.
+      perspectiveX: |-
+        ```
+        perspectiveX: number | null
+        ```
+
+        Where the vanishing point of the tilted layers of the board is across
+        it, a fraction of its width (0 is its left edge, 1 its right one), as
+        CSS `perspective-origin`. `null` is its middle, 0.5. Animatable as the
+        keyframe property `perspectiveX`.
+      perspectiveY: |-
+        ```
+        perspectiveY: number | null
+        ```
+
+        Where the vanishing point of the tilted layers of the board is down
+        it, a fraction of its height (0 is its top edge, 1 its bottom one).
+        `null` is its middle, 0.5. Animatable as the keyframe property
+        `perspectiveY`.
+      preserve3d: |-
+        ```
+        preserve3d: boolean
+        ```
+
+        When true the board, unless it clips its content, is a 3D space: its
+        children draw back to front by their depth (see `Group.preserve3d`).
+        Penpot Motion.
       grid: |-
         ```
         readonly grid?: GridLayout
@@ -2899,6 +2971,16 @@ VariantContainer:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -3711,6 +3793,7 @@ Boolean:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
@@ -4091,6 +4174,16 @@ Boolean:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -7072,6 +7165,7 @@ Ellipse:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
@@ -7424,6 +7518,16 @@ Ellipse:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -9663,6 +9767,7 @@ Group:
     ```
     interface Group {
         type: "group";
+        preserve3d: boolean;
         children: Shape[];
         appendChild(child: Shape): void;
         insertChild(index: number, child: Shape): void;
@@ -9729,6 +9834,7 @@ Group:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         fills: Fill[]
         | "mixed";
@@ -9829,6 +9935,15 @@ Group:
         ```
 
         The type of the shape, which is always 'group' for groups.
+      preserve3d: |-
+        ```
+        preserve3d: boolean
+        ```
+
+        When true the group is a 3D space, as CSS `transform-style: preserve-3d`: its children keep their depth (`translateZ`) and tilt
+        (`rotateX`, `rotateY`) in one space with its own, seen once with the
+        perspective of its board, and draw back to front. An opacity, a blur,
+        a shadow or a mask flattens it. Penpot Motion.
       children: |-
         ```
         readonly children: Shape[]
@@ -10094,6 +10209,16 @@ Group:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -11097,6 +11222,7 @@ Image:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
@@ -11449,6 +11575,16 @@ Image:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -15116,6 +15252,7 @@ Path:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
@@ -15490,6 +15627,16 @@ Path:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -16547,6 +16694,7 @@ Rectangle:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
@@ -16899,6 +17047,16 @@ Rectangle:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -18776,6 +18934,7 @@ Follow:
         position: boolean;
         rotation: boolean;
         scale: boolean;
+        tilt: boolean;
         opacity: boolean;
         delay: number;
     }
@@ -18816,6 +18975,13 @@ Follow:
         ```
 
         Whether it scales with the leader, around the leader's pivot.
+      tilt: |-
+        ```
+        readonly tilt: boolean
+        ```
+
+        Whether it tilts as the leader does: the change of the leader's 3D
+        rotation (`rotateX`, `rotateY`), around its own pivot.
       opacity: |-
         ```
         readonly opacity: boolean
@@ -18843,6 +19009,7 @@ FollowProps:
         position?: boolean;
         rotation?: boolean;
         scale?: boolean;
+        tilt?: boolean;
         opacity?: boolean;
         delay?: number;
     }
@@ -18883,6 +19050,13 @@ FollowProps:
         ```
 
         Scale with the leader, around its pivot. `true` by default.
+      tilt: |-
+        ```
+        tilt?: boolean
+        ```
+
+        Tilt as the leader does (its 3D rotation, `rotateX` and `rotateY`),
+        around its own pivot. `true` by default.
       opacity: |-
         ```
         opacity?: boolean
@@ -20393,6 +20567,7 @@ ShapeBase:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         fills: Fill[]
         | "mixed";
@@ -20740,6 +20915,16 @@ ShapeBase:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -21609,6 +21794,7 @@ SvgRaw:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         fills: Fill[]
         | "mixed";
@@ -21950,6 +22136,16 @@ SvgRaw:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -22634,6 +22830,7 @@ Text:
         rotation: number;
         rotateX: number;
         rotateY: number;
+        translateZ: number;
         backfaceHidden: boolean;
         fills: Fill[]
         | "mixed";
@@ -22993,6 +23190,16 @@ Text:
         The 3D rotation in degrees of the shape about its own vertical axis:
         a positive value tilts its right edge away from the viewer, as CSS
         `rotateY()` does. Penpot Motion; 0 is flat.
+      translateZ: |-
+        ```
+        translateZ: number
+        ```
+
+        How far in pixels the shape comes towards the viewer, in the space of
+        its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+        from the vanishing point of its board. Negative goes back. Penpot
+        Motion; 0 is in the plane. Animatable as the keyframe property
+        `translateZ`.
       backfaceHidden: |-
         ```
         backfaceHidden: boolean
@@ -28489,6 +28696,10 @@ AnimatableProperty:
         | "rotation"
         | "rotateX"
         | "rotateY"
+        | "translateZ"
+        | "perspective"
+        | "perspectiveX"
+        | "perspectiveY"
         | "scaleX"
         | "scaleY"
         | "opacity"
@@ -28523,7 +28734,12 @@ AnimatableProperty:
     * `width`, `height`, `strokeWidth`, `blur`, `backgroundBlur`,
       `shadowOffsetX`, `shadowOffsetY`, `shadowBlur`, `shadowSpread` and the
       `borderRadius…` corners: pixels.
-    * `rotation`: degrees.
+    * `rotation`, `rotateX`, `rotateY`: degrees.
+    * `translateZ`: how far the layer comes towards the viewer, in pixels.
+    * `perspective`: the distance of the viewer of the tilted layers of a
+      board, in pixels; `perspectiveX`, `perspectiveY`: their vanishing
+      point, a fraction of the board (0.5 is its middle). Only boards take
+      them (see `Board.perspective`).
     * `scaleX`, `scaleY`: a factor, 1 is the layer's own size.
     * `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1.
     * `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
@@ -28579,7 +28795,14 @@ PresetAnimationType:
     ==============================
 
     ```
-    PresetAnimationType: "fade" | "move" | "scale" | "rotate" | "blur"
+    PresetAnimationType:
+        | "fade"
+        | "move"
+        | "scale"
+        | "rotate"
+        | "flip-x"
+        | "flip-y"
+        | "blur"
     ```
 
     The effect of a preset animation:
@@ -28588,6 +28811,9 @@ PresetAnimationType:
     * `move`: the position, from `offsetX` and `offsetY` pixels away.
     * `scale`: the size, from `amount` times it (0.5 by default).
     * `rotate`: the rotation, from `amount` degrees turned (-90 by default).
+    * `flip-x` and `flip-y`: the 3D rotation about the layer's own X or Y
+      axis (`rotateX`, `rotateY`), from `amount` degrees turned (90 by
+      default), around the pivot of its track: `flip-y` turns a card over.
     * `blur`: a layer blur, from a radius of `amount` pixels (8 by default) to
       the layer's own; a layer without a blur gets one while it plays.
 

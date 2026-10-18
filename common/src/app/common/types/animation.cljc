@@ -52,8 +52,9 @@
 ;; presets from interactions plus a custom cubic-bezier curve.
 (def animatable-properties
   #{:x :y :width :height :opacity :rotation :scale-x :scale-y
-    ;; the 3D rotation, about the layer's own axes (see `app.common.geom.tilt`)
-    :rotate-x :rotate-y
+    ;; the 3D rotation, about the layer's own axes, and the depth (see
+    ;; `app.common.geom.tilt`)
+    :rotate-x :rotate-y :translate-z
     ;; the camera of a board: how far the viewer of its tilted layers is,
     ;; and where their vanishing point is (see `camera-properties`)
     :perspective :perspective-x :perspective-y
@@ -2727,7 +2728,7 @@
   #{:opacity :r1 :r2 :r3 :r4 :fills :strokes :shadow :blur :background-blur
     :trim-start :trim-end :trim-offset :text-units :content
     ;; the tilt, drawn and not kept in the geometry (see `app.common.geom.tilt`)
-    :rotate-x :rotate-y :tilt-pivot
+    :rotate-x :rotate-y :tilt-pivot :translate-z
     :perspective :perspective-x :perspective-y})
 
 (defn appearance-changes
@@ -3013,6 +3014,9 @@
                                 :rest-x (or (:rotate-x shape) 0)
                                 :rest-y (or (:rotate-y shape) 0)}))
 
+      (has? values :translate-z)
+      (ctm/change-property :translate-z (:translate-z values))
+
       ;; the camera of a board, all of it when a part plays
       (and (has? values :perspective :perspective-x :perspective-y) (= :frame (:type shape)))
       (as-> $ (reduce (fn [modifiers property]
@@ -3071,6 +3075,7 @@
     :rotation (or (:rotation shape) 0)
     :rotate-x (or (:rotate-x shape) 0)
     :rotate-y (or (:rotate-y shape) 0)
+    :translate-z (or (:translate-z shape) 0)
     :scale-x  1
     :scale-y  1
     :blur     (or (dm/get-in shape [:blur :value]) 0)
@@ -3519,7 +3524,8 @@
    [:height ::sm/safe-number]
    [:rotation ::sm/safe-number]
    [:rotate-x {:optional true} ::sm/safe-number]
-   [:rotate-y {:optional true} ::sm/safe-number]])
+   [:rotate-y {:optional true} ::sm/safe-number]
+   [:translate-z {:optional true} ::sm/safe-number]])
 
 (defn rest-pose
   "Where `shape-id` of `objects` rests in the board of `timeline`, as its
@@ -3535,7 +3541,8 @@
      :height   (or (:height selrect) 0)
      :rotation (or (:rotation shape) 0)
      :rotate-x (or (:rotate-x shape) 0)
-     :rotate-y (or (:rotate-y shape) 0)}))
+     :rotate-y (or (:rotate-y shape) 0)
+     :translate-z (or (:translate-z shape) 0)}))
 
 (defn fits-keyframe?
   "Whether `shape` can show `keyframe`: it has the fill, stroke or shadow
@@ -3602,6 +3609,7 @@
       :rotation (+ value (- (:rotation to) (:rotation from)))
       :rotate-x (+ value (- (:rotate-x to 0) (:rotate-x from 0)))
       :rotate-y (+ value (- (:rotate-y to 0) (:rotate-y from 0)))
+      :translate-z (+ value (- (:translate-z to 0) (:translate-z from 0)))
       :width    (* value (ratio :width))
       :height   (* value (ratio :height))
       value)))
@@ -3610,7 +3618,7 @@
   "The pose the values of keyframe entries are counted from (see
   `schema:keys-entry`): positions, rotation and tilt from 0, sizes as
   factors of 1."
-  {:x 0 :y 0 :rotation 0 :rotate-x 0 :rotate-y 0 :width 1 :height 1})
+  {:x 0 :y 0 :rotation 0 :rotate-x 0 :rotate-y 0 :translate-z 0 :width 1 :height 1})
 
 (defn keyframes->keys-entry
   "A keyframe entry (see `schema:keys-entry`) of `keyframes`, those of one
@@ -3826,7 +3834,7 @@
 (def ^:private edit-properties
   "Properties an edit of a shape records as keyframes. Scale stays a
   timeline value; width and height follow a resize."
-  [:x :y :width :height :rotation :rotate-x :rotate-y :opacity :r1 :r2 :r3 :r4
+  [:x :y :width :height :rotation :rotate-x :rotate-y :translate-z :opacity :r1 :r2 :r3 :r4
    :perspective :perspective-x :perspective-y])
 
 (def ^:private edit-absolute-properties
@@ -3910,6 +3918,7 @@
       :rotation (or (:rotation shape) 0)
       :rotate-x (or (:rotate-x shape) 0)
       :rotate-y (or (:rotate-y shape) 0)
+      :translate-z (or (:translate-z shape) 0)
       :opacity  (or (:opacity shape) 1)
       :r1       (or (:r1 shape) 0)
       :r2       (or (:r2 shape) 0)

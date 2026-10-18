@@ -1576,13 +1576,13 @@
                 :render-shape-pixels (fn [_ _ _] (js/Uint8Array. 0))}]
     (dea/render-shape-at-rest objects tid [] {:bridge bridge})
     (let [[_ shape props] (first @calls)]
-      (t/is (= [:opacity :text-units :rotate-x] props))
+      (t/is (= [:opacity :text-units :rotate-x :translate-z] props))
       (t/is (= [] (:text-units shape)) "whatever the canvas posed"))))
 
 (t/deftest a-tilted-layer-is-shot-flat
   ;; its layer in the export tilts it (see `app.common.geom.tilt`)
   (let [{:keys [objects tid]} (text-board)
-        objects (update objects tid assoc :rotate-y 60 :backface-hidden true)
+        objects (update objects tid assoc :rotate-y 60 :translate-z 30 :backface-hidden true)
         calls   (atom [])
         bridge  {:use-shape (fn [_])
                  :set-shape-hidden (fn [_])
@@ -1591,9 +1591,10 @@
                  :render-shape-pixels (fn [_ _ _] (js/Uint8Array. 0))}]
     (dea/render-shape-at-rest objects tid [] {:bridge bridge})
     (let [[[_ shot] [_ after props]] @calls]
-      (t/is (= [0 0 false] ((juxt :rotate-x :rotate-y :backface-hidden) shot)))
-      (t/is (= 60 (:rotate-y after)) "and tilted again")
-      (t/is (some #{:rotate-x} props)))))
+      (t/is (= [0 0 0 false] ((juxt :rotate-x :rotate-y :translate-z :backface-hidden) shot)))
+      (t/is (= [60 30] ((juxt :rotate-y :translate-z) after)) "and tilted and lifted again")
+      (t/is (some #{:rotate-x} props))
+      (t/is (some #{:translate-z} props)))))
 
 ;; AUDIO IN THE EXPORT PANEL
 
@@ -1609,7 +1610,9 @@
     (t/is (= #{:lottie :dotlottie} (formats (assoc-in objects [cid :rotate-y] 30) tl :lottie/three-d)))
     (t/is (= #{:svg} (formats (assoc-in objects [cid :rotate-y] 30) tl :svg/three-d)))
     (t/is (= #{:svg} (formats objects (cta/add-keyframe tl cid {:time 500 :property :rotate-x :value 20}) :svg/three-d))
-          "a tilt that plays")))
+          "a tilt that plays")
+    (t/is (= #{:lottie :dotlottie} (formats (assoc-in objects [cid :translate-z] 40) tl :lottie/three-d))
+          "a layer in depth")))
 
 (t/deftest formats-without-sound-say-so
   (let [{:keys [objects bid]} (test-objects)

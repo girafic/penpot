@@ -125,7 +125,7 @@
                  :selector code-selector
                  ;; flat: the animation writes the tilt itself (see
                  ;; `acss/frame-values`)
-                 :transform #(sv/get-value :transform (dissoc % :rotate-x :rotate-y) objects {})
+                 :transform #(sv/get-value :transform (dissoc % :rotate-x :rotate-y :translate-z) objects {})
                  :units (assoc unit-options :texts #(code-units? (get objects %)))}]
     (some->> (seq codes)
              (mapcat (fn [{:keys [timeline copies]}] (cons timeline (map :timeline copies))))

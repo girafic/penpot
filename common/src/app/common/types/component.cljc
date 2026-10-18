@@ -92,6 +92,8 @@
    :opacity                 :layer-effects-group
    :blend-mode              :layer-effects-group
    :backface-hidden         :layer-effects-group
+   :translate-z             :geometry-group
+   :preserve-depth          :layer-effects-group
    :perspective             :layer-effects-group
    :perspective-x           :layer-effects-group
    :perspective-y           :layer-effects-group

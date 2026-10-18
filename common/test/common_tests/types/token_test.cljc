@@ -139,4 +139,7 @@
   (t/is (contains? (cto/shape-type->attributes :frame true) :perspective) "a board with a layout too")
   (t/is (not (contains? (cto/shape-type->attributes :rect false) :perspective)) "a board's only")
   (t/is (= [:rotation :number] (get cto/tokens-by-input :rotate-x)))
+  (t/is (= #{:translate-z} (cto/shape-attr->token-attrs :translate-z)))
+  (t/is (contains? (cto/shape-type->attributes :rect false) :translate-z) "any layer comes forward")
+  (t/is (= [:number :dimensions] (get cto/tokens-by-input :translate-z)))
   (t/is (true? (sm/validate cto/schema:applied-tokens {:rotate-x "tilt.card" :perspective "depth.far"}))))

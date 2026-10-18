@@ -222,6 +222,29 @@
                                              :perspective-origin))
           "its vanishing point"))))
 
+(deftest a-3d-space-keeps-the-depth-of-its-layers
+  (testing "a group that is a 3D space preserves 3D, its board sees it"
+    (let [pid   (uuid/next)
+          gid   (uuid/next)
+          cid   (uuid/next)
+          c     (child cid gid
+                       :frame-id pid
+                       :selrect (grc/make-rect 50 50 100 100)
+                       :points (pts 50 50 100 100)
+                       :translate-z 40
+                       :rotate-y 90)
+          group (merge (child gid pid :type :group :frame-id pid :shapes [cid])
+                       {:preserve-depth true :rotate-x -20})
+          b     (frame pid :shapes [gid] :perspective 800)
+          objs  (objects b group c)]
+      (is (= "translateZ(40px) rotateX(0deg) rotateY(90deg)" (css/get-css-value objs c :transform))
+          "towards the viewer, then in its own axes")
+      (is (= "preserve-3d" (css/get-css-value objs group :transform-style)))
+      (is (= "800px" (css/get-css-value objs b :perspective)) "on the parent of the 3D space")
+      (is (nil? (css/get-css-value objs group :perspective)) "not on the space itself: seen once")
+      (is (nil? (css/get-css-value (assoc-in objs [gid :opacity] 0.5) (assoc group :opacity 0.5) :transform-style))
+          "an opacity flattens it"))))
+
 (deftest a-flip-card-keeps-its-faces-in-3d
   (testing "a tilted group whose faces hide their backs preserves 3D, unless it fades"
     (let [gid   (uuid/next)

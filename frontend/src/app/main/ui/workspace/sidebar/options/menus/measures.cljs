@@ -34,6 +34,7 @@
    [app.main.ui.components.search-bar :refer [search-bar*]]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.icons :as deprecated-icon]
    [app.main.ui.workspace.sidebar.options.menus.audio :refer [audio-menu*]]
@@ -54,7 +55,8 @@
    :x :y
    :ox :oy
    :rotation
-   :rotate-x :rotate-y :backface-hidden :perspective :perspective-x :perspective-y
+   :rotate-x :rotate-y :backface-hidden :translate-z :preserve-depth
+   :perspective :perspective-x :perspective-y
    :r1 :r2 :r3 :r4
    :selrect
    :points
@@ -169,6 +171,10 @@
                      (get n-values :rotate-y))
          (identical? (get o-values :backface-hidden)
                      (get n-values :backface-hidden))
+         (identical? (get o-values :translate-z)
+                     (get n-values :translate-z))
+         (identical? (get o-values :preserve-depth)
+                     (get n-values :preserve-depth))
          (identical? (get o-values :perspective)
                      (get n-values :perspective))
          (identical? (get o-values :perspective-x)
@@ -677,6 +683,29 @@
                                                 (assoc % :backface-hidden true)
                                                 (dissoc % :backface-hidden))))))
 
+        ;; DEPTH: how far a layer comes towards the viewer, and whether a
+        ;; group or board is a 3D space (see `gtl/three-d-space?`)
+        on-depth-change
+        (mf/use-fn (mf/deps on-tilt-change) #(on-tilt-change :translate-z %))
+
+        space-ids
+        (mf/with-memo [shapes]
+          (into [] (comp (filter #(contains? #{:group :frame} (:type %))) (map :id)) shapes))
+
+        on-preserve-change
+        (mf/use-fn
+         (mf/deps space-ids)
+         (fn [preserve?]
+           (st/emit! (dwsh/update-shapes space-ids #(if preserve?
+                                                      (assoc % :preserve-depth true)
+                                                      (dissoc % :preserve-depth))))))
+
+        on-preserve-check
+        (mf/use-fn
+         (mf/deps on-preserve-change)
+         (fn [event]
+           (on-preserve-change (-> event dom/get-target dom/checked?))))
+
         ;; The drag of the 3D tool: one undo step, both axes at once
         tilt-undo-ref
         (mf/use-ref nil)
@@ -733,7 +762,7 @@
           (let [objects (deref refs/workspace-page-objects)]
             (boolean
              (some (fn [id]
-                     (some #(gtl/tilted? (get objects %)) (cfh/get-children-ids objects id)))
+                     (some #(gtl/three-d? (get objects %)) (cfh/get-children-ids objects id)))
                    board-ids))))
 
         on-camera-change
@@ -1128,11 +1157,58 @@
                  [:> keyframe-diamond* {:properties [attr]}])]))
           [:> tilt-tool* {:rotate-x rx
                           :rotate-y ry
+                          :rotation (get values :rotation)
+                          :translate-z (get values :translate-z)
                           :backface-hidden (:backface-hidden values)
+                          :preserve-depth (when (seq space-ids) (get values :preserve-depth))
+                          :space? (seq space-ids)
                           :on-tilt on-tilt-drag
                           :on-drag-start on-tilt-drag-start
                           :on-drag-end on-tilt-drag-end
-                          :on-backface-change on-backface-change}]]))
+                          :on-axis-change on-tilt-change
+                          :on-rotation-change on-rotation-change
+                          :on-backface-change on-backface-change
+                          :on-preserve-change on-preserve-change}]]))
+
+     (when (options :tilt)
+       (let [z (get values :translate-z)]
+         [:div {:class (stl/css :depth)}
+          (if token-numeric-inputs
+            [:div {:class (stl/css-case :rotate-axis-tokens (nil? motion-id)
+                                        :rotate-axis (some? motion-id)
+                                        :with-keyframe (some? motion-id))}
+             [:> numeric-input-wrapper*
+              {:on-change on-depth-change
+               :on-detach on-detach-token
+               :text-icon "Z"
+               :attr :translate-z
+               :property (tr "workspace.options.depth")
+               :applied-token (get applied-tokens :translate-z)
+               :placeholder (if (or (= :multiple (get applied-tokens :translate-z)) (= :multiple z))
+                              (tr "settings.multiple") "--")
+               :value (if (= :multiple z) z (or z 0))}]
+             (when motion-id
+               [:> keyframe-diamond* {:properties [:translate-z]}])]
+            [:div {:class (stl/css-case :rotate-axis true
+                                        :with-keyframe (some? motion-id))
+                   :title (tr "workspace.options.depth")}
+             [:span {:class (stl/css :icon-text)} "Z"]
+             [:> deprecated-input/numeric-input*
+              {:no-validate true
+               :placeholder (if (= :multiple z) (tr "settings.multiple") "--")
+               :on-change on-depth-change
+               :class (stl/css :numeric-input)
+               :value (if (= :multiple z) z (or z 0))}]
+             [:span {:class (stl/css :origin-unit)} "px"]
+             (when motion-id
+               [:> keyframe-diamond* {:properties [:translate-z]}])])
+          (when (seq space-ids)
+            [:div {:class (stl/css :preserve-depth)
+                   :title (tr "workspace.options.preserve-3d.hint")}
+             [:> checkbox* {:id "preserve-3d"
+                            :label (tr "workspace.options.preserve-3d")
+                            :checked (true? (get values :preserve-depth))
+                            :on-change on-preserve-check}]])]))
 
      (when (and (options :perspective)
                 (or holds-tilt?

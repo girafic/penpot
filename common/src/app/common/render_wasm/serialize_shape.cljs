@@ -52,6 +52,7 @@
 
   (when (props/tilt-props? shape)
     (props/set-shape-tilt shape)
+    (props/set-shape-depth shape)
     (when (= :frame (:type shape))
       (props/set-shape-perspective shape))))
 

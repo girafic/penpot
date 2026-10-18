@@ -388,6 +388,8 @@
                 (tilt-actions context-data)
                 (generic-attribute-actions #{:perspective} "Perspective"
                                            (assoc context-data :on-update-shape dwta/update-perspective))
+                (generic-attribute-actions #{:translate-z} "Position Z"
+                                           (assoc context-data :on-update-shape dwta/update-depth))
                 (let [line-height (line-height context-data)]
                   (when (seq line-height) line-height))))
      :stroke-width stroke-width-actions

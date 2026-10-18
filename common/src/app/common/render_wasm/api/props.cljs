@@ -218,6 +218,8 @@
   [shape]
   (or (some? (:rotate-x shape))
       (some? (:rotate-y shape))
+      (some? (:translate-z shape))
+      (true? (:preserve-depth shape))
       (true? (:backface-hidden shape))
       (some? (:perspective shape))
       (some? (:perspective-x shape))
@@ -236,6 +238,15 @@
     (h/call wasm/internal-module "_set_shape_tilt"
             rx ry (or x 0.5) (or y 0.5) (or rest-x rx) (or rest-y ry)
             (true? (:backface-hidden shape)))))
+
+(defn set-shape-depth
+  "How far the current shape comes towards the viewer, as `shape` does
+  (`:translate-z`, px), and whether it is a 3D space (`:preserve-depth`, see
+  `app.common.geom.tilt`)."
+  [shape]
+  (h/call wasm/internal-module "_set_shape_depth"
+          (or (:translate-z shape) 0)
+          (true? (:preserve-depth shape))))
 
 (defn set-shape-perspective
   "The camera of the current board, as `board` has it: how far the viewer

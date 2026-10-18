@@ -588,13 +588,25 @@
     (t/is (close-pairs? [[0 0] [1000 90]] (keyframes-of result card :rotate-y)))
     (t/is (empty? (:skipped result)) "nothing a board can not show")))
 
-(t/deftest a-3d-layer-with-depth-is-reported
-  (let [result (lottie/lottie->shapes
-                (document [(layer 1 "Deep" [(rect-group [20 10 40 30] [0 0 1 1])]
-                                  :ddd 1 :ks (ks-3d :p (static [40 25 300]) :ry (static 20)))]
-                          :ddd 1)
-                {:x 0 :y 0})]
-    (t/is (= {:three-d 1} (:skipped result)))))
+(t/deftest a-3d-layer-keeps-its-depth
+  (t/testing "a depth that stays is how far it comes towards the viewer"
+    (let [result (lottie/lottie->shapes
+                  (document [(layer 1 "Deep" [(rect-group [20 10 40 30] [0 0 1 1])]
+                                    :ddd 1 :ks (ks-3d :p (static [40 25 300]) :ry (static 20)))]
+                            :ddd 1)
+                  {:x 0 :y 0})
+          deep   (shape-named result "Deep")]
+      (t/is (= -300 (norm (:translate-z deep))) "Lottie counts it away from the viewer")
+      (t/is (empty? (:skipped result)))))
+
+  (t/testing "a depth that plays is reported"
+    (let [result (lottie/lottie->shapes
+                  (document [(layer 1 "Deep" [(rect-group [20 10 40 30] [0 0 1 1])]
+                                    :ddd 1 :ks (ks-3d :p (anim (kf 0 [40 25 0]) (kf 30 [40 25 300]))
+                                                      :ry (static 20)))]
+                            :ddd 1)
+                  {:x 0 :y 0})]
+      (t/is (= {:three-d 1} (:skipped result))))))
 
 (t/deftest a-straight-camera-is-the-perspective-of-the-board
   (let [camera (fn [z] {:ty 13 :ind 2 :nm "Camera" :pe (static 800)
@@ -626,3 +638,23 @@
         back   (shape-named result "Card")]
     (t/is (some? back))
     (t/is (close-pairs? [[0 0] [1000 180]] (keyframes-of result back :rotate-y)))))
+
+(t/deftest a-depth-goes-to-lottie-and-back
+  ;; towards the viewer in Penpot, away from it in Lottie
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bid    (:id board)
+        card   (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 200 :height 100
+                                     :fills [{:fill-color "#2e7d6b" :fill-opacity 1}]})
+                   (assoc :parent-id bid :frame-id bid :name "Card" :translate-z 60 :rotate-y 20))
+        sid    (:id card)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe sid {:time 0 :property :opacity :value 1})
+                   (cta/add-keyframe sid {:time 1000 :property :opacity :value 0.5}))
+        doc    (alottie/timeline->lottie tl {bid (assoc board :shapes [sid]) sid card})
+        layer  (first (filter #(= "Card" (:nm %)) (:layers (walk/keywordize-keys doc))))
+        result (lottie/lottie->shapes (walk/keywordize-keys doc) {:x 0 :y 0})
+        back   (shape-named result "Card")]
+    (t/is (= 1 (:ddd layer)))
+    (t/is (mth/close? -60 (get-in layer [:ks :p :z :k]) 1e-6))
+    (t/is (mth/close? 60 (:translate-z back) 1e-6))
+    (t/is (mth/close? 20 (:rotate-y back) 1e-6))))

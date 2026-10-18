@@ -8,11 +8,14 @@
   "The 3D rotation tool of the design tab (Penpot Motion, see
   `app.common.geom.tilt`): a card in a pad that tilts the selected layers
   as it is dragged, across about their vertical axis (Y), up and down
-  about their horizontal one (X), with Shift in steps of 15°."
+  about their horizontal one (X), with Shift in steps of 15°; under it
+  the fields of the turn about each axis (Z is the turn in the plane),
+  the depth, the back face and, of groups and boards, the 3D space."
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data.macros :as dm]
    [app.common.math :as mth]
+   [app.main.ui.components.numeric-input :as deprecated-input]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
@@ -50,16 +53,38 @@
   [rect sidebar-left]
   (let [height (.-innerHeight js/window)
         right  (+ (- (.-innerWidth js/window) sidebar-left) 12)
-        top    (max 8 (min (- (:top rect) 40) (- height 340)))]
+        top    (max 8 (min (- (:top rect) 40) (- height 440)))]
     {:right right :top top}))
 
+(mf/defc ^:private axis-field*
+  "A number of the tool, `label` before it and `unit` after it, `wide`
+  across the row."
+  [{:keys [label title unit value on-change wide]}]
+  [:div {:class (stl/css-case :tilt-field true
+                              :wide (true? wide))
+         :title title}
+   [:span {:class (stl/css :tilt-field-label)} label]
+   [:> deprecated-input/numeric-input*
+    {:no-validate true
+     :aria-label title
+     :placeholder (if (= :multiple value) (tr "settings.multiple") "--")
+     :on-change on-change
+     :class (stl/css :tilt-field-input)
+     :value (if (= :multiple value) value (or value 0))}]
+   [:span {:class (stl/css :tilt-field-unit)} unit]])
+
 (mf/defc tilt-tool*
-  "The button of the tool and, open, its pad. `rotate-x`, `rotate-y` and
-  `backface-hidden` are the values of the selection (`:multiple` when
-  they differ); `on-tilt` takes the tilt `[rx ry]` a drag gives,
-  `on-drag-start` and `on-drag-end` bracket a drag (one undo step),
-  `on-backface-change` the switch of the back face."
-  [{:keys [rotate-x rotate-y backface-hidden on-tilt on-drag-start on-drag-end on-backface-change]}]
+  "The button of the tool and, open, its pad. `rotate-x`, `rotate-y`,
+  `rotation`, `translate-z`, `backface-hidden` and `preserve-3d` are the
+  values of the selection (`:multiple` when they differ), `space?`
+  whether it holds groups or boards; `on-tilt` takes the tilt `[rx ry]` a
+  drag gives, `on-drag-start` and `on-drag-end` bracket a drag (one undo
+  step), `on-axis-change` an attribute and its value from a field,
+  `on-rotation-change` the turn in the plane, `on-backface-change` and
+  `on-preserve-change` the switches."
+  [{:keys [rotate-x rotate-y rotation translate-z backface-hidden preserve-3d space?
+           on-tilt on-drag-start on-drag-end on-axis-change on-rotation-change
+           on-backface-change on-preserve-change]}]
   (let [place*   (mf/use-state nil)
         place    (deref place*)
         open?    (some? place)
@@ -138,7 +163,17 @@
         (mf/use-fn
          (mf/deps on-backface-change)
          (fn [event]
-           (on-backface-change (-> event dom/get-target dom/checked?))))]
+           (on-backface-change (-> event dom/get-target dom/checked?))))
+
+        on-preserve
+        (mf/use-fn
+         (mf/deps on-preserve-change)
+         (fn [event]
+           (on-preserve-change (-> event dom/get-target dom/checked?))))
+
+        on-x     (mf/use-fn (mf/deps on-axis-change) #(on-axis-change :rotate-x %))
+        on-y     (mf/use-fn (mf/deps on-axis-change) #(on-axis-change :rotate-y %))
+        on-depth (mf/use-fn (mf/deps on-axis-change) #(on-axis-change :translate-z %))]
 
     (mf/with-effect [open?]
       (when open?
@@ -193,11 +228,27 @@
            [:span {:class (stl/css :tilt-dot)}]]]
 
          [:div {:class (stl/css :tilt-footer)}
-          [:span {:class (stl/css :tilt-values)}
-           (if (or (= :multiple rotate-x) (= :multiple rotate-y))
-             (tr "settings.multiple")
-             (dm/str "X " (mth/precision rx 1) "°  ·  Y " (mth/precision ry 1) "°"))]
+          [:div {:class (stl/css :tilt-fields)}
+           [:> axis-field* {:label "X" :unit "°" :value rotate-x
+                            :title (tr "workspace.options.rotate-x")
+                            :on-change on-x}]
+           [:> axis-field* {:label "Y" :unit "°" :value rotate-y
+                            :title (tr "workspace.options.rotate-y")
+                            :on-change on-y}]
+           [:> axis-field* {:label "Z" :unit "°" :value rotation
+                            :title (tr "workspace.options.rotation")
+                            :on-change on-rotation-change}]
+           [:> axis-field* {:label (tr "workspace.options.tilt-tool.depth") :unit "px" :value translate-z
+                            :title (tr "workspace.options.depth")
+                            :wide true
+                            :on-change on-depth}]]
           [:> checkbox* {:id "tilt-tool-backface-hidden"
                          :label (tr "workspace.options.backface-hidden")
                          :checked (true? backface-hidden)
-                         :on-change on-backface}]]]])]))
+                         :on-change on-backface}]
+          (when space?
+            [:> checkbox* {:id "tilt-tool-preserve-3d"
+                           :label (tr "workspace.options.preserve-3d")
+                           :title (tr "workspace.options.preserve-3d.hint")
+                           :checked (true? preserve-3d)
+                           :on-change on-preserve}])]]])]))

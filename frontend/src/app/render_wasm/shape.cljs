@@ -196,6 +196,9 @@
         (when (cfh/frame-shape? shape)
           (api/set-shape-perspective shape))
 
+        (:translate-z :preserve-depth)
+        (api/set-shape-depth shape)
+
         ;; the units of a text a split animation poses (Penpot Motion)
         :text-units
         (api/set-shape-text-units v)

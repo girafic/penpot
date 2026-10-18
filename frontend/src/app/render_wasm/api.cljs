@@ -1131,6 +1131,11 @@
   [shape]
   (props/set-shape-tilt shape))
 
+(defn set-shape-depth
+  "The depth of the current shape (see `props/set-shape-depth`)."
+  [shape]
+  (props/set-shape-depth shape))
+
 (defn set-shape-perspective
   "The camera of the current board (see `props/set-shape-perspective`)."
   [board]

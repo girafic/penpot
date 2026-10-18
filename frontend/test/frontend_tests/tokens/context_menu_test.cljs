@@ -201,12 +201,12 @@
   (t/testing "shows all number attribute items for text"
     (let [actions (token-menu-actions [:text1] "token-number")
           action-titles (mapv :title actions)]
-      (t/is (= action-titles ["Rotation" "Rotation X" "Rotation Y" "Line Height"]))))
+      (t/is (= action-titles ["Rotation" "Rotation X" "Rotation Y" "Position Z" "Line Height"]))))
 
   (t/testing "shows non text attributes for non text shapes"
     (let [actions (token-menu-actions [:frame1 :rect1 :group1] "token-number")
           action-titles (mapv :title actions)]
-      (t/is (= action-titles ["Rotation" "Rotation X" "Rotation Y" "Perspective"])
+      (t/is (= action-titles ["Rotation" "Rotation X" "Rotation Y" "Perspective" "Position Z"])
             "the perspective of the board"))))
 
 (t/deftest stroke-width-items

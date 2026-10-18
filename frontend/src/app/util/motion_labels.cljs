@@ -37,6 +37,7 @@
       :rotation "Rotation"
       :rotate-x "Rotation X"
       :rotate-y "Rotation Y"
+      :translate-z "Position Z"
       :perspective (tr "workspace.options.perspective")
       :perspective-x (tr "workspace.options.vanishing-point-x")
       :perspective-y (tr "workspace.options.vanishing-point-y")

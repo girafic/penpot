@@ -130,9 +130,46 @@
   padding: 0 deprecated.$s-16 deprecated.$s-12;
 }
 
-.tilt-values {
+// The fields: the turn about X, Y and Z in a row, the depth under them
+.tilt-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: deprecated.$s-4;
+}
+
+.tilt-field {
+  @extend %input-element;
   @include deprecated.body-small-typography;
 
+  min-inline-size: 0;
+
+  &.wide {
+    grid-column: 1 / -1;
+  }
+}
+
+// as wide as their text, unlike the labels of other inputs
+.tilt-field .tilt-field-label,
+.tilt-field .tilt-field-unit {
+  @include deprecated.body-small-typography;
+
+  flex: none;
+  width: auto;
   color: var(--color-foreground-secondary);
+  white-space: nowrap;
+  text-transform: none;
+}
+
+.tilt-field .tilt-field-label {
+  padding-inline: deprecated.$s-8 deprecated.$s-4;
+}
+
+.tilt-field .tilt-field-unit {
+  padding-inline: 0 deprecated.$s-6;
+}
+
+.tilt-field-input {
+  flex: 1;
+  min-inline-size: 0;
   font-variant-numeric: tabular-nums;
 }

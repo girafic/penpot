@@ -82,31 +82,45 @@
   [prop]
   (or (animated? prop) (not (mth/almost-zero? (scalar (rest-value prop 0))))))
 
+(defn- depth-of
+  "The z of the position of the 3D transform `tr` at rest, away from the
+  viewer: of a split position its `z`, else the third of `[x y z]`."
+  [tr]
+  (let [p (:p tr)]
+    (if (some? (:z p))
+      (scalar (rest-value (:z p) 0))
+      (let [v (rest-value p [0 0 0])]
+        (if (and (sequential? v) (> (count v) 2)) (scalar (nth v 2)) 0)))))
+
 (defn- tilt-attrs
   "The tilt at rest of a layer of the 3D transform `tr`: its `rx`, `ry`
   the other way round (Lottie turns them so), the keyframes of those that
-  play counting from flat (see `add-transform-keyframes`)."
-  [tr]
-  (let [at (fn [prop] (if (animated? prop) 0 (- (scalar (rest-value prop 0)))))]
+  play counting from flat (see `add-transform-keyframes`); and, of a 3D
+  layer (`three-d?`), its depth (`:translate-z`, towards the viewer) from
+  the z of its position."
+  [tr three-d?]
+  (let [at (fn [prop] (if (animated? prop) 0 (- (scalar (rest-value prop 0)))))
+        z  (if three-d? (depth-of tr) 0)]
     (cond-> {}
       (not (mth/almost-zero? (at (:rx tr)))) (assoc :rotate-x (at (:rx tr)))
-      (not (mth/almost-zero? (at (:ry tr)))) (assoc :rotate-y (at (:ry tr))))))
+      (not (mth/almost-zero? (at (:ry tr)))) (assoc :rotate-y (at (:ry tr)))
+      (not (mth/almost-zero? z))             (assoc :translate-z (- z)))))
 
 (defn- tilts?
   [tr]
   (or (nonzero? (:rx tr)) (nonzero? (:ry tr))))
 
 (defn- exact-3d?
-  "Whether a board shows the 3D transform `tr` as it plays: no depth (a
-  position or anchor off z 0), no orientation (`or`), no turn in the plane
-  (`rz`) under a tilt, which Lottie turns first."
+  "Whether a board shows the 3D transform `tr` as it plays: a depth that
+  stays (the z of its position, see `tilt-attrs`), no anchor off z 0, no
+  orientation (`or`), no turn in the plane (`rz`) under a tilt, which
+  Lottie turns first."
   [tr]
   (let [z      (fn [prop] (let [v (rest-value prop [0 0 0])]
                             (if (and (sequential? v) (> (count v) 2)) (scalar (nth v 2)) 0)))
         orient (rest-value (:or tr) [0 0 0])]
     (and (not (animated? (:p tr)))
-         (mth/almost-zero? (z (:p tr)))
-         (not (some? (get-in tr [:p :z])))
+         (not (animated? (get-in tr [:p :z])))
          (mth/almost-zero? (z (:a tr)))
          (not (animated? (:or tr)))
          (every? #(mth/almost-zero? (scalar %)) (if (sequential? orient) orient [orient]))
@@ -988,7 +1002,7 @@
     (if direct?
       (let [id    (uuid/next)
             shape (drawable-shape ctx id parent-id single)
-            shape (cond-> (merge (assoc shape :name (or (:nm layer) (:name shape))) (tilt-attrs tr))
+            shape (cond-> (merge (assoc shape :name (or (:nm layer) (:name shape))) (tilt-attrs tr (= 1 (:ddd layer))))
                     (and (not fades?) (not span?) (< opacity 1))
                     (assoc :opacity (* opacity (:opacity shape 1))))]
         (ctx :add shape)
@@ -1037,7 +1051,7 @@
               nil)))
 
         (let [node (merge (frame-shape id (:nm layer) parent-id pivot (ctx :box-since slot) nil)
-                          (tilt-attrs tr))
+                          (tilt-attrs tr (= 1 (:ddd layer))))
               node (cond-> node
                      (empty? roles)
                      (with-effects fx)

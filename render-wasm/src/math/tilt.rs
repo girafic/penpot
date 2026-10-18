@@ -10,11 +10,16 @@
 //! vanishing point of the board (its middle unless it is moved, as CSS
 //! `perspective-origin`).
 //!
+//! A layer also comes `translate_z` px towards the viewer, in the space of
+//! its parent.
+//!
 //! The tilt of a layer is a homography of the page (a 3×3 `Matrix` with a
 //! perspective row), drawn after the layer's own transform. The layers in a
 //! tilted group or board are drawn through its homography too, after their
 //! own: each tilted layer flattens what it holds, as CSS does without
-//! `preserve-3d`.
+//! `preserve-3d`. A group that is a 3D space does not: its tilt and depth go
+//! into those of what it holds (`model44`), seen once (`seen`), and the
+//! layers of a 3D space draw back to front.
 
 use super::{Matrix, Point, Rect};
 
@@ -54,9 +59,10 @@ impl Tilt {
     }
 }
 
-type M44 = [f64; 16];
+/// A matrix of space, by rows, turning column vectors `[x y z 1]`.
+pub type M44 = [f64; 16];
 
-fn mul44(a: &M44, b: &M44) -> M44 {
+pub fn mul44(a: &M44, b: &M44) -> M44 {
     let mut out = [0.0; 16];
     for r in 0..4 {
         for c in 0..4 {
@@ -138,7 +144,7 @@ fn matrix44(m: &Matrix) -> M44 {
     ]
 }
 
-fn apply44(m: &M44, [x, y, z]: [f64; 3]) -> [f64; 3] {
+pub fn apply44(m: &M44, [x, y, z]: [f64; 3]) -> [f64; 3] {
     [
         m[0] * x + m[1] * y + m[2] * z + m[3],
         m[4] * x + m[5] * y + m[6] * z + m[7],
@@ -205,10 +211,46 @@ fn tilt44(selrect: &Rect, tilt: &Tilt) -> M44 {
     )
 }
 
+/// Where a layer with the box `selrect`, drawn through `transform` (its
+/// transform around its middle), takes the points of the page in space:
+/// its `tilt` (in its own axes) and then its depth `z` (towards the
+/// viewer). `None` when it stays in the plane.
+pub fn model44(selrect: &Rect, transform: &Matrix, tilt: Option<&Tilt>, z: f32) -> Option<M44> {
+    let tilt = tilt.filter(|t| !t.is_flat());
+    if tilt.is_none() && z.abs() < 1e-6 {
+        return None;
+    }
+    let lifted = translate44(0.0, 0.0, z as f64);
+    Some(match tilt {
+        Some(tilt) => {
+            let inverse = transform.invert().unwrap_or_default();
+            [
+                matrix44(transform),
+                tilt44(selrect, tilt),
+                matrix44(&inverse),
+            ]
+            .iter()
+            .fold(lifted, |acc, m| mul44(&acc, m))
+        }
+        None => lifted,
+    })
+}
+
+/// The homography of the page the points of `m` show at, seen from
+/// `distance` px with the vanishing point `vp`.
+pub fn seen(m: &M44, distance: f32, vp: Point) -> Matrix {
+    let camera = about44(
+        &perspective44(distance.max(1.0) as f64),
+        [vp.x as f64, vp.y as f64, 0.0],
+    );
+    restrict(&mul44(&camera, m))
+}
+
 /// The homography of the page a layer with the box `selrect`, drawn
 /// through `transform` (its transform around its middle), is drawn
 /// through for `tilt`, seen from `distance` px with the vanishing point
 /// `vp`. `None` for a flat tilt.
+#[cfg(test)]
 pub fn tilt_matrix(
     selrect: &Rect,
     transform: &Matrix,
@@ -216,22 +258,7 @@ pub fn tilt_matrix(
     distance: f32,
     vp: Point,
 ) -> Option<Matrix> {
-    if tilt.is_flat() {
-        return None;
-    }
-    let inverse = transform.invert().unwrap_or_default();
-    let m = [
-        about44(
-            &perspective44(distance.max(1.0) as f64),
-            [vp.x as f64, vp.y as f64, 0.0],
-        ),
-        matrix44(transform),
-        tilt44(selrect, tilt),
-        matrix44(&inverse),
-    ]
-    .iter()
-    .fold(translate44(0.0, 0.0, 0.0), |acc, m| mul44(&acc, m));
-    Some(restrict(&m))
+    model44(selrect, transform, Some(tilt), 0.0).map(|m| seen(&m, distance, vp))
 }
 
 fn get9(h: &Matrix) -> [f64; 9] {

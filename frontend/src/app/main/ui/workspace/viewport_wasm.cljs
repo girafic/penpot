@@ -690,15 +690,17 @@
     (mf/with-effect [edition @initialized?]
       (when (and edition @initialized?)
         (when-let [shape (get (deref refs/workspace-page-objects) edition)]
-          (when (gtl/tilted? shape)
+          (when (gtl/three-d? shape)
             (wselect/use-shape edition)
             (wasm.api/set-shape-tilt (dissoc shape :rotate-x :rotate-y))
+            (wasm.api/set-shape-depth (dissoc shape :translate-z))
             (wasm.api/request-render "start-flat-edition")
             (fn []
               (when (wasm.api/initialized?)
                 (when-let [shape (get (deref refs/workspace-page-objects) edition)]
                   (wselect/use-shape edition)
                   (wasm.api/set-shape-tilt shape)
+                  (wasm.api/set-shape-depth shape)
                   (wasm.api/request-render "stop-flat-edition"))))))))
 
     (mf/with-effect [path-editing? edition @initialized?]

@@ -323,6 +323,23 @@
   min-inline-size: 0;
 }
 
+// The depth of a layer and, of a group or board, whether it is a 3D space.
+.depth {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1/-1;
+}
+
+.preserve-3d {
+  @include deprecated.body-small-typography;
+
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+  color: var(--color-foreground-secondary);
+}
+
 // The vanishing point of a board, X and Y in a row under its perspective.
 .vanishing-axis {
   grid-row: 2;

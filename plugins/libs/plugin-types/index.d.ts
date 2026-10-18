@@ -250,6 +250,13 @@ export interface Board extends ShapeBase {
   perspectiveY: number | null;
 
   /**
+   * When true the board, unless it clips its content, is a 3D space: its
+   * children draw back to front by their depth (see `Group.preserve3d`).
+   * Penpot Motion.
+   */
+  preserve3d: boolean;
+
+  /**
    * The grid layout configuration of the board, if applicable.
    */
   readonly grid?: GridLayout;
@@ -2556,6 +2563,15 @@ export interface Group extends ShapeBase {
    * The type of the shape, which is always 'group' for groups.
    */
   readonly type: 'group';
+
+  /**
+   * When true the group is a 3D space, as CSS `transform-style:
+   * preserve-3d`: its children keep their depth (`translateZ`) and tilt
+   * (`rotateX`, `rotateY`) in one space with its own, seen once with the
+   * perspective of its board, and draw back to front. An opacity, a blur,
+   * a shadow or a mask flattens it. Penpot Motion.
+   */
+  preserve3d: boolean;
 
   // Container Properties
   /**
@@ -5445,6 +5461,7 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  *   `shadowOffsetX`, `shadowOffsetY`, `shadowBlur`, `shadowSpread` and the
  *   `borderRadius…` corners: pixels.
  * - `rotation`, `rotateX`, `rotateY`: degrees.
+ * - `translateZ`: how far the layer comes towards the viewer, in pixels.
  * - `perspective`: the distance of the viewer of the tilted layers of a
  *   board, in pixels; `perspectiveX`, `perspectiveY`: their vanishing
  *   point, a fraction of the board (0.5 is its middle). Only boards take
@@ -5474,6 +5491,7 @@ export type AnimatableProperty =
   | 'rotation'
   | 'rotateX'
   | 'rotateY'
+  | 'translateZ'
   | 'perspective'
   | 'perspectiveX'
   | 'perspectiveY'
@@ -6312,6 +6330,15 @@ export interface ShapeBase extends PluginData {
    * `rotateY()` does. Penpot Motion; 0 is flat.
    */
   rotateY: number;
+
+  /**
+   * How far in pixels the shape comes towards the viewer, in the space of
+   * its parent, as CSS `translateZ()`: nearer, it shows bigger and away
+   * from the vanishing point of its board. Negative goes back. Penpot
+   * Motion; 0 is in the plane. Animatable as the keyframe property
+   * `translateZ`.
+   */
+  translateZ: number;
 
   /**
    * When true the shape hides while its back faces the viewer, as CSS

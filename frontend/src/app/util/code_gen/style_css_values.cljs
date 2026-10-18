@@ -187,12 +187,18 @@
 (declare get-flat-transform)
 
 (defn- tilt-transform
-  "The 3D rotation of `shape` (see `app.common.geom.tilt`) as CSS, after
-  its turn in the plane: in its own axes, around its middle."
+  "The depth and 3D rotation of `shape` (see `app.common.geom.tilt`) as
+  CSS, after its turn in the plane: towards the viewer, then in its own
+  axes, around its middle."
   [shape]
-  (when (gtl/tilted? shape)
-    (dm/str "rotateX(" (fmt/format-number (or (:rotate-x shape) 0)) "deg) "
-            "rotateY(" (fmt/format-number (or (:rotate-y shape) 0)) "deg)")))
+  (when (gtl/three-d? shape)
+    (->> [(when (gtl/lifted? shape)
+            (dm/str "translateZ(" (fmt/format-number (:translate-z shape)) "px)"))
+          (when (gtl/tilted? shape)
+            (dm/str "rotateX(" (fmt/format-number (or (:rotate-x shape) 0)) "deg) "
+                    "rotateY(" (fmt/format-number (or (:rotate-y shape) 0)) "deg)"))]
+         (remove nil?)
+         (str/join " "))))
 
 (defn- get-transform
   [shape objects]
@@ -203,10 +209,16 @@
       (or flat tilt))))
 
 (defn- tilted-children
-  "The layers of `shape` that tilt (see `app.common.geom.tilt`): CSS sees
-  them with the perspective of their parent element."
+  "The layers of `shape` that leave the plane, or are 3D spaces (see
+  `app.common.geom.tilt`): CSS sees them with the perspective of their
+  parent element. None for a 3D space group, whose layers share the
+  space of its parent element (see `gtl/three-d-space?`)."
   [shape objects]
-  (into [] (comp (map #(get objects %)) (filter gtl/tilted?)) (:shapes shape)))
+  (when-not (and (cfh/group-shape? shape) (gtl/three-d-space? shape))
+    (into []
+          (comp (map #(get objects %))
+                (filter #(or (gtl/three-d? %) (gtl/three-d-space? %))))
+          (:shapes shape))))
 
 (defn- get-perspective
   "The perspective of the board of the tilted layers of `shape`."
@@ -232,20 +244,25 @@
        (mth/almost-zero? (mod (or (:rotate-y shape) 0) 180))))
 
 (defn- get-transform-style
-  "`preserve-3d` for a tilted `shape` whose layers hide their back faces in
-  its plane, a card that flips: CSS judges their backs by its tilt too.
-  Only when it groups nothing CSS would flatten it for (a clip, opacity,
-  a filter, a blend or a mask)."
+  "`preserve-3d` for a 3D space (see `gtl/three-d-space?`), and for a
+  tilted `shape` whose layers hide their back faces in its plane, a card
+  that flips: CSS judges their backs by its tilt too. Only when it groups
+  nothing CSS would flatten it for (a clip, opacity, a filter, a blend or
+  a mask)."
   [shape objects]
-  (when (and (gtl/tilted? shape)
-             (some #(and (:backface-hidden %) (planar-turn? %))
-                   (map #(get objects %) (:shapes shape)))
-             (not (and (cfh/frame-shape? shape) (not (:show-content shape))))
-             (< (- 1 (or (:opacity shape) 1)) 0.001)
-             (empty? (:blur shape))
-             (empty? (:shadow shape))
-             (contains? #{nil :normal} (:blend-mode shape))
-             (not (:masked-group shape)))
+  (cond
+    (gtl/three-d-space? shape)
+    "preserve-3d"
+
+    (and (gtl/tilted? shape)
+         (some #(and (:backface-hidden %) (planar-turn? %))
+               (map #(get objects %) (:shapes shape)))
+         (not (and (cfh/frame-shape? shape) (not (:show-content shape))))
+         (< (- 1 (or (:opacity shape) 1)) 0.001)
+         (empty? (:blur shape))
+         (empty? (:shadow shape))
+         (contains? #{nil :normal} (:blend-mode shape))
+         (not (:masked-group shape)))
     "preserve-3d"))
 
 (defn- get-flat-transform

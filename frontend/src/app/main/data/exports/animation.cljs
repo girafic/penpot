@@ -159,17 +159,19 @@
       ;; `app.common.geom.tilt`), the picture would tilt it twice
       (when (and apply-shape-properties shape)
         (if (= :text (:type shape))
-          (apply-shape-properties (assoc shape :opacity 1 :text-units [] :rotate-x 0 :rotate-y 0 :backface-hidden false)
-                                  [:opacity :text-units :rotate-x])
-          (apply-shape-properties (assoc shape :opacity 1 :rotate-x 0 :rotate-y 0 :backface-hidden false)
-                                  [:opacity :rotate-x])))
+          (apply-shape-properties (assoc shape :opacity 1 :text-units [] :rotate-x 0 :rotate-y 0
+                                         :translate-z 0 :backface-hidden false)
+                                  [:opacity :text-units :rotate-x :translate-z])
+          (apply-shape-properties (assoc shape :opacity 1 :rotate-x 0 :rotate-y 0
+                                         :translate-z 0 :backface-hidden false)
+                                  [:opacity :rotate-x :translate-z])))
       (let [bytes (render-shape-pixels shape-id 1 :png)]
         {:bytes bytes
          :rect  (when get-shape-extrect
                   (get-shape-extrect shape-id))})
       (finally
         (when (and apply-shape-properties shape)
-          (apply-shape-properties shape [:opacity :rotate-x]))
+          (apply-shape-properties shape [:opacity :rotate-x :translate-z]))
         (doseq [id hide-ids]
           (let [shape (get objects id)]
             (if apply-shape-properties
@@ -646,8 +648,9 @@
     fit the board's;
   - `:gif/alpha` and `:mp4/alpha`, a board that shows through (see
     `see-through?`): GIF has no partial transparency, MP4 none at all;
-  - `:lottie/three-d` and `:svg/three-d`, a layer that tilts (see
-    `app.common.geom.tilt`), at rest or as it plays: the players of
+  - `:lottie/three-d` and `:svg/three-d`, a layer that tilts or comes
+    out of the plane (see `app.common.geom.tilt`), at rest or as it
+    plays: the players of
     Lottie see it with their own depth or none (lottie-web's SVG and
     canvas renderers and dotLottie flat, without a camera, which stops
     lottie-web's), an SVG flat."
@@ -698,7 +701,8 @@
           ;; a layer that tilts, at rest or as it plays
           tilted?   (or (contains? animated :rotate-x)
                         (contains? animated :rotate-y)
-                        (some?* gtl/tilted?))
+                        (contains? animated :translate-z)
+                        (some?* gtl/three-d?))
           table
           [[:lottie/images lottie-formats
             (boolean (some (fn [id]

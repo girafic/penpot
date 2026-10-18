@@ -251,6 +251,19 @@
     (t/is (= 0 (cta/rest-value shape :rotate-x nil)))
     (t/is (= 10 (cta/rest-value shape :rotate-y nil)))))
 
+(t/deftest a-depth-plays-as-a-change-of-the-layer
+  (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
+        sid   (:id shape)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe sid {:time 0 :property :translate-z :value 0})
+                  (cta/add-keyframe sid {:time 1000 :property :translate-z :value 100}))
+        mods  (get-in (ctaf/timeline->modif-tree tl {sid shape} 500) [sid :modifiers])]
+    (t/is (mth/close? 50 (:translate-z (ctm/apply-structure-modifiers shape mods)) 0.001))
+    (t/is (= 0 (cta/rest-value shape :translate-z nil)))
+    (t/testing "CSS plays it before the tilt"
+      (let [css (acss/timeline->css tl {sid shape})]
+        (t/is (str/includes? css "translateZ(100px) rotateX(0deg) rotateY(0deg) scale(1, 1);"))))))
+
 (t/deftest the-camera-of-a-board-plays
   ;; The perspective and the vanishing point of a board ride the modifier
   ;; pipeline as changes of the board, all of them when one plays.

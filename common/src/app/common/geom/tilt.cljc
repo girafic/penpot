@@ -18,12 +18,20 @@
   (`:perspective-x`, `:perspective-y`, fractions of it, its middle
   without; CSS `perspective-origin`).
 
-  The tilt of a shape is a homography of the page (`tilt-matrix`), a
-  vector of 9 numbers by rows mapping `[x y 1]`. The layers in a tilted
+  A layer also comes `:translate-z` px towards the viewer, in the space
+  of its parent: nearer, it shows bigger, away from the vanishing point.
+
+  What a shape is drawn through is a homography of the page (`own-matrix`),
+  a vector of 9 numbers by rows mapping `[x y 1]`. The layers in a tilted
   group or board are drawn through its homography too, after their own
   (`projection`): each tilted layer flattens what it holds, as CSS does
-  without `preserve-3d`. The WASM renderer does the same sums
-  (`render-wasm/src/math/tilt.rs`)."
+  without `preserve-3d`. A group that is a 3D space (`:preserve-depth`, see
+  `three-d-space?`) does not: what it holds keeps its depth in its space,
+  its tilt and depth in theirs, seen once (CSS `transform-style:
+  preserve-3d`); the layers of a 3D space are drawn back to front
+  (`depth`). A board that is a 3D space draws what it holds back to front
+  too, seen with its own perspective. The WASM renderer does the same
+  sums (`render-wasm/src/math/tilt.rs`)."
   (:require
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
@@ -50,6 +58,40 @@
   [shape]
   (or (not (mth/almost-zero? (or (:rotate-x shape) 0)))
       (not (mth/almost-zero? (or (:rotate-y shape) 0)))))
+
+(defn lifted?
+  "Whether `shape` comes out of the plane of its parent, towards the
+  viewer or away (`:translate-z`)."
+  [shape]
+  (not (mth/almost-zero? (or (:translate-z shape) 0))))
+
+(defn three-d?
+  "Whether `shape` leaves the plane: it tilts or comes out of it."
+  [shape]
+  (or (tilted? shape) (lifted? shape)))
+
+(defn three-d-space?
+  "Whether `shape` is a 3D space: a group or a board that does not clip,
+  set `:preserve-depth`, with nothing that would flatten what it holds into
+  its plane, as CSS flattens a `preserve-3d` element with a clip, an
+  opacity, a filter, a blend or a mask."
+  [shape]
+  (and (true? (:preserve-depth shape))
+       (case (:type shape)
+         :group (not (:masked-group shape))
+         :frame (true? (:show-content shape))
+         false)
+       (>= (or (:opacity shape) 1) 0.999)
+       (not (some #(not (:hidden %)) (:shadow shape)))
+       (not (and (some? (:blur shape)) (not (:hidden (:blur shape))) (pos? (:value (:blur shape) 0))))
+       (contains? #{nil :normal} (:blend-mode shape))))
+
+(defn- space-group?
+  "Whether `shape` is a group that is a 3D space (see `three-d-space?`):
+  it draws nothing of its own, its tilt and depth go into those of what
+  it holds."
+  [shape]
+  (and (= :group (:type shape)) (three-d-space? shape)))
 
 ;; 4×4 matrices, by rows, turning column vectors [x y z 1]
 
@@ -219,44 +261,116 @@
                (mul44 rotation (translate44 (- (nth o 0)) (- (nth o 1)) 0))))
       (about44 rotation (box-point shape 0.5 0.5)))))
 
+(defn- model44
+  "Where `shape` takes the points of the page in space: its tilt (in its
+  own axes, after its transform) and then its depth, nil when it stays in
+  the plane."
+  [shape]
+  (when (three-d? shape)
+    (let [z (or (:translate-z shape) 0)]
+      (reduce mul44
+              [(translate44 0 0 z)
+               (matrix->m44 (gtr/transform-matrix shape))
+               (tilt44 shape)
+               (matrix->m44 (gtr/inverse-transform-matrix shape))]))))
+
+(defn- seen
+  "The homography of the page the points of `m44` show at, seen as
+  `perspective` says (see `perspective-of`)."
+  [m44 {:keys [distance vp]}]
+  (let [vx (dm/get-prop vp :x)
+        vy (dm/get-prop vp :y)]
+    (restrict (mul44 (about44 (perspective44 distance) [vx vy 0]) m44))))
+
 (defn seen-tilt-matrix
-  "The homography of the page `shape` is drawn through for its own tilt,
-  seen as `perspective` says (see `perspective-of`), nil when it does not
-  tilt."
-  [shape {:keys [distance vp]}]
-  (when (tilted? shape)
-    (let [vx (dm/get-prop vp :x)
-          vy (dm/get-prop vp :y)]
-      (restrict
-       (reduce mul44
-               [(about44 (perspective44 distance) [vx vy 0])
-                (matrix->m44 (gtr/transform-matrix shape))
-                (tilt44 shape)
-                (matrix->m44 (gtr/inverse-transform-matrix shape))])))))
+  "The homography of the page `shape` is drawn through for its own tilt
+  and depth, seen as `perspective` says (see `perspective-of`), nil when
+  it stays in the plane."
+  [shape perspective]
+  (some-> (model44 shape) (seen perspective)))
+
+(defn- space-chain
+  "`[m44 top]`: where `shape` and the 3D space groups it is in (see
+  `space-group?`) take the points of the page, nil when all stay in the
+  plane, and the outermost of them."
+  [objects shape]
+  (loop [m   (model44 shape)
+         top shape]
+    (let [parent (get objects (:parent-id top))]
+      (if (and (some? parent) (not= uuid/zero (:id parent)) (space-group? parent))
+        (recur (if-let [pm (model44 parent)] (if m (mul44 pm m) pm) m) parent)
+        [m top]))))
+
+(defn own-matrix
+  "The homography of the page `shape` of `objects` is drawn through in
+  the plane of the layer it is in: its tilt and depth and those of the 3D
+  space groups it is in (see `space-chain`), seen from the board of the
+  outermost (see `perspective-of`); nil when it stays in the plane, and
+  for a 3D space group, which passes its own to what it holds."
+  [objects shape]
+  (when-not (space-group? shape)
+    (let [[m top] (space-chain objects shape)]
+      (when (some? m)
+        (seen m (perspective-of objects top))))))
 
 (defn tilt-matrix
   "The homography of the page `shape` of `objects` is drawn through for
-  its own tilt, seen from its board (see `seen-tilt-matrix`)."
+  its own tilt and depth (see `own-matrix`)."
   [objects shape]
-  (when (tilted? shape)
-    (seen-tilt-matrix shape (perspective-of objects shape))))
+  (own-matrix objects shape))
 
 (defn projection
-  "The homography of the page `shape` is drawn through: its own tilt,
-  then that of each group or board it is in, nil when none tilts."
+  "The homography of the page `shape` is drawn through: its own (see
+  `own-matrix`), then that of each group or board it is in, nil when
+  none leaves the plane."
   [objects shape]
-  (loop [h      (tilt-matrix objects shape)
+  (loop [h      (own-matrix objects shape)
          parent (get objects (:parent-id shape))]
     (if (or (nil? parent) (= uuid/zero (:id parent)))
       h
-      (recur (mul (tilt-matrix objects parent) h)
+      (recur (mul (own-matrix objects parent) h)
              (get objects (:parent-id parent))))))
+
+(defn depth
+  "How far the middle of `shape` comes towards the viewer in the 3D space
+  it is in (see `space-chain`), px: what draws it before or after the
+  other layers of a 3D space."
+  [objects shape]
+  (let [[m _] (space-chain objects shape)
+        c     (gco/shape->center shape)]
+    (if (some? m)
+      (nth (apply44 m [(:x c) (:y c) 0]) 2)
+      0)))
+
+(defn depth-sorted
+  "`ids`, layers of `objects` in the parent `parent`, from the back to the
+  front: in a 3D space (see `three-d-space?`) by their `depth`, the later
+  one in front where two are as deep; else as they are."
+  [objects parent ids]
+  (if (three-d-space? parent)
+    (->> (map-indexed vector ids)
+         (sort-by (fn [[i id]] [(depth objects (get objects id)) i]))
+         (mapv second))
+    ids))
+
+(defn- shown-projection
+  "The homography the box of `shape` shows through (see `projection`); of
+  a 3D space group, which draws nothing itself, as if it drew, through
+  its own tilt and depth too."
+  [objects shape]
+  (if (space-group? shape)
+    (let [[m top] (space-chain objects shape)
+          parent  (get objects (:parent-id top))]
+      (mul (when (and (some? parent) (not= uuid/zero (:id parent)))
+             (projection objects parent))
+           (some-> m (seen (perspective-of objects top)))))
+    (projection objects shape)))
 
 (defn project-outline
   "`points` of the flat `shape` as they show, tilted (see `projection`):
   nil when nothing tilts it or one reaches the viewer."
   [objects shape points]
-  (when-let [h (projection objects shape)]
+  (when-let [h (shown-projection objects shape)]
     (let [projected (mapv #(project-point h %) points)]
       (when (every? some? projected)
         projected))))
@@ -331,7 +445,7 @@
   "The outline of `shape` (see `outline-polylines`) as it shows, tilted:
   nil when nothing tilts it or a point reaches the viewer."
   [objects shape]
-  (when-let [h (projection objects shape)]
+  (when-let [h (shown-projection objects shape)]
     (let [lines (mapv (fn [line] (update line :points (fn [pts] (mapv #(project-point h %) pts))))
                       (outline-polylines shape))]
       (when (every? (fn [line] (every? some? (:points line))) lines)

@@ -119,9 +119,11 @@ impl ShapesPoolImpl {
         projection
     }
 
-    /// Drops the extrect cache of the tilted layers in `id` (and of the
-    /// ancestors they grow): their board sees them from its middle with its
-    /// perspective, so they show elsewhere when it changes.
+    /// Drops the extrect cache of the layers in `id` that leave the plane,
+    /// or are in a 3D space, (and of the ancestors they grow): their board
+    /// sees them from its vanishing point with its perspective, and a 3D
+    /// space group takes them with its tilt and depth, so they show
+    /// elsewhere when those change.
     pub fn invalidate_tilted_descendants(&mut self, id: &Uuid) {
         if !self.has_tilts {
             return;
@@ -129,10 +131,20 @@ impl ShapesPoolImpl {
         let Some(shape) = self.get_raw(id) else {
             return;
         };
+        let space = shape.preserve_3d;
         let tilted: Vec<Uuid> = shape
             .all_children(self, true, false)
             .into_iter()
-            .filter(|child| self.get_raw(child).is_some_and(|s| s.is_tilted()))
+            .filter(|child| {
+                space
+                    || self.get_raw(child).is_some_and(|s| {
+                        s.is_three_d()
+                            || s.preserve_3d
+                            || s.parent_id
+                                .and_then(|p| self.get_raw(&p))
+                                .is_some_and(|p| p.preserve_3d)
+                    })
+            })
             .collect();
         for child in tilted {
             if let Some(idx) = self.uuid_to_idx.get(&child).copied() {

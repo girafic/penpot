@@ -647,13 +647,41 @@ pub extern "C" fn set_shape_tilt(
         pivot: (px, py),
         rest: (rest_rx, rest_ry),
     };
+    let mut space = false;
     with_current_shape_mut!(state, |shape: &mut Shape| {
         shape.set_tilt(Some(tilt), backface_hidden);
+        space = shape.preserve_3d;
     });
     if !tilt.is_flat() || backface_hidden {
         with_state!(state, {
             state.shapes.mark_tilts();
         });
+    }
+    // what a 3D space holds takes its tilt
+    if space {
+        invalidate_current_tilted_descendants();
+    }
+    Ok(())
+}
+
+/// How far the current shape comes towards the viewer, px, in the space of
+/// its parent (see `math::tilt`), and whether it is a 3D space (a group or
+/// a board, see `Shape::three_d_space`).
+#[no_mangle]
+#[wasm_error]
+pub extern "C" fn set_shape_depth(z: f32, preserve_3d: bool) -> Result<()> {
+    let mut was_space = false;
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        was_space = shape.preserve_3d;
+        shape.set_depth(z, preserve_3d);
+    });
+    if z.abs() > 1e-6 || preserve_3d {
+        with_state!(state, {
+            state.shapes.mark_tilts();
+        });
+    }
+    if preserve_3d || was_space {
+        invalidate_current_tilted_descendants();
     }
     Ok(())
 }

@@ -32,6 +32,7 @@
    :rotation "rotation"
    :rotate-x "rotateX"
    :rotate-y "rotateY"
+   :translate-z "translateZ"
    :perspective "perspective"
    :perspective-x "perspectiveX"
    :perspective-y "perspectiveY"
@@ -74,7 +75,7 @@
 (def property-order
   "The animatable properties in the order of the rows of the dock, which
   the code follows."
-  [:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y
+  [:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y :translate-z
    :perspective :perspective-x :perspective-y
    :opacity :r1 :r2 :r3 :r4
    :fill-color :fill-opacity
@@ -351,6 +352,7 @@
    ["rotate" #{:rotation} :rotate]
    ["rotateX" #{:rotate-x} :rotate-x]
    ["rotateY" #{:rotate-y} :rotate-y]
+   ["z" #{:translate-z} :translate-z]
    ["perspective" #{:perspective} :perspective]
    ["perspectiveOrigin" #{:perspective-x :perspective-y} :perspective-origin]
    ["scaleX" #{:width :scale-x} :scale-x]
@@ -580,8 +582,9 @@
   the tilt in its own axes, after its turn, before its scale, lifted to
   its pivot by `lift` (`[dx dy dz]`, see `acss/frame-values`)."
   [lift]
-  (str "transformTemplate={({ x = 0, y = 0, rotate = 0, rotateX = 0, rotateY = 0, scaleX = 1, scaleY = 1 }) =>\n"
+  (str "transformTemplate={({ x = 0, y = 0, z = 0, rotate = 0, rotateX = 0, rotateY = 0, scaleX = 1, scaleY = 1 }) =>\n"
        "          `translate(${withUnit(x, \"px\")}, ${withUnit(y, \"px\")}) "
+       "translateZ(${withUnit(z, \"px\")}) "
        "rotate(${withUnit(rotate, \"deg\")}) "
        (when-let [[dx dy dz] lift]
          (str "translate3d(" (react-number dx) "px, " (react-number dy) "px, " (react-number dz) "px) "))
@@ -658,7 +661,7 @@
         names  (into #{} (map :name) values)
         origin (:origin layer)
         units  (when (:units layer) (react-units layer objects))
-        tilt?  (or (contains? names "rotateX") (contains? names "rotateY"))
+        tilt?  (or (contains? names "rotateX") (contains? names "rotateY") (contains? names "z"))
         template? (or tilt? (and (contains? names "rotate") (contains? names "scaleX")))]
     {:hold? (or (some :hold? values) (:hold? units))
      :template? template?

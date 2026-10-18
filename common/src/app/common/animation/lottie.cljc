@@ -1878,12 +1878,13 @@
 (declare lottie-shifted)
 
 (defn- lottie-tilted?
-  "Whether the layer of `shape` playing `track` tilts out of the plane or
-  hides its back face, at rest or as it plays."
+  "Whether the layer of `shape` playing `track` tilts out of the plane,
+  comes out of it (`:translate-z`) or hides its back face, at rest or as
+  it plays."
   [shape track]
-  (or (gtl/tilted? shape)
+  (or (gtl/three-d? shape)
       (true? (:backface-hidden shape))
-      (some #(contains? #{:rotate-x :rotate-y} (:property %)) (:keyframes track))))
+      (some #(contains? #{:rotate-x :rotate-y :translate-z} (:property %)) (:keyframes track))))
 
 (defn- lottie-posed
   "`objects` of `ctx` at `t` ms, the shapes of `ids` posed as its
@@ -1936,7 +1937,9 @@
   turning it (`rz`), whose child it is: Lottie turns a layer in the plane
   before it tilts it. A layer whose drawing holds its turn at rest (an
   image or a precomp, see `lottie-holder-ks`) turns that back, so its
-  tilt is in its own axes. Its back face hidden by its opacity (see
+  tilt is in its own axes. Its depth (`:translate-z`, towards the viewer)
+  is the z of its position (or of the null's), away from the viewer in
+  Lottie. Its back face hidden by its opacity (see
   `lottie-backface-opacity`). `[layer]` or `[layer null]`, the null with
   what the layer follows (`::follow`)."
   [ctx shape track layer]
@@ -1956,7 +1959,9 @@
                   :ry (lottie-prop-1d (by-prop :rotate-y) #(* -1 fx %) (* -1 fx rest-y))
                   :rz {:a 0 :k (- baked)}
                   :or {:a 0 :k [0 0 0]}}
-        lift?    (not-every? mth/almost-zero? [lx ly lz])
+        depth    (lottie-prop-1d (by-prop :translate-z) #(- %) (- (or (:translate-z shape) 0)))
+        deep?    (or (= 1 (:a depth)) (not (mth/almost-zero? (:k depth))))
+        lift?    (or deep? (not-every? mth/almost-zero? [lx ly lz]))
         o        (lottie-backface-opacity ctx shape track (:o ks))]
     (if turns?
       (let [null  {:ddd 1
@@ -1964,7 +1969,7 @@
                    :nm (str (or (:name shape) "layer") " turn")
                    :sr 1
                    :ks {:o {:a 0 :k 100}
-                        :p (:p ks)
+                        :p (cond-> (:p ks) deep? (assoc :z depth))
                         :a {:a 0 :k [0 0 0]}
                         :s {:a 0 :k [100 100 100]}
                         :rx {:a 0 :k 0}
@@ -1994,7 +1999,7 @@
                                            (-> p
                                                (update :x lottie-shifted (* fx lx))
                                                (update :y lottie-shifted (* fy ly))
-                                               (assoc :z {:a 0 :k (- lz)}))))))))])))
+                                               (assoc :z (lottie-shifted depth (- lz))))))))))])))
 
 (defn- lottie-node-layers
   "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first,
