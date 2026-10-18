@@ -8934,6 +8934,26 @@ msgstr "Open overlay: %s"
 msgid "workspace.options.interaction-open-url"
 msgstr "Open URL"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-play-to-marker"
+msgstr "Play to marker"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-play-to-marker-dest"
+msgstr "Play to: %s"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-marker"
+msgstr "Marker"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-marker-next"
+msgstr "Next marker"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-marker-previous"
+msgstr "Previous marker"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs:376, src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs:552
 msgid "workspace.options.interaction-pos-bottom-center"
 msgstr "Bottom center"

@@ -14661,6 +14661,54 @@ OpenUrl:
         ```
 
         The URL to open when the action is executed
+PlayToMarker:
+  overview: |-
+    Interface PlayToMarker
+    ======================
+
+    Plays the timeline of the board the shape is on, in the view mode, from
+    where it shows to a marker of it, forwards or backwards, and pauses
+    there (Penpot Motion). A click on a "next" button of a carousel or a
+    coverflow moves it one marker on. While it plays to a marker, the next
+    and previous ones count from that marker, so a quick second click goes
+    on from there; past the first or last marker nothing happens.
+
+    Example
+    ```
+    const tl = board.timeline;next.addInteraction('click', { type: 'play-to-marker', step: 'next' });first.addInteraction('click', { type: 'play-to-marker', markerId: tl.markers[0].id });
+    ```
+
+    ```
+    interface PlayToMarker {
+        type: "play-to-marker";
+        markerId?: string;
+        step?: "next" | "previous";
+    }
+    ```
+
+    Referenced by: Action
+  members:
+    Properties:
+      type: |-
+        ```
+        readonly type: "play-to-marker"
+        ```
+
+        The action type
+      markerId: |-
+        ```
+        readonly markerId?: string
+        ```
+
+        The id of the marker it plays to (see `Marker.id`). When not given, it
+        plays to the next or previous marker, as `step` says.
+      step: |-
+        ```
+        readonly step?: "next" | "previous"
+        ```
+
+        Without `markerId`: whether it plays to the next marker (by default)
+        or the previous one.
 OverlayAction:
   overview: |-
     Interface OverlayAction
@@ -28185,6 +28233,7 @@ Action:
         | CloseOverlay
         | PreviousScreen
         | OpenUrl
+        | PlayToMarker
     ```
 
     Type for all the possible types of actions in an interaction.

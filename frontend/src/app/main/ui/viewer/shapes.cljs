@@ -144,6 +144,11 @@
     :open-url
     (st/emit! (dom/open-new-window (:url interaction)))
 
+    ;; the timeline of the board on screen (Penpot Motion)
+    :play-to-marker
+    (when-let [board-id (:id base-frame)]
+      (st/emit! (dv/play-to-marker board-id interaction)))
+
     nil))
 
 ;; Perform the opposite action of an interaction, if possible

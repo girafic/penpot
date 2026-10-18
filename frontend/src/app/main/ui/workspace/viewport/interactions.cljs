@@ -122,6 +122,9 @@
                      :open-url (dm/str "M1 -5 L 3 -7 L 7 -3 L 1 3 L -1 1"
                                        "M-1 5 L -3 7 L -7 3 L -1 -3 L 1 -1")
 
+                     ;; a play mark to a marker line (Penpot Motion)
+                     :play-to-marker "M -5 -5 L 2 0 L -5 5 Z M 5 -5 L 5 5"
+
                      nil)
         inv-zoom (/ 1 zoom)]
     [:*

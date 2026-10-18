@@ -151,7 +151,8 @@ export type Action =
   | ToggleOverlay
   | CloseOverlay
   | PreviousScreen
-  | OpenUrl;
+  | OpenUrl
+  | PlayToMarker;
 
 /**
  * Represents an active user in Penpot, extending the `User` interface.
@@ -3610,6 +3611,38 @@ export interface OpenUrl {
    * The URL to open when the action is executed
    */
   readonly url: string;
+}
+
+/**
+ * Plays the timeline of the board the shape is on, in the view mode, from
+ * where it shows to a marker of it, forwards or backwards, and pauses
+ * there (Penpot Motion). A click on a "next" button of a carousel or a
+ * coverflow moves it one marker on. While it plays to a marker, the next
+ * and previous ones count from that marker, so a quick second click goes
+ * on from there; past the first or last marker nothing happens.
+ *
+ * @example
+ * ```js
+ * const tl = board.timeline;
+ * next.addInteraction('click', { type: 'play-to-marker', step: 'next' });
+ * first.addInteraction('click', { type: 'play-to-marker', markerId: tl.markers[0].id });
+ * ```
+ */
+export interface PlayToMarker {
+  /**
+   * The action type
+   */
+  readonly type: 'play-to-marker';
+  /**
+   * The id of the marker it plays to (see `Marker.id`). When not given, it
+   * plays to the next or previous marker, as `step` says.
+   */
+  readonly markerId?: string;
+  /**
+   * Without `markerId`: whether it plays to the next marker (by default)
+   * or the previous one.
+   */
+  readonly step?: 'next' | 'previous';
 }
 
 /**

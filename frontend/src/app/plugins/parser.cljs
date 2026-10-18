@@ -494,6 +494,12 @@
 ;;  type: 'open-url';
 ;;  url: string;
 ;;}
+;;
+;;export interface PlayToMarker {
+;;  type: 'play-to-marker';
+;;  markerId?: string;
+;;  step?: 'next' | 'previous';
+;;}
 (defn parse-action
   [action]
   (when action
@@ -528,6 +534,14 @@
          :open-url
          {:action-type action-type
           :url (ctsi/normalize-url (obj/get action "url"))}
+
+         ;; a marker, else the next one (Penpot Motion)
+         :play-to-marker
+         (let [marker-id (some-> (obj/get action "markerId") uuid/parse*)
+               step      (some-> (obj/get action "step") parse-keyword)]
+           (cond-> {:action-type action-type}
+             (some? marker-id) (assoc :marker-id marker-id)
+             (nil? marker-id)  (assoc :marker-step (if (contains? ctsi/marker-steps step) step :next))))
 
          nil)))))
 

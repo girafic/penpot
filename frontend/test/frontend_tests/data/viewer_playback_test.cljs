@@ -246,3 +246,65 @@
              (get-in (ptk/update (dv/cue-timeline board) state) [:viewer-local :timeline]))
           "at its first frame, not playing until it shows")))
 
+;; PLAY TO A MARKER (a prototype action)
+
+(defn- marker-board
+  "A view of a board with a timeline of 1.8 s and markers at 0, 900 and
+  1800, its playback as `local` says."
+  [local]
+  (let [page-id  (uuid/next)
+        board-id (uuid/next)
+        timeline (-> (cta/make-timeline {:board-id board-id :duration 1800})
+                     (cta/add-marker {:time 0 :name "One"})
+                     (cta/add-marker {:time 900 :name "Two"})
+                     (cta/add-marker {:time 1800 :name "Three"}))]
+    {:board-id board-id
+     :state {:route {:params {:query {:page-id (str page-id)}}}
+             :viewer {:pages {page-id {:objects {} :timelines {board-id timeline}}}}
+             :viewer-local {:timeline (merge {:timeline-id board-id} local)}}}))
+
+(defn- emitted
+  [event state]
+  (let [out (atom [])]
+    (->> (ptk/watch event state (rx/subject))
+         (rx/subs! #(swap! out conj %)))
+    @out))
+
+(t/deftest a-prototype-plays-to-the-next-or-previous-marker
+  (let [{:keys [state board-id]} (marker-board {:time 900})
+        target (fn [state step]
+                 (when-let [event (first (emitted (dv/play-to-marker board-id {:marker-step step}) state))]
+                   (get-in (ptk/update event state) [:viewer-local :timeline :target])))]
+    (t/is (= 1800 (target state :next)))
+    (t/is (= 0 (target state :previous)))
+    (t/testing "while it plays to one, from that one"
+      (let [state (update-in state [:viewer-local :timeline] assoc :time 1200 :playing? true :target 1800)]
+        (t/is (nil? (target state :next)) "none past the last")
+        (t/is (= 900 (target state :previous)))))))
+
+(t/deftest playing-to-a-marker-stops-there-either-way
+  (let [{:keys [state board-id]} (marker-board {:time 900})
+        play (fn [state target frames]
+               (let [raf (atom [])
+                     out (atom [])]
+                 (with-redefs [ts/raf        (fn [f] (swap! raf conj f) (count @raf))
+                               ts/cancel-af! (fn [_] nil)]
+                   (let [sub (rx/subs! #(swap! out conj %) (ptk/watch (dv/play-to board-id target) state (rx/subject)))]
+                     (doseq [now frames]
+                       ((peek @raf) now))
+                     (rx/dispose! sub)))
+                 (mapv (fn [event]
+                         (if (= ::dv/seek-timeline (ptk/type event))
+                           (get-in (ptk/update event state) [:viewer-local :timeline :time])
+                           (ptk/type event)))
+                       @out)))]
+    ;; frames 100 and 400 ms in, then as far again: there
+    (t/is (= [1000 1300 1800 ::dv/pause-timeline] (play state 1800 [0 100 400 900])))
+    (t/is (= [1700 1400 900 ::dv/pause-timeline]
+             (play (assoc-in state [:viewer-local :timeline :time] 1800) 900 [0 100 400 900]))
+          "backwards")
+    (t/is (nil? (get-in (ptk/update (dv/pause-timeline)
+                                    (assoc-in state [:viewer-local :timeline :target] 1800))
+                        [:viewer-local :timeline :target]))
+          "a pause leaves no marker to go on from")))
+

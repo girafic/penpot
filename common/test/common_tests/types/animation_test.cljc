@@ -251,6 +251,21 @@
     (t/is (= 0 (cta/rest-value shape :rotate-x nil)))
     (t/is (= 10 (cta/rest-value shape :rotate-y nil)))))
 
+(t/deftest a-prototype-plays-to-a-marker
+  (let [tl (-> (mk-timeline)
+               (cta/add-marker {:time 0 :name "One"})
+               (cta/add-marker {:time 900 :name "Two"})
+               (cta/add-marker {:time 1800 :name "Three"}))
+        [one two three] (:markers tl)]
+    (t/is (= two (cta/target-marker tl 0 {:marker-step :next})))
+    (t/is (= three (cta/target-marker tl 900 {:marker-step :next})) "from the one it is at")
+    (t/is (= two (cta/target-marker tl 1200 {:marker-step :previous})) "back from between two")
+    (t/is (= one (cta/target-marker tl 900 {:marker-step :previous})))
+    (t/is (nil? (cta/target-marker tl 1800 {:marker-step :next})) "none past the last")
+    (t/is (nil? (cta/target-marker tl 0 {:marker-step :previous})))
+    (t/is (= three (cta/target-marker tl 0 {:marker-id (:id three)})))
+    (t/is (nil? (cta/target-marker tl 0 {:marker-id (uuid/next)})) "a marker since removed")))
+
 (t/deftest a-depth-plays-as-a-change-of-the-layer
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
         sid   (:id shape)

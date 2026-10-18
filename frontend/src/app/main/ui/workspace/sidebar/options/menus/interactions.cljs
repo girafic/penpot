@@ -8,6 +8,7 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.types.page :as ctp]
    [app.common.types.shape-tree :as ctt]
@@ -46,8 +47,17 @@
   [interaction]
   (get (event-type-names) (:event-type interaction) "--"))
 
+(defn- marker-label
+  "How the menu names the marker `interaction` plays to, of `markers`."
+  [interaction markers]
+  (case (:marker-step interaction)
+    :next     (tr "workspace.options.interaction-marker-next")
+    :previous (tr "workspace.options.interaction-marker-previous")
+    (or (:name (d/seek #(= (:marker-id interaction) (:id %)) markers))
+        (tr "workspace.options.interaction-none"))))
+
 (defn- action-summary
-  [interaction destination]
+  [interaction destination markers]
   (case (:action-type interaction)
     :navigate       (tr "workspace.options.interaction-navigate-to-dest"
                         (get destination :name (tr "workspace.options.interaction-none")))
@@ -59,6 +69,8 @@
                         (get destination :name (tr "workspace.options.interaction-self")))
     :prev-screen    (tr "workspace.options.interaction-prev-screen")
     :open-url       (tr "workspace.options.interaction-open-url")
+    :play-to-marker (tr "workspace.options.interaction-play-to-marker-dest"
+                        (marker-label interaction markers))
     "--"))
 
 (defn- get-frames-options
@@ -181,6 +193,12 @@
         shape-parents        (mf/with-memo [frames shape]
                                (filter (comp (set shape-parent-ids) :id) frames))
 
+        ;; the markers of the timeline of the board it is on (Penpot Motion)
+        timelines            (:timelines (mf/deref refs/workspace-page))
+        markers              (mf/with-memo [objects timelines shape]
+                               (let [board (cfh/get-root-frame objects (:id shape))]
+                                 (dm/get-in timelines [(:id board) :markers])))
+
         overlay-pos-type     (:overlay-pos-type interaction)
         close-click-outside? (:close-click-outside interaction false)
         background-overlay?  (:background-overlay interaction false)
@@ -233,6 +251,16 @@
          (fn [event]
            (let [value (uuid/parse* event)]
              (update-interaction index #(ctsi/set-position-relative-to % value)))))
+
+        change-marker
+        (mf/use-fn
+         (mf/deps index update-interaction)
+         (fn [value]
+           (let [marker (case value
+                          ("next" "previous") (keyword value)
+                          (uuid/parse* value))]
+             (when (some? marker)
+               (update-interaction index #(ctsi/set-marker % marker))))))
 
         change-preserve-scroll
         (mf/use-fn
@@ -346,7 +374,13 @@
                              {:value :toggle-overlay :label (tr "workspace.options.interaction-toggle-overlay")}
                              {:value :close-overlay  :label (tr "workspace.options.interaction-close-overlay")}
                              {:value :prev-screen    :label (tr "workspace.options.interaction-prev-screen")}
-                             {:value :open-url       :label (tr "workspace.options.interaction-open-url")}]
+                             {:value :open-url       :label (tr "workspace.options.interaction-open-url")}
+                             {:value :play-to-marker :label (tr "workspace.options.interaction-play-to-marker")}]
+
+        marker-options      (into [{:value "next" :label (tr "workspace.options.interaction-marker-next")}
+                                   {:value "previous" :label (tr "workspace.options.interaction-marker-previous")}]
+                                  (map (fn [{:keys [id name]}] {:value (str id) :label name}))
+                                  markers)
 
         frames-opts         (get-frames-options frames shape)
 
@@ -395,7 +429,7 @@
 
     [:div {:class (stl/css :interaction-item)}
      [:> prototype-pill* {:title (event-type-name interaction)
-                          :description (action-summary interaction destination)
+                          :description (action-summary interaction destination markers)
                           :left-button-icon-id i/hsva
                           :left-button-tooltip (tr "labels.options")
                           :is-left-button-active open-extended?
@@ -460,6 +494,19 @@
                            :label (tr "workspace.options.interaction-preserve-scroll")
                            :checked preserve-scroll?
                            :on-change change-preserve-scroll}]]])
+
+        ;; Marker
+        (when (ctsi/has-marker interaction)
+          [:div {:class (stl/css :interaction-row)}
+           [:div {:class (stl/css :interaction-row-label)}
+            [:div {:class (stl/css :interaction-row-name)}
+             (tr "workspace.options.interaction-marker")]]
+           [:div {:class (stl/css :interaction-row-select)}
+            [:& select {:default-value (if-let [step (:marker-step interaction)]
+                                         (name step)
+                                         (str (:marker-id interaction)))
+                        :options marker-options
+                        :on-change change-marker}]]])
 
         ;; URL
         (when (ctsi/has-url interaction)

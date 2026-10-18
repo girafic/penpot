@@ -527,6 +527,12 @@
 ;;  type: 'open-url';
 ;;  url: string;
 ;;}
+;;
+;;export interface PlayToMarker {
+;;  type: 'play-to-marker';
+;;  markerId?: string;
+;;  step?: 'next' | 'previous';
+;;}
 (defn format-action
   [interaction plugin file-id page-id]
   (when interaction
@@ -569,6 +575,11 @@
        :open-url
        #js {:type "open-url"
             :url (:url interaction)}
+
+       :play-to-marker
+       #js {:type "play-to-marker"
+            :markerId (some-> (:marker-id interaction) str)
+            :step (some-> (:marker-step interaction) name)}
 
        nil))))
 

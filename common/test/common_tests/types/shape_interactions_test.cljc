@@ -211,6 +211,39 @@
         (t/is (= "https://example.com" (:url new-interaction)))))))
 
 
+(t/deftest option-marker
+  ;; a prototype plays the timeline of the board to a marker (Penpot Motion)
+  (let [i1 ctsi/default-interaction
+        i2 (ctsi/set-action-type i1 :play-to-marker)
+        id (uuid/next)]
+
+    (t/testing "plays to the next marker by default"
+      (t/is (not (ctsi/has-marker i1)))
+      (t/is (ctsi/has-marker i2))
+      (t/is (= :next (:marker-step i2)))
+      (t/is (nil? (ctsi/has-destination i2)) "no board to go to")
+      (t/is (nil? (ctsi/has-animation? i2)) "no screen change to animate"))
+
+    (t/testing "to a marker or a step, one at a time"
+      (let [to-id (ctsi/set-marker i2 id)
+            back  (ctsi/set-marker to-id :previous)]
+        (t/is (= id (:marker-id to-id)))
+        (t/is (not (contains? to-id :marker-step)))
+        (t/is (= :previous (:marker-step back)))
+        (t/is (not (contains? back :marker-id)))
+        (t/is (ctsi/check-interaction to-id))
+        (t/is (ctsi/check-interaction back))))
+
+    (t/testing "another action drops it"
+      (let [nav (ctsi/set-action-type (ctsi/set-marker i2 id) :navigate)]
+        (t/is (not (contains? nav :marker-id)))
+        (t/is (not (contains? nav :marker-step)))))
+
+    (t/testing "the schema takes no other step"
+      (t/is (thrown? #?(:clj Exception :cljs :default)
+                     (ctsi/check-interaction (assoc i2 :marker-step :last)))))))
+
+
 (t/deftest option-overlay-opts
   (let [base-frame    (-> (cts/setup-shape {:type :frame})
                           (assoc-in [:selrect :width] 100)

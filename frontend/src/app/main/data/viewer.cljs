@@ -13,6 +13,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.logic.timelines :as cltl]
+   [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.transit :as t]
    [app.common.types.animation :as cta]
@@ -1107,7 +1108,8 @@
                    (-> (cond-> local
                          (not= timeline-id (:timeline-id local))
                          (assoc :time 0 :elapsed 0))
-                       (assoc :timeline-id timeline-id :playing? true)))))
+                       (assoc :timeline-id timeline-id :playing? true)
+                       (dissoc :target)))))
 
     ptk/WatchEvent
     (watch [_ state stream]
@@ -1158,12 +1160,78 @@
   (ptk/reify ::pause-timeline
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:viewer-local :timeline :playing?] false))
+      (update-in state [:viewer-local :timeline]
+                 #(-> % (assoc :playing? false) (dissoc :target))))
 
     ;; stop, show-moment and the end of playback pause too
     ptk/EffectEvent
     (effect [_ _ _]
       (audio/stop-all!))))
+
+(defn play-to
+  "Play the timeline of the board `board-id` from where it shows to its
+  `target` time (ms), forwards or backwards at the pace it plays, and
+  pause there; its sound plays along forwards (it has no way to play
+  backwards). A pause, another play or `play-timeline` stops it on the
+  way."
+  [board-id target]
+  (ptk/reify ::play-to
+    ptk/UpdateEvent
+    (update [_ state]
+      ;; another board's timeline from its start
+      (update-in state [:viewer-local :timeline]
+                 (fn [local]
+                   (-> (cond-> local
+                         (not= board-id (:timeline-id local))
+                         (assoc :time 0 :elapsed 0))
+                       (assoc :timeline-id board-id :playing? true :target target)))))
+
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [page     (viewer-current-page state)
+            timeline (board-clock page (:files state) board-id)
+            start    (or (dm/get-in state [:viewer-local :timeline :time]) 0)
+            span     (mth/abs (- target start))
+            dir      (if (< target start) -1 1)
+            sound?   (and (= 1 dir)
+                          (seq (:audio-clips timeline))
+                          (not (audio-muted? state))
+                          (some? (audio/now-ms)))
+            stopper  (rx/filter #(or (ptk/type? ::pause-timeline %)
+                                     (ptk/type? ::play-to %)
+                                     (ptk/type? ::play-timeline %))
+                                stream)]
+        (if (or (nil? timeline) (mth/almost-zero? span))
+          (rx/of (seek-timeline target) (pause-timeline))
+          (->> (rx/concat
+                (->> (frame-times 0)
+                     (rx/take-while #(< % span))
+                     (rx/map #(+ start (* dir %)))
+                     (rx/tap #(when sound? (audio/follow! ::board timeline % 1 true)))
+                     (rx/map seek-timeline))
+                ;; there, unless stopped on the way
+                (rx/of (seek-timeline target) (pause-timeline)))
+               (rx/take-until stopper)))))))
+
+(defn play-to-marker
+  "Play the timeline of the board `board-id` from where it shows to the
+  marker `interaction` says (see `cta/target-marker`), a prototype action
+  (see `ctsi/schema:play-to-marker-interaction`): the next or previous one
+  counted from the marker it plays to while it plays to one, so that a
+  quick second click goes on from there. Nothing past the ends."
+  [board-id interaction]
+  (ptk/reify ::play-to-marker
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [page     (viewer-current-page state)
+            timeline (board-clock page (:files state) board-id)
+            local    (:timeline (:viewer-local state))
+            from     (if (= board-id (:timeline-id local))
+                       (or (when (:playing? local) (:target local)) (:time local) 0)
+                       0)]
+        (if-let [marker (some-> timeline (cta/target-marker from interaction))]
+          (rx/of (play-to board-id (:time marker)))
+          (rx/empty))))))
 
 (defn toggle-play-timeline
   [timeline-id]

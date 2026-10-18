@@ -1901,6 +1901,17 @@
   [timeline time]
   (d/seek #(< (:time %) time) (rseq (vec (:markers timeline)))))
 
+(defn target-marker
+  "The marker of `timeline` a prototype plays to from `time` (see
+  `app.common.types.shape.interactions/schema:play-to-marker-interaction`):
+  `marker-id`, else the one after or before `time` (`marker-step` `:next`
+  or `:previous`); nil when there is none."
+  [timeline time {:keys [marker-id marker-step]}]
+  (cond
+    (some? marker-id)         (d/seek #(= marker-id (:id %)) (:markers timeline))
+    (= :next marker-step)     (marker-after timeline time)
+    (= :previous marker-step) (marker-before timeline time)))
+
 (defn toggle-animation-flag
   "Set or clear `flag` of an animation: `:hidden` (left out of playback
   and exports) or `:locked` (kept from edits)."

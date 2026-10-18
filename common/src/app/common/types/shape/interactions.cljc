@@ -42,7 +42,14 @@
     :toggle-overlay
     :close-overlay
     :prev-screen
-    :open-url})
+    :open-url
+    ;; play the timeline of the board to a marker (Penpot Motion)
+    :play-to-marker})
+
+(def marker-steps
+  "The markers `:play-to-marker` can play to besides a given one: the next
+  or the previous one."
+  #{:next :previous})
 
 (def overlay-positioning-types
   #{:manual
@@ -126,7 +133,9 @@
    [:close-click-outside {:optional true} :boolean]
    [:background-overlay {:optional true} :boolean]
    [:position-relative-to {:optional true} [:maybe ::sm/uuid]]
-   [:url {:optional true} :string]])
+   [:url {:optional true} :string]
+   [:marker-id {:optional true} ::sm/uuid]
+   [:marker-step {:optional true} [::sm/one-of marker-steps]]])
 
 (def schema:navigate-interaction
   [:map {:title "NavigateInteraction"}
@@ -179,6 +188,16 @@
    [:event-type [::sm/one-of event-types]]
    [:url :string]])
 
+(def schema:play-to-marker-interaction
+  "Play the timeline of the board the shape is on from where it is to the
+  marker `:marker-id`, or to the next or previous one (`:marker-step`),
+  and pause there (Penpot Motion)."
+  [:map {:title "PlayToMarkerInteraction"}
+   [:action-type [:= :play-to-marker]]
+   [:event-type [::sm/one-of event-types]]
+   [:marker-id {:optional true} ::sm/uuid]
+   [:marker-step {:optional true} [::sm/one-of marker-steps]]])
+
 (def schema:interaction
   [:schema {:title "Interaction"
             :gen/gen (sg/one-of (sg/generator schema:navigate-interaction)
@@ -186,7 +205,8 @@
                                 (sg/generator schema:close-overlay-interaction)
                                 (sg/generator schema:toggle-overlay-interaction)
                                 (sg/generator schema:prev-scren-interaction)
-                                (sg/generator schema:open-url-interaction))}
+                                (sg/generator schema:open-url-interaction)
+                                (sg/generator schema:play-to-marker-interaction))}
    [:and
     schema:generic-interaction-attrs
     [:multi {:dispatch :action-type :title "InteractionAttrs"}
@@ -195,7 +215,8 @@
      [:toggle-overlay schema:toggle-overlay-interaction]
      [:close-overlay schema:close-overlay-interaction]
      [:prev-screen schema:prev-scren-interaction]
-     [:open-url schema:open-url-interaction]]]])
+     [:open-url schema:open-url-interaction]
+     [:play-to-marker schema:play-to-marker-interaction]]]])
 
 (def check-interaction
   (sm/check-fn schema:interaction))
@@ -278,12 +299,20 @@
             :open-url
             (assoc interaction
                    :action-type action-type
-                   :url (get interaction :url ""))))]
+                   :url (get interaction :url ""))
+
+            :play-to-marker
+            (cond-> (assoc interaction :action-type action-type)
+              (nil? (:marker-id interaction))
+              (assoc :marker-step (get interaction :marker-step :next)))))]
 
     (cond-> new-interaction
       (not (allowed-animation? action-type
                                (-> new-interaction :animation :animation-type)))
-      (dissoc :animation-type :animation))))
+      (dissoc :animation-type :animation)
+
+      (not= :play-to-marker action-type)
+      (dissoc :marker-id :marker-step))))
 
 ;; FIXME: should be renamed to has-delay?
 
@@ -391,6 +420,25 @@
           "expected compatible interaction map with url param")
 
   (assoc interaction :url url))
+
+(defn has-marker
+  "Whether `interaction` plays to a marker (see
+  `schema:play-to-marker-interaction`)."
+  [interaction]
+  (= (:action-type interaction) :play-to-marker))
+
+(defn set-marker
+  "`interaction` playing to `marker`: a marker id, or `:next` or
+  `:previous` (see `marker-steps`)."
+  [interaction marker]
+  (assert (check-interaction interaction))
+  (assert (or (uuid? marker) (contains? marker-steps marker))
+          "expected a marker id, :next or :previous")
+  (assert (has-marker interaction)
+          "expected an interaction that plays to a marker")
+  (if (uuid? marker)
+    (-> interaction (dissoc :marker-step) (assoc :marker-id marker))
+    (-> interaction (dissoc :marker-id) (assoc :marker-step marker))))
 
 (defn has-overlay-opts
   [interaction]

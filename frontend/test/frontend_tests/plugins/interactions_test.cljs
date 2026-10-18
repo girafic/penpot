@@ -125,3 +125,27 @@
               "an action without destination is accepted")
         (t/is (throws? #(set! (.-action inter) #js {:type "navigate-to" :destination board2}))
               "navigating to the parent board is still rejected")))))
+
+(t/deftest an-interaction-plays-to-a-marker
+  ;; Penpot Motion: the timeline of the board to a marker, or the next
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context "00000000-0000-0000-0000-000000000000")
+            _           (set! st/state store)
+            ^js page    (. context -currentPage)
+            ^js board   (.createBoard context)
+            ^js next    (.createRectangle context)
+            id          "4a1d3c2e-0000-4000-8000-000000000001"]
+        (.appendChild board next)
+        (let [^js i (.addInteraction next "click" #js {:type "play-to-marker" :step "previous"})]
+          (t/is (= "play-to-marker" (.. i -action -type)))
+          (t/is (= "previous" (.. i -action -step)))
+          (t/is (undefined? (.. i -action -markerId))))
+        (let [^js i (.addInteraction next "click" #js {:type "play-to-marker" :markerId id})]
+          (t/is (= id (.. i -action -markerId)))
+          (t/is (undefined? (.. i -action -step))))
+        (let [^js i (.addInteraction next "click" #js {:type "play-to-marker"})]
+          (t/is (= "next" (.. i -action -step)) "the next one by default"))
+        (t/is (empty? (flows-of store context page)) "no board to go to, no flow")))))
+
