@@ -499,6 +499,16 @@
   (into (get selection :nodes #{})
         (segment-node-indices content (get selection :segments #{}))))
 
+(defn first-point-available?
+  "Whether `selection` is one node of `content` (one position) that its
+  closed subpath does not start at yet, so that the first point of an
+  outline keyframe can go there (see `path/start-subpath-at`)."
+  [content selection]
+  (let [nodes (selected-node-indices content selection)]
+    (and (= 1 (selected-node-count content {:nodes nodes}))
+         (let [point (first (node-positions content nodes))]
+           (not= (vec (path/start-subpath-at content point)) (vec content))))))
+
 (defn selection-coordinate-rect
   "Returns the bounds of selected segments, nodes, and handlers."
   [content selection]
@@ -686,6 +696,27 @@
                 {:sub sub :selected selected}))
             {:sub fragment :selected (set (node-indices fragment))}
             free)))
+
+(defn- node-points
+  "The position of each segment of `content` (nil for a close)."
+  [content]
+  (mapv (fn [segment]
+          (when-not (= :close-path (:command segment))
+            (path.helpers/segment->point segment)))
+        content))
+
+(defn same-nodes-reordered?
+  "Whether `new-content` holds the nodes of `old-content`, the same
+  positions, in another order: as the first point and the way round of an
+  outline keyframe leave them (see `tools/start-at-node`). A path the
+  editor holds may have a node twice (where a subpath closes), so sets,
+  not counts."
+  [old-content new-content]
+  (let [old-points (node-points old-content)
+        new-points (node-points new-content)]
+    (and (not= old-points new-points)
+         (= (into #{} (remove nil?) old-points)
+            (into #{} (remove nil?) new-points)))))
 
 (defn remap-selection
   "Remaps a grouped selection after path content changes."

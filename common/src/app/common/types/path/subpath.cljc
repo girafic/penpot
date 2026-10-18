@@ -225,29 +225,55 @@
 ;; THE START AND THE WAY ROUND (of a morph keyframe, see
 ;; `app.common.types.path.morph`)
 
-(defn- slices
-  "The subpaths of the plain `segments`, each the vector of its segments
-  from its move-to; a segment after a close starts another one from the
-  start of the subpath it closed, as SVG draws it."
+(defn- parts
+  "The subpaths of the plain `segments`, each as `{:slice :segments
+  :own-move?}`: `:slice` the vector of its segments from its move-to, a
+  segment after a close starting another one from the start of the
+  subpath it closed, as SVG draws it; `:segments` the segments it came
+  from, without the move-to `:slice` adds (`:own-move?` false)."
   [segments]
   (:out
    (reduce (fn [{:keys [out start closed?]} segment]
              (let [command (:command segment)]
                (cond
                  (= :move-to command)
-                 {:out (conj out [segment]) :start (helpers/segment->point segment) :closed? false}
+                 {:out (conj out {:slice [segment] :segments [segment] :own-move? true})
+                  :start (helpers/segment->point segment)
+                  :closed? false}
 
                  (or (empty? out) closed?)
-                 {:out (conj out [(helpers/make-move-to (or start (gpt/point 0 0))) segment])
+                 {:out (conj out {:slice [(helpers/make-move-to (or start (gpt/point 0 0))) segment]
+                                  :segments [segment]
+                                  :own-move? false})
                   :start start
                   :closed? (= :close-path command)}
 
                  :else
-                 {:out (update out (dec (count out)) conj segment)
+                 {:out (update out (dec (count out)) #(-> % (update :slice conj segment) (update :segments conj segment)))
                   :start start
                   :closed? (= :close-path command)})))
            {:out [] :start nil :closed? false}
            segments)))
+
+(defn- slices
+  "The subpaths of the plain `segments`, each the vector of its segments
+  from its move-to (see `parts`)."
+  [segments]
+  (mapv :slice (parts segments)))
+
+(defn- join-parts
+  "The plain segments of the subpaths `ps` (see `parts`), each one in
+  `changed` (by index) as given there, the others as they came: one that
+  follows a close keeps the move-to of its slice when the subpath before
+  it starts elsewhere now (`moved`), as it drew from that one's start."
+  [ps changed moved]
+  (into [] cat
+        (map (fn [i {:keys [slice segments own-move?]}]
+               (or (get changed i)
+                   (if (and (not own-move?) (contains? moved (dec i)))
+                     slice
+                     segments)))
+             (range) ps)))
 
 (defn- closed?
   "Whether the subpath `slice` is closed: by a close, or ending where it
@@ -286,22 +312,32 @@
         (comp (filter closed?) (map #(helpers/segment->point (first %))))
         (slices (vec content))))
 
+(defn- start-slice
+  "The closed subpath `slice` starting at its node at `point`, drawing the
+  same, or nil when it has none there or already starts there (a subpath
+  the path editor holds may come back to its start in the middle, see
+  `close-subpaths`)."
+  [slice point]
+  (when (and (closed? slice) (not (pt= point (helpers/segment->point (first slice)))))
+    (let [segs (body slice)
+          k    (when (> (count segs) 1)
+                 (d/index-of-pred (pop segs) #(pt= point (helpers/segment->point %))))]
+      (when (some? k)
+        (let [p (helpers/segment->point (nth segs k))]
+          (into [(helpers/make-move-to p)]
+                (closing (-> (subvec segs (inc k)) (into (subvec segs 0 (inc k)))) p)))))))
+
 (defn start-at
   "The plain segments of `content` with its closed subpath that has a node
   at `point` (see `pt=`) starting at it, drawing the same; the others as
-  they are."
+  they are, and `content` as it is when none starts elsewhere."
   [content point]
-  (into []
-        (mapcat (fn [slice]
-                  (let [segs (when (closed? slice) (body slice))
-                        k    (when (> (count segs) 1)
-                               (d/index-of-pred (pop segs) #(pt= point (helpers/segment->point %))))]
-                    (if (some? k)
-                      (let [p (helpers/segment->point (nth segs k))]
-                        (into [(helpers/make-move-to p)]
-                              (closing (-> (subvec segs (inc k)) (into (subvec segs 0 (inc k)))) p)))
-                      slice))))
-        (slices (vec content))))
+  (let [content (vec content)
+        ps      (parts content)
+        changed (into {} (keep-indexed (fn [i {:keys [slice]}] (some->> (start-slice slice point) (vector i)))) ps)]
+    (if (empty? changed)
+      content
+      (join-parts ps changed (set (keys changed))))))
 
 (defn- reverse-slice
   "The subpath `slice` going the other way round: a closed one from the
@@ -338,23 +374,33 @@
   one of `points` (all of them without `points`) going the other way
   round (see `reverse-slice`), each closed one with the closed ones its
   box meets, one after another: a hole goes round with the outline
-  around it, so that it stays a hole (nonzero)."
+  around it, so that it stays a hole (nonzero). An open one turns alone;
+  the others stay as they are."
   [content points]
-  (let [subs    (slices (vec content))
+  (let [content (vec content)
+        ps      (parts content)
+        subs    (mapv :slice ps)
         boxes   (mapv slice-box subs)
-        closed  (into #{} (filter #(and (closed? (nth subs %)) (some? (nth boxes %)))) (range (count subs)))
+        closed  (filterv #(and (closed? (nth subs %)) (some? (nth boxes %))) (range (count subs)))
         hit?    (fn [slice]
                   (let [nodes (cons (helpers/segment->point (first slice)) (map helpers/segment->point (body slice)))]
                     (or (empty? points) (some (fn [p] (some #(pt= p %) nodes)) points))))
         hit     (into #{} (filter #(hit? (nth subs %))) (range (count subs)))
-        grow    (fn [turned]
-                  (into turned
-                        (filter (fn [i] (some #(and (contains? closed %) (boxes-meet? (nth boxes i) (nth boxes %))) turned)))
-                        closed))
-        turned  (loop [turned hit]
-                  (let [more (grow turned)]
-                    (if (= more turned) turned (recur more))))]
-    (into [] cat (map (fn [i slice] (if (contains? turned i) (reverse-slice slice) slice)) (range) subs))))
+        ;; from the closed ones hit, each closed one taken once
+        turned  (loop [turned hit
+                       todo   (into [] (filter (set closed)) hit)]
+                  (if-let [j (peek todo)]
+                    (let [new (filterv #(and (not (contains? turned %))
+                                             (boxes-meet? (nth boxes j) (nth boxes %)))
+                                       closed)]
+                      (recur (into turned new) (into (pop todo) new)))
+                    turned))]
+    (if (empty? turned)
+      content
+      ;; a closed subpath turns from its start, and only a close starts a
+      ;; subpath without a move-to: the one after a turned one draws from
+      ;; where it did
+      (join-parts ps (into {} (map (fn [i] [i (reverse-slice (nth subs i))])) turned) #{}))))
 
 ;; FIXME: revisit this fn impl for perfromance
 (defn reverse-content

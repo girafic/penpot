@@ -2977,6 +2977,63 @@
     (t/is (= (undirected content) (undirected (path/reverse-subpaths-at content [(gpt/point 10 10)])))
           "the same lines, the other way round")))
 
+(defn- plain-num
+  "The plain segments of `content`, their numbers as doubles."
+  [content]
+  (mapv #(update % :params update-vals double) (plain-of content)))
+
+(t/deftest a-start-stays-where-nothing-starts-elsewhere
+  (let [raw  (path/from-string "M0 0 L10 0 L10 10 Z L20 20 L30 0 Z")
+        ;; as the path editor holds it: one subpath coming back to its
+        ;; start in the middle (see `close-subpaths`)
+        held (path/close-subpaths raw)]
+    (t/is (= (plain-num held) (plain-num (path/start-subpath-at held (gpt/point 0 0))))
+          "at its start, as it is, the repeat of the start left where it is")
+    (let [started (path/start-subpath-at held (gpt/point 10 10))]
+      (t/is (= [10.0 10.0] (mapv double ((juxt :x :y) (:params (first (vec started)))))))
+      (t/is (= (drawn-segments held) (drawn-segments started)) "the same drawing"))
+    (t/is (= (plain-num raw) (plain-num (path/start-subpath-at raw (gpt/point 0 0))))
+          "as SVG gives it, at its start: as it is")
+    (t/is (= (plain-num (path/from-string "M10 10 L0 0 L10 0 Z M0 0 L20 20 L30 0 Z"))
+             (plain-num (path/start-subpath-at raw (gpt/point 10 10))))
+          "the subpath after a close keeps drawing from where it did")
+    (let [started (path/start-subpath-at raw (gpt/point 20 20))]
+      (t/is (= [20.0 20.0] (mapv double ((juxt :x :y) (:params (nth (vec started) 4))))) "the second one starts there")
+      (t/is (= (drawn-segments raw) (drawn-segments started)) "the same drawing"))))
+
+(t/deftest a-turn-leaves-the-other-subpaths-as-they-are
+  (let [raw  (path/from-string "M0 0 L10 0 L10 10 Z L20 20 L30 0 M40 0 L50 0 L50 10 Z")
+        back (path/reverse-subpaths-at raw [(gpt/point 50 0)])]
+    (t/is (= (take 6 (plain-num raw)) (take 6 (plain-num back)))
+          "the closed one and the open one after its close, as they were")
+    (t/is (= (undirected raw) (undirected back)) "the same lines")))
+
+(defn- squares
+  "Closed 10×10 squares at each x of `xs`, one subpath each."
+  [xs]
+  (path/from-plain (mapcat (fn [x] [{:command :move-to :params {:x x :y 0}}
+                                    {:command :line-to :params {:x (+ x 10) :y 0}}
+                                    {:command :line-to :params {:x (+ x 10) :y 10}}
+                                    {:command :line-to :params {:x x :y 10}}
+                                    {:command :close-path :params {}}])
+                           xs)))
+
+(t/deftest boxes-that-meet-one-after-another-go-round-together
+  (let [chain (squares [0 8 16])
+        signs (subpath-signs chain)]
+    (t/is (= (mapv - signs) (subpath-signs (path/reverse-subpaths-at chain [(gpt/point 0 0)])))
+          "A meets B and B meets C: all three, though A does not meet C"))
+  (let [chain (squares (range 0 4000 10))]
+    (t/is (every? neg? (map * (subpath-signs chain) (subpath-signs (path/reverse-subpaths-at chain [(gpt/point 0 0)]))))
+          "a chain of 400, every one")))
+
+(t/deftest an-open-subpath-turns-alone
+  (let [content (path/from-plain (into (vec square) [{:command :move-to :params {:x 5 :y 5}}
+                                                     {:command :line-to :params {:x 20 :y 5}}]))
+        back    (path/reverse-subpaths-at content [(gpt/point 20 5)])]
+    (t/is (= (take 5 (plain-num content)) (take 5 (plain-num back))) "the square its box meets as it is")
+    (t/is (= [20.0 5.0] (mapv double ((juxt :x :y) (:params (nth (vec back) 5))))) "the open one from its end")))
+
 (t/deftest a-hole-goes-round-with-its-outline
   ;; an O: the inner ring goes round against the outer one; reversing
   ;; one of them reverses both, a square apart stays as it is

@@ -118,7 +118,7 @@
         ;; Auto can match it again (see `dwa/outline-auto?`)
         playhead (mf/deref ref:playhead)
         timeline (mf/deref ref:timeline)
-        fixed?   (and (some? timeline) (dwa/outline-auto? timeline shape-id playhead))
+        auto?    (and (some? timeline) (dwa/outline-auto? timeline shape-id playhead))
 
         on-auto
         (mf/use-fn
@@ -131,7 +131,7 @@
         [:div {:class (stl/css :outline-row)}
          [:span {:class (stl/css :trim-label)} (tr "workspace.animation.path")]
          [:div {:class (stl/css :outline-actions)}
-          (when fixed?
+          (when auto?
             [:> button* {:variant "ghost"
                          :title (tr "workspace.animation.outline-auto-title")
                          :on-click on-auto}

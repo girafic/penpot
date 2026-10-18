@@ -1890,18 +1890,27 @@
                      (for [[t v e] (keyframes #(spec-value spec %1 %2 steady?) [spec] 0.25 duration at-rest steady?)]
                        [shape-id (entry :content t (ctao/outline-of (assoc shape :content (numbers-content template v))) e nil)]))
 
-                   ;; others: each held, switching at the middle of its
-                   ;; interval as CSS and Blink play values that cannot
-                   ;; morph (an explicit discrete one as it says)
+                   ;; others: each held, switching where the easing of its
+                   ;; interval reaches half way (see `half-way`), as CSS
+                   ;; and Blink play values that cannot morph (an explicit
+                   ;; discrete one as it says)
                    :else
                    (let [discrete? (and (seq (:easings spec)) (every? #(= :step %) (:easings spec)))
                          spec      (if discrete?
                                      (assoc spec :values values)
-                                     (let [ts  (vec (:times spec))
-                                           es  (concat (:easings spec) (repeat nil))
-                                           mid (map (fn [t0 t1 e]
-                                                      (if (= :step e) t1 (+ t0 (* (- t1 t0) (half-way e)))))
-                                                    ts (subvec ts 1) es)]
+                                     (let [ts   (vec (:times spec))
+                                           es   (concat (:easings spec) (repeat nil))
+                                           dur  (:dur spec)
+                                           ;; on a whole ms, as the keyframes are cut: a
+                                           ;; switch a moment after it would hold the old
+                                           ;; value there (see `keyframes`)
+                                           snap (fn [f]
+                                                  (if (and (number? dur) (pos? dur) (mth/finite? dur))
+                                                    (/ (mth/round (* f dur)) dur)
+                                                    f))
+                                           mid  (map (fn [t0 t1 e]
+                                                       (if (= :step e) t1 (snap (+ t0 (* (- t1 t0) (half-way e))))))
+                                                     ts (subvec ts 1) es)]
                                        (assoc spec
                                               :times (vec (concat [(first ts)] mid [(peek ts)]))
                                               :values (conj values (peek values))

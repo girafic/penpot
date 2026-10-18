@@ -2710,6 +2710,13 @@
   [state]
   (update state :workspace-animation dissoc :outline-edit-id))
 
+(defn- outline-row-editable?
+  "Whether the Path row of `id` in `tl` takes edits: neither locked nor
+  hidden."
+  [tl id]
+  (not (or (cta/slot-flag? tl id :locked :content nil)
+           (cta/slot-flag? tl id :hidden :content nil))))
+
 (defn outline-edit
   "What an edit of the path `id` in motion mode starts from when its
   outline goes into keyframes, its Path row animated, auto-keyframe on
@@ -2726,8 +2733,7 @@
                (= :path (:type shape))
                (some? tl)
                (= (:board-id tl) (cfh/get-shape-id-root-frame objects id))
-               (not (cta/slot-flag? tl id :locked :content nil))
-               (not (cta/slot-flag? tl id :hidden :content nil)))
+               (outline-row-editable? tl id))
       (let [track     (cta/get-track tl id)
             animated? (some #(= :content (:property %)) (:keyframes track))
             asked?    (= id (dm/get-in state [:workspace-animation :outline-edit-id]))]
@@ -2764,8 +2770,7 @@
              tl      (current-timeline state)]
          (if (and (= :path (:type shape))
                   (some? tl)
-                  (not (cta/slot-flag? tl id :locked :content nil))
-                  (not (cta/slot-flag? tl id :hidden :content nil)))
+                  (outline-row-editable? tl id))
            (let [time     (playhead state)
                  new-row? (not (some #(= :content (:property %))
                                      (:keyframes (cta/get-track tl id))))
@@ -2786,15 +2791,18 @@
 
 (defn outline-auto?
   "Whether the outline keyframe of `shape-id` at `time` in `tl` holds its
-  first point by hand where Auto can match it again: its Path row neither
-  locked nor hidden, and of outlines of other structures (a row of one
-  structure pairs point by point, its first points as they are)."
+  first point by hand where Auto can match it again: not the first
+  keyframe of its row (that one pairs with none), its Path row editable
+  (see `outline-row-editable?`), and of outlines of other structures (a
+  row of one structure pairs point by point, its first points as they
+  are)."
   [tl shape-id time]
   (let [kfs (filterv #(= :content (:property %)) (:keyframes (cta/get-track tl shape-id)))]
     (boolean
      (and (:fixed-start (keyframe-at tl shape-id :content time))
-          (not (cta/slot-flag? tl shape-id :locked :content nil))
-          (not (cta/slot-flag? tl shape-id :hidden :content nil))
+          ;; not the first: a keyframe pairs with the one before it
+          (some #(< (:time %) time) kfs)
+          (outline-row-editable? tl shape-id)
           (not (every? #(morph/same-structure? (:value (first kfs)) (:value %)) (rest kfs)))))))
 
 (defn set-outline-fixed
@@ -2810,8 +2818,7 @@
             time (playhead state)]
         (if (and (some? tl)
                  (some? (keyframe-at tl id :content time))
-                 (not (cta/slot-flag? tl id :locked :content nil))
-                 (not (cta/slot-flag? tl id :hidden :content nil)))
+                 (outline-row-editable? tl id))
           (let [tl (cta/set-outline-fixed tl id time fixed?)]
             (rx/of (commit-timeline it state (:board-id tl) tl)
                    (apply-preview)))

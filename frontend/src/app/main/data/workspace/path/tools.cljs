@@ -493,14 +493,17 @@
   (ptk/reify ::start-at-node
     ptk/UpdateEvent
     (update [_ state]
-      (if (outline-edit? state)
-        (let [id       (st/get-path-id state)
-              content  (st/get-path state :content)
-              selected (helpers/selected-node-indices content (st/get-selection state id))
-              point    (first (helpers/node-positions content selected))]
-          (fixed-start state (process-path-tool (fn [content _]
-                                                  (path/start-subpath-at content point)))))
-        state))))
+      (let [id        (st/get-path-id state)
+            content   (st/get-path state :content)
+            selection (st/get-selection state id)]
+        (if (and (outline-edit? state)
+                 (some? content)
+                 (helpers/first-point-available? content selection))
+          (let [selected (helpers/selected-node-indices content selection)
+                point    (first (helpers/node-positions content selected))]
+            (fixed-start state (process-path-tool (fn [content _]
+                                                    (path/start-subpath-at content point)))))
+          state)))))
 
 (defn reverse-direction
   "Make the subpaths of the selected nodes, or all of them without any,

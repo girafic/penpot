@@ -224,6 +224,51 @@
                                                     :dur "1s" :repeatCount "indefinite"}))))]
       (t/is (= [0 500] (mapv first (take 2 (held-outlines result))))))))
 
+(defn- spline-half
+  "The progress where the cubic bezier easing `[x1 y1 x2 y2]` reaches 0.5."
+  [[x1 y1 x2 y2]]
+  (let [b (fn [p1 p2 t] (+ (* 3 p1 t (- 1 t) (- 1 t)) (* 3 p2 t t (- 1 t)) (* t t t)))]
+    (loop [lo 0.0 hi 1.0 n 0]
+      (let [m (/ (+ lo hi) 2)]
+        (cond
+          (= n 50) (b x1 x2 m)
+          (< (b y1 y2 m) 0.5) (recur m hi (inc n))
+          :else (recur lo m (inc n)))))))
+
+(defn- switch-time
+  "When the outline of the element `shape` of `result` becomes `outline`."
+  [result outline]
+  (some #(when (= outline (nth % 2)) (first %)) (held-outlines result)))
+
+(t/deftest outlines-switch-where-splines-and-steps-say
+  (t/testing "a SMIL spline where it reaches half way"
+    (let [spline [0.42 0 1 1]
+          result (import-svg (svg (el :path {:id "shape" :d tri :fill "#ff0000"}
+                                      (el :animate {:attributeName "d" :values (str tri ";" sq)
+                                                    :calcMode "spline" :keyTimes "0;1" :keySplines "0.42 0 1 1"
+                                                    :dur "1s" :fill "freeze"}))))
+          switch (switch-time result "M0,0L80,0L80,80L0,80Z")]
+      (t/is (some? switch))
+      (t/is (<= (abs (- switch (* 1000 (spline-half spline)))) 1) (str "the square from " switch " ms"))
+      (t/is (= [:step :step nil] (mapv second (held-outlines result)))
+            "a clean jump there, no morph into it nor keyframes after it")))
+  (t/testing "CSS steps by keyframe"
+    (let [anim   (fn [first-tf]
+                   (import-svg (svg (el :style {} (str "@keyframes m {"
+                                                       " 0% { d: path('" tri "'); animation-timing-function: " first-tf "; }"
+                                                       " 50% { d: path('" sq "'); animation-timing-function: ease-in; }"
+                                                       " 100% { d: path('" hexa "'); } }"
+                                                       " #shape { animation: m 1s forwards; }"))
+                                    (el :path {:id "shape" :d tri :fill "#ff0000"}))))
+          ends   (anim "step-end")
+          starts (anim "step-start")
+          hexa?  #(cstr/starts-with? (nth % 2) "M0,0L40,0L60,20")]
+      (t/is (= 500 (switch-time ends "M0,0L80,0L80,80L0,80Z")) "step-end: the square at the end of its interval")
+      (let [switch (some #(when (hexa? %) (first %)) (held-outlines ends))]
+        (t/is (and (some? switch) (<= (abs (- switch (+ 500 (* 500 (spline-half [0.42 0 1 1]))))) 1))
+              (str "ease-in after it: the hexagon from " switch " ms")))
+      (t/is (= 0 (switch-time starts "M0,0L80,0L80,80L0,80Z")) "step-start: the square from the start of its interval"))))
+
 (t/deftest a-path-past-what-a-row-holds-is-counted
   (let [big    (fn [k] (str "M0 0" (apply str (map #(str " L" % " " (mod (+ % k) 7)) (range 1 5000)))))
         result (import-svg (svg (el :path {:id "shape" :d (big 0) :fill "#ff0000"}

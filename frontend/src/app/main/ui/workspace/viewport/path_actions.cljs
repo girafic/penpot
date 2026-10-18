@@ -7,7 +7,6 @@
 (ns app.main.ui.workspace.viewport.path-actions
   (:require-macros [app.main.style :as stl])
   (:require
-   [app.common.types.path :as path]
    [app.main.data.workspace.path :as drp]
    [app.main.data.workspace.path.helpers :as path.helpers]
    [app.main.data.workspace.path.shortcuts :as sc]
@@ -246,12 +245,10 @@
         ;; point and its way round (see `drp/start-at-node`)
         outline-edit?   (true? (:outline-edit state))
         ;; one node, of a closed subpath that does not start there yet
-        one-node?       (mf/with-memo [outline-edit? content selected-nodes]
+        one-node?       (mf/with-memo [outline-edit? content selection]
                           (boolean
-                           (when (and outline-edit?
-                                      (= 1 (path.helpers/selected-node-count content {:nodes selected-nodes})))
-                             (let [point (first (path.helpers/node-positions content selected-nodes))]
-                               (not= (vec (path/start-subpath-at content point)) (vec content))))))
+                           (and outline-edit?
+                                (path.helpers/first-point-available? content selection))))
 
         on-first-point
         (mf/use-fn

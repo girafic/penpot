@@ -7,6 +7,7 @@
 (ns frontend-tests.data.animation-morph-test
   "The outline of a path as keyframes (path morphing) in the workspace."
   (:require
+   [app.common.data.undo-stack :as u]
    [app.common.files.changes :as cpc]
    [app.common.files.changes-builder :as pcb]
    [app.common.geom.point :as gpt]
@@ -451,6 +452,102 @@
     (t/is (not (get-in undo [:workspace-local :edit-path (thi/id :blob) :outline-fixed]))
           "undone, the edit no longer sets it")))
 
+;; UNDO OF THE FIRST POINT AND THE WAY ROUND
+
+(def ^:private make-entry #'app.main.data.workspace.path.undo/make-entry)
+(def ^:private load-entry #'app.main.data.workspace.path.undo/load-entry)
+
+(defn- held
+  "`state` with the edited path as the path editor holds it, its close a
+  line back to its start (see `path/close-subpaths`)."
+  [state]
+  (update-in state [:workspace-drawing :object :content] path/close-subpaths))
+
+(defn- types-by-point
+  "The handler types of the edit in `state`, by the position of their
+  nodes."
+  [state]
+  (let [content (vec (get-in state [:workspace-drawing :object :content]))]
+    (into {}
+          (map (fn [[i t]] [[(get-in content [i :params :x]) (get-in content [i :params :y])] t]))
+          (get-in state [:workspace-local :edit-path (thi/id :blob) :handler-types]))))
+
+(t/deftest an-undo-keeps-handler-types-and-selection-on-their-nodes
+  (doseq [[label tool nodes] [["first point" drp/start-at-node #{1}]
+                              ["way round of one" drp/reverse-direction #{1}]
+                              ["way round of all" drp/reverse-direction #{}]]]
+    (let [file   (morph-file)
+          id     (thi/id :blob)
+          state  (-> (editing (workspace-state file 1000) nodes true)
+                     (held)
+                     (assoc-in [:workspace-local :edit-path id :handler-types] {2 :mirror}))
+          before (make-entry state)
+          after  (ptk/update (tool) state)
+          done   (make-entry after)
+          undone (load-entry after before)
+          redone (load-entry undone done)]
+      (t/is (not= (edited-points state) (edited-points after)) (str label ": the tool changed the order"))
+      (t/is (= (edited-points state) (edited-points undone)) (str label ": undone, the content as it was"))
+      (t/is (= {[20 70] :mirror} (types-by-point undone)) (str label ": undone, the mode on its node"))
+      (t/is (= {[20 70] :mirror} (types-by-point redone)) (str label ": redone, the mode on its node"))
+      (t/is (= (edited-points after) (edited-points redone)) (str label ": redone, the content of the tool"))
+      (when (seq nodes)
+        (t/is (= #{(gpt/point 60 30)} (selected-points undone)) (str label ": undone, the node still selected"))
+        (t/is (= #{(gpt/point 60 30)} (selected-points redone)) (str label ": redone, the node still selected"))))))
+
+(t/deftest an-undo-of-a-handle-drag-keeps-its-handle-selected
+  (let [file    (morph-file)
+        id      (thi/id :blob)
+        curve   (path/from-plain [{:command :move-to :params {:x 20 :y 30}}
+                                  {:command :line-to :params {:x 60 :y 30}}
+                                  {:command :curve-to :params {:c1x 60 :c1y 50 :c2x 40 :c2y 70 :x 20 :y 70}}
+                                  {:command :line-to :params {:x 20 :y 30}}])
+        state   (-> (editing (workspace-state file 1000) #{} true)
+                    (assoc-in [:workspace-drawing :object :content] curve)
+                    (assoc-in [:workspace-local :edit-path id :selection :handlers] #{[2 :c1]}))
+        before  (make-entry state)
+        dragged (assoc-in state [:workspace-drawing :object :content]
+                          (path/from-plain (assoc-in (vec curve) [2 :params :c1x] 70)))
+        undone  (load-entry dragged before)]
+    (t/is (= #{[2 :c1]} (get-in undone [:workspace-local :edit-path id :selection :handlers]))
+          "the handle still selected, as before")))
+
+(t/deftest an-undo-takes-a-handle-mode-back-from-an-edit-without-any
+  (let [file   (morph-file)
+        id     (thi/id :blob)
+        state  (-> (editing (workspace-state file 1000) #{1} true)
+                   (held))
+        before (make-entry state)
+        mirror (ptk/update (drp/set-handler-type :mirror) state)
+        undone (load-entry mirror before)]
+    (t/is (nil? (get-in state [:workspace-local :edit-path id :handler-types])) "an edit that began by drawing has none")
+    (t/is (= {[60 30] :mirror} (types-by-point mirror)))
+    (t/is (empty? (get-in undone [:workspace-local :edit-path id :handler-types])) "undone, none again")))
+
+(t/deftest choosing-a-handle-mode-is-one-undo-step
+  (let [file   (morph-file)
+        id     (thi/id :blob)
+        state  (-> (editing (workspace-state file 1000) #{1} true)
+                   (held)
+                   (assoc-in [:workspace-local :edit-path id :handler-types] {1 :mirror}))
+        stack  (u/append (u/make-stack) (make-entry state))
+        indep  (ptk/update (drp/set-handler-type :independent) state)
+        stack' (u/append stack (make-entry indep))]
+    (t/is (= {[60 30] :independent} (types-by-point indep)))
+    (t/is (not= stack stack') "an entry of its own, though the nodes stay where they are")
+    (t/is (= {1 :mirror} (:handler-types (u/peek (u/undo stack')))) "undone, the mode before")))
+
+(t/deftest an-undo-of-a-removed-node-gives-its-mode-back
+  (let [file    (morph-file)
+        id      (thi/id :blob)
+        state   (-> (editing (workspace-state file 1000) #{2} true)
+                    (held)
+                    (assoc-in [:workspace-local :edit-path id :handler-types] {1 :mirror 2 :aligned}))
+        before  (make-entry state)
+        removed (ptk/update (drp/remove-node) state)
+        undone  (load-entry removed before)]
+    (t/is (= {[60 30] :mirror [20 70] :aligned} (types-by-point undone)) "both modes on their nodes again")))
+
 (defn- fixed-row-file
   "`morph-file` with the Path row of :blob going from the triangle to
   `to` (at 1000), held by hand there."
@@ -485,8 +582,48 @@
         mixed  (fixed-row-file square)]
     (t/is (true? (auto? mixed)) "a row of other structures")
     (t/is (false? (auto? (with-row-flag mixed :locked))) "not a locked one")
+    (t/is (false? (auto? (with-row-flag mixed :hidden))) "nor a hidden one")
     (let [locked (with-row-flag mixed :locked)]
       (t/is (empty? (commits (await (emitted (dwa/set-outline-fixed (thi/id :blob) false) (workspace-state locked 1000)))))
             "a locked row keeps its mark"))
     (t/is (false? (auto? (fixed-row-file other)))
           "nor a row of one structure, which pairs point by point")))
+
+(t/deftest auto-leaves-the-first-keyframe-alone
+  ;; the mark of the first keyframe pairs with nothing (see `morph/match`)
+  (let [square (path/from-plain [{:command :move-to :params {:x 40 :y 40}}
+                                 {:command :line-to :params {:x 0 :y 40}}
+                                 {:command :line-to :params {:x 0 :y 0}}
+                                 {:command :line-to :params {:x 40 :y 0}}
+                                 {:command :close-path :params {}}])
+        file   (morph-file)
+        page   (thf/current-page file)
+        blob   (get-in page [:objects (thi/id :blob)])
+        tl     (-> (get-in page [:timelines (thi/id :board-a)])
+                   (cta/set-outline-at blob 0 (ctao/outline-of blob))
+                   (cta/set-outline-at blob 1000 (ctao/outline-of (assoc blob :content square)))
+                   (cta/set-outline-fixed (thi/id :blob) 0 true))]
+    (t/is (true? (:fixed-start (some #(when (and (= :content (:property %)) (zero? (:time %))) %)
+                                     (:keyframes (cta/get-track tl (thi/id :blob)))))))
+    (t/is (false? (dwa/outline-auto? tl (thi/id :blob) 0)) "no Auto on the first keyframe")))
+
+(t/deftest first-point-shows-where-a-subpath-can-start
+  ;; as the path editor holds them (see `path/close-subpaths`): two loops
+  ;; of one subpath, its start coming back between them
+  (let [merged (path/close-subpaths (path/from-string "M0 0 L10 0 L10 10 Z L20 20 L30 0 Z"))
+        open   (path/close-subpaths (path/from-string "M0 0 L10 0 L10 10"))
+        sel    (fn [nodes] {:nodes nodes :segments #{} :handlers #{}})]
+    (t/is (false? (dwph/first-point-available? merged (sel #{}))) "no node")
+    (t/is (false? (dwph/first-point-available? merged (sel #{1 2}))) "two nodes")
+    (t/is (false? (dwph/first-point-available? merged (sel #{0}))) "its start")
+    (t/is (false? (dwph/first-point-available? merged (sel #{3}))) "its start where it comes back")
+    (t/is (true? (dwph/first-point-available? merged (sel #{2}))) "another node")
+    (t/is (false? (dwph/first-point-available? open (sel #{1}))) "a node of an open subpath")))
+
+(t/deftest the-first-point-tool-leaves-a-start-as-it-is
+  (let [file   (morph-file)
+        merged (path/close-subpaths (path/from-string "M0 0 L10 0 L10 10 Z L20 20 L30 0 Z"))
+        state  (-> (editing (workspace-state file 1000) #{3} true)
+                   (assoc-in [:workspace-drawing :object :content] merged))]
+    (t/is (= state (ptk/update (drp/start-at-node) state))
+          "the content and the mark as they are, at the start where it comes back")))

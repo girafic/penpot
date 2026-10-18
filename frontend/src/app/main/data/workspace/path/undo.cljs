@@ -38,9 +38,25 @@
      :last-point (get-in state [:workspace-local :edit-path id :last-point])
      :prev-handler (get-in state [:workspace-local :edit-path id :prev-handler])
      ;; a first point or a way round set by hand (see `tools/start-at-node`)
-     :outline-fixed (get-in state [:workspace-local :edit-path id :outline-fixed])}))
+     :outline-fixed (get-in state [:workspace-local :edit-path id :outline-fixed])
+     ;; the handle modes, which a tool moves with their nodes; an edit that
+     ;; began by drawing has none yet
+     :handler-types (or (get-in state [:workspace-local :edit-path id :handler-types]) {})}))
 
-(defn- load-entry [state {:keys [content selrect points last-point prev-handler outline-fixed]}]
+(defn- restored-selection
+  "The `selection` of `old-content` in the restored `content`: the
+  selected nodes by position when only their order changed (the first
+  point or the way round of an outline keyframe, see
+  `helpers/same-nodes-reordered?`), else remapped as after any change."
+  [selection old-content content]
+  (if (helpers/same-nodes-reordered? old-content content)
+    (assoc helpers/empty-selection
+           :nodes (helpers/remap-selected-nodes
+                   (helpers/selected-node-indices old-content selection)
+                   old-content content))
+    (helpers/remap-selection selection old-content content)))
+
+(defn- load-entry [state {:keys [content selrect points last-point prev-handler outline-fixed handler-types] :as entry}]
   (let [id (st/get-path-id state)
         old-content (st/get-path state :content)]
     (-> state
@@ -56,8 +72,12 @@
                           :last-point last-point
                           :prev-handler prev-handler
                           :outline-fixed outline-fixed)
+             ;; an entry made before entries kept them keeps the current ones
+             (contains? entry :handler-types)
+             (assoc :handler-types handler-types)
+
              (some? content)
-             (update :selection helpers/remap-selection old-content content)))))))
+             (update :selection restored-selection old-content content)))))))
 
 (defn undo-path []
   (ptk/reify ::undo-path
