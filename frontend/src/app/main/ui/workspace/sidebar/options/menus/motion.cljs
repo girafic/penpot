@@ -213,7 +213,7 @@
 (def ^:private text-preset-styles
   "The built-in presets that play the units of a text (see
   `cta/text-styles`), offered when the selection holds a text."
-  [:typewriter :rise-words :cascade-lines :pop-letters])
+  [:typewriter :rise-words :cascade-lines :pop-letters :flip-letters])
 
 (defn- preset-label
   [preset]
@@ -236,6 +236,7 @@
     :rise-words    (tr "workspace.animation.preset.rise-words")
     :cascade-lines (tr "workspace.animation.preset.cascade-lines")
     :pop-letters   (tr "workspace.animation.preset.pop-letters")
+    :flip-letters  (tr "workspace.animation.preset.flip-letters")
     (name preset)))
 
 (def ^:private split-label
@@ -267,9 +268,8 @@
   random order and, given the `unit-count` of the text, the `:stagger`
   (ms between two units) and whether it is past the live cap
   (`:capped`)."
-  [{:keys [type split spread order duration]} split-allowed unit-count]
-  ;; a flip turns all of a text over: its units pose in its plane only
-  (when (and (true? split-allowed) (not (contains? #{:flip-x :flip-y} type)))
+  [{:keys [split spread order duration]} split-allowed unit-count]
+  (when (true? split-allowed)
     (let [counted? (and (some? split) (some? unit-count))]
       (cond-> {:kind (or split :layer)}
         (some? split)        (assoc :spread (or spread tu/default-spread) :order (or order :forward))

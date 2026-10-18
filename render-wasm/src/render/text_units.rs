@@ -21,6 +21,7 @@ use skia_safe::{
 };
 
 use crate::globals::current_browser;
+use crate::math::tilt;
 use crate::performance;
 use crate::shapes::text_units::{TextUnits, UnitPiece, UnitPose};
 use crate::shapes::{
@@ -39,14 +40,16 @@ struct Placed {
 
 /// Paint `layouts`, the paragraphs of the text `content` laid out from
 /// builder groups of `group_sizes` builders each (a group per paragraph, see
-/// `calculate_text_layout_data`), with `units` posed. A layout the groups do
-/// not account for paints at rest.
+/// `calculate_text_layout_data`), with `units` posed, those that turn in 3D
+/// seen from `distance` (flat without, see `tilt::unit_matrix`). A layout
+/// the groups do not account for paints at rest.
 pub fn paint_layouts(
     canvas: &Canvas,
     content: &TextContent,
     layouts: &mut [ParagraphLayout],
     group_sizes: &[usize],
     units: &TextUnits,
+    distance: Option<f32>,
 ) {
     performance::begin_measure!("render_text_units");
 
@@ -86,7 +89,7 @@ pub fn paint_layouts(
         let placed: Vec<Placed> = pieces
             .iter()
             .filter(|piece| piece.paragraph == index)
-            .map(|piece| place(layout, piece.range.clone(), &piece.pose))
+            .map(|piece| place(layout, piece.range.clone(), &piece.pose, distance))
             .collect();
         paint_paragraph(canvas, &paragraphs[index], layout, &placed);
     }
@@ -95,8 +98,15 @@ pub fn paint_layouts(
 }
 
 /// Where the piece `range` of the laid out paragraph is, and the matrix
-/// that poses it around the centre of its box.
-fn place(layout: &ParagraphLayout, range: Range<usize>, pose: &UnitPose) -> Placed {
+/// that poses it around the centre of its box: seen from `distance` for a
+/// 3D turn, else flat (a turn about X or Y leaves it as it is in the
+/// plane).
+fn place(
+    layout: &ParagraphLayout,
+    range: Range<usize>,
+    pose: &UnitPose,
+    distance: Option<f32>,
+) -> Placed {
     let bounds = layout
         .paragraph
         .get_rects_for_range(range.clone(), RectHeightStyle::Tight, RectWidthStyle::Tight)
@@ -108,10 +118,23 @@ fn place(layout: &ParagraphLayout, range: Range<usize>, pose: &UnitPose) -> Plac
         .with_offset((layout.x, layout.y));
     let center = bounds.center();
 
-    let mut matrix = Matrix::translate((center.x + pose.dx, center.y + pose.dy));
-    matrix.pre_rotate(pose.rotation, None);
-    matrix.pre_scale((pose.scale_x, pose.scale_y), None);
-    matrix.pre_translate((-center.x, -center.y));
+    let matrix = match distance.filter(|_| pose.is_tilted()) {
+        Some(distance) => tilt::unit_matrix(
+            center,
+            (pose.dx, pose.dy),
+            pose.rotation,
+            (pose.rotate_x, pose.rotate_y),
+            (pose.scale_x, pose.scale_y),
+            distance,
+        ),
+        None => {
+            let mut matrix = Matrix::translate((center.x + pose.dx, center.y + pose.dy));
+            matrix.pre_rotate(pose.rotation, None);
+            matrix.pre_scale((pose.scale_x, pose.scale_y), None);
+            matrix.pre_translate((-center.x, -center.y));
+            matrix
+        }
+    };
 
     Placed {
         range,
@@ -338,7 +361,7 @@ pub fn outline_layouts(
             .collect();
         let placed: Vec<Placed> = mine
             .iter()
-            .map(|piece| place(layout, piece.range.clone(), &piece.pose))
+            .map(|piece| place(layout, piece.range.clone(), &piece.pose, None))
             .collect();
         let (by_piece, at_rest) = outline_paragraph(&paragraphs[index], layout, &placed);
         for ((piece, place), runs) in mine.iter().zip(&placed).zip(by_piece) {
@@ -675,7 +698,7 @@ mod tests {
         let content = shape.get_text_content();
         let mut builders = content.paragraph_builder_group_from_text(None);
         let layout = calculate_text_layout_data(shape, content, &mut builders, true);
-        place(&layout.paragraphs[0], range, &UnitPose::REST).bounds
+        place(&layout.paragraphs[0], range, &UnitPose::REST, None).bounds
     }
 
     #[test]
@@ -732,6 +755,56 @@ mod tests {
                 assert_eq!(pixel(&moved, x, y + 20), pixel(&at_rest, x, y));
             }
         }
+    }
+
+    #[test]
+    fn a_word_turned_in_3d_shows_narrower_where_it_stands() {
+        let mut resources = RenderResources::try_new_headless().expect("headless resources");
+        let _guard = TestRenderResourcesGuard::install(&mut resources);
+        let mut shape = text_shape("Hello world", None);
+        let world = range_box(&shape, 6..11);
+        let turned = |rotate_y: f32| TextUnits {
+            line_count: 0,
+            units: vec![unit(
+                UnitKind::Word,
+                6,
+                11,
+                UnitPose {
+                    rotate_y,
+                    ..UnitPose::REST
+                },
+            )],
+        };
+
+        let at_rest = painted(&shape, None, fills);
+        let split = world.left.floor() as i32 - 1;
+        let (l, t, r, b) = ink_box(&at_rest, split..WIDTH).expect("world paints");
+
+        // without a view of the board, it stays flat
+        assert_eq!(
+            ink_box(&painted(&shape, Some(&turned(60.0)), fills), split..WIDTH),
+            Some((l, t, r, b))
+        );
+
+        shape.text_unit_distance = Some(1000.0);
+        let half = painted(&shape, Some(&turned(60.0)), fills);
+        // "Hello" stays
+        assert_eq!(ink_box(&half, 0..split), ink_box(&at_rest, 0..split));
+        // "world" turned 60 about its middle: about half as wide, as high
+        let (hl, ht, hr, hb) = ink_box(&half, split..WIDTH).expect("world paints");
+        let width = (r - l) as f32;
+        assert!(
+            ((hr - hl) as f32 - width / 2.0).abs() <= 2.0,
+            "{:?}",
+            (hl, hr, l, r)
+        );
+        assert!((ht - t).abs() <= 1 && (hb - b).abs() <= 1);
+        assert!(((hl + hr) - (l + r)).abs() <= 2, "about its middle");
+        // edge on, nothing shows of it
+        assert_eq!(
+            ink_box(&painted(&shape, Some(&turned(90.0)), fills), split..WIDTH),
+            None
+        );
     }
 
     #[test]

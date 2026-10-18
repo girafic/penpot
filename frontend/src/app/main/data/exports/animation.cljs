@@ -698,11 +698,16 @@
                                   (> (mth/abs (- n (mth/round n))) 0.01))))
                           (:copy-loops timeline))
           clear?    (some-> (get objects board-id) see-through?)
-          ;; a layer that tilts, at rest or as it plays
+          ;; a layer that tilts, at rest or as it plays, or a unit of a
+          ;; text that turns in 3D
           tilted?   (or (contains? animated :rotate-x)
                         (contains? animated :rotate-y)
                         (contains? animated :translate-z)
-                        (some?* gtl/three-d?))
+                        (some?* gtl/three-d?)
+                        (some (fn [[_ {units-tl :timeline}]]
+                                (some #(contains? #{:rotate-x :rotate-y} (:property %))
+                                      (mapcat :keyframes (vals (:tracks units-tl)))))
+                              units))
           table
           [[:lottie/images lottie-formats
             (boolean (some (fn [id]

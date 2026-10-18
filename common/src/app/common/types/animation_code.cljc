@@ -591,6 +591,18 @@
        "rotateX(${withUnit(rotateX, \"deg\")}) rotateY(${withUnit(rotateY, \"deg\")}) "
        "scale(${scaleX}, ${scaleY})`}"))
 
+(defn- unit-tilt-template
+  "`transform-template` of a unit of a text that turns in 3D, seen from
+  `distance` px in front of its middle (none for an orthographic board),
+  as render-wasm draws it (see `acss/unit-perspective`)."
+  [distance]
+  (str "transformTemplate={({ x = 0, y = 0, rotate = 0, rotateX = 0, rotateY = 0, scaleX = 1, scaleY = 1 }) =>\n"
+       "            `" (when (some? distance) (str "perspective(" (react-number distance) "px) "))
+       "translate(${withUnit(x, \"px\")}, ${withUnit(y, \"px\")}) "
+       "rotate(${withUnit(rotate, \"deg\")}) "
+       "rotateX(${withUnit(rotateX, \"deg\")}) rotateY(${withUnit(rotateY, \"deg\")}) "
+       "scale(${scaleX}, ${scaleY})`}"))
+
 (def ^:private with-unit
   "The helper of `transform-template`."
   "const withUnit = (value, unit) => (typeof value === \"number\" ? `${value}${unit}` : value);")
@@ -621,11 +633,13 @@
   (let [{units-tl :timeline :keys [ids bases]} units
         played  (-> units-tl cta/expand-paths cta/cut-timeline)
         sampled (cta/expand-springs played)
+        seen    (acss/unit-perspective objects shape)
         spans   (mapv (fn [k id]
                         (let [unit   {:id id :shape (cta/unit-shape units-tl objects id) :clock units-tl}
                               values (merge-scale (layer-animation unit objects played sampled))]
                           {:hold? (some :hold? values)
                            :values values
+                           :tilt? (some #(contains? #{"rotateX" "rotateY"} (:name %)) values)
                            :class (str "penpot-unit penpot-unit-" k)}))
                       (range)
                       ids)
@@ -644,13 +658,16 @@
                   (if (string? item)
                     (str "        " (react-text item) "\n")
                     (let [[k text] item
-                          {:keys [values class]} (nth spans k)]
+                          {:keys [values class tilt?]} (nth spans k)]
                       (str "        <motion.span\n"
                            "          className=\"" class "\"\n"
                            "          style={{ display: \"inline-block\" }}\n"
+                           (when tilt?
+                             (str "          " (unit-tilt-template seen) "\n"))
                            (react-props values "          ")
                            "        >" (react-text text) "</motion.span>\n"))))]
     {:hold? (some :hold? spans)
+     :template? (some :tilt? spans)
      :code  (str/join "        <br />\n" (map #(str/join "" (map piece %)) pieces))}))
 
 (defn- react-layer
@@ -664,7 +681,7 @@
         tilt?  (or (contains? names "rotateX") (contains? names "rotateY") (contains? names "z"))
         template? (or tilt? (and (contains? names "rotate") (contains? names "scaleX")))]
     {:hold? (or (some :hold? values) (:hold? units))
-     :template? template?
+     :template? (or template? (:template? units))
      :code
      (str "      {/* " (or (get-in layer [:shape :name]) "Layer") " */}\n"
           "      <motion.div\n"

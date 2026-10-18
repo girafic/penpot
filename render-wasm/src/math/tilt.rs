@@ -386,6 +386,55 @@ pub fn back_facing(h: &Matrix) -> bool {
     a * (e * i - f * hh) - b * (d * i - f * g) + c * (d * hh - e * g) < 0.0
 }
 
+fn rotate_z44(deg: f64) -> M44 {
+    let (s, c) = deg.to_radians().sin_cos();
+    [
+        c, -s, 0.0, 0.0, //
+        s, c, 0.0, 0.0, //
+        0.0, 0.0, 1.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0,
+    ]
+}
+
+fn scale44(x: f64, y: f64) -> M44 {
+    [
+        x, 0.0, 0.0, 0.0, //
+        0.0, y, 0.0, 0.0, //
+        0.0, 0.0, 1.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0,
+    ]
+}
+
+/// The matrix a unit of a text is drawn through after the text (Penpot
+/// Motion, see `shapes::text_units`), its box centred at `center`: moved
+/// by `offset`, turned by `rotation` degrees and in 3D by `tilt` (degrees
+/// about X and Y) and scaled by `scale`, seen from `distance` px in front
+/// of its centre. As CSS draws a unit, `perspective() translate() rotate()
+/// rotateX() rotateY() scale()` about its centre, flat in the plane of the
+/// text: CSS can not see the units, nested in the text, with the vanishing
+/// point of the board.
+pub fn unit_matrix(
+    center: Point,
+    offset: (f32, f32),
+    rotation: f32,
+    tilt: (f32, f32),
+    scale: (f32, f32),
+    distance: f32,
+) -> Matrix {
+    let (cx, cy) = (center.x as f64, center.y as f64);
+    let local = [
+        translate44(offset.0 as f64, offset.1 as f64, 0.0),
+        rotate_z44(rotation as f64),
+        rotation44(tilt.0 as f64, tilt.1 as f64),
+        scale44(scale.0 as f64, scale.1 as f64),
+    ]
+    .iter()
+    .fold(perspective44(distance.max(1.0) as f64), |acc, m| {
+        mul44(&acc, m)
+    });
+    restrict(&about44(&local, [cx, cy, 0.0]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -676,5 +725,45 @@ mod tests {
         )
         .unwrap();
         assert!(project_rect(&h, &selrect).is_none());
+    }
+
+    fn corners_f64(h: &Matrix, x: f32, y: f32, w: f32, hh: f32) -> Vec<(f64, f64)> {
+        corners(h, x, y, w, hh)
+            .into_iter()
+            .map(|(px, py)| (px as f64, py as f64))
+            .collect()
+    }
+
+    #[test]
+    fn a_unit_turned_in_3d_shows_as_a_layer_of_its_box_seen_from_its_middle() {
+        // the box of the rect of `rect_tilt`, whose vanishing point is its middle
+        let center = Point::new(200.0, 200.0);
+        for (rx, ry) in [(0.0, 60.0), (45.0, 0.0), (30.0, -50.0)] {
+            let unit = unit_matrix(center, (0.0, 0.0), 0.0, (rx, ry), (1.0, 1.0), 1000.0);
+            assert_corners(
+                &corners_f64(&rect_tilt(rx, ry), 100.0, 150.0, 200.0, 100.0),
+                &corners(&unit, 100.0, 150.0, 200.0, 100.0),
+            );
+        }
+    }
+
+    #[test]
+    fn a_unit_with_no_3d_turn_poses_as_in_the_plane() {
+        let unit = unit_matrix(
+            Point::new(50.0, 20.0),
+            (5.0, -3.0),
+            45.0,
+            (0.0, 0.0),
+            (2.0, 0.5),
+            800.0,
+        );
+        let mut flat = Matrix::translate((55.0, 17.0));
+        flat.pre_rotate(45.0, None);
+        flat.pre_scale((2.0, 0.5), None);
+        flat.pre_translate((-50.0, -20.0));
+        assert_corners(
+            &corners_f64(&flat, 40.0, 10.0, 20.0, 20.0),
+            &corners(&unit, 40.0, 10.0, 20.0, 20.0),
+        );
     }
 }

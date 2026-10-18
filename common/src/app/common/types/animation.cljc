@@ -1415,7 +1415,9 @@
                    {:type :move :duration 900 :offset-x 0 :offset-y 40 :split :line}]
    :pop-letters   [{:type :fade :duration 800 :split :char :spread 0.7}
                    {:type :scale :duration 800 :amount 0.3 :easing overshoot-easing
-                    :split :char :spread 0.7}]})
+                    :split :char :spread 0.7}]
+   :flip-letters  [{:type :fade :duration 900 :split :char :spread 0.6}
+                   {:type :flip-x :duration 900 :split :char :spread 0.6}]})
 
 (def text-styles
   "The built-in presets that play the units of a text (see
@@ -1524,10 +1526,7 @@
             (let [tokens (entry-tokens type (:applied-tokens params))]
               (cond-> (merge (get animation-defaults type)
                              (d/without-nils (select-keys params [:easing :amount :offset-x :offset-y]))
-                             ;; the units of a text pose in its plane only: a flip
-                             ;; turns the whole text over
-                             (when-not (contains? #{:flip-x :flip-y} type)
-                               (split-settings params))
+                             (split-settings params)
                              {:id (or id (uuid/next))
                               :type type
                               :direction (or direction :in)
@@ -3287,8 +3286,10 @@
 
 (def ^:private unit-rest
   "The values of a unit of a text at rest, where the text lays it out,
-  which the effects of its split animations start from."
-  {:x 0 :y 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 1 :blur 0})
+  which the effects of its split animations start from: `:rotate-x` and
+  `:rotate-y` turn it in 3D about its middle, as a layer tilts (see
+  `app.common.geom.tilt`)."
+  {:x 0 :y 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 1 :blur 0 :rotate-x 0 :rotate-y 0})
 
 (defn- resolve-unit
   "`{property keyframes}` of a unit of a text playing `animations`, the
@@ -3318,11 +3319,13 @@
         scale-x  (value :scale-x)
         scale-y  (value :scale-y)
         opacity  (value :opacity)
-        blur     (value :blur)]
+        blur     (value :blur)
+        rotate-x (value :rotate-x)
+        rotate-y (value :rotate-y)]
     (when-not (and (== x 0) (== y 0) (== rotation 0) (== scale-x 1) (== scale-y 1) (== opacity 1)
-                   (== blur 0))
+                   (== blur 0) (== rotate-x 0) (== rotate-y 0))
       (assoc base :dx x :dy y :rotation rotation :scale-x scale-x :scale-y scale-y :opacity opacity
-             :blur blur))))
+             :blur blur :rotate-x rotate-x :rotate-y rotate-y))))
 
 (defrecord UnitPlan [base keyframes from to before after])
 

@@ -11,12 +11,13 @@
 //! writes it:
 //!
 //! ```text
-//! u32 count, u32 line_count, then `count` entries of 44 bytes:
+//! u32 count, u32 line_count, then `count` entries of 52 bytes:
 //!   u8 kind (0 char, 1 word, 2 line), u8[3] padding,
 //!   u32 index (the paragraph of a char or word unit; the line of a line unit),
 //!   u32 start, u32 end (UTF-16 offsets in the source text of the paragraph; 0 for a line),
 //!   f32 dx, f32 dy, f32 rotation (degrees), f32 scale_x, f32 scale_y, f32 opacity,
-//!   f32 blur (the radius of a layer blur, px)
+//!   f32 blur (the radius of a layer blur, px),
+//!   f32 rotate_x, f32 rotate_y (degrees, the 3D turn about its centre)
 //! ```
 
 use std::collections::HashMap;
@@ -51,8 +52,10 @@ impl TryFrom<u8> for UnitKind {
 }
 
 /// How a unit stands off its rest pose: moved by `dx`, `dy`, turned by
-/// `rotation` degrees and scaled around the centre of its box, faded to
-/// `opacity` and blurred by `blur`, the radius of a layer blur.
+/// `rotation` degrees, scaled and turned in 3D by `rotate_x`, `rotate_y`
+/// degrees around the centre of its box (seen from the distance of the
+/// viewer of its board, see `math::tilt::unit_matrix`), faded to `opacity`
+/// and blurred by `blur`, the radius of a layer blur.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UnitPose {
     pub dx: f32,
@@ -62,6 +65,8 @@ pub struct UnitPose {
     pub scale_y: f32,
     pub opacity: f32,
     pub blur: f32,
+    pub rotate_x: f32,
+    pub rotate_y: f32,
 }
 
 impl UnitPose {
@@ -73,21 +78,16 @@ impl UnitPose {
         scale_y: 1.0,
         opacity: 1.0,
         blur: 0.0,
+        rotate_x: 0.0,
+        rotate_y: 0.0,
     };
 
     /// The pose of the given values, a value that is not a number taking
     /// the rest one, the opacity kept within 0 and 1 and the blur from 0.
-    fn sanitized(
-        dx: f32,
-        dy: f32,
-        rotation: f32,
-        scale_x: f32,
-        scale_y: f32,
-        opacity: f32,
-        blur: f32,
-    ) -> Self {
+    fn sanitized(values: [f32; 9]) -> Self {
         let or = |value: f32, rest: f32| if value.is_finite() { value } else { rest };
         let rest = Self::REST;
+        let [dx, dy, rotation, scale_x, scale_y, opacity, blur, rotate_x, rotate_y] = values;
         Self {
             dx: or(dx, rest.dx),
             dy: or(dy, rest.dy),
@@ -96,15 +96,30 @@ impl UnitPose {
             scale_y: or(scale_y, rest.scale_y),
             opacity: or(opacity, rest.opacity).clamp(0.0, 1.0),
             blur: or(blur, rest.blur).max(0.0),
+            rotate_x: or(rotate_x, rest.rotate_x),
+            rotate_y: or(rotate_y, rest.rotate_y),
         }
+    }
+
+    /// Whether it turns the unit out of the plane of the text.
+    pub fn is_tilted(&self) -> bool {
+        self.rotate_x.abs() > 1e-6 || self.rotate_y.abs() > 1e-6
     }
 
     /// Whether a point of the unit can end up further from the centre of
     /// its box than it is at rest: when it turns or grows.
     fn reaches_out(&self) -> bool {
-        self.rotation != 0.0 || self.scale_x.abs() > 1.0 || self.scale_y.abs() > 1.0
+        self.rotation != 0.0
+            || self.scale_x.abs() > 1.0
+            || self.scale_y.abs() > 1.0
+            || self.is_tilted()
     }
 }
+
+/// How much nearer the viewer than its box a unit turned in 3D can grow:
+/// its near side comes towards the viewer, seen bigger (twice at half the
+/// distance of the viewer).
+const TILT_REACH: f32 = 2.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextUnit {
@@ -142,7 +157,7 @@ pub struct UnitPiece {
 
 impl TextUnits {
     pub const HEADER_SIZE: usize = 8;
-    pub const ENTRY_SIZE: usize = 44;
+    pub const ENTRY_SIZE: usize = 52;
 
     /// The units `bytes` holds (see the byte contract above); `None` for no
     /// units, which clears them.
@@ -239,10 +254,16 @@ impl TextUnits {
         pieces
     }
 
+    /// Whether a unit turns out of the plane of the text.
+    pub fn has_tilts(&self) -> bool {
+        self.units.iter().any(|unit| unit.pose.is_tilted())
+    }
+
     /// How far the units can reach out of `text`, the box of the text at
     /// rest: as far as they move and blur and, for a unit that turns or
     /// grows, as far as a box as big as the text could turn or grow around
-    /// its centre.
+    /// its centre, twice that for one turned towards the viewer (see
+    /// `TILT_REACH`).
     pub fn outset(&self, text: &Rect) -> f32 {
         let half_diagonal = text.width().hypot(text.height()) / 2.0;
         self.units
@@ -257,7 +278,8 @@ impl TextUnits {
                 let moved = pose.dx.abs().max(pose.dy.abs()) + blurred;
                 if pose.reaches_out() {
                     let scale = pose.scale_x.abs().max(pose.scale_y.abs()).max(1.0);
-                    moved + scale * half_diagonal
+                    let tilt = if pose.is_tilted() { TILT_REACH } else { 1.0 };
+                    moved + scale * tilt * half_diagonal
                 } else {
                     moved
                 }
@@ -276,7 +298,7 @@ fn parse_unit(bytes: &[u8]) -> Result<TextUnit> {
         index: u32_at(4),
         start: u32_at(8),
         end: u32_at(12),
-        pose: UnitPose::sanitized(
+        pose: UnitPose::sanitized([
             f32_at(16),
             f32_at(20),
             f32_at(24),
@@ -284,7 +306,9 @@ fn parse_unit(bytes: &[u8]) -> Result<TextUnit> {
             f32_at(32),
             f32_at(36),
             f32_at(40),
-        ),
+            f32_at(44),
+            f32_at(48),
+        ]),
     })
 }
 
@@ -344,7 +368,7 @@ mod tests {
     use crate::utils::Browser;
     use crate::uuid::Uuid;
 
-    fn bytes(line_count: u32, entries: &[(u8, u32, u32, u32, [f32; 7])]) -> Vec<u8> {
+    fn bytes(line_count: u32, entries: &[(u8, u32, u32, u32, [f32; 9])]) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend((entries.len() as u32).to_le_bytes());
         out.extend(line_count.to_le_bytes());
@@ -388,7 +412,7 @@ mod tests {
         )
     }
 
-    const REST: [f32; 7] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
+    const REST: [f32; 9] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0];
 
     #[test]
     fn no_units_clear_them() {
@@ -400,8 +424,14 @@ mod tests {
         let units = TextUnits::from_bytes(&bytes(
             3,
             &[
-                (1, 0, 6, 11, [0.0, 12.5, 0.0, 1.0, 1.0, 0.4, 0.0]),
-                (2, 1, 0, 0, [3.0, 0.0, 45.0, 2.0, 0.5, 1.0, 2.5]),
+                (1, 0, 6, 11, [0.0, 12.5, 0.0, 1.0, 1.0, 0.4, 0.0, 0.0, 0.0]),
+                (
+                    2,
+                    1,
+                    0,
+                    0,
+                    [3.0, 0.0, 45.0, 2.0, 0.5, 1.0, 2.5, 30.0, -60.0],
+                ),
             ],
         ))
         .unwrap()
@@ -433,6 +463,8 @@ mod tests {
                         scale_x: 2.0,
                         scale_y: 0.5,
                         blur: 2.5,
+                        rotate_x: 30.0,
+                        rotate_y: -60.0,
                         ..UnitPose::REST
                     },
                 },
@@ -462,7 +494,17 @@ mod tests {
                 0,
                 0,
                 1,
-                [f32::NAN, f32::INFINITY, f32::NAN, f32::NAN, 2.0, 7.0, -3.0],
+                [
+                    f32::NAN,
+                    f32::INFINITY,
+                    f32::NAN,
+                    f32::NAN,
+                    2.0,
+                    7.0,
+                    -3.0,
+                    f32::NAN,
+                    0.0,
+                ],
             )],
         ))
         .unwrap()

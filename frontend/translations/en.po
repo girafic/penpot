@@ -7212,6 +7212,10 @@ msgstr "Cascade lines"
 msgid "workspace.animation.preset.pop-letters"
 msgstr "Pop letters"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.preset.flip-letters"
+msgstr "Flip letters"
+
 msgid "workspace.animation.split"
 msgstr "Animate by"
 

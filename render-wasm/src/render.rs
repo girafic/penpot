@@ -604,6 +604,10 @@ pub(crate) struct RenderState {
     /// The tilts the shapes are drawn through this pass (see
     /// `tilt_projection`).
     tilt_projections: HashMap<Uuid, Option<Matrix>>,
+    /// The distance of the viewer the units of the texts that turn in 3D
+    /// are seen from this pass (see `Shape::unit_distance`), found with
+    /// their tilts.
+    unit_distances: HashMap<Uuid, Option<f32>>,
     /// The shape a render of one shape renders: the tilts of the layers it is
     /// in are left out.
     tilt_stop: Option<Uuid>,
@@ -820,6 +824,7 @@ impl RenderState {
             drop_shadows_ops_warmed: false,
             drop_shadow_filter_cache: shadows::DropShadowFilterCache::new(),
             tilt_projections: HashMap::default(),
+            unit_distances: HashMap::default(),
             tilt_stop: None,
             viewport_presented: false,
         })
@@ -831,6 +836,11 @@ impl RenderState {
     /// (`tilt_stop`) leaves out the tilts of the layers it is in, the 3D
     /// space groups too.
     pub fn tilt_projection(&mut self, shape: &Shape, tree: ShapesPoolRef) -> Option<Matrix> {
+        // the units of a text turn in 3D without any layer tilting
+        if shape.text_units.is_some() && !self.unit_distances.contains_key(&shape.id) {
+            self.unit_distances
+                .insert(shape.id, shape.unit_distance(tree));
+        }
         if !tree.has_tilts() {
             return None;
         }
@@ -1888,6 +1898,12 @@ impl RenderState {
         } else {
             None
         };
+
+        // how far the units of a text that turn in 3D are seen from (see
+        // `unit_distances`)
+        if let Some(distance) = self.unit_distances.get(&shape.id).copied().flatten() {
+            shape.to_mut().text_unit_distance = Some(distance);
+        }
 
         let center = shape.center();
         let mut matrix = shape.transform;
@@ -3146,6 +3162,7 @@ impl RenderState {
         self.preview_mode = saved_preview_mode;
         self.tilt_stop = saved_tilt_stop;
         self.tilt_projections.clear();
+        self.unit_distances.clear();
 
         // Restore render-surface transforms for the workspace context.
         // If we have a current tile, restore its tile render context; otherwise
@@ -4219,6 +4236,7 @@ impl RenderState {
 
         // The tilts are those of the shapes as they are now
         self.tilt_projections.clear();
+        self.unit_distances.clear();
 
         // During interactive transforms we compute the union of the current bounds of all
         // modified shapes (doc-space @ 100% zoom, scale=1.0). This is used as a cheap overlap

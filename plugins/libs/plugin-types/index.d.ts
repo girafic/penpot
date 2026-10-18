@@ -4351,7 +4351,7 @@ export interface Timeline {
    * @param shape The board or a layer inside it.
    * @param style The style, like `slide-up` (a fade and a move up) or `pop`.
    * The text styles (`typewriter`, `rise-words`, `cascade-lines`,
-   * `pop-letters`) go on text layers only.
+   * `pop-letters`, `flip-letters`) go on text layers only.
    * @param start When they start, in milliseconds, before 0 too.
    */
   addAnimationStyle(
@@ -5819,7 +5819,10 @@ export interface PresetAnimationProps {
    * and dotLottie exports play the units (an SVG or Lottie as a picture
    * of each, but of a text that underlines or strikes some of its text,
    * which plays whole); the code (`Timeline.toCSS`, `toReact`, `toJSON`)
-   * plays characters and words, a split by lines on the whole text.
+   * plays characters and words, a split by lines on the whole text. A
+   * split `flip-x` or `flip-y` turns each unit over in 3D, seen from the
+   * perspective of the board in front of its middle (the SVG and Lottie
+   * exports show it in the plane).
    */
   split?: TextSplit;
   /**
@@ -5960,6 +5963,8 @@ export interface PresetAnimation {
  * - `rise-words`: the words fade in and rise.
  * - `cascade-lines`: the lines fade in and rise.
  * - `pop-letters`: the characters fade in and pop from a small size.
+ * - `flip-letters`: the characters fade in and turn over about their
+ *   horizontal middle, in 3D (Penpot Motion).
  */
 export type AnimationStyle =
   | 'slide-up'
@@ -5972,7 +5977,8 @@ export type AnimationStyle =
   | 'typewriter'
   | 'rise-words'
   | 'cascade-lines'
-  | 'pop-letters';
+  | 'pop-letters'
+  | 'flip-letters';
 
 /**
  * An entry of an animation style (`LibraryAnimationStyle`), its `start`

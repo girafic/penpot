@@ -544,6 +544,7 @@ fn paint_text_with_emoji_overlay(
             &mut layout_info.paragraphs,
             &group_sizes,
             units,
+            shape.text_unit_distance,
         );
         return;
     }

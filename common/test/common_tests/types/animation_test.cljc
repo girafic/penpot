@@ -319,8 +319,8 @@
     (t/is (= [110 20] (mapv #(at (flip :flip-y :in) (assoc shape :rotate-y 20) % :rotate-y) [0 400]))
           "from where its tilt rests")
     (t/is (= [:rotation :number] (cta/animation-token-types :flip-y :amount)))
-    (t/is (nil? (:split (cta/make-animation {:type :flip-y :split :word})))
-          "the units of a text turn in its plane only: a flip turns all of it")))
+    (t/is (= :word (:split (cta/make-animation {:type :flip-y :split :word})))
+          "the units of a text turn over too")))
 
 (t/deftest remove-shapes-drops-tracks
   (let [a (uuid/next)
@@ -3481,7 +3481,7 @@
 
 (t/deftest builtin-styles-are-the-composites-and-the-text-presets
   (t/is (= #{:slide-up :slide-down :slide-left :slide-right :pop :zoom :spin
-             :typewriter :rise-words :cascade-lines :pop-letters}
+             :typewriter :rise-words :cascade-lines :pop-letters :flip-letters}
            (set (keys cta/builtin-styles)))))
 
 (defn- arc-timeline
@@ -4341,6 +4341,22 @@
         (t/is (= [] (:keyframes resolved)))
         (t/is (= 1 (count (:animations resolved))))))))
 
+(t/deftest a-flip-turns-the-units-of-a-text-over-one-by-one
+  (let [{:keys [board text objects]} (board-and-text "Hi you")
+        sid (:id text)
+        tl  (text-timeline board sid {:type :flip-x :split :word :start 0 :duration 400 :spread 1
+                                      :easing :linear})
+        at  #(mapv (comp (partial mapv mth/round) (juxt :start :rotate-x :rotate-y :dx :rotation))
+                   (text-units-at tl objects sid %))]
+    (t/is (= [[0 90 0 0 0] [3 90 0 0 0]] (at 0)) "both edge on before they turn")
+    (t/is (= [[0 45 0 0 0] [3 90 0 0 0]] (at 100)) "the first turns, the second waits")
+    (t/is (= [[3 45 0 0 0]] (at 300)) "the first rests, the second turns")
+    (t/is (= [] (at 400)))
+    (t/is (= [:rotate-x] (->> (cta/unit-timelines (cta/resolve-animations tl objects) objects)
+                              vals first :timeline :tracks vals
+                              (mapcat :keyframes) (map :property) distinct))
+          "the exports play the turn of each unit")))
+
 (t/deftest a-split-animation-plays-whole-on-a-layer-that-is-no-text
   (let [{:keys [board rect objects]} (board-and-rect)
         sid   (:id rect)
@@ -4399,7 +4415,7 @@
   (let [{:keys [board text objects]} (board-and-text "Hi you" "there")
         sid  (:id text)
         tl   (text-timeline board sid {:type :fade :split :line :start 100})
-        rest {:dx 0 :dy 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 0 :blur 0}]
+        rest {:dx 0 :dy 0 :rotation 0 :scale-x 1 :scale-y 1 :opacity 0 :blur 0 :rotate-x 0 :rotate-y 0}]
     (t/is (= [(merge {:kind :line :index 0 :line-count 1} rest)]
              (text-units-at tl objects sid 0))
           "without position data, the text is one line")
@@ -4435,7 +4451,7 @@
   (t/is (= {:text-units []} (cta/appearance-changes (ctm/change-property nil :text-units [])))))
 
 (t/deftest text-presets-split-their-animations
-  (doseq [preset [:typewriter :rise-words :cascade-lines :pop-letters]
+  (doseq [preset [:typewriter :rise-words :cascade-lines :pop-letters :flip-letters]
           :let [animations (mapv cta/make-animation (get cta/builtin-styles preset))]]
     (t/is (seq animations) (name preset))
     (t/is (every? #(and (:split %) (sm/validate cta/schema:preset-animation %)) animations)
@@ -4516,7 +4532,7 @@
           "entries stay entries")))
 
 (t/deftest the-text-presets-are-the-ones-that-split
-  (t/is (= #{:typewriter :rise-words :cascade-lines :pop-letters} cta/text-styles)))
+  (t/is (= #{:typewriter :rise-words :cascade-lines :pop-letters :flip-letters} cta/text-styles)))
 
 (t/deftest units-follow-a-text-edited-while-it-plays
   (let [{:keys [board text objects]} (board-and-text "Hi you there")
@@ -4623,6 +4639,19 @@
                        (flatten (concat (unit-values units 50) (unit-values units 50)))
                        (flatten (concat (unit-values units 450) (unit-values units 850)))))
           "the same every 400 ms (each repeat starting 1 ms after the one before)")))
+
+(t/deftest an-svg-shows-its-units-in-the-plane
+  ;; Penpot Motion: an SVG draws no 3D turn of a unit, as of a layer
+  (let [{:keys [board text objects]} (board-and-text "Hi you there")
+        sid    (:id text)
+        tl     (text-timeline board sid {:type :flip-x :start 0 :duration 600 :split :word :spread 1})
+        images (into {[sid :rest] {:href "data:," :x 50 :y 100 :width 300 :height 40}}
+                     (map (fn [k] [[sid k] {:href "data:," :x (+ 50 (* 60 k)) :y 100 :width 40 :height 20}]))
+                     (range 3))
+        svg    (asvg/timeline->svg tl objects images)]
+    (t/is (= 3 (count (re-seq #"<g class=\"penpot-unit-" svg))))
+    (t/is (not (str/includes? svg "rotateX(")))
+    (t/is (not (str/includes? svg "perspective(")))))
 
 (t/deftest the-markup-exports-play-the-units-they-have-pictures-of
   (let [{:keys [board text objects]} (board-and-text "Hi you there")

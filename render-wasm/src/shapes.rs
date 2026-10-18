@@ -212,6 +212,10 @@ pub struct Shape {
     /// The units of a text that a split animation poses one by one, see
     /// `text_units`.
     pub text_units: Option<TextUnits>,
+    /// The distance of the viewer the units of the text that turn in 3D
+    /// are seen from, set by the render of a pass (see `unit_distance`);
+    /// never stored.
+    pub text_unit_distance: Option<f32>,
     /// The 3D rotation of the layer (Penpot Motion), see `math::tilt`.
     pub tilt: Option<Tilt>,
     /// Hide the layer while its back faces the viewer.
@@ -336,6 +340,7 @@ impl Shape {
             deferred_batch_strokes: None,
             trim: None,
             text_units: None,
+            text_unit_distance: None,
             tilt: None,
             backface_hidden: false,
             perspective: None,
@@ -664,6 +669,16 @@ impl Shape {
             parent_id = parent.parent_id;
         }
         (tilt::DEFAULT_PERSPECTIVE, self.center())
+    }
+
+    /// The distance of the viewer the units of this text that turn in 3D
+    /// are seen from (see `tilt::unit_matrix`): that of its board. `None`
+    /// without such units.
+    pub fn unit_distance(&self, shapes_pool: ShapesPoolRef) -> Option<f32> {
+        if !self.text_units.as_ref().is_some_and(TextUnits::has_tilts) {
+            return None;
+        }
+        Some(self.perspective_of(shapes_pool).0)
     }
 
     /// The homography of the page this layer is drawn through in the plane

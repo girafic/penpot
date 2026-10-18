@@ -237,7 +237,9 @@
 (defn- css-declarations
   "The CSS declarations of `shape` at a frame: the tilt in its own axes,
   after the turn it rests at (`rest-transform`, flat) and before its
-  scale, lifted to its pivot (see `frame-values`)."
+  scale, lifted to its pivot (see `frame-values`); the unit of a text
+  that turns in 3D seen from its `:unit-perspective` (px) in front of its
+  middle, as render-wasm draws it (see `tilt::unit_matrix`)."
   [shape values origin rest-transform pivot]
   (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity border-radius
                 background-color border-color border-width box-shadow blur backdrop-blur
@@ -246,7 +248,10 @@
         (frame-values shape values origin pivot)]
     (cond-> []
       (contains? frame :translate-x)
-      (conj (str "transform: translate(" (fmt translate-x) "px, " (fmt translate-y) "px) "
+      (conj (str "transform: "
+                 (when-let [distance (and (contains? frame :rotate-x) (:unit-perspective shape))]
+                   (str "perspective(" (fmt distance) "px) "))
+                 "translate(" (fmt translate-x) "px, " (fmt translate-y) "px) "
                  "rotate(" (fmt rotate) "deg) "
                  (when-not (str/blank? rest-transform)
                    (str rest-transform " "))
@@ -295,6 +300,14 @@
       (contains? frame :perspective)
       (conj (str "perspective: " (fmt perspective) "px;")
             (str "perspective-origin: " perspective-origin ";")))))
+
+(defn unit-perspective
+  "How far in front of its middle a unit of the text `text` of `objects`
+  that turns in 3D is seen from, px: the perspective of its board, nil
+  for an orthographic one (see `gtl/perspective-of`)."
+  [objects text]
+  (let [{:keys [distance orthographic?]} (gtl/perspective-of objects text)]
+    (when-not orthographic? distance)))
 
 (defn keyframe-timing
   "The CSS timing function of the segment starting at `keyframe`, or nil
@@ -495,7 +508,10 @@
                  [k unit-id] (map-indexed vector unit-ids)]
              (let [kf-name  (str "penpot-unit-" text-id "-" k)
                    selector ((:selector units) text k)
-                   unit     (cta/unit-shape units-tl objects unit-id)]
+                   ;; an SVG draws a turn in 3D flat
+                   seen     (when-not svg? (unit-perspective objects text))
+                   unit     (cond-> (cta/unit-shape units-tl objects unit-id)
+                              (some? seen) (assoc :unit-perspective seen))]
                [selector
                 (str (css-comment (str (or (:name text) text-id) ", unit " (inc k))) "\n"
                      (track->keyframes-css units-tl unit (get-in units-tl [:tracks unit-id]) kf-name

@@ -247,19 +247,48 @@
 
 (defn- split-text-page
   "A page whose board plays the words of the text :title one after the
-  other."
-  []
-  (let [file  (-> (thf/sample-file :file1)
-                  (tho/add-frame :board :x 0 :y 0 :width 400 :height 300)
-                  (tho/add-text :title "Hi you there" :text-params {:parent-label :board}))
-        board (thi/id :board)
-        tl    (cta/add-animation (cta/make-timeline {:board-id board :duration 1000})
-                                 (thi/id :title) {:type :move :split :word :spread 1 :start 0 :duration 600
-                                                  :offset-x 0 :offset-y 20})
-        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
-                                          (pcb/with-page (thf/current-page file))
-                                          (pcb/set-timeline board tl)))]
-    (thf/current-page file)))
+  other: moving up, or by `animation`."
+  ([]
+   (split-text-page {:type :move :split :word :spread 1 :start 0 :duration 600
+                     :offset-x 0 :offset-y 20}))
+  ([animation]
+   (split-text-page animation {}))
+  ([animation board-attrs]
+   (let [file  (-> (thf/sample-file :file1)
+                   (tho/add-frame :board (merge {:x 0 :y 0 :width 400 :height 300} board-attrs))
+                   (tho/add-text :title "Hi you there" :text-params {:parent-label :board}))
+         board (thi/id :board)
+         tl    (cta/add-animation (cta/make-timeline {:board-id board :duration 1000})
+                                  (thi/id :title) animation)
+         file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                           (pcb/with-page (thf/current-page file))
+                                           (pcb/set-timeline board tl)))]
+     (thf/current-page file))))
+
+(t/deftest the-units-that-turn-in-3d-are-seen-from-the-board
+  ;; Penpot Motion: each unit with the perspective of its board in front of
+  ;; its middle, as render-wasm draws it
+  (let [flip    {:type :flip-x :split :word :spread 1 :start 0 :duration 600}
+        options {:units {:kinds #{:word}
+                         :selector (fn [_ k] (str ".title .penpot-unit-" k))
+                         :origin (constantly "50% 50%")
+                         :display "inline-block"}}
+        code    (fn [page] (cltl/code-timelines page {} (thi/id :board) :units? #(= :text (:type %))))
+        css     (fn [page] (acss/timeline->css (:timeline (code page)) (:objects page) options))]
+    (t/testing "CSS"
+      (let [out (css (split-text-page flip))]
+        (t/is (cstr/includes? out "transform: perspective(1000px) translate(0px, 0px) rotate(0deg) rotateX(90deg) rotateY(0deg)"))
+        (t/is (cstr/includes? out "rotateX(0deg)")))
+      (t/is (cstr/includes? (css (split-text-page flip {:perspective 600})) "perspective(600px) translate("))
+      (let [out (css (split-text-page flip {:orthographic true}))]
+        (t/is (cstr/includes? out "rotateX(90deg)"))
+        (t/is (not (cstr/includes? out "perspective(")) "an orthographic board: none")))
+    (t/testing "React"
+      (let [page  (split-text-page flip)
+            react (ctac/motion-react (code page) (:objects page))]
+        (t/is (= 3 (count (re-seq #"transformTemplate=\{\(\{ x = 0, y = 0, rotate = 0, rotateX = 0" react))))
+        (t/is (cstr/includes? react "`perspective(1000px) translate(${withUnit(x, \"px\")}"))
+        (t/is (cstr/includes? react "const withUnit") "the helper of the template")))))
 
 (t/deftest the-code-can-play-the-units-of-a-text
   (let [page  (split-text-page)
