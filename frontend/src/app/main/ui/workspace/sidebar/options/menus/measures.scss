@@ -340,6 +340,17 @@
   color: var(--color-foreground-secondary);
 }
 
+// Whether a board sees its tilted layers without perspective.
+.orthographic {
+  @include deprecated.body-small-typography;
+
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  color: var(--color-foreground-secondary);
+}
+
 // The vanishing point of a board, X and Y in a row under its perspective.
 .vanishing-axis {
   grid-row: 2;

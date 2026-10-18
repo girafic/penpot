@@ -97,6 +97,7 @@
    :perspective             :layer-effects-group
    :perspective-x           :layer-effects-group
    :perspective-y           :layer-effects-group
+   :orthographic            :layer-effects-group
    :shadow                  :shadow-group
    :blur                    :blur-group
    :background-blur         :blur-group

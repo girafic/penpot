@@ -48,6 +48,12 @@
 (def min-perspective 100)
 (def max-perspective 100000)
 
+(def orthographic-distance
+  "How far the viewer of the tilted layers of an orthographic board (see
+  `perspective-of`) is, px: far enough to see them without perspective,
+  and finite, so that the planes of the depth sort stay numbers."
+  1e7)
+
 (def ^:private min-w
   "The least depth factor a point shows at: a point nearer the viewer
   (or behind) does not show."
@@ -208,15 +214,20 @@
 (defn perspective-of
   "How the tilted layers of the board of `shape` are seen: the distance
   of the viewer (`:perspective` of the board, `default-perspective`
-  without) and the vanishing point (see `vanishing-point`; the middle of
-  `shape` at the root of the page)."
+  without; `orthographic-distance` for an `:orthographic` board, which
+  sees them without perspective, `:orthographic?`) and the vanishing
+  point (see `vanishing-point`; the middle of `shape` at the root of the
+  page)."
   [objects shape]
   (let [board (get objects (:frame-id shape))]
     (if (and (some? board)
              (not= uuid/zero (:id board))
              (= :frame (:type board)))
-      {:distance (or (:perspective board) default-perspective)
-       :vp       (vanishing-point board)}
+      {:distance      (if (true? (:orthographic board))
+                        orthographic-distance
+                        (or (:perspective board) default-perspective))
+       :orthographic? (true? (:orthographic board))
+       :vp            (vanishing-point board)}
       {:distance default-perspective
        :vp       (gco/shape->center shape)})))
 

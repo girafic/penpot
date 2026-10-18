@@ -196,6 +196,24 @@
         (t/is (= [face-id rect-id] (gtl/depth-sorted flat (get flat group-id) [face-id rect-id])))
         (t/is (= [rect-id face-id] (gtl/depth-sorted flat (get flat group-id) [rect-id face-id])))))))
 
+(t/deftest an-orthographic-board-sees-without-perspective
+  (let [near? (fn [expected actual]
+                (every? true? (map (fn [[ex ey] [ax ay]]
+                                     (and (mth/close? ex ax 1e-2) (mth/close? ey ay 1e-2)))
+                                   expected actual)))]
+    (t/testing "a turn about Y narrows the layer, its edges stay as long"
+      (let [objs (objects (board 0 0 400 400 :orthographic true) (rect 100 150 200 100 :rotate-y 60))]
+        (t/is (near? [[150 150] [250 150] [250 250] [150 250]] (corners objs rect-id)))))
+    (t/testing "turned isometrically, a square is the rhombus of an isometric drawing"
+      ;; as CSS rotateX(54.7356deg) rotateZ(45deg) without perspective
+      (let [square (-> (rect 150 150 100 100)
+                       (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 200 200) 60))
+                       (assoc :rotate-x 35.2644 :rotate-y -45))
+            objs   (objects (board 0 0 400 400 :orthographic true) square)]
+        (t/is (near? [[129.289322 200] [200 159.175161] [200 240.824839] [270.710678 200]]
+                     (sort (corners objs rect-id))))))
+    (t/is (cts/valid-shape? (assoc (board 0 0 10 10) :orthographic true)))))
+
 (t/deftest a-layer-forward-shows-bigger
   ;; 100 px towards a viewer 1000 px away: 1000/900 as big, from the
   ;; vanishing point

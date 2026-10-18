@@ -687,13 +687,18 @@ pub extern "C" fn set_shape_depth(z: f32, preserve_3d: bool) -> Result<()> {
 }
 
 /// How far the viewer of the tilted layers of the current board is, px (0 is
-/// the default), and where their vanishing point is: `vx`, `vy`, fractions
-/// of its box.
+/// the default), where their vanishing point is: `vx`, `vy`, fractions of
+/// its box, and whether they are seen without perspective.
 #[no_mangle]
 #[wasm_error]
-pub extern "C" fn set_shape_perspective(distance: f32, vx: f32, vy: f32) -> Result<()> {
+pub extern "C" fn set_shape_perspective(
+    distance: f32,
+    vx: f32,
+    vy: f32,
+    orthographic: bool,
+) -> Result<()> {
     with_current_shape_mut!(state, |shape: &mut Shape| {
-        shape.set_perspective(Some(distance), (vx, vy));
+        shape.set_perspective(Some(distance), (vx, vy), orthographic);
     });
     invalidate_current_tilted_descendants();
     Ok(())

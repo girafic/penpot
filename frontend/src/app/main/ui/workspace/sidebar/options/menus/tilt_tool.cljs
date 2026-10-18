@@ -16,6 +16,7 @@
    [app.common.data.macros :as dm]
    [app.common.math :as mth]
    [app.main.ui.components.numeric-input :as deprecated-input]
+   [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
@@ -42,6 +43,13 @@
                   (mth/precision v 1)))]
     [(round (- rx0 (* dy degrees-per-px)))
      (round (+ ry0 (* dx degrees-per-px)))]))
+
+(def isometric
+  "The turn `[rotation rotate-x rotate-y]` (degrees) that shows a layer
+  isometrically, CSS `rotateX(54.7356deg) rotateZ(45deg)` in the order
+  the tilt is drawn in (see `app.common.geom.tilt`): its plane seen from
+  a corner of a cube. With an orthographic board, for isometric drawings."
+  [60 35.2644 -45])
 
 (defn- number-or-zero
   [v]
@@ -119,6 +127,16 @@
            (on-drag-start)
            (on-tilt [0 0])
            (on-drag-end)))
+
+        on-isometric
+        (mf/use-fn
+         (mf/deps on-tilt on-rotation-change on-drag-start on-drag-end)
+         (fn [_]
+           (let [[r ix iy] isometric]
+             (on-drag-start)
+             (on-rotation-change r)
+             (on-tilt [ix iy])
+             (on-drag-end))))
 
         on-pointer-down
         (mf/use-fn
@@ -242,6 +260,11 @@
                             :title (tr "workspace.options.depth")
                             :wide true
                             :on-change on-depth}]]
+          [:> button* {:variant "secondary"
+                       :class (stl/css :tilt-isometric)
+                       :title (tr "workspace.options.tilt-tool.isometric.hint")
+                       :on-click on-isometric}
+           (tr "workspace.options.tilt-tool.isometric")]
           [:> checkbox* {:id "tilt-tool-backface-hidden"
                          :label (tr "workspace.options.backface-hidden")
                          :checked (true? backface-hidden)

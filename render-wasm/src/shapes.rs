@@ -227,6 +227,9 @@ pub struct Shape {
     /// Where the vanishing point of the tilted layers of this board is,
     /// fractions of its box (its middle by default).
     pub perspective_origin: (f32, f32),
+    /// Whether the tilted layers of this board are seen without
+    /// perspective (see `math::tilt::ORTHOGRAPHIC_DISTANCE`).
+    pub orthographic: bool,
 }
 
 // Returns all ancestor shapes of this shape, traversing up the parent hierarchy
@@ -337,6 +340,7 @@ impl Shape {
             backface_hidden: false,
             perspective: None,
             perspective_origin: (0.5, 0.5),
+            orthographic: false,
             translate_z: 0.0,
             preserve_3d: false,
         }
@@ -504,11 +508,17 @@ impl Shape {
     }
 
     /// How far the viewer of the tilted layers of this board is, px (`None`
-    /// is the default), and where their vanishing point is, fractions of
-    /// its box.
-    pub fn set_perspective(&mut self, distance: Option<f32>, origin: (f32, f32)) {
+    /// is the default), where their vanishing point is, fractions of its
+    /// box, and whether they are seen without perspective.
+    pub fn set_perspective(
+        &mut self,
+        distance: Option<f32>,
+        origin: (f32, f32),
+        orthographic: bool,
+    ) {
         self.perspective = distance.filter(|d| *d > 0.0);
         self.perspective_origin = origin;
+        self.orthographic = orthographic;
     }
 
     /// The vanishing point of the tilted layers of this board: the point at
@@ -644,10 +654,12 @@ impl Shape {
                 break;
             };
             if matches!(parent.shape_type, Type::Frame(_)) {
-                return (
-                    parent.perspective.unwrap_or(tilt::DEFAULT_PERSPECTIVE),
-                    parent.vanishing_point(),
-                );
+                let distance = if parent.orthographic {
+                    tilt::ORTHOGRAPHIC_DISTANCE
+                } else {
+                    parent.perspective.unwrap_or(tilt::DEFAULT_PERSPECTIVE)
+                };
+                return (distance, parent.vanishing_point());
             }
             parent_id = parent.parent_id;
         }
@@ -2572,7 +2584,7 @@ mod tests {
         board.set_selrect(0.0, 0.0, 1200.0, 400.0);
         assert_eq!(board.vanishing_point(), Point::new(600.0, 200.0));
 
-        board.set_perspective(None, (0.25, 0.75));
+        board.set_perspective(None, (0.25, 0.75), false);
         assert_eq!(board.vanishing_point(), Point::new(300.0, 300.0));
 
         // turned a quarter around its middle, its top left corner lies at
@@ -2580,7 +2592,7 @@ mod tests {
         let mut quarter = any_shape();
         quarter.set_selrect(0.0, 0.0, 200.0, 100.0);
         quarter.set_transform(0.0, 1.0, -1.0, 0.0, 0.0, 0.0);
-        quarter.set_perspective(Some(800.0), (0.0, 0.0));
+        quarter.set_perspective(Some(800.0), (0.0, 0.0), false);
         let vp = quarter.vanishing_point();
         assert!(math::is_close_to(vp.x, 150.0) && math::is_close_to(vp.y, -50.0));
     }
@@ -2596,7 +2608,7 @@ mod tests {
             let board = pool.add_shape(board_id);
             board.set_shape_type(Type::Frame(Frame::default()));
             board.set_selrect(0.0, 0.0, 400.0, 400.0);
-            board.set_perspective(Some(800.0), (0.5, 0.5));
+            board.set_perspective(Some(800.0), (0.5, 0.5), false);
             board.children = vec![group_id];
         }
         {
@@ -2693,7 +2705,7 @@ mod tests {
             let board = pool.add_shape(board_id);
             board.set_shape_type(Type::Frame(Frame::default()));
             board.set_selrect(0.0, 0.0, 400.0, 400.0);
-            board.set_perspective(Some(800.0), (0.5, 0.5));
+            board.set_perspective(Some(800.0), (0.5, 0.5), false);
             board.children = vec![group_id];
         }
         {
@@ -2722,6 +2734,42 @@ mod tests {
         let (moon, _) = get(&moon_id).space_face(&pool);
         assert_eq!(tilt::in_front(&picture, &moon, eye), Some(true));
         assert_eq!(tilt::in_front(&moon, &picture, eye), Some(false));
+    }
+
+    #[test]
+    fn an_orthographic_board_sees_without_perspective() {
+        let mut pool = ShapesPool::new();
+        pool.initialize(2);
+        let [board_id, rect_id] = [(); 2].map(|_| Uuid::new_v4());
+        {
+            let board = pool.add_shape(board_id);
+            board.set_shape_type(Type::Frame(Frame::default()));
+            board.set_selrect(0.0, 0.0, 400.0, 400.0);
+            board.set_perspective(None, (0.5, 0.5), true);
+            board.children = vec![rect_id];
+        }
+        {
+            let rect = pool.add_shape(rect_id);
+            rect.set_shape_type(Type::Rect(Rect::default()));
+            rect.set_selrect(100.0, 150.0, 300.0, 250.0);
+            rect.set_parent(board_id);
+            rect.set_tilt(Some(tilt::Tilt::new(0.0, 60.0)), false);
+        }
+        pool.mark_tilts();
+        // a turn about Y narrows it, its edges stay as long
+        let corners = projected_corners(&pool, &rect_id);
+        let expected = [
+            (150.0, 150.0),
+            (250.0, 150.0),
+            (250.0, 250.0),
+            (150.0, 250.0),
+        ];
+        for ((ex, ey), (ax, ay)) in expected.iter().zip(&corners) {
+            assert!(
+                (ex - ax).abs() < 0.01 && (ey - ay).abs() < 0.01,
+                "{corners:?}"
+            );
+        }
     }
 
     #[test]

@@ -24,6 +24,7 @@
             :perspective
             :perspective-x
             :perspective-y
+            :orthographic
             :preserve-depth
             :selrect
             :points

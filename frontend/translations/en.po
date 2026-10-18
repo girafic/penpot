@@ -9251,6 +9251,14 @@ msgid "workspace.options.preserve-3d.hint"
 msgstr "What it holds keeps its depth and tilt in one space, drawn back to front. An opacity, a blur, a shadow or a clip flattens it."
 
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
+msgid "workspace.options.orthographic"
+msgstr "Orthographic"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
+msgid "workspace.options.orthographic.hint"
+msgstr "See the tilted layers of the board without perspective, as from afar: for isometric drawings"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.vanishing-point-x"
 msgstr "Vanishing point X"
 
@@ -9273,6 +9281,14 @@ msgstr "Drag the card to tilt the layer, with Shift in steps of 15°"
 #: src/app/main/ui/workspace/sidebar/options/menus/tilt_tool.cljs
 msgid "workspace.options.tilt-tool.depth"
 msgstr "Depth"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/tilt_tool.cljs
+msgid "workspace.options.tilt-tool.isometric"
+msgstr "Isometric"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/tilt_tool.cljs
+msgid "workspace.options.tilt-tool.isometric.hint"
+msgstr "Turn the layer as an isometric drawing shows it; make its board orthographic to see it without perspective"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/typography.cljs:461
 msgid "workspace.options.search-font"

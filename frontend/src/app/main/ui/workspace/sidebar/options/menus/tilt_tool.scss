@@ -148,6 +148,10 @@
   }
 }
 
+.tilt-isometric {
+  inline-size: 100%;
+}
+
 // as wide as their text, unlike the labels of other inputs
 .tilt-field .tilt-field-label,
 .tilt-field .tilt-field-unit {

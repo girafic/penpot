@@ -224,6 +224,7 @@
       (some? (:perspective shape))
       (some? (:perspective-x shape))
       (some? (:perspective-y shape))
+      (true? (:orthographic shape))
       (some? (:tilt-pivot shape))))
 
 (defn set-shape-tilt
@@ -256,7 +257,8 @@
   (h/call wasm/internal-module "_set_shape_perspective"
           (or (:perspective board) 0)
           (or (:perspective-x board) 0.5)
-          (or (:perspective-y board) 0.5)))
+          (or (:perspective-y board) 0.5)
+          (true? (:orthographic board))))
 
 (defn set-shape-text-units
   "Pose the units of the current text one by one, as a split animation of

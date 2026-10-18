@@ -56,7 +56,7 @@
    :ox :oy
    :rotation
    :rotate-x :rotate-y :backface-hidden :translate-z :preserve-depth
-   :perspective :perspective-x :perspective-y
+   :perspective :perspective-x :perspective-y :orthographic
    :r1 :r2 :r3 :r4
    :selrect
    :points
@@ -181,6 +181,8 @@
                      (get n-values :perspective-x))
          (identical? (get o-values :perspective-y)
                      (get n-values :perspective-y))
+         (identical? (get o-values :orthographic)
+                     (get n-values :orthographic))
          (identical? (get o-values :hide-in-viewer)
                      (get n-values :hide-in-viewer))
          (identical? (get o-values :width)
@@ -802,6 +804,15 @@
         on-vanishing-y-change
         (mf/use-fn (mf/deps on-camera-change) #(on-camera-change :perspective-y %))
 
+        on-orthographic-change
+        (mf/use-fn
+         (mf/deps board-ids)
+         (fn [event]
+           (let [on? (-> event dom/get-target dom/checked?)]
+             (st/emit! (dwsh/update-shapes board-ids #(if on?
+                                                        (assoc % :orthographic true)
+                                                        (dissoc % :orthographic)))))))
+
         on-width-change
         (mf/use-fn (mf/deps on-size-change) #(on-size-change % :width))
 
@@ -1216,6 +1227,7 @@
      (when (and (options :perspective)
                 (or holds-tilt?
                     camera-animated?
+                    (true? (:orthographic values))
                     (some #(number? (get values %)) cta/camera-properties)))
        [:div {:class (stl/css :perspective)}
         (if token-numeric-inputs
@@ -1278,7 +1290,15 @@
                :value (when (number? value) (mth/precision (* 100 value) 2))}]
              [:span {:class (stl/css :origin-unit)} "%"]
              (when motion-id
-               [:> keyframe-diamond* {:properties [attr]}])]))])
+               [:> keyframe-diamond* {:properties [attr]}])]))
+
+        ;; seen without perspective, as from afar: isometric drawings
+        [:div {:class (stl/css :orthographic)
+               :title (tr "workspace.options.orthographic.hint")}
+         [:> checkbox* {:id "orthographic"
+                        :label (tr "workspace.options.orthographic")
+                        :checked (true? (:orthographic values))
+                        :on-change on-orthographic-change}]]])
 
      (when (or (options :clip-content) (options :show-in-viewer))
        [:div {:class (stl/css :clip-show)}

@@ -192,7 +192,7 @@
         (:rotate-x :rotate-y :backface-hidden :tilt-pivot)
         (api/set-shape-tilt shape)
 
-        (:perspective :perspective-x :perspective-y)
+        (:perspective :perspective-x :perspective-y :orthographic)
         (when (cfh/frame-shape? shape)
           (api/set-shape-perspective shape))
 

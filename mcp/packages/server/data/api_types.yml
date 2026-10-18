@@ -1061,6 +1061,7 @@ Board:
         perspective: number | null;
         perspectiveX: number | null;
         perspectiveY: number | null;
+        orthographic: boolean;
         preserve3d: boolean;
         grid?: GridLayout;
         flex?: FlexLayout;
@@ -1281,6 +1282,15 @@ Board:
         it, a fraction of its height (0 is its top edge, 1 its bottom one).
         `null` is its middle, 0.5. Animatable as the keyframe property
         `perspectiveY`.
+      orthographic: |-
+        ```
+        orthographic: boolean
+        ```
+
+        When true the board sees its tilted layers without perspective, as
+        from afar (a parallel projection): for isometric drawings, with the
+        layers turned by rotation 60, rotateX 35.2644 and rotateY -45.
+        Penpot Motion.
       preserve3d: |-
         ```
         preserve3d: boolean
@@ -2394,6 +2404,7 @@ VariantContainer:
         perspective: number | null;
         perspectiveX: number | null;
         perspectiveY: number | null;
+        orthographic: boolean;
         preserve3d: boolean;
         grid?: GridLayout;
         flex?: FlexLayout;
@@ -2614,6 +2625,15 @@ VariantContainer:
         it, a fraction of its height (0 is its top edge, 1 its bottom one).
         `null` is its middle, 0.5. Animatable as the keyframe property
         `perspectiveY`.
+      orthographic: |-
+        ```
+        orthographic: boolean
+        ```
+
+        When true the board sees its tilted layers without perspective, as
+        from afar (a parallel projection): for isometric drawings, with the
+        layers turned by rotation 60, rotateX 35.2644 and rotateY -45.
+        Penpot Motion.
       preserve3d: |-
         ```
         preserve3d: boolean

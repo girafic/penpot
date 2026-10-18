@@ -251,6 +251,14 @@ export interface Board extends ShapeBase {
   perspectiveY: number | null;
 
   /**
+   * When true the board sees its tilted layers without perspective, as
+   * from afar (a parallel projection): for isometric drawings, with the
+   * layers turned by rotation 60, rotateX 35.2644 and rotateY -45.
+   * Penpot Motion.
+   */
+  orthographic: boolean;
+
+  /**
    * When true the board, unless it clips its content, is a 3D space: its
    * children draw back to front by their depth (see `Group.preserve3d`).
    * Penpot Motion.

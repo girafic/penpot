@@ -2185,6 +2185,26 @@
                      :else
                      (commit-tilt! self :perspective-y value nil)))}
 
+                {:name "orthographic"
+                 :get
+                 (fn [self]
+                   (-> self u/proxy->shape :orthographic true?))
+
+                 :set
+                 (fn [self value]
+                   (cond
+                     (not (boolean? value))
+                     (u/not-valid plugin-id :orthographic value)
+
+                     (not (r/check-permission plugin-id "content:write"))
+                     (u/not-valid plugin-id :orthographic "Plugin doesn't have 'content:write' permission")
+
+                     (not (u/page-active? page-id))
+                     (u/not-valid plugin-id :orthographic "Cannot modify a page that is not currently active")
+
+                     :else
+                     (commit-tilt! self :orthographic (when value true) nil)))}
+
                 {:name "showInViewMode"
                  :get
                  (fn [self]

@@ -26,6 +26,11 @@ use super::{Matrix, Point, Rect};
 /// The distance of the viewer, px, of a board with no perspective of its own.
 pub const DEFAULT_PERSPECTIVE: f32 = 1000.0;
 
+/// How far the viewer of the tilted layers of an orthographic board is, px:
+/// far enough to see them without perspective, and finite, so that the
+/// planes of the depth sort stay numbers.
+pub const ORTHOGRAPHIC_DISTANCE: f32 = 1e7;
+
 /// The least depth factor a point shows at: a point nearer the viewer (or
 /// behind) does not show.
 const MIN_W: f64 = 0.01;

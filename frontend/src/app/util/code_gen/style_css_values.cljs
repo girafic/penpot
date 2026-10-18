@@ -221,16 +221,20 @@
           (:shapes shape))))
 
 (defn- get-perspective
-  "The perspective of the board of the tilted layers of `shape`."
+  "The perspective of the board of the tilted layers of `shape`; none for
+  an orthographic one, which sees them without."
   [shape objects]
   (when-let [child (first (tilted-children shape objects))]
-    (fmt/format-pixels (:distance (gtl/perspective-of objects child)))))
+    (let [{:keys [distance orthographic?]} (gtl/perspective-of objects child)]
+      (when-not orthographic?
+        (fmt/format-pixels distance)))))
 
 (defn- get-perspective-origin
   "The vanishing point of the tilted layers of `shape` (the middle of
   their board) in its box."
   [shape objects]
-  (when-let [child (first (tilted-children shape objects))]
+  (when-let [child (first (remove #(:orthographic? (gtl/perspective-of objects %))
+                                  (tilted-children shape objects)))]
     (let [{:keys [vp]} (gtl/perspective-of objects child)
           box          (:selrect shape)]
       (dm/str (fmt/format-pixels (- (:x vp) (:x box))) " "

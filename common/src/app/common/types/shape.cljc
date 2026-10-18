@@ -324,7 +324,10 @@
    ;; Where the vanishing point of its tilted layers is, fractions of its
    ;; box; absent is its middle (0.5).
    [:perspective-x {:optional true} ::sm/safe-number]
-   [:perspective-y {:optional true} ::sm/safe-number]])
+   [:perspective-y {:optional true} ::sm/safe-number]
+   ;; Whether its tilted layers are seen without perspective, as from
+   ;; afar (parallel projection, for isometric drawings)
+   [:orthographic {:optional true} :boolean]])
 
 (def ^:private schema:nilable-geom-attrs
   "`schema:shape-geom-attrs`, but nilable.
@@ -558,7 +561,7 @@
 (def ^:private allowed-bool-attrs #{:shapes :bool-type :content})
 (def ^:private allowed-group-attrs #{:shapes})
 (def ^:private allowed-frame-attrs #{:shapes :hide-fill-on-export :show-content :hide-in-viewer
-                                     :perspective :perspective-x :perspective-y
+                                     :perspective :perspective-x :perspective-y :orthographic
                                      :layout :layout-flex-dir :layout-gap-type :layout-gap
                                      :layout-align-items :layout-justify-content :layout-align-content
                                      :layout-wrap-type :layout-padding-type :layout-padding
