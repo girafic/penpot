@@ -219,6 +219,9 @@ pub struct Shape {
     /// How far the viewer of the tilted layers of this board is, px; `None`
     /// is `math::tilt::DEFAULT_PERSPECTIVE`.
     pub perspective: Option<f32>,
+    /// Where the vanishing point of the tilted layers of this board is,
+    /// fractions of its box (its middle by default).
+    pub perspective_origin: (f32, f32),
 }
 
 // Returns all ancestor shapes of this shape, traversing up the parent hierarchy
@@ -328,6 +331,7 @@ impl Shape {
             tilt: None,
             backface_hidden: false,
             perspective: None,
+            perspective_origin: (0.5, 0.5),
         }
     }
 
@@ -492,10 +496,23 @@ impl Shape {
         self.invalidate_extrect();
     }
 
-    /// How far the viewer of the tilted layers of this board is, px; `None`
-    /// is the default.
-    pub fn set_perspective(&mut self, distance: Option<f32>) {
+    /// How far the viewer of the tilted layers of this board is, px (`None`
+    /// is the default), and where their vanishing point is, fractions of
+    /// its box.
+    pub fn set_perspective(&mut self, distance: Option<f32>, origin: (f32, f32)) {
         self.perspective = distance.filter(|d| *d > 0.0);
+        self.perspective_origin = origin;
+    }
+
+    /// The vanishing point of the tilted layers of this board: the point at
+    /// the fractions `perspective_origin` of its box, as it lies.
+    pub fn vanishing_point(&self) -> Point {
+        let (fx, fy) = self.perspective_origin;
+        let point = Point::new(
+            self.selrect.x() + self.selrect.width() * fx,
+            self.selrect.y() + self.selrect.height() * fy,
+        );
+        self.centered_transform().map_point(point)
     }
 
     pub fn is_tilted(&self) -> bool {
@@ -503,8 +520,8 @@ impl Shape {
     }
 
     /// The distance of the viewer and the vanishing point the tilt of this
-    /// layer is seen with: those of its board (its middle), the default
-    /// around its own middle at the root.
+    /// layer is seen with: those of its board (see `vanishing_point`), the
+    /// default around its own middle at the root.
     pub fn perspective_of(&self, shapes_pool: ShapesPoolRef) -> (f32, Point) {
         let mut parent_id = self.parent_id;
         while let Some(id) = parent_id.filter(|id| !id.is_nil()) {
@@ -514,7 +531,7 @@ impl Shape {
             if matches!(parent.shape_type, Type::Frame(_)) {
                 return (
                     parent.perspective.unwrap_or(tilt::DEFAULT_PERSPECTIVE),
-                    parent.center(),
+                    parent.vanishing_point(),
                 );
             }
             parent_id = parent.parent_id;
@@ -2426,6 +2443,25 @@ mod tests {
         assert!(math::is_close_to(after.max_y(), before.max_y()));
         assert!(math::is_close_to(after.min_y(), 20.0));
         assert!(math::is_close_to(after.max_y(), 40.0));
+    }
+
+    #[test]
+    fn the_vanishing_point_of_a_board_is_at_its_fractions_as_it_lies() {
+        let mut board = any_shape();
+        board.set_selrect(0.0, 0.0, 1200.0, 400.0);
+        assert_eq!(board.vanishing_point(), Point::new(600.0, 200.0));
+
+        board.set_perspective(None, (0.25, 0.75));
+        assert_eq!(board.vanishing_point(), Point::new(300.0, 300.0));
+
+        // turned a quarter around its middle, its top left corner lies at
+        // the top right
+        let mut quarter = any_shape();
+        quarter.set_selrect(0.0, 0.0, 200.0, 100.0);
+        quarter.set_transform(0.0, 1.0, -1.0, 0.0, 0.0, 0.0);
+        quarter.set_perspective(Some(800.0), (0.0, 0.0));
+        let vp = quarter.vanishing_point();
+        assert!(math::is_close_to(vp.x, 150.0) && math::is_close_to(vp.y, -50.0));
     }
 
     #[test]

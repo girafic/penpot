@@ -8525,7 +8525,7 @@ msgid "workspace.options.export.issue.lottie-three-d"
 msgstr "3D rotation · Players differ in %s"
 
 msgid "workspace.options.export.issue.lottie-three-d.text"
-msgstr "Tilted layers play as 3D layers of %s without a camera. lottie-web (SVG and canvas renderers) and dotLottie players show the tilt without depth; lottie-web's HTML renderer and Skottie add a depth of their own. A hidden back face plays as the opacity of the layer."
+msgstr "Tilted layers play as 3D layers of %s without a camera, so the perspective of the board and its vanishing point stay behind. lottie-web (SVG and canvas renderers) and dotLottie players show the tilt without depth; lottie-web's HTML renderer and Skottie add a depth of their own. A hidden back face plays as the opacity of the layer."
 
 msgid "workspace.options.export.issue.svg-three-d"
 msgstr "3D rotation · Flat in %s"
@@ -9217,6 +9217,14 @@ msgstr "Hide the back face"
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.perspective"
 msgstr "Perspective"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
+msgid "workspace.options.vanishing-point-x"
+msgstr "Vanishing point X"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
+msgid "workspace.options.vanishing-point-y"
+msgstr "Vanishing point Y"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/tilt_tool.cljs
 msgid "workspace.options.tilt-tool"

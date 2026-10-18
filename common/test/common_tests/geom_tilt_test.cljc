@@ -99,6 +99,25 @@
                              [1106.7064063828627 252.46505106683296]]
                             (corners objs rect-id))))))
 
+(t/deftest the-vanishing-point-of-a-board-moves
+  (t/testing "as CSS `perspective-origin: 25% 75%`"
+    (let [objs (objects (board 0 0 1200 400 :perspective-x 0.25 :perspective-y 0.75)
+                        (rect 1050 150 100 100 :rotate-y 70))]
+      (t/is (gpt/close? (gpt/point 300 300) (gtl/vanishing-point (get objs board-id))))
+      (t/is (close-corners? [[1121.4967127838604 142.60484679950116]
+                             [1080.4326662896508 156.7314213093065]
+                             [1080.4326662896508 252.24380710310214]
+                             [1121.4967127838604 247.53494893316704]]
+                            (corners objs rect-id)))))
+
+  (t/testing "at its fractions as the board lies, turned"
+    (let [quarter (-> (board 0 0 200 100 :perspective-x 0 :perspective-y 0)
+                      (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 100 50) 90)))
+          vp      (gtl/vanishing-point quarter)]
+      ;; its top left corner turns to the top right
+      (t/is (mth/close? 150 (:x vp) 1e-6))
+      (t/is (mth/close? -50 (:y vp) 1e-6)))))
+
 (t/deftest the-layers-of-a-tilted-group-tilt-with-it
   (let [group (-> (cts/setup-shape {:type :group :x 50 :y 50 :width 300 :height 300})
                   (merge {:id group-id :parent-id board-id :frame-id board-id :rotate-x 20}))
@@ -195,5 +214,7 @@
     (t/is (not (cts/valid-shape? (assoc shape :rotate-x nil))))
     (t/is (not (cts/valid-shape? (assoc shape :rotate-y "30"))))
     (t/is (cts/valid-shape? (assoc frame :perspective 800)))
+    (t/is (cts/valid-shape? (assoc frame :perspective-x 0.25 :perspective-y 1.5)))
+    (t/is (not (cts/valid-shape? (assoc frame :perspective-x "0.5"))))
     (t/is (not (cts/valid-shape? (assoc frame :perspective 50))))
     (t/is (not (cts/valid-shape? (assoc frame :perspective nil))))))

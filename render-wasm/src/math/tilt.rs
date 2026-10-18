@@ -7,7 +7,8 @@
 //! layer in its own axes, before its turn in the plane, the top edge going
 //! back for a positive X, the right edge for a positive Y; a point `z`
 //! towards the viewer shows at `vp + (p - vp) * d / (d - z)`, `vp` the
-//! middle of the board.
+//! vanishing point of the board (its middle unless it is moved, as CSS
+//! `perspective-origin`).
 //!
 //! The tilt of a layer is a homography of the page (a 3×3 `Matrix` with a
 //! perspective row), drawn after the layer's own transform. The layers in a
@@ -515,6 +516,29 @@ mod tests {
         };
         assert!(!off(60.0));
         assert!(off(65.0));
+    }
+
+    #[test]
+    fn the_vanishing_point_moves_the_projection() {
+        // `perspective-origin: 25% 75%` of a board 1200 x 400
+        let selrect = Rect::from_xywh(1050.0, 150.0, 100.0, 100.0);
+        let h = tilt_matrix(
+            &selrect,
+            &Matrix::default(),
+            &Tilt::new(0.0, 70.0),
+            1000.0,
+            Point::new(300.0, 300.0),
+        )
+        .unwrap();
+        assert_corners(
+            &[
+                (1121.4967127838604, 142.60484679950116),
+                (1080.4326662896508, 156.7314213093065),
+                (1080.4326662896508, 252.24380710310214),
+                (1121.4967127838604, 247.53494893316704),
+            ],
+            &corners(&h, 1050.0, 150.0, 100.0, 100.0),
+        );
     }
 
     #[test]

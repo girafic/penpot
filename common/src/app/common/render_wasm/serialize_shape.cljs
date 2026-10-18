@@ -53,7 +53,7 @@
   (when (props/tilt-props? shape)
     (props/set-shape-tilt shape)
     (when (= :frame (:type shape))
-      (props/set-shape-perspective (:perspective shape)))))
+      (props/set-shape-perspective shape))))
 
 (defn serialize-shape
   "Applies every host-independent WASM property of `shape`."

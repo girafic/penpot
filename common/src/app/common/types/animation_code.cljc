@@ -32,6 +32,9 @@
    :rotation "rotation"
    :rotate-x "rotateX"
    :rotate-y "rotateY"
+   :perspective "perspective"
+   :perspective-x "perspectiveX"
+   :perspective-y "perspectiveY"
    :scale-x "scaleX"
    :scale-y "scaleY"
    :opacity "opacity"
@@ -72,6 +75,7 @@
   "The animatable properties in the order of the rows of the dock, which
   the code follows."
   [:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y
+   :perspective :perspective-x :perspective-y
    :opacity :r1 :r2 :r3 :r4
    :fill-color :fill-opacity
    :stroke-color :stroke-opacity :stroke-width
@@ -347,6 +351,8 @@
    ["rotate" #{:rotation} :rotate]
    ["rotateX" #{:rotate-x} :rotate-x]
    ["rotateY" #{:rotate-y} :rotate-y]
+   ["perspective" #{:perspective} :perspective]
+   ["perspectiveOrigin" #{:perspective-x :perspective-y} :perspective-origin]
    ["scaleX" #{:width :scale-x} :scale-x]
    ["scaleY" #{:height :scale-y} :scale-y]
    ["opacity" #{:opacity} :opacity]
@@ -393,7 +399,7 @@
   [value v]
   (case value
     "borderRadius" (str "\"" (str/join " " (map #(str (react-number %) "px") v)) "\"")
-    ("backgroundColor" "borderColor" "boxShadow" "color" "WebkitTextStrokeColor") (str "\"" v "\"")
+    ("backgroundColor" "borderColor" "boxShadow" "color" "WebkitTextStrokeColor" "perspectiveOrigin") (str "\"" v "\"")
     ("filter" "backdropFilter") (str "\"blur(" (react-number v) "px)\"")
     (react-number v)))
 

@@ -37,6 +37,9 @@
       :rotation "Rotation"
       :rotate-x "Rotation X"
       :rotate-y "Rotation Y"
+      :perspective (tr "workspace.options.perspective")
+      :perspective-x (tr "workspace.options.vanishing-point-x")
+      :perspective-y (tr "workspace.options.vanishing-point-y")
       :r1 (tr "workspace.options.radius-top-left")
       :r2 (tr "workspace.options.radius-top-right")
       :r3 (tr "workspace.options.radius-bottom-right")

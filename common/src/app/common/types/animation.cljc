@@ -27,6 +27,7 @@
    [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
    [app.common.schema :as sm]
    [app.common.types.animation-outline :as ctao]
@@ -53,6 +54,9 @@
   #{:x :y :width :height :opacity :rotation :scale-x :scale-y
     ;; the 3D rotation, about the layer's own axes (see `app.common.geom.tilt`)
     :rotate-x :rotate-y
+    ;; the camera of a board: how far the viewer of its tilted layers is,
+    ;; and where their vanishing point is (see `camera-properties`)
+    :perspective :perspective-x :perspective-y
     :r1 :r2 :r3 :r4
     :fill-color :fill-opacity
     :stroke-color :stroke-opacity :stroke-width
@@ -77,6 +81,21 @@
 
 (def color-properties
   #{:fill-color :stroke-color :shadow-color})
+
+(def camera-properties
+  "The properties of the camera of a board (see `app.common.geom.tilt`):
+  the distance of the viewer of its tilted layers, px, and their
+  vanishing point, fractions of its box. Only boards have them."
+  #{:perspective :perspective-x :perspective-y})
+
+(defn camera-rest
+  "The value of the camera property `property` of `board` without
+  keyframes."
+  [board property]
+  (case property
+    :perspective   (or (:perspective board) gtl/default-perspective)
+    :perspective-x (or (:perspective-x board) 0.5)
+    :perspective-y (or (:perspective-y board) 0.5)))
 
 (def indexed-properties
   #{:fill-color :fill-opacity
@@ -2708,7 +2727,8 @@
   #{:opacity :r1 :r2 :r3 :r4 :fills :strokes :shadow :blur :background-blur
     :trim-start :trim-end :trim-offset :text-units :content
     ;; the tilt, drawn and not kept in the geometry (see `app.common.geom.tilt`)
-    :rotate-x :rotate-y :tilt-pivot})
+    :rotate-x :rotate-y :tilt-pivot
+    :perspective :perspective-x :perspective-y})
 
 (defn appearance-changes
   "`{attr value}` of the `appearance-attrs` that `modifiers` change, or nil.
@@ -2993,6 +3013,14 @@
                                 :rest-x (or (:rotate-x shape) 0)
                                 :rest-y (or (:rotate-y shape) 0)}))
 
+      ;; the camera of a board, all of it when a part plays
+      (and (has? values :perspective :perspective-x :perspective-y) (= :frame (:type shape)))
+      (as-> $ (reduce (fn [modifiers property]
+                        (ctm/change-property modifiers property
+                                             (get values property (camera-rest shape property))))
+                      $
+                      camera-properties))
+
       (contains? values :r1)
       (ctm/change-property :r1 (:r1 values))
 
@@ -3046,6 +3074,8 @@
     :scale-x  1
     :scale-y  1
     :blur     (or (dm/get-in shape [:blur :value]) 0)
+    (:perspective :perspective-x :perspective-y)
+    (when (= :frame (:type shape)) (camera-rest shape property))
     nil))
 
 (defn- effect-value
@@ -3538,6 +3568,9 @@
     (:trim-start :trim-end :trim-offset)
     (d/not-empty? (:strokes shape))
 
+    (:perspective :perspective-x :perspective-y)
+    (= :frame (:type shape))
+
     :content
     (= :path (:type shape))
 
@@ -3793,12 +3826,13 @@
 (def ^:private edit-properties
   "Properties an edit of a shape records as keyframes. Scale stays a
   timeline value; width and height follow a resize."
-  [:x :y :width :height :rotation :rotate-x :rotate-y :opacity :r1 :r2 :r3 :r4])
+  [:x :y :width :height :rotation :rotate-x :rotate-y :opacity :r1 :r2 :r3 :r4
+   :perspective :perspective-x :perspective-y])
 
 (def ^:private edit-absolute-properties
   "Properties an edit records as they end up, not as a change of the
   value shown."
-  #{:opacity :width :height :r1 :r2 :r3 :r4})
+  #{:opacity :width :height :r1 :r2 :r3 :r4 :perspective :perspective-x :perspective-y})
 
 (defn- angle-delta
   "The turn from `from` to `to` degrees the short way round: a shape
@@ -3880,7 +3914,9 @@
       :r1       (or (:r1 shape) 0)
       :r2       (or (:r2 shape) 0)
       :r3       (or (:r3 shape) 0)
-      :r4       (or (:r4 shape) 0))))
+      :r4       (or (:r4 shape) 0)
+      (:perspective :perspective-x :perspective-y)
+      (when (= :frame (:type shape)) (camera-rest shape property)))))
 
 (defn- keyframe-easing-at
   "The easing of the keyframe of the slot of `property` and `index` of

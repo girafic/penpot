@@ -220,6 +220,8 @@
       (some? (:rotate-y shape))
       (true? (:backface-hidden shape))
       (some? (:perspective shape))
+      (some? (:perspective-x shape))
+      (some? (:perspective-y shape))
       (some? (:tilt-pivot shape))))
 
 (defn set-shape-tilt
@@ -236,10 +238,14 @@
             (true? (:backface-hidden shape)))))
 
 (defn set-shape-perspective
-  "How far the viewer of the tilted layers of the current board is, px;
-  nil is the default."
-  [perspective]
-  (h/call wasm/internal-module "_set_shape_perspective" (or perspective 0)))
+  "The camera of the current board, as `board` has it: how far the viewer
+  of its tilted layers is, px (nil is the default), and their vanishing
+  point, fractions of its box (its middle by default)."
+  [board]
+  (h/call wasm/internal-module "_set_shape_perspective"
+          (or (:perspective board) 0)
+          (or (:perspective-x board) 0.5)
+          (or (:perspective-y board) 0.5)))
 
 (defn set-shape-text-units
   "Pose the units of the current text one by one, as a split animation of

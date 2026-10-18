@@ -453,6 +453,8 @@
      :rotation (or (:rotation shape) 0)
      :rotate-x (or (:rotate-x shape) 0)
      :rotate-y (or (:rotate-y shape) 0)
+     (:perspective :perspective-x :perspective-y)
+     (when (cfh/frame-shape? shape) (cta/camera-rest shape property))
      :opacity  (or (:opacity shape) 1)
      :width    (or (-> shape :selrect :width) 0)
      :height   (or (-> shape :selrect :height) 0)
@@ -482,6 +484,11 @@
 (def transform-properties
   [:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y])
 
+(def camera-properties
+  "The camera of a board (see `cta/camera-properties`), in the order of
+  the rows of the dock."
+  [:perspective :perspective-x :perspective-y])
+
 (def appearance-properties
   [:fill-color :fill-opacity
    :stroke-color :stroke-opacity :stroke-width
@@ -491,7 +498,7 @@
    :trim-start :trim-end :trim-offset])
 
 (def animatable-properties
-  (into transform-properties (concat [:opacity :r1 :r2 :r3 :r4] appearance-properties [:content])))
+  (into transform-properties (concat camera-properties [:opacity :r1 :r2 :r3 :r4] appearance-properties [:content])))
 
 (defn- store-value
   [m property index v]
@@ -517,6 +524,11 @@
                              (concat [:opacity :r1 :r2 :r3 :r4 :blur :background-blur]
                                      (keys cta/trim-properties))))
         values   (cond-> values
+                   (cfh/frame-shape? shape)
+                   (into (map (fn [property]
+                                [property (get animated property (cta/camera-rest shape property))]))
+                         camera-properties)
+
                    (= :path (:type shape))
                    (assoc :content (or (:content animated)
                                        (ctao/outline-value shape (cta/get-track timeline (:id shape))))))]
@@ -552,7 +564,7 @@
   [property value]
   (case property
     (:scale-x :scale-y :opacity :fill-opacity :stroke-opacity :shadow-opacity
-              :trim-start :trim-end :trim-offset)
+              :trim-start :trim-end :trim-offset :perspective-x :perspective-y)
     (* value 100)
     value))
 
@@ -561,7 +573,7 @@
   [property display]
   (case property
     (:scale-x :scale-y :opacity :fill-opacity :stroke-opacity :shadow-opacity
-              :trim-start :trim-end :trim-offset)
+              :trim-start :trim-end :trim-offset :perspective-x :perspective-y)
     (/ display 100)
     display))
 

@@ -112,7 +112,9 @@
   `position-origin`). A tilted shape (see `app.common.geom.tilt`) has its
   `:rotate-x` and `:rotate-y` (degrees) with its transform, and, turning
   around `pivot` (fractions of its box) off its middle with a tilt at
-  rest, `:lift` (`[dx dy dz]` px, see `gtl/lift`)."
+  rest, `:lift` (`[dx dy dz]` px, see `gtl/lift`). A board whose camera
+  plays (see `cta/camera-properties`) has `:perspective` (px) and
+  `:perspective-origin` (CSS, shares of its box)."
   ([shape values origin]
    (frame-values shape values origin nil))
   ([shape values origin pivot]
@@ -177,7 +179,14 @@
       (assoc :blur (:blur values))
 
       (contains? values :background-blur)
-      (assoc :backdrop-blur (:background-blur values)))))
+      (assoc :backdrop-blur (:background-blur values))
+
+      ;; the camera of a board: CSS sees the tilted layers in it with its
+      ;; perspective (see `app.common.geom.tilt`)
+      (and (cta/has? values :perspective :perspective-x :perspective-y) (= :frame (:type shape)))
+      (assoc :perspective (get values :perspective (cta/camera-rest shape :perspective))
+             :perspective-origin (str (fmt (* 100 (get values :perspective-x (cta/camera-rest shape :perspective-x)))) "% "
+                                      (fmt (* 100 (get values :perspective-y (cta/camera-rest shape :perspective-y)))) "%")))))
 
 (declare svg-group-declarations css-declarations)
 
@@ -226,7 +235,7 @@
   [shape values origin rest-transform pivot]
   (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity border-radius
                 background-color border-color border-width box-shadow blur backdrop-blur
-                color text-stroke-color text-stroke-width lift]
+                color text-stroke-color text-stroke-width lift perspective perspective-origin]
          :as frame}
         (frame-values shape values origin pivot)]
     (cond-> []
@@ -273,7 +282,11 @@
       (conj (str "filter: blur(" (fmt blur) "px);"))
 
       (contains? frame :backdrop-blur)
-      (conj (str "backdrop-filter: blur(" (fmt backdrop-blur) "px);")))))
+      (conj (str "backdrop-filter: blur(" (fmt backdrop-blur) "px);"))
+
+      (contains? frame :perspective)
+      (conj (str "perspective: " (fmt perspective) "px;")
+            (str "perspective-origin: " perspective-origin ";")))))
 
 (defn keyframe-timing
   "The CSS timing function of the segment starting at `keyframe`, or nil

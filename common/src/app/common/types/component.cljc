@@ -93,6 +93,8 @@
    :blend-mode              :layer-effects-group
    :backface-hidden         :layer-effects-group
    :perspective             :layer-effects-group
+   :perspective-x           :layer-effects-group
+   :perspective-y           :layer-effects-group
    :shadow                  :shadow-group
    :blur                    :blur-group
    :background-blur         :blur-group

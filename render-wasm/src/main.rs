@@ -658,20 +658,21 @@ pub extern "C" fn set_shape_tilt(
     Ok(())
 }
 
-/// How far the viewer of the tilted layers of the current board is, px; 0 is
-/// the default.
+/// How far the viewer of the tilted layers of the current board is, px (0 is
+/// the default), and where their vanishing point is: `vx`, `vy`, fractions
+/// of its box.
 #[no_mangle]
 #[wasm_error]
-pub extern "C" fn set_shape_perspective(distance: f32) -> Result<()> {
+pub extern "C" fn set_shape_perspective(distance: f32, vx: f32, vy: f32) -> Result<()> {
     with_current_shape_mut!(state, |shape: &mut Shape| {
-        shape.set_perspective(Some(distance));
+        shape.set_perspective(Some(distance), (vx, vy));
     });
     invalidate_current_tilted_descendants();
     Ok(())
 }
 
-/// The tilted layers of the current board are seen from its middle: they
-/// show elsewhere when it changes.
+/// The tilted layers of the current board are seen from its vanishing
+/// point: they show elsewhere when it changes.
 fn invalidate_current_tilted_descendants() {
     with_state!(state, {
         if let Some(id) = state.current_id {

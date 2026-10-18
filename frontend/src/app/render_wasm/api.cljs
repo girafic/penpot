@@ -1132,8 +1132,9 @@
   (props/set-shape-tilt shape))
 
 (defn set-shape-perspective
-  [perspective]
-  (props/set-shape-perspective perspective))
+  "The camera of the current board (see `props/set-shape-perspective`)."
+  [board]
+  (props/set-shape-perspective board))
 
 (defn set-shape-trim
   "Draw the strokes only from `start` to `end` of the outline, moved along

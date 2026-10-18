@@ -2105,6 +2105,46 @@
                      :else
                      (commit-tilt! self :perspective value nil)))}
 
+                {:name "perspectiveX"
+                 :get
+                 (fn [self]
+                   (-> self u/proxy->shape :perspective-x))
+
+                 :set
+                 (fn [self value]
+                   (cond
+                     (not (or (nil? value) (sm/valid-safe-number? value)))
+                     (u/not-valid plugin-id :perspectiveX value)
+
+                     (not (r/check-permission plugin-id "content:write"))
+                     (u/not-valid plugin-id :perspectiveX "Plugin doesn't have 'content:write' permission")
+
+                     (not (u/page-active? page-id))
+                     (u/not-valid plugin-id :perspectiveX "Cannot modify a page that is not currently active")
+
+                     :else
+                     (commit-tilt! self :perspective-x value nil)))}
+
+                {:name "perspectiveY"
+                 :get
+                 (fn [self]
+                   (-> self u/proxy->shape :perspective-y))
+
+                 :set
+                 (fn [self value]
+                   (cond
+                     (not (or (nil? value) (sm/valid-safe-number? value)))
+                     (u/not-valid plugin-id :perspectiveY value)
+
+                     (not (r/check-permission plugin-id "content:write"))
+                     (u/not-valid plugin-id :perspectiveY "Plugin doesn't have 'content:write' permission")
+
+                     (not (u/page-active? page-id))
+                     (u/not-valid plugin-id :perspectiveY "Cannot modify a page that is not currently active")
+
+                     :else
+                     (commit-tilt! self :perspective-y value nil)))}
+
                 {:name "showInViewMode"
                  :get
                  (fn [self]

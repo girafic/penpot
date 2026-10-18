@@ -314,7 +314,11 @@
    [:use-for-thumbnail {:optional true} :boolean]
    ;; How far, px, the viewer of its tilted layers is (see
    ;; `app.common.geom.tilt`); absent is `gtl/default-perspective`.
-   [:perspective {:optional true} [::sm/number {:min 100 :max 100000}]]])
+   [:perspective {:optional true} [::sm/number {:min 100 :max 100000}]]
+   ;; Where the vanishing point of its tilted layers is, fractions of its
+   ;; box; absent is its middle (0.5).
+   [:perspective-x {:optional true} ::sm/safe-number]
+   [:perspective-y {:optional true} ::sm/safe-number]])
 
 (def ^:private schema:nilable-geom-attrs
   "`schema:shape-geom-attrs`, but nilable.
@@ -546,7 +550,8 @@
                                           :transform-inverse :parent-id :frame-id})
 (def ^:private allowed-bool-attrs #{:shapes :bool-type :content})
 (def ^:private allowed-group-attrs #{:shapes})
-(def ^:private allowed-frame-attrs #{:shapes :hide-fill-on-export :show-content :hide-in-viewer :perspective
+(def ^:private allowed-frame-attrs #{:shapes :hide-fill-on-export :show-content :hide-in-viewer
+                                     :perspective :perspective-x :perspective-y
                                      :layout :layout-flex-dir :layout-gap-type :layout-gap
                                      :layout-align-items :layout-justify-content :layout-align-content
                                      :layout-wrap-type :layout-padding-type :layout-padding

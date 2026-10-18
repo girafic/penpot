@@ -227,10 +227,27 @@ export interface Board extends ShapeBase {
 
   /**
    * How far the viewer of the tilted layers of the board is, in px
-   * (100 to 100000), as CSS `perspective`: the vanishing point is the
-   * middle of the board. `null` is the default, 1000.
+   * (100 to 100000), as CSS `perspective`; their vanishing point is at
+   * `perspectiveX`, `perspectiveY`. `null` is the default, 1000.
+   * Animatable as the keyframe property `perspective`.
    */
   perspective: number | null;
+
+  /**
+   * Where the vanishing point of the tilted layers of the board is across
+   * it, a fraction of its width (0 is its left edge, 1 its right one), as
+   * CSS `perspective-origin`. `null` is its middle, 0.5. Animatable as the
+   * keyframe property `perspectiveX`.
+   */
+  perspectiveX: number | null;
+
+  /**
+   * Where the vanishing point of the tilted layers of the board is down
+   * it, a fraction of its height (0 is its top edge, 1 its bottom one).
+   * `null` is its middle, 0.5. Animatable as the keyframe property
+   * `perspectiveY`.
+   */
+  perspectiveY: number | null;
 
   /**
    * The grid layout configuration of the board, if applicable.
@@ -5427,7 +5444,11 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  * - `width`, `height`, `strokeWidth`, `blur`, `backgroundBlur`,
  *   `shadowOffsetX`, `shadowOffsetY`, `shadowBlur`, `shadowSpread` and the
  *   `borderRadius…` corners: pixels.
- * - `rotation`: degrees.
+ * - `rotation`, `rotateX`, `rotateY`: degrees.
+ * - `perspective`: the distance of the viewer of the tilted layers of a
+ *   board, in pixels; `perspectiveX`, `perspectiveY`: their vanishing
+ *   point, a fraction of the board (0.5 is its middle). Only boards take
+ *   them (see `Board.perspective`).
  * - `scaleX`, `scaleY`: a factor, 1 is the layer's own size.
  * - `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1.
  * - `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
@@ -5453,6 +5474,9 @@ export type AnimatableProperty =
   | 'rotation'
   | 'rotateX'
   | 'rotateY'
+  | 'perspective'
+  | 'perspectiveX'
+  | 'perspectiveY'
   | 'scaleX'
   | 'scaleY'
   | 'opacity'

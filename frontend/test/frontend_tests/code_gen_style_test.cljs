@@ -216,7 +216,11 @@
       (is (= "800px" (css/get-css-value objs b :perspective)))
       (is (= "100px 100px" (css/get-css-value objs b :perspective-origin))
           "the middle of the board")
-      (is (nil? (css/get-css-value objs c :perspective)) "a layer holding no tilt has none"))))
+      (is (nil? (css/get-css-value objs c :perspective)) "a layer holding no tilt has none")
+      (is (= "50px 300px" (css/get-css-value (assoc objs pid (assoc b :perspective-x 0.25 :perspective-y 1.5))
+                                             (assoc b :perspective-x 0.25 :perspective-y 1.5)
+                                             :perspective-origin))
+          "its vanishing point"))))
 
 (deftest a-flip-card-keeps-its-faces-in-3d
   (testing "a tilted group whose faces hide their backs preserves 3D, unless it fades"

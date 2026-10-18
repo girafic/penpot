@@ -14,7 +14,9 @@
   turns the layer in its own axes, before its turn in the plane, the top
   edge going back for a positive `:rotate-x`, the right edge for a
   positive `:rotate-y`; a point `z` towards the viewer shows at
-  `vp + (p - vp) * d / (d - z)`, `vp` the centre of the board.
+  `vp + (p - vp) * d / (d - z)`, `vp` the vanishing point of the board
+  (`:perspective-x`, `:perspective-y`, fractions of it, its middle
+  without; CSS `perspective-origin`).
 
   The tilt of a shape is a homography of the page (`tilt-matrix`), a
   vector of 9 numbers by rows mapping `[x y 1]`. The layers in a tilted
@@ -150,10 +152,21 @@
 
 ;; layers
 
+(defn vanishing-point
+  "The vanishing point of the tilted layers of `board`: the point at the
+  fractions `:perspective-x`, `:perspective-y` of its box (its middle
+  without), as the board lies."
+  [board]
+  (let [sr (:selrect board)
+        fx (or (:perspective-x board) 0.5)
+        fy (or (:perspective-y board) 0.5)]
+    (gpt/transform (gpt/point (+ (:x sr) (* (:width sr) fx)) (+ (:y sr) (* (:height sr) fy)))
+                   (gtr/transform-matrix board))))
+
 (defn perspective-of
   "How the tilted layers of the board of `shape` are seen: the distance
   of the viewer (`:perspective` of the board, `default-perspective`
-  without) and the vanishing point, the centre of the board (that of
+  without) and the vanishing point (see `vanishing-point`; the middle of
   `shape` at the root of the page)."
   [objects shape]
   (let [board (get objects (:frame-id shape))]
@@ -161,7 +174,7 @@
              (not= uuid/zero (:id board))
              (= :frame (:type board)))
       {:distance (or (:perspective board) default-perspective)
-       :vp       (gco/shape->center board)}
+       :vp       (vanishing-point board)}
       {:distance default-perspective
        :vp       (gco/shape->center shape)})))
 

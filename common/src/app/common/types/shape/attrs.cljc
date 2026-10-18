@@ -21,6 +21,8 @@
             :rotate-y
             :backface-hidden
             :perspective
+            :perspective-x
+            :perspective-y
             :selrect
             :points
             :show-content

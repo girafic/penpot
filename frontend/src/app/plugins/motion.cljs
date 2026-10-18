@@ -1521,6 +1521,10 @@
               (cta/slot-flag? (locate) shape-id :locked (:property keyframe) (:index keyframe))
               (u/not-valid plugin-id :addKeyframe "The property is locked")
 
+              (and (contains? cta/camera-properties (:property keyframe))
+                   (not= :frame (:type (get (u/locate-objects file-id page-id) shape-id))))
+              (u/not-valid plugin-id :addKeyframe "Only a board has a camera (perspective, perspectiveX, perspectiveY)")
+
               (and (= :content (:property keyframe))
                    (not= :path (:type (get (u/locate-objects file-id page-id) shape-id))))
               (u/not-valid plugin-id :addKeyframe "Only a path morphs: turn the layer into a path first")

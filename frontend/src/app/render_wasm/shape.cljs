@@ -192,9 +192,9 @@
         (:rotate-x :rotate-y :backface-hidden :tilt-pivot)
         (api/set-shape-tilt shape)
 
-        :perspective
+        (:perspective :perspective-x :perspective-y)
         (when (cfh/frame-shape? shape)
-          (api/set-shape-perspective v))
+          (api/set-shape-perspective shape))
 
         ;; the units of a text a split animation poses (Penpot Motion)
         :text-units

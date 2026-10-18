@@ -251,6 +251,32 @@
     (t/is (= 0 (cta/rest-value shape :rotate-x nil)))
     (t/is (= 10 (cta/rest-value shape :rotate-y nil)))))
 
+(t/deftest the-camera-of-a-board-plays
+  ;; The perspective and the vanishing point of a board ride the modifier
+  ;; pipeline as changes of the board, all of them when one plays.
+  (let [board (assoc (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+                     :perspective 800)
+        bid   (:id board)
+        tl    (-> (mk-timeline)
+                  (cta/add-keyframe bid {:time 0 :property :perspective-x :value 0})
+                  (cta/add-keyframe bid {:time 1000 :property :perspective-x :value 1}))
+        mods  (get-in (ctaf/timeline->modif-tree tl {bid board} 250) [bid :modifiers])
+        board' (ctm/apply-structure-modifiers board mods)]
+    (t/is (mth/close? 0.25 (:perspective-x board') 0.001))
+    (t/is (= [800 0.5] ((juxt :perspective :perspective-y) board')) "the rest of it as it rests")
+    (t/is (= [800 0.5 0.5] (mapv #(cta/rest-value board % nil) [:perspective :perspective-x :perspective-y])))
+    (t/is (= 1000 (cta/rest-value (dissoc board :perspective) :perspective nil)) "the default distance")
+    (t/testing "only boards have one"
+      (let [rect (cts/setup-shape {:type :rect :x 0 :y 0 :width 10 :height 10})]
+        (t/is (true? (cta/fits-keyframe? board {:property :perspective})))
+        (t/is (false? (cta/fits-keyframe? rect {:property :perspective-y})))
+        (t/is (nil? (cta/rest-value rect :perspective nil)))))
+    (t/testing "CSS plays it on the board"
+      (let [css (acss/timeline->css tl {bid board})]
+        (t/is (str/includes? css "perspective: 800px;"))
+        (t/is (str/includes? css "perspective-origin: 0% 50%;"))
+        (t/is (str/includes? css "perspective-origin: 100% 50%;"))))))
+
 (t/deftest a-flip-turns-the-layer-over-in-3d
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
         sid   (:id shape)

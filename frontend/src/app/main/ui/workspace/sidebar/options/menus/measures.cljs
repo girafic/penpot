@@ -54,7 +54,7 @@
    :x :y
    :ox :oy
    :rotation
-   :rotate-x :rotate-y :backface-hidden :perspective
+   :rotate-x :rotate-y :backface-hidden :perspective :perspective-x :perspective-y
    :r1 :r2 :r3 :r4
    :selrect
    :points
@@ -171,6 +171,10 @@
                      (get n-values :backface-hidden))
          (identical? (get o-values :perspective)
                      (get n-values :perspective))
+         (identical? (get o-values :perspective-x)
+                     (get n-values :perspective-x))
+         (identical? (get o-values :perspective-y)
+                     (get n-values :perspective-y))
          (identical? (get o-values :hide-in-viewer)
                      (get n-values :hide-in-viewer))
          (identical? (get o-values :width)
@@ -710,11 +714,19 @@
              (when (animated? :rotate-y)
                (st/emit! (dwa/set-value-at-playhead motion-id :rotate-y ry))))))
 
-        ;; The perspective of the boards, shown when one has tilted layers
-        ;; or a perspective of its own
+        ;; The camera of the boards (see `cta/camera-properties`), shown
+        ;; when one has tilted layers or a camera of its own; an animated
+        ;; part of it takes the value at the playhead
         board-ids
         (mf/with-memo [shapes]
           (into [] (comp (filter cfh/frame-shape?) (map :id)) shapes))
+
+        timeline
+        (mf/deref ref:timeline)
+
+        camera-animated?
+        (and (some? motion-id)
+             (some #(seq (cta/property-keyframes timeline motion-id %)) cta/camera-properties))
 
         holds-tilt?
         (mf/with-memo [board-ids]
@@ -724,21 +736,39 @@
                      (some #(gtl/tilted? (get objects %)) (cfh/get-children-ids objects id)))
                    board-ids))))
 
-        on-perspective-change
+        on-camera-change
         (mf/use-fn
-         (mf/deps board-ids)
-         (fn [value]
+         (mf/deps board-ids motion-id)
+         (fn [attr value]
            (if (or (nil? value) (number? value) (string? value))
              (let [value (cond
                            (number? value) value
-                           (string? value) (d/parse-double value))]
-               (st/emit! (dwsh/update-shapes board-ids
-                                             #(if (number? value)
-                                                (assoc % :perspective (mth/clamp value gtl/min-perspective gtl/max-perspective))
-                                                (dissoc % :perspective)))))
+                           (string? value) (d/parse-double value))
+                   value (when (number? value)
+                           (if (= :perspective attr)
+                             (mth/clamp value gtl/min-perspective gtl/max-perspective)
+                             ;; the vanishing point, shown in percent
+                             (mth/clamp (/ value 100) -10 10)))]
+               (if (and (some? motion-id)
+                        (number? value)
+                        (seq (cta/property-keyframes (deref ref:timeline) motion-id attr)))
+                 (st/emit! (dwa/set-value-at-playhead motion-id attr value))
+                 (st/emit! (dwsh/update-shapes board-ids
+                                               #(if (number? value)
+                                                  (assoc % attr value)
+                                                  (dissoc % attr))))))
              (st/emit! (dwta/apply-token-from-input {:token (first value)
-                                                     :attrs #{:perspective}
+                                                     :attrs #{attr}
                                                      :shape-ids board-ids})))))
+
+        on-perspective-change
+        (mf/use-fn (mf/deps on-camera-change) #(on-camera-change :perspective %))
+
+        on-vanishing-x-change
+        (mf/use-fn (mf/deps on-camera-change) #(on-camera-change :perspective-x %))
+
+        on-vanishing-y-change
+        (mf/use-fn (mf/deps on-camera-change) #(on-camera-change :perspective-y %))
 
         on-width-change
         (mf/use-fn (mf/deps on-size-change) #(on-size-change % :width))
@@ -1062,8 +1092,10 @@
           (for [[attr value label icon on-change] [[:rotate-x rx (tr "workspace.options.rotate-x") "X°" on-rotate-x-change]
                                                    [:rotate-y ry (tr "workspace.options.rotate-y") "Y°" on-rotate-y-change]]]
             (if token-numeric-inputs
+              ;; in motion mode a field with its diamond, as the rotation is
               [:div {:key (name attr)
-                     :class (stl/css-case :rotate-axis-tokens true
+                     :class (stl/css-case :rotate-axis-tokens (nil? motion-id)
+                                          :rotate-axis (some? motion-id)
                                           :with-keyframe (some? motion-id))}
                [:> numeric-input-wrapper*
                 {:on-change on-change
@@ -1103,25 +1135,33 @@
                           :on-backface-change on-backface-change}]]))
 
      (when (and (options :perspective)
-                (or holds-tilt? (number? (:perspective values))))
+                (or holds-tilt?
+                    camera-animated?
+                    (some #(number? (get values %)) cta/camera-properties)))
        [:div {:class (stl/css :perspective)}
         (if token-numeric-inputs
           [:div {:class (stl/css :perspective-input-tokens)}
            [:span {:class (stl/css :perspective-label)} (tr "workspace.options.perspective")]
-           [:> numeric-input-wrapper*
-            {:on-change on-perspective-change
-             :on-detach on-detach-token
-             :text-icon "px"
-             :min gtl/min-perspective
-             :max gtl/max-perspective
-             :attr :perspective
-             :property (tr "workspace.options.perspective")
-             :applied-token (get applied-tokens :perspective)
-             :placeholder (if (= :multiple (:perspective values))
-                            (tr "settings.multiple")
-                            (str gtl/default-perspective))
-             :value (when (number? (:perspective values)) (:perspective values))}]]
-          [:div {:class (stl/css :perspective-input)
+           ;; a field with its diamond, as the rotation is, in motion mode
+           [:div {:class (stl/css-case :perspective-field (some? motion-id)
+                                       :with-keyframe (some? motion-id))}
+            [:> numeric-input-wrapper*
+             {:on-change on-perspective-change
+              :on-detach on-detach-token
+              :text-icon "px"
+              :min gtl/min-perspective
+              :max gtl/max-perspective
+              :attr :perspective
+              :property (tr "workspace.options.perspective")
+              :applied-token (get applied-tokens :perspective)
+              :placeholder (if (= :multiple (:perspective values))
+                             (tr "settings.multiple")
+                             (str gtl/default-perspective))
+              :value (when (number? (:perspective values)) (:perspective values))}]
+            (when motion-id
+              [:> keyframe-diamond* {:properties [:perspective]}])]]
+          [:div {:class (stl/css-case :perspective-input true
+                                      :with-keyframe (some? motion-id))
                  :title (tr "workspace.options.perspective")}
            [:span {:class (stl/css :icon-text)} (tr "workspace.options.perspective")]
            [:> deprecated-input/numeric-input*
@@ -1133,7 +1173,32 @@
                             (str gtl/default-perspective))
              :on-change on-perspective-change
              :class (stl/css :numeric-input)
-             :value (when (number? (:perspective values)) (:perspective values))}]])])
+             :value (when (number? (:perspective values)) (:perspective values))}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:perspective]}])])
+
+        ;; the vanishing point, in percent of the board
+        (for [[attr label icon on-change] [[:perspective-x (tr "workspace.options.vanishing-point-x") "X" on-vanishing-x-change]
+                                           [:perspective-y (tr "workspace.options.vanishing-point-y") "Y" on-vanishing-y-change]]]
+          (let [value (get values attr)]
+            [:div {:key (name attr)
+                   :class (stl/css-case :vanishing-axis true
+                                        :with-keyframe (some? motion-id))
+                   :title label}
+             [:span {:class (stl/css :icon-text)} icon]
+             [:> deprecated-input/numeric-input*
+              {:no-validate true
+               :is-nillable true
+               :min -1000
+               :max 1000
+               :aria-label label
+               :placeholder (if (= :multiple value) (tr "settings.multiple") "50")
+               :on-change on-change
+               :class (stl/css :numeric-input)
+               :value (when (number? value) (mth/precision (* 100 value) 2))}]
+             [:span {:class (stl/css :origin-unit)} "%"]
+             (when motion-id
+               [:> keyframe-diamond* {:properties [attr]}])]))])
 
      (when (or (options :clip-content) (options :show-in-viewer))
        [:div {:class (stl/css :clip-show)}

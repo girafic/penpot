@@ -47,3 +47,20 @@
         (t/is (not (contains? (stored store context rect) :rotate-x)) "flat is no tilt")
         (t/is (not (contains? (stored store context rect) :backface-hidden)))
         (t/is (nil? (.-perspective board)) "the default")))))
+
+(t/deftest the-vanishing-point-of-a-board-reads-and-writes
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context plugin-id)
+            _           (set! st/state store)
+            ^js board   (.createBoard context)]
+        (t/is (nil? (.-perspectiveX board)) "its middle by default")
+        (set! (.-perspectiveX board) 0.25)
+        (set! (.-perspectiveY board) 1.5)
+        (t/is (= [0.25 1.5] [(.-perspectiveX board) (.-perspectiveY board)]))
+        (t/is (= 0.25 (:perspective-x (stored store context board))))
+        (set! (.-perspectiveY board) "middle")
+        (t/is (= 1.5 (.-perspectiveY board)) "not a number: left as it is")
+        (set! (.-perspectiveX board) nil)
+        (t/is (not (contains? (stored store context board) :perspective-x)) "back to its middle")))))

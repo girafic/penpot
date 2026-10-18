@@ -306,7 +306,9 @@
 }
 
 .rotate-axis,
-.perspective-input {
+.perspective-input,
+.perspective-field,
+.vanishing-axis {
   @extend %input-element;
   @include deprecated.body-small-typography;
 
@@ -321,8 +323,14 @@
   min-inline-size: 0;
 }
 
+// The vanishing point of a board, X and Y in a row under its perspective.
+.vanishing-axis {
+  grid-row: 2;
+}
+
 .perspective-input-tokens {
   grid-column: 1 / span 2;
+  grid-row: 1;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -338,6 +346,7 @@
 
 .perspective-input {
   grid-column: 1 / span 2;
+  grid-row: 1;
 
   .icon-text {
     inline-size: auto;
