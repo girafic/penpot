@@ -7077,6 +7077,52 @@ ContextUtils:
         ```
         const isBoard = utils.types.isBoard(shape);console.log(isBoard);
         ```
+Cube:
+  overview: |-
+    Interface Cube
+    ==============
+
+    Cube animation (Penpot Motion): the board turns away as a side of a cube
+    and the next one comes in on the side next to it.
+    For `navigate-to` only.
+
+    ```
+    interface Cube {
+        type: "cube";
+        direction: "left" | "right" | "up" | "down";
+        duration: number;
+        easing?: "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out";
+    }
+    ```
+
+    Referenced by: Animation
+  members:
+    Properties:
+      type: |-
+        ```
+        readonly type: "cube"
+        ```
+
+        Type of the animation
+      direction: |-
+        ```
+        readonly direction: "left" | "right" | "up" | "down"
+        ```
+
+        The way the near side of the board goes, as with `push`
+      duration: |-
+        ```
+        readonly duration: number
+        ```
+
+        Duration of the animation effect
+      easing: |-
+        ```
+        readonly easing?: "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
+        ```
+
+        Function that the turn will follow for the interpolation.
+        Defaults to `linear`
 Dissolve:
   overview: |-
     Interface Dissolve
@@ -9010,6 +9056,52 @@ FlexLayout:
         ```
         flexLayout.appendChild(childShape);
         ```
+Flip:
+  overview: |-
+    Interface Flip
+    ==============
+
+    Flip animation (Penpot Motion): the board turns over like a card, the
+    next one on its back.
+    For `navigate-to` only.
+
+    ```
+    interface Flip {
+        type: "flip";
+        direction: "left" | "right" | "up" | "down";
+        duration: number;
+        easing?: "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out";
+    }
+    ```
+
+    Referenced by: Animation
+  members:
+    Properties:
+      type: |-
+        ```
+        readonly type: "flip"
+        ```
+
+        Type of the animation
+      direction: |-
+        ```
+        readonly direction: "left" | "right" | "up" | "down"
+        ```
+
+        The way the near side of the board goes, as with `push`
+      duration: |-
+        ```
+        readonly duration: number
+        ```
+
+        Duration of the animation effect
+      easing: |-
+        ```
+        readonly easing?: "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out"
+        ```
+
+        Function that the turn will follow for the interpolation.
+        Defaults to `linear`
 Flow:
   overview: |-
     Interface Flow
@@ -28266,7 +28358,7 @@ Animation:
     ====================
 
     ```
-    Animation: Dissolve | Slide | Push
+    Animation: Dissolve | Slide | Push | Flip | Cube
     ```
 
     Type of all the animations that can be added to an interaction.

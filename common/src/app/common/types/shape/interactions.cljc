@@ -78,7 +78,12 @@
   #{:in :out})
 
 (def animation-types
-  #{:dissolve :slide :push})
+  #{:dissolve :slide :push :flip :cube})
+
+(def navigate-only-animation-types
+  "The ones that turn one board into the next (Penpot Motion: flip and
+  cube, in 3D): not for overlays."
+  #{:push :flip :cube})
 
 (def schema:dissolve-animation
   [:map {:title "AnimationDisolve"}
@@ -105,16 +110,38 @@
    [:easing [::sm/one-of easing-types]]
    [:direction [::sm/one-of direction-types]]])
 
+(def schema:flip-animation
+  "The board turns over like a card, the next one on its back (Penpot
+  Motion)."
+  [:map {:title "FlipAnimation"}
+   [:animation-type [:= :flip]]
+   [:duration ::sm/safe-int]
+   [:easing [::sm/one-of easing-types]]
+   [:direction [::sm/one-of direction-types]]])
+
+(def schema:cube-animation
+  "The board turns away as a side of a cube, the next one on the side
+  that comes in (Penpot Motion)."
+  [:map {:title "CubeAnimation"}
+   [:animation-type [:= :cube]]
+   [:duration ::sm/safe-int]
+   [:easing [::sm/one-of easing-types]]
+   [:direction [::sm/one-of direction-types]]])
+
 (def schema:animation
   [:multi {:dispatch :animation-type
            :title "Animation"
            :gen/gen (sg/one-of (sg/generator schema:dissolve-animation)
                                (sg/generator schema:slide-animation)
-                               (sg/generator schema:push-animation))
+                               (sg/generator schema:push-animation)
+                               (sg/generator schema:flip-animation)
+                               (sg/generator schema:cube-animation))
            :decode/json #(update % :animation-type keyword)}
    [:dissolve schema:dissolve-animation]
    [:slide schema:slide-animation]
-   [:push schema:push-animation]])
+   [:push schema:push-animation]
+   [:flip schema:flip-animation]
+   [:cube schema:cube-animation]])
 
 (sm/register! ::animation schema:animation)
 
@@ -643,8 +670,8 @@
   [action-type animation-type]
   ; Some specific combinations are forbidden, but may occur if the action type
   ; is changed from a type that allows the animation to another one that doesn't.
-  ; Currently the only case is an overlay action with push animation.
-  (or (not= animation-type :push)
+  ; Currently the only case is an overlay action with push, flip or cube.
+  (or (not (contains? navigate-only-animation-types animation-type))
       (allow-push? action-type)))
 
 (defn set-animation-type
@@ -680,7 +707,7 @@
                 :direction (get-in interaction [:animation :direction] :right)
                 :offset-effect (get-in interaction [:animation :offset-effect] false))
 
-        (= animation-type :push)
+        (contains? navigate-only-animation-types animation-type)
         (update :animation assoc
                 :duration (get-in interaction [:animation :duration] 300)
                 :easing (get-in interaction [:animation :easing] :linear)
@@ -688,7 +715,7 @@
 
 (defn has-duration?
   [interaction]
-  (#{:dissolve :slide :push} (-> interaction :animation :animation-type)))
+  (#{:dissolve :slide :push :flip :cube} (-> interaction :animation :animation-type)))
 
 (defn set-duration
   [interaction duration]
@@ -702,7 +729,7 @@
 
 (defn has-easing?
   [interaction]
-  (#{:dissolve :slide :push} (-> interaction :animation :animation-type)))
+  (#{:dissolve :slide :push :flip :cube} (-> interaction :animation :animation-type)))
 
 (defn set-easing
   [interaction easing]
@@ -734,7 +761,7 @@
 
 (defn has-direction?
   [interaction]
-  (#{:slide :push} (-> interaction :animation :animation-type)))
+  (#{:slide :push :flip :cube} (-> interaction :animation :animation-type)))
 
 (defn set-direction
   [interaction direction]

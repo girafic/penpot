@@ -12,6 +12,7 @@
    [app.common.geom.modifiers :as gm]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
+   [app.common.math :as mth]
    [app.common.types.page :as ctp]
    [app.common.uuid :as uuid]
    [app.config :as cf]
@@ -363,6 +364,80 @@
   ([item keyframes options onfinish]
    (dom/animate! item (moved-keyframes keyframes) options onfinish)))
 
+(def ^:private turn-steps
+  "Keyframes of a flip or a cube turn: between two the size changes
+  linearly, a little off the one that keeps it in its box."
+  12)
+
+(defn- turn-fit
+  "How much smaller a board `along` px across the turn, turned `deg`
+  about an axis `depth` px behind it and seen from `persp` px, has to be
+  to stay in its box: its near side grows, a side of a cube swings out."
+  [deg depth along persp]
+  (let [rad (mth/radians deg)
+        c   (mth/cos rad)
+        s   (mth/sin rad)
+        a   (/ along 2)]
+    (reduce min 1
+            (for [x [(- a) a]]
+              (let [z     (+ (* (- x) s) (* depth (- c 1)))
+                    grow  (/ persp (- persp z))
+                    shift (mth/abs (* grow (+ (* x c) (* depth s))))]
+                (min (if (pos? shift) (/ a shift) 1) (/ 1 grow)))))))
+
+(defn turn-keyframes
+  "The keyframes of the board that leaves and of the one that comes in
+  for a `:flip` or `:cube` `animation` (Penpot Motion): a flip turns both
+  over about their middle, the next on the back of the one that leaves;
+  a cube turns them as two sides about an axis half a board behind. The
+  direction is the way the near side goes, as a push moves. Both are
+  seen from twice their size away and made smaller together as much as
+  they need to stay in their boxes. Returns `[leaves comes-in]`."
+  [animation orig-size current-size]
+  (let [cube?          (= :cube (:animation-type animation))
+        [axis sign]    (case (:direction animation)
+                         :left  ["Y" -1]
+                         :up    ["X" 1]
+                         :down  ["X" -1]
+                         ["Y" 1])
+        turn           (* sign (if cube? 90 180))
+        along          (fn [size] (if (= axis "Y") (:width size) (:height size)))
+        persp          (* 2 (max (along orig-size) (along current-size)))
+        depth          (fn [size] (if cube? (/ (along size) 2) 0))
+        faces          [[orig-size 0 turn] [current-size (- turn) 0]]
+        deg-at         (fn [from to t] (+ from (* t (- to from))))
+        frames         (for [i (range (inc turn-steps))]
+                         (let [t   (/ i turn-steps)
+                               fit (reduce min (for [[size from to] faces]
+                                                 (turn-fit (deg-at from to t) (depth size)
+                                                           (along size) persp)))]
+                           [t fit]))
+        keyframes      (fn [[size from to]]
+                         (let [d (depth size)]
+                           (into-array
+                            (for [[t fit] frames]
+                              #js {:offset t
+                                   :transform (dm/str "scale(" fit ") perspective(" persp "px) "
+                                                      "translateZ(" (- d) "px) "
+                                                      "rotate" axis "(" (deg-at from to t) "deg) "
+                                                      "translateZ(" d "px)")}))))]
+    (mapv keyframes faces)))
+
+(defn- animate-turn!
+  "Plays a `:flip` or `:cube` `animation` on the two viewports (see
+  `turn-keyframes`), their backs hidden."
+  [animation current-viewport orig-viewport current-size orig-size]
+  (let [[leaves comes-in] (turn-keyframes animation orig-size current-size)
+        timing            #js {:duration (:duration animation)
+                               :easing (name (:easing animation))}]
+    (doseq [viewport [orig-viewport current-viewport]]
+      (dom/set-css-property! viewport "backface-visibility" "hidden"))
+    (dom/animate! orig-viewport leaves timing)
+    (dom/animate! current-viewport comes-in timing
+                  (fn []
+                    (dom/set-css-property! current-viewport "backface-visibility" "")
+                    (st/emit! (dv/complete-animation :go-to-frame))))))
+
 (defn animate-go-to-frame
   [animation current-viewport orig-viewport current-size orig-size wrapper-size]
   (case (:animation-type animation)
@@ -613,7 +688,10 @@
                       [#js {:top "0"}
                        #js {:top (str offset "px")}]
                       #js {:duration (:duration animation)
-                           :easing (name (:easing animation))})))))
+                           :easing (name (:easing animation))})))
+
+    (:flip :cube)
+    (animate-turn! animation current-viewport orig-viewport current-size orig-size)))
 
 (defn animate-open-overlay
   [animation overlay-viewport

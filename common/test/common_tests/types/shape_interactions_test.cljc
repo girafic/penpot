@@ -775,6 +775,26 @@
             new-interaction (ctsi/set-action-type interaction :open-overlay)]
         (t/is (nil? (:animation new-interaction)))))))
 
+(t/deftest flip-and-cube-turn-one-board-into-the-next
+  ;; Penpot Motion: 3D transitions, for navigating only
+  (doseq [type [:flip :cube]]
+    (t/testing (name type)
+      (let [i (ctsi/set-animation-type ctsi/default-interaction type)]
+        (t/is (= {:animation-type type :duration 300 :easing :linear :direction :right}
+                 (:animation i)))
+        (t/is (ctsi/check-interaction i))
+        (t/is (ctsi/has-direction? i))
+        (t/is (ctsi/has-duration? i))
+        (t/is (ctsi/has-easing? i))
+        (t/is (not (ctsi/has-way? i)))
+        (t/is (not (ctsi/has-offset-effect? i)))
+        (t/is (= :up (-> (ctsi/set-direction i :down) :animation ctsi/invert-direction :direction))
+              "going back turns the other way")
+        (t/is (not (ctsi/allowed-animation? :open-overlay type)))
+        (t/is (nil? (:animation (ctsi/set-action-type i :toggle-overlay)))
+              "an overlay can not turn")
+        (t/is (= type (-> (ctsi/set-action-type i :navigate) :animation :animation-type)))))))
+
 
 (t/deftest option-duration
   (let [i1 ctsi/default-interaction

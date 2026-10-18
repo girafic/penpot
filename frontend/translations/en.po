@@ -8830,6 +8830,14 @@ msgstr "None"
 msgid "workspace.options.interaction-animation-push"
 msgstr "Push"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-animation-flip"
+msgstr "Flip"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs
+msgid "workspace.options.interaction-animation-cube"
+msgstr "Cube"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/interactions.cljs:380
 msgid "workspace.options.interaction-animation-slide"
 msgstr "Slide"

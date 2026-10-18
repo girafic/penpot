@@ -418,7 +418,9 @@
         animation-opts
         (mf/with-memo [basic-animation-opts]
           (if (ctsi/allow-push? (:action-type interaction))
-            (d/concat-vec basic-animation-opts [{:value :push :label (tr "workspace.options.interaction-animation-push")}])
+            (d/concat-vec basic-animation-opts [{:value :push :label (tr "workspace.options.interaction-animation-push")}
+                                                {:value :flip :label (tr "workspace.options.interaction-animation-flip")}
+                                                {:value :cube :label (tr "workspace.options.interaction-animation-cube")}])
             basic-animation-opts))
 
         easing-options [{:icon :easing-linear      :value :linear      :label (tr "workspace.options.interaction-easing-linear")}

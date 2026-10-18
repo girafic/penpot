@@ -184,7 +184,7 @@ export interface ActiveUser extends User {
 /**
  * Type of all the animations that can be added to an interaction.
  */
-export type Animation = Dissolve | Slide | Push;
+export type Animation = Dissolve | Slide | Push | Flip | Cube;
 
 /**
  * Represents blur properties in Penpot.
@@ -1863,6 +1863,34 @@ export interface ContextUtils {
 }
 
 /**
+ * Cube animation (Penpot Motion): the board turns away as a side of a cube
+ * and the next one comes in on the side next to it.
+ * For `navigate-to` only.
+ */
+export interface Cube {
+  /**
+   * Type of the animation
+   */
+  readonly type: 'cube';
+
+  /**
+   * The way the near side of the board goes, as with `push`
+   */
+  readonly direction: 'right' | 'left' | 'up' | 'down';
+
+  /**
+   * Duration of the animation effect
+   */
+  readonly duration: number;
+
+  /**
+   * Function that the turn will follow for the interpolation.
+   * Defaults to `linear`
+   */
+  readonly easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
+}
+
+/**
  * Dissolve animation
  */
 export interface Dissolve {
@@ -2206,6 +2234,34 @@ export interface FlexLayout extends CommonLayout {
    * ```
    */
   appendChild(child: Shape): void;
+}
+
+/**
+ * Flip animation (Penpot Motion): the board turns over like a card, the
+ * next one on its back.
+ * For `navigate-to` only.
+ */
+export interface Flip {
+  /**
+   * Type of the animation
+   */
+  readonly type: 'flip';
+
+  /**
+   * The way the near side of the board goes, as with `push`
+   */
+  readonly direction: 'right' | 'left' | 'up' | 'down';
+
+  /**
+   * Duration of the animation effect
+   */
+  readonly duration: number;
+
+  /**
+   * Function that the turn will follow for the interpolation.
+   * Defaults to `linear`
+   */
+  readonly easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
 }
 
 /**

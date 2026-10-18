@@ -185,6 +185,7 @@
    [frontend-tests.util.audio-test]
    [frontend-tests.util.dom.dnd-test]
    [frontend-tests.viewer-hotspots-test]
+   [frontend-tests.viewer-turn-test]
    [frontend-tests.worker-snap-test]
    [goog.object :as gobj]))
 
@@ -381,6 +382,7 @@
    'frontend-tests.util.dom.dnd-test
    'frontend-tests.util-zip-test
    'frontend-tests.viewer-hotspots-test
+   'frontend-tests.viewer-turn-test
    'frontend-tests.worker-snap-test])
 
 (assert (every? find-ns-obj test-namespaces)

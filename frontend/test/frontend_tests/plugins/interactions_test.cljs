@@ -9,6 +9,8 @@
    [app.common.test-helpers.files :as cthf]
    [app.main.store :as st]
    [app.plugins.api :as api]
+   [app.plugins.format :as format]
+   [app.plugins.shape :as shape]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.state :as ths]
    [frontend-tests.helpers.wasm :as thw]
@@ -149,3 +151,29 @@
           (t/is (= "next" (.. i -action -step)) "the next one by default"))
         (t/is (empty? (flows-of store context page)) "no board to go to, no flow")))))
 
+
+(t/deftest a-board-turns-into-the-next
+  ;; Penpot Motion: the flip and cube transitions, for navigating only
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context plugin-id)
+            _           (set! st/state store)
+            ^js board1  (.createBoard context)
+            ^js board2  (.createBoard context)
+            ^js overlay (.createBoard context)]
+        ;; as app.plugins does: the action shows its destination
+        (set! format/shape-proxy shape/shape-proxy)
+        (ptk/emit! store #(assoc-in % [:plugins :flags plugin-id :throw-validation-errors] true))
+        (doseq [type ["flip" "cube"]]
+          (let [^js i (.addInteraction board1 "click"
+                                       #js {:type "navigate-to" :destination board2
+                                            :animation #js {:type type :direction "left"
+                                                            :duration 600 :easing "ease-in-out"}})
+                ^js a (.. i -action -animation)]
+            (t/is (= [type "left" 600 "ease-in-out"]
+                     [(.-type a) (.-direction a) (.-duration a) (.-easing a)]))
+            (t/is (throws? #(set! (.-action i) #js {:type "open-overlay" :destination overlay
+                                                    :animation #js {:type type :direction "left"
+                                                                    :duration 600}}))
+                  "an overlay can not turn")))))))

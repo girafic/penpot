@@ -410,7 +410,21 @@
 ;;   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
 ;; }
 ;;
-;; export type Animation = Dissolve | Slide | Push;
+;; export interface Flip {
+;;   type: 'flip';
+;;   direction: 'right' | 'left' | 'up' | 'down';
+;;   duration: number;
+;;   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
+;; }
+;;
+;; export interface Cube {
+;;   type: 'cube';
+;;   direction: 'right' | 'left' | 'up' | 'down';
+;;   duration: number;
+;;   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
+;; }
+;;
+;; export type Animation = Dissolve | Slide | Push | Flip | Cube;
 
 (defn parse-animation
   [^js animation]
@@ -431,7 +445,7 @@
           :easing (-> (obj/get animation "easing") parse-keyword)
           :offset-effect (boolean (obj/get animation "offsetEffect"))}
 
-         :push
+         (:push :flip :cube)
          {:animation-type animation-type
           :direction (-> (obj/get animation "direction") parse-keyword)
           :duration (obj/get animation "duration")

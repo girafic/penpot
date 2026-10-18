@@ -444,7 +444,21 @@
 ;;   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
 ;; }
 ;;
-;; export type Animation = Dissolve | Slide | Push;
+;; export interface Flip {
+;;   type: 'flip';
+;;   direction: 'right' | 'left' | 'up' | 'down';
+;;   duration: number;
+;;   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
+;; }
+;;
+;; export interface Cube {
+;;   type: 'cube';
+;;   direction: 'right' | 'left' | 'up' | 'down';
+;;   duration: number;
+;;   easing?: 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
+;; }
+;;
+;; export type Animation = Dissolve | Slide | Push | Flip | Cube;
 
 (defn format-animation
   [animation]
@@ -465,8 +479,8 @@
             :easing (format-key (:easing animation))
             :offsetEffect (:offset-effect animation)}
 
-       :push
-       #js {:type "push"
+       (:push :flip :cube)
+       #js {:type (format-key (:animation-type animation))
             :direction (format-key (:direction animation))
             :duration (:duration animation)
             :easing (format-key (:easing animation))}
