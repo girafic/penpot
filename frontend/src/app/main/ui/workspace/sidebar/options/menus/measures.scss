@@ -317,6 +317,25 @@
   }
 }
 
+.rotate-axis-tokens {
+  min-inline-size: 0;
+}
+
+.perspective-input-tokens {
+  grid-column: 1 / span 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-s);
+  min-inline-size: 0;
+}
+
+.perspective-label {
+  @include deprecated.body-small-typography;
+
+  color: var(--color-foreground-secondary);
+}
+
 .perspective-input {
   grid-column: 1 / span 2;
 

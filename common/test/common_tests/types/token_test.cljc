@@ -129,3 +129,14 @@
            {:value "{x} cd}" :cursor 3}))
   (t/is (= (cto/insert-ref "{a}{bc}" 5 "x")
            {:value "{a}{x}" :cursor 6})))
+
+(t/deftest tilt-and-perspective-take-tokens
+  ;; Penpot Motion, see `app.common.geom.tilt`
+  (t/is (= #{:rotate-x} (cto/shape-attr->token-attrs :rotate-x)))
+  (t/is (= #{:perspective} (cto/shape-attr->token-attrs :perspective)))
+  (t/is (contains? (cto/shape-type->attributes :rect false) :rotate-y) "any layer tilts")
+  (t/is (contains? (cto/shape-type->attributes :frame false) :perspective))
+  (t/is (contains? (cto/shape-type->attributes :frame true) :perspective) "a board with a layout too")
+  (t/is (not (contains? (cto/shape-type->attributes :rect false) :perspective)) "a board's only")
+  (t/is (= [:rotation :number] (get cto/tokens-by-input :rotate-x)))
+  (t/is (true? (sm/validate cto/schema:applied-tokens {:rotate-x "tilt.card" :perspective "depth.far"}))))

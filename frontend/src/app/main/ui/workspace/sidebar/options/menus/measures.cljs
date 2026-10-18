@@ -647,14 +647,17 @@
         (mf/use-fn
          (mf/deps ids motion-id)
          (fn [attr value]
-           (when (or (string? value) (number? value))
+           (if (or (string? value) (number? value))
              (let [value (fixed-decimal-value value)]
                (if (and (some? motion-id)
                         (seq (cta/property-keyframes (deref ref:timeline) motion-id attr)))
                  (st/emit! (dwa/set-value-at-playhead motion-id attr value))
                  (st/emit! (dwsh/update-shapes ids #(if (mth/almost-zero? value)
                                                       (dissoc % attr)
-                                                      (assoc % attr value)))))))))
+                                                      (assoc % attr value))))))
+             (st/emit! (dwta/apply-token-from-input {:token (first value)
+                                                     :attrs #{attr}
+                                                     :shape-ids ids})))))
 
         on-rotate-x-change
         (mf/use-fn (mf/deps on-tilt-change) #(on-tilt-change :rotate-x %))
@@ -725,13 +728,17 @@
         (mf/use-fn
          (mf/deps board-ids)
          (fn [value]
-           (let [value (cond
-                         (number? value) value
-                         (string? value) (d/parse-double value))]
-             (st/emit! (dwsh/update-shapes board-ids
-                                           #(if (number? value)
-                                              (assoc % :perspective (mth/clamp value gtl/min-perspective gtl/max-perspective))
-                                              (dissoc % :perspective)))))))
+           (if (or (nil? value) (number? value) (string? value))
+             (let [value (cond
+                           (number? value) value
+                           (string? value) (d/parse-double value))]
+               (st/emit! (dwsh/update-shapes board-ids
+                                             #(if (number? value)
+                                                (assoc % :perspective (mth/clamp value gtl/min-perspective gtl/max-perspective))
+                                                (dissoc % :perspective)))))
+             (st/emit! (dwta/apply-token-from-input {:token (first value)
+                                                     :attrs #{:perspective}
+                                                     :shape-ids board-ids})))))
 
         on-width-change
         (mf/use-fn (mf/deps on-size-change) #(on-size-change % :width))
@@ -1052,34 +1059,41 @@
        (let [rx (get values :rotate-x)
              ry (get values :rotate-y)]
          [:div {:class (stl/css :tilt)}
-          [:div {:class (stl/css-case :rotate-axis true
-                                      :with-keyframe (some? motion-id))
-                 :title (tr "workspace.options.rotate-x")}
-           [:span {:class (stl/css :icon-text)} "X°"]
-           [:> deprecated-input/numeric-input*
-            {:no-validate true
-             :min -360
-             :max 360
-             :placeholder (if (= :multiple rx) (tr "settings.multiple") "--")
-             :on-change on-rotate-x-change
-             :class (stl/css :numeric-input)
-             :value (if (= :multiple rx) rx (or rx 0))}]
-           (when motion-id
-             [:> keyframe-diamond* {:properties [:rotate-x]}])]
-          [:div {:class (stl/css-case :rotate-axis true
-                                      :with-keyframe (some? motion-id))
-                 :title (tr "workspace.options.rotate-y")}
-           [:span {:class (stl/css :icon-text)} "Y°"]
-           [:> deprecated-input/numeric-input*
-            {:no-validate true
-             :min -360
-             :max 360
-             :placeholder (if (= :multiple ry) (tr "settings.multiple") "--")
-             :on-change on-rotate-y-change
-             :class (stl/css :numeric-input)
-             :value (if (= :multiple ry) ry (or ry 0))}]
-           (when motion-id
-             [:> keyframe-diamond* {:properties [:rotate-y]}])]
+          (for [[attr value label icon on-change] [[:rotate-x rx (tr "workspace.options.rotate-x") "X°" on-rotate-x-change]
+                                                   [:rotate-y ry (tr "workspace.options.rotate-y") "Y°" on-rotate-y-change]]]
+            (if token-numeric-inputs
+              [:div {:key (name attr)
+                     :class (stl/css-case :rotate-axis-tokens true
+                                          :with-keyframe (some? motion-id))}
+               [:> numeric-input-wrapper*
+                {:on-change on-change
+                 :on-detach on-detach-token
+                 :text-icon icon
+                 :min -360
+                 :max 360
+                 :attr attr
+                 :property label
+                 :applied-token (get applied-tokens attr)
+                 :placeholder (if (or (= :multiple (get applied-tokens attr)) (= :multiple value))
+                                (tr "settings.multiple") "--")
+                 :value (if (= :multiple value) value (or value 0))}]
+               (when motion-id
+                 [:> keyframe-diamond* {:properties [attr]}])]
+              [:div {:key (name attr)
+                     :class (stl/css-case :rotate-axis true
+                                          :with-keyframe (some? motion-id))
+                     :title label}
+               [:span {:class (stl/css :icon-text)} icon]
+               [:> deprecated-input/numeric-input*
+                {:no-validate true
+                 :min -360
+                 :max 360
+                 :placeholder (if (= :multiple value) (tr "settings.multiple") "--")
+                 :on-change on-change
+                 :class (stl/css :numeric-input)
+                 :value (if (= :multiple value) value (or value 0))}]
+               (when motion-id
+                 [:> keyframe-diamond* {:properties [attr]}])]))
           [:> tilt-tool* {:rotate-x rx
                           :rotate-y ry
                           :backface-hidden (:backface-hidden values)
@@ -1091,19 +1105,35 @@
      (when (and (options :perspective)
                 (or holds-tilt? (number? (:perspective values))))
        [:div {:class (stl/css :perspective)}
-        [:div {:class (stl/css :perspective-input)
-               :title (tr "workspace.options.perspective")}
-         [:span {:class (stl/css :icon-text)} (tr "workspace.options.perspective")]
-         [:> deprecated-input/numeric-input*
-          {:no-validate true
-           :min gtl/min-perspective
-           :max gtl/max-perspective
-           :placeholder (if (= :multiple (:perspective values))
-                          (tr "settings.multiple")
-                          (str gtl/default-perspective))
-           :on-change on-perspective-change
-           :class (stl/css :numeric-input)
-           :value (when (number? (:perspective values)) (:perspective values))}]]])
+        (if token-numeric-inputs
+          [:div {:class (stl/css :perspective-input-tokens)}
+           [:span {:class (stl/css :perspective-label)} (tr "workspace.options.perspective")]
+           [:> numeric-input-wrapper*
+            {:on-change on-perspective-change
+             :on-detach on-detach-token
+             :text-icon "px"
+             :min gtl/min-perspective
+             :max gtl/max-perspective
+             :attr :perspective
+             :property (tr "workspace.options.perspective")
+             :applied-token (get applied-tokens :perspective)
+             :placeholder (if (= :multiple (:perspective values))
+                            (tr "settings.multiple")
+                            (str gtl/default-perspective))
+             :value (when (number? (:perspective values)) (:perspective values))}]]
+          [:div {:class (stl/css :perspective-input)
+                 :title (tr "workspace.options.perspective")}
+           [:span {:class (stl/css :icon-text)} (tr "workspace.options.perspective")]
+           [:> deprecated-input/numeric-input*
+            {:no-validate true
+             :min gtl/min-perspective
+             :max gtl/max-perspective
+             :placeholder (if (= :multiple (:perspective values))
+                            (tr "settings.multiple")
+                            (str gtl/default-perspective))
+             :on-change on-perspective-change
+             :class (stl/css :numeric-input)
+             :value (when (number? (:perspective values)) (:perspective values))}]])])
 
      (when (or (options :clip-content) (options :show-in-viewer))
        [:div {:class (stl/css :clip-show)}

@@ -340,6 +340,21 @@
 
 (def rotation-keys (schema-keys schema:rotation))
 
+;; The 3D rotation of a layer and the perspective of a board (Penpot
+;; Motion, see `app.common.geom.tilt`)
+(def ^:private schema:tilt
+  [:map {:title "TiltTokenAttrs"}
+   [:rotate-x {:optional true} schema:token-name]
+   [:rotate-y {:optional true} schema:token-name]])
+
+(def tilt-keys (schema-keys schema:tilt))
+
+(def ^:private schema:perspective
+  [:map {:title "PerspectiveTokenAttrs"}
+   [:perspective {:optional true} schema:token-name]])
+
+(def perspective-keys (schema-keys schema:perspective))
+
 (def ^:private schema:number
   (-> (reduce mu/union [schema:line-height
                         schema:rotation])
@@ -400,6 +415,8 @@
                          number-keys
                          opacity-keys
                          rotation-keys
+                         tilt-keys
+                         perspective-keys
                          shadow-keys
                          sizing-keys
                          spacing-keys
@@ -418,6 +435,8 @@
    schema:sizing
    schema:spacing
    schema:rotation
+   schema:tilt
+   schema:perspective
    schema:number
    schema:font-size
    schema:letter-spacing
@@ -493,6 +512,8 @@
      (opacity-keys shape-attr) #{shape-attr}
      (spacing-keys shape-attr) #{shape-attr}
      (rotation-keys shape-attr) #{shape-attr}
+     (tilt-keys shape-attr) #{shape-attr}
+     (perspective-keys shape-attr) #{shape-attr}
      (number-keys shape-attr) #{shape-attr}
      (axis-keys shape-attr) #{shape-attr})))
 
@@ -520,6 +541,7 @@
   (set/union color-keys
              stroke-width-keys
              rotation-keys
+             tilt-keys
              sizing-keys
              opacity-keys
              shadow-keys
@@ -546,9 +568,10 @@
     :bool    generic-attributes
     :circle  generic-attributes
     :rect    rect-attributes
-    :frame   (if is-layout
-               frame-with-layout-attributes
-               rect-attributes)
+    :frame   (set/union (if is-layout
+                          frame-with-layout-attributes
+                          rect-attributes)
+                        perspective-keys)
     :image   rect-attributes
     :path    generic-attributes
     :svg-raw generic-attributes
@@ -591,6 +614,9 @@
    :x                  [:dimensions]
    :y                  [:dimensions]
    :rotation           [:rotation :number]
+   :rotate-x           [:rotation :number]
+   :rotate-y           [:rotation :number]
+   :perspective        [:number :dimensions]
    :border-radius      [:border-radius :dimensions]
    :row-gap            [:spacing :dimensions]
    :column-gap         [:spacing :dimensions]

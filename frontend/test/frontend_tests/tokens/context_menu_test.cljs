@@ -155,7 +155,7 @@
   (t/testing "shows color items for selection of all shapes"
     (let [actions (token-menu-actions [:frame1 :rect1 :group1 :text1] "token-rotation")
           action-titles (mapv :title actions)]
-      (t/is (= action-titles ["Rotation"])))))
+      (t/is (= action-titles ["Rotation" "Rotation X" "Rotation Y"]) "and the 3D rotation"))))
 
 (t/deftest dimensions-items
   (t/testing "shows `rect-attributes` dimension items for rect"
@@ -201,12 +201,13 @@
   (t/testing "shows all number attribute items for text"
     (let [actions (token-menu-actions [:text1] "token-number")
           action-titles (mapv :title actions)]
-      (t/is (= action-titles ["Rotation" "Line Height"]))))
+      (t/is (= action-titles ["Rotation" "Rotation X" "Rotation Y" "Line Height"]))))
 
   (t/testing "shows non text attributes for non text shapes"
     (let [actions (token-menu-actions [:frame1 :rect1 :group1] "token-number")
           action-titles (mapv :title actions)]
-      (t/is (= action-titles ["Rotation"])))))
+      (t/is (= action-titles ["Rotation" "Rotation X" "Rotation Y" "Perspective"])
+            "the perspective of the board"))))
 
 (t/deftest stroke-width-items
   (with-redefs [cf/flags no-per-side-flags]

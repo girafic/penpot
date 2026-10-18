@@ -7,7 +7,10 @@
 (ns app.main.data.workspace.tokens.application
   (:require
    [app.common.data :as d]
+   [app.common.files.helpers :as cfh]
    [app.common.files.tokens :as cfo]
+   [app.common.geom.tilt :as gtl]
+   [app.common.math :as mth]
    [app.common.types.component :as ctk]
    [app.common.types.shape.layout :as ctsl]
    [app.common.types.shape.radius :as ctsr]
@@ -99,6 +102,37 @@
                                   {:page-id page-id
                                    :ignore-touched true
                                    :no-wasm? true})))))))
+
+(defn update-tilt
+  "Tilt the shapes of `shape-ids` about the axes of `attributes` (see
+  `ctt/tilt-keys`) by `value` degrees: flat is no tilt."
+  ([value shape-ids attributes] (update-tilt value shape-ids attributes nil))
+  ([value shape-ids attributes page-id]
+   (when (number? value)
+     (let [attrs (filter ctt/tilt-keys attributes)]
+       (dwsh/update-shapes shape-ids
+                           (fn [shape]
+                             (reduce (fn [shape attr]
+                                       (if (mth/almost-zero? value)
+                                         (dissoc shape attr)
+                                         (assoc shape attr value)))
+                                     shape
+                                     attrs))
+                           {:ignore-touched true
+                            :page-id page-id})))))
+
+(defn update-perspective
+  "The perspective of the boards of `shape-ids`, `value` px kept within
+  what a board takes."
+  ([value shape-ids attributes] (update-perspective value shape-ids attributes nil))
+  ([value shape-ids _attributes page-id]
+   (when (number? value)
+     (dwsh/update-shapes shape-ids
+                         #(cond-> %
+                            (cfh/frame-shape? %)
+                            (assoc :perspective (mth/clamp value gtl/min-perspective gtl/max-perspective)))
+                         {:ignore-touched true
+                          :page-id page-id}))))
 
 (defn update-stroke-width
   ([value shape-ids attributes]
@@ -657,6 +691,8 @@
    ctt/sizing-keys         apply-dimensions-token
    ctt/opacity-keys        update-opacity
    ctt/rotation-keys       update-rotation
+   ctt/tilt-keys           update-tilt
+   ctt/perspective-keys    update-perspective
 
    ;; Typography
    ctt/font-family-keys     update-font-family
@@ -1095,7 +1131,7 @@
    :number
    {:title "Number"
     :attributes ctt/rotation-keys
-    :all-attributes ctt/number-keys
+    :all-attributes (set/union ctt/number-keys ctt/tilt-keys ctt/perspective-keys)
     :on-update-shape update-rotation
     :modal {:key :tokens/number
             :fields [{:label "Number"
@@ -1104,6 +1140,7 @@
    :rotation
    {:title "Rotation"
     :attributes ctt/rotation-keys
+    :all-attributes (set/union ctt/rotation-keys ctt/tilt-keys)
     :on-update-shape update-rotation
     :modal {:key :tokens/rotation
             :fields [{:label "Rotation"

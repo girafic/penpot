@@ -362,7 +362,14 @@
                                                         :hint (tr "workspace.tokens.radius")
                                                         :on-update-shape-all dwta/update-shape-radius
                                                         :on-update-shape update-shape-radius-for-corners})
-        shadow (partial generic-attribute-actions #{:shadow} "Shadow")]
+        shadow (partial generic-attribute-actions #{:shadow} "Shadow")
+        ;; the 3D rotation (Penpot Motion, see `app.common.geom.tilt`)
+        tilt-actions (fn [context-data]
+                       (concat
+                        (generic-attribute-actions #{:rotate-x} "Rotation X"
+                                                   (assoc context-data :on-update-shape dwta/update-tilt))
+                        (generic-attribute-actions #{:rotate-y} "Rotation Y"
+                                                   (assoc context-data :on-update-shape dwta/update-tilt))))]
     {:border-radius border-radius
      :color (fn [context-data]
               (concat
@@ -370,11 +377,17 @@
                (generic-attribute-actions #{:stroke-color} "Stroke" (assoc context-data :on-update-shape dwta/update-stroke-color))))
      :spacing spacing-attribute-actions
      :sizing sizing-attribute-actions
-     :rotation (partial generic-attribute-actions #{:rotation} "Rotation")
+     :rotation (fn [context-data]
+                 (concat
+                  (generic-attribute-actions #{:rotation} "Rotation" context-data)
+                  (tilt-actions context-data)))
      :opacity (partial generic-attribute-actions #{:opacity} "Opacity")
      :number (fn [context-data]
                (concat
                 (generic-attribute-actions #{:rotation} "Rotation" (assoc context-data :on-update-shape dwta/update-rotation))
+                (tilt-actions context-data)
+                (generic-attribute-actions #{:perspective} "Perspective"
+                                           (assoc context-data :on-update-shape dwta/update-perspective))
                 (let [line-height (line-height context-data)]
                   (when (seq line-height) line-height))))
      :stroke-width stroke-width-actions

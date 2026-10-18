@@ -143,6 +143,33 @@
              (t/testing "shape radius got update to the resolved token value."
                (t/is (= (:r1 rect-1') 24))))))))))
 
+(t/deftest test-apply-tilt-token
+  ;; a rotation token tilts a layer about its own axes (Penpot Motion)
+  (t/async
+    done
+    (let [file   (-> (ctht/sample-file-with-tokens
+                      :lib-fn #(-> %
+                                   (ctob/add-set (ctob/make-token-set :id (cthi/new-id! :set-a) :name "Set A"))
+                                   (ctob/add-theme (ctob/make-token-theme :id (cthi/new-id! :theme-a)
+                                                                          :name "Theme A" :sets #{"Set A"}))
+                                   (ctob/add-token (cthi/id :set-a)
+                                                   (ctob/make-token {:name "tilt.card" :value "30" :type :rotation})))
+                      :status-fn #(ctos/set-tokens-status % #{(cthi/id :theme-a)} #{(cthi/id :set-a)}))
+                     (ctho/add-rect :rect-1))
+          store  (ths/setup-store file)
+          rect-1 (cths/get-shape file :rect-1)
+          events [(dwta/apply-token {:shape-ids [(:id rect-1)]
+                                     :attributes #{:rotate-y}
+                                     :token (toht/get-token file "tilt.card")
+                                     :on-update-shape dwta/update-tilt})]]
+      (tohs/run-store-async
+       store done events
+       (fn [new-state]
+         (let [rect-1' (cths/get-shape (ths/get-file-from-state new-state) :rect-1)]
+           (t/is (= "tilt.card" (get-in rect-1' [:applied-tokens :rotate-y])))
+           (t/is (= 30 (:rotate-y rect-1')))
+           (t/is (nil? (:rotate-x rect-1')) "only the axis it was applied to")))))))
+
 (t/deftest test-apply-multiple-tokens
   (t/testing "applying a token twice with the same attributes will override the previously applied tokens values"
     (t/async
