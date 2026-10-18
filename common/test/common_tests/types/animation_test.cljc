@@ -233,6 +233,24 @@
       (let [shape' (ctm/apply-structure-modifiers shape modifiers)]
         (t/is (mth/close? 0.5 (double (:opacity shape')) 0.001))))))
 
+(t/deftest a-tilt-plays-around-the-pivot-from-where-it-rests
+  ;; The tilt rides the modifier pipeline as a change of the shape, with
+  ;; the pivot of its track and the tilt it rests at (see `gtl/lift`).
+  (let [shape  (assoc (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100}) :rotate-y 10)
+        sid    (:id shape)
+        tl     (-> (mk-timeline)
+                   (cta/add-keyframe sid {:time 0 :property :rotate-y :value 0})
+                   (cta/add-keyframe sid {:time 1000 :property :rotate-y :value 90})
+                   (cta/set-track-origin sid 0 0.5))
+        mods   (get-in (ctaf/timeline->modif-tree tl {sid shape} 500) [sid :modifiers])
+        shape' (ctm/apply-structure-modifiers shape mods)]
+    (t/is (mth/close? 45 (:rotate-y shape') 0.001))
+    (t/is (mth/close? 0 (:rotate-x shape') 0.001) "the other axis stays where it rests")
+    (t/is (= [0.0 0.5 0 10]
+             ((juxt :x :y :rest-x :rest-y) (:tilt-pivot shape'))))
+    (t/is (= 0 (cta/rest-value shape :rotate-x nil)))
+    (t/is (= 10 (cta/rest-value shape :rotate-y nil)))))
+
 (t/deftest remove-shapes-drops-tracks
   (let [a (uuid/next)
         b (uuid/next)
@@ -390,6 +408,31 @@
                          "transform: translate(100px, 0px) rotate(0deg) scale(1, 1);")
           "without one, as before")))
 
+(t/deftest timeline->css-tilts-in-the-axes-of-the-layer
+  (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
+        sid   (:id shape)
+        door  (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                  (cta/add-keyframe sid {:time 0 :property :rotate-y :value 0})
+                  (cta/add-keyframe sid {:time 1000 :property :rotate-y :value 60})
+                  (cta/set-track-origin sid 0 0.5))
+        rest  {:transform (constantly "matrix(0.866, 0.5, -0.5, 0.866, 0, 0)")}
+        css   (acss/timeline->css door {sid shape} rest)]
+    (t/is (str/includes? css (str "transform: translate(0px, 0px) rotate(0deg) "
+                                  "matrix(0.866, 0.5, -0.5, 0.866, 0, 0) "
+                                  "rotateX(0deg) rotateY(60deg) scale(1, 1);"))
+          "after the turn it rests at, before its scale")
+    (t/is (str/includes? css "transform-origin: 0% 50%;") "around its hinge")
+    (t/testing "a layer tilted at rest turns from where its pivot rests"
+      (let [css (acss/timeline->css door {sid (assoc shape :rotate-y 30)})]
+        ;; its left edge, 50 px left of its middle, comes 25 px forward
+        (t/is (str/includes? css "translate3d(6.699px, 0px, 25px) rotateX(0deg) rotateY(0deg)"))))
+    (t/testing "a move keeps the tilt it rests at"
+      (let [move (-> (cta/make-timeline {:board-id (uuid/next) :duration 1000})
+                     (cta/add-keyframe sid {:time 0 :property :x :value 0})
+                     (cta/add-keyframe sid {:time 1000 :property :x :value 100}))
+            css  (acss/timeline->css move {sid (assoc shape :rotate-x 20)})]
+        (t/is (str/includes? css "rotate(0deg) rotateX(20deg) rotateY(0deg) scale(1, 1);"))))))
+
 (t/deftest frame-values-are-what-css-plays
   (let [shape  (cts/setup-shape {:type :rect :x 10 :y 20 :width 100 :height 50})
         origin {:x 0 :y 0}]
@@ -491,6 +534,76 @@
     (t/is (= [0.0] (get-in ks [:o :k 1 :s])))       ; opacity 0 -> 0
     ;; anchor is the shape centre
     (t/is (= [200.0 150.0 0] (get-in ks [:a :k])))))
+
+(defn- close-numbers?
+  [expected actual]
+  (and (= (count expected) (count actual))
+       (every? true? (map #(mth/close? (double %1) (double %2) 0.001) expected actual))))
+
+(defn- tilt-scene
+  "A board 400×300 with a rect 200×100 at 100,100 in it, `f` of the rect,
+  and a timeline of the rect `g` of an empty one of 1000 ms."
+  [f g]
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bid   (:id board)
+        shape (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 200 :height 100})
+                  (assoc :parent-id bid :frame-id bid)
+                  (f))
+        sid   (:id shape)]
+    [(g (cta/make-timeline {:board-id bid :duration 1000}) sid)
+     {bid (assoc board :shapes [sid]) sid shape}
+     sid]))
+
+(defn- lottie-k
+  "The values of the 1D Lottie property `prop`."
+  [prop]
+  (if (= 1 (:a prop)) (mapv #(first (:s %)) (:k prop)) [(:k prop)]))
+
+(t/deftest timeline->lottie-tilts-in-3d
+  (let [[tl objects] (tilt-scene identity
+                                 #(-> %1
+                                      (cta/add-keyframe %2 {:time 0 :property :rotate-y :value 0})
+                                      (cta/add-keyframe %2 {:time 1000 :property :rotate-y :value 60})))
+        L     (alottie/timeline->lottie tl objects)
+        layer (first (:layers L))
+        ks    (:ks layer)]
+    (t/is (= 1 (:ddd L)) "a 3D composition")
+    (t/is (= 1 (:ddd layer)))
+    (t/is (close-numbers? [0 -60] (lottie-k (:ry ks))) "Lottie turns the other way round")
+    (t/is (close-numbers? [0] (lottie-k (:rx ks))))
+    (t/is (nil? (:r ks)) "a 3D layer turns by rz")
+    (t/is (nil? (:parent layer)) "no turn in the plane, no null")))
+
+(t/deftest timeline->lottie-turns-a-tilted-layer-on-a-null
+  (let [[tl objects sid] (tilt-scene #(-> %
+                                          (gsh/transform-shape (ctm/rotation (ctm/empty) (gpt/point 200 150) 30))
+                                          (assoc :rotate-x 45 :flip-x true))
+                                     #(-> %1
+                                          (cta/add-keyframe %2 {:time 0 :property :opacity :value 1})
+                                          (cta/add-keyframe %2 {:time 1000 :property :opacity :value 0.5})))
+        L      (alottie/timeline->lottie tl objects)
+        layers (:layers L)
+        child  (d/seek #(= 4 (:ty %)) layers)
+        null   (d/seek #(= 3 (:ty %)) layers)]
+    (t/is (some? (get objects sid)))
+    (t/is (= (:ind null) (:parent child)) "the layer a child of the null")
+    (t/is (= 1 (:ddd null)))
+    (t/is (close-numbers? [30] (lottie-k (get-in null [:ks :rz]))) "the null turns it in the plane")
+    (t/is (close-numbers? [-45] (lottie-k (get-in child [:ks :rx]))) "its tilt in its own axes")
+    (t/is (close-numbers? [0] (lottie-k (get-in child [:ks :rz]))))
+    (t/is (= 1 (get-in child [:ks :o :a])) "its opacity plays on it")))
+
+(t/deftest timeline->lottie-hides-a-back-face-by-opacity
+  (let [[tl objects] (tilt-scene #(assoc % :backface-hidden true)
+                                 #(-> %1
+                                      (cta/add-keyframe %2 {:time 0 :property :rotate-y :value 0 :easing :linear})
+                                      (cta/add-keyframe %2 {:time 1000 :property :rotate-y :value 180})))
+        L     (alottie/timeline->lottie tl objects)
+        o     (get-in (first (:layers L)) [:ks :o])]
+    (t/is (= 1 (:a o)))
+    (t/is (close-numbers? [100 0] (lottie-k o)) "shown, then gone where its back turns")
+    (t/is (every? #(= 1 (:h %)) (:k o)) "held")
+    (t/is (< 25 (:t (second (:k o))) 35) "at about half of 60 frames")))
 
 (t/deftest timeline->lottie-writes-fill-stroke-and-blur
   (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
@@ -3553,6 +3666,19 @@
         after (turned objects rid -20)]
     (t/is (close? 340 (get-in after [rid :rotation])))
     (t/is (close? (- shown 20) (recorded (cta/record-edit tl objects after 500) rid :rotation 500)))))
+
+(t/deftest record-edit-adds-a-tilt-to-the-value-shown
+  (let [{:keys [rect objects] :as scene} (board-and-rect)
+        rid   (:id rect)
+        tl    (edit-timeline scene :rotate-y 0 300)
+        shown (get-in (values-at tl objects 500) [rid :rotate-y])
+        tl'   (cta/record-edit tl objects (assoc-in objects [rid :rotate-y] 30) 500)]
+    ;; no turn the short way round: a tilt is not kept within 0-360
+    (t/is (close? (+ shown 30) (recorded tl' rid :rotate-y 500)))
+    (t/testing "an edit of another row of a flat layer records no tilt"
+      (let [tl  (edit-timeline scene :x 0 200)
+            tl' (cta/record-edit tl objects (moved objects [rid] 30 0) 500)]
+        (t/is (empty? (cta/property-keyframes tl' rid :rotate-y)))))))
 
 (t/deftest record-edit-takes-opacity-as-it-ends-up
   (let [{:keys [rect objects] :as scene} (board-and-rect)

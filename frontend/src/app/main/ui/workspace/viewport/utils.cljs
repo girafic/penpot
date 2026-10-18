@@ -7,6 +7,7 @@
 (ns app.main.ui.workspace.viewport.utils
   (:require
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
@@ -153,7 +154,9 @@
   viewport draw, as it shows them: moved by `wasm-modifiers` while
   dragged and, in motion mode while paused, where the animation shows
   them (`shown`, a delay of `cltl/shown-shapes`, see `with-shown`), a
-  path with the outline it has at the playhead."
+  path with the outline it has at the playhead. The groups and boards
+  they are in too, whose tilts tilt them (see `app.common.geom.tilt`)."
   [objects wasm-modifiers ids shown]
-  (cond-> (apply-wasm-modifiers-to-ids objects wasm-modifiers ids)
-    (some? shown) (with-shown shown ids)))
+  (let [ids (into (set ids) (mapcat #(cfh/get-parent-ids objects %)) ids)]
+    (cond-> (apply-wasm-modifiers-to-ids objects wasm-modifiers ids)
+      (some? shown) (with-shown shown ids))))

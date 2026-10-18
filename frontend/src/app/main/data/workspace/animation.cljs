@@ -451,6 +451,8 @@
      :x        (- (-> shape :selrect :x) (:x origin))
      :y        (- (-> shape :selrect :y) (:y origin))
      :rotation (or (:rotation shape) 0)
+     :rotate-x (or (:rotate-x shape) 0)
+     :rotate-y (or (:rotate-y shape) 0)
      :opacity  (or (:opacity shape) 1)
      :width    (or (-> shape :selrect :width) 0)
      :height   (or (-> shape :selrect :height) 0)
@@ -478,7 +480,7 @@
      (get cta/trim-properties property))))
 
 (def transform-properties
-  [:x :y :width :height :scale-x :scale-y :rotation])
+  [:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y])
 
 (def appearance-properties
   [:fill-color :fill-opacity

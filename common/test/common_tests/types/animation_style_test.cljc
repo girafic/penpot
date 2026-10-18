@@ -572,6 +572,11 @@
       (t/is (close-all? [50 75] (mapv :value (cta/keys-entry-keyframes entry to)))))
     (let [entry (cta/keyframes->keys-entry (row :rotation 10 100) from)]
       (t/is (close-all? [0 90] (mapv :value (:keyframes entry)))))
+    (let [entry (cta/keyframes->keys-entry (row :rotate-y 20 200) (assoc from :rotate-y 20))]
+      (t/is (close-all? [0 180] (mapv :value (:keyframes entry))) "a tilt from where it rests")
+      (t/is (close-all? [5 185] (mapv :value (cta/keys-entry-keyframes entry (assoc to :rotate-y 5)))))
+      (t/is (close-all? [0 180] (mapv :value (cta/keys-entry-keyframes entry to)))
+            "a layer resting flat"))
     (let [entry (cta/keyframes->keys-entry (row :opacity 1 0.5) from)]
       (t/is (= [1 0.5] (mapv :value (cta/keys-entry-keyframes entry to))) "the others as they are"))))
 

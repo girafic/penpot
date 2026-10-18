@@ -10,6 +10,7 @@
   plays too (see `app.common.animation.svg`)."
   (:require
    [app.common.data :as d]
+   [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.color :as clr]
@@ -92,7 +93,9 @@
 
 (def ^:private css-transform-properties
   "The properties the CSS of an animation plays through `transform`."
-  #{:x :y :width :height :scale-x :scale-y :rotation})
+  #{:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y})
+
+(declare frame-values*)
 
 (defn frame-values
   "What `shape` shows at one frame of its animation, `values` (its
@@ -106,7 +109,28 @@
   its glyphs in the fills of its spans, see `cta/paint-fills`),
   `:box-shadow` (the CSS of its visible shadows), `:blur` and
   `:backdrop-blur` (px). `origin` is where its positions count from (see
-  `position-origin`)."
+  `position-origin`). A tilted shape (see `app.common.geom.tilt`) has its
+  `:rotate-x` and `:rotate-y` (degrees) with its transform, and, turning
+  around `pivot` (fractions of its box) off its middle with a tilt at
+  rest, `:lift` (`[dx dy dz]` px, see `gtl/lift`)."
+  ([shape values origin]
+   (frame-values shape values origin nil))
+  ([shape values origin pivot]
+   (let [frame (frame-values* shape values origin)]
+     (if (and (contains? frame :translate-x)
+              (or (gtl/tilted? shape) (cta/has? values :rotate-x :rotate-y)))
+       (let [rest-x (or (:rotate-x shape) 0)
+             rest-y (or (:rotate-y shape) 0)
+             {px :x py :y} (or pivot cta/default-transform-origin)
+             lift   (gtl/lift shape px py rest-x rest-y)]
+         (cond-> (assoc frame
+                        :rotate-x (get values :rotate-x rest-x)
+                        :rotate-y (get values :rotate-y rest-y))
+           (some #(not (mth/almost-zero? %)) lift)
+           (assoc :lift lift)))
+       frame))))
+
+(defn- frame-values*
   [shape values origin]
   (let [selrect (:selrect shape)
         base-x  (:x selrect)
@@ -169,11 +193,11 @@
   `svg-appearance-css`), its shadows and the corners CSS can not play by
   SMIL (see `svg-smil`)."
   ([shape values origin rest-transform]
-   (values->declarations shape values origin rest-transform false))
-  ([shape values origin rest-transform svg?]
+   (values->declarations shape values origin rest-transform false nil))
+  ([shape values origin rest-transform svg? pivot]
    (if svg?
      (svg-group-declarations shape values origin)
-     (css-declarations shape values origin rest-transform))))
+     (css-declarations shape values origin rest-transform pivot))))
 
 (defn- svg-group-declarations
   "The declarations of the group of a layer of an SVG: a turned shape
@@ -196,18 +220,25 @@
       (conj (str "opacity: " (fmt opacity) ";")))))
 
 (defn- css-declarations
-  [shape values origin rest-transform]
+  "The CSS declarations of `shape` at a frame: the tilt in its own axes,
+  after the turn it rests at (`rest-transform`, flat) and before its
+  scale, lifted to its pivot (see `frame-values`)."
+  [shape values origin rest-transform pivot]
   (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity border-radius
                 background-color border-color border-width box-shadow blur backdrop-blur
-                color text-stroke-color text-stroke-width]
+                color text-stroke-color text-stroke-width lift]
          :as frame}
-        (frame-values shape values origin)]
+        (frame-values shape values origin pivot)]
     (cond-> []
       (contains? frame :translate-x)
       (conj (str "transform: translate(" (fmt translate-x) "px, " (fmt translate-y) "px) "
                  "rotate(" (fmt rotate) "deg) "
                  (when-not (str/blank? rest-transform)
                    (str rest-transform " "))
+                 (when-let [[dx dy dz] lift]
+                   (str "translate3d(" (fmt dx) "px, " (fmt dy) "px, " (fmt dz) "px) "))
+                 (when (contains? frame :rotate-x)
+                   (str "rotateX(" (fmt (:rotate-x frame)) "deg) rotateY(" (fmt (:rotate-y frame)) "deg) "))
                  "scale(" (fmt scale-x) ", " (fmt scale-y) ");"))
 
       (contains? frame :opacity)
@@ -357,7 +388,8 @@
                                         (map (fn [t] [t (some #(when (= (:time %) t) (keyframe-timing %)) kfs)])
                                              times))]
                    (let [pct   (fmt (* 100.0 (/ (double t) duration)))
-                         decls (cond-> (values->declarations shape (values t) origin rest-transform svg?)
+                         decls (cond-> (values->declarations shape (values t) origin rest-transform svg?
+                                                             (cta/track-origin track))
                                  (and seg-timing (< t duration))
                                  (conj (str "animation-timing-function: " seg-timing ";")))]
                      (str "  " pct "% { " (str/join " " decls) " }")))]

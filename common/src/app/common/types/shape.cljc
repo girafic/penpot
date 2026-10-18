@@ -272,6 +272,13 @@
    [:flip-x {:optional true} [:maybe :boolean]]
    [:flip-y {:optional true} [:maybe :boolean]]
 
+   ;; The 3D rotation of the layer, degrees about its own X and Y axes,
+   ;; and whether it hides while its back faces the viewer (Penpot
+   ;; Motion, see `app.common.geom.tilt`). Absent is flat and shown.
+   [:rotate-x {:optional true} ::sm/safe-number]
+   [:rotate-y {:optional true} ::sm/safe-number]
+   [:backface-hidden {:optional true} :boolean]
+
    ;; Carried on circles, rects and texts too, not only on frames, so it
    ;; belongs here rather than in `schema:frame-attrs`. Not nilable: the key
    ;; lives outside the record, `app.common.logic.shapes` dissocs it to unset
@@ -304,7 +311,10 @@
    ;; `use-for-thumbnail` is a frame attribute the model has long had, since
    ;; `app.common.files.migrations` renames `:use-for-thumbnail?` to it and
    ;; `app.common.logic.libraries` reads it, and this schema had not declared.
-   [:use-for-thumbnail {:optional true} :boolean]])
+   [:use-for-thumbnail {:optional true} :boolean]
+   ;; How far, px, the viewer of its tilted layers is (see
+   ;; `app.common.geom.tilt`); absent is `gtl/default-perspective`.
+   [:perspective {:optional true} [::sm/number {:min 100 :max 100000}]]])
 
 (def ^:private schema:nilable-geom-attrs
   "`schema:shape-geom-attrs`, but nilable.
@@ -526,7 +536,8 @@
   #{:page-id :component-id :component-file :component-root :main-instance
     :remote-synced :shape-ref :touched :blocked :collapsed :locked
     :hidden :masked-group :mask-mode :fills :proportion :proportion-lock :constraints-h
-    :constraints-v :fixed-scroll :r1 :r2 :r3 :r4 :rotation :opacity :grids :exports
+    :constraints-v :fixed-scroll :r1 :r2 :r3 :r4 :rotation :rotate-x :rotate-y :backface-hidden
+    :opacity :grids :exports
     :strokes :blend-mode :interactions :shadow :blur :background-blur :grow-type :applied-tokens
     :plugin-data})
 
@@ -535,7 +546,7 @@
                                           :transform-inverse :parent-id :frame-id})
 (def ^:private allowed-bool-attrs #{:shapes :bool-type :content})
 (def ^:private allowed-group-attrs #{:shapes})
-(def ^:private allowed-frame-attrs #{:shapes :hide-fill-on-export :show-content :hide-in-viewer
+(def ^:private allowed-frame-attrs #{:shapes :hide-fill-on-export :show-content :hide-in-viewer :perspective
                                      :layout :layout-flex-dir :layout-gap-type :layout-gap
                                      :layout-align-items :layout-justify-content :layout-align-content
                                      :layout-wrap-type :layout-padding-type :layout-padding

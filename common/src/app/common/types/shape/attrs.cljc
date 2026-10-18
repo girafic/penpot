@@ -17,6 +17,10 @@
             :x :y
             :r1 :r2 :r3 :r4
             :rotation
+            :rotate-x
+            :rotate-y
+            :backface-hidden
+            :perspective
             :selrect
             :points
             :show-content
@@ -90,6 +94,9 @@
             :width :height
             :x :y
             :rotation
+            :rotate-x
+            :rotate-y
+            :backface-hidden
             :selrect
             :points
 
@@ -129,6 +136,9 @@
            :width :height
            :x :y
            :rotation
+           :rotate-x
+           :rotate-y
+           :backface-hidden
            :r1 :r2 :r3 :r4
            :selrect
            :points
@@ -188,6 +198,9 @@
              :width :height
              :x :y
              :rotation
+             :rotate-x
+             :rotate-y
+             :backface-hidden
              :selrect
              :points
 
@@ -246,6 +259,9 @@
            :width :height
            :x :y
            :rotation
+           :rotate-x
+           :rotate-y
+           :backface-hidden
            :selrect
            :points
 
@@ -304,6 +320,9 @@
            :width :height
            :x :y
            :rotation
+           :rotate-x
+           :rotate-y
+           :backface-hidden
            :selrect
            :points
 
@@ -386,6 +405,9 @@
             :width :height
             :x :y
             :rotation
+            :rotate-x
+            :rotate-y
+            :backface-hidden
             :r1 :r2 :r3 :r4
             :selrect
             :points
@@ -424,6 +446,9 @@
               :width :height
               :x :y
               :rotation
+              :rotate-x
+              :rotate-y
+              :backface-hidden
               :r1 :r2 :r3 :r4
               :selrect
               :points
@@ -483,6 +508,9 @@
            :width :height
            :x :y
            :rotation
+           :rotate-x
+           :rotate-y
+           :backface-hidden
            :r1 :r2 :r3 :r4
            :selrect
            :points

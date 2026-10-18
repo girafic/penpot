@@ -60,6 +60,9 @@ pub struct ShapesPoolImpl {
     structure: HashMap<usize, Vec<StructureEntry>>,
     /// Scale content values, keyed by index
     scale_content: HashMap<usize, f32>,
+    /// Whether a shape has ever tilted (see `math::tilt`): until then nothing
+    /// needs to look for tilts.
+    has_tilts: bool,
 }
 
 // Type aliases - no longer need lifetimes!
@@ -79,6 +82,66 @@ impl ShapesPoolImpl {
             modifier_uuids: Vec::new(),
             structure: HashMap::default(),
             scale_content: HashMap::default(),
+            has_tilts: false,
+        }
+    }
+
+    /// Whether a shape may tilt (see `math::tilt`).
+    pub fn has_tilts(&self) -> bool {
+        self.has_tilts
+    }
+
+    pub fn mark_tilts(&mut self) {
+        self.has_tilts = true;
+    }
+
+    /// The homography `shape` is drawn through for its own tilt and those of
+    /// the groups and boards it is in (see `math::tilt`); `None` when
+    /// nothing tilts it.
+    pub fn tilt_projection(&self, shape: &Shape) -> Option<skia::Matrix> {
+        if !self.has_tilts {
+            return None;
+        }
+        let mut projection = shape.tilt_matrix(self);
+        let mut parent_id = shape.parent_id;
+        while let Some(id) = parent_id.filter(|id| !id.is_nil()) {
+            let Some(parent) = self.get(&id) else {
+                break;
+            };
+            if let Some(h) = parent.tilt_matrix(self) {
+                projection = Some(match projection {
+                    Some(p) => skia::Matrix::concat(&h, &p),
+                    None => h,
+                });
+            }
+            parent_id = parent.parent_id;
+        }
+        projection
+    }
+
+    /// Drops the extrect cache of the tilted layers in `id` (and of the
+    /// ancestors they grow): their board sees them from its middle with its
+    /// perspective, so they show elsewhere when it changes.
+    pub fn invalidate_tilted_descendants(&mut self, id: &Uuid) {
+        if !self.has_tilts {
+            return;
+        }
+        let Some(shape) = self.get_raw(id) else {
+            return;
+        };
+        let tilted: Vec<Uuid> = shape
+            .all_children(self, true, false)
+            .into_iter()
+            .filter(|child| self.get_raw(child).is_some_and(|s| s.is_tilted()))
+            .collect();
+        for child in tilted {
+            if let Some(idx) = self.uuid_to_idx.get(&child).copied() {
+                self.shapes[idx].invalidate_extrect();
+                if let Some(cell) = self.modified_shape_cache.get_mut(&idx) {
+                    *cell = OnceCell::new();
+                }
+            }
+            self.invalidate_ancestors_extrect(&child);
         }
     }
 
@@ -521,6 +584,7 @@ impl ShapesPoolImpl {
             modifier_uuids: Vec::new(),
             structure: HashMap::default(),
             scale_content: HashMap::default(),
+            has_tilts: self.has_tilts,
         }
     }
 
@@ -612,6 +676,7 @@ impl Clone for ShapesPoolImpl {
             modifier_uuids: self.modifier_uuids.clone(),
             structure: self.structure.clone(),
             scale_content: self.scale_content.clone(),
+            has_tilts: self.has_tilts,
         }
     }
 }

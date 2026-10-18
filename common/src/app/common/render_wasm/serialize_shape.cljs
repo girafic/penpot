@@ -30,23 +30,30 @@
    [app.common.render-wasm.svg-derived :as svg-derived]))
 
 (defn needs-shape-tail?
-  "True when `shape` needs the per-shape svg-attrs/path tail after a
-  structural upload: svg-attrs present, or `:path`/`:bool` with content."
+  "True when `shape` needs the per-shape svg-attrs/path/tilt tail after a
+  structural upload: svg-attrs present, `:path`/`:bool` with content, or a
+  3D rotation (see `props/tilt-props?`)."
   [shape]
   (let [type (:type shape)]
     (or (some? (:svg-attrs shape))
         (and (contains? #{:path :bool} type)
-             (some? (:content shape))))))
+             (some? (:content shape)))
+        (props/tilt-props? shape))))
 
 (defn- write-shape-tail!
-  "Per-shape svg-attrs/path tail after a structural upload."
+  "Per-shape svg-attrs/path/tilt tail after a structural upload."
   [shape]
   (when (some? (:svg-attrs shape))
     (props/set-shape-svg-attrs (:svg-attrs shape)))
 
   (let [type (:type shape)]
     (when (and (contains? #{:path :bool} type) (some? (:content shape)))
-      (props/set-shape-path-content (:content shape)))))
+      (props/set-shape-path-content (:content shape))))
+
+  (when (props/tilt-props? shape)
+    (props/set-shape-tilt shape)
+    (when (= :frame (:type shape))
+      (props/set-shape-perspective (:perspective shape)))))
 
 (defn serialize-shape
   "Applies every host-independent WASM property of `shape`."

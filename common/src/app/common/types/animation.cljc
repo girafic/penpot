@@ -51,6 +51,8 @@
 ;; presets from interactions plus a custom cubic-bezier curve.
 (def animatable-properties
   #{:x :y :width :height :opacity :rotation :scale-x :scale-y
+    ;; the 3D rotation, about the layer's own axes (see `app.common.geom.tilt`)
+    :rotate-x :rotate-y
     :r1 :r2 :r3 :r4
     :fill-color :fill-opacity
     :stroke-color :stroke-opacity :stroke-width
@@ -2929,7 +2931,8 @@
         sx       (axis-scale base-w values :width :scale-x)
         sy       (axis-scale base-h values :height :scale-y)
         target-r (get values :rotation base-r)
-        box      (box-point shape (or pivot default-transform-origin))
+        fraction (or pivot default-transform-origin)
+        box      (box-point shape fraction)
         pivot    (origin-point shape (or pivot default-transform-origin))
         turned?  (and (some? (:transform shape)) (not (gmt/unit? (:transform shape))))
         ;; a scale scales what the shape holds, its strokes, shadows and
@@ -2965,6 +2968,17 @@
 
       (has? values :opacity)
       (ctm/change-property :opacity (get values :opacity))
+
+      ;; The tilt turns around the pivot too, placed where the layer rests
+      ;; (see `gtl/lift`), so its values at rest show it as it rests.
+      (has? values :rotate-x :rotate-y)
+      (-> (ctm/change-property :rotate-x (get values :rotate-x (or (:rotate-x shape) 0)))
+          (ctm/change-property :rotate-y (get values :rotate-y (or (:rotate-y shape) 0)))
+          (ctm/change-property :tilt-pivot
+                               {:x (:x fraction)
+                                :y (:y fraction)
+                                :rest-x (or (:rotate-x shape) 0)
+                                :rest-y (or (:rotate-y shape) 0)}))
 
       (contains? values :r1)
       (ctm/change-property :r1 (:r1 values))
@@ -3014,6 +3028,8 @@
     :y        (- (dm/get-in shape [:selrect :y] 0) (:y origin))
     :opacity  (or (:opacity shape) 1)
     :rotation (or (:rotation shape) 0)
+    :rotate-x (or (:rotate-x shape) 0)
+    :rotate-y (or (:rotate-y shape) 0)
     :scale-x  1
     :scale-y  1
     :blur     (or (dm/get-in shape [:blur :value]) 0)
@@ -3457,12 +3473,14 @@
    [:y ::sm/safe-number]
    [:width ::sm/safe-number]
    [:height ::sm/safe-number]
-   [:rotation ::sm/safe-number]])
+   [:rotation ::sm/safe-number]
+   [:rotate-x {:optional true} ::sm/safe-number]
+   [:rotate-y {:optional true} ::sm/safe-number]])
 
 (defn rest-pose
   "Where `shape-id` of `objects` rests in the board of `timeline`, as its
   keyframes count it: its position in the board (a board on the canvas,
-  see `position-origin`), its size and its rotation."
+  see `position-origin`), its size, its rotation and its tilt."
   [timeline objects shape-id]
   (let [shape   (get objects shape-id)
         origin  (position-origin timeline objects shape-id)
@@ -3471,7 +3489,9 @@
      :y        (- (or (:y selrect) 0) (:y origin))
      :width    (or (:width selrect) 0)
      :height   (or (:height selrect) 0)
-     :rotation (or (:rotation shape) 0)}))
+     :rotation (or (:rotation shape) 0)
+     :rotate-x (or (:rotate-x shape) 0)
+     :rotate-y (or (:rotate-y shape) 0)}))
 
 (defn fits-keyframe?
   "Whether `shape` can show `keyframe`: it has the fill, stroke or shadow
@@ -3521,8 +3541,8 @@
 
 (defn- relative-value
   "`value` of `property`, of a layer resting at `from`, for a layer
-  resting at `to`: positions and rotation moved as far as `to` rests from
-  `from`, sizes scaled as much as it is bigger (as the copies of a
+  resting at `to`: positions, rotation and tilt moved as far as `to` rests
+  from `from`, sizes scaled as much as it is bigger (as the copies of a
   component take the animation of their main). Scales are factors
   already, and the other properties look the same on any layer."
   [property value from to]
@@ -3533,15 +3553,17 @@
       :x        (+ value (- (:x to) (:x from)))
       :y        (+ value (- (:y to) (:y from)))
       :rotation (+ value (- (:rotation to) (:rotation from)))
+      :rotate-x (+ value (- (:rotate-x to 0) (:rotate-x from 0)))
+      :rotate-y (+ value (- (:rotate-y to 0) (:rotate-y from 0)))
       :width    (* value (ratio :width))
       :height   (* value (ratio :height))
       value)))
 
 (def ^:private neutral-pose
   "The pose the values of keyframe entries are counted from (see
-  `schema:keys-entry`): positions and rotation from 0, sizes as factors of
-  1."
-  {:x 0 :y 0 :rotation 0 :width 1 :height 1})
+  `schema:keys-entry`): positions, rotation and tilt from 0, sizes as
+  factors of 1."
+  {:x 0 :y 0 :rotation 0 :rotate-x 0 :rotate-y 0 :width 1 :height 1})
 
 (defn keyframes->keys-entry
   "A keyframe entry (see `schema:keys-entry`) of `keyframes`, those of one
@@ -3628,9 +3650,9 @@
                  (- (count animations) (count kept)))}))
 
 (def ^:private pivot-properties
-  "The properties that scale, resize or turn a layer around its pivot (the
-  `:origin` of its track)."
-  #{:rotation :scale-x :scale-y :width :height})
+  "The properties that scale, resize, turn or tilt a layer around its
+  pivot (the `:origin` of its track)."
+  #{:rotation :rotate-x :rotate-y :scale-x :scale-y :width :height})
 
 (defn- pivot-motion?
   "Whether `track` scales, resizes or turns its layer: what its pivot is
@@ -3757,7 +3779,7 @@
 (def ^:private edit-properties
   "Properties an edit of a shape records as keyframes. Scale stays a
   timeline value; width and height follow a resize."
-  [:x :y :width :height :rotation :opacity :r1 :r2 :r3 :r4])
+  [:x :y :width :height :rotation :rotate-x :rotate-y :opacity :r1 :r2 :r3 :r4])
 
 (def ^:private edit-absolute-properties
   "Properties an edit records as they end up, not as a change of the
@@ -3838,6 +3860,8 @@
       :width    (dm/get-in shape [:selrect :width])
       :height   (dm/get-in shape [:selrect :height])
       :rotation (or (:rotation shape) 0)
+      :rotate-x (or (:rotate-x shape) 0)
+      :rotate-y (or (:rotate-y shape) 0)
       :opacity  (or (:opacity shape) 1)
       :r1       (or (:r1 shape) 0)
       :r2       (or (:r2 shape) 0)

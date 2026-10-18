@@ -9,8 +9,10 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.tilt :as gtl]
    [app.common.logic.shapes :as cls]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
@@ -38,6 +40,7 @@
    [app.main.ui.workspace.sidebar.options.menus.border-radius :refer  [border-radius-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
    [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* follow-menu* keyframe-diamond* outline-row* reach-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.tilt-tool :refer [tilt-tool*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
    [clojure.set :as set]
@@ -51,6 +54,7 @@
    :x :y
    :ox :oy
    :rotation
+   :rotate-x :rotate-y :backface-hidden :perspective
    :r1 :r2 :r3 :r4
    :selrect
    :points
@@ -64,13 +68,13 @@
    :layout-item-absolute])
 
 (def ^:private generic-options
-  #{:size :position :rotation})
+  #{:size :position :rotation :tilt})
 
 (def ^:private rect-options
-  #{:size :position :rotation :radius})
+  #{:size :position :rotation :tilt :radius})
 
 (def ^:private frame-options
-  #{:presets :size :position :rotation :radius :clip-content :show-in-viewer})
+  #{:presets :size :position :rotation :tilt :perspective :radius :clip-content :show-in-viewer})
 
 (defn- type->options
   [type]
@@ -159,6 +163,14 @@
                      (get n-values :y))
          (identical? (get o-values :rotation)
                      (get n-values :rotation))
+         (identical? (get o-values :rotate-x)
+                     (get n-values :rotate-x))
+         (identical? (get o-values :rotate-y)
+                     (get n-values :rotate-y))
+         (identical? (get o-values :backface-hidden)
+                     (get n-values :backface-hidden))
+         (identical? (get o-values :perspective)
+                     (get n-values :perspective))
          (identical? (get o-values :hide-in-viewer)
                      (get n-values :hide-in-viewer))
          (identical? (get o-values :width)
@@ -628,6 +640,99 @@
                                                      :attrs #{:rotation}
                                                      :shape-ids ids})))))
 
+        ;; 3D ROTATION (Penpot Motion, see `app.common.geom.tilt`): an
+        ;; animated tilt takes the value at the playhead, as an animated
+        ;; rotation does; flat is no tilt at all.
+        on-tilt-change
+        (mf/use-fn
+         (mf/deps ids motion-id)
+         (fn [attr value]
+           (when (or (string? value) (number? value))
+             (let [value (fixed-decimal-value value)]
+               (if (and (some? motion-id)
+                        (seq (cta/property-keyframes (deref ref:timeline) motion-id attr)))
+                 (st/emit! (dwa/set-value-at-playhead motion-id attr value))
+                 (st/emit! (dwsh/update-shapes ids #(if (mth/almost-zero? value)
+                                                      (dissoc % attr)
+                                                      (assoc % attr value)))))))))
+
+        on-rotate-x-change
+        (mf/use-fn (mf/deps on-tilt-change) #(on-tilt-change :rotate-x %))
+
+        on-rotate-y-change
+        (mf/use-fn (mf/deps on-tilt-change) #(on-tilt-change :rotate-y %))
+
+        on-backface-change
+        (mf/use-fn
+         (mf/deps ids)
+         (fn [hidden?]
+           (st/emit! (dwsh/update-shapes ids #(if hidden?
+                                                (assoc % :backface-hidden true)
+                                                (dissoc % :backface-hidden))))))
+
+        ;; The drag of the 3D tool: one undo step, both axes at once
+        tilt-undo-ref
+        (mf/use-ref nil)
+
+        on-tilt-drag-start
+        (mf/use-fn
+         (fn []
+           (let [undo-id (js/Symbol)]
+             (mf/set-ref-val! tilt-undo-ref undo-id)
+             (st/emit! (dwu/start-undo-transaction undo-id)))))
+
+        on-tilt-drag-end
+        (mf/use-fn
+         (fn []
+           (when-let [undo-id (mf/ref-val tilt-undo-ref)]
+             (mf/set-ref-val! tilt-undo-ref nil)
+             (st/emit! (dwu/commit-undo-transaction undo-id)))))
+
+        on-tilt-drag
+        (mf/use-fn
+         (mf/deps ids motion-id)
+         (fn [[rx ry]]
+           (let [timeline  (deref ref:timeline)
+                 animated? (fn [attr]
+                             (and (some? motion-id)
+                                  (seq (cta/property-keyframes timeline motion-id attr))))
+                 tilt      (fn [shape attr value]
+                             (cond
+                               (animated? attr)          shape
+                               (mth/almost-zero? value)  (dissoc shape attr)
+                               :else                     (assoc shape attr value)))]
+             (st/emit! (dwsh/update-shapes ids #(-> % (tilt :rotate-x rx) (tilt :rotate-y ry))))
+             (when (animated? :rotate-x)
+               (st/emit! (dwa/set-value-at-playhead motion-id :rotate-x rx)))
+             (when (animated? :rotate-y)
+               (st/emit! (dwa/set-value-at-playhead motion-id :rotate-y ry))))))
+
+        ;; The perspective of the boards, shown when one has tilted layers
+        ;; or a perspective of its own
+        board-ids
+        (mf/with-memo [shapes]
+          (into [] (comp (filter cfh/frame-shape?) (map :id)) shapes))
+
+        holds-tilt?
+        (mf/with-memo [board-ids]
+          (let [objects (deref refs/workspace-page-objects)]
+            (boolean
+             (some (fn [id]
+                     (some #(gtl/tilted? (get objects %)) (cfh/get-children-ids objects id)))
+                   board-ids))))
+
+        on-perspective-change
+        (mf/use-fn
+         (mf/deps board-ids)
+         (fn [value]
+           (let [value (cond
+                         (number? value) value
+                         (string? value) (d/parse-double value))]
+             (st/emit! (dwsh/update-shapes board-ids
+                                           #(if (number? value)
+                                              (assoc % :perspective (mth/clamp value gtl/min-perspective gtl/max-perspective))
+                                              (dissoc % :perspective)))))))
+
         on-width-change
         (mf/use-fn (mf/deps on-size-change) #(on-size-change % :width))
 
@@ -942,6 +1047,63 @@
                                    :ids ids
                                    :values values
                                    :applied-tokens applied-tokens}])])
+
+     (when (options :tilt)
+       (let [rx (get values :rotate-x)
+             ry (get values :rotate-y)]
+         [:div {:class (stl/css :tilt)}
+          [:div {:class (stl/css-case :rotate-axis true
+                                      :with-keyframe (some? motion-id))
+                 :title (tr "workspace.options.rotate-x")}
+           [:span {:class (stl/css :icon-text)} "X°"]
+           [:> deprecated-input/numeric-input*
+            {:no-validate true
+             :min -360
+             :max 360
+             :placeholder (if (= :multiple rx) (tr "settings.multiple") "--")
+             :on-change on-rotate-x-change
+             :class (stl/css :numeric-input)
+             :value (if (= :multiple rx) rx (or rx 0))}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:rotate-x]}])]
+          [:div {:class (stl/css-case :rotate-axis true
+                                      :with-keyframe (some? motion-id))
+                 :title (tr "workspace.options.rotate-y")}
+           [:span {:class (stl/css :icon-text)} "Y°"]
+           [:> deprecated-input/numeric-input*
+            {:no-validate true
+             :min -360
+             :max 360
+             :placeholder (if (= :multiple ry) (tr "settings.multiple") "--")
+             :on-change on-rotate-y-change
+             :class (stl/css :numeric-input)
+             :value (if (= :multiple ry) ry (or ry 0))}]
+           (when motion-id
+             [:> keyframe-diamond* {:properties [:rotate-y]}])]
+          [:> tilt-tool* {:rotate-x rx
+                          :rotate-y ry
+                          :backface-hidden (:backface-hidden values)
+                          :on-tilt on-tilt-drag
+                          :on-drag-start on-tilt-drag-start
+                          :on-drag-end on-tilt-drag-end
+                          :on-backface-change on-backface-change}]]))
+
+     (when (and (options :perspective)
+                (or holds-tilt? (number? (:perspective values))))
+       [:div {:class (stl/css :perspective)}
+        [:div {:class (stl/css :perspective-input)
+               :title (tr "workspace.options.perspective")}
+         [:span {:class (stl/css :icon-text)} (tr "workspace.options.perspective")]
+         [:> deprecated-input/numeric-input*
+          {:no-validate true
+           :min gtl/min-perspective
+           :max gtl/max-perspective
+           :placeholder (if (= :multiple (:perspective values))
+                          (tr "settings.multiple")
+                          (str gtl/default-perspective))
+           :on-change on-perspective-change
+           :class (stl/css :numeric-input)
+           :value (when (number? (:perspective values)) (:perspective values))}]]])
 
      (when (or (options :clip-content) (options :show-in-viewer))
        [:div {:class (stl/css :clip-show)}

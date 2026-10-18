@@ -194,3 +194,38 @@
       (is (str/includes? markup "root-0")
           "the text nodes must expose their $id as a class for the CSS to apply")
       (is (str/includes? markup "root-0-paragraph-set-0-paragraph-0")))))
+
+;; --- 3D rotation (Penpot Motion) -------------------------------------------
+
+(deftest a-tilted-layer-tilts-in-its-own-axes
+  (testing "rotateX and rotateY after its turn in the plane, its parent the perspective"
+    (let [pid  (uuid/next)
+          cid  (uuid/next)
+          c    (child cid pid
+                      :frame-id pid
+                      :selrect (grc/make-rect 50 50 100 100)
+                      :points (pts 50 50 100 100)
+                      :rotate-x 20
+                      :rotate-y 45
+                      :backface-hidden true)
+          b    (frame pid :shapes [cid] :perspective 800)
+          objs (objects b c)]
+      (is (= "rotateX(20deg) rotateY(45deg)" (css/get-css-value objs c :transform))
+          "a layer flat in the plane writes only its tilt")
+      (is (= "hidden" (css/get-css-value objs c :backface-visibility)))
+      (is (= "800px" (css/get-css-value objs b :perspective)))
+      (is (= "100px 100px" (css/get-css-value objs b :perspective-origin))
+          "the middle of the board")
+      (is (nil? (css/get-css-value objs c :perspective)) "a layer holding no tilt has none"))))
+
+(deftest a-flip-card-keeps-its-faces-in-3d
+  (testing "a tilted group whose faces hide their backs preserves 3D, unless it fades"
+    (let [gid   (uuid/next)
+          fid   (uuid/next)
+          bid   (uuid/next)
+          face  #(child %1 gid :backface-hidden true :rotate-y %2)
+          group (merge (child gid uuid/zero :type :group :shapes [fid bid]) {:rotate-y 180})
+          objs  (objects group (face fid nil) (face bid 180))]
+      (is (= "preserve-3d" (css/get-css-value objs group :transform-style)))
+      (is (nil? (css/get-css-value (assoc-in objs [gid :opacity] 0.5) (assoc group :opacity 0.5) :transform-style))
+          "an opacity would flatten it"))))

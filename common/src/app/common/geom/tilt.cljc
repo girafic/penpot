@@ -1,0 +1,325 @@
+;; This Source Code Form is subject to the terms of the Mozilla Public
+;; License, v. 2.0. If a copy of the MPL was not distributed with this
+;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
+;;
+;; Copyright (c) KALEIDOS SUBSIDIARY SL
+
+(ns app.common.geom.tilt
+  "The 3D rotation of layers (Penpot Motion): a layer tilts about its own
+  X and Y axes (`:rotate-x`, `:rotate-y`, degrees), seen with the
+  perspective of its board (`:perspective`, px). It is drawn, not kept in
+  its geometry: `:transform`, `:points` and `:selrect` stay flat.
+
+  As CSS draws `perspective(d) rotate(r) rotateX(a) rotateY(b)`: the tilt
+  turns the layer in its own axes, before its turn in the plane, the top
+  edge going back for a positive `:rotate-x`, the right edge for a
+  positive `:rotate-y`; a point `z` towards the viewer shows at
+  `vp + (p - vp) * d / (d - z)`, `vp` the centre of the board.
+
+  The tilt of a shape is a homography of the page (`tilt-matrix`), a
+  vector of 9 numbers by rows mapping `[x y 1]`. The layers in a tilted
+  group or board are drawn through its homography too, after their own
+  (`projection`): each tilted layer flattens what it holds, as CSS does
+  without `preserve-3d`. The WASM renderer does the same sums
+  (`render-wasm/src/math/tilt.rs`)."
+  (:require
+   [app.common.data.macros :as dm]
+   [app.common.geom.point :as gpt]
+   [app.common.geom.shapes.common :as gco]
+   [app.common.geom.shapes.transforms :as gtr]
+   [app.common.math :as mth]
+   [app.common.types.path.helpers :as path.helpers]
+   [app.common.uuid :as uuid]))
+
+(def default-perspective
+  "The distance of the viewer, px, of a board with no `:perspective`."
+  1000)
+
+(def min-perspective 100)
+(def max-perspective 100000)
+
+(def ^:private min-w
+  "The least depth factor a point shows at: a point nearer the viewer
+  (or behind) does not show."
+  0.01)
+
+(defn tilted?
+  "Whether `shape` tilts out of the plane."
+  [shape]
+  (or (not (mth/almost-zero? (or (:rotate-x shape) 0)))
+      (not (mth/almost-zero? (or (:rotate-y shape) 0)))))
+
+;; 4×4 matrices, by rows, turning column vectors [x y z 1]
+
+(defn- mul44
+  [a b]
+  (vec (for [r (range 4) c (range 4)]
+         (+ (* (nth a (* r 4)) (nth b c))
+            (* (nth a (+ (* r 4) 1)) (nth b (+ 4 c)))
+            (* (nth a (+ (* r 4) 2)) (nth b (+ 8 c)))
+            (* (nth a (+ (* r 4) 3)) (nth b (+ 12 c)))))))
+
+(defn- translate44
+  [x y z]
+  [1 0 0 x
+   0 1 0 y
+   0 0 1 z
+   0 0 0 1])
+
+(defn- rotate-x44
+  [deg]
+  (let [r (mth/radians deg)
+        c (mth/cos r)
+        s (mth/sin r)]
+    [1 0 0 0
+     0 c (- s) 0
+     0 s c 0
+     0 0 0 1]))
+
+(defn- rotate-y44
+  [deg]
+  (let [r (mth/radians deg)
+        c (mth/cos r)
+        s (mth/sin r)]
+    [c 0 s 0
+     0 1 0 0
+     (- s) 0 c 0
+     0 0 0 1]))
+
+(defn- perspective44
+  [d]
+  [1 0 0 0
+   0 1 0 0
+   0 0 1 0
+   0 0 (/ -1 d) 1])
+
+(defn- matrix->m44
+  "The plane matrix `m` (`gmt/matrix`) in space: depth stays."
+  [m]
+  [(dm/get-prop m :a) (dm/get-prop m :c) 0 (dm/get-prop m :e)
+   (dm/get-prop m :b) (dm/get-prop m :d) 0 (dm/get-prop m :f)
+   0 0 1 0
+   0 0 0 1])
+
+(defn- apply44
+  "`[x y z]` moved by the affine `m`."
+  [m [x y z]]
+  [(+ (* (nth m 0) x) (* (nth m 1) y) (* (nth m 2) z) (nth m 3))
+   (+ (* (nth m 4) x) (* (nth m 5) y) (* (nth m 6) z) (nth m 7))
+   (+ (* (nth m 8) x) (* (nth m 9) y) (* (nth m 10) z) (nth m 11))])
+
+(defn- restrict
+  "The homography `m` makes of the plane `z = 0`: its rows and columns of
+  x, y and w."
+  [m]
+  [(nth m 0) (nth m 1) (nth m 3)
+   (nth m 4) (nth m 5) (nth m 7)
+   (nth m 12) (nth m 13) (nth m 15)])
+
+;; homographies
+
+(defn mul
+  "The homography of `a` after `b`; either nil is no change."
+  [a b]
+  (cond
+    (nil? a) b
+    (nil? b) a
+    :else
+    (vec (for [r (range 3) c (range 3)]
+           (+ (* (nth a (* r 3)) (nth b c))
+              (* (nth a (+ (* r 3) 1)) (nth b (+ 3 c)))
+              (* (nth a (+ (* r 3) 2)) (nth b (+ 6 c))))))))
+
+(defn det
+  "The determinant of the homography `h`."
+  [h]
+  (let [[a b c d e f g h' i] h]
+    (- (+ (* a (- (* e i) (* f h')))
+          (* c (- (* d h') (* e g))))
+       (* b (- (* d i) (* f g))))))
+
+(defn project-point
+  "`point` through the homography `h`, nil where it reaches the viewer."
+  [h point]
+  (let [x (dm/get-prop point :x)
+        y (dm/get-prop point :y)
+        w (+ (* (nth h 6) x) (* (nth h 7) y) (nth h 8))]
+    (when (> w min-w)
+      (gpt/point (/ (+ (* (nth h 0) x) (* (nth h 1) y) (nth h 2)) w)
+                 (/ (+ (* (nth h 3) x) (* (nth h 4) y) (nth h 5)) w)))))
+
+;; layers
+
+(defn perspective-of
+  "How the tilted layers of the board of `shape` are seen: the distance
+  of the viewer (`:perspective` of the board, `default-perspective`
+  without) and the vanishing point, the centre of the board (that of
+  `shape` at the root of the page)."
+  [objects shape]
+  (let [board (get objects (:frame-id shape))]
+    (if (and (some? board)
+             (not= uuid/zero (:id board))
+             (= :frame (:type board)))
+      {:distance (or (:perspective board) default-perspective)
+       :vp       (gco/shape->center board)}
+      {:distance default-perspective
+       :vp       (gco/shape->center shape)})))
+
+(defn- rotation44
+  [rx ry]
+  (mul44 (rotate-x44 (or rx 0)) (rotate-y44 (or ry 0))))
+
+(defn- about44
+  "`m` around the point `[x y z]`."
+  [m [x y z]]
+  (mul44 (translate44 x y z) (mul44 m (translate44 (- x) (- y) (- z)))))
+
+(defn- box-point
+  "The point at the fractions `fx`, `fy` of the box of `shape` before it
+  turns."
+  [shape fx fy]
+  (let [sr (:selrect shape)]
+    [(+ (:x sr) (* (:width sr) fx)) (+ (:y sr) (* (:height sr) fy)) 0]))
+
+(defn lift
+  "How far the point at the fractions `fx`, `fy` of the box of `shape`
+  (before it turns) moves, `[dx dy dz]` (dz towards the viewer), when it
+  tilts by `rest-x`, `rest-y` around the middle: the place an animation
+  turns it from, around that point, so that its values at rest show it
+  as it rests."
+  [shape fx fy rest-x rest-y]
+  (let [o      (box-point shape fx fy)
+        center (box-point shape 0.5 0.5)
+        moved  (apply44 (about44 (rotation44 rest-x rest-y) center) o)]
+    (mapv - moved o)))
+
+(defn- tilt44
+  "The tilt of `shape` in the space of its box: around its middle, or,
+  while an animation plays it (`:tilt-pivot`, fractions of its box and
+  the tilt it rests at), around its pivot placed where it rests."
+  [shape]
+  (let [rotation (rotation44 (:rotate-x shape) (:rotate-y shape))]
+    (if-let [{:keys [x y rest-x rest-y]} (:tilt-pivot shape)]
+      (let [o      (box-point shape x y)
+            [dx dy dz] (lift shape x y rest-x rest-y)]
+        (mul44 (translate44 (+ (nth o 0) dx) (+ (nth o 1) dy) dz)
+               (mul44 rotation (translate44 (- (nth o 0)) (- (nth o 1)) 0))))
+      (about44 rotation (box-point shape 0.5 0.5)))))
+
+(defn seen-tilt-matrix
+  "The homography of the page `shape` is drawn through for its own tilt,
+  seen as `perspective` says (see `perspective-of`), nil when it does not
+  tilt."
+  [shape {:keys [distance vp]}]
+  (when (tilted? shape)
+    (let [vx (dm/get-prop vp :x)
+          vy (dm/get-prop vp :y)]
+      (restrict
+       (reduce mul44
+               [(about44 (perspective44 distance) [vx vy 0])
+                (matrix->m44 (gtr/transform-matrix shape))
+                (tilt44 shape)
+                (matrix->m44 (gtr/inverse-transform-matrix shape))])))))
+
+(defn tilt-matrix
+  "The homography of the page `shape` of `objects` is drawn through for
+  its own tilt, seen from its board (see `seen-tilt-matrix`)."
+  [objects shape]
+  (when (tilted? shape)
+    (seen-tilt-matrix shape (perspective-of objects shape))))
+
+(defn projection
+  "The homography of the page `shape` is drawn through: its own tilt,
+  then that of each group or board it is in, nil when none tilts."
+  [objects shape]
+  (loop [h      (tilt-matrix objects shape)
+         parent (get objects (:parent-id shape))]
+    (if (or (nil? parent) (= uuid/zero (:id parent)))
+      h
+      (recur (mul (tilt-matrix objects parent) h)
+             (get objects (:parent-id parent))))))
+
+(defn project-outline
+  "`points` of the flat `shape` as they show, tilted (see `projection`):
+  nil when nothing tilts it or one reaches the viewer."
+  [objects shape points]
+  (when-let [h (projection objects shape)]
+    (let [projected (mapv #(project-point h %) points)]
+      (when (every? some? projected)
+        projected))))
+
+(defn projected-points
+  "The corners of `shape` as they show, tilted (see `project-outline`)."
+  [objects shape]
+  (project-outline objects shape (:points shape)))
+
+(defn back-facing?
+  "Whether `shape` shows its back: what tilts it (see `projection`)
+  turns it over. A flip in the plane is no back."
+  [objects shape]
+  (boolean
+   (when-let [h (projection objects shape)]
+     (neg? (det h)))))
+
+;; outlines
+
+(def ^:private curve-steps 12)
+(def ^:private ellipse-steps 48)
+
+(defn- ellipse-polyline
+  [shape]
+  (let [{:keys [x y width height]} (:selrect shape)
+        rx  (/ width 2)
+        ry  (/ height 2)
+        cx  (+ x rx)
+        cy  (+ y ry)
+        mtx (gtr/transform-matrix shape)]
+    {:points (mapv (fn [i]
+                     (let [a (/ (* 2 mth/PI i) ellipse-steps)]
+                       (gpt/transform (gpt/point (+ cx (* rx (mth/cos a))) (+ cy (* ry (mth/sin a)))) mtx)))
+                   (range ellipse-steps))
+     :closed? true}))
+
+(defn- path-polylines
+  "The subpaths of the path `content` as polylines, their curves in
+  `curve-steps` lines."
+  [content]
+  (let [finish (fn [lines line] (cond-> lines (seq (:points line)) (conj line)))
+        [lines line]
+        (reduce
+         (fn [[lines line] {:keys [command params]}]
+           (let [pt (when (some? (:x params)) (gpt/point (:x params) (:y params)))]
+             (case command
+               :move-to    [(finish lines line) {:points [pt] :closed? false}]
+               :line-to    [lines (update line :points (fnil conj []) pt)]
+               :curve-to   (let [start (or (peek (:points line)) pt)
+                                 h1    (gpt/point (:c1x params) (:c1y params))
+                                 h2    (gpt/point (:c2x params) (:c2y params))]
+                             [lines (update line :points (fnil into [])
+                                            (map #(path.helpers/curve-values start pt h1 h2 (/ % curve-steps)))
+                                            (range 1 (inc curve-steps)))])
+               :close-path [lines (assoc line :closed? true)]
+               [lines line])))
+         [[] {:points [] :closed? false}]
+         (seq content))]
+    (finish lines line)))
+
+(defn outline-polylines
+  "The outline of `shape` as it lies flat, polylines of points of the
+  page (`{:points :closed?}`): the corners of its box, the points of an
+  ellipse, the subpaths of a path."
+  [shape]
+  (case (:type shape)
+    :circle [(ellipse-polyline shape)]
+    :path   (path-polylines (:content shape))
+    [{:points (vec (:points shape)) :closed? true}]))
+
+(defn projected-outline
+  "The outline of `shape` (see `outline-polylines`) as it shows, tilted:
+  nil when nothing tilts it or a point reaches the viewer."
+  [objects shape]
+  (when-let [h (projection objects shape)]
+    (let [lines (mapv (fn [line] (update line :points (fn [pts] (mapv #(project-point h %) pts))))
+                      (outline-polylines shape))]
+      (when (every? (fn [line] (every? some? (:points line))) lines)
+        lines))))

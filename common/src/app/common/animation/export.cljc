@@ -15,6 +15,7 @@
    [app.common.data.macros :as dm]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.modifiers :as ctm]
@@ -45,7 +46,9 @@
   a board and what is in it; and the masked groups in it with what holds
   them, up to the board, so that a masked group is a layer and what it
   holds too, which its mask keeps to it (an SVG `<mask>` or a Lottie
-  matte)."
+  matte); and what holds a layer that tilts or hides its back face (see
+  `app.common.geom.tilt`), up to the board, and a group or board that
+  does, so it is a layer and what it holds too, which its tilt tilts."
   [objects timeline]
   (let [board-id (:board-id timeline)
         tree     (tree-seq #(seq (dm/get-in objects [% :shapes]))
@@ -53,6 +56,14 @@
                            board-id)
         boards   (filterv #(board-inner-shadows? (get objects %)) tree)
         masked   (filterv #(true? (dm/get-in objects [% :masked-group])) tree)
+        tilted   (into []
+                       (comp (remove #{board-id})
+                             (filter #(let [shape (get objects %)]
+                                        (or (gtl/tilted? shape) (true? (:backface-hidden shape)))))
+                             (keep #(if (contains? #{:group :frame} (dm/get-in objects [% :type]))
+                                      %
+                                      (dm/get-in objects [% :parent-id]))))
+                       tree)
         up       (fn [id]
                    (->> (iterate #(dm/get-in objects [% :parent-id]) id)
                         (take-while #(and (some? %) (contains? objects %)))
@@ -62,7 +73,8 @@
     (-> (svg-holder-ids objects (svg-sized-ids objects timeline))
         (into boards)
         (into (comp (remove #{board-id}) (keep #(dm/get-in objects [% :parent-id]))) boards)
-        (into (mapcat up) masked))))
+        (into (mapcat up) masked)
+        (into (mapcat up) tilted))))
 
 (defn export-layer-ids
   "The layers of an SVG or Lottie export of `timeline` (with its

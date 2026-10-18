@@ -1058,6 +1058,7 @@ Board:
         type: "board";
         clipContent: boolean;
         showInViewMode: boolean;
+        perspective: number | null;
         grid?: GridLayout;
         flex?: FlexLayout;
         guides: Guide[];
@@ -1136,6 +1137,9 @@ Board:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
         layoutCell?: LayoutCellProperties;
@@ -1246,6 +1250,14 @@ Board:
         ```
 
         When true the board will be displayed in the view mode
+      perspective: |-
+        ```
+        perspective: number | null
+        ```
+
+        How far the viewer of the tilted layers of the board is, in px
+        (100 to 100000), as CSS `perspective`: the vanishing point is the
+        middle of the board. `null` is the default, 1000.
       grid: |-
         ```
         readonly grid?: GridLayout
@@ -1574,6 +1586,32 @@ Board:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       strokes: |-
         ```
         strokes: Stroke[]
@@ -2312,6 +2350,7 @@ VariantContainer:
         type: "board";
         clipContent: boolean;
         showInViewMode: boolean;
+        perspective: number | null;
         grid?: GridLayout;
         flex?: FlexLayout;
         guides: Guide[];
@@ -2391,6 +2430,9 @@ VariantContainer:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
         layoutCell?: LayoutCellProperties;
@@ -2500,6 +2542,14 @@ VariantContainer:
         ```
 
         When true the board will be displayed in the view mode
+      perspective: |-
+        ```
+        perspective: number | null
+        ```
+
+        How far the viewer of the tilted layers of the board is, in px
+        (100 to 100000), as CSS `perspective`: the vanishing point is the
+        middle of the board. `null` is the default, 1000.
       grid: |-
         ```
         readonly grid?: GridLayout
@@ -2832,6 +2882,32 @@ VariantContainer:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       strokes: |-
         ```
         strokes: Stroke[]
@@ -3633,6 +3709,9 @@ Boolean:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
         layoutCell?: LayoutCellProperties;
@@ -3995,6 +4074,32 @@ Boolean:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       strokes: |-
         ```
         strokes: Stroke[]
@@ -6965,6 +7070,9 @@ Ellipse:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
         layoutCell?: LayoutCellProperties;
@@ -7299,6 +7407,32 @@ Ellipse:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       strokes: |-
         ```
         strokes: Stroke[]
@@ -9593,6 +9727,9 @@ Group:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         fills: Fill[]
         | "mixed";
         strokes: Stroke[];
@@ -9940,6 +10077,32 @@ Group:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       fills: |-
         ```
         fills: Fill[] | "mixed"
@@ -10932,6 +11095,9 @@ Image:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
         layoutCell?: LayoutCellProperties;
@@ -11266,6 +11432,32 @@ Image:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       strokes: |-
         ```
         strokes: Stroke[]
@@ -14922,6 +15114,9 @@ Path:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
         layoutCell?: LayoutCellProperties;
@@ -15278,6 +15473,32 @@ Path:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       strokes: |-
         ```
         strokes: Stroke[]
@@ -16324,6 +16545,9 @@ Rectangle:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         strokes: Stroke[];
         layoutChild?: LayoutChildProperties;
         layoutCell?: LayoutCellProperties;
@@ -16658,6 +16882,32 @@ Rectangle:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       strokes: |-
         ```
         strokes: Stroke[]
@@ -20141,6 +20391,9 @@ ShapeBase:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         fills: Fill[]
         | "mixed";
         strokes: Stroke[];
@@ -20470,6 +20723,32 @@ ShapeBase:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       fills: |-
         ```
         fills: Fill[] | "mixed"
@@ -21328,6 +21607,9 @@ SvgRaw:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         fills: Fill[]
         | "mixed";
         strokes: Stroke[];
@@ -21651,6 +21933,32 @@ SvgRaw:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       fills: |-
         ```
         fills: Fill[] | "mixed"
@@ -22324,6 +22632,9 @@ Text:
         flipX: boolean;
         flipY: boolean;
         rotation: number;
+        rotateX: number;
+        rotateY: number;
+        backfaceHidden: boolean;
         fills: Fill[]
         | "mixed";
         strokes: Stroke[];
@@ -22665,6 +22976,32 @@ Text:
         ```
 
         The rotation in degrees of the shape with respect to its center.
+      rotateX: |-
+        ```
+        rotateX: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own horizontal axis:
+        a positive value tilts its top edge away from the viewer, as CSS
+        `rotateX()` does. The perspective is that of its board (see
+        `Board.perspective`). Penpot Motion; 0 is flat.
+      rotateY: |-
+        ```
+        rotateY: number
+        ```
+
+        The 3D rotation in degrees of the shape about its own vertical axis:
+        a positive value tilts its right edge away from the viewer, as CSS
+        `rotateY()` does. Penpot Motion; 0 is flat.
+      backfaceHidden: |-
+        ```
+        backfaceHidden: boolean
+        ```
+
+        When true the shape hides while its back faces the viewer, as CSS
+        `backface-visibility: hidden`: a card that flips shows its back layer
+        only. The back is that of the shape as its tilt and the tilt of the
+        groups and boards it is in turn it.
       fills: |-
         ```
         fills: Fill[] | "mixed"
@@ -28150,6 +28487,8 @@ AnimatableProperty:
         | "width"
         | "height"
         | "rotation"
+        | "rotateX"
+        | "rotateY"
         | "scaleX"
         | "scaleY"
         | "opacity"

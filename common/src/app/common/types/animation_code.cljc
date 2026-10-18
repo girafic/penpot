@@ -30,6 +30,8 @@
    :width "width"
    :height "height"
    :rotation "rotation"
+   :rotate-x "rotateX"
+   :rotate-y "rotateY"
    :scale-x "scaleX"
    :scale-y "scaleY"
    :opacity "opacity"
@@ -69,7 +71,7 @@
 (def property-order
   "The animatable properties in the order of the rows of the dock, which
   the code follows."
-  [:x :y :width :height :scale-x :scale-y :rotation
+  [:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y
    :opacity :r1 :r2 :r3 :r4
    :fill-color :fill-opacity
    :stroke-color :stroke-opacity :stroke-width
@@ -343,6 +345,8 @@
   [["x" #{:x} :translate-x]
    ["y" #{:y} :translate-y]
    ["rotate" #{:rotation} :rotate]
+   ["rotateX" #{:rotate-x} :rotate-x]
+   ["rotateY" #{:rotate-y} :rotate-y]
    ["scaleX" #{:width :scale-x} :scale-x]
    ["scaleY" #{:height :scale-y} :scale-y]
    ["opacity" #{:opacity} :opacity]
@@ -443,10 +447,11 @@
 (defn- frame-at
   "The frame values (see `acss/frame-values`) of `layer` at `time` of the
   played `timeline`."
-  [timeline objects {:keys [id shape]} time]
+  [timeline objects {:keys [id shape origin]} time]
   (acss/frame-values shape
                      (get (cta/values-at timeline time) id {})
-                     (cta/position-origin timeline objects id)))
+                     (cta/position-origin timeline objects id)
+                     origin))
 
 (defn- repeat-of
   "The repeat options of a clock: none playing once, forever in a loop,
@@ -564,6 +569,19 @@
        "          `translate(${withUnit(x, \"px\")}, ${withUnit(y, \"px\")}) "
        "rotate(${withUnit(rotate, \"deg\")}) scale(${scaleX}, ${scaleY})`}"))
 
+(defn- tilt-template
+  "`transform-template` of a layer that tilts (see `app.common.geom.tilt`):
+  the tilt in its own axes, after its turn, before its scale, lifted to
+  its pivot by `lift` (`[dx dy dz]`, see `acss/frame-values`)."
+  [lift]
+  (str "transformTemplate={({ x = 0, y = 0, rotate = 0, rotateX = 0, rotateY = 0, scaleX = 1, scaleY = 1 }) =>\n"
+       "          `translate(${withUnit(x, \"px\")}, ${withUnit(y, \"px\")}) "
+       "rotate(${withUnit(rotate, \"deg\")}) "
+       (when-let [[dx dy dz] lift]
+         (str "translate3d(" (react-number dx) "px, " (react-number dy) "px, " (react-number dz) "px) "))
+       "rotateX(${withUnit(rotateX, \"deg\")}) rotateY(${withUnit(rotateY, \"deg\")}) "
+       "scale(${scaleX}, ${scaleY})`}"))
+
 (def ^:private with-unit
   "The helper of `transform-template`."
   "const withUnit = (value, unit) => (typeof value === \"number\" ? `${value}${unit}` : value);")
@@ -634,7 +652,8 @@
         names  (into #{} (map :name) values)
         origin (:origin layer)
         units  (when (:units layer) (react-units layer objects))
-        template? (and (contains? names "rotate") (contains? names "scaleX"))]
+        tilt?  (or (contains? names "rotateX") (contains? names "rotateY"))
+        template? (or tilt? (and (contains? names "rotate") (contains? names "scaleX")))]
     {:hold? (or (some :hold? values) (:hold? units))
      :template? template?
      :code
@@ -643,7 +662,11 @@
           "        className=\"" (class-name (:shape layer)) "\"\n"
           "        style={{ originX: " (react-number (:x origin)) ", originY: " (react-number (:y origin)) " }}\n"
           (when template?
-            (str "        " transform-template "\n"))
+            (str "        "
+                 (if tilt?
+                   (tilt-template (:lift (frame-at played objects layer 0)))
+                   transform-template)
+                 "\n"))
           (react-props values "        ")
           (if (some? units)
             (str "      >\n" (:code units) "      </motion.div>")

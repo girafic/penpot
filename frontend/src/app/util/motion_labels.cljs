@@ -35,6 +35,8 @@
       :scale-x "Scale X"
       :scale-y "Scale Y"
       :rotation "Rotation"
+      :rotate-x "Rotation X"
+      :rotate-y "Rotation Y"
       :r1 (tr "workspace.options.radius-top-left")
       :r2 (tr "workspace.options.radius-top-right")
       :r3 (tr "workspace.options.radius-bottom-right")

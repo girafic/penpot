@@ -1576,10 +1576,40 @@
                 :render-shape-pixels (fn [_ _ _] (js/Uint8Array. 0))}]
     (dea/render-shape-at-rest objects tid [] {:bridge bridge})
     (let [[_ shape props] (first @calls)]
-      (t/is (= [:opacity :text-units] props))
+      (t/is (= [:opacity :text-units :rotate-x] props))
       (t/is (= [] (:text-units shape)) "whatever the canvas posed"))))
 
+(t/deftest a-tilted-layer-is-shot-flat
+  ;; its layer in the export tilts it (see `app.common.geom.tilt`)
+  (let [{:keys [objects tid]} (text-board)
+        objects (update objects tid assoc :rotate-y 60 :backface-hidden true)
+        calls   (atom [])
+        bridge  {:use-shape (fn [_])
+                 :set-shape-hidden (fn [_])
+                 :clean-modifiers (fn [])
+                 :apply-shape-properties (fn [shape props] (log calls :props shape (vec props)))
+                 :render-shape-pixels (fn [_ _ _] (js/Uint8Array. 0))}]
+    (dea/render-shape-at-rest objects tid [] {:bridge bridge})
+    (let [[[_ shot] [_ after props]] @calls]
+      (t/is (= [0 0 false] ((juxt :rotate-x :rotate-y :backface-hidden) shot)))
+      (t/is (= 60 (:rotate-y after)) "and tilted again")
+      (t/is (some #{:rotate-x} props)))))
+
 ;; AUDIO IN THE EXPORT PANEL
+
+(t/deftest a-tilt-says-how-the-formats-play-it
+  (let [{:keys [objects bid cid]} (test-objects)
+        tl      (-> (cta/make-timeline {:board-id bid :duration 1000})
+                    (cta/add-keyframe cid {:time 0 :property :x :value 10})
+                    (cta/add-keyframe cid {:time 1000 :property :x :value 50}))
+        formats (fn [objects tl kind]
+                  (into #{} (keep (fn [[format kinds]] (when (some #{kind} kinds) format)))
+                        (dea/export-issues objects tl)))]
+    (t/is (empty? (formats objects tl :lottie/three-d)) "nothing tilts, nothing to say")
+    (t/is (= #{:lottie :dotlottie} (formats (assoc-in objects [cid :rotate-y] 30) tl :lottie/three-d)))
+    (t/is (= #{:svg} (formats (assoc-in objects [cid :rotate-y] 30) tl :svg/three-d)))
+    (t/is (= #{:svg} (formats objects (cta/add-keyframe tl cid {:time 500 :property :rotate-x :value 20}) :svg/three-d))
+          "a tilt that plays")))
 
 (t/deftest formats-without-sound-say-so
   (let [{:keys [objects bid]} (test-objects)

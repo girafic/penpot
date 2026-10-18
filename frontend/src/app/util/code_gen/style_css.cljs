@@ -74,6 +74,10 @@ body {
    :width
    :height
    :transform
+   :perspective
+   :perspective-origin
+   :transform-style
+   :backface-visibility
    :background
    :border
    :border-block-start-width

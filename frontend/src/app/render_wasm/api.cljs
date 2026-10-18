@@ -1126,6 +1126,15 @@
   [opacity]
   (h/call wasm/internal-module "_set_shape_opacity" (or opacity 1)))
 
+(defn set-shape-tilt
+  "Tilt the current shape as `shape` does (see `props/set-shape-tilt`)."
+  [shape]
+  (props/set-shape-tilt shape))
+
+(defn set-shape-perspective
+  [perspective]
+  (props/set-shape-perspective perspective))
+
 (defn set-shape-trim
   "Draw the strokes only from `start` to `end` of the outline, moved along
   by `offset` (fractions of it), see `cta/trim-properties`."

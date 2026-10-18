@@ -384,6 +384,17 @@
                           (cta/add-keyframe (thi/id :a) {:time 0 :property :opacity :value 0 :interpolation :step})
                           (cta/add-keyframe (thi/id :a) {:time 600 :property :opacity :value 1}))))))
 
+(t/deftest react-tilts-in-the-axes-of-the-layer
+  (let [react (react-of #(-> %
+                             (cta/add-keyframe (thi/id :a) {:time 0 :property :rotate-y :value 0})
+                             (cta/add-keyframe (thi/id :a) {:time 400 :property :rotate-y :value 180})))]
+    (t/is (cstr/includes? react "animate={{ rotateY: [0, 180, 180] }}"))
+    (t/is (cstr/includes? react (str "rotate(${withUnit(rotate, \"deg\")}) "
+                                     "rotateX(${withUnit(rotateX, \"deg\")}) rotateY(${withUnit(rotateY, \"deg\")}) "
+                                     "scale(${scaleX}, ${scaleY})"))
+          "the tilt between its turn and its scale")
+    (t/is (cstr/includes? react "const withUnit"))))
+
 (t/deftest react-repeats-as-the-clock-plays
   (let [move   #(-> %
                     (cta/add-keyframe (thi/id :a) {:time 0 :property :x :value 20})

@@ -34,7 +34,9 @@
    :no-audio        i/volume-off
    :copy-clock      i/component-copy
    :gif/alpha       i/rgba
-   :mp4/alpha       i/rgba})
+   :mp4/alpha       i/rgba
+   :lottie/three-d  i/rotation
+   :svg/three-d     i/rotation})
 
 (defn issue-texts
   "What the list says of an issue `kind` (see `dea/export-issues`), in the

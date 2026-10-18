@@ -172,3 +172,11 @@
   margin: 0;
   color: var(--color-foreground-secondary);
 }
+
+// PDF and SVG draw tilted layers flat (Penpot Motion)
+.flat-3d-hint {
+  @include deprecated.body-small-typography;
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}

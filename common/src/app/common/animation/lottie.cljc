@@ -20,9 +20,12 @@
    [app.common.animation.export :as aexp]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.geom.shapes :as gsh]
    [app.common.geom.shapes.corners :as gco]
+   [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.common.types.animation-follow :as ctaf]
@@ -972,7 +975,8 @@
      :w (mth/round width)
      :h (mth/round height)
      :nm (or (:name timeline) "Penpot Animation")
-     :ddd 0
+     ;; 3D when a layer tilts (see `lottie-tilted-layers`)
+     :ddd (if (some #(= 1 (:ddd %)) (concat layers (mapcat :layers assets))) 1 0)
      :assets (vec assets)
      :layers (vec layers)}))
 
@@ -995,13 +999,16 @@
 (defn- lottie-numbered
   "`layers` numbered (`:ind`), each that follows the board it is in
   (`::follow`) a child of the null layer that moves it (`::null`, see
-  `lottie-follow-null`)."
+  `lottie-follow-null`), a tilted one (`::tilt-parent`) of the null that
+  turns it in the plane (`::tilt-null`, see `lottie-tilted-layers`)."
   [layers]
   (let [numbered (into [] (map-indexed (fn [i layer] (assoc layer :ind (inc i)))) layers)
-        nulls    (into {} (keep #(when-let [id (::null %)] [id (:ind %)])) numbered)]
+        nulls    (into {} (keep #(when-let [id (::null %)] [id (:ind %)])) numbered)
+        turns    (into {} (keep #(when-let [id (::tilt-null %)] [id (:ind %)])) numbered)]
     (mapv (fn [layer]
-            (cond-> (dissoc layer ::null ::follow)
-              (contains? nulls (::follow layer)) (assoc :parent (get nulls (::follow layer)))))
+            (cond-> (dissoc layer ::null ::follow ::tilt-null ::tilt-parent)
+              (contains? nulls (::follow layer)) (assoc :parent (get nulls (::follow layer)))
+              (contains? turns (::tilt-parent layer)) (assoc :parent (get turns (::tilt-parent layer)))))
           numbered)))
 
 (defn- lottie-follow-null
@@ -1866,6 +1873,129 @@
     (contains? (:leaders ctx) (:id shape))
     (assoc ::rest-ks (lottie-rest-ks ctx shape))))
 
+;; 3D (Penpot Motion, see `app.common.geom.tilt`)
+
+(declare lottie-shifted)
+
+(defn- lottie-tilted?
+  "Whether the layer of `shape` playing `track` tilts out of the plane or
+  hides its back face, at rest or as it plays."
+  [shape track]
+  (or (gtl/tilted? shape)
+      (true? (:backface-hidden shape))
+      (some #(contains? #{:rotate-x :rotate-y} (:property %)) (:keyframes track))))
+
+(defn- lottie-posed
+  "`objects` of `ctx` at `t` ms, the shapes of `ids` posed as its
+  timeline plays them (see `ctaf/timeline->modif-tree`)."
+  [{:keys [timeline objects]} ids t]
+  (let [tree (ctaf/timeline->modif-tree (update timeline :tracks select-keys ids) objects t)]
+    (reduce (fn [objects id]
+              (if-let [mods (dm/get-in tree [id :modifiers])]
+                (update objects id #(-> % (gsh/transform-shape mods) (ctm/apply-structure-modifiers mods)))
+                objects))
+            objects
+            ids)))
+
+(defn- lottie-backface-opacity
+  "The opacity `o` of the layer of `shape` playing `track`, none while it
+  shows its back if it hides it (see `gtl/back-facing?`, which Lottie can
+  not), at each frame it turns: held."
+  [{:keys [objects duration] :as ctx} shape track o]
+  (if-not (true? (:backface-hidden shape))
+    o
+    (let [id     (:id shape)
+          ids    (cons id (cfh/get-parent-ids objects id))
+          step   (/ 1000.0 lottie-fps)
+          frames (conj (vec (range 0 duration step)) duration)
+          back   (mapv (fn [t]
+                         (let [posed (lottie-posed ctx ids t)]
+                           (gtl/back-facing? posed (get posed id))))
+                       frames)]
+      (if (not-any? true? back)
+        o
+        (let [values (acss/shape-values {:tracks {id track}} id)
+              rest   (or (:opacity shape) 1)
+              at     (fn [t back?] (if back? 0 (* 100.0 (get (values t) :opacity rest))))
+              stops  (map (fn [t back?] [t (at t back?)]) frames back)
+              ;; each frame while its opacity plays, else where it turns
+              stops  (if (= 1 (:a o))
+                       stops
+                       (keep-indexed (fn [i [_ v :as stop]]
+                                       (when (or (zero? i) (not= v (second (nth stops (dec i)))))
+                                         stop))
+                                     stops))]
+          {:a 1 :k (mapv (fn [[t v]] {:t (ms->frames t) :s [v] :h 1}) stops)})))))
+
+(defn- lottie-tilted-layers
+  "The layers of the layer `layer` of `shape` playing `track`, which tilts
+  (see `lottie-tilted?`): the layer in 3D, tilted in its own axes (`rx`,
+  `ry`, the other way round from CSS, and again along an axis its drawing
+  is flipped on), its pivot lifted to where its tilt at rest takes it
+  (see `gtl/lift`); and, when it turns in the plane, a 3D null layer
+  turning it (`rz`), whose child it is: Lottie turns a layer in the plane
+  before it tilts it. A layer whose drawing holds its turn at rest (an
+  image or a precomp, see `lottie-holder-ks`) turns that back, so its
+  tilt is in its own axes. Its back face hidden by its opacity (see
+  `lottie-backface-opacity`). `[layer]` or `[layer null]`, the null with
+  what the layer follows (`::follow`)."
+  [ctx shape track layer]
+  (let [ks       (:ks layer)
+        by-prop  (group-by :property (:keyframes track))
+        base-r   (or (:rotation shape) 0)
+        baked    (if (= 4 (:ty layer)) 0 base-r)
+        fx       (if (:flip-x shape) -1 1)
+        fy       (if (:flip-y shape) -1 1)
+        rest-x   (or (:rotate-x shape) 0)
+        rest-y   (or (:rotate-y shape) 0)
+        {px :x py :y} (cta/track-origin track)
+        [lx ly lz]    (gtl/lift shape px py rest-x rest-y)
+        r        (or (:r ks) {:a 0 :k 0})
+        turns?   (or (= 1 (:a r)) (not (mth/almost-zero? (:k r))) (not (mth/almost-zero? baked)))
+        tilt     {:rx (lottie-prop-1d (by-prop :rotate-x) #(* -1 fy %) (* -1 fy rest-x))
+                  :ry (lottie-prop-1d (by-prop :rotate-y) #(* -1 fx %) (* -1 fx rest-y))
+                  :rz {:a 0 :k (- baked)}
+                  :or {:a 0 :k [0 0 0]}}
+        lift?    (not-every? mth/almost-zero? [lx ly lz])
+        o        (lottie-backface-opacity ctx shape track (:o ks))]
+    (if turns?
+      (let [null  {:ddd 1
+                   :ty 3
+                   :nm (str (or (:name shape) "layer") " turn")
+                   :sr 1
+                   :ks {:o {:a 0 :k 100}
+                        :p (:p ks)
+                        :a {:a 0 :k [0 0 0]}
+                        :s {:a 0 :k [100 100 100]}
+                        :rx {:a 0 :k 0}
+                        :ry {:a 0 :k 0}
+                        :rz (lottie-shifted r baked)
+                        :or {:a 0 :k [0 0 0]}}
+                   :ao 0
+                   :ip 0
+                   :op (ms->frames (:duration ctx))
+                   :st 0
+                   :bm 0
+                   ::tilt-null (:id shape)}
+            child (-> layer
+                      (assoc :ddd 1 ::tilt-parent (:id shape))
+                      (update :ks #(-> (dissoc % :r)
+                                       (merge tilt)
+                                       (assoc :o o
+                                              :p {:a 0 :k [(* fx lx) (* fy ly) (- lz)]}))))]
+        [child null])
+      [(-> layer
+           (assoc :ddd 1)
+           (update :ks #(-> (dissoc % :r)
+                            (merge tilt)
+                            (assoc :o o)
+                            (cond-> lift?
+                              (update :p (fn [p]
+                                           (-> p
+                                               (update :x lottie-shifted (* fx lx))
+                                               (update :y lottie-shifted (* fy ly))
+                                               (assoc :z {:a 0 :k (- lz)}))))))))])))
+
 (defn- lottie-node-layers
   "The Lottie layers of `nodes` (see `layer-nodes`), the top-most first,
   each that follows the board it is in as it resizes (`:follow` of
@@ -1896,11 +2026,18 @@
                                     (let [ef (filterv #(not= 25 (:ty %)) (:ef layer))]
                                       (if (seq ef) (assoc layer :ef ef) (dissoc layer :ef)))
                                     layer)
-                          layers  (if (and (seq shadows) (lottie-see-through? layer))
+                          layers  (cond
+                                    (and (seq shadows) (lottie-see-through? layer))
                                     [(lottie-faded-layers ctx shape layer shadows)]
+
+                                    (lottie-tilted? shape track)
+                                    (into (lottie-tilted-layers ctx shape track layer) shadows)
+
+                                    :else
                                     (into [layer] shadows))]
                       (if-let [stops (get (:follow ctx) id)]
-                        (conj (mapv #(assoc % ::follow id) layers) (lottie-follow-null ctx shape stops))
+                        (conj (mapv #(cond-> % (nil? (::tilt-parent %)) (assoc ::follow id)) layers)
+                              (lottie-follow-null ctx shape stops))
                         layers)))))
         (rseq (vec nodes))))
 

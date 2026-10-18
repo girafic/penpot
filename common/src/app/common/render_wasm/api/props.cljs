@@ -211,6 +211,36 @@
     (h/call wasm/internal-module "stringToUTF8" content offset size)
     (h/call wasm/internal-module "_set_shape_svg_raw_content")))
 
+(defn tilt-props?
+  "Whether `shape` tilts out of the plane, hides its back face or (a
+  board) sees its tilted layers from its own distance (see
+  `app.common.geom.tilt`)."
+  [shape]
+  (or (some? (:rotate-x shape))
+      (some? (:rotate-y shape))
+      (true? (:backface-hidden shape))
+      (some? (:perspective shape))
+      (some? (:tilt-pivot shape))))
+
+(defn set-shape-tilt
+  "Tilt the current shape as `shape` does: its `:rotate-x`, `:rotate-y`
+  and `:backface-hidden`, around its middle, or, while an animation plays
+  it, around the pivot of `:tilt-pivot` placed where it rests (see
+  `app.common.geom.tilt`)."
+  [shape]
+  (let [rx (or (:rotate-x shape) 0)
+        ry (or (:rotate-y shape) 0)
+        {:keys [x y rest-x rest-y]} (:tilt-pivot shape)]
+    (h/call wasm/internal-module "_set_shape_tilt"
+            rx ry (or x 0.5) (or y 0.5) (or rest-x rx) (or rest-y ry)
+            (true? (:backface-hidden shape)))))
+
+(defn set-shape-perspective
+  "How far the viewer of the tilted layers of the current board is, px;
+  nil is the default."
+  [perspective]
+  (h/call wasm/internal-module "_set_shape_perspective" (or perspective 0)))
+
 (defn set-shape-text-units
   "Pose the units of the current text one by one, as a split animation of
   Penpot Motion moves them (see `app.common.render-wasm.serializers.text-units`);

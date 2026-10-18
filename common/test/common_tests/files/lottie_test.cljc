@@ -566,3 +566,63 @@
             [bx by] (centre-at result (named name) t)]
         (t/is (and (mth/close? ax bx 1) (mth/close? ay by 1))
               (str name " at " t ": " [ax ay] " " [bx by]))))))
+
+;; --- 3D layers (Penpot Motion)
+
+(defn- ks-3d
+  [& {:as more}]
+  (merge (dissoc rest-ks :r)
+         {:p (static [40 25 0]) :a (static [40 25 0])
+          :rx (static 0) :ry (static 0) :rz (static 0) :or (static [0 0 0])}
+         more))
+
+(t/deftest a-3d-layer-tilts-the-other-way-round
+  (let [result (lottie/lottie->shapes
+                (document [(layer 1 "Card" [(rect-group [20 10 40 30] [0 0 1 1])]
+                                  :ddd 1 :ks (ks-3d :rx (static 30) :ry (anim (kf 0 0) (kf 30 -90))))]
+                          :ddd 1)
+                {:x 0 :y 0})
+        card   (shape-named result "Card")]
+    (t/is (= -30 (norm (:rotate-x card))) "Lottie turns X the other way round")
+    (t/is (nil? (:rotate-y card)) "a tilt that plays counts from flat")
+    (t/is (close-pairs? [[0 0] [1000 90]] (keyframes-of result card :rotate-y)))
+    (t/is (empty? (:skipped result)) "nothing a board can not show")))
+
+(t/deftest a-3d-layer-with-depth-is-reported
+  (let [result (lottie/lottie->shapes
+                (document [(layer 1 "Deep" [(rect-group [20 10 40 30] [0 0 1 1])]
+                                  :ddd 1 :ks (ks-3d :p (static [40 25 300]) :ry (static 20)))]
+                          :ddd 1)
+                {:x 0 :y 0})]
+    (t/is (= {:three-d 1} (:skipped result)))))
+
+(t/deftest a-straight-camera-is-the-perspective-of-the-board
+  (let [camera (fn [z] {:ty 13 :ind 2 :nm "Camera" :pe (static 800)
+                        :ks {:p (static [100 50 z]) :a (static [100 50 0]) :or (static [0 0 0])
+                             :rx (static 0) :ry (static 0) :rz (static 0) :o (static 100)}
+                        :ip 0 :op 60 :st 0})
+        doc    #(document [(layer 1 "Card" [(rect-group [20 10 40 30] [0 0 1 1])]
+                                  :ddd 1 :ks (ks-3d :ry (static 20)))
+                           (camera %)]
+                          :ddd 1)
+        [board] (:shapes (lottie/lottie->shapes (doc -800) {:x 0 :y 0}))]
+    (t/is (= 800 (norm (:perspective board))))
+    (t/is (empty? (:skipped (lottie/lottie->shapes (doc -800) {:x 0 :y 0}))))
+    (t/is (= {:camera 1} (:skipped (lottie/lottie->shapes (doc -300) {:x 0 :y 0})))
+          "a camera elsewhere is none")))
+
+(t/deftest a-tilt-goes-to-lottie-and-back
+  (let [board  (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bid    (:id board)
+        card   (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 200 :height 100
+                                     :fills [{:fill-color "#2e7d6b" :fill-opacity 1}]})
+                   (assoc :parent-id bid :frame-id bid :name "Card"))
+        sid    (:id card)
+        tl     (-> (cta/make-timeline {:board-id bid :duration 1000})
+                   (cta/add-keyframe sid {:time 0 :property :rotate-y :value 0})
+                   (cta/add-keyframe sid {:time 1000 :property :rotate-y :value 180}))
+        doc    (alottie/timeline->lottie tl {bid (assoc board :shapes [sid]) sid card})
+        result (lottie/lottie->shapes (walk/keywordize-keys doc) {:x 0 :y 0})
+        back   (shape-named result "Card")]
+    (t/is (some? back))
+    (t/is (close-pairs? [[0 0] [1000 180]] (keyframes-of result back :rotate-y)))))

@@ -499,6 +499,7 @@ pub extern "C" fn set_shape_selrect(left: f32, top: f32, right: f32, bottom: f32
     with_current_shape_mut!(state, |shape: &mut Shape| {
         shape.set_selrect(left, top, right, bottom);
     });
+    invalidate_current_tilted_descendants();
     Ok(())
 }
 
@@ -533,6 +534,7 @@ pub extern "C" fn set_shape_transform(
     with_current_shape_mut!(state, |shape: &mut Shape| {
         shape.set_transform(a, b, c, d, e, f);
     });
+    invalidate_current_tilted_descendants();
     Ok(())
 }
 
@@ -621,6 +623,61 @@ pub extern "C" fn set_shape_opacity(opacity: f32) -> Result<()> {
         shape.set_opacity(opacity);
     });
     Ok(())
+}
+
+/// Tilt the current shape out of the plane (Penpot Motion, see
+/// `math::tilt`): `rx`, `ry` degrees about its own axes, around the point at
+/// the fractions `px`, `py` of its box placed where the tilt `rest_rx`,
+/// `rest_ry` takes it (the middle and the tilt itself at rest).
+#[no_mangle]
+#[wasm_error]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn set_shape_tilt(
+    rx: f32,
+    ry: f32,
+    px: f32,
+    py: f32,
+    rest_rx: f32,
+    rest_ry: f32,
+    backface_hidden: bool,
+) -> Result<()> {
+    let tilt = math::tilt::Tilt {
+        rotate_x: rx,
+        rotate_y: ry,
+        pivot: (px, py),
+        rest: (rest_rx, rest_ry),
+    };
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        shape.set_tilt(Some(tilt), backface_hidden);
+    });
+    if !tilt.is_flat() || backface_hidden {
+        with_state!(state, {
+            state.shapes.mark_tilts();
+        });
+    }
+    Ok(())
+}
+
+/// How far the viewer of the tilted layers of the current board is, px; 0 is
+/// the default.
+#[no_mangle]
+#[wasm_error]
+pub extern "C" fn set_shape_perspective(distance: f32) -> Result<()> {
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        shape.set_perspective(Some(distance));
+    });
+    invalidate_current_tilted_descendants();
+    Ok(())
+}
+
+/// The tilted layers of the current board are seen from its middle: they
+/// show elsewhere when it changes.
+fn invalidate_current_tilted_descendants() {
+    with_state!(state, {
+        if let Some(id) = state.current_id {
+            state.shapes.invalidate_tilted_descendants(&id);
+        }
+    });
 }
 
 #[no_mangle]

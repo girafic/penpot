@@ -53,6 +53,7 @@ pub use text::*;
 pub use text_units::TextUnits;
 pub use transform::*;
 
+use crate::math::tilt::{self, Tilt};
 use crate::math::{self, Bounds, Matrix, Point};
 
 use crate::state::ShapesPoolRef;
@@ -211,6 +212,13 @@ pub struct Shape {
     /// The units of a text that a split animation poses one by one, see
     /// `text_units`.
     pub text_units: Option<TextUnits>,
+    /// The 3D rotation of the layer (Penpot Motion), see `math::tilt`.
+    pub tilt: Option<Tilt>,
+    /// Hide the layer while its back faces the viewer.
+    pub backface_hidden: bool,
+    /// How far the viewer of the tilted layers of this board is, px; `None`
+    /// is `math::tilt::DEFAULT_PERSPECTIVE`.
+    pub perspective: Option<f32>,
 }
 
 // Returns all ancestor shapes of this shape, traversing up the parent hierarchy
@@ -317,6 +325,9 @@ impl Shape {
             deferred_batch_strokes: None,
             trim: None,
             text_units: None,
+            tilt: None,
+            backface_hidden: false,
+            perspective: None,
         }
     }
 
@@ -471,6 +482,52 @@ impl Shape {
     pub fn set_text_units(&mut self, units: Option<TextUnits>) {
         self.text_units = units;
         self.invalidate_extrect();
+    }
+
+    /// Tilt the layer out of the plane (see `math::tilt`); a flat tilt is
+    /// none. Its extrect is that of the tilted layer.
+    pub fn set_tilt(&mut self, tilt: Option<Tilt>, backface_hidden: bool) {
+        self.tilt = tilt.filter(|t| !t.is_flat());
+        self.backface_hidden = backface_hidden;
+        self.invalidate_extrect();
+    }
+
+    /// How far the viewer of the tilted layers of this board is, px; `None`
+    /// is the default.
+    pub fn set_perspective(&mut self, distance: Option<f32>) {
+        self.perspective = distance.filter(|d| *d > 0.0);
+    }
+
+    pub fn is_tilted(&self) -> bool {
+        self.tilt.is_some()
+    }
+
+    /// The distance of the viewer and the vanishing point the tilt of this
+    /// layer is seen with: those of its board (its middle), the default
+    /// around its own middle at the root.
+    pub fn perspective_of(&self, shapes_pool: ShapesPoolRef) -> (f32, Point) {
+        let mut parent_id = self.parent_id;
+        while let Some(id) = parent_id.filter(|id| !id.is_nil()) {
+            let Some(parent) = shapes_pool.get(&id) else {
+                break;
+            };
+            if matches!(parent.shape_type, Type::Frame(_)) {
+                return (
+                    parent.perspective.unwrap_or(tilt::DEFAULT_PERSPECTIVE),
+                    parent.center(),
+                );
+            }
+            parent_id = parent.parent_id;
+        }
+        (tilt::DEFAULT_PERSPECTIVE, self.center())
+    }
+
+    /// The homography of the page this layer is drawn through for its own
+    /// tilt (see `math::tilt`), `None` when flat.
+    pub fn tilt_matrix(&self, shapes_pool: ShapesPoolRef) -> Option<Matrix> {
+        let t = self.tilt.as_ref()?;
+        let (distance, vp) = self.perspective_of(shapes_pool);
+        tilt::tilt_matrix(&self.selrect, &self.centered_transform(), t, distance, vp)
     }
 
     pub fn set_vertical_align(&mut self, align: VerticalAlign) {
@@ -1294,7 +1351,11 @@ impl Shape {
         bounds = self.apply_children_bounds(bounds, shapes_pool, scale);
         bounds = self.apply_children_blur(bounds, shapes_pool);
 
-        bounds.to_rect()
+        // A tilted layer shows what it draws, and what it holds, tilted.
+        let rect = bounds.to_rect();
+        self.tilt_matrix(shapes_pool)
+            .and_then(|h| tilt::project_rect(&h, &rect))
+            .unwrap_or(rect)
     }
 
     pub fn left_top(&self) -> Point {
@@ -1951,7 +2012,7 @@ impl Shape {
 
         // Cannot flatten if it has visual effects that affect children:
 
-        if self.clip_content {
+        if self.clip_content || self.tilt.is_some() {
             return false;
         }
 

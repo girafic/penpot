@@ -30,6 +30,7 @@ pub use surfaces::{SurfaceId, Surfaces};
 use crate::error::{Error, Result};
 use crate::globals::get_text_editor_state;
 use crate::math;
+use crate::math::tilt;
 use crate::shapes::{
     all_with_ancestors, modifier_changes_text_layout, radius_to_sigma, Blur, BlurType, Corners,
     Fill, MaskMode, Shadow, Shape, SolidColor, Stroke, StrokeKind, Type,
@@ -148,23 +149,32 @@ impl NodeRenderState {
         element: &Shape,
         offset: Option<(f32, f32)>,
         clip_inset: Option<f32>,
+        projection: Option<&Matrix>,
     ) -> Option<ClipStack> {
         if self.id.is_nil() {
             return self.clip_bounds.clone();
         }
 
-        Self::append_child_clip(element, self.clip_bounds.clone(), offset, clip_inset)
+        Self::append_child_clip(
+            element,
+            self.clip_bounds.clone(),
+            offset,
+            clip_inset,
+            projection,
+        )
     }
 
     /// Appends `element`'s own clip to `clip_bounds`, for walks that carry a
     /// bare [`ClipStack`] instead of a [`NodeRenderState`] (the drop-shadow
     /// silhouette recursion). Returns the stack untouched when `element` does
-    /// not clip its content.
+    /// not clip its content. `projection` is the tilt `element` is drawn
+    /// through (see `RenderState::tilt_projection`): it clips in that plane.
     fn append_child_clip(
         element: &Shape,
         clip_bounds: Option<ClipStack>,
         offset: Option<(f32, f32)>,
         clip_inset: Option<f32>,
+        projection: Option<&Matrix>,
     ) -> Option<ClipStack> {
         if !element.clip() {
             return clip_bounds;
@@ -181,6 +191,9 @@ impl NodeRenderState {
         let mut transform = element.transform;
         transform.post_translate(bounds.center());
         transform.pre_translate(-bounds.center());
+        if let Some(projection) = projection {
+            transform.post_concat(projection);
+        }
 
         let corners = match &element.shape_type {
             Type::Rect(data) => data.corners,
@@ -210,6 +223,7 @@ impl NodeRenderState {
         &self,
         element: &Shape,
         shadow: &Shadow,
+        projection: Option<&Matrix>,
     ) -> Option<ClipStack> {
         if self.id.is_nil() {
             return self.clip_bounds.clone();
@@ -240,6 +254,9 @@ impl NodeRenderState {
                 let mut transform = element.transform;
                 transform.post_translate(element.center());
                 transform.pre_translate(-element.center());
+                if let Some(projection) = projection {
+                    transform.post_concat(projection);
+                }
 
                 let corners = match &element.shape_type {
                     Type::Frame(data) => data.corners,
@@ -507,6 +524,12 @@ pub(crate) struct RenderState {
     pub drop_shadows_ops_warmed: bool,
     /// Filter-surface snapshots for drop shadows, reused across tiles.
     drop_shadow_filter_cache: shadows::DropShadowFilterCache,
+    /// The tilts the shapes are drawn through this pass (see
+    /// `tilt_projection`).
+    tilt_projections: HashMap<Uuid, Option<Matrix>>,
+    /// The shape a render of one shape renders: the tilts of the layers it is
+    /// in are left out.
+    tilt_stop: Option<Uuid>,
     /// Visible tiles were already presented this pass; interest-ring fill may
     /// still be running. Final Full should not re-present.
     pub viewport_presented: bool,
@@ -719,8 +742,67 @@ impl RenderState {
             tile_atlas_flushed: false,
             drop_shadows_ops_warmed: false,
             drop_shadow_filter_cache: shadows::DropShadowFilterCache::new(),
+            tilt_projections: HashMap::default(),
+            tilt_stop: None,
             viewport_presented: false,
         })
+    }
+
+    /// The homography of the page `shape` is drawn through for its own tilt
+    /// and those of the groups and boards it is in (see `math::tilt`), worked
+    /// out once a pass; `None` when nothing tilts it. A render of one shape
+    /// (`tilt_stop`) leaves out the tilts of the layers it is in.
+    pub fn tilt_projection(&mut self, shape: &Shape, tree: ShapesPoolRef) -> Option<Matrix> {
+        if !tree.has_tilts() {
+            return None;
+        }
+        if let Some(projection) = self.tilt_projections.get(&shape.id) {
+            return *projection;
+        }
+        let parent = if self.tilt_stop == Some(shape.id) {
+            None
+        } else {
+            shape
+                .parent_id
+                .filter(|id| !id.is_nil())
+                .and_then(|id| tree.get(&id))
+                .and_then(|parent| self.tilt_projection(parent, tree))
+        };
+        let projection = match (parent, shape.tilt_matrix(tree)) {
+            (Some(parent), Some(own)) => Some(Matrix::concat(&parent, &own)),
+            (parent, own) => parent.or(own),
+        };
+        self.tilt_projections.insert(shape.id, projection);
+        projection
+    }
+
+    /// The tilt the walker found for the shape `id` this pass (see
+    /// `tilt_projection`).
+    fn cached_tilt_projection(&self, id: &Uuid) -> Option<Matrix> {
+        self.tilt_projections.get(id).copied().flatten()
+    }
+
+    /// The matrix `shape` is drawn through: its transform around its middle,
+    /// then its tilts.
+    fn shape_draw_matrix(&self, shape: &Shape) -> Matrix {
+        let matrix = shape.centered_transform();
+        match self.cached_tilt_projection(&shape.id) {
+            Some(projection) => Matrix::concat(&projection, &matrix),
+            None => matrix,
+        }
+    }
+
+    /// `bounds` of `shape`, in the plane of the layers it is in, as they
+    /// show through the tilts of those layers; `None` where they reach the
+    /// viewer.
+    fn tilted_bounds(&self, shape: &Shape, bounds: Rect) -> Option<Rect> {
+        match shape
+            .parent_id
+            .and_then(|id| self.cached_tilt_projection(&id))
+        {
+            Some(projection) => tilt::project_rect(&projection, &bounds),
+            None => Some(bounds),
+        }
     }
 
     /// Combines every visible layer blur currently active (ancestors + shape)
@@ -859,10 +941,7 @@ impl RenderState {
             .surfaces
             .get_render_context_translation(self.render_area, scale);
 
-        let center = shape.center();
-        let mut matrix = shape.transform;
-        matrix.post_translate(center);
-        matrix.pre_translate(-center);
+        let matrix = self.shape_draw_matrix(shape);
 
         self.surfaces.canvas(target_surface).save();
 
@@ -1597,11 +1676,8 @@ impl RenderState {
                 self.apply_clip_stack_to_surfaces(clips, target_surface as u32, scale, None);
             }
 
-            if !shape.transform.is_identity() {
-                let center = shape.center();
-                let mut matrix = shape.transform;
-                matrix.post_translate(center);
-                matrix.pre_translate(-center);
+            let matrix = self.shape_draw_matrix(shape);
+            if !matrix.is_identity() {
                 self.surfaces.apply_mut(target_surface as u32, |s| {
                     s.canvas().concat(&matrix);
                 });
@@ -1667,7 +1743,9 @@ impl RenderState {
 
         // Only save canvas state if we have clipping or transforms
         // For simple shapes without clipping, skip expensive save/restore
-        let needs_save = shape_draw_needs_save(shape, clip_bounds.is_some(), offset.is_some());
+        let projection = self.cached_tilt_projection(&shape.id);
+        let needs_save = shape_draw_needs_save(shape, clip_bounds.is_some(), offset.is_some())
+            || projection.is_some();
 
         if needs_save {
             self.surfaces.apply_mut(surface_ids, |s| {
@@ -1733,6 +1811,11 @@ impl RenderState {
         // Apply the additional transformation matrix if exists
         if let Some(offset) = offset {
             matrix.pre_translate(offset);
+        }
+
+        // Then its tilts (see `tilt_projection`)
+        if let Some(projection) = projection {
+            matrix.post_concat(&projection);
         }
 
         match &shape.shape_type {
@@ -2901,6 +2984,7 @@ impl RenderState {
         let saved_masked_group_reach = std::mem::take(&mut self.masked_group_reach);
         let saved_ignore_nested_blurs = self.ignore_nested_blurs;
         let saved_preview_mode = self.preview_mode;
+        let saved_tilt_stop = self.tilt_stop.replace(*id);
 
         // Reset focus mode so all shapes in the export tree are rendered.
         // Without this, leftover focus_mode state from the workspace could
@@ -2974,6 +3058,8 @@ impl RenderState {
         self.masked_group_reach = saved_masked_group_reach;
         self.ignore_nested_blurs = saved_ignore_nested_blurs;
         self.preview_mode = saved_preview_mode;
+        self.tilt_stop = saved_tilt_stop;
+        self.tilt_projections.clear();
 
         // Restore render-surface transforms for the workspace context.
         // If we have a current tile, restore its tile render context; otherwise
@@ -3410,8 +3496,12 @@ impl RenderState {
                 continue;
             }
 
-            let nested_clip_bounds =
-                node_render_state.get_nested_shadow_clip_bounds(element, shadow);
+            let nested_clip_bounds = node_render_state.get_nested_shadow_clip_bounds(
+                element,
+                shadow,
+                self.cached_tilt_projection(&element.id).as_ref(),
+            );
+            self.tilt_projection(shadow_shape, tree);
 
             if !matches!(shadow_shape.shape_type, Type::Text(_)) {
                 self.render_drop_black_shadow(
@@ -3539,8 +3629,9 @@ impl RenderState {
 
         // The masked group's children are clipped by the group itself before
         // anything below it applies.
+        let projection = self.tilt_projection(shape, pass.tree);
         let children_clip_bounds =
-            NodeRenderState::append_child_clip(shape, clip_bounds, None, None);
+            NodeRenderState::append_child_clip(shape, clip_bounds, None, None, projection.as_ref());
 
         for content_id in content_ids {
             let Some(content) = pass.tree.get(&content_id) else {
@@ -3597,6 +3688,7 @@ impl RenderState {
             false,
         );
 
+        self.tilt_projection(shape, pass.tree);
         self.render_drop_black_shadow(
             shape,
             pass.tree,
@@ -3614,8 +3706,9 @@ impl RenderState {
 
         // Descendants of a clipping container are invisible outside it, so they
         // must not widen the silhouette either.
+        let projection = self.tilt_projection(shape, pass.tree);
         let children_clip_bounds =
-            NodeRenderState::append_child_clip(shape, clip_bounds, None, None);
+            NodeRenderState::append_child_clip(shape, clip_bounds, None, None, projection.as_ref());
 
         for child_id in get_simplified_children(pass.tree, shape) {
             let Some(child) = pass.tree.get(&child_id) else {
@@ -3725,6 +3818,14 @@ impl RenderState {
         let mut bounds = drop_filter.compute_fast_bounds(shape_bounds);
         // Account for the shadow offset so the temporary surface fully contains the shifted blur.
         bounds.offset(world_offset);
+        // A shape in a tilted layer shows where that layer's tilt takes it
+        let tilted = self.cached_tilt_projection(&shape.id).is_some();
+        if tilted {
+            match self.tilted_bounds(shape, bounds) {
+                Some(tilted_bounds) => bounds = tilted_bounds,
+                None => return Ok(()),
+            }
+        }
         // Early cull if the shadow bounds are outside the render area.
         if !bounds.intersects(self.render_area_with_margins) && target_surface != SurfaceId::Export
         {
@@ -3818,7 +3919,7 @@ impl RenderState {
         // High zoom with blur: use render_into_filter_surface to ensure blur has enough space
         // Apply spread geometrically to avoid dilate filter rounding issues
         let layer_blur_value = combined_blur.map(|b| b.value).unwrap_or(0.0);
-        let cache_key = clip_bounds.is_none().then(|| {
+        let cache_key = (clip_bounds.is_none() && !tilted).then(|| {
             shadows::DropShadowFilterCacheKey::for_shape(
                 shape.id,
                 shadow,
@@ -3935,7 +4036,8 @@ impl RenderState {
         };
 
         let recursive = element.is_recursive();
-        let use_direct_container_shadow = element.uses_direct_container_drop_shadow(tree);
+        let use_direct_container_shadow = element.uses_direct_container_drop_shadow(tree)
+            && self.cached_tilt_projection(&element.id).is_none();
         let mut rendered_any = false;
         for shadow in element.drop_shadows_visible() {
             if !shadow.is_perceptible_at_scale_for(scale, recursive) {
@@ -4029,6 +4131,9 @@ impl RenderState {
             target_surface = SurfaceId::Export;
         }
 
+        // The tilts are those of the shapes as they are now
+        self.tilt_projections.clear();
+
         // During interactive transforms we compute the union of the current bounds of all
         // modified shapes (doc-space @ 100% zoom, scale=1.0). This is used as a cheap overlap
         // guard to decide when cached top-level crops are unsafe to reuse (something is moving
@@ -4087,6 +4192,7 @@ impl RenderState {
             };
             let scale = self.get_scale();
             let mut extrect: Option<Rect> = None;
+            let projection = self.tilt_projection(element, tree);
 
             // If the shape is not in the tile set, then we add them.
             if self.tiles.get_tiles_of(node_id).is_none() {
@@ -4106,6 +4212,16 @@ impl RenderState {
                 // Aggressive early exit: check hidden first (fastest check)
                 if transformed_element.hidden {
                     continue;
+                }
+
+                // A tilted layer that shows its back while it hides it, or
+                // that reaches the viewer, draws nothing of what it holds.
+                if let Some(projection) = projection.as_ref() {
+                    if (element.backface_hidden && tilt::back_facing(projection))
+                        || tilt::project_rect(projection, &element.bounds().to_rect()).is_none()
+                    {
+                        continue;
+                    }
                 }
 
                 if !self.shape_visible_for_viewer_layer(&node_id, tree) {
@@ -4149,16 +4265,20 @@ impl RenderState {
                     None => self.render_area_with_margins,
                 };
 
+                // A tilted shape shows where its tilt takes it (its extrect),
+                // and one in a tilted layer where that layer's tilt does.
                 let is_visible = export
                     || mask.is_some()
-                    || if is_container || has_effects {
-                        let element_extrect =
-                            extrect.get_or_insert_with(|| transformed_element.extrect(tree, scale));
-                        element_extrect.intersects(area)
+                    || if is_container || has_effects || transformed_element.is_tilted() {
+                        let element_extrect = *extrect
+                            .get_or_insert_with(|| transformed_element.extrect(tree, scale));
+                        self.tilted_bounds(element, element_extrect)
+                            .is_some_and(|bounds| bounds.intersects(area))
                             && !transformed_element.visually_insignificant(scale, tree)
                     } else {
                         let selrect = transformed_element.selrect();
-                        selrect.intersects(area)
+                        self.tilted_bounds(element, selrect)
+                            .is_some_and(|bounds| bounds.intersects(area))
                             && !transformed_element.visually_insignificant(scale, tree)
                     };
 
@@ -4426,6 +4546,7 @@ impl RenderState {
                     element,
                     None,
                     clip_inset_for_children,
+                    projection.as_ref(),
                 );
 
                 let children_ids: Vec<_> = if can_flatten {
@@ -5451,14 +5572,14 @@ mod tests {
     #[test]
     fn append_child_clip_leaves_the_stack_alone_for_a_non_clipping_shape() {
         let shape = frame(false);
-        assert!(NodeRenderState::append_child_clip(&shape, None, None, None).is_none());
+        assert!(NodeRenderState::append_child_clip(&shape, None, None, None, None).is_none());
 
         let existing: ClipStack = vec![(
             Rect::from_ltrb(0.0, 0.0, 10.0, 10.0),
             None,
             Matrix::new_identity(),
         )];
-        let stack = NodeRenderState::append_child_clip(&shape, Some(existing), None, None)
+        let stack = NodeRenderState::append_child_clip(&shape, Some(existing), None, None, None)
             .expect("the incoming stack is returned as-is");
         assert_eq!(stack.len(), 1);
     }
@@ -5466,7 +5587,7 @@ mod tests {
     #[test]
     fn append_child_clip_adds_the_selrect_of_a_clipping_shape() {
         let shape = frame(true);
-        let stack = NodeRenderState::append_child_clip(&shape, None, None, None)
+        let stack = NodeRenderState::append_child_clip(&shape, None, None, None, None)
             .expect("a clipping shape starts a stack");
 
         assert_eq!(stack.len(), 1);
@@ -5479,8 +5600,8 @@ mod tests {
         let mut inner = frame(true);
         inner.set_selrect(30.0, 40.0, 60.0, 70.0);
 
-        let stack = NodeRenderState::append_child_clip(&outer, None, None, None);
-        let stack = NodeRenderState::append_child_clip(&inner, stack, None, None)
+        let stack = NodeRenderState::append_child_clip(&outer, None, None, None, None);
+        let stack = NodeRenderState::append_child_clip(&inner, stack, None, None, None)
             .expect("both clips are kept");
 
         assert_eq!(stack.len(), 2);
@@ -5510,8 +5631,9 @@ mod tests {
                     flattened: false,
                 };
 
-                let walker = node.get_children_clip_bounds(&shape, None, clip_inset);
-                let silhouette = NodeRenderState::append_child_clip(&shape, None, None, clip_inset);
+                let walker = node.get_children_clip_bounds(&shape, None, clip_inset, None);
+                let silhouette =
+                    NodeRenderState::append_child_clip(&shape, None, None, clip_inset, None);
 
                 assert_eq!(
                     walker.as_ref().map(|s| s.len()),
@@ -5534,7 +5656,7 @@ mod tests {
         shape.set_selrect(0.0, 0.0, 100.0, 100.0);
         shape.clip_content = true;
 
-        let stack = NodeRenderState::append_child_clip(&shape, None, None, Some(2.0))
+        let stack = NodeRenderState::append_child_clip(&shape, None, None, Some(2.0), None)
             .expect("a clipping shape starts a stack");
 
         assert_eq!(stack[0].0, Rect::from_ltrb(2.0, 2.0, 98.0, 98.0));

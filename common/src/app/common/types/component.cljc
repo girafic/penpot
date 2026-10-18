@@ -85,10 +85,14 @@
    :width                   :geometry-group
    :height                  :geometry-group
    :rotation                :geometry-group
+   :rotate-x                :geometry-group
+   :rotate-y                :geometry-group
    :transform               :geometry-group
    :transform-inverse       :geometry-group
    :opacity                 :layer-effects-group
    :blend-mode              :layer-effects-group
+   :backface-hidden         :layer-effects-group
+   :perspective             :layer-effects-group
    :shadow                  :shadow-group
    :blur                    :blur-group
    :background-blur         :blur-group

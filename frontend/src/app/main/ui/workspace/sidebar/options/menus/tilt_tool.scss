@@ -1,0 +1,138 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+// The 3D rotation tool of the design tab (Penpot Motion)
+.tilt-tool {
+  display: flex;
+}
+
+.tilt-button {
+  @extend %button-tertiary;
+
+  height: var(--sp-xxxl);
+  width: var(--sp-xxxl);
+  border-radius: deprecated.$br-8;
+
+  &.active {
+    @extend %button-icon-selected;
+  }
+}
+
+.tilt-button-icon {
+  width: deprecated.$s-16;
+  height: deprecated.$s-16;
+  fill: none;
+  stroke: var(--icon-foreground);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+.tilt-button-axis {
+  stroke-dasharray: 1.5 1.5;
+}
+
+.tilt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-set);
+}
+
+.tilt-popover {
+  position: fixed;
+  z-index: var(--z-index-set);
+  display: flex;
+  flex-direction: column;
+  width: deprecated.$s-252;
+  border: 1px solid var(--panel-border-color);
+  border-radius: deprecated.$br-12;
+  background-color: var(--color-background-primary);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+  outline: none;
+}
+
+.tilt-header {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+  padding: deprecated.$s-8 deprecated.$s-8 deprecated.$s-8 deprecated.$s-16;
+  border-bottom: 1px solid var(--panel-border-color);
+}
+
+.tilt-title {
+  @include deprecated.body-medium-typography;
+
+  flex: 1;
+  color: var(--color-foreground-primary);
+}
+
+// The pad: a card seen with some depth, dragged to tilt it
+.tilt-pad {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: deprecated.$s-160;
+  margin: deprecated.$s-12;
+  border-radius: deprecated.$br-8;
+  background-color: var(--color-background-tertiary);
+  perspective: 420px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.tilt-ghost,
+.tilt-card {
+  position: absolute;
+  width: deprecated.$s-80;
+  height: deprecated.$s-100;
+  border-radius: deprecated.$br-4;
+}
+
+.tilt-ghost {
+  border: 1px dashed var(--color-foreground-secondary);
+  opacity: 0.5;
+}
+
+.tilt-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-accent-primary);
+  background-color: var(--color-background-quaternary);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+
+  &.hides-back {
+    backface-visibility: hidden;
+  }
+}
+
+.tilt-dot {
+  width: deprecated.$s-8;
+  height: deprecated.$s-8;
+  border-radius: 50%;
+  background-color: var(--color-accent-primary);
+}
+
+.tilt-footer {
+  display: flex;
+  flex-direction: column;
+  gap: deprecated.$s-8;
+  padding: 0 deprecated.$s-16 deprecated.$s-12;
+}
+
+.tilt-values {
+  @include deprecated.body-small-typography;
+
+  color: var(--color-foreground-secondary);
+  font-variant-numeric: tabular-nums;
+}

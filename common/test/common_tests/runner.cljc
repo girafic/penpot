@@ -54,6 +54,7 @@
    [common-tests.geom-shapes-tree-seq-test]
    [common-tests.geom-snap-test]
    [common-tests.geom-test]
+   [common-tests.geom-tilt-test]
    [common-tests.helpers-test]
    [common-tests.logging-test]
    [common-tests.logic.animation-styles-sync-test]
@@ -167,6 +168,7 @@
    'common-tests.geom-shapes-tree-seq-test
    'common-tests.geom-snap-test
    'common-tests.geom-test
+   'common-tests.geom-tilt-test
    'common-tests.helpers-test
    'common-tests.logging-test
    'common-tests.logic.animation-styles-sync-test

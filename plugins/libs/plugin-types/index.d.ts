@@ -226,6 +226,13 @@ export interface Board extends ShapeBase {
   showInViewMode: boolean;
 
   /**
+   * How far the viewer of the tilted layers of the board is, in px
+   * (100 to 100000), as CSS `perspective`: the vanishing point is the
+   * middle of the board. `null` is the default, 1000.
+   */
+  perspective: number | null;
+
+  /**
    * The grid layout configuration of the board, if applicable.
    */
   readonly grid?: GridLayout;
@@ -5432,6 +5439,8 @@ export type AnimatableProperty =
   | 'width'
   | 'height'
   | 'rotation'
+  | 'rotateX'
+  | 'rotateY'
   | 'scaleX'
   | 'scaleY'
   | 'opacity'
@@ -6242,6 +6251,29 @@ export interface ShapeBase extends PluginData {
    * The rotation in degrees of the shape with respect to its center.
    */
   rotation: number;
+
+  /**
+   * The 3D rotation in degrees of the shape about its own horizontal axis:
+   * a positive value tilts its top edge away from the viewer, as CSS
+   * `rotateX()` does. The perspective is that of its board (see
+   * `Board.perspective`). Penpot Motion; 0 is flat.
+   */
+  rotateX: number;
+
+  /**
+   * The 3D rotation in degrees of the shape about its own vertical axis:
+   * a positive value tilts its right edge away from the viewer, as CSS
+   * `rotateY()` does. Penpot Motion; 0 is flat.
+   */
+  rotateY: number;
+
+  /**
+   * When true the shape hides while its back faces the viewer, as CSS
+   * `backface-visibility: hidden`: a card that flips shows its back layer
+   * only. The back is that of the shape as its tilt and the tilt of the
+   * groups and boards it is in turn it.
+   */
+  backfaceHidden: boolean;
 
   /**
    * The fills applied to the shape.

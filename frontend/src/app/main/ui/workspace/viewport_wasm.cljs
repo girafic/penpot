@@ -11,6 +11,7 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.tilt :as gtl]
    [app.common.logic.timelines :as cltl]
    [app.common.render-wasm.api.select :as wselect]
    [app.common.types.color :as clr]
@@ -683,6 +684,22 @@
     (hooks/setup-shortcuts path-editing? path-drawing? text-editing? grid-editing?)
     ;; The renderer draws every board, animated or not
     (hooks/setup-active-frames base-objects hover-ids selected active-frames zoom transform vbox nil)
+
+    ;; The shape edited draws flat while it is, as its editors show it
+    ;; (see `app.common.geom.tilt`)
+    (mf/with-effect [edition @initialized?]
+      (when (and edition @initialized?)
+        (when-let [shape (get (deref refs/workspace-page-objects) edition)]
+          (when (gtl/tilted? shape)
+            (wselect/use-shape edition)
+            (wasm.api/set-shape-tilt (dissoc shape :rotate-x :rotate-y))
+            (wasm.api/request-render "start-flat-edition")
+            (fn []
+              (when (wasm.api/initialized?)
+                (when-let [shape (get (deref refs/workspace-page-objects) edition)]
+                  (wselect/use-shape edition)
+                  (wasm.api/set-shape-tilt shape)
+                  (wasm.api/request-render "stop-flat-edition"))))))))
 
     (mf/with-effect [path-editing? edition @initialized?]
       (when (and path-editing? edition @initialized?)

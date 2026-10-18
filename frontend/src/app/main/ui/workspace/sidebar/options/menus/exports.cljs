@@ -9,6 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
+   [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
    [app.main.data.exports.animation :as dea]
@@ -459,6 +460,18 @@
         (mf/with-memo [shapes]
           (filter (comp seq :exports) shapes))
 
+        ;; PDF and SVG draw the 3D rotation of layers flat (see
+        ;; `app.common.geom.tilt`)
+        flat-3d?
+        (mf/with-memo [shapes exports]
+          (and (seqable? exports)
+               (some #(contains? #{:pdf :svg} (:type %)) exports)
+               (let [objects (deref refs/workspace-page-objects)]
+                 (some (fn [shape]
+                         (some #(gtl/tilted? (get objects %))
+                               (cons (:id shape) (cfh/get-children-ids objects (:id shape)))))
+                       shapes))))
+
         sname
         (when (seqable? exports)
           (let [sname  (-> shapes-with-exports first :name)
@@ -743,6 +756,9 @@
                                    :on-click delete-export
                                    :data-value index
                                    :icon i/remove}]])])
+
+           (when flat-3d?
+             [:p {:class (stl/css :flat-3d-hint)} (tr "workspace.options.export.flat-3d")])
 
            (when (or (= :multiple exports) (seq exports))
              [:button

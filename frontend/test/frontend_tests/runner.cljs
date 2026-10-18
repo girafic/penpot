@@ -97,6 +97,7 @@
    [frontend-tests.plugins.parser-test]
    [frontend-tests.plugins.register-test]
    [frontend-tests.plugins.shape-bugfixes-test]
+   [frontend-tests.plugins.shape-tilt-test]
    [frontend-tests.plugins.text-test]
    [frontend-tests.plugins.tokens-test]
    [frontend-tests.plugins.user-test]
@@ -166,6 +167,7 @@
    [frontend-tests.ui.team-container-test]
    [frontend-tests.ui.text-attrs-multiple-test]
    [frontend-tests.ui.text-units-svg-test]
+   [frontend-tests.ui.tilt-tool-test]
    [frontend-tests.ui.timeline-lanes-test]
    [frontend-tests.ui.timeline-recording-test]
    [frontend-tests.ui.timeline-selection-test]
@@ -289,6 +291,7 @@
    'frontend-tests.plugins.parser-test
    'frontend-tests.plugins.register-test
    'frontend-tests.plugins.shape-bugfixes-test
+   'frontend-tests.plugins.shape-tilt-test
    'frontend-tests.plugins.text-test
    'frontend-tests.plugins.tokens-test
    'frontend-tests.plugins.user-test
@@ -359,6 +362,7 @@
    'frontend-tests.ui.team-container-test
    'frontend-tests.ui.text-attrs-multiple-test
    'frontend-tests.ui.text-units-svg-test
+   'frontend-tests.ui.tilt-tool-test
    'frontend-tests.ui.timeline-lanes-test
    'frontend-tests.ui.timeline-recording-test
    'frontend-tests.ui.timeline-selection-test

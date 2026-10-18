@@ -75,6 +75,67 @@
     [(scalar (first v)) (scalar (if (> (count v) 1) (second v) (first v)))]
     [(scalar v) (scalar v)]))
 
+;; --- 3D (Penpot Motion, see `app.common.geom.tilt`)
+
+(defn- nonzero?
+  "Whether the Lottie `prop` plays or rests off `zero`."
+  [prop]
+  (or (animated? prop) (not (mth/almost-zero? (scalar (rest-value prop 0))))))
+
+(defn- tilt-attrs
+  "The tilt at rest of a layer of the 3D transform `tr`: its `rx`, `ry`
+  the other way round (Lottie turns them so), the keyframes of those that
+  play counting from flat (see `add-transform-keyframes`)."
+  [tr]
+  (let [at (fn [prop] (if (animated? prop) 0 (- (scalar (rest-value prop 0)))))]
+    (cond-> {}
+      (not (mth/almost-zero? (at (:rx tr)))) (assoc :rotate-x (at (:rx tr)))
+      (not (mth/almost-zero? (at (:ry tr)))) (assoc :rotate-y (at (:ry tr))))))
+
+(defn- tilts?
+  [tr]
+  (or (nonzero? (:rx tr)) (nonzero? (:ry tr))))
+
+(defn- exact-3d?
+  "Whether a board shows the 3D transform `tr` as it plays: no depth (a
+  position or anchor off z 0), no orientation (`or`), no turn in the plane
+  (`rz`) under a tilt, which Lottie turns first."
+  [tr]
+  (let [z      (fn [prop] (let [v (rest-value prop [0 0 0])]
+                            (if (and (sequential? v) (> (count v) 2)) (scalar (nth v 2)) 0)))
+        orient (rest-value (:or tr) [0 0 0])]
+    (and (not (animated? (:p tr)))
+         (mth/almost-zero? (z (:p tr)))
+         (not (some? (get-in tr [:p :z])))
+         (mth/almost-zero? (z (:a tr)))
+         (not (animated? (:or tr)))
+         (every? #(mth/almost-zero? (scalar %)) (if (sequential? orient) orient [orient]))
+         (not (and (nonzero? (:rz tr)) (tilts? tr))))))
+
+(defn- default-camera
+  "The perspective of the camera layer `layer` of `doc` when it looks
+  straight at the middle of the composition from its zoom away (`pe`), as
+  a board sees its tilted layers (see `app.common.geom.tilt`), clamped to
+  what a board takes; nil for any other."
+  [doc layer]
+  (let [tr (:ks layer)
+        pe (:pe layer)
+        w  (scalar (:w doc))
+        h  (scalar (:h doc))]
+    (when (and (= 13 (:ty layer))
+               (map? pe)
+               (not-any? animated? [pe (:p tr) (:a tr) (:or tr) (:rx tr) (:ry tr) (:rz tr)]))
+      (let [d          (scalar (rest-value pe 0))
+            [px py pz] (let [v (rest-value (:p tr) [(/ w 2) (/ h 2) (- d)])]
+                         (if (sequential? v) (map scalar v) [0 0 0]))
+            close?     #(mth/close? (double %1) (double %2) 0.5)]
+        (when (and (pos? d)
+                   (close? px (/ w 2))
+                   (close? py (/ h 2))
+                   (close? (or pz 0) (- d))
+                   (not-any? nonzero? [(:rx tr) (:ry tr) (:rz tr)]))
+          (mth/clamp d 100 100000))))))
+
 (defn- clamp01
   [v]
   (mth/clamp v 0 1))
@@ -626,6 +687,8 @@
   (add-keyframes ctx id (:s tr) :scale-x #(scale-factor (first (pair %))))
   (add-keyframes ctx id (:s tr) :scale-y #(scale-factor (second (pair %))))
   (add-keyframes ctx id (or (:r tr) (:rz tr)) :rotation scalar)
+  (add-keyframes ctx id (:rx tr) :rotate-x #(- (scalar %)))
+  (add-keyframes ctx id (:ry tr) :rotate-y #(- (scalar %)))
   (add-position-keyframes ctx id (:p tr) (:p rest) parent-m node-x node-y))
 
 (defn- shape-at
@@ -918,14 +981,14 @@
         own-nodes (if hidden? [] (layer-shape-nodes ctx layer m))
         single    (when (and (= 1 (count own-nodes)) (= :drawable (:kind (first own-nodes))))
                     (first own-nodes))
-        turns?    (or (animated? (:s tr)) (animated? (or (:r tr) (:rz tr))))
+        turns?    (or (animated? (:s tr)) (animated? (or (:r tr) (:rz tr))) (tilts? tr))
         direct?   (and (some? single) (not parent?) (nil? clip) (not effects?)
                        (not (and span? fades?))
                        (or (not turns?) (centred? single pivot)))]
     (if direct?
       (let [id    (uuid/next)
             shape (drawable-shape ctx id parent-id single)
-            shape (cond-> (assoc shape :name (or (:nm layer) (:name shape)))
+            shape (cond-> (merge (assoc shape :name (or (:nm layer) (:name shape))) (tilt-attrs tr))
                     (and (not fades?) (not span?) (< opacity 1))
                     (assoc :opacity (* opacity (:opacity shape 1))))]
         (ctx :add shape)
@@ -973,7 +1036,8 @@
               :opacity (add-keyframes ctx id (:o tr) :opacity #(clamp01 (/ (scalar %) 100)))
               nil)))
 
-        (let [node (frame-shape id (:nm layer) parent-id pivot (ctx :box-since slot) nil)
+        (let [node (merge (frame-shape id (:nm layer) parent-id pivot (ctx :box-since slot) nil)
+                          (tilt-attrs tr))
               node (cond-> node
                      (empty? roles)
                      (with-effects fx)
@@ -1087,11 +1151,14 @@
     (:hd layer) false
     ;; a matte draws as the mask of the layer it keeps (see `add-layer`)
     (and (some? (:td layer)) (not= 0 (:td layer))) false
+    ;; a camera looking straight at the board is its perspective (see
+    ;; `lottie->shapes`)
+    (some? (default-camera (ctx :doc) layer)) false
     (contains? unsupported-layers (:ty layer)) (do (ctx :skip (unsupported-layers (:ty layer))) false)
     :else (do (when (and (:tt layer) (nil? (::matte layer))) (ctx :skip :matte))
               (when (:tm layer) (ctx :skip :time-remap))
               (when (and (some? (:sr layer)) (not= 1 (:sr layer))) (ctx :skip :time-stretch))
-              (when (= 1 (:ddd layer)) (ctx :skip :three-d))
+              (when (and (= 1 (:ddd layer)) (not (exact-3d? (:ks layer)))) (ctx :skip :three-d))
               true)))
 
 (defn- prune
@@ -1220,6 +1287,7 @@
                                     (vswap! state assoc :offset before))
                      :origin-x    x
                      :origin-y    y))
+        camera   (some #(default-camera doc %) (:layers doc))
         board    (cts/setup-shape
                   {:type :frame
                    :id id
@@ -1229,7 +1297,8 @@
                    :frame-id uuid/zero
                    :fills (if (some? background) [{:fill-color background :fill-opacity 1}] [])
                    :strokes []
-                   :shapes []})]
+                   :shapes []})
+        board    (cond-> board (some? camera) (assoc :perspective camera))]
     (comp-layers ctx nil id [1 0 0 1 x y] 0)
     (let [{:keys [shapes keyframes follows skipped]} @state
           timeline (reduce (fn [timeline [shape-id kf]]

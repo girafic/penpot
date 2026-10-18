@@ -7575,7 +7575,7 @@ msgid "workspace.lottie.feature.audio"
 msgstr "audio layers"
 
 msgid "workspace.lottie.feature.camera"
-msgstr "cameras"
+msgstr "cameras that move or turn"
 
 msgid "workspace.lottie.feature.complex-mask"
 msgstr "masks other than one added mask"
@@ -7626,7 +7626,7 @@ msgid "workspace.lottie.feature.text"
 msgstr "text layers"
 
 msgid "workspace.lottie.feature.three-d"
-msgstr "3D layers"
+msgstr "3D depth and orientation"
 
 msgid "workspace.lottie.feature.time-remap"
 msgstr "time remapping"
@@ -8489,6 +8489,22 @@ msgstr "Size animation · Stretches in %s"
 msgid "workspace.options.export.issue.lottie-size.text"
 msgstr "Width and height play as a scale of the layer in %s, which stretches its strokes, corners and text. Rectangles, ellipses and boards that are not rotated, in plain colors and with equal corners change their size instead, the layers in a board moving as their constraints say."
 
+#: src/app/main/ui/workspace/sidebar/options/menus/exports.cljs
+msgid "workspace.options.export.flat-3d"
+msgstr "PDF and SVG draw the tilted layers flat."
+
+msgid "workspace.options.export.issue.lottie-three-d"
+msgstr "3D rotation · Players differ in %s"
+
+msgid "workspace.options.export.issue.lottie-three-d.text"
+msgstr "Tilted layers play as 3D layers of %s without a camera. lottie-web (SVG and canvas renderers) and dotLottie players show the tilt without depth; lottie-web's HTML renderer and Skottie add a depth of their own. A hidden back face plays as the opacity of the layer."
+
+msgid "workspace.options.export.issue.svg-three-d"
+msgstr "3D rotation · Flat in %s"
+
+msgid "workspace.options.export.issue.svg-three-d.text"
+msgstr "An %s draws tilted layers as they lie flat: SVG has no perspective."
+
 msgid "workspace.options.export.issue.lottie-matte"
 msgstr "Luminance inverted mask · May not play in %s"
 
@@ -9157,6 +9173,34 @@ msgstr "Retry"
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs:684, src/app/main/ui/workspace/sidebar/options/menus/measures.cljs:692
 msgid "workspace.options.rotation"
 msgstr "Rotation"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
+msgid "workspace.options.rotate-x"
+msgstr "3D rotation X: the top edge goes back"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
+msgid "workspace.options.rotate-y"
+msgstr "3D rotation Y: the right edge goes back"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
+msgid "workspace.options.backface-hidden"
+msgstr "Hide the back face"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
+msgid "workspace.options.perspective"
+msgstr "Perspective"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/tilt_tool.cljs
+msgid "workspace.options.tilt-tool"
+msgstr "3D rotation"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/tilt_tool.cljs
+msgid "workspace.options.tilt-tool.reset"
+msgstr "Flat again"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/tilt_tool.cljs
+msgid "workspace.options.tilt-tool.hint"
+msgstr "Drag the card to tilt the layer, with Shift in steps of 15°"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/typography.cljs:461
 msgid "workspace.options.search-font"

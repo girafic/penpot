@@ -55,6 +55,35 @@
     (t/is (= (:touched copy-root') nil))
     (t/is (= (:touched copy-child') #{:fill-group}))))
 
+(t/deftest test-touched-when-tilting
+  ;; A tilt is geometry, as a rotation; hiding the back face is an
+  ;; effect of the layer, as its opacity (Penpot Motion).
+  (let [;; ==== Setup
+        file       (-> (thf/sample-file :file1)
+                       (tho/add-simple-component-with-copy :component1
+                                                           :main-root
+                                                           :main-child
+                                                           :copy-root
+                                                           :copy-root-params {:children-labels [:copy-child]}))
+        page       (thf/current-page file)
+        copy-child (ths/get-shape file :copy-child)
+
+        ;; ==== Action
+        tilt       (fn [f]
+                     (thf/apply-changes file
+                                        (cls/generate-update-shapes (pcb/empty-changes nil (:id page))
+                                                                    #{(:id copy-child)}
+                                                                    f
+                                                                    (:objects page)
+                                                                    {})))
+        file-x     (tilt #(assoc % :rotate-x 30))
+        file-back  (tilt #(assoc % :backface-hidden true))]
+
+    ;; ==== Check
+    (t/is (= 30 (:rotate-x (ths/get-shape file-x :copy-child))))
+    (t/is (= #{:geometry-group} (:touched (ths/get-shape file-x :copy-child))))
+    (t/is (= #{:layer-effects-group} (:touched (ths/get-shape file-back :copy-child))))))
+
 (t/deftest test-touched-from-library
   (let [;; ==== Setup
         library    (-> (thf/sample-file :library :is-shared true)

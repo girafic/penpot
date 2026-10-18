@@ -297,6 +297,37 @@
   grid-column: 2 / -1;
 }
 
+// The 3D rotation (Penpot Motion): X and Y, then the back face toggle.
+.tilt,
+.perspective {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1/-1;
+}
+
+.rotate-axis,
+.perspective-input {
+  @extend %input-element;
+  @include deprecated.body-small-typography;
+
+  min-inline-size: 0;
+
+  .icon-text {
+    padding-top: deprecated.$s-1;
+  }
+}
+
+.perspective-input {
+  grid-column: 1 / span 2;
+
+  .icon-text {
+    inline-size: auto;
+    padding-inline-end: var(--sp-s);
+    white-space: nowrap;
+  }
+}
+
+
 .lock-size-btn {
   @extend %button-tertiary;
 

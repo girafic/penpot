@@ -188,6 +188,14 @@
         (:trim-start :trim-end :trim-offset)
         (api/set-shape-trim (:trim-start shape) (:trim-end shape) (:trim-offset shape))
 
+        ;; the 3D rotation (Penpot Motion, see `app.common.geom.tilt`)
+        (:rotate-x :rotate-y :backface-hidden :tilt-pivot)
+        (api/set-shape-tilt shape)
+
+        :perspective
+        (when (cfh/frame-shape? shape)
+          (api/set-shape-perspective v))
+
         ;; the units of a text a split animation poses (Penpot Motion)
         :text-units
         (api/set-shape-text-units v)

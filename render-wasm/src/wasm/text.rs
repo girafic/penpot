@@ -364,7 +364,16 @@ pub extern "C" fn intersect_position_in_shape(
             return false;
         };
         if let Type::Text(content) = &shape.shape_type {
-            return content.intersect_position_in_text(shape, x_pos, y_pos);
+            // A tilted text shows elsewhere than its flat box: the point is
+            // taken back to where the flat text has it.
+            let point = match state.shapes.tilt_projection(shape) {
+                Some(h) => match h.invert() {
+                    Some(inverse) => inverse.map_point((x_pos, y_pos)),
+                    None => return false,
+                },
+                None => skia_safe::Point::new(x_pos, y_pos),
+            };
+            return content.intersect_position_in_text(shape, point.x, point.y);
         }
     });
     false

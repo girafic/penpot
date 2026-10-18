@@ -12,6 +12,8 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.tilt :as gtl]
+   [app.common.math :as mth]
    [app.common.types.shape.layout :as ctl]
    [app.main.ui.formats :as fmt]
    [app.util.code-gen.common :as cgc]
@@ -182,7 +184,71 @@
     (when (and root? (ctl/any-layout? shape))
       1)))
 
+(declare get-flat-transform)
+
+(defn- tilt-transform
+  "The 3D rotation of `shape` (see `app.common.geom.tilt`) as CSS, after
+  its turn in the plane: in its own axes, around its middle."
+  [shape]
+  (when (gtl/tilted? shape)
+    (dm/str "rotateX(" (fmt/format-number (or (:rotate-x shape) 0)) "deg) "
+            "rotateY(" (fmt/format-number (or (:rotate-y shape) 0)) "deg)")))
+
 (defn- get-transform
+  [shape objects]
+  (let [flat (get-flat-transform shape objects)
+        tilt (tilt-transform shape)]
+    (if (and flat tilt)
+      (dm/str flat " " tilt)
+      (or flat tilt))))
+
+(defn- tilted-children
+  "The layers of `shape` that tilt (see `app.common.geom.tilt`): CSS sees
+  them with the perspective of their parent element."
+  [shape objects]
+  (into [] (comp (map #(get objects %)) (filter gtl/tilted?)) (:shapes shape)))
+
+(defn- get-perspective
+  "The perspective of the board of the tilted layers of `shape`."
+  [shape objects]
+  (when-let [child (first (tilted-children shape objects))]
+    (fmt/format-pixels (:distance (gtl/perspective-of objects child)))))
+
+(defn- get-perspective-origin
+  "The vanishing point of the tilted layers of `shape` (the middle of
+  their board) in its box."
+  [shape objects]
+  (when-let [child (first (tilted-children shape objects))]
+    (let [{:keys [vp]} (gtl/perspective-of objects child)
+          box          (:selrect shape)]
+      (dm/str (fmt/format-pixels (- (:x vp) (:x box))) " "
+              (fmt/format-pixels (- (:y vp) (:y box)))))))
+
+(defn- planar-turn?
+  "Whether a tilt of `shape` keeps it in the plane of its parent, front or
+  back."
+  [shape]
+  (and (mth/almost-zero? (mod (or (:rotate-x shape) 0) 180))
+       (mth/almost-zero? (mod (or (:rotate-y shape) 0) 180))))
+
+(defn- get-transform-style
+  "`preserve-3d` for a tilted `shape` whose layers hide their back faces in
+  its plane, a card that flips: CSS judges their backs by its tilt too.
+  Only when it groups nothing CSS would flatten it for (a clip, opacity,
+  a filter, a blend or a mask)."
+  [shape objects]
+  (when (and (gtl/tilted? shape)
+             (some #(and (:backface-hidden %) (planar-turn? %))
+                   (map #(get objects %) (:shapes shape)))
+             (not (and (cfh/frame-shape? shape) (not (:show-content shape))))
+             (< (- 1 (or (:opacity shape) 1)) 0.001)
+             (empty? (:blur shape))
+             (empty? (:shadow shape))
+             (contains? #{nil :normal} (:blend-mode shape))
+             (not (:masked-group shape)))
+    "preserve-3d"))
+
+(defn- get-flat-transform
   [shape objects]
   (if (cgc/svg-markup? shape)
     (let [parent (get objects (:parent-id shape))
@@ -559,6 +625,10 @@
     :top (get-top-position  shape objects)
     :z-index (get-z-index  shape objects)
     :transform (get-transform  shape objects)
+    :perspective (get-perspective shape objects)
+    :perspective-origin (get-perspective-origin shape objects)
+    :transform-style (get-transform-style shape objects)
+    :backface-visibility (when (:backface-hidden shape) "hidden")
 
     ;; Size
     :width (get-width shape objects options)

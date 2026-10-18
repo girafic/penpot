@@ -17,6 +17,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.modifiers :as cgm]
    [app.common.geom.rect :as grc]
+   [app.common.geom.tilt :as gtl]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.render-wasm.api.select :as wselect]
@@ -139,8 +140,8 @@
   `{:bytes :rect}`, `:rect` the box the picture covers on the canvas (the
   shape as it is, turned, with its shadows and blur, see
   `wasm.api/get-shape-extrect`), nil without a way to know it. It is
-  rasterized opaque: the layer of the export has its opacity, which its
-  animation may change. A text shows its units at rest, whatever the
+  rasterized opaque and flat: the layer of the export has its opacity and
+  its tilt, which its animation may change. A text shows its units at rest, whatever the
   canvas posed (see `cta/text-unit-entries`)."
   [objects shape-id hide-ids {:keys [bridge] :or {bridge (default-bridge)}}]
   (let [{:keys [use-shape set-shape-hidden clean-modifiers get-shape-extrect
@@ -154,17 +155,21 @@
         (set-shape-hidden true))
       ;; after hiding its layers: a change of the shape itself before
       ;; would keep them in the picture of it
+      ;; flat too: the layer of the export tilts it (see
+      ;; `app.common.geom.tilt`), the picture would tilt it twice
       (when (and apply-shape-properties shape)
         (if (= :text (:type shape))
-          (apply-shape-properties (assoc shape :opacity 1 :text-units []) [:opacity :text-units])
-          (apply-shape-properties (assoc shape :opacity 1) [:opacity])))
+          (apply-shape-properties (assoc shape :opacity 1 :text-units [] :rotate-x 0 :rotate-y 0 :backface-hidden false)
+                                  [:opacity :text-units :rotate-x])
+          (apply-shape-properties (assoc shape :opacity 1 :rotate-x 0 :rotate-y 0 :backface-hidden false)
+                                  [:opacity :rotate-x])))
       (let [bytes (render-shape-pixels shape-id 1 :png)]
         {:bytes bytes
          :rect  (when get-shape-extrect
                   (get-shape-extrect shape-id))})
       (finally
         (when (and apply-shape-properties shape)
-          (apply-shape-properties shape [:opacity]))
+          (apply-shape-properties shape [:opacity :rotate-x]))
         (doseq [id hide-ids]
           (let [shape (get objects id)]
             (if apply-shape-properties
@@ -640,7 +645,12 @@
     plays once and starts over with one that loops, unless its cycles
     fit the board's;
   - `:gif/alpha` and `:mp4/alpha`, a board that shows through (see
-    `see-through?`): GIF has no partial transparency, MP4 none at all."
+    `see-through?`): GIF has no partial transparency, MP4 none at all;
+  - `:lottie/three-d` and `:svg/three-d`, a layer that tilts (see
+    `app.common.geom.tilt`), at rest or as it plays: the players of
+    Lottie see it with their own depth or none (lottie-web's SVG and
+    canvas renderers and dotLottie flat, without a camera, which stops
+    lottie-web's), an SVG flat."
   [objects timeline]
   (if (nil? timeline)
     {}
@@ -685,6 +695,10 @@
                                   (> (mth/abs (- n (mth/round n))) 0.01))))
                           (:copy-loops timeline))
           clear?    (some-> (get objects board-id) see-through?)
+          ;; a layer that tilts, at rest or as it plays
+          tilted?   (or (contains? animated :rotate-x)
+                        (contains? animated :rotate-y)
+                        (some?* gtl/tilted?))
           table
           [[:lottie/images lottie-formats
             (boolean (some (fn [id]
@@ -729,7 +743,9 @@
             (boolean (seq (:audio-clips timeline)))]
            [:copy-clock #{:gif :avif :svg :lottie :dotlottie} (boolean bound?)]
            [:gif/alpha #{:gif} (boolean clear?)]
-           [:mp4/alpha #{:mp4} (boolean clear?)]]]
+           [:mp4/alpha #{:mp4} (boolean clear?)]
+           [:lottie/three-d lottie-formats (boolean tilted?)]
+           [:svg/three-d #{:svg} (boolean tilted?)]]]
       (reduce (fn [issues [kind formats on?]]
                 (if on?
                   (reduce #(update %1 %2 (fnil conj []) kind) issues formats)

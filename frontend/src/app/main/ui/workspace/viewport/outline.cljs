@@ -10,6 +10,7 @@
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.tilt :as gtl]
    [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
    [app.main.refs :as refs]
@@ -19,11 +20,25 @@
    [clojure.set :as set]
    [rumext.v2 :as mf]))
 
+(defn- polylines->d
+  [lines]
+  (apply str
+         (for [{:keys [points closed?]} lines
+               [i {:keys [x y]}] (map-indexed vector points)]
+           (str (if (zero? i) "M" "L") x " " y
+                (when (and closed? (= i (dec (count points)))) "Z")))))
+
 (mf/defc outline*
-  [{:keys [shape modifier zoom]}]
+  "The outline of `shape`; a tilted one (or one in a tilted group or
+  board, see `app.common.geom.tilt`) as it shows, from `objects` as they
+  show."
+  [{:keys [shape modifier zoom objects]}]
   (let [zoom      (d/nilv zoom 1)
         shape     (gsh/transform-shape shape (:modifiers modifier))
         transform (gsh/transform-str shape)
+        tilted    (mf/with-memo [objects shape]
+                    (when (some? objects)
+                      (gtl/projected-outline objects shape)))
 
         ;; NOTE: that we don't use mf/deref to avoid a repaint dependency here
         objects   (deref refs/workspace-page-objects)
@@ -89,18 +104,25 @@
                   :ry (obj/get border-attrs "ry")
                   :d  (obj/get border-attrs "d")})))]
 
-    [:> outline-type props]))
+    (if (some? tilted)
+      [:path {:d (polylines->d tilted)
+              :fill "none"
+              :stroke color
+              :stroke-width (/ 1 zoom)
+              :pointer-events "none"}]
+      [:> outline-type props])))
 
 (mf/defc shape-outlines-render*
-  {::mf/wrap [#(mf/memo' % (mf/check-props ["shapes" "zoom" "modifiers"]))]}
-  [{:keys [shapes zoom modifiers]}]
+  {::mf/wrap [#(mf/memo' % (mf/check-props ["shapes" "zoom" "modifiers" "objects"]))]}
+  [{:keys [shapes zoom modifiers objects]}]
   (for [shape shapes]
     (let [shape-id (dm/get-prop shape :id)
           modifier (get modifiers shape-id)]
       [:> outline* {:key (dm/str "outline-" shape-id)
                     :shape shape
                     :modifier modifier
-                    :zoom zoom}])))
+                    :zoom zoom
+                    :objects objects}])))
 
 (mf/defc shape-outlines*
   [{:keys [selected hover highlighted objects edition zoom modifiers]}]
@@ -126,4 +148,5 @@
     [:g.outlines.blurrable
      [:> shape-outlines-render* {:shapes shapes
                                  :zoom zoom
-                                 :modifiers modifiers}]]))
+                                 :modifiers modifiers
+                                 :objects objects}]]))

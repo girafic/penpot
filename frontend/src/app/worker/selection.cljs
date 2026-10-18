@@ -13,7 +13,9 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.shapes.intersect :as gsi]
    [app.common.geom.shapes.text :as gst]
+   [app.common.geom.tilt :as gtl]
    [app.common.types.modifiers :as ctm]
    [app.common.uuid :as uuid]
    [app.util.quadtree :as qdt]
@@ -25,11 +27,24 @@
 
 (def ^:const padding-percent 0.10)
 
+(defn- with-tilt-points
+  "`shape` with the corners it shows at when it, or a group or board it is
+  in, tilts (`:tilt-points`, see `app.common.geom.tilt`): it is hit there."
+  [objects shape]
+  (if-let [points (gtl/projected-points objects shape)]
+    (assoc shape :tilt-points points)
+    shape))
+
 (defn- index-shape
   "A reducing function that ads a shape to the index"
   [objects parents-index clip-index index shape]
-  (let [bounds
+  (let [shape (with-tilt-points objects shape)
+
+        bounds
         (cond
+          (some? (:tilt-points shape))
+          (grc/points->rect (:tilt-points shape))
+
           (and ^boolean (cfh/text-shape? shape)
                ^boolean (some? (:position-data shape))
                ^boolean (d/not-empty? (:position-data shape)))
@@ -57,7 +72,7 @@
         (get parents-index shape-id)
 
         clip-parents
-        (get clip-index shape-id)
+        (mapv #(with-tilt-points objects %) (get clip-index shape-id))
 
         frame
         (when (and (not= :frame shape-type)
@@ -153,6 +168,11 @@
   (let [result (-> (qdt/search index (clj->js rect))
                    (es6-iterator-seq))
 
+        ;; A tilted shape is hit where it shows, by its corners
+        tilted-overlaps?
+        (fn [shape]
+          (gsi/overlaps-rect-points? rect (:tilt-points shape)))
+
         ;; Check if the shape matches the filter criteria
         match-criteria?
         (fn [shape]
@@ -169,9 +189,13 @@
                    (and (not ignore-groups?) (contains? shape :component-id))
                    (and (not ignore-groups?) (not (cfh/root-frame? shape)))
                    (and (d/not-empty? (:shapes shape))
-                        (gsh/rect-contains-shape? rect shape))
+                        (gsh/rect-contains-shape? rect (cond-> shape
+                                                         (some? (:tilt-points shape))
+                                                         (assoc :points (:tilt-points shape)))))
                    (and (empty? (:shapes shape))
-                        (gsh/overlaps? shape rect)))))
+                        (if (some? (:tilt-points shape))
+                          (tilted-overlaps? shape)
+                          (gsh/overlaps? shape rect))))))
 
         overlaps-outer-shape?
         (fn [shape]
@@ -231,16 +255,22 @@
 
         overlaps?
         (fn [shape]
-          (if (and (false? using-selrect?)
-                   (empty? (:fills shape))
-                   (not (contains? (-> shape :svg-attrs) :fill))
-                   (not (contains? (-> shape :svg-attrs :style) :fill)))
+          (cond
+            (some? (:tilt-points shape))
+            (tilted-overlaps? shape)
+
+            (and (false? using-selrect?)
+                 (empty? (:fills shape))
+                 (not (contains? (-> shape :svg-attrs) :fill))
+                 (not (contains? (-> shape :svg-attrs :style) :fill)))
             (case  (:type shape)
               ;; If the shape has no fills the overlap depends on the stroke
               :rect (and (overlaps-outer-shape? shape) (not (overlaps-inner-shape? shape)))
               :circle (and (overlaps-outer-shape? shape) (not (overlaps-inner-shape? shape)))
               (:bool :path) (overlaps-path? shape)
               (gsh/overlaps? shape rect))
+
+            :else
             (gsh/overlaps? shape rect)))
 
         overlaps-parent?

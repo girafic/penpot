@@ -11,6 +11,7 @@
    [app.common.files.helpers :as cfh]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.tilt :as gtl]
    [app.common.json :as json]
    [app.common.path-names :as cpn]
    [app.common.record :as crc]
@@ -331,6 +332,15 @@
 
       :else
       (st/emit! (dwsh/update-shapes [id] #(assoc % :exports value))))))
+
+(defn- commit-tilt!
+  "Set `attr` of the shape of `self` to `value` (see `app.common.geom.tilt`),
+  removed at `default`: a flat layer has none."
+  [self attr value default]
+  (let [id (obj/get self "$id")]
+    (st/emit! (dwsh/update-shapes [id] #(if (= value default)
+                                          (dissoc % attr)
+                                          (assoc % attr value))))))
 
 (defn shape-proxy? [p]
   (obj/type-of? p "ShapeProxy"))
@@ -987,6 +997,60 @@
                 :else
                 (let [id (obj/get self "$id")]
                   (st/emit! (dw/flip-vertical-selected #{id})))))}
+
+           :rotateX
+           {:this true
+            :get #(-> % u/proxy->shape (:rotate-x 0))
+            :set
+            (fn [self value]
+              (cond
+                (not (sm/valid-safe-number? value))
+                (u/not-valid plugin-id :rotateX value)
+
+                (not (r/check-permission plugin-id "content:write"))
+                (u/not-valid plugin-id :rotateX "Plugin doesn't have 'content:write' permission")
+
+                (not (u/page-active? page-id))
+                (u/not-valid plugin-id :rotateX "Cannot modify a page that is not currently active")
+
+                :else
+                (commit-tilt! self :rotate-x value 0)))}
+
+           :rotateY
+           {:this true
+            :get #(-> % u/proxy->shape (:rotate-y 0))
+            :set
+            (fn [self value]
+              (cond
+                (not (sm/valid-safe-number? value))
+                (u/not-valid plugin-id :rotateY value)
+
+                (not (r/check-permission plugin-id "content:write"))
+                (u/not-valid plugin-id :rotateY "Plugin doesn't have 'content:write' permission")
+
+                (not (u/page-active? page-id))
+                (u/not-valid plugin-id :rotateY "Cannot modify a page that is not currently active")
+
+                :else
+                (commit-tilt! self :rotate-y value 0)))}
+
+           :backfaceHidden
+           {:this true
+            :get #(-> % u/proxy->shape :backface-hidden boolean)
+            :set
+            (fn [self value]
+              (cond
+                (not (boolean? value))
+                (u/not-valid plugin-id :backfaceHidden value)
+
+                (not (r/check-permission plugin-id "content:write"))
+                (u/not-valid plugin-id :backfaceHidden "Plugin doesn't have 'content:write' permission")
+
+                (not (u/page-active? page-id))
+                (u/not-valid plugin-id :backfaceHidden "Cannot modify a page that is not currently active")
+
+                :else
+                (commit-tilt! self :backface-hidden value false)))}
 
            ;; Strokes and fills
            :fills
@@ -2018,6 +2082,28 @@
 
                      :else
                      (st/emit! (dwsh/update-shapes [id] #(assoc % :show-content (not value))))))}
+
+                {:name "perspective"
+                 :get
+                 (fn [self]
+                   (-> self u/proxy->shape :perspective))
+
+                 :set
+                 (fn [self value]
+                   (cond
+                     (not (or (nil? value)
+                              (and (sm/valid-safe-number? value)
+                                   (<= gtl/min-perspective value gtl/max-perspective))))
+                     (u/not-valid plugin-id :perspective value)
+
+                     (not (r/check-permission plugin-id "content:write"))
+                     (u/not-valid plugin-id :perspective "Plugin doesn't have 'content:write' permission")
+
+                     (not (u/page-active? page-id))
+                     (u/not-valid plugin-id :perspective "Cannot modify a page that is not currently active")
+
+                     :else
+                     (commit-tilt! self :perspective value nil)))}
 
                 {:name "showInViewMode"
                  :get
