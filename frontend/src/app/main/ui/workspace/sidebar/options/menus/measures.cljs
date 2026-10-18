@@ -762,7 +762,10 @@
           (let [objects (deref refs/workspace-page-objects)]
             (boolean
              (some (fn [id]
-                     (some #(gtl/three-d? (get objects %)) (cfh/get-children-ids objects id)))
+                     ;; the layers it sees, not those of the boards in it
+                     (some #(let [shape (get objects %)]
+                              (and (= id (:frame-id shape)) (gtl/three-d? shape)))
+                           (cfh/get-children-ids objects id)))
                    board-ids))))
 
         on-camera-change
@@ -1233,7 +1236,8 @@
               :placeholder (if (= :multiple (:perspective values))
                              (tr "settings.multiple")
                              (str gtl/default-perspective))
-              :value (when (number? (:perspective values)) (:perspective values))}]
+              ;; the distance it sees from, the default without one of its own
+              :value (let [v (:perspective values)] (cond (number? v) v (not= :multiple v) gtl/default-perspective))}]
             (when motion-id
               [:> keyframe-diamond* {:properties [:perspective]}])]]
           [:div {:class (stl/css-case :perspective-input true
