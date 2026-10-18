@@ -7158,6 +7158,14 @@ msgstr "Scale"
 msgid "workspace.animation.preset.rotate"
 msgstr "Rotate"
 
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.preset.flip-x"
+msgstr "Flip X"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/motion.cljs
+msgid "workspace.animation.preset.flip-y"
+msgstr "Flip Y"
+
 msgid "workspace.animation.preset.slide-up"
 msgstr "Slide up"
 
@@ -7271,6 +7279,22 @@ msgstr "Rotate in"
 
 msgid "workspace.animation.rotate-out"
 msgstr "Rotate out"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.flip-x-in"
+msgstr "Flip X in"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.flip-x-out"
+msgstr "Flip X out"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.flip-y-in"
+msgstr "Flip Y in"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.flip-y-out"
+msgstr "Flip Y out"
 
 msgid "workspace.animation.type"
 msgstr "Type"

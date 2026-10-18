@@ -5604,10 +5604,20 @@ export interface Keyframe {
  * - `move`: the position, from `offsetX` and `offsetY` pixels away.
  * - `scale`: the size, from `amount` times it (0.5 by default).
  * - `rotate`: the rotation, from `amount` degrees turned (-90 by default).
+ * - `flip-x` and `flip-y`: the 3D rotation about the layer's own X or Y
+ *   axis (`rotateX`, `rotateY`), from `amount` degrees turned (90 by
+ *   default), around the pivot of its track: `flip-y` turns a card over.
  * - `blur`: a layer blur, from a radius of `amount` pixels (8 by default) to
  *   the layer's own; a layer without a blur gets one while it plays.
  */
-export type PresetAnimationType = 'fade' | 'move' | 'scale' | 'rotate' | 'blur';
+export type PresetAnimationType =
+  | 'fade'
+  | 'move'
+  | 'scale'
+  | 'rotate'
+  | 'flip-x'
+  | 'flip-y'
+  | 'blur';
 
 /**
  * A preset animation to add, see `Timeline.addAnimation`.

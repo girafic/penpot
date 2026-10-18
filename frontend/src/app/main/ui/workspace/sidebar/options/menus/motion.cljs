@@ -205,7 +205,7 @@
 ;; PRESET ANIMATIONS
 
 (def ^:private preset-types
-  [:fade :move :scale :rotate :blur])
+  [:fade :move :scale :rotate :flip-y :flip-x :blur])
 
 (def ^:private preset-styles
   [:slide-up :slide-down :slide-left :slide-right :pop :zoom :spin])
@@ -222,6 +222,8 @@
     :move          (tr "workspace.animation.preset.move")
     :scale         (tr "workspace.animation.preset.scale")
     :rotate        (tr "workspace.animation.preset.rotate")
+    :flip-x        (tr "workspace.animation.preset.flip-x")
+    :flip-y        (tr "workspace.animation.preset.flip-y")
     :blur          (tr "workspace.animation.preset.blur")
     :slide-up      (tr "workspace.animation.preset.slide-up")
     :slide-down    (tr "workspace.animation.preset.slide-down")
@@ -265,8 +267,9 @@
   random order and, given the `unit-count` of the text, the `:stagger`
   (ms between two units) and whether it is past the live cap
   (`:capped`)."
-  [{:keys [split spread order duration]} split-allowed unit-count]
-  (when (true? split-allowed)
+  [{:keys [type split spread order duration]} split-allowed unit-count]
+  ;; a flip turns all of a text over: its units pose in its plane only
+  (when (and (true? split-allowed) (not (contains? #{:flip-x :flip-y} type)))
     (let [counted? (and (some? split) (some? unit-count))]
       (cond-> {:kind (or split :layer)}
         (some? split)        (assoc :spread (or spread tu/default-spread) :order (or order :forward))
@@ -652,8 +655,11 @@
                                :on-change-end on-change-end
                                :on-change on-angle}]]
 
-          :rotate
-          [:> animation-row* {:label (tr "workspace.options.rotation")}
+          (:rotate :flip-x :flip-y)
+          [:> animation-row* {:label (case type
+                                       :flip-x (tr "workspace.options.rotate-x")
+                                       :flip-y (tr "workspace.options.rotate-y")
+                                       (tr "workspace.options.rotation"))}
            [:> numeric-input* {:icon i/rotation
                                :property (tr "workspace.options.rotation")
                                :step 15

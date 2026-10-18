@@ -251,6 +251,23 @@
     (t/is (= 0 (cta/rest-value shape :rotate-x nil)))
     (t/is (= 10 (cta/rest-value shape :rotate-y nil)))))
 
+(t/deftest a-flip-turns-the-layer-over-in-3d
+  (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
+        sid   (:id shape)
+        at    (fn [tl shape t property]
+                (get-in (cta/values-at (cta/resolve-animations tl {sid shape}) t) [sid property]))
+        flip  (fn [type direction]
+                (cta/add-animation (mk-timeline) sid {:type type :direction direction :start 0 :duration 400}))]
+    (t/is (= [90 0] [(at (flip :flip-y :in) shape 0 :rotate-y) (at (flip :flip-y :in) shape 400 :rotate-y)])
+          "in: from a quarter turn to where it rests")
+    (t/is (= [0 90] [(at (flip :flip-x :out) shape 0 :rotate-x) (at (flip :flip-x :out) shape 400 :rotate-x)])
+          "out: the other way, about X")
+    (t/is (= [110 20] (mapv #(at (flip :flip-y :in) (assoc shape :rotate-y 20) % :rotate-y) [0 400]))
+          "from where its tilt rests")
+    (t/is (= [:rotation :number] (cta/animation-token-types :flip-y :amount)))
+    (t/is (nil? (:split (cta/make-animation {:type :flip-y :split :word})))
+          "the units of a text turn in its plane only: a flip turns all of it")))
+
 (t/deftest remove-shapes-drops-tracks
   (let [a (uuid/next)
         b (uuid/next)

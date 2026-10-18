@@ -202,7 +202,7 @@
 ;; layer's own values, `:out` from them to the effect. Within its span it
 ;; takes over the keyframes of the properties it animates.
 (def animation-types
-  #{:fade :move :scale :rotate :blur})
+  #{:fade :move :scale :rotate :blur :flip-x :flip-y})
 
 (def animation-directions
   #{:in :out})
@@ -216,7 +216,9 @@
    [:duration ::sm/safe-int]
    [:easing {:optional true} schema:easing]
    ;; fade: opacity factor, scale: scale factor, rotate: degrees, blur:
-   ;; the radius of a layer blur in px
+   ;; the radius of a layer blur in px, flip-x and flip-y: the 3D turn
+   ;; about the X or Y axis of the layer in degrees (see
+   ;; `app.common.geom.tilt`)
    [:amount {:optional true} ::sm/safe-number]
    ;; move: offset in px
    [:offset-x {:optional true} ::sm/safe-number]
@@ -1367,7 +1369,9 @@
    :move   {:offset-x 0 :offset-y 40}
    :scale  {:amount 0.5}
    :rotate {:amount -90}
-   :blur   {:amount 8}})
+   :blur   {:amount 8}
+   :flip-x {:amount 90}
+   :flip-y {:amount 90}})
 
 (def builtin-styles
   "The built-in composite presets and the animations each one adds, which
@@ -1405,6 +1409,8 @@
     :scale  [:scale-x :scale-y]
     :rotate [:rotation]
     :blur   [:blur]
+    :flip-x [:rotate-x]
+    :flip-y [:rotate-y]
     []))
 
 (defn style-use?
@@ -1458,7 +1464,7 @@
     :amount (case type
               :fade [:opacity]
               :scale [:number]
-              :rotate [:rotation :number]
+              (:rotate :flip-x :flip-y) [:rotation :number]
               :blur [:dimensions :number]
               [])
     (:offset-x :offset-y) (if (= :move type) [:dimensions :number] [])
@@ -1496,7 +1502,10 @@
             (let [tokens (entry-tokens type (:applied-tokens params))]
               (cond-> (merge (get animation-defaults type)
                              (d/without-nils (select-keys params [:easing :amount :offset-x :offset-y]))
-                             (split-settings params)
+                             ;; the units of a text pose in its plane only: a flip
+                             ;; turns the whole text over
+                             (when-not (contains? #{:flip-x :flip-y} type)
+                               (split-settings params))
                              {:id (or id (uuid/next))
                               :type type
                               :direction (or direction :in)
@@ -3044,6 +3053,7 @@
     :scale  (* base (or amount 1))
     :rotate (+ base (or amount 0))
     :blur   (+ base (or amount 0))
+    (:flip-x :flip-y) (+ base (or amount 0))
     base))
 
 (defn- animation-keyframes
@@ -3662,7 +3672,7 @@
   (boolean (or (some #(contains? pivot-properties (:property %)) keyframes)
                (some #(if (keys-entry? %)
                         (contains? pivot-properties (:property %))
-                        (contains? #{:scale :rotate} (:type %)))
+                        (contains? #{:scale :rotate :flip-x :flip-y} (:type %)))
                      (expand-uses animations)))))
 
 (defn- merge-animation

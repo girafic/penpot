@@ -1052,7 +1052,7 @@
                      (parse-entry-tokens (obj/get props "appliedTokens") type))]
      (cond
        (not (contains? cta/animation-types type))
-       "The type should be one of 'fade', 'move', 'scale', 'rotate' or 'blur'"
+       "The type should be one of 'fade', 'move', 'scale', 'rotate', 'flip-x', 'flip-y' or 'blur'"
 
        (not (contains? #{"in" "out"} direction))
        "The direction should be 'in' or 'out'"

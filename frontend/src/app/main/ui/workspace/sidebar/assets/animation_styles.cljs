@@ -45,7 +45,7 @@
   (l/derived dwa/motion-mode? st/state))
 
 (def ^:private entry-types
-  [:fade :move :scale :rotate :blur])
+  [:fade :move :scale :rotate :flip-y :flip-x :blur])
 
 (defn- set-editing
   "Open the editor of the style `id`, or close it with nil."

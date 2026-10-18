@@ -76,6 +76,8 @@
                 :move   (if out? (tr "workspace.animation.move-out") (tr "workspace.animation.move-in"))
                 :scale  (if out? (tr "workspace.animation.scale-out") (tr "workspace.animation.scale-in"))
                 :rotate (if out? (tr "workspace.animation.rotate-out") (tr "workspace.animation.rotate-in"))
+                :flip-x (if out? (tr "workspace.animation.flip-x-out") (tr "workspace.animation.flip-x-in"))
+                :flip-y (if out? (tr "workspace.animation.flip-y-out") (tr "workspace.animation.flip-y-in"))
                 :blur   (if out? (tr "workspace.animation.blur-out") (tr "workspace.animation.blur-in"))
                 (name type))]
     (if (and (some? split) (not= :style type))
