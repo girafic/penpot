@@ -170,6 +170,32 @@
     (t/is (false? (gtl/three-d-space? (assoc (board 0 0 10 10) :preserve-depth true))) "a board that clips")
     (t/is (true? (gtl/three-d-space? (assoc (board 0 0 10 10) :preserve-depth true :show-content true))))))
 
+(t/deftest parallel-layers-draw-by-their-planes
+  ;; turned 32° the small moon, 34 px in front of the picture but off its
+  ;; middle, is less deep by its middle: its plane tells
+  (let [group   (-> (cts/setup-shape {:type :group :x 100 :y 100 :width 200 :height 200})
+                    (merge {:id group-id :parent-id board-id :frame-id board-id
+                            :shapes [rect-id face-id] :rotate-y 32 :preserve-depth true}))
+        picture (rect 106 140 188 120 :parent-id group-id :translate-z 36)
+        moon    (merge (rect 238 183 34 34 :parent-id group-id :translate-z 70) {:id face-id})
+        objs    (objects (board 0 0 400 400 :perspective 800) group picture moon)]
+    (t/is (< (gtl/depth objs moon) (gtl/depth objs picture)))
+    (t/is (= [rect-id face-id] (gtl/depth-sorted objs (get objs group-id) [face-id rect-id])))
+    (t/is (true? (gtl/in-front? [[0 0 0] [10 0 0] [10 10 0] [0 10 0]]
+                                [[0 0 10] [10 0 10] [10 10 10] [0 10 10]]
+                                [5 5 1000])))
+    (t/is (nil? (gtl/in-front? [[0 0 0] [10 0 0] [10 10 0] [0 10 0]]
+                               [[0 0 0] [10 0 0] [10 10 0] [0 10 0]]
+                               [5 5 1000]))
+          "one plane: nothing tells")
+    (t/testing "in one plane they keep their order, however the space turns"
+      (let [flat (-> objs
+                     (update group-id assoc :rotate-x 14 :rotate-y -32)
+                     (update rect-id dissoc :translate-z)
+                     (update face-id dissoc :translate-z))]
+        (t/is (= [face-id rect-id] (gtl/depth-sorted flat (get flat group-id) [face-id rect-id])))
+        (t/is (= [rect-id face-id] (gtl/depth-sorted flat (get flat group-id) [rect-id face-id])))))))
+
 (t/deftest a-layer-forward-shows-bigger
   ;; 100 px towards a viewer 1000 px away: 1000/900 as big, from the
   ;; vanishing point

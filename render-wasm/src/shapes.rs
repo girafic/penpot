@@ -599,6 +599,30 @@ impl Shape {
         (m, top)
     }
 
+    /// The corners of this layer in the 3D space it is in (see
+    /// `space_chain`), and where the viewer of that space is.
+    pub fn space_face(&self, shapes_pool: ShapesPoolRef) -> ([[f64; 3]; 4], [f64; 3]) {
+        let (m, top) = self.space_chain(shapes_pool);
+        let (distance, vp) = top.perspective_of(shapes_pool);
+        let transform = self.centered_transform();
+        let r = self.selrect;
+        let corners = [
+            (r.left, r.top),
+            (r.right, r.top),
+            (r.right, r.bottom),
+            (r.left, r.bottom),
+        ]
+        .map(|(x, y)| {
+            let p = transform.map_point(Point::new(x, y));
+            let q = [p.x as f64, p.y as f64, 0.0];
+            match &m {
+                Some(m) => tilt::apply44(m, q),
+                None => q,
+            }
+        });
+        (corners, [vp.x as f64, vp.y as f64, distance as f64])
+    }
+
     /// How far the middle of this layer comes towards the viewer in the 3D
     /// space it is in, px: what draws it before or after the other layers
     /// of a 3D space.
@@ -2656,6 +2680,48 @@ mod tests {
         let depth = |id: &Uuid| pool.get(id).expect("face").depth(&pool);
         assert!((depth(&front_id) - 111.60254037844386).abs() < 1e-3);
         assert!((depth(&right_id) + 25.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn parallel_layers_draw_by_their_planes() {
+        // turned 32° the small moon, 34 px in front of the picture but off
+        // its middle, is less deep by its middle: its plane tells
+        let mut pool = ShapesPool::new();
+        pool.initialize(4);
+        let [board_id, group_id, picture_id, moon_id] = [(); 4].map(|_| Uuid::new_v4());
+        {
+            let board = pool.add_shape(board_id);
+            board.set_shape_type(Type::Frame(Frame::default()));
+            board.set_selrect(0.0, 0.0, 400.0, 400.0);
+            board.set_perspective(Some(800.0), (0.5, 0.5));
+            board.children = vec![group_id];
+        }
+        {
+            let group = pool.add_shape(group_id);
+            group.set_shape_type(Type::Group(Group::default()));
+            group.set_selrect(100.0, 100.0, 300.0, 300.0);
+            group.set_parent(board_id);
+            group.set_tilt(Some(tilt::Tilt::new(0.0, 32.0)), false);
+            group.set_depth(0.0, true);
+            group.children = vec![moon_id, picture_id];
+        }
+        for (id, rect, z) in [
+            (picture_id, (106.0, 140.0, 294.0, 260.0), 36.0),
+            (moon_id, (238.0, 183.0, 272.0, 217.0), 70.0),
+        ] {
+            let shape = pool.add_shape(id);
+            shape.set_shape_type(Type::Rect(Rect::default()));
+            shape.set_selrect(rect.0, rect.1, rect.2, rect.3);
+            shape.set_parent(group_id);
+            shape.set_depth(z, false);
+        }
+        pool.mark_tilts();
+        let get = |id: &Uuid| pool.get(id).expect("shape");
+        assert!(get(&moon_id).depth(&pool) < get(&picture_id).depth(&pool));
+        let (picture, eye) = get(&picture_id).space_face(&pool);
+        let (moon, _) = get(&moon_id).space_face(&pool);
+        assert_eq!(tilt::in_front(&picture, &moon, eye), Some(true));
+        assert_eq!(tilt::in_front(&moon, &picture, eye), Some(false));
     }
 
     #[test]

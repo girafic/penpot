@@ -367,19 +367,82 @@ fn sort_z_index(tree: ShapesPoolRef, element: &Shape, children_ids: Vec<Uuid>) -
         children_ids
     };
 
-    // The layers of a 3D space draw back to front, by how far their middle
-    // comes towards the viewer (see `Shape::depth`); as they are where two
-    // are as deep.
+    // the layers of a 3D space draw back to front
     if tree.has_tilts() && element.three_d_space() {
-        let mut by_depth: Vec<(f64, Uuid)> = ids
-            .into_iter()
-            .map(|id| (tree.get(&id).map(|s| s.depth(tree)).unwrap_or(0.0), id))
-            .collect();
-        by_depth.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        by_depth.into_iter().map(|(_, id)| id).collect()
+        depth_sorted(tree, ids)
     } else {
         ids
     }
+}
+
+/// The most layers a 3D space sorts by their planes; more go by the depth
+/// of their middle only.
+const MAX_PLANE_SORTED: usize = 128;
+
+/// A layer of a 3D space as `depth_sorted` orders it: how far its middle
+/// comes towards the viewer, its corners in the space and where the viewer
+/// of the space is (see `Shape::space_face`).
+struct SpaceLayer {
+    id: Uuid,
+    depth: f64,
+    corners: [[f64; 3]; 4],
+    eye: [f64; 3],
+}
+
+impl SpaceLayer {
+    /// Whether this layer shows in front of `other`.
+    fn ahead_of(&self, other: &SpaceLayer) -> bool {
+        match tilt::in_front(&other.corners, &self.corners, self.eye) {
+            Some(ahead) => ahead,
+            None if tilt::coplanar(&other.corners, &self.corners) => false,
+            None => self.depth > other.depth,
+        }
+    }
+}
+
+/// `ids` (front first), the layers of a 3D space, front first as they
+/// show: each, from the back, goes in front of those it shows in front of
+/// (see `tilt::in_front`), as layers parallel to each other need; where
+/// two lie in one plane as they are, where they cross by how far their
+/// middle comes towards the viewer (see `Shape::depth`).
+fn depth_sorted(tree: ShapesPoolRef, ids: Vec<Uuid>) -> Vec<Uuid> {
+    let layers: Vec<SpaceLayer> = ids
+        .iter()
+        .rev()
+        .filter_map(|id| {
+            tree.get(id).map(|s| {
+                let (corners, eye) = s.space_face(tree);
+                SpaceLayer {
+                    id: *id,
+                    depth: s.depth(tree),
+                    corners,
+                    eye,
+                }
+            })
+        })
+        .collect();
+    if layers.len() != ids.len() {
+        return ids;
+    }
+    if layers.len() > MAX_PLANE_SORTED {
+        let mut by_depth = layers;
+        by_depth.sort_by(|a, b| {
+            a.depth
+                .partial_cmp(&b.depth)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        return by_depth.into_iter().rev().map(|l| l.id).collect();
+    }
+    // back first
+    let mut order: Vec<SpaceLayer> = Vec::with_capacity(layers.len());
+    for layer in layers {
+        let mut at = order.len();
+        while at > 0 && order[at - 1].ahead_of(&layer) {
+            at -= 1;
+        }
+        order.insert(at, layer);
+    }
+    order.into_iter().rev().map(|l| l.id).collect()
 }
 
 /// Children bottom to top, in the same order the GPU renderer paints them.

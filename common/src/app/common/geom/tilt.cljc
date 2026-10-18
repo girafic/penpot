@@ -342,15 +342,104 @@
       (nth (apply44 m [(:x c) (:y c) 0]) 2)
       0)))
 
+(defn- sub3 [[ax ay az] [bx by bz]] [(- ax bx) (- ay by) (- az bz)])
+(defn- dot3 [[ax ay az] [bx by bz]] (+ (* ax bx) (* ay by) (* az bz)))
+(defn- cross3
+  [[ax ay az] [bx by bz]]
+  [(- (* ay bz) (* az by)) (- (* az bx) (* ax bz)) (- (* ax by) (* ay bx))])
+
+(defn- face
+  "`[corners eye]`: the corners of `shape` in the 3D space it is in (see
+  `space-chain`), and where the viewer of that space is."
+  [objects shape]
+  (let [[m top] (space-chain objects shape)
+        {:keys [distance vp]} (perspective-of objects top)]
+    [(mapv (fn [p] (let [q [(:x p) (:y p) 0]] (if m (apply44 m q) q))) (:points shape))
+     [(dm/get-prop vp :x) (dm/get-prop vp :y) distance]]))
+
+(def ^:private plane-tolerance
+  "How far, px, a corner can be off a plane and count as in it."
+  0.01)
+
+(defn- eye-sides
+  "How far `points` are from the plane of the layer with the corners
+  `corners`, px, positive on the side of `eye`; nil for a layer with no
+  area."
+  [[c0 c1 _ c3] points eye]
+  (let [n   (cross3 (sub3 c1 c0) (sub3 c3 c0))
+        len (mth/sqrt (dot3 n n))]
+    (when (> len 1e-9)
+      (let [side (fn [p] (/ (dot3 n (sub3 p c0)) len))
+            e    (side eye)]
+        (when-not (mth/almost-zero? e)
+          (mapv #(if (pos? e) (side %) (- (side %))) points))))))
+
+(defn- coplanar?
+  "Whether the layers with the corners `a` and `b` lie in one plane."
+  [[c0 c1 _ c3] b]
+  (let [n   (cross3 (sub3 c1 c0) (sub3 c3 c0))
+        len (mth/sqrt (dot3 n n))]
+    (and (> len 1e-9)
+         (every? #(< (mth/abs (/ (dot3 n (sub3 % c0)) len)) plane-tolerance) b))))
+
+(defn in-front?
+  "Whether the layer with the corners `b` shows in front of the one with
+  the corners `a`, seen from `eye`: true when `b` is all on the side of
+  the plane of `a` the viewer is on, or `a` all behind the plane of `b`;
+  false the other way round; nil when they cross or lie in one plane."
+  [a b eye]
+  (let [on-eye-side? (fn [sides] (and (some? sides)
+                                      (every? #(> % (- plane-tolerance)) sides)
+                                      (some #(> % plane-tolerance) sides)))
+        behind?      (fn [sides] (and (some? sides)
+                                      (every? #(< % plane-tolerance) sides)
+                                      (some #(< % (- plane-tolerance)) sides)))
+        b-to-a       (eye-sides a b eye)
+        a-to-b       (eye-sides b a eye)]
+    (cond
+      (or (on-eye-side? b-to-a) (behind? a-to-b)) true
+      (or (behind? b-to-a) (on-eye-side? a-to-b)) false
+      :else nil)))
+
+(def ^:private max-plane-sorted
+  "The most layers a 3D space sorts by their planes; more go by the depth
+  of their middle only."
+  128)
+
 (defn depth-sorted
-  "`ids`, layers of `objects` in the parent `parent`, from the back to the
-  front: in a 3D space (see `three-d-space?`) by their `depth`, the later
-  one in front where two are as deep; else as they are."
+  "`ids`, layers of `objects` in the parent `parent` from the back to the
+  front, as they show: in a 3D space (see `three-d-space?`) each, from the
+  back, goes in front of those it shows in front of (see `in-front?`), as
+  layers parallel to each other need; where two lie in one plane as they
+  are, where they cross by how far their middle comes towards the viewer
+  (see `depth`); else as they are."
   [objects parent ids]
   (if (three-d-space? parent)
-    (->> (map-indexed vector ids)
-         (sort-by (fn [[i id]] [(depth objects (get objects id)) i]))
-         (mapv second))
+    (let [layers (mapv (fn [id]
+                         (let [shape (get objects id)]
+                           {:id id :depth (depth objects shape) :face (face objects shape)}))
+                       ids)]
+      (if (> (count layers) max-plane-sorted)
+        (->> (map-indexed vector layers)
+             (sort-by (fn [[i l]] [(:depth l) i]))
+             (mapv (comp :id second)))
+        (let [ahead? (fn [x y]
+                       (let [[fx eye] (:face x)
+                             [fy _]   (:face y)
+                             ahead    (in-front? fy fx eye)]
+                         (cond
+                           (some? ahead)     ahead
+                           (coplanar? fy fx) false
+                           :else             (> (:depth x) (:depth y)))))]
+          (->> layers
+               (reduce (fn [order layer]
+                         (let [at (loop [at (count order)]
+                                    (if (and (pos? at) (ahead? (nth order (dec at)) layer))
+                                      (recur (dec at))
+                                      at))]
+                           (into (conj (subvec order 0 at) layer) (subvec order at))))
+                       [])
+               (mapv :id)))))
     ids))
 
 (defn- shown-projection

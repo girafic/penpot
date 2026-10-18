@@ -261,6 +261,79 @@ pub fn tilt_matrix(
     model44(selrect, transform, Some(tilt), 0.0).map(|m| seen(&m, distance, vp))
 }
 
+/// How far, px, a corner can be off a plane and count as in it.
+const PLANE_TOLERANCE: f64 = 0.01;
+
+fn sub3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// How far `points` are from the plane of the layer with the `corners`,
+/// px, positive on the side of `eye`; `None` for a layer with no area.
+fn eye_sides(corners: &[[f64; 3]; 4], points: &[[f64; 3]; 4], eye: [f64; 3]) -> Option<[f64; 4]> {
+    let c0 = corners[0];
+    let n = cross3(sub3(corners[1], c0), sub3(corners[3], c0));
+    let len = dot3(n, n).sqrt();
+    if len <= 1e-9 {
+        return None;
+    }
+    let side = |p: [f64; 3]| dot3(n, sub3(p, c0)) / len;
+    let e = side(eye);
+    if e.abs() < 1e-9 {
+        return None;
+    }
+    Some(points.map(|p| if e > 0.0 { side(p) } else { -side(p) }))
+}
+
+/// Whether the layers with the corners `a` and `b` lie in one plane.
+pub fn coplanar(a: &[[f64; 3]; 4], b: &[[f64; 3]; 4]) -> bool {
+    let c0 = a[0];
+    let n = cross3(sub3(a[1], c0), sub3(a[3], c0));
+    let len = dot3(n, n).sqrt();
+    len > 1e-9
+        && b.iter()
+            .all(|p| (dot3(n, sub3(*p, c0)) / len).abs() < PLANE_TOLERANCE)
+}
+
+/// Whether the layer with the corners `b` shows in front of the one with
+/// the corners `a`, seen from `eye`: `Some(true)` when `b` is all on the side
+/// of the plane of `a` the viewer is on, or `a` all behind the plane of `b`;
+/// `Some(false)` the other way round; `None` when they cross or lie in one
+/// plane.
+pub fn in_front(a: &[[f64; 3]; 4], b: &[[f64; 3]; 4], eye: [f64; 3]) -> Option<bool> {
+    let on_eye_side = |sides: Option<[f64; 4]>| {
+        sides.is_some_and(|s| {
+            s.iter().all(|v| *v > -PLANE_TOLERANCE) && s.iter().any(|v| *v > PLANE_TOLERANCE)
+        })
+    };
+    let behind = |sides: Option<[f64; 4]>| {
+        sides.is_some_and(|s| {
+            s.iter().all(|v| *v < PLANE_TOLERANCE) && s.iter().any(|v| *v < -PLANE_TOLERANCE)
+        })
+    };
+    let b_to_a = eye_sides(a, b, eye);
+    let a_to_b = eye_sides(b, a, eye);
+    if on_eye_side(b_to_a) || behind(a_to_b) {
+        Some(true)
+    } else if behind(b_to_a) || on_eye_side(a_to_b) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 fn get9(h: &Matrix) -> [f64; 9] {
     let mut v = [0.0f32; 9];
     h.get_9(&mut v);
@@ -566,6 +639,24 @@ mod tests {
             ],
             &corners(&h, 1050.0, 150.0, 100.0, 100.0),
         );
+    }
+
+    #[test]
+    fn planes_tell_which_layer_is_in_front() {
+        let at = |z: f64| {
+            [
+                [0.0, 0.0, z],
+                [10.0, 0.0, z],
+                [10.0, 10.0, z],
+                [0.0, 10.0, z],
+            ]
+        };
+        let eye = [5.0, 5.0, 1000.0];
+        assert_eq!(in_front(&at(0.0), &at(10.0), eye), Some(true));
+        assert_eq!(in_front(&at(10.0), &at(0.0), eye), Some(false));
+        assert_eq!(in_front(&at(0.0), &at(0.0), eye), None);
+        assert!(coplanar(&at(0.0), &at(0.0)));
+        assert!(!coplanar(&at(0.0), &at(10.0)));
     }
 
     #[test]
