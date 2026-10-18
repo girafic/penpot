@@ -10,6 +10,7 @@
    [app.common.data :as d]
    [app.common.files.helpers :as cfh]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.tilt :as gtl]
    [app.common.types.shape.interactions :as ctsi]
    [app.main.data.viewer :as dv]
    [app.main.refs :as refs]
@@ -28,6 +29,7 @@
    [app.util.dom :as dom]
    [app.util.object :as obj]
    [app.util.timers :as tm]
+   [cuerdas.core :as str]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
 
@@ -303,10 +305,47 @@
 ;; In WASM viewer mode the frame pixels come from a WASM snapshot, so we don't
 ;; render the SVG visuals at all. We only render the actionable areas (hotspots)
 ;; on top of the image: a transparent hit/highlight rect per interactive shape,
-;; wired to the same interaction handlers as the regular SVG tree.
+;; wired to the same interaction handlers as the regular SVG tree. A shape
+;; tilted or in depth (Penpot Motion, see `app.common.geom.tilt`) takes the
+;; outline it shows at.
+
+(defn hotspot-ids
+  "The board `frame-id` of `objects` and the shapes in it, in the order
+  they are drawn, the bottom one first: each shape before what it holds,
+  the layers of a 3D space by their depth (see `gtl/depth-sorted`), so
+  that the hotspot on top is where what shows on top is."
+  [objects frame-id]
+  (letfn [(walk [id]
+            (let [shape (get objects id)
+                  ids   (cond->> (:shapes shape)
+                          (gtl/three-d-space? shape) (gtl/depth-sorted objects shape))]
+              (mapcat #(cons % (walk %)) ids)))]
+    (cons frame-id (walk frame-id))))
+
+(defn- hidden-back?
+  "Whether `shape` of `objects`, or a layer it is in, hides its back and
+  shows it: none of it shows (see `gtl/back-facing?`)."
+  [objects shape]
+  (loop [shape shape]
+    (cond
+      (or (nil? shape) (cfh/root? shape)) false
+      (and (:backface-hidden shape) (gtl/back-facing? objects shape)) true
+      :else (recur (get objects (:parent-id shape))))))
+
+(defn hotspot-outline
+  "Where the hotspot of `shape` of `objects` is: `:box`, its box as it
+  lies, when nothing tilts it; the corners it shows at through the tilts
+  and depths of it and the layers it is in (see `gtl/projected-points`);
+  nil when there is nothing of it to click: its back is hidden, or it
+  reaches the viewer."
+  [objects shape]
+  (if (nil? (gtl/projection objects shape))
+    :box
+    (when-not (hidden-back? objects shape)
+      (gtl/projected-points objects shape))))
 
 (mf/defc hotspot*
-  [{:keys [shape all-objects]}]
+  [{:keys [shape objects all-objects]}]
   (let [base-frame   (mf/use-ctx base-frame-ctx)
         frame-offset (mf/use-ctx frame-offset-ctx)
         show-interactions (mf/deref ref:viewer-show-interactions)
@@ -321,29 +360,40 @@
         on-pe (mf/use-fn (mf/deps shape base-frame frame-offset all-objects overlays)
                          #(on-pointer-enter % shape base-frame frame-offset all-objects overlays))
         on-pl (mf/use-fn (mf/deps shape base-frame frame-offset all-objects overlays)
-                         #(on-pointer-leave % shape base-frame frame-offset all-objects overlays))]
+                         #(on-pointer-leave % shape base-frame frame-offset all-objects overlays))
+
+        outline (mf/with-memo [objects shape]
+                  (hotspot-outline (or objects all-objects) shape))]
 
     (mf/with-effect []
       (let [sems (on-load shape base-frame frame-offset all-objects overlays)]
         (partial run! tm/dispose! sems)))
 
-    [:g {:style {:cursor (when (ctsi/actionable? interactions) "pointer")}
-         :on-pointer-down on-pd
-         :on-pointer-up on-pu
-         :on-pointer-enter on-pe
-         :on-pointer-leave on-pl}
-     [:rect {:x (- x 1)
-             :y (- y 1)
-             :width (+ width 2)
-             :height (+ height 2)
-             :fill "var(--color-accent-tertiary)"
-             :stroke "var(--color-accent-tertiary)"
-             :stroke-width (if show-interactions 1 0)
-             :fill-opacity (if show-interactions 0.2 0)
-             ;; This rect is the only hit target, so it must always capture
-             ;; pointer events even when fully transparent.
-             :pointer-events "all"
-             :transform (gsh/transform-str shape)}]]))
+    (when (some? outline)
+      [:g {:style {:cursor (when (ctsi/actionable? interactions) "pointer")}
+           :on-pointer-down on-pd
+           :on-pointer-up on-pu
+           :on-pointer-enter on-pe
+           :on-pointer-leave on-pl}
+       (if (= :box outline)
+         [:rect {:x (- x 1)
+                 :y (- y 1)
+                 :width (+ width 2)
+                 :height (+ height 2)
+                 :fill "var(--color-accent-tertiary)"
+                 :stroke "var(--color-accent-tertiary)"
+                 :stroke-width (if show-interactions 1 0)
+                 :fill-opacity (if show-interactions 0.2 0)
+                 ;; This rect is the only hit target, so it must always capture
+                 ;; pointer events even when fully transparent.
+                 :pointer-events "all"
+                 :transform (gsh/transform-str shape)}]
+         [:path {:d (str "M" (str/join " L" (map #(str (:x %) " " (:y %)) outline)) " Z")
+                 :fill "var(--color-accent-tertiary)"
+                 :stroke "var(--color-accent-tertiary)"
+                 :stroke-width (if show-interactions 1 0)
+                 :fill-opacity (if show-interactions 0.2 0)
+                 :pointer-events "all"}])])))
 
 (mf/defc frame-hotspots*
   "Renders interaction hotspots for a frame subtree (WASM viewer mode).
@@ -355,7 +405,7 @@
   [{:keys [objects all-objects shape-filter frame]}]
   (let [all-objects (or all-objects objects)
         frame-id    (:id frame)
-        ids         (cond->> (cons frame-id (cfh/get-children-ids objects frame-id))
+        ids         (cond->> (hotspot-ids objects frame-id)
                       shape-filter (filter shape-filter))
         hotspots    (->> ids
                          (keep #(get objects %))
@@ -365,6 +415,7 @@
      (for [shape hotspots]
        [:> hotspot* {:key (str (:id shape))
                      :shape shape
+                     :objects objects
                      :all-objects all-objects}])]))
 
 

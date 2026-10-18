@@ -8,7 +8,9 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.common.files.helpers :as cfh]
+   [app.common.geom.modifiers :as gm]
    [app.common.geom.point :as gpt]
+   [app.common.geom.shapes :as gsh]
    [app.main.render-viewer-wasm :as rwv]
    [app.main.ui.viewer.shapes :as shapes]
    [app.main.ui.viewer.viewport-common :as vpc]
@@ -24,28 +26,72 @@
     {:width  (js/Math.round (* css-w dpr))
      :height (js/Math.round (* css-h dpr))}))
 
+(def ^:private hotspot-interval
+  "How often, ms, the hotspots follow the animation as it plays: often
+  enough to click what moves, seldom enough to keep playback smooth."
+  100)
+
+(defn- use-posed-modifiers
+  "The modif-tree the ref `modifiers-ref` (of a delay, see
+  `interactions/viewport*`) holds, followed at most every
+  `hotspot-interval` ms, the last one always."
+  [modifiers-ref]
+  (let [state* (mf/use-state #(some-> modifiers-ref deref force))]
+    (mf/with-effect [modifiers-ref]
+      (when (some? modifiers-ref)
+        (let [key     (js/Symbol "hotspots")
+              last-at (volatile! 0)
+              timer   (volatile! nil)
+              take!   (fn []
+                        (vreset! last-at (js/Date.now))
+                        (vreset! timer nil)
+                        (reset! state* (force @modifiers-ref)))]
+          (take!)
+          (add-watch modifiers-ref key
+                     (fn [_ _ _ _]
+                       (let [wait (- hotspot-interval (- (js/Date.now) @last-at))]
+                         (cond
+                           (not (pos? wait)) (take!)
+                           (nil? @timer)     (vreset! timer (js/setTimeout take! wait))))))
+          (fn []
+            (remove-watch modifiers-ref key)
+            (some-> @timer js/clearTimeout)))))
+    (deref state*)))
+
 (mf/defc wasm-hotspots-svg*
-  [{:keys [vbox size class prepared prepared-all prepared-frame shape-filter]}]
-  [:svg {:view-box vbox
-         :width (:width size)
-         :height (:height size)
-         :version "1.1"
-         :xmlnsXlink "http://www.w3.org/1999/xlink"
-         :xmlns "http://www.w3.org/2000/svg"
-         :fill "none"
-         :style {:position "absolute"
-                 :top 0
-                 :left 0}
-         :class class}
-   [:> shapes/frame-hotspots*
-    {:objects prepared
-     :all-objects prepared-all
-     :frame prepared-frame
-     :shape-filter shape-filter}]])
+  "The hotspots of the board, over its WASM picture, where its shapes
+  show: as the animation of `modifiers-ref` poses them (see
+  `use-posed-modifiers`), tilted and in depth (see `shapes/hotspot*`)."
+  [{:keys [vbox size class prepared prepared-all prepared-frame shape-filter
+           objects frame delta modifiers-ref]}]
+  (let [modifiers (use-posed-modifiers modifiers-ref)
+        prepared  (mf/with-memo [prepared modifiers objects frame size delta]
+                    (if (and (seq modifiers) (some? objects))
+                      (->> (gsh/apply-objects-modifiers objects (gm/set-objects-modifiers modifiers objects))
+                           (vpc/prepare-objects frame size delta))
+                      prepared))
+        prepared-frame (or (get prepared (:id prepared-frame)) prepared-frame)]
+    [:svg {:view-box vbox
+           :width (:width size)
+           :height (:height size)
+           :version "1.1"
+           :xmlnsXlink "http://www.w3.org/1999/xlink"
+           :xmlns "http://www.w3.org/2000/svg"
+           :fill "none"
+           :style {:position "absolute"
+                   :top 0
+                   :left 0}
+           :class class}
+     [:> shapes/frame-hotspots*
+      {:objects prepared
+       :all-objects prepared-all
+       :frame prepared-frame
+       :shape-filter shape-filter}]]))
 
 (mf/defc wasm-layer*
   [{:keys [canvas-ref scale size vbox
-           prepared prepared-all prepared-frame class shape-filter]}]
+           prepared prepared-all prepared-frame class shape-filter
+           objects frame delta modifiers-ref]}]
   (let [{:keys [width height]} (canvas-dimensions scale size)]
     [:div {:style {:position "absolute"
                    :top 0
@@ -62,7 +108,11 @@
                              :prepared prepared
                              :prepared-all prepared-all
                              :prepared-frame prepared-frame
-                             :shape-filter shape-filter}]]))
+                             :shape-filter shape-filter
+                             :objects objects
+                             :frame frame
+                             :delta delta
+                             :modifiers-ref modifiers-ref}]]))
 
 (defn- fixed-scroll-layer-ids
   [objects frame-id has-fixed?]
@@ -132,6 +182,10 @@
         (mf/props {:prepared prepared
                    :prepared-all prepared-all
                    :prepared-frame prepared-frame
+                   :objects objects
+                   :frame frame
+                   :delta delta
+                   :modifiers-ref modifiers-ref
                    :canvas-ref not-fixed-wasm-ref
                    :scale scale
                    :size size
@@ -146,6 +200,10 @@
         (mf/props {:prepared prepared
                    :prepared-all prepared-all
                    :prepared-frame prepared-frame
+                   :objects objects
+                   :frame frame
+                   :delta delta
+                   :modifiers-ref modifiers-ref
                    :canvas-ref fixed-wasm-ref
                    :scale scale
                    :size size
