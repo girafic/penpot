@@ -1168,57 +1168,74 @@
     (effect [_ _ _]
       (audio/stop-all!))))
 
+(defn marker-jump-speed
+  "How much faster than its pace the timeline plays from `time` to the
+  marker at `target` (ms): a jump over `n` stretches between markers
+  takes √n times as long as one, so a far one comes quickly but is seen
+  on the way."
+  [timeline time target]
+  (let [lo (min time target)
+        hi (max time target)
+        n  (inc (count (filter #(< lo (:time %) hi) (:markers timeline))))]
+    (mth/sqrt n)))
+
 (defn play-to
   "Play the timeline of the board `board-id` from where it shows to its
-  `target` time (ms), forwards or backwards at the pace it plays, and
-  pause there; its sound plays along forwards (it has no way to play
-  backwards). A pause, another play or `play-timeline` stops it on the
-  way."
-  [board-id target]
-  (ptk/reify ::play-to
-    ptk/UpdateEvent
-    (update [_ state]
-      ;; another board's timeline from its start
-      (update-in state [:viewer-local :timeline]
-                 (fn [local]
-                   (-> (cond-> local
-                         (not= board-id (:timeline-id local))
-                         (assoc :time 0 :elapsed 0))
-                       (assoc :timeline-id board-id :playing? true :target target)))))
+  `target` time (ms), forwards or backwards, `speed` times its pace (1
+  without), and pause there; its sound plays along forwards at its pace
+  (it has no way to play backwards, or faster). A pause, another play or
+  `play-timeline` stops it on the way."
+  ([board-id target]
+   (play-to board-id target 1))
+  ([board-id target speed]
+   (ptk/reify ::play-to
+     ptk/UpdateEvent
+     (update [_ state]
+       ;; another board's timeline from its start
+       (update-in state [:viewer-local :timeline]
+                  (fn [local]
+                    (-> (cond-> local
+                          (not= board-id (:timeline-id local))
+                          (assoc :time 0 :elapsed 0))
+                        (assoc :timeline-id board-id :playing? true :target target)))))
 
-    ptk/WatchEvent
-    (watch [_ state stream]
-      (let [page     (viewer-current-page state)
-            timeline (board-clock page (:files state) board-id)
-            start    (or (dm/get-in state [:viewer-local :timeline :time]) 0)
-            span     (mth/abs (- target start))
-            dir      (if (< target start) -1 1)
-            sound?   (and (= 1 dir)
-                          (seq (:audio-clips timeline))
-                          (not (audio-muted? state))
-                          (some? (audio/now-ms)))
-            stopper  (rx/filter #(or (ptk/type? ::pause-timeline %)
-                                     (ptk/type? ::play-to %)
-                                     (ptk/type? ::play-timeline %))
-                                stream)]
-        (if (or (nil? timeline) (mth/almost-zero? span))
-          (rx/of (seek-timeline target) (pause-timeline))
-          (->> (rx/concat
-                (->> (frame-times 0)
-                     (rx/take-while #(< % span))
-                     (rx/map #(+ start (* dir %)))
-                     (rx/tap #(when sound? (audio/follow! ::board timeline % 1 true)))
-                     (rx/map seek-timeline))
-                ;; there, unless stopped on the way
-                (rx/of (seek-timeline target) (pause-timeline)))
-               (rx/take-until stopper)))))))
+     ptk/WatchEvent
+     (watch [_ state stream]
+       (let [page     (viewer-current-page state)
+             timeline (board-clock page (:files state) board-id)
+             start    (or (dm/get-in state [:viewer-local :timeline :time]) 0)
+             span     (mth/abs (- target start))
+             dir      (if (< target start) -1 1)
+             speed    (if (and (number? speed) (pos? speed)) speed 1)
+             sound?   (and (= 1 dir)
+                           (mth/close? speed 1)
+                           (seq (:audio-clips timeline))
+                           (not (audio-muted? state))
+                           (some? (audio/now-ms)))
+             stopper  (rx/filter #(or (ptk/type? ::pause-timeline %)
+                                      (ptk/type? ::play-to %)
+                                      (ptk/type? ::play-timeline %))
+                                 stream)]
+         (if (or (nil? timeline) (mth/almost-zero? span))
+           (rx/of (seek-timeline target) (pause-timeline))
+           (->> (rx/concat
+                 (->> (frame-times 0)
+                      (rx/map #(* speed %))
+                      (rx/take-while #(< % span))
+                      (rx/map #(+ start (* dir %)))
+                      (rx/tap #(when sound? (audio/follow! ::board timeline % 1 true)))
+                      (rx/map seek-timeline))
+                 ;; there, unless stopped on the way
+                 (rx/of (seek-timeline target) (pause-timeline)))
+                (rx/take-until stopper))))))))
 
 (defn play-to-marker
   "Play the timeline of the board `board-id` from where it shows to the
   marker `interaction` says (see `cta/target-marker`), a prototype action
   (see `ctsi/schema:play-to-marker-interaction`): the next or previous one
   counted from the marker it plays to while it plays to one, so that a
-  quick second click goes on from there. Nothing past the ends."
+  quick second click goes on from there. A jump over several markers
+  plays faster (see `marker-jump-speed`). Nothing past the ends."
   [board-id interaction]
   (ptk/reify ::play-to-marker
     ptk/WatchEvent
@@ -1226,11 +1243,11 @@
       (let [page     (viewer-current-page state)
             timeline (board-clock page (:files state) board-id)
             local    (:timeline (:viewer-local state))
-            from     (if (= board-id (:timeline-id local))
-                       (or (when (:playing? local) (:target local)) (:time local) 0)
-                       0)]
+            same?    (= board-id (:timeline-id local))
+            now      (if same? (or (:time local) 0) 0)
+            from     (if same? (or (when (:playing? local) (:target local)) now) 0)]
         (if-let [marker (some-> timeline (cta/target-marker from interaction))]
-          (rx/of (play-to board-id (:time marker)))
+          (rx/of (play-to board-id (:time marker) (marker-jump-speed timeline now (:time marker))))
           (rx/empty))))))
 
 (defn toggle-play-timeline

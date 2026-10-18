@@ -308,3 +308,25 @@
                         [:viewer-local :timeline :target]))
           "a pause leaves no marker to go on from")))
 
+(t/deftest a-jump-over-several-markers-plays-faster
+  (let [{:keys [state board-id]} (marker-board {:time 0})
+        tl (-> (get-in state [:viewer :pages]) vals first :timelines vals first)
+        frames (fn [speed]
+                 (let [raf (atom [])
+                       out (atom [])]
+                   (with-redefs [ts/raf        (fn [f] (swap! raf conj f) (count @raf))
+                                 ts/cancel-af! (fn [_] nil)]
+                     (let [sub (rx/subs! #(swap! out conj %)
+                                         (ptk/watch (dv/play-to board-id 1800 speed) state (rx/subject)))]
+                       (doseq [now [0 100 400 700 1000]]
+                         ((peek @raf) now))
+                       (rx/dispose! sub)))
+                   (into [] (keep #(when (= ::dv/seek-timeline (ptk/type %))
+                                     (get-in (ptk/update % state) [:viewer-local :timeline :time])))
+                         @out)))]
+    (t/is (= 1 (dv/marker-jump-speed tl 0 900)) "one stretch: its pace")
+    (t/is (= (js/Math.sqrt 2) (dv/marker-jump-speed tl 0 1800)) "two: √2 as fast")
+    (t/is (= (js/Math.sqrt 2) (dv/marker-jump-speed tl 1800 0)) "backwards too")
+    (t/is (= (js/Math.sqrt 2) (dv/marker-jump-speed tl 450 1800)) "from between two")
+    (t/is (= [200 800 1400 1800] (frames 2)) "twice as fast, there all the same")))
+
