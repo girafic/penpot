@@ -261,6 +261,42 @@
 (def ^:private noop
   (constantly nil))
 
+(def ^:private presets-menu-height
+  "The most the menu of presets is high, px (as `.presets-menu` caps it)."
+  400)
+
+(defn presets-menu-style
+  "The style of the menu of presets of a button with the box `button` in
+  a panel showing `area` (both `{:top :bottom}`, px of the window): below
+  the button, or above it when there is more room there and too little
+  below, as high as the room allows, as React style keys. The panel
+  scrolls above the dock of the timeline: a menu reaching under it showed
+  only its first items."
+  [button area]
+  (let [margin 8
+        below  (- (:bottom area) (:bottom button) margin)
+        above  (- (:top button) (:top area) margin)]
+    (if (and (< below presets-menu-height) (> above below))
+      {:insetBlockStart "auto"
+       :insetBlockEnd "100%"
+       :maxBlockSize (dm/str (min presets-menu-height above) "px")}
+      {:maxBlockSize (dm/str (max 120 (min presets-menu-height below)) "px")})))
+
+(defn- scroll-area
+  "The box of the nearest ancestor of `node` that scrolls, where what it
+  holds shows; the window without one."
+  [node]
+  (loop [node (.-parentElement node)]
+    (cond
+      (nil? node)
+      #js {:top 0 :bottom (.-innerHeight js/window)}
+
+      (contains? #{"auto" "scroll"} (.-overflowY (js/getComputedStyle node)))
+      (.getBoundingClientRect node)
+
+      :else
+      (recur (.-parentElement node)))))
+
 (defn split-controls
   "The controls `animation-item*` shows to play `animation` by the units
   of a text, nil without `split-allowed`: `:kind` (`:layer` for the whole
@@ -1395,11 +1431,19 @@
 
         open*      (mf/use-state false)
         open?      (deref open*)
+        menu-style* (mf/use-state nil)
 
         on-toggle-menu
         (mf/use-fn
+         (mf/deps open?)
          (fn [event]
            (dom/stop-propagation event)
+           (when-not open?
+             (let [node   (dom/get-current-target event)
+                   button (.getBoundingClientRect node)
+                   area   (scroll-area node)]
+               (reset! menu-style* (presets-menu-style {:top (.-top button) :bottom (.-bottom button)}
+                                                       {:top (.-top area) :bottom (.-bottom area)}))))
            (swap! open* not)))
 
         on-close-menu
@@ -1440,6 +1484,7 @@
 
       [:> dropdown-menu* {:show open?
                           :on-close on-close-menu
+                          :style (some-> (deref menu-style*) clj->js)
                           :class (stl/css :presets-menu)}
        (for [preset preset-types]
          [:> dropdown-menu-item* {:key (name preset)

@@ -37,6 +37,19 @@
         "a random order shuffles")
   (t/is (true? (:capped (motion/split-controls fade-by-word true 1001))) "past the live cap"))
 
+(t/deftest the-menu-of-presets-opens-where-there-is-room
+  (let [area {:top 100 :bottom 760}]
+    (t/is (= {:maxBlockSize "400px"} (motion/presets-menu-style {:top 200 :bottom 232} area))
+          "room below: down, as high as it goes")
+    (t/is (= {:insetBlockStart "auto" :insetBlockEnd "100%" :maxBlockSize "400px"}
+             (motion/presets-menu-style {:top 600 :bottom 632} area))
+          "near the dock: up")
+    (t/is (= {:insetBlockStart "auto" :insetBlockEnd "100%" :maxBlockSize "392px"}
+             (motion/presets-menu-style {:top 500 :bottom 532} area))
+          "up, as high as the room above")
+    (t/is (= {:maxBlockSize "320px"} (motion/presets-menu-style {:top 400 :bottom 432} {:top 300 :bottom 760}))
+          "down where there is more room below")))
+
 (t/deftest the-dock-names-the-units
   (t/is (= (tr "workspace.animation.label.split" (tr "workspace.animation.fade-in") (tr "workspace.animation.split.word"))
            (motion/animation-label fade-by-word)))
