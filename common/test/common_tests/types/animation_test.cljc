@@ -15,6 +15,7 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.tilt :as gtl]
    [app.common.logic.timelines :as cltl]
    [app.common.math :as mth]
    [app.common.schema :as sm]
@@ -469,6 +470,30 @@
       (t/is (nil? (get (acss/scene-layers tl objects) (:id group))) "the space draws nothing itself")
       (t/is (str/includes? css (str "penpot-anim-" (:id face))))
       (t/is (str/includes? css "brightness(0.333);") "turned away at the end"))))
+
+(t/deftest a-layer-of-a-sliding-3d-space-keeps-its-depth-in-css
+  ;; a 3D space turned 60° about Y slides 600 px right; the face in it is
+  ;; 200 px back, so its depth cues stay as they rest
+  (let [board  (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 1000 :height 300})
+                   (assoc :depth-fade 0.5 :depth-blur 2))
+        bid    (:id board)
+        face   (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 100})
+        group  (-> (cts/setup-shape {:type :group :x 100 :y 100 :width 100 :height 100})
+                   (assoc :parent-id bid :frame-id bid :shapes [(:id face)] :preserve-depth true :rotate-y 60))
+        face   (assoc face :parent-id (:id group) :frame-id bid :translate-z -200)
+        gid    (:id group)
+        fid    (:id face)
+        objects {bid (assoc board :shapes [gid]) gid group fid face}
+        tl     (-> (mk-timeline)
+                   (assoc :board-id bid)
+                   (cta/add-keyframe gid {:time 0 :property :x :value 100 :easing :linear})
+                   (cta/add-keyframe gid {:time 1000 :property :x :value 700}))
+        scene  (get (acss/scene-layers tl objects) fid)
+        round  #(update-vals % (fn [v] (mth/precision v 3)))
+        rest   (round (gtl/scene-effects objects face))]
+    (t/is (fn? scene) "it moves as its space does")
+    (t/is (= {:fade 0.933 :blur 2.0} rest))
+    (t/is (= rest (round (scene 0)) (round (scene 500)) (round (scene 1000))) "the face moves with its space")))
 
 (t/deftest a-flip-turns-the-layer-over-in-3d
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})

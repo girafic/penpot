@@ -11,6 +11,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.geom.modifiers :as cgm]
    [app.common.geom.shapes :as gsh]
    [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
@@ -349,16 +350,14 @@
   #{:x :y :width :height :rotation :scale-x :scale-y :rotate-x :rotate-y :translate-z})
 
 (defn- posed
-  "`objects` with the layers of `ids` posed as `timeline` plays them at
-  `t` (see `ctaf/timeline->modif-tree`)."
-  [timeline objects ids t]
+  "`objects` posed as `timeline` plays them at `t` (see
+  `ctaf/timeline->modif-tree`), what a layer holds moving with it (see
+  `cgm/set-objects-modifiers`), as the canvas poses them."
+  [timeline objects t]
   (let [tree (ctaf/timeline->modif-tree timeline objects t)]
-    (reduce (fn [objects id]
-              (if-let [mods (get-in tree [id :modifiers])]
-                (update objects id gsh/transform-shape mods)
-                objects))
-            objects
-            ids)))
+    (if (empty? tree)
+      objects
+      (gsh/apply-objects-modifiers objects (cgm/set-objects-modifiers tree objects)))))
 
 (defn scene-layers
   "`{id scene}` of the layers of `objects` the light or the depth cues of
@@ -375,7 +374,15 @@
                   (vals objects))]
     (if (empty? lit)
       {}
-      (let [played (cta/resolve-animations timeline objects)]
+      (let [played (cta/resolve-animations timeline objects)
+            ;; the page as it plays at a time, which every layer that
+            ;; shows anew reads
+            poses  (volatile! {})
+            pose   (fn [t]
+                     (or (get @poses t)
+                         (let [objs (posed timeline objects t)]
+                           (vswap! poses assoc t objs)
+                           objs)))]
         (into {}
               (keep
                (fn [shape]
@@ -388,21 +395,16 @@
                          ;; the light of its board turns as it plays
                          board  (:frame-id shape)
                          lights (some #(contains? cta/light-properties (:property %))
-                                      (dm/get-in played [:tracks board :keyframes]))
-                         ids    (cond-> ids lights (conj board))]
+                                      (dm/get-in played [:tracks board :keyframes]))]
                      (if (or lights
                              (some (fn [track]
                                      (or (some? (:follow track))
                                          (some #(contains? scene-properties (:property %)) (:keyframes track))))
                                    tracks))
-                       ;; a follow or a link plays from other layers
-                       (let [scoped (if (some #(or (:follow %) (seq (:links %))) (keep #(get-in timeline [:tracks %]) ids))
-                                      timeline
-                                      (update timeline :tracks select-keys ids))
-                             cache  (volatile! {})]
+                       (let [cache (volatile! {})]
                          [id (fn [t]
                                (or (get @cache t)
-                                   (let [objs    (posed scoped objects ids t)
+                                   (let [objs    (pose t)
                                          effects (or (gtl/scene-effects objs (get objs id)) {})]
                                      (vswap! cache assoc t effects)
                                      effects)))])
