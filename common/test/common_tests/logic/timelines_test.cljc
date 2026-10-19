@@ -1609,6 +1609,30 @@
     (t/is (= (copy-of objects copy :main-still) (get-in tl [:tracks dot :follow :leader])))
     (t/is (nil? (get-in (cltl/animation-tree copies objects 500) [dot :modifiers])) "it stays where it is")))
 
+(t/deftest a-copy-of-a-component-links-in-the-copy
+  (let [file  (following-component-file :main-rect)
+        page  (thf/current-page file)
+        main  (thi/id :main)
+        tl    (-> (get (:timelines page) main)
+                  (cta/set-link (thi/id :main-still) {:property :rotation :source (thi/id :main-rect)
+                                                      :source-property :x})
+                  (cta/set-link (thi/id :main-dot) {:property :opacity :source (thi/id :main-still)
+                                                    :source-property :rotation :factor 0.01}))
+        file  (thf/apply-changes file (-> (pcb/empty-changes nil)
+                                          (pcb/with-page page)
+                                          (pcb/set-timeline main tl)))
+        {:keys [objects board copy main-page]} (component-scene file)
+        still (copy-of objects copy :main-still)
+        tl    (get (cltl/instance-timelines objects board nil main-page) [:copy copy main])]
+    (t/is (= (copy-of objects copy :main-rect) (:source (cta/link-of tl still :rotation)))
+          "the rect of the copy, not of the main")
+    (let [objects (-> objects
+                      (dissoc still)
+                      (update-in [copy :shapes] #(filterv (partial not= still) %)))
+          tl      (get (cltl/instance-timelines objects board nil main-page) [:copy copy main])]
+      (t/is (nil? (cta/link-of tl (copy-of objects copy :main-dot) :opacity))
+            "a source the copy lacks links nothing"))))
+
 (t/deftest the-code-plays-a-follow-by-keyframes
   (let [file (following-file)
         page (thf/current-page file)

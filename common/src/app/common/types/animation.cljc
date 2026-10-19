@@ -115,13 +115,15 @@
 
 (defn played-light
   "The light of `board` as `values` (its values at a time) play its light
-  properties, nil when they play none."
+  properties, nil when they play none or the board has no light (its
+  rows stay, and play again once it has one)."
   [board values]
-  (when (some #(contains? values %) (keys light-properties))
+  (when (and (some? (:light board))
+             (some #(contains? values %) (keys light-properties)))
     (reduce-kv (fn [light property key]
                  (cond-> light
                    (contains? values property) (assoc key (get values property))))
-               (or (:light board) gtl/default-light)
+               (:light board)
                light-properties)))
 
 (def indexed-properties
@@ -1175,6 +1177,12 @@
   [timeline shape-id]
   (mapv #(merge link-defaults %) (dm/get-in timeline [:tracks shape-id :links])))
 
+(defn- ranged-link?
+  "Whether `link` maps a range of its source (see `schema:link`): with
+  both ends, `:input` and `:output`; half a range is none."
+  [link]
+  (and (some? (:input link)) (some? (:output link))))
+
 (defn link-of
   "The link of `property` of `shape-id` (see `links-of`), or nil."
   [timeline shape-id property]
@@ -1190,7 +1198,7 @@
                    (d/update-when :delay #(int (mth/round %))))
         ;; a range takes both ends of both, or none
         link   (cond-> link
-                 (not (and (some? (:input link)) (some? (:output link))))
+                 (not (ranged-link? link))
                  (dissoc :input :output))
         stored (into {} (remove (fn [[k v]] (or (nil? v) (= v (get link-defaults k ::none))))) link)
         links  (dm/get-in timeline [:tracks shape-id :links] [])
@@ -3158,8 +3166,10 @@
                       camera-properties))
 
       ;; the light of a board, all of it when a part plays
-      (and (= :frame (:type shape)) (some? (played-light shape values)))
-      (ctm/change-property :light (played-light shape values))
+      (= :frame (:type shape))
+      (as-> $ (if-let [light (played-light shape values)]
+                (ctm/change-property $ :light light)
+                $))
 
       (contains? values :r1)
       (ctm/change-property :r1 (:r1 values))
@@ -3467,8 +3477,8 @@
   keyframe of where it rests and the offset for a source row with none,
   none when that is where it rests. A link with a range samples the
   source row (see `ranged-row`)."
-  [timeline objects tracks shape-id {:keys [property source source-property input output] :as link}]
-  (if (and (some? input) (some? output))
+  [timeline objects tracks shape-id {:keys [property source source-property] :as link}]
+  (if (ranged-link? link)
     (let [row (sort-keyframes
                (filterv #(and (= source-property (:property %)) (nil? (:index %)))
                         (dm/get-in tracks [source :keyframes])))]
@@ -3491,8 +3501,12 @@
                              (dm/get-in tracks [source :keyframes]))]
     (if (seq row)
       (mapv (fn [keyframe]
+              ;; the handles of a motion path are offsets from the
+              ;; value, which the map scales by the factor
               (-> keyframe
-                  (dissoc :index :path-in :path-out :applied-tokens)
+                  (dissoc :index :applied-tokens)
+                  (d/update-when :path-in * factor)
+                  (d/update-when :path-out * factor)
                   (assoc :property property
                          :value (mapped (:value keyframe))
                          :time (+ (:time keyframe) delay))))
@@ -3536,7 +3550,7 @@
                 (let [property (:property link)
                       row      (linked-row timeline objects tracks id link)
                       ;; a range samples the source through the duration
-                      loops?   (and (nil? (:input link))
+                      loops?   (and (not (ranged-link? link))
                                     (contains? (dm/get-in tracks [(:source link) :loops] #{})
                                                (:source-property link)))]
                   (update tracks id
@@ -3715,17 +3729,7 @@
          timeline
          boards)))))
 
-(defn resolve-animations
-  "Return `timeline` as it plays: its hidden rows left out and its preset
-  animations turned into the keyframes they stand for, but the split
-  animations that play the units of a text one by one, which stay the
-  `:animations` of its track (see `text-unit-entries`), and the outlines
-  of a path matched to morph into each other (see `match-outlines`); its
-  links played (see `play-links`), the trims of groups passed to what
-  they hold (see `play-group-trims`) and the shadows a turning light
-  casts (see `play-cast-shadows`).
-  Everything that reads keyframes uses it: the preview, the playback and
-  the exports."
+(defn- resolve-animations*
   [timeline objects]
   (match-outlines
    (play-cast-shadows
@@ -3750,6 +3754,39 @@
       objects)
      objects)
     objects)))
+
+;; The timelines `resolve-animations` gave, `[objects resolved]` by
+;; timeline, gone with a timeline no longer read: every frame of the
+;; playback and every sample of an export reads the same timeline over the
+;; same objects, and links, cast shadows and group trims sample whole rows.
+#?(:cljs
+   (defonce ^:private resolved-cache
+     (js/WeakMap.)))
+
+(defn resolve-animations
+  "Return `timeline` as it plays: its hidden rows left out and its preset
+  animations turned into the keyframes they stand for, but the split
+  animations that play the units of a text one by one, which stay the
+  `:animations` of its track (see `text-unit-entries`), and the outlines
+  of a path matched to morph into each other (see `match-outlines`); its
+  links played (see `play-links`), the trims of groups passed to what
+  they hold (see `play-group-trims`) and the shadows a turning light
+  casts (see `play-cast-shadows`).
+  Everything that reads keyframes uses it: the preview, the playback and
+  the exports. In the browser the same as last time while `timeline` and
+  `objects` are."
+  [timeline objects]
+  #?(:cljs
+     (if (map? timeline)
+       (let [[objs resolved] (.get resolved-cache timeline)]
+         (if (and (some? resolved) (identical? objs objects))
+           resolved
+           (let [resolved (resolve-animations* timeline objects)]
+             (.set resolved-cache timeline [objects resolved])
+             resolved)))
+       (resolve-animations* timeline objects))
+     :clj
+     (resolve-animations* timeline objects)))
 
 (def ^:private unit-rest
   "The values of a unit of a text at rest, where the text lays it out,

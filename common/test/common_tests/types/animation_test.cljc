@@ -379,6 +379,26 @@
         (t/is (str/includes? css "brightness(1.667)") "turned to the light at the start")
         (t/is (str/includes? css "brightness(0.333)") "turned away at the end")))))
 
+(t/deftest a-board-without-a-light-plays-none
+  ;; its light turned off, the rows of its light stay
+  (let [board (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+        bid   (:id board)
+        card  (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 100})
+                  (assoc :parent-id bid :frame-id bid :rotate-y 60))
+        cid   (:id card)
+        objects {bid (assoc board :shapes [cid]) cid card}
+        tl    (-> (mk-timeline)
+                  (assoc :board-id bid)
+                  (cta/add-keyframe bid {:time 0 :property :light-angle :value 90 :easing :linear})
+                  (cta/add-keyframe bid {:time 1000 :property :light-angle :value 270}))
+        mods  (get-in (ctaf/timeline->modif-tree tl objects 500) [bid :modifiers])]
+    (t/is (nil? (:light (ctm/apply-structure-modifiers board mods))) "the canvas lights nothing")
+    (t/is (= {} (acss/scene-layers tl objects)) "nor does CSS")
+    (t/is (nil? (cta/played-light board {:light-angle 180})))
+    (t/is (= {:angle 180 :height 30 :ambient 0.2}
+             (cta/played-light (assoc board :light {:angle 90 :height 30 :ambient 0.2}) {:light-angle 180}))
+          "once it has one, they play again")))
+
 (t/deftest a-turning-light-turns-the-shadows-it-casts
   (let [board  (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
                    (assoc :light {:angle 315 :height 45 :ambient 0.3 :shadows true}))
@@ -6720,3 +6740,43 @@
     (t/testing "removing the link, or its source, unlinks"
       (t/is (nil? (get-in (cta/remove-link tl wheel :rotation) [:tracks wheel])) "nothing left of the track")
       (t/is (empty? (cta/links-of (cta/remove-shapes tl [car]) wheel))))))
+
+(t/deftest a-link-follows-the-curve-of-its-source
+  ;; the car swerves along a motion path: its x leaves its first keyframe
+  ;; with a handle 300 out
+  (let [{:keys [car wheel timeline objects]} (car-and-wheel)
+        curved (-> timeline
+                   (cta/remove-property car :x nil)
+                   (cta/add-keyframe car {:time 0 :property :x :value 0 :easing :linear :path-out 300})
+                   (cta/add-keyframe car {:time 1000 :property :x :value 100}))
+        x      #(get-in (values-at curved objects %) [car :x])]
+    (t/is (> (x 250) 100) "past its end, along the curve")
+    (doseq [factor [1 2]]
+      (let [tl  (cta/set-link curved wheel {:property :rotation :source car :source-property :x :factor factor})
+            rot #(get-in (values-at tl objects %) [wheel :rotation])]
+        (doseq [t [250 500 750]]
+          (t/is (close? (+ 10 (* factor (- (x t) 50))) (rot t))
+                (str "rest + factor × (source − its rest), factor " factor " at " t " ms")))))))
+
+(t/deftest half-a-range-links-as-no-range
+  ;; data that did not go through `set-link`: an input without an output
+  (let [{:keys [car wheel timeline objects]} (car-and-wheel)
+        tl     (assoc-in timeline [:tracks wheel :links]
+                         [{:property :rotation :source car :source-property :x :factor 3.6 :input [0 1]}])
+        looped (cta/toggle-slot-flag tl car :loops :x nil)]
+    (t/is (close? (+ 10 (* 3.6 (- (get-in (values-at tl objects 400) [car :x]) 50)))
+                  (get-in (values-at tl objects 400) [wheel :rotation]))
+          "it maps by its factor")
+    (t/is (contains? (get-in (cta/resolve-animations looped objects) [:tracks wheel :loops]) :rotation)
+          "and loops where its source loops")))
+
+#?(:cljs
+   (t/deftest a-timeline-resolves-once-while-it-and-its-objects-stay
+     (let [{:keys [car wheel timeline objects]} (car-and-wheel)
+           tl   (cta/set-link timeline wheel {:property :rotation :source car :source-property :x :factor 3.6})
+           once (cta/resolve-animations tl objects)]
+       (t/is (identical? once (cta/resolve-animations tl objects)) "every frame reads the same")
+       (t/is (not (identical? once (cta/resolve-animations tl (assoc-in objects [car :name] "Car"))))
+             "other objects resolve it anew")
+       (t/is (not (identical? once (cta/resolve-animations (assoc tl :duration 2000) objects)))
+             "and so does another timeline"))))
