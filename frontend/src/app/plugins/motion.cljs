@@ -1525,6 +1525,11 @@
                    (not= :frame (:type (get (u/locate-objects file-id page-id) shape-id))))
               (u/not-valid plugin-id :addKeyframe "Only a board has a camera (perspective, perspectiveX, perspectiveY)")
 
+              (and (contains? cta/light-properties (:property keyframe))
+                   (let [board (get (u/locate-objects file-id page-id) shape-id)]
+                     (not (and (= :frame (:type board)) (some? (:light board))))))
+              (u/not-valid plugin-id :addKeyframe "Only a board with a light has one to animate (lightAngle, lightHeight, lightAmbient)")
+
               (and (= :content (:property keyframe))
                    (not= :path (:type (get (u/locate-objects file-id page-id) shape-id))))
               (u/not-valid plugin-id :addKeyframe "Only a path morphs: turn the layer into a path first")

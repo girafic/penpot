@@ -9322,6 +9322,18 @@ msgstr "Orthographic"
 msgid "workspace.options.orthographic.hint"
 msgstr "See the tilted layers of the board without perspective, as from afar: for isometric drawings"
 
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.light-angle"
+msgstr "Light angle"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.light-height"
+msgstr "Light height"
+
+#: src/app/util/motion_labels.cljs
+msgid "workspace.animation.light-ambient"
+msgstr "Ambient light"
+
 #: src/app/main/ui/workspace/viewport/tilt_handles.cljs
 msgid "workspace.viewport.tilt-handle.x"
 msgstr "3D rotation X: drag up and down, with Shift in steps of 15°"

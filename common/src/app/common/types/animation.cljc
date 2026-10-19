@@ -58,6 +58,8 @@
     ;; the camera of a board: how far the viewer of its tilted layers is,
     ;; and where their vanishing point is (see `camera-properties`)
     :perspective :perspective-x :perspective-y
+    ;; the light of a board (see `light-properties`)
+    :light-angle :light-height :light-ambient
     :r1 :r2 :r3 :r4
     :fill-color :fill-opacity
     :stroke-color :stroke-opacity :stroke-width
@@ -97,6 +99,30 @@
     :perspective   (or (:perspective board) gtl/default-perspective)
     :perspective-x (or (:perspective-x board) 0.5)
     :perspective-y (or (:perspective-y board) 0.5)))
+
+(def light-properties
+  "The properties of the light of a board (see `gtl/shade`): where it
+  comes from, degrees round the view and above the plane, and the share of
+  it from all round. Only boards with a light have them."
+  {:light-angle :angle :light-height :height :light-ambient :ambient})
+
+(defn light-rest
+  "The value of the light property `property` of `board` without
+  keyframes."
+  [board property]
+  (let [key (get light-properties property)]
+    (get (or (:light board) gtl/default-light) key (get gtl/default-light key))))
+
+(defn played-light
+  "The light of `board` as `values` (its values at a time) play its light
+  properties, nil when they play none."
+  [board values]
+  (when (some #(contains? values %) (keys light-properties))
+    (reduce-kv (fn [light property key]
+                 (cond-> light
+                   (contains? values property) (assoc key (get values property))))
+               (or (:light board) gtl/default-light)
+               light-properties)))
 
 (def indexed-properties
   #{:fill-color :fill-opacity
@@ -2797,7 +2823,7 @@
     :trim-start :trim-end :trim-offset :text-units :content
     ;; the tilt, drawn and not kept in the geometry (see `app.common.geom.tilt`)
     :rotate-x :rotate-y :tilt-pivot :translate-z
-    :perspective :perspective-x :perspective-y})
+    :perspective :perspective-x :perspective-y :light})
 
 (defn appearance-changes
   "`{attr value}` of the `appearance-attrs` that `modifiers` change, or nil.
@@ -3093,6 +3119,10 @@
                       $
                       camera-properties))
 
+      ;; the light of a board, all of it when a part plays
+      (and (= :frame (:type shape)) (some? (played-light shape values)))
+      (ctm/change-property :light (played-light shape values))
+
       (contains? values :r1)
       (ctm/change-property :r1 (:r1 values))
 
@@ -3149,6 +3179,8 @@
     :blur     (or (dm/get-in shape [:blur :value]) 0)
     (:perspective :perspective-x :perspective-y)
     (when (= :frame (:type shape)) (camera-rest shape property))
+    (:light-angle :light-height :light-ambient)
+    (when (= :frame (:type shape)) (light-rest shape property))
     nil))
 
 (defn- effect-value
@@ -3734,6 +3766,9 @@
 
     (:perspective :perspective-x :perspective-y)
     (= :frame (:type shape))
+
+    (:light-angle :light-height :light-ambient)
+    (and (= :frame (:type shape)) (some? (:light shape)))
 
     :content
     (= :path (:type shape))

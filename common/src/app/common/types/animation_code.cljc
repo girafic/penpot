@@ -37,6 +37,9 @@
    :perspective "perspective"
    :perspective-x "perspectiveX"
    :perspective-y "perspectiveY"
+   :light-angle "lightAngle"
+   :light-height "lightHeight"
+   :light-ambient "lightAmbient"
    :scale-x "scaleX"
    :scale-y "scaleY"
    :opacity "opacity"
@@ -78,6 +81,7 @@
   the code follows."
   [:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y :translate-z
    :perspective :perspective-x :perspective-y
+   :light-angle :light-height :light-ambient
    :opacity :r1 :r2 :r3 :r4
    :fill-color :fill-opacity
    :stroke-color :stroke-opacity :stroke-width

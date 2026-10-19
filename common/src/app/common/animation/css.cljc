@@ -10,6 +10,7 @@
   plays too (see `app.common.animation.svg`)."
   (:require
    [app.common.data :as d]
+   [app.common.data.macros :as dm]
    [app.common.geom.shapes :as gsh]
    [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
@@ -365,8 +366,8 @@
   plays: `scene` their effects at rest (`{:shade :fade :blur}`, those that
   change them), or, of a layer that moves in 3D as it plays (it or a 3D
   space group it is in, see `gtl/space-ids`), a function of a time to
-  them (`{}` for none then). Of the layers in the planes of their boards,
-  none."
+  them (`{}` for none then), as for one whose board's light plays. Of the
+  layers in the planes of their boards, none."
   [timeline objects]
   (let [lit (into #{}
                   (comp (filter #(and (= :frame (:type %)) (some? (gtl/scene %))))
@@ -383,11 +384,17 @@
                             (not (gtl/three-d-space? shape)))
                    (let [id     (:id shape)
                          ids    (gtl/space-ids objects shape)
-                         tracks (keep #(get-in played [:tracks %]) ids)]
-                     (if (some (fn [track]
-                                 (or (some? (:follow track))
-                                     (some #(contains? scene-properties (:property %)) (:keyframes track))))
-                               tracks)
+                         tracks (keep #(get-in played [:tracks %]) ids)
+                         ;; the light of its board turns as it plays
+                         board  (:frame-id shape)
+                         lights (some #(contains? cta/light-properties (:property %))
+                                      (dm/get-in played [:tracks board :keyframes]))
+                         ids    (cond-> ids lights (conj board))]
+                     (if (or lights
+                             (some (fn [track]
+                                     (or (some? (:follow track))
+                                         (some #(contains? scene-properties (:property %)) (:keyframes track))))
+                                   tracks))
                        ;; a follow or a link plays from other layers
                        (let [scoped (if (some #(or (:follow %) (seq (:links %))) (keep #(get-in timeline [:tracks %]) ids))
                                       timeline

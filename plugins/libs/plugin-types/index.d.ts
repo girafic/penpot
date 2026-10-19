@@ -286,10 +286,12 @@ export interface Board extends ShapeBase {
    * colours. `null` is no light; a partial object takes the rest from
    * `{ angle: 315, height: 45, ambient: 0.3 }`. Penpot Motion.
    *
+   * A light from the right, and none:
+   *
    * @example
    * ```js
-   * board.light = { angle: 90, height: 30, ambient: 0.2 }; // from the right
-   * board.light = null; // no light
+   * board.light = { angle: 90, height: 30, ambient: 0.2 };
+   * board.light = null;
    * ```
    */
   light: Light | null;
@@ -5749,6 +5751,10 @@ export type TimelinePlayback = 'once' | 'loop' | 'ping-pong';
  *   board, in pixels; `perspectiveX`, `perspectiveY`: their vanishing
  *   point, a fraction of the board (0.5 is its middle). Only boards take
  *   them (see `Board.perspective`).
+ * - `lightAngle`, `lightHeight`: where the light of a board comes from,
+ *   degrees round the view (clockwise from its top) and above it;
+ *   `lightAmbient`: the share of it from all round (0 to 1). Only boards
+ *   with a light take them (see `Board.light`).
  * - `scaleX`, `scaleY`: a factor, 1 is the layer's own size.
  * - `opacity`, `fillOpacity`, `strokeOpacity`, `shadowOpacity`: 0 to 1.
  * - `fillColor`, `strokeColor`, `shadowColor`: a hexadecimal color like
@@ -5778,6 +5784,9 @@ export type AnimatableProperty =
   | 'perspective'
   | 'perspectiveX'
   | 'perspectiveY'
+  | 'lightAngle'
+  | 'lightHeight'
+  | 'lightAmbient'
   | 'scaleX'
   | 'scaleY'
   | 'opacity'

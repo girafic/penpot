@@ -316,6 +316,34 @@
     (t/is (not (str/includes? (acss/timeline->css tl {bid (assoc board :orthographic true)}) "perspective"))
           "seen without perspective, none plays")))
 
+(t/deftest the-light-of-a-board-plays
+  (let [board (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+                  (assoc :light {:angle 90 :height 30 :ambient 0.2}))
+        bid   (:id board)
+        card  (-> (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 100})
+                  (assoc :parent-id bid :frame-id bid :rotate-y 60))
+        cid   (:id card)
+        objects {bid (assoc board :shapes [cid]) cid card}
+        tl    (-> (mk-timeline)
+                  (assoc :board-id bid)
+                  (cta/add-keyframe bid {:time 0 :property :light-angle :value 90 :easing :linear})
+                  (cta/add-keyframe bid {:time 1000 :property :light-angle :value 270}))
+        mods  (get-in (ctaf/timeline->modif-tree tl objects 500) [bid :modifiers])]
+    (t/is (= {:angle 180 :height 30 :ambient 0.2}
+             (update (:light (ctm/apply-structure-modifiers board mods)) :angle mth/round))
+          "the rest of it as it rests")
+    (t/is (= [90 30 0.2] (mapv #(cta/rest-value board % nil) [:light-angle :light-height :light-ambient])))
+    (t/testing "only boards with a light have one"
+      (t/is (true? (cta/fits-keyframe? board {:property :light-angle})))
+      (t/is (false? (cta/fits-keyframe? (dissoc board :light) {:property :light-height})))
+      (t/is (false? (cta/fits-keyframe? card {:property :light-ambient}))))
+    (t/testing "CSS shades the card frame by frame"
+      (let [css (acss/timeline->css tl objects)]
+        (t/is (fn? (get (acss/scene-layers tl objects) cid)) "its board's light plays")
+        (t/is (str/includes? css (str "penpot-anim-" cid)))
+        (t/is (str/includes? css "brightness(1.667)") "turned to the light at the start")
+        (t/is (str/includes? css "brightness(0.333)") "turned away at the end")))))
+
 (t/deftest the-light-and-depth-cues-of-a-board-play-in-css
   ;; lit from the right, 30° up, a fifth all round; half gone 1000 px back
   (let [board   (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})

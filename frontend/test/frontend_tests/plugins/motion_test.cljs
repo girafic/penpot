@@ -296,6 +296,23 @@
         (.unlink timeline wheel "rotation")
         (t/is (= ["opacity"] (map :property (links wheel))))))))
 
+(t/deftest the-light-of-a-board-takes-keyframes
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [[store ^js context]    (setup true)
+            [^js board [^js card]] (board-with-rects context 1)
+            ^js timeline           (.addTimeline board)
+            properties             #(mapv (juxt :property :value)
+                                          (:keyframes (stored-track store context board board)))]
+        (t/is (thrown? js/Error (.addKeyframe timeline board #js {:property "lightAngle" :time 0 :value 90}))
+              "a board with no light")
+        (t/is (thrown? js/Error (.addKeyframe timeline card #js {:property "lightAngle" :time 0 :value 90}))
+              "a layer has no light")
+        (set! (.-light board) #js {:angle 90})
+        (.addKeyframe timeline board #js {:property "lightAngle" :time 0 :value 90})
+        (.addKeyframe timeline board #js {:property "lightAmbient" :time 500 :value 0.6})
+        (t/is (= [[:light-angle 90] [:light-ambient 0.6]] (properties)))))))
+
 (t/deftest a-layer-follows-another-of-its-board
   (thw/with-wasm-mocks*
     (fn []

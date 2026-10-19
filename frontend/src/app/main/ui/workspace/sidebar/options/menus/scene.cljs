@@ -12,19 +12,27 @@
   (:require
    [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
+   [app.common.types.animation :as cta]
+   [app.main.data.workspace.animation :as dwa]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.store :as st]
    [app.main.ui.components.numeric-input :as deprecated-input]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.controls.checkbox :refer [checkbox*]]
+   [app.main.ui.workspace.sidebar.options.menus.motion :refer [keyframe-diamond*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
+   [okulary.core :as l]
    [rumext.v2 :as mf]))
+
+(def ^:private ref:timeline
+  (l/derived dwa/current-timeline st/state))
 
 (mf/defc scene-field*
   "A number of the scene shown with its `label` and `unit`: `value`
   (`:multiple` mixed), `scale` times what it keeps (percent of a share);
   `on-change` gets what it keeps."
-  [{:keys [label hint unit value scale min max on-change]}]
+  [{:keys [label hint unit value scale min max on-change keyframes]}]
   (let [scale     (or scale 1)
         on-change (mf/use-fn
                    (mf/deps on-change scale)
@@ -41,7 +49,10 @@
        :on-change on-change
        :class (stl/css :numeric-input)
        :value (when (number? value) (mth/precision (* scale value) 2))}]
-     [:span {:class (stl/css :scene-unit)} unit]]))
+     [:span {:class (stl/css :scene-unit)} unit]
+     ;; its diamond, in motion mode, as the camera has
+     (when (some? keyframes)
+       [:> keyframe-diamond* {:properties [keyframes]}])]))
 
 (def ^:private cue-attrs
   [:depth-fade :depth-blur :depth-focus])
@@ -58,7 +69,8 @@
   with its fields while it is on (the ambient light and the focus beside
   it)."
   [{:keys [ids values]}]
-  (let [light  (:light values)
+  (let [motion-id (mf/use-ctx ctx/motion-shape-id)
+        light  (:light values)
         lit?   (some? light)
         shared (when (map? light) light)
         cued?  (some #(some? (get values %)) cue-attrs)
@@ -72,16 +84,23 @@
                                                   (assoc % :light (or (:light %) gtl/default-light))
                                                   (dissoc % :light)))))))
 
+        ;; an animated part of it takes the value at the playhead, as the
+        ;; camera does
         on-light-change
         (mf/use-fn
-         (mf/deps ids)
+         (mf/deps ids motion-id)
          (fn [attr value]
            (when (number? value)
-             (let [value (case attr
-                           :angle   (mod value 360)
-                           :height  (mth/clamp value 0 90)
-                           :ambient (mth/clamp value 0 1))]
-               (st/emit! (dwsh/update-shapes ids #(cond-> % (map? (:light %)) (assoc-in [:light attr] value))))))))
+             (let [value    (case attr
+                              :angle   (mod value 360)
+                              :height  (mth/clamp value 0 90)
+                              :ambient (mth/clamp value 0 1))
+                   property (keyword (str "light-" (name attr)))]
+               (if (and (some? motion-id)
+                        (seq (cta/property-keyframes (deref ref:timeline) motion-id property)))
+                 (st/emit! (dwa/set-value-at-playhead motion-id property value))
+                 (st/emit! (dwsh/update-shapes ids #(cond-> % (map? (:light %)) (assoc-in [:light attr] value)))))))))
+
 
         on-cues-check
         (mf/use-fn
@@ -125,18 +144,21 @@
          [:> scene-field* {:label (tr "workspace.options.scene.ambient")
                            :hint (tr "workspace.options.scene.ambient.hint")
                            :unit "%" :scale 100 :min 0 :max 100
+                           :keyframes (when motion-id :light-ambient)
                            :value (light-of :ambient)
                            :on-change on-ambient}]]
         [:div {:class (stl/css :scene-row :light-angle)}
          [:> scene-field* {:label (tr "workspace.options.scene.angle")
                            :hint (tr "workspace.options.scene.angle.hint")
                            :unit "°" :min -360 :max 720
+                           :keyframes (when motion-id :light-angle)
                            :value (light-of :angle)
                            :on-change on-angle}]]
         [:div {:class (stl/css :scene-row :light-height)}
          [:> scene-field* {:label (tr "workspace.options.scene.height")
                            :hint (tr "workspace.options.scene.height.hint")
                            :unit "°" :min 0 :max 90
+                           :keyframes (when motion-id :light-height)
                            :value (light-of :height)
                            :on-change on-height}]]])
 
