@@ -316,6 +316,51 @@
     (t/is (not (str/includes? (acss/timeline->css tl {bid (assoc board :orthographic true)}) "perspective"))
           "seen without perspective, none plays")))
 
+(t/deftest the-light-and-depth-cues-of-a-board-play-in-css
+  ;; lit from the right, 30° up, a fifth all round; half gone 1000 px back
+  (let [board   (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+                    (assoc :light {:angle 90 :height 30 :ambient 0.2} :depth-fade 0.5))
+        bid     (:id board)
+        in      #(assoc % :parent-id bid :frame-id bid)
+        card    (in (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 100}))
+        back    (in (assoc (cts/setup-shape {:type :rect :x 250 :y 100 :width 100 :height 100}) :translate-z -1000))
+        still   (in (assoc (cts/setup-shape {:type :rect :x 250 :y 200 :width 50 :height 50}) :translate-z -1000))
+        [cid kid sid] (map :id [card back still])
+        objects {bid (assoc board :shapes [cid kid sid]) cid card kid back sid still}
+        tl      (-> (mk-timeline)
+                    (assoc :board-id bid)
+                    (cta/add-keyframe cid {:time 0 :property :rotate-y :value 0 :easing :linear})
+                    (cta/add-keyframe cid {:time 1000 :property :rotate-y :value 60})
+                    (cta/add-keyframe kid {:time 0 :property :opacity :value 1})
+                    (cta/add-keyframe kid {:time 1000 :property :opacity :value 0.5}))
+        scenes  (acss/scene-layers tl objects)
+        css     (acss/timeline->css tl objects)]
+    (t/is (fn? (get scenes cid)) "turning, it shows anew")
+    (t/is (= {:fade 0.5} (update (get scenes kid) :fade mth/precision 6)) "the same all along")
+    (t/is (str/includes? css "filter: blur(0px) brightness(1);") "looking at the viewer")
+    (t/is (str/includes? css "brightness(1.667);") "turned to the light at the end")
+    (t/is (str/includes? css "opacity: 0.25;") "its opacity faded")
+    (t/is (not (str/includes? css (str "penpot-anim-" sid))) "the static CSS shows a layer that does not move")
+    (t/is (not (str/includes? (acss/timeline->css tl objects {:svg? true}) "brightness")) "an SVG draws 3D flat"))
+  (t/testing "a layer of a 3D space group that turns plays them on its own"
+    (let [board (-> (cts/setup-shape {:type :frame :x 0 :y 0 :width 400 :height 300})
+                    (assoc :light {:angle 90 :height 30 :ambient 0.2}))
+          bid   (:id board)
+          face  (cts/setup-shape {:type :rect :x 100 :y 100 :width 100 :height 100})
+          group (-> (cts/setup-shape {:type :group :x 100 :y 100 :width 100 :height 100})
+                    (assoc :parent-id bid :frame-id bid :shapes [(:id face)] :preserve-depth true))
+          face  (assoc face :parent-id (:id group) :frame-id bid)
+          objects {bid (assoc board :shapes [(:id group)]) (:id group) group (:id face) face}
+          tl    (-> (mk-timeline)
+                    (assoc :board-id bid)
+                    (cta/add-keyframe (:id group) {:time 0 :property :rotate-y :value 0 :easing :linear})
+                    (cta/add-keyframe (:id group) {:time 1000 :property :rotate-y :value -60}))
+          css   (acss/timeline->css tl objects)]
+      (t/is (fn? (get (acss/scene-layers tl objects) (:id face))))
+      (t/is (nil? (get (acss/scene-layers tl objects) (:id group))) "the space draws nothing itself")
+      (t/is (str/includes? css (str "penpot-anim-" (:id face))))
+      (t/is (str/includes? css "brightness(0.333);") "turned away at the end"))))
+
 (t/deftest a-flip-turns-the-layer-over-in-3d
   (let [shape (cts/setup-shape {:type :rect :x 0 :y 0 :width 100 :height 100})
         sid   (:id shape)

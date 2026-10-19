@@ -31,7 +31,12 @@
   preserve-3d`); the layers of a 3D space are drawn back to front
   (`depth`). A board that is a 3D space draws what it holds back to front
   too, seen with its own perspective. The WASM renderer does the same
-  sums (`render-wasm/src/math/tilt.rs`)."
+  sums (`render-wasm/src/math/tilt.rs`).
+
+  A board can light the layers in it that leave the plane and give them
+  depth cues (`scene-effects`): its light shades each by how its face
+  turns to it, its depth cues fade those behind their focus and blur
+  those off it."
   (:require
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
@@ -211,6 +216,13 @@
     (gpt/transform (gpt/point (+ (:x sr) (* (:width sr) fx)) (+ (:y sr) (* (:height sr) fy)))
                    (gtr/transform-matrix board))))
 
+(defn- board-of
+  "The board `shape` of `objects` is in, nil at the root of the page."
+  [objects shape]
+  (let [board (get objects (:frame-id shape))]
+    (when (and (some? board) (not= uuid/zero (:id board)) (= :frame (:type board)))
+      board)))
+
 (defn perspective-of
   "How the tilted layers of the board of `shape` are seen: the distance
   of the viewer (`:perspective` of the board, `default-perspective`
@@ -219,17 +231,14 @@
   point (see `vanishing-point`; the middle of `shape` at the root of the
   page)."
   [objects shape]
-  (let [board (get objects (:frame-id shape))]
-    (if (and (some? board)
-             (not= uuid/zero (:id board))
-             (= :frame (:type board)))
-      {:distance      (if (true? (:orthographic board))
-                        orthographic-distance
-                        (or (:perspective board) default-perspective))
-       :orthographic? (true? (:orthographic board))
-       :vp            (vanishing-point board)}
-      {:distance default-perspective
-       :vp       (gco/shape->center shape)})))
+  (if-let [board (board-of objects shape)]
+    {:distance      (if (true? (:orthographic board))
+                      orthographic-distance
+                      (or (:perspective board) default-perspective))
+     :orthographic? (true? (:orthographic board))
+     :vp            (vanishing-point board)}
+    {:distance default-perspective
+     :vp       (gco/shape->center shape)}))
 
 (defn- rotation44
   [rx ry]
@@ -312,6 +321,17 @@
         (recur (if-let [pm (model44 parent)] (if m (mul44 pm m) pm) m) parent)
         [m top]))))
 
+(defn space-ids
+  "The ids of `shape` and of the 3D space groups it is in (see
+  `space-chain`): the layers whose tilt and depth move it in its space."
+  [objects shape]
+  (loop [ids [(:id shape)]
+         top shape]
+    (let [parent (get objects (:parent-id top))]
+      (if (and (some? parent) (not= uuid/zero (:id parent)) (space-group? parent))
+        (recur (conj ids (:id parent)) parent)
+        ids))))
+
 (defn own-matrix
   "The homography of the page `shape` of `objects` is drawn through in
   the plane of the layer it is in: its tilt and depth and those of the 3D
@@ -359,6 +379,81 @@
   [[ax ay az] [bx by bz]]
   [(- (* ay bz) (* az by)) (- (* az bx) (* ax bz)) (- (* ax by) (* ay bx))])
 
+;; light and depth cues
+
+(def default-light
+  "The light a board gets when it is lit: from the top left, halfway up,
+  a third of it all round."
+  {:angle 315 :height 45 :ambient 0.3})
+
+(def ^:private max-shade
+  "The most a light brightens a layer by."
+  3)
+
+(def max-depth-blur
+  "The most blur the depth cues of a board give a layer, px."
+  100)
+
+(defn scene
+  "The light and the depth cues of `board`: its `:light` (`{:angle
+  :height :ambient}`, see `shade`), `:fade` and `:blur` (its `:depth-fade`
+  and `:depth-blur`, see `fade-share` and `focus-blur`) and the depth they
+  count from, `:focus` (its `:depth-focus`); nil when it has none."
+  [board]
+  (let [light (:light board)
+        fade  (or (:depth-fade board) 0)
+        blur  (or (:depth-blur board) 0)]
+    (when (or (some? light) (pos? fade) (pos? blur))
+      {:light light :fade fade :blur blur :focus (or (:depth-focus board) 0)})))
+
+(defn- facing-normal
+  "The normal, of length 1, of the plane the affine `m` takes the page
+  to, on the side of `eye` from `c`, a point of it: the side that shows."
+  [m c eye]
+  (let [o   (apply44 m [0 0 0])
+        n   (cross3 (sub3 (apply44 m [1 0 0]) o) (sub3 (apply44 m [0 1 0]) o))
+        len (mth/sqrt (dot3 n n))]
+    (when (> len 1e-9)
+      (let [n (mapv #(/ % len) n)]
+        (if (neg? (dot3 n (sub3 eye c))) (mapv - n) n)))))
+
+(defn light-direction
+  "Where `light` comes from, a vector of length 1 (z towards the viewer):
+  `:angle` degrees round the view, clockwise from its top, `:height`
+  degrees above the plane."
+  [{:keys [angle height]}]
+  (let [a (mth/radians (or angle 0))
+        h (mth/radians (or height 0))]
+    [(* (mth/sin a) (mth/cos h)) (- (* (mth/cos a) (mth/cos h))) (mth/sin h)]))
+
+(defn shade
+  "How much brighter `light` shows a face with the normal `n` (of length
+  1, see `facing-normal`) than one that looks at the viewer: diffuse
+  light, `:ambient` (0 to 1) of it from all round. A face that looks at
+  the viewer keeps its colours (1)."
+  [light n]
+  (let [ambient (mth/clamp (or (:ambient light) 0) 0 1)
+        l       (light-direction light)
+        lit     (fn [cos] (+ ambient (* (- 1 ambient) (max 0 cos))))]
+    (mth/clamp (/ (lit (dot3 n l)) (max 0.05 (lit (nth l 2)))) 0 max-shade)))
+
+(defn fade-share
+  "The share of its opacity a layer `z` px off the plane (towards the
+  viewer) keeps by the depth cues of its board: `fade` (0 to 1) of it
+  gone each 1000 px behind `focus` (px, towards the viewer), none in
+  front."
+  [fade focus z]
+  (if (or (>= z focus) (<= fade 0))
+    1
+    (mth/pow (- 1 (min fade 1)) (/ (- focus z) 1000))))
+
+(defn focus-blur
+  "The blur, px, the depth cues of its board give a layer `z` px off the
+  plane: `blur` px each 100 px off `focus` (px, towards the viewer), up to
+  `max-depth-blur`."
+  [blur focus z]
+  (min max-depth-blur (* (max 0 blur) (/ (mth/abs (- z focus)) 100))))
+
 (defn- face
   "`[corners eye]`: the corners of `shape` in the 3D space it is in (see
   `space-chain`), and where the viewer of that space is."
@@ -367,6 +462,35 @@
         {:keys [distance vp]} (perspective-of objects top)]
     [(mapv (fn [p] (let [q [(:x p) (:y p) 0]] (if m (apply44 m q) q))) (:points shape))
      [(dm/get-prop vp :x) (dm/get-prop vp :y) distance]]))
+
+(defn scene-effects
+  "How the light and the depth cues of its board (see `scene`) show the
+  layer `shape` of `objects` that leaves the plane, it or a 3D space
+  group it is in (see `space-chain`): `:shade` (its brightness, see
+  `shade`), `:fade` (the share of its opacity kept, see `fade-share`) and
+  `:blur` (px, see `focus-blur`, by the depth of its middle), those that
+  change it. Nil for a layer in the plane and for a 3D space, which draws
+  nothing in a light of its own: its layers do. The WASM renderer does
+  the same sums (`Shape::scene_effects`)."
+  [objects shape]
+  (when-not (three-d-space? shape)
+    (let [[m top] (space-chain objects shape)]
+      (when (some? m)
+        (when-let [{:keys [light fade blur focus]} (scene (board-of objects top))]
+          (let [{:keys [distance vp]} (perspective-of objects top)
+                c (gco/shape->center shape)
+                c (apply44 m [(:x c) (:y c) 0])
+                z (nth c 2)
+                n (when (some? light)
+                    (facing-normal m c [(dm/get-prop vp :x) (dm/get-prop vp :y) distance]))
+                s (if (some? n) (shade light n) 1)
+                f (fade-share fade focus z)
+                b (focus-blur blur focus z)]
+            (not-empty
+             (cond-> {}
+               (> (mth/abs (- s 1)) 1e-4) (assoc :shade s)
+               (< f 0.9999)               (assoc :fade f)
+               (> b 0.01)                 (assoc :blur b)))))))))
 
 (def ^:private plane-tolerance
   "How far, px, a corner can be off a plane and count as in it."

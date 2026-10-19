@@ -101,3 +101,28 @@
         (t/is (true? (.-orthographic board)) "not a boolean: left as it is")
         (set! (.-orthographic board) false)
         (t/is (not (contains? (stored store context board) :orthographic)) "back to perspective")))))
+
+(t/deftest a-board-lights-its-layers-in-3d
+  (thw/with-wasm-mocks*
+    (fn []
+      (let [store       (ths/setup-store (cthf/sample-file :file1 :page-label :page1))
+            ^js context (api/create-context plugin-id)
+            _           (set! st/state store)
+            ^js board   (.createBoard context)]
+        (t/is (nil? (.-light board)) "no light by default")
+        (set! (.-light board) #js {:angle 90})
+        (t/is (= {:angle 90 :height 45 :ambient 0.3} (:light (stored store context board)))
+              "the rest of the default light")
+        (t/is (= 90 (.-angle (.-light board))))
+        (set! (.-light board) #js {:angle 0 :height 120 :ambient 0})
+        (t/is (= 90 (:angle (:light (stored store context board)))) "too high: left as it is")
+        (set! (.-light board) nil)
+        (t/is (not (contains? (stored store context board) :light)) "no light")
+        (set! (.-depthFade board) 0.4)
+        (set! (.-depthBlur board) 2)
+        (set! (.-depthFocus board) -100)
+        (t/is (= [0.4 2 -100] ((juxt :depth-fade :depth-blur :depth-focus) (stored store context board))))
+        (set! (.-depthFade board) 2)
+        (t/is (= 0.4 (.-depthFade board)) "more than all of it: left as it is")
+        (set! (.-depthBlur board) 0)
+        (t/is (not (contains? (stored store context board) :depth-blur)) "none")))))

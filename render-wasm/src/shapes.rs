@@ -234,6 +234,12 @@ pub struct Shape {
     /// Whether the tilted layers of this board are seen without
     /// perspective (see `math::tilt::ORTHOGRAPHIC_DISTANCE`).
     pub orthographic: bool,
+    /// The light of the layers in 3D of this board and their depth cues
+    /// (see `scene_effects`).
+    pub scene: tilt::Scene,
+    /// How much brighter the light of its board shows this layer, set by
+    /// the render of a pass (see `with_scene_effects`); never stored.
+    pub scene_shade: Option<f32>,
 }
 
 // Returns all ancestor shapes of this shape, traversing up the parent hierarchy
@@ -346,6 +352,8 @@ impl Shape {
             perspective: None,
             perspective_origin: (0.5, 0.5),
             orthographic: false,
+            scene: tilt::Scene::default(),
+            scene_shade: None,
             translate_z: 0.0,
             preserve_3d: false,
         }
@@ -526,6 +534,11 @@ impl Shape {
         self.orthographic = orthographic;
     }
 
+    /// The light of the layers in 3D of this board and their depth cues.
+    pub fn set_scene(&mut self, scene: tilt::Scene) {
+        self.scene = scene;
+    }
+
     /// The vanishing point of the tilted layers of this board: the point at
     /// the fractions `perspective_origin` of its box, as it lies.
     pub fn vanishing_point(&self) -> Point {
@@ -653,22 +666,76 @@ impl Shape {
     /// layer is seen with: those of its board (see `vanishing_point`), the
     /// default around its own middle at the root.
     pub fn perspective_of(&self, shapes_pool: ShapesPoolRef) -> (f32, Point) {
-        let mut parent_id = self.parent_id;
-        while let Some(id) = parent_id.filter(|id| !id.is_nil()) {
-            let Some(parent) = shapes_pool.get(&id) else {
-                break;
-            };
-            if matches!(parent.shape_type, Type::Frame(_)) {
-                let distance = if parent.orthographic {
+        match self.board(shapes_pool) {
+            Some(board) => {
+                let distance = if board.orthographic {
                     tilt::ORTHOGRAPHIC_DISTANCE
                 } else {
-                    parent.perspective.unwrap_or(tilt::DEFAULT_PERSPECTIVE)
+                    board.perspective.unwrap_or(tilt::DEFAULT_PERSPECTIVE)
                 };
-                return (distance, parent.vanishing_point());
+                (distance, board.vanishing_point())
+            }
+            None => (tilt::DEFAULT_PERSPECTIVE, self.center()),
+        }
+    }
+
+    /// The board this layer is in, `None` at the root of the page.
+    fn board<'a>(&self, shapes_pool: ShapesPoolRef<'a>) -> Option<&'a Shape> {
+        let mut parent_id = self.parent_id;
+        while let Some(id) = parent_id.filter(|id| !id.is_nil()) {
+            let parent = shapes_pool.get(&id)?;
+            if matches!(parent.shape_type, Type::Frame(_)) {
+                return Some(parent);
             }
             parent_id = parent.parent_id;
         }
-        (tilt::DEFAULT_PERSPECTIVE, self.center())
+        None
+    }
+
+    /// How the light and the depth cues of its board show this layer when
+    /// it leaves the plane, it or a 3D space group it is in (see
+    /// `space_chain`, `tilt::scene_effects`); `None` for a layer in the
+    /// plane and for a 3D space, which draws nothing in a light of its own:
+    /// its layers do.
+    pub fn scene_effects(&self, shapes_pool: ShapesPoolRef) -> Option<tilt::SceneEffects> {
+        if self.three_d_space() {
+            return None;
+        }
+        let (m, top) = self.space_chain(shapes_pool);
+        let m = m?;
+        let board = top.board(shapes_pool)?;
+        if board.scene.is_empty() {
+            return None;
+        }
+        let (distance, vp) = top.perspective_of(shapes_pool);
+        tilt::scene_effects(
+            &m,
+            self.center(),
+            [vp.x as f64, vp.y as f64, distance as f64],
+            &board.scene,
+        )
+    }
+
+    /// This layer as `effects` (see `scene_effects`) show it: its opacity
+    /// faded, its blur that of the depth cues too (their variances add) and
+    /// its brightness, which its layer paints (see `scene_shade`).
+    pub fn with_scene_effects(&self, effects: &tilt::SceneEffects) -> Shape {
+        let mut shape = self.clone();
+        shape.opacity *= effects.fade;
+        if effects.blur > 0.0 {
+            let blur = match shape
+                .blur
+                .filter(|b| !b.hidden && b.blur_type == BlurType::LayerBlur)
+            {
+                Some(own) => own.value.hypot(effects.blur),
+                None => effects.blur,
+            };
+            shape.set_blur(Some(Blur::new(BlurType::LayerBlur, false, blur)));
+        }
+        if effects.shade != 1.0 {
+            shape.scene_shade = Some(effects.shade);
+        }
+        shape
     }
 
     /// The distance of the viewer the units of this text that turn in 3D
@@ -2233,6 +2300,7 @@ impl Shape {
     /// (opacity < 1.0, non-default blend mode, or frame clip layer blur)
     pub fn needs_layer(&self) -> bool {
         self.opacity() < 1.0
+            || self.scene_shade.is_some()
             || self.blend_mode().0 != skia::BlendMode::SrcOver
             || self.has_frame_clip_layer_blur()
             || (matches!(self.shape_type, Type::Group(g) if g.masked))
@@ -2793,6 +2861,147 @@ mod tests {
                 "{corners:?}"
             );
         }
+    }
+
+    /// How a face looking at the viewer is lit from 30° above the plane, a
+    /// fifth of the light all round (as in `geom_tilt_test.cljc`).
+    const FLAT_LIT: f64 = 0.2 + 0.8 * 0.5;
+
+    fn lit_from_the_right() -> tilt::Scene {
+        tilt::Scene {
+            light: Some(tilt::Light {
+                angle: 90.0,
+                height: 30.0,
+                ambient: 0.2,
+            }),
+            ..tilt::Scene::default()
+        }
+    }
+
+    /// A board of `scene` holding a rect at 100,150 of 200×100 tilted by
+    /// `rotate_y` and `z` px towards the viewer: how the scene shows it.
+    fn scene_of_a_rect(scene: tilt::Scene, rotate_y: f32, z: f32) -> Option<tilt::SceneEffects> {
+        let mut pool = ShapesPool::new();
+        pool.initialize(2);
+        let [board_id, rect_id] = [(); 2].map(|_| Uuid::new_v4());
+        {
+            let board = pool.add_shape(board_id);
+            board.set_shape_type(Type::Frame(Frame::default()));
+            board.set_selrect(0.0, 0.0, 400.0, 400.0);
+            board.set_scene(scene);
+            board.children = vec![rect_id];
+        }
+        {
+            let rect = pool.add_shape(rect_id);
+            rect.set_shape_type(Type::Rect(Rect::default()));
+            rect.set_selrect(100.0, 150.0, 300.0, 250.0);
+            rect.set_parent(board_id);
+            rect.set_tilt(Some(tilt::Tilt::new(0.0, rotate_y)), false);
+            rect.set_depth(z, false);
+        }
+        pool.mark_tilts();
+        pool.get(&rect_id).expect("rect").scene_effects(&pool)
+    }
+
+    #[test]
+    fn a_light_shades_the_layers_in_3d() {
+        let lit = |rotate_y, z| scene_of_a_rect(lit_from_the_right(), rotate_y, z);
+        assert_eq!(lit(0.0, 0.0), None, "a layer in the plane");
+        assert_eq!(
+            lit(0.0, -50.0),
+            None,
+            "off the plane, looking at the viewer"
+        );
+        let towards = lit(30.0, 0.0).expect("shaded").shade as f64;
+        let expected =
+            (0.2 + 0.8 * (0.5 * 0.8660254037844386 + 0.8660254037844386 * 0.5)) / FLAT_LIT;
+        assert!((towards - expected).abs() < 1e-5, "{towards}");
+        let away = lit(-60.0, 0.0).expect("shaded").shade as f64;
+        assert!((away - 0.2 / FLAT_LIT).abs() < 1e-5, "{away}");
+        assert_eq!(lit(180.0, 0.0), None, "its back looks at the viewer");
+        assert_eq!(
+            scene_of_a_rect(tilt::Scene::default(), 30.0, 0.0),
+            None,
+            "a board with no light"
+        );
+    }
+
+    #[test]
+    fn a_3d_space_group_lights_what_it_holds() {
+        let (mut pool, group_id, front_id, right_id) = cube_corner(true);
+        let board_id = pool
+            .get(&group_id)
+            .and_then(|g| g.parent_id)
+            .expect("board");
+        pool.get_mut(&board_id)
+            .expect("board")
+            .set_scene(lit_from_the_right());
+        assert_eq!(
+            pool.get(&group_id).expect("group").scene_effects(&pool),
+            None
+        );
+        let front = pool
+            .get(&front_id)
+            .expect("front")
+            .scene_effects(&pool)
+            .expect("lit");
+        let expected = (0.2 + 0.8 * 0.8660254037844386) / FLAT_LIT;
+        assert!((front.shade as f64 - expected).abs() < 1e-5, "{front:?}");
+        let right = pool
+            .get(&right_id)
+            .expect("right")
+            .scene_effects(&pool)
+            .expect("lit");
+        assert!(
+            (right.shade as f64 - 0.2 / FLAT_LIT).abs() < 1e-5,
+            "{right:?}"
+        );
+    }
+
+    #[test]
+    fn depth_cues_fade_and_blur_the_layers_in_3d() {
+        let cues = |fade, blur, focus| tilt::Scene {
+            light: None,
+            fade,
+            blur,
+            focus,
+        };
+        let half = scene_of_a_rect(cues(0.5, 0.0, 0.0), 0.0, -1000.0).expect("faded");
+        assert!((half.fade - 0.5).abs() < 1e-6 && half.shade == 1.0 && half.blur == 0.0);
+        assert_eq!(
+            scene_of_a_rect(cues(0.5, 0.0, 0.0), 0.0, 200.0),
+            None,
+            "in front"
+        );
+        let behind_focus = scene_of_a_rect(cues(0.5, 0.0, 150.0), 0.0, -850.0).expect("faded");
+        assert!((behind_focus.fade - 0.5).abs() < 1e-6, "behind its focus");
+        let blurred = scene_of_a_rect(cues(0.0, 2.0, 0.0), 0.0, -250.0).expect("blurred");
+        assert!((blurred.blur - 5.0).abs() < 1e-5 && blurred.fade == 1.0);
+        let off_focus = scene_of_a_rect(cues(0.0, 2.0, -50.0), 0.0, 150.0).expect("blurred");
+        assert!((off_focus.blur - 4.0).abs() < 1e-5);
+        assert_eq!(
+            scene_of_a_rect(cues(0.0, 2.0, -250.0), 0.0, -250.0),
+            None,
+            "at its focus"
+        );
+        let far = scene_of_a_rect(cues(0.0, 100.0, 0.0), 0.0, -5000.0).expect("blurred");
+        assert_eq!(far.blur as f64, tilt::MAX_DEPTH_BLUR, "up to a limit");
+    }
+
+    #[test]
+    fn scene_effects_fade_blur_and_shade_the_layer() {
+        let mut shape = any_shape();
+        shape.set_opacity(0.8);
+        shape.set_blur(Some(Blur::new(BlurType::LayerBlur, false, 3.0)));
+        let shown = shape.with_scene_effects(&tilt::SceneEffects {
+            shade: 1.5,
+            fade: 0.5,
+            blur: 4.0,
+        });
+        assert!((shown.opacity() - 0.4).abs() < 1e-6);
+        assert_eq!(shown.blur.map(|b| b.value), Some(5.0), "the variances add");
+        assert_eq!(shown.scene_shade, Some(1.5));
+        assert!(shown.needs_layer());
     }
 
     #[test]

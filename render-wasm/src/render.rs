@@ -657,6 +657,9 @@ pub(crate) struct RenderState {
     /// are seen from this pass (see `Shape::unit_distance`), found with
     /// their tilts.
     unit_distances: HashMap<Uuid, Option<f32>>,
+    /// How the light and the depth cues of their boards show the shapes this
+    /// pass (see `Shape::scene_effects`), found with their tilts.
+    scene_effects: HashMap<Uuid, Option<tilt::SceneEffects>>,
     /// The shape a render of one shape renders: the tilts of the layers it is
     /// in are left out.
     tilt_stop: Option<Uuid>,
@@ -874,6 +877,7 @@ impl RenderState {
             drop_shadow_filter_cache: shadows::DropShadowFilterCache::new(),
             tilt_projections: HashMap::default(),
             unit_distances: HashMap::default(),
+            scene_effects: HashMap::default(),
             tilt_stop: None,
             viewport_presented: false,
         })
@@ -919,6 +923,23 @@ impl RenderState {
         };
         self.tilt_projections.insert(shape.id, projection);
         projection
+    }
+
+    /// `shape` as the light and the depth cues of its board show it (see
+    /// `Shape::with_scene_effects`), worked out once a pass; itself when
+    /// nothing in its board leaves the plane.
+    fn with_scene<'a>(&mut self, shape: &'a Shape, tree: ShapesPoolRef) -> Cow<'a, Shape> {
+        if !tree.has_tilts() {
+            return Cow::Borrowed(shape);
+        }
+        let effects = *self
+            .scene_effects
+            .entry(shape.id)
+            .or_insert_with(|| shape.scene_effects(tree));
+        match effects {
+            Some(effects) => Cow::Owned(shape.with_scene_effects(&effects)),
+            None => Cow::Borrowed(shape),
+        }
     }
 
     /// The tilt the walker found for the shape `id` this pass (see
@@ -3213,6 +3234,7 @@ impl RenderState {
         self.tilt_stop = saved_tilt_stop;
         self.tilt_projections.clear();
         self.unit_distances.clear();
+        self.scene_effects.clear();
 
         // Restore render-surface transforms for the workspace context.
         // If we have a current tile, restore its tile render context; otherwise
@@ -4287,6 +4309,7 @@ impl RenderState {
         // The tilts are those of the shapes as they are now
         self.tilt_projections.clear();
         self.unit_distances.clear();
+        self.scene_effects.clear();
 
         // During interactive transforms we compute the union of the current bounds of all
         // modified shapes (doc-space @ 100% zoom, scale=1.0). This is used as a cheap overlap
@@ -4347,6 +4370,10 @@ impl RenderState {
             let scale = self.get_scale();
             let mut extrect: Option<Rect> = None;
             let projection = self.tilt_projection(element, tree);
+            // the light and the depth cues of its board, when it is in 3D:
+            // the same both times the walker passes it
+            let scened = self.with_scene(element, tree);
+            let element: &Shape = &scened;
 
             // If the shape is not in the tile set, then we add them.
             if self.tiles.get_tiles_of(node_id).is_none() {
@@ -5428,6 +5455,7 @@ fn masked_group_layer_paint(element: &Shape, filter: Option<skia::ImageFilter>) 
     }
     paint.set_alpha_f(element.opacity());
     paint.set_blend_mode(element.blend_mode().into());
+    paint.set_color_filter(scene_shade_filter(element));
     paint
 }
 
@@ -5439,8 +5467,26 @@ fn shape_layer_paint(element: &Shape) -> skia::Paint {
     if !element.is_masked_group() {
         paint.set_blend_mode(element.blend_mode().into());
         paint.set_alpha_f(element.opacity());
+        paint.set_color_filter(scene_shade_filter(element));
     }
     paint
+}
+
+/// The colour filter of the brightness the light of its board shows
+/// `element` with (see `Shape::scene_shade`): its colours scaled, as CSS
+/// `filter: brightness()` does.
+fn scene_shade_filter(element: &Shape) -> Option<skia::ColorFilter> {
+    element.scene_shade.map(|s| {
+        skia::color_filters::matrix_row_major(
+            &[
+                s, 0.0, 0.0, 0.0, 0.0, //
+                0.0, s, 0.0, 0.0, 0.0, //
+                0.0, 0.0, s, 0.0, 0.0, //
+                0.0, 0.0, 0.0, 1.0, 0.0,
+            ],
+            None,
+        )
+    })
 }
 
 #[cfg(test)]

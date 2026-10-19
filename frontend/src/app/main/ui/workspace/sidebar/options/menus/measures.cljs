@@ -41,6 +41,7 @@
    [app.main.ui.workspace.sidebar.options.menus.border-radius :refer  [border-radius-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
    [app.main.ui.workspace.sidebar.options.menus.motion :refer [animations-menu* follow-menu* keyframe-diamond* links-menu* outline-row* reach-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.scene :refer [scene-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.tilt-tool :refer [tilt-tool*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
@@ -57,6 +58,7 @@
    :rotation
    :rotate-x :rotate-y :backface-hidden :translate-z :preserve-depth
    :perspective :perspective-x :perspective-y :orthographic
+   :light :depth-fade :depth-blur :depth-focus
    :r1 :r2 :r3 :r4
    :selrect
    :points
@@ -183,6 +185,14 @@
                      (get n-values :perspective-y))
          (identical? (get o-values :orthographic)
                      (get n-values :orthographic))
+         (identical? (get o-values :light)
+                     (get n-values :light))
+         (identical? (get o-values :depth-fade)
+                     (get n-values :depth-fade))
+         (identical? (get o-values :depth-blur)
+                     (get n-values :depth-blur))
+         (identical? (get o-values :depth-focus)
+                     (get n-values :depth-focus))
          (identical? (get o-values :hide-in-viewer)
                      (get n-values :hide-in-viewer))
          (identical? (get o-values :width)
@@ -1236,7 +1246,8 @@
                 (or holds-tilt?
                     camera-animated?
                     orthographic?
-                    (some #(number? (get values %)) cta/camera-properties)))
+                    (some #(number? (get values %)) cta/camera-properties)
+                    (some #(some? (get values %)) [:light :depth-fade :depth-blur])))
        [:div {:class (stl/css :perspective)}
         (if token-numeric-inputs
           [:div {:class (stl/css :perspective-input-tokens)}
@@ -1309,7 +1320,10 @@
          [:> checkbox* {:id "orthographic"
                         :label (tr "workspace.options.orthographic")
                         :checked orthographic?
-                        :on-change on-orthographic-change}]]])
+                        :on-change on-orthographic-change}]]
+
+        ;; the light of its layers in 3D and their depth cues
+        [:> scene-menu* {:ids board-ids :values values}]])
 
      (when (or (options :clip-content) (options :show-in-viewer))
        [:div {:class (stl/css :clip-show)}

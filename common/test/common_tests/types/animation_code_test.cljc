@@ -448,6 +448,23 @@
           "the tilt between its turn and its scale")
     (t/is (cstr/includes? react "const withUnit"))))
 
+(t/deftest react-plays-the-light-of-the-board
+  ;; lit from the right, 30° up, a fifth all round: :a turns to the light
+  (let [[objects code] (board-scene #(-> %
+                                         (cta/add-keyframe (thi/id :a) {:time 0 :property :rotate-y :value 0 :easing :linear})
+                                         (cta/add-keyframe (thi/id :a) {:time 1200 :property :rotate-y :value 60})))
+        objects (update objects (thi/id :board) assoc :light {:angle 90 :height 30 :ambient 0.2})
+        react   (ctac/motion-react code objects :class-name #(:name %))
+        line    (some #(when (cstr/includes? % "filter: [") %) (cstr/split-lines react))]
+    (t/is (some? line) "a filter that changes as it turns")
+    (t/is (not (cstr/includes? line "opacity:")) "the depth cues leave its opacity as it is")
+    (t/is (cstr/includes? react "\"blur(0px) brightness(1)\"") "looking at the viewer")
+    (t/is (cstr/includes? react "\"blur(0px) brightness(1.667)\"") "turned to the light")
+    (t/is (not (cstr/includes? (ctac/motion-react code (update objects (thi/id :board) dissoc :light)
+                                                  :class-name #(:name %))
+                               "brightness"))
+          "no light, none")))
+
 (t/deftest react-repeats-as-the-clock-plays
   (let [move   #(-> %
                     (cta/add-keyframe (thi/id :a) {:time 0 :property :x :value 20})

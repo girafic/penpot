@@ -8581,13 +8581,13 @@ msgid "workspace.options.export.issue.lottie-three-d"
 msgstr "3D rotation · Players differ in %s"
 
 msgid "workspace.options.export.issue.lottie-three-d.text"
-msgstr "Tilted layers play as 3D layers of %s without a camera, so the perspective of the board and its vanishing point stay behind, and a 3D space plays flat. lottie-web (SVG and canvas renderers) and dotLottie players show the tilt without depth; lottie-web's HTML renderer and Skottie add a depth of their own. A hidden back face plays as the opacity of the layer."
+msgstr "Tilted layers play as 3D layers of %s without a camera, so the perspective of the board and its vanishing point stay behind, and a 3D space plays flat. lottie-web (SVG and canvas renderers) and dotLottie players show the tilt without depth; lottie-web's HTML renderer and Skottie add a depth of their own. A hidden back face plays as the opacity of the layer. The light and the depth cues of the board stay behind."
 
 msgid "workspace.options.export.issue.svg-three-d"
 msgstr "3D rotation · Flat in %s"
 
 msgid "workspace.options.export.issue.svg-three-d.text"
-msgstr "An %s draws tilted layers, and layers in depth, as they lie flat: SVG has no perspective."
+msgstr "An %s draws tilted layers, and layers in depth, as they lie flat, without the light and the depth cues of the board: SVG has no perspective."
 
 msgid "workspace.options.export.issue.lottie-matte"
 msgstr "Luminance inverted mask · May not play in %s"
@@ -9321,6 +9321,70 @@ msgstr "Orthographic"
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.orthographic.hint"
 msgstr "See the tilted layers of the board without perspective, as from afar: for isometric drawings"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.light"
+msgstr "Light"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.light.hint"
+msgstr "Light the layers of the board that leave its plane: faces turned to the light show brighter, faces turned away darker"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.angle"
+msgstr "Angle"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.angle.hint"
+msgstr "Where the light comes from, degrees round the view: 0 from the top, 90 from the right"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.height"
+msgstr "Height"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.height.hint"
+msgstr "How high the light is, degrees above the board: 90 shines straight at it"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.ambient"
+msgstr "Ambient"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.ambient.hint"
+msgstr "How much of the light comes from all round: faces turned away from the light keep this much"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.depth"
+msgstr "Depth cues"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.depth.hint"
+msgstr "Fade and blur the layers of the board that leave its plane by how deep they are"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.fade"
+msgstr "Fade"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.fade.hint"
+msgstr "How much a layer fades each 1000 px behind the focus"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.blur"
+msgstr "Blur"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.blur.hint"
+msgstr "How much a layer blurs, px, each 100 px off the focus"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.focus"
+msgstr "Focus"
+
+#: src/app/main/ui/workspace/sidebar/options/menus/scene.cljs
+msgid "workspace.options.scene.focus.hint"
+msgstr "The depth that stays sharp and clear, px in front of the board (negative: behind it): layers blur off it and fade behind it"
 
 #: src/app/main/ui/workspace/sidebar/options/menus/measures.cljs
 msgid "workspace.options.vanishing-point-x"

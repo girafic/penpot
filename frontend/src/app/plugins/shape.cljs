@@ -2205,6 +2205,92 @@
                      :else
                      (commit-tilt! self :orthographic (when value true) nil)))}
 
+                ;; the light of its layers in 3D and their depth cues (see
+                ;; `gtl/scene-effects`)
+                {:name "light"
+                 :get
+                 (fn [self]
+                   (some-> self u/proxy->shape :light clj->js))
+
+                 :set
+                 (fn [self value]
+                   (let [light (when (some? value)
+                                 (merge gtl/default-light
+                                        (-> (js->clj value :keywordize-keys true)
+                                            (select-keys [:angle :height :ambient]))))]
+                     (cond
+                       (not (or (nil? value) (and (object? value) (sm/validate cts/schema:light light))))
+                       (u/not-valid plugin-id :light value)
+
+                       (not (r/check-permission plugin-id "content:write"))
+                       (u/not-valid plugin-id :light "Plugin doesn't have 'content:write' permission")
+
+                       (not (u/page-active? page-id))
+                       (u/not-valid plugin-id :light "Cannot modify a page that is not currently active")
+
+                       :else
+                       (commit-tilt! self :light light nil))))}
+
+                {:name "depthFade"
+                 :get
+                 (fn [self]
+                   (-> self u/proxy->shape (:depth-fade 0)))
+
+                 :set
+                 (fn [self value]
+                   (cond
+                     (not (and (sm/valid-safe-number? value) (<= 0 value 1)))
+                     (u/not-valid plugin-id :depthFade value)
+
+                     (not (r/check-permission plugin-id "content:write"))
+                     (u/not-valid plugin-id :depthFade "Plugin doesn't have 'content:write' permission")
+
+                     (not (u/page-active? page-id))
+                     (u/not-valid plugin-id :depthFade "Cannot modify a page that is not currently active")
+
+                     :else
+                     (commit-tilt! self :depth-fade value 0)))}
+
+                {:name "depthBlur"
+                 :get
+                 (fn [self]
+                   (-> self u/proxy->shape (:depth-blur 0)))
+
+                 :set
+                 (fn [self value]
+                   (cond
+                     (not (and (sm/valid-safe-number? value) (<= 0 value 100)))
+                     (u/not-valid plugin-id :depthBlur value)
+
+                     (not (r/check-permission plugin-id "content:write"))
+                     (u/not-valid plugin-id :depthBlur "Plugin doesn't have 'content:write' permission")
+
+                     (not (u/page-active? page-id))
+                     (u/not-valid plugin-id :depthBlur "Cannot modify a page that is not currently active")
+
+                     :else
+                     (commit-tilt! self :depth-blur value 0)))}
+
+                {:name "depthFocus"
+                 :get
+                 (fn [self]
+                   (-> self u/proxy->shape (:depth-focus 0)))
+
+                 :set
+                 (fn [self value]
+                   (cond
+                     (not (sm/valid-safe-number? value))
+                     (u/not-valid plugin-id :depthFocus value)
+
+                     (not (r/check-permission plugin-id "content:write"))
+                     (u/not-valid plugin-id :depthFocus "Plugin doesn't have 'content:write' permission")
+
+                     (not (u/page-active? page-id))
+                     (u/not-valid plugin-id :depthFocus "Cannot modify a page that is not currently active")
+
+                     :else
+                     (commit-tilt! self :depth-focus value 0)))}
+
                 {:name "showInViewMode"
                  :get
                  (fn [self]

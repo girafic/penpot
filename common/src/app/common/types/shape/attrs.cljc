@@ -25,6 +25,10 @@
             :perspective-x
             :perspective-y
             :orthographic
+            :light
+            :depth-fade
+            :depth-blur
+            :depth-focus
             :preserve-depth
             :selrect
             :points

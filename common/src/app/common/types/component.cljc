@@ -98,6 +98,10 @@
    :perspective-x           :layer-effects-group
    :perspective-y           :layer-effects-group
    :orthographic            :layer-effects-group
+   :light                   :layer-effects-group
+   :depth-fade              :layer-effects-group
+   :depth-blur              :layer-effects-group
+   :depth-focus             :layer-effects-group
    :shadow                  :shadow-group
    :blur                    :blur-group
    :background-blur         :blur-group

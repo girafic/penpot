@@ -225,6 +225,9 @@
       (some? (:perspective-x shape))
       (some? (:perspective-y shape))
       (true? (:orthographic shape))
+      (some? (:light shape))
+      (some? (:depth-fade shape))
+      (some? (:depth-blur shape))
       (some? (:tilt-pivot shape))))
 
 (defn set-shape-tilt
@@ -259,6 +262,21 @@
           (or (:perspective-x board) 0.5)
           (or (:perspective-y board) 0.5)
           (true? (:orthographic board))))
+
+(defn set-shape-scene
+  "The light of the layers in 3D of the current board and their depth
+  cues, as `board` has them (`:light`, `:depth-fade`, `:depth-blur`,
+  `:depth-focus`, see `app.common.geom.tilt/scene`)."
+  [board]
+  (let [{:keys [angle height ambient] :as light} (:light board)]
+    (h/call wasm/internal-module "_set_shape_scene"
+            (some? light)
+            (or angle 0)
+            (or height 0)
+            (or ambient 0)
+            (or (:depth-fade board) 0)
+            (or (:depth-blur board) 0)
+            (or (:depth-focus board) 0))))
 
 (defn set-shape-text-units
   "Pose the units of the current text one by one, as a split animation of

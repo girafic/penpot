@@ -207,6 +207,27 @@ export interface Blur {
 }
 
 /**
+ * The light of the layers in 3D of a board (`Board.light`). Penpot Motion.
+ */
+export interface Light {
+  /**
+   * Where the light comes from, degrees round the view, clockwise from
+   * its top: 0 from the top, 90 from the right.
+   */
+  angle: number;
+  /**
+   * How high the light is, degrees above the board (0 to 90): 90 shines
+   * straight at it.
+   */
+  height: number;
+  /**
+   * The share of the light (0 to 1) that comes from all round: faces
+   * turned away from the light keep this much.
+   */
+  ambient: number;
+}
+
+/**
  * Represents a board in Penpot.
  * This interface extends `ShapeBase` and includes properties and methods specific to board.
  */
@@ -257,6 +278,43 @@ export interface Board extends ShapeBase {
    * Penpot Motion.
    */
   orthographic: boolean;
+
+  /**
+   * The light of the layers of the board that leave its plane (tilted,
+   * moved in depth or in a 3D space): faces turned to it show brighter,
+   * faces turned away darker, faces looking at the viewer keep their
+   * colours. `null` is no light; a partial object takes the rest from
+   * `{ angle: 315, height: 45, ambient: 0.3 }`. Penpot Motion.
+   *
+   * @example
+   * ```js
+   * board.light = { angle: 90, height: 30, ambient: 0.2 }; // from the right
+   * board.light = null; // no light
+   * ```
+   */
+  light: Light | null;
+
+  /**
+   * Depth cue: the share of their opacity (0 to 1) the layers of the
+   * board that leave its plane lose each 1000 px behind `depthFocus`.
+   * 0 is none.
+   * Penpot Motion.
+   */
+  depthFade: number;
+
+  /**
+   * Depth cue: the px of blur (0 to 100) the layers of the board that
+   * leave its plane get each 100 px off `depthFocus`. 0 is none.
+   * Penpot Motion.
+   */
+  depthBlur: number;
+
+  /**
+   * Depth cue: the depth that stays sharp and clear, px towards the
+   * viewer from the board (negative: behind it): `depthBlur` counts from
+   * it, and `depthFade` behind it. Penpot Motion.
+   */
+  depthFocus: number;
 
   /**
    * When true the board, unless it clips its content, is a 3D space: its

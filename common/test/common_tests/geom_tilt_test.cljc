@@ -341,6 +341,65 @@
     (t/is (some? (gtl/projection objs (get objs rect-id))))
     (t/is (nil? (gtl/projected-points objs (get objs rect-id))))))
 
+(def ^:private flat-lit
+  "How a face looking at the viewer is lit from 30° above the plane,
+  a fifth of the light all round."
+  (+ 0.2 (* 0.8 0.5)))
+
+(t/deftest a-light-shades-the-layers-in-3d
+  ;; from the right, 30° above the plane: a face turned to it shows
+  ;; brighter, one turned away darker, one looking at the viewer as it is
+  (let [lit (fn [& attrs]
+              (let [objs (objects (board 0 0 400 400 :light {:angle 90 :height 30 :ambient 0.2})
+                                  (apply rect 100 150 200 100 attrs))]
+                (gtl/scene-effects objs (get objs rect-id))))]
+    (t/is (nil? (lit)) "a layer in the plane")
+    (t/is (nil? (lit :translate-z -50)) "a layer off the plane looking at the viewer")
+    (t/is (mth/close? (/ (+ 0.2 (* 0.8 (+ (* 0.5 0.8660254037844386) (* 0.8660254037844386 0.5)))) flat-lit)
+                      (:shade (lit :rotate-y 30)) 1e-6)
+          "its right edge back, it looks to the right")
+    (t/is (mth/close? (/ 0.2 flat-lit) (:shade (lit :rotate-y -60)) 1e-6)
+          "its left edge back, away from the light: what comes from all round")
+    (t/is (nil? (lit :rotate-y 180)) "its back looks at the viewer as its face did")
+    (t/is (nil? (let [objs (objects (board 0 0 400 400) (rect 100 150 200 100 :rotate-y 30))]
+                  (gtl/scene-effects objs (get objs rect-id))))
+          "a board with no light")))
+
+(t/deftest a-3d-space-group-lights-what-it-holds
+  (let [objs (-> (cube-corner :preserve-depth true)
+                 (update board-id assoc :light {:angle 90 :height 30 :ambient 0.2}))]
+    (t/is (nil? (gtl/scene-effects objs (get objs group-id))) "it draws nothing of its own")
+    (t/is (mth/close? (/ (+ 0.2 (* 0.8 0.8660254037844386)) flat-lit)
+                      (:shade (gtl/scene-effects objs (get objs rect-id))) 1e-6)
+          "turned 30° to the light with the group")
+    (t/is (mth/close? (/ 0.2 flat-lit) (:shade (gtl/scene-effects objs (get objs face-id))) 1e-6)
+          "turned 120°: it shows its back, which looks away from the light"))
+  (t/testing "a group that flattens what it holds is shaded as one"
+    (let [objs (-> (cube-corner)
+                   (update board-id assoc :light {:angle 90 :height 30 :ambient 0.2}))]
+      (t/is (mth/close? (/ (+ 0.2 (* 0.8 0.8660254037844386)) flat-lit)
+                        (:shade (gtl/scene-effects objs (get objs group-id))) 1e-6))
+      (t/is (nil? (gtl/scene-effects objs (get objs rect-id))) "in the plane of the group"))))
+
+(t/deftest depth-cues-fade-and-blur-the-layers-in-3d
+  (let [cued (fn [cues & attrs]
+               (let [objs (objects (apply board 0 0 400 400 (mapcat identity cues))
+                                   (apply rect 100 150 200 100 attrs))]
+                 (gtl/scene-effects objs (get objs rect-id))))]
+    (t/is (mth/close? 0.5 (:fade (cued {:depth-fade 0.5} :translate-z -1000)) 1e-9)
+          "half gone 1000 px behind")
+    (t/is (mth/close? (mth/sqrt 0.5) (:fade (cued {:depth-fade 0.5} :translate-z -500)) 1e-9))
+    (t/is (nil? (cued {:depth-fade 0.5} :translate-z 200)) "none in front")
+    (t/is (mth/close? 0.5 (:fade (cued {:depth-fade 0.5 :depth-focus 150} :translate-z -850)) 1e-9)
+          "behind its focus")
+    (t/is (nil? (cued {:depth-fade 0.5 :depth-blur 2})) "none in the plane")
+    (t/is (mth/close? 5 (:blur (cued {:depth-blur 2} :translate-z -250)) 1e-9)
+          "2 px each 100 px off the plane")
+    (t/is (mth/close? 4 (:blur (cued {:depth-blur 2 :depth-focus -50} :translate-z 150)) 1e-9)
+          "and off a focus")
+    (t/is (nil? (cued {:depth-blur 2 :depth-focus -250} :translate-z -250)) "sharp at its focus")
+    (t/is (= gtl/max-depth-blur (:blur (cued {:depth-blur 100} :translate-z -5000))) "up to a limit")))
+
 (t/deftest the-tilt-attributes-validate
   (let [shape (rect 0 0 10 10)
         frame (board 0 0 100 100)]
@@ -354,4 +413,8 @@
     (t/is (not (cts/valid-shape? (assoc frame :preserve-depth "yes"))))
     (t/is (not (cts/valid-shape? (assoc frame :perspective-x "0.5"))))
     (t/is (not (cts/valid-shape? (assoc frame :perspective 50))))
-    (t/is (not (cts/valid-shape? (assoc frame :perspective nil))))))
+    (t/is (not (cts/valid-shape? (assoc frame :perspective nil))))
+    (t/is (cts/valid-shape? (assoc frame :light gtl/default-light :depth-fade 0.4 :depth-blur 3 :depth-focus -120)))
+    (t/is (not (cts/valid-shape? (assoc frame :light {:angle 0 :height 120 :ambient 0}))))
+    (t/is (not (cts/valid-shape? (assoc frame :light {:angle 0}))))
+    (t/is (not (cts/valid-shape? (assoc frame :depth-fade 2))))))

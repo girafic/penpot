@@ -1,0 +1,65 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS SUBSIDIARY SL
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+// The light and the depth cues of a board (Penpot Motion): rows of the
+// grid of its perspective section, placed in the order they come.
+.scene-check {
+  @include deprecated.body-small-typography;
+
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+  color: var(--color-foreground-secondary);
+}
+
+.scene-row {
+  min-inline-size: 0;
+}
+
+// a switch, then beside it the ambient light or the focus, under it the
+// rest of its fields
+.light-angle,
+.depth-fade {
+  grid-column: 1;
+}
+
+.light-ambient,
+.light-height,
+.depth-focus,
+.depth-blur {
+  grid-column: 2;
+}
+
+.scene-field {
+  @extend %input-element;
+  @include deprecated.body-small-typography;
+
+  min-inline-size: 0;
+}
+
+// a word, not the icon a field of the measures shows
+.scene-field .scene-label {
+  @include deprecated.body-small-typography;
+
+  inline-size: auto;
+  padding-inline-end: var(--sp-xs);
+  color: var(--color-foreground-secondary);
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.scene-field .scene-unit {
+  padding-inline-end: var(--sp-s);
+  color: var(--input-foreground-color);
+  text-transform: none;
+}
+
+.numeric-input {
+  min-inline-size: 0;
+}

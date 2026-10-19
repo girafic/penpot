@@ -704,6 +704,39 @@ pub extern "C" fn set_shape_perspective(
     Ok(())
 }
 
+/// The light of the layers in 3D of the current board, if `lit` (where it
+/// comes from: `angle` degrees round the view, clockwise from its top,
+/// `height` degrees above the plane; the `ambient` share of it), and their
+/// depth cues: the share of opacity gone each 1000 px behind `focus`, the px
+/// of blur each 100 px off it (see `math::tilt::Scene`).
+#[no_mangle]
+#[wasm_error]
+pub extern "C" fn set_shape_scene(
+    lit: bool,
+    angle: f32,
+    height: f32,
+    ambient: f32,
+    fade: f32,
+    blur: f32,
+    focus: f32,
+) -> Result<()> {
+    let scene = math::tilt::Scene {
+        light: lit.then_some(math::tilt::Light {
+            angle,
+            height,
+            ambient,
+        }),
+        fade,
+        blur,
+        focus,
+    };
+    with_current_shape_mut!(state, |shape: &mut Shape| {
+        shape.set_scene(scene);
+    });
+    invalidate_current_tilted_descendants();
+    Ok(())
+}
+
 /// The tilted layers of the current board are seen from its vanishing
 /// point: they show elsewhere when it changes.
 fn invalidate_current_tilted_descendants() {

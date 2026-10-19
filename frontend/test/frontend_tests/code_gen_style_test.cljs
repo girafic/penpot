@@ -237,6 +237,33 @@
       (is (nil? (css/get-css-value objs b :perspective-origin)))
       (is (= "rotateX(0deg) rotateY(45deg)" (css/get-css-value objs c :transform)) "the tilt stays"))))
 
+(deftest the-light-and-depth-cues-of-a-board-show-in-the-css
+  (testing "a layer turned to the light shows brighter, one set back fades and blurs"
+    (let [pid  (uuid/next)
+          cid  (uuid/next)
+          did  (uuid/next)
+          c    (child cid pid
+                      :frame-id pid
+                      :selrect (grc/make-rect 50 50 100 100)
+                      :points (pts 50 50 100 100)
+                      :rotate-y 60)
+          d    (child did pid
+                      :frame-id pid
+                      :selrect (grc/make-rect 50 50 100 100)
+                      :points (pts 50 50 100 100)
+                      :opacity 0.8
+                      :blur {:id (uuid/next) :type :layer-blur :value 3 :hidden false}
+                      :translate-z -1000)
+          b    (frame pid :shapes [cid did] :perspective 800
+                      :light {:angle 90 :height 30 :ambient 0.2}
+                      :depth-fade 0.5 :depth-blur 0.4)
+          objs (objects b c d)]
+      (is (= "brightness(1.667)" (css/get-css-value objs c :filter)))
+      (is (= "blur(5px)" (css/get-css-value objs d :filter)) "its blur and theirs, 3 and 4")
+      (is (= "0.4" (str (css/get-css-value objs d :opacity))) "its opacity half gone")
+      (is (nil? (css/get-css-value (objects (dissoc b :light :depth-fade :depth-blur) c) c :filter))
+          "no light, no filter"))))
+
 (deftest a-3d-space-keeps-the-depth-of-its-layers
   (testing "a group that is a 3D space preserves 3D, its board sees it"
     (let [pid   (uuid/next)

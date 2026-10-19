@@ -347,7 +347,9 @@
 
 (def ^:private react-values
   "The values of motion.dev a layer animates, in this order: their names,
-  the properties behind each and the key of `acss/frame-values` they show."
+  the properties behind each and the key of `acss/frame-values` they show
+  (`:filter`, see `frame-at`). `:scene` is the light and the depth cues
+  of its board, as they change (see `acss/scene-layers`)."
   [["x" #{:x} :translate-x]
    ["y" #{:y} :translate-y]
    ["rotate" #{:rotation} :rotate]
@@ -358,14 +360,14 @@
    ["perspectiveOrigin" #{:perspective-x :perspective-y} :perspective-origin]
    ["scaleX" #{:width :scale-x} :scale-x]
    ["scaleY" #{:height :scale-y} :scale-y]
-   ["opacity" #{:opacity} :opacity]
+   ["opacity" #{:opacity :scene} :opacity]
    ["borderRadius" #{:r1 :r2 :r3 :r4} :border-radius]
    ["backgroundColor" #{:fill-color :fill-opacity} :background-color]
    ["borderColor" #{:stroke-color :stroke-opacity} :border-color]
    ["borderWidth" #{:stroke-width} :border-width]
    ["boxShadow" #{:shadow-offset-x :shadow-offset-y :shadow-blur
                   :shadow-spread :shadow-color :shadow-opacity} :box-shadow]
-   ["filter" #{:blur} :blur]
+   ["filter" #{:blur :scene} :filter]
    ["backdropFilter" #{:background-blur} :backdrop-blur]])
 
 (def ^:private text-react-values
@@ -403,7 +405,8 @@
   (case value
     "borderRadius" (str "\"" (str/join " " (map #(str (react-number %) "px") v)) "\"")
     ("backgroundColor" "borderColor" "boxShadow" "color" "WebkitTextStrokeColor" "perspectiveOrigin") (str "\"" v "\"")
-    ("filter" "backdropFilter") (str "\"blur(" (react-number v) "px)\"")
+    "filter"         (str "\"" v "\"")
+    "backdropFilter" (str "\"blur(" (react-number v) "px)\"")
     (react-number v)))
 
 (def ^:private linear-ease "\"linear\"")
@@ -455,12 +458,16 @@
 
 (defn- frame-at
   "The frame values (see `acss/frame-values`) of `layer` at `time` of the
-  played `timeline`."
-  [timeline objects {:keys [id shape origin]} time]
-  (acss/frame-values shape
-                     (get (cta/values-at timeline time) id {})
-                     (cta/position-origin timeline objects id)
-                     origin))
+  played `timeline`, in the light and the depth cues of its board (its
+  `:scene`, see `acss/scene-layers`), with its CSS `:filter`."
+  [timeline objects {:keys [id shape origin scene]} time]
+  (let [values (cond-> (get (cta/values-at timeline time) id {})
+                 (map? scene) (assoc :scene scene)
+                 (fn? scene)  (assoc :scene (scene time)))
+        frame  (acss/frame-values shape values (cta/position-origin timeline objects id) origin)]
+    (cond-> frame
+      (or (contains? frame :blur) (contains? frame :brightness))
+      (assoc :filter (acss/filter-css frame)))))
 
 (defn- repeat-of
   "The repeat options of a clock: none playing once, forever in a loop,
@@ -496,10 +503,17 @@
         duration (max 1 (:duration clock))
         repeats  (repeat-of clock)
         animated (into #{} (map :property) (:keyframes (get-in played [:tracks (:id layer)])))
-        ;; an orthographic board has no camera to play
+        ;; an orthographic board has no camera to play; the light and the
+        ;; depth cues of its board change as the layer moves in 3D
         animated (cond-> animated
                    (true? (get-in layer [:shape :orthographic]))
-                   (set/difference #{:perspective :perspective-x :perspective-y}))]
+                   (set/difference #{:perspective :perspective-x :perspective-y})
+
+                   (fn? (:scene layer))
+                   (conj :scene))
+        ;; they change all along: a linear step each frame
+        scene-kfs (mapv (fn [t] {:time t :property :scene :easing :linear})
+                        (conj (vec (acss/sample-times 0 duration)) duration))]
     (into []
           (keep
            (fn [[value-name properties frame-key]]
@@ -508,7 +522,9 @@
                  (let [by-property (fn [timeline]
                                      (let [kfs (:keyframes (get-in timeline [:tracks (:id layer)]))]
                                        (into {}
-                                             (map (fn [p] [p (vec (sort-by :time (filter #(= p (:property %)) kfs)))]))
+                                             (map (fn [p] [p (if (= :scene p)
+                                                               scene-kfs
+                                                               (vec (sort-by :time (filter #(= p (:property %)) kfs))))]))
                                              properties)))
                        spring      (when (= 1 (count properties))
                                      (native-spring (val (first (by-property played))) clock))]
@@ -527,18 +543,20 @@
                            values (mapv #(react-literal value-name
                                                         (get (frame-at sampled objects layer %) frame-key))
                                         times)]
-                       {:name value-name
-                        :initial (first values)
-                        :animate (str "[" (str/join ", " values) "]")
-                        :hold? (some #{hold-ease} eases)
-                        :transition (str "{ "
-                                         (str/join ", "
-                                                   (concat
-                                                    [(str "duration: " (react-number (/ duration 1000.0)))
-                                                     (str "times: [" (str/join ", " (map #(react-time (/ % duration)) times)) "]")
-                                                     (str "ease: [" (str/join ", " eases) "]")]
-                                                    repeats))
-                                         " }")}))))))
+                       ;; the light and the depth cues alone leave it as it is
+                       (when-not (and (= [:scene] properties) (apply = values))
+                         {:name value-name
+                          :initial (first values)
+                          :animate (str "[" (str/join ", " values) "]")
+                          :hold? (some #{hold-ease} eases)
+                          :transition (str "{ "
+                                           (str/join ", "
+                                                     (concat
+                                                      [(str "duration: " (react-number (/ duration 1000.0)))
+                                                       (str "times: [" (str/join ", " (map #(react-time (/ % duration)) times)) "]")
+                                                       (str "ease: [" (str/join ", " eases) "]")]
+                                                      repeats))
+                                           " }")})))))))
            (if (= :text (:type (:shape layer))) text-react-values react-values)))))
 
 (defn- merge-scale
@@ -711,7 +729,18 @@
   (let [board   (get objects board-id)
         played  (memoize (fn [clock]
                            (-> (cta/resolve-animations clock objects) cta/expand-loops cta/expand-paths cta/cut-timeline)))
+        scenes  (acss/scene-layers timeline objects)
         layers  (code-layers code objects :ids ids)
+        ;; the light and the depth cues of the board, and the layers they
+        ;; show anew that play nothing of their own
+        layers  (into (mapv #(cond-> % (contains? scenes (:id %)) (assoc :scene (get scenes (:id %)))) layers)
+                      (keep (fn [[id scene]]
+                              (when (and (fn? scene)
+                                         (or (nil? ids) (contains? ids id))
+                                         (not (some #(= id (:id %)) layers)))
+                                {:id id :shape (get objects id) :clock timeline
+                                 :origin cta/default-transform-origin :scene scene})))
+                      scenes)
         divs    (mapv (fn [layer]
                         (let [p (played (:clock layer))]
                           (react-layer layer objects p (cta/expand-springs p) class-name)))

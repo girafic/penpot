@@ -1045,6 +1045,45 @@ Blur:
 
         Specifies whether the blur effect is hidden.
         Defaults to false if omitted.
+Light:
+  overview: |-
+    Interface Light
+    ===============
+
+    The light of the layers in 3D of a board (`Board.light`). Penpot Motion.
+
+    ```
+    interface Light {
+        angle: number;
+        height: number;
+        ambient: number;
+    }
+    ```
+
+    Referenced by: Board, VariantContainer
+  members:
+    Properties:
+      angle: |-
+        ```
+        angle: number
+        ```
+
+        Where the light comes from, degrees round the view, clockwise from
+        its top: 0 from the top, 90 from the right.
+      height: |-
+        ```
+        height: number
+        ```
+
+        How high the light is, degrees above the board (0 to 90): 90 shines
+        straight at it.
+      ambient: |-
+        ```
+        ambient: number
+        ```
+
+        The share of the light (0 to 1) that comes from all round: faces
+        turned away from the light keep this much.
 Board:
   overview: |-
     Interface Board
@@ -1062,6 +1101,10 @@ Board:
         perspectiveX: number | null;
         perspectiveY: number | null;
         orthographic: boolean;
+        light: Light | null;
+        depthFade: number;
+        depthBlur: number;
+        depthFocus: number;
         preserve3d: boolean;
         grid?: GridLayout;
         flex?: FlexLayout;
@@ -1291,6 +1334,46 @@ Board:
         from afar (a parallel projection): for isometric drawings, with the
         layers turned by rotation 60, rotateX 35.2644 and rotateY -45.
         Penpot Motion.
+      light: |-
+        ```
+        light: Light | null
+        ```
+
+        The light of the layers of the board that leave its plane (tilted,
+        moved in depth or in a 3D space): faces turned to it show brighter,
+        faces turned away darker, faces looking at the viewer keep their
+        colours. `null` is no light; a partial object takes the rest from
+        `{ angle: 315, height: 45, ambient: 0.3 }`. Penpot Motion.
+
+        Example
+        ```
+        board.light = { angle: 90, height: 30, ambient: 0.2 }; // from the rightboard.light = null; // no light
+        ```
+      depthFade: |-
+        ```
+        depthFade: number
+        ```
+
+        Depth cue: the share of their opacity (0 to 1) the layers of the
+        board that leave its plane lose each 1000 px behind `depthFocus`.
+        0 is none.
+        Penpot Motion.
+      depthBlur: |-
+        ```
+        depthBlur: number
+        ```
+
+        Depth cue: the px of blur (0 to 100) the layers of the board that
+        leave its plane get each 100 px off `depthFocus`. 0 is none.
+        Penpot Motion.
+      depthFocus: |-
+        ```
+        depthFocus: number
+        ```
+
+        Depth cue: the depth that stays sharp and clear, px towards the
+        viewer from the board (negative: behind it): `depthBlur` counts from
+        it, and `depthFade` behind it. Penpot Motion.
       preserve3d: |-
         ```
         preserve3d: boolean
@@ -2405,6 +2488,10 @@ VariantContainer:
         perspectiveX: number | null;
         perspectiveY: number | null;
         orthographic: boolean;
+        light: Light | null;
+        depthFade: number;
+        depthBlur: number;
+        depthFocus: number;
         preserve3d: boolean;
         grid?: GridLayout;
         flex?: FlexLayout;
@@ -2634,6 +2721,46 @@ VariantContainer:
         from afar (a parallel projection): for isometric drawings, with the
         layers turned by rotation 60, rotateX 35.2644 and rotateY -45.
         Penpot Motion.
+      light: |-
+        ```
+        light: Light | null
+        ```
+
+        The light of the layers of the board that leave its plane (tilted,
+        moved in depth or in a 3D space): faces turned to it show brighter,
+        faces turned away darker, faces looking at the viewer keep their
+        colours. `null` is no light; a partial object takes the rest from
+        `{ angle: 315, height: 45, ambient: 0.3 }`. Penpot Motion.
+
+        Example
+        ```
+        board.light = { angle: 90, height: 30, ambient: 0.2 }; // from the rightboard.light = null; // no light
+        ```
+      depthFade: |-
+        ```
+        depthFade: number
+        ```
+
+        Depth cue: the share of their opacity (0 to 1) the layers of the
+        board that leave its plane lose each 1000 px behind `depthFocus`.
+        0 is none.
+        Penpot Motion.
+      depthBlur: |-
+        ```
+        depthBlur: number
+        ```
+
+        Depth cue: the px of blur (0 to 100) the layers of the board that
+        leave its plane get each 100 px off `depthFocus`. 0 is none.
+        Penpot Motion.
+      depthFocus: |-
+        ```
+        depthFocus: number
+        ```
+
+        Depth cue: the depth that stays sharp and clear, px towards the
+        viewer from the board (negative: behind it): `depthBlur` counts from
+        it, and `depthFade` behind it. Penpot Motion.
       preserve3d: |-
         ```
         preserve3d: boolean

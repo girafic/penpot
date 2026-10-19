@@ -1141,6 +1141,12 @@
   [board]
   (props/set-shape-perspective board))
 
+(defn set-shape-scene
+  "The light and the depth cues of the current board (see
+  `props/set-shape-scene`)."
+  [board]
+  (props/set-shape-scene board))
+
 (defn set-shape-trim
   "Draw the strokes only from `start` to `end` of the outline, moved along
   by `offset` (fractions of it), see `cta/trim-properties`."

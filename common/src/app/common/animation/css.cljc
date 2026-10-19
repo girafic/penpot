@@ -10,9 +10,11 @@
   plays too (see `app.common.animation.svg`)."
   (:require
    [app.common.data :as d]
+   [app.common.geom.shapes :as gsh]
    [app.common.geom.tilt :as gtl]
    [app.common.math :as mth]
    [app.common.types.animation :as cta]
+   [app.common.types.animation-follow :as ctaf]
    [app.common.types.color :as clr]
    [clojure.string :as str]))
 
@@ -95,7 +97,7 @@
   "The properties the CSS of an animation plays through `transform`."
   #{:x :y :width :height :scale-x :scale-y :rotation :rotate-x :rotate-y :translate-z})
 
-(declare frame-values*)
+(declare frame-values* frame-values**)
 
 (defn frame-values
   "What `shape` shows at one frame of its animation, `values` (its
@@ -115,7 +117,9 @@
   rest, `:lift` (`[dx dy dz]` px, see `gtl/lift`); one that comes out of
   the plane its `:translate-z` (px, towards the viewer). A board whose camera
   plays (see `cta/camera-properties`) has `:perspective` (px) and
-  `:perspective-origin` (CSS, shares of its box)."
+  `:perspective-origin` (CSS, shares of its box). A layer the light or the
+  depth cues of its board show (`:scene` of `values`, see `scene-layers`)
+  has its `:opacity` faded, its `:blur` with theirs and its `:brightness`."
   ([shape values origin]
    (frame-values shape values origin nil))
   ([shape values origin pivot]
@@ -138,7 +142,26 @@
            (assoc :translate-z z)))
        frame))))
 
+(defn- with-scene
+  "`frame` of `shape` with the light and the depth cues of its board (the
+  `:scene` of `values`, `{:shade :fade :blur}`, see `scene-layers`): its
+  opacity faded, its blur and theirs (their variances add) and its
+  `:brightness`, written all along, as they change."
+  [frame shape values]
+  (if-let [{:keys [shade fade blur]} (:scene values)]
+    (let [own  (get values :blur (if (get-in shape [:blur :hidden]) 0 (get-in shape [:blur :value] 0)))
+          cued (or blur 0)]
+      (assoc frame
+             :opacity (* (get values :opacity (or (:opacity shape) 1)) (or fade 1))
+             :blur (mth/sqrt (+ (* own own) (* cued cued)))
+             :brightness (or shade 1)))
+    frame))
+
 (defn- frame-values*
+  [shape values origin]
+  (with-scene (frame-values** shape values origin) shape values))
+
+(defn- frame-values**
   [shape values origin]
   (let [selrect (:selrect shape)
         base-x  (:x selrect)
@@ -236,6 +259,14 @@
       (contains? frame :opacity)
       (conj (str "opacity: " (fmt opacity) ";")))))
 
+(defn filter-css
+  "The CSS `filter` of a frame (see `frame-values`): its `:blur` (px) and
+  its `:brightness`."
+  [{:keys [blur brightness]}]
+  (str/join " " (cond-> []
+                  (some? blur)       (conj (str "blur(" (fmt blur) "px)"))
+                  (some? brightness) (conj (str "brightness(" (fmt brightness) ")")))))
+
 (defn- css-declarations
   "The CSS declarations of `shape` at a frame: the tilt in its own axes,
   after the turn it rests at (`rest-transform`, flat) and before its
@@ -244,7 +275,7 @@
   middle, as render-wasm draws it (see `tilt::unit_matrix`)."
   [shape values origin rest-transform pivot]
   (let [{:keys [translate-x translate-y rotate scale-x scale-y opacity border-radius
-                background-color border-color border-width box-shadow blur backdrop-blur
+                background-color border-color border-width box-shadow backdrop-blur
                 color text-stroke-color text-stroke-width lift perspective perspective-origin]
          :as frame}
         (frame-values shape values origin pivot)]
@@ -293,8 +324,8 @@
       (contains? frame :box-shadow)
       (conj (str "box-shadow: " box-shadow ";"))
 
-      (contains? frame :blur)
-      (conj (str "filter: blur(" (fmt blur) "px);"))
+      (or (contains? frame :blur) (contains? frame :brightness))
+      (conj (str "filter: " (filter-css frame) ";"))
 
       (contains? frame :backdrop-blur)
       (conj (str "backdrop-filter: blur(" (fmt backdrop-blur) "px);"))
@@ -310,6 +341,67 @@
   [objects text]
   (let [{:keys [distance orthographic?]} (gtl/perspective-of objects text)]
     (when-not orthographic? distance)))
+
+(def ^:private scene-properties
+  "The properties whose play moves a layer in 3D: the light and the depth
+  cues of its board show it anew (see `scene-layers`)."
+  #{:x :y :width :height :rotation :scale-x :scale-y :rotate-x :rotate-y :translate-z})
+
+(defn- posed
+  "`objects` with the layers of `ids` posed as `timeline` plays them at
+  `t` (see `ctaf/timeline->modif-tree`)."
+  [timeline objects ids t]
+  (let [tree (ctaf/timeline->modif-tree timeline objects t)]
+    (reduce (fn [objects id]
+              (if-let [mods (get-in tree [id :modifiers])]
+                (update objects id gsh/transform-shape mods)
+                objects))
+            objects
+            ids)))
+
+(defn scene-layers
+  "`{id scene}` of the layers of `objects` the light or the depth cues of
+  their board show (see `gtl/scene-effects`) as `timeline` (as designed)
+  plays: `scene` their effects at rest (`{:shade :fade :blur}`, those that
+  change them), or, of a layer that moves in 3D as it plays (it or a 3D
+  space group it is in, see `gtl/space-ids`), a function of a time to
+  them (`{}` for none then). Of the layers in the planes of their boards,
+  none."
+  [timeline objects]
+  (let [lit (into #{}
+                  (comp (filter #(and (= :frame (:type %)) (some? (gtl/scene %))))
+                        (map :id))
+                  (vals objects))]
+    (if (empty? lit)
+      {}
+      (let [played (cta/resolve-animations timeline objects)]
+        (into {}
+              (keep
+               (fn [shape]
+                 (when (and (contains? lit (:frame-id shape))
+                            (not (:hidden shape))
+                            (not (gtl/three-d-space? shape)))
+                   (let [id     (:id shape)
+                         ids    (gtl/space-ids objects shape)
+                         tracks (keep #(get-in played [:tracks %]) ids)]
+                     (if (some (fn [track]
+                                 (or (some? (:follow track))
+                                     (some #(contains? scene-properties (:property %)) (:keyframes track))))
+                               tracks)
+                       ;; a follow or a link plays from other layers
+                       (let [scoped (if (some #(or (:follow %) (seq (:links %))) (keep #(get-in timeline [:tracks %]) ids))
+                                      timeline
+                                      (update timeline :tracks select-keys ids))
+                             cache  (volatile! {})]
+                         [id (fn [t]
+                               (or (get @cache t)
+                                   (let [objs    (posed scoped objects ids t)
+                                         effects (or (gtl/scene-effects objs (get objs id)) {})]
+                                     (vswap! cache assoc t effects)
+                                     effects)))])
+                       (when-let [effects (gtl/scene-effects objects shape)]
+                         [id effects]))))))
+              (vals objects))))))
 
 (defn keyframe-timing
   "The CSS timing function of the segment starting at `keyframe`, or nil
@@ -405,8 +497,9 @@
   width and height on its elements (see `svg-sized?`), not as a scale.
   With `eased?`, as the canvas eases each property (see `eased-stops`);
   else a stop of each keyframe, which code reads best, its timing that
-  of the stretch to the next."
-  [timeline shape track kf-name origin rest-transform & {:keys [svg? sized? eased?]}]
+  of the stretch to the next. `scene`, the light and the depth cues of
+  its board (see `scene-layers`), plays with it."
+  [timeline shape track kf-name origin rest-transform & {:keys [svg? sized? eased? scene]}]
   (let [duration (max 1 (:duration timeline))
         sid      (:shape-id track)
         kfs      (:keyframes track)
@@ -416,8 +509,12 @@
                            (comp (map :time) (filter #(<= % duration)))
                            kfs)
                      vec)
-        values   (let [values (shape-values timeline sid)]
-                   #(cond-> (values %) sized? (dissoc :width :height)))
+        values   (let [values (shape-values timeline sid)
+                       scene  (if (map? scene) (constantly scene) scene)]
+                   #(cond-> (values %)
+                      sized?       (dissoc :width :height)
+                      ;; all three, so that the stops see each change
+                      (some? scene) (assoc :scene (merge {:shade 1 :fade 1 :blur 0} (scene %)))))
         stops    (for [[t seg-timing] (if eased?
                                         (map (fn [[t kf]] [t (some-> kf keyframe-timing)])
                                              (eased-stops (comp value-numbers values) kfs times))
@@ -452,7 +549,9 @@
   "Generate a CSS string (`@keyframes` blocks + per-shape `animation`
   rules) for `timeline`, using the base geometry from `objects`. Pure.
   Played once, a shape keeps the last frame. With reduced motion asked
-  for, the shapes stay as designed. Split animations play as animations
+  for, the shapes stay as designed. A layer the light or the depth cues
+  of its board show (see `scene-layers`) plays them with its animation,
+  and one they show anew as it moves in 3D plays them on its own. Split animations play as animations
   of the whole text (see `flatten-splits`) unless `:units` says
   otherwise. Options: `:ids`, the shapes to write (all by default),
   `:selector`, the CSS selector of a shape (`shape-css-class` by
@@ -476,7 +575,9 @@
   ([timeline objects]
    (timeline->css timeline objects nil))
   ([timeline objects {:keys [ids selector origin transform units svg? sized]}]
-   (let [timeline (-> timeline
+   (let [;; an SVG draws 3D flat, in no light
+         scenes   (if svg? {} (scene-layers timeline objects))
+         timeline (-> timeline
                       (cta/flatten-splits (or (:kinds units) #{}) (or (:texts units) (constantly true)))
                       (cta/resolve-animations objects)
                       ;; no outline of a path, which no CSS of a box plays
@@ -492,7 +593,17 @@
                                       tracks)))
                       cta/expand-loops
                       cta/expand-paths
-                      cta/cut-timeline)
+                      cta/cut-timeline
+                      ;; a layer the light or the depth cues of its board
+                      ;; show anew as it plays plays them on its own
+                      (update :tracks
+                              (fn [tracks]
+                                (reduce-kv (fn [tracks id scene]
+                                             (cond-> tracks
+                                               (and (fn? scene) (not (contains? tracks id)))
+                                               (assoc id {:shape-id id :keyframes []})))
+                                           tracks
+                                           scenes))))
          duration (max 1 (:duration timeline))
          iter     (case (cta/playback-mode timeline)
                     :loop      "infinite"
@@ -540,8 +651,9 @@
                                                                 (cta/position-origin timeline objects sid)
                                                                 (when transform (transform shape))
                                                                 :svg? svg?
-                                                                :eased? svg?
-                                                                :sized? (contains? sized sid)) "\n\n"
+                                                                :eased? (or svg? (fn? (get scenes sid)))
+                                                                :sized? (contains? sized sid)
+                                                                :scene (get scenes sid)) "\n\n"
                                           selector " {\n  animation: " kf-name " "
                                           duration "ms linear " iter ";\n"
                                           "  transform-origin: "

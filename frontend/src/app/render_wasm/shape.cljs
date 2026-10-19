@@ -196,6 +196,10 @@
         (when (cfh/frame-shape? shape)
           (api/set-shape-perspective shape))
 
+        (:light :depth-fade :depth-blur :depth-focus)
+        (when (cfh/frame-shape? shape)
+          (api/set-shape-scene shape))
+
         (:translate-z :preserve-depth)
         (api/set-shape-depth shape)
 

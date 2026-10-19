@@ -378,9 +378,19 @@
     (:shadow shape)))
 
 (defn- get-filter
-  [shape]
+  "The blur of `shape`, px, or, when the light or the depth cues of its
+  board show it (see `gtl/scene-effects`), `{:blur :brightness}`, its
+  blur and theirs (their variances add)."
+  [shape objects]
   (when-not (cgc/svg-markup? shape)
-    (get-in shape [:blur :value])))
+    (let [own                     (get-in shape [:blur :value])
+          {:keys [shade] :as fx}  (gtl/scene-effects objects shape)
+          blur                    (if-let [cued (:blur fx)]
+                                    (mth/sqrt (+ (* (or own 0) (or own 0)) (* cued cued)))
+                                    own)]
+      (if (some? shade)
+        {:blur blur :brightness shade}
+        blur))))
 
 (defn- get-backdrop-filter
   [shape]
@@ -395,9 +405,12 @@
     (ctl/grid-layout? shape) "grid"))
 
 (defn- get-opacity
-  [shape]
-  (when (< (:opacity shape) 1)
-    (:opacity shape)))
+  "The opacity of `shape`, faded by the depth cues of its board (see
+  `gtl/scene-effects`)."
+  [shape objects]
+  (let [opacity (* (or (:opacity shape) 1) (:fade (gtl/scene-effects objects shape) 1))]
+    (when (< opacity 1)
+      opacity)))
 
 (defn- get-overflow
   [shape]
@@ -688,9 +701,9 @@
     :background (get-background shape)
 
     ;; Visual Effects
-    :opacity (get-opacity shape)
+    :opacity (get-opacity shape objects)
     :box-shadow (get-box-shadow shape)
-    :filter (get-filter shape)
+    :filter (get-filter shape objects)
     :backdrop-filter (get-backdrop-filter shape)
     :overflow (get-overflow shape)
 

@@ -20,6 +20,11 @@
 //! `preserve-3d`. A group that is a 3D space does not: its tilt and depth go
 //! into those of what it holds (`model44`), seen once (`seen`), and the
 //! layers of a 3D space draw back to front.
+//!
+//! A board can light the layers in it that leave the plane and give them
+//! depth cues (`Scene`, `scene_effects`): its light shades each by how its
+//! face turns to it, its depth cues fade those behind their focus and blur
+//! those off it.
 
 use super::{Matrix, Point, Rect};
 
@@ -283,6 +288,130 @@ fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
+}
+
+/// The light of the layers in 3D of a board: where it comes from, degrees
+/// round the view, clockwise from its top, and degrees above the plane,
+/// and the share of it that comes from all round (see `shade`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Light {
+    pub angle: f32,
+    pub height: f32,
+    pub ambient: f32,
+}
+
+/// The light of the layers in 3D of a board and their depth cues: the
+/// share of their opacity gone each 1000 px behind `focus` (`fade`, see
+/// `fade_share`), the px of blur each 100 px off it (`blur`, see
+/// `focus_blur`); `focus` px towards the viewer.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Scene {
+    pub light: Option<Light>,
+    pub fade: f32,
+    pub blur: f32,
+    pub focus: f32,
+}
+
+impl Scene {
+    /// Whether the board neither lights nor cues its layers.
+    pub fn is_empty(&self) -> bool {
+        self.light.is_none() && self.fade <= 0.0 && self.blur <= 0.0
+    }
+}
+
+/// How the light and the depth cues of its board show a layer in 3D (see
+/// `scene_effects`): its brightness, the share of its opacity it keeps and
+/// its blur, px.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneEffects {
+    pub shade: f32,
+    pub fade: f32,
+    pub blur: f32,
+}
+
+/// The most a light brightens a layer by.
+const MAX_SHADE: f64 = 3.0;
+
+/// The most blur the depth cues of a board give a layer, px.
+pub const MAX_DEPTH_BLUR: f64 = 100.0;
+
+/// The normal, of length 1, of the plane the affine `m` takes the page to,
+/// on the side of `eye` from `c`, a point of it: the side that shows.
+fn facing_normal(m: &M44, c: [f64; 3], eye: [f64; 3]) -> Option<[f64; 3]> {
+    let o = apply44(m, [0.0, 0.0, 0.0]);
+    let n = cross3(
+        sub3(apply44(m, [1.0, 0.0, 0.0]), o),
+        sub3(apply44(m, [0.0, 1.0, 0.0]), o),
+    );
+    let len = dot3(n, n).sqrt();
+    if len <= 1e-9 {
+        return None;
+    }
+    let n = [n[0] / len, n[1] / len, n[2] / len];
+    Some(if dot3(n, sub3(eye, c)) < 0.0 {
+        [-n[0], -n[1], -n[2]]
+    } else {
+        n
+    })
+}
+
+/// Where `light` comes from, a vector of length 1 (z towards the viewer).
+pub fn light_direction(light: &Light) -> [f64; 3] {
+    let a = (light.angle as f64).to_radians();
+    let h = (light.height as f64).to_radians();
+    [a.sin() * h.cos(), -a.cos() * h.cos(), h.sin()]
+}
+
+/// How much brighter `light` shows a face with the normal `n` (of length 1)
+/// than one that looks at the viewer: diffuse light, its ambient share of it
+/// from all round. A face that looks at the viewer keeps its colours (1).
+pub fn shade(light: &Light, n: [f64; 3]) -> f64 {
+    let ambient = (light.ambient as f64).clamp(0.0, 1.0);
+    let l = light_direction(light);
+    let lit = |cos: f64| ambient + (1.0 - ambient) * cos.max(0.0);
+    (lit(dot3(n, l)) / lit(l[2]).max(0.05)).clamp(0.0, MAX_SHADE)
+}
+
+/// The share of its opacity a layer `z` px off the plane (towards the
+/// viewer) keeps: `fade` (0 to 1) of it gone each 1000 px behind `focus`
+/// (px, towards the viewer), none in front.
+pub fn fade_share(fade: f64, focus: f64, z: f64) -> f64 {
+    if z >= focus || fade <= 0.0 {
+        1.0
+    } else {
+        (1.0 - fade.min(1.0)).powf((focus - z) / 1000.0)
+    }
+}
+
+/// The blur, px, of a layer `z` px off the plane: `blur` px each 100 px off
+/// `focus`, up to `MAX_DEPTH_BLUR`.
+pub fn focus_blur(blur: f64, focus: f64, z: f64) -> f64 {
+    (blur.max(0.0) * (z - focus).abs() / 100.0).min(MAX_DEPTH_BLUR)
+}
+
+/// How `scene` shows a layer whose middle `center` the 3D space it is in
+/// takes where `m` does, seen from `eye`: those of its brightness, opacity
+/// and blur that change; `None` for none. The same sums as
+/// `gtl/scene-effects` (common).
+pub fn scene_effects(m: &M44, center: Point, eye: [f64; 3], scene: &Scene) -> Option<SceneEffects> {
+    let c = apply44(m, [center.x as f64, center.y as f64, 0.0]);
+    let z = c[2];
+    let shade = scene
+        .light
+        .and_then(|light| facing_normal(m, c, eye).map(|n| shade(&light, n)))
+        .unwrap_or(1.0);
+    let fade = fade_share(scene.fade as f64, scene.focus as f64, z);
+    let blur = focus_blur(scene.blur as f64, scene.focus as f64, z);
+    let effects = SceneEffects {
+        shade: if (shade - 1.0).abs() > 1e-4 {
+            shade as f32
+        } else {
+            1.0
+        },
+        fade: if fade < 0.9999 { fade as f32 } else { 1.0 },
+        blur: if blur > 0.01 { blur as f32 } else { 0.0 },
+    };
+    (effects.shade != 1.0 || effects.fade != 1.0 || effects.blur != 0.0).then_some(effects)
 }
 
 /// How far `points` are from the plane of the layer with the `corners`,

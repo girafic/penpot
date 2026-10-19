@@ -41,7 +41,7 @@
    :border-style              :border-style
    :border-color              :border-color
    :box-shadow                :shadows
-   :filter                    :blur
+   :filter                    :filter
    :backdrop-filter           :background-blur
    :gap                       :size-array
    :row-gap                   :size-array
@@ -182,6 +182,17 @@
   [value]
   (dm/fmt "blur(%)" (fmt/format-pixels value)))
 
+(defn format-filter
+  "A CSS `filter` of a blur (px) or of `{:blur :brightness}` (the light of
+  a layer in 3D, see `gtl/scene-effects`)."
+  [value]
+  (if (map? value)
+    (->> [(when (and (some? (:blur value)) (pos? (:blur value))) (format-blur (:blur value)))
+          (when (some? (:brightness value)) (dm/str "brightness(" (fmt/format-number (:brightness value) {:precision 3}) ")"))]
+         (remove nil?)
+         (str/join " "))
+    (format-blur value)))
+
 (defn-  format-matrix
   [value]
   (fmt/format-matrix value))
@@ -206,6 +217,7 @@
       :tracks (format-tracks value)
       :shadows (format-shadow value options)
       :blur (format-blur value)
+      :filter (format-filter value)
       :background-blur (format-blur value)
       :matrix (format-matrix value)
       (if (keyword? value) (d/name value) value))))

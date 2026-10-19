@@ -307,6 +307,13 @@
   [:map {:title "GroupAttrs"}
    [:shapes [:vector {:gen/max 10 :gen/min 1} ::sm/uuid]]])
 
+(def schema:light
+  "The light of the layers in 3D of a board (see `gtl/shade`)."
+  [:map {:title "Light"}
+   [:angle ::sm/safe-number]
+   [:height [::sm/number {:min 0 :max 90}]]
+   [:ambient [::sm/number {:min 0 :max 1}]]])
+
 (def ^:private schema:frame-attrs
   [:map {:title "FrameAttrs"}
    [:shapes [:vector {:gen/max 10 :gen/min 1} ::sm/uuid]]
@@ -327,7 +334,17 @@
    [:perspective-y {:optional true} ::sm/safe-number]
    ;; Whether its tilted layers are seen without perspective, as from
    ;; afar (parallel projection, for isometric drawings)
-   [:orthographic {:optional true} :boolean]])
+   [:orthographic {:optional true} :boolean]
+   ;; The light of its layers in 3D and their depth cues (see
+   ;; `gtl/scene-effects`): where the light comes from (degrees round the
+   ;; view, clockwise from its top; degrees above the plane) and how much
+   ;; of it comes from all round; the share of opacity gone each 1000 px
+   ;; behind the focus; the px of blur each 100 px off it; the focus, px
+   ;; towards the viewer
+   [:light {:optional true} schema:light]
+   [:depth-fade {:optional true} [::sm/number {:min 0 :max 1}]]
+   [:depth-blur {:optional true} [::sm/number {:min 0 :max 100}]]
+   [:depth-focus {:optional true} ::sm/safe-number]])
 
 (def ^:private schema:nilable-geom-attrs
   "`schema:shape-geom-attrs`, but nilable.
@@ -562,6 +579,7 @@
 (def ^:private allowed-group-attrs #{:shapes})
 (def ^:private allowed-frame-attrs #{:shapes :hide-fill-on-export :show-content :hide-in-viewer
                                      :perspective :perspective-x :perspective-y :orthographic
+                                     :light :depth-fade :depth-blur :depth-focus
                                      :layout :layout-flex-dir :layout-gap-type :layout-gap
                                      :layout-align-items :layout-justify-content :layout-align-content
                                      :layout-wrap-type :layout-padding-type :layout-padding
